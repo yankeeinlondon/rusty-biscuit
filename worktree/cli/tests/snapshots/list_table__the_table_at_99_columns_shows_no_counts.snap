@@ -20,4 +20,4 @@ expression: "plain_at(99, &Example::new())"
 └───────────────────┴──────────────────────────────────┴──────────────────┴─────────────────────┘
 
  Worktree   ○ clean    ● uncommitted files    ● uncommitted source files
- Branch     └─ merges cleanly into parent    └─ conflicts with parent    └┄ parent deleted
+ Branch     └─ merges cleanly into parent     └─ conflicts with parent      └┄ parent deleted

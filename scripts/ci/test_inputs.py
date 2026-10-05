@@ -19,6 +19,11 @@ Two reference forms are recognized, and nothing else:
   test context count: an integration-test target, a module declared under
   `#[cfg(test)]`, or a `#[test]` function.
 
+A Markdown document's `::file` transclusions extend both forms: code that
+names a document also reads every file the document transcludes, so the
+planner treats a change to a transcluded file as a change to each document that
+pulls it in (`transcluding_documents`).
+
 Files are found the way rustc finds them — by walking `mod` declarations from
 each Cargo target root — so the nextest identity of every reference is exact:
 a literal inside a test function names that test, and one in a helper names the
@@ -201,6 +206,64 @@ def normalize(path: str) -> str | None:
         else:
             parts.append(component)
     return "/".join(parts) if parts else None
+
+
+# A Darkmatter transclusion: `::file` at the start of a line, then a quoted or
+# bare target, then optional attributes (`exclude="…"`, `actor=…`).
+_TRANSCLUSION = re.compile(
+    r'^[ \t]*::file[ \t]+(?:"(?P<quoted>[^"\n]+)"|(?P<bare>[^\s"]+))', re.MULTILINE
+)
+
+
+def transcluded(document: str, text: str) -> set[str]:
+    """The repository paths a Markdown document pulls in with `::file`.
+
+    A target is relative to the document's directory, or to the repository
+    root when spelled `@…`. A target holding an expression (`{{…}}`) names
+    nothing until a run supplies values, so it is not a static input.
+    """
+    found: set[str] = set()
+    for match in _TRANSCLUSION.finditer(text):
+        target = match.group("quoted") or match.group("bare")
+        if "{{" in target:
+            continue
+        if target.startswith("@"):
+            path = normalize(target[1:])
+        else:
+            path = normalize(posixpath.join(posixpath.dirname(document), target))
+        if path is not None:
+            found.add(path)
+    return found
+
+
+def transcluding_documents(
+    paths: Iterable[str], documents: Iterable[str], read: Callable[[str], str | None]
+) -> dict[str, set[str]]:
+    """Each document that transcludes one of `paths`, directly or through other
+    documents, mapped to the paths it reaches.
+
+    A test that reads `prompts/implement-plan.md` also reads the
+    `prompts/_os.md` it transcludes, so a change to the fragment must schedule
+    that test even though no code names the fragment.
+    """
+    includers: dict[str, set[str]] = {}
+    for document in documents:
+        text = read(document)
+        if text is None or "::file" not in text:
+            continue
+        for target in transcluded(document, text):
+            includers.setdefault(target, set()).add(document)
+    reached: dict[str, set[str]] = {}
+    for path in set(paths):
+        pending = [path]
+        seen = {path}
+        while pending:
+            for document in includers.get(pending.pop(), ()):
+                if document not in seen:
+                    seen.add(document)
+                    pending.append(document)
+                    reached.setdefault(document, set()).add(path)
+    return reached
 
 
 def _l1_features(package: dict) -> set[str] | None:

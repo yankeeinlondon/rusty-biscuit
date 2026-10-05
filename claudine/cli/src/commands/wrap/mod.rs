@@ -730,7 +730,7 @@ fn run_provider_wrapper_inner(
         verbose,
     );
     provider_tail_report::announce(
-        provider,
+        &provider_tail_report::SwitchContext::for_launch(profile, non_interactive_requested),
         &provider_tail,
         &claudine::composition::ProviderTailNotices::default(),
         silent_requested,

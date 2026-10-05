@@ -122,8 +122,10 @@ impl CallerProjection {
     }
 }
 
-fn trigger_discovery_boundary(options: &crate::markdown::compose::ComposeRequest, _document_path: &Path) -> Option<PathBuf> {
-    options.resolution_context().repository_root().map(Path::to_path_buf)
+/// Trigger discovery runs only for a request inside a repository; the schema
+/// roots themselves come from the document's own context.
+fn discovers_triggers(options: &crate::markdown::compose::ComposeRequest) -> bool {
+    options.resolution_context().repository_root().is_some()
 }
 
 pub(crate) fn prepare_schemas(
@@ -157,14 +159,19 @@ pub(crate) fn prepare_schemas(
     if let Some(fallback) = options.file_ref_fallback_dir.clone() {
         schemas = schemas.with_file_ref_fallback_dir(fallback);
     }
-    if let Some(baseline) = options.baseline_schema.clone() {
+    schemas = schemas.with_caller_input_records(&caller_input_records(options));
+    if options.baseline_is_darkmatter_default {
+        schemas = schemas.with_darkmatter_baseline_json_schema().map_err(|err| {
+            prepare_error(format!("schema could not be prepared: {err}"), err)
+        })?;
+    } else if let Some(baseline) = options.baseline_schema.clone() {
         schemas = schemas.with_baseline(baseline).map_err(|err| {
             prepare_error(format!("schema could not be prepared: {err}"), err)
         })?;
     }
     if options.trigger_schemas
-        && let Some(ComposeSource::File(document_path)) = markdown.source()
-        && let Some(boundary) = trigger_discovery_boundary(options, document_path)
+        && let Some(ComposeSource::File(_)) = markdown.source()
+        && discovers_triggers(options)
     {
         schemas = if let Some(registry) = trigger_registry.take() {
             schemas.with_trigger_registry(registry)
@@ -172,7 +179,7 @@ pub(crate) fn prepare_schemas(
             #[cfg(test)]
             TRIGGER_DISCOVERY_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             schemas
-                .with_trigger_discovery(document_path, boundary)
+                .with_trigger_discovery()
                 .map_err(|err| {
                     prepare_error(format!("trigger schemas could not be prepared: {err}"), err)
                 })?
@@ -759,27 +766,23 @@ fn caller_input_records(options: &crate::markdown::compose::ComposeRequest) -> c
     if !options.caller_input_records().is_empty() {
         return options.caller_input_records().clone();
     }
-    let overrides: Vec<(&String, &serde_json::Value)> = [&options.set_overrides, &options.data_overrides]
-        .into_iter()
-        .filter_map(|layer| layer.as_ref().and_then(serde_json::Value::as_object))
-        .flatten()
-        .collect();
-    if overrides.is_empty() {
-        return Default::default();
-    }
-    let context = options.resolution_context();
-    let origin = context.for_trusted_external_cwd(
-        options.file_ref_fallback_dir.as_deref().unwrap_or_else(|| context.request_cwd()),
-    );
-    overrides
-        .into_iter()
-        .map(|(key, value)| {
-            (
-                key.clone(),
-                crate::markdown::compose::CallerInputRecord::new(value.clone(), origin.clone()),
-            )
-        })
-        .collect()
+    crate::markdown::compose::caller_input_records_for_overrides(
+        [&options.set_overrides, &options.data_overrides].into_iter().flatten(),
+        options.resolution_context(),
+        options.file_ref_fallback_dir.as_deref(),
+    )
+}
+
+/// The context each caller-supplied property was authored in, for the
+/// `match()` judgment of its value.
+fn caller_origins(
+    records: &crate::markdown::compose::CallerInputRecords,
+) -> crate::markdown::schemas::validate::CallerOrigins {
+    crate::markdown::schemas::validate::CallerOrigins::new(
+        records
+            .iter()
+            .map(|(key, record)| (key.clone(), record.origin().clone())),
+    )
 }
 
 fn select_file_mode(
@@ -1016,11 +1019,12 @@ fn root_schema_arm_applies(
         return RootArmApplicability::None;
     }
     let wrapped = crate::markdown::schemas::validate::wrap_arm_as_root_schema(arm);
-    let Ok(validator) = crate::markdown::schemas::validate::build_validator_in_context(
+    let Ok(validator) = crate::markdown::schemas::validate::build_validator_with_callers(
         &wrapped,
         Some(&document_context.cwd),
         None,
         &document_context.file_resolution_context,
+        caller_origins(records),
     ) else {
         return RootArmApplicability::None;
     };
@@ -1279,9 +1283,13 @@ fn resolve_caller_file_value(
                 );
             }
             failure(
-                format!(
-                    "file reference `{raw}` did not match a file from `{}`",
-                    context.cwd().display()
+                crate::markdown::errors::with_glob_hint(
+                    format!(
+                        "file reference `{raw}` did not match a file from `{}`",
+                        context.cwd().display()
+                    ),
+                    biscuit_file::ResolutionFailure::NoMatch,
+                    raw,
                 ),
                 FileReferenceDiagnostic::NoMatch {
                     raw: raw.to_string(),
@@ -1563,30 +1571,23 @@ mod tests {
     }
 
     #[test]
-    fn trigger_discovery_is_passive_and_reuses_request_repository_boundary() {
+    fn trigger_discovery_needs_a_request_repository() {
         let request_repo = tempfile::tempdir().unwrap();
         let nested_repo = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(request_repo.path().join(".git")).unwrap();
         std::fs::create_dir_all(nested_repo.path().join(".git")).unwrap();
-        let document_path = nested_repo.path().join("prompt.md");
         let snapshot = biscuit_file::FileResolutionContext::new(request_repo.path())
             .with_repository_root(request_repo.path());
         let options = crate::markdown::compose::test_request_in(ComposeOptions::new(), snapshot);
-        // A context without a repository root bounds nothing, even when the
-        // document itself sits inside a repository.
+        // A context without a repository root discovers nothing, even when
+        // the document itself sits inside a repository.
         let unbounded = crate::markdown::compose::test_request_in(
             ComposeOptions::new(),
             biscuit_file::FileResolutionContext::new(nested_repo.path()),
         );
 
-        assert_eq!(
-            trigger_discovery_boundary(&options, &document_path).as_deref(),
-            Some(request_repo.path()),
-        );
-        assert_eq!(
-            trigger_discovery_boundary(&unbounded, &document_path).as_deref(),
-            None,
-        );
+        assert!(discovers_triggers(&options));
+        assert!(!discovers_triggers(&unbounded));
     }
 
     #[test]

@@ -5,7 +5,7 @@ use crate::commands::schema::assignment::{self, Assignment, PositionalKind};
 use crate::io::{DocumentArgumentError, OpenedArgument, open_argument};
 use crate::request::MdRequest;
 use darkmatter::markdown::errors::resolution_failure_name;
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::{LineBreaks, Prose};
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::errors::BlockError;
 use biscuit_terminal::terminal::Terminal;
@@ -167,16 +167,15 @@ fn validate_one(
         Ok(context) => context,
         Err(err) => return FileOutcome::ParseError(format!("{err:#}")),
     };
-    let boundary = document_context.repository_root().map(Path::to_path_buf);
+    let in_repository = document_context.repository_root().is_some();
     let api = api.clone().with_file_resolution_context(document_context);
-    let api = match boundary {
-        Some(boundary) if !no_trigger_schemas => {
-            match api.with_trigger_discovery(&discovery_path, boundary) {
-                Ok(api) => api,
-                Err(err) => return FileOutcome::SchemaError(Box::new(err)),
-            }
+    let api = if in_repository && !no_trigger_schemas {
+        match api.with_trigger_discovery() {
+            Ok(api) => api,
+            Err(err) => return FileOutcome::SchemaError(Box::new(err)),
         }
-        _ => api,
+    } else {
+        api
     };
 
     if !assignments.is_empty() {
@@ -369,8 +368,13 @@ fn emit_problem_bullet(problem: &ValidationProblem, terminal: &Terminal) {
     };
 
     let message = trim_redundant_property_prefix(&problem.message, problem.property.as_deref());
-    let bullet = format!("    - {prefix}{}{location_suffix}", escape_prose(message));
-    println!("{}", Prose::new(bullet).render(terminal));
+    // A message's own `hint:` row stays a row, indented under its bullet.
+    let message = escape_prose(message).replace('\n', "\n      ");
+    let bullet = format!("    - {prefix}{message}{location_suffix}");
+    println!(
+        "{}",
+        Prose::new(bullet).with_line_breaks(LineBreaks::Hard).render(terminal)
+    );
 
     // Surface the declared property description on its own dimmed sub-line,
     // one indent level beneath the bullet (Decision #7). Enrichment already
@@ -524,9 +528,10 @@ fn format_location(problem: &ValidationProblem) -> String {
     }
 }
 
-/// Escape text so it renders exactly as written inside Prose markup.
+/// Escape text so it renders exactly as written inside Prose markup; code
+/// spans it marks with backticks stay literal.
 fn escape_prose(input: &str) -> String {
-    Prose::escape_text(input)
+    Prose::escape_text_outside_code_spans(input)
 }
 
 /// The typed argument error inside an [`FileOutcome::Unopened`] report.

@@ -12,15 +12,15 @@
 //! not exist yet, and a partial a chooser is about to complete must not rule
 //! an arm out before the user picks a file.
 //!
-//! The glob is compared the way candidate discovery walks it: in portable
-//! (`/`-separated) spelling, relative to the launch directory, so a file a
-//! chooser offers is a file the arm accepts. [`FileMatchGlobs`] is that one
-//! comparison, shared with Claudine's candidate walk.
+//! Each pattern is a [`GlobReference`] pattern (`[!][prefix]glob`) with the
+//! file-name view, judged from the value's `cwd`: the document's folder for a
+//! frontmatter value, the launch directory for a caller-supplied one.
+//! [`FileMatchGlobs`] is that one judgment, shared with Claudine's candidate
+//! walk.
 
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
-use biscuit_file::FileResolutionContext;
-use globset::{Glob, GlobSet, GlobSetBuilder};
+use biscuit_file::{FileResolutionContext, GlobReference, GlobReferenceError};
 use jsonschema::{Keyword, ValidationError, paths::Location};
 use serde_json::{Map, Value};
 
@@ -30,104 +30,67 @@ use super::simplified::{Constraint, PropertyDef, SchemaArm, SimplifiedType, Type
 /// Keyword carrying the globs a root-union arm enforces on a file value.
 pub const DARKMATTER_MATCH_KEYWORD: &str = "x-darkmatter-match";
 
-/// Compiled positive and negative globs of one `file(match(...))` constraint.
+/// The patterns of one `file(match(...))` constraint, as a [`GlobReference`]
+/// with the file-name view.
 ///
-/// A path is accepted when at least one positive pattern matches and no
-/// negative (`!`-prefixed) pattern does; with only negative patterns, every
-/// path a negative pattern does not reject is accepted. A pattern without a
-/// `/` that does not start with `**` also matches at any depth, so `*.md`
-/// accepts `docs/api.md`.
+/// A path is accepted when some positive pattern admits it and no `!`
+/// pattern rejects it, each judged relative to the first of its own roots
+/// that contains the path. A pattern whose glob after the prefix has no `/`
+/// (`*.md`, `^*.md`, `!_*.md`) also matches a file's bare name at any depth.
+#[derive(Debug, Clone)]
 pub struct FileMatchGlobs {
-    positive: Option<GlobSet>,
-    negative: GlobSet,
+    globs: GlobReference,
 }
 
 impl FileMatchGlobs {
-    /// Compile `patterns`; `None` when any pattern is not a valid glob.
-    #[must_use]
-    pub fn compile(patterns: &[String]) -> Option<Self> {
-        let mut positive = GlobSetBuilder::new();
-        let mut negative = GlobSetBuilder::new();
-        let mut has_positive = false;
-        for raw in patterns {
-            let (target, is_negative) = match raw.strip_prefix('!') {
-                Some(stripped) => (stripped, true),
-                None => (raw.as_str(), false),
-            };
-            let builder = if is_negative {
-                &mut negative
-            } else {
-                has_positive = true;
-                &mut positive
-            };
-            builder.add(Glob::new(target).ok()?);
-            if !target.contains('/') && !target.starts_with("**") {
-                builder.add(Glob::new(&format!("**/{target}")).ok()?);
-            }
-        }
-        Some(Self {
-            positive: if has_positive {
-                Some(positive.build().ok()?)
-            } else {
-                None
-            },
-            negative: negative.build().ok()?,
+    /// Parse `patterns`.
+    ///
+    /// ## Errors
+    ///
+    /// The [`GlobReferenceError`] of the first pattern that is not a valid
+    /// glob reference (an invalid glob, `%`, a remote URL, a malformed
+    /// prefix), or [`GlobReferenceError::NoPositivePattern`].
+    pub fn new(patterns: &[String]) -> Result<Self, GlobReferenceError> {
+        Ok(Self {
+            globs: GlobReference::new(patterns)?.with_file_name_view(),
         })
     }
 
-    /// Whether a `/`-separated relative path, or its file name, is accepted.
-    /// A negative match on either view rejects the path.
+    /// Whether `path` is accepted, judged without a walk; it need not exist.
+    /// A relative path is read from `ctx`'s `cwd`, which is also where bare
+    /// and `./` patterns start.
     #[must_use]
-    pub fn is_match(&self, rel_path: &str, file_name: &str) -> bool {
-        if self.negative.is_match(rel_path) || self.negative.is_match(file_name) {
-            return false;
-        }
-        match &self.positive {
-            Some(set) => set.is_match(rel_path) || set.is_match(file_name),
-            None => true,
-        }
+    pub fn matches(&self, path: &Path, ctx: &FileResolutionContext) -> bool {
+        self.globs.matches(path, ctx)
     }
 
-    /// Whether the existing file at `path` is accepted, judged relative to the
-    /// first of `anchors` that contains it.
-    ///
-    /// A file under none of them is judged by its full path without the root,
-    /// so a `**/`-led glob can still accept it while an anchored one cannot.
-    fn admits_path(&self, path: &Path, anchors: &[PathBuf]) -> bool {
-        let file_name = path.file_name().and_then(|name| name.to_str()).unwrap_or_default();
-        let judge = |relative: &Path| self.is_match(&portable(relative), file_name);
-        let containing = |path: &Path, anchors: &[PathBuf]| {
-            anchors
-                .iter()
-                .find_map(|anchor| path.strip_prefix(anchor).ok().map(Path::to_path_buf))
-        };
-        if let Some(relative) = containing(path, anchors) {
-            return judge(&relative);
-        }
-        // Symlinked spellings (macOS `/var` vs `/private/var`) of one location.
-        let canonical = biscuit_file::canonicalize_simplified(path).ok();
-        if let Some(canonical) = &canonical {
-            let canonical_anchors: Vec<PathBuf> = anchors
-                .iter()
-                .filter_map(|anchor| biscuit_file::canonicalize_simplified(anchor).ok())
-                .collect();
-            if let Some(relative) = containing(canonical, &canonical_anchors) {
-                return judge(&relative);
-            }
-        }
-        judge(canonical.as_deref().unwrap_or(path))
+    /// Whether a listing that reached the existing file `path` would offer it:
+    /// [`matches`](Self::matches), less a file symlink whose target leaves
+    /// the tree (see [`GlobReference::lists_file`]).
+    #[must_use]
+    pub fn lists_file(&self, path: &Path, ctx: &FileResolutionContext) -> bool {
+        self.globs.lists_file(path, ctx)
+    }
+
+    /// The positive patterns' roots in precedence order, for a caller that
+    /// walks them and judges each file with [`lists_file`](Self::lists_file).
+    #[must_use]
+    pub fn roots(&self, ctx: &FileResolutionContext) -> Vec<PathBuf> {
+        self.globs.roots(ctx)
     }
 }
 
-/// The `/`-joined normal components of `path`, whatever the host separator.
-fn portable(path: &Path) -> String {
-    path.components()
-        .filter_map(|component| match component {
-            Component::Normal(part) => Some(part.to_string_lossy()),
-            _ => None,
-        })
-        .collect::<Vec<_>>()
-        .join("/")
+/// Why `patterns` cannot be a `match()` constraint: the index of the
+/// offending pattern (`None` when the list as a whole is at fault) and the
+/// cause. `None` when every pattern is a valid glob reference.
+pub(crate) fn definition_error(patterns: &[String]) -> Option<(Option<usize>, GlobReferenceError)> {
+    for (index, pattern) in patterns.iter().enumerate() {
+        match GlobReference::new([pattern]) {
+            Ok(_) | Err(GlobReferenceError::NoPositivePattern) => {}
+            Err(error) => return Some((Some(index), error)),
+        }
+    }
+    FileMatchGlobs::new(patterns).err().map(|error| (None, error))
 }
 
 /// The globs a simplified root-union arm enforces on top-level `property`.
@@ -153,22 +116,21 @@ pub(crate) fn file_match_patterns(definition: &PropertyDef) -> Option<&[String]>
     })
 }
 
-/// Whether a caller's file value satisfies an arm's globs, resolved
-/// from the caller's own `origin`.
+/// Whether a caller's file value satisfies an arm's globs, resolved and
+/// judged from the caller's own `origin`.
 ///
 /// The same judgment the [`DARKMATTER_MATCH_KEYWORD`] validator makes: a value
 /// that names no existing file, or still holds template or shell syntax, is
-/// not judged. Unparseable globs admit every value, as they offer none.
+/// not judged. Patterns that are not valid glob references admit every value,
+/// as they offer none; the schema definition check reports them.
 #[must_use]
 pub fn file_match_admits(value: &str, patterns: &[String], origin: &FileResolutionContext) -> bool {
-    FileMatchGlobs::compile(patterns).is_none_or(|globs| {
-        admits(&globs, value, Some(origin.cwd()), None, origin)
-    })
+    FileMatchGlobs::new(patterns).map_or(true, |globs| admits(&globs, value, None, None, origin))
 }
 
 /// Resolution matches the `darkmatter-file` format's: from `base_dir`, else
-/// the context's `cwd`. Without `base_dir` the glob is still anchored at the
-/// process directory; glob references replace this function and that read.
+/// the context's `cwd`. That directory is also the value's `cwd` for the
+/// globs.
 fn admits(
     globs: &FileMatchGlobs,
     value: &str,
@@ -182,40 +144,31 @@ fn admits(
     let Ok(path) = resolve_file_reference_in_context(value, base_dir, fallback, context) else {
         return true;
     };
-    let ambient = std::env::current_dir().ok();
-    let Some(base_dir) = base_dir.or(ambient.as_deref()) else {
-        return true;
-    };
-    let mut anchors: Vec<PathBuf> = Vec::new();
-    let mut push = |anchor: &Path| {
-        if !anchors.iter().any(|known| known == anchor) {
-            anchors.push(anchor.to_path_buf());
+    let value_context = match base_dir {
+        Some(base_dir) => {
+            crate::markdown::compose::expression::resolve_ctx::document_file_context(base_dir, context)
         }
+        None => context.clone(),
     };
-    if let Some(fallback) = fallback {
-        push(fallback);
-    }
-    push(context.launch_magic_scope().request_dir());
-    push(base_dir);
-    if let Some(root) = context.repository_root() {
-        push(root);
-    }
-    globs.admits_path(&path, &anchors)
+    globs.matches(&path, &value_context)
 }
 
 type KeywordResult<'a> = Result<Box<dyn for<'i> Keyword<'i>>, ValidationError<'a>>;
 
-/// Factory for [`DARKMATTER_MATCH_KEYWORD`], judging values from the
-/// validator's anchors (see [`admits`]). A structural validator judges only
-/// an absolute path naming an existing file (by its full path) and admits
-/// every value whose meaning needs a context.
+/// Factory for [`DARKMATTER_MATCH_KEYWORD`], judging values in the
+/// validator's context (see [`admits`]); a property a caller supplied is
+/// judged in the context it was authored in. A structural validator judges
+/// only an absolute path naming an existing file, by its full path
+/// ([`GlobReference::matches_without_context`]), and admits every value whose
+/// meaning needs a context. Root-union coercion relies on that to pick an
+/// arm by glob.
 pub(crate) fn match_keyword_factory(
     file_values: super::validate::FileValues,
 ) -> impl for<'a> Fn(&'a Map<String, Value>, &'a Value, Location) -> KeywordResult<'a>
 + Send
 + Sync
 + 'static {
-    move |_parent, schema, _location| {
+    move |_parent, schema, location| {
         let patterns: Vec<String> = schema
             .as_array()
             .and_then(|items| items.iter().map(|item| item.as_str().map(String::from)).collect())
@@ -224,31 +177,81 @@ pub(crate) fn match_keyword_factory(
                     "{DARKMATTER_MATCH_KEYWORD} must be an array of strings"
                 ))
             })?;
-        let globs = FileMatchGlobs::compile(&patterns).ok_or_else(|| {
-            ValidationError::schema(format!("{DARKMATTER_MATCH_KEYWORD} holds an invalid glob"))
+        let globs = FileMatchGlobs::new(&patterns).map_err(|error| {
+            ValidationError::schema(format!("{DARKMATTER_MATCH_KEYWORD} holds an invalid glob: {error}"))
         })?;
         Ok(Box::new(MatchKeyword {
             globs,
             patterns,
-            file_values: file_values.clone(),
+            judged_in: JudgedIn::for_keyword(&file_values, &location),
         }))
     }
+}
+
+/// Where a [`MatchKeyword`] judges its values.
+enum JudgedIn {
+    /// No context: only an existing absolute path is judged.
+    Syntax,
+    /// Resolved like the `darkmatter-file` format, from `base_dir` (else the
+    /// context's `cwd`), and judged from that directory.
+    Resolved {
+        base_dir: Option<PathBuf>,
+        fallback: Option<PathBuf>,
+        context: Box<FileResolutionContext>,
+    },
+}
+
+impl JudgedIn {
+    /// A caller-supplied property is judged in the context it was authored
+    /// in; its value is already projected from there.
+    fn for_keyword(file_values: &super::validate::FileValues, location: &Location) -> Self {
+        match file_values {
+            super::validate::FileValues::Syntax => Self::Syntax,
+            super::validate::FileValues::Resolved { base_dir, fallback, context, callers } => {
+                let origin = top_level_property(location)
+                    .map_or(super::validate::ValueOrigin::Document, |property| callers.origin_of(&property));
+                match origin {
+                    super::validate::ValueOrigin::Caller(origin) => Self::Resolved {
+                        base_dir: None,
+                        fallback: None,
+                        context: Box::new(origin.clone()),
+                    },
+                    super::validate::ValueOrigin::Document => Self::Resolved {
+                        base_dir: base_dir.clone(),
+                        fallback: fallback.clone(),
+                        context: context.clone(),
+                    },
+                }
+            }
+        }
+    }
+}
+
+/// The top-level property a keyword's schema location belongs to: the
+/// segment after the location's first `properties`. `match` is emitted only
+/// on top-level root-union properties (see [`root_union_match_patterns`]).
+fn top_level_property(location: &Location) -> Option<String> {
+    let pointer = location.as_str();
+    let mut segments = pointer.split('/').skip(1);
+    segments.by_ref().find(|segment| *segment == "properties")?;
+    segments
+        .next()
+        .map(|segment| segment.replace("~1", "/").replace("~0", "~"))
 }
 
 struct MatchKeyword {
     globs: FileMatchGlobs,
     patterns: Vec<String>,
-    file_values: super::validate::FileValues,
+    judged_in: JudgedIn,
 }
 
 impl MatchKeyword {
     fn check(&self, value: &str) -> bool {
-        match &self.file_values {
-            // An absolute path needs no anchor: it is judged by its full path.
-            super::validate::FileValues::Syntax => super::format::context_free_path(value)
+        match &self.judged_in {
+            JudgedIn::Syntax => super::format::context_free_path(value)
                 .filter(|path| path.exists())
-                .is_none_or(|path| self.globs.admits_path(&path, &[])),
-            super::validate::FileValues::Resolved { base_dir, fallback, context } => {
+                .is_none_or(|path| self.globs.globs.matches_without_context(&path)),
+            JudgedIn::Resolved { base_dir, fallback, context } => {
                 admits(&self.globs, value, base_dir.as_deref(), fallback.as_deref(), context)
             }
         }
@@ -347,13 +350,13 @@ mod tests {
     }
 
     #[test]
-    fn globs_compare_in_portable_spelling_relative_to_the_first_containing_anchor() {
-        let globs = FileMatchGlobs::compile(&["fixes/**/spec.md".to_string()]).unwrap();
-        let launch = PathBuf::from("/work/repo");
-        let path = launch.join("fixes").join("x").join("spec.md");
-        assert!(globs.admits_path(&path, std::slice::from_ref(&launch)));
-        let features = launch.join("features").join("x").join("spec.md");
-        assert!(!globs.admits_path(&features, &[launch]));
+    fn globs_judge_a_path_relative_to_the_value_cwd() {
+        let globs = FileMatchGlobs::new(&["fixes/**/spec.md".to_string()]).unwrap();
+        let launch = tempfile::tempdir().unwrap();
+        let context = FileResolutionContext::new(launch.path());
+        assert!(globs.matches(Path::new("fixes/x/spec.md"), &context));
+        assert!(globs.matches(&launch.path().join("fixes").join("x").join("spec.md"), &context));
+        assert!(!globs.matches(Path::new("features/x/spec.md"), &context));
     }
 
     #[test]

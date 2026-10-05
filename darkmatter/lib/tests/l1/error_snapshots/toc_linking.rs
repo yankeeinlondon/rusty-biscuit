@@ -74,6 +74,7 @@ fn unresolved_target_names_its_failure_and_hints_at_fallback_chain() {
         path: "./missing.md".into(),
         line: 6,
         failure: Some(biscuit_file::ResolutionFailure::NoMatch),
+        glob_hint: None,
     };
     let out = render(&err);
     assert_contains_all(

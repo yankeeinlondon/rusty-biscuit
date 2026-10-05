@@ -87,7 +87,7 @@ Targets preserve one semantic node:
 |---|---|
 | Terminal | Summary plus a dim/italic block-quote body |
 | Markdown dialect | Original directive form |
-| MarkdownPlus | Native HTML `<details>`/`<summary>` |
+| MarkdownPlus | Native HTML `<details>`/`<summary>`; the summary is written as HTML (raw HTML is not parsed as Markdown), the body as Markdown; raw HTML in the summary is byte-identical, or lossy when it holds a blank line |
 | Browser | Native `<details>`/`<summary>`, no JavaScript |
 | JSON | `NodeKind::Disclosure` |
 
@@ -106,3 +106,9 @@ of the summary rather than disappearing.
   rendering or fetching.
 - Validate malformed code directives before HTML output so browser rendering
   cannot soften a fatal Markdown error.
+- Raw HTML is escaped (`RawHtmlPolicy::Escape`) in HTML and printed with a
+  diagnostic (Warn) in the terminal, except a comment-only `Html` node
+  (`renderable::tree::is_html_comment_only`), which shows nothing in either:
+  it carries the `` `a`<!-- -->`b` `` separator renderable's Markdown writer
+  puts between touching code spans. The fold keeps the node, so Markdown
+  output keeps the comment. Tests: `tests/l1/serialized_code_neighbors.rs`.

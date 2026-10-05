@@ -152,6 +152,8 @@ pub struct Table {
     /// Caller-supplied block appearance (color/background/emphasis/border)
     /// overlaid onto the projected table node so both render paths carry it.
     block_style: Style,
+    /// See [`Table::with_min_width`].
+    min_width: Option<usize>,
 }
 
 impl Table {
@@ -223,6 +225,28 @@ impl Table {
     /// alignment, and row fill.
     pub fn prefer_cursor_alignment(mut self) -> Self {
         self.prefer_cursor_alignment = true;
+        self
+    }
+
+    /// Draw the table at least `cells` wide, borders included.
+    ///
+    /// A table whose content is narrower grows its last visible column by the
+    /// difference, the same column a filling `width` grows, and stops at that
+    /// column's `max_width`. The available width still caps the table, and a
+    /// wider table is unchanged.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use biscuit_terminal::components::table::{Table, TableColumn};
+    ///
+    /// let table = Table::new()
+    ///     .with_columns(vec![TableColumn::new("A"), TableColumn::new("B")])
+    ///     .with_min_width(30);
+    /// assert_eq!(table.plan_widths(80).unwrap().table_width, 30);
+    /// ```
+    pub fn with_min_width(mut self, cells: u32) -> Self {
+        self.min_width = Some(cells as usize);
         self
     }
 
@@ -377,6 +401,7 @@ impl Table {
             prefer_cursor_alignment: self.prefer_cursor_alignment,
             style: self.style.clone(),
             block_style: self.block_style.clone(),
+            min_width: self.min_width,
         })
     }
 
@@ -697,11 +722,12 @@ impl Table {
         })
     }
 
-    /// Grow the last visible column when the table has an explicit width.
+    /// Grow the last visible column when the table has an explicit width or
+    /// a minimum width.
     ///
     /// Honors [`Layout::width`](renderable::layout::Layout):
     /// - [`Width::Auto`] (the default) and [`Width::FitContent`] hug the
-    ///   content's widest line.
+    ///   content's widest line, or grow to [`Table::with_min_width`].
     /// - [`Width::Fixed`] (e.g. `width: 100%` ⇒
     ///   `Width::Fixed(Length::Percent(100.0))`) fills the available width.
     ///
@@ -718,18 +744,23 @@ impl Table {
         available_render_width: usize,
         border_overhead: usize,
     ) {
-        if !matches!(self.layout.width, Width::Fixed(_)) {
-            return;
-        }
+        let target_width = if matches!(self.layout.width, Width::Fixed(_)) {
+            // Filling requires a finite width to fill to. An unbounded width —
+            // the `u32::MAX` sentinel a natural-width measurement passes — has
+            // nothing to fill, so the table hugs its content regardless of
+            // `width`.
+            if available_render_width >= u32::MAX as usize {
+                return;
+            }
+            available_render_width
+        } else {
+            match self.min_width {
+                Some(min_width) => min_width.min(available_render_width),
+                None => return,
+            }
+        };
 
-        // Filling requires a finite width to fill to. An unbounded width — the
-        // `u32::MAX` sentinel a natural-width measurement passes — has nothing to
-        // fill, so the table hugs its content regardless of `width`.
-        if available_render_width >= u32::MAX as usize {
-            return;
-        }
-
-        let content_budget = available_render_width.saturating_sub(border_overhead);
+        let content_budget = target_width.saturating_sub(border_overhead);
         let content_used: usize = columns.iter().map(|column| column.resolved_width).sum();
         if content_budget <= content_used {
             return;
@@ -1564,13 +1595,13 @@ impl Table {
     ///
     /// The first child row is the header row; each remaining child row is a
     /// data row. Most cells carry the readable pre-formatted text as a single
-    /// [`NodeKind::Text`] child; a [`TableCellContent::StyledProse`] cell
-    /// instead projects its parsed inline children
-    /// ([`Prose::to_render_nodes`](crate::components::prose::Prose::to_render_nodes))
-    /// directly, degrading any top-level
-    /// fenced-code child to escaped literal text. Every cell also carries
+    /// [`NodeKind::Text`] child; a [`TableCellContent::StyledInlineProse`]
+    /// cell instead projects its parsed inline children
+    /// ([`InlineProse::to_render_nodes`](crate::components::prose::InlineProse::to_render_nodes))
+    /// directly, so a fenced block in the cell arrives as inline code. Every
+    /// cell also carries
     /// [`TableCellHints`] recording the cell kind, the original typed value as
-    /// JSON (`null` for `StyledProse`), and alignment. The table node
+    /// JSON (`null` for `StyledInlineProse`), and alignment. The table node
     /// carries per-column [`TableColumnHints`] and [`TableTerminalHints`], and
     /// the consolidated [`Layout`] when margins are non-default. When the
     /// component carries a non-empty title, it is seeded onto the projected
@@ -1618,9 +1649,7 @@ impl Table {
                 .enumerate()
                 .map(|(col_idx, content)| {
                     let children = match content {
-                        TableCellContent::StyledProse(prose) => {
-                            degrade_code_nodes(prose.to_render_nodes())
-                        }
+                        TableCellContent::StyledInlineProse(prose) => prose.to_render_nodes(),
                         _ => vec![RenderNode::text(content.to_string())],
                     };
                     let mut cell = RenderNode::table_cell(children);
@@ -1680,6 +1709,7 @@ impl Table {
             stripe_bg: self.style.stripe_bg,
             stripe_text: self.style.stripe_text,
             highlight_row: self.style.highlight_row,
+            min_width: self.min_width.and_then(|w| u32::try_from(w).ok()),
         });
 
         // Carry the consolidated layout when it differs from the default.
@@ -1729,7 +1759,7 @@ impl Table {
         }
     }
 
-    /// Resolves every [`StyledProse`](TableCellContent::StyledProse) cell of a
+    /// Resolves every [`StyledInlineProse`](TableCellContent::StyledInlineProse) cell of a
     /// cloned [`Table`] into [`Text`](TableCellContent::Text) for the active
     /// `term`, in place.
     ///
@@ -1741,14 +1771,14 @@ impl Table {
     ///
     /// ## Returns
     ///
-    /// The number of `StyledProse` cells resolved — used by
+    /// The number of `StyledInlineProse` cells resolved — used by
     /// [`Self::render_bespoke_instrumented`] to prove the single up-front
     /// resolution pass touches each cell exactly once.
     fn resolve_prose_cells_in_place(table: &mut Table, term: &Terminal) -> usize {
         let mut resolved = 0;
         for row in &mut table.data {
             for cell in row {
-                if let TableCellContent::StyledProse(prose) = cell {
+                if let TableCellContent::StyledInlineProse(prose) = cell {
                     let rendered = prose.render(term);
                     *cell = TableCellContent::Text(rendered);
                     resolved += 1;
@@ -1786,7 +1816,7 @@ impl Table {
         self.render_bespoke_instrumented(term).0
     }
 
-    /// [`Self::render_bespoke`] plus the number of `StyledProse` cells resolved
+    /// [`Self::render_bespoke`] plus the number of `StyledInlineProse` cells resolved
     /// during the single up-front resolution pass.
     ///
     /// ## Notes
@@ -1794,7 +1824,7 @@ impl Table {
     /// `#[doc(hidden)]`, `pub` for tests only. The returned count comes from the
     /// same resolution pass the real render uses, so a test can assert each
     /// Prose cell is resolved exactly once *before* any width planning — width
-    /// planning then operates on a uniform `Text` grid with no `StyledProse`
+    /// planning then operates on a uniform `Text` grid with no `StyledInlineProse`
     /// left to re-resolve.
     #[doc(hidden)]
     pub fn render_bespoke_instrumented(&self, term: &Terminal) -> (String, usize) {
@@ -2052,7 +2082,7 @@ fn cell_content_kind(content: &TableCellContent) -> &'static str {
         TableCellContent::Integer(_) => "integer",
         TableCellContent::Float(_) => "float",
         TableCellContent::Currency(_, _) => "currency",
-        TableCellContent::StyledProse(_) => "styled_prose",
+        TableCellContent::StyledInlineProse(_) => "styled_inline_prose",
     }
 }
 
@@ -2066,23 +2096,8 @@ fn cell_content_raw_value(content: &TableCellContent) -> serde_json::Value {
             "currency": currency_token(currency),
             "amount": amount,
         }),
-        TableCellContent::StyledProse(_) => serde_json::Value::Null,
+        TableCellContent::StyledInlineProse(_) => serde_json::Value::Null,
     }
-}
-
-/// Replaces top-level `NodeKind::Code` children with `NodeKind::Text` nodes
-/// containing the code body as literal text. Inline structure (Strong,
-/// Emphasis, Link, Span, Text, etc.) is preserved as-is.
-fn degrade_code_nodes(nodes: Vec<RenderNode>) -> Vec<RenderNode> {
-    nodes
-        .into_iter()
-        .map(|node| match &node.kind {
-            renderable::tree::NodeKind::Code { value, .. } => {
-                RenderNode::text(value.clone())
-            }
-            _ => node,
-        })
-        .collect()
 }
 
 /// Returns the ISO-style token for a [`Currency`].
@@ -2480,7 +2495,7 @@ fn render_row_with_cursor_positioning(
         let is_padding_only = content.bytes().all(|b| b == b' ');
         if !is_padding_only {
             // Patch mid-content resets so the stripe survives between
-            // styled Prose spans (e.g. <bg-red>A</bg-red> gap <bg-red>B</bg-red>).
+            // styled Prose spans (e.g. <bg-coral>A</bg-coral> gap <bg-coral>B</bg-coral>).
             let patched: std::borrow::Cow<'_, str> = if has_stripe && content.contains("\x1b[") {
                 let mut s = content.to_string();
                 // Build full restore (bg + fg)
@@ -2598,7 +2613,7 @@ pub(crate) fn wrap_cell_content(content: &str, strategy: &WordWrap, width: usize
             return vec![String::new()];
         }
         // Even without word wrap, a cell may hold explicit newlines (e.g. a
-        // multiline `StyledProse`). Balance the SGR per line so a color or
+        // multiline `StyledInlineProse`). Balance the SGR per line so a color or
         // emphasis run cannot bleed across the split into padding, borders, or
         // the next row. No-op for a single line.
         return sanitize_wrapped_lines(lines);
@@ -5151,7 +5166,7 @@ mod tests {
 
     #[test]
     fn test_stripe_survives_bg_reset_mid_content_space_padded() {
-        // When Prose content like <bg-red>A</bg-red> emits \x1b[49m (bg-only
+        // When Prose content like <bg-coral>A</bg-coral> emits \x1b[49m (bg-only
         // reset), the stripe bg must be re-applied so that text between styled
         // spans keeps the stripe.
         let content = "\x1b[41mERR\x1b[49m, \x1b[41mWARN\x1b[49m";

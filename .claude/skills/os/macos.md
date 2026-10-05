@@ -6,11 +6,15 @@ conditions that masquerade as repository defects.
 
 ## Paths
 
+- APFS on the primary macOS host rejects `U+FDD1` in a filename with
+  "Illegal byte sequence". Git metadata can still record a missing path
+  containing it. Exercise such renderer inputs through a real Git record's
+  `gitdir` text or the public rendering API rather than creating that filename.
 - `/var` and `/tmp` are symlinks into `/private`. A test that compares a
   `tempfile` path with what a child process reports must canonicalize on
   Unix (the `launched_spelling` helper does) or the two spellings differ.
   This is the macOS half of the same trap Windows has with short names
-  ([windows.md](windows.md)).
+  ([windows-paths.md](windows-paths.md)).
 - The same split reaches production code: a launch directory from
   `current_dir()` is physical (`/private/var/…`) while `$HOME` keeps its
   authored spelling (`/var/…`), so a lexical `launch == home` or
@@ -27,8 +31,28 @@ conditions that masquerade as repository defects.
   `prunable`. Do not treat that state as corruption; `git worktree prune`
   clears the registration, and long-lived worktrees belong under
   `~/.claudine/worktrees`, not `/tmp`.
+- Case-insensitive APFS folds names by a Unicode rule, not by lowercasing: `ς` opens a stored
+  `Σ` and `ß` opens a stored `SS`, though their `to_lowercase()` strings
+  differ. Decide whether a spelling is the stored one by an exact
+  `read_dir` entry, never by comparing folded strings. When the parent can
+  be traversed but not listed (mode `0111`), `fs::canonicalize` still
+  reports the stored final name (`locked/anchor/DOCS` canonicalizes to
+  `…/docs`), unless that name is a symlink. biscuit-file's absolute-glob
+  spelling check relies on both facts (verified 2026-10-02).
+- macOS temporary directories can live on a case-sensitive filesystem. Do
+  not assert that a differently cased ASCII or Unicode name opens merely
+  because `cfg!(target_os = "macos")` is true. Probe the fixture directory's
+  behavior and keep the ordinary exact-name and mismatch assertions on both
+  filesystem types. Reproduced 2026-10-02 with a temporary HFSX image:
+  `hdiutil create -size 40m -fs HFSX -volname glob-review-case -type UDIF /tmp/glob-review-case.dmg`,
+  attach with `hdiutil attach -nobrowse -mountpoint /tmp/glob-review-case-mount /tmp/glob-review-case.dmg`,
+  then set `TMPDIR=/tmp/glob-review-case-mount` on the area's `just test`
+  command. Detach the image and remove it afterward. These commands need no
+  administrator prompt or foreground window.
 - `dirs::home_dir()` honors `HOME` here, which is why a hermetic-home test can
-  be green on macOS and read the real home directory on Windows.
+  be green on macOS and read the real home directory on Windows. The shared
+  `biscuit_file::home_dir()` follows `USERPROFILE` on Windows instead, so a
+  fixture setting both variables lands in the same place on every OS.
 - A Unix socket path holds at most 104 bytes (`sun_path`), and the per-user
   `$TMPDIR` (`/private/var/folders/xx/…/T/`) spends about half of that. A
   test that starts a socket-binding daemon under a `tempfile` directory can
@@ -90,6 +114,21 @@ focus-stealing tests could run, and they do not run on CI at all. Details in
 
 ## Host conditions that look like repo failures
 
+- **A Homebrew upgrade of `libgit2` breaks linking with `ld: library 'git2'
+  not found`.** `libgit2-sys` links the system library when `pkg-config`
+  finds a compatible one, and its build-script output records the versioned
+  Cellar path (`/opt/homebrew/Cellar/libgit2/1.9.4/lib`). After `brew upgrade`
+  moves it (1.9.7 on 2026-10-03), every feature combination whose
+  `libgit2-sys` build predates the upgrade fails to link (for example
+  `cd sniff && just test`, `just check-tier-coverage sniff`), while another
+  combination built later links fine, so it looks like a change-specific
+  failure. Confirm with `grep link-search target/debug/build/libgit2-sys-*/output`.
+  `cargo clean -p libgit2-sys` did **not** help: the rerun build script wrote
+  the same stale path (the cached build under `kache` is the suspect, not
+  proven). Prefixing the command with `LIBGIT2_NO_PKG_CONFIG=1` builds the
+  vendored libgit2 instead and links (one-time C build, about 4 min under
+  load).
+
 - **`CDPATH` sends a relative `cd` from a linked worktree into the main
   checkout.** Agent shells on this host inherit a `CDPATH` that lists
   `/Users/ken/coding/personal/rusty-biscuit` and does not start with `.`. In
@@ -100,7 +139,10 @@ focus-stealing tests could run, and they do not run on CI at all. Details in
   `2026-09-24-ux-improvements` ran against the main checkout this way. The
   giveaways were a first log line naming `/Users/ken/coding/...` and
   test counts that did not match the branch. In scripts, `unset CDPATH` and
-  `cd` to absolute paths (or `./area`), and log `pwd` first.
+  `cd` to absolute paths (or `./area`), and log `pwd` first. It redirects
+  edits too: on 2026-10-03 a `cd darkmatter/lib/src && sed -i …` issued while
+  the shell was already inside that directory wrote into the main checkout.
+  After any relative-`cd` edit, check `git -C <main checkout> status`.
 - **Claudine currently shadows the login home for agent sessions on this
   host.** An agent can inherit `HOME=/Users/ken/.claudine` even though the
   login home and OpenPGP keyring are under `/Users/ken`. A signed Git command

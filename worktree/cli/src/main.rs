@@ -6,7 +6,7 @@ mod perf;
 mod shell_integration;
 
 use args::{Cli, Commands};
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::{LineBreaks, Prose};
 use biscuit_terminal::components::renderable::TerminalRenderable as _;
 use biscuit_terminal::terminal::Terminal;
 use clap::{CommandFactory, Parser};
@@ -21,15 +21,17 @@ fn main() {
         let terminal = Terminal::default();
         let msg = match &e {
             worktree::WorktreeError::Cancelled => "<dim>Cancelled.</dim>".to_string(),
-            // These carry their own Prose markup and heading.
+            // These carry their own Prose markup and heading, and are printed
+            // after one blank line.
             worktree::WorktreeError::RefusedToLoseWork(markup)
-            | worktree::WorktreeError::BlockedByEnvironment(markup) => markup.clone(),
-            _ => format!(
-                "<red><b>Error:</b></red> {}",
-                Prose::escape_text(&e.to_string())
-            ),
+            | worktree::WorktreeError::BlockedByEnvironment(markup) => {
+                eprintln!();
+                markup.clone()
+            }
+            _ => error_markup(&e.to_string()),
         };
-        eprintln!("{}", Prose::new(msg).render(&terminal));
+        let rendered = Prose::new(msg).with_line_breaks(LineBreaks::Hard).render(&terminal);
+        eprintln!("{rendered}");
         std::process::exit(exit::exit_code(&e));
     }
 }
@@ -59,8 +61,8 @@ fn run(process_start: std::time::Instant) -> Result<(), worktree::WorktreeError>
             commands::create(&branch, from.as_deref(), stay)
         }
         Commands::Go { name, .. } => commands::go(&name),
-        Commands::InternalRefresh { repo, attempt, force } => {
-            commands::refresh_worker::run(&repo, attempt.as_deref(), force);
+        Commands::InternalRefresh { repo, attempt } => {
+            commands::refresh_worker::run(&repo, attempt.as_deref());
             Ok(())
         }
         Commands::Remove {
@@ -109,5 +111,41 @@ fn reject_listing_flags(cli: &Cli) {
                 format!("{flag} applies only to listing (`wt` or `wt list`), not to `wt {command}`"),
             )
             .exit();
+    }
+}
+
+/// The markup for a plain error message.
+///
+/// Backtick spans in `message` stay code spans, so their contents are passed
+/// through unescaped: a code span shows backslashes literally.
+fn error_markup(message: &str) -> String {
+    format!("<red><b>Error:</b></red> {}", Prose::escape_text_outside_code_spans(message))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn error_markup_leaves_code_spans_unescaped_and_escapes_the_rest() {
+        let message = "HEAD is detached, so there is no current branch to fork `fix/f_x` from. \
+            Pass `--from <branch>` to choose the branch it starts from. a_b <c>";
+
+        let markup = error_markup(message);
+
+        assert!(markup.contains("`fix/f_x`"), "{markup}");
+        assert!(markup.contains("`--from <branch>`"), "{markup}");
+        assert!(markup.ends_with(r"a\_b \<c\>"), "{markup}");
+    }
+
+    #[test]
+    fn error_markup_renders_code_span_contents_without_backslashes() {
+        let terminal = Terminal::new_optimistic(200);
+        let message = "`feat_x` already exists, so `--from <base>` would be ignored.";
+
+        let rendered = Prose::new(error_markup(message)).render(&terminal);
+        let plain = biscuit_terminal::utils::escape_codes::strip_escape_codes(rendered);
+
+        assert_eq!(plain, "Error: feat_x already exists, so --from <base> would be ignored.");
     }
 }

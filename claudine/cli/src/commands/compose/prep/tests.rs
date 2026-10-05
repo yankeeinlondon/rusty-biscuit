@@ -37,6 +37,7 @@ fn shared_args() -> SharedComposeArgs {
         perf: false,
         max_iterations: None,
         on_rate_limit: None,
+        caller_arguments: Default::default(),
         provider_tail: Default::default(),
         provider_tail_notices: Default::default(),
     }

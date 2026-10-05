@@ -5,6 +5,12 @@ blast_radius:
 - biscuit-file/lib/src/file_reference/resolve.rs
 - biscuit-file/lib/src/file_reference/context.rs
 - biscuit-file/lib/src/file_reference/error.rs
+- biscuit-file/lib/src/file_reference/glob/mod.rs
+- biscuit-file/lib/src/file_reference/glob/parse.rs
+- biscuit-file/lib/src/file_reference/glob/roots.rs
+- biscuit-file/lib/src/file_reference/glob/list.rs
+- biscuit-file/lib/src/file_reference/glob/matches.rs
+- biscuit-file/lib/src/file_reference/glob/error.rs
 - biscuit-file/lib/src/lib.rs
 - biscuit-file/lib/Cargo.toml
 ---
@@ -194,10 +200,59 @@ rejected at parse time with `FileReferenceError::UnsupportedUserHome`.
 ~/.config/app.toml  → <home>/.config/app.toml
 ```
 
-The home directory comes from the resolution context (or the cross-platform
-home provider in ambient mode). If the explicit context has no home
-directory, resolution fails with the typed `MissingHomeContext` — not a
-silent miss.
+The home directory comes from the resolution context, which captures it
+once with `biscuit_file::home_dir()` (ambient mode reads it the same way).
+That reader is the process environment: `HOME` on macOS and Linux,
+`USERPROFILE` on native Windows, each with the platform's own profile lookup
+as the fallback when the variable is unset. A relative value counts as no
+home at all; there is no second lookup that could undo an override. The home
+is used exactly as spelled: not canonicalized, not checked for existence.
+
+```text
+HOME=/tmp/fixture         (macOS/Linux)  ~/app.toml → /tmp/fixture/app.toml
+USERPROFILE=D:\fixture    (Windows)      ~/app.toml → D:\fixture\app.toml
+HOME=D:\fixture only      (Windows)      ~ still follows USERPROFILE
+HOME=relative/dir                        no home → MissingHomeContext
+```
+
+To relocate home on native Windows, set `USERPROFILE`; setting only `HOME`
+is not enough. The environment is an input chosen by whoever launches the
+process, not proof of a trusted filesystem boundary.
+
+```mermaid
+flowchart TD
+    A["home_dir()"] --> B{"Which OS?"}
+    B -- "macOS / Linux" --> C{"HOME set?"}
+    B -- "native Windows" --> D{"USERPROFILE set?<br/>(HOME is never read)"}
+    C -- yes --> E["value of HOME"]
+    C -- no --> F["platform profile lookup"]
+    D -- yes --> G["value of USERPROFILE"]
+    D -- no --> F
+    E --> H{"absolute?"}
+    G --> H
+    F --> H
+    H -- yes --> I["home, used exactly as spelled<br/>(no canonicalization, no existence check)"]
+    H -- no --> J["no home: ~ fails with MissingHomeContext"]
+```
+
+Code that needs the home calls `biscuit_file::home_dir()` rather than
+`dirs::home_dir()` or `std::env::home_dir()`. On Windows `dirs::home_dir()`
+asks the OS for the profile folder and ignores `USERPROFILE`, so a program
+using it would read one home while `~` resolved against another. A caller
+that serves one request captures the value once and passes it down, so every
+read in that request sees the same home:
+
+```rust
+use biscuit_file::FileResolutionContext;
+
+// Captures home_dir() once; every `~` in this context uses that value.
+let ctx = FileResolutionContext::new("/work/repo");
+let home = ctx.home_dir();
+# let _ = home;
+```
+
+If the explicit context has no home directory, resolution fails with the
+typed `MissingHomeContext` — not a silent miss.
 
 Note the difference from magic references: `@` *includes* HOME in its search
 list, but `~` is home-*pinned* with no other candidate.
@@ -250,8 +305,9 @@ wins over inference in every layout. Plain `add_magic_path` means
 `PathPosition` therefore orders a root only **within its tier**: `Start`
 precedes and `End` follows that tier's intrinsic roots. No position can move a
 user-tier root ahead of a local one. After ordering, roots are deduplicated by
-normalized path, keeping the first occurrence and its provenance — a
-configured root equal to an intrinsic root is searched once, as `Magic`.
+[`PathIdentity`](#path-identity), keeping the first occurrence, its
+provenance, and its spelling — a configured root equal to an intrinsic root is
+searched once, as `Magic`.
 
 A relative configured root is joined onto the captured request directory, not
 the process working directory, and the tier test uses that same absolute path.
@@ -360,30 +416,32 @@ whatever the process has. `resolve_target()` is the ambient twin.
 
 ### Recursive Search (`%`)
 
-A leading `%` on any reference kind switches from exact-path checking to
-recursive directory traversal. The same roots the kind would normally *join*
-against become traversal *starting points*:
-
-1. every file under each root is checked against the reference's **filename**
-   (last path component);
-2. if the reference has directory components (`%docs/spec.md`), a match's
-   parent path must additionally *end with* those components;
-3. all matches across all roots are sorted lexicographically and the first is
-   returned.
+A leading `%` turns a reference into a search: it finds the **most local**
+file whose path ends with the payload, below the roots the reference kind
+would otherwise join against. It is `take_first` of the
+[glob reference](#glob-references-globreference) `**/<payload>` under the
+same prefix, with the payload kept literal:
 
 ```text
-%@README.md         → search every magic root in order, recursively, for "README.md"
-%./config.toml      → search under the working directory for "config.toml"
-%@docs/spec.md      → find any "spec.md" whose parent path ends with "docs"
-%vault:notes.md     → search all vault roots for "notes.md"
+%@README.md       → first match of  @**/README.md
+%./config.toml    → first match of  ./**/config.toml
+%@docs/spec.md    → first match of  @**/docs/spec.md   (a spec.md whose parent ends with docs)
+%vault:notes.md   → first match of  vault:**/notes.md
+%pages/[id].md    → finds a file literally named [id].md
+%/srv/conf/x.md   → first match of  /srv/conf/**/x.md (an absolute payload searches below its directory)
 ```
 
-Recursive references use the same post-interpolation anchoring and root order
-as direct references. Traversal does **not** follow directory symlinks
-(direct exact-path probing does follow a final symlink to its regular-file
-target). In [detailed diagnostics](#diagnostics-resolve_detailed), each
-traversal root is recorded with `ProbeDisposition::SearchRoot` rather than as
-a direct candidate probe.
+"Most local" is the glob's native order: the first root, in the kind's
+precedence order, that holds any match wins, and within it the shallowest
+match. From inside a package, `%^README.md` returns the package's
+`x/y/README.md` before the repository root's `README.md`; later roots are not
+searched once a root has a match.
+
+Recursive references use the same post-interpolation anchoring, roots, and
+boundary checks as direct references, and the search does **not** follow
+directory symlinks. In [detailed diagnostics](#diagnostics-resolve_detailed),
+each root is recorded with `ProbeDisposition::SearchRoot` rather than as a
+direct candidate probe.
 
 ### Environment Variable Interpolation
 
@@ -470,7 +528,7 @@ assert_eq!(nested.cwd(), repo_root.join("includes"));
 ```
 
 `FileResolutionContext::new(cwd)` captures the process environment and
-the cross-platform home directory once. Variables whose name or value is not
+the home directory (`home_dir()`, see [Home](#home-)) once. Variables whose name or value is not
 valid Unicode are left out of the snapshot, so a reference naming one fails
 with `MissingEnvironmentVariable`. `with_env(map)` **replaces** that snapshot
 rather than adding to it — after
@@ -504,7 +562,7 @@ differently after a `chdir`. Three inputs keep their own, different rules and
 may be relative: environment values (a relative `{{VAR}}` expansion resolves
 like any relative reference), configured magic roots (anchored on the
 captured request directory), and vault roots. The ambient `home_dir()`
-provider reports a relative `$HOME` as no home directory, so `new()` never
+reader reports a relative home as no home directory, so `new()` never
 captures one. `new()` reads the environment through the public
 `capture_env()`; a caller that builds with `from_snapshot` and wants the same
 process values calls `home_dir()` and `capture_env()` itself.
@@ -952,8 +1010,8 @@ which belongs to the optional fetching API rather than local resolution.
    | Vault | Configured roots, then captured `$VAULT` paths |
    | Remote URL | No local candidates |
 
-   Plans are lexically deduplicated preserving first-seen order, and every
-   entry retains its root provenance. With an explicit context, every
+   Plans are deduplicated by `PathIdentity`, preserving first-seen order, and
+   every entry retains its root provenance and spelling. With an explicit context, every
    relative candidate must lie lexically inside a boundary
    [tree root](#the-file-tree-base_dir-and-the-relative-boundary), and every
    `&`/`^` candidate inside the repository, or the plan fails before
@@ -968,9 +1026,10 @@ which belongs to the optional fetching API rather than local resolution.
    metadata error records `Io`, stores `FileReferenceError::Io { path, source }`,
    and stops immediately. A regular file records `Matched` and wins (metadata
    follows symlinks, so a direct symlink to a regular file matches).
-   Recursive resolution traverses the same ordered roots without following
-   directory symlinks, applies the filename and parent-suffix filters, sorts
-   matches lexically across roots, and takes the first.
+   Recursive resolution is `GlobReference::take_first` on `**/<payload>`
+   over the same ordered roots, without following directory symlinks: the
+   shallowest match under the first root that has one (see
+   [Recursive Search](#recursive-search-)).
 
 6. **Normalize.** Resolved local paths are made absolute with `.`/`..`
    normalized lexically by the [path identity](#path-identity) rules (a `..`
@@ -1045,9 +1104,361 @@ C:\..\..\repo       → C:\repo          (and at a drive root)
 ```
 
 A verbatim path without dot segments is then reduced to its legacy spelling,
-so `\\?\C:\repo` and `C:\repo` select the same tree. Containment additionally
-checks where a candidate really lands; see
+so `\\?\C:\repo` and `C:\repo` select the same tree.
+
+Deduplication compares identities rather than these reduced spellings, so a
+verbatim path too long to reduce is still a duplicate of its legacy spelling.
+The first occurrence survives with its own text:
+
+```text
+1. \\?\C:\repo\<300-character name>\x.md   (Repository)   kept, prefix and all
+2. C:\repo\<300-character name>\x.md       (Source)       dropped as a duplicate
+```
+
+Containment additionally checks where a candidate really lands; see
 [Trust boundaries and containment](#trust-boundaries-and-containment).
+
+## Canonicalizing Paths
+
+Canonicalizing asks the filesystem for a path's real location: symlinks are
+followed, `.` and `..` are resolved, and the file must exist. On native
+Windows, `std::fs::canonicalize` also rewrites the result into the verbatim
+form `\\?\C:\...`. Most other code cannot use that form:
+
+- `FileReference` rejects it as an unsupported device prefix;
+- Git reports repositories in the ordinary form, so a verbatim path never
+  matches a Git root by prefix;
+- a `file://` URL or a message built from it shows `\\?\` to the user.
+
+`biscuit_file::canonicalize_simplified` (no feature needed) canonicalizes the
+same way but returns the ordinary spelling whenever it names the same file.
+On macOS and Linux it is exactly `std::fs::canonicalize`.
+
+```rust
+use std::path::Path;
+
+let real = biscuit_file::canonicalize_simplified(Path::new("."))?;
+// Windows: C:\work\repo   (std::fs::canonicalize: \\?\C:\work\repo)
+// macOS:   /private/var/... for a path under /var, as before
+# let _ = real;
+# Ok::<(), std::io::Error>(())
+```
+
+**The rule:** if the canonical path leaves the spot where it was computed
+(returned, stored, persisted, shown, put in a URL, parsed again, or compared
+with a path someone else produced), use `canonicalize_simplified`. A raw
+`std::fs::canonicalize`, `.canonicalize()`, or `dunce::canonicalize` is
+acceptable only for a *private comparison*: both sides are canonicalized the
+same way and only the yes/no answer is kept.
+
+```rust
+use std::path::Path;
+
+// Private comparison: both sides get the same treatment, only the bool escapes.
+fn same_file(a: &Path, b: &Path) -> bool {
+    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    }
+}
+# let _ = same_file;
+```
+
+A cache or lookup key counts as private only when every producer of keys uses
+the same function, including any fallback taken when canonicalization fails.
+A key that is the canonical path on success and the authored path on failure
+mixes two spellings on Windows, so it uses `canonicalize_simplified`.
+
+```mermaid
+flowchart TD
+    A["Need a path's real location"] --> B{"Does the result leave<br/>this comparison?"}
+    B -- "returned, stored, shown,<br/>URL, reparsed, hashed into a shared key" --> C["canonicalize_simplified"]
+    B -- "no: both sides canonicalized<br/>the same way, only the answer kept" --> D{"In biscuit-file, Claudine,<br/>or Darkmatter?"}
+    D -- yes --> E["raw call allowed only with an entry<br/>in the package's path_lookup_guard test"]
+    D -- no --> F["raw call allowed"]
+```
+
+In `biscuit-file`, `claudine`, `claudine-cli`, `darkmatter`, and
+`darkmatter-cli`, a Level 1 source guard (`path_lookup_guard`) fails on any
+direct canonicalize call in production code unless that package's guard file
+lists it, by file, enclosing function, and operation, with the invariant that
+makes it private. The failure message names the file and line and prints an
+entry to paste. The same guard rejects a direct `dirs::home_dir` or
+`std::env::home_dir` in Claudine; use `biscuit_file::home_dir()` there.
+A call is found however the file spells it: qualified, imported, renamed, or
+through a chain of aliases (`use std::fs as f; use f::canonicalize as c;`
+then `c(path)`), each import counting only in the module or function that
+declares it. A `canonicalize` or `home_dir` imported from a module the guard
+cannot place (`use other::home_dir as h;`) is reported for review, never
+skipped. Production code is every file under `src/` plus everything the
+library, binary, and build-script roots compile in. The roots are the ones the
+package's `Cargo.toml` selects, read the way Cargo reads them
+(`path = 'x.rs'`, `[ lib ]`, and `lib = { path = "x.rs" }` all count;
+`./x.rs` and `src/../x.rs` name the same file as `x.rs`, so one exception
+covers it), plus `src/lib.rs`, `src/main.rs`, and `src/bin/*`. From each root
+the guard follows `mod` declarations as the compiler does, so a module loaded
+with `#[path = "../shared/io.rs"]` is scanned wherever it lives, and both
+files of `#[cfg_attr(windows, path = "win.rs")] mod imp;` (`win.rs` and
+`imp.rs`) are scanned. Code under `#[cfg(test)]` is skipped, along with the
+module files it declares. Nothing outside `src/` is scanned unless a root
+reaches it: a binary at `main.rs` does not pull in `tests/`. A `[[bin]]` under
+`tests/` is still production code. Only a binary that the guard call lists as a
+test fixture is skipped, and a listed binary must live under `tests/` and
+declare `required-features`, so a default build and `cargo install` never
+compile it. A manifest that is not valid TOML, a target `path` or `build` value
+of the wrong type, empty, or absolute, a target whose source file is missing,
+or a `mod x;` with no `x.rs` or `x/mod.rs` fails the guard instead of shrinking
+what it scans. Modules declared by a macro, and files pulled in with
+`include!`, are not followed.
+
+## Glob References: `GlobReference`
+
+A `FileReference` names **one** file and never reads glob syntax: `[`, `]`,
+`*`, and `?` are legal file-name characters, so `pages/[id].md` is a literal
+name. When you want **a set** of files, build a `GlobReference`. Each pattern
+is `[!][prefix]glob`: the prefix is any file-reference prefix (`./`, bare,
+`&`, `^`, `@`, `~`, `vault:`, absolute, `{{VAR}}`), and it searches exactly
+the roots that prefix resolves against.
+
+```rust,no_run
+use std::collections::HashMap;
+use biscuit_file::{FileResolutionContext, GlobReference};
+
+let ctx = FileResolutionContext::from_snapshot("/repo/pkg", None, HashMap::new())
+    .with_repository_root("/repo");
+let specs = GlobReference::new(["^**/*spec*.md", "!&**/_completed/**"])?;
+let listing = specs.list_files(&ctx)?;      // every match, most local first
+let first = specs.take_first(&ctx)?;        // the first of that order
+let member = specs.matches("/repo/pkg/x/spec.md".as_ref(), &ctx); // no walk
+let roots = specs.roots(&ctx);              // for callers that walk themselves
+# let _ = (listing, first, member, roots);
+# Ok::<(), biscuit_file::GlobReferenceError>(())
+```
+
+| Call | Returns | Use it for |
+|------|---------|------------|
+| `list_files(&ctx)` | `GlobListing { matches, skipped }` | the whole set, in native order |
+| `take_first(&ctx)` | `Option<PathBuf>` | the single most local match (`%` uses this) |
+| `matches(&path, &ctx)` | `bool` | membership of one path, which need not exist; a relative path is read from the context's `cwd`. Never fails: a pattern whose roots the context cannot supply admits and rejects nothing, and an invalid context admits nothing |
+| `roots(&ctx)` | `Vec<PathBuf>` | the positive patterns' roots, in precedence order |
+| `lists_file(&path, &ctx)` | `bool` | whether `list_files` would list an existing file its walk reached: `matches`, except that a file symlink whose target leaves the tree (a skipped entry) is not listed. For a caller that walks `roots` itself with its own filters, as Claudine's completion does, and must offer exactly what a listing would |
+| `matches_without_context(&path)` | `bool` | membership of an absolute path for a caller with no request: bare patterns read from the filesystem root (`**/fixes/**/spec.md` judges the full path), absolute patterns as written; patterns that need a context admit and reject nothing |
+| `with_file_name_view()` | `GlobReference` | also match a bare file name at any depth when the glob after the prefix has no `/` (`*.md`, `!_*.md`) |
+| `escape(text)` | `String` | make text literal: `[id].md` → `[[]id[]].md` |
+| `patterns()` | iterator of `&str` | the patterns as authored, `!` included |
+
+`new` checks everything it can without a context: the prefix grammar, the
+glob syntax, and that at least one pattern is positive. Root failures (no
+repository, no home, a tree escape) surface when a context is supplied.
+
+### `FileReference` or `GlobReference`?
+
+| You want… | Use |
+|-----------|-----|
+| one file the author named, with a clean `None` on a miss | `FileReference` |
+| the most local file with a given name anywhere below a prefix | `FileReference` with `%` (`%^README.md`) |
+| every file that fits a shape (`^**/*spec*.md`), possibly with exclusions | `GlobReference::list_files` |
+| the most local file that fits a shape | `GlobReference::take_first` |
+| to test a path the user typed against a configured set | `GlobReference::matches` |
+
+The two never reinterpret each other's text. Brackets show the difference:
+
+```text
+FileReference "pages/[id].md"   → the file literally named [id].md
+GlobReference "pages/[id].md"   → pages/i.md or pages/d.md ([id] is a character class)
+GlobReference "pages/[[]id[]].md" (GlobReference::escape("[id].md")) → the literal [id].md
+FileReference "%pages/[id].md"  → the shallowest pages/[id].md below the roots, literally
+```
+
+### Native order: most local first
+
+Every result follows one order. The positive patterns' roots are merged into
+one precedence list (each pattern's roots in turn; a root already seen keeps
+its first place), and each root is walked once:
+
+```mermaid
+flowchart TD
+    A["Merged roots, most local first<br/>(^: package, area, repository)"] --> B{Another root?}
+    B -- no --> Z[Done]
+    B -- yes --> C["Walk it; skip files an earlier root already owns"]
+    C --> D["Sort this root's matches:<br/>fewest path components first,<br/>then component by component<br/>(a/x.md before a-b/x.md)"]
+    D --> E[Append to the listing]
+    E --> F{take_first and<br/>the listing has a match?}
+    F -- yes --> G["Return the first match;<br/>later roots are never walked"]
+    F -- no --> B
+```
+
+`take_first` is therefore cheap in the common case: it returns the shallowest
+match under the first root that has any, and never walks the remaining roots.
+It is exactly what a [`%` reference](#recursive-search-) runs.
+
+A file belongs to the **first root that contains it** and is judged only by
+its path relative to that root. A later root never re-includes a file an
+earlier root excluded: with `["^**/*spec*.md", "!x/**"]` in a package,
+`{package}/x/spec.md` is excluded, even though from the repository root it
+reads `…/pkg/x/spec.md`, which `!x/**` does not match. Two spellings of one
+file (`/var/…` and `/private/var/…` on macOS) are one file.
+
+For example, with `^**/intro.md` launched in package `pkg` of area `area`:
+
+```text
+{pkg}/intro.md, {pkg}/a/b/intro.md, {area}/intro.md, {repo}/intro.md, {repo}/z/intro.md
+```
+
+### Pattern rules
+
+- `!` marks an exclusion and takes its own prefix (`!&**/_completed/**`). At
+  least one pattern must be positive (`NoPositivePattern` otherwise).
+- `*` and `?` never cross `/`; `**` does. Matching is case-sensitive on every
+  OS, and that includes the directory names an absolute pattern starts with:
+  with only `/repo/docs/a.md` on disk, `/repo/DOCS/*.md` matches nothing even
+  on a case-insensitive filesystem (the macOS and Windows default), where
+  `/repo/DOCS` opens the same directory. The same holds for any other spelling
+  the filesystem treats as the same name, such as `/repo/ς/*.md` for a stored
+  `Σ` or `/repo/ß/*.md` for a stored `SS` on case-insensitive APFS, and for a
+  Linux directory made case-insensitive with `chattr +F`.
+  Each name you write must be spelled exactly as an entry of its parent, so a
+  symlinked name such as macOS `/var` still works. A pattern whose spelling
+  does not match, or cannot be confirmed, lists nothing and matches nothing;
+  it is not an error. Names a `{{VAR}}` value supplies are a root the context
+  provides and are judged by the directory they reach, like `~` or `&`.
+  - When a parent can be traversed but not listed (mode `0111`), the stored
+    name is read from the canonical path on macOS and Windows, so
+    `/locked/anchor/docs/*.md` still works and `/locked/anchor/DOCS/*.md`
+    still matches nothing. On Linux, and for a symlinked name, the spelling
+    counts as confirmed only when the other-case spelling (`DOCS` for `docs`)
+    does not reach the same entry; inside a case-insensitive folder that
+    cannot be listed, even a correct spelling cannot be confirmed and the
+    pattern matches nothing.
+  - On Windows, an 8.3 short name such as `RUNNER~1` is the filesystem's own
+    alternate name for a folder and is never listed, so a name of that form is
+    accepted as written.
+  - A name that cannot be examined at all (its parent cannot be traversed) is
+    not checked: no judgment below it uses the filesystem's spelling rules,
+    and a listing reports the unreadable directory as an I/O error.
+- `\` is never an escape: it is a literal character on Unix and a path
+  separator on Windows, as in any Windows path; write literal text
+  with `GlobReference::escape`. A `{{VAR}}` value is always literal.
+- A pattern with no glob syntax is valid and matches that one path.
+- `%` and `http(s)://` prefixes are rejected (`RejectedPrefix`): a glob is
+  already recursive, and a URL has nothing local to walk.
+- Leading literal directories narrow the search (`^docs/*.md` walks only
+  `docs/` under each root). No filters apply: hidden, ignored, and
+  `_`-prefixed files are matched like any other.
+
+### The relative boundary and symlinks
+
+Bare, `./`, and `../` patterns keep the same
+[relative boundary](#the-file-tree-base_dir-and-the-relative-boundary) as a
+single reference: a search directory outside the tree is a
+`RelativeTreeEscape` error unless the context opted in with
+`allow_external_relative()`. The check is made on the directory the walk
+starts in, so leading `..` hops count:
+
+```text
+tree: /work/repo          cwd: /work/repo/docs
+
+../**/*.md          → walks /work/repo                 allowed
+../../**/*.md       → walks /work                      RelativeTreeEscape
+~/notes/**/*.md     → not a relative pattern           never checked
+```
+
+`~`, `@`, absolute, and vault roots are not bound by it, nor is a `{{VAR}}`
+that expands to an absolute path (one that expands to a relative path is a
+relative pattern and is bound). `&` and `^` stay inside the repository.
+
+A search never follows a directory symlink. When the context enforces the
+boundary, a bare, `./`, or `../` pattern that matches a **file** symlink whose
+target lies outside the tree leaves it out of `matches` and reports it in
+`GlobListing::skipped` as a `SkippedEntry { link, target }`, so a caller can
+say why it is missing. With `allow_external_relative()` the link is listed
+like any other file. A single `FileReference` to that link still fails with
+`RelativeTreeEscape`.
+
+```text
+tree: /work/repo     docs/shared.md → /opt/team/shared.md
+
+GlobReference "./**/*.md" from /work/repo/docs
+  matches: [/work/repo/docs/a.md]
+  skipped: [SkippedEntry { link: /work/repo/docs/shared.md, target: /opt/team/shared.md }]
+```
+
+### Errors: `GlobReferenceError`
+
+Each variant that concerns one pattern names it as authored, `!` included.
+`resolution_failure()` maps a variant to the same `ResolutionFailure` class a
+`FileReference` failure of the same kind reports.
+
+| Variant | When | Raised by |
+|---------|------|-----------|
+| `RejectedPrefix { pattern, prefix, reason }` | a `%` or `http(s)://` prefix | `new` |
+| `MalformedPrefix { pattern, source }` | text the reference grammar rejects, an empty pattern, or a prefix with no glob after it (`&`, `docs/`) | `new` |
+| `InvalidGlob { pattern, message }` | invalid glob syntax after the prefix (`*.{md`) | `new` |
+| `NoPositivePattern` | an empty list, or only `!` exclusions | `new` |
+| `RelativeTreeEscape { pattern, base_dir, candidate }` | a bare, `./`, or `../` search directory outside the tree | `list_files`, `take_first` |
+| `OutsideRepository { pattern, sigil, reference_cwd }` | a `&` or `^` pattern with no repository containing `cwd` | `list_files`, `take_first` |
+| `Unresolvable { pattern, source }` | a missing home, vault, or environment variable, a repository escape, or an injected sigil | `list_files`, `take_first` |
+| `InvalidContext(source)` | the context fails `validate()` | `list_files`, `take_first` |
+| `Io { path, source }` | a directory the search must enter (a root, a search directory, or any directory below it that could hold a match), or the target of a matched file symlink, exists but cannot be read; `path` names it | `list_files`, `take_first` |
+
+An unreadable directory fails the search; it is never left out of a listing
+that would then look complete. With `docs/` readable and `docs/locked/`
+unreadable (`chmod 000`):
+
+```rust
+GlobReference::new(["docs/**/*.md"])?.list_files(&ctx);     // Err(Io { path: ".../docs/locked", .. })
+GlobReference::new(["docs/locked/*.md"])?.take_first(&ctx); // Err(Io { .. }), not Ok(None)
+FileReference::new("%secret.md")?.resolve_in_context(&ctx); // Err(FileReferenceError::Io { .. })
+GlobReference::new(["docs/*.md"])?.list_files(&ctx);        // Ok: no match can lie inside docs/locked
+```
+
+Three cases are not errors:
+
+- A root or literal search directory that does not exist holds no matches
+  (`missing/*.md` lists nothing).
+- A directory deeper than the pattern can reach hides nothing: without `**`,
+  each `/` bounds how deep a match lies, so `docs/*.md` never needs
+  `docs/locked/`. A `**` pattern (or the file-name view) reaches every depth.
+- An entry that disappears during the walk, and a dangling file symlink, are
+  simply absent. A symlink whose target cannot be examined for another reason
+  (an unreadable directory, a cycle of links) is an `Io` error naming the link.
+
+`take_first` (and so `%`) fails only when the unreadable directory could hold
+a file that precedes its result: under the first root with a match, a
+directory whose files are all deeper than that match cannot change it.
+`matches`, `lists_file`, `matches_without_context`, and `roots` never fail.
+
+### When a literal reference misses
+
+A `FileReference` never reads glob syntax: `docs/*.md` names one file whose
+name is `*.md`. When such a reference finds nothing, the miss carries a hint
+that the text was read literally and that a set of files needs a form that
+accepts a glob reference, such as `::file-links`. Resolution itself stays
+literal; only the message changes.
+
+The hint belongs to the failure class, so a consumer that reports a miss asks
+for it instead of testing for wildcards itself:
+
+```rust
+use biscuit_file::ResolutionFailure;
+
+assert!(ResolutionFailure::NoMatch.glob_hint("docs/*.md").is_some());
+// A plain missing name, and any failure other than a miss, have none.
+assert!(ResolutionFailure::NoMatch.glob_hint("docs/missing.md").is_none());
+assert!(ResolutionFailure::InvalidReference.glob_hint("../*.md").is_none());
+```
+
+`DetailedResolution::glob_hint()` answers the same question for a resolution
+already in hand. Every consumer that turns a single-file miss into an error or
+warning appends this hint, so the explanation reads the same in `md`,
+`claudine`, and the language server:
+
+| Reference | Outcome | Hint |
+|-----------|---------|------|
+| `docs/*.md` (no such file) | `NoMatch` | yes |
+| `docs/missing.md` | `NoMatch` | no |
+| `../*.md` leaving the tree | `InvalidReference` | no |
+| `docs/a.md` (exists) | match | no |
 
 ## Portable References: `PortablePath`
 

@@ -71,25 +71,29 @@ fn compose_empty_key_setter_errors() {
     );
 }
 
+/// A second bare word is a positional argument in `argv`, not a second file.
 #[test]
-fn compose_multiple_file_candidates_errors() {
-    let fixture = CliProcessFixture::named("compose-multiple-candidates");
+fn compose_second_bare_word_is_a_positional_not_a_file() {
+    let fixture = CliProcessFixture::named("compose-second-bare-word");
     let a = fixture.cwd().join("a.md");
     let b = fixture.cwd().join("b.md");
-    fs::write(&a, "---\n---\nbody\n").unwrap();
+    fs::write(&a, "---\ntitle: a\n---\nArgs: {{ argv }}\n").unwrap();
     fs::write(&b, "---\n---\nbody\n").unwrap();
 
-    let assert = fixture
+    let output = fixture
         .command()
-        .args(["compose", a.to_str().unwrap(), b.to_str().unwrap()])
-        .assert()
-        .code(1);
-    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
-    let plain = strip_ansi(&stderr);
-    assert!(
-        plain.contains("multiple"),
-        "expected multiple-file error, got: {plain}"
-    );
+        .args(["compose", "--claude", "--dry-run", a.to_str().unwrap(), b.to_str().unwrap()])
+        .output()
+        .unwrap();
+    let plain = strip_ansi(&format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    ));
+    assert!(output.status.success(), "{plain}");
+    assert!(!plain.contains("multiple"), "no multiple-file error: {plain}");
+    let expected = format!("Args: [{}]", serde_json::json!(b.to_str().unwrap()));
+    assert!(plain.contains(&expected), "expected {expected}: {plain}");
 }
 
 #[test]

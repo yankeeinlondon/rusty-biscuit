@@ -132,6 +132,48 @@ fn explicit_file_not_found_errors() {
     }
 }
 
+/// An explicit system prompt reference that looks like a glob names one file:
+/// its miss is `SystemPromptFileNotFound` with the literal-glob hint, while a
+/// glob-looking reference that fails for another reason (`~user` is
+/// malformed, an unset `{{VAR}}` is a missing anchor) reports that failure
+/// without the hint.
+#[test]
+fn explicit_file_glob_hint_only_on_a_miss() {
+    let tmp = TempDir::new().unwrap();
+    std::fs::create_dir_all(tmp.path().join("docs")).unwrap();
+    std::fs::write(tmp.path().join("docs/a.md"), "# A").unwrap();
+    let context = LaunchContext {
+        agent: None,
+        cwd: tmp.path().to_path_buf(),
+        repo_root: None,
+        package_area_root: None,
+        package_root: None,
+    };
+    let resolve = |file: &str| {
+        let args = SystemPromptArgs { append_file: Some(file.to_string()), ..Default::default() };
+        resolve_system_prompt_source(&args, &context)
+    };
+
+    let miss = resolve("./docs/*.md").unwrap_err();
+    assert!(matches!(miss, crate::error::ClaudineError::SystemPromptFileNotFound(_)), "{miss:?}");
+    assert!(miss.to_string().contains("::file-links"), "{miss}");
+
+    let plain = resolve("./docs/missing.md").unwrap_err();
+    assert!(matches!(plain, crate::error::ClaudineError::SystemPromptFileNotFound(_)), "{plain:?}");
+    assert!(!plain.to_string().contains("::file-links"), "{plain}");
+
+    for other in ["~user/*.md", "{{CLAUDINE_TEST_UNSET_GLOB_VAR}}/*.md"] {
+        let err = resolve(other).unwrap_err();
+        let crate::error::ClaudineError::SystemPromptFileUnresolvable { source, .. } = &err else {
+            panic!("`{other}` must report its own failure: {err:?}");
+        };
+        assert_ne!(source.resolution_failure(), biscuit_file::ResolutionFailure::NoMatch);
+        assert!(!err.to_string().contains("::file-links"), "{err}");
+    }
+
+    assert!(resolve("./docs/a.md").unwrap().is_some());
+}
+
 /// A `@`-prefixed `--append-system-prompt` reference is a magic-root search,
 /// resolving under the supplied repository root — the migration added `@`
 /// support the former `cwd.join` grammar lacked.
@@ -385,7 +427,7 @@ fn standard_discovery_repo_fallback() {
 
 #[test]
 fn standard_discovery_user_home_fallback() {
-    // Note: This test has limitations because we cannot easily mock dirs::home_dir().
+    // Note: This test has limitations because we cannot easily mock biscuit_file::home_dir().
     // We test the case where no local files exist, which should either:
     // 1. Return None if ~/.claudine/system-prompt.md doesn't exist (normal test env)
     // 2. Return Some with User scope if it does exist (real user environment)
@@ -634,4 +676,100 @@ fn non_interactive_candidates_use_builtin_when_no_files_exist() {
         SystemPromptSource::BuiltInNonInteractive
     ));
     assert_eq!(candidates[0].1, DEFAULT_NON_INTERACTIVE_SYSTEM_PROMPT);
+}
+
+/// Sets `dir` to mode `000` and restores `0755` on drop. `None` when this
+/// user can still list it (a privileged user).
+#[cfg(unix)]
+struct Locked(PathBuf);
+
+#[cfg(unix)]
+impl Locked {
+    fn new(dir: &std::path::Path) -> Option<Self> {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let locked = Self(dir.to_path_buf());
+        match std::fs::read_dir(dir) {
+            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => Some(locked),
+            other => {
+                eprintln!("skipping: {} is still listable after chmod 000 ({other:?})", dir.display());
+                None
+            }
+        }
+    }
+}
+
+#[cfg(unix)]
+impl Drop for Locked {
+    fn drop(&mut self) {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o755));
+    }
+}
+
+/// Whether `result` is a permission-denied I/O error naming `path`.
+#[cfg(unix)]
+fn is_denied_naming<T>(result: &Result<T, crate::error::ClaudineError>, path: &std::path::Path) -> bool {
+    matches!(
+        result,
+        Err(crate::error::ClaudineError::Io(error))
+            if error.kind() == std::io::ErrorKind::PermissionDenied
+                && error.to_string().contains(&path.display().to_string())
+    )
+}
+
+/// A package prompt behind an ancestor that cannot be searched is an I/O
+/// error naming it, never a reason to use the repository's prompt.
+#[cfg(unix)]
+#[test]
+fn standard_discovery_fails_on_an_inaccessible_scope() {
+    let tmp = TempDir::new().unwrap();
+    let repo = tmp.path().join("repo");
+    let package = repo.join("locked/package");
+    std::fs::create_dir_all(&package).unwrap();
+    std::fs::write(package.join("system-prompt.md"), "# Package").unwrap();
+    std::fs::write(repo.join("system-prompt.md"), "# Repo").unwrap();
+    let context = LaunchContext {
+        agent: None,
+        cwd: repo.clone(),
+        repo_root: Some(repo.clone()),
+        package_area_root: None,
+        package_root: Some(package.clone()),
+    };
+    let args = SystemPromptArgs::default();
+
+    let (_, text) = resolve_system_prompt_source_with_home(&args, &context, None).unwrap().unwrap();
+    assert_eq!(text, "# Package");
+
+    let Some(_locked) = Locked::new(&repo.join("locked")) else { return };
+    let result = resolve_system_prompt_source_with_home(&args, &context, None);
+    assert!(is_denied_naming(&result, &package.join("system-prompt.md")), "{result:?}");
+}
+
+/// The repository's non-interactive appendix behind a folder that cannot be
+/// searched is an I/O error naming it, not a list without it.
+#[cfg(unix)]
+#[test]
+fn non_interactive_candidates_fail_on_an_inaccessible_repo_file() {
+    let tmp = TempDir::new().unwrap();
+    let repo = tmp.path().join("repo");
+    let home = tmp.path().join("home");
+    std::fs::create_dir_all(repo.join(".claudine")).unwrap();
+    std::fs::create_dir_all(home.join(".claudine")).unwrap();
+    let repo_file = repo.join(".claudine/non-interactive.md");
+    std::fs::write(&repo_file, "Repo appendix").unwrap();
+    std::fs::write(home.join(".claudine/non-interactive.md"), "Home appendix").unwrap();
+    let context = LaunchContext {
+        agent: None,
+        cwd: repo.clone(),
+        repo_root: Some(repo.clone()),
+        package_area_root: None,
+        package_root: None,
+    };
+
+    assert_eq!(resolve_non_interactive_candidates_with_home(&context, Some(&home)).unwrap().len(), 3);
+
+    let Some(_locked) = Locked::new(&repo.join(".claudine")) else { return };
+    let result = resolve_non_interactive_candidates_with_home(&context, Some(&home));
+    assert!(is_denied_naming(&result, &repo_file), "{result:?}");
 }

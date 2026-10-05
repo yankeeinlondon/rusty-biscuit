@@ -215,7 +215,7 @@ impl McpProviderStateStore {
     }
 
     fn canonical_repo_path(path: &Path) -> Option<PathBuf> {
-        fs::canonicalize(path).ok()
+        biscuit_file::canonicalize_simplified(path).ok()
     }
 }
 
@@ -311,6 +311,51 @@ mod tests {
                 .entries_for_provider(Provider::Codex, &Scope::Repo(repo_root))
                 .is_empty()
         );
+    }
+
+    /// New repository keys take the shared canonical spelling. A state file
+    /// written earlier holds the raw `fs::canonicalize` spelling (a `\\?\`
+    /// verbatim path on Windows); that key still resolves for the authored
+    /// path, a new record reuses it instead of adding a second key, and the
+    /// file round-trips with one key.
+    #[test]
+    fn a_repo_key_persisted_in_the_raw_canonical_spelling_still_resolves() {
+        let tmp = TempDir::new().unwrap();
+        let repo_root = tmp.path().join("repo");
+        fs::create_dir_all(&repo_root).unwrap();
+        let state_path = tmp.path().join("mcp-state.json");
+        let scope = Scope::Repo(repo_root.clone());
+        let keys = |store: &McpProviderStateStore| store.state().repos.keys().cloned().collect::<Vec<_>>();
+
+        let mut store = McpProviderStateStore::load_from(&state_path).unwrap();
+        store.record_managed(Provider::Codex, &scope, make_entry("calendar", McpOrigin::Managed));
+        let helper_key = biscuit_file::canonicalize_simplified(&repo_root)
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        assert_eq!(keys(&store), std::slice::from_ref(&helper_key));
+        assert!(!helper_key.starts_with(r"\\?\"), "{helper_key}");
+        store.save_to(&state_path).unwrap();
+
+        let raw_key = fs::canonicalize(&repo_root).unwrap().to_string_lossy().into_owned();
+        let mut on_disk: serde_json::Value = serde_json::from_str(&fs::read_to_string(&state_path).unwrap()).unwrap();
+        let repos = on_disk["repos"].as_object_mut().unwrap();
+        let entries = repos.remove(&helper_key).unwrap();
+        repos.insert(raw_key.clone(), entries);
+        fs::write(&state_path, serde_json::to_string_pretty(&on_disk).unwrap()).unwrap();
+
+        let mut store = McpProviderStateStore::load_from(&state_path).unwrap();
+        let entry = store
+            .entry_for_catalog_id(Provider::Codex, &scope, "calendar")
+            .expect("the raw-spelled key resolves for the authored path");
+        assert_eq!(entry.native_name, "calendar");
+        store.record_managed(Provider::Codex, &scope, make_entry("linear", McpOrigin::Managed));
+        assert_eq!(keys(&store), std::slice::from_ref(&raw_key));
+        store.save_to(&state_path).unwrap();
+
+        let reloaded = McpProviderStateStore::load_from(&state_path).unwrap();
+        assert_eq!(keys(&reloaded), [raw_key]);
+        assert_eq!(reloaded.entries_for_provider(Provider::Codex, &scope).len(), 2);
     }
 
     #[test]

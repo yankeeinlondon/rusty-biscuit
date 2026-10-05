@@ -3,19 +3,32 @@
 //! Verifies that the status table and verbose commit section render correctly
 //! in a real terminal (tmux), both on a plain terminal and when the
 //! image-capable graph path is exercised. The design test checks the table's
-//! colors and emphasis cell by cell in a styled tmux capture, and the stale
-//! scene checks the dim PR age line beneath the legend. Two scenes resize the
+//! colors and emphasis cell by cell in a styled tmux capture. The stale scene
+//! holds the worker's PR request past the 3 s wait and checks the dim age
+//! item and hint beneath the legend, the cleared spinner, and a caption that
+//! is no longer "still checking"; the failed-refresh scene checks the dim
+//! `(couldn't refresh)` item. Two scenes resize the
 //! pane to exactly 99 and 100 columns to prove the counts' width gate on the
 //! terminal's own width, including a `-> parent` cell against a non-default
 //! parent. Two scenes point `origin` at a local Gitea stand-in: one proves the
-//! dim credentials warning beneath the caption, the other holds the check
+//! credentials warning as a closing note, the other holds the check
 //! past the 3 s wait to prove the spinner is drawn and then cleared before
 //! the caption, and that the dim refresh hint follows the legend. Two more
 //! let the pane's git reach a bare repository through the stand-in and hold
 //! `wt list -r`'s worker in each spinner phase: the no-key fallback turning
 //! into the fetch on the same line, and the rate-limited fallback, each
-//! captured as one spinner line before it clears ahead of the caption. The
-//! caption suffix's dim italic is checked in the design test. The graph as an
+//! captured as one spinner line before it clears ahead of the caption. A
+//! third holds the PR lock while `wt list -r` runs, then releases it with
+//! nothing published, and proves that once the retry's head finishes after
+//! showing the fallback, the spinner is back to one `updating` line. The
+//! caption suffix's dim italic is checked in the design test. The
+//! unavailable-row scenes add real broken worktrees to the design fixture (a
+//! deleted directory, a deleted `.git` file, a link in place of a moved
+//! checkout, and a corrupt index that makes only `git status` fail) and check
+//! the `✕` and dim `?` glyphs, each legend variant and its absence, the table
+//! borders, and the notes' order and wrapping at the spawn width, 80, and
+//! 60 columns, with every path and command in a note shown whole. The graph
+//! as an
 //! image-capable terminal draws it is tested in
 //! `level2_graph_in_kitty.rs`.
 
@@ -25,13 +38,13 @@ mod styled_capture;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use assert_cmd::cargo::cargo_bin;
 use biscuit_test_harness::tmux::TmuxHarness;
 use biscuit_test_harness::CapturedFrame;
 use biscuit_test_harness::TerminalHarness;
-use perf_support::{FakeGitea, GitHold, GiteaReply, NoRequest, ProxyStub, wait_for_refresh_workers};
+use perf_support::{FakeGitea, GitHold, GiteaReply, NoRequest, WorkerPaths, reap_workers, wait_for_refresh_workers};
 use serial_test::serial;
 use styled_capture::{Color, StyledScreen};
 use test_toolkit::{Backend, Level, require_level};
@@ -278,6 +291,11 @@ const GITHUB_ORIGIN: &str = "https://github.com/owner/repo.git";
 /// All three branches have fork-origin records naming `main`, so they hang
 /// from it in the Branch column. The stores live under `home`, which the pane
 /// passes to `wt` as `HOME` and `XDG_CACHE_HOME`'s parent.
+///
+/// Every listing in a pane leaves a detached worker. Dropping the fixture
+/// reaps it ([`reap_workers`]) before the temporary directory goes, so declare
+/// a [`FakeGitea`] after the fixture: it drops first and ends its held
+/// requests.
 struct DesignFixture {
     _parent: tempfile::TempDir,
     home: PathBuf,
@@ -301,10 +319,17 @@ impl DesignFixture {
     }
 
     /// [`Self::new`] with `origin` at [`FakeGitea::ORIGIN`]; pair it with a
-    /// pane whose proxy is a [`FakeGitea`]. The stored PR answer names no
-    /// branch of `o/r`, so no badge shows.
+    /// pane whose proxy is a [`FakeGitea`]. The listing's worker asks Gitea
+    /// for open PRs, so the stored answer's badge shows only until Gitea
+    /// answers.
     fn with_gitea_origin() -> Self {
-        Self::build(Duration::ZERO, false, FakeGitea::ORIGIN)
+        Self::with_gitea_pr_age(Duration::ZERO)
+    }
+
+    /// [`Self::with_gitea_origin`] whose stored PR answer was fetched
+    /// `pr_age` ago.
+    fn with_gitea_pr_age(pr_age: Duration) -> Self {
+        Self::build(pr_age, false, FakeGitea::ORIGIN)
     }
 
     /// [`Self::with_gitea_origin`] plus a bare `o/r.git` whose `main` is one
@@ -460,14 +485,15 @@ impl DesignFixture {
             .save_atomic(&self.store_path(fork_origin_path(main).expect("fork-origin path")))
             .expect("write fork-origin store");
 
-        // Bound to this origin; a fresh answer makes `wt` send no request.
+        // Bound to this origin and naming its repository.
         let fetched_at = unix_now() - pr_age.as_secs();
         let origin = worktree::pull_requests::origin_url(main).expect("the fixture has an origin");
+        let source_repo = if origin == FakeGitea::ORIGIN { "o/r" } else { "owner/repo" };
         let pr = |number: u32, source: &str, target: &str| {
             serde_json::json!({
                 "number": number,
-                "url": format!("https://github.com/owner/repo/pull/{number}"),
-                "source_repo": "owner/repo",
+                "url": format!("https://example.invalid/{source_repo}/pull/{number}"),
+                "source_repo": source_repo,
                 "source_branch": source,
                 "target_branch": target,
             })
@@ -481,9 +507,10 @@ impl DesignFixture {
             "origin_digest": worktree::pull_requests::origin_digest(&origin),
             "fetched_at": fetched_at,
             "publication": worktree::remote_head::new_attempt_id().expect("a publication id"),
-            "writer": "refresh",
-            "source_repo": "owner/repo",
+            "source_repo": source_repo,
             "pull_requests": pull_requests,
+            // A seeded answer: nothing is known of how it was asked.
+            "credentials": { "state": "unknown" },
         });
         fs::write(self.pr_store(), serde_json::to_vec(&prs).unwrap()).expect("write PR store");
 
@@ -513,8 +540,8 @@ impl DesignFixture {
     /// reliably empty a tmux pane, so a reused pane can still show an earlier
     /// run's legend and satisfy this run's wait.
     fn list_in(&self, colorfgbg: &str) -> StyledScreen {
-        // A refused proxy keeps any request off the network; the fresh store
-        // means none is made.
+        // A refused proxy keeps every request off the network, and fails
+        // the worker's PR request at once.
         self.list_until("list", colorfgbg, "http://127.0.0.1:9", "parent deleted")
     }
 
@@ -602,6 +629,21 @@ impl DesignFixture {
             )
             .expect("send wt list failed");
         harness
+    }
+}
+
+impl Drop for DesignFixture {
+    fn drop(&mut self) {
+        let in_cache = |real: PathBuf| real.file_name().map(|name| self.cache_dir().join("worktree").join(name));
+        let paths = WorkerPaths {
+            main: self.main.clone(),
+            pr_store: pr_store_path(&self.main).ok().and_then(in_cache),
+            head_store: remote_head_store_path(&self.main).ok().and_then(in_cache),
+        };
+        let finished = reap_workers(&paths, || {});
+        if !std::thread::panicking() {
+            assert!(finished, "a refresh worker outlived the test or kept a lock");
+        }
     }
 }
 
@@ -734,7 +776,11 @@ fn level2_list_styles_follow_the_design_in_tmux() {
     // Legend: the dim ring, both dots, and the Branch connectors.
     let legend = screen.row_with(&["Worktree", "uncommitted source files"]);
     screen.assert_span(legend, "○", "dim", |s| s.dim);
-    assert!(!plain.contains("PRs as of"), "a fresh answer has no age line:\n{plain}");
+    // The worker's PR request was refused, so this run dates the stored
+    // answer it shows; the item is the PR status, not part of the legend.
+    let item = screen.row_with(&["PRs as of"]);
+    assert_eq!(screen.text(item).trim(), "- PRs as of less than 1 min ago (couldn't refresh)", "{plain}");
+    assert_eq!(item, screen.row_with(&["Branch", "parent deleted"]) + 1, "{plain}");
     let dots: Vec<_> = screen.rows[legend].iter().filter(|c| c.ch == '●').collect();
     assert!(dots.len() == 2 && dots[0].style.fg_is(YELLOW) && dots[1].style.fg_is(RED), "{dots:?}");
     let branch_legend = screen.row_with(&["Branch", "conflicts with parent"]);
@@ -774,20 +820,32 @@ fn level2_list_width_flag_leaves_the_counts_in_tmux() {
     screen.assert_span(feature, "+1", "dim green", |s| s.dim && s.fg_is(GREEN));
 }
 
-/// A stale stored answer in a real terminal: its badge still shows, and the
-/// dim age line follows the legend. The detached refresh `wt list` starts
-/// sends its requests to a hanging local proxy, which the test then closes so
-/// the worker fails, stores nothing, and exits before the fixture is removed.
+/// A stale stored answer in a real terminal while the worker's PR request is
+/// still held at the 3 s wait: its badge still shows, the dim age item is the
+/// first status item (it follows the legend when, as in tmux, there is no
+/// graph), and the dim refresh hint follows it. Only the PR half was left, so
+/// the spinner said `updating`, is gone, and the caption says the check
+/// ended rather than "still checking". Released, the request fails and the
+/// worker stores nothing.
 #[test]
 #[serial(level2_terminal)]
 fn level2_list_stale_pr_answer_shows_a_dim_age_line_in_tmux() {
+    use biscuit_terminal::components::spinner::FRAMES;
+
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
-    let fixture = DesignFixture::with_pr_age(Duration::from_secs(12 * 60 + 5));
+    let fixture = DesignFixture::with_gitea_pr_age(Duration::from_secs(12 * 60 + 5));
     let seeded = fs::read(fixture.pr_store()).expect("seeded store");
-    let proxy = ProxyStub::hanging();
+    // Plain HTTP reaches the stand-in at once, so no connect timeout races
+    // the listing's 3 s wait.
+    let gitea = FakeGitea::new(GiteaReply::Status(503));
+    gitea.hold();
 
-    let screen = fixture.list_until("list", "15;0", &proxy.url(), "PRs as of");
+    let mut harness = fixture.start_in_pane(None, "list", "15;0", &gitea.url());
+    let during = wait_for_pane(&mut harness, |plain| plain.contains("updating"));
+    assert!(FRAMES.iter().any(|glyph| during.plain.contains(glyph)), "the spinner drew a frame:\n{}", during.plain);
+    let screen =
+        StyledScreen::parse(&wait_for_pane(&mut harness, |plain| unwrapped(plain).contains("force refresh immediately")).raw);
     let plain = screen.plain();
 
     let feature = screen.row_with(&["● wt-feature", "│"]);
@@ -796,31 +854,96 @@ fn level2_list_stale_pr_answer_shows_a_dim_age_line_in_tmux() {
     let legend_end = screen.row_with(&["Branch", "parent deleted"]);
     let age = screen.row_with(&["PRs as of"]);
     assert_eq!(age, legend_end + 1, "the age line follows the legend:\n{plain}");
-    assert_eq!(screen.text(age).trim(), "PRs as of 12 min ago", "{plain}");
+    assert_eq!(screen.text(age).trim(), "- PRs as of 12 min ago", "{plain}");
     screen.assert_span(age, "PRs as of 12 min ago", "dim", |s| s.dim);
+    let hint = screen.row_with(&["running this command again"]);
+    assert_eq!(hint, age + 1, "the hint follows the PR item:\n{plain}");
+    screen.assert_span(hint, "running this command again", "dim", |s| s.dim);
 
-    // The worker's requests reached the stub, not the network: one from its
-    // PR half and one from its live-head half (the provider's branch-head
-    // API; git's own fallback is refused). Unblock them and wait until the
-    // worker released both locks and exited.
-    let deadline = Instant::now() + Duration::from_secs(20);
-    assert!(proxy.wait_for_connections(2, Duration::from_secs(20)), "the worker never made its requests");
-    let lock = pr_lock_path(&fixture.pr_store());
-    while !lock.exists() || probe_refresh(&fixture) == RefreshOutcome::Contended || head_lock_held(&fixture) {
-        proxy.close_held();
-        assert!(Instant::now() < deadline, "the worker never released its lock");
-        std::thread::sleep(Duration::from_millis(20));
+    for glyph in FRAMES {
+        assert!(!plain.contains(glyph), "a spinner frame is left on the pane:\n{plain}");
     }
-    let left = wait_for_refresh_workers(&fixture.main, 0, Duration::from_secs(20));
-    assert!(left.is_empty(), "the worker outlived its request: {left:?}");
-    assert!(!head_lock_held(&fixture), "the live-head lock is free");
-    assert_eq!(proxy.connections(), 2, "one worker request per half, none in the foreground");
+    assert!(!plain.contains("updating"), "the spinner's text is left on the pane:\n{plain}");
+    let sentences = unwrapped(&plain);
+    assert!(sentences.contains("(couldn't check origin;"), "the head half had ended:\n{plain}");
+    assert!(!sentences.contains("still checking"), "{plain}");
+
+    // The request is still held after the listing returned; fail it and
+    // wait until the worker released both locks and exited.
+    assert_eq!(gitea.waiting(), 1, "the PR request is still held:\n{plain}");
+    gitea.release(GiteaReply::Status(503));
+    assert_worker_gone(&fixture);
+    assert_ne!(probe_refresh(&fixture), RefreshOutcome::Contended, "the PR lock is free");
+    assert_eq!(gitea.requests(), 1, "one PR request, from the worker");
+    assert_eq!(fs::read(fixture.pr_store()).expect("store"), seeded, "a failed refresh is never stored");
+}
+
+/// A failed assertion in a scene whose PR request is still held after the
+/// listing returned: the pane, then the server (ending the request), then
+/// the fixture (reaping the worker) drop, so no worker outlives the
+/// fixture's directory, and the failure reaches the harness unchanged.
+#[test]
+#[serial(level2_terminal)]
+fn level2_a_failed_assertion_in_a_held_pr_scene_still_reaps_the_worker() {
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+
+    let mut workers = Vec::new();
+    let mut directory = None;
+    let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let fixture = DesignFixture::with_gitea_pr_age(Duration::from_secs(12 * 60 + 5));
+        let gitea = FakeGitea::new(GiteaReply::Status(503));
+        gitea.hold();
+        let mut harness = fixture.start_in_pane(None, "list", "15;0", &gitea.url());
+        wait_for_pane(&mut harness, |plain| unwrapped(plain).contains("force refresh immediately"));
+        assert_eq!(gitea.waiting(), 1, "the PR request is still held");
+        workers = perf_support::refresh_workers(&fixture.main).iter().map(|worker| worker.pid).collect();
+        directory = Some(fixture.main.clone());
+        // Answered only after this stall: the worker outlives the release,
+        // so only a teardown that waits for it can pass.
+        gitea.before_reply(|| std::thread::sleep(Duration::from_secs(2)));
+        panic!("{}", perf_support::MANUFACTURED_FAILURE);
+    }));
+
+    perf_support::assert_manufactured_failure(unwound);
+    assert_eq!(workers.len(), 1, "the listing returned with its worker held");
+    for pid in workers {
+        assert!(!perf_support::process_running(pid), "worker {pid} outlived the fixture");
+    }
+    let directory = directory.expect("the fixture was built");
+    assert!(!directory.exists(), "{directory:?} outlived the fixture");
+}
+
+/// A PR request that fails inside the wait leaves the stored badge and dates
+/// it with one dim `(couldn't refresh)` item beneath the legend, and no hint:
+/// both halves ended.
+#[test]
+#[serial(level2_terminal)]
+fn level2_list_failed_pr_refresh_shows_a_dim_couldnt_refresh_item_in_tmux() {
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+
+    let fixture = DesignFixture::with_gitea_pr_age(Duration::from_secs(12 * 60 + 5));
+    let seeded = fs::read(fixture.pr_store()).expect("seeded store");
+    let gitea = FakeGitea::new(GiteaReply::Status(500));
+
+    let screen = fixture.list_until("list", "15;0", &gitea.url(), "couldn't refresh");
+    let plain = screen.plain();
+
+    let feature = screen.row_with(&["● wt-feature", "│"]);
+    screen.assert_span(feature, " PR #99 ", "a PR badge", |s| s.bg_is(PR_BADGE));
+    let item = screen.row_with(&["PRs as of"]);
+    assert_eq!(item, screen.row_with(&["Branch", "parent deleted"]) + 1, "the item follows the legend:\n{plain}");
+    assert_eq!(screen.text(item).trim(), "- PRs as of 12 min ago (couldn't refresh)", "{plain}");
+    screen.assert_span(item, "PRs as of 12 min ago (couldn't refresh)", "dim", |s| s.dim);
+    assert!(!unwrapped(&plain).contains("running this command again"), "both halves ended:\n{plain}");
+
+    assert_worker_gone(&fixture);
+    assert_eq!(gitea.requests(), 1);
     assert_eq!(fs::read(fixture.pr_store()).expect("store"), seeded, "a failed refresh is never stored");
 }
 
 /// A refresh that makes no request: `Contended` while a worker holds the lock.
 fn probe_refresh(fixture: &DesignFixture) -> RefreshOutcome {
-    refresh(&fixture.pr_store(), &fixture.main, unix_now, false, |_| Box::new(NoRequest))
+    refresh(&fixture.pr_store(), &fixture.main, unix_now, |_| Box::new(NoRequest))
 }
 
 /// Whether a worker holds the live-head lock.
@@ -926,13 +1049,13 @@ fn assert_worker_gone(fixture: &DesignFixture) {
     assert!(!head_lock_held(fixture), "the live-head lock is free");
 }
 
-/// A confirmed credentials condition this run observed prints one dim line
-/// directly beneath the caption, not italic like the caption's suffix. The
+/// A confirmed credentials condition this run observed prints one closing
+/// note after the legend, styled like the other notes (not dim). The
 /// worker's branch-head request gets a 404 without a key, and git's fallback
 /// is refused, so Gitea "did not show this repository".
 #[test]
 #[serial(level2_terminal)]
-fn level2_list_credentials_warning_is_a_dim_line_beneath_the_caption_in_tmux() {
+fn level2_list_credentials_warning_is_a_closing_note_in_tmux() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let fixture = DesignFixture::with_gitea_origin();
@@ -952,17 +1075,66 @@ fn level2_list_credentials_warning_is_a_dim_line_beneath_the_caption_in_tmux() {
         ),
         "{plain}"
     );
-    let suffix_end = screen.row_with(&["ago)"]);
     let warning = screen.row_with(&["did not show this repository"]);
-    assert_eq!(warning, suffix_end + 1, "the warning follows the caption:\n{plain}");
-    screen.assert_span(warning, "did not show this repository", "dim, not italic", |s| s.dim && !s.italic);
-    assert!(warning < screen.row_with(&["Worktree", "Branch"]), "the warning precedes the table:\n{plain}");
+    assert!(screen.text(warning).starts_with(" - Gitea did not show"), "a list item:\n{plain}");
+    screen.assert_span(warning, "did not show this repository", "plain", |s| !s.dim && !s.italic);
+    assert!(warning > screen.row_with(&["parent deleted"]), "the warning follows the legend:\n{plain}");
     assert!(!sentences.contains("running this command again"), "the worker finished, so no hint:\n{plain}");
+    assert!(!plain.contains("GITEA_TOKEN="), "a variable is named, never assigned:\n{plain}");
+
+    assert!(!sentences.contains("PRs as of") && !sentences.contains("couldn't get"), "the PRs answered:\n{plain}");
+
+    assert_worker_gone(&fixture);
+    assert!(gitea.branch_requests() >= 1, "the worker asked Gitea for the branch head");
+    assert_eq!(gitea.requests(), 1, "and, like every listing, for open PRs");
+}
+
+/// The keyless notice in a real pane: the worker's PR request is answered
+/// without a key while its head check fails generically (HTTP 500, then the
+/// refused fallback), so the notice is the one credentials line. It is a
+/// closing note, not dim, and drawn after the spinner (seen while the
+/// check is held) has been cleared. In the warning test above the same
+/// anonymous PR answer is outranked by the head's confirmed warning.
+#[test]
+#[serial(level2_terminal)]
+fn level2_list_keyless_notice_is_a_closing_note_after_the_spinner_in_tmux() {
+    use biscuit_terminal::components::spinner::FRAMES;
+
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+
+    let fixture = DesignFixture::with_gitea_origin();
+    let gitea = FakeGitea::new(GiteaReply::Open(Vec::new()));
+    gitea.answer_branch_heads_with(500);
+    gitea.hold_branch_heads();
+
+    let mut harness = fixture.start_in_pane(None, "list", "15;0", &gitea.url());
+    let during = wait_for_pane(&mut harness, |plain| plain.contains("updating"));
+    assert!(FRAMES.iter().any(|glyph| during.plain.contains(glyph)), "the spinner drew a frame:\n{}", during.plain);
+    gitea.release(GiteaReply::Open(Vec::new()));
+    let screen = StyledScreen::parse(&wait_for_pane(&mut harness, |plain| plain.contains("parent deleted")).raw);
+    let plain = screen.plain();
+    let sentences = unwrapped(&plain);
+
+    for glyph in FRAMES {
+        assert!(!plain.contains(glyph), "a spinner frame is left on the pane:\n{plain}");
+    }
+    assert!(!plain.contains("updating"), "the spinner's text is left on the pane:\n{plain}");
+    assert!(
+        sentences.contains(
+            "Gitea answered without an API key; set GITEA_TOKEN or FORGEJO_TOKEN or CODEBERG_TOKEN to authenticate API requests."
+        ),
+        "{plain}"
+    );
+    assert!(!sentences.contains("did not show this repository"), "one credentials line:\n{plain}");
+    let notice = screen.row_with(&["Gitea", "answered", "without"]);
+    assert!(screen.text(notice).starts_with(" - Gitea answered"), "a list item:\n{plain}");
+    screen.assert_span(notice, "answered without an API key", "plain", |s| !s.dim && !s.italic);
+    assert!(notice > screen.row_with(&["parent deleted"]), "the notice follows the legend:\n{plain}");
     assert!(!plain.contains("GITEA_TOKEN="), "a variable is named, never assigned:\n{plain}");
 
     assert_worker_gone(&fixture);
     assert!(gitea.branch_requests() >= 1, "the worker asked Gitea for the branch head");
-    assert_eq!(gitea.requests(), 0, "a fresh PR answer makes no PR request");
+    assert_eq!(gitea.requests(), 1, "and, like every listing, for open PRs");
 }
 
 /// With `origin`'s answer held past the 3 s wait, the spinner draws on the
@@ -1005,7 +1177,7 @@ fn level2_list_clears_the_spinner_before_the_caption_and_shows_a_dim_hint_in_tmu
 
     gitea.release(GiteaReply::Open(Vec::new()));
     assert_worker_gone(&fixture);
-    assert_eq!(gitea.requests(), 0, "a fresh PR answer makes no PR request");
+    assert_eq!(gitea.requests(), 1, "like every listing, it asked for open PRs");
 }
 
 /// The spinner's texts (spec §3 step 3).
@@ -1112,4 +1284,444 @@ fn level2_list_spinner_shows_the_rate_limited_fallback_in_tmux() {
     assert_spinner_cleared_before_caption(&screen, "main  is 2 commits behind");
 
     assert_worker_gone(&fixture);
+}
+
+/// `wt list -r`'s PR retry, in a real pane. The test holds the PR lock, as
+/// a worker whose request is in flight would, so the listing's first worker
+/// finds the PRs contended while its head shows the no-key fallback (its
+/// `ls-remote` held), then fetches `origin`'s new commit, and the spinner
+/// says `updating` while the wait follows the lock. The lock is then released
+/// with nothing published, as when its holder fails, so the listing
+/// relaunches; the replacement's head shows the fallback again while its
+/// `ls-remote` is held, and once that head finishes with the replacement's
+/// PR request still held at the stand-in, the spinner must go back to one
+/// `updating` line rather than keep the finished fallback. Released, the
+/// spinner is gone before the caption.
+#[test]
+#[serial(level2_terminal)]
+fn level2_list_spinner_returns_to_updating_after_a_pr_retrys_head_finishes_in_tmux() {
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+
+    let fixture = DesignFixture::with_gitea_repository();
+    let gitea = FakeGitea::new(GiteaReply::Open(Vec::new()));
+    gitea.serve_repositories(fixture.git_root());
+    gitea.hold();
+    gitea.hold_git(GitHold::All);
+    // `std`'s file lock is the same `flock` the worker's sidecar lock takes.
+    let holder = fs::File::create(pr_lock_path(&fixture.pr_store())).expect("create the PR lock sidecar");
+    holder.try_lock().expect("the test holds the PR lock");
+
+    let mut harness = fixture.start_in_pane(None, "list -r", "15;0", &gitea.url());
+    assert!(gitea.wait_for_git_waiting(1, Duration::from_secs(15)), "the first head's ls-remote reached git");
+    let first = wait_for_pane(&mut harness, |plain| plain.contains("no API key, using fallback method"));
+    assert_one_spinner_line(&first.plain, "no API key, using fallback method");
+
+    // The first head fetches and finishes; the PRs are still contended.
+    gitea.hold_git(GitHold::None);
+    let waiting = wait_for_pane(&mut harness, |plain| plain.contains("updating"));
+    assert_one_spinner_line(&waiting.plain, "updating");
+    assert_eq!(gitea.requests(), 0, "the contended worker asked for no PRs");
+
+    // The holder gives up with nothing published: the listing retries both
+    // halves.
+    gitea.hold_git(GitHold::All);
+    drop(holder);
+    assert!(gitea.wait_for_git_waiting(1, Duration::from_secs(15)), "the replacement's ls-remote reached git");
+    let replacement = wait_for_pane(&mut harness, |plain| plain.contains("no API key, using fallback method"));
+    assert_one_spinner_line(&replacement.plain, "no API key, using fallback method");
+
+    // The replacement's head finishes; its PR request is still held.
+    gitea.hold_git(GitHold::None);
+    let pr_only = wait_for_pane(&mut harness, |plain| plain.contains("updating"));
+    assert_one_spinner_line(&pr_only.plain, "updating");
+    assert_eq!(gitea.requests(), 1, "the replacement asked for PRs");
+
+    gitea.release(GiteaReply::Open(Vec::new()));
+    let screen = StyledScreen::parse(&wait_for_pane(&mut harness, |plain| plain.contains("parent deleted")).raw);
+    // The first head's fetch put `main` two behind; the replacement found it
+    // current.
+    assert_spinner_cleared_before_caption(&screen, "main  is 2 commits behind");
+
+    assert_worker_gone(&fixture);
+}
+
+/// A way [`DesignFixture::break_worktree`] leaves a new linked worktree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Broken {
+    /// Its directory is deleted; Git marks it `prunable`.
+    Missing,
+    /// Its `.git` file is deleted; Git marks it `prunable`.
+    Unlinked,
+    /// Its directory is moved and a link to it put in its place; Git reads
+    /// through the link and does not mark it.
+    #[cfg(unix)]
+    Link,
+    /// Its index is overwritten with bytes Git can't parse: Git still lists it
+    /// unmarked, but `git status` in it exits nonzero.
+    StatusFails,
+}
+
+impl Broken {
+    fn dir(self) -> &'static str {
+        match self {
+            Broken::Missing => "wt-gone",
+            Broken::Unlinked => "wt-unlinked",
+            #[cfg(unix)]
+            Broken::Link => "wt-moved",
+            Broken::StatusFails => "wt-bad-index",
+        }
+    }
+
+    fn marked_prunable(self) -> bool {
+        matches!(self, Broken::Missing | Broken::Unlinked)
+    }
+}
+
+/// The directory holding [`DesignFixture::break_worktree`]'s worktrees. Its
+/// name alone is longer than a line of a note at 80 columns, so every path a
+/// note shows must be kept whole past the pane's width on every host.
+const LONG_DIR: &str = "a-directory-name-long-enough-that-no-line-of-a-note-can-hold-a-path-inside-it";
+
+impl DesignFixture {
+    /// Adds a linked worktree under [`LONG_DIR`] on a new branch from `main`
+    /// and leaves it as `kind` describes.
+    fn break_worktree(&self, kind: Broken) {
+        let parent = self.main.parent().expect("the fixture's parent directory").join(LONG_DIR);
+        let dir = parent.join(kind.dir());
+        let branch = &kind.dir()["wt-".len()..];
+        run_git(&self.main, &["worktree", "add", "-q", dir.to_str().unwrap(), "-b", branch, "main"]);
+        match kind {
+            Broken::Missing => fs::remove_dir_all(&dir).expect("delete the checkout"),
+            Broken::Unlinked => fs::remove_file(dir.join(".git")).expect("delete the .git file"),
+            #[cfg(unix)]
+            Broken::Link => {
+                let saved = parent.join("saved-checkout");
+                fs::rename(&dir, &saved).expect("move the checkout");
+                std::os::unix::fs::symlink(&saved, &dir).expect("link the old path to it");
+            }
+            Broken::StatusFails => {
+                let index = self.main.join(".git").join("worktrees").join(kind.dir()).join("index");
+                assert!(index.is_file(), "the worktree's index is at {}", index.display());
+                fs::write(&index, b"not an index").expect("corrupt the index");
+                let status = Command::new("git").current_dir(&dir).args(["status", "--porcelain"]).output().unwrap();
+                assert!(!status.status.success(), "git status fails in {}: {status:?}", dir.display());
+            }
+        }
+        let porcelain = Command::new("git").current_dir(&self.main).args(["worktree", "list", "--porcelain"]).output().unwrap();
+        let porcelain = String::from_utf8(porcelain.stdout).unwrap();
+        let record = porcelain
+            .split("\n\n")
+            .find(|record| record.lines().next().is_some_and(|line| line.ends_with(kind.dir())))
+            .unwrap_or_else(|| panic!("{} in {porcelain}", kind.dir()));
+        assert_eq!(record.contains("\nprunable"), kind.marked_prunable(), "{record}");
+    }
+
+    /// Runs `wt list` to completion in a fresh pane, `cols` wide when given,
+    /// and returns everything it printed, scrollback included, with each line
+    /// the terminal soft-wrapped joined back into one row, and the pane's
+    /// width.
+    fn list_to_end(&self, cols: Option<u32>) -> (StyledScreen, usize) {
+        // The quotes keep the typed command line from matching the marker.
+        let mut harness = self.start_in_pane(cols, "list; echo wt-list-\"\"done", "15;0", "http://127.0.0.1:9");
+        wait_for_pane(&mut harness, |plain| plain.lines().any(|line| line.trim() == "wt-list-done"));
+        let output = Command::new("tmux")
+            .args(["capture-pane", "-t", harness.session_name(), "-p", "-e", "-J", "-S", "-200", "-E", "-"])
+            .output()
+            .expect("tmux capture-pane should succeed");
+        let cols = harness.pane_cols().expect("pane width") as usize;
+        (StyledScreen::parse(&String::from_utf8_lossy(&output.stdout)), cols)
+    }
+}
+
+/// The Worktree glyph a row of `kind` shows.
+fn broken_glyph(kind: Broken) -> char {
+    if kind == Broken::StatusFails { '?' } else { '✕' }
+}
+
+/// The `✕`/`?` entries that end the Worktree legend line for a table holding
+/// `broken`, or `None` when it shows neither.
+fn expected_legend_markers(broken: &[Broken]) -> Option<String> {
+    #[cfg(unix)]
+    let link = broken.contains(&Broken::Link);
+    #[cfg(not(unix))]
+    let link = false;
+    let marked = broken.iter().any(|kind| kind.marked_prunable());
+    let cross = match (marked, link) {
+        (true, false) => Some("✕ git can't read worktree"),
+        (false, true) => Some("✕ its path is a link"),
+        (true, true) => Some("✕ git can't read worktree, or its path is a link"),
+        (false, false) => None,
+    };
+    let question = broken.contains(&Broken::StatusFails).then_some("? couldn't check");
+    let parts: Vec<&str> = [cross, question].into_iter().flatten().collect();
+    (!parts.is_empty()).then(|| parts.join("    "))
+}
+
+/// The text a user copies from the note for a row of `kind`: its command or
+/// its path, never broken by a wrap.
+fn expected_copyable(kind: Broken, path: &str) -> Option<String> {
+    Some(match kind {
+        Broken::Missing => "wt remove gone".to_string(),
+        Broken::Unlinked => "wt remove unlinked".to_string(),
+        #[cfg(unix)]
+        Broken::Link => path.to_string(),
+        Broken::StatusFails => return None,
+    })
+}
+
+/// The note `wt` owes an unavailable row of `kind`, whose path Git records
+/// as `path`.
+fn expected_note(kind: Broken, path: &str) -> Option<String> {
+    Some(match kind {
+        Broken::Missing => {
+            "wt-gone: its directory is gone; wt remove gone checks whether its remaining Git record can be removed safely."
+                .to_string()
+        }
+        Broken::Unlinked => "wt-unlinked: its .git file is missing; wt remove unlinked removes it.".to_string(),
+        #[cfg(unix)]
+        Broken::Link => format!("wt-moved: {path} is a link, which may have replaced the original checkout."),
+        Broken::StatusFails => return None,
+    })
+}
+
+/// Text with every space and quote removed, so wrapped text compares with
+/// its unwrapped sentence (a path may be quoted).
+fn squeezed(text: &str) -> String {
+    text.chars().filter(|ch| !ch.is_whitespace() && *ch != '\'').collect()
+}
+
+/// The paths Git records for the base checkout and each linked worktree,
+/// spelled as Git spells them (and so as the notes show them).
+fn recorded_paths(main: &std::path::Path) -> Vec<String> {
+    let output = Command::new("git").current_dir(main).args(["worktree", "list", "--porcelain"]).output().unwrap();
+    String::from_utf8(output.stdout)
+        .unwrap()
+        .lines()
+        .filter_map(|line| line.strip_prefix("worktree "))
+        .map(str::to_string)
+        .collect()
+}
+
+/// Lists `fixture`, with `broken` added, in a real pane `cols` wide (the
+/// spawn width, at least 100, for `None`) and asserts what the terminal
+/// shows: each new row's glyph and style in the Worktree column beside the
+/// unchanged design rows, intact table borders no wider than the pane, the
+/// `✕`/`?` legend entries exactly when a row needs them, and one note per
+/// unavailable row, in table row order, after the existing `--ff` note,
+/// wrapped to the pane except for a path or command too long for any line,
+/// which is shown whole.
+///
+/// Below 80 columns only the rows and the notes are checked: there the
+/// table's `-> parent` header and the legend lines overrun the pane whether
+/// or not a row is unavailable.
+fn assert_unavailable_scene(fixture: &DesignFixture, broken: &[Broken], cols: Option<u32>) {
+    let (screen, cols) = fixture.list_to_end(cols);
+    let plain = screen.plain();
+    let narrow = cols < 80;
+    let width = |row: usize| screen.text(row).trim_end().chars().count();
+    // Only what this run printed: from its table to the marker.
+    let top = (0..screen.rows.len()).rfind(|&row| screen.text(row).starts_with('┌')).unwrap_or_else(|| panic!("no table\n{plain}"));
+    let done = (top..screen.rows.len()).find(|&row| screen.text(row).trim() == "wt-list-done").expect("the marker");
+
+    // Borders: every line of the table is closed on both sides, all as wide
+    // as its top border, and that fits the pane.
+    let bottom = (top..done).find(|&row| screen.text(row).starts_with('└')).unwrap_or_else(|| panic!("no bottom border\n{plain}"));
+    let table_width = width(top);
+    assert!(table_width <= cols, "the table is {table_width} columns in a {cols}-column pane\n{plain}");
+    for row in (top..=bottom).filter(|_| !narrow) {
+        let text = screen.text(row);
+        let text = text.trim_end();
+        let (first, last) = (text.chars().next().unwrap(), text.chars().last().unwrap());
+        assert!(
+            "┌│├└".contains(first) && "┐│┤┘".contains(last) && width(row) == table_width,
+            "table line {row} is not closed at {table_width} columns: {text:?}\n{plain}"
+        );
+    }
+
+    // Worktree column: each row's glyph one space after the border, then its
+    // name. The design rows are unchanged; each broken row shows its glyph.
+    let separator = (top + 1..bottom).find(|&row| screen.text(row).starts_with('├')).expect("header separator");
+    let rows: Vec<(usize, String)> = (separator + 1..bottom)
+        .filter_map(|row| {
+            let cell = screen.text(row).split('│').nth(1).unwrap().trim().to_string();
+            (!cell.is_empty()).then_some((row, cell))
+        })
+        .collect();
+    let cell_of = |name: &str| {
+        rows.iter()
+            .find(|(_, cell)| cell.split_once(' ').is_some_and(|(_, rest)| rest == name))
+            .unwrap_or_else(|| panic!("no row named {name}\n{plain}"))
+            .clone()
+    };
+    for (name, glyph) in [("base repo", '○'), ("wt-clash", '○'), ("wt-docs", '●'), ("wt-feature", '●')] {
+        assert_eq!(cell_of(name).1, format!("{glyph} {name}"), "{plain}");
+    }
+    for &kind in broken {
+        let (row, cell) = cell_of(kind.dir());
+        let glyph = broken_glyph(kind);
+        assert_eq!(cell, format!("{glyph} {}", kind.dir()), "{plain}");
+        assert!(screen.text(row).starts_with(&format!("│ {glyph} {} ", kind.dir())), "{:?}", screen.text(row));
+        if glyph == '✕' {
+            screen.assert_span(row, "✕", "red, not dim", |s| s.fg_is(RED) && !s.dim);
+        } else {
+            screen.assert_span(row, "?", "dim", |s| s.dim);
+        }
+        screen.assert_span(row, kind.dir(), "plain", |s| !s.dim && !s.bold && s.fg.is_none());
+    }
+    let marks = rows.iter().filter(|(_, cell)| cell.starts_with(['✕', '?'])).count();
+    assert_eq!(marks, broken.len(), "only the broken rows are marked\n{plain}");
+
+    // Legend: `✕` and `?` entries end the Worktree line exactly when a row
+    // shows them.
+    let legend = (bottom..done)
+        .filter(|_| !narrow)
+        .find(|&row| screen.text(row).starts_with(" Worktree ") && screen.text(row).contains("uncommitted source files"))
+        .or(narrow.then_some(0));
+    let listing = (top..done).map(|row| screen.text(row)).collect::<Vec<_>>().join("\n");
+    match legend.map(|legend| (legend, expected_legend_markers(broken))) {
+        _ if narrow => {}
+        None => panic!("no Worktree legend\n{plain}"),
+        Some((legend, Some(expected))) => {
+            // A legend line wider than the pane is soft-wrapped by the
+            // terminal, as the Branch line is; the capture joins it.
+            let text = screen.text(legend);
+            assert!(unwrapped(&text).ends_with(&format!("uncommitted source files {}", unwrapped(&expected))), "{text:?}\n{plain}");
+            assert!(screen.text(legend + 1).starts_with(" Branch "), "one Worktree line\n{plain}");
+            if expected.starts_with('✕') {
+                screen.assert_span(legend, "✕", "red", |s| s.fg_is(RED) && !s.dim);
+                let meaning = expected.split("    ").next().unwrap().trim_start_matches("✕ ");
+                screen.assert_span(legend, meaning.split(' ').next().unwrap(), "dim", |s| s.dim);
+            }
+            if expected.contains("? couldn't") {
+                screen.assert_span(legend, "?", "dim", |s| s.dim);
+                screen.assert_span(legend, "couldn't", "dim", |s| s.dim);
+            }
+        }
+        Some((legend, None)) => {
+            assert!(screen.text(legend).trim_end().ends_with("uncommitted source files"), "no marker entries\n{plain}");
+            assert!(screen.text(legend + 1).starts_with(" Branch "), "{plain}");
+            assert!(!listing.contains('✕') && !listing.contains("couldn't check"), "{plain}");
+        }
+    }
+
+    // Notes: the `--ff` suggestion, then one item per `✕` row in table
+    // order, each a ` - ` line with `   ` continuations within the pane. A
+    // row is wider only when it holds a path under `LONG_DIR`, which the
+    // terminal soft-wrapped and the capture joined.
+    let ff = (bottom..done)
+        .find(|&row| screen.text(row).starts_with(" - main is 1 commit behind origin/main; run"))
+        .unwrap_or_else(|| panic!("no --ff note\n{plain}"));
+    let mut items: Vec<Vec<usize>> = Vec::new();
+    for row in ff..done {
+        let text = screen.text(row);
+        if text.starts_with(" - ") {
+            items.push(vec![row]);
+        } else {
+            assert!(text.starts_with("   ") && !text.trim().is_empty(), "row {row} is not part of a note: {text:?}\n{plain}");
+            items.last_mut().unwrap().push(row);
+        }
+        assert!(width(row) <= cols || text.contains(LONG_DIR), "note line {row} is wider than the pane: {text:?}");
+    }
+    let item_text = |item: &[usize]| item.iter().map(|&row| screen.text(row)).collect::<Vec<_>>().join(" ");
+    let paths = recorded_paths(&fixture.main);
+    let unavailable: Vec<&str> = rows
+        .iter()
+        .filter(|(_, cell)| cell.starts_with('✕'))
+        .map(|(_, cell)| cell.split_once(' ').unwrap().1)
+        .collect();
+    assert_eq!(items.len(), 1 + unavailable.len(), "the --ff note and one per ✕ row\n{plain}");
+    for (item, name) in items[1..].iter().zip(&unavailable) {
+        let kind = *broken.iter().find(|kind| kind.dir() == *name).expect("a broken row");
+        let path = paths.iter().find(|path| path.ends_with(name)).expect("Git's path for the row");
+        let expected = expected_note(kind, path).expect("a note for a ✕ row");
+        let text = item_text(item);
+        let text = text.strip_prefix(" - ").expect("an item");
+        assert_eq!(squeezed(text), squeezed(&expected), "the {name} note, in row order\n{plain}");
+        let copyable = expected_copyable(kind, path).expect("a ✕ row's command or path");
+        assert!(text.contains(&copyable), "the {name} note shows {copyable:?} whole\n{plain}");
+        // Styled like the `--ff` note: nothing dim, the command a badge.
+        for &row in item {
+            assert!(
+                screen.rows[row].iter().skip(3).filter(|cell| cell.ch != ' ').all(|cell| !cell.style.dim),
+                "the {name} note is not dim: {:?}",
+                screen.text(row)
+            );
+        }
+        if matches!(kind, Broken::Missing | Broken::Unlinked) {
+            let badge = item.iter().flat_map(|&row| &screen.rows[row]).filter(|cell| cell.style.inverse);
+            assert_eq!(badge.map(|cell| cell.ch).collect::<String>().trim(), copyable, "the {name} badge");
+        }
+    }
+}
+
+/// Every new Worktree state in a real pane at its spawn width, at 80
+/// columns, and at 60: a missing checkout, an unlinked one, one replaced by a link
+/// (`✕`, each with its note), and one whose `git status` fails (dim `?`, no
+/// note), beside the healthy and dirty design rows.
+#[test]
+#[serial(level2_terminal)]
+#[cfg(unix)]
+fn level2_list_marks_unavailable_and_unknown_rows_in_tmux() {
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+
+    let fixture = DesignFixture::new();
+    let broken = [Broken::Missing, Broken::Unlinked, Broken::Link, Broken::StatusFails];
+    for kind in broken {
+        fixture.break_worktree(kind);
+    }
+    assert_unavailable_scene(&fixture, &broken, None);
+    assert_unavailable_scene(&fixture, &broken, Some(80));
+    assert_unavailable_scene(&fixture, &broken, Some(60));
+}
+
+/// Only rows Git can't read: the legend names that cause alone and has no
+/// `?`.
+#[test]
+#[serial(level2_terminal)]
+fn level2_list_legend_explains_only_unreadable_rows_in_tmux() {
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+
+    let fixture = DesignFixture::new();
+    let broken = [Broken::Missing, Broken::Unlinked];
+    for kind in broken {
+        fixture.break_worktree(kind);
+    }
+    assert_unavailable_scene(&fixture, &broken, None);
+}
+
+/// Only a link in place of a checkout: the legend says so, and never that
+/// Git can't read it.
+#[test]
+#[serial(level2_terminal)]
+#[cfg(unix)]
+fn level2_list_legend_explains_only_a_link_row_in_tmux() {
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+
+    let fixture = DesignFixture::new();
+    fixture.break_worktree(Broken::Link);
+    assert_unavailable_scene(&fixture, &[Broken::Link], None);
+}
+
+/// Only a failed status: a dim `?` row, the `?` legend alone, and no
+/// recovery note.
+#[test]
+#[serial(level2_terminal)]
+fn level2_list_legend_explains_only_unknown_status_in_tmux() {
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+
+    let fixture = DesignFixture::new();
+    fixture.break_worktree(Broken::StatusFails);
+    assert_unavailable_scene(&fixture, &[Broken::StatusFails], None);
+}
+
+/// The control: with no unavailable or unknown row, no marker legend entries,
+/// no `✕` or `?`, and only the `--ff` note, at both widths.
+#[test]
+#[serial(level2_terminal)]
+fn level2_list_without_unavailable_rows_adds_no_marker_legend_or_note_in_tmux() {
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+
+    let fixture = DesignFixture::new();
+    assert_unavailable_scene(&fixture, &[], None);
+    assert_unavailable_scene(&fixture, &[], Some(80));
 }

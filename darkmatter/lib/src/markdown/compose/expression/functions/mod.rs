@@ -2165,17 +2165,35 @@ fn destination_needs_wrapping(dest: &str) -> bool {
 /// Formats a Markdown inline link `[text](destination)` with text and
 /// destination escaping.
 fn format_markdown_link(text: &str, destination: &str) -> String {
-    let escaped_text = escape_link_text(text);
-    let safe_dest = if destination_needs_wrapping(destination) {
+    format!("[{}]({})", escape_link_text(text), markdown_destination(destination))
+}
+
+/// Formats a Markdown inline link whose text is one code span.
+///
+/// The label is fenced by [`renderable::markdown::code_span`] and is otherwise
+/// literal: `[`, `]`, and `\` are not escaped, because a code span binds
+/// tighter than link brackets and gives backslashes no meaning. An empty label
+/// yields `[](destination)`, the same as `link(target, "")`.
+fn format_markdown_code_link(text: &str, destination: &str) -> String {
+    format!(
+        "[{}]({})",
+        renderable::markdown::code_span(text),
+        markdown_destination(destination)
+    )
+}
+
+/// Spells a link destination, wrapping it in angle brackets when CommonMark
+/// would otherwise end or split it.
+fn markdown_destination(destination: &str) -> String {
+    if destination_needs_wrapping(destination) {
         let inner = destination.replace('<', "\\<").replace('>', "\\>");
         format!("<{inner}>")
     } else {
         destination.to_string()
-    };
-    format!("[{escaped_text}]({safe_dest})")
+    }
 }
 
-/// Renders a resolved local path as a `link()` destination.
+/// Renders a resolved local path as a `link()`-family destination.
 ///
 /// ## Errors
 ///
@@ -2185,16 +2203,82 @@ fn format_markdown_link(text: &str, destination: &str) -> String {
 /// an option: it may be a magic (`@`), repository (`&`/`^`), or source-relative
 /// reference that
 /// names a different file once the composed document moves.
-fn portable_destination(path: &Path) -> Result<String, ExpressionError> {
+fn portable_destination(function: &'static str, path: &Path) -> Result<String, ExpressionError> {
     biscuit_file::try_portable_string(path).ok_or_else(|| {
         expression_other(
-            "link",
+            function,
             format!(
-                "link() cannot render {} as a Markdown destination: no faithful portable spelling exists, and CommonMark would consume the backslash escapes in its native form.",
+                "{function}() cannot render {} as a Markdown destination: no faithful portable spelling exists, and CommonMark would consume the backslash escapes in its native form.",
                 path.display()
             ),
         )
     })
+}
+
+/// The raw label and destination shared by `link()` and `code_link()`, before
+/// either spells the label as Markdown.
+struct LinkParts {
+    label: String,
+    destination: String,
+}
+
+/// Resolves the `link(file)` / `link(target, desc)` argument shapes for
+/// `function`, which names the caller in every error.
+///
+/// Returns `Ok(None)` when a null argument propagates to a null result.
+fn resolve_link_parts(
+    function: &'static str,
+    args: &[Value],
+    ctx: &ResolutionContext,
+) -> Result<Option<LinkParts>, ExpressionError> {
+    match args.len() {
+        1 => {
+            if args[0].is_null() {
+                return Ok(None);
+            }
+            let raw = require_string_expr(function, &args[0])?;
+            if is_remote_url(raw) {
+                return Err(expression_other(
+                    function,
+                    format!(
+                        "{function}() one-argument form does not accept HTTP(S) URLs; use {function}(target, desc)"
+                    ),
+                ));
+            }
+            let path = resolve_path_arg(function, &args[0], ctx)?;
+            let label = make_portable_relative_in_context(
+                &path,
+                &ctx.cwd,
+                &ctx.file_resolution_context,
+            );
+            let destination = portable_destination(function, &path)?;
+            Ok(Some(LinkParts { label, destination }))
+        }
+        2 => {
+            if any_null(args) {
+                return Ok(None);
+            }
+            let target_raw = require_string_expr(function, &args[0])?;
+            let label = require_string_expr(function, &args[1])?.to_string();
+            let destination = if is_remote_url(target_raw) {
+                url::Url::parse(target_raw).map_err(|e| {
+                    expression_other(
+                        function,
+                        format!("{function}() invalid URL {target_raw:?}: {e}"),
+                    )
+                })?;
+                target_raw.to_string()
+            } else {
+                let path = resolve_path_arg(function, &args[0], ctx)?;
+                portable_destination(function, &path)?
+            };
+            Ok(Some(LinkParts { label, destination }))
+        }
+        _ => Err(expression_other(
+            function,
+            format!("{function}() requires 1 or 2 arguments"),
+        )),
+    }
 }
 
 /// `link(file)` / `link(target, desc)` — emits a Markdown inline link.
@@ -2205,50 +2289,20 @@ fn portable_destination(path: &Path) -> Result<String, ExpressionError> {
 /// - Two arguments: `target` may be a local file reference or an HTTP(S) URL;
 ///   `desc` must be a string and is used as the link text.
 pub fn link_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
-    match args.len() {
-        1 => {
-            if args[0].is_null() {
-                return Ok(Value::Null);
-            }
-            let raw = require_string_expr("link", &args[0])?;
-            if is_remote_url(raw) {
-                return Err(expression_other(
-                    "link",
-                    "link() one-argument form does not accept HTTP(S) URLs; use link(target, desc)"
-                        .to_string(),
-                ));
-            }
-            let path = resolve_path_arg("link", &args[0], ctx)?;
-            let desc = make_portable_relative_in_context(
-                &path,
-                &ctx.cwd,
-                &ctx.file_resolution_context,
-            );
-            let dest = portable_destination(&path)?;
-            Ok(Value::String(format_markdown_link(&desc, &dest)))
-        }
-        2 => {
-            if any_null(args) {
-                return Ok(Value::Null);
-            }
-            let target_raw = require_string_expr("link", &args[0])?;
-            let desc = require_string_expr("link", &args[1])?;
-            let dest = if is_remote_url(target_raw) {
-                url::Url::parse(target_raw).map_err(|e| {
-                    expression_other("link", format!("link() invalid URL {target_raw:?}: {e}"))
-                })?;
-                target_raw.to_string()
-            } else {
-                let path = resolve_path_arg("link", &args[0], ctx)?;
-                portable_destination(&path)?
-            };
-            Ok(Value::String(format_markdown_link(desc, &dest)))
-        }
-        _ => Err(expression_other(
-            "link",
-            "link() requires 1 or 2 arguments".to_string(),
-        )),
-    }
+    Ok(resolve_link_parts("link", args, ctx)?.map_or(Value::Null, |parts| {
+        Value::String(format_markdown_link(&parts.label, &parts.destination))
+    }))
+}
+
+/// `code_link(file)` / `code_link(target, desc)` — emits a Markdown inline link
+/// whose text is inline code, such as `` [`plans/foo.md`](/abs/plans/foo.md) ``.
+///
+/// Arguments, null handling, destinations, and errors are `link()`'s; only the
+/// label differs (see [`format_markdown_code_link`]).
+pub fn code_link_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
+    Ok(resolve_link_parts("code_link", args, ctx)?.map_or(Value::Null, |parts| {
+        Value::String(format_markdown_code_link(&parts.label, &parts.destination))
+    }))
 }
 
 /// Validates that a skill name is a single basename component.
@@ -2429,125 +2483,46 @@ pub fn try_frontmatter_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Val
     Ok(Value::Object(outcome))
 }
 
-/// `find_files(pattern) -> file[] | Error` — every regular file a glob
-/// reference matches, as sorted absolute portable paths.
+/// `find_files(pattern) -> file[] | Error` — every file a glob reference
+/// matches, as absolute portable paths in native order.
 ///
-/// The path before the first segment holding `*`, `?`, or `[` is an ordinary
-/// file reference naming the directory to search (`&claudine/fixes`), and the
-/// rest is a glob matched against paths below it, where `*` stays within one
-/// segment and `**` crosses segments. A pattern without a wildcard names one
-/// file. The directory reference names its first candidate that exists, as a
-/// file reference does: when that candidate is a file, or none exists, nothing
-/// matches, and so does a `null` pattern; a candidate that cannot be probed
-/// before it is an error. Directory symlinks are not followed.
+/// The pattern is a [`GlobReference`](biscuit_file::GlobReference) authored
+/// in this document: its prefix (`&`, `^`, `@`, `~`, `./`, bare, …) picks the
+/// roots single-file resolution uses for that sigil, and the result merges
+/// every root's matches, most local root first, then shallowest, then
+/// component-wise. A bare pattern searches the document's folder, then the
+/// repository root. `*` stays within one segment and `**` crosses segments;
+/// a pattern without a wildcard names one path under each root. No hidden,
+/// ignored, or underscore filter applies, so a `&**/…` walk from the
+/// repository root also visits build output.
+///
+/// Directory symlinks are not followed. A file symlink a bare, `./`, or `../`
+/// pattern matches whose target leaves the file tree is left out and reported
+/// as a [`GLOB_SKIPPED_SYMLINK_CODE`](crate::markdown::compose::ComposeWarning::GLOB_SKIPPED_SYMLINK_CODE)
+/// warning. A `null` pattern lists nothing; a pattern that cannot be parsed or
+/// rooted is an [`ExpressionError::GlobReference`].
 pub fn find_files_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
     require_args_expr("find_files", args, 1)?;
     if any_null(args) {
         return Ok(Value::Array(Vec::new()));
     }
     let raw = require_string_expr("find_files", &args[0])?;
-    if is_remote_url(raw) {
-        return Err(expression_other(
-            "find_files",
-            format!("find_files() searches local directories and cannot search {raw:?}"),
-        ));
-    }
-    if raw.starts_with('%') {
-        return Err(expression_other(
-            "find_files",
-            format!("find_files() takes a glob, not a `%` recursive reference: {raw:?}"),
-        ));
-    }
-    let normalized = normalize_path_arg(raw);
-    let Some(wildcard) = normalized.find(['*', '?', '[']) else {
-        let found = resolve_arg("find_files", raw, ctx)?.filter(|path| path.is_file());
-        return Ok(Value::Array(
-            found
-                .map(|path| Value::String(biscuit_file::to_portable_string(&path)))
-                .into_iter()
-                .collect(),
-        ));
+    let glob_error = |source| ExpressionError::GlobReference {
+        function: "find_files",
+        source: Arc::new(source),
     };
-    // A leading root sigil belongs to the directory even when a wildcard
-    // follows it directly (`&**/spec.md`).
-    let sigil_len = match normalized.as_bytes() {
-        [b'&' | b'^' | b'@', b'/', ..] => 2,
-        [b'&' | b'^' | b'@', ..] => 1,
-        _ => 0,
-    };
-    let (prefix, glob) = match normalized[sigil_len..wildcard].rfind('/') {
-        Some(slash) => {
-            let slash = sigil_len + slash;
-            (&normalized[..slash], &normalized[slash + 1..])
-        }
-        None => (&normalized[..sigil_len.min(1)], &normalized[sigil_len..]),
-    };
-    let matcher = globset::GlobBuilder::new(glob)
-        .literal_separator(true)
-        .build()
-        .map_err(|error| {
-            expression_other("find_files", format!("find_files() has an invalid glob {glob:?}: {error}"))
-        })?
-        .compile_matcher();
-    // A bare sigil names its root, which a reference spells with a `.` payload.
-    let directory_ref = match prefix {
-        "" | "&" | "^" | "@" => format!("{prefix}."),
-        other => other.to_string(),
-    };
-    let file_ref = biscuit_file::FileReference::new(&directory_ref).map_err(|error| {
-        file_reference_error("find_files", raw, ctx, FileRefFailure::classify(&error), Some(error))
-    })?;
-    let directory = super::resolve_ctx::resolve_document_directory(
-        &file_ref,
-        &ctx.cwd,
-        &ctx.file_resolution_context,
-    )
-    .map_err(|error| {
-        file_reference_error("find_files", raw, ctx, FileRefFailure::classify(&error), Some(error))
-    })?;
-    let mut matches = Vec::new();
-    if let Some(directory) = directory {
-        collect_glob_matches(&directory, &directory, &matcher, &mut matches).map_err(|error| {
-            expression_other("find_files", format!("find_files() could not search {raw:?}: {error}"))
-        })?;
-    }
-    matches.sort();
+    // A URL keeps its `//`, so the glob reference rejects it as remote.
+    let pattern = if is_remote_url(raw) { raw.to_string() } else { normalize_path_arg(raw) };
+    let globs = biscuit_file::GlobReference::new([pattern]).map_err(glob_error)?;
+    let listing = globs.list_files(&ctx.file_context()).map_err(glob_error)?;
+    ctx.glob_warnings.record("interpolation", &listing);
     Ok(Value::Array(
-        matches
+        listing
+            .matches
             .iter()
             .map(|path| Value::String(biscuit_file::to_portable_string(path)))
             .collect(),
     ))
-}
-
-/// Walks `directory` without following directory symlinks, collecting the
-/// regular files whose `/`-separated path below `root` matches `matcher`.
-fn collect_glob_matches(
-    root: &Path,
-    directory: &Path,
-    matcher: &globset::GlobMatcher,
-    matches: &mut Vec<PathBuf>,
-) -> std::io::Result<()> {
-    for entry in std::fs::read_dir(directory)? {
-        let entry = entry?;
-        let path = entry.path();
-        let file_type = entry.file_type()?;
-        if file_type.is_dir() {
-            collect_glob_matches(root, &path, matcher, matches)?;
-            continue;
-        }
-        // A symlink counts when it points at a regular file.
-        if !(file_type.is_file() || (file_type.is_symlink() && path.is_file())) {
-            continue;
-        }
-        let Ok(relative) = path.strip_prefix(root) else {
-            continue;
-        };
-        if matcher.is_match(biscuit_file::to_portable_string(relative)) {
-            matches.push(path);
-        }
-    }
-    Ok(())
 }
 
 /// A value read from another document's frontmatter, with stored literal
@@ -5083,6 +5058,205 @@ mod tests {
             let ctx = ResolutionContext::at(std::env::temp_dir());
             assert!(link_fn(&[json!(123)], &ctx).is_err());
             assert!(link_fn(&[json!("a"), json!(123)], &ctx).is_err());
+        }
+
+        /// Returns the visible text, code spans included, of the single link
+        /// in `markdown`, and whether that text came from exactly one code span.
+        fn link_code_label(markdown: &str) -> (String, bool) {
+            use pulldown_cmark::{Event, Parser, Tag, TagEnd};
+
+            let mut label = String::new();
+            let mut code_spans = 0;
+            let mut other_text = false;
+            let mut inside = false;
+            for event in Parser::new(markdown) {
+                match event {
+                    Event::Start(Tag::Link { .. }) => inside = true,
+                    Event::End(TagEnd::Link) => inside = false,
+                    Event::Code(code) if inside => {
+                        code_spans += 1;
+                        label.push_str(&code);
+                    }
+                    Event::Text(text) if inside => {
+                        other_text = true;
+                        label.push_str(&text);
+                    }
+                    _ => {}
+                }
+            }
+            (label, code_spans == 1 && !other_text)
+        }
+
+        fn code_link(args: &[Value], ctx: &ResolutionContext) -> String {
+            code_link_fn(args, ctx).unwrap().as_str().unwrap().to_string()
+        }
+
+        /// Splits `[label](destination)` at the `](` that ends the label.
+        fn split_link(markdown: &str) -> (&str, &str) {
+            let index = markdown.rfind("](").expect("a Markdown link");
+            (&markdown[1..index], &markdown[index + 2..markdown.len() - 1])
+        }
+
+        #[test]
+        fn code_link_one_arg_matches_link_destination_with_a_code_label() {
+            let (dir, ctx) = ctx_with_temp_dir();
+            std::fs::create_dir_all(dir.path().join("plans")).unwrap();
+            std::fs::write(dir.path().join("plans/foo.md"), "x").unwrap();
+            std::fs::write(dir.path().join("my doc (v1).md"), "x").unwrap();
+
+            for file in ["plans/foo.md", "my doc (v1).md"] {
+                let plain = link_fn(&[json!(file)], &ctx).unwrap();
+                let plain = plain.as_str().unwrap();
+                let code = code_link(&[json!(file)], &ctx);
+
+                let (plain_label, plain_dest) = split_link(plain);
+                let (code_label, code_dest) = split_link(&code);
+                assert_eq!(code_dest, plain_dest, "same destination spelling and quoting");
+                assert_eq!(code_label, format!("`{plain_label}`"));
+                assert_eq!(link_code_label(&code), (file.to_string(), true), "{code}");
+            }
+            assert_eq!(
+                code_link(&[json!("plans/foo.md")], &ctx),
+                format!(
+                    "[`plans/foo.md`]({})",
+                    biscuit_file::to_portable_string(&dir.path().join("plans/foo.md"))
+                )
+            );
+        }
+
+        #[test]
+        fn code_link_two_arg_file_and_url_destinations_match_link() {
+            let (dir, ctx) = ctx_with_temp_dir();
+            std::fs::write(dir.path().join("doc.md"), "x").unwrap();
+
+            for target in ["doc.md", "https://example.com/page", "HTTPS://example.com/page"] {
+                let plain = link_fn(&[json!(target), json!("md hash")], &ctx).unwrap();
+                let code = code_link(&[json!(target), json!("md hash")], &ctx);
+                assert_eq!(split_link(&code).1, split_link(plain.as_str().unwrap()).1);
+                assert_eq!(split_link(&code).0, "`md hash`");
+            }
+        }
+
+        #[test]
+        fn code_link_keeps_brackets_unescaped_inside_the_code_span() {
+            let ctx = ResolutionContext::at(std::env::temp_dir());
+            let url = json!("https://example.com");
+
+            let rendered = code_link(&[url.clone(), json!("a]b")], &ctx);
+            assert_eq!(rendered, "[`a]b`](https://example.com)");
+            assert_eq!(link_code_label(&rendered), ("a]b".to_string(), true));
+
+            let rendered = code_link(&[url, json!("click [here]")], &ctx);
+            assert_eq!(rendered, "[`click [here]`](https://example.com)");
+            assert_eq!(link_code_label(&rendered), ("click [here]".to_string(), true));
+        }
+
+        #[test]
+        fn code_link_emits_backslashes_as_is() {
+            let ctx = ResolutionContext::at(std::env::temp_dir());
+            let rendered = code_link(&[json!("https://example.com"), json!(r"a\_b")], &ctx);
+            assert_eq!(rendered, r"[`a\_b`](https://example.com)");
+            assert_eq!(link_code_label(&rendered), (r"a\_b".to_string(), true));
+        }
+
+        #[test]
+        fn code_link_fences_backticks_and_pads_edges() {
+            let ctx = ResolutionContext::at(std::env::temp_dir());
+            let url = json!("https://example.com");
+            for (label, expected) in [
+                ("a`b", "[``a`b``](https://example.com)"),
+                ("``x``", "[``` ``x`` ```](https://example.com)"),
+                ("`a`", "[`` `a` ``](https://example.com)"),
+                (" a ", "[`  a  `](https://example.com)"),
+            ] {
+                let rendered = code_link(&[url.clone(), json!(label)], &ctx);
+                assert_eq!(rendered, expected, "{label:?}");
+                assert_eq!(link_code_label(&rendered), (label.to_string(), true), "{label:?}");
+            }
+        }
+
+        #[test]
+        fn code_link_turns_line_endings_into_spaces() {
+            let ctx = ResolutionContext::at(std::env::temp_dir());
+            for label in ["one\ntwo", "one\r\ntwo", "one\rtwo"] {
+                let rendered = code_link(&[json!("https://example.com"), json!(label)], &ctx);
+                assert_eq!(rendered, "[`one two`](https://example.com)", "{label:?}");
+            }
+        }
+
+        #[test]
+        fn code_link_empty_label_is_an_ordinary_empty_link() {
+            let ctx = ResolutionContext::at(std::env::temp_dir());
+            let rendered = code_link(&[json!("https://example.com"), json!("")], &ctx);
+            assert_eq!(rendered, "[](https://example.com)");
+            assert_eq!(
+                link_fn(&[json!("https://example.com"), json!("")], &ctx).unwrap(),
+                json!(rendered)
+            );
+        }
+
+        #[test]
+        fn code_link_null_propagates_like_link() {
+            let ctx = ResolutionContext::at(std::env::temp_dir());
+            for args in [
+                vec![json!(null)],
+                vec![json!(null), json!("desc")],
+                vec![json!("https://example.com"), json!(null)],
+            ] {
+                assert_eq!(code_link_fn(&args, &ctx).unwrap(), json!(null), "{args:?}");
+                assert_eq!(link_fn(&args, &ctx).unwrap(), json!(null), "{args:?}");
+            }
+        }
+
+        /// Each failure carries `link()`'s cause under the name the caller
+        /// invoked, and `link()`'s own error text is unchanged.
+        #[test]
+        fn code_link_errors_name_code_link_with_the_link_cause() {
+            let ctx = ResolutionContext::at(std::env::temp_dir());
+            let cases: [(Vec<Value>, &str); 6] = [
+                (vec![json!("https://example.com/doc.md")], "one-argument form does not accept HTTP(S) URLs"),
+                (vec![], "requires 1 or 2 arguments"),
+                (vec![json!("a"), json!("b"), json!("c")], "requires 1 or 2 arguments"),
+                // Neither parses as a URL, so both fail as file paths.
+                (vec![json!("http://[::1"), json!("x")], "invalid file path"),
+                (vec![json!("https://exa mple.com"), json!("x")], ""),
+                (vec![json!(123)], ""),
+            ];
+            for (args, cause) in cases {
+                let link_err = link_fn(&args, &ctx).unwrap_err();
+                let code_err = code_link_fn(&args, &ctx).unwrap_err();
+                let function = match &code_err {
+                    ExpressionError::Other { function, .. } => Some(function.as_str()),
+                    ExpressionError::FileReference(diagnostic) => Some(diagnostic.function),
+                    _ => None,
+                };
+                assert!(matches!(function, None | Some("code_link")), "{code_err:?}");
+                assert!(code_err.to_string().contains(cause), "{code_err}");
+                assert!(link_err.to_string().contains(cause), "{link_err}");
+                assert_eq!(
+                    code_err.to_string(),
+                    link_err.to_string().replace("link(", "code_link("),
+                    "{args:?}"
+                );
+            }
+            assert_eq!(
+                link_fn(&[json!("https://example.com/doc.md")], &ctx).unwrap_err().to_string(),
+                "link(): link() one-argument form does not accept HTTP(S) URLs; use link(target, desc)"
+            );
+            assert!(code_link_fn(&[json!("a"), json!(123)], &ctx).is_err());
+        }
+
+        #[test]
+        fn code_link_is_dispatched_by_name_and_alias() {
+            let ctx = ResolutionContext::at(std::env::temp_dir());
+            let args = [json!("https://example.com"), json!("md hash")];
+            for name in ["code_link", "codelink"] {
+                assert_eq!(
+                    dispatch_fs(name, &args, &ctx).unwrap().unwrap(),
+                    json!("[`md hash`](https://example.com)"),
+                    "{name}"
+                );
+            }
         }
 
         #[test]

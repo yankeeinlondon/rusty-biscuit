@@ -92,6 +92,103 @@ pub(crate) fn cli_switch_catalog(frontmatter: &Value) -> Result<Value, GenError>
     Ok(json!({ "researched": parsed.into_iter().map(|r| r.catalog).collect::<Vec<_>>() }))
 }
 
+/// Holds a catalog-shaped value that did not come from research (an
+/// override) to the same rules: written back as the authored records it
+/// would be projected from, it must project to exactly itself.
+///
+/// ## Errors
+///
+/// [`GenError::CliSwitchInvalid`] when a rule refuses the value, or when it
+/// is not in the generator's canonical form (an unknown key, unsorted
+/// records or scopes, or a shape the catalog does not have).
+pub(crate) fn check_cli_switch_catalog(catalog: &Value) -> Result<(), GenError> {
+    let projected = cli_switch_catalog(&authored_document(catalog)?)?;
+    if projected == *catalog {
+        Ok(())
+    } else {
+        Err(invalid(
+            "the override",
+            format!("is not in the generator's canonical form; write it as `{projected}`"),
+        ))
+    }
+}
+
+/// The authored document a catalog value would be projected from. A record
+/// shape the catalog does not have is carried through unchanged, so the
+/// projection or the final comparison refuses it.
+fn authored_document(catalog: &Value) -> Result<Value, GenError> {
+    let mut document = Map::new();
+    document.insert("schema_revision".into(), json!(SWITCH_CONTRACT_REVISION));
+    match catalog.as_object().filter(|map| map.len() == 1).and_then(|map| map.iter().next()) {
+        Some((member, payload)) if member == "unknown" => {
+            document.insert("cli_switches".into(), json!([]));
+            if let Some(gap) = payload.get("gap") {
+                document.insert("cli_switches_gap".into(), gap.clone());
+            }
+        }
+        Some((member, Value::Array(records))) if member == "researched" => {
+            let records = records.iter().map(authored_record).collect();
+            document.insert("cli_switches".into(), Value::Array(records));
+        }
+        _ => {
+            return Err(invalid(
+                "the override",
+                format!("must be `{{researched: [...]}}` or `{{unknown: {{gap: ...}}}}`, got `{catalog}`"),
+            ));
+        }
+    }
+    Ok(Value::Object(document))
+}
+
+fn authored_record(record: &Value) -> Value {
+    let Value::Object(fields) = record else {
+        return record.clone();
+    };
+    let mut authored = Map::new();
+    for (key, value) in fields {
+        match (key.as_str(), value) {
+            ("value", Value::Object(typed)) if typed.len() == 1 => {
+                let (value_type, payload) = typed.iter().next().expect("len checked");
+                authored.insert("value_type".into(), json!(value_type));
+                if let Some(optional) = payload.get("optional") {
+                    authored.insert("value_optional".into(), optional.clone());
+                }
+                if let Some(min) = payload.get("min") {
+                    authored.insert("variadic_min".into(), min.clone());
+                }
+            }
+            ("value", other) => {
+                authored.insert("value_type".into(), other.clone());
+            }
+            ("attachments", attachments) => {
+                authored.insert("attachment".into(), attachments.clone());
+            }
+            ("scopes", Value::Array(scopes)) => {
+                let scopes = scopes.iter().map(authored_scope).collect();
+                authored.insert("invocation_scope".into(), Value::Array(scopes));
+            }
+            ("scopes", other) => {
+                authored.insert("invocation_scope".into(), other.clone());
+            }
+            ("gap", Value::Null) => {}
+            _ => {
+                authored.insert(key.clone(), value.clone());
+            }
+        }
+    }
+    Value::Object(authored)
+}
+
+fn authored_scope(scope: &Value) -> Value {
+    match scope {
+        Value::String(global) if global == "global" => json!({ "applies_to": "global" }),
+        Value::Object(map) if map.len() == 1 && map.contains_key("command") => {
+            json!({ "applies_to": "command", "command": map["command"] })
+        }
+        other => other.clone(),
+    }
+}
+
 fn unknown(gap: &str) -> Value {
     json!({ "unknown": { "gap": gap } })
 }

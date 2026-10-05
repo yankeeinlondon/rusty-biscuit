@@ -879,7 +879,7 @@ fn schema_load_hint_appears_inside_block_quote_border() {
     let term = Terminal::new_optimistic(80);
     let rendered = strip_escape_codes(err.report_block_error(&term));
 
-    let hint_token = "Verify the `$schema` path";
+    let hint_token = "Verify the $schema path";
     let hint_lines: Vec<&str> = rendered
         .lines()
         .filter(|l| l.contains(hint_token))
@@ -2948,4 +2948,514 @@ fn unresolved_prompt_arguments_render_their_failure_class() {
             None => assert!(!rendered.contains("failure:"), "{err:?}: {rendered}"),
         }
     }
+}
+
+// -- literal code-span contents --------------------------------------------
+//
+// A code span's contents are literal, so a value a diagnostic places between
+// backticks must reach the terminal exactly as authored: Prose escaping there
+// would show its backslashes. Each value carries an underscore pair, brackets,
+// braces, and a backslash.
+
+/// The authored value for one diagnostic field, tagged so each argument of a
+/// multi-value diagnostic is asserted separately.
+fn code_value(tag: &str) -> String {
+    format!(r"{tag}_a_[x]{{{{ctx.area}}}}a\b")
+}
+
+/// Render `err` on a wide, colorless terminal and assert every value appears
+/// exactly as authored, with no Prose escape added to any of them.
+fn assert_code_values_render_literally(err: &CompositionError, values: &[String]) {
+    use biscuit_terminal::errors::BlockError;
+    use biscuit_terminal::utils::escape_codes::strip_escape_codes;
+
+    let term = Terminal::builder()
+        .width(500)
+        .color_depth(biscuit_terminal::discovery::detection::ColorDepth::None)
+        .build();
+    let rendered = strip_escape_codes(err.report_block_error(&term));
+    for value in values {
+        assert!(rendered.contains(value.as_str()), "{err:?}: `{value}` must render literally:\n{rendered}");
+    }
+    for escaped in [r"\_", r"\[", r"\{", r"a\\b"] {
+        assert!(!rendered.contains(escaped), "{err:?}: escape `{escaped}` leaked into:\n{rendered}");
+    }
+}
+
+#[test]
+fn lifecycle_diagnostics_show_code_span_values_literally() {
+    let source_path = || PathBuf::from("prompts/review.md");
+    let v = code_value;
+    let cases = vec![
+        (
+            CompositionError::LifecycleNestedSpanInLiteral {
+                source_path: source_path(),
+                property: "success.say".into(),
+                literal: v("literal"),
+                nested: v("nested"),
+                suggestion: None,
+            },
+            vec![v("literal"), v("nested"), "`{{ … }}` inside a quoted string".to_string()],
+        ),
+        (
+            CompositionError::LifecycleEvaluationError {
+                source_path: source_path(),
+                event: "start".into(),
+                surface: "say".into(),
+                message: "boom".into(),
+                property: Some(v("property")),
+                reason: LifecycleEvaluationReason::Expression,
+                cause: None,
+            },
+            vec![v("property")],
+        ),
+        (
+            CompositionError::RemovedValidationKey {
+                source_path: source_path(),
+                key: v("key"),
+                replacement: "use a stack".into(),
+            },
+            vec![v("key")],
+        ),
+        (
+            CompositionError::LifecycleActionInvalidShortForm {
+                source_path: source_path(),
+                property: "start".into(),
+                raw: v("raw"),
+                message: "bad".into(),
+            },
+            vec![v("raw")],
+        ),
+        (
+            CompositionError::LifecycleSetInvalidKey {
+                source_path: source_path(),
+                property: "start".into(),
+                path: "set".into(),
+                key: v("key"),
+                message: "bad".into(),
+            },
+            vec![v("key")],
+        ),
+        (
+            CompositionError::LifecycleProxyWithWholeMapping {
+                source_path: source_path(),
+                property: "start".into(),
+                path: "with".into(),
+                raw: v("raw"),
+            },
+            vec![v("raw")],
+        ),
+        (
+            CompositionError::LifecycleProxyWithDynamicKey {
+                source_path: source_path(),
+                property: "start".into(),
+                path: "with".into(),
+                key: v("key"),
+            },
+            vec![v("key")],
+        ),
+        (
+            CompositionError::LifecycleProxyWithEvaluationFailed {
+                source_path: source_path(),
+                property: "start".into(),
+                path: "with.spec".into(),
+                target: v("target"),
+                message: "boom".into(),
+                cause: None,
+            },
+            vec![v("target")],
+        ),
+        (
+            CompositionError::LifecycleProxyWithoutOwningCoordinator {
+                source_path: source_path(),
+                property: "start".into(),
+                target: v("target"),
+                command: "claude".into(),
+            },
+            vec![v("target")],
+        ),
+        (
+            CompositionError::LifecycleProxyCycle {
+                source_path: source_path(),
+                target: v("target"),
+                chain: vec![v("first"), v("second")],
+                limit: 8,
+            },
+            vec![v("target"), v("first"), v("second")],
+        ),
+        (
+            CompositionError::LifecycleShortFormRemoved {
+                source_path: source_path(),
+                property: "start".into(),
+                raw: v("raw"),
+                rewrite: v("rewrite"),
+            },
+            vec![v("raw"), v("rewrite")],
+        ),
+        (
+            CompositionError::InvalidFileReference {
+                context: Box::new(FileReferenceContext {
+                    source_path: source_path(),
+                    event: Some("initialize".to_string()),
+                    property: "initialize".to_string(),
+                    reference: v("reference"),
+                    hint: "A `proxy` target must name an existing Markdown document.".to_string(),
+                }),
+                source: crate::harness::HarnessError::PathResolutionFailed {
+                    raw: "nope.md".to_string(),
+                    failure: crate::harness::PathResolutionFailure::TargetMissing,
+                    source_path: Some(PathBuf::from("/repo/run.md")),
+                    resolved: Some(PathBuf::from("/repo/nope.md")),
+                    resolution: None,
+                },
+            },
+            vec![v("reference")],
+        ),
+    ];
+    for (err, values) in cases {
+        assert_code_values_render_literally(&err, &values);
+    }
+}
+
+#[test]
+fn nested_span_suggestion_names_the_wrapper_without_escapes() {
+    let err = CompositionError::LifecycleNestedSpanInLiteral {
+        source_path: PathBuf::from("prompts/review.md"),
+        property: "success.say".into(),
+        literal: "'a {{x}}'".into(),
+        nested: "{{x}}".into(),
+        suggestion: Some("'a ' + x".into()),
+    };
+    assert_code_values_render_literally(&err, &["its `{{ }}` wrapper".to_string()]);
+}
+
+#[test]
+fn selection_diagnostics_show_code_span_values_literally() {
+    let query = code_value("query");
+    let cases = [
+        CompositionError::AutocompleteNoMatches { query: query.clone() },
+        CompositionError::AutocompleteOverCap { query: query.clone(), cap: 50 },
+        CompositionError::AutocompleteCancelled { query: query.clone() },
+    ];
+    for err in cases {
+        assert_code_values_render_literally(&err, std::slice::from_ref(&query));
+    }
+}
+
+#[test]
+fn selection_query_holding_a_backtick_stays_one_code_span() {
+    use biscuit_terminal::errors::BlockError;
+    use biscuit_terminal::utils::escape_codes::strip_escape_codes;
+
+    let err = CompositionError::AutocompleteNoMatches { query: "q`_a_`".into() };
+    let term = Terminal::builder()
+        .width(500)
+        .color_depth(biscuit_terminal::discovery::detection::ColorDepth::None)
+        .build();
+    let rendered = strip_escape_codes(err.report_block_error(&term));
+    // A double-backtick fence keeps the value's own backtick inside one span.
+    assert!(rendered.contains("query `` q`_a_` ``."), "{rendered}");
+}
+
+#[test]
+fn schema_parse_diagnostic_shows_the_property_literally() {
+    let property = code_value("property");
+    let err = CompositionError::SchemaParse {
+        source_path: PathBuf::from("prompts/review.md"),
+        property: Some(property.clone()),
+        message: "bad type".into(),
+        span: None,
+    };
+    assert_code_values_render_literally(&err, &[property]);
+}
+
+// -------------------------------------------------------------------------
+// Display rows: a diagnostic that lists items one per row keeps every row,
+// rather than joining them into one wrapped paragraph.
+// -------------------------------------------------------------------------
+
+/// The block's visible rows on a wide colorless terminal: escape codes
+/// stripped, the `┃` border removed, each row trimmed. Blank rows are kept so
+/// paragraph gaps stay observable.
+fn display_rows(err: &CompositionError) -> Vec<String> {
+    use biscuit_terminal::errors::BlockError;
+    use biscuit_terminal::utils::escape_codes::strip_escape_codes;
+
+    let term = Terminal::builder()
+        .width(500)
+        .color_depth(biscuit_terminal::discovery::detection::ColorDepth::None)
+        .build();
+    strip_escape_codes(err.report_block_error(&term))
+        .lines()
+        .map(|line| line.trim_start().trim_start_matches('┃').trim().to_string())
+        .collect()
+}
+
+/// Asserts a row starting with `heading` is immediately followed by exactly
+/// `items` as rows in order, and that no other row repeats any of them.
+#[track_caller]
+fn assert_rows_follow(rows: &[String], heading: &str, items: &[&str]) {
+    let at = rows
+        .iter()
+        .position(|row| row.starts_with(heading))
+        .unwrap_or_else(|| panic!("heading row `{heading}` missing: {rows:#?}"));
+    let following: Vec<&str> = rows[at + 1..]
+        .iter()
+        .take(items.len())
+        .map(String::as_str)
+        .collect();
+    assert_eq!(following, items, "rows after `{heading}`: {rows:#?}");
+    for item in items {
+        assert_eq!(
+            rows.iter().filter(|row| row.contains(item)).count(),
+            1,
+            "`{item}` must appear on exactly one row: {rows:#?}"
+        );
+    }
+}
+
+#[test]
+fn lifecycle_invalid_property_lists_each_expected_field_on_its_own_row() {
+    let err = CompositionError::LifecycleInvalid {
+        property: "success".into(),
+        message: "unknown field `speek`".into(),
+        source_file: PathBuf::from("prompts/run.md"),
+        unknown_field: Some("speek".into()),
+        expected_fields: vec!["say".into(), "effect".into()],
+    };
+    let rows = display_rows(&err);
+    assert_rows_follow(&rows, "Expected one of:", &["- `say`", "- `effect`"]);
+}
+
+#[test]
+fn invalid_file_reference_plan_lists_each_candidate_on_its_own_row() {
+    let repo = tempfile::tempdir().unwrap();
+    let err = implicit_reference_error("missing.md", repo.path());
+    let rows = display_rows(&err);
+    let tried: Vec<&String> = rows.iter().filter(|row| row.starts_with(['1', '2'])).collect();
+    assert_eq!(tried.len(), 2, "one row per candidate: {rows:#?}");
+    assert!(tried[0].starts_with("1. ") && tried[0].ends_with("missing.md"), "{rows:#?}");
+    assert!(tried[1].starts_with("2. ") && tried[1].ends_with("missing.md"), "{rows:#?}");
+    let heading = rows.iter().position(|row| row == "Tried:").expect("`Tried:` row");
+    assert_eq!(&rows[heading + 1], tried[0], "{rows:#?}");
+}
+
+#[test]
+fn composed_body_empty_lists_each_override_on_its_own_row() {
+    let err = CompositionError::ComposedBodyEmpty {
+        source_path: PathBuf::from("prompts/run.md"),
+        mode: super::super::types::CompositionMode::ChainedDocument,
+        provided_overrides: vec!["topic".into(), "tone".into()],
+    };
+    let rows = display_rows(&err);
+    assert_rows_follow(&rows, "Provided overrides:", &["- `topic`", "- `tone`"]);
+}
+
+#[test]
+fn schema_validation_lists_each_problem_on_its_own_row() {
+    let err = CompositionError::SchemaValidation {
+        source_path: PathBuf::from("prompts/run.md"),
+        message: "two problems".into(),
+        problems: vec!["/topic".into(), "/tone".into()],
+        failures: Vec::new(),
+    };
+    let rows = display_rows(&err);
+    assert_rows_follow(&rows, "Problems:", &["- `/topic`", "- `/tone`"]);
+}
+
+#[test]
+fn missing_properties_lists_each_typed_property_on_its_own_row() {
+    let err = CompositionError::MissingProperties {
+        source_path: PathBuf::from("prompts/run.md"),
+        missing: vec![
+            MissingProperty {
+                name: "topic".into(),
+                type_label: Some("string".into()),
+                description: None,
+                interactive_shape: None,
+            },
+            MissingProperty {
+                name: "tone".into(),
+                type_label: Some("enum(formal|casual)".into()),
+                description: None,
+                interactive_shape: None,
+            },
+        ],
+        frontmatter_description: None,
+        pointer_paths: Vec::new(),
+    };
+    let rows = display_rows(&err);
+    assert_rows_follow(
+        &rows,
+        "Missing:",
+        &["- `topic`: string", "- `tone`: enum(formal|casual)"],
+    );
+}
+
+#[test]
+fn missing_properties_lists_each_pointer_on_its_own_row() {
+    let err = CompositionError::MissingProperties {
+        source_path: PathBuf::from("prompts/run.md"),
+        missing: Vec::new(),
+        frontmatter_description: None,
+        pointer_paths: vec!["/topic".into(), "/tone".into()],
+    };
+    let rows = display_rows(&err);
+    assert_rows_follow(&rows, "Validation problems:", &["- `/topic`", "- `/tone`"]);
+}
+
+fn sequence_step(
+    step: usize,
+    missing: Vec<MissingProperty>,
+    pointer_paths: Vec<String>,
+) -> SequenceMissingPropertiesStep {
+    SequenceMissingPropertiesStep {
+        step,
+        step_name: format!("step{step}"),
+        source_path: PathBuf::from("prompts/seq.md"),
+        missing,
+        frontmatter_description: Some(format!("what step {step} does")),
+        pointer_paths,
+    }
+}
+
+#[test]
+fn sequence_missing_properties_keeps_each_step_description_and_property_row() {
+    let property = |name: &str| MissingProperty {
+        name: name.into(),
+        type_label: Some("string".into()),
+        description: None,
+        interactive_shape: None,
+    };
+    let err = CompositionError::SequenceMissingProperties {
+        failure_count: 2,
+        failures: vec![
+            sequence_step(1, vec![property("topic"), property("tone")], Vec::new()),
+            sequence_step(2, vec![property("audience")], Vec::new()),
+        ],
+    };
+    let rows = display_rows(&err);
+    assert_rows_follow(
+        &rows,
+        "Step 1: step1 (",
+        &["what step 1 does", "- `topic`: string", "- `tone`: string"],
+    );
+    assert_rows_follow(
+        &rows,
+        "Step 2: step2 (",
+        &["what step 2 does", "- `audience`: string"],
+    );
+}
+
+#[test]
+fn sequence_missing_properties_lists_each_pointer_on_its_own_row() {
+    let err = CompositionError::SequenceMissingProperties {
+        failure_count: 1,
+        failures: vec![sequence_step(
+            1,
+            Vec::new(),
+            vec!["/topic".into(), "/tone".into()],
+        )],
+    };
+    let rows = display_rows(&err);
+    assert_rows_follow(
+        &rows,
+        "Step 1: step1 (",
+        &["what step 1 does", "- `/topic`", "- `/tone`"],
+    );
+}
+
+#[test]
+fn agent_resolution_failure_lists_each_installed_agent_on_its_own_row() {
+    let err = CompositionError::AgentResolutionFailed {
+        source_path: PathBuf::from("prompts/run.md"),
+        state: AgentResolutionState::SingleInvalid { hint: "nope".into() },
+        installed: vec![Provider::Claude, Provider::Codex],
+    };
+    let rows = display_rows(&err);
+    let listed: Vec<&String> = rows.iter().filter(|row| row.starts_with("- ")).collect();
+    assert_eq!(
+        listed,
+        [&format!("- {}", Provider::Claude), &format!("- {}", Provider::Codex)],
+        "{rows:#?}"
+    );
+}
+
+#[test]
+fn agent_resolution_breakdown_keeps_each_bullet_on_its_own_row() {
+    let err = CompositionError::AgentResolutionFailed {
+        source_path: PathBuf::from("prompts/run.md"),
+        state: AgentResolutionState::NoAgent,
+        installed: vec![Provider::Claude],
+    };
+    let rows = display_rows(&err);
+    assert_eq!(
+        rows.iter().filter(|row| row.starts_with("- ")).count(),
+        3,
+        "{rows:#?}"
+    );
+}
+
+#[test]
+fn loop_iteration_failure_keeps_the_watchdog_detail_row() {
+    let err = CompositionError::LoopIterationFailed {
+        iteration: 2,
+        prompt_path: PathBuf::from("plan.md"),
+        exit_code: 1,
+        reason: "step_timeout\n  ↳ no stream activity for 30m".into(),
+        exit_reason: Some("step_timeout".into()),
+        snapshot: None,
+    };
+    let rows = display_rows(&err);
+    assert_rows_follow(&rows, "step_timeout", &["↳ no stream activity for 30m"]);
+}
+
+#[test]
+fn loop_rate_limit_keeps_the_provider_message_row() {
+    let err = CompositionError::LoopRateLimited {
+        iteration: 1,
+        prompt_path: PathBuf::from("plan.md"),
+        provider: None,
+        model: None,
+        reset_at: None,
+        message: Some("Usage limit reached".into()),
+    };
+    let rows = display_rows(&err);
+    assert_rows_follow(
+        &rows,
+        "loop halted at iteration 1 of plan.md: provider rate limited",
+        &["↳ Usage limit reached"],
+    );
+}
+
+#[test]
+fn a_message_hint_row_stays_its_own_row() {
+    // The catch-all block shows the variant's `Display`, whose glob hint is a
+    // row of its own.
+    let err = CompositionError::FileNotFound("plans/*.md".into());
+    let message = err.to_string();
+    let (first, hint) = message.split_once('\n').expect("a glob reference carries a hint row");
+    let rows = display_rows(&err);
+    assert_rows_follow(&rows, first, &[hint]);
+
+    let err = CompositionError::SchemaLoad {
+        source_path: PathBuf::from("prompts/run.md"),
+        message: message.clone(),
+    };
+    let rows = display_rows(&err);
+    assert_rows_follow(&rows, first, &[hint]);
+}
+
+#[test]
+fn a_blank_line_in_a_row_paragraph_still_separates_paragraphs() {
+    let err = CompositionError::SchemaValidation {
+        source_path: PathBuf::from("prompts/run.md"),
+        message: "First\n\nSecond".into(),
+        problems: Vec::new(),
+        failures: Vec::new(),
+    };
+    let rows = display_rows(&err);
+    let first = rows.iter().position(|row| row == "First").expect("`First` row");
+    assert_eq!(rows[first + 1], "", "a blank row between paragraphs: {rows:#?}");
+    assert_eq!(rows[first + 2], "Second", "{rows:#?}");
 }

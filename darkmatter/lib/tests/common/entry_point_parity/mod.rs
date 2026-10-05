@@ -27,11 +27,34 @@
 //! `<id>` is its `/`-spelled path below the fixture root, so `::file`,
 //! `::code`, and `::toc-linking` output all name the file they resolved.
 //!
+//! The repository also holds the files a glob row lists ([`GLOB_FILES`]):
+//! `*spec*.md` files in the package, the area, and the repository root, some
+//! under a `_completed/` folder, and one `plan.md` no pattern matches.
+//!
 //! **Table 1** ([`DocumentCell`]) puts one reference in one document per cell,
 //! so a failing cell cannot mask another. **Table 2** ([`ValueCell`]) supplies
 //! the reference as a caller value from a launch directory. A cell expects one
 //! file, compared by [`canonicalize_simplified`] then [`PathIdentity`], or one
 //! [`ResolutionFailure`] class; messages and wrapper types are never compared.
+//!
+//! **Glob rows** ([`GlobDocumentCell`], [`GlobValueCell`]) put a glob
+//! reference ([`GlobForm`]) in each table: Table 1 through `::file-links`,
+//! `find_files()`, and `file(match(...))` validation of a frontmatter value,
+//! from a document in the package; Table 2 through `file(match(...))`
+//! completion and validation of a caller-supplied value, from both launch
+//! directories. A glob cell expects the files in native order
+//! ([`Expected::Files`]) or one [`ResolutionFailure`] class. A consumer that
+//! cannot show an order (a `::file-links` tree, a per-value verdict) reports
+//! [`Observed::FileSet`], compared as a set. Every entry point on a row
+//! meets the same expectation, so entry points that pass agree with each
+//! other.
+//!
+//! Only the in-process entry points (the library and DMLS) run every form at
+//! every depth. A process entry point (`md`, `claudine`) runs the forms that
+//! each depend on one context input ([`PROCESS_FORMS`]) at one depth, and an
+//! `md` route other than `compose` runs one cell: resolution is shared code, so
+//! a process can only disagree through the context it builds, and every
+//! process cell costs a spawn.
 //!
 //! Rows come from an exhaustive `match` over [`EntryPoint`] (no `_` arm), so a
 //! new entry point without rows does not compile, and each runner matches the
@@ -45,8 +68,8 @@
 //! entry point.
 //!
 //! Shared by `#[path]` with the darkmatter-cli, dmls, and claudine-cli
-//! runners; each declares this file in `[package.metadata.ci.tests]
-//! source-inputs`.
+//! runners (claudine-cli's chooser runner is a unit test of its binary); each
+//! declares this file in `[package.metadata.ci.tests] source-inputs`.
 
 #![allow(dead_code)]
 
@@ -61,6 +84,9 @@ pub enum Owner {
     DarkmatterCli,
     Dmls,
     ClaudineCli,
+    /// claudine-cli's binary unit tests, for an entry point no process
+    /// reaches without a terminal.
+    ClaudineCliChooser,
 }
 
 /// Every entry point of change 1 that resolves a file reference.
@@ -109,10 +135,15 @@ pub enum EntryPoint {
     /// `claudine compose --dry-run <document> target=<value>`: a
     /// caller-supplied schema `file` property value (Table 2).
     ClaudineSuppliedValue,
+    /// The candidates Claudine's missing-property chooser offers for a
+    /// `file(match(...))` property (`file_candidate_paths`), glob rows of
+    /// Table 2 only. The chooser needs a terminal, so its runner calls the
+    /// walk inside the binary's unit tests.
+    ClaudineChooser,
 }
 
 impl EntryPoint {
-    pub const ALL: [EntryPoint; 32] = [
+    pub const ALL: [EntryPoint; 33] = [
         Self::ComposePipeline,
         Self::Preflight,
         Self::SchemaValidation,
@@ -145,6 +176,7 @@ impl EntryPoint {
         Self::ClaudineCompletion,
         Self::ClaudinePromptArgument,
         Self::ClaudineSuppliedValue,
+        Self::ClaudineChooser,
     ];
 
     pub fn owner(self) -> Owner {
@@ -160,25 +192,48 @@ impl EntryPoint {
             | Self::ClaudineCompletion
             | Self::ClaudinePromptArgument
             | Self::ClaudineSuppliedValue => Owner::ClaudineCli,
+            Self::ClaudineChooser => Owner::ClaudineCliChooser,
         }
     }
 
     /// This entry point's cells in both tables.
     pub fn rows(self) -> Vec<Row> {
         use Consumer::*;
+        use GlobConsumer::{FileLinks, FindFiles, MatchCompletion, MatchValidation};
         const EDITOR: &[Consumer] = &[File, Code, TocLinking, SchemaFile, MarkdownLink];
+        const COMPOSED_GLOBS: &[GlobConsumer] = &[FileLinks, FindFiles, MatchValidation];
         match self {
             // Row (a) reaches the library only as `::file ~/…`.
-            Self::ComposePipeline => document_rows(self, &[File, Code, TocLinking, SchemaFile], &Form::ALL, true),
-            Self::Preflight => document_rows(self, &[File, Code, TocLinking, SchemaFile], &Form::ALL, true),
-            Self::SchemaValidation => document_rows(self, &[SchemaFile], &Form::ALL, false),
-            Self::MdCompose => document_rows(self, &[File, Code, TocLinking, SchemaFile], &Form::ALL, false),
-            Self::MdSchemaValidate => document_rows(self, &[SchemaFile], &Form::ALL, false),
+            Self::ComposePipeline => [
+                document_rows(self, &[File, Code, TocLinking, SchemaFile], &Form::ALL, true),
+                glob_document_rows(self, COMPOSED_GLOBS),
+                glob_value_rows(self, &[MatchValidation]),
+            ]
+            .concat(),
+            Self::Preflight => [
+                document_rows(self, &[File, Code, TocLinking, SchemaFile], &Form::ALL, true),
+                glob_document_rows(self, &[MatchValidation]),
+            ]
+            .concat(),
+            Self::SchemaValidation => {
+                [document_rows(self, &[SchemaFile], &Form::ALL, false), glob_document_rows(self, &[MatchValidation])]
+                    .concat()
+            }
+            Self::MdCompose => [
+                process_document_rows(self, &[File, SchemaFile]),
+                one_glob_document_row(self, FileLinks),
+            ]
+            .concat(),
+            Self::MdSchemaValidate => {
+                [process_document_rows(self, &[SchemaFile]), one_glob_document_row(self, MatchValidation)].concat()
+            }
             // A quoted `'~/…'` argument is the only `~` spelling `md` sees.
             // Rows (a) and (b) test the opened document's own references, so
-            // only composition, which reads them, runs them.
-            Self::MdArgument(route) => {
-                let mut rows = value_rows(self, &Form::ALL, route == MdRoute::Compose);
+            // only composition, which reads them, runs them. Every other route
+            // opens its argument through the same reader, so one cell that
+            // needs the reader's context fails any route that bypasses it.
+            Self::MdArgument(MdRoute::Compose) => {
+                let mut rows = value_rows(self, PROCESS_FORMS, true);
                 for launch in Launch::ALL {
                     for value in Supplied::ARGUMENT_ONLY {
                         rows.push(Row::Value(ValueCell { entry: self, value, launch }));
@@ -186,17 +241,36 @@ impl EntryPoint {
                 }
                 rows
             }
-            Self::DmlsDiagnostics => document_rows(self, &[SchemaFile], &Form::ALL, false),
+            Self::MdArgument(_) => vec![Row::Value(ValueCell {
+                entry: self,
+                value: Supplied::Form(Form::RepositoryScoped),
+                launch: Launch::Package,
+            })],
+            // DMLS evaluates no expression and lists no `::file-links` glob;
+            // it validates `match()`.
+            Self::DmlsDiagnostics => {
+                [document_rows(self, &[SchemaFile], &Form::ALL, false), glob_document_rows(self, &[MatchValidation])]
+                    .concat()
+            }
             Self::DmlsDocumentLinks => document_rows(self, EDITOR, &Form::ALL, false),
             Self::DmlsLinkGraph => document_rows(self, EDITOR, &Form::ALL, false),
             Self::DmlsDefinition => document_rows(self, EDITOR, &Form::ALL, false),
             Self::DmlsCodeActions => document_rows(self, EDITOR, &Form::ALL, false),
-            Self::ClaudineComposition => document_rows(self, &[File, Code, TocLinking, SchemaFile], &Form::ALL, false),
+            Self::ClaudineComposition => [
+                process_document_rows(self, &[File, SchemaFile]),
+                one_glob_document_row(self, FileLinks),
+            ]
+            .concat(),
             // The value is the prompt itself, so the notes documents' own
             // references (rows (a) and (b)) are composition's, not completion's.
-            Self::ClaudineCompletion => value_rows(self, &Form::ALL, false),
-            Self::ClaudinePromptArgument => value_rows(self, &Form::ALL, true),
-            Self::ClaudineSuppliedValue => value_rows(self, &Form::ALL, false),
+            Self::ClaudineCompletion => {
+                [value_rows(self, PROCESS_FORMS, false), one_glob_value_row_per_launch(self, MatchCompletion)].concat()
+            }
+            Self::ClaudinePromptArgument => value_rows(self, PROCESS_FORMS, true),
+            Self::ClaudineSuppliedValue => {
+                [value_rows(self, PROCESS_FORMS, false), one_glob_value_row_per_launch(self, MatchValidation)].concat()
+            }
+            Self::ClaudineChooser => glob_value_rows(self, &[MatchCompletion]),
         }
     }
 }
@@ -458,6 +532,13 @@ pub enum Launch {
 impl Launch {
     pub const ALL: [Launch; 2] = [Self::RepositoryRoot, Self::Package];
 
+    fn slug(self) -> &'static str {
+        match self {
+            Self::RepositoryRoot => "root",
+            Self::Package => "package",
+        }
+    }
+
     fn relative(self) -> &'static str {
         match self {
             Self::RepositoryRoot => "repo",
@@ -532,10 +613,112 @@ pub struct ValueCell {
     pub launch: Launch,
 }
 
+/// A construct that reads a glob reference.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum GlobConsumer {
+    /// `::file-links <glob>`: the files its tree lists. The tree orders its
+    /// entries as a directory listing, so they compare as a set.
+    FileLinks,
+    /// `find_files('<glob>')`: its list, in order.
+    FindFiles,
+    /// `file(match(...))` validation of one value per candidate
+    /// ([`ParityFixture::glob_candidates`]). The value's arm of a root union
+    /// admits a file only through its globs, and the other arm's
+    /// `enum(glob-rejected)` no path satisfies, so the admitted candidates are
+    /// the glob's members, compared as a set.
+    MatchValidation,
+    /// `file(match(...))` completion candidates, in order.
+    MatchCompletion,
+}
+
+impl GlobConsumer {
+    fn slug(self) -> &'static str {
+        match self {
+            Self::FileLinks => "file-links",
+            Self::FindFiles => "find-files",
+            Self::MatchValidation => "match",
+            Self::MatchCompletion => "completion",
+        }
+    }
+}
+
+/// A glob reference form; one row per form and consumer in each table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum GlobForm {
+    /// `^**/*spec*.md`: the package, the area, then the repository root.
+    Scoped,
+    /// `^**/*spec*.md` and `!&**/_completed/**`.
+    ScopedExcluding,
+    /// `../…/**/*spec*.md`, climbing to the fixture root, past the
+    /// repository root.
+    TreeEscape,
+}
+
+impl GlobForm {
+    pub const ALL: [GlobForm; 3] = [Self::Scoped, Self::ScopedExcluding, Self::TreeEscape];
+
+    /// Whether `consumer` reads this form: `::file-links` and `find_files()`
+    /// take one pattern, so they have no `!` exclusion row.
+    pub fn reaches(self, consumer: GlobConsumer) -> bool {
+        !(self == Self::ScopedExcluding && matches!(consumer, GlobConsumer::FileLinks | GlobConsumer::FindFiles))
+    }
+
+    /// The patterns, from a directory `levels_below_root` directories below
+    /// the fixture root (only the tree escape depends on it).
+    pub fn patterns(self, levels_below_root: usize) -> Vec<String> {
+        match self {
+            Self::Scoped => vec!["^**/*spec*.md".into()],
+            Self::ScopedExcluding => vec!["^**/*spec*.md".into(), "!&**/_completed/**".into()],
+            Self::TreeEscape => vec![format!("{}**/*spec*.md", "../".repeat(levels_below_root))],
+        }
+    }
+
+    fn slug(self) -> &'static str {
+        match self {
+            Self::Scoped => "scoped",
+            Self::ScopedExcluding => "excluding",
+            Self::TreeEscape => "escape",
+        }
+    }
+}
+
+/// Where every Table 1 glob document lives: below the package root, so `^`
+/// finds the package from a nested folder.
+pub const GLOB_DEPTH: Depth = Depth::Two;
+
+/// One Table 1 glob cell: entry point × glob consumer × form, in a document
+/// at [`GLOB_DEPTH`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct GlobDocumentCell {
+    pub entry: EntryPoint,
+    pub consumer: GlobConsumer,
+    pub form: GlobForm,
+}
+
+/// One Table 2 glob cell: entry point × glob consumer × form × launch
+/// directory. The patterns are the schema's; the launch directory is the
+/// caller's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct GlobValueCell {
+    pub entry: EntryPoint,
+    pub consumer: GlobConsumer,
+    pub form: GlobForm,
+    pub launch: Launch,
+}
+
+impl GlobValueCell {
+    /// The schema's patterns, spelled for the launch directory.
+    pub fn patterns(&self) -> Vec<String> {
+        self.form.patterns(self.launch.relative().split('/').count())
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Row {
     Document(DocumentCell),
     Value(ValueCell),
+    GlobDocument(GlobDocumentCell),
+    GlobValue(GlobValueCell),
 }
 
 impl Row {
@@ -543,6 +726,8 @@ impl Row {
         match self {
             Self::Document(cell) => cell.entry,
             Self::Value(cell) => cell.entry,
+            Self::GlobDocument(cell) => cell.entry,
+            Self::GlobValue(cell) => cell.entry,
         }
     }
 }
@@ -577,6 +762,79 @@ fn document_rows(entry: EntryPoint, consumers: &[Consumer], forms: &[Form], thro
     rows
 }
 
+/// The forms a process entry point (`md`, `claudine`) runs. Resolution is
+/// shared code the in-process runners cover form by form; a process can only
+/// differ in the context it builds, so each form here depends on one context
+/// input: the document's folder, the repository root and package catalog, the
+/// configured `@` root, the home directory, and the tree boundary. Every
+/// process cell is a spawn, which is why the process tables stay this small.
+const PROCESS_FORMS: &[Form] = &[
+    Form::BareBeside,
+    Form::RepositoryScoped,
+    Form::ConfiguredMagic,
+    Form::Home,
+    Form::TreeEscape,
+];
+
+/// [`document_rows`] for a process entry point: [`PROCESS_FORMS`] at the
+/// deepest depth, plus the document opened by its absolute path, whose
+/// `../../outside.md` must not meet a boundary.
+fn process_document_rows(entry: EntryPoint, consumers: &[Consumer]) -> Vec<Row> {
+    let mut rows = Vec::new();
+    for &consumer in consumers {
+        for &form in PROCESS_FORMS {
+            rows.push(Row::Document(DocumentCell {
+                entry,
+                consumer,
+                placement: Placement::Repository(form, Depth::Three),
+            }));
+        }
+        rows.push(Row::Document(DocumentCell {
+            entry,
+            consumer,
+            placement: Placement::OpenedByAbsolutePath(NotesReference::Outside),
+        }));
+    }
+    rows
+}
+
+fn one_glob_document_row(entry: EntryPoint, consumer: GlobConsumer) -> Vec<Row> {
+    glob_document_rows(entry, &[consumer]).into_iter().take(1).collect()
+}
+
+fn one_glob_value_row_per_launch(entry: EntryPoint, consumer: GlobConsumer) -> Vec<Row> {
+    let form = GlobForm::ALL
+        .into_iter()
+        .find(|form| form.reaches(consumer))
+        .expect("every glob consumer reads some glob form");
+    Launch::ALL
+        .into_iter()
+        .map(|launch| Row::GlobValue(GlobValueCell { entry, consumer, form, launch }))
+        .collect()
+}
+
+fn glob_document_rows(entry: EntryPoint, consumers: &[GlobConsumer]) -> Vec<Row> {
+    let mut rows = Vec::new();
+    for &consumer in consumers {
+        for form in GlobForm::ALL.into_iter().filter(|form| form.reaches(consumer)) {
+            rows.push(Row::GlobDocument(GlobDocumentCell { entry, consumer, form }));
+        }
+    }
+    rows
+}
+
+fn glob_value_rows(entry: EntryPoint, consumers: &[GlobConsumer]) -> Vec<Row> {
+    let mut rows = Vec::new();
+    for launch in Launch::ALL {
+        for &consumer in consumers {
+            for form in GlobForm::ALL.into_iter().filter(|form| form.reaches(consumer)) {
+                rows.push(Row::GlobValue(GlobValueCell { entry, consumer, form, launch }));
+            }
+        }
+    }
+    rows
+}
+
 fn value_rows(entry: EntryPoint, forms: &[Form], documents: bool) -> Vec<Row> {
     let mut rows = Vec::new();
     for launch in Launch::ALL {
@@ -597,6 +855,8 @@ fn value_rows(entry: EntryPoint, forms: &[Form], documents: bool) -> Vec<Row> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Expected {
     File(PathBuf),
+    /// A glob cell's files, in native order.
+    Files(Vec<PathBuf>),
     Failure(ResolutionFailure),
     /// The value is rendered as literal text and no file is read
     /// ([`MdRoute::CodeBlockDefault`]).
@@ -608,6 +868,12 @@ pub enum Expected {
 pub enum Observed {
     /// The one file the reference resolved to.
     File(PathBuf),
+    /// A glob consumer's files, in the order it gave them.
+    Files(Vec<PathBuf>),
+    /// A glob consumer's files where it gives no order (a `::file-links`
+    /// tree, the values validation admitted); compared as a set. Never empty:
+    /// validation that admits nothing is [`Observed::Unresolved`].
+    FileSet(Vec<PathBuf>),
     /// The failure class on the reference's error.
     Failure(ResolutionFailure),
     /// The entry point succeeded without naming a file. Only an entry point
@@ -615,9 +881,10 @@ pub enum Observed {
     /// reports this; it satisfies an `Expected::File` cell.
     Accepted,
     /// The reference resolved to nothing and the entry point names no class.
-    /// Only completion reports this (it offers no suggestions); it satisfies
-    /// an `Expected::Failure` cell of any class, and the class is compared at
-    /// the same value's execution ([`EntryPoint::ClaudinePromptArgument`]).
+    /// Only completion (it offers no suggestions) and glob validation (it
+    /// admits no candidate) report this; it satisfies an `Expected::Failure`
+    /// cell of any class, and the class is compared where the same reference
+    /// executes ([`EntryPoint::ClaudinePromptArgument`], `find_files()`).
     Unresolved,
     /// The value was rendered as literal text, naming no file.
     Literal,
@@ -652,6 +919,9 @@ impl ParityFixture {
 
         for id in target_ids() {
             write(&root.join(&id), &format!("## {TARGET_MARKER}{id}\n"));
+        }
+        for id in GLOB_FILES {
+            write(&root.join(id), "# Glob file\n");
         }
         fixture
     }
@@ -864,6 +1134,129 @@ impl ParityFixture {
             .collect()
     }
 
+    /// Every file a glob row can list, matching or not: the candidates
+    /// validation judges.
+    pub fn glob_candidates(&self) -> Vec<PathBuf> {
+        GLOB_FILES.iter().map(|id| self.root.join(id)).collect()
+    }
+
+    /// The document a `::file-links` or `find_files()` cell composes, at
+    /// [`GLOB_DEPTH`]; [`Self::write_glob_document`] writes it.
+    pub fn glob_document(&self, cell: &GlobDocumentCell) -> PathBuf {
+        self.depth_dir(GLOB_DEPTH)
+            .join(format!("glob-{}-{}.md", cell.consumer.slug(), cell.form.slug()))
+    }
+
+    /// Writes [`Self::glob_document`].
+    pub fn write_glob_document(&self, cell: &GlobDocumentCell) -> PathBuf {
+        let path = self.glob_document(cell);
+        let patterns = cell.form.patterns(GLOB_DEPTH.levels_below_root());
+        let text = match (cell.consumer, patterns.as_slice()) {
+            (GlobConsumer::FileLinks, [pattern]) => format!("# Cell\n\n::file-links {pattern}\n"),
+            (GlobConsumer::FindFiles, [pattern]) => {
+                format!("# Cell\n\n{GLOB_FILES_PREFIX}{{{{ find_files('{pattern}') }}}}\n")
+            }
+            _ => panic!("{cell:?} has no single-document form"),
+        };
+        write(&path, &text);
+        path
+    }
+
+    /// The `(candidate, document)` pairs of a Table 1 `match()` validation
+    /// cell: one document per [`Self::glob_candidates`] entry, holding that
+    /// candidate as its `spec` value. [`Self::write_glob_match_documents`]
+    /// writes them.
+    pub fn glob_match_documents(&self, cell: &GlobDocumentCell) -> Vec<(PathBuf, PathBuf)> {
+        let dir = self.depth_dir(GLOB_DEPTH);
+        self.glob_candidates()
+            .into_iter()
+            .enumerate()
+            .map(|(index, candidate)| (candidate, dir.join(format!("glob-match-{}-{index}.md", cell.form.slug()))))
+            .collect()
+    }
+
+    /// Writes [`Self::glob_match_documents`].
+    pub fn write_glob_match_documents(&self, cell: &GlobDocumentCell) -> Vec<(PathBuf, PathBuf)> {
+        let schema = match_schema(&cell.form.patterns(GLOB_DEPTH.levels_below_root()));
+        let documents = self.glob_match_documents(cell);
+        for (candidate, path) in &documents {
+            let value = to_portable_string(candidate);
+            write(path, &format!("---\n{schema}spec: '{value}'\n---\n\n# Cell\n"));
+        }
+        documents
+    }
+
+    /// The prompt a Table 2 glob cell supplies its `spec` value to, or
+    /// completes it for, at the repository root;
+    /// [`Self::write_glob_value_document`] writes it.
+    pub fn glob_value_document(&self, cell: &GlobValueCell) -> PathBuf {
+        self.repo().join(format!("glob-value-{}-{}.md", cell.form.slug(), cell.launch.slug()))
+    }
+
+    /// Writes [`Self::glob_value_document`]: the `match()` schema alone.
+    pub fn write_glob_value_document(&self, cell: &GlobValueCell) -> PathBuf {
+        let path = self.glob_value_document(cell);
+        write(&path, &format!("---\n{}---\n\n# Cell\n", match_schema(&cell.patterns())));
+        path
+    }
+
+    /// The files the `find_files()` line ([`GLOB_FILES_PREFIX`]) of rendered
+    /// output lists, in order; `None` when no such line was rendered.
+    pub fn find_files_listed(&self, output: &str) -> Option<Vec<PathBuf>> {
+        let line = output.lines().find_map(|line| line.trim().strip_prefix(GLOB_FILES_PREFIX))?;
+        let inner = line.trim().strip_prefix('[')?.strip_suffix(']')?.trim();
+        if inner.is_empty() {
+            return Some(Vec::new());
+        }
+        Some(
+            inner
+                .split(',')
+                .map(|item| PathBuf::from(item.trim().trim_matches('"').replace("\\\\", "\\").replace("\\/", "/")))
+                .collect(),
+        )
+    }
+
+    /// The files a rendered `::file-links` tree links: each `📄` entry's
+    /// `file://` target.
+    pub fn file_links_listed(&self, output: &str) -> Vec<PathBuf> {
+        output
+            .lines()
+            .filter(|line| line.contains('\u{1f4c4}'))
+            .filter_map(|line| {
+                let start = line.find("(file://")? + "(file://".len();
+                let end = start + line[start..].find(')')?;
+                Some(file_url_path(&line[start..end]))
+            })
+            .collect()
+    }
+
+    /// The file a completion candidate names from `launch`: `&` from the
+    /// repository root, `~/` from `HOME`, absolute, or relative to the launch
+    /// directory (`../` included).
+    pub fn completion_path(&self, value: &str, launch: Launch) -> PathBuf {
+        if let Some(rest) = value.strip_prefix('&') {
+            self.repo().join(rest)
+        } else if let Some(rest) = value.strip_prefix("~/") {
+            self.home().join(rest)
+        } else if Path::new(value).is_absolute() {
+            PathBuf::from(value)
+        } else {
+            self.launch_dir(launch).join(value)
+        }
+    }
+
+    pub fn expected_glob_document(&self, cell: &GlobDocumentCell) -> Expected {
+        expected_glob(&self.root, cell.form, cell.consumer, &PACKAGE_ORDER)
+    }
+
+    pub fn expected_glob_value(&self, cell: &GlobValueCell) -> Expected {
+        let order = match cell.launch {
+            Launch::RepositoryRoot => &REPOSITORY_ORDER,
+            Launch::Package => &PACKAGE_ORDER,
+        };
+        expected_glob(&self.root, cell.form, cell.consumer, order)
+    }
+
     /// Every fixture target named in rendered output, in order of first
     /// appearance.
     pub fn marked_targets(&self, output: &str) -> Vec<PathBuf> {
@@ -926,6 +1319,21 @@ impl ParityFixture {
                 }
             }
             (Expected::File(_), Observed::Accepted) => Ok(()),
+            (Expected::Files(want), Observed::Files(got)) => {
+                if same_order(want, got) {
+                    Ok(())
+                } else {
+                    Err(format!("expected {}, got {}", self.show_all(want), self.show_all(got)))
+                }
+            }
+            (Expected::Files(want), Observed::FileSet(got)) => {
+                if same_set(want, got) {
+                    Ok(())
+                } else {
+                    Err(format!("expected the set {}, got {}", self.show_all(want), self.show_all(got)))
+                }
+            }
+            (Expected::Files(want), other) => Err(format!("expected {}, got {other:?}", self.show_all(want))),
             (Expected::Literal, Observed::Literal) => Ok(()),
             (Expected::Literal, other) => Err(format!("expected literal text, got {other:?}")),
             (Expected::Failure(want), Observed::Failure(got)) if want == got => Ok(()),
@@ -934,8 +1342,15 @@ impl ParityFixture {
             (Expected::Failure(want), Observed::File(got)) => {
                 Err(format!("expected {want:?}, got {}", self.show(got)))
             }
+            (Expected::Failure(want), Observed::Files(got) | Observed::FileSet(got)) => {
+                Err(format!("expected {want:?}, got {}", self.show_all(got)))
+            }
             (Expected::Failure(want), other) => Err(format!("expected {want:?}, got {other:?}")),
         }
+    }
+
+    fn show_all(&self, paths: &[PathBuf]) -> String {
+        format!("[{}]", paths.iter().map(|path| self.show(path)).collect::<Vec<_>>().join(", "))
     }
 
     fn show(&self, path: &Path) -> String {
@@ -959,6 +1374,135 @@ pub fn identity(path: &Path) -> PathIdentity {
         }
     });
     PathIdentity::new(&canonical)
+}
+
+fn same_order(want: &[PathBuf], got: &[PathBuf]) -> bool {
+    want.len() == got.len() && want.iter().zip(got).all(|(want, got)| identity(want) == identity(got))
+}
+
+fn same_set(want: &[PathBuf], got: &[PathBuf]) -> bool {
+    let want: Vec<PathIdentity> = want.iter().map(|path| identity(path)).collect();
+    let got: Vec<PathIdentity> = got.iter().map(|path| identity(path)).collect();
+    want.len() == got.len() && want.iter().all(|path| got.contains(path))
+}
+
+/// A [`GlobConsumer::MatchValidation`] cell's observation from each
+/// candidate's outcome: `Ok` admitted it, an error naming [`REJECTED`]
+/// rejected it (the glob ruled the `match()` arm out, leaving the arm whose
+/// enum no path satisfies), and any other error is unexpected. Admitting
+/// nothing is [`Observed::Unresolved`]: validation names no failure class.
+pub fn validation_verdicts(outcomes: Vec<(PathBuf, Result<(), String>)>) -> Observed {
+    // A terminal block may wrap the member at its `-`, inside a `┃` rule.
+    let squeeze = |text: &str| -> String {
+        text.chars().filter(|c| !c.is_whitespace() && !matches!(c, '-' | '\u{2503}')).collect()
+    };
+    let rejected = squeeze(REJECTED);
+    let mut admitted = Vec::new();
+    for (candidate, outcome) in outcomes {
+        match outcome {
+            Ok(()) => admitted.push(candidate),
+            Err(text) if squeeze(&text).contains(&rejected) => {}
+            Err(text) => return Observed::Unexpected(format!("{}: {text}", candidate.display())),
+        }
+    }
+    if admitted.is_empty() { Observed::Unresolved } else { Observed::FileSet(admitted) }
+}
+
+/// The body line a `find_files()` cell renders its list on.
+pub const GLOB_FILES_PREFIX: &str = "glob-files=";
+
+/// The one member of a `match()` cell's second arm, which no path is; every
+/// entry point names it when it rejects a candidate. A missing required
+/// property would not do: DMLS reports none outside strict mode.
+pub const REJECTED: &str = "glob-rejected";
+
+/// The root-union schema of a `match()` cell: the first arm admits `spec`
+/// only through `patterns`; the second only as [`REJECTED`].
+fn match_schema(patterns: &[String]) -> String {
+    format!("$schema:\n  - spec: 'file(eager; match({}))'\n  - spec: 'enum({REJECTED})'\n", patterns.join(", "))
+}
+
+/// The path a `file://` URL names, percent-decoded; a Windows drive path
+/// (`/C:/…`) loses its leading `/`.
+fn file_url_path(url: &str) -> PathBuf {
+    let bytes = url.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        let hex = bytes.get(index + 1..index + 3).and_then(|pair| std::str::from_utf8(pair).ok());
+        match (bytes[index], hex.and_then(|pair| u8::from_str_radix(pair, 16).ok())) {
+            (b'%', Some(byte)) => {
+                decoded.push(byte);
+                index += 3;
+            }
+            (byte, _) => {
+                decoded.push(byte);
+                index += 1;
+            }
+        }
+    }
+    let text = String::from_utf8_lossy(&decoded).into_owned();
+    match text.as_bytes() {
+        [b'/', drive, b':', ..] if drive.is_ascii_alphabetic() => PathBuf::from(&text[1..]),
+        _ => PathBuf::from(text),
+    }
+}
+
+/// The glob rows' files below the fixture root: the `*spec*.md` files, two
+/// under `_completed/` folders, and a `plan.md` that no pattern matches.
+pub const GLOB_FILES: [&str; 9] = [
+    "repo/area/pkg/pkg-spec.md",
+    "repo/area/pkg/features/f1/spec.md",
+    "repo/area/pkg/features/f1/plan.md",
+    "repo/area/pkg/features/_completed/old/spec.md",
+    "repo/area/area-spec.md",
+    "repo/area/other/z/spec.md",
+    "repo/repo-spec.md",
+    "repo/fixes/x/spec.md",
+    "repo/fixes/_completed/y/spec.md",
+];
+
+/// `^**/*spec*.md`'s native order from inside the package: the package's
+/// files, the area's, then the repository root's, each by depth below its
+/// root, then component-wise.
+const PACKAGE_ORDER: [&str; 8] = [
+    "repo/area/pkg/pkg-spec.md",
+    "repo/area/pkg/features/f1/spec.md",
+    "repo/area/pkg/features/_completed/old/spec.md",
+    "repo/area/area-spec.md",
+    "repo/area/other/z/spec.md",
+    "repo/repo-spec.md",
+    "repo/fixes/x/spec.md",
+    "repo/fixes/_completed/y/spec.md",
+];
+
+/// `^**/*spec*.md`'s native order from the repository root, whose only `^`
+/// root is the repository root: by depth, then component-wise.
+const REPOSITORY_ORDER: [&str; 8] = [
+    "repo/repo-spec.md",
+    "repo/area/area-spec.md",
+    "repo/area/pkg/pkg-spec.md",
+    "repo/fixes/x/spec.md",
+    "repo/area/other/z/spec.md",
+    "repo/fixes/_completed/y/spec.md",
+    "repo/area/pkg/features/f1/spec.md",
+    "repo/area/pkg/features/_completed/old/spec.md",
+];
+
+/// A glob cell's expectation from `order`, the scoped pattern's native
+/// order from the cell's directory. The exclusion drops `_completed/`; a
+/// completion walk skips `_`-prefixed folders as well (suggestions only,
+/// so validation still admits what a user types); the tree escape is
+/// `InvalidReference`.
+fn expected_glob(root: &Path, form: GlobForm, consumer: GlobConsumer, order: &[&str]) -> Expected {
+    if form == GlobForm::TreeEscape {
+        return Expected::Failure(ResolutionFailure::InvalidReference);
+    }
+    let excluded = |id: &&&str| {
+        let completed = id.contains("/_completed/");
+        (form == GlobForm::ScopedExcluding && completed) || (consumer == GlobConsumer::MatchCompletion && id.contains("/_"))
+    };
+    Expected::Files(order.iter().filter(|id| !excluded(id)).map(|id| root.join(id)).collect())
 }
 
 /// Folds a runner's per-cell results into one report naming every

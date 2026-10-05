@@ -774,14 +774,12 @@ fn render_about_report(report: &AboutReport, term: &Terminal) -> String {
             } else {
                 ""
             };
+            // `TableCellContent::Text` is plain text, not Prose markup, so
+            // table values are never passed through `Prose::escape_text`.
             let candidate_text = if paths.is_empty() {
                 "none".to_string()
             } else {
-                paths
-                    .iter()
-                    .map(|path| Prose::escape_text(path))
-                    .collect::<Vec<_>>()
-                    .join("\n")
+                paths.join("\n")
             };
             table.add_row(vec![
                 TableCellContent::Text(target.to_string()),
@@ -831,7 +829,7 @@ fn render_about_report(report: &AboutReport, term: &Terminal) -> String {
         for setting in &report.settings {
             let (status, value) = setting_value_text(&setting.value);
             table.add_row(vec![
-                TableCellContent::Text(Prose::escape_text(&setting.name)),
+                TableCellContent::Text(setting.name.clone()),
                 TableCellContent::Text(setting.locator.clone()),
                 TableCellContent::Text(status.to_string()),
                 TableCellContent::Text(value.unwrap_or_default()),
@@ -855,15 +853,12 @@ fn render_about_report(report: &AboutReport, term: &Terminal) -> String {
             ]);
         for fact in &report.env_facts {
             let value_text = if report.is_current_terminal {
-                fact.value
-                    .as_ref()
-                    .map(|value| Prose::escape_text(value))
-                    .unwrap_or_else(|| "unset".to_string())
+                fact.value.clone().unwrap_or_else(|| "unset".to_string())
             } else {
                 "(not current terminal)".to_string()
             };
             table.add_row(vec![
-                TableCellContent::Text(Prose::escape_text(&fact.name)),
+                TableCellContent::Text(fact.name.clone()),
                 TableCellContent::Text(fact.vars.join(", ")),
                 TableCellContent::Text(value_text),
             ]);
@@ -875,7 +870,7 @@ fn render_about_report(report: &AboutReport, term: &Terminal) -> String {
     // Plist cache note
     if let Some(ref note) = report.plist_cache_note {
         let mut note_section = Section::new(HeadingLevel::h2, "Note");
-        note_section.push(Prose::new(Prose::escape_text(note)));
+        note_section.push(Prose::new(Prose::escape_text_outside_code_spans(note)));
         root.push(note_section);
     }
 
@@ -892,14 +887,15 @@ fn config_candidate_targets(candidates: &ConfigCandidatesJson) -> [(&'static str
     ]
 }
 
+/// The status label and plain-text (unescaped) value for a settings table row.
 fn setting_value_text(value: &SettingValue) -> (&'static str, Option<String>) {
     match value {
-        SettingValue::Found { value } => ("found", Some(Prose::escape_text(value))),
+        SettingValue::Found { value } => ("found", Some(value.clone())),
         SettingValue::Absent => ("absent", None),
         SettingValue::LocatorOnly { reason } => {
             ("locator-only", Some(format!("not extractable ({reason})")))
         }
-        SettingValue::Unreadable { reason } => ("unreadable", Some(Prose::escape_text(reason))),
+        SettingValue::Unreadable { reason } => ("unreadable", Some(reason.clone())),
         SettingValue::Unavailable { reason, .. } => ("unavailable", Some((*reason).to_string())),
     }
 }

@@ -1,4 +1,4 @@
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::{LineBreaks, Prose};
 use biscuit_terminal::components::renderable::TerminalRenderable as _;
 use biscuit_terminal::errors::as_block_error as as_terminal_block_error;
 use biscuit_terminal::terminal::Terminal;
@@ -94,38 +94,42 @@ fn main() {
         }
 
         // Fallback: legacy Display-chain renderer.
-        // Deduplicate chain: skip causes whose message is already contained in a prior message.
-        let top = e.to_string();
-        let mut seen = top.clone();
-        let causes: Vec<String> = e
-            .chain()
-            .skip(1)
-            .filter_map(|c| {
-                let msg = c.to_string();
-                if seen.contains(&msg) {
-                    None
-                } else {
-                    seen.push_str(&msg);
-                    Some(msg)
-                }
-            })
-            .collect();
-        let msg = if causes.is_empty() {
-            format!("<red><b>Error:</b></red> {top}")
-        } else {
-            format!(
-                "<red><b>Error:</b></red> {top}\n       {}",
-                causes
-                    .iter()
-                    .map(|c| format!("<dim>▸</dim> {c}"))
-                    .collect::<Vec<_>>()
-                    .join("\n       ")
-            )
-        };
-        let terminal = Terminal::default();
-        eprintln!("{}", Prose::new(msg).render(&terminal));
+        eprintln!("{}", error_chain_prose(&e).render(&Terminal::default()));
         std::process::exit(1);
     }
+}
+
+/// The legacy Display-chain report: the top error, then each cause not
+/// already contained in an earlier message on its own indented row.
+fn error_chain_prose(e: &color_eyre::Report) -> Prose {
+    let top = e.to_string();
+    let mut seen = top.clone();
+    let causes: Vec<String> = e
+        .chain()
+        .skip(1)
+        .filter_map(|c| {
+            let msg = c.to_string();
+            if seen.contains(&msg) {
+                None
+            } else {
+                seen.push_str(&msg);
+                Some(msg)
+            }
+        })
+        .collect();
+    let msg = if causes.is_empty() {
+        format!("<red><b>Error:</b></red> {top}")
+    } else {
+        format!(
+            "<red><b>Error:</b></red> {top}\n       {}",
+            causes
+                .iter()
+                .map(|c| format!("<dim>▸</dim> {c}"))
+                .collect::<Vec<_>>()
+                .join("\n       ")
+        )
+    };
+    Prose::new(msg).with_line_breaks(LineBreaks::Hard)
 }
 
 fn run() -> Result<()> {
@@ -235,3 +239,28 @@ fn reset_sigpipe() {
 
 #[cfg(not(unix))]
 fn reset_sigpipe() {}
+
+#[cfg(test)]
+mod error_chain_tests {
+    use super::*;
+
+    #[test]
+    fn each_cause_is_its_own_indented_row() {
+        let report = color_eyre::eyre::eyre!("inner cause")
+            .wrap_err("middle cause")
+            .wrap_err("top error");
+        let term = Terminal::builder()
+            .width(200)
+            .color_depth(biscuit_terminal::discovery::detection::ColorDepth::None)
+            .build();
+        let rendered = biscuit_terminal::utils::escape_codes::strip_escape_codes(
+            error_chain_prose(&report).render(&term),
+        );
+        let rows: Vec<&str> = rendered.lines().collect();
+        assert_eq!(
+            rows,
+            ["Error: top error", "       ▸ middle cause", "       ▸ inner cause"],
+            "{rendered:?}"
+        );
+    }
+}

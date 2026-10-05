@@ -17,9 +17,11 @@ use std::io::IsTerminal;
 use std::path::Path;
 
 use biscuit_terminal::discovery::detection::ColorDepth;
+use biscuit_terminal::components::prose::LineBreaks;
 use biscuit_terminal::prelude::{Prose, TerminalRenderable, UnorderedList};
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::{Length, TargetValue};
+use renderable::markdown::code_span;
 
 use crate::generate::{CheckOutcome, Generation, Provenance};
 
@@ -46,21 +48,19 @@ pub fn output_terminal() -> Terminal {
 }
 
 /// Escapes Prose markup sigils in dynamic text so identifiers, paths, and
-/// `<placeholder>` tokens render literally in both color and plain modes.
+/// `<placeholder>` tokens render literally in both color and plain modes; code
+/// spans the text marks with backticks stay literal.
 fn esc(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    for ch in text.chars() {
-        if matches!(ch, '\\' | '*' | '_' | '[' | ']' | '(' | ')' | '<' | '>' | '{') {
-            out.push('\\');
-        }
-        out.push(ch);
-    }
-    out
+    Prose::escape_text_outside_code_spans(text)
 }
 
 /// Renders one Prose line (markup interpreted, trailing newline appended).
+/// A newline inside it, such as an error listing one problem per row, stays a
+/// row break.
 fn line(term: &Terminal, markup: impl AsRef<str>) -> String {
-    let mut out = Prose::new(markup.as_ref()).render(term);
+    let mut out = Prose::new(markup.as_ref())
+        .with_line_breaks(LineBreaks::Hard)
+        .render(term);
     out.push('\n');
     out
 }
@@ -369,7 +369,7 @@ pub fn prompt(term: &Terminal, name: &str) -> String {
 pub fn prompt_unrecognized(term: &Terminal, other: &str) -> String {
     line(
         term,
-        format!("unrecognized `{}` — expected y, n, or q", esc(other)),
+        format!("unrecognized {} — expected y, n, or q", code_span(other)),
     )
 }
 
@@ -414,6 +414,26 @@ pub fn agent_errors_gate_error(
             "{slug}: deterministic gate error written to {}: {}",
             esc(&biscuit_file::to_portable_string(findings_path)),
             esc(error.unwrap_or("unknown gate error"))
+        ),
+    )
+}
+
+/// The `validate` outcome when every input for the provider is accepted.
+pub fn inputs_accepted(term: &Terminal, slug: &str) -> String {
+    line(
+        term,
+        format!("{slug}: <green>the generator accepts every input</green>"),
+    )
+}
+
+/// The `validate` outcome naming the input the generator refused (stdout, so
+/// a research fleet can show it to the researcher).
+pub fn inputs_refused(term: &Terminal, slug: &str, err: &crate::errors::GenError) -> String {
+    line(
+        term,
+        format!(
+            "{slug}: <red>the generator refuses an input:</red> {}",
+            esc(&err.to_string())
         ),
     )
 }

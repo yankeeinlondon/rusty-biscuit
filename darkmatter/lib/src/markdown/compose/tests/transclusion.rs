@@ -2057,9 +2057,16 @@ mod file_links_compose {
         let root = dir.path().join("root.md");
         std::fs::write(&root, "# Root\n\n::file-links --dir docs/topics\n").unwrap();
 
+        // The repository icon follows the request context's repository root.
+        let context = biscuit_file::FileResolutionContext::new(dir.path())
+            .with_repository_root(dir.path())
+            .with_source_path(&root);
         let md = Markdown::try_from(root.as_path()).unwrap();
         let (composed, _report) = md
-            .compose_with(&crate::markdown::compose::test_request(ComposeOptions::new().with_source_file(&root)))
+            .compose_with(&crate::markdown::compose::test_request_in(
+                ComposeOptions::new().with_source_file(&root),
+                context,
+            ))
             .unwrap();
 
         let options = TerminalOptions {
@@ -2340,7 +2347,7 @@ mod file_links_compose {
     }
 
     #[test]
-    fn out_of_bound_path_is_ignored() {
+    fn a_relative_glob_leaving_the_repository_is_a_typed_error() {
         let dir = tempfile::tempdir().unwrap();
         let docs = dir.path().join("docs");
         std::fs::create_dir(&docs).unwrap();
@@ -2349,19 +2356,46 @@ mod file_links_compose {
         let root = dir.path().join("root.md");
         std::fs::write(&root, "# Root\n\n::file-links ../*\n\n").unwrap();
 
+        let context = biscuit_file::FileResolutionContext::new(dir.path())
+            .with_repository_root(dir.path())
+            .with_source_path(&root);
         let md = Markdown::try_from(root.as_path()).unwrap();
-        let options = ComposeOptions::new()
-            .with_source_file(&root)
-            .disable(ComposeOperation::Cleanup)
-            .disable(ComposeOperation::Normalization);
-        let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
+        let options = || {
+            ComposeOptions::new()
+                .with_source_file(&root)
+                .disable(ComposeOperation::Cleanup)
+                .disable(ComposeOperation::Normalization)
+        };
 
-        let text = composed.content();
-        assert!(
-            !text.contains(".."),
-            "out-of-bound paths should be excluded: {text}"
-        );
+        // Permissive: the directive is skipped with a classified warning.
+        let (_, report) = md
+            .compose_with(&crate::markdown::compose::test_request_in(options(), context.clone()))
+            .unwrap();
         assert_eq!(report.transclusions_skipped, 1);
+        let warning = report
+            .warnings
+            .iter()
+            .find(|warning| warning.message.contains("leaves file tree"))
+            .unwrap_or_else(|| panic!("{:?}", report.warnings));
+        assert_eq!(warning.resolution_failure, Some(biscuit_file::ResolutionFailure::InvalidReference));
+
+        // Strict: the typed error.
+        let error = md
+            .compose_with(&crate::markdown::compose::test_request_in(options().with_fail_fast(true), context))
+            .expect_err("a relative glob may not leave the repository");
+        assert!(
+            matches!(
+                &error,
+                crate::markdown::types::MarkdownError::FileLinks(
+                    crate::markdown::compose::FileLinksError::GlobReference {
+                        source: biscuit_file::GlobReferenceError::RelativeTreeEscape { .. },
+                        ..
+                    }
+                )
+            ),
+            "{error:?}"
+        );
+        assert_eq!(error.resolution_failure(), Some(biscuit_file::ResolutionFailure::InvalidReference));
     }
 
     #[test]

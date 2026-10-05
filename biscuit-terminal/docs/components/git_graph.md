@@ -52,8 +52,9 @@ print!("{}", graph.render(&Terminal::new()));
 | `GraphLine::with_merge(source, destination)` | Appends a `LaneMerge`: the commit `source` on this line was merged by the merge commit `destination` on another lane. The destination's lane is found by where that commit is drawn. Append oldest first; a line merged at its tip passes its tip as `source`. |
 | `with_ref(name, sha)` | A ref tip: local branch, remote branch, or tag. |
 | `GraphPullRequest` | An open PR: number, source branch, and target branch. |
-| `with_current_branch(name)` | The checked-out branch. Unset, or the default branch, is the **base view**. |
+| `with_current_branch(name)` | The checked-out branch. Unset, or the default branch, is the **base view**; otherwise a **focused view** draws `origin/<default>`, the current branch and its chain of non-default parents, and any lane whose drawn commits hold the fork of a lane already in view. |
 | `with_incomplete_history()` | The caller could not establish some of the history it passed; the graph shows the incomplete-history notice. |
+| `with_max_rows(u32)` | Caps the base view's height at this many rows instead of half the terminal's; lanes past it are left out as usual. |
 
 ### Lanes and tags
 
@@ -138,9 +139,11 @@ The component never draws something at a commit other than the one it was given:
 |---|---|---|
 | `forked_at` | unset, or its commit is not drawn | The lane is drawn **unconnected** (declared before the default lane's first commit, so its first commit has no parent), never from the start of another lane |
 | a ref, a label-only line's tip, a PR's source tip | its commit is not drawn | The tag is left out |
-| a line's merge | its source is not drawn on that line, its destination is not drawn or is on the same line, the destination would be emitted before the source, the destination already merges another source, or two lanes' merges depend on each other (only the first is drawn) | A plain `commit`, no merge |
+| a line's merge | its source is not drawn on that line, its destination is not drawn or is on the same line, the destination would still be emitted before the source after its lane waits for it (a lane that reaches a destination first waits before it until the source is drawn), the destination already merges another source, or two lanes' merges depend on each other (only the first is drawn) | A plain `commit`, no merge |
 
-Each of these, and `with_incomplete_history()`, sets `GitGraphPlan::incomplete`, and the rendered graph is followed by the dim line `INCOMPLETE_HISTORY_NOTE` ("Some history is not shown"), after the hidden-lanes note. Tags of lanes the height cap leaves out are counted by that note instead. A PR for a branch the graph does not know has no commit to account for, and is not counted.
+Each of these is recorded in `GitGraphPlan::omissions` as a `GraphOmission` (`UnconnectedLane { branch, fork }`, `Merge { branch, destination }`, or `Tag(name)`), so a caller can say what is missing. Each, and `with_incomplete_history()`, sets `GitGraphPlan::incomplete`, and the rendered graph is followed by the dim line `INCOMPLETE_HISTORY_NOTE` ("Some history is not shown"), after the hidden-lanes note. Tags of lanes the height cap leaves out are counted by that note instead. A PR for a branch the graph does not know has no commit to account for, and is not counted.
+
+A caller that lists its own notes (as `wt list` does) calls `render_without_notes(&term)` instead of `render`: it returns the same drawing without either note, together with the `GitGraphPlan` it was drawn from, so the caller can report `hidden_lanes` and `incomplete` in its own words.
 
 ### Sizing and fitting
 
@@ -154,7 +157,7 @@ Each of these, and `with_incomplete_history()`, sets `GitGraphPlan::incomplete`,
 
 The image is sized with `ImageWidth::Scale` (see [TerminalImage](./terminal_image.md)): at 125%, gitGraph's 10-unit commit IDs and 14–16-unit branch labels read comfortably. Fitting works in two steps:
 
-1. **Height (base view only).** Past half the terminal's rows, the graph keeps the default lane and adds the other lanes most recently active first, each with its drawn ancestors (the lanes holding its fork commit and every one of its merge destinations, and its parent's lane), until the next would not fit. So a merge between two branch lanes is drawn with both lanes or with neither. A dim line then says `N more worktrees not shown`.
+1. **Height (base view only).** Past half the terminal's rows, or the `with_max_rows(rows)` a caller set instead, the graph keeps the default lane and adds the other lanes most recently active first, each with its drawn ancestors (the lanes holding its fork commit and every one of its merge destinations, and its parent's lane), until the next would not fit. So a merge between two branch lanes is drawn with both lanes or with neither. A dim line then says `N more worktrees not shown`.
 2. **Width.** While the graph is wider than the available columns, commits move into `+N` squares one at a time. A commit beside an existing square goes first, then the oldest commit on the lane showing the most. Lane tips, fork points, merge sources and destinations, and tagged commits are never trimmed. Only when nothing more can be trimmed does the image shrink to fit.
 
 `biscuit-visualized` keeps neighboring tags from overlapping (see [its gitGraph corrections](../../../biscuit-visualized/docs/mermaid-gitgraph.md)). It widens the commit spacing only when two tags on different commits would collide, and only as far as a one-em gap needs. A single long label, such as `main` and `origin/main` stacked on one commit, keeps the default spacing, so trimming narrows the image as usual. When tags do collide, the wider spacing applies to every column, so trimming may not narrow the image enough and it shrinks instead. Labels are never shortened.

@@ -101,6 +101,7 @@ pub mod conditions;
 pub mod context;
 mod frontmatter_interpolation;
 pub(crate) mod frontmatter_shell_expansion;
+pub(crate) mod glob_listing;
 pub(crate) mod icmp;
 pub(crate) mod indent;
 pub(crate) mod parse_utils;
@@ -166,7 +167,10 @@ pub use shell_expansion::ShellExpansionError;
 pub use shell_expansion::ShellTimeoutBehavior;
 pub use context::effective_state::{EffectiveState, EffectiveStateBuilder};
 pub(crate) use context::effective_state::ResolvingLookup;
-pub use context::options::{CallerInputRecord, CallerInputRecords, ComposeOptions, ComposeSource};
+pub use context::options::{
+    CallerInputRecord, CallerInputRecords, ComposeOptions, ComposeSource, caller_input_records_for_overrides,
+    file_resolution_context_identity,
+};
 pub use context::request::{
     ComposeRequest, ContextBuildError, RequestSnapshot, build_resolution_context,
     build_resolution_context_with_catalog,

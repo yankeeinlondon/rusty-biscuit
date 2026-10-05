@@ -609,20 +609,44 @@ property and dispatches by `CompletionKind`:
 - **`enum` → enum members** as `property='value'`. Prefix-insensitive
   match when a value partial is typed; all members surface when the
   partial is empty.
-- **`file(match='*.png', …)` → filesystem paths** rooted at the
-  invoking `cwd` (the launch area; see the "Why anchored on the `cwd`"
-  note under *Setter values*), filtered by the
-  property's glob patterns. The walk shares the scope walker's
-  exclusion rules — `.gitignore` plus the `_`-prefix and curated
-  skip-list (`target`, `node_modules`, …) elision — so archived
-  `_completed/` artefacts never surface. The typed value partial is
-  applied as a case-insensitive substring (`*partial*`) over the
-  repo-relative path, not just the basename: because `match(...)`
-  candidates routinely share a basename (every `**/*spec*.md` hit is
-  `spec.md`), a directory fragment like `spec=features/real` is the
-  only way to narrow them. An empty `match(...)` list falls back to the
-  default markdown glob (see the ENTER-path note below); the legacy
-  zero-candidate behavior was dropped.
+- **`file(match(…))` → the files the globs admit.** Each pattern is a
+  glob reference, so its prefix picks where it searches, exactly as a
+  single file reference does:
+
+  | Pattern | Searched, in order |
+  |---------|--------------------|
+  | `**/*spec*.md` (bare) | the launch directory, then the repository root |
+  | `./**/*spec*.md` | the launch directory only |
+  | `&**/*spec*.md` | the repository root |
+  | `^**/*spec*.md` | the package, the package area, then the repository root |
+  | `~/notes/*.md`, `@prompts/*.md`, `/abs/*.md` | home, the `@` roots, the path as written |
+
+  A file is offered once, from the first of those folders that contains
+  it, and only when `match()` validation would accept it there, so a
+  `!fixes/**` exclusion judged from the package is not undone by the
+  repository-root pass. The walk shares the scope walker's exclusion
+  rules — hidden files and directories, `.gitignore`, plus the
+  `_`-prefix and curated skip-list (`target`, `node_modules`, …) — so
+  archived `_completed/` artefacts never surface. These rules only
+  shape the suggestions: validation still accepts a hidden, ignored, or
+  `_`-prefixed file you type. A file symlink that a bare, `./`, or `../`
+  pattern matches and whose target leaves the file tree is left out
+  silently; completion reports no warning for it.
+
+  Candidates keep the search order (nearest folder first, then
+  shallowest, then by path component); they are not re-sorted
+  alphabetically. Each is spelled so that it resolves back to the same
+  file from where you are: a file under the launch directory keeps its
+  plain relative path (`fixes/…/spec.md`, never `./fixes/…/spec.md`),
+  and any other file takes the first of `../x.md` or `../sibling/x.md`,
+  `&path`, `~/path`, or the absolute path that does. A `{{VAR}}`
+  spelling is never offered, because a placeholder reads oddly in a
+  shell argument. The typed value partial is a
+  case-insensitive substring (`*partial*`) over that spelling, so a
+  directory fragment like `spec=features/real` narrows candidates that
+  share a basename. An empty `match(...)` list falls back to the
+  default markdown glob under the launch directory (see the ENTER-path
+  note below).
 - **`url`, `email`, `date`, `datetime`, `time` (hint-only)** emit no
   candidates. The `__complete` stdout protocol does not carry a
   description channel today, so the hint string from
@@ -638,6 +662,11 @@ claudine compose @plan.md tier=<TAB>
 claudine compose @plan.md cover=<TAB>          # schema: file(match('*.png'))
 → cover='assets/cover.png'
 → cover='assets/dark/cover.png'
+
+# launched from packages/web, schema: file(match(^**/*spec*.md))
+claudine compose @plan.md spec=<TAB>
+→ spec='fixes/login/spec.md'                 # under the launch directory
+→ spec='&fixes/2026-09-29-ts-review/spec.md' # the repository root's, two levels up
 ```
 
 ### Root-level unions
@@ -663,7 +692,10 @@ out in arm declaration order.
 If `$schema` cannot be loaded (missing file, unparseable schema, raw
 JSON Schema without typed metadata) the schema completer returns no
 candidates and the slot falls through to the existing `@`-gated setter
-completer described above. Completion is strictly side-effect free: no
+completer described above. The exception is a line with a provider switch
+after the file: ownership then needs the schema's parameter names, and an
+unreadable schema offers nothing (see
+[Provider arguments after the composition file](#provider-arguments-after-the-composition-file)). Completion is strictly side-effect free: no
 shell directives are executed, no provider sessions are launched, no
 on-disk caches are written.
 
@@ -671,6 +703,97 @@ on-disk caches are written.
 malformed schema or a transient filesystem failure must not break
 `<TAB>` for the entire command. Returning nothing keeps the shell's
 own completion alive in those edge cases.
+
+## Provider arguments after the composition file
+
+A composition command can carry arguments for the agent after its file
+(`claudine compose plan.md --codex -c model_reasoning_effort=low`). Which
+words are Claudine's setters and positionals and which belong to the
+agent is decided by type-aware ownership (see
+[Type-aware ownership](../argv-normalization.md#type-aware-ownership)).
+Completion asks the same code the same question, with the word under the
+cursor as the last argument, so it never offers a setter for a word the
+agent would receive.
+
+What you can expect, with a `plan.md` whose `$schema` declares `phase`
+(a number) and `mode` (`enum(fast, slow)`):
+
+| You type | Offered | Why |
+| --- | --- | --- |
+| `compose plan.md --codex -c low ph<TAB>` | `phase=` | `-c` took `low`; `ph` is Claudine's |
+| `compose plan.md --codex -c low mode=<TAB>` | `mode='fast'`, `mode='slow'` | the setter value slot completes as usual |
+| `compose plan.md --codex -c <TAB>` | nothing | the word is `-c`'s value: it belongs to Codex |
+| `compose plan.md --codex -c ph<TAB>` | nothing | an unfinished value of `-c`, not a setter name |
+| `compose plan.md --codex -c phase=2 ph<TAB>` | nothing | `phase=2` is a declared parameter, so `-c` has no value and the command would fail |
+| `compose plan.md -c low ph<TAB>` | nothing | no agent named: Claude's `-c` takes nothing and Codex's takes a value, so `low` is ambiguous |
+| `compose plan.md --codex -c low --mod<TAB>` | `--model` | the words before the flag read cleanly |
+| `compose plan.md --codex -c phase=2 --mod<TAB>` | nothing | `-c` still has no value; a new flag cannot repair it |
+| `compose plan.md -c low --mod<TAB>` | nothing | `low` is ambiguous, whatever the cursor shape |
+| `compose plan.md --codex -c low --exclude co<TAB>` | `codex` | a Claudine option's value; the words before the option read cleanly |
+| `compose plan.md --codex -c phase=2 --exclude co<TAB>` | nothing | `-c` still has no value; an option's value cannot repair it |
+| `compose plan.md -c low --on-rate-limit <TAB>` | nothing | `low` is ambiguous |
+| `compose plan.md -c low --codex --on-rate-limit <TAB>` | `pause`, `abort`, `continue` | the later `--codex` names the agent, so `low` is `-c`'s value |
+| `compose plan.md -- ph<TAB>` | nothing | everything after `--` is forwarded to the agent untouched |
+
+The rules:
+
+- **Same candidates as execution.** The provider named on the command line
+  (`--codex`, `--provider codex`), else the file's literal `agent`, else
+  every provider. A caller setter such as `agent=codex` does not narrow
+  them. Add `agent: codex` to the file, or name the provider, and
+  `compose plan.md -c low ph<TAB>` offers `phase=` again.
+- **A word an open switch takes is the agent's.** Nothing is offered for
+  it, empty or partial. Once the switch's value is complete, the next word
+  is Claudine's again.
+- **A line execution would reject offers nothing.** An ambiguous word, a
+  missing value the provider requires, a `$schema` that cannot be read
+  when a provider switch makes it matter, or an `argv=` setter. Completion
+  never prompts (an interactive run asks which agent the arguments are for;
+  completion does not) and never reports an error. This holds for every
+  cursor shape: a setter, a bare word, a flag, or a Claudine option's value
+  (`--provider`, `--exclude`, `--on-rate-limit`, `--debug`,
+  `sequence --budget-ledger`, and every other value-taking option or alias).
+- **A flag is judged by the words before it.** A partial flag such as
+  `--mod` may become a Claudine option, so it is not itself read as a
+  forwarded switch; the words before it must read cleanly for any flag to
+  be offered.
+- **Nothing after an authored `--`.** No setter, file, or flag candidates,
+  and no clap fallback either, for composition and wrapper commands alike.
+- **No provider switch, no file read.** Without a forwarded switch every
+  word after the file is Claudine's, so `compose new.md spec=@<TAB>` keeps
+  working for a file that does not exist yet.
+- **Claudine options keep their own slots.** A Claudine option's value
+  (`--model <TAB>`, `--step-timeout <TAB>`) goes to clap's completion,
+  never to the setter or file completers, once the words before the option
+  read cleanly. The option and its unfinished value are left out of that
+  check, so `--on-rate-limit a<TAB>` still offers `abort`. Which options
+  take a value comes from the same clap definitions the argument partition
+  reads, so the two cannot disagree.
+- **Provider switches are not completed.** `--codex -c` is never offered
+  as a candidate; the flag completer offers Claudine's own options and the
+  `--<provider>` selection switches.
+
+```mermaid
+flowchart TD
+    A["word under the cursor"] --> B{"after an authored --?"}
+    B -->|yes| N["offer nothing"]
+    B -->|no| C{"after the composition file?"}
+    C -->|no| S["slot completer (file, setter, flag)"]
+    C -->|yes| D{"a flag, or a Claudine option's value?"}
+    D -->|"yes: judge only the words before it"| E
+    D -->|"no: judge the word as well"| E{"any provider switch after the file?"}
+    E -->|no| F["ownership without reading the file"]
+    E -->|yes| G["read the file's agent and literal $schema"]
+    G -->|unreadable| N
+    G --> F
+    F -->|error: ambiguous, missing value, ...| N
+    F -->|the agent's word| N
+    F -->|Claudine's word| S
+```
+
+Ownership needs the composition file and its literal `$schema` only;
+it runs no templates, shell, lifecycle actions, or provider, and writes
+nothing.
 
 ## ENTER-path autocomplete
 
@@ -682,6 +805,9 @@ Runtime operation-file recovery distinguishes three outcomes for
    operation-file recovery runs.
 2. **Unresolved bare discovery name** — a single-component implicit name
    such as `access` or `access.md` is eligible for the interactive picker.
+   A name containing `*`, `?`, or `[` (such as `*.md`) is not: it is
+   reported as an explicit miss, because a file reference reads those
+   characters literally.
 3. **Unresolved explicit reference** — a typed path or reference such as
    `./docs/access.md`, `~/access.md`, or `@access.md` reports the existing
    `composition.invalid_file_reference` typed no-match diagnostic without
@@ -701,6 +827,13 @@ nothing, finds too much, or is cancelled is also `failure: no-match`, because
 the picker runs only after the name matched no file. The classes are listed in
 [File Reference Failures](../../../../darkmatter/docs/errors/file-reference-failures.md).
 
+An explicit miss whose reference contains `*`, `?`, or `[`
+(`claudine compose --dry-run 'docs/*.md'`) also explains that a file
+reference reads those characters literally and that a set of files needs a
+form that accepts a glob reference, such as `::file-links`. A plain missing
+name (`docs/missing.md`) and a failure other than `no-match` carry no such
+hint.
+
 Interactive file collection also applies to **missing `$schema`
 properties**: when a frontmatter schema declares
 a property typed `file` or `file[]`, the value can be supplied
@@ -718,14 +851,17 @@ Claudine prints the non-interactive remediation block instead.
 - A property typed `file[]` uses a multi-select `ChooseMany` chooser:
   press `Space` to toggle items, then `Enter` to submit the set.
 
-Candidates come from the schema's `match(...)` globs when present;
+Candidates come from the schema's `match(...)` globs when present,
+searched and ordered exactly as TAB completion's are (see *Property
+values* above), and listed in that order;
 otherwise the bare `file`/`file[]` fallback walks the invoking `cwd`
 (the launch area — the runtime missing-property chooser runs *before*
 the wrapper's `switch_process_cwd`, so its `cwd` is still the launch
 area) for markdown files, excluding prompt directories so composition
 prompts do not leak into generic file values. Both walks share the scope walker's exclusion rules —
 `.gitignore`, the `_`-prefix elision, and the curated skip-list
-(`target`, `node_modules`, …).
+(`target`, `node_modules`, …) — and the `match(...)` walk also skips
+hidden files and directories.
 
 ### Layout
 
@@ -1019,6 +1155,20 @@ $ claudine compose file.md spec=@<TAB>
 ```text
 $ claudine claude --<TAB>
 # → shell native completion (filenames, clap-exported flags)
+
+$ claudine claude -- --<TAB>
+# → nothing: everything after `--` belongs to the agent
+```
+
+### Provider arguments after the file
+
+```text
+# plan.md declares `phase` in its $schema
+$ claudine compose plan.md --codex -c low ph<TAB>
+→ phase=
+
+$ claudine compose plan.md --codex -c ph<TAB>
+# → nothing: the word is the value of Codex's `-c`
 ```
 
 ## Architecture
@@ -1030,8 +1180,15 @@ flowchart TD
     C --> D["engine::classify_completion_target"]
     D -->|Root| E["root_menu::render"]
     D -->|CompositionPositional| F["composition::run"]
-    D -->|SetterValue| G["setter_value::run"]
-    D -->|Other| H["emit nothing → shell fallback"]
+    D -->|SetterValue / SetterName / Other| O{"engine/ownership.rs: Claudine's word?"}
+    D -->|CompositionProviderFlag| P{"engine/ownership.rs: words before the flag read cleanly?"}
+    P -->|no| H2
+    P -->|yes| H3["--provider switches + clap flags"]
+    H3 --> M
+    O -->|no| H2["emit nothing"]
+    O -->|yes, SetterValue| G["setter_value::run"]
+    O -->|yes, Other| H["clap fallback or nothing → shell fallback"]
+    D -->|Declined: after --| H2
     F --> I["scopes::resolve_compose_scopes"]
     G --> I
     I --> J["walker::walk (.gitignore-aware)"]
@@ -1044,6 +1201,7 @@ flowchart TD
 | Module | Role |
 |---|---|
 | [`engine/mod.rs`](../../../cli/src/completion/engine/mod.rs) | Entry point; classifies the cursor slot and dispatches. |
+| [`engine/ownership.rs`](../../../cli/src/completion/engine/ownership.rs) | Asks type-aware ownership whether the word after the composition file is Claudine's, and, for a flag or a Claudine option's value at the cursor, whether the words before it read cleanly. |
 | [`root_menu.rs`](../../../cli/src/completion/root_menu.rs) | Curated subcommand menu + `init` visibility. |
 | [`composition/mod.rs`](../../../cli/src/completion/composition/mod.rs) | Shared compose/inline-compose/sequence pipeline. |
 | [`setter_value.rs`](../../../cli/src/completion/setter_value.rs) | `@`-gated file completion inside `name=value` setters. |

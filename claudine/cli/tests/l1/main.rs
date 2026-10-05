@@ -24,6 +24,7 @@ mod completion_committed_prompt_schema;
 mod completion_compose;
 mod completion_contract;
 mod completion_inline_compose;
+mod completion_ownership;
 mod completion_perf;
 mod completion_resolution_round_trip;
 mod completion_sequence;
@@ -74,6 +75,7 @@ mod handle_deadline;
 mod handle_message_drain;
 mod handle_repo_config;
 mod handoff_owners;
+mod home_lookup_round_trip;
 mod hooks_cli;
 #[cfg(unix)]
 mod inline_completion_lifecycle;
@@ -94,6 +96,8 @@ mod level1_provider_overlay_home;
 #[cfg(unix)]
 mod level1_provider_picker_pty;
 #[cfg(unix)]
+mod level1_ownership_prompt_pty;
+#[cfg(unix)]
 mod level1_pty_wrapper_summary;
 #[cfg(unix)]
 mod level1_review_router_partial_pty;
@@ -113,10 +117,12 @@ mod loop_gate_ambient;
 mod loop_initialize_state;
 mod mcp_cli;
 mod override_boundary_guard;
+mod path_lookup_guard;
 mod preflight_execution_parity;
 mod pr_flow_rehearsal;
 mod prompt_guide_defects;
 mod lifecycle_set_shell_values;
+mod literal_glob_hint;
 #[cfg(unix)]
 mod prompt_reporting;
 // Installs the `claudine-fake-pi` fixture binary, which only `test-fixtures`
@@ -129,7 +135,9 @@ mod protect_cli;
 mod provider_error_finalize;
 mod provider_tail_launch;
 mod provider_tail_notice;
+mod provider_tail_ownership;
 mod run_harness_loop_call_sites;
+mod setter_after_switch;
 // Spawns the `claudine-fake-goose` fixture binary, which only
 // `test-fixtures` builds.
 #[cfg(feature = "test-fixtures")]
@@ -165,6 +173,7 @@ mod shipped_prompt_route_drift;
 mod shipped_prompts;
 mod skills_integration;
 mod spawn_site_guard;
+mod switch_catalog_guard;
 mod system_prompt_perf_bench;
 mod test_placement;
 mod test_seam_gate_guard;

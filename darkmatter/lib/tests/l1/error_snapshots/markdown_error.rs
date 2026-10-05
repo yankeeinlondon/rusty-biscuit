@@ -47,7 +47,7 @@ fn theme_load_renders_leaf_block() {
     let out = render(&err);
     assert_contains_all(
         &out,
-        &["MarkdownError", "theme load failed", "unknown theme `neon`"],
+        &["MarkdownError", "theme load failed", "unknown theme neon"],
     );
 }
 

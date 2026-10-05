@@ -41,12 +41,20 @@ pub(crate) fn build_harness_launch(
             profile,
             profile.build_resume_args(session_id)?,
         );
+        // The resolved-provider check, at the resume entrypoint's own command
+        // path, before this spawn.
+        super::super::provider_tail_report::SwitchContext::for_resume(provider, &entrypoint_args, session_id)
+            .check(provider_tail)?;
         super::super::resume::assemble_resume_args(
             entrypoint_args,
             base_args,
             provider_tail.launch_args(),
         )
     } else {
+        // The resolved-provider check before this spawn: a retry, proxy
+        // target, or step may launch a provider ownership did not assume.
+        super::super::provider_tail_report::SwitchContext::for_launch(profile, effective_non_interactive)
+            .check(provider_tail)?;
         base_args.to_vec()
     };
 

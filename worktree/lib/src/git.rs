@@ -1,5 +1,6 @@
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Output};
 use std::io::Write;
 
 use crate::error::WorktreeError;
@@ -161,20 +162,48 @@ pub fn git_from_raw(base: &Path, dir: &Path, args: &[&str]) -> Result<String, Wo
 
 /// [`git_from`]'s stdout exactly as git wrote it.
 pub fn git_from_bytes(base: &Path, dir: &Path, args: &[&str], stdin: Option<&[u8]>) -> Result<Vec<u8>, WorktreeError> {
-    git_from_bytes_status(base, dir, args, stdin, false)
+    git_from_bytes_status(base, dir, args, stdin, &[], false)
+}
+
+/// [`git_from_bytes`] with extra environment variables for the Git process
+/// (for example `GIT_INDEX_FILE`).
+pub(crate) fn git_from_bytes_with_env(base: &Path, dir: &Path, args: &[&str], env: &[(&str, &OsStr)]) -> Result<Vec<u8>, WorktreeError> {
+    git_from_bytes_status(base, dir, args, None, env, false)
+}
+
+/// Runs `git -C <dir> <args>` from `base` like [`git_from`], but returns the
+/// whole [`Output`] whatever the exit status, for commands whose exit status
+/// is not their result. Stdin is closed. `Err` only when Git could not be
+/// spawned or waited on.
+/// Arguments are OS strings, so a path that is not UTF-8 reaches Git intact.
+pub(crate) fn git_from_output(base: &Path, dir: &Path, args: &[&OsStr]) -> std::io::Result<Output> {
+    #[cfg(any(test, feature = "count-git"))]
+    {
+        let lossy: Vec<String> = args.iter().map(|arg| arg.to_string_lossy().into_owned()).collect();
+        recorder::record(&lossy.iter().map(String::as_str).collect::<Vec<_>>());
+    }
+
+    Command::new("git")
+        .current_dir(base)
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .stdin(std::process::Stdio::null())
+        .output()
 }
 
 /// Like [`git_from_bytes`], but accepts Git's no-matches exit code.
 pub(crate) fn git_from_bytes_allow_no_match(base: &Path, dir: &Path, args: &[&str], stdin: Option<&[u8]>) -> Result<Vec<u8>, WorktreeError> {
-    git_from_bytes_status(base, dir, args, stdin, true)
+    git_from_bytes_status(base, dir, args, stdin, &[], true)
 }
 
-fn git_from_bytes_status(base: &Path, dir: &Path, args: &[&str], stdin: Option<&[u8]>, allow_no_match: bool) -> Result<Vec<u8>, WorktreeError> {
+fn git_from_bytes_status(base: &Path, dir: &Path, args: &[&str], stdin: Option<&[u8]>, env: &[(&str, &OsStr)], allow_no_match: bool) -> Result<Vec<u8>, WorktreeError> {
     #[cfg(any(test, feature = "count-git"))]
     recorder::record(args);
 
     let mut command = Command::new("git");
-    command.current_dir(base).arg("-C").arg(dir).args(args)
+    command.current_dir(base).arg("-C").arg(dir).args(args).envs(env.iter().copied())
         .stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
     if stdin.is_some() {
         command.stdin(std::process::Stdio::piped());

@@ -228,6 +228,46 @@ fn a_document_in_no_repository_resolves_against_its_own_folder() {
     fixture.shutdown();
 }
 
+/// A single-file target whose text looks like a glob names that file
+/// literally; its broken-path diagnostic carries biscuit-file's literal-glob
+/// hint, while a plain miss and a failure other than a miss do not.
+#[test]
+fn a_literal_glob_miss_diagnostic_hints_at_glob_forms() {
+    let workspace = LspWorkspace::new();
+    let folder = workspace.path().join("plain/notes");
+    let document = folder.join("doc.md");
+    let text = "# Doc\n\n::file docs/*.md\n\n::file docs/missing.md\n\n::file &docs/*.md\n\n::file docs/a.md\n\n[glob](docs/*.md) [plain](docs/missing.md)\n";
+    write(&document, text);
+    write(&folder.join("docs/a.md"), "# A\n");
+
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(watched_params(&[workspace.path()]));
+    open(&fixture, &uri(&document), text);
+
+    let diagnostics = current_diagnostics(&mut fixture, &uri(&document));
+    let message_of = |code: &str, needle: &str| -> String {
+        diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic["code"] == json!(code))
+            .filter_map(|diagnostic| diagnostic["message"].as_str())
+            .find(|message| message.contains(needle))
+            .unwrap_or_else(|| panic!("no {code} diagnostic names {needle}: {diagnostics:#?}"))
+            .to_string()
+    };
+    let hinted = |message: &str| message.contains("::file-links");
+
+    assert!(hinted(&message_of("dm.transclusion.broken_path", "`docs/*.md`")));
+    assert!(!hinted(&message_of("dm.transclusion.broken_path", "docs/missing.md")));
+    assert!(!hinted(&message_of("dm.transclusion.broken_path", "&docs/*.md")), "a missing-context failure");
+    assert!(hinted(&message_of("dm.links.broken_path", "`docs/*.md`")));
+    assert!(!hinted(&message_of("dm.links.broken_path", "docs/missing.md")));
+    assert!(
+        !diagnostics.iter().any(|diagnostic| diagnostic["message"].as_str().is_some_and(|m| m.contains("docs/a.md"))),
+        "the control resolves: {diagnostics:#?}"
+    );
+    fixture.shutdown();
+}
+
 // ── Acceptance Criterion 9 (outside the matrix): every feature ──────────────
 
 #[test]

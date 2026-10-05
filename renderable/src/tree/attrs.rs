@@ -677,7 +677,7 @@ pub struct TableColumnHints {
 /// ```
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct TableCellHints {
-    /// Cell kind: `"text"`, `"integer"`, `"float"`, `"currency"`, or `"styled_prose"`.
+    /// Cell kind: `"text"`, `"integer"`, `"float"`, `"currency"`, or `"styled_inline_prose"`.
     pub kind: String,
     /// The original typed value, preserved as JSON.
     pub raw_value: serde_json::Value,
@@ -733,6 +733,11 @@ pub struct TableTerminalHints {
     /// form when `None`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub highlight_row: Option<TableRowHighlight>,
+    /// The narrowest outer width, in cells and borders included, the table
+    /// is drawn at. The last column absorbs the extra width; the available
+    /// width still caps it. Omitted from the serialized form when `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_width: Option<u32>,
 }
 
 /// A terminal-only highlight for one data row of a [`NodeKind::Table`] node.
@@ -1265,13 +1270,80 @@ impl<'de> Deserialize<'de> for AriaAttrName {
     }
 }
 
+/// The HTML element a [`NodeKind::Paragraph`] renders as in the browser.
+///
+/// Browser presentation only: the Markdown and terminal renderers ignore it,
+/// so every variant has the same block shape there. The default, [`P`], is
+/// expressed by absence and never serialized. Elements that already have
+/// their own node kind (`blockquote`, `pre`, `li`, `h1`–`h6`) are not
+/// variants, and this is distinct from [`NodeKind::Section`], which is
+/// document structure rather than a presentation choice.
+///
+/// [`NodeKind::Paragraph`]: crate::tree::NodeKind::Paragraph
+/// [`NodeKind::Section`]: crate::tree::NodeKind::Section
+/// [`P`]: BlockElement::P
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BlockElement {
+    /// `<p>`.
+    #[default]
+    P,
+    /// `<div>`.
+    Div,
+    /// `<section>`.
+    Section,
+    /// `<article>`.
+    Article,
+    /// `<aside>`.
+    Aside,
+    /// `<header>`.
+    Header,
+    /// `<footer>`.
+    Footer,
+}
+
+impl BlockElement {
+    /// Every variant, in declaration order.
+    pub const ALL: [BlockElement; 7] = [
+        BlockElement::P,
+        BlockElement::Div,
+        BlockElement::Section,
+        BlockElement::Article,
+        BlockElement::Aside,
+        BlockElement::Header,
+        BlockElement::Footer,
+    ];
+
+    /// Returns `true` for the default [`BlockElement::P`].
+    #[must_use]
+    pub fn is_default(&self) -> bool {
+        *self == BlockElement::P
+    }
+
+    /// Returns the HTML tag this element renders as.
+    #[must_use]
+    pub fn block_tag(self) -> crate::html::tag::BlockTag {
+        use crate::html::tag::BlockTag;
+        match self {
+            BlockElement::P => BlockTag::P,
+            BlockElement::Div => BlockTag::Div,
+            BlockElement::Section => BlockTag::Section,
+            BlockElement::Article => BlockTag::Article,
+            BlockElement::Aside => BlockTag::Aside,
+            BlockElement::Header => BlockTag::Header,
+            BlockElement::Footer => BlockTag::Footer,
+        }
+    }
+}
+
 /// Typed, validated browser-target attributes for a node.
 ///
 /// Attaches to a node as the sparse [`NodeAttrs::browser`] field. It carries
 /// every attribute the browser renderer is expected to emit *before* the fold
 /// begins, so the browser paths never patch completed HTML. The `link` and
 /// `image` sub-groups are kind-specific (a `link` group is permitted only on a
-/// [`NodeKind::Link`], an `image` group only on a [`NodeKind::Image`]); the
+/// [`NodeKind::Link`], an `image` group only on a [`NodeKind::Image`]), as is
+/// a non-default `block_element` (only on a [`NodeKind::Paragraph`]); the
 /// remaining fields apply to any node.
 ///
 /// `inline_style` is a validated [`CssStyle`](crate::stylesheet::CssStyle), not
@@ -1282,6 +1354,7 @@ impl<'de> Deserialize<'de> for AriaAttrName {
 ///
 /// [`NodeKind::Link`]: crate::tree::NodeKind::Link
 /// [`NodeKind::Image`]: crate::tree::NodeKind::Image
+/// [`NodeKind::Paragraph`]: crate::tree::NodeKind::Paragraph
 ///
 /// ## Examples
 ///
@@ -1315,6 +1388,12 @@ pub struct BrowserAttrs {
     /// Validated HTML `aria-*` attributes, in deterministic key order.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub aria_attrs: BTreeMap<AriaAttrName, String>,
+    /// The element a [`NodeKind::Paragraph`] renders as; valid only on a
+    /// paragraph when not the default.
+    ///
+    /// [`NodeKind::Paragraph`]: crate::tree::NodeKind::Paragraph
+    #[serde(default, skip_serializing_if = "BlockElement::is_default")]
+    pub block_element: BlockElement,
 }
 
 impl BrowserAttrs {
@@ -1329,6 +1408,7 @@ impl BrowserAttrs {
             && self.inline_style.is_none()
             && self.data_attrs.is_empty()
             && self.aria_attrs.is_empty()
+            && self.block_element.is_default()
     }
 }
 
@@ -3189,6 +3269,7 @@ mod tests {
                 row: 2,
                 bg: crate::color::Color::BasicColor(crate::color::BasicColor::Black),
             }),
+            min_width: Some(60),
         });
         let hints = attrs.table_terminal_hints();
         assert!(hints.prefer_cursor_alignment);
@@ -3202,6 +3283,7 @@ mod tests {
         );
         assert_eq!(hints.stripe_text, None);
         assert_eq!(hints.highlight_row.map(|h| h.row), Some(2));
+        assert_eq!(hints.min_width, Some(60));
     }
 
     #[test]
@@ -3762,6 +3844,27 @@ mod tests {
             "{}"
         );
         assert!(BrowserAttrs::default().is_empty());
+    }
+
+    #[test]
+    fn block_element_round_trips_and_default_is_sparse() {
+        for element in BlockElement::ALL {
+            let mut attrs = NodeAttrs::default();
+            attrs.browser_mut_or_default().block_element = element;
+            attrs.retain_non_default_browser();
+            if element.is_default() {
+                // The default `P` is absence: nothing is stored or written.
+                assert!(attrs.browser.is_none());
+                assert_eq!(serde_json::to_string(&attrs).unwrap(), "{}");
+                continue;
+            }
+            let json = serde_json::to_string(&attrs).unwrap();
+            let name = element.block_tag().name();
+            assert!(json.contains(&format!(r#""block_element":"{name}""#)), "{json}");
+            let decoded: NodeAttrs = serde_json::from_str(&json).unwrap();
+            assert_eq!(decoded.browser().map(|b| b.block_element), Some(element));
+            assert_eq!(serde_json::to_string(&decoded).unwrap(), json);
+        }
     }
 
     #[test]

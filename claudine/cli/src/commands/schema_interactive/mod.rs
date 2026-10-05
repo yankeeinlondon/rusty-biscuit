@@ -358,10 +358,9 @@ fn choose_provided_file_reference(
 
 /// Glob candidates filtered by the provided partial substring.
 ///
-/// The testable core of [`resolve_provided_file_reference`]: walks the
-/// `match(...)` patterns from the launch area
-/// ([`scopes::property_value_root`]) and retains candidates whose path contains
-/// `provided` (case-insensitive), sorted for stable ordering.
+/// The testable core of [`resolve_provided_file_reference`]: the
+/// `match(...)` candidates ([`file_candidate_paths`], in native order) whose
+/// path contains `provided` (case-insensitive).
 fn provided_partial_candidates(
     patterns: &[String],
     provided: &str,
@@ -370,7 +369,6 @@ fn provided_partial_candidates(
     let mut candidates = file_candidate_paths(patterns, ctx);
     let needle = provided.to_ascii_lowercase();
     candidates.retain(|path| scopes::path_matches_query(path, &needle));
-    candidates.sort();
     candidates
 }
 
@@ -656,7 +654,7 @@ fn collect_file(
     patterns: &[String],
 ) -> io::Result<serde_json::Value> {
     let ctx = ScopeContext::discover();
-    let mut paths = file_candidate_paths(patterns, &ctx);
+    let paths = file_candidate_paths(patterns, &ctx);
 
     if paths.is_empty() {
         return Err(io::Error::new(
@@ -665,7 +663,6 @@ fn collect_file(
         ));
     }
 
-    paths.sort();
     let options: Vec<ChoiceOption<FileDetail>> = paths
         .into_iter()
         .map(|path| {

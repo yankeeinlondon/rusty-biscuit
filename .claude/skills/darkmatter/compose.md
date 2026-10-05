@@ -486,7 +486,7 @@ optional-target idiom is condition-aware and warning-free:
 | `{{ current.branch }}` | The same key as `ctx.branch`, observed when this expression evaluates |
 | `{{ current_env.HOME }}` | The same key as `env.HOME`, reread from the live process environment |
 | `{{ file_exists(path) }}` | Read-side function (also `frontmatter`, `markdown_title`, `markdown_body_empty`, `validate_schema`, `absolute`, `relative`); resolves on every surface, both interpolation passes included |
-| `{{ find_files('&area/fixes/**/2026-01-01-x/spec.md') }}` | Every file a glob reference matches, sorted absolute paths; the path before the first wildcard is a file reference naming the directory walked (so the walk stays bounded), `[]` when nothing matches. Use it to find a spec by directory identity and to see ambiguity, which `%` (first lexical match) hides |
+| `{{ find_files('&area/fixes/**/2026-01-01-x/spec.md') }}` | `GlobReference::list_files` in the document's context: every match merged across the prefix's roots, most local first (a bare glob: document folder, then repository root), absolute paths, `[]` when nothing matches. Unfiltered (`_completed/` included). Skipped out-of-tree file symlinks go to the request's `GlobWarningSink` (`dm.glob.skipped_symlink`, drained by the root pipeline); parse/root failures are `ExpressionError::GlobReference`. Use it to see ambiguity, which `%` (most local match) hides |
 | `{{ try_frontmatter(file) }}` | `frontmatter(file)` as `{ok, value, error}`: a missing, unreadable, or unparsable file is `ok: false` with the reason instead of failing the composition |
 
 Read-side functions and `doc.*` resolve identically on every surface
@@ -695,6 +695,8 @@ Numeric strings auto-convert for comparisons.
 
 {{ link(doc.path) }}         // Markdown link using relative text and absolute destination
 {{ link("https://example.com", "Example") }}  // Link with explicit description
+{{ code_link(plan) }}        // Same link, text as inline code: [`plans/foo.md`](/abs/plans/foo.md)
+{{ code_link(url, "a]b") }}  // Code-span text is literal; never wrap {{ link(x) }} in backticks
 {{ has_skill("rust") }}      // true when a skill directory exists in user or local roots
 {{ has_local_skill("rust") }} // true when a skill directory exists in local roots only
 ```

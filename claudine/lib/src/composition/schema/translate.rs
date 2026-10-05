@@ -123,6 +123,7 @@ pub(super) fn translate_schema_failure(
         source,
         options.file_ref_fallback_dir.as_deref(),
         &options.file_resolution_context,
+        &options.schema_caller_records(),
     )?;
     let phase = match mode {
         PrepareMode::Inline => Some(SchemaPhase::Launch),
@@ -224,7 +225,8 @@ pub(super) fn handle_retry_error(
     };
     rebase_caller_file_problems(&mut problems, caller_input_records);
 
-    let effective = load_effective_schema(source, file_ref_fallback_dir, file_resolution_context)?;
+    let effective =
+        load_effective_schema(source, file_ref_fallback_dir, file_resolution_context, caller_input_records)?;
     let categorized = categorize_problems(&problems, effective.as_ref(), phase);
 
     if !categorized.invalid_required.is_empty() {

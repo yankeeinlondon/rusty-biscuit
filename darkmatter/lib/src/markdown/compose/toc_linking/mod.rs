@@ -99,6 +99,7 @@ pub(crate) fn resolve_target_chain(
             path: directive.targets.join(", "),
             line: directive.line,
             failure,
+            glob_hint: failure.zip(directive.targets.first()).and_then(|(failure, target)| failure.glob_hint(target)),
         }),
     }
 }

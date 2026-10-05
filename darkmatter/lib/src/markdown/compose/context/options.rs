@@ -52,6 +52,26 @@ impl CallerInputRecord {
 /// Immutable caller overrides keyed by the winning top-level property.
 pub type CallerInputRecords = std::collections::BTreeMap<String, CallerInputRecord>;
 
+/// The caller records of `overrides` (a JSON object of top-level values) when
+/// no explicit records were captured: every value is a caller's, supplied in
+/// the launch area, which is `launch_area` when one is recorded and else the
+/// request directory of `context`. Composition uses this rule for options
+/// without [`ComposeOptions::with_caller_input_records`]; a host that validates
+/// the same overrides itself uses it to agree with composition.
+pub fn caller_input_records_for_overrides<'a>(
+    overrides: impl IntoIterator<Item = &'a serde_json::Value>,
+    context: &biscuit_file::FileResolutionContext,
+    launch_area: Option<&std::path::Path>,
+) -> CallerInputRecords {
+    let origin = context.for_trusted_external_cwd(launch_area.unwrap_or_else(|| context.request_cwd()));
+    overrides
+        .into_iter()
+        .filter_map(serde_json::Value::as_object)
+        .flatten()
+        .map(|(key, value)| (key.clone(), CallerInputRecord::new(value.clone(), origin.clone())))
+        .collect()
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum SourceDerivation {
     #[default]
@@ -468,6 +488,11 @@ pub struct ComposeOptions {
     /// the authority is projected, so `--allow-host` stays the single entry
     /// point. Default: no grants, which denies every target.
     pub(crate) icmp: crate::markdown::compose::icmp::IcmpAuthority,
+
+    /// Where `find_files()` records the file symlinks its glob listings
+    /// skipped. Shared by every child of the request and drained into the
+    /// root report.
+    pub(crate) glob_warnings: crate::markdown::compose::glob_listing::GlobWarningSink,
 
     /// The request's refresh authority behind the lazy `current` root (R30).
     /// It owns the invocation's capability to observe one mutable fact now and
@@ -889,6 +914,7 @@ impl ComposeOptions {
             suppress_shell_probes: false,
             nested_compose: Default::default(),
             icmp: Default::default(),
+            glob_warnings: Default::default(),
             current: Default::default(),
             schema_phase: None,
             preflight_graph: None,
@@ -1502,6 +1528,7 @@ impl ComposeOptions {
                 crate::markdown::compose::shell_expansion::probe::ShellProbe::from_environment(self.context.env());
         }
         context.icmp = self.icmp_authority();
+        context.glob_warnings = self.glob_warnings.clone();
         context.current = self.current_authority();
         context.caller_file_provenance = self.caller_file_provenance.clone();
         context.nested_compose = self.nested_compose.clone();
@@ -1546,6 +1573,7 @@ impl ComposeOptions {
                 crate::markdown::compose::shell_expansion::probe::ShellProbe::from_environment(self.context.env());
         }
         context.icmp = self.icmp_authority();
+        context.glob_warnings = self.glob_warnings.clone();
         context.current = self.current_authority();
         context.caller_file_provenance = self.caller_file_provenance.clone();
         context
@@ -2128,6 +2156,25 @@ const CACHE_OPTIONS_DOMAIN: &str = "dm.compose-cache-options.v1";
 /// the two encodings can evolve independently.
 const GRAPH_CONTEXT_DOMAIN: &str = "dm.compose-graph-context.v1";
 
+/// Versioned domain marker for [`file_resolution_context_identity`].
+const FILE_RESOLUTION_CONTEXT_DOMAIN: &str = "dm.file-resolution-context.v1";
+
+/// A run-local identity of everything in `context` that can change how a
+/// reference, glob, schema root, or trigger resolves: source path, `cwd`,
+/// request directory, repository, package and area roots, home, launch `@`
+/// scope, environment, magic and vault roots, and the tree root with its
+/// origin.
+///
+/// Two contexts with the same identity resolve every reference alike, so a
+/// cache of context-dependent results (DMLS's effective schemas) may key on
+/// it. The value is an xxHash and is not stable across Darkmatter versions;
+/// never persist it.
+pub fn file_resolution_context_identity(context: &biscuit_file::FileResolutionContext) -> u64 {
+    let mut enc = GraphIdentityEncoder::new(FILE_RESOLUTION_CONTEXT_DOMAIN);
+    encode_file_resolution_context(&mut enc, context);
+    enc.finish()
+}
+
 /// Platform tags for [`GraphIdentityEncoder::path`]. Every path encode writes
 /// exactly one of these before its length-prefixed payload, so a Unix byte
 /// sequence and a Windows wide-unit sequence can never hash alike. The values
@@ -2572,6 +2619,8 @@ impl ComposeOptions {
             suppress_shell_probes,
             nested_compose,
             icmp,
+            // A warning sink: it changes the report, never a composed result.
+            glob_warnings: _,
             current,
             schema_phase,
             exclude_keys,

@@ -272,6 +272,24 @@ fn validate_resolves_document_arguments_through_the_reference_grammar() {
         let error = json(&output)["error"].as_str().unwrap_or_default().to_string();
         assert!(error.contains("failure: invalid-reference"), "{document}: {error}");
     }
+
+    // The human-readable error keeps the `failure:` class on a row of its own.
+    let output = Command::new(biscuit_test_harness::bin_exe!("messenger"))
+        .current_dir(&launch)
+        .args(["research", "--root", "../../../.."])
+        .args(["--today", "2026-09-17", "validate", "@"])
+        .env_remove("COMPLETE")
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("run messenger");
+    assert_ne!(code(&output), 0);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let rows: Vec<&str> = stderr.lines().filter(|row| !row.trim().is_empty()).collect();
+    let at = rows
+        .iter()
+        .position(|row| row.starts_with("error: document `@` did not resolve to a file:"))
+        .unwrap_or_else(|| panic!("error row: {stderr}"));
+    assert_eq!(rows.get(at + 1).copied(), Some("failure: invalid-reference"), "{stderr}");
 }
 
 /// End to end over the real shipped artifacts: the accepted documents are

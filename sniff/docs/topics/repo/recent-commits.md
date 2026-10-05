@@ -171,7 +171,7 @@ The layout above is written once and folded into each text format. Prose output 
 - links are written as `[text](url)`; the terminal `Prose` component turns them into OSC8 hyperlinks, or keeps the Markdown form when the terminal lacks OSC8 support
 - file links are built from the repository root, so Windows paths become `file:///C:/…`
 - **deleted files are never linked**, because the target is gone; a collection that was deserialized from JSON has no repository root and renders every file unlinked
-- dynamic text is backslash-escaped for Prose and Markdown (`\`, `*`, `_`, `[`, `]`, `<`, `>`, and in Markdown also `` ` ``), so a heading such as `handle <red>tags</red>` renders literally; link targets percent-encode `(`, `)`, space, `<`, and `>`
+- dynamic text is backslash-escaped for Prose and Markdown (`\`, `*`, `_`, `[`, `]`, `<`, `>`, and in Markdown also `` ` ``, `~`, and `&`), so a heading such as `handle <red>tags</red>` renders literally and `&copy;` is not decoded to `©`; link targets percent-encode `&`, `(`, `)`, space, `<`, and `>`
 
 > **Behavior change:** plain output strips everything. The previous `--plain` output kept Markdown bold markers such as `**Description:**`; plain reports now contain no markup at all.
 

@@ -31,6 +31,8 @@ use super::scopes::{self, ScopeContext};
 mod candidates;
 mod keys;
 #[cfg(test)]
+mod parity_tests;
+#[cfg(test)]
 mod tests;
 
 pub(crate) use candidates::{file_candidate_paths, property_value};

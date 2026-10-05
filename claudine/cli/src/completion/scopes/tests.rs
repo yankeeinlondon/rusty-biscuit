@@ -96,9 +96,9 @@ fn outside_repo_only_user_scope_is_set() {
     assert!(set.package_area.is_none());
     assert!(set.package.is_none());
     assert!(set.extras.is_empty());
-    // user_claudine depends on dirs::home_dir(); assert only when
+    // user_claudine depends on biscuit_file::home_dir(); assert only when
     // $HOME is resolvable, otherwise the field is None.
-    if dirs::home_dir().is_some() {
+    if biscuit_file::home_dir().is_some() {
         assert!(set.user_claudine.is_some());
     }
 }

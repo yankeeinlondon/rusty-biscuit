@@ -628,8 +628,8 @@ fn every_plan_gets_its_own_launch_root_outside_legacy_storage() {
     }
 }
 
-/// Review 2, finding 2: native Windows ignores `USERPROFILE` when resolving the
-/// home, so a disposable launch needs overlay storage it can name without it.
+/// Review 2, finding 2: a launch can name its overlay storage without moving
+/// the home.
 #[test]
 fn an_absolute_overlay_dir_override_moves_only_the_launch_roots() {
     // `HOME` is not absolute on Windows, which needs a drive; nothing is created.
@@ -859,7 +859,7 @@ mod lease {
         let root = lease.root().to_path_buf();
         let targets = Targets {
             overlay: overlay.clone(),
-            source: fs::canonicalize(&source).unwrap(),
+            source: biscuit_file::canonicalize_simplified(&source).unwrap(),
             lock: root.with_file_name("launch.lock"),
             marker: root.with_file_name("launch.retained"),
         };
@@ -967,7 +967,7 @@ mod lease {
         let tmp = TempDir::new().unwrap();
         let (source, _overlay, mut lease) = rotated_copy(&tmp);
         let root = lease.root().to_path_buf();
-        let source = fs::canonicalize(source).unwrap();
+        let source = biscuit_file::canonicalize_simplified(&source).unwrap();
         let lock = root.with_file_name("launch.lock");
         lease.set_io(Arc::new(Faults(vec![
             (Op::AtomicWrite, source),

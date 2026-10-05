@@ -158,6 +158,56 @@ pub fn resolution_failure_row(
     ))
 }
 
+/// `message` followed by biscuit-file's literal-glob hint
+/// ([`ResolutionFailure::glob_hint`](biscuit_file::ResolutionFailure::glob_hint))
+/// on its own `hint:` line, when `failure` is a no-match of a `reference`
+/// whose text looks like a glob; otherwise `message` unchanged.
+///
+/// Every Darkmatter message that reports a single-file failure passes through
+/// this, so a literal-glob miss is explained in the same words on every
+/// surface and no message tests for wildcards itself.
+///
+/// ## Examples
+///
+/// ```
+/// use biscuit_file::ResolutionFailure;
+/// use darkmatter::markdown::errors::with_glob_hint;
+///
+/// let glob = with_glob_hint("File not found: docs/*.md", ResolutionFailure::NoMatch, "docs/*.md");
+/// assert!(glob.contains("::file-links"));
+/// let plain = with_glob_hint("File not found: a.md", ResolutionFailure::NoMatch, "a.md");
+/// assert_eq!(plain, "File not found: a.md");
+/// ```
+pub fn with_glob_hint(
+    message: impl Into<String>,
+    failure: biscuit_file::ResolutionFailure,
+    reference: &str,
+) -> String {
+    with_hint_line(message, failure.glob_hint(reference))
+}
+
+/// `message` followed by `hint` on its own `hint:` line, when there is one:
+/// the line [`with_glob_hint`] writes, for a caller that computed the hint
+/// when the failure was raised.
+pub fn with_hint_line(message: impl Into<String>, hint: Option<&str>) -> String {
+    let mut message = message.into();
+    if let Some(hint) = hint {
+        message.push_str("\nhint: ");
+        message.push_str(hint);
+    }
+    message
+}
+
+/// Prose markup for a [`StatusBlock::hint`] whose text spans rows, such as a
+/// message carrying the `hint:` line [`with_hint_line`] writes: each newline
+/// becomes Prose's backslash hard break, since a hint is otherwise one
+/// soft-wrapped paragraph.
+///
+/// [`StatusBlock::hint`]: biscuit_terminal::components::status_block::StatusBlock::hint
+pub fn hint_rows(markup: &str) -> String {
+    markup.lines().collect::<Vec<_>>().join("\\\n")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -169,6 +219,47 @@ mod tests {
 
     fn render(err: &dyn BlockError) -> String {
         strip_escape_codes(err.report_block_error_optimistic(Some(80)))
+    }
+
+    /// Rendered rows without the `┃` border, trimmed, blank rows dropped.
+    fn rows(err: &dyn BlockError) -> Vec<String> {
+        strip_escape_codes(err.report_block_error_optimistic(Some(200)))
+            .lines()
+            .map(|line| line.trim_start().trim_start_matches('┃').trim().to_string())
+            .filter(|row| !row.is_empty())
+            .collect()
+    }
+
+    #[test]
+    fn a_not_found_transclusion_keeps_its_hint_row() {
+        let err = crate::markdown::compose::transclusion::TransclusionError::target_not_found("plans/*.md");
+        let rows = rows(&err);
+        let at = rows
+            .iter()
+            .position(|row| row == "File not found: plans/*.md")
+            .unwrap_or_else(|| panic!("{rows:#?}"));
+        assert!(rows[at + 1].starts_with("hint: *, ?, and [ are literal"), "{rows:#?}");
+    }
+
+    #[test]
+    fn hint_rows_keep_a_multi_line_hint_on_separate_rows() {
+        use biscuit_terminal::components::status::StatusState;
+        use biscuit_terminal::components::status_block::StatusBlock;
+
+        let block = StatusBlock::new(StatusState::Error)
+            .body("body")
+            .hint(hint_rows("Error: no file matched\nhint: quote it"));
+        let rendered = strip_escape_codes(biscuit_terminal::components::renderable::TerminalRenderable::render(
+            &block,
+            &biscuit_terminal::terminal::Terminal::new_optimistic(200),
+        ));
+        let rows: Vec<&str> = rendered
+            .lines()
+            .map(|line| line.trim_start().trim_start_matches('┃').trim())
+            .filter(|row| !row.is_empty())
+            .collect();
+        let at = rows.iter().position(|row| *row == "Error: no file matched").unwrap_or_else(|| panic!("{rows:#?}"));
+        assert_eq!(rows[at + 1], "hint: quote it", "{rows:#?}");
     }
 
     fn test_ctx() -> SourceContext {
@@ -399,5 +490,18 @@ mod tests {
         let err: std::io::Error = std::io::Error::other("bare");
         let dyn_err: &(dyn std::error::Error + 'static) = &err;
         assert!(as_block_error(dyn_err).is_none());
+    }
+
+    #[test]
+    fn escaped_message_renders_its_code_span_without_backslashes() {
+        use biscuit_terminal::components::prose::Prose;
+        use biscuit_terminal::components::renderable::TerminalRenderable;
+
+        let rendered = strip_escape_codes(
+            Prose::new(Prose::escape_text_outside_code_spans("glob `docs/*.md` and *not* <this>")).render_optimistic(Some(80)),
+        );
+        assert!(rendered.contains("docs/*.md"), "{rendered}");
+        assert!(rendered.contains("*not* <this>"), "{rendered}");
+        assert!(!rendered.contains('\\'), "{rendered}");
     }
 }

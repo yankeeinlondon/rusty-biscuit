@@ -142,7 +142,7 @@ impl ListArgs {
         if self.html {
             println!(
                 "{}",
-                render_html_with_layout(&list.render_html_fragment().render(), &self.layout)
+                render_html_with_alignment(&list.render_html_fragment().render(), &self.layout)
             );
             return Ok(());
         }
@@ -181,7 +181,7 @@ impl ListArgs {
         if self.html {
             println!(
                 "{}",
-                render_html_with_layout(&list.render_html_fragment().render(), &self.layout)
+                render_html_with_alignment(&list.render_html_fragment().render(), &self.layout)
             );
             return Ok(());
         }
@@ -223,39 +223,4 @@ fn apply_layout<L: TerminalRenderable>(list: &mut L, layout: &LayoutArgs) {
     if let Some(align) = layout.alignment {
         list.layout_mut().alignment = align;
     }
-}
-
-/// Wraps the rendered HTML fragment in a `<div>` only when the CLI was given
-/// layout properties the tree-path CSS lowering cannot express on the
-/// component's own root element.
-///
-/// The tree renderer lowers `Layout` to CSS on the `<ol>` itself (see
-/// `layout_to_css` in `renderable::tree::render::browser`). Margins (all four
-/// sides) and `max_width`-driven alignment are emitted there directly. The
-/// only LayoutArgs property without an `<ol>`-level peer is `--alignment`
-/// without a `max_width`, which would need a `text-align` declaration on a
-/// surrounding block. We wrap in that case only; otherwise we return the
-/// fragment as-is to avoid double-application of properties (e.g. doubled
-/// `margin-left`).
-fn render_html_with_layout(fragment: &str, layout: &LayoutArgs) -> String {
-    let Some(style) = wrapper_only_css(layout) else {
-        return fragment.to_string();
-    };
-    format!("<div style=\"{style}\">{fragment}</div>")
-}
-
-/// Returns the CSS declarations that the tree-path layout lowering cannot
-/// express on the component's own element. Today that is `text-align` from
-/// `--alignment` when no `max_width` is in play. Margins are always
-/// expressible by the tree path and therefore deliberately omitted here.
-fn wrapper_only_css(layout: &LayoutArgs) -> Option<String> {
-    use biscuit_terminal::utils::layout::Alignment;
-
-    let alignment = layout.alignment?;
-    let text_align = match alignment {
-        Alignment::Left => "left",
-        Alignment::Center => "center",
-        Alignment::Right => "right",
-    };
-    Some(format!("text-align: {text_align}"))
 }

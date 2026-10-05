@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use biscuit_terminal::components::list::UnorderedList;
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::{LineBreaks, Prose};
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::table::{Table, TableCellContent, TableColumn};
 use biscuit_terminal::terminal::Terminal;
@@ -170,7 +170,8 @@ pub fn run(args: ResearchArgs, snapshot: std::io::Result<RequestSnapshot>) -> i3
             if json {
                 println!("{}", pretty(&json!({ "error": message })));
             } else {
-                eprint!("{}", Prose::new(format!("<b>error:</b> {}", Prose::escape_text(&message))).render(&terminal()));
+                // A reference failure carries its `failure:` row.
+                eprint!("{}", Prose::new(format!("<b>error:</b> {}", Prose::escape_text_outside_code_spans(&message))).with_line_breaks(LineBreaks::Hard).render(&terminal()));
                 eprintln!();
             }
             EXIT_UNAVAILABLE
@@ -311,7 +312,10 @@ fn resolve_document(document: &Path, context: &FileResolutionContext) -> Result<
     let reference = FileReference::new(&raw).map_err(|error| failed(error.to_string(), error.resolution_failure()))?;
     match reference.resolve_in_context(context) {
         Ok(Some(path)) => Ok(path),
-        Ok(None) => Err(failed("no file matches".into(), ResolutionFailure::NoMatch)),
+        Ok(None) => Err(failed(
+            darkmatter::markdown::errors::with_glob_hint("no file matches", ResolutionFailure::NoMatch, &raw),
+            ResolutionFailure::NoMatch,
+        )),
         Err(error) => Err(failed(error.to_string(), error.resolution_failure())),
     }
 }

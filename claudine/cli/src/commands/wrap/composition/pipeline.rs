@@ -756,9 +756,18 @@ fn construct_argv_and_system_prompt(
         // model, transport, system-prompt, MCP, and prompt-delivery injections
         // (`apply_entrypoint` inserts the entrypoint subcommand at index 0, so a
         // tail-first base still lands after it, exactly like the wrapper). Announce
-        // it once per distinct (provider, tail) for the owning command.
+        // it once per distinct (provider, tail) for the owning command, after
+        // the resolved-provider check: a switch this provider types
+        // differently from ownership's reading fails before anything runs.
+        let switch_context = crate::commands::wrap::provider_tail_report::SwitchContext::for_launch(
+            profile,
+            effective_non_interactive,
+        );
+        switch_context
+            .check(&request.provider_tail)
+            .map_err(color_eyre::eyre::Report::new)?;
         crate::commands::wrap::provider_tail_report::announce(
-            provider,
+            &switch_context,
             &request.provider_tail,
             &request.provider_tail_notices,
             silent,

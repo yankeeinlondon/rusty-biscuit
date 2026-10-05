@@ -1,5 +1,5 @@
 use crate::args::LayoutArgs;
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::{LineBreaks, Prose};
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::terminal_image::parse_width_spec;
 use biscuit_terminal::components::two_column::ColumnWidth;
@@ -165,16 +165,44 @@ pub fn emit_image_output(output: &str) -> color_eyre::Result<()> {
 pub fn print_example_command_with_terminal(cmd: &str, term: &Terminal) {
     println!();
     println!("{}", Prose::new("<b>Command:</b>").render(term));
-    println!(
-        "{}",
-        Prose::new(format!("<dim>{}</dim>", Prose::escape_text(cmd))).render(term)
-    );
+    println!("{}", render_example_command(cmd, term));
+}
+
+/// Renders an example command dimmed and literal.
+///
+/// A multi-line command (shell `\` continuations) keeps its line structure.
+fn render_example_command(cmd: &str, term: &Terminal) -> String {
+    Prose::new(format!("<dim>{}</dim>", Prose::escape_text(cmd)))
+        .with_line_breaks(LineBreaks::Hard)
+        .render(term)
 }
 
 pub fn print_example_command(cmd: &str) {
     let plain = std::env::args_os().any(|arg| arg == "--plain");
     let term = terminal_for_render(plain);
     print_example_command_with_terminal(cmd, &term);
+}
+
+/// Wraps a component's HTML fragment in a `<div>` carrying `text-align` when
+/// `--alignment` is set, and returns it unchanged otherwise.
+///
+/// Margins never go on this wrapper: the component lowers its own `Layout`
+/// to CSS, so adding them here would apply them twice. Alignment needs the
+/// wrapper because `renderable`'s CSS lowering expresses alignment only as
+/// auto margins on a box capped by `max_width`, while the terminal centers
+/// the lines of a full-width box.
+pub fn render_html_with_alignment(fragment: &str, layout: &LayoutArgs) -> String {
+    use biscuit_terminal::utils::layout::Alignment;
+
+    let Some(alignment) = layout.alignment else {
+        return fragment.to_string();
+    };
+    let text_align = match alignment {
+        Alignment::Left => "left",
+        Alignment::Center => "center",
+        Alignment::Right => "right",
+    };
+    format!("<div style=\"text-align: {text_align}\">{fragment}</div>")
 }
 
 /// Emits a YAML frontmatter block carrying the CLI's `--margin-left` /
@@ -210,6 +238,24 @@ pub fn layout_style_frontmatter(layout: &LayoutArgs) -> Option<String> {
     Some(out)
 }
 
+/// Drops `term`'s color depth when `NO_COLOR` is set.
+///
+/// A command that strips SGR from its output under `NO_COLOR` must render
+/// through this terminal first: the renderer then chooses the unstyled forms
+/// itself (inline code keeps its backtick fence), whereas a styled render
+/// stripped afterwards leaves inline code unmarked. Hyperlink support and the
+/// other detected capabilities are kept.
+pub fn colorless_when_no_color(term: Terminal) -> Terminal {
+    if std::env::var("NO_COLOR").is_ok() {
+        Terminal {
+            color_depth: ColorDepth::None,
+            ..term
+        }
+    } else {
+        term
+    }
+}
+
 /// Strips SGR (Select Graphic Rendition) CSI sequences from `s`.
 ///
 /// This preserves non-color ANSI sequences such as OSC8 hyperlinks
@@ -241,4 +287,31 @@ pub fn strip_sgr_sequences(s: &str) -> String {
         i += 1;
     }
     String::from_utf8_lossy(&out).into_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn example_command_keeps_its_continuation_lines() {
+        let term = Terminal::builder()
+            .width(120)
+            .color_depth(ColorDepth::None)
+            .build();
+        let cmd = "bt erd --title \"E-Commerce Schema\" \\\n  --entity \"Customer { int id PK }\" \\\n  \"Customer ||--o{ Order : places\"";
+
+        let rendered = render_example_command(cmd, &term);
+        let lines: Vec<&str> = rendered.trim_end().lines().map(str::trim_end).collect();
+
+        assert_eq!(
+            lines,
+            vec![
+                "bt erd --title \"E-Commerce Schema\" \\",
+                "  --entity \"Customer { int id PK }\" \\",
+                "  \"Customer ||--o{ Order : places\"",
+            ],
+            "{rendered:?}"
+        );
+    }
 }

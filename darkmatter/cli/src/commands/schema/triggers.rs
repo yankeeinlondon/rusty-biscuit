@@ -1,36 +1,38 @@
 //! `md schema triggers` implementation.
 
+use biscuit_terminal::components::list::OrderedList;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
-use color_eyre::eyre::{Result, eyre};
+use renderable::markdown::code_span;
+use color_eyre::eyre::Result;
 use darkmatter::markdown::Markdown;
 use crate::io::{DocumentOutsideRepository, open_argument};
 use crate::request::MdRequest;
-use darkmatter::markdown::schemas::{DarkmatterSchemas, normalize_path, trace_registry};
+use darkmatter::markdown::schemas::{
+    DarkmatterSchemas, InvalidSchemasDir, SchemaRoot, SchemaRootKind, SchemaRootState,
+    trace_registry,
+};
 use std::path::Path;
 
-/// Prints repository roots, shadowing, and arm-by-arm trigger results.
+/// Prints the five schema roots, shadowing, and arm-by-arm trigger results.
 pub fn run_triggers(file: &Path, request: &MdRequest) -> Result<()> {
     // The argument resolves first, so a tree escape or malformed reference is
     // `InvalidReference` rather than a later missing-repository error.
     let opened = open_argument(file, request)?;
     // Legacy-spelling canonicalization: a verbatim `\\?\` result would gain a
-    // path segment the gix-derived boundary lacks, failing `normalize_path`.
+    // path segment the gix-derived repository root lacks.
     let document_path = biscuit_file::canonicalize_simplified(opened.path())
         .unwrap_or_else(|_| opened.path().to_path_buf());
     let markdown = Markdown::try_from(document_path.as_path())?;
     let context = request.document_context(Some(opened.reference()), &document_path)?;
-    let boundary = context
-        .repository_root()
-        .map(Path::to_path_buf)
-        .ok_or_else(|| DocumentOutsideRepository { document: opened.path().to_path_buf() })?;
-    let api = DarkmatterSchemas::new(context.clone()).with_trigger_discovery(&document_path, &boundary)?;
+    if context.repository_root().is_none() {
+        return Err(DocumentOutsideRepository { document: opened.path().to_path_buf() }.into());
+    }
+    let api = DarkmatterSchemas::new(context).with_trigger_discovery()?;
     let registry = api
         .trigger_registry()
         .expect("trigger discovery always installs a registry");
-    let normalized = normalize_path(&document_path, &boundary)
-        .ok_or_else(|| eyre!("document is outside discovery boundary"))?;
     let frontmatter = serde_json::Value::Object(
         markdown
             .frontmatter()
@@ -39,18 +41,16 @@ pub fn run_triggers(file: &Path, request: &MdRequest) -> Result<()> {
             .map(|(key, value)| (key.clone(), value.clone()))
             .collect(),
     );
-    let trace = trace_registry(registry, &frontmatter, &normalized);
+    let trace = trace_registry(registry, &frontmatter, Some(&document_path));
     let terminal = Terminal::default();
 
     emit(&terminal, format!("<bold>Document:</bold> {}", escaped(opened.path())));
-    emit(&terminal, format!("<bold>Boundary:</bold> {}", escaped(&trace.boundary)));
-    emit(&terminal, "<bold>Schema roots:</bold>".to_string());
-    if trace.roots.is_empty() {
-        emit(&terminal, "- <dim>none</dim>".to_string());
+    emit(&terminal, "<bold>Schema roots (search order):</bold>".to_string());
+    let mut roots = OrderedList::empty();
+    for root in trace.roots.entries() {
+        roots.add(Prose::new(describe_root(root)));
     }
-    for root in &trace.roots {
-        emit(&terminal, format!("- {}", escaped(root)));
-    }
+    println!("{}", roots.render(&terminal));
 
     emit(&terminal, "<bold>Shadowed envelopes:</bold>".to_string());
     if trace.shadowed.is_empty() {
@@ -76,13 +76,47 @@ pub fn run_triggers(file: &Path, request: &MdRequest) -> Result<()> {
             } else {
                 format!(
                     "<red>defeated</red>: {}",
-                    Prose::escape_text(arm.defeat.as_deref().unwrap_or("condition did not match"))
+                    Prose::escape_text_outside_code_spans(arm.defeat.as_deref().unwrap_or("condition did not match"))
                 )
             };
             emit(&terminal, format!("  - arm {} — {result}", arm.index + 1));
         }
     }
     Ok(())
+}
+
+/// One root's line: its label, its folder, and why it is not searched when it
+/// is not.
+fn describe_root(root: &SchemaRoot) -> String {
+    let label = root.kind.label();
+    match &root.state {
+        SchemaRootState::Searched(path) => format!("{label}: {}", escaped(path)),
+        SchemaRootState::Absent(path) => {
+            format!("{label}: {} <dim>(absent)</dim>", escaped(path))
+        }
+        SchemaRootState::Duplicate { path, of } => format!(
+            "{label}: {} <dim>(same folder as the {}; searched there)</dim>",
+            escaped(path),
+            of.label()
+        ),
+        SchemaRootState::NotApplicable => {
+            let reason = match root.kind {
+                SchemaRootKind::Package => "none (the document is not in a package)",
+                SchemaRootKind::PackageArea => "none (the document is not in a package area)",
+                SchemaRootKind::Tree => "none",
+                SchemaRootKind::SchemasDir => "unset",
+                SchemaRootKind::Home => "none (no home directory)",
+            };
+            format!("{label}: <dim>{reason}</dim>")
+        }
+        SchemaRootState::Invalid { value, reason } => {
+            let reason = match reason {
+                InvalidSchemasDir::Empty => "invalid (empty)",
+                InvalidSchemasDir::Relative => "invalid (not an absolute path)",
+            };
+            format!("{label}: {} <red>{reason}</red>", code_span(value))
+        }
+    }
 }
 
 fn escaped(path: &Path) -> String {

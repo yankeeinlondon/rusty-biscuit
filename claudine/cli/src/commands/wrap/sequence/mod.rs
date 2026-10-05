@@ -548,7 +548,9 @@ pub(crate) fn execute_sequence(
                     && let Some(markup) =
                         super::composition::agent_prompt_message(state, &source.resolved_path)
                 {
-                    log::message(&Prose::new(markup).render(&log::terminal()));
+                    log::message(
+                        &claudine::composition::agent_message_prose(markup).render(&log::terminal()),
+                    );
                 }
                 // The --dry-run arm above returns before this point, so the
                 // dry-run seam never invokes a picker.
@@ -560,6 +562,22 @@ pub(crate) fn execute_sequence(
         };
         live_targets.into_iter().map(Some).collect()
     };
+
+    // The resolved-provider check for every step whose provider is already
+    // known, so a forwarded switch a step's provider types differently fails
+    // before step 1 runs. Steps decided at runtime are checked before their
+    // spawn. Sequence steps are never interactive.
+    if !shared.dry_run {
+        for (step, target) in plan.steps.iter().zip(&resolved_targets) {
+            if let Some(target) = target
+                && review::is_review_eligible(step)
+                && let Some(profile) = super::profile::profile_for_provider(target.provider)
+            {
+                super::provider_tail_report::SwitchContext::for_launch(profile, true)
+                    .check(&shared.provider_tail)?;
+            }
+        }
+    }
 
     // Announced *before* Phase 1c, not after it. Schema validation and shell
     // approval can be slow or interactive, so this is the progress feedback the

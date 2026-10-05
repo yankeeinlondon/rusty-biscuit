@@ -261,7 +261,7 @@ fn bare_sidecar_composes_unchanged_with_one_typed_warning_across_two_passes() {
     assert_eq!(warning.stage, "schema_validation");
     assert_eq!(warning.source.as_deref(), Some("darkmatter.schema"));
     assert_eq!(warning.code.as_deref(), Some("dm.schema.missing_simplified_envelope"));
-    assert_eq!(warning.path.as_deref(), Some(schema_path.canonicalize().unwrap().as_path()));
+    assert_eq!(warning.path.as_deref(), Some(biscuit_file::canonicalize_simplified(&schema_path).unwrap().as_path()));
     assert_eq!(warning.consumer.as_deref(), Some(document_path.as_path()));
 }
 
@@ -302,7 +302,7 @@ fn schema_advisory_is_not_duplicated_when_transclusion_reports_merge() {
         })
         .collect();
     assert_eq!(warnings.len(), 1, "got: {:?}", report.warnings);
-    assert_eq!(warnings[0].path.as_deref(), Some(schema_path.canonicalize().unwrap().as_path()));
+    assert_eq!(warnings[0].path.as_deref(), Some(biscuit_file::canonicalize_simplified(&schema_path).unwrap().as_path()));
     assert_eq!(warnings[0].consumer.as_deref(), Some(root_path.as_path()));
 }
 

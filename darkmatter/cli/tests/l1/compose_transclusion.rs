@@ -265,7 +265,7 @@ fn test_compose_link_transcluded_child() {
         "stdout should contain normalized sibling path relative to parent, got:\n{stdout}"
     );
     // Should not contain absolute path
-    let abs_sibling = std::fs::canonicalize(&sibling_file).unwrap();
+    let abs_sibling = biscuit_file::canonicalize_simplified(&sibling_file).unwrap();
     assert!(
         !stdout.contains(abs_sibling.to_string_lossy().as_ref()),
         "stdout should not contain absolute path, got:\n{stdout}"
@@ -433,12 +433,12 @@ fn compose_env_anchored_child_is_bounded_by_the_variable() {
 
     let escape = compose("escape.md");
     let stdout = String::from_utf8_lossy(&escape.stdout);
-    let stderr = String::from_utf8_lossy(&escape.stderr);
+    let stderr = biscuit_test_harness::strip_ansi(&String::from_utf8_lossy(&escape.stderr));
     let collapsed = stderr.split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(!escape.status.success(), "stdout: {stdout}");
     assert!(!stdout.contains("outside-content"), "{stdout}");
     assert!(
-        collapsed.contains("relative reference `../../outside.md` leaves file tree"),
+        collapsed.contains("relative reference ../../outside.md leaves file tree"),
         "{collapsed}"
     );
 }

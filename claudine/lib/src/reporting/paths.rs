@@ -10,7 +10,7 @@ pub fn expand_path(path: &Path) -> Result<PathBuf> {
         return Ok(path.to_path_buf());
     }
 
-    let home = dirs::home_dir().ok_or_else(|| {
+    let home = biscuit_file::home_dir().ok_or_else(|| {
         ClaudineError::ReportingPathUnavailable("home directory is not available".to_string())
     })?;
 
@@ -19,7 +19,7 @@ pub fn expand_path(path: &Path) -> Result<PathBuf> {
 
 /// Return the base `~/.claudine` directory.
 pub fn claudine_home_dir() -> Result<PathBuf> {
-    dirs::home_dir()
+    biscuit_file::home_dir()
         .map(|path| path.join(".claudine"))
         .ok_or_else(|| {
             ClaudineError::ReportingPathUnavailable("home directory is not available".to_string())

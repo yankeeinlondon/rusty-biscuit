@@ -70,6 +70,29 @@ fn absolute_missing_path_is_target_missing() {
     );
 }
 
+/// A missing target whose text looks like a glob (a proxy or harness source
+/// such as `docs/*.md`) names that file literally, and its message carries
+/// the literal-glob hint; a plain missing name does not.
+#[test]
+fn literal_glob_miss_carries_the_glob_hint() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("run.md");
+    std::fs::write(&source, "x").unwrap();
+    std::fs::create_dir_all(dir.path().join("docs")).unwrap();
+    std::fs::write(dir.path().join("docs/a.md"), "a").unwrap();
+    let ctx = HarnessResolutionContext {
+        source_path: &source,
+        repo_root: None,
+        package_area: None,
+    };
+
+    let glob = resolve_harness_path("./docs/*.md", &ctx).unwrap_err().to_string();
+    assert!(glob.contains("::file-links"), "{glob}");
+    let plain = resolve_harness_path("./docs/missing.md", &ctx).unwrap_err().to_string();
+    assert!(plain.contains("target does not exist") && !plain.contains("::file-links"), "{plain}");
+    assert!(resolve_harness_path("./docs/a.md", &ctx).is_ok());
+}
+
 /// G2: `@foo` is a magic-root search, so the repository root is a search
 /// root — `@prompts/x.md` resolves under `<repo>/prompts/`.
 #[test]

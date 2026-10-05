@@ -24,7 +24,7 @@
 use std::{
     collections::{HashMap, HashSet},
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, OnceLock},
+    sync::{Arc, Mutex, OnceLock, Weak},
 };
 
 use indexmap::IndexMap;
@@ -71,19 +71,22 @@ pub const DEFAULT_CACHE_SIZE: usize = 64;
 /// document-first, then repository-relative candidate plan of their document.
 /// The request's file-resolution context, passed per call, is part of cache
 /// identity too, since it supplies the repository tier of that plan.
-/// [`Self::file_ref_fallback_dir`] is also part of cache identity: it anchors
-/// `match()` globs, but is not a resolution candidate for document-authored
-/// references.
+/// [`Self::file_ref_fallback_dir`] is also part of cache identity, though it
+/// is not a resolution candidate for document-authored references. So are
+/// [`Self::with_caller_origins`]: a caller-supplied property's `match()` globs
+/// are judged from the caller's own context.
 ///
 /// [`Self::structural_validator_for`] serves validators that judge file values
 /// by syntax alone, for callers with no request (coercion probes, examples).
 #[derive(Clone)]
 pub struct ValidatorCache {
     inner: Arc<Mutex<CacheInner>>,
-    /// Launch-area metadata: a `match()` glob anchor and diagnostic facet.
+    /// Launch-area metadata carried to file-reference diagnostics.
     ///
     /// This is not a resolution candidate for document-authored references.
     file_ref_fallback_dir: Option<PathBuf>,
+    /// Where each caller-supplied top-level property was authored.
+    caller_origins: CallerOrigins,
 }
 
 impl Default for ValidatorCache {
@@ -93,7 +96,14 @@ impl Default for ValidatorCache {
 }
 
 struct CacheInner {
-    entries: HashMap<u64, CacheEntry>,
+    /// Validators by key. The key omits parts of [`JudgedIn`] (a document
+    /// and its transcluded children share one), so a slot holds every
+    /// validator whose `judged_in` differs rather than replacing one with
+    /// another and recompiling on each alternation.
+    entries: HashMap<u64, Vec<CacheEntry>>,
+    /// Content hashes of shared schemas, by allocation. The `Weak` keeps the
+    /// allocation from being reused for another schema while it is listed.
+    schema_hashes: Vec<(Weak<Value>, u64)>,
     tick: u64,
     capacity: usize,
 }
@@ -112,8 +122,58 @@ struct CacheEntry {
 enum JudgedIn {
     /// Syntax alone (a structural validator).
     Syntax,
-    /// A request's context.
-    Context(Box<biscuit_file::FileResolutionContext>),
+    /// A request's context, and the contexts its caller-supplied properties
+    /// were authored in.
+    Context(Box<biscuit_file::FileResolutionContext>, CallerOrigins),
+}
+
+/// Where a top-level property's value came from (see [`CallerOrigins`]).
+pub(crate) enum ValueOrigin<'a> {
+    /// Authored in the document: judged from the document's folder.
+    Document,
+    /// Supplied by a caller, who authored it in this context.
+    Caller(&'a biscuit_file::FileResolutionContext),
+}
+
+/// The context each caller-supplied top-level property was authored in,
+/// keyed by property name.
+///
+/// A caller's value reaches validation projected from its own context (the
+/// launch directory), so its `match()` globs are judged there too: a bare or
+/// `./` pattern starts at the launch directory for a caller value and at the
+/// document's folder for a frontmatter value.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct CallerOrigins(Arc<std::collections::BTreeMap<String, biscuit_file::FileResolutionContext>>);
+
+impl CallerOrigins {
+    pub(crate) fn new(
+        origins: impl IntoIterator<Item = (String, biscuit_file::FileResolutionContext)>,
+    ) -> Self {
+        Self(Arc::new(origins.into_iter().collect()))
+    }
+
+    /// Where `property`'s value came from.
+    pub(crate) fn origin_of(&self, property: &str) -> ValueOrigin<'_> {
+        match self.0.get(property) {
+            Some(context) => ValueOrigin::Caller(context),
+            None => ValueOrigin::Document,
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// Cache-key bytes: each property and the directories that root its
+    /// patterns. The full contexts are compared on lookup.
+    fn key_bytes(&self, bytes: &mut Vec<u8>) {
+        for (property, origin) in self.0.iter() {
+            bytes.push(0xfd);
+            bytes.extend_from_slice(property.as_bytes());
+            bytes.push(0xff);
+            bytes.extend_from_slice(origin.cwd().to_string_lossy().as_bytes());
+        }
+    }
 }
 
 impl ValidatorCache {
@@ -131,14 +191,16 @@ impl ValidatorCache {
         Self {
             inner: Arc::new(Mutex::new(CacheInner {
                 entries: HashMap::new(),
+                schema_hashes: Vec::new(),
                 tick: 0,
                 capacity: cap,
             })),
             file_ref_fallback_dir: None,
+            caller_origins: CallerOrigins::default(),
         }
     }
 
-    /// Records the launch-area anchor for `match()` globs and
+    /// Records the launch-area metadata carried to
     /// `format: darkmatter-file` diagnostics.
     ///
     /// Per D2 the launch area is not a resolution input for a document-authored
@@ -147,6 +209,14 @@ impl ValidatorCache {
     #[must_use]
     pub fn with_file_ref_fallback_dir(mut self, dir: impl Into<PathBuf>) -> Self {
         self.file_ref_fallback_dir = Some(dir.into());
+        self
+    }
+
+    /// Records the contexts caller-supplied properties were authored in, so
+    /// their `match()` globs are judged from there (see [`CallerOrigins`]).
+    #[must_use]
+    pub(crate) fn with_caller_origins(mut self, origins: CallerOrigins) -> Self {
+        self.caller_origins = origins;
         self
     }
 
@@ -169,18 +239,64 @@ impl ValidatorCache {
         base_dir: Option<&Path>,
         context: &biscuit_file::FileResolutionContext,
     ) -> Result<Arc<Validator>, SchemaError> {
-        let judged_in = JudgedIn::Context(Box::new(context.clone()));
-        let key = canonical_hash(schema, base_dir, self.file_ref_fallback_dir.as_deref(), &judged_in);
+        self.validator_for_hashed(schema, schema_content_hash(schema), base_dir, context)
+    }
+
+    /// [`Self::validator_for`] for a schema shared through an `Arc`: its
+    /// content is hashed once per allocation rather than on every lookup,
+    /// which matters for a large schema (the Darkmatter baseline) that every
+    /// compose phase looks up again.
+    ///
+    /// ## Errors
+    ///
+    /// As [`Self::validator_for`].
+    pub fn validator_for_shared(
+        &self,
+        schema: &Arc<Value>,
+        base_dir: Option<&Path>,
+        context: &biscuit_file::FileResolutionContext,
+    ) -> Result<Arc<Validator>, SchemaError> {
+        let content = self.shared_schema_hash(schema);
+        self.validator_for_hashed(schema, content, base_dir, context)
+    }
+
+    fn shared_schema_hash(&self, schema: &Arc<Value>) -> u64 {
+        let pointer = Arc::as_ptr(schema);
+        {
+            let guard = self.inner.lock().expect("validator cache lock poisoned");
+            if let Some((_, hash)) = guard.schema_hashes.iter().find(|(weak, _)| weak.as_ptr() == pointer) {
+                return *hash;
+            }
+        }
+        let hash = schema_content_hash(schema);
+        let mut guard = self.inner.lock().expect("validator cache lock poisoned");
+        guard.schema_hashes.retain(|(weak, _)| weak.strong_count() > 0);
+        guard.schema_hashes.push((Arc::downgrade(schema), hash));
+        hash
+    }
+
+    fn validator_for_hashed(
+        &self,
+        schema: &Value,
+        content: u64,
+        base_dir: Option<&Path>,
+        context: &biscuit_file::FileResolutionContext,
+    ) -> Result<Arc<Validator>, SchemaError> {
+        let judged_in = JudgedIn::Context(Box::new(context.clone()), self.caller_origins.clone());
+        let key = canonical_hash(content, base_dir, self.file_ref_fallback_dir.as_deref(), &judged_in);
         // Fast path: hit.
         if let Some(hit) = self.lookup(&key, &judged_in) {
             return Ok(hit);
         }
         // Miss: build outside the lock to keep contention low.
-        let validator = Arc::new(build_validator_in_context(
+        let validator = Arc::new(build_validator_with(
             schema,
-            base_dir,
-            self.file_ref_fallback_dir.as_deref(),
-            context,
+            &FileValues::Resolved {
+                base_dir: base_dir.map(PathBuf::from),
+                fallback: self.file_ref_fallback_dir.clone(),
+                context: Box::new(context.clone()),
+                callers: self.caller_origins.clone(),
+            },
         )?);
         self.insert(key, validator.clone(), judged_in);
         Ok(validator)
@@ -195,7 +311,7 @@ impl ValidatorCache {
     /// Propagates [`SchemaError::BuildValidator`] when `jsonschema` rejects
     /// the schema.
     pub fn structural_validator_for(&self, schema: &Value) -> Result<Arc<Validator>, SchemaError> {
-        let key = canonical_hash(schema, None, None, &JudgedIn::Syntax);
+        let key = canonical_hash(schema_content_hash(schema), None, None, &JudgedIn::Syntax);
         if let Some(hit) = self.lookup(&key, &JudgedIn::Syntax) {
             return Ok(hit);
         }
@@ -208,10 +324,11 @@ impl ValidatorCache {
         let mut guard = self.inner.lock().expect("validator cache lock poisoned");
         guard.tick = guard.tick.wrapping_add(1);
         let tick = guard.tick;
-        let entry = guard.entries.get_mut(key)?;
-        if &entry.judged_in != judged_in {
-            return None;
-        }
+        let entry = guard
+            .entries
+            .get_mut(key)?
+            .iter_mut()
+            .find(|entry| &entry.judged_in == judged_in)?;
         entry.last_used = tick;
         Some(entry.validator.clone())
     }
@@ -221,24 +338,27 @@ impl ValidatorCache {
         guard.tick = guard.tick.wrapping_add(1);
         let tick = guard.tick;
         let cap = guard.capacity;
-        guard.entries.insert(
-            key,
-            CacheEntry {
-                validator,
-                judged_in,
-                last_used: tick,
-            },
-        );
-        while guard.entries.len() > cap {
-            if let Some(victim_key) = guard
+        let slot = guard.entries.entry(key).or_default();
+        slot.retain(|entry| entry.judged_in != judged_in);
+        slot.push(CacheEntry {
+            validator,
+            judged_in,
+            last_used: tick,
+        });
+        while guard.entries.values().map(Vec::len).sum::<usize>() > cap {
+            let Some((victim_key, victim_index)) = guard
                 .entries
                 .iter()
-                .min_by_key(|(_, e)| e.last_used)
-                .map(|(k, _)| *k)
-            {
-                guard.entries.remove(&victim_key);
-            } else {
+                .flat_map(|(key, slot)| slot.iter().enumerate().map(move |(index, entry)| (*key, index, entry.last_used)))
+                .min_by_key(|(_, _, last_used)| *last_used)
+                .map(|(key, index, _)| (key, index))
+            else {
                 break;
+            };
+            let slot = guard.entries.get_mut(&victim_key).expect("victim slot exists");
+            slot.remove(victim_index);
+            if slot.is_empty() {
+                guard.entries.remove(&victim_key);
             }
         }
     }
@@ -249,13 +369,19 @@ impl ValidatorCache {
         self.file_ref_fallback_dir.as_deref()
     }
 
+    pub(super) fn caller_origins(&self) -> &CallerOrigins {
+        &self.caller_origins
+    }
+
     /// Returns the current number of cached validators. Mainly a testing aid.
     pub fn len(&self) -> usize {
         self.inner
             .lock()
             .expect("validator cache lock poisoned")
             .entries
-            .len()
+            .values()
+            .map(Vec::len)
+            .sum()
     }
 
     /// Reports whether the cache is empty.
@@ -304,15 +430,33 @@ pub(super) fn build_structural_validator(schema: &Value) -> Result<Validator, Sc
 /// anchors `format: darkmatter-file` value resolution: implicit bare
 /// references resolve document-first then repository-root, explicit
 /// `./`/`../` from the document directory only. `file_ref_fallback_dir` (the
-/// launch area) anchors `match()` globs but is **not** a resolution input
-/// (D2). Threading `base_dir` lets schema validation agree with
-/// expression-side `file_exists`/`frontmatter` resolution on the same `file`
-/// value.
+/// launch area) is **not** a resolution input (D2). A document value's
+/// `match()` globs are judged from `base_dir` too. Threading `base_dir` lets
+/// schema validation agree with expression-side `file_exists`/`frontmatter`
+/// resolution on the same `file` value.
 pub(crate) fn build_validator_in_context(
     schema: &Value,
     base_dir: Option<&Path>,
     file_ref_fallback_dir: Option<&Path>,
     file_resolution_context: &biscuit_file::FileResolutionContext,
+) -> Result<Validator, SchemaError> {
+    build_validator_with_callers(
+        schema,
+        base_dir,
+        file_ref_fallback_dir,
+        file_resolution_context,
+        CallerOrigins::default(),
+    )
+}
+
+/// [`build_validator_in_context`] for a document some of whose top-level
+/// properties a caller supplied (see [`CallerOrigins`]).
+pub(crate) fn build_validator_with_callers(
+    schema: &Value,
+    base_dir: Option<&Path>,
+    file_ref_fallback_dir: Option<&Path>,
+    file_resolution_context: &biscuit_file::FileResolutionContext,
+    callers: CallerOrigins,
 ) -> Result<Validator, SchemaError> {
     build_validator_with(
         schema,
@@ -320,6 +464,7 @@ pub(crate) fn build_validator_in_context(
             base_dir: base_dir.map(PathBuf::from),
             fallback: file_ref_fallback_dir.map(PathBuf::from),
             context: Box::new(file_resolution_context.clone()),
+            callers,
         },
     )
 }
@@ -331,11 +476,13 @@ pub(crate) enum FileValues {
     /// syntax (see [`build_structural_validator`]).
     Syntax,
     /// Resolved through a request's context from `base_dir`, else the
-    /// context's `cwd`.
+    /// context's `cwd`; a caller-supplied property's `match()` globs are
+    /// judged in its entry of `callers`.
     Resolved {
         base_dir: Option<PathBuf>,
         fallback: Option<PathBuf>,
         context: Box<biscuit_file::FileResolutionContext>,
+        callers: CallerOrigins,
     },
 }
 
@@ -706,6 +853,7 @@ impl FileRefAnchors<'_> {
                 base_dir: base_dir.map(PathBuf::from),
                 fallback: fallback.map(PathBuf::from),
                 context: Box::new(context.clone()),
+                callers: CallerOrigins::default(),
             },
         }
     }
@@ -1157,20 +1305,22 @@ fn default_capacity() -> usize {
 /// security boundary. An accidental collision could only serve a wrong
 /// validator, and XXH64's collision resistance over these small distinct inputs
 /// is more than adequate (repo convention — [`biscuit_hash`]).
+/// Hash of a schema's content: identical `Value`s serialize to identical
+/// bytes, so equal schemas share a hash.
+fn schema_content_hash(schema: &Value) -> u64 {
+    biscuit_hash::xx_hash_bytes(&serde_json::to_vec(schema).expect("schema serialises to JSON"))
+}
+
 fn canonical_hash(
-    schema: &Value,
+    content: u64,
     base_dir: Option<&Path>,
     fallback: Option<&Path>,
     judged_in: &JudgedIn,
 ) -> u64 {
-    // `serde_json::to_vec` is stable per the active feature set; this is
-    // sufficient for cache identity (false misses are tolerable, false hits
-    // are not — which `to_vec` guarantees because identical Values
-    // serialise to identical bytes).
-    let mut bytes = serde_json::to_vec(schema).expect("schema serialises to JSON");
-    // Domain-separate each anchor from the schema bytes (and from each other)
-    // so a schema ending in bytes that collide with a path prefix cannot alias
-    // a different (schema, base_dir, fallback) triple.
+    let mut bytes = content.to_le_bytes().to_vec();
+    // Domain-separate each anchor from the schema hash (and from each other)
+    // so path bytes cannot alias a different (schema, base_dir, fallback)
+    // triple.
     bytes.push(0xff);
     if let Some(dir) = base_dir {
         bytes.extend_from_slice(dir.to_string_lossy().as_bytes());
@@ -1187,7 +1337,12 @@ fn canonical_hash(
             bytes.push(0xfe);
             None
         }
-        JudgedIn::Context(context) => Some(context.as_ref()),
+        JudgedIn::Context(context, callers) => {
+            if !callers.is_empty() {
+                callers.key_bytes(&mut bytes);
+            }
+            Some(context.as_ref())
+        }
     };
     for anchor in [
         context.and_then(biscuit_file::FileResolutionContext::repository_root),
@@ -1262,6 +1417,27 @@ mod tests {
             !third.is_valid(&instance),
             "the repository-less request still judges without the repository",
         );
+    }
+
+    /// A document and the child it transcludes share a key (only their
+    /// source paths differ), so alternating between them must reuse both
+    /// validators rather than recompile on each switch.
+    #[test]
+    fn cache_keeps_contexts_sharing_a_key_without_recompiling() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let schema = Arc::new(trivial_schema());
+        let parent = biscuit_file::FileResolutionContext::new(dir.path()).with_source_path(dir.path().join("parent.md"));
+        let child = biscuit_file::FileResolutionContext::new(dir.path()).with_source_path(dir.path().join("child.md"));
+
+        let cache = ValidatorCache::with_capacity(4);
+        let parent_first = cache.validator_for_shared(&schema, Some(dir.path()), &parent).unwrap();
+        let child_first = cache.validator_for_shared(&schema, Some(dir.path()), &child).unwrap();
+        let parent_again = cache.validator_for_shared(&schema, Some(dir.path()), &parent).unwrap();
+        let child_again = cache.validator_for_shared(&schema, Some(dir.path()), &child).unwrap();
+
+        assert!(Arc::ptr_eq(&parent_first, &parent_again));
+        assert!(Arc::ptr_eq(&child_first, &child_again));
+        assert_eq!(cache.len(), 2);
     }
 
     #[test]

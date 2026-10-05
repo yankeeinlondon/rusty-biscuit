@@ -30,7 +30,7 @@ flowchart LR
         R4["Rule 4 — --help / -h hoist<br/><i>composition subcommands only</i>"]
         R1 --> R2 --> R4
     end
-    B --> PP["partition_composition_tail<br/>(Claudine argv + provider tail)"]
+    B --> PP["partition_composition_tail<br/>(Claudine argv + arguments after the file)"]
     PP --> C["--plain pre-scan<br/>(sets NO_COLOR)"]
     C --> D["parse_cli_from"]
     subgraph D["parse_cli_from"]
@@ -68,8 +68,13 @@ provider-argument forwarding (a synthetic `--` collided with an authored `--`
 boundary). Its job — plus forwarding the agent tail — now belongs to the
 post-normalization ownership partition, `argv::partition_composition_tail`,
 described in [argv-normalization.md](./argv-normalization.md#provider-argument-partition).
-It returns the tail as one `ProviderTail` descriptor that records where an
-authored `--` split it; the same page documents the forwarding notice,
+The partition keeps the arguments after the file for **type-aware
+ownership**, which runs inside the command once the file is read and splits
+them into setters, positional arguments (`argv`), and one `ProviderTail`
+descriptor that records where an authored `--` split it (see
+[argv-normalization.md → Type-aware ownership](./argv-normalization.md#type-aware-ownership)).
+Help and version never reach ownership, so they never open a file. The same
+page documents the forwarding notice,
 redaction, and correlated error report that composition and the direct
 wrappers share, and how a lifecycle `resume` re-sends the tail.
 Rule 4 still runs so `--help` is hoisted before the partition sees it.
@@ -141,13 +146,22 @@ Several properties of the clap surface shape the pre-parser's rules:
 - `Cli` sets `disable_help_flag = true` and declares its own non-global
   `help: bool`. Composition subcommands therefore never inherit a
   functional `--help` handler. Rule 4 exists precisely to route
-  `--help` / `-h` into the root handler on those subcommands.
+  `--help` / `-h` into the root handler on those subcommands. Because that
+  root `help` is an ordinary Boolean, clap would validate the subcommand's
+  required arguments before reporting it; `parse_cli_from` therefore answers
+  a root help request even when that validation fails, so
+  `claudine compose --help` needs no file.
+- Every other subcommand, at every depth (`budget grant`, `mcp alias`),
+  gets an injected `--help` / `-h` of clap's own help action, which clap
+  handles before required-argument validation. Direct wrappers keep their
+  own help screen instead.
 - `ComposeArgs`, `InlineComposeArgs`, and `SequenceArgs` each expose a
   greedy multi-value positional (`#[arg(num_args = 1..)]`) that collects
   files plus `key=value` setters in any order. The ownership partition
-  removes the agent tail before clap sees it, so this positional only ever
-  receives the file and Claudine setters; Rule 4 handles the trailing
-  `--help` case separately.
+  holds back everything after the file, so this positional only ever
+  receives the file and the setters before it; type-aware ownership later
+  adds the setters and positionals after the file. Rule 4 handles the
+  trailing `--help` case separately.
 - The original seven provider booleans on `SharedComposeArgs` are retained only
   as clap help entries. Rule 1 accepts every catalog-derived provider boolean,
   including providers without a dedicated struct field, and rewrites it before
@@ -183,8 +197,8 @@ want `--help` as a value.
 This is structurally unavoidable in clap's derive model without giving
 up either the greedy positional or help recognition. The pre-parser and
 ownership partition convert argv into a shape clap already handles correctly:
-`--help` is hoisted to a root-level flag position, and the provider tail is
-removed before clap receives composition setters.
+`--help` is hoisted to a root-level flag position, and the arguments after
+the file are held back for type-aware ownership before clap parses.
 
 ### 2. Catalog-derived provider booleans plus `--provider`
 
@@ -348,11 +362,13 @@ greedy-positional + `--help` interaction).
 
 ## Testing
 
-- **Unit tests** live in the `argv` module (`mod.rs` and `partition.rs`)
-  under `#[cfg(test)] mod tests` and cover every rewrite rule, each
-  boolean-to-slug mapping, every pass-through guarantee, and the ownership
-  partition (implicit/explicit tails, owned-flag reclaim, ordering errors,
-  setter-vs-tail classification). They include a drift-detection test that
+- **Unit tests** live in the `argv` module (`mod.rs` and
+  `partition/tests.rs`) and cover every rewrite rule, each boolean-to-slug
+  mapping, every pass-through guarantee, and the partition (what reaches clap
+  and what is held for ownership, owned-flag markers, the explicit tail,
+  ordering errors, and the partition followed by ownership). The ownership
+  rules are tested beside `own_arguments` in the library. They include a
+  drift-detection test that
   iterates the clap surface to verify the derived owned-flag surface.
 - **Integration tests** live in
   [`claudine/cli/tests/l1/argv_normalization.rs`](../../cli/tests/l1/argv_normalization.rs)

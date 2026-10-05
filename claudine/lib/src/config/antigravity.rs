@@ -182,7 +182,7 @@ fn config_path(config_dir: Option<&Path>) -> PathBuf {
     match config_dir {
         Some(dir) => dir.join("hooks.json"),
         None => {
-            let home = dirs::home_dir().unwrap_or_default();
+            let home = biscuit_file::home_dir().unwrap_or_default();
             home.join(".gemini").join("config").join("hooks.json")
         }
     }

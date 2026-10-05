@@ -83,18 +83,18 @@ fn project_in_context(
 ///
 /// The request repository root keeps the launch directory's spelling while a
 /// probed candidate may come back canonical (macOS `/var` vs `/private/var`,
-/// Windows verbatim prefixes). Both spellings name the same directory, so a
+/// a symlinked ancestor). Both spellings name the same directory, so a
 /// literal miss retries against the canonical form of each side before giving
 /// up; a path that does not exist simply keeps its literal spelling.
 fn strip_prefix_any_spelling(abs: &Path, root: &Path) -> Option<PathBuf> {
     if let Ok(stripped) = abs.strip_prefix(root) {
         return Some(stripped.to_path_buf());
     }
-    let canonical_root = std::fs::canonicalize(root).ok()?;
+    let canonical_root = biscuit_file::canonicalize_simplified(root).ok()?;
     if let Ok(stripped) = abs.strip_prefix(&canonical_root) {
         return Some(stripped.to_path_buf());
     }
-    let canonical_abs = std::fs::canonicalize(abs).ok()?;
+    let canonical_abs = biscuit_file::canonicalize_simplified(abs).ok()?;
     canonical_abs
         .strip_prefix(&canonical_root)
         .ok()
@@ -189,7 +189,7 @@ mod tests {
         // cwd is a temp dir (outside any repo, outside $HOME), so the
         // projection reaches the home-alias arm for a path under $HOME.
         let base = TempDir::new().unwrap();
-        let home = dirs::home_dir().expect("home dir available");
+        let home = biscuit_file::home_dir().expect("home dir available");
         let abs = home.join("notes/file.md");
         assert_eq!(make_relative(&abs, base.path()), "~/notes/file.md");
         assert_eq!(

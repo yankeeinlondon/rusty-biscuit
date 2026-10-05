@@ -11,7 +11,7 @@ target: "{{ review }}"
 iteration: {{ file_index(review) }}
 report: "{{ dirname(review) + '/' + 'implementation-report-' + iteration + '.md' }}"
 initial_review: {{ review }}
-
+yolo: true
 initialize:
     stack:
         - when: "!frontmatter(review, 'implemented') && !is_indexed_file(review)"
@@ -36,6 +36,8 @@ initialize:
 ::file "../_os.md"
 
 ::file "../_test-tiers.md"
+
+::file "../_headless-orchestration.md"
 
 ## Task
 

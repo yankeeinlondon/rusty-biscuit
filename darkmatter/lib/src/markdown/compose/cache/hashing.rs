@@ -19,7 +19,7 @@ use crate::markdown::compose::ComposeContext;
 ///
 /// Used by the run-local cache and as the `source_id` of run-local keys.
 pub(crate) fn compose_cache_key(source_path: &Path) -> String {
-    std::fs::canonicalize(source_path)
+    biscuit_file::canonicalize_simplified(source_path)
         .unwrap_or_else(|_| source_path.to_path_buf())
         .to_string_lossy()
         .to_string()

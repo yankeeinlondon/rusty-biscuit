@@ -1092,9 +1092,13 @@ functions:
       category: Filesystem
       order: 64
       description:
-          Returns every file a glob reference matches (`&dir/**/name.md`), as sorted
-          absolute paths; the path before the first wildcard is the directory searched,
-          its first candidate that exists (a file there matches nothing).
+          Returns every file a glob reference matches (`&dir/**/name.md`, `^docs/*.md`),
+          as absolute paths merged across every root of its prefix in native order (most
+          local root first, then shallowest, then by path component). A bare pattern searches
+          the document's folder, then the repository root. A file symlink a bare, `./`, or
+          `../` pattern matches whose target leaves the file tree is skipped with a
+          `dm.glob.skipped_symlink` warning. A directory the search must enter but
+          cannot read fails the expression with an I/O failure instead of shortening the list.
       overloads:
           - parameters:
                 - name: pattern
@@ -1320,6 +1324,38 @@ functions:
             example:
                 expression: link("fixture.md", "Fixture")
                 result: "[Fixture](/path/to/fixture.md)"
+                verification: display-only
+                reason: result includes an absolute destination path, which is not portable
+    - name: code_link
+      category: Filesystem
+      order: 78
+      description:
+          Creates a Markdown link whose text is inline code. Arguments, destinations,
+          and errors match link(); the text is a code span, so brackets and
+          backslashes are kept as written rather than escaped.
+      overloads:
+          - parameters:
+                - name: file
+                  type: file
+            returns:
+                type: string
+                fallible: true
+            example:
+                expression: code_link("fixture.md")
+                result: "[`fixture.md`](/path/to/fixture.md)"
+                verification: display-only
+                reason: result includes an absolute path, which is not portable
+          - parameters:
+                - name: target
+                  type: file
+                - name: desc
+                  type: string
+            returns:
+                type: string
+                fallible: true
+            example:
+                expression: code_link("fixture.md", "md hash")
+                result: "[`md hash`](/path/to/fixture.md)"
                 verification: display-only
                 reason: result includes an absolute destination path, which is not portable
     - name: has_skill

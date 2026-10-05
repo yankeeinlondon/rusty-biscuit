@@ -115,11 +115,10 @@ fn compose_implicit_tail_notice_names_switches_and_forwards_tokens_unchanged() {
     assert_eq!(code, 0, "stderr:\n{stderr}");
     let notices = notice_lines(&stderr);
     assert_eq!(notices.len(), 1, "stderr:\n{stderr}");
+    // Codex's `-c` is researched as accepting an attached value, so
+    // `-csecretvalue` is named by its switch alone.
     assert!(
-        notices[0].contains(
-            "Forwarding provider arguments to Codex: -c, --api-key, a short switch with \
-             attached text (not shown)"
-        ),
+        notices[0].contains("Forwarding provider arguments to Codex: -c, --api-key, -c"),
         "{notices:?}"
     );
     for hidden in ["model_reasoning_effort", SECRET, "secretvalue", "recogni"] {
@@ -243,6 +242,143 @@ Step body
         notices[0].contains("Forwarding provider arguments to Codex: -c"),
         "{notices:?}"
     );
+}
+
+/// `stderr` with ANSI removed and every run of whitespace collapsed, so a
+/// word-wrapped sentence reads as one line.
+#[cfg(unix)]
+fn flattened(stderr: &str) -> String {
+    stderr.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Each implicit switch is explained from the compiled Codex catalog at the
+/// `exec` command the launch uses: a researched one by what it is, an
+/// unresearched one as forwarded anyway. Both launch paths read the same
+/// catalog, and the child still receives every token unchanged.
+#[cfg(unix)]
+#[test]
+fn each_forwarded_switch_is_explained_from_the_compiled_catalog() {
+    let fixture = CliProcessFixture::named("tail-notice-explained");
+    let log = recording_codex(&fixture);
+    let file = prompt_file(&fixture);
+    let unrecognized = "--frobnicate: Claudine's compiled Codex switch catalog has no established \
+                        type for it at its `exec` command; Claudine forwards it anyway.";
+
+    let (code, stderr) = run(
+        &fixture,
+        &["compose", "--codex", &file, "-c", "model_reasoning_effort=low", "--frobnicate"],
+    );
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    let flat = flattened(&stderr);
+    assert!(flat.contains("-c is Codex's --config switch ("), "{flat}");
+    assert!(flat.contains("); forwarding to Codex."), "{flat}");
+    assert!(flat.contains(unrecognized), "{flat}");
+    for hidden in ["model_reasoning_effort", "reject", "recogni"] {
+        assert!(!flat.contains(hidden), "{hidden}: {flat}");
+    }
+    assert_eq!(
+        occurrences(&launches(&log)[0], &["-c", "model_reasoning_effort=low", "--frobnicate"]),
+        1
+    );
+
+    let (code, stderr) = run(&fixture, &["codex", "-c", "x=y", "--frobnicate", "do the thing"]);
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    let flat = flattened(&stderr);
+    assert!(flat.contains("-c is Codex's --config switch ("), "{flat}");
+    assert!(flat.contains(unrecognized), "{flat}");
+    // `AGENT_PARAMS` lists non-secret values by design; the notice never does.
+    assert!(notice_lines(&stderr).iter().all(|notice| !notice.contains("x=y")), "{stderr}");
+    assert_eq!(occurrences(&launches(&log)[0], &["-c", "x=y", "--frobnicate"]), 1);
+
+    // Quiet output drops the explanations with the notice.
+    let (code, stderr) = run(&fixture, &["codex", "--quiet", "-c", "x=y", "do the thing"]);
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert!(!flattened(&stderr).contains("--config switch"), "{stderr}");
+}
+
+/// Install a fake `opencode` that records its arguments the way
+/// [`recording_codex`] does and appends a line to `body`, so an inline run
+/// passes its body-change check.
+#[cfg(unix)]
+fn recording_opencode(fixture: &CliProcessFixture, body: &std::path::Path) -> std::path::PathBuf {
+    let dir = fixture.home().join("opencode-launches");
+    fs::create_dir_all(&dir).unwrap();
+    write_executable(
+        &fixture.bin_dir().join("opencode"),
+        &format!(
+            "#!/bin/sh\n\
+             for arg in \"$@\"; do printf '%s\\037' \"$arg\"; done > '{dir}/launch-'$$\n\
+             printf '\\nAgent wrote this.\\n' >> '{body}'\n\
+             exit 0\n",
+            dir = dir.display(),
+            body = body.display()
+        ),
+    );
+    dir
+}
+
+/// OpenCode's compiled record for `--get-yargs-completions` declares its
+/// type unknown, so every launch command explains it exactly like a switch
+/// with no record (`--new-unresearched-switch`): unrecognized at the `run`
+/// entrypoint, never a known OpenCode switch. The inline notice is emitted
+/// before its body-change check, and the child receives the tokens unchanged.
+#[cfg(unix)]
+#[test]
+fn a_switch_whose_record_is_typed_unknown_is_not_called_known() {
+    for switch in ["--get-yargs-completions", "--new-unresearched-switch"] {
+        for command in ["compose", "sequence", "inline-compose", "opencode"] {
+            let case = format!("{command} {switch}");
+            let fixture = CliProcessFixture::named("tail-notice-unknown-type");
+            let body = fixture.cwd().join("inline.md");
+            let log = recording_opencode(&fixture, &body);
+            let target = match command {
+                "compose" => prompt_file(&fixture),
+                "sequence" => {
+                    prompt_file(&fixture);
+                    let seq = fixture.cwd().join("seq.md");
+                    fs::write(&seq, "---\nsequence:\n  - name: plan\n    prompt: plan.md\n---\nBody\n").unwrap();
+                    seq.to_str().unwrap().to_owned()
+                }
+                "inline-compose" => {
+                    fs::write(&body, "---\ntitle: plan\nprompt: Write the plan.\n---\nOld body\n").unwrap();
+                    body.to_str().unwrap().to_owned()
+                }
+                _ => "do the thing".to_owned(),
+            };
+            // A direct wrapper has no type-aware ownership: a bare word after
+            // the switch would be part of its prompt, so the switch goes alone.
+            let forwarded: &[&str] = if command == "opencode" { &[switch] } else { &[switch, "foo"] };
+            let mut args: Vec<&str> = vec![command];
+            if command == "opencode" {
+                args.extend(forwarded);
+                args.push(&target);
+            } else {
+                args.extend(["--opencode", &target]);
+                args.extend(forwarded);
+            }
+            let unrecognized = format!(
+                "{switch}: Claudine's compiled OpenCode switch catalog has no established type \
+                 for it at its `run` command; Claudine forwards it anyway."
+            );
+
+            let output = fixture
+                .command()
+                .env("OPENCODE_MODEL", "test/model")
+                .args(&args)
+                .output()
+                .unwrap();
+            let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+            assert_eq!(output.status.code(), Some(0), "{case}\nstderr:\n{stderr}");
+            let flat = flattened(&stderr);
+            assert!(flat.contains(&unrecognized), "{case}: {flat}");
+            for claim in ["is one of OpenCode's switches", "OpenCode switch (", " a OpenCode ", "reject"] {
+                assert!(!flat.contains(claim), "{case} claims {claim}: {flat}");
+            }
+            let launches = launches(&log);
+            assert_eq!(launches.len(), 1, "{case}: {launches:?}");
+            assert_eq!(occurrences(&launches[0], forwarded), 1, "{case}: {launches:?}");
+        }
+    }
 }
 
 #[cfg(unix)]
@@ -379,9 +515,11 @@ fn composition_refuses_a_non_utf8_tail_token_without_launching() {
         let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
 
         assert!(!output.status.success(), "stderr:\n{stderr}");
-        // `-c` is forwarded argument 1 either way; the bad token is 2.
+        // `-c` is argument 1 after the file; the bad token is 2, or 3
+        // after an authored `--`.
+        let position = if explicit { 3 } else { 2 };
         assert!(
-            stderr.contains("provider argument 2 "),
+            stderr.contains(&format!("argument {position} after the composition file")),
             "explicit={explicit} stderr:\n{stderr}"
         );
         assert!(stderr.contains("not valid UTF-8"), "stderr:\n{stderr}");

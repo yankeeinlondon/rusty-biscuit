@@ -1,40 +1,43 @@
-//! Composition provider-argument ownership partition (pre-clap).
+//! Composition argument partition (pre-clap).
 //!
 //! Composition subcommands (`compose`, `inline-compose`, `sequence`) forward
-//! any CLI switch Claudine does not own to the underlying agent, mirroring the
-//! direct-wrapper launch contract. This module runs **after** [`super::normalize`]
-//! (Rules 1/2/4) and **replaces** the retired Rule 3 synthetic-separator
-//! coupling: instead of protecting trailing setters behind an inserted `--`,
-//! it partitions the normalized argv into two explicit vectors —
+//! provider switches to the underlying agent. This module runs **after**
+//! [`super::normalize`] (Rules 1/2/4) and settles everything that needs no
+//! composition file:
 //!
-//! - the **Claudine argv** handed to clap (file, `key=value` setters, and
-//!   Claudine-owned options with their values), and
-//! - the **provider tail** ([`ProviderTail`]) threaded into execution as
-//!   first-class launch state.
+//! - the **Claudine argv** handed to clap: the file, setters before it, and
+//!   Claudine-owned options with their values, wherever they appear before an
+//!   authored `--`;
+//! - the [`ArgumentsAfterFile`]: every other token after the file, in order,
+//!   plus the opaque suffix after the first `--`.
+//!
+//! Which of those tokens are setters, positionals (`argv`), or provider
+//! switches and their values depends on the file's authored `$schema` and
+//! `agent`, so type-aware ownership
+//! ([`claudine::composition::own_arguments`]) decides it inside the command,
+//! after the file is resolved. Help and version never get that far, so they
+//! never open a file.
 //!
 //! ## Ownership model
 //!
 //! Tokens after the composition subcommand are classified left to right:
 //!
 //! 1. A token matching Claudine's clap surface (option name, alias, or short,
-//!    in space or `=`/attached form) always belongs to Claudine — even after
-//!    an implicit agent tail has started — preserving the wrapper's flag
-//!    precedence (`-m`, `-o`, `-y`, `--model`, `--silent`, …). Its value slot
-//!    (for value-bearing options in space form) is kept with it.
-//! 2. The first **non-Claudine switch** after the composition file has been
-//!    identified starts an implicit agent tail. Every non-Claudine token from
-//!    that point (including setter-shaped values and bare operands) is
-//!    forwarded in original order.
+//!    in space or `=`/attached form) always belongs to Claudine, with the
+//!    value slot of a value-bearing option in space form. After the file, the
+//!    removed option leaves a [`CallerArgument::ClaudineOption`] marker so the
+//!    tokens on either side never join one provider value run.
+//! 2. The first bare non-setter token is the composition file. Setters before
+//!    it stay with Claudine.
 //! 3. A literal `--` after the file starts an **explicit** opaque tail: the
-//!    delimiter is consumed by Claudine and everything after it is forwarded
-//!    verbatim with no further classification. Its position is kept as the
-//!    tail's boundary, so an implicit prefix before it stays distinguishable.
+//!    delimiter is consumed and everything after it is forwarded verbatim
+//!    with no further classification, later `--` tokens included.
 //!
-//! An unowned switch — or a `--` — appearing *before* the composition file is
-//! a [`PartitionError`], because the file must be resolvable independently of
-//! provider argv. So is a forwarded token that is not valid UTF-8: the child
-//! argv is `String`-based, and a lossy conversion would send different bytes
-//! than the caller wrote.
+//! An unowned switch, or a `--`, appearing *before* the composition file is a
+//! [`PartitionError`], because the file must be resolvable independently of
+//! provider argv. So is an argument after the file that is not valid UTF-8:
+//! the child argv is `String`-based, and a lossy conversion would send
+//! different bytes than the caller wrote.
 //!
 //! The owned-flag surface is derived from the clap command definitions (see
 //! [`OwnedFlags::for_composition`]); it is never a second hand-maintained list.
@@ -43,7 +46,7 @@ use std::collections::HashSet;
 use std::ffi::OsString;
 
 use clap::{ArgAction, Args, CommandFactory};
-use claudine::composition::ProviderTail;
+use claudine::composition::{ArgumentsAfterFile, CallerArgument};
 
 use crate::args::Cli;
 use crate::commands::compose::ComposeArgs;
@@ -58,9 +61,10 @@ pub(crate) enum PartitionError {
     SwitchBeforeFile { subcommand: String, switch: String },
     /// A literal `--` appeared before the composition file.
     SeparatorBeforeFile { subcommand: String },
-    /// A forwarded token is not valid UTF-8. `position` counts forwarded
-    /// tokens from 1; the bytes themselves are never echoed.
-    NonUtf8ProviderArgument { position: usize },
+    /// An argument after the composition file is not valid UTF-8.
+    /// `position` counts arguments after the file from 1; the bytes
+    /// themselves are never echoed.
+    NonUtf8Argument { position: usize },
 }
 
 impl std::fmt::Display for PartitionError {
@@ -82,10 +86,9 @@ impl std::fmt::Display for PartitionError {
                  Supported order: claudine {subcommand} <file> [key=value ...] \
                  [CLAUDINE_OPTIONS] -- [AGENT_ARGS ...]"
             ),
-            Self::NonUtf8ProviderArgument { position } => write!(
+            Self::NonUtf8Argument { position } => write!(
                 f,
-                "provider argument {position} (counting forwarded arguments from 1) is not \
-                 valid UTF-8.\n\
+                "argument {position} after the composition file is not valid UTF-8.\n\
                  Claudine forwards provider arguments unchanged and will not rewrite one \
                  into different text. Pass the argument as valid UTF-8."
             ),
@@ -182,6 +185,12 @@ impl OwnedFlags {
         self.bool_flags.contains(flag)
     }
 
+    /// Whether `token` is a Claudine option whose value is the next argv
+    /// token (`--model`, `-m`, but not `--model=x` or `-mx`).
+    pub(crate) fn consumes_next(&self, token: &str) -> bool {
+        looks_like_flag(token) && matches!(self.classify(token), Ownership::ConsumesNext)
+    }
+
     /// Classify a flag-shaped token against the owned surface.
     fn classify(&self, token: &str) -> Ownership {
         if let Some(long_body) = token.strip_prefix("--") {
@@ -228,30 +237,30 @@ impl OwnedFlags {
 }
 
 /// Partition an already-[normalized](super::normalize) argv into the Claudine
-/// argv (for clap) and the provider tail (for execution).
+/// argv (for clap) and the [`ArgumentsAfterFile`] that type-aware ownership
+/// classifies once the file's frontmatter is read.
 ///
-/// Returns the argv unchanged, with an empty tail, for any non-composition
-/// argv.
+/// Returns the argv unchanged, with no arguments after the file, for any
+/// non-composition argv.
 ///
 /// ## Errors
 ///
 /// [`PartitionError`] when a non-Claudine switch or a `--` appears before the
-/// composition file, or when a forwarded token is not valid UTF-8.
+/// composition file, or when an argument after the file is not valid UTF-8.
 pub(crate) fn partition_composition_tail(
     argv: Vec<OsString>,
-) -> Result<(Vec<OsString>, ProviderTail), PartitionError> {
+) -> Result<(Vec<OsString>, ArgumentsAfterFile), PartitionError> {
     let Some((sub_idx, sub_name)) = find_subcommand(&argv, COMPOSITION_SUBCOMMANDS) else {
-        return Ok((argv, ProviderTail::default()));
+        return Ok((argv, ArgumentsAfterFile::default()));
     };
 
     let owned = OwnedFlags::for_composition();
 
     // Everything up to and including the subcommand stays in the Claudine argv.
     let mut claudine: Vec<OsString> = argv[..=sub_idx].to_vec();
-    let mut tail: Vec<String> = Vec::new();
+    let mut after_file: Vec<CallerArgument> = Vec::new();
     let mut opaque: Option<Vec<String>> = None;
-    let mut tail_started = false;
-    let mut file_seen = false;
+    let mut file_index: Option<usize> = None;
 
     let mut i = sub_idx + 1;
     while i < argv.len() {
@@ -260,318 +269,76 @@ pub(crate) fn partition_composition_tail(
 
         // Explicit `--` boundary: opaque, unclassified tail.
         if text == Some("--") {
-            if !file_seen {
+            let Some(file_index) = file_index else {
                 return Err(PartitionError::SeparatorBeforeFile {
                     subcommand: sub_name.to_string(),
                 });
-            }
+            };
             let mut suffix = Vec::with_capacity(argv.len() - i - 1);
-            for token in &argv[i + 1..] {
-                suffix.push(forwarded_text(token, tail.len() + suffix.len())?);
+            for (offset, token) in argv[i + 1..].iter().enumerate() {
+                suffix.push(argument_text(token, i + 1 + offset - file_index)?);
             }
             opaque = Some(suffix);
             break;
         }
 
-        // Claudine-owned flags win everywhere before an explicit boundary,
-        // including after an implicit tail has started.
+        // Claudine-owned flags win everywhere before an explicit boundary.
+        // After the file, the removed option leaves a marker so ownership
+        // never joins the tokens on either side into one value run.
         if let Some(text) = text
             && looks_like_flag(text)
         {
-            match owned.classify(text) {
-                Ownership::ConsumesNext => {
-                    claudine.push(token.clone());
-                    if let Some(value) = argv.get(i + 1) {
-                        claudine.push(value.clone());
-                        i += 2;
-                        continue;
-                    }
-                    i += 1;
-                    continue;
-                }
-                Ownership::SelfContained => {
-                    claudine.push(token.clone());
-                    i += 1;
-                    continue;
-                }
+            let consumed = match owned.classify(text) {
+                Ownership::ConsumesNext => 1 + usize::from(i + 1 < argv.len()),
+                Ownership::SelfContained => 1,
                 Ownership::Unowned => {
-                    // A non-Claudine switch starts (or extends) the implicit tail.
-                    if !tail_started && !file_seen {
+                    if file_index.is_none() {
                         return Err(PartitionError::SwitchBeforeFile {
                             subcommand: sub_name.to_string(),
                             switch: text.to_string(),
                         });
                     }
-                    tail.push(text.to_string());
-                    tail_started = true;
+                    after_file.push(CallerArgument::Token(text.to_string()));
                     i += 1;
                     continue;
                 }
+            };
+            claudine.extend(argv[i..i + consumed].iter().cloned());
+            if file_index.is_some() {
+                after_file.push(CallerArgument::ClaudineOption);
             }
+            i += consumed;
+            continue;
         }
 
-        // Positional token (file, setter, operand) or a non-UTF-8 token.
-        if tail_started {
-            tail.push(forwarded_text(token, tail.len())?);
-        } else if !file_seen {
+        match file_index {
+            // After the file: a setter, positional, or provider value, for
+            // ownership to decide.
+            Some(file_index) => {
+                after_file.push(CallerArgument::Token(argument_text(token, i - file_index)?));
+            }
             // Before the file: a setter-shaped token is a Claudine setter and
             // leaves the file unclaimed; any other bare token is the file.
-            if !text.map(looks_like_setter).unwrap_or(false) {
-                file_seen = true;
+            None => {
+                if !text.map(looks_like_setter).unwrap_or(false) {
+                    file_index = Some(i);
+                }
+                claudine.push(token.clone());
             }
-            claudine.push(token.clone());
-        } else {
-            // File already seen, no tail yet: a second bare positional falls
-            // through to clap's existing multiple-file diagnostic; a setter is
-            // applied as a Claudine override.
-            claudine.push(token.clone());
         }
         i += 1;
     }
 
-    Ok((claudine, ProviderTail::new(tail, opaque)))
+    Ok((claudine, ArgumentsAfterFile::new(after_file, opaque)))
 }
 
-/// The UTF-8 text of a token joining the tail at zero-based `index`.
-fn forwarded_text(token: &OsString, index: usize) -> Result<String, PartitionError> {
+/// The UTF-8 text of the argument `position` places after the file.
+fn argument_text(token: &OsString, position: usize) -> Result<String, PartitionError> {
     token
         .to_str()
         .map(str::to_owned)
-        .ok_or(PartitionError::NonUtf8ProviderArgument { position: index + 1 })
+        .ok_or(PartitionError::NonUtf8Argument { position })
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn argv(tokens: &[&str]) -> Vec<OsString> {
-        tokens.iter().map(OsString::from).collect()
-    }
-
-    fn strs(tokens: &[&str]) -> Vec<String> {
-        tokens.iter().map(|s| s.to_string()).collect()
-    }
-
-    fn partition(tokens: &[&str]) -> (Vec<String>, ProviderTail) {
-        let (claudine, tail) = partition_composition_tail(argv(tokens)).expect("no partition error");
-        let claudine: Vec<String> = claudine
-            .into_iter()
-            .map(|t| t.to_string_lossy().into_owned())
-            .collect();
-        (claudine, tail)
-    }
-
-    #[test]
-    fn non_composition_argv_passes_through() {
-        let (claudine, tail) = partition(&["claudine", "codex", "-c", "x"]);
-        assert_eq!(claudine, strs(&["claudine", "codex", "-c", "x"]));
-        assert!(tail.is_empty());
-    }
-
-    #[test]
-    fn reported_command_forwards_config_switch() {
-        // The headline bug: `-c model_reasoning_effort=low` must reach codex,
-        // and the setter-shaped value must NOT become a frontmatter override.
-        let (claudine, tail) = partition(&[
-            "claudine",
-            "sequence",
-            "fleet.md",
-            "-y",
-            "--provider",
-            "codex",
-            "-c",
-            "model_reasoning_effort=low",
-        ]);
-        assert_eq!(
-            claudine,
-            strs(&["claudine", "sequence", "fleet.md", "-y", "--provider", "codex"])
-        );
-        assert_eq!(tail.launch_args(), strs(&["-c", "model_reasoning_effort=low"]));
-        assert_eq!(tail.boundary(), None);
-    }
-
-    #[test]
-    fn setter_before_tail_stays_with_claudine() {
-        let (claudine, tail) = partition(&["claudine", "compose", "file.md", "name=Ken", "--codexflag"]);
-        assert_eq!(
-            claudine,
-            strs(&["claudine", "compose", "file.md", "name=Ken"])
-        );
-        assert_eq!(tail.launch_args(), strs(&["--codexflag"]));
-    }
-
-    #[test]
-    fn owned_flag_after_tail_is_reclaimed() {
-        // `-m gpt5` is Claudine's model flag; it wins even after the tail
-        // started. `--config` and its bare operand stay in the tail.
-        let (claudine, tail) = partition(&[
-            "claudine", "compose", "file.md", "--config", "foo", "-m", "gpt5",
-        ]);
-        assert_eq!(
-            claudine,
-            strs(&["claudine", "compose", "file.md", "-m", "gpt5"])
-        );
-        assert_eq!(tail.launch_args(), strs(&["--config", "foo"]));
-    }
-
-    #[test]
-    fn explicit_separator_forwards_opaque_tail() {
-        let (claudine, tail) = partition(&[
-            "claudine", "compose", "file.md", "--", "-c", "--silent", "value",
-        ]);
-        assert_eq!(claudine, strs(&["claudine", "compose", "file.md"]));
-        // Even `--silent` (a Claudine flag) is opaque after `--`.
-        assert_eq!(tail.launch_args(), strs(&["-c", "--silent", "value"]));
-        assert_eq!(tail.boundary(), Some(0));
-    }
-
-    #[test]
-    fn separator_after_implicit_prefix_keeps_the_boundary() {
-        // `-c x=y -- --native z`: one Boolean could not describe this tail.
-        let (claudine, tail) = partition(&[
-            "claudine", "compose", "file.md", "-c", "x=y", "--", "--native", "z",
-        ]);
-        assert_eq!(claudine, strs(&["claudine", "compose", "file.md"]));
-        assert_eq!(tail.launch_args(), strs(&["-c", "x=y", "--native", "z"]));
-        assert_eq!(tail.boundary(), Some(2));
-        assert_eq!(tail.implicit_args(), strs(&["-c", "x=y"]));
-        assert_eq!(tail.opaque_args().unwrap(), strs(&["--native", "z"]));
-    }
-
-    #[test]
-    fn authored_empty_suffix_is_preserved() {
-        let (_, prefix_only) = partition(&["claudine", "compose", "file.md", "-c", "x", "--"]);
-        assert_eq!(prefix_only.launch_args(), strs(&["-c", "x"]));
-        assert_eq!(prefix_only.boundary(), Some(2));
-
-        let (_, bare) = partition(&["claudine", "compose", "file.md", "--"]);
-        assert!(bare.is_empty());
-        assert_eq!(bare.boundary(), Some(0));
-    }
-
-    #[test]
-    fn only_the_first_separator_is_consumed() {
-        let (_, tail) = partition(&["claudine", "compose", "file.md", "--", "a", "--", "b"]);
-        assert_eq!(tail.launch_args(), strs(&["a", "--", "b"]));
-        assert_eq!(tail.boundary(), Some(0));
-    }
-
-    #[test]
-    fn switch_before_file_errors() {
-        let err = partition_composition_tail(argv(&["claudine", "compose", "--unknown", "file.md"]))
-            .expect_err("switch before file must error");
-        assert!(matches!(err, PartitionError::SwitchBeforeFile { .. }));
-    }
-
-    #[test]
-    fn separator_before_file_errors() {
-        let err = partition_composition_tail(argv(&["claudine", "compose", "--", "file.md"]))
-            .expect_err("separator before file must error");
-        assert!(matches!(err, PartitionError::SeparatorBeforeFile { .. }));
-    }
-
-    #[test]
-    fn value_flag_value_is_not_mistaken_for_file() {
-        // `-m gpt5` consumes its value; `file.md` is still the file, and the
-        // trailing `--x` starts the tail.
-        let (claudine, tail) = partition(&["claudine", "compose", "-m", "gpt5", "file.md", "--x"]);
-        assert_eq!(
-            claudine,
-            strs(&["claudine", "compose", "-m", "gpt5", "file.md"])
-        );
-        assert_eq!(tail.launch_args(), strs(&["--x"]));
-    }
-
-    #[test]
-    fn second_bare_positional_stays_for_clap_diagnostic() {
-        // Two ordinary non-setter positionals must keep flowing to clap's
-        // existing multiple-file error rather than starting a tail.
-        let (claudine, tail) = partition(&["claudine", "compose", "a.md", "b.md"]);
-        assert_eq!(claudine, strs(&["claudine", "compose", "a.md", "b.md"]));
-        assert!(tail.is_empty());
-    }
-
-    #[test]
-    fn bundled_bool_shorts_are_owned() {
-        let (claudine, tail) = partition(&["claudine", "compose", "file.md", "-yq", "--x"]);
-        assert_eq!(
-            claudine,
-            strs(&["claudine", "compose", "file.md", "-yq"])
-        );
-        assert_eq!(tail.launch_args(), strs(&["--x"]));
-    }
-
-    // ── Drift detection: the owned surface is derived from clap definitions ──
-
-    #[test]
-    fn owned_surface_is_derived_from_clap_and_non_empty() {
-        let owned = OwnedFlags::for_composition();
-        assert!(
-            !owned.value_flags.is_empty() && !owned.bool_flags.is_empty(),
-            "owned surface must be populated from the clap command definitions"
-        );
-        // Representative value-bearing options (space form consumes next token).
-        for flag in ["--provider", "--model", "-m", "--set", "--output", "-o"] {
-            assert!(
-                owned.is_value_flag(flag),
-                "{flag} must be a value-bearing owned flag; if the clap surface \
-                 changed, this drift test is the intended failure point"
-            );
-        }
-        // Representative boolean options.
-        for flag in ["--yolo", "-y", "--silent", "--dry-run", "--sandbox"] {
-            assert!(owned.is_bool_flag(flag), "{flag} must be a boolean owned flag");
-        }
-        // The `sequence`-only flag is in the union.
-        assert!(owned.is_value_flag("--fail-fast"));
-    }
-
-    // ── Non-UTF-8 refusal: never rewrite the bytes a caller forwarded ──
-
-    #[cfg(unix)]
-    fn invalid_token() -> OsString {
-        use std::os::unix::ffi::OsStringExt;
-        OsString::from_vec(vec![b'b', 0xFF, b'd'])
-    }
-
-    #[cfg(windows)]
-    fn invalid_token() -> OsString {
-        use std::os::windows::ffi::OsStringExt;
-        // An unpaired surrogate: valid WTF-16, not valid UTF-8.
-        OsString::from_wide(&[0x0062, 0xD800, 0x0064])
-    }
-
-    fn with_invalid(tokens: &[&str], at: usize) -> Vec<OsString> {
-        let mut argv = argv(tokens);
-        argv.insert(at, invalid_token());
-        argv
-    }
-
-    #[test]
-    fn non_utf8_implicit_tail_token_is_refused_by_position() {
-        let argv = with_invalid(&["claudine", "compose", "file.md", "--x", "-c"], 5);
-        let err = partition_composition_tail(argv).expect_err("lossy conversion must be refused");
-        assert_eq!(err, PartitionError::NonUtf8ProviderArgument { position: 3 });
-        let message = err.to_string();
-        assert!(message.contains("provider argument 3"), "{message}");
-        assert!(message.contains("not valid UTF-8"), "{message}");
-        assert!(!message.contains('\u{FFFD}'), "{message}");
-    }
-
-    #[test]
-    fn non_utf8_opaque_tail_token_is_refused_by_position() {
-        let argv = with_invalid(&["claudine", "compose", "file.md", "-c", "x", "--", "a"], 7);
-        let err = partition_composition_tail(argv).expect_err("lossy conversion must be refused");
-        assert_eq!(err, PartitionError::NonUtf8ProviderArgument { position: 4 });
-    }
-
-    #[test]
-    fn non_utf8_token_outside_the_tail_is_left_for_clap() {
-        // Before any tail starts, the token is a Claudine positional; clap
-        // reports it, so the partition passes it through untouched.
-        let argv = with_invalid(&["claudine", "compose", "file.md"], 3);
-        let (claudine, tail) = partition_composition_tail(argv).expect("not a tail token");
-        assert_eq!(claudine[3], invalid_token());
-        assert!(tail.is_empty());
-    }
-}
+mod tests;

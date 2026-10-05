@@ -23,8 +23,9 @@ Because composition flows through the same execution path as `claudine claude` /
 
 ### Positional Arguments
 
-Each command accepts exactly one file reference plus zero or more `key=value`
-setters, in any order:
+Each command takes one file reference plus any number of `key=value` setters
+and bare words. The first bare word that is not a setter is the file; it must
+come before any provider switch:
 
 ```sh
 claudine compose @prompts/review.md review=review.md
@@ -35,46 +36,181 @@ claudine inline-compose draft=false @notes/update.md
 A token is a setter when it contains `=` and its key starts with an ASCII
 letter or `_` and contains only letters, digits, `_`, or `-`. Dot-paths and
 path-like tokens (for example `foo.bar=baz`) are not setters and are treated
-as file-reference candidates.
+as file-reference candidates (or, after the file, as positional arguments).
+
+Every bare word after the file that no provider switch takes becomes the
+`argv` frontmatter property, an array of strings in the order typed:
+
+```sh
+claudine compose plan.md alpha --codex -c x=y beta phase=2
+# argv: ["alpha", "beta"]   phase: 2   provider tail: -c x=y
+```
+
+```markdown
+Arguments: {{ argv }}
+```
+
+- Values are strings, never JSON5-parsed (`1` stays `"1"`); an empty argument
+  stays an empty string. The file is not in `argv`, and neither is anything
+  after an authored `--`.
+- With at least one positional, `argv` overrides an authored `argv`, like a
+  setter. With none, an authored `argv` is left alone.
+- `argv` is reserved: an `argv=…` setter, or a `--set` object holding `argv`,
+  is an error before `--` (with or without positionals). Pass the values as
+  bare words instead.
+- `sequence` applies `argv` to every step, and it stays caller input through
+  retries and `proxy` hand-offs. `inline-compose` never writes it into the
+  document.
+- A document that declares `argv` in its `$schema` validates the effective
+  array like any other value (declare it as `string[]`).
 
 Setter values are parsed as JSON5 first and fall back to strings when JSON5
 parsing fails, so `count=3`, `enabled=true`, `tags=["a","b"]`, and
-`review=review.md` all resolve to their natural types.
+`review=review.md` all resolve to their natural types. The value is split at
+the first `=`, so `label=a=b` sets `label` to `a=b`, and `phase=` sets an
+empty string.
 
-Inline setters override matching keys from `--set`. For `sequence`, reserved
-per-step overlay keys still win over both `--set` and shorthand setters.
+Setters can sit anywhere after the file, including after provider switches
+(see [Setters after a provider switch](#setters-after-a-provider-switch)).
+When a key is repeated, the last occurrence wins. Inline setters override
+matching keys from `--set` wherever either is written (`--set` is accepted
+once per command). For `sequence`, reserved per-step overlay keys still win
+over both `--set` and shorthand setters.
 
 ### Provider Argument Forwarding
 
 Any CLI switch Claudine does not own is forwarded to the underlying agent,
-mirroring the direct-wrapper contract. The first non-Claudine switch **after
-the composition file** starts an agent tail; every token from there is passed
-through verbatim:
+mirroring the direct-wrapper contract. No `--` is needed. Which tokens after
+the file belong to the agent is decided per token from the switch's researched
+type in Claudine's compiled catalog:
 
 ```sh
-# `-c model_reasoning_effort=low` is forwarded to Codex; the setter-shaped
-# value is NOT applied as a frontmatter override.
-claudine sequence fleet.md --codex -c model_reasoning_effort=low
+# Codex's -c takes one value, so the setter-shaped value is forwarded and
+# not applied as a frontmatter override; phase=2 is Claudine's setter.
+claudine sequence fleet.md --codex -c model_reasoning_effort=low phase=2
+
+# Claude's --add-dir takes a list: a and b are forwarded; x=y is a setter.
+claudine compose plan.md --claude --add-dir a b x=y
 ```
 
-No `--` is required. An explicit `--` after the file still works and forwards
-its tail opaquely (no Claudine flag is extracted from it). Claudine-owned flags
-always win before a `--` — a colliding native switch (e.g. Codex's own `-m`)
-must be placed after `--`. The composition file must come first: an unowned
-switch (or a `--`) before the file is an error with ordering guidance.
+- A `key=value` the document's `$schema` declares is always Claudine's, even
+  directly after a provider switch.
+- Any other `key=value` goes to the agent only as the first value of a switch
+  that takes a string or a list; otherwise it is a setter.
+- A bare word a switch does not take is a positional argument (`argv`), so a
+  provider operand needs `--`.
+- The types come from the provider named on the command line, else the
+  document's literal `agent`, else every provider. When those providers read a
+  word differently (Claude's `-c` takes nothing, Codex's takes a value),
+  Claudine asks which agent the arguments are for in an interactive session,
+  and otherwise fails with `ambiguous provider argument`. Naming the provider
+  (`--codex`) or using `--` settles it.
+- Ownership reads the document **as authored**: a caller `agent=…` or `--set`
+  changes the run, not who owns a token.
+- Before every launch the implicit switches are checked against the provider
+  that actually runs, at the command it runs (including a resume entrypoint).
+  A value the switch does not take, or a missing required value, fails before
+  the spawn.
+
+An explicit `--` after the file still works and forwards its tail opaquely:
+nothing after it is classified or checked. Claudine-owned flags always win
+before a `--` — a colliding native switch (e.g. Codex's own `-m`) must be
+placed after `--`. The composition file must come first: an unowned switch
+(or a `--`) before the file is an error with ordering guidance. The full rules
+are in [argv-normalization.md → Type-aware ownership](argv-normalization.md#type-aware-ownership).
+
+#### Setters after a provider switch
+
+A `key=value` written after a provider switch is still a setter: it changes
+the prompt's frontmatter and is never sent to the agent. The only exception
+is the switch's own value. Claudine knows how many values each provider
+switch takes, so it can tell the two apart:
+
+```sh
+# -c takes one value: x=y is Codex's, phase=2 is a setter.
+claudine compose plan.md --codex -c x=y phase=2
+#   frontmatter: phase: 2        agent receives: -c x=y
+
+# The attached form carries its value, so phase=2 is a setter.
+claudine compose plan.md --codex --config=x=y phase=2
+#   frontmatter: phase: 2        agent receives: --config=x=y
+
+# --add-dir takes a list: the run of bare words ends at the setter.
+claudine compose plan.md --claude --add-dir a b phase=2
+#   frontmatter: phase: 2        agent receives: --add-dir a b
+
+# A list switch takes at most one key=value, and only as its first value.
+claudine compose plan.md --claude --add-dir x=y phase=2
+#   frontmatter: phase: 2        agent receives: --add-dir x=y
+
+# A Claudine option (-m) between the words ends the switch's run.
+claudine compose plan.md --codex -c x=y -m gpt5 phase=2
+#   model: gpt5   frontmatter: phase: 2   agent receives: -c x=y
+```
+
+A switch that takes no value, or one Claudine has no record of, never takes
+a `key=value`, so a setter right after it stays a setter. Values the agent
+receives are unchanged strings: in `-c count=3 count=3` the first `count=3`
+reaches Codex as text and the second sets `count` to the number `3`.
+
+The per-token decision, including the cases above, is drawn in the
+flowchart under
+[argv-normalization.md → Type-aware ownership](argv-normalization.md#type-aware-ownership).
+
+**A declared parameter is never a switch's value.** If the document's
+`$schema` declares `phase`, then `phase=2` is a setter even directly after
+`-c`. That leaves `-c` with no value, so the command fails before any agent
+starts. The words after it never move up to fill the gap, so
+`--codex -c phase=2 x=y` fails the same way:
+
+```text
+Error: provider argument `-c` takes a value for Codex (at its `exec` command), but none was
+forwarded with it: the `phase` setter after it is a parameter the document declares, so it
+stays Claudine's and is never the switch's value.
+Give `-c` a separate provider value, or put intentional provider arguments after `--`.
+```
+
+The message names the switch, the parameter, and the provider, but never the
+setter's value. When the `$schema` is written as an expression, its parameter
+names are not known before it runs, so a `key=value` a switch could take is
+an error asking you to put the provider value after `--` or pass the setter
+with `--set`.
+
+**`--` keeps provider data away from the prompt.** Every word after an
+authored `--` goes to the agent untouched, even one shaped like a declared
+parameter:
+
+```sh
+claudine compose plan.md --codex -- -c x=y phase=2
+#   frontmatter: unchanged       agent receives: -c x=y phase=2
+```
+
+The same setter applies to every launch of the command: each `sequence`
+step, a lifecycle `retry`, `resume`, or `proxy` target. `inline-compose` uses
+it for the run and never writes it into the document.
+
+> **Behavior change.** Earlier releases forwarded every token after the first
+> provider switch Claudine did not own, so a trailing `phase=2` reached the
+> agent and the prompt silently kept its default. Setters are now applied
+> wherever they appear. If you meant a `key=value` as provider data, put it
+> after `--`.
 
 Before launch, one INFO status says what is forwarded. It names switches only,
-never values, and describes a tail after `--` as opaque:
+never values, and describes a tail after `--` as opaque. Each switch before
+the `--` is then explained from Claudine's compiled switch catalog:
 
 ```text
 ℹ Forwarding provider arguments to Codex: -c
+- -c is Codex's --config switch (override one configuration value for this run); forwarding to Codex.
+
 ℹ Forwarding an opaque argument tail to Codex (passed after --).
 ```
 
 The notice appears once per distinct provider and tail for the whole command,
 so a `sequence` whose steps and parallel tasks all launch Codex with the same
-tail shows it once. `--quiet` and `--silent` suppress it. Claudine makes no
-claim about whether the agent accepts a forwarded switch, so a genuinely
+tail shows it once. `--quiet` and `--silent` suppress it. A switch the catalog
+does not establish is still forwarded, and its sentence says so. Claudine
+makes no claim about whether the agent accepts a forwarded switch, so a genuinely
 invalid one may be rejected by the agent at startup (see
 [When the agent rejects the tail](#when-the-agent-rejects-the-tail)).
 
@@ -82,8 +218,9 @@ invalid one may be rejected by the agent at startup (see
 values (`--api-key ****`, `--token=****`, `-c****` for a credential attached
 to a short switch) masked, so a launch can be audited. The `AGENT_PARAMS`
 variable the agent's environment carries is masked the same way. The agent
-itself receives the original tokens. A forwarded token that is not valid UTF-8
-is refused before anything runs, because Claudine will not change its bytes.
+itself receives the original tokens. An argument after the file that is not
+valid UTF-8 is refused before anything runs, because Claudine will not change
+its bytes.
 See the mechanism in
 [argv-normalization.md → Provider-argument partition](argv-normalization.md#provider-argument-partition).
 
@@ -963,7 +1100,7 @@ $schema:
 
 `claudine compose plan spec=everywhere` (with no literal `everywhere` file) now:
 
-1. walks the `match(**/*spec*.md)` glob from the **launch area** (the same `property_value_root` anchor completion uses, so *offered == accepted*),
+1. walks the `match(**/*spec*.md)` glob exactly as TAB completion does, so *offered == accepted*: a bare pattern searches the **launch area** first and then the repository root, and `./`, `&`, `^`, `~`, and `@` name their own folders (see [Property values](./completions/shell-completions.md#property-values-after-)),
 2. filters candidates whose path contains `everywhere` (case-insensitive), and
 3. drives a **confirmation dialog** on a single match or a **chooser** on multiple, then records the selected path in the effective override and caller provenance before continuing preparation. Each unresolved supplied input is handled, including individual file-array elements.
 

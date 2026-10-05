@@ -535,7 +535,7 @@ refresh it after changing the catalog.
 | Filesystem | `markdown_title(file)` | Returns the title from frontmatter or the first H1 heading. | `markdown_title("fixture.md")` ⇒ `Fixture Title` |
 | Filesystem | `validate_schema(file)` | Validates a Markdown document against its declared schema. | `validate_schema("fixture.md")` ⇒ `true` |
 | Filesystem | `validate_schema(file, obj)` | Validates a Markdown document against its declared schema. | `validate_schema("fixture.md", {})` ⇒ `true` |
-| Filesystem | `find_files(pattern)` | Returns every file a glob reference matches (`&dir/**/name.md`), as sorted absolute paths; the path before the first wildcard is the directory searched, its first candidate that exists (a file there matches nothing). | `length(find_files("**/note.md"))` ⇒ `2` |
+| Filesystem | `find_files(pattern)` | Returns every file a glob reference matches (`&dir/**/name.md`, `^docs/*.md`), as absolute paths merged across every root of its prefix in native order (most local root first, then shallowest, then by path component). A bare pattern searches the document's folder, then the repository root. A file symlink a bare, `./`, or `../` pattern matches whose target leaves the file tree is skipped with a `dm.glob.skipped_symlink` warning. A directory the search must enter but cannot read fails the expression with an I/O failure instead of shortening the list. | `length(find_files("**/note.md"))` ⇒ `2` |
 | Filesystem | `is_indexed_file(file)` | Returns true when the filename stem matches the indexed grammar (base-NNN). | `is_indexed_file("review-1.md")` ⇒ `true` |
 | Filesystem | `file_index(file)` | Returns the parsed index suffix, or -1 when non-indexed. | `file_index("review-1.md")` ⇒ `1` |
 | Filesystem | `increment_file_index(file)` | Increments the numeric index suffix, preserving zero-padding width. | `increment_file_index("review-1.md")` ⇒ `review-2.md` |
@@ -550,6 +550,8 @@ refresh it after changing the catalog.
 | Filesystem | `join(left, right)` | Joins two path strings with normalized separators. | `join("sub", "note.md")` ⇒ `sub/note.md` |
 | Filesystem | `link(file)` | Creates a Markdown link to a local file, using its relative path as the link text. |  |
 | Filesystem | `link(target, desc)` | Creates a Markdown link to a local file, using its relative path as the link text. |  |
+| Filesystem | `code_link(file)` | Creates a Markdown link whose text is inline code. Arguments, destinations, and errors match link(); the text is a code span, so brackets and backslashes are kept as written rather than escaped. |  |
+| Filesystem | `code_link(target, desc)` | Creates a Markdown link whose text is inline code. Arguments, destinations, and errors match link(); the text is a code span, so brackets and backslashes are kept as written rather than escaped. |  |
 | Filesystem | `has_command(cmd)` | Returns true when the command is found on PATH or is an existing executable absolute path. |  |
 | Context | `has_skill(name)` | Returns true when a skill directory exists in a user-scoped or local-scoped skill root. |  |
 | Context | `has_local_skill(name)` | Returns true when a skill directory exists in a local-scoped skill root. |  |
@@ -653,6 +655,7 @@ whether a local path exists; they operate on the resolved path shape.
 | `absolute(path)` | the absolute form of a path | **no** |
 | `relative(path)` | a path relative to the base dir | **no** |
 | `has_command(cmd)` | whether a command is runnable on the host | **no** |
+| `find_files(pattern)` | every file a glob reference matches | **no** |
 
 `frontmatter(path, …)` and `markdown_title(path)` decode a stored
 [literal token](../inline/interpolation.md#literal-tokens) to the text it
@@ -678,6 +681,69 @@ intentionally **not** resolved and always return `false` by design:
 
 Both follow the never-error contract — they return `false` rather than raising —
 and can be addressed later without an API change.
+
+#### Finding Files
+
+`find_files(pattern)` lists every file a **glob reference** matches, so a
+document can count, list, or link a set of files it does not name one by one:
+
+```md
+{{ as_unordered_list(find_files("^docs/*.md")) }}
+{{ length(find_files("&**/spec.md")) }} specs in this repository
+```
+
+The pattern is an optional file-reference prefix followed by a glob. The
+prefix picks the folders searched, exactly as it does for a single file
+reference, and the result merges the matches of **every** folder, not just the
+first one that has any:
+
+| Pattern | Folders searched, in order |
+| --- | --- |
+| `*.md` (bare) | the document's folder, then the repository root |
+| `./docs/*.md`, `../x/*.md` | the document's folder only |
+| `&**/spec.md` | the repository root |
+| `^docs/*.md` | the package, the package area, then the repository root |
+| `@prompts/*.md`, `~/notes/*.md`, `/abs/*.md` | the `@` folders, the home directory, the folder as written |
+
+Results are absolute paths, spelled with `/`, in **native order**: the most
+local folder's files first, then within each folder the shallowest files
+first, then by path component. They are not re-sorted alphabetically across
+folders. A file reached from two folders is listed once, under the first.
+
+```mermaid
+flowchart LR
+    P["^docs/*.md"] --> R1["package/docs"]
+    P --> R2["area/docs"]
+    P --> R3["repository/docs"]
+    R1 --> L["one list: package files,<br/>then area files,<br/>then repository files"]
+    R2 --> L
+    R3 --> L
+```
+
+`*` and `?` stay within one path segment and `**` crosses segments. The full
+grammar, including `!` exclusions and escaping, is biscuit-file's
+[Glob References](../../../biscuit-file/docs/topics/file-references.md#glob-references-globreference).
+
+- **Nothing is filtered.** Hidden files, gitignored files, and `_`-prefixed
+  files are listed like any other, so `find_files("&**/*.md")` walks build
+  output such as `target/` too. Narrow the pattern (`&docs/**/*.md`) when that
+  matters.
+- **Symlinks.** Directory symlinks are never followed. A file symlink that a
+  bare, `./`, or `../` pattern matches and whose target leaves the document's
+  file tree is left out, and the compose report gets one
+  `dm.glob.skipped_symlink` warning naming the link and its target.
+- **`null` lists nothing.** `find_files(null)` returns `[]`.
+- **Failures.** A pattern that cannot be used fails the expression, and the
+  error ends with the same `failure:` row a failed file reference shows (see
+  [File Reference Failures](../errors/file-reference-failures.md)):
+
+  | Pattern | Why | Row |
+  | --- | --- | --- |
+  | `../../*.md` in a document at the repository root | a bare, `./`, or `../` glob may not climb out of the file tree (`RelativeTreeEscape`) | `failure: invalid-reference` |
+  | `&**/*.md` or `^*.md` outside a repository | `&` and `^` need a repository (`OutsideRepository`) | `failure: missing-context` |
+  | `[a.md` | the glob syntax is invalid | `failure: invalid-reference` |
+  | `https://example.com/*.md` | a glob reference is local only | `failure: unsupported-remote` |
+  | `docs/**/*.md` where `docs/locked/` cannot be read | the search would have to enter a directory it cannot read; the error names that directory rather than returning a partial list | `failure: io` |
 
 #### Indexed and Path Helpers
 
@@ -742,8 +808,30 @@ merge_status: '$( is_truthy(predict_conflicts("feature/api")) ? "conflicted" : "
   form rejects HTTP(S) URLs because a description is required.
 - `link(target, desc)` — emits `[desc](destination)`. `target` may be a local
   file reference or an HTTP(S) URL; `desc` must be a string. Link text escapes
-  `[` and `]`; destinations that would break CommonMark are wrapped in angle
-  brackets or percent-encoded.
+  `\`, `[`, and `]`; destinations that would break CommonMark (spaces,
+  parentheses, angle brackets, control characters) are wrapped in angle
+  brackets.
+- `code_link(file)` and `code_link(target, desc)` — the same link with the text
+  as inline code. Arguments, null handling, destinations, and errors are
+  `link()`'s; only the text differs.
+
+  ```md
+  The {{code_link(plan)}} _plan_ has been created
+  ```
+
+  With `plan` set to `plans/foo.md`, this composes to
+  `` The [`plans/foo.md`](/abs/plans/foo.md) _plan_ has been created `` and
+  renders as a clickable link with a code-styled label.
+  `{{code_link("https://example.com", "md hash")}}` gives
+  `` [`md hash`](https://example.com) ``.
+
+  Because the text is a code span, it is literal: `[`, `]`, and `\` are kept as
+  written, not escaped, so `code_link(url, "a]b")` gives `` [`a]b`](url) ``. The
+  fence grows past any backtick in the text (`` a`b `` gives
+  ```` [``a`b``](url) ````), line endings become spaces, and an empty text gives
+  the ordinary empty link `[](url)`. Use `code_link()` rather than wrapping
+  `{{link(x)}}` in backticks: a code span around a link shows the literal
+  `[text](url)`.
 
 #### Skill Helpers
 

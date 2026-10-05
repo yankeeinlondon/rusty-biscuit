@@ -297,6 +297,11 @@ fn recursive_completion_stays_unsupported_but_malformed_payloads_still_error() {
     }
 }
 
+/// A junction is a reparse point the filesystem follows, and the lexical path
+/// stays inside the repository; only the canonical check through the nearest
+/// existing ancestor (`missing.md` does not exist) sees the escape. Needs the
+/// Windows filesystem: junctions exist nowhere else, and the Unix symlink
+/// form is covered by the portable link tests.
 #[cfg(windows)]
 #[test]
 fn repository_containment_rejects_an_external_junction() {

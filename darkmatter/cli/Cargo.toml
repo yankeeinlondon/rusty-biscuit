@@ -53,6 +53,8 @@ tempfile = "3"
 serial_test = "3"
 test-toolkit = { path = "../../tools/test-toolkit" }
 tracing-test = "0.2"
+# The shared path lookup guard reads target roots from `Cargo.toml`.
+toml = "1.0"
 syntect = "5.2"
 # Unconditional for every test target, not just the `terminal-tests` ones: the
 # ungated targets resolve fixtures through `manifest_dir!()`, which the optional

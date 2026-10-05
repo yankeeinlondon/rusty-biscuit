@@ -1288,13 +1288,24 @@ impl<'a> TransclusionEngine<'a> {
             })
         };
 
-        let render = match file_links::discover(&directive, &options.source) {
+        let discovered = file_links::discover(
+            &directive,
+            &options.source,
+            &options.source_file_resolution_context(),
+        );
+        // Each file symlink the glob left out is reported, whatever the result.
+        let mut report = ComposeReport::new();
+        if let Ok(result) = &discovered {
+            for entry in &result.skipped {
+                report.add_warning(ComposeWarning::skipped_symlink("file_links", entry).at_line(directive.line));
+            }
+        }
+        let render = match discovered {
             Ok(result) => match result.render {
                 Some(render) => render,
                 None => {
                     // Empty result: strict mode inserts a subtle notice,
                     // permissive mode removes the directive with a warning.
-                    let mut report = ComposeReport::new();
                     report.transclusions_skipped = 1;
                     if options.fail_fast {
                         return skipped_replace("_No matching files_".to_string(), report);
@@ -1314,7 +1325,6 @@ impl<'a> TransclusionEngine<'a> {
             },
             Err(err) => {
                 if self.resolve_ignore_invalid(options) {
-                    let mut report = ComposeReport::new();
                     report.transclusions_skipped = 1;
                     report.add_warning(
                         ComposeWarning::new("file_links", err.to_string()).at_line(directive.line),
@@ -1372,7 +1382,6 @@ impl<'a> TransclusionEngine<'a> {
             directive.inferred_indent.as_deref(),
         );
 
-        let mut report = ComposeReport::new();
         report.transclusions_applied = 1;
         Ok(ResolvedTransclusion {
             order,

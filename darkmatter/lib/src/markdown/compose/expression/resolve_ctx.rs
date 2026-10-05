@@ -79,6 +79,10 @@ pub struct ResolutionContext {
     /// authority grants nothing, so a surface that was not given one cannot
     /// send a packet.
     pub(crate) icmp: crate::markdown::compose::icmp::IcmpAuthority,
+    /// Where `find_files()` records the file symlinks it skipped; the request's
+    /// sink, so the root report receives them. The default sink is drained by
+    /// no one.
+    pub(crate) glob_warnings: crate::markdown::compose::glob_listing::GlobWarningSink,
     /// Refresh authority for the lazy `current` root, carrying the invocation's
     /// capability to observe one mutable fact now. The default holds no
     /// provider, so a surface that was not given one fails closed instead of
@@ -117,6 +121,7 @@ impl ResolutionContext {
             shell_probe: Default::default(),
             nested_compose: Default::default(),
             icmp: Default::default(),
+            glob_warnings: Default::default(),
             current: Default::default(),
             file_resolution_context: context,
             caller_file_provenance: HashMap::new(),
@@ -395,7 +400,7 @@ pub(crate) fn resolve_document_file_ref(
 /// A `cwd` outside the request's tree is the caller's own document, so it is
 /// derived the way compose admits such a source: trusted-external when only
 /// that derivation is valid.
-fn document_file_context(
+pub(crate) fn document_file_context(
     cwd: &Path,
     request_context: &biscuit_file::FileResolutionContext,
 ) -> biscuit_file::FileResolutionContext {
@@ -468,32 +473,6 @@ pub(crate) fn resolve_document_file_ref_shape(
                 file_ref.raw()
             ))
         })
-}
-
-/// Resolves a document-backed reference to the directory it names, or `None`
-/// when its first existing candidate is a file or no candidate exists.
-///
-/// The candidate that decides is the one
-/// [`resolve_entry_in_context`](crate::markdown::fs::resolve_entry_in_context)
-/// selects, so a directory reader and a file reader agree on precedence:
-/// `&dir` is the repository root's `dir`, `^dir` the first of the package,
-/// package-area, then repository `dir` that exists.
-///
-/// ## Errors
-///
-/// Propagates the typed [`FileReferenceError`] when the plan cannot be built
-/// (an invalid context or a missing home, vault, or repository anchor) or a
-/// candidate before the deciding one cannot be probed (`Io`).
-pub(crate) fn resolve_document_directory(
-    file_ref: &FileReference,
-    cwd: &Path,
-    request_context: &biscuit_file::FileResolutionContext,
-) -> Result<Option<PathBuf>, FileReferenceError> {
-    let ctx = document_file_context(cwd, request_context);
-    Ok(match crate::markdown::fs::resolve_entry_in_context(file_ref, &ctx)? {
-        Some(crate::markdown::fs::ReferenceEntry::Directory(directory)) => Some(directory),
-        Some(crate::markdown::fs::ReferenceEntry::File(_)) | None => None,
-    })
 }
 
 #[cfg(test)]

@@ -8,4 +8,4 @@ expression: out
 ┃ 
 ┃ failure: invalid-reference
 ┃ 
-┃ Check sigil usage: `@` magic, `&` repository root, `^` repository-scoped.
+┃ Check sigil usage: @ magic, & repository root, ^ repository-scoped.

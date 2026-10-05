@@ -107,6 +107,7 @@ impl Markdown {
         // Same handle rule for the lazy roots: one sink drains every fail-closed
         // `current.*` read raised anywhere under this root.
         let current = options.current_authority();
+        let glob_warnings = options.glob_warnings.clone();
         let mut report = self.run_compose_pipeline_internal(options, &mut runtime)?;
         report.cache_stats = Some(runtime.cache.stats());
         let remote_fetch_stats = runtime.remote_fetch.stats();
@@ -114,6 +115,7 @@ impl Markdown {
         report.remote_fetch_stats = Some(remote_fetch_stats);
         report.warnings.extend(icmp.take_warnings());
         report.warnings.extend(current.take_warnings());
+        report.add_warnings(glob_warnings.take_warnings());
         Ok(report)
     }
 
@@ -143,7 +145,7 @@ impl Markdown {
         let node = match &options.source {
             ComposeSource::Unknown => None,
             ComposeSource::File(path) => Some((
-                std::fs::canonicalize(path)
+                biscuit_file::canonicalize_simplified(path)
                     .unwrap_or_else(|_| path.clone())
                     .to_string_lossy()
                     .to_string(),

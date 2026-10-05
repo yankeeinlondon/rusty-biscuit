@@ -51,7 +51,7 @@ fn test_end_to_end_link_interpolation() {
 
 #[test]
 fn test_home_dir_interpolation() {
-    let home = dirs::home_dir().expect("Has home dir");
+    let home = biscuit_file::home_dir().expect("Has home dir");
     let target = home.join("integration_test_home.txt");
     fs::write(&target, "home content").unwrap();
     let abs_target = std::fs::canonicalize(&target).unwrap();

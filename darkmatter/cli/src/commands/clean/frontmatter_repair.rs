@@ -292,7 +292,7 @@ impl EditProjectionPass {
 impl FrontmatterRepair {
     /// The zero-cost outcome for documents with no frontmatter, or an empty
     /// frontmatter block: no YAML analysis, no schema resolution, and — most
-    /// expensively — no trigger-schema git-root ancestor walk.
+    /// expensively — no trigger-schema discovery in the schema roots.
     fn untouched(source: &str) -> Self {
         Self {
             source: source.to_string(),
@@ -656,8 +656,8 @@ fn build_markdown(source: String, document_path: Option<&Path>) -> Result<Markdo
 ///
 /// Called at most once per run and only behind a non-empty frontmatter block,
 /// so the returned context *is* the per-invocation cache the performance
-/// contract requires — trigger discovery's ancestor walk to the Git root
-/// happens here or not at all.
+/// contract requires — trigger discovery in the schema roots happens here
+/// or not at all.
 fn resolve_schema_context(
     flags: &CleanSchemaFlags,
     document_path: Option<&Path>,
@@ -691,7 +691,8 @@ fn resolve_schema_context(
     Ok(config.resolve(document_path)?)
 }
 
-/// Escape text so it renders exactly as written inside Prose markup.
+/// Escape text so it renders exactly as written inside Prose markup; code
+/// spans it marks with backticks stay literal.
 fn escape_prose(text: &str) -> String {
-    Prose::escape_text(text)
+    Prose::escape_text_outside_code_spans(text)
 }

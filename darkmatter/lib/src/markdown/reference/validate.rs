@@ -152,7 +152,7 @@ impl biscuit_terminal::components::renderable::TerminalRenderable for Validation
         use std::collections::BTreeMap;
 
         use biscuit_terminal::components::list::UnorderedList;
-        use biscuit_terminal::components::prose::Prose;
+        use biscuit_terminal::components::prose::{LineBreaks, Prose};
 
         let errors: Vec<_> = self
             .report
@@ -211,12 +211,18 @@ impl biscuit_terminal::components::renderable::TerminalRenderable for Validation
                 };
 
                 list.add(Prose::new(match issue.resolution_failure() {
-                    Some(failure) => format!(
-                        "{item_text}\n\n<dim>failure:</dim> {}",
-                        crate::markdown::errors::resolution_failure_name(failure)
-                    ),
+                    Some(failure) => {
+                        let mut text = format!(
+                            "{item_text}\n\n<dim>failure:</dim> {}",
+                            crate::markdown::errors::resolution_failure_name(failure)
+                        );
+                        if let Some(hint) = failure.glob_hint(&issue.reference_display) {
+                            text.push_str(&format!("\n<dim>hint:</dim> {hint}"));
+                        }
+                        text
+                    }
                     None => item_text,
-                }));
+                }).with_line_breaks(LineBreaks::Hard));
             }
 
             out.push_str(&list.render(term));
@@ -745,7 +751,11 @@ fn validate_local_path(
                 .is_some_and(|origin| origin == "data");
             report.issues.push(ReferenceIssue {
                 code: ReferenceIssueCode::MissingLocalTarget,
-                message: format!("Missing local target: {raw}"),
+                message: crate::markdown::errors::with_glob_hint(
+                    format!("Missing local target: {raw}"),
+                    biscuit_file::ResolutionFailure::NoMatch,
+                    raw,
+                ),
                 severity: if in_data { ReferenceSeverity::Warning } else { ReferenceSeverity::Error },
                 kind: record.kind,
                 reference_display: raw.to_string(),

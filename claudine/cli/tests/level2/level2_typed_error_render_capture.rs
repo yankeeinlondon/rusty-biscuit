@@ -882,13 +882,13 @@ fn level2_proxy_routes_share_identity_across_routes_in_tmux() {
     let init_plain = normalize_wrapped_block(&init.frame.plain);
     let term_plain = normalize_wrapped_block(&term.frame.plain);
     assert!(
-        init_plain.contains("`initialize` event of"),
+        init_plain.contains("initialize event of"),
         "the initialize route must render its structured event label separately \
          from the property path.\nplain:\n{}",
         init.frame.plain
     );
     assert!(
-        term_plain.contains("`failure` event of"),
+        term_plain.contains("failure event of"),
         "the terminal route must render its structured event label separately \
          from the property path.\nplain:\n{}",
         term.frame.plain
@@ -1111,7 +1111,9 @@ fn level2_preflight_shell_denial_renders_status_block_in_tmux() {
 ///
 /// That path stays valid (spec §D5) — if it starts rendering a block, selection
 /// has become too eager. Argument-shape rejection is the honest unstructured
-/// case: authored prose with no typed error behind it. Per `decisions.md` D-10,
+/// case: authored prose with no typed error behind it. An `argv=` setter is
+/// one (`argv` holds positional arguments and cannot be set by name). Per
+/// `decisions.md` D-10,
 /// `--timeout not-a-duration` is deliberately **not** used here — it looks
 /// unstructured but carries a typed `HarnessError::InvalidTimeout`, and
 /// correctly renders a block.
@@ -1122,7 +1124,7 @@ fn level2_unstructured_failure_still_uses_the_generic_fallback_in_tmux() {
 
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
     let staged = stage("claudine-l2-unstructured", TRIVIAL_DOC, 0);
-    let capture = run_in_pane(&mut harness, &staged, &TTY_COLOR, &["also-a-file.md"]);
+    let capture = run_in_pane(&mut harness, &staged, &TTY_COLOR, &["argv=x"]);
 
     assert!(
         capture.has_generic_error_line(),

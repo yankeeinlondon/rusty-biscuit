@@ -106,11 +106,14 @@ pub enum GenError {
     )]
     UnknownOverrideField { field: String },
 
-    #[error("override for `{field}` is missing its required `reason:` string")]
-    OverrideMissingReason { field: String },
+    #[error("override for `{field}` needs a non-empty `reason:` string, found {found}")]
+    OverrideInvalidReason { field: String, found: &'static str },
 
     #[error("override for `{field}` is missing its required `value:` key")]
     OverrideMissingValue { field: String },
+
+    #[error("override for `{field}` has the key `{key}`; an override holds only `value:` and `reason:`")]
+    OverrideUnknownKey { field: String, key: String },
 
     #[error(
         "wired provider slug `{slug}` has no active roster entry (missing, or flagged \

@@ -653,6 +653,10 @@ impl ComposeWarning {
     /// Code of a lenient expression evaluation failure.
     pub const EXPRESSION_EVALUATION_FAILURE_CODE: &'static str =
         "dm.expression.evaluation_failure";
+    /// Code of the warning for a file symlink a glob reference left out
+    /// because its target lies outside the file tree. Shared by
+    /// `find_files()` and `::file-links`.
+    pub const GLOB_SKIPPED_SYMLINK_CODE: &'static str = "dm.glob.skipped_symlink";
 
     /// Creates a new warning.
     pub fn new(stage: impl Into<String>, message: impl Into<String>) -> Self {
@@ -682,7 +686,7 @@ impl ComposeWarning {
         advisory: &SchemaAdvisory,
         consumer: impl Into<PathBuf>,
     ) -> Self {
-        let path = std::fs::canonicalize(advisory.path())
+        let path = biscuit_file::canonicalize_simplified(advisory.path())
             .unwrap_or_else(|_| advisory.path().to_path_buf());
         Self {
             stage: "schema_validation".to_string(),
@@ -763,6 +767,25 @@ impl ComposeWarning {
                 },
             }),
             ..Self::new(stage, message)
+        }
+    }
+
+    /// A file symlink a glob reference matched but left out, because its
+    /// target lies outside the file tree. One per link: the same link reached
+    /// by two globs, or by one glob evaluated twice, is one issue.
+    pub(crate) fn skipped_symlink(stage: impl Into<String>, entry: &biscuit_file::SkippedEntry) -> Self {
+        let link = biscuit_file::to_portable_string(&entry.link);
+        let target = biscuit_file::to_portable_string(&entry.target);
+        Self {
+            code: Some(Self::GLOB_SKIPPED_SYMLINK_CODE.to_string()),
+            identity: Some(WarningIdentity {
+                subject: WarningSubject::Path(entry.link.clone()),
+            }),
+            path: Some(entry.link.clone()),
+            ..Self::new(
+                stage,
+                format!("skipped `{link}`: it links to `{target}`, which is outside the file tree"),
+            )
         }
     }
 

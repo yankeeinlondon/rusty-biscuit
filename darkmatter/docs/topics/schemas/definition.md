@@ -97,7 +97,7 @@ $schema:
 | `boolean`    | Any JSON boolean.                                                                                      | Constraints: `default`, `required`.                                                                                                                                             |
 | `boolish`    | A JSON boolean **or** the strings `"true"` / `"false"` (any case).                                     | Compiles to `anyOf: [boolean, enum]`. A `"true"` / `"false"` value is **normalized** to a real boolean (see [Type Coercion](#type-coercion)).                                  |
 | `object`     | Any YAML/JSON object.                                                                                  | No nested-schema authoring in v1 — `object` accepts any shape. Reference an external file for deeper typing.                                                                    |
-| `file`       | A file reference parsed via `biscuit-file::FileReference`. Single or array form.                       | Constraints: `eager`, `match(glob, ...)`, `required`. **Lazy by default**; `file(eager)` resolves and checks existence (implicit paths from the document directory first, then the repository root; explicit `./`/`../` from the document directory only). Schema-selected file values materialize as absolute native paths at the request boundary; lazy values use the first unprobed candidate. See [Files](#files).        |
+| `file`       | A file reference parsed via `biscuit-file::FileReference`. Single or array form.                       | Constraints: `eager`, `match(glob, ...)` (each glob a prefixed glob reference such as `^**/*spec*.md`), `required`. **Lazy by default**; `file(eager)` resolves and checks existence (implicit paths from the document directory first, then the repository root; explicit `./`/`../` from the document directory only). Schema-selected file values materialize as absolute native paths at the request boundary; lazy values use the first unprobed candidate. See [Files](#files).        |
 | `enum`       | A value from an explicit set.                                                                          | Constraints required — the members are the constraint. See [Enumerations](#enumerations).                                                                                       |
 | `literal`    | Exactly one scalar value, of any scalar type.                                                          | Compiles to JSON Schema `const`. Bare `true`/`2` are typed; quoting forces string. Constraints: `required`, an equal `default`. See [Literals](#literals).                       |
 | `url`        | A string parseable as an absolute URL.                                                                 | Constraints: `scheme(...)`, `default`, `required`.                                                                                                                              |
@@ -502,6 +502,52 @@ configured globs still validates. In a root union, it is also an arm constraint:
 an existing file outside an arm's declared glob rules that arm out. This holds
 when the other arms declare the same glob, a different glob, or no glob.
 
+Each glob is a **glob reference**: an optional `!` (exclude), an optional
+file-reference prefix, then the glob. The prefix says where the glob starts,
+so one schema can mean the same files from any launch directory:
+
+| Prefix | Example | Judged from |
+|---|---|---|
+| _(none)_ | `**/*spec*.md`, `*.md` | the value's directory, then the repository root |
+| `./` | `./docs/*.md` | the value's directory only |
+| `../` | `../shared/*.md` | the parent of the value's directory only |
+| `&` | `&fixes/**/spec.md` | the repository root only |
+| `^` | `^**/*spec*.md` | the package, the package area, then the repository root |
+| `@` | `@prompts/*.md` | the launch directory's package, package area, and repository root, then home |
+| `~/` | `~/notes/**/*.md` | your home folder |
+| absolute | `/srv/specs/*.md` | that folder |
+| `vault:` | `vault:journal/**/*.md` | each configured vault root |
+| `{{VAR}}` | `{{SPECS_DIR}}/*.md` | the folder the variable names; its value is literal text, never glob syntax |
+| `!` | `!&**/_completed/**` | excludes what the rest of the pattern, with its own prefix, matches |
+
+- **The value's directory** is the launch directory for a value a caller
+  supplies (`md compose doc.md spec=…`, a completion, a chooser) and the
+  document's folder for a value written in the frontmatter, so a bare, `./`,
+  or `../` pattern can mean two different places. Use `&`, `^`, or `@` when a
+  pattern must mean one place for both.
+- **Nearest root.** A file is judged only relative to the first of a
+  pattern's folders that contains it, so `match(**/*spec*.md, !fixes/**)`
+  launched from `pkg/` rejects `pkg/fixes/x/spec.md` and the repository
+  root's `fixes/y/spec.md` alike.
+- **File-name view.** A pattern with no `/` after its prefix (`*.md`,
+  `^*.md`, `!_*.md`) also matches a file's bare name at any depth, so
+  `match(*.md, !_*.md)` rejects `docs/_draft.md`.
+- `*` stays within one path segment and `**` crosses segments; matching is
+  case-sensitive on every OS.
+- A pattern that is not a glob reference is a schema definition error naming
+  the property and pattern: `%…` (a glob already recurses), a URL, an
+  invalid glob, or a list of only `!` exclusions.
+
+A prefixed pattern means the same files wherever `md` runs. Here `journal`
+offers Markdown from every configured vault except its templates, and `spec`
+offers spec files from anywhere in the repository:
+
+```yaml
+$schema:
+    journal: "file(match('vault:journal/**/*.md', '!vault:journal/_templates/**'))"
+    spec:    "file(eager; match('&**/features/**/spec.md'))"
+```
+
 ```yaml
 $schema:
     - kind: "literal(feature)"
@@ -531,12 +577,14 @@ The rules:
 - Only an **existing** file is judged. A value that names no file yet (a lazy
   output path, a partial a chooser is about to complete, a value still holding
   `{{ … }}` or `$(…)`) never rules an arm out; existence is `eager`'s job.
-- The path is compared in portable `/` spelling, relative to the launch
-  directory, which is where completion walks the glob; a file outside it is
-  compared relative to the document's directory, then the repository root.
-  What completion offers, the arm accepts.
-- Document-authored and caller-supplied values follow the same rule, each
-  resolved from its own origin. In a `file[]`, every item must match.
+- The path is judged from the value's directory, as above: a caller-supplied
+  value from the launch directory, which is where completion walks the glob,
+  so what completion offers, the arm accepts; a document-authored value from
+  the document's folder. Each is resolved from that same origin. In a
+  `file[]`, every item must match.
+- Coercion, which runs without a request, judges only an existing absolute
+  path against the bare and absolute patterns (by its full path), so a
+  `./`, `&`, `^`, or `@` pattern cannot steer how a sibling value is coerced.
 
 When a schema arm selects `file(eager)`, validation probes the candidate plan and
 materializes the winning **absolute native path**. A lazy `file` value materializes
@@ -953,9 +1001,15 @@ The resolution rules:
 Path references in `$schema` resolve like implicit file references: a bare path is
 tried **from the document's directory first, then the repository root**, while an explicit
 `./`/`../` reference resolves from the document's directory only. A bare **name**
-(`$schema: claudine.yaml`, no path separator) instead resolves against the configured
-[schema roots](#repository-trigger-schemas) nearest-first. No ambient current working
-directory is read.
+(`$schema: claudine.yaml`, no path separator) instead resolves to the first of the
+five [schema roots](#schema-roots) that holds that file; write `./claudine.yaml` for a
+file beside the document. The same lookup applies to a bare name in an import
+(`Name@claudine.yaml`) or `example(claudine.yaml)`. A name no root holds is an
+error, which suggests `./claudine.yaml` when a file of that name sits beside the
+document. When no root is searched at all (none of the five folders exists,
+trigger discovery is off with `--no-trigger-schemas`, or `md` is checking a
+document outside a repository), a bare name resolves like any other bare path.
+No ambient current working directory is read.
 
 Remote (`http://` / `https://`) references are **not supported** in v1 and produce a clear `SchemaError::RemoteUnsupported` directing the user to download the schema locally.
 
@@ -1516,7 +1570,8 @@ All failure modes are variants of `SchemaError`:
 | Variant                 | Meaning                                                                                                   |
 |-------------------------|-----------------------------------------------------------------------------------------------------------|
 | `Grammar`               | A type-and-constraint string could not be parsed. Carries property name, message, and byte span.          |
-| `Unresolved`            | `$schema` reference could not be resolved via `FileReference`.                                            |
+| `Unresolved`            | `$schema` reference is malformed or `FileReference` rejected it; carries the typed resolver error.        |
+| `NoMatch`               | `$schema` reference matched no file (a path, or a bare name no schema root holds); a text with `*`, `?`, or `[` adds the literal-glob hint. |
 | `AmbiguousReferenced`   | Referenced file is neither a valid SimplifiedSchema nor a valid JSON Schema.                              |
 | `RemoteUnsupported`     | `http://` / `https://` `$schema` references are rejected in v1.                                           |
 | `SchemaDocument`        | A recognized standalone schema document (pure or tagged envelope) has a missing or malformed payload.     |
@@ -1652,9 +1707,9 @@ unless the same baseline is supplied explicitly.
 `md schema about` is the **implementation-bound CLI reference** for this topic. Its contents come from a typed descriptor catalog (`schema_type_descriptors`, `schema_constraint_descriptors`, `schema_shape_descriptors`, `inline_object_rule_descriptors`, `coercion_rule_descriptors`, `validation_behavior_descriptors` in `darkmatter::markdown::schemas`), which library callers can consume to render their own reports. Drift between this prose document and the CLI report is caught by parity tests that pin the descriptor catalog to the implemented `SimplifiedType` and `Constraint` enums.
 ### Repository Trigger Schemas
 
-File-backed CLI and DMLS validation can discover `schemas/` directories from
-the document's directory through an explicit repository or workspace boundary.
-A YAML file opts into activation by declaring `kind: trigger-schema`:
+File-backed CLI and DMLS validation discover trigger schemas in the five
+[schema roots](#schema-roots) of the document being checked. A YAML file in
+one of those folders opts into activation by declaring `kind: trigger-schema`:
 
 ```yaml
 kind: trigger-schema
@@ -1666,11 +1721,93 @@ match:
 $schema: prompt.yaml
 ```
 
-The envelope and payload are separate files. Bare filenames such as
-`prompt.yaml` resolve against discovered schema roots, nearest first; use
+The envelope and payload are separate files. A bare filename such as
+`prompt.yaml` resolves to the first schema root that holds it; use
 `./prompt.yaml` when the intended file is beside the referencing document or
-schema. A trigger filename in a nearer root shadows the same filename in every
-farther root.
+schema. A trigger filename in an earlier root shadows the same filename in
+every later root: the shadowed file is reported by `md schema triggers` and
+never evaluated.
+
+#### Schema roots
+
+Darkmatter and DMLS look for schema files in exactly five folders, searched
+most local first:
+
+| # | Root | Present when | Example |
+|---|------|--------------|---------|
+| 1 | package root | the document is inside a package of a monorepo | `{package}/schemas/` |
+| 2 | package-area root | the document is inside a package area | `claudine/schemas/` |
+| 3 | file tree root | always | `{repo}/schemas/` in a repository |
+| 4 | the folder `SCHEMAS_DIR` names | the variable is set | `$SCHEMAS_DIR/` |
+| 5 | your home folder | a home folder is known | `~/schemas/` |
+
+```mermaid
+flowchart LR
+    D[document being checked] --> P["1. package root/schemas"]
+    P --> A["2. package-area root/schemas"]
+    A --> T["3. file tree root/schemas"]
+    T --> S["4. $SCHEMAS_DIR (if set)"]
+    S --> H["5. ~/schemas"]
+    H --> R["the first root holding a file name wins"]
+```
+
+- The package and package area are those of the **document**, not of the
+  directory you launched `md` from. `md` searches the roots only for a
+  document in a repository; DMLS searches them for any document inside an
+  open workspace folder. Outside a repository the file tree root is the tree
+  the document was opened in (often its own folder).
+- `SCHEMAS_DIR` names the schemas folder **itself**, which can be any folder
+  you choose: with `SCHEMAS_DIR=/opt/team/dm-defs`, files are read from
+  `/opt/team/dm-defs/`, never from `/opt/team/dm-defs/schemas/`. It must be an
+  absolute path; an empty or relative value adds no root and
+  `md schema triggers` reports it as invalid.
+- A folder that does not exist is skipped. A root that names the same folder
+  as an earlier one (say `SCHEMAS_DIR` pointing at `~/schemas`) is searched
+  once, at the earlier position.
+- A folder Darkmatter cannot inspect or read is an **error**, never a skipped
+  root. If `locked/` has mode `000`, a root at `locked/anchor/schemas/` stops
+  trigger discovery and bare-name `$schema` lookup with an I/O error naming
+  that folder, so a `policy.yaml` in a later root such as `~/schemas/` can
+  never stand in for the one you could not read. `md schema validate` and
+  `md schema triggers` report the error and show no partial result; DMLS
+  reports it on the document's `$schema` (or the top of its frontmatter).
+- `schemas/` folders anywhere else, such as `{package}/docs/schemas/`, are
+  not searched.
+- Both values come from the environment the process started with. DMLS reads
+  them when the editor starts the server, so a GUI editor that lacks a shell
+  variable lacks `SCHEMAS_DIR` too; restart the server after changing it.
+
+#### Matching a path with `$path`
+
+`$path` takes one or more [glob references](#files), the same
+patterns `match()` uses, and matches when some positive pattern admits the
+document and no `!` pattern does:
+
+```yaml
+kind: trigger-schema
+match:
+    $path:
+        - "^docs/**"     # docs/ of the document's package, area, or repository
+        - "!**/_*.md"    # but never a file whose name starts with `_`
+$schema: docs.yaml
+```
+
+- A pattern whose glob names no folder (`SKILL.md`, `*.md`) also matches that
+  file name at any depth.
+- A bare, `./`, or `../` pattern is read from the folder that holds the
+  trigger's `schemas/` folder, so a package trigger's `*.md` matches every
+  Markdown file in the package. A trigger in `SCHEMAS_DIR` or `~/schemas` lives
+  outside your repositories, so its bare patterns are read from the checked
+  document's file tree root: `docs/*.md` there matches `{repo}/docs/x.md`,
+  not `{repo}/pkg/docs/x.md`. Prefer `&`, `^`, or `**/` in user-level
+  triggers; they say which root they mean.
+- `&`, `^`, `~`, and absolute paths are allowed. `~/notes/**` is how a
+  trigger in `~/schemas` applies across all of your notes.
+- `@`, `%`, `vault:`, and a `{{VAR}}` **anywhere** in a pattern are
+  definition errors naming the pattern: whether a schema applies must not
+  depend on the launch directory, vault configuration, or an arbitrary
+  environment variable. So are an invalid glob and a list of only `!`
+  patterns.
 
 Property conditions reuse SimplifiedSchema type expressions. A condition
 without `required` is a guard: absence is allowed, but a present value of the
@@ -1682,17 +1819,28 @@ Stateful or phase-specific constraints (`eager`, imports, `example`,
 
 The match grammar supports freely nested `all`, `any`, `none`, and
 `min-match: { count, of }` combinators. A sequence under `match:` is an outer
-OR of independent arms. `$path` matches the boundary-relative,
-forward-slash-separated, case-sensitive path with gitignore-style globs. Every
-arm must contain a satisfiable presence gate or `$path`; otherwise the vacuous
-arm is a load error.
+OR of independent arms. `$path` is case-sensitive on every OS (see
+[Matching a path with `$path`](#matching-a-path-with-path)). Every arm must
+contain a satisfiable presence gate or `$path`; otherwise the vacuous arm is a
+load error.
 
-Effective precedence is caller baseline, matching trigger payloads (nearest
-root and then filename order), then the document's own `$schema`. Trigger
+Effective precedence is caller baseline, matching trigger payloads (schema
+root order and then filename order), then the document's own `$schema`. Trigger
 payloads must be merge-compatible object schemas. Discovery is transactional:
 an invalid opted-in envelope rejects the scan, while unrelated YAML files are
 ignored. Library hosts opt in explicitly with
 `DarkmatterSchemas::with_trigger_discovery`; `md compose` and
 `md schema validate` opt in for repository-backed files and accept
-`--no-trigger-schemas`. Use `md schema triggers <file>` to inspect roots,
-shadowing, matched arms, and defeat explanations.
+`--no-trigger-schemas`. Use `md schema triggers <file>` to inspect the five
+roots (marking absent folders and an unset or invalid `SCHEMAS_DIR`),
+shadowing, matched arms, and defeat explanations. A root it cannot inspect
+fails the command with the I/O error instead of a listing:
+
+```text
+Schema roots (search order):
+1. package root: none (the document is not in a package)
+2. package-area root: /repo/claudine/schemas
+3. file tree root: /repo/schemas
+4. SCHEMAS_DIR: unset
+5. home: /home/me/schemas (absent)
+```

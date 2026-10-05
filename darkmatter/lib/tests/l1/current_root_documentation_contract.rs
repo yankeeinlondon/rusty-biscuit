@@ -48,7 +48,7 @@ const PAGES: &[(&str, &[&str])] = &[
         ],
     ),
     (
-        ".claude/skills/claudine/SKILL.md",
+        ".claude/skills/claudine/cli-commands.md",
         &[
             "`current.<key>` is the same key as `ctx.<key>` read lazily",
             "`current_env.<key>` is the lazy mirror of `env.<key>`",

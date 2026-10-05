@@ -2252,11 +2252,12 @@ fn repo_root_in_base_spelling(base_dir: &Path, authored_root: &Path) -> PathBuf 
 /// authored path is then its own key, degrading to the per-path cache misses
 /// that predate symmetric keying rather than failing the invocation.
 ///
-/// Keys are only ever compared against other keys. On Windows `canonicalize`
-/// yields a `\\?\` verbatim path, which must never reach a projection or a
-/// comparison against an authored path.
+/// Keys are only ever compared against other keys. A fallback key is an
+/// authored spelling, so a canonical key must share that spelling family: a
+/// Windows verbatim (`\\?\`) key would never equal the fallback key for the
+/// same directory.
 fn canonical_key(path: &Path) -> PathBuf {
-    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+    biscuit_file::canonicalize_simplified(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 /// `path` made absolute against the snapshot's request directory.

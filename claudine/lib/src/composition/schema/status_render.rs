@@ -1,14 +1,16 @@
 //! Shared terminal projection for schema status reports.
 
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::{LineBreaks, Prose};
 
 use super::{PropertyState, PropertyStatus, SchemaStatusReport};
 
 /// Build the reusable [`Prose`] representation of a schema status report.
+///
+/// The heading and each property are separate display rows (hard breaks).
 pub fn schema_status_report_prose(report: &SchemaStatusReport) -> Prose {
     let path_display = biscuit_file::to_portable_string(&report.source_path);
     let path_escaped = escape_schema_prose(&path_display);
-    let absolute = report.source_path.canonicalize().ok().or_else(|| {
+    let absolute = biscuit_file::canonicalize_simplified(&report.source_path).ok().or_else(|| {
         report.source_path.is_absolute().then(|| report.source_path.clone())
     });
     let path_reference = absolute
@@ -21,7 +23,7 @@ pub fn schema_status_report_prose(report: &SchemaStatusReport) -> Prose {
 
     if report.raw_json_schema {
         body.push_str("\n  <dim><i>(raw JSON Schema — per-property metadata unavailable)</i></dim>");
-        return Prose::new(body);
+        return Prose::new(body).with_line_breaks(LineBreaks::Hard);
     }
 
     for status in &report.required {
@@ -40,7 +42,7 @@ pub fn schema_status_report_prose(report: &SchemaStatusReport) -> Prose {
         );
     }
 
-    Prose::new(body)
+    Prose::new(body).with_line_breaks(LineBreaks::Hard)
 }
 
 #[doc(hidden)]
@@ -94,8 +96,9 @@ pub fn description_suffix(description: Option<&str>) -> String {
 }
 
 /// Escape schema text (paths, names, types, descriptions) for splicing into
-/// Prose markup, so it renders exactly as written.
+/// Prose markup, so it renders exactly as written; code spans a description
+/// marks with backticks stay literal.
 #[doc(hidden)]
 pub fn escape_schema_prose(input: &str) -> String {
-    Prose::escape_text(input)
+    Prose::escape_text_outside_code_spans(input)
 }

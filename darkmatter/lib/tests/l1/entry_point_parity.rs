@@ -2,12 +2,17 @@
 //! pre-flight, and schema validation, each through its public API with a
 //! request snapshot that carries the fixture `HOME`, the configured extra `@`
 //! root, and no process state.
+//!
+//! Glob rows: the compose pipeline lists `::file-links` and `find_files()`
+//! and validates `match()` for a frontmatter value (Table 1) and for a
+//! caller-supplied `--set` value from each launch directory (Table 2);
+//! pre-flight and schema validation validate the frontmatter value.
 
 #[path = "../common/entry_point_parity/mod.rs"]
 mod matrix;
 
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use biscuit_file::PathPosition;
 use darkmatter::markdown::compose::preflight::{PreflightGraphNode, PreflightResolvedTarget};
@@ -17,14 +22,22 @@ use darkmatter::markdown::compose::{
 use darkmatter::markdown::schemas::DarkmatterSchemas;
 use darkmatter::markdown::{Markdown, MarkdownError};
 use matrix::{
-    ChainCase, ChainOutcome, Consumer, Depth, HASH_CONSUMERS, DocumentCell, EntryPoint, Observed, Owner, ParityFixture,
-    ParityReport, Row, rows_for,
+    ChainCase, ChainOutcome, Consumer, Depth, HASH_CONSUMERS, DocumentCell, EntryPoint, GlobConsumer, GlobDocumentCell,
+    GlobValueCell, Launch, Observed, Owner, ParityFixture, ParityReport, Row, rows_for,
 };
 
 /// Table 1's launch directory is the repository root; the snapshot holds the
 /// fixture `HOME`, the configured extra `@` root, and an empty environment.
 fn snapshot(fixture: &ParityFixture) -> RequestSnapshot {
     RequestSnapshot::new(fixture.repo())
+        .with_home(Some(fixture.home()))
+        .with_magic_root(fixture.configured_magic_root(), PathPosition::Start)
+}
+
+/// A Table 2 snapshot: the same `HOME` and extra `@` root, launched from
+/// `launch`.
+fn launch_snapshot(fixture: &ParityFixture, launch: Launch) -> RequestSnapshot {
+    RequestSnapshot::new(fixture.launch_dir(launch))
         .with_home(Some(fixture.home()))
         .with_magic_root(fixture.configured_magic_root(), PathPosition::Start)
 }
@@ -117,6 +130,83 @@ fn schema_validation(fixture: &ParityFixture, cell: &DocumentCell) -> Observed {
     }
 }
 
+/// A `::file-links` or `find_files()` cell composed: the files it lists, or
+/// the class of the failure composition raised or tolerated.
+fn compose_glob_listing(fixture: &ParityFixture, cell: &GlobDocumentCell) -> Observed {
+    let document = fixture.write_glob_document(cell);
+    let md = Markdown::try_from(document.as_path()).expect("read cell document");
+    let (composed, report) = match md.compose_with(&request_for(fixture, &document)) {
+        Ok(result) => result,
+        Err(error) => return error_class(&error),
+    };
+    if let Some(failure) = report.warnings.iter().find_map(|warning| warning.resolution_failure) {
+        return Observed::Failure(failure);
+    }
+    let output = composed.content();
+    match cell.consumer {
+        GlobConsumer::FileLinks => match fixture.file_links_listed(output) {
+            files if files.is_empty() => Observed::Unexpected(format!("no `::file-links` tree in {output:?}")),
+            files => Observed::FileSet(files),
+        },
+        GlobConsumer::FindFiles => fixture
+            .find_files_listed(output)
+            .map_or_else(|| Observed::Unexpected(format!("no `find_files()` line in {output:?}")), Observed::Files),
+        GlobConsumer::MatchValidation | GlobConsumer::MatchCompletion => unreachable!("{cell:?} lists no files"),
+    }
+}
+
+/// A Table 1 `match()` validation cell: each candidate's document through
+/// `entry`.
+fn glob_match_document(fixture: &ParityFixture, cell: &GlobDocumentCell) -> Observed {
+    let outcomes = fixture
+        .write_glob_match_documents(cell)
+        .into_iter()
+        .map(|(candidate, document)| {
+            let md = Markdown::try_from(document.as_path()).expect("read cell document");
+            let outcome = match cell.entry {
+                EntryPoint::ComposePipeline => md
+                    .compose_with(&request_for(fixture, &document))
+                    .map(|_| ())
+                    .map_err(|error| format!("{error:?}")),
+                EntryPoint::Preflight => md
+                    .compose_preflight(&request_for(fixture, &document))
+                    .map(|_| ())
+                    .map_err(|error| format!("{error:?}")),
+                EntryPoint::SchemaValidation => {
+                    let schemas = DarkmatterSchemas::new(build_resolution_context(&snapshot(fixture)).expect("context"));
+                    let report = schemas.validate(&md).expect("prepare the schema");
+                    if report.problems.is_empty() { Ok(()) } else { Err(format!("{:?}", report.problems)) }
+                }
+                other => unreachable!("{other:?} validates no darkmatter glob document"),
+            };
+            (candidate, outcome)
+        })
+        .collect();
+    matrix::validation_verdicts(outcomes)
+}
+
+/// A Table 2 `match()` validation cell: each candidate supplied as `spec`
+/// (`--set`) from the cell's launch directory.
+fn glob_match_value(fixture: &ParityFixture, cell: &GlobValueCell) -> Observed {
+    let document = fixture.write_glob_value_document(cell);
+    let md = Markdown::try_from(document.as_path()).expect("read cell document");
+    let outcomes = fixture
+        .glob_candidates()
+        .into_iter()
+        .map(|candidate| {
+            let value = biscuit_file::to_portable_string(&candidate);
+            let options = ComposeOptions::new()
+                .with_source_file(&document)
+                .with_set_overrides(serde_json::json!({ "spec": value }));
+            let request =
+                ComposeRequest::prepare(options, &launch_snapshot(fixture, cell.launch)).expect("prepare the request");
+            let outcome = md.compose_with(&request).map(|_| ()).map_err(|error| format!("{error:?}"));
+            (candidate, outcome)
+        })
+        .collect::<Vec<(PathBuf, Result<(), String>)>>();
+    matrix::validation_verdicts(outcomes)
+}
+
 #[test]
 fn every_entry_point_has_a_row() {
     for entry in EntryPoint::ALL {
@@ -130,8 +220,23 @@ fn darkmatter_entry_points_agree_on_every_reference() {
     let fixture = ParityFixture::create(root.path());
     let mut report = ParityReport::new(Owner::Darkmatter);
     for row in rows_for(Owner::Darkmatter) {
-        let Row::Document(cell) = row else {
-            panic!("darkmatter runs Table 1 only: {row:?}");
+        let cell = match row {
+            Row::Document(cell) => cell,
+            Row::GlobDocument(cell) => {
+                let observed = match cell.consumer {
+                    GlobConsumer::FileLinks | GlobConsumer::FindFiles => compose_glob_listing(&fixture, &cell),
+                    GlobConsumer::MatchValidation => glob_match_document(&fixture, &cell),
+                    GlobConsumer::MatchCompletion => unreachable!("darkmatter completes nothing: {row:?}"),
+                };
+                report.record(&fixture, &row, &fixture.expected_glob_document(&cell), &observed);
+                continue;
+            }
+            Row::GlobValue(cell) => {
+                let observed = glob_match_value(&fixture, &cell);
+                report.record(&fixture, &row, &fixture.expected_glob_value(&cell), &observed);
+                continue;
+            }
+            Row::Value(_) => panic!("darkmatter runs no Table 2 reference value: {row:?}"),
         };
         let observed = match cell.entry {
             EntryPoint::ComposePipeline => compose_pipeline(&fixture, &cell),
@@ -148,7 +253,8 @@ fn darkmatter_entry_points_agree_on_every_reference() {
             | EntryPoint::ClaudineComposition
             | EntryPoint::ClaudineCompletion
             | EntryPoint::ClaudinePromptArgument
-            | EntryPoint::ClaudineSuppliedValue => unreachable!("{:?} is not darkmatter's", cell.entry),
+            | EntryPoint::ClaudineSuppliedValue
+            | EntryPoint::ClaudineChooser => unreachable!("{:?} is not darkmatter's", cell.entry),
         };
         report.record(&fixture, &row, &fixture.expected_document(&cell), &observed);
     }

@@ -118,9 +118,11 @@ fn markdown_plus_target_wraps_with_details_summary() {
         output.contains("</details>"),
         "must close details: {output}"
     );
+    // The summary line is raw HTML, which a reader does not parse as
+    // Markdown, so its phrasing is written as HTML.
     assert!(
-        output.contains("License _Agreement_"),
-        "summary must render inline markdown: {output}"
+        output.contains("<summary>License <em>Agreement</em></summary>"),
+        "summary must render inline HTML: {output}"
     );
     assert!(
         output.contains("Keep your **hands** off."),

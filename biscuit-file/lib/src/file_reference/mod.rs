@@ -24,6 +24,7 @@ mod context;
 pub mod error;
 #[cfg(feature = "fetch")]
 pub mod fetch;
+mod glob;
 mod parse;
 mod portable;
 mod resolve;
@@ -31,6 +32,7 @@ mod resolve;
 use std::path::{Path, PathBuf};
 
 pub use error::FileReferenceError;
+pub use glob::{GlobListing, GlobReference, GlobReferenceError, SkippedEntry};
 pub use portable::{
     Attempt, AttemptOutcome, ConfigurationProblem, EnvAnchorProblem, FilterProblem, Finding,
     IntentForms, InvalidTarget, NotApplicable, PORTABLE_ENV_VARIABLES, PathIdentity,
@@ -282,6 +284,30 @@ pub enum ResolutionFailure {
     UnsupportedRemote,
 }
 
+impl ResolutionFailure {
+    /// The hint a failure of this class carries for the reference spelled
+    /// `reference`: present only for a [`NoMatch`](Self::NoMatch) whose text
+    /// contains `*`, `?`, or `[`.
+    ///
+    /// A file reference never reads glob syntax, so `docs/*.md` names a file
+    /// called `*.md`. Every consumer that reports a single-file miss appends
+    /// this hint to its message, so the literal reading is explained in one
+    /// wording everywhere and no consumer tests for wildcards itself.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use biscuit_file::ResolutionFailure;
+    ///
+    /// assert!(ResolutionFailure::NoMatch.glob_hint("docs/*.md").is_some());
+    /// assert!(ResolutionFailure::NoMatch.glob_hint("docs/missing.md").is_none());
+    /// assert!(ResolutionFailure::Io.glob_hint("docs/*.md").is_none());
+    /// ```
+    pub fn glob_hint(self, reference: &str) -> Option<&'static str> {
+        (self == Self::NoMatch && reference.contains(['*', '?', '['])).then_some(GLOB_HINT)
+    }
+}
+
 /// The terminal outcome of a detailed resolution.
 #[derive(Debug)]
 pub enum DetailedOutcome {
@@ -381,6 +407,16 @@ impl DetailedResolution {
         }
     }
 
+    /// [`ResolutionFailure::glob_hint`] for this outcome and reference:
+    /// `None` for a match, any other failure, or text without `*`, `?`, or
+    /// `[`.
+    pub fn glob_hint(&self) -> Option<&'static str> {
+        match self.outcome {
+            DetailedOutcome::Failed(failure) => failure.glob_hint(&self.raw),
+            DetailedOutcome::Matched(_) => None,
+        }
+    }
+
     /// Project the detailed outcome onto the legacy convenience shape.
     ///
     /// A match yields `Ok(Some(path))`, a no-match yields `Ok(None)`, and every
@@ -399,6 +435,10 @@ impl DetailedResolution {
         }
     }
 }
+
+/// The text [`ResolutionFailure::glob_hint`] returns.
+const GLOB_HINT: &str = "`*`, `?`, and `[` are literal in a file reference; \
+    to match a set of files, use a form that accepts a glob reference (for example `::file-links`)";
 
 /// Entry form for a partial completion token.
 ///

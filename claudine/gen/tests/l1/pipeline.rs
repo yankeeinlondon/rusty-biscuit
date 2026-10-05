@@ -77,17 +77,12 @@ impl Fixture {
             copy(&format!("docs/research/{topic}/{slug}.md"));
         }
         // The agent-cli contract names its records in its own types file and
-        // shares identifier/evidence types; documents written before
-        // revision 2 validate against the frozen revision-1 contract. Joined
-        // onto the manifest directory so a change to one runs these tests.
+        // shares identifier/evidence types. Joined onto the manifest
+        // directory so a change to one runs these tests.
         let manifest = biscuit_test_harness::manifest_dir!();
         for (rel, from) in [
             ("docs/research/_types.yaml", manifest.join("../docs/research/_types.yaml")),
             ("docs/research/agent-cli/_types.yaml", manifest.join("../docs/research/agent-cli/_types.yaml")),
-            (
-                "docs/research/agent-cli/_schema.r1.yaml",
-                manifest.join("../docs/research/agent-cli/_schema.r1.yaml"),
-            ),
         ] {
             fs::copy(&from, dir.path().join("claudine").join(rel))
                 .unwrap_or_else(|err| panic!("fixture copy of `{rel}` failed: {err}"));
@@ -470,7 +465,32 @@ fn override_without_reason_is_rejected() {
         "model_env_vars:\n    value: [\"X\"]\n",
     );
     let err = fixture.generate().unwrap_err();
-    assert!(matches!(err, GenError::OverrideMissingReason { field } if field == "model_env_vars"));
+    assert!(matches!(
+        err,
+        GenError::OverrideInvalidReason { field, found: "no `reason:` key" } if field == "model_env_vars"
+    ));
+}
+
+#[test]
+fn an_override_reason_of_the_wrong_shape_is_named_not_reported_absent() {
+    let cases = [
+        ("    reason: null\n", "null"),
+        ("    reason: 7\n", "a number"),
+        ("    reason: [a]\n", "a list"),
+        ("    reason: \"  \"\n", "an empty string"),
+    ];
+    for (reason, expected) in cases {
+        let fixture = Fixture::new();
+        fixture.write(
+            "docs/providers/overrides/claude.yaml",
+            &format!("model_env_vars:\n    value: [\"X\"]\n{reason}"),
+        );
+        let err = fixture.generate().unwrap_err();
+        assert!(
+            matches!(&err, GenError::OverrideInvalidReason { field, found } if field == "model_env_vars" && *found == expected),
+            "{reason:?}: {err}"
+        );
+    }
 }
 
 #[test]

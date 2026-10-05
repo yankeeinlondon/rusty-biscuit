@@ -39,6 +39,7 @@ Behavior:
 - they are mutually exclusive
 - explicit files are resolved through the shared `biscuit-file::FileReference` grammar against the launch context: a bare implicit reference checks the launch directory first, then the repository root; an explicit `./`/`../` reference is launch-directory-only; `@` is a magic-root search, `&` pins to the repository root, `^` searches package, package-area, then repository roots, `~/` is home-pinned, and absolute paths resolve to themselves
 - if an explicit file is selected, standard `system-prompt.md` discovery is skipped
+- an explicit file that matches nothing fails with `system prompt file not found`; when its text contains `*`, `?`, or `[` (`--asp 'docs/*.md'`) the message adds that a file reference reads those characters literally. A reference that fails for another reason (malformed, such as `~user/x.md`, an unset `{{VAR}}`, or an unreadable candidate) reports that failure instead, without the hint
 - direct provider wrappers additionally accept `--edit`, which opens the **user prompt** (not the system prompt) in an external editor before launch; composition entry points do not
 
 Internally these switches map to `claudine::system_prompt::SystemPromptArgs`.
@@ -76,6 +77,8 @@ Outside a detected repo the local search collapses to:
 
 1. current working directory
 2. `~/.claudine/system-prompt.md`
+
+A location that does not have the file is skipped. A location Claudine cannot inspect is an error, not a skip: if the package root sits below a folder without search permission (`chmod 000 locked`), the run fails with an I/O error naming `locked/.../system-prompt.md` rather than quietly using the repository's or your home's prompt. The non-interactive appendix candidates below follow the same rule.
 
 ### Discovered-file delivery mode
 
@@ -194,7 +197,7 @@ Which of the two layouts applies is decided once, from the `repo_root` resolved 
 Gemini has no native append flag for `GEMINI_SYSTEM_MD`, so Claudine pre-composes the user's persistent `GEMINI.md` with the overlay before writing the merged file:
 
 ```rust
-let real_gemini_md = dirs::home_dir()
+let real_gemini_md = biscuit_file::home_dir()
     .map(|h| h.join(".gemini").join("GEMINI.md"))
     .filter(|p| p.is_file());
 let merged = match real_gemini_md {

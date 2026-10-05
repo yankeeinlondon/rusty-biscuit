@@ -1754,6 +1754,7 @@ fn schema_reference_stays_document_relative_through_claudine_load() {
         &source,
         Some(fallback_dir.path()),
         &crate::test_support::context_for(&source.resolved_path),
+        &Default::default(),
     ).unwrap();
     assert!(
         effective.is_some(),
@@ -1782,6 +1783,7 @@ fn root_union_schema_string_arm_stays_document_relative_through_claudine_load() 
         &source,
         Some(fallback_dir.path()),
         &crate::test_support::context_for(&source.resolved_path),
+        &Default::default(),
     ).unwrap();
     assert!(
         effective.is_some(),
@@ -2253,4 +2255,39 @@ fn provided_file_match_partial_in_a_union_reports_unresolved_file_reference() {
     );
     let err = pre_validate_schema(&source, Some(&overrides), None, &crate::test_support::context()).expect_err("still invalid");
     assert!(matches!(err, CompositionError::SchemaValidation { .. }), "{err}");
+}
+
+#[test]
+fn schema_status_report_keeps_the_heading_and_each_property_on_rows() {
+    use biscuit_terminal::prelude::TerminalRenderable;
+
+    let status = |name: &str, state| PropertyStatus {
+        name: name.to_string(),
+        type_label: "string".to_string(),
+        description: None,
+        state,
+    };
+    let report = SchemaStatusReport {
+        source_path: PathBuf::from("prompts/seq.md"),
+        required: vec![
+            status("state", PropertyState::Valid),
+            status("topic", PropertyState::Missing),
+        ],
+        optional: vec![status("tone", PropertyState::Valid)],
+        has_invalid_optional: false,
+        raw_json_schema: false,
+    };
+    let term = biscuit_terminal::terminal::Terminal::builder()
+        .width(300)
+        .color_depth(biscuit_terminal::discovery::detection::ColorDepth::None)
+        .build();
+    let rendered = biscuit_terminal::utils::escape_codes::strip_escape_codes(
+        schema_status_report_prose(&report).render(&term),
+    );
+    let rows: Vec<&str> = rendered.lines().map(str::trim).filter(|row| !row.is_empty()).collect();
+    assert_eq!(rows.len(), 4, "heading plus one row per property: {rows:#?}");
+    assert!(rows[0].ends_with("prompt has the following schema:"), "{rows:#?}");
+    assert!(rows[1].starts_with("✓ state: string"), "{rows:#?}");
+    assert!(rows[2].starts_with("⍉ topic: string"), "{rows:#?}");
+    assert!(rows[3].starts_with("✓ tone: string"), "{rows:#?}");
 }

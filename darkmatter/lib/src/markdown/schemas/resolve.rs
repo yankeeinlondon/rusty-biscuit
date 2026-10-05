@@ -93,7 +93,9 @@ pub struct ResolvedSchema {
 ///
 /// Returns:
 /// - [`SchemaError::RemoteUnsupported`] for `http://` / `https://` values.
-/// - [`SchemaError::Unresolved`] when a file reference fails to resolve.
+/// - [`SchemaError::Unresolved`] when a file reference is malformed or the
+///   resolver rejects it.
+/// - [`SchemaError::NoMatch`] when a file reference matches no file.
 /// - [`SchemaError::Io`] when reading the referenced file fails.
 /// - [`SchemaError::AmbiguousReferenced`] when the referenced file is neither
 ///   a valid SimplifiedSchema nor a JSON Schema.
@@ -465,11 +467,9 @@ fn resolve_reference_in_context(
             });
         }
         // No sibling either — the bare name simply does not resolve.
-        return Err(SchemaError::Unresolved {
+        return Err(SchemaError::NoMatch {
             reference: trimmed.to_string(),
-            source: biscuit_file::FileReferenceError::InvalidSyntax(format!(
-                "bare-name reference `{trimmed}` not found in any schema root"
-            )),
+            bare_name: true,
         });
     }
 
@@ -482,11 +482,9 @@ fn resolve_reference_in_context(
             reference: trimmed.to_string(),
             source,
         })?
-        .ok_or_else(|| SchemaError::Unresolved {
+        .ok_or_else(|| SchemaError::NoMatch {
             reference: trimmed.to_string(),
-            source: biscuit_file::FileReferenceError::InvalidSyntax(format!(
-                "no file matched `{trimmed}`"
-            )),
+            bare_name: false,
         })?;
 
     let mut resolved = load_guarded_in_context(
@@ -1181,11 +1179,9 @@ impl ImportEngine {
                         suggestion: format!("./{trimmed}"),
                     });
                 }
-                return Err(SchemaError::Unresolved {
+                return Err(SchemaError::NoMatch {
                     reference: reference.to_string(),
-                    source: biscuit_file::FileReferenceError::InvalidSyntax(format!(
-                        "bare-name reference `{trimmed}` not found in any schema root"
-                    )),
+                    bare_name: true,
                 });
             }
         } else {
@@ -1198,11 +1194,9 @@ impl ImportEngine {
                     reference: trimmed.to_string(),
                     source,
                 })?
-                .ok_or_else(|| SchemaError::Unresolved {
+                .ok_or_else(|| SchemaError::NoMatch {
                     reference: trimmed.to_string(),
-                    source: biscuit_file::FileReferenceError::InvalidSyntax(format!(
-                        "no file matched `{trimmed}`"
-                    )),
+                    bare_name: false,
                 })?
         };
 
@@ -1250,7 +1244,7 @@ impl ImportEngine {
 /// the given path when canonicalization fails (it should not, since the path
 /// was just resolved on disk).
 fn canonical_path(path: &Path) -> PathBuf {
-    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+    biscuit_file::canonicalize_simplified(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 /// Loads a standalone schema file's mapping payload as named types.
@@ -1641,11 +1635,9 @@ fn resolve_one_example(
                         suggestion: format!("./{trimmed}"),
                     });
                 }
-                return Err(SchemaError::Unresolved {
+                return Err(SchemaError::NoMatch {
                     reference: reference.to_string(),
-                    source: biscuit_file::FileReferenceError::InvalidSyntax(format!(
-                        "bare-name reference `{trimmed}` not found in any schema root"
-                    )),
+                    bare_name: true,
                 });
             }
         } else {
@@ -1654,11 +1646,9 @@ fn resolve_one_example(
                     reference: trimmed.to_string(),
                     source,
                 })?
-                .ok_or_else(|| SchemaError::Unresolved {
+                .ok_or_else(|| SchemaError::NoMatch {
                     reference: trimmed.to_string(),
-                    source: biscuit_file::FileReferenceError::InvalidSyntax(format!(
-                        "no file matched `{trimmed}`"
-                    )),
+                    bare_name: false,
                 })?
         }
     };
@@ -2196,11 +2186,30 @@ mod tests {
     }
 
     #[test]
-    fn missing_file_errors_with_unresolved() {
+    fn missing_file_errors_with_no_match() {
         let dir = tempfile::tempdir().unwrap();
         let v = yaml_value("./nope.yaml");
         let err = resolve_yaml_schema(&v, dir.path(), &biscuit_file::FileResolutionContext::new(dir.path())).unwrap_err();
-        assert!(matches!(err, SchemaError::Unresolved { .. }));
+        assert!(matches!(err, SchemaError::NoMatch { bare_name: false, .. }), "{err:?}");
+        assert!(!err.to_string().contains("::file-links"), "a plain miss has no glob hint: {err}");
+    }
+
+    /// A `$schema` reference that looks like a glob names one file; its miss
+    /// is a `NoMatch` carrying the literal-glob hint. A malformed reference is
+    /// `Unresolved` with its syntax error and carries no hint, whatever its
+    /// text.
+    #[test]
+    fn literal_glob_miss_hints_and_invalid_syntax_does_not() {
+        let dir = tempfile::tempdir().unwrap();
+        let context = biscuit_file::FileResolutionContext::new(dir.path());
+
+        let glob = resolve_yaml_schema(&yaml_value("./schemas/*.yaml"), dir.path(), &context).unwrap_err();
+        assert!(matches!(glob, SchemaError::NoMatch { .. }), "{glob:?}");
+        assert!(glob.to_string().contains("::file-links"), "{glob}");
+
+        let malformed = resolve_yaml_schema(&yaml_value("~user/*.yaml"), dir.path(), &context).unwrap_err();
+        assert!(matches!(malformed, SchemaError::Unresolved { .. }), "{malformed:?}");
+        assert!(!malformed.to_string().contains("::file-links"), "{malformed}");
     }
 
     #[test]
@@ -3325,7 +3334,7 @@ mod bare_name_phase3 {
     }
 
     #[test]
-    fn bare_name_not_found_no_sibling_is_unresolved() {
+    fn bare_name_not_found_no_sibling_is_no_match() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
 
@@ -3335,7 +3344,7 @@ mod bare_name_phase3 {
         let roots = vec![root.join("schemas")];
         let v = yaml_value("nonexistent.yaml");
         let err = resolve_yaml_schema_with_roots(&v, &root.join("docs"), &roots, &biscuit_file::FileResolutionContext::new(root.join("docs"))).unwrap_err();
-        assert!(matches!(err, SchemaError::Unresolved { .. }));
+        assert!(matches!(err, SchemaError::NoMatch { bare_name: true, .. }), "{err:?}");
     }
 
     #[test]

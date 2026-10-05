@@ -1,14 +1,13 @@
 use std::path::{Path, PathBuf};
 
 use tracing::{debug, trace};
-use walkdir::WalkDir;
 
 use crate::file_reference::context::{
     FileResolutionContext, ResolutionContext, find_git_root, home_dir,
 };
 use crate::file_reference::error::FileReferenceError;
 use crate::file_reference::parse;
-use crate::file_reference::portable::{PathIdentity, normalize_native};
+use crate::file_reference::portable::{PathIdentity, first_seen_by_identity, normalize_native};
 use crate::file_reference::{
     CompletionEntryForm, DetailedOutcome, FileReferenceKind, MagicPathList, ParsedReference,
     PartialCompletion, PathTemplate, ProbeDisposition, ProbedCandidate, ReferenceKind,
@@ -109,20 +108,9 @@ pub(crate) fn resolve_core(
     };
     let effective_kind = effective_public_kind(parsed, anchoring);
 
-    let repository_root = if resolution_uses_repository_root(parsed, anchoring) {
-        if let (ReferenceKind::Magic(_), Some(scope)) = (&parsed.kind, &ctx.launch_magic_scope) {
-            // `@` anchors on the immutable launch scope (ruling 2): the
-            // snapshot's repository root — or its absence — is authoritative,
-            // never the source-derived anchors or a fresh discovery.
-            scope.repository_root().map(Path::to_path_buf)
-        } else {
-            match resolve_repository_root(ctx) {
-                Ok(root) => root,
-                Err(e) => return failed_core(classify_error(&e), e),
-            }
-        }
-    } else {
-        ctx.repository_root.clone()
+    let repository_root = match anchored_repository_root(parsed, anchoring, ctx) {
+        Ok(root) => root,
+        Err(e) => return failed_core(classify_error(&e), e),
     };
 
     if parsed.recursive {
@@ -358,7 +346,7 @@ enum ProbeStep {
     NonFile,
     /// The path is a regular file (following a symlink) -- the winner.
     Matched,
-    /// A permission/invalid-path/other I/O failure -- stop the search.
+    /// A permission or other I/O failure -- stop the search.
     Io(std::io::Error),
 }
 
@@ -366,11 +354,17 @@ enum ProbeStep {
 /// failure. `Path::is_file()` is insufficient because it collapses permission
 /// and other I/O errors into `false`. Metadata follows symlinks, so a symlink
 /// to a regular file still matches.
+///
+/// A name the OS cannot hold (Windows rejects `*` and `?`) cannot exist, so it
+/// is absent rather than an I/O failure: `docs/*.md` is a plain miss on every
+/// OS.
 fn probe_candidate(path: &Path) -> ProbeStep {
     match std::fs::metadata(path) {
         Ok(meta) if meta.is_file() => ProbeStep::Matched,
         Ok(_) => ProbeStep::NonFile,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => ProbeStep::Missing,
+        Err(e) if matches!(e.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::InvalidFilename) => {
+            ProbeStep::Missing
+        }
         Err(e) => ProbeStep::Io(e),
     }
 }
@@ -493,7 +487,7 @@ fn resolve_direct_core(
                 probed.push(make_probed(candidate, ProbeDisposition::NonFile));
             }
             ProbeStep::Io(err) => {
-                // A permission/invalid-path/other I/O failure stops the search
+                // A permission or other I/O failure stops the search
                 // with the candidate path and typed source attached; it must not
                 // be misreported as absence.
                 let kind = err.kind();
@@ -519,8 +513,12 @@ fn resolve_direct_core(
     }
 }
 
-/// Resolve with recursive directory traversal, retaining the global lexical
-/// winner while sourcing its search roots from the shared candidate builder.
+/// Resolve a recursive (`%`) reference: the most local match of
+/// `**/<payload>` under the same roots a direct reference would probe.
+///
+/// The search roots stay the diagnostics-visible candidates; the search
+/// itself is `GlobReference`'s first-of-native-order, so the result is the
+/// shallowest match under the first root that has one.
 #[allow(clippy::too_many_arguments)]
 fn resolve_recursive_core(
     parsed: &ParsedReference,
@@ -532,6 +530,12 @@ fn resolve_recursive_core(
     repository_root: Option<PathBuf>,
     effective_kind: FileReferenceKind,
 ) -> CoreResolution {
+    let failed = |repository_root, error: FileReferenceError| CoreResolution {
+        candidates: Vec::new(),
+        repository_root,
+        effective_kind: Some(effective_kind),
+        outcome: CoreOutcome::Failed(classify_error(&error), error),
+    };
     let roots = match build_search_roots(
         parsed,
         interpolated,
@@ -542,110 +546,41 @@ fn resolve_recursive_core(
         repository_root.as_deref(),
     ) {
         Ok(roots) => roots,
-        Err(e) => {
-            let failure = classify_error(&e);
-            return CoreResolution {
-                candidates: Vec::new(),
-                repository_root,
-                effective_kind: Some(effective_kind),
-                outcome: CoreOutcome::Failed(failure, e),
-            };
-        }
+        Err(e) => return failed(repository_root, e),
     };
 
-    let path = Path::new(interpolated);
-
-    // Extract the filename to search for and optional subdirectory filter
-    let needle = path
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| interpolated.to_string());
-
-    debug!(
-        root_count = roots.len(),
-        ?needle,
-        "starting recursive search"
-    );
-
-    let mut matches: Vec<PathBuf> = Vec::new();
-
-    for root_candidate in &roots {
-        let root = root_candidate.path();
-        if let Some(boundary) =
-            candidate_boundary(parsed, anchoring, ctx, repository_root.as_deref())
-        {
-            let authored_candidate = normalize_components(&root.join(interpolated));
-            if let Err(error) =
-                validate_containment(boundary, &parsed.authored, &authored_candidate)
+    // The authored candidate under each root must not land outside its
+    // boundary, as for a direct reference, even when nothing is found there.
+    if let Some(boundary) = candidate_boundary(parsed, anchoring, ctx, repository_root.as_deref()) {
+        for root in &roots {
+            let authored_candidate = normalize_components(&root.path().join(interpolated));
+            if let Err(error) = validate_containment(boundary, &parsed.authored, &authored_candidate)
             {
-                return CoreResolution {
-                    candidates: Vec::new(),
-                    repository_root,
-                    effective_kind: Some(effective_kind),
-                    outcome: CoreOutcome::Failed(classify_error(&error), error),
-                };
+                return failed(repository_root, error);
             }
-        }
-        if !root.is_dir() {
-            continue;
-        }
-
-        let subdir_filter = recursive_subdir_filter(path, root);
-        let walk_root = if path.is_absolute() {
-            path.parent().unwrap_or(root)
-        } else {
-            root
-        };
-
-        let walker = WalkDir::new(walk_root)
-            .follow_links(false)
-            .into_iter()
-            .filter_map(|e| e.ok());
-
-        for entry in walker {
-            if !entry.file_type().is_file() {
-                continue;
-            }
-
-            let entry_name = entry.file_name().to_string_lossy();
-            if entry_name != needle {
-                continue;
-            }
-
-            // The filter and entry parent are both root-relative so absolute
-            // prefixes and a leading `./` cannot make equivalent paths differ.
-            if let Some(ref subdir) = subdir_filter {
-                let entry_path = entry.path();
-                if let Ok(rel) = entry_path.strip_prefix(root) {
-                    if let Some(parent) = rel.parent() {
-                        if !parent.ends_with(subdir) {
-                            continue;
-                        }
-                    } else {
-                        continue;
-                    }
-                }
-            }
-
-            let matched = normalize_absolute(entry.path(), &ctx.cwd);
-            if let Some(boundary) =
-                candidate_boundary(parsed, anchoring, ctx, repository_root.as_deref())
-                && let Err(error) = validate_containment(boundary, &parsed.authored, &matched)
-            {
-                return CoreResolution {
-                    candidates: Vec::new(),
-                    repository_root,
-                    effective_kind: Some(effective_kind),
-                    outcome: CoreOutcome::Failed(classify_error(&error), error),
-                };
-            }
-            matches.push(matched);
         }
     }
 
-    // Sort lexicographically and select the first match (global lexical winner).
-    matches.sort();
-    debug!(match_count = matches.len(), "recursive search complete");
+    debug!(root_count = roots.len(), "starting recursive search");
+    let found = match crate::file_reference::glob::take_first_recursive(
+        parsed,
+        interpolated,
+        anchoring == Some(EffectiveAnchoring::Absolute),
+        magic_paths,
+        vault_roots,
+        ctx,
+    ) {
+        Ok(found) => found,
+        Err(e) => return failed(repository_root, e.into_reference_error()),
+    };
+    let found = found.map(|path| normalize_absolute(&path, &ctx.cwd));
+    if let Some(matched) = &found
+        && let Some(boundary) = candidate_boundary(parsed, anchoring, ctx, repository_root.as_deref())
+        && let Err(error) = validate_containment(boundary, &parsed.authored, matched)
+    {
+        return failed(repository_root, error);
+    }
+    debug!(?found, "recursive search complete");
 
     // The search roots are the diagnostics-visible "candidates" for a recursive
     // reference; they carry provenance but are not direct file probes.
@@ -654,31 +589,15 @@ fn resolve_recursive_core(
         .map(|candidate| make_probed(candidate, ProbeDisposition::SearchRoot))
         .collect();
 
-    let outcome = match matches.into_iter().next() {
-        Some(path) => CoreOutcome::Matched(path),
-        None => CoreOutcome::NoMatch,
-    };
-
     CoreResolution {
         candidates: probed,
         repository_root,
         effective_kind: Some(effective_kind),
-        outcome,
+        outcome: match found {
+            Some(path) => CoreOutcome::Matched(path),
+            None => CoreOutcome::NoMatch,
+        },
     }
-}
-
-/// Return the recursive parent filter relative to a traversal root.
-fn recursive_subdir_filter(path: &Path, root: &Path) -> Option<PathBuf> {
-    let parent = normalize_components(path.parent()?);
-    let root = normalize_components(root);
-    let root_relative = parent.strip_prefix(&root).unwrap_or(&parent);
-    // The filter is a suffix of a traversed entry's parent, which never spells
-    // a `..` hop, so a relative reference's leading hops are not part of it.
-    let names: PathBuf = root_relative
-        .components()
-        .skip_while(|component| matches!(component, std::path::Component::ParentDir))
-        .collect();
-    (!names.as_os_str().is_empty()).then_some(names)
 }
 
 /// The containment rule every candidate of this resolution is held to:
@@ -694,6 +613,25 @@ fn candidate_boundary<'a>(
         (Some(sigil), Some(root)) => Some(Boundary::Repository { sigil, root }),
         _ => relative_boundary(anchoring, ctx),
     }
+}
+
+/// The repository root a reference anchors on, or the context's supplied
+/// root when the reference does not anchor on one (so no discovery runs).
+fn anchored_repository_root(
+    parsed: &ParsedReference,
+    anchoring: Option<EffectiveAnchoring>,
+    ctx: &ResolutionContext,
+) -> Result<Option<PathBuf>, FileReferenceError> {
+    if !resolution_uses_repository_root(parsed, anchoring) {
+        return Ok(ctx.repository_root.clone());
+    }
+    if let (ReferenceKind::Magic(_), Some(scope)) = (&parsed.kind, &ctx.launch_magic_scope) {
+        // `@` anchors on the immutable launch scope (ruling 2): the
+        // snapshot's repository root — or its absence — is authoritative,
+        // never the source-derived anchors or a fresh discovery.
+        return Ok(scope.repository_root().map(Path::to_path_buf));
+    }
+    resolve_repository_root(ctx)
 }
 
 /// Resolve the repository root for a resolution context.
@@ -839,11 +777,7 @@ fn build_magic_chain(inputs: &MagicChainInputs) -> Vec<RootEntry> {
     }
     roots.extend(user_appends);
 
-    // Roots are already normalized, so the dedupe key is the path itself;
-    // first-seen provenance wins.
-    let mut seen = std::collections::HashSet::new();
-    roots.retain(|root| seen.insert(root.path.clone()));
-    roots
+    first_seen_by_identity(roots, |root| PathIdentity::new(&root.path))
 }
 
 /// The ordered `@` search roots for an explicit [`FileResolutionContext`]:
@@ -899,8 +833,8 @@ fn magic_chain_inputs<'a>(
 /// Strip a Windows `\\?\` verbatim prefix from a search root. No-op elsewhere.
 ///
 /// Roots arrive in whichever spelling the caller produced: `std::fs::canonicalize`
-/// yields a verbatim path, while `gix` worktree discovery and `dirs` yield the
-/// legacy form. Both spellings must be collapsed *before* anything is joined
+/// yields a verbatim path, while `gix` worktree discovery and a home read from
+/// the environment usually yield the legacy form. Both spellings must be collapsed *before* anything is joined
 /// onto a root, because Win32 performs no path normalization under a verbatim
 /// prefix -- a reference's own `/` separators would stay literal filename
 /// characters and every probe would miss. Collapsing here also makes two
@@ -1179,7 +1113,8 @@ fn build_search_roots(
     Ok(candidates)
 }
 
-/// Collect recursive search roots for a local reference's effective anchoring.
+/// Collect the search roots of a local reference's effective anchoring, for
+/// recursive (`%`) resolution and [`reference_roots`].
 fn collect_anchoring_roots(
     anchoring: EffectiveAnchoring,
     interpolated: &str,
@@ -1205,20 +1140,72 @@ fn collect_anchoring_roots(
     }
 }
 
+/// The roots a reference's payload is searched under, with the containment
+/// rule a search under them keeps.
+///
+/// Shared by recursive (`%`) resolution and `GlobReference`, so both read the
+/// one sigil-to-roots mapping that single-file resolution uses.
+pub(crate) struct ReferenceRoots {
+    /// Absolute, normalized roots in precedence order, without duplicates.
+    pub roots: Vec<PathBuf>,
+    /// Whether the payload resolved as an absolute path; its one root is then
+    /// the filesystem root.
+    pub absolute: bool,
+    /// The tree root a relative payload must stay inside, when one applies.
+    pub tree_boundary: Option<PathBuf>,
+    /// The sigil and repository root a `&` or `^` payload must stay inside.
+    pub repository: Option<(char, PathBuf)>,
+}
+
+/// Compute the [`ReferenceRoots`] of a parsed reference whose payload
+/// interpolated to `interpolated`.
+pub(crate) fn reference_roots(
+    parsed: &ParsedReference,
+    interpolated: &str,
+    magic_paths: &MagicPathList,
+    vault_roots: &[PathBuf],
+    ctx: &ResolutionContext,
+) -> Result<ReferenceRoots, FileReferenceError> {
+    let anchoring = compute_effective_anchoring(parsed, interpolated)?;
+    let repository_root = anchored_repository_root(parsed, anchoring, ctx)?;
+    let entries = match anchoring {
+        Some(anchoring) => {
+            collect_anchoring_roots(anchoring, interpolated, ctx, repository_root.as_deref())
+        }
+        None => collect_roots(
+            &parsed.kind,
+            magic_paths,
+            vault_roots,
+            ctx,
+            repository_root.as_deref(),
+        )?,
+    };
+    let mut seen = std::collections::HashSet::new();
+    let roots = entries
+        .into_iter()
+        .map(|entry| normalize_absolute(simplify_root(&entry.path), &ctx.cwd))
+        .filter(|root| seen.insert(root.clone()))
+        .collect();
+    let tree_boundary = match relative_boundary(anchoring, ctx) {
+        Some(Boundary::Tree { base_dir }) => Some(base_dir.to_path_buf()),
+        _ => None,
+    };
+    Ok(ReferenceRoots {
+        roots,
+        absolute: anchoring == Some(EffectiveAnchoring::Absolute),
+        tree_boundary,
+        repository: repository_sigil(&parsed.kind).zip(repository_root),
+    })
+}
+
 /// Remove lexically duplicate candidates while preserving first-seen order.
 ///
-/// The dedupe key is [`normalize_components`], so `<root>/x` reached via two
-/// roots that name the same directory -- including one spelled verbatim and one
-/// legacy -- collapses to one entry; the earlier provenance wins.
+/// The dedupe key is [`PathIdentity`], so `<root>/x` reached via two roots that
+/// name the same directory -- including one spelled verbatim and one legacy,
+/// even when the verbatim path is too long to reduce -- collapses to one entry;
+/// the earlier candidate keeps its provenance and its spelling.
 fn dedupe_candidates(candidates: Vec<ResolutionCandidate>) -> Vec<ResolutionCandidate> {
-    let mut seen = std::collections::HashSet::new();
-    let mut out = Vec::with_capacity(candidates.len());
-    for candidate in candidates {
-        if seen.insert(normalize_components(candidate.path())) {
-            out.push(candidate);
-        }
-    }
-    out
+    first_seen_by_identity(candidates, |candidate| PathIdentity::new(candidate.path()))
 }
 
 /// Build the ordered candidate plan without probing the filesystem.
@@ -1238,17 +1225,7 @@ pub(crate) fn candidate_plan(
 
     let interpolated = interpolate(parsed.kind.template(), ctx)?;
     let anchoring = compute_effective_anchoring(parsed, &interpolated)?;
-    let repository_root = if resolution_uses_repository_root(parsed, anchoring) {
-        if let (ReferenceKind::Magic(_), Some(scope)) = (&parsed.kind, &ctx.launch_magic_scope) {
-            // Same launch-scope authority as `resolve_core`; see the comment
-            // there.
-            scope.repository_root().map(Path::to_path_buf)
-        } else {
-            resolve_repository_root(ctx)?
-        }
-    } else {
-        ctx.repository_root.clone()
-    };
+    let repository_root = anchored_repository_root(parsed, anchoring, ctx)?;
 
     if parsed.recursive {
         build_search_roots(
@@ -1278,21 +1255,46 @@ fn interpolate(
     template: &PathTemplate,
     ctx: &ResolutionContext,
 ) -> Result<String, FileReferenceError> {
-    let mut result = String::new();
+    Ok(interpolate_pieces(template, ctx)?
+        .into_iter()
+        .map(|piece| piece.text)
+        .collect())
+}
 
-    for segment in &template.segments {
-        match segment {
-            TemplateSegment::Literal(s) => result.push_str(s),
-            TemplateSegment::EnvVar(name) => {
-                let value = ctx.env.get(name).ok_or_else(|| {
-                    FileReferenceError::MissingEnvironmentVariable { name: name.clone() }
-                })?;
-                result.push_str(value);
-            }
-        }
-    }
+/// One interpolated run of a template: authored text, or the value of one
+/// `{{VAR}}`.
+pub(crate) struct InterpolatedPiece {
+    pub text: String,
+    pub from_env: bool,
+}
 
-    Ok(result)
+/// Interpolate a template, keeping each authored run apart from each
+/// environment value so a glob can read only the authored text as glob
+/// syntax.
+pub(crate) fn interpolate_pieces(
+    template: &PathTemplate,
+    ctx: &ResolutionContext,
+) -> Result<Vec<InterpolatedPiece>, FileReferenceError> {
+    template
+        .segments
+        .iter()
+        .map(|segment| match segment {
+            TemplateSegment::Literal(s) => Ok(InterpolatedPiece {
+                text: s.clone(),
+                from_env: false,
+            }),
+            TemplateSegment::EnvVar(name) => ctx
+                .env
+                .get(name)
+                .map(|value| InterpolatedPiece {
+                    text: value.clone(),
+                    from_env: true,
+                })
+                .ok_or_else(|| FileReferenceError::MissingEnvironmentVariable {
+                    name: name.clone(),
+                }),
+        })
+        .collect()
 }
 
 /// Normalize a path to absolute without following symlinks.
@@ -1400,7 +1402,7 @@ pub(crate) fn validate_containment(
 ) -> Result<(), FileReferenceError> {
     validate_lexical(boundary, reference, candidate)?;
     let root = boundary.root();
-    let canonical_root = match dunce::canonicalize(root) {
+    let canonical_root = match crate::canonicalize_simplified(root) {
         Ok(canonical) => canonical,
         // A tree root that does not exist contains no file, so no candidate
         // inside it can land elsewhere; the lexical check already decided.
@@ -1418,7 +1420,7 @@ pub(crate) fn validate_containment(
         }
     };
     let existing = deepest_existing_ancestor(candidate)?;
-    let canonical_existing = dunce::canonicalize(&existing).map_err(|source| {
+    let canonical_existing = crate::canonicalize_simplified(&existing).map_err(|source| {
         FileReferenceError::Io {
             path: existing.clone(),
             source,
@@ -1453,12 +1455,15 @@ fn deepest_existing_ancestor(path: &Path) -> Result<PathBuf, FileReferenceError>
     while let Some(candidate) = current {
         match std::fs::symlink_metadata(candidate) {
             Ok(_) => return Ok(candidate.to_path_buf()),
-            // A regular file part-way down the path (`ENOTDIR`) means this
-            // path does not exist either; the probe reports that failure.
+            // A regular file part-way down the path (`ENOTDIR`), or a name
+            // the OS cannot hold (Windows rejects `*`), means this path does
+            // not exist either; the probe reports that failure.
             Err(error)
                 if matches!(
                     error.kind(),
-                    std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+                    std::io::ErrorKind::NotFound
+                        | std::io::ErrorKind::NotADirectory
+                        | std::io::ErrorKind::InvalidFilename
                 ) =>
             {
                 current = candidate.parent();

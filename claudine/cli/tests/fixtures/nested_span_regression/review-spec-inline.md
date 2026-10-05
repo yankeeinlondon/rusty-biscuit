@@ -15,7 +15,7 @@ success:
             ? "The review of the draft specification file in {{ctx.area}} has completed"
             : "The review of the draft specification file in the {{ctx.repo_name}} repo has completed"
         }}
-    message: "✅  review of the draft specification `{{ link(spec) }}` has completed"
+    message: "✅  review of the draft specification {{ code_link(spec) }} has completed"
 failure:
     say: |-
         {{

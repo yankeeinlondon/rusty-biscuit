@@ -150,8 +150,8 @@ points on the shared `run_with_deadline` helper.
 ### Blocking open-PR listing
 
 `remote::blocking::open_pull_requests` (and `_with`) lists a repository's open
-PRs as `PrSummary` through the same `run_with_deadline` helper and error
-contract. Both entry points page through the focused client's private
+PRs as `OpenPullRequests { pull_requests: Vec<PrSummary>, credentials }`
+through the same `run_with_deadline` helper and error contract. Both entry points page through the focused client's private
 `pr_list_rows`, which uses `NotFound::Error`; keep new PR list walks on it.
 
 - Filter server-side by the open state (GitHub/Gitea `open`, GitLab `opened`,
@@ -163,7 +163,8 @@ contract. Both entry points page through the focused client's private
 
 ### Blocking branch head
 
-`remote::blocking::branch_head` (and `_with`) returns `BranchHead { sha }`
+`remote::blocking::branch_head` (and `_with`) returns `BranchHead { sha,
+credentials }`
 through the same `run_with_deadline` helper, from the focused client's
 `branch_head` request (GitHub singular `git/ref/heads/{branch}`, since the
 plural `refs` prefix-matches and can answer an array; Gitea/Forgejo
@@ -178,11 +179,36 @@ plural `refs` prefix-matches and can answer an array; Gitea/Forgejo
   provider modules have one; the focused client does not). A rejected or
   insufficient token is reported, and the caller decides on a fallback.
 
+### Blocking request credentials
+
+`run_with_deadline` installs a `SentLog` on its copy of the client
+(`with_sent_log`); `fetch_json` appends the credential selection it made for
+every request it sends (`SentWith::Anonymous` or `Key(name)`), from the same
+`credential()` call that authenticates the request. There is no second
+lookup, and no extra request.
+
+- Success: `RequestCredentials::from_sent` folds the log: empty is `Unknown`,
+  all anonymous is `Anonymous`, any key is `Keyed { variables }` (distinct
+  names, first-use order). Pages and GitLab fork lookups all count.
+- Failure: `classify`'s `key` is the last sent request's key, so
+  `NotFoundOrNotPermitted { key }`, `RateLimited`, `CredentialsRejected`, and
+  `CredentialsInsufficient` name what was actually sent, including a
+  host-bound `SNIFF_*_TOKEN` of a discovered (`ProviderAndHost`) client.
+- `RequestCredentials` is plain data (no serde, names only); a consumer that
+  persists it (`worktree`'s `CredentialEvidence`) owns its stored shape.
+- An empty variable is unset in `credentials::provider_token` and
+  `host_bound_provider_token` alike (`token_in`), so it is never sent, never
+  hides a later candidate, and never reads as keyed.
+- Proven by `l1::branch_head::*credentials*`/`*host_bound*`/`*empty*` (a
+  discovered loopback Gitea for the host-bound case) and
+  `l1::open_pull_requests::a_paginated_answer_is_anonymous_only_when_every_page_was`
+  (a responder sets or removes the token between pages).
+
 ### Blocking credentials classification
 
 `focused.rs` splits a 403 while the headers and body are still available;
-`blocking::classify` sees only the `SniffError` plus the `key` that
-`run_with_deadline` resolved from `FocusedProviderClient::credential_key`.
+`blocking::classify` sees only the `SniffError` plus the `key` of the last
+request sent (above).
 
 - 429, or a 403 with `x-ratelimit-remaining: 0` or a "rate limit" body, is
   `SniffError::RateLimited` → `RateLimited { authenticated, key }`.
@@ -193,7 +219,7 @@ plural `refs` prefix-matches and can answer an array; Gitea/Forgejo
 - 401 is `CredentialsRequired { key: None }` without a token and
   `CredentialsRejected { key }` with one.
 - `credentials::provider_token_variables` is the one list of candidate names:
-  `provider_token` sends the first set one and `credential_env` reports them in
+  `provider_token` sends the first set, nonempty one and `credential_env` reports them in
   that order. It differs from schematic's `env_auth` (GitHub order, and
   Bitbucket's `BITBUCKET_TOKEN` versus username/app password).
 - No `PrUnavailable` message may carry a token: `client_for_url` never echoes

@@ -56,6 +56,8 @@ mod level2_lifecycle_loop;
 #[cfg(unix)]
 mod level2_malformed_frontmatter_capture;
 #[cfg(unix)]
+mod level2_ownership_prompt_capture;
+#[cfg(unix)]
 mod level2_perf_capture;
 #[cfg(unix)]
 mod level2_prompt_reporting_capture;

@@ -14,7 +14,7 @@ use renderable::tree::{RenderNode, RenderStrictness, TreeRenderable};
 use crate::{
     components::{
         block_quote::BlockQuote,
-        prose::Prose,
+        prose::{InlineProse, Prose},
         renderable::{BrowserRenderable, RenderableTerminalContent, TerminalRenderable},
         status::{Status, StatusState},
     },
@@ -135,7 +135,8 @@ impl StatusBlock {
 
     /// Sets the body content as a vector of [`Prose`] items.
     ///
-    /// Each item is rendered individually and stacked vertically with a
+    /// Each item contributes its own paragraph and code blocks, keeping its
+    /// inline styling and line-break mode; blocks stack vertically with a
     /// single blank line between them inside a continuous block quote.
     pub fn body(mut self, body: impl crate::components::prose::IntoProseVec) -> Self {
         self.body = body.into_prose_vec();
@@ -235,29 +236,19 @@ impl StatusBlock {
         }
     }
 
-    /// Plain-text projection of a prose source string.
+    /// Plain-text projection of a prose component.
     ///
-    /// Renders the prose through a deliberately uncolored, non-Nerd terminal
-    /// and strips any residual escape codes so bracketed tags such as
-    /// `<b>Bold</b>` flatten to `Bold` rather than leaking the markup into
+    /// Renders the component through a deliberately uncolored, non-Nerd
+    /// terminal and strips any residual escape codes so bracketed tags such
+    /// as `<b>Bold</b>` flatten to `Bold` rather than leaking the markup into
     /// Markdown or Browser output.
-    fn prose_plain_text(prose_src: &str) -> String {
+    fn prose_plain_text(prose: &dyn TerminalRenderable) -> String {
         let mut term = Terminal::builder()
             .width(80)
             .color_depth(ColorDepth::None)
             .build();
         term.is_nerd_font = Some(false);
-        strip_ansi_codes(&Prose::new(prose_src).render(&term))
-    }
-
-    /// Flatten the body into a single plain-text blob with `\n\n` between
-    /// items.
-    fn body_plain_text(&self) -> String {
-        self.body
-            .iter()
-            .map(|p| Self::prose_plain_text(p.content()))
-            .collect::<Vec<_>>()
-            .join("\n\n")
+        strip_ansi_codes(&prose.render(&term))
     }
 
     /// Builds the canonical projection of this status block.
@@ -268,9 +259,10 @@ impl StatusBlock {
     /// projection emits a `Root` with one optional header `Paragraph` plus a
     /// body surface that is one of:
     ///
-    /// - a `BlockQuote` carrying `leading blank, body, [blank, hint]` when
-    ///   body content is present — the trailing `blank, hint` pair is only
-    ///   emitted for a non-blank hint;
+    /// - a `BlockQuote` carrying `leading blank, body blocks, [blank, hint]`
+    ///   when body content is present — each body [`Prose`] contributes its
+    ///   own `Paragraph` and `Code` blocks with their inline styling, and the
+    ///   trailing `blank, hint` pair is only emitted for a non-blank hint;
     /// - a standalone `Paragraph` hint when the body is empty and a
     ///   non-blank hint is configured;
     /// - nothing beyond the optional header when both body and hint are
@@ -288,7 +280,9 @@ impl StatusBlock {
 
         if let Some(header_text) = &self.header {
             let icon = Self::severity_icon(&self.severity);
-            let header_plain = Self::prose_plain_text(header_text);
+            // The header shares a line with the severity icon, so it is
+            // inline: a blank line in it must not open a paragraph.
+            let header_plain = Self::prose_plain_text(&InlineProse::new(header_text));
             let header_text = format!("{icon} {header_plain}");
             let mut node = RenderNode::paragraph(vec![RenderNode::text(header_text)]);
             node.attrs.classes = vec!["status-block__header".into()];
@@ -300,20 +294,21 @@ impl StatusBlock {
         }
 
         if !self.body.is_empty() {
-            let body_text = self.body_plain_text();
             let mut block_children: Vec<RenderNode> = Vec::new();
 
             block_children.push(RenderNode::paragraph(vec![RenderNode::text(
                 String::new(),
             )]));
-            block_children.push(RenderNode::paragraph(vec![RenderNode::text(body_text)]));
+            for prose in &self.body {
+                block_children.extend(prose.embedded_nodes());
+            }
 
             if let Some(hint_text) = self.non_blank_hint() {
                 block_children.push(RenderNode::paragraph(vec![RenderNode::text(
                     String::new(),
                 )]));
 
-                let hint = Self::prose_plain_text(hint_text);
+                let hint = Self::prose_plain_text(&Prose::new(hint_text));
 
                 let mut hint_node = RenderNode::paragraph(vec![RenderNode::emphasis(vec![
                     RenderNode::text(hint),
@@ -351,7 +346,7 @@ impl StatusBlock {
             });
             children.push(node);
         } else if let Some(hint_text) = self.non_blank_hint() {
-            let hint = Self::prose_plain_text(hint_text);
+            let hint = Self::prose_plain_text(&Prose::new(hint_text));
             let mut node = RenderNode::paragraph(vec![RenderNode::text(hint)]);
             node.attrs.classes = vec!["status-block__hint".into()];
             children.push(node);
@@ -906,22 +901,35 @@ mod tests {
     }
 
     #[test]
-    fn body_prose_tags_are_flattened() {
-        let block = StatusBlock::new(StatusState::Info).body(Prose::new("<b>bold</b> text"));
+    fn body_prose_keeps_its_inline_structure() {
+        let block = StatusBlock::new(StatusState::Info)
+            .body(Prose::new("<b>bold</b> text with `code`"));
         let md = block.render_markdown();
-        assert!(!md.contains("<b>"));
-        assert!(md.contains("bold"));
-        assert!(md.contains("text"));
+        assert!(!md.contains("<b>"), "{md:?}");
+        assert!(md.contains("> **bold** text with `code`"), "{md:?}");
     }
 
     #[test]
-    fn multiple_body_items_join_with_blank_line() {
+    fn multiple_body_items_are_sibling_paragraphs() {
         let block = StatusBlock::new(StatusState::Info)
             .body(vec![Prose::new("first"), Prose::new("second")]);
-        let body_text = block.body_plain_text();
-        assert!(body_text.contains("first"));
-        assert!(body_text.contains("second"));
-        assert!(body_text.contains("\n\n"));
+        let md = block.render_markdown();
+        assert!(md.contains("> first\n>\n> second"), "{md:?}");
+        let rendered = strip_ansi(&block.render(&no_color_terminal(80)));
+        assert!(rendered.contains("┃ first\n┃ \n┃ second"), "{rendered:?}");
+    }
+
+    #[test]
+    fn body_line_breaks_mode_survives_projection() {
+        use crate::components::prose::LineBreaks;
+        let block = StatusBlock::new(StatusState::Info)
+            .body(Prose::new("Key: one\nKey: two").with_line_breaks(LineBreaks::Hard));
+        let rendered = strip_ansi(&block.render(&no_color_terminal(80)));
+        assert!(rendered.contains("┃ Key: one\n┃ Key: two"), "{rendered:?}");
+
+        let soft = StatusBlock::new(StatusState::Info).body("Key: one\nKey: two");
+        let rendered = strip_ansi(&soft.render(&no_color_terminal(80)));
+        assert!(rendered.contains("┃ Key: one Key: two"), "{rendered:?}");
     }
 
     // ── Terminal rendering: default border (tree path) ────────────────

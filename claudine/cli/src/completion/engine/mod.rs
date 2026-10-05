@@ -19,6 +19,13 @@
 //!   against `docs/`, `features/`, `fixes/`, and `reviews/` at repo,
 //!   package-area, and package levels.
 //!
+//! After the composition file, a slot is completed only when type-aware
+//! ownership says the word under the cursor is Claudine's
+//! ([`ownership::cursor_is_claudines`]), and a flag only when the words
+//! before it read cleanly ([`ownership::committed_arguments_are_owned`]); a
+//! word a provider switch takes, a line ownership rejects, and anything after
+//! an authored `--` get nothing.
+//!
 //! Remaining slots (wrapper flag values, administrative subcommands, etc.)
 //! emit zero candidates so the shell's native file / flag completion takes
 //! over. The new engine intentionally does **not** attach file completers
@@ -41,11 +48,12 @@ use crate::completion::scopes::{ComposeMode, ScopeContext};
 use crate::completion::setter_value;
 use std::ffi::OsString;
 
+mod ownership;
 mod tokens;
 
+use crate::argv::OwnedFlags;
 use tokens::{
-    is_flag_token, is_global_bool_flag, is_setter_name_partial, is_setter_shaped,
-    is_value_bearing_flag, split_setter,
+    is_flag_token, is_global_bool_flag, is_setter_name_partial, is_setter_shaped, split_setter,
 };
 
 /// Top-level classification of the cursor position in argv.
@@ -87,6 +95,9 @@ pub(crate) enum CompletionTarget {
     /// via `<TAB>` even though the argv normalizer — not a clap field —
     /// is what actually rewrites it to `--provider <slug>`.
     CompositionProviderFlag { partial: String },
+    /// Cursor is past an authored `--`, where every word belongs to the
+    /// agent. Nothing is offered, not even clap's fallback.
+    Declined,
     /// Cursor is anywhere else — a wrapper flag value, an administrative
     /// subcommand, etc. The engine emits zero candidates so the shell
     /// falls back to its native file / flag completion.
@@ -172,7 +183,25 @@ pub(crate) fn run_with_context(
     current_index: usize,
     ctx: &RootContext,
 ) -> Vec<String> {
-    match classify_completion_target(argv, current_index) {
+    let target = classify_completion_target(argv, current_index);
+    // After the composition file, a word an open provider switch takes is the
+    // agent's, and a line ownership cannot read offers nothing. The root menu
+    // and the file slot precede the arguments ownership reads.
+    let owned = match target {
+        CompletionTarget::SetterValue { .. }
+        | CompletionTarget::SetterName { .. }
+        | CompletionTarget::Other => ownership::cursor_is_claudines(argv, current_index),
+        CompletionTarget::CompositionProviderFlag { .. } => {
+            ownership::committed_arguments_are_owned(argv, current_index)
+        }
+        CompletionTarget::Root(_)
+        | CompletionTarget::CompositionPositional { .. }
+        | CompletionTarget::Declined => true,
+    };
+    if !owned {
+        return Vec::new();
+    }
+    match target {
         CompletionTarget::Root(partial) => {
             let _span = tracing::trace_span!(
                 target: "claudine::completion",
@@ -217,6 +246,7 @@ pub(crate) fn run_with_context(
             let scope_ctx = ScopeContext::discover();
             run_setter_name(&partial, &file_arg, argv, current_index, &scope_ctx)
         }
+        CompletionTarget::Declined => Vec::new(),
         CompletionTarget::Other => {
             // Unrecognized slot — try clap's dynamic completion for
             // administrative subcommand flags and other static-command-tree
@@ -282,21 +312,6 @@ fn collect_supplied_setter_names(argv: &[String], current_index: usize) -> HashS
     out
 }
 
-/// Fall back to clap's dynamic completion for slots the custom engine does
-/// not own (administrative subcommand flags, wrapper flags, etc.).
-///
-/// Activates when:
-/// - the cursor partial is flag-shaped (`-` or `--`), or
-/// - the previous token is flag-shaped (indicating the cursor is on a flag
-///   value).
-///
-/// Empty or non-flag partials at vanilla positional slots still defer to the
-/// shell's native file completion, preserving the contract tested by
-/// `non_targeted_subcommand_emits_no_candidates`.
-///
-/// Uses the same `ignore_errors(true)` command tree that powers the legacy
-/// `CompleteEnv` path so wrapper subcommands do not short-circuit on unknown
-/// passthrough tokens.
 /// Complete a flag-shaped token inside a composition subcommand.
 ///
 /// Offers the catalog-derived `--<provider>` selection switches first
@@ -324,6 +339,21 @@ fn run_composition_provider_flag(
     out
 }
 
+/// Fall back to clap's dynamic completion for slots the custom engine does
+/// not own (administrative subcommand flags, wrapper flags, etc.).
+///
+/// Activates when:
+/// - the cursor partial is flag-shaped (`-` or `--`), or
+/// - the previous token is flag-shaped (indicating the cursor is on a flag
+///   value).
+///
+/// Empty or non-flag partials at vanilla positional slots still defer to the
+/// shell's native file completion, preserving the contract tested by
+/// `non_targeted_subcommand_emits_no_candidates`.
+///
+/// Uses the same `ignore_errors(true)` command tree that powers the legacy
+/// `CompleteEnv` path so wrapper subcommands do not short-circuit on unknown
+/// passthrough tokens.
 fn clap_dynamic_fallback(argv: &[String], current_index: usize) -> Vec<String> {
     let partial = argv.get(current_index).map(String::as_str).unwrap_or("");
     let prev_flag = current_index
@@ -366,11 +396,12 @@ pub(crate) fn classify_completion_target(
     }
 
     // A literal `--` before the cursor means we've crossed into wrapper
-    // passthrough. The root menu and every slot-specific completer
-    // decline to touch anything past that separator.
+    // passthrough or a composition command's opaque agent tail. The root
+    // menu, every slot-specific completer, and clap's fallback decline to
+    // touch anything past that separator.
     for token in argv.iter().take(current_index) {
         if token == "--" {
-            return CompletionTarget::Other;
+            return CompletionTarget::Declined;
         }
     }
 
@@ -453,8 +484,15 @@ fn classify_post_subcommand(
     // committed prompt-file positional (skipping flags, flag values, and
     // `key=value` setters). The file_arg, when present, unlocks the
     // schema-aware completers downstream.
-    let (file_arg, has_seen_positional_before_cursor) =
-        scan_committed_positional(argv, sub_idx + 1, current_index);
+    let scan = scan_committed_positional(argv, sub_idx + 1, current_index);
+
+    // The cursor is the value of a Claudine option (`--model <TAB>`): clap's
+    // fallback completes it, never a setter or file completer.
+    if scan.cursor_is_option_value {
+        return CompletionTarget::Other;
+    }
+    let file_arg = scan.file_arg;
+    let has_seen_positional_before_cursor = scan.seen_positional;
 
     // A setter-shaped cursor routes to the setter-value completer
     // regardless of the positional state — the `name=` prefix
@@ -489,16 +527,21 @@ fn classify_post_subcommand(
     }
 }
 
-/// Walk argv between `start` and `cursor` and return:
-///
-/// - The first committed positional file argument (non-flag, non-setter)
-///   when one exists.
-/// - `true` when at least one positional was committed before the cursor.
-fn scan_committed_positional(
-    argv: &[String],
-    start: usize,
-    cursor: usize,
-) -> (Option<String>, bool) {
+/// What the words before the cursor commit.
+struct PositionalScan {
+    /// The first positional (non-flag, non-setter): the composition file.
+    file_arg: Option<String>,
+    /// At least one positional precedes the cursor.
+    seen_positional: bool,
+    /// The cursor is the separate value of a Claudine option.
+    cursor_is_option_value: bool,
+}
+
+/// Walk argv between `start` and `cursor`. A Claudine option's separate value
+/// is skipped using the same clap-derived surface the argv partition uses
+/// ([`OwnedFlags::for_composition`]); any other switch is one word.
+fn scan_committed_positional(argv: &[String], start: usize, cursor: usize) -> PositionalScan {
+    let owned = OwnedFlags::for_composition();
     let mut idx = start;
     let mut file_arg: Option<String> = None;
     let mut seen = false;
@@ -509,7 +552,14 @@ fn scan_committed_positional(
             continue;
         }
         if is_flag_token(token) {
-            if is_value_bearing_flag(token) && !token.contains('=') {
+            if owned.consumes_next(token) {
+                if idx + 1 == cursor {
+                    return PositionalScan {
+                        file_arg,
+                        seen_positional: seen,
+                        cursor_is_option_value: true,
+                    };
+                }
                 idx += 2;
             } else {
                 idx += 1;
@@ -526,7 +576,11 @@ fn scan_committed_positional(
         }
         idx += 1;
     }
-    (file_arg, seen)
+    PositionalScan {
+        file_arg,
+        seen_positional: seen,
+        cursor_is_option_value: false,
+    }
 }
 
 fn classify_root_partial(token: &str) -> RootPartial {

@@ -81,17 +81,19 @@ fn list_output_is_the_redesigned_table() {
 
     assert!(output.status.success(), "wt list should succeed");
     assert_eq!(String::from_utf8_lossy(&output.stdout), "");
+    // The last column widens the table toward the legend's width, up to the
+    // 80-column terminal.
     assert_eq!(
         String::from_utf8_lossy(&output.stderr),
-        "\n┌─────────────┬───────────┬───────────┬───────────┐\n\
-│ Worktree    │ Branch    │ ->  main  │ -> parent │\n\
-├─────────────┼───────────┼───────────┼───────────┤\n\
-│ ○ base repo │  main     │ —         │ —         │\n\
-│ ○ feature-a │ feature-a │ clean     │ —         │\n\
-└─────────────┴───────────┴───────────┴───────────┘\n\
+        "\n┌─────────────┬───────────┬───────────┬────────────────────────────────────────┐\n\
+│ Worktree    │ Branch    │ ->  main  │ -> parent                              │\n\
+├─────────────┼───────────┼───────────┼────────────────────────────────────────┤\n\
+│ ○ base repo │  main     │ —         │ —                                      │\n\
+│ ○ feature-a │ feature-a │ clean     │ —                                      │\n\
+└─────────────┴───────────┴───────────┴────────────────────────────────────────┘\n\
 \n\
 \x20Worktree   ○ clean    ● uncommitted files    ● uncommitted source files\n\
-\x20Branch     └─ merges cleanly into parent    └─ conflicts with parent    └┄ parent deleted\n"
+\x20Branch     └─ merges cleanly into parent     └─ conflicts with parent      └┄ parent deleted\n"
     );
 }
 
@@ -202,4 +204,140 @@ fn fork_store(home: &Path, main: &Path) -> PathBuf {
         None
     }
     find(home).unwrap_or_else(|| worktree::fork_origin::fork_origin_path(main).expect("store path"))
+}
+
+/// The `lhg-before` shape (a detached linked worktree whose `.git` file is
+/// gone) and a worktree whose directory is gone, beside a healthy one, through
+/// the real binary: `✕`, never `○`, an accurate note for each, and nothing on
+/// disk or in Git's records changed by listing.
+#[test]
+fn worktrees_git_cannot_read_are_crossed_and_explained_without_repair() {
+    let repo = tempfile::tempdir().expect("create temp dir");
+    let main = repo.path().join("main");
+    fs::create_dir(&main).expect("create main repo dir");
+    init_repo(&main);
+    commit(&main, "file.txt", "1\n");
+    let unlinked = repo.path().join("lhg-before");
+    let missing = repo.path().join("feat-gone");
+    let healthy = repo.path().join("feat-ok");
+    run_git(&main, &["worktree", "add", "-q", "--detach", unlinked.to_str().unwrap(), "HEAD"]);
+    run_git(&main, &["worktree", "add", "-q", "-b", "feat/gone", missing.to_str().unwrap()]);
+    run_git(&main, &["worktree", "add", "-q", "-b", "feat/ok", healthy.to_str().unwrap()]);
+    fs::write(unlinked.join("kept.txt"), "work\n").expect("write");
+    fs::remove_file(unlinked.join(".git")).expect("unlink");
+    fs::remove_dir_all(&missing).expect("remove directory");
+    let porcelain = || {
+        let output = Command::new("git").current_dir(&main).args(["worktree", "list", "--porcelain"]).output().unwrap();
+        String::from_utf8(output.stdout).unwrap()
+    };
+    let records_before = porcelain();
+    assert_eq!(records_before.matches("prunable").count(), 2, "{records_before}");
+    // Git's own spelling of each path, which the notes show.
+
+    let output = Home::new().wt(&main, &["list"]);
+
+    assert!(output.status.success(), "wt list should succeed: {output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let cell = |name: &str| {
+        let line = stderr.lines().find(|line| line.contains(&format!(" {name} "))).unwrap_or_else(|| panic!("{name}: {stderr}"));
+        line.split('│').nth(1).unwrap().trim().to_string()
+    };
+    assert_eq!(cell("lhg-before"), "✕ lhg-before", "{stderr}");
+    assert_eq!(cell("feat-gone"), "✕ feat-gone", "{stderr}");
+    assert_eq!(cell("feat-ok"), "○ feat-ok", "{stderr}");
+    assert!(stderr.contains("✕ git can't read worktree"), "{stderr}");
+    assert!(!stderr.contains("couldn't check"), "no readable row is unknown: {stderr}");
+
+    // Notes wrap at the captured width, so compare their words.
+    let words: String = stderr.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(
+        words.contains("lhg-before: its .git file is missing; wt remove lhg-before removes it."),
+        "{words}"
+    );
+    assert!(
+        words.contains("feat-gone: its directory is gone; wt remove feat/gone checks whether its remaining Git record can be removed safely."),
+        "{words}"
+    );
+    let lhg = words.find("lhg-before: its").unwrap();
+    let gone = words.find("feat-gone: its").unwrap();
+    assert!(gone < lhg, "notes follow table row order: {stderr}");
+
+    // Listing repaired and removed nothing.
+    assert!(fs::symlink_metadata(unlinked.join(".git")).is_err(), "the link was not restored");
+    assert_eq!(fs::read_to_string(unlinked.join("kept.txt")).unwrap(), "work\n");
+    assert!(fs::symlink_metadata(&missing).is_err(), "nothing was recreated");
+    assert_eq!(porcelain(), records_before, "Git's records are unchanged");
+}
+
+/// A checkout moved away and replaced by a link to it: Git reads through the
+/// link and does not mark it `prunable`, yet the row is `✕` with a note, and
+/// listing changes nothing.
+#[test]
+fn a_checkout_replaced_by_a_readable_link_is_crossed() {
+    let repo = tempfile::tempdir().expect("create temp dir");
+    let main = repo.path().join("main");
+    fs::create_dir(&main).expect("create main repo dir");
+    init_repo(&main);
+    commit(&main, "file.txt", "1\n");
+    let target = repo.path().join("target");
+    let saved = repo.path().join("saved");
+    run_git(&main, &["worktree", "add", "-q", "-b", "topic", target.to_str().unwrap()]);
+    fs::rename(&target, &saved).expect("move checkout");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&saved, &target).expect("symlink");
+    #[cfg(windows)]
+    {
+        let status = Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&target)
+            .arg(&saved)
+            .stdout(std::process::Stdio::null())
+            .status()
+            .expect("cmd runs");
+        assert!(status.success(), "mklink /J needs no privilege");
+    }
+
+    let output = Home::new().wt(&main, &["list"]);
+
+    assert!(output.status.success(), "wt list should succeed: {output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let row = stderr.lines().find(|line| line.contains(" target ")).unwrap_or_else(|| panic!("{stderr}"));
+    assert_eq!(row.split('│').nth(1).unwrap().trim(), "✕ target", "{stderr}");
+    assert!(stderr.contains("✕ its path is a link"), "{stderr}");
+    let words: String = stderr.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(words.contains("is a link, which may have replaced the original checkout."), "{words}");
+    assert!(!words.contains("Git can't read"), "{words}");
+    assert!(saved.join("file.txt").is_file());
+}
+
+/// A missing worktree whose recorded path ends in a name holding a
+/// noncharacter and markup-like text: Git lists the path from its metadata,
+/// the branch is ambiguous with another worktree's directory, so the note
+/// suggests the basename, and it must be the exact recorded one, quoted, with
+/// the markup shown literally. The path only exists in Git's metadata; some
+/// filesystems (APFS) refuse the noncharacter in a real filename.
+#[test]
+fn a_missing_entry_named_with_delimiter_like_text_gets_its_exact_remove_command() {
+    let repo = tempfile::tempdir().expect("create temp dir");
+    let main = repo.path().join("main");
+    fs::create_dir(&main).expect("create main repo dir");
+    init_repo(&main);
+    commit(&main, "file.txt", "1\n");
+    let target = repo.path().join("target");
+    let topic_dir = repo.path().join("topic");
+    run_git(&main, &["worktree", "add", "-q", "-b", "topic", target.to_str().unwrap()]);
+    run_git(&main, &["worktree", "add", "-q", "-b", "other", topic_dir.to_str().unwrap()]);
+    fs::remove_dir_all(&target).expect("remove directory");
+    let name = "target\u{FDD1}<red>INJECTED";
+    let gitdir = main.join(".git").join("worktrees").join("target").join("gitdir");
+    let recorded = fs::read_to_string(&gitdir).expect("read gitdir");
+    let parent = recorded.trim_end().strip_suffix("target/.git").unwrap_or_else(|| panic!("{recorded:?}"));
+    fs::write(&gitdir, format!("{parent}{name}/.git\n")).expect("rewrite gitdir");
+
+    let output = Home::new().wt(&main, &["list"]);
+
+    assert!(output.status.success(), "wt list should succeed: {output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains(&format!("{name}: its directory is gone;")), "{stderr}");
+    assert!(stderr.contains(&format!("wt remove '{name}'")), "{stderr}");
 }

@@ -1020,3 +1020,119 @@ fn source_context_keeps_its_own_repository_and_the_launch_scope() {
     assert_eq!(derived.launch_magic_scope(), launch_context.launch_magic_scope());
     derived.validate().unwrap();
 }
+
+/// Code-span contents are literal, so a reference, a searched or tried path,
+/// and a suggestion must render exactly as written, without the backslashes
+/// Prose escaping would add. Path separators are normalized to `/`, so these
+/// values carry underscores, brackets, and braces rather than a backslash.
+fn assert_no_prose_escapes(rendered: &str) {
+    for escaped in [r"\_", r"\[", r"\{"] {
+        assert!(!rendered.contains(escaped), "escape `{escaped}` leaked into:\n{rendered}");
+    }
+}
+
+#[test]
+fn candidate_no_match_shows_reference_paths_and_suggestions_literally() {
+    let repo = TempDir::new().unwrap();
+    let launch = repo.path().join("_l_[d]{e}");
+    fs::create_dir_all(&launch).unwrap();
+    let context = FileResolutionContext::new(&launch).with_repository_root(repo.path());
+    let err = resolve_composition_source_in_context("./_a_x.md", &context)
+        .unwrap_err()
+        .with_file_reference_suggestions(vec!["_s_[y]/{z}.md".to_string()]);
+
+    let rendered = err.report_block_error(&plain_terminal());
+    assert!(rendered.contains("`./_a_x.md`"), "{rendered}");
+    assert!(rendered.contains("_l_[d]{e}`."), "launch directory: {rendered}");
+    assert!(rendered.contains("_l_[d]{e}/./_a_x.md`"), "tried candidate: {rendered}");
+    assert!(rendered.contains("`_s_[y]/{z}.md`"), "suggestion: {rendered}");
+    assert_no_prose_escapes(&rendered);
+}
+
+#[test]
+fn magic_no_match_shows_payload_and_search_roots_literally() {
+    let rendered = render_magic_miss("@_a_x.md");
+    assert!(
+        rendered.contains("`_a_x.md` was not found under any directory"),
+        "{rendered}"
+    );
+    assert_no_prose_escapes(&rendered);
+}
+
+/// The rendered block's rows on [`plain_terminal`], without the `┃` border.
+fn block_rows(err: &CompositionError) -> Vec<String> {
+    err.report_block_error(&plain_terminal())
+        .lines()
+        .map(|line| line.trim_start().trim_start_matches('┃').trim().to_string())
+        .collect()
+}
+
+#[test]
+fn magic_no_match_lists_each_search_root_on_its_own_row() {
+    let (_fixture, home, repo) = staged_repo_under_home();
+    let context = with_prompt_magic_roots(
+        FileResolutionContext::from_snapshot(&repo, Some(home.clone()), HashMap::new())
+            .with_repository_root(&repo),
+        &repo,
+        None,
+        None,
+        Some(&home),
+    );
+    let err = resolve_composition_source_in_context("@prompts/missing.md", &context).unwrap_err();
+    let (_, resolution, _) = err.file_reference_no_match().unwrap();
+    let roots = resolution.magic_search_roots().len();
+    assert!(roots >= 2);
+
+    let rows = block_rows(&err);
+    let heading = rows
+        .iter()
+        .position(|row| row.ends_with("an `@` reference searches:"))
+        .unwrap_or_else(|| panic!("heading row missing: {rows:#?}"));
+    let listed: Vec<&String> = rows[heading + 1..]
+        .iter()
+        .take_while(|row| row.starts_with("- `"))
+        .collect();
+    assert_eq!(listed.len(), roots, "one row per root: {rows:#?}");
+    for (row, root) in listed.iter().zip(resolution.magic_search_roots()) {
+        let path = format!("- `{}`", biscuit_file::to_portable_string(root.path()));
+        assert!(row == &&path || row == &&format!("{path} (*)"), "{row} vs {path}");
+    }
+}
+
+#[test]
+fn candidate_no_match_lists_each_tried_path_and_suggestion_on_its_own_row() {
+    let repo = TempDir::new().unwrap();
+    let launch = repo.path().join("launch");
+    fs::create_dir_all(&launch).unwrap();
+    let context = FileResolutionContext::new(&launch).with_repository_root(repo.path());
+    let err = resolve_composition_source_in_context("missing.md", &context)
+        .unwrap_err()
+        .with_file_reference_suggestions(vec!["a/missing.md".into(), "b/missing.md".into()]);
+    let (_, resolution, _) = err.file_reference_no_match().unwrap();
+    let expected_tried: Vec<String> = resolution
+        .candidates()
+        .iter()
+        .map(|probed| {
+            let label = match probed.candidate().provenance() {
+                biscuit_file::RootProvenance::Source => "launch directory",
+                biscuit_file::RootProvenance::Repository => "repository",
+                other => panic!("unexpected provenance {other:?}"),
+            };
+            format!(
+                "- {label}: `{}`",
+                biscuit_file::to_portable_string(probed.candidate().path())
+            )
+        })
+        .collect();
+    assert_eq!(expected_tried.len(), 2);
+
+    let rows = block_rows(&err);
+    let tried = rows.iter().position(|row| row == "Tried:").expect("`Tried:` row");
+    assert_eq!(rows[tried + 1..tried + 3], expected_tried[..], "{rows:#?}");
+    let suggested = rows.iter().position(|row| row == "Did you mean:").expect("suggestion heading");
+    assert_eq!(
+        rows[suggested + 1..suggested + 3],
+        ["- `a/missing.md`", "- `b/missing.md`"],
+        "{rows:#?}"
+    );
+}

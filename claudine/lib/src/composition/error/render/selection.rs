@@ -5,7 +5,7 @@
 //! here.
 
 use super::super::*;
-use super::escape_prose_path;
+use renderable::markdown::code_span;
 use crate::composition::types::AgentResolutionState;
 
 /// Render the [`StatusBlock`] for a selection/target-family
@@ -21,7 +21,7 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
             let body = render_agent_resolution_failed_body(state, installed, &file_link);
             StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("CompositionError", "agent resolution failed"))
-                .body(body)
+                .body(crate::composition::agent_message::agent_message_prose(body))
                 .hint(
                     "Specify an installed provider with --claude, --codex, etc., run in an \
                      interactive terminal, or correct the `agent` frontmatter property."
@@ -31,8 +31,8 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
             .error_header(ErrorHeader::new("CompositionError", "no autocomplete matches"))
             .body(super::with_failure_row(
                 format!(
-                    "No files matched autocomplete query <cyan>`{}`</cyan>.",
-                    escape_prose_path(query)
+                    "No files matched autocomplete query <cyan>{}</cyan>.",
+                    code_span(query)
                 ),
                 err,
             ))
@@ -42,8 +42,8 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
             .body(super::with_failure_row(
                 format!(
                     "More than <cyan>{cap}</cyan> files matched autocomplete query \
-                     <cyan>`{}`</cyan>.",
-                    escape_prose_path(query)
+                     <cyan>{}</cyan>.",
+                    code_span(query)
                 ),
                 err,
             ))
@@ -65,8 +65,8 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
             ))
             .body(super::with_failure_row(
                 format!(
-                    "Autocomplete for query <cyan>`{}`</cyan> was cancelled.",
-                    escape_prose_path(query)
+                    "Autocomplete for query <cyan>{}</cyan> was cancelled.",
+                    code_span(query)
                 ),
                 err,
             ))

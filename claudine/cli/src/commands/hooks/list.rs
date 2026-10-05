@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use color_eyre::eyre::Result;
 
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::{InlineProse, LineBreaks, Prose};
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::table::table::{Table, TableCellContent, TableColumn};
 use biscuit_terminal::utils::layout::{Edges, Length, TargetValue, WordWrap};
@@ -253,12 +253,18 @@ const DI: &str = "<dim><italic>";
 /// Undo dim+italic only (preserves background for table striping).
 const DI_R: &str = "</italic></dim>";
 
+/// One row per configured action, for the `Actions` table cell.
+fn actions_prose(actions: &[HookAction]) -> InlineProse {
+    let text = actions.iter().map(format_action).collect::<Vec<_>>().join("\n");
+    InlineProse::new(text).with_line_breaks(LineBreaks::Hard)
+}
+
 fn format_action(action: &HookAction) -> String {
     match action {
         HookAction::Speak { message, .. } => {
             format!(
                 "<cyan>Speak</cyan>({DI}\"{}\"{DI_R})",
-                Prose::escape_text(&truncate_string(message, 40))
+                Prose::escape_text_outside_code_spans(&truncate_string(message, 40))
             )
         }
         HookAction::SoundEffect {
@@ -426,10 +432,7 @@ pub(super) fn run_provider_detail(
         let actions_cell: TableCellContent = match actions {
             None => "-".into(),
             Some(a) if a.is_empty() => Prose::new("<dim>(no actions)</dim>").render(&term).into(),
-            Some(a) => {
-                let text = a.iter().map(format_action).collect::<Vec<_>>().join("\n");
-                Prose::new(text).render(&term).into()
-            }
+            Some(a) => actions_prose(a).into(),
         };
 
         table.add_row(vec![
@@ -752,6 +755,25 @@ pub(super) fn run_verbose(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn actions_cell_puts_each_action_on_its_own_row() {
+        let actions: Vec<HookAction> = serde_json::from_str(
+            r#"[{ "type": "speak", "message": "one" }, { "type": "speak", "message": "two" }]"#,
+        )
+        .expect("two actions");
+        let mut table = Table::new().with_columns(vec![TableColumn::new("Actions")]);
+        table.add_row(vec![actions_prose(&actions).into()]);
+        let term = biscuit_terminal::terminal::Terminal::builder()
+            .width(200)
+            .color_depth(biscuit_terminal::discovery::detection::ColorDepth::None)
+            .build();
+        let rendered = biscuit_terminal::utils::escape_codes::strip_escape_codes(table.render(&term));
+        let rows: Vec<&str> = rendered.lines().filter(|row| row.contains("Speak")).collect();
+        assert_eq!(rows.len(), 2, "one table row line per action: {rendered}");
+        assert!(rows[0].contains("\"one\"") && !rows[0].contains("two"), "{rendered}");
+        assert!(rows[1].contains("\"two\""), "{rendered}");
+    }
 
     #[test]
     fn invalid_sound_effect_warning_renders_escaped_name() {

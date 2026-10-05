@@ -1319,7 +1319,7 @@ pub(crate) fn schema_hover_details(def: &PropertyDef) -> Option<String> {
     // A `literal(x)` atom shows its exact pinned value directly under the type,
     // ahead of the shared constraint/description lines.
     if let Some(value) = atom.literal_value() {
-        lines.push(format!("Value: _{value}_"));
+        lines.push(format!("Value: {}", hover_italic(&value.to_string())));
     }
 
     if is_required(def) {
@@ -1327,7 +1327,7 @@ pub(crate) fn schema_hover_details(def: &PropertyDef) -> Option<String> {
     }
     lines.extend(eager_hover_line(def));
     if let Some(members) = enum_members(atom) {
-        let italicized: Vec<String> = members.iter().map(|m| format!("_{m}_")).collect();
+        let italicized: Vec<String> = members.iter().map(|m| hover_italic(m)).collect();
         lines.push(format!("Values: {}", italicized.join(", ")));
     }
     if let Some(default) = default_value(atom) {
@@ -2033,6 +2033,33 @@ fn enum_members(atom: &PropertyAtom) -> Option<&[String]> {
         Constraint::Members(members) => Some(members.as_slice()),
         _ => None,
     })
+}
+
+/// Italicizes `text` for a hover line, where it follows a space and precedes
+/// `,` or the line end.
+///
+/// A `_` or `\` at either edge is backslash-escaped so it cannot join or
+/// escape the `_` delimiters (`_x` → `_\_x_`, not `__x_`). Text that is
+/// empty or has edge whitespace, where no delimiter can open or close, is
+/// written plain.
+fn hover_italic(text: &str) -> String {
+    if text.is_empty()
+        || text.starts_with(char::is_whitespace)
+        || text.ends_with(char::is_whitespace)
+    {
+        return text.to_string();
+    }
+    let mut out = String::with_capacity(text.len() + 4);
+    out.push('_');
+    let last = text.char_indices().next_back().map(|(index, _)| index);
+    for (index, c) in text.char_indices() {
+        if (index == 0 || Some(index) == last) && matches!(c, '_' | '\\') {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out.push('_');
+    out
 }
 
 /// The declared default value of an atom, if any.
@@ -4164,5 +4191,26 @@ mod tests {
         let (element, start) = flow_array_element("[a,    b", 0);
         assert_eq!(element, "b");
         assert_eq!(start, 7); // after `,    `
+    }
+
+    #[test]
+    fn hover_italic_keeps_its_delimiters_able_to_open_and_close() {
+        let cases = [
+            ("draft", "_draft_"),
+            ("\"published\"", "_\"published\"_"),
+            ("snake_case", "_snake_case_"),
+            // An edge `_` would join the delimiter run, an edge `\` would
+            // escape it.
+            ("_private", "_\\_private_"),
+            ("trailing_", "_trailing\\__"),
+            ("_", "_\\__"),
+            ("a\\", "_a\\\\_"),
+            // No delimiter opens before or closes after whitespace.
+            (" padded", " padded"),
+            ("", ""),
+        ];
+        for (text, expected) in cases {
+            assert_eq!(hover_italic(text), expected, "{text:?}");
+        }
     }
 }

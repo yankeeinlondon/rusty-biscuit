@@ -172,7 +172,8 @@ pub struct DocumentArgumentError {
 
 impl std::fmt::Display for DocumentArgumentError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Failed to load file: {:?}", self.argument)
+        let message = format!("Failed to load file: {:?}", self.argument);
+        f.write_str(&darkmatter::markdown::errors::with_glob_hint(message, self.failure, &self.argument))
     }
 }
 
@@ -206,10 +207,12 @@ impl BlockError for DocumentArgumentError {
             Prose::escape_text(&self.argument)
         ))];
         if let Some(source) = &self.source {
-            body.push(Prose::new(Prose::escape_text(&source.to_string())));
+            body.push(Prose::new(Prose::escape_text_outside_code_spans(&source.to_string())));
         }
         body.push(resolution_failure_row(self.failure));
-        let hint = if self.failure == ResolutionFailure::InvalidReference {
+        let hint = if let Some(glob_hint) = self.failure.glob_hint(&self.argument) {
+            glob_hint
+        } else if self.failure == ResolutionFailure::InvalidReference {
             "A relative path stays inside the repository; a file whose name starts with `@`, `&`, `^`, or `!` is spelled with `./` (`./@`)."
         } else {
             "Check the path, or the sigil: `@` magic, `&` repository root, `^` repository-scoped."

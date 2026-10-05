@@ -158,6 +158,23 @@ pub(super) fn pointer_to_dotted(pointer: &str) -> String {
 /// `body` followed by `err`'s `failure: <class>` row, when it has a class
 /// ([`CompositionError::resolution_failure`]). The class name is the stable
 /// spelling Darkmatter renders, so one reader parses both.
+/// A paragraph whose single newlines separate display rows, such as a bold
+/// heading followed by one `- item` row per entry. Default [`Prose`] would
+/// join those rows into one wrapped line.
+pub(super) fn rows(text: impl Into<String>) -> Prose {
+    Prose::new(text).with_line_breaks(biscuit_terminal::components::prose::LineBreaks::Hard)
+}
+
+/// The `failure:` row [`with_failure_row`] appends, as its own body paragraph.
+pub(super) fn failure_row(err: &CompositionError) -> Option<Prose> {
+    err.resolution_failure().map(|failure| {
+        Prose::new(format!(
+            "<dim>failure:</dim> {}",
+            darkmatter::markdown::errors::resolution_failure_name(failure)
+        ))
+    })
+}
+
 pub(super) fn with_failure_row(mut body: String, err: &CompositionError) -> String {
     if let Some(failure) = err.resolution_failure() {
         body.push_str(&format!(
@@ -171,7 +188,7 @@ pub(super) fn with_failure_row(mut body: String, err: &CompositionError) -> Stri
 pub(super) fn render_file_link(path: &std::path::Path) -> String {
     let label = biscuit_file::to_portable_string(path);
     let escaped_label = escape_prose_path(&label);
-    let absolute = path.canonicalize().ok().or_else(|| {
+    let absolute = biscuit_file::canonicalize_simplified(path).ok().or_else(|| {
         if path.is_absolute() {
             Some(path.to_path_buf())
         } else {
@@ -195,8 +212,13 @@ fn optional_line(line: usize) -> Value {
 
 /// Escape author or diagnostic text for splicing into Prose markup, so paths,
 /// identifiers such as `_loop_count`, and messages render exactly as written.
+/// Code spans a message marks with backticks stay literal.
+///
+/// Never use it for a value placed inside a code span: a span's contents are
+/// literal, so the added backslashes would show. Fence such a value with
+/// [`renderable::markdown::code_span`] instead.
 pub(super) fn escape_prose_path(input: &str) -> String {
-    Prose::escape_text(input)
+    Prose::escape_text_outside_code_spans(input)
 }
 
 /// Map a `ComposeFailed`'s inner [`MarkdownError`] to a composition code,

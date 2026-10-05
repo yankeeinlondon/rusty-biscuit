@@ -1,5 +1,5 @@
 use std::io::IsTerminal as _;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use biscuit_terminal::components::list::UnorderedList;
@@ -12,35 +12,31 @@ use sniff::remote::blocking::credential_env;
 use worktree::WorktreeError;
 use worktree::api_preference::{self, RepoIdentity};
 use worktree::fast_forward::{FfRefusal, FfResult, fast_forward_default};
-use worktree::listing::CaptionState;
+use worktree::listing::{CaptionState, RefSnapshot};
 use worktree::live_remote::tracking_ref_changed_at;
-use worktree::pull_requests::{
-    CachedPrs, LIST_DEADLINE, OpenPrSource, PrListing, SniffOpenPrSource, fetch_and_publish, origin_digest,
-    origin_url, pr_lock_held, pr_store_path, select_cached, unix_now,
-};
+use worktree::pull_requests::{CachedPrs, PrListing, origin_digest, origin_url, pr_store_path, select_cached, unix_now};
 use worktree::remote_head::{
-    ApiCondition, ApiNote, Attempt, CachedRemoteHead, CheckFailure, Outcome, Phase, PrFailure, PrStatus,
+    ApiCondition, ApiNote, Attempt, CachedRemoteHead, CheckFailure, CredentialEvidence, Outcome, Phase, PrFailure,
     remote_head_store_path, select_cached_head,
 };
-use worktree::worktree::{fill_worktree_statuses, parse_worktree_state};
+use worktree::worktree::{WorktreeList, parse_worktree_state};
 
 use super::git_graph;
 use super::list_table::{
-    self, CredentialCondition, CredentialLine, FfNotice, FfSuggestion, LastKnown, RemoteFacts, RemoteStatus,
-    Sections, TableFacts,
+    self, CredentialCondition, CredentialLine, FfNotice, FfSuggestion, GraphOmissions, LastKnown, PrOutcome, RemoteFacts,
+    RemoteStatus, Sections, TableFacts,
 };
 use crate::perf;
 
 mod wait;
 
 pub use wait::{FORCED_BUDGET, LaunchArgs, ORDINARY_BUDGET, WorkerHandle, WorkerLaunch};
-use wait::{Progress, StoreEnv, WaitEnd, WaitRequest, Waited};
+use wait::{HeadEnd, PrEnd, Progress, StoreEnv, WaitEnd, WaitRequest};
 
 /// The flags that apply only to listing (spec §7–§9).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ListFlags {
-    /// `-r`/`--refresh`: ignore both freshness windows and wait for the whole
-    /// update and PR refresh.
+    /// `-r`/`--refresh`: wait for the whole update and PR refresh.
     pub refresh: bool,
     /// `--ignore-api`: record this repository in `~/.wt.json` first.
     pub ignore_api: bool,
@@ -55,32 +51,18 @@ impl ListFlags {
     }
 }
 
-/// Builds the open-PR source for an `origin` URL when a request is due.
-pub type PrConnect = fn(&str) -> Box<dyn OpenPrSource>;
-
-/// The production source: sniff's provider client for `origin`.
-fn origin_pr_source(origin: &str) -> Box<dyn OpenPrSource> {
-    Box::new(SniffOpenPrSource {
-        remote_url: origin.to_string(),
-        deadline: LIST_DEADLINE,
-    })
-}
-
-/// How listing reaches the network: a foreground PR request on a PR miss, and
-/// the worker it launches (or adopts) and waits for. Tests replace both, and
-/// shorten the waits.
+/// How listing reaches the network: only through the worker it launches and
+/// waits for. Tests replace the launch and shorten the waits.
 #[derive(Clone, Copy)]
 pub struct ListSeams {
-    pub connect: PrConnect,
     pub launch: WorkerLaunch,
-    /// Ordinary listing's wait for the attempt.
+    /// Ordinary listing's wait for both halves.
     pub wait_budget: Duration,
     /// The `--refresh`/`--ff` wait.
     pub forced_budget: Duration,
 }
 
 const PRODUCTION_SEAMS: ListSeams = ListSeams {
-    connect: origin_pr_source,
     launch: super::refresh_worker::launch,
     wait_budget: ORDINARY_BUDGET,
     forced_budget: FORCED_BUDGET,
@@ -98,61 +80,67 @@ struct Stores<'a> {
 struct RemoteAnswers {
     /// The stored PR answer as of the end of the wait.
     prs: PrListing,
-    /// This run's foreground PR request failure, for §5.
-    pr_failure: Option<PrFailure>,
     origin: Option<String>,
     /// The repository is in `~/.wt.json`: no provider request, no badges.
     ignored: bool,
+    /// `origin` changed or disappeared during the wait: the PR answer and
+    /// both halves' results belong to the old one and are not shown
+    /// ([`RemoteAnswers::observed`]).
+    origin_changed: bool,
     /// `None` without an `origin`: nothing was launched.
-    waited: Option<Waited>,
-    /// The `pr gather` perf stage: the origin lookup, PR selection, and any
-    /// foreground PR request.
-    pr_gather: Duration,
-    /// The `remote wait` perf stage: the launch and the wait.
+    waited: Option<WaitEnd>,
+    /// The `pr reread` perf child: the origin recheck and stored PR answer
+    /// read after the wait.
+    pr_reread: Duration,
+    /// The `remote wait` perf child: the launch and the wait.
     remote_wait: Duration,
 }
 
-/// The remote stage for the repository whose main checkout is `main`: the
-/// stored PR answer (a request only on a miss), then one worker attempt,
-/// launched or adopted, waited for.
-///
-/// The PR miss request settles before the launch, so the worker's PR half
-/// finds its answer and never repeats it. `--ignore-api` records the
-/// repository before anything asks the network. Without an `origin` nothing
-/// is requested or launched, and stored answers are ignored.
-fn gather_remote(
-    stores: Stores<'_>,
-    main: &Path,
-    default_branch: &str,
-    flags: ListFlags,
-    seams: ListSeams,
-) -> Result<RemoteAnswers, WorktreeError> {
+/// What the remote stage settled before any speculative local work.
+struct RemotePlan {
+    /// `None`: nothing is launched and stored answers are ignored.
+    origin: Option<String>,
+    /// The repository is in `~/.wt.json`.
+    ignored: bool,
+    /// The origin lookup, `--ignore-api` record, and preference read: the
+    /// `pr gather` perf stage.
+    pr_gather: Duration,
+}
+
+/// The remote stage's first step, run before any local gather: looks up
+/// `origin` and, for `--ignore-api`, records the repository, so a failed
+/// preference write exits with no listing and no worker launched.
+fn prepare_remote(main: &Path, flags: ListFlags) -> Result<RemotePlan, WorktreeError> {
     let t0 = Instant::now();
     let origin = origin_url(main);
     if flags.ignore_api {
         record_ignore_api(origin.as_deref())?;
     }
+    let ignored = origin.as_deref().is_some_and(|origin| {
+        api_preference::preference_path().is_some_and(|path| api_preference::load(&path).ignores_origin(origin))
+    });
+    Ok(RemotePlan { origin, ignored, pr_gather: t0.elapsed() })
+}
+
+/// The remote stage for the repository whose main checkout is `main`: one
+/// worker launched and waited for (both halves, or the head attempt it
+/// adopts), then the stored PR answer as the wait left it.
+///
+/// The worker is the only PR writer; nothing here asks the network. Without
+/// an `origin` nothing is launched, and stored answers are ignored. The
+/// spinner is cleared before this returns.
+fn follow_remote(
+    plan: RemotePlan,
+    stores: Stores<'_>,
+    main: &Path,
+    default_branch: &str,
+    flags: ListFlags,
+    seams: ListSeams,
+) -> RemoteAnswers {
+    let RemotePlan { origin, ignored, .. } = plan;
     let Some(origin) = origin else {
-        return Ok(RemoteAnswers { pr_gather: t0.elapsed(), ..RemoteAnswers::default() });
+        return RemoteAnswers::default();
     };
-    let ignored = api_preference::preference_path()
-        .is_some_and(|path| api_preference::load(&path).ignores_origin(&origin));
-    let mut pr_failure = None;
-    let mut prs = match select_cached(stores.prs, Some(&origin), unix_now()) {
-        CachedPrs::Fresh(listing) | CachedPrs::Stale(listing) => listing,
-        // A forced worker asks anyway; an ignored repository never asks.
-        CachedPrs::Miss if ignored || flags.forced() => PrListing::default(),
-        CachedPrs::Miss => {
-            match fetch_and_publish(stores.prs, main, &origin, unix_now(), (seams.connect)(&origin).as_ref()) {
-                Ok(listing) => listing.unwrap_or_default(),
-                Err(failure) => {
-                    pr_failure = Some(failure);
-                    PrListing::default()
-                }
-            }
-        }
-    };
-    let pr_gather = t0.elapsed();
 
     let t0 = Instant::now();
     let digest = origin_digest(&origin);
@@ -169,14 +157,29 @@ fn gather_remote(
     progress.finish();
     let remote_wait = t0.elapsed();
 
-    // The worker may have published a newer PR answer while we waited.
-    if let CachedPrs::Fresh(listing) | CachedPrs::Stale(listing) = select_cached(stores.prs, Some(&origin), unix_now()) {
-        prs = listing;
-    }
-    if ignored {
-        prs = PrListing::default();
-    }
-    Ok(RemoteAnswers { prs, pr_failure, origin: Some(origin), ignored, waited: Some(waited), pr_gather, remote_wait })
+    // Read on every exit path: the worker may have published while we
+    // waited, and an answer for an `origin` replaced meanwhile is not shown.
+    let t0 = Instant::now();
+    let origin_changed = origin_url(main).as_deref() != Some(origin.as_str());
+    let prs = match select_cached(stores.prs, Some(&origin), unix_now()) {
+        CachedPrs::Fresh(listing) | CachedPrs::Stale(listing) if !ignored && !origin_changed => listing,
+        _ => PrListing::default(),
+    };
+    let pr_reread = t0.elapsed();
+    RemoteAnswers { prs, origin: Some(origin), ignored, origin_changed, waited: Some(waited), pr_reread, remote_wait }
+}
+
+/// [`prepare_remote`] then [`follow_remote`], with nothing in between.
+#[cfg(test)]
+fn gather_remote(
+    stores: Stores<'_>,
+    main: &Path,
+    default_branch: &str,
+    flags: ListFlags,
+    seams: ListSeams,
+) -> Result<RemoteAnswers, WorktreeError> {
+    let plan = prepare_remote(main, flags)?;
+    Ok(follow_remote(plan, stores, main, default_branch, flags, seams))
 }
 
 /// `--ignore-api`: adds `origin`'s repository to `~/.wt.json`.
@@ -189,11 +192,12 @@ fn record_ignore_api(origin: Option<&str>) -> Result<(), WorktreeError> {
     api_preference::add(&path, &identity)
 }
 
-/// The followed attempt as the wait left it, and what the caption says of it.
-fn remote_status(end: &WaitEnd, last: impl Fn() -> LastKnown) -> RemoteStatus {
+/// The followed head attempt as the wait left it, and what the caption says
+/// of it; the PR half never changes it.
+fn remote_status(head: &HeadEnd, last: impl Fn() -> LastKnown) -> RemoteStatus {
     let failed = |reason| RemoteStatus::CheckFailed { reason, last: last() };
-    match end {
-        WaitEnd::Finished { attempt, .. } => match attempt.outcome {
+    match head {
+        HeadEnd::Finished(attempt) => match attempt.outcome {
             Some(Outcome::InSync) => RemoteStatus::CheckedNow,
             Some(Outcome::Fetched) => RemoteStatus::Fetched,
             Some(Outcome::Absent) => RemoteStatus::Absent,
@@ -201,24 +205,148 @@ fn remote_status(end: &WaitEnd, last: impl Fn() -> LastKnown) -> RemoteStatus {
             Some(Outcome::CheckFailed { reason }) => failed(reason),
             Some(Outcome::Unavailable { .. }) | None => failed(CheckFailure::Other),
         },
-        WaitEnd::TimedOut { last: Some(Attempt { phase: Phase::Fetching, .. }) } => RemoteStatus::StillPulling,
-        WaitEnd::TimedOut { .. } => RemoteStatus::StillChecking { last: last() },
-        WaitEnd::Unavailable => failed(CheckFailure::Other),
+        HeadEnd::Running { last: Some(Attempt { phase: Phase::Fetching, .. }) } => RemoteStatus::StillPulling,
+        HeadEnd::Running { .. } => RemoteStatus::StillChecking { last: last() },
+        HeadEnd::Unavailable => failed(CheckFailure::Other),
     }
 }
 
-/// This run's attempt, if it got far enough to record one.
-fn followed_attempt(end: &WaitEnd) -> Option<&Attempt> {
-    match end {
-        WaitEnd::Finished { attempt, .. } => Some(attempt),
-        WaitEnd::TimedOut { last } => last.as_ref(),
-        WaitEnd::Unavailable => None,
+/// This run's head attempt, if it got far enough to record one.
+fn followed_attempt(head: &HeadEnd) -> Option<&Attempt> {
+    match head {
+        HeadEnd::Finished(attempt) => Some(attempt),
+        HeadEnd::Running { last } => last.as_ref(),
+        HeadEnd::Unavailable => None,
     }
 }
 
-/// The §5 line for what this run observed: the attempt's API note first,
-/// then a PR failure (the foreground request's, or the forced worker's).
-fn credential_line(origin: &str, attempt: Option<&Attempt>, pr_failure: Option<&PrFailure>) -> Option<CredentialLine> {
+/// This listing's own results from both halves, for the repository `origin`
+/// still names.
+///
+/// Only [`RemoteAnswers::observed`] makes one, and every projection of
+/// request evidence reads through it: the caption's head status
+/// ([`caption_status`]) and the PR item, credentials line, keyless notice,
+/// and closing fallback notice ([`request_notices`]). So none of them can
+/// describe an `origin` that was replaced or removed during the wait.
+struct Observed<'a> {
+    origin: &'a str,
+    waited: &'a WaitEnd,
+    ignored: bool,
+}
+
+impl RemoteAnswers {
+    /// The repository-identity guard: `None` without a wait, and when
+    /// `origin` changed or disappeared during it.
+    fn observed(&self) -> Option<Observed<'_>> {
+        if self.origin_changed {
+            return None;
+        }
+        Some(Observed { origin: self.origin.as_deref()?, waited: self.waited.as_ref()?, ignored: self.ignored })
+    }
+}
+
+/// The caption's head status: the followed attempt
+/// ([`remote_status`]), or, for an `origin` replaced or removed during the
+/// wait, the row a worker that noticed the change itself gives
+/// (`couldn't check origin`). `None` when nothing was launched.
+fn caption_status(remote: &RemoteAnswers, last: impl Fn() -> LastKnown) -> Option<RemoteStatus> {
+    remote.waited.as_ref()?;
+    Some(match remote.observed() {
+        Some(observed) => remote_status(&observed.waited.head, last),
+        None => RemoteStatus::CheckFailed { reason: CheckFailure::Other, last: last() },
+    })
+}
+
+/// What the status list and the notes say about this listing's requests.
+#[derive(Debug, Default, PartialEq)]
+struct RequestNotices {
+    pr_outcome: Option<PrOutcome>,
+    credential_line: Option<CredentialLine>,
+    fallback_notice: Option<Vec<String>>,
+}
+
+/// Every request notice for `remote`, all behind the one
+/// [`RemoteAnswers::observed`] guard: nothing without a wait or after
+/// `origin` changed.
+fn request_notices(remote: &RemoteAnswers) -> RequestNotices {
+    let Some(observed) = remote.observed() else {
+        return RequestNotices::default();
+    };
+    let attempt = followed_attempt(&observed.waited.head);
+    RequestNotices {
+        pr_outcome: Some(pr_outcome(&observed)),
+        credential_line: credential_line(
+            observed.origin,
+            attempt,
+            observed_pr_failure(&observed),
+            observed_keyless(&observed),
+        ),
+        fallback_notice: fallback_notice(observed.origin, attempt),
+    }
+}
+
+/// This run's PR half as the status list and badges present it (§5). An
+/// ignored repository is ignored whatever the wait saw.
+fn pr_outcome(observed: &Observed<'_>) -> PrOutcome {
+    if observed.ignored {
+        return PrOutcome::Ignored;
+    }
+    match observed.waited.prs {
+        PrEnd::Published => PrOutcome::Published,
+        PrEnd::Ignored => PrOutcome::Ignored,
+        PrEnd::Unsupported => PrOutcome::Unsupported,
+        PrEnd::Failed(_) => PrOutcome::Failed,
+        PrEnd::Pending => PrOutcome::Pending,
+    }
+}
+
+/// This run's PR failure, from its receipt.
+fn observed_pr_failure<'a>(observed: &Observed<'a>) -> Option<&'a PrFailure> {
+    match &observed.waited.prs {
+        PrEnd::Failed(failure) => Some(failure),
+        _ => None,
+    }
+}
+
+/// Whether this listing observed a successful API answer sent without a key,
+/// in either half: the followed head attempt's check, or the PR publication
+/// the wait accepted.
+///
+/// Only evidence recorded by the worker for those exact results counts; a
+/// cached answer, unknown credentials, an ignored repository, and a check
+/// whose worker saw `origin` change never do. Evidence published after the
+/// wait returned was never read.
+fn observed_keyless(observed: &Observed<'_>) -> bool {
+    if observed.ignored {
+        return false;
+    }
+    let waited = observed.waited;
+    let head = followed_attempt(&waited.head).is_some_and(|attempt| {
+        attempt.credentials == CredentialEvidence::Anonymous
+            && !matches!(attempt.outcome, Some(Outcome::Unavailable { .. }))
+    });
+    let prs = waited.prs == PrEnd::Published && waited.pr_credentials == CredentialEvidence::Anonymous;
+    head || prs
+}
+
+/// Providers whose documentation gives an API key a higher rate limit than
+/// an anonymous request on the hosts the blocking lookups ask: github.com,
+/// gitlab.com, and bitbucket.org. Gitea and Forgejo set no such default, so
+/// their notice promises only authentication.
+fn keyed_limits_are_higher(provider: &str) -> bool {
+    matches!(provider, "GitHub" | "GitLab" | "Bitbucket")
+}
+
+/// The one credentials line for what this run observed: the attempt's
+/// confirmed API condition first, then this run's PR failure, from its
+/// receipt, and only then the keyless notice when `keyless`
+/// ([`observed_keyless`]).
+fn credential_line(
+    origin: &str,
+    attempt: Option<&Attempt>,
+    pr_failure: Option<&PrFailure>,
+    keyless: bool,
+) -> Option<CredentialLine> {
     let env = credential_env(origin)?;
     let accepted = env.variables.join(" or ");
     let line = |condition, key: &Option<String>| CredentialLine {
@@ -250,6 +378,11 @@ fn credential_line(origin: &str, attempt: Option<&Attempt>, pr_failure: Option<&
         }
         PrFailure::CredentialsRequired | PrFailure::NotFoundOrNotPermitted | PrFailure::Other => None,
     })
+    .or_else(|| {
+        keyless.then(|| {
+            line(CredentialCondition::AnsweredWithoutKey { higher_limits: keyed_limits_are_higher(&env.provider) }, &None)
+        })
+    })
 }
 
 /// §8: the attempt fell back to `ls-remote` because no key was set, and Git
@@ -272,6 +405,7 @@ fn ff_notice(result: &FfResult) -> Option<FfNotice> {
             FfNotice::Missing(reference.clone())
         }
         FfRefusal::Changed => FfNotice::Changed,
+        FfRefusal::UnavailableHolder(path) => FfNotice::UnavailableHolder(path.clone()),
         FfRefusal::Other => FfNotice::Failed,
     })
 }
@@ -306,6 +440,169 @@ pub fn run(
     Ok(())
 }
 
+/// The accepted results of one listing, ready to render once.
+struct Listing {
+    /// Committed: dirtiness, caption, target, tree, and comparisons all
+    /// describe the accepted ref snapshot ([`WorktreeList::ref_snapshot`]).
+    list: WorktreeList,
+    remote: RemoteAnswers,
+    ff: Option<FfResult>,
+    /// Gathered from the same accepted snapshot as `list`.
+    graph: Option<git_graph::GraphFacts>,
+    verbose: Option<git_graph::VerboseData>,
+    main_checkout: Option<PathBuf>,
+    head_store: Option<PathBuf>,
+}
+
+/// Graph and verbose data from one snapshot, with how long the gather took.
+type History = ((Option<git_graph::GraphFacts>, Option<git_graph::VerboseData>), Duration);
+
+/// Everything `wt list` shows, gathered while the refresh worker runs.
+///
+/// After the cheap parse step (which captures the initial ref snapshot), the
+/// remote wait runs on this thread while scoped threads gather dirtiness,
+/// the ref-dependent facts, and graph and verbose history from that
+/// snapshot. They are joined before `--ff` runs. When remote work was
+/// followed or a fast-forward attempted, refs are read again: the first
+/// gather is accepted only when both reads succeeded with equal tips;
+/// otherwise the ref-dependent facts, graph, and verbose data are gathered
+/// once more from the final read. Dirtiness is kept, except that a checkout
+/// `--ff` moved is measured again. The gathers' persistent effects (cache
+/// save, fork-record and copy-record pruning) happen once, in
+/// [`WorktreeList::commit`] of the accepted results.
+///
+/// Scoped tasks never write to the terminal; only the wait's spinner, on this
+/// thread, does, and it is cleared before the wait returns.
+///
+/// `--perf` shows the concurrent region as one measured group
+/// (`remote wait ‖ local gather`, or `local gather` without remote work) and a
+/// regather as another (`regather`); their children overlap and are not
+/// added to the total.
+fn gather_listing(
+    verbose: bool,
+    flags: ListFlags,
+    image_support: ImageSupport,
+    seams: ListSeams,
+    collector: &mut Option<perf::PerfCollector>,
+) -> Result<Listing, WorktreeError> {
+    let mut list = parse_worktree_state()?;
+    let main_checkout = list.entries().first().map(|main| main.path.clone());
+    let pr_store = main_checkout.as_deref().and_then(|main| pr_store_path(main).ok());
+    let head_store = main_checkout.as_deref().and_then(|main| remote_head_store_path(main).ok());
+    let default_branch = list.default_branch.clone();
+    let plan = match (&pr_store, &head_store, &main_checkout) {
+        (Some(_), Some(_), Some(main)) => Some(prepare_remote(main, flags)?),
+        _ => None,
+    };
+    perf::record(collector, "pr gather", plan.as_ref().map(|plan| plan.pr_gather).unwrap_or_default());
+
+    let needs_graph = image_support != ImageSupport::None;
+    let initial = list.ref_snapshot().clone();
+    let cache = list.load_comparison_cache();
+    let first_input = git_graph::GatherInput::from_list(&list, initial.tips());
+    let needs_verbose = verbose && first_input.has_verbose();
+    let needs_history = needs_graph || needs_verbose;
+
+    let history_stage = if needs_graph { "graph gather" } else { "verbose gather" };
+
+    // The group's span runs from before the first spawn until the wait, the
+    // PR reread, and every local task have finished.
+    let group_start = Instant::now();
+    let (remote, (dirty, first_facts, list_elapsed), first_history) = std::thread::scope(|scope| {
+        let history = needs_history.then(|| {
+            scope.spawn(|| {
+                #[cfg(test)]
+                tests::overlap::arrive(tests::overlap::Gather::Graph);
+                let t0 = Instant::now();
+                let data = git_graph::gather(&first_input, needs_graph, needs_verbose);
+                #[cfg(test)]
+                tests::overlap::finished(tests::overlap::Gather::Graph);
+                (data, t0.elapsed())
+            })
+        });
+        let local = scope.spawn(|| {
+            #[cfg(test)]
+            tests::overlap::arrive(tests::overlap::Gather::List);
+            let t0 = Instant::now();
+            let (dirty, facts) = list.gather_local(initial.tips(), &cache);
+            #[cfg(test)]
+            tests::overlap::finished(tests::overlap::Gather::List);
+            (dirty, facts, t0.elapsed())
+        });
+
+        let remote = match (plan, &pr_store, &head_store, &main_checkout) {
+            (Some(plan), Some(prs), Some(head), Some(main)) => {
+                follow_remote(plan, Stores { prs, head }, main, &default_branch, flags, seams)
+            }
+            _ => RemoteAnswers::default(),
+        };
+        #[cfg(test)]
+        tests::overlap::remote_finished();
+        // A timeout limits only the wait: a longer local gather is waited for.
+        let local = local.join().expect("list gather thread panicked");
+        let history: Option<History> = history.map(|handle| handle.join().expect("graph gather thread panicked"));
+        (remote, local, history)
+    });
+    let group_elapsed = group_start.elapsed();
+    let mut children = Vec::new();
+    if remote.waited.is_some() {
+        children.extend([("remote wait", remote.remote_wait), ("pr reread", remote.pr_reread)]);
+    }
+    children.push(("list gather", list_elapsed));
+    if let Some((_, elapsed)) = &first_history {
+        children.push((history_stage, *elapsed));
+    }
+    let group = if remote.waited.is_some() { "remote wait ‖ local gather" } else { "local gather" };
+    perf::record_group(collector, group, group_elapsed, children);
+
+    let ff = match (&main_checkout, flags.fast_forward) {
+        (Some(main), true) => {
+            let t0 = Instant::now();
+            let result = fast_forward_default(main, &default_branch);
+            perf::record(collector, "fast-forward", t0.elapsed());
+            Some(result)
+        }
+        _ => None,
+    };
+
+    // The fetch and the fast-forward move refs; everything shown describes
+    // the state they left. Without either, the initial read is the final one.
+    let reread = remote.waited.is_some() || ff.is_some();
+    let accepted_refs = if reread { RefSnapshot::read() } else { initial.clone() };
+    let (facts, history) = if !reread || initial.matches(&accepted_refs) {
+        (first_facts, first_history.map(|(data, _)| data))
+    } else {
+        let t0 = Instant::now();
+        let final_input = git_graph::GatherInput::from_list(&list, accepted_refs.tips());
+        let ((facts, facts_elapsed), history) = std::thread::scope(|scope| {
+            let history = needs_history.then(|| {
+                scope.spawn(|| {
+                    let t0 = Instant::now();
+                    (git_graph::gather(&final_input, needs_graph, needs_verbose), t0.elapsed())
+                })
+            });
+            let t0 = Instant::now();
+            let facts = list.gather_ref_facts(accepted_refs.tips(), &cache);
+            ((facts, t0.elapsed()), history.map(|handle| handle.join().expect("graph regather thread panicked")))
+        });
+        let mut children = vec![("list regather", facts_elapsed)];
+        if let Some((_, elapsed)) = &history {
+            children.push((if needs_graph { "graph regather" } else { "verbose regather" }, *elapsed));
+        }
+        perf::record_group(collector, "regather", t0.elapsed(), children);
+        (facts, history.map(|(data, _)| data))
+    };
+    list.commit(accepted_refs, dirty, facts, cache);
+    if let Some(FfResult::Moved { checkout: Some(checkout), .. }) = &ff {
+        let t0 = Instant::now();
+        list.refresh_dirty_status(checkout);
+        perf::record(collector, "checkout status refresh", t0.elapsed());
+    }
+
+    let (graph, verbose) = history.unwrap_or((None, None));
+    Ok(Listing { list, remote, ff, graph, verbose, main_checkout, head_store })
+}
+
 #[allow(clippy::too_many_arguments)]
 fn run_pipeline(
     width_spec: Option<&str>,
@@ -317,83 +614,13 @@ fn run_pipeline(
     terminal: &Terminal,
     seams: ListSeams,
 ) -> Result<Option<perf::PerfCollector>, WorktreeError> {
-    let mut collector = if perf {
-        Some(perf::PerfCollector::new(process_start))
-    } else {
-        None
-    };
-
-    if perf {
-        perf::record(&mut collector, "pre-dispatch", process_start.elapsed());
-    }
+    let mut collector = perf.then(|| perf::PerfCollector::new(process_start));
+    perf::record(&mut collector, "pre-dispatch", process_start.elapsed());
 
     let parsed_width = width_spec.and_then(|s| parse_width_spec(s).ok());
-    let mut list = parse_worktree_state()?;
-    let main_checkout = list.entries().first().map(|main| main.path.clone());
-    let pr_store = main_checkout.as_deref().and_then(|main| pr_store_path(main).ok());
-    let head_store = main_checkout.as_deref().and_then(|main| remote_head_store_path(main).ok());
+    let Listing { list, remote, ff, graph: graph_facts, verbose: verbose_data, main_checkout, head_store } =
+        gather_listing(verbose, flags, image_support, seams, &mut collector)?;
     let default_branch = list.default_branch.clone();
-
-    let mut remote = match (&pr_store, &head_store, &main_checkout) {
-        (Some(prs), Some(head), Some(main)) => {
-            gather_remote(Stores { prs, head }, main, &default_branch, flags, seams)?
-        }
-        _ => RemoteAnswers::default(),
-    };
-    if perf {
-        perf::record(&mut collector, "pr gather", remote.pr_gather);
-        perf::record(&mut collector, "remote wait", remote.remote_wait);
-    }
-
-    let ff = match (&main_checkout, flags.fast_forward) {
-        (Some(main), true) => {
-            let t0 = Instant::now();
-            let result = fast_forward_default(main, &default_branch);
-            perf::record(&mut collector, "fast-forward", t0.elapsed());
-            Some(result)
-        }
-        _ => None,
-    };
-    // The fetch and the fast-forward move refs; everything below describes
-    // the state they left.
-    if remote.waited.is_some() || ff.is_some() {
-        list.reread_refs();
-    }
-
-    let needs_graph = image_support != ImageSupport::None;
-    let gather_input = git_graph::GatherInput::from_list(&list);
-    let needs_verbose = verbose && gather_input.has_verbose();
-    let (graph_facts, verbose_data) = std::thread::scope(|scope| {
-        let graph_handle = (needs_graph || needs_verbose).then(|| {
-            scope.spawn(|| {
-                #[cfg(test)]
-                tests::overlap::arrive(tests::overlap::Gather::Graph);
-                let t0 = perf.then(Instant::now);
-                let data = git_graph::gather(&gather_input, needs_graph, needs_verbose);
-                (data, t0.map(|start| start.elapsed()))
-            })
-        });
-
-        #[cfg(test)]
-        tests::overlap::arrive(tests::overlap::Gather::List);
-        let t0 = perf.then(Instant::now);
-        fill_worktree_statuses(&mut list)?;
-        if let Some(start) = t0 {
-            perf::record(&mut collector, "list gather", start.elapsed());
-        }
-
-        Ok::<_, WorktreeError>(match graph_handle {
-            Some(handle) => {
-                let (data, elapsed) = handle.join().expect("graph gather thread panicked");
-                if let Some(elapsed) = elapsed {
-                    let stage = if needs_graph { "graph gather" } else { "verbose gather" };
-                    perf::record(&mut collector, stage, elapsed);
-                }
-                data
-            }
-            None => (None, None),
-        })
-    })?;
 
     let t0 = perf.then(Instant::now);
     let now = unix_now();
@@ -403,9 +630,17 @@ fn run_pipeline(
         .as_ref()
         .map(|caption| caption.tracking_sha.clone())
         .or_else(|| list.refs().remote(&tracking_ref).map(str::to_string));
-    let status = match (&remote.origin, &remote.waited, &head_store, &main_checkout) {
-        (Some(origin), Some(waited), Some(head_store), Some(main)) => Some(remote_status(&waited.end, || {
-            match select_cached_head(head_store, Some(origin), Some(&default_branch), now) {
+    let status = match (&remote.origin, &head_store, &main_checkout) {
+        (Some(origin), Some(head_store), Some(main)) => caption_status(&remote, || {
+            // The stored answer is bound to the `origin` this listing
+            // launched for; after it changed, only the reflog still dates
+            // anything true of this repository.
+            let stored = if remote.origin_changed {
+                CachedRemoteHead::Miss
+            } else {
+                select_cached_head(head_store, Some(origin), Some(&default_branch), now)
+            };
+            match stored {
                 CachedRemoteHead::Fresh(head) | CachedRemoteHead::Stale(head) => {
                     LastKnown::Answer { checked_at: head.checked_at }
                 }
@@ -415,7 +650,7 @@ fn run_pipeline(
                     None => LastKnown::Never,
                 },
             }
-        })),
+        }),
         _ => None,
     };
     let remote_facts = status.map(|status| RemoteFacts {
@@ -423,21 +658,12 @@ fn run_pipeline(
         tracking_tip: tracking_tip.as_deref(),
         status,
     });
-    let unfinished = unfinished(&mut remote, pr_store.as_deref(), now);
     let mut facts = TableFacts::from_list(&list, &remote.prs, remote_facts);
-    if let (Some(origin), Some(waited)) = (&remote.origin, &remote.waited) {
-        let attempt = followed_attempt(&waited.end);
-        let receipt_failure = match &waited.end {
-            WaitEnd::Finished { receipt: Some(receipt), .. } => match &receipt.prs {
-                PrStatus::Failed { failure } => Some(failure),
-                _ => None,
-            },
-            _ => None,
-        };
-        facts.credential_line = credential_line(origin, attempt, remote.pr_failure.as_ref().or(receipt_failure));
-        facts.fallback_notice = fallback_notice(origin, attempt);
-    }
-    facts.unfinished = unfinished;
+    let notices = request_notices(&remote);
+    facts.pr_outcome = notices.pr_outcome;
+    facts.credential_line = notices.credential_line;
+    facts.fallback_notice = notices.fallback_notice;
+    facts.timed_out = remote.waited.as_ref().is_some_and(|waited| waited.timed_out);
     facts.ff_notice = ff.as_ref().and_then(ff_notice);
     // §9: a failed check or fetch still leaves `--ff` a local tracking ref to
     // move to, and the caption keeps the reason. Only a render while the
@@ -453,14 +679,6 @@ fn run_pipeline(
         perf::record(&mut collector, "table render", start.elapsed());
     }
 
-    let graph = graph_facts.map(|facts| {
-        let t0 = perf.then(Instant::now);
-        let graph = facts.to_git_graph(&remote.prs, parsed_width.clone()).render(&image_terminal(terminal));
-        if let Some(start) = t0 {
-            perf::record(&mut collector, "graph image render (biscuit-terminal)", start.elapsed());
-        }
-        graph
-    });
     let verbose_text = verbose_data.map(|data| {
         let t0 = perf.then(Instant::now);
         let text = render_verbose(&data, terminal);
@@ -469,38 +687,49 @@ fn run_pipeline(
         }
         text
     });
-    let hint = list_table::render_hint(&facts, terminal);
+    let status = list_table::render_status(&facts, terminal, now);
+    // Everything but the graph is known now, so the graph gets the rows the
+    // rest of the listing leaves (the notes before the graph adds its own).
+    let max_graph_rows = list_table::graph_row_budget(
+        terminal.height(),
+        &[Some(table.as_str()), status.as_deref(), verbose_text.as_deref(), list_table::render_notes(&facts, terminal).as_deref()],
+    );
+    let badges = facts.badges();
+    let graph = graph_facts.and_then(|graph_facts| {
+        let t0 = perf.then(Instant::now);
+        let graph = graph_facts
+            .to_git_graph(badges, parsed_width.clone())
+            .with_max_rows(max_graph_rows)
+            .render_without_notes(&image_terminal(terminal));
+        if let Some(start) = t0 {
+            perf::record(&mut collector, "graph image render (biscuit-terminal)", start.elapsed());
+        }
+        graph.map(|graph| (graph, graph_facts))
+    });
+    let graph = graph.map(|((image, plan), graph_facts)| {
+        facts.graph_omissions = GraphOmissions {
+            hidden_lanes: plan.hidden_lanes,
+            omissions: plan.omissions,
+            history_gap: graph_facts.incomplete,
+            shallow: graph_facts.shallow,
+            merged_elsewhere: graph_facts.merged_elsewhere,
+            forked_off_line: graph_facts.forked_off_line,
+        };
+        image
+    });
     let notes = list_table::render_notes(&facts, terminal);
     eprint!(
         "{}",
         list_table::assemble(Sections {
             table: &table,
             graph: graph.as_deref(),
-            hint: hint.as_deref(),
+            status: status.as_deref(),
             verbose: verbose_text.as_deref(),
             notes: notes.as_deref(),
         })
     );
 
     Ok(collector)
-}
-
-/// §6: the wait ran out, or a PR refresh is still running at render time.
-///
-/// A PR refresh can be running only while the stored answer is not fresh.
-/// While our worker lives it may be the one refreshing; once it has exited,
-/// only another holder of the PR lock can be, and probing is then safe.
-fn unfinished(remote: &mut RemoteAnswers, pr_store: Option<&Path>, now: u64) -> bool {
-    let (Some(origin), Some(waited), Some(pr_store)) = (&remote.origin, &mut remote.waited, pr_store) else {
-        return false;
-    };
-    if matches!(waited.end, WaitEnd::TimedOut { .. }) {
-        return true;
-    }
-    let pr_pending =
-        !remote.ignored && !matches!(select_cached(pr_store, Some(origin), now), CachedPrs::Fresh(_));
-    let worker_running = waited.worker.as_mut().is_some_and(|worker| !worker.has_exited());
-    pr_pending && (worker_running || pr_lock_held(pr_store))
 }
 
 fn render_verbose(data: &git_graph::VerboseData, terminal: &Terminal) -> String {

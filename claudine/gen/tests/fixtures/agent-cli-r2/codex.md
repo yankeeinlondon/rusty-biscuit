@@ -1,10 +1,12 @@
 ---
 $schema: ./_schema.yaml
 schema_revision: 2
+provider: codex
 created: 2026-07-02
 last_updated: 2026-07-03
-agent: codex
-model: default
+agent: opencode
+model: zai-coding-plan/glm-5.3
+reasoning_effort: provider_default
 latest_version: "0.142.5"
 versions_examined:
   - "0.142.5"

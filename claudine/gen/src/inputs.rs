@@ -188,20 +188,31 @@ fn load_optional_yaml_map(path: &Path) -> Result<BTreeMap<String, Value>, GenErr
 }
 
 /// Loads and shape-checks the overrides file (every entry needs `value:`
-/// and a non-empty `reason:`).
+/// and a non-empty `reason:`, and nothing else).
 fn load_overrides(path: &Path) -> Result<BTreeMap<String, OverrideEntry>, GenError> {
     let raw = load_optional_yaml_map(path)?;
     let mut overrides = BTreeMap::new();
     for (field, entry) in raw {
-        let reason = entry
-            .get("reason")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|r| !r.is_empty())
-            .ok_or_else(|| GenError::OverrideMissingReason {
-                field: field.clone(),
-            })?
-            .to_string();
+        // A misspelled key would otherwise be ignored while its entry still
+        // applies.
+        if let Some(key) = entry
+            .as_object()
+            .and_then(|keys| keys.keys().find(|key| !matches!(key.as_str(), "value" | "reason")))
+        {
+            return Err(GenError::OverrideUnknownKey {
+                field,
+                key: key.clone(),
+            });
+        }
+        let reason = match entry.get("reason") {
+            Some(Value::String(reason)) if !reason.trim().is_empty() => reason.trim().to_string(),
+            found => {
+                return Err(GenError::OverrideInvalidReason {
+                    field,
+                    found: describe_reason(&entry, found),
+                });
+            }
+        };
         let value = entry
             .get("value")
             .cloned()
@@ -211,6 +222,21 @@ fn load_overrides(path: &Path) -> Result<BTreeMap<String, OverrideEntry>, GenErr
         overrides.insert(field, OverrideEntry { value, reason });
     }
     Ok(overrides)
+}
+
+/// Names what stood where an override's `reason:` string belongs, so a
+/// wrong-type reason is never reported as an absent one.
+fn describe_reason(entry: &Value, reason: Option<&Value>) -> &'static str {
+    match reason {
+        _ if !entry.is_object() => "an entry that is not a mapping",
+        None => "no `reason:` key",
+        Some(Value::Null) => "null",
+        Some(Value::String(_)) => "an empty string",
+        Some(Value::Bool(_)) => "a Boolean",
+        Some(Value::Number(_)) => "a number",
+        Some(Value::Array(_)) => "a list",
+        Some(Value::Object(_)) => "a mapping",
+    }
 }
 
 /// Reads a research document, validates its frontmatter against the

@@ -5,7 +5,6 @@ expression: "labeled(vec![(\"with a graph\".into(), assemble(Some(graph), None))
 ## with a graph
 
   main  is 7 commits behind  origin/main
- GitHub rate limited the request for updated information. Try again in a few minutes.
 
 ┌───────────────────┬──────────────────────────────────┬──────────────────────┬───────────────────────────┐
 │ Worktree          │ Branch                           │ ->  origin/main      │ -> parent                 │
@@ -22,12 +21,13 @@ expression: "labeled(vec![(\"with a graph\".into(), assemble(Some(graph), None))
 └───────────────────┴──────────────────────────────────┴──────────────────────┴───────────────────────────┘
 
  Worktree   ○ clean    ● uncommitted files    ● uncommitted source files
- Branch     └─ merges cleanly into parent    └─ conflicts with parent    └┄ parent deleted
- PRs as of 10 min ago
+ Branch     └─ merges cleanly into parent     └─ conflicts with parent      └┄ parent deleted
 <the git graph>
+ - PRs as of 10 min ago
  - running this command again will provide updated metrics; alternatively use the --refresh / -r flags to force refresh immediately
 
  - main is 7 commits behind origin/main; run  wt --ff  to fast-forward it.
+ - GitHub rate limited the request for updated information. Try again in a few minutes.
  - Git checked origin using `ls-remote`; this can take longer than the provider API.
  - Set GH_TOKEN or GITHUB_TOKEN to let wt try the provider API, or use  --ignore-api  to use Git directly for this repository.
 
@@ -35,7 +35,6 @@ expression: "labeled(vec![(\"with a graph\".into(), assemble(Some(graph), None))
 ## without a graph
 
   main  is 7 commits behind  origin/main
- GitHub rate limited the request for updated information. Try again in a few minutes.
 
 ┌───────────────────┬──────────────────────────────────┬──────────────────────┬───────────────────────────┐
 │ Worktree          │ Branch                           │ ->  origin/main      │ -> parent                 │
@@ -52,11 +51,12 @@ expression: "labeled(vec![(\"with a graph\".into(), assemble(Some(graph), None))
 └───────────────────┴──────────────────────────────────┴──────────────────────┴───────────────────────────┘
 
  Worktree   ○ clean    ● uncommitted files    ● uncommitted source files
- Branch     └─ merges cleanly into parent    └─ conflicts with parent    └┄ parent deleted
- PRs as of 10 min ago
+ Branch     └─ merges cleanly into parent     └─ conflicts with parent      └┄ parent deleted
+ - PRs as of 10 min ago
  - running this command again will provide updated metrics; alternatively use the --refresh / -r flags to force refresh immediately
 
  - main is 7 commits behind origin/main; run  wt --ff  to fast-forward it.
+ - GitHub rate limited the request for updated information. Try again in a few minutes.
  - Git checked origin using `ls-remote`; this can take longer than the provider API.
  - Set GH_TOKEN or GITHUB_TOKEN to let wt try the provider API, or use  --ignore-api  to use Git directly for this repository.
 
@@ -64,7 +64,6 @@ expression: "labeled(vec![(\"with a graph\".into(), assemble(Some(graph), None))
 ## with a graph and --verbose
 
   main  is 7 commits behind  origin/main
- GitHub rate limited the request for updated information. Try again in a few minutes.
 
 ┌───────────────────┬──────────────────────────────────┬──────────────────────┬───────────────────────────┐
 │ Worktree          │ Branch                           │ ->  origin/main      │ -> parent                 │
@@ -81,13 +80,14 @@ expression: "labeled(vec![(\"with a graph\".into(), assemble(Some(graph), None))
 └───────────────────┴──────────────────────────────────┴──────────────────────┴───────────────────────────┘
 
  Worktree   ○ clean    ● uncommitted files    ● uncommitted source files
- Branch     └─ merges cleanly into parent    └─ conflicts with parent    └┄ parent deleted
- PRs as of 10 min ago
+ Branch     └─ merges cleanly into parent     └─ conflicts with parent      └┄ parent deleted
 <the git graph>
+ - PRs as of 10 min ago
  - running this command again will provide updated metrics; alternatively use the --refresh / -r flags to force refresh immediately
 <the verbose section>
 
  - main is 7 commits behind origin/main; run  wt --ff  to fast-forward it.
+ - GitHub rate limited the request for updated information. Try again in a few minutes.
  - Git checked origin using `ls-remote`; this can take longer than the provider API.
  - Set GH_TOKEN or GITHUB_TOKEN to let wt try the provider API, or use  --ignore-api  to use Git directly for this repository.
 
@@ -95,7 +95,6 @@ expression: "labeled(vec![(\"with a graph\".into(), assemble(Some(graph), None))
 ## without a graph, with --verbose
 
   main  is 7 commits behind  origin/main
- GitHub rate limited the request for updated information. Try again in a few minutes.
 
 ┌───────────────────┬──────────────────────────────────┬──────────────────────┬───────────────────────────┐
 │ Worktree          │ Branch                           │ ->  origin/main      │ -> parent                 │
@@ -112,11 +111,12 @@ expression: "labeled(vec![(\"with a graph\".into(), assemble(Some(graph), None))
 └───────────────────┴──────────────────────────────────┴──────────────────────┴───────────────────────────┘
 
  Worktree   ○ clean    ● uncommitted files    ● uncommitted source files
- Branch     └─ merges cleanly into parent    └─ conflicts with parent    └┄ parent deleted
- PRs as of 10 min ago
+ Branch     └─ merges cleanly into parent     └─ conflicts with parent      └┄ parent deleted
+ - PRs as of 10 min ago
  - running this command again will provide updated metrics; alternatively use the --refresh / -r flags to force refresh immediately
 <the verbose section>
 
  - main is 7 commits behind origin/main; run  wt --ff  to fast-forward it.
+ - GitHub rate limited the request for updated information. Try again in a few minutes.
  - Git checked origin using `ls-remote`; this can take longer than the provider API.
  - Set GH_TOKEN or GITHUB_TOKEN to let wt try the provider API, or use  --ignore-api  to use Git directly for this repository.

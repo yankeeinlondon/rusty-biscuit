@@ -2,6 +2,7 @@
 
 use crate::common;
 
+use common::prompt_staging::{stage_shipped_prompts, workspace_root};
 use common::{CliProcessFixture, strip_ansi, write};
 // Consumed only inside the `#[cfg(unix)]` statements below; ungated, the
 // Windows check (`just check-windows`) reports it unused.
@@ -283,30 +284,15 @@ fn shipped_implement_router_prefers_an_unimplemented_review_over_the_completed_p
     );
 
     let router = fixture.cwd().join("prompts/implement.md");
-    write(&router, include_str!("../../../../prompts/implement.md"));
-    write(
-        &fixture
-            .cwd()
-            .join("prompts/_implement/implement-suggestions.md"),
-        include_str!("../../../../prompts/_implement/implement-suggestions.md"),
-    );
-    // The shipped route transcludes these snippets; without them the
-    // redirect fails on a missing file instead of reaching its assertions.
-    write(
-        &fixture.cwd().join("prompts/_no_formatting.md"),
-        include_str!("../../../../prompts/_no_formatting.md"),
-    );
-    write(
-        &fixture.cwd().join("prompts/_os.md"),
-        include_str!("../../../../prompts/_os.md"),
-    );
-    write(
-        &fixture.cwd().join("prompts/_test-tiers.md"),
-        include_str!("../../../../prompts/_test-tiers.md"),
-    );
-    write(
-        &fixture.cwd().join("prompts/_input-robustness.md"),
-        include_str!("../../../../prompts/_input-robustness.md"),
+    let repository = workspace_root();
+    stage_shipped_prompts(
+        &repository,
+        &fixture.cwd().join("prompts"),
+        &[
+            "prompts/implement.md",
+            "prompts/_implement/implement-suggestions.md",
+            "prompts/_implement/implement-plan.md",
+        ],
     );
     write(
         &fixture.cwd().join("prompts/_implement/implement-plan.md"),
@@ -427,6 +413,46 @@ fn direct_and_proxy_targets_agree_and_caller_values_outrank_proxy_with() {
             "caller values must produce the same prepared target and outrank proxy.with; stderr:\n{output}"
         );
         assert!(!output.contains("ROUTE=decoy/overlay"), "{output}");
+    }
+}
+
+/// Setters after a provider switch are reclaimed as caller overrides through
+/// the same call as setters before it: a file reference among them anchors at
+/// the caller's directory (not the repository root or a prompt's directory),
+/// outranks `proxy.with`, and never reaches the provider's argv.
+#[test]
+fn setters_after_a_provider_switch_keep_caller_file_provenance() {
+    let fixture = CliProcessFixture::named("caller-file-after-switch");
+    fixture.initialize_repository();
+    fixture.seed_user_config();
+    install_goose(&fixture);
+
+    let caller_dir = fixture.cwd().join("pkg");
+    write(&caller_dir.join("cases/original/spec.md"), "---\nmarker: original\n---\n");
+    write(&fixture.cwd().join("cases/original/spec.md"), "---\nmarker: root-decoy\n---\n");
+    write(&fixture.cwd().join("cases/decoy/spec.md"), "---\nmarker: decoy\n---\n");
+    let target = fixture.cwd().join("prompts/target.md");
+    write(
+        &target,
+        "---\n$schema:\n  spec: 'file(required)'\n  choice: 'string(required)'\nmarker: \"{{ frontmatter(spec, 'marker') }}\"\n---\nROUTE={{ marker }}/{{ choice }}\n",
+    );
+    let router = fixture.cwd().join("prompts/router.md");
+    write(
+        &router,
+        "---\ninitialize:\n  stack:\n    - action: {action: proxy, target: './target.md', with: {spec: 'cases/decoy/spec.md', choice: overlay}}\n---\nRouter.\n",
+    );
+    // `--fixture-flag` is no researched Goose switch, so it never takes a setter.
+    let arguments = ["--fixture-flag", "spec=cases/original/spec.md", "choice=caller"];
+
+    for document in [&target, &router] {
+        let output = run_compose(&fixture, &caller_dir, document, &arguments);
+        assert!(output.contains("ROUTE=original/caller"), "{}: stderr:\n{output}", document.display());
+        let provider_args = std::fs::read_to_string(fixture.home().join("provider-prompt")).unwrap();
+        assert!(provider_args.contains("--fixture-flag"), "{provider_args}");
+        assert!(
+            !provider_args.contains("spec=") && !provider_args.contains("choice="),
+            "reclaimed setters are not provider data: {provider_args}"
+        );
     }
 }
 

@@ -8,7 +8,7 @@ use darkmatter::markdown::{
     schemas::{
         Constraint, DarkmatterSchemas, PropertyAtom, SimplifiedType, TypeExpr,
         ValidationProblemCode, parse_yaml_schema, to_json_schema,
-        triggers::{MatchExpr, matches as trigger_matches},
+        triggers::{MatchExpr, PathSubject, matches as trigger_matches},
     },
 };
 use serde_json::{Value, json};
@@ -36,7 +36,7 @@ fn semantic_match(name: &str, ty: SimplifiedType, is_array: bool, value: Value) 
             description: None,
         },
     };
-    trigger_matches(&expr, &json!({ name: value }), "docs/input.md")
+    trigger_matches(&expr, &json!({ name: value }), &PathSubject::detached())
 }
 
 #[test]

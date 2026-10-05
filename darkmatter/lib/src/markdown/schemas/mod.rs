@@ -68,6 +68,7 @@ mod phase;
 mod reference;
 pub mod resolve;
 pub mod rewrite;
+pub mod roots;
 pub mod simplified;
 pub mod triggers;
 pub mod validate;
@@ -128,13 +129,15 @@ pub use simplified::{
 };
 #[cfg(feature = "work-counters")]
 pub use simplified::alias_search_work;
+pub use roots::{
+    InvalidSchemasDir, SCHEMAS_DIR_VARIABLE, SchemaRoot, SchemaRootKind, SchemaRootState,
+    SchemaRoots, SearchedRoot,
+};
 pub use triggers::{
-    LoadedTrigger, MatchArms, MatchExpr, PathGlobs, ShadowedFile, TriggerEnvelope,
+    LoadedTrigger, MatchArms, MatchExpr, PathGlobs, PathSubject, ShadowedFile, TriggerEnvelope,
     TriggerArmTrace, TriggerEvaluation, TriggerRegistry, TriggerTrace, TriggerTraceEntry,
-    evaluate_registry, matched_triggers, normalize_path,
-    normalize_relative_path, parse_trigger_envelope, parse_trigger_envelope_from_str,
-    trace_registry,
-    schema_roots, scan,
+    evaluate_registry, matched_triggers, parse_trigger_envelope, parse_trigger_envelope_from_str,
+    trace_registry, scan,
 };
 pub use validate::{CACHE_SIZE_ENV, DEFAULT_CACHE_SIZE, PositionMap, ValidatorCache};
 
@@ -304,6 +307,28 @@ impl DarkmatterSchemas {
         self
     }
 
+    /// Records the contexts caller-supplied properties were authored in, so
+    /// their `match()` globs are judged from there rather than from the
+    /// document's folder.
+    #[must_use]
+    pub(crate) fn with_caller_origins(mut self, origins: validate::CallerOrigins) -> Self {
+        self.cache = self.cache.with_caller_origins(origins);
+        self
+    }
+
+    /// Marks the top-level properties in `records` as caller-supplied: a
+    /// bare or `./` `match()` pattern on one of them is judged from the
+    /// record's origin (typically the launch directory) rather than from the
+    /// document's folder, as composition judges it.
+    #[must_use]
+    pub fn with_caller_input_records(self, records: &crate::markdown::compose::CallerInputRecords) -> Self {
+        self.with_caller_origins(validate::CallerOrigins::new(
+            records
+                .iter()
+                .map(|(property, record)| (property.clone(), record.origin().clone())),
+        ))
+    }
+
     /// This instance resolving through `context` instead, keeping its
     /// baseline and trigger registry: one configuration validating documents
     /// that each carry their own context.
@@ -399,34 +424,26 @@ impl DarkmatterSchemas {
         Ok(())
     }
 
-    /// Enables trigger-schema discovery by scanning from `document_path`'s
-    /// directory up through `boundary` (inclusive).
+    /// Enables trigger-schema discovery in the five [schema roots](roots) of
+    /// this instance's context, which must be the checked document's own
+    /// context.
     ///
-    /// The scan is performed eagerly at configuration time. Every `schemas/`
-    /// directory on the ancestor walk is a schema root, nearest first; trigger
-    /// envelopes are loaded transactionally (one malformed trigger aborts the
-    /// whole scan). The resulting [`triggers::TriggerRegistry`] is stored and
-    /// consumed by [`Self::effective_for`].
+    /// The scan is performed eagerly at configuration time: trigger envelopes
+    /// are loaded transactionally (one malformed trigger aborts the whole
+    /// scan). The resulting [`triggers::TriggerRegistry`] is stored and
+    /// consumed by [`Self::effective_for`], whose bare-name `$schema` lookup
+    /// also searches its roots.
     ///
     /// [`DarkmatterSchemas::new`] never scans disk — discovery is opt-in via
-    /// this method or [`Self::with_trigger_registry`]. Implicit CWD-based
-    /// discovery is forbidden.
+    /// this method or [`Self::with_trigger_registry`].
     ///
     /// ## Errors
     ///
     /// Propagates [`SchemaError::TriggerLoad`] when a trigger file in a
-    /// discovered root claims the `kind: trigger-schema` envelope but is
+    /// searched root claims the `kind: trigger-schema` envelope but is
     /// malformed (bad envelope, bad match grammar, vacuous arm).
-    pub fn with_trigger_discovery(
-        self,
-        document_path: impl AsRef<Path>,
-        boundary: impl AsRef<Path>,
-    ) -> Result<Self, SchemaError> {
-        let registry = triggers::scan(
-            document_path.as_ref(),
-            boundary.as_ref(),
-            &self.file_resolution_context,
-        )?;
+    pub fn with_trigger_discovery(self) -> Result<Self, SchemaError> {
+        let registry = triggers::scan(&self.file_resolution_context)?;
         Ok(self.with_trigger_registry(registry))
     }
 
@@ -434,9 +451,8 @@ impl DarkmatterSchemas {
     /// DMLS, or constructed programmatically by a test).
     ///
     /// [`DarkmatterSchemas::new`] never scans disk — discovery is opt-in.
-    /// Implicit CWD-based discovery is forbidden; a caller must explicitly
-    /// supply a document path + boundary (via [`Self::with_trigger_discovery`])
-    /// or a prebuilt registry.
+    /// A caller must explicitly ask for discovery (via
+    /// [`Self::with_trigger_discovery`]) or supply a prebuilt registry.
     #[must_use]
     pub fn with_trigger_registry(mut self, registry: triggers::TriggerRegistry) -> Self {
         self.triggers = Some(registry);
@@ -454,7 +470,7 @@ impl DarkmatterSchemas {
     /// merges the layers in precedence order:
     ///
     /// 1. The caller-configured baseline (if any).
-    /// 2. Matching trigger-schema payloads — nearest root first,
+    /// 2. Matching trigger-schema payloads — first schema root first,
     ///    filename-lexicographic within a root (the registry's built-in order).
     ///    Shadowing is applied before matching (a shadowed file is never in the
     ///    registry).
@@ -495,11 +511,11 @@ impl DarkmatterSchemas {
         let schema_value = schema_override.or_else(|| frontmatter.get("$schema"));
 
         // Schema roots from the trigger registry feed bare-name $schema
-        // resolution (Phase 3 context).
+        // resolution.
         let trigger_roots: &[PathBuf] = self
             .triggers
             .as_ref()
-            .map(|reg| reg.roots.as_slice())
+            .map(|reg| reg.roots.search_paths())
             .unwrap_or(&[]);
 
         // Resolve the document $schema with schema-root context.
@@ -580,7 +596,7 @@ impl DarkmatterSchemas {
         // Keep eager-file validation on the same request-scoped candidate plan
         // as expression-side `file_exists` and `frontmatter` resolution.
         let validator =
-            self.cache.validator_for(&merged_json, Some(&base_dir), &self.file_resolution_context)?;
+            self.cache.validator_for_shared(&merged_json, Some(&base_dir), &self.file_resolution_context)?;
         let arm_validators = build_arm_validators(
             &merged_json,
             &self.cache,
@@ -608,6 +624,7 @@ impl DarkmatterSchemas {
             base_dir: Some(base_dir),
             file_ref_fallback_dir: self.cache.file_ref_fallback_dir().map(Path::to_path_buf),
             file_resolution_context: self.file_resolution_context.clone(),
+            caller_origins: self.cache.caller_origins().clone(),
             dependencies,
             advisories,
         }))
@@ -615,7 +632,7 @@ impl DarkmatterSchemas {
 
     /// Matches the configured trigger registry against the document and
     /// resolves each matching payload. Returns the ordered trigger layers
-    /// (nearest root first). Empty when no registry is configured or no
+    /// (first schema root first). Empty when no registry is configured or no
     /// triggers match.
     fn resolve_trigger_layers(
         &self,
@@ -628,12 +645,10 @@ impl DarkmatterSchemas {
             return Ok(Vec::new());
         }
 
-        // Normalized boundary-relative path for `$path` matching.
-        let normalized_path = match source.source() {
-            Some(ComposeSource::File(p)) => {
-                triggers::normalize_path(p, &registry.boundary).unwrap_or_default()
-            }
-            _ => String::new(),
+        // `$path` judges the document's file; an in-memory source has none.
+        let document = match source.source() {
+            Some(ComposeSource::File(p)) => Some(p.as_path()),
+            _ => None,
         };
 
         // Frontmatter snapshot for matching (strip the `$schema` control key).
@@ -644,7 +659,7 @@ impl DarkmatterSchemas {
         let pre_resolved = !registry.payloads.is_empty();
 
         let evaluations =
-            triggers::assemble::evaluate_registry(registry, &fm_json, &normalized_path);
+            triggers::assemble::evaluate_registry(registry, &fm_json, document);
         let mut layers = Vec::with_capacity(
             evaluations.iter().filter(|eval| eval.matched).count(),
         );
@@ -662,7 +677,7 @@ impl DarkmatterSchemas {
             } else {
                 let payload = triggers::assemble::resolve_trigger_payload(
                     eval.trigger,
-                    &registry.roots,
+                    registry.roots.search_paths(),
                     &self.file_resolution_context,
                 )?;
                 (payload.json_schema, payload.dependencies, payload.advisories)
@@ -821,6 +836,9 @@ pub struct EffectiveSchema {
     file_ref_fallback_dir: Option<PathBuf>,
     /// The request's context, used by eager-file normalization.
     file_resolution_context: biscuit_file::FileResolutionContext,
+    /// Caller-supplied properties and their origins, for the `match()`
+    /// judgment of a phase's rebuilt validators.
+    caller_origins: validate::CallerOrigins,
     /// Resolved paths of the files this schema depends on: the sorted,
     /// deduplicated union of the document `$schema`'s `Name@file`/`@this` imports
     /// (Feature B), its `example(...)` artifacts (Feature A), and the referenced
@@ -844,7 +862,7 @@ impl EffectiveSchema {
     /// of those in any root-union, `allOf`, or `if`/`then`/`else` arm
     /// (baseline and trigger layers are already merged in). Declaring is not
     /// requiring; an optional property is declared.
-    pub(crate) fn declares_top_level_property(&self, name: &str) -> bool {
+    pub fn declares_top_level_property(&self, name: &str) -> bool {
         schema_declares_property(&self.json_schema, &self.json_schema, name, 0)
     }
 
@@ -936,11 +954,12 @@ impl EffectiveSchema {
             None => (None, self.json_schema.as_ref().clone()),
         };
         phase::make_passive(&mut json_schema);
-        let validator = Arc::new(validate::build_validator_in_context(
+        let validator = Arc::new(validate::build_validator_with_callers(
             &json_schema,
             self.base_dir.as_deref(),
             self.file_ref_fallback_dir.as_deref(),
             &self.file_resolution_context,
+            self.caller_origins.clone(),
         )?);
         let arm_validators = json_schema
             .get("anyOf")
@@ -949,11 +968,12 @@ impl EffectiveSchema {
                 arms.iter()
                     .map(|arm| {
                         let root = validate::wrap_arm_as_root_schema(arm);
-                        validate::build_validator_in_context(
+                        validate::build_validator_with_callers(
                             &root,
                             self.base_dir.as_deref(),
                             self.file_ref_fallback_dir.as_deref(),
                             &self.file_resolution_context,
+                            self.caller_origins.clone(),
                         )
                         .map(Arc::new)
                     })
@@ -969,6 +989,7 @@ impl EffectiveSchema {
             base_dir: self.base_dir.clone(),
             file_ref_fallback_dir: self.file_ref_fallback_dir.clone(),
             file_resolution_context: self.file_resolution_context.clone(),
+            caller_origins: self.caller_origins.clone(),
             dependencies: self.dependencies.clone(),
             advisories: self.advisories.clone(),
         };
@@ -2935,6 +2956,24 @@ mod phase4_trigger_assembly {
         }
     }
 
+    /// The hermetic context of a document in `doc_dir` of repository `root`:
+    /// no home directory and no environment, so no user-level schema root.
+    /// A document under `{root}/pkg` belongs to the package `{root}/pkg`.
+    fn doc_context(root: &Path, doc_path: &Path) -> biscuit_file::FileResolutionContext {
+        let doc_dir = doc_path.parent().unwrap();
+        let context = biscuit_file::FileResolutionContext::from_snapshot(
+            doc_dir,
+            None,
+            std::collections::HashMap::new(),
+        )
+        .with_repository_root(root);
+        if doc_path.starts_with(root.join("pkg")) {
+            context.with_package_root(root.join("pkg"))
+        } else {
+            context
+        }
+    }
+
     fn repo_fixture() -> TempDir {
         let dir = TempDir::new().unwrap();
         fs::create_dir_all(dir.path().join(".git")).unwrap();
@@ -2999,10 +3038,10 @@ mod phase4_trigger_assembly {
             },
             ..Default::default()
         });
-        let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(root))
+        let api = DarkmatterSchemas::new(doc_context(root, &doc_path))
             .with_baseline(baseline)
             .unwrap()
-            .with_trigger_discovery(&doc_path, root)
+            .with_trigger_discovery()
             .unwrap();
 
         let effective = api.effective_for(&md_from_file(&doc_path))
@@ -3040,8 +3079,8 @@ mod phase4_trigger_assembly {
              ---\nbody\n",
         );
 
-        let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(root))
-            .with_trigger_discovery(&doc_path, root)
+        let api = DarkmatterSchemas::new(doc_context(root, &doc_path))
+            .with_trigger_discovery()
             .unwrap();
 
         let effective = api.effective_for(&md_from_file(&doc_path))
@@ -3078,8 +3117,8 @@ mod phase4_trigger_assembly {
              ---\nbody\n",
         );
 
-        let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(root))
-            .with_trigger_discovery(&doc_path, root)
+        let api = DarkmatterSchemas::new(doc_context(root, &doc_path))
+            .with_trigger_discovery()
             .unwrap();
 
         let effective = api.effective_for(&md_from_file(&doc_path))
@@ -3109,8 +3148,8 @@ mod phase4_trigger_assembly {
              ---\nbody\n",
         );
 
-        let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(root))
-            .with_trigger_discovery(&doc_path, root)
+        let api = DarkmatterSchemas::new(doc_context(root, &doc_path))
+            .with_trigger_discovery()
             .unwrap();
 
         // No $schema, no matching trigger → None.
@@ -3153,8 +3192,8 @@ mod phase4_trigger_assembly {
              ---\nbody\n",
         );
 
-        let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(root))
-            .with_trigger_discovery(&doc_path, root)
+        let api = DarkmatterSchemas::new(doc_context(root, &doc_path))
+            .with_trigger_discovery()
             .unwrap();
 
         let effective = api.effective_for(&md_from_file(&doc_path))
@@ -3188,8 +3227,8 @@ mod phase4_trigger_assembly {
         let doc_path = root.join("doc.md");
         write(&doc_path, "---\nprompt: hello\n---\nbody\n");
 
-        let err = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(root))
-            .with_trigger_discovery(&doc_path, root)
+        let err = DarkmatterSchemas::new(doc_context(root, &doc_path))
+            .with_trigger_discovery()
             .err()
             .expect("non-mergeable payload must fail at scan time");
         assert!(
@@ -3218,8 +3257,8 @@ mod phase4_trigger_assembly {
              ---\nbody\n",
         );
 
-        let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(root))
-            .with_trigger_discovery(&doc_path, root)
+        let api = DarkmatterSchemas::new(doc_context(root, &doc_path))
+            .with_trigger_discovery()
             .unwrap();
 
         let report = api.validate(&md_from_file(&doc_path)).unwrap();
@@ -3247,8 +3286,8 @@ mod phase4_trigger_assembly {
         let doc_path = root.join("doc.md");
         write(&doc_path, "---\nprompt: hello\n---\nbody\n");
 
-        let err = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(root))
-            .with_trigger_discovery(&doc_path, root)
+        let err = DarkmatterSchemas::new(doc_context(root, &doc_path))
+            .with_trigger_discovery()
             .err()
             .expect("self-referencing payload must fail at scan time");
         assert!(
@@ -3279,8 +3318,8 @@ mod phase4_trigger_assembly {
         let doc_path = root.join("doc.md");
         write(&doc_path, "---\nprompt: hello\n---\nbody\n");
 
-        let err = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(root))
-            .with_trigger_discovery(&doc_path, root)
+        let err = DarkmatterSchemas::new(doc_context(root, &doc_path))
+            .with_trigger_discovery()
             .err()
             .expect("payload referencing a trigger must fail at scan time");
         assert!(
@@ -3309,8 +3348,8 @@ mod phase4_trigger_assembly {
              ---\nbody\n",
         );
 
-        let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(root))
-            .with_trigger_discovery(&doc_path, root)
+        let api = DarkmatterSchemas::new(doc_context(root, &doc_path))
+            .with_trigger_discovery()
             .unwrap();
 
         let err = unwrap_effective_err(api.effective_for(&md_from_file(&doc_path)));
@@ -3345,8 +3384,8 @@ mod phase4_trigger_assembly {
              ---\nbody\n",
         );
 
-        let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(root))
-            .with_trigger_discovery(&doc_path, root)
+        let api = DarkmatterSchemas::new(doc_context(root, &doc_path))
+            .with_trigger_discovery()
             .unwrap();
 
         let effective = api.effective_for(&md_from_file(&doc_path))
@@ -3399,8 +3438,8 @@ mod phase4_trigger_assembly {
             "$schema:\n  doc_prop: 'string(required)'\n",
         );
 
-        let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(root))
-            .with_trigger_discovery(&doc_path, root)
+        let api = DarkmatterSchemas::new(doc_context(root, &doc_path))
+            .with_trigger_discovery()
             .unwrap();
 
         let effective = api.effective_for(&md_from_file(&doc_path))
@@ -3447,8 +3486,8 @@ mod phase4_trigger_assembly {
         );
 
         // Build the registry separately (simulating DMLS per-boundary caching).
-        let registry = triggers::scan(&doc_path, root, &biscuit_file::FileResolutionContext::new(root)).unwrap();
-        let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(root)).with_trigger_registry(registry);
+        let registry = triggers::scan(&doc_context(root, &doc_path)).unwrap();
+        let api = DarkmatterSchemas::new(doc_context(root, &doc_path)).with_trigger_registry(registry);
 
         let effective = api.effective_for(&md_from_file(&doc_path))
             .unwrap()
@@ -3509,8 +3548,8 @@ mod phase4_trigger_assembly {
              ---\nbody\n",
         );
 
-        let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(root))
-            .with_trigger_discovery(&doc_path, root)
+        let api = DarkmatterSchemas::new(doc_context(root, &doc_path))
+            .with_trigger_discovery()
             .unwrap();
 
         let effective = api.effective_for(&md_from_file(&doc_path))
@@ -3564,10 +3603,10 @@ mod phase4_trigger_assembly {
             },
             ..Default::default()
         });
-        let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(root))
+        let api = DarkmatterSchemas::new(doc_context(root, &doc_path))
             .with_baseline(baseline)
             .unwrap()
-            .with_trigger_discovery(&doc_path, root)
+            .with_trigger_discovery()
             .unwrap();
 
         let effective = api.effective_for(&md_from_file(&doc_path))

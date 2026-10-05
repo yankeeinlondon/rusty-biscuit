@@ -68,3 +68,49 @@ pub(crate) fn document_context(source_path: &Path, repo_root: Option<&Path>) -> 
     crate::composition::build_prompt_resolution_context(&snapshot_at(base_dir), repo_root, repo_info.as_ref())
         .expect("build the document context")
 }
+
+const CWD_PROBE_SOURCE: &str = "fn main() {\n    let cwd = std::env::current_dir().unwrap();\n    \
+     println!(\"{}\", cwd.display().to_string().replace('\\\\', \"/\"));\n}\n";
+
+/// A program that prints its working directory, `/`-separated; `None` when
+/// `rustc` is unavailable. A test uses it where a shell builtin would do,
+/// because the shell blacklist rejects every Windows shell that could.
+///
+/// It prints the portable spelling because its output lands in a Markdown
+/// document: a native Windows path would lose the separator of any segment
+/// beginning with punctuation to CommonMark backslash escaping.
+///
+/// Compiling it costs seconds of CPU, so it is compiled once per probe source
+/// into the temporary directory and shared by every test and later run.
+pub(crate) fn cwd_probe() -> Option<std::path::PathBuf> {
+    let compiler = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
+    let available = std::process::Command::new(&compiler)
+        .arg("--version")
+        .output()
+        .is_ok_and(|output| output.status.success());
+    if !available {
+        return None;
+    }
+    let key = format!("{:016x}", biscuit_hash::xx_hash_bytes(CWD_PROBE_SOURCE.as_bytes()));
+    let dir = std::env::temp_dir().join(format!("claudine-cwd-probe-{key}"));
+    std::fs::create_dir_all(&dir).expect("create the probe directory");
+    let executable = dir.join(format!("cwd-probe{}", std::env::consts::EXE_SUFFIX));
+    let lock = std::fs::File::create(dir.join("lock")).expect("create the probe lock");
+    lock.lock().expect("lock the probe");
+    if !executable.is_file() {
+        let source = dir.join("cwd_probe.rs");
+        std::fs::write(&source, CWD_PROBE_SOURCE).expect("write the probe source");
+        let compilation = std::process::Command::new(compiler)
+            .arg(&source)
+            .arg("-o")
+            .arg(&executable)
+            .output()
+            .expect("run rustc");
+        assert!(
+            compilation.status.success(),
+            "failed to compile cwd probe: {}",
+            String::from_utf8_lossy(&compilation.stderr)
+        );
+    }
+    Some(executable)
+}

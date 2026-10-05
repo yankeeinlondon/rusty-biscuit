@@ -6,7 +6,8 @@ pub(super) fn subagent_description(arrow: char, name: &Option<String>) -> String
     format!("{arrow} {name_part}")
 }
 
-/// Escape text for splicing into Prose markup, so it renders exactly as written.
+/// Escape text for splicing into Prose markup, so it renders exactly as
+/// written; code spans the text marks with backticks stay literal.
 pub(crate) fn escape_prose(input: &str) -> String {
-    biscuit_terminal::components::prose::Prose::escape_text(input)
+    biscuit_terminal::components::prose::Prose::escape_text_outside_code_spans(input)
 }

@@ -570,6 +570,66 @@ fn reference_removed_package_sigil_exits_2_with_migration_help() {
         .stderr(predicate::str::contains("`^`"));
 }
 
+// ── Home lookup ─────────────────────────────────────────────────────
+
+/// Runs `bf ref ~/cfg.toml` from an empty directory with the child's home
+/// variables set as given; the parent's environment is never touched.
+fn resolve_home_reference(home: &str, user_profile: &str) -> std::process::Output {
+    let cwd = tempfile::TempDir::new().unwrap();
+    bf().current_dir(cwd.path())
+        .env("HOME", home)
+        .env("USERPROFILE", user_profile)
+        .args(["ref", "~/cfg.toml"])
+        .output()
+        .unwrap()
+}
+
+/// `HOME` and `USERPROFILE` disagree; `~` follows `HOME` on POSIX and
+/// `USERPROFILE` on native Windows, where `HOME` alone does not relocate home.
+/// The home is used as spelled, not canonicalized (macOS temp paths keep `/var`).
+#[test]
+fn home_reference_follows_the_platform_home_variable() {
+    let posix_home = tempfile::TempDir::new().unwrap();
+    let windows_home = tempfile::TempDir::new().unwrap();
+    for home in [&posix_home, &windows_home] {
+        std::fs::write(home.path().join("cfg.toml"), "").unwrap();
+    }
+
+    let output = resolve_home_reference(
+        posix_home.path().to_str().unwrap(),
+        windows_home.path().to_str().unwrap(),
+    );
+
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let expected = if cfg!(windows) { &windows_home } else { &posix_home };
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap().trim_end(),
+        biscuit_file::to_portable_string(&expected.path().join("cfg.toml")),
+    );
+}
+
+/// A relative home is no home: `~` fails with the missing-home error rather
+/// than resolving against the working directory or falling back to the real
+/// profile, which would defeat the override.
+#[test]
+fn a_relative_home_is_no_home_and_does_not_fall_back() {
+    for relative in ["relhome", "./relhome", "."] {
+        let cwd = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir(cwd.path().join("relhome")).unwrap();
+        std::fs::write(cwd.path().join("relhome/cfg.toml"), "").unwrap();
+        std::fs::write(cwd.path().join("cfg.toml"), "").unwrap();
+
+        bf().current_dir(cwd.path())
+            .env("HOME", relative)
+            .env("USERPROFILE", relative)
+            .args(["ref", "~/cfg.toml"])
+            .assert()
+            .code(2)
+            .stdout(predicate::str::is_empty())
+            .stderr(predicate::str::contains("no home directory is available"));
+    }
+}
+
 // ── Unknown file type ───────────────────────────────────────────────
 
 #[test]
@@ -599,4 +659,19 @@ fn debug_flag_produces_stderr_output() {
             predicate::str::contains("processing input")
                 .or(predicate::str::contains("biscuit_file")),
         );
+}
+
+// The guard engine and its self-tests live in darkmatter-cli.
+#[path = "../../../darkmatter/cli/tests/common/path_lookup_guard.rs"]
+mod path_lookup_guard;
+
+/// `bf` makes no direct canonicalize call; a new one goes through
+/// `biscuit_file::canonicalize_simplified`.
+#[test]
+fn production_source_canonicalizes_only_through_the_shared_helper() {
+    // Spelled for CI's test-input index, which does not count the `#[path]`
+    // include above (`source-inputs` in Cargo.toml).
+    let _ = include_str!("../../../darkmatter/cli/tests/common/path_lookup_guard.rs");
+    let _ = include_str!("../../../darkmatter/cli/tests/common/source_scan.rs");
+    path_lookup_guard::assert_guarded("biscuit-file/cli", &manifest_dir!(), &[path_lookup_guard::Rule::Canonicalize], &[]);
 }

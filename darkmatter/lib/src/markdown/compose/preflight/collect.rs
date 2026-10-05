@@ -312,7 +312,7 @@ fn collect_recursive(
     let is_nested = nested_key.is_some();
     let source_key = nested_key.or_else(|| match &options.source {
         ComposeSource::File(path) => Some(
-            std::fs::canonicalize(path)
+            biscuit_file::canonicalize_simplified(path)
                 .unwrap_or_else(|_| path.clone())
                 .to_string_lossy()
                 .to_string(),

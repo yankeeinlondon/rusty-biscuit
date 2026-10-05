@@ -150,6 +150,7 @@ impl ResolutionDetail {
 /// Kept out of the `#[error]` attribute because each arm reads a different
 /// optional field.
 fn path_resolution_detail(
+    raw: &str,
     failure: PathResolutionFailure,
     source_path: Option<&PathBuf>,
     resolved: Option<&PathBuf>,
@@ -163,13 +164,17 @@ fn path_resolution_detail(
             ),
             None => "source path has no parent directory".to_string(),
         },
-        PathResolutionFailure::TargetMissing => match resolved {
-            Some(path) => format!(
-                "target does not exist: {}",
-                biscuit_file::to_portable_string(path)
-            ),
-            None => "target does not exist".to_string(),
-        },
+        PathResolutionFailure::TargetMissing => darkmatter::markdown::errors::with_glob_hint(
+            match resolved {
+                Some(path) => format!(
+                    "target does not exist: {}",
+                    biscuit_file::to_portable_string(path)
+                ),
+                None => "target does not exist".to_string(),
+            },
+            biscuit_file::ResolutionFailure::NoMatch,
+            raw,
+        ),
     }
 }
 
@@ -252,7 +257,7 @@ pub enum HarnessError {
     /// Path resolution failed for another reason.
     #[error(
         "path resolution failed for \"{raw}\": {}",
-        path_resolution_detail(*failure, source_path.as_ref(), resolved.as_ref())
+        path_resolution_detail(raw, *failure, source_path.as_ref(), resolved.as_ref())
     )]
     PathResolutionFailed {
         /// The reference exactly as authored.

@@ -180,9 +180,162 @@ describes every field. Generation fails, rather than skipping a record, when:
 Records are emitted sorted by canonical spelling and then by command path, so
 the order of the research document never changes `data.rs`.
 
-**Planned:** nothing reads `cli_switches` at run time yet. Looking a switch up
-by provider and command path, and using the type to decide which arguments go
-to the agent, are planned.
+An override of `cli_switches` in `docs/providers/overrides/<slug>.yaml` is
+held to the same rules. It is written in the generated catalog shape, and
+generation fails unless it is exactly what valid research would generate: no
+unknown keys, records and scopes in emitted order, and every rule above. For
+example, this override fails because an empty inventory needs a gap:
+
+```yaml
+cli_switches:
+    value: {researched: []}
+    reason: "…"
+```
+
+Write `{unknown: {gap: "<what is missing and how to establish it>"}}` instead.
+The error shows the canonical form when only the order or a key differs.
+
+An override entry holds exactly `value:` and a non-empty `reason:`; any other
+key in it (a misspelled `reason`, say) fails generation for every field, not
+only `cli_switches`.
+
+#### What generation accepts, field by field
+
+Both inputs are judged shape by shape, and the generator's tests hold one case
+for every cell below, so a change to either reader that lets a shape through
+fails a test. `R` means generation fails; `A` means it succeeds and keeps the
+value's meaning; `—` means the shape cannot occur (a scalar has no elements).
+"Trailing" is text YAML cannot read after the value on its line, such as
+`aliases: ["-c"] x`; it and a repeated key fail when the file is read, before
+any rule runs.
+
+Research document (`docs/research/agent-cli/<slug>.md` frontmatter):
+
+| Field | Absent | `null` | Wrong type | One bad element | Every element bad | Empty | Repeated key | Trailing |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `schema_revision` | R¹ | R | R | — | — | R | R | R |
+| `cli_switches` | R | R | R | R | R | A² | R | R |
+| `cli_switches_gap` | A³ | R | R | — | — | R | R | R |
+| `flag` | R | R | R | — | — | R | R | R |
+| `aliases` | A (none) | R | R | R | R | A⁴ | R | R |
+| `value_type` | R | R | R | — | — | R | R | R |
+| `value_optional` | R⁵ | R | R | — | — | R | R | R |
+| `variadic_min` | R⁵ | R | R | — | — | R | R | R |
+| `attachment` | R | R | R | R | R | A⁶ | R | R |
+| `invocation_scope` | R | R | R | R | R | R | R | R |
+| `applies_to` | R | R | R | — | — | R | R | R |
+| `command` | R | R | R | R | R | A⁷ | R | R |
+| `description` | R | R | R | — | — | R | R | R |
+| `gap` | R⁸ | R | R | — | — | R | R | R |
+
+1. A document without `schema_revision` is revision 1; it is judged by the
+   frozen revision-1 contract when one exists (see
+   [below](#research-written-for-an-older-contract)) and fails otherwise.
+2. Only beside a `cli_switches_gap`; an empty list alone fails.
+3. Beside records. Absent beside an empty list fails, and present beside
+   records fails.
+4. Unless the record still lists `short_attached`, which needs a one-dash,
+   one-character spelling.
+5. For a switch of that type. On any other type the field must be absent, and
+   `null` there fails too.
+6. For a `none` or `unknown` switch; a switch that takes a value needs a form.
+7. `[]` is the root command. It fails when the record already lists the root.
+8. When the value type or `variadic_min` is `unknown`; otherwise `gap` must be
+   absent.
+
+`variadic_min` is an integer of at least 1 or `unknown`: `123` is accepted, and
+`0`, `1.5`, text, a list, a mapping, and a Boolean fail.
+
+Override (`docs/providers/overrides/<slug>.yaml`, the `cli_switches:` entry):
+
+| Field | Absent | `null` | Wrong type | One bad element | Every element bad | Empty | Repeated key | Trailing |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| entry `value` | R | R | R | — | — | R | R | R |
+| entry `reason` | R | R | R | — | — | R | R | R |
+| `researched` | R | R | R | R | R | R | R | R |
+| `unknown` | R | R | R | — | — | R | R | R |
+| `unknown.gap` | R | R | R | — | — | R | R | R |
+| `flag` | R | R | R | — | — | R | R | R |
+| `aliases` | R | R | R | R | R | R⁹ | R | R |
+| `value` | R | R | R | — | — | R | R | R |
+| scalar `optional` | R | R | R | — | — | R | R | R |
+| variadic `min` | R | R | R | — | — | R | R | R |
+| `attachments` | R | R | R | R | R | R¹⁰ | R | R |
+| `scopes` | R | R | R | R | R | R | R | R |
+| scope `command` | R | R | R | R | R | A⁷ | R | R |
+| `description` | R | R | R | — | — | R | R | R |
+| record `gap` | R¹¹ | R¹¹ | R | — | — | R | R | R |
+
+9. Accepted once `short_attached` is removed too, as in research.
+10. For a switch that takes a value; `"none"` and `"unknown"` records carry
+    `attachments: []`.
+11. For a record whose value or minimum is `unknown`. A known record writes
+    `gap: null`, and leaving `gap` out of it fails because the override is
+    then not in canonical form.
+
+The override must also be in canonical form: exactly one of `researched` and
+`unknown`, no member the catalog lacks (in the outer value, a record, a scope,
+or `unknown`), records sorted by canonical spelling, and each record's scopes
+sorted. The order of keys inside a mapping does not matter, and an override
+may list fewer records than research does.
+
+#### Looking a switch up
+
+Every reader goes through one lookup in `claudine::provider`, keyed by provider
+and by the native command path the launch uses: the words after the executable,
+such as `["exec"]` for a non-interactive Codex run or `["exec", "resume"]` for
+its resume entrypoint, and `[]` for the root command. A record answers there
+when one of its scopes is global or names that exact path.
+
+```rust
+use claudine::provider::{Provider, SwitchLookup, lookup_switch, match_switch_token};
+
+// An exact spelling: canonical or alias.
+let SwitchLookup::Known(config) = lookup_switch(Provider::Codex, &["exec"], "-c") else { … };
+assert_eq!(config.flag, "--config");
+
+// A token with its value attached, split only in a researched form.
+let token = match_switch_token(Provider::Codex, &["exec"], "-cmodel=o3").unwrap();
+assert_eq!(token.spelling, "-c");
+```
+
+| Function | Answers |
+| --- | --- |
+| `lookup_switch(provider, path, spelling)` | `Known(&CliSwitch)`; `NotInCatalog` when the inventory is researched and nothing applies there; `CatalogGap { gap }` when the inventory is a gap |
+| `match_switch_token(provider, path, token)` | The record for a whole token: an exact spelling, `--name=value` for a switch that accepts `equals`, or `-xvalue` for one that accepts `short_attached`; `None` otherwise |
+
+`SwitchLookup::value()` reads anything not established as
+`SwitchValue::Unknown`, never `None`, so an unresearched switch is never
+mistaken for one that takes no value.
+
+A `Known` answer is not proof of a type: a record can itself declare its
+value `unknown` (OpenCode's global `--get-yargs-completions`, and OpenCode's
+and Kilo's `--models` at `stats`). Every reader treats such a record exactly
+like `NotInCatalog`: ownership applies the unrecognized-switch rule, the
+launch check leaves it to the provider, completion reads the next word as
+the agent's, and the forwarding notice says the catalog has no established
+type for it.
+
+Two readers use the lookup:
+
+- **The forwarding notice** names `-csecret` as `-c` only because Codex's `-c`
+  is researched as `short_attached`, and it explains each forwarded switch
+  (see
+  [CLI Pre-Parsing → Forwarding notice](argv-normalization.md#forwarding-notice-and-redaction)).
+- **Type-aware ownership** reads each candidate provider's value type through
+  `match_switch_token` to decide which words after a composition file belong
+  to the agent, and checks them again against the provider that launches
+  (see [Type-aware ownership](argv-normalization.md#type-aware-ownership)).
+  A switch one candidate knows and another does not is read differently by
+  the two, which ownership treats as a disagreement, never as "takes no
+  value". Shell completion asks the same question, so it never offers a
+  setter for a word the agent will receive.
+
+A test in `claudine-cli` fails when a switch table (a `CliSwitch` literal, an
+array of them, or a researched catalog over a literal slice) is written
+anywhere but a generated `data.rs`, so no second, hand-kept table can drift
+from the research. Matching on a looked-up `SwitchValue` is reading the
+research and is allowed.
 
 #### Research written for an older contract
 
@@ -205,9 +358,12 @@ flowchart LR
 ```
 
 Each coercion decides what an older document projects to. Today only `agent-cli`
-is versioned this way: its documents still at revision 1 keep feeding
-`config_paths`, and their `cli_switches` generate as `Unknown` with a gap asking
-for re-research. Delete a frozen contract once no document is at its revision.
+is versioned this way: a revision-1 document would keep feeding `config_paths`,
+and its `cli_switches` would generate as `Unknown` with a gap asking for
+re-research. Every `agent-cli` document is now at revision 2, so the area keeps
+no frozen contract; the generator's tests keep the revision-1 contract as a
+fixture to prove the mechanism. Delete a frozen contract once no document is at
+its revision.
 
 ### Related generated artifacts
 

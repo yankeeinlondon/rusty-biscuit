@@ -30,7 +30,7 @@ const ALLOWLIST: &[Allowance] = &[
 
 #[test]
 fn production_source_builds_contexts_only_through_the_builder() {
-    context_guard::assert_guarded("darkmatter-cli", &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"), ALLOWLIST);
+    context_guard::assert_guarded("darkmatter-cli", &biscuit_test_harness::manifest_dir!().join("src"), ALLOWLIST);
 }
 
 /// Every gate rejects its seeded violation, test code, comments, and literals

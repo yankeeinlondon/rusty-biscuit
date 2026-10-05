@@ -480,6 +480,49 @@ fn context_expressions_includes_every_function() {
     assert_one_row_each("expression report", &expected, &actual);
 }
 
+/// `code_link()` lists both overloads once each in the Filesystem group,
+/// directly after `link()`'s two rows, with no list of its own: the rows come
+/// from darkmatter's catalog descriptors.
+#[test]
+fn context_expressions_lists_code_link_beside_link_in_the_filesystem_group() {
+    let assert = repository_fixture()
+        .command()
+        .env("COLUMNS", "200")
+        .args(["context", "--expressions"])
+        .assert()
+        .success();
+    let stdout = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stdout));
+
+    // A group heading is an unindented, unbordered line.
+    let lines: Vec<&str> = stdout.lines().collect();
+    let is_heading = |line: &str| {
+        !line.is_empty() && !line.starts_with(' ') && !line.contains('│') && !line.contains('─')
+    };
+    let start = lines
+        .iter()
+        .position(|line| line.trim() == "Filesystem")
+        .unwrap_or_else(|| panic!("expected a Filesystem group; got:\n{stdout}"));
+    let end = lines[start + 1..]
+        .iter()
+        .position(|line| is_heading(line))
+        .map_or(lines.len(), |offset| start + 1 + offset);
+    let group = lines[start..end].join("\n");
+
+    let signatures: Vec<String> = first_column_cells(&group)
+        .into_iter()
+        .filter(|cell| cell.starts_with("link(") || cell.starts_with("code_link("))
+        .collect();
+    assert_eq!(
+        signatures,
+        ["link(file)", "link(target, desc)", "code_link(file)", "code_link(target, desc)"],
+        "Filesystem group:\n{group}"
+    );
+    assert!(
+        group.contains("Creates a Markdown link whose text is inline"),
+        "the catalog description must render; group:\n{group}"
+    );
+}
+
 /// More-context AC1 and AC26: every added variable appears in `claudine
 /// context` and every added function in `claudine context --expressions`, and
 /// the `recent_commits` pair renders once on each side from one catalog entry.

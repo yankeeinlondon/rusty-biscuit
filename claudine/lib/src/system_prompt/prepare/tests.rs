@@ -31,37 +31,6 @@ fn write_temp_file(dir: &std::path::Path, name: &str, content: &str) -> PathBuf 
     path
 }
 
-/// Build an executable in `dir` that prints its working directory, and return
-/// its portable path text for use as both a `::shell` command and a whitelist
-/// `prefix` rule.
-///
-/// The probe reports the portable spelling because its output lands in a
-/// Markdown document: a native Windows path would lose the separator of any
-/// segment beginning with punctuation to CommonMark backslash escaping.
-fn compile_cwd_probe(dir: &std::path::Path) -> String {
-    std::fs::create_dir_all(dir).unwrap();
-    let source = write_temp_file(
-        dir,
-        "cwd_probe.rs",
-        "fn main() {\n    let cwd = std::env::current_dir().unwrap();\n    \
-         println!(\"{}\", cwd.display().to_string().replace('\\\\', \"/\"));\n}\n",
-    );
-    let executable = dir.join(format!("cwd-probe{}", std::env::consts::EXE_SUFFIX));
-    let compiler = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
-    let compilation = std::process::Command::new(compiler)
-        .arg(&source)
-        .arg("-o")
-        .arg(&executable)
-        .output()
-        .unwrap();
-    assert!(
-        compilation.status.success(),
-        "failed to compile cwd probe: {}",
-        String::from_utf8_lossy(&compilation.stderr)
-    );
-    biscuit_file::to_portable_string(&executable)
-}
-
 struct ScopedHome {
     original: Option<std::ffi::OsString>,
 }
@@ -868,15 +837,14 @@ fn session_reuses_resolved_external_source_context() {
 
 #[test]
 fn non_repository_session_runs_shell_in_launch_cwd() {
-    let compiler = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
-    if !std::process::Command::new(compiler)
-        .arg("--version")
-        .output()
-        .is_ok_and(|output| output.status.success())
-    {
+    // A compiled probe rather than `pwd`: the built-in shell blacklist rejects
+    // every Windows shell that could report a working directory, and no
+    // whitelist can override it.
+    let Some(probe) = crate::test_support::cwd_probe() else {
         eprintln!("skipping cwd probe test because rustc is unavailable");
         return;
-    }
+    };
+    let probe = biscuit_file::to_portable_string(&probe);
 
     let tmp = TempDir::new().unwrap();
     let launch = tmp.path().join("launch");
@@ -889,10 +857,6 @@ fn non_repository_session_runs_shell_in_launch_cwd() {
         .status()
         .unwrap();
     assert!(status.success());
-    // A compiled probe rather than `pwd`: the built-in shell blacklist rejects
-    // every Windows shell that could report a working directory, and no
-    // whitelist can override it.
-    let probe = compile_cwd_probe(&tmp.path().join("probe"));
     write_temp_file(
         &source_repo,
         ".darkmatter-shell-whitelist",

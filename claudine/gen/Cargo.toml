@@ -30,6 +30,8 @@ sniff = { path = "../../sniff/lib" }
 # dependency tree transitively via darkmatter and does not depend on the
 # `claudine` lib/CLI, so the bootstrap boundary is preserved.
 biscuit-terminal = { path = "../../biscuit-terminal/lib" }
+# `renderable::markdown::code_span` fences dynamic values in report code spans.
+renderable = { path = "../../renderable" }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }

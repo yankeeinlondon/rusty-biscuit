@@ -52,7 +52,7 @@ const INVENTORY: &[(&str, &str, Coverage)] = &[
 /// Every `impl … EvaluationLookup for <Type>` outside a comment, as
 /// `(type, file relative to src/)`.
 fn scanned_implementations() -> Vec<(String, String)> {
-    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let src = biscuit_test_harness::manifest_dir!().join("src");
     let mut found = Vec::new();
     let mut pending = vec![src.clone()];
     while let Some(dir) = pending.pop() {
@@ -146,7 +146,9 @@ fn assert_reserved_roots_win(name: &str, lookup: &dyn EvaluationLookup) {
 #[test]
 fn every_production_lookup_keeps_bare_names_out_of_ctx() {
     let state = state();
-    let resolution = ResolutionContext::new(biscuit_file::FileResolutionContext::new(std::env::temp_dir()));
+    let file_context = biscuit_file::FileResolutionContext::new(std::env::temp_dir());
+    let resolution = ResolutionContext::new(file_context.clone());
+    let environment = std::collections::HashMap::new();
     let data = json!({ "env": DOCUMENT_ENV });
     let view = std::sync::Arc::new(BindingView::builder(ScopeId::new("parity")).build().unwrap());
 
@@ -183,7 +185,6 @@ fn every_production_lookup_keeps_bare_names_out_of_ctx() {
                 assert_reserved_roots_win(name, &seed);
             }
             "ShortcutLookup" => {
-                let file_context = biscuit_file::FileResolutionContext::new(".");
                 let lookup = ShortcutLookup::new(&data, &file_context);
                 assert_bare_name_is_a_document_property(name, &lookup);
                 assert_reserved_roots_win(name, &lookup);
@@ -191,7 +192,6 @@ fn every_production_lookup_keeps_bare_names_out_of_ctx() {
             "CtxLookup" => {
                 // Context-only: there is no document to read, so only the
                 // fallback half applies.
-                let environment = std::collections::HashMap::new();
                 let lookup = CtxLookup::new(Path::new("."), &environment);
                 assert_bare_name_is_a_document_property(name, &lookup);
             }

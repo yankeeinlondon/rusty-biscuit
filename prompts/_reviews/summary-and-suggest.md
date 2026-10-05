@@ -70,6 +70,8 @@ by running
 sniff repo recent-commits "{{timeframe}}" --package-area "{{ctx.area}}" --plain -vv
 ```
 
+::file "../_headless-orchestration.md"
+
 ## Task
 
 - before starting, determine your strategy for use of sub-agents, you should favor acting as an Orchestrator so that you may preserve as much of your context window as possible

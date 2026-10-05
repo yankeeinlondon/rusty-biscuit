@@ -5,7 +5,8 @@
 //! [`super`] routes this family here.
 
 use super::super::*;
-use super::{escape_prose_path, render_file_link};
+use super::{escape_prose_path, render_file_link, rows};
+use renderable::markdown::code_span;
 
 /// Render the [`StatusBlock`] for a schema/frontmatter-family
 /// [`CompositionError`].
@@ -18,9 +19,13 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
             let file_link = render_file_link(source_path);
             StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("CompositionError", "schema load failed"))
-                .body(format!(
-                    "Could not load the `$schema` referenced by {file_link}.\n\n{message}"
-                ))
+                // The loader's message can carry its own `hint:` row.
+                .body(vec![
+                    Prose::new(format!(
+                        "Could not load the `$schema` referenced by {file_link}."
+                    )),
+                    rows(message.as_str()),
+                ])
                 .hint(
                     "Verify the `$schema` path is correct, relative to the prompt's parent \
                      directory. Remote `http://` / `https://` references are not supported.",
@@ -42,7 +47,7 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
             // value. Each gets the remediation that actually applies.
             let (scope, hint) = match property {
                 Some(prop) => (
-                    format!(" for property <cyan>`{}`</cyan>", Prose::escape_text(prop)),
+                    format!(" for property <cyan>{}</cyan>", code_span(prop)),
                     "Check the SimplifiedSchema type-and-constraint syntax. Constraints are \
                      separated by `;` and a constraint's arguments by `,` — e.g. \
                      `file(required; match(**/*.md))`.",
@@ -55,10 +60,12 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
             };
             StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("CompositionError", "invalid schema"))
-                .body(format!(
-                    "The `$schema` declared in {file_link} is not a valid schema{scope}.\n\n\
-                     {message}"
-                ))
+                .body(vec![
+                    Prose::new(format!(
+                        "The `$schema` declared in {file_link} is not a valid schema{scope}."
+                    )),
+                    rows(message.as_str()),
+                ])
                 .hint(hint)
         }
         CompositionError::SchemaValidation {
@@ -68,18 +75,22 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
             failures,
         } => {
             let file_link = render_file_link(source_path);
-            let mut body = format!("Schema validation failed for {file_link}.\n\n{message}");
+            let mut body = vec![
+                Prose::new(format!("Schema validation failed for {file_link}.")),
+                rows(message.as_str()),
+            ];
             if !problems.is_empty() {
-                body.push_str("\n\n<b>Problems:</b>");
+                let mut listed = String::from("<b>Problems:</b>");
                 for problem in problems {
-                    body.push_str(&format!("\n- <cyan>`{problem}`</cyan>"));
+                    listed.push_str(&format!("\n- <cyan>`{problem}`</cyan>"));
                 }
+                body.push(rows(listed));
             }
             for failure in failures {
-                body.push_str(&format!(
-                    "\n\n<dim>failure:</dim> {}",
+                body.push(Prose::new(format!(
+                    "<dim>failure:</dim> {}",
                     darkmatter::markdown::errors::resolution_failure_name(*failure)
-                ));
+                )));
             }
             StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("CompositionError", "schema validation"))
@@ -199,15 +210,15 @@ fn render_missing_properties_block(
 ) -> StatusBlock {
     let file_link = render_file_link(source_path);
 
-    let mut body = format!("Required {plural} missing in {file_link}.",
-        plural = if missing.len() == 1 { "property is" } else { "properties are" });
+    let mut body = vec![Prose::new(format!("Required {plural} missing in {file_link}.",
+        plural = if missing.len() == 1 { "property is" } else { "properties are" }))];
 
     if let Some(desc) = frontmatter_description.filter(|d| !d.trim().is_empty()) {
-        body.push_str(&format!("\n\n<i><dim>{}</dim></i>", escape_prose_path(desc)));
+        body.push(Prose::new(format!("<i><dim>{}</dim></i>", escape_prose_path(desc))));
     }
 
     if !missing.is_empty() {
-        body.push_str("\n\n<b>Missing:</b>");
+        let mut listed = String::from("<b>Missing:</b>");
         for prop in missing {
             let type_label = prop
                 .type_label
@@ -218,13 +229,15 @@ fn render_missing_properties_block(
             if let Some(desc) = prop.description.as_deref().filter(|d| !d.trim().is_empty()) {
                 line.push_str(&format!(" <i><dim>— {}</dim></i>", escape_prose_path(desc)));
             }
-            body.push_str(&line);
+            listed.push_str(&line);
         }
+        body.push(rows(listed));
     } else if !pointer_paths.is_empty() {
-        body.push_str("\n\n<b>Validation problems:</b>");
+        let mut listed = String::from("<b>Validation problems:</b>");
         for pointer in pointer_paths {
-            body.push_str(&format!("\n- <cyan>`{pointer}`</cyan>"));
+            listed.push_str(&format!("\n- <cyan>`{pointer}`</cyan>"));
         }
+        body.push(rows(listed));
     }
 
     StatusBlock::new(StatusState::Error)

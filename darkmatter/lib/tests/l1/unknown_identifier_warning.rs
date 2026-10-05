@@ -376,7 +376,7 @@ fn a_transcluded_child_knows_inherited_state_and_warns_for_itself() {
     let warnings = unknown_identifiers(&report);
     assert_eq!(warned_roots(&report), ["child_typo"], "{:?}", report.warnings);
     // A transcluded child is loaded by its canonical path.
-    assert_eq!(warnings[0].path, Some(child.canonicalize().unwrap()));
+    assert_eq!(warnings[0].path, Some(biscuit_file::canonicalize_simplified(&child).unwrap()));
     assert_eq!(warnings[0].line_number, Some(1));
 }
 
@@ -486,7 +486,7 @@ fn one_root_in_two_transcluded_documents_warns_once_per_document() {
     let (_, report) = compose(&root, options(dir.path(), &root));
 
     let paths: Vec<_> = unknown_identifiers(&report).iter().map(|w| w.path.clone()).collect();
-    let expected = [Some(a.canonicalize().unwrap()), Some(b.canonicalize().unwrap())];
+    let expected = [Some(biscuit_file::canonicalize_simplified(&a).unwrap()), Some(biscuit_file::canonicalize_simplified(&b).unwrap())];
     assert_eq!(paths, expected, "{:?}", report.warnings);
 }
 

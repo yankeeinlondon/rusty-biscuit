@@ -703,7 +703,7 @@ fn explicit_dot_slash_is_source_relative_only() {
         matches!(
             err,
             CompositionError::SequenceExternalLoad {
-                source: SequenceLoadCause::NotFound,
+                source: SequenceLoadCause::NotFound { .. },
                 ..
             }
         ),
@@ -909,7 +909,7 @@ fn external_missing_file_reference_yields_not_found() {
         matches!(
             err,
             CompositionError::SequenceExternalLoad {
-                source: SequenceLoadCause::NotFound,
+                source: SequenceLoadCause::NotFound { .. },
                 ..
             }
         ),
@@ -925,7 +925,22 @@ fn sequence_load_cause_home_dir_display() {
         SequenceLoadCause::HomeDir.to_string(),
         "unable to resolve home directory"
     );
-    assert_eq!(SequenceLoadCause::NotFound.to_string(), "file not found");
+    assert_eq!(SequenceLoadCause::NotFound { glob_hint: None }.to_string(), "file not found");
+}
+
+/// A sequence source whose text looks like a glob names that file literally;
+/// its not-found message carries the literal-glob hint, a plain miss's does
+/// not.
+#[test]
+fn sequence_literal_glob_miss_carries_the_glob_hint() {
+    let dir = tempfile::tempdir().unwrap();
+    let source_path = dir.path().join("run.md");
+    std::fs::write(&source_path, "x").unwrap();
+
+    let glob = resolve_sequence_reference("./steps/*.yaml", &source_path).unwrap_err().to_string();
+    assert!(glob.contains("file not found") && glob.contains("::file-links"), "{glob}");
+    let plain = resolve_sequence_reference("./steps/missing.yaml", &source_path).unwrap_err().to_string();
+    assert!(plain.contains("file not found") && !plain.contains("::file-links"), "{plain}");
 }
 
 // -- build_step_overlay ---------------------------------------------------

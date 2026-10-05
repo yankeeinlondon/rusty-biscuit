@@ -59,7 +59,7 @@ When a prompt's `$schema` declares a property as a `file` (or `file[]`) with a `
 
 - imagine your only spec lives at `{launch-area}/features/2026-06-30-style-everywhere/spec.md`
 - you type `claudine compose plan spec=everywhere` and press ENTER
-- Claudine walks the `match(**/*spec*.md)` glob from the **launch area** (the same anchor completion suggestions use, so what is _offered_ is always what is _accepted_), then keeps only candidates whose path contains `everywhere` (case-insensitive)
+- Claudine walks the `match(**/*spec*.md)` glob the way TAB completion does: a bare pattern searches the **launch area** first and then the repository root (`./**/*spec*.md` searches the launch area only; `&`, `^`, `~`, and `@` name their own folders). Every file it offers is one the schema accepts. It then keeps only candidates whose path contains `everywhere` (case-insensitive), launch-area files first
 
 The resolution then follows the familiar pattern:
 

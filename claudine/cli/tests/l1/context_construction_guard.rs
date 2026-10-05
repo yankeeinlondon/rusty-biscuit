@@ -83,7 +83,7 @@ const ALLOWLIST: &[Allowance] = &[
         1,
         "`CLAUDE_CONFIG_DIR` locates Claude Code's session registry for steering",
     ),
-    ambient("commands/uninstall.rs", "dirs::home_dir", 1, "locates provider configuration to unregister hooks from"),
+    ambient("commands/uninstall.rs", "biscuit_file::home_dir", 1, "locates provider configuration to unregister hooks from"),
     ambient(
         "commands/wrap/composition/dry_run.rs",
         "std::env::current_dir",
@@ -93,7 +93,7 @@ const ALLOWLIST: &[Allowance] = &[
     ambient("commands/wrap/composition/staged_boot.rs", "std::env::var_os", 1, FORCE_COLOR),
     ambient(
         "commands/wrap/composition/timeouts.rs",
-        "dirs::home_dir",
+        "biscuit_file::home_dir",
         1,
         "shortens a path in a timeout notice (rendering)",
     ),
@@ -129,7 +129,7 @@ const ALLOWLIST: &[Allowance] = &[
     ),
     ambient(
         "commands/wrap/exec/stream_capture.rs",
-        "dirs::home_dir",
+        "biscuit_file::home_dir",
         1,
         "expands `~` in `CLAUDINE_RAW_STREAM_DIR` (diagnostic capture)",
     ),
@@ -149,7 +149,7 @@ const ALLOWLIST: &[Allowance] = &[
     ambient("commands/wrap/harness_orch/loop_control.rs", "std::env::var_os", 1, FORCE_COLOR),
     ambient(
         "commands/wrap/harness_orch/loop_control/requeue.rs",
-        "dirs::home_dir",
+        "biscuit_file::home_dir",
         1,
         "locates Claudine's requeue fallback directory",
     ),
@@ -161,12 +161,12 @@ const ALLOWLIST: &[Allowance] = &[
     ),
     ambient(
         "commands/wrap/live_semantic_sink/mod.rs",
-        "dirs::home_dir",
+        "biscuit_file::home_dir",
         2,
         "shortens paths in streamed event rendering",
     ),
-    ambient("commands/wrap/profile/gemini.rs", "dirs::home_dir", 1, "locates Gemini CLI's configuration for its overlay"),
-    ambient("commands/wrap/profile/opencode.rs", "dirs::home_dir", 1, "locates OpenCode's configuration for its overlay"),
+    ambient("commands/wrap/profile/gemini.rs", "biscuit_file::home_dir", 1, "locates Gemini CLI's configuration for its overlay"),
+    ambient("commands/wrap/profile/opencode.rs", "biscuit_file::home_dir", 1, "locates OpenCode's configuration for its overlay"),
     ambient("commands/wrap/profile/opencode.rs", "std::env::var_os", 1, "`XDG_CONFIG_HOME` locates OpenCode's configuration"),
     ambient("commands/wrap/runaway_guard.rs", "std::env::var_os", 1, "the automatic-steering switch"),
     ambient("commands/wrap/session_report.rs", "std::env::var", 1, "the session-report switch"),
@@ -196,7 +196,7 @@ fn production_source_builds_contexts_only_through_the_builder() {
     let _ = include_str!("../../../../darkmatter/cli/tests/common/source_scan.rs");
     context_guard::assert_guarded(
         "claudine-cli",
-        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
+        &biscuit_test_harness::manifest_dir!().join("src"),
         ALLOWLIST,
     );
 }

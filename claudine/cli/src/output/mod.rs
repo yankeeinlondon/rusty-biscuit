@@ -290,7 +290,7 @@ pub(crate) fn log_wrapper_env_details(
         for (key, value) in &env_plan.added {
             items.push(RenderableTerminalContent::from(Prose::new(format!(
                 "<green>{key}</green><dim>={}</dim>",
-                summarize_value(key, value)
+                Prose::escape_text(&summarize_value(key, value))
             ))));
         }
 
@@ -322,13 +322,14 @@ pub(crate) fn log_dry_run(
     sp_lines: Option<&[String]>,
 ) {
     let mut header = format!(
-        "\n<blue><bold>Claudine</bold></blue> <dim>\u{25b8}</dim> <bold>{}</bold> <dim>[DRY RUN]</dim>",
+        "<blue><bold>Claudine</bold></blue> <dim>\u{25b8}</dim> <bold>{}</bold> <dim>[DRY RUN]</dim>",
         profile.provider()
     );
     if repo_requested {
         header.push_str(&format!(" {}", &*REPO_FLAG.to_string()));
     }
-    log::message(&Prose::new(header).render(term));
+    // The blank spacing row sits outside the Prose, which trims edge newlines.
+    log::message(&format!("\n{}", Prose::new(header).render(term)));
 
     // Working directory
     log::message(
@@ -350,7 +351,7 @@ pub(crate) fn log_dry_run(
     log::message(
         &Prose::new(format!(
             "<bold>Command:</bold> <dim>{}</dim>",
-            cmd_parts.join(" ")
+            Prose::escape_text(&cmd_parts.join(" "))
         ))
         .render(term),
     );
@@ -370,7 +371,8 @@ pub(crate) fn log_dry_run(
     }
     for (key, value) in &env_plan.added {
         items.push(RenderableTerminalContent::from(Prose::new(format!(
-            "<green>{key}</green><dim>={value}</dim>"
+            "<green>{key}</green><dim>={}</dim>",
+            Prose::escape_text(value)
         ))));
     }
     if items.is_empty() {

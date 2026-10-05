@@ -244,7 +244,7 @@ fn inline_style_background_is_honored() {
         .find(|s| s.name == "background_inline")
         .expect("scenario exists");
     // Status has no inline background representation; it renders identically to
-    // baseline. The other three components wrap a `Prose` background span.
+    // baseline. The other three components wrap a styled background span.
     for case in inline_component_cases() {
         let out = (case.render)(&scenario);
         if case.name == "Status" {

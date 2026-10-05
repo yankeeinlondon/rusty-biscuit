@@ -61,7 +61,10 @@ fix +args:
         spec="$(printf '%s\n' "${matches}" | fzf --select-1 --height=15 --border --border-label 'Choose the spec to fix')"
     fi
 
-    implemented="$(md get --raw "${spec}" implemented 2>/dev/null || true)"
+    if ! implemented="$(md get --raw "${spec}" implemented)"; then
+        echo -e "{{ red }}ERROR:{{ reset }} could not read the frontmatter of $(just _link "${spec}"); fix the error above before running the review/fix cycle." >&2
+        exit 1
+    fi
     if [[ "${implemented}" != "true" ]]; then
         echo -e "{{ yellow }}$(just _link "${spec}"){{ reset }} is not marked {{ italic }}implemented{{ reset }} (implemented: '${implemented}'); implement it before running the review/fix cycle." >&2
         exit 1
@@ -73,14 +76,18 @@ fix +args:
     # review's `ready`, and a ready review also sets the spec's `completed`.
     latest_review() {
         local iterations
-        iterations="$(md get --raw "${spec}" review_iterations 2>/dev/null || true)"
+        iterations="$(md get --raw "${spec}" review_iterations)" || return 1
         [[ "${iterations}" =~ ^[0-9]+$ ]] && (( iterations > 0 )) && echo "${dir}/review-${iterations}.md"
         return 0
     }
 
     review="$(latest_review)"
-    if [[ -n "${review}" && "$(md get --raw "${review}" ready 2>/dev/null || true)" == "true" ]] \
-        || [[ "$(md get --raw "${spec}" completed 2>/dev/null || true)" == "true" ]]; then
+    review_ready=""
+    if [[ -n "${review}" && -f "${review}" ]]; then
+        review_ready="$(md get --raw "${review}" ready)"
+    fi
+    completed="$(md get --raw "${spec}" completed)"
+    if [[ "${review_ready}" == "true" || "${completed}" == "true" ]]; then
         echo -e "$(just _link "${spec}") is already {{ green }}production ready{{ reset }}; nothing to do."
         exit 0
     fi
@@ -116,7 +123,11 @@ fix +args:
 
         # Without an unimplemented review there are no findings to implement,
         # so the cycle starts with its review.
-        if [[ -n "${review}" && -f "${review}" && "$(md get --raw "${review}" implemented 2>/dev/null || true)" != "true" ]]; then
+        review_implemented="true"
+        if [[ -n "${review}" && -f "${review}" ]]; then
+            review_implemented="$(md get --raw "${review}" implemented)"
+        fi
+        if [[ "${review_implemented}" != "true" ]]; then
             echo -e "🛠  cycle ${cycle}/${max_cycles}: implementing the findings of $(just _link "${review}")"
             claudine compose "@prompts/_implement/implement-suggestions.md" -y --${implement_agent} --model "${implement_model}" spec="${spec}"
         fi
@@ -125,7 +136,7 @@ fix +args:
         claudine compose "@prompts/_reviews/feature-review.md" -y --${review_agent} --model "${review_model}" spec="${spec}"
 
         review="$(latest_review)"
-        ready="$(md get --raw "${review}" ready 2>/dev/null || true)"
+        ready="$(md get --raw "${review}" ready)"
         if [[ "${ready}" == "true" ]]; then
             echo -e "👍 $(just _link "${review}") marked the spec {{ green }}production ready{{ reset }} after ${cycle} cycle(s)"
             exit 0
@@ -133,12 +144,6 @@ fix +args:
         if [[ "${ready}" != "false" ]]; then
             echo -e "{{ red }}ERROR:{{ reset }} ${review} did not set a boolean 'ready' frontmatter property" >&2
             exit 1
-        fi
-        # The review prompt's contract: a recurring finding class stops the
-        # loop so a human reads the review before another cycle runs.
-        if [[ "$(md get --raw "${review}" recurrence 2>/dev/null || true)" == "true" ]]; then
-            echo -e "{{ yellow }}STOP:{{ reset }} $(just _link "${review}") reports a finding class an earlier review already raised; read it before running another cycle." >&2
-            exit 2
         fi
     done
 
