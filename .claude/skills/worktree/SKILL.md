@@ -52,6 +52,12 @@ facts and traps, not user docs.
 - **Network code is bounded and noninteractive.** It goes through
   `live_remote`, which disables credential prompts and kills the whole process
   tree at its deadline.
+- **A thread that runs Git must carry the call-count scope.** Take
+  `git::calls::TaskHandle::current()` before spawning, run the task through
+  `handle.run(..)`, and pass each joined result through `calls::joined`.
+  Without it the thread's Git calls silently drop out of a `git_calls` count
+  (scopes are per thread). Any new helper that starts Git calls
+  `calls::started()` once, after a successful spawn, or uses `calls::output`.
 - **Tests never reach the network.** Use the stand-ins in
   [testing.md](testing.md) and `example.invalid` origins.
 - **The graph never substitutes what it cannot draw.** It marks the plan

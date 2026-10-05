@@ -124,6 +124,16 @@ The variable turns a missing-backend skip into a failure.
   run.
 - Fail the Nth ref read with `recorder::fail_matching` plus an `AtomicUsize`
   (`for-each-ref` is the only call it matches in a listing).
+- `recorder` and `git::calls` are different counts. The recorder logs every
+  **requested** call into one process-global log, *before* spawning, so an
+  injected failure or a failed spawn is still logged; it needs `count-git`
+  (or `cfg(test)`) and `#[serial_test::serial]`. `calls::CallScope` counts
+  only **started** processes, per thread, is always compiled, and needs no
+  serialization. With no injection and every spawn succeeding, the two agree:
+  `listing::repo_tests::a_counting_scope_sees_every_call_of_a_threaded_local_gather`
+  asserts exactly that, which is how a missing `TaskHandle` at a spawn site
+  shows up. `live_remote::run_transport` is the exception: its own Git
+  process is never recorded, so it counts one more than the recorder.
 - `run_pipeline_gathers_the_graph_while_list_gather_is_unfinished` has no
   `origin`: it proves list-versus-graph overlap only. Overlap with the wait is
   `pipeline::the_local_gathers_start_while_the_worker_outcome_is_held`.
