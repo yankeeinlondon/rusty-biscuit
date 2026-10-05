@@ -24,11 +24,40 @@ fn timed(options: ListOptions) -> ListOptions {
     ListOptions { timings: true, ..options }
 }
 
-/// The document is a library one and survives its own strict decoder, which
-/// rejects any remainder that does not reconcile exactly.
+/// Stages only the `wt` command or its worker process measures.
+const NOT_LIBRARY: [Stage; 17] = [
+    Stage::Startup,
+    Stage::CaptionStatus,
+    Stage::DisplayFacts,
+    Stage::TableRender,
+    Stage::VerboseRender,
+    Stage::NotesRender,
+    Stage::GraphBudget,
+    Stage::GraphRender,
+    Stage::FinalNotesRender,
+    Stage::WriteOutput,
+    Stage::WorkerSetup,
+    Stage::WorkerHalves,
+    Stage::PrRefresh,
+    Stage::HeadRefresh,
+    Stage::PrRequest,
+    Stage::HeadCheck,
+    Stage::HeadFetch,
+];
+
+/// Every stage in `spans`, at any depth.
+fn all_stages(spans: &[Span]) -> Vec<Stage> {
+    spans.iter().flat_map(|span| std::iter::once(span.stage()).chain(all_stages(span.children()))).collect()
+}
+
+/// The document is a library one: it holds no command or worker stage, and
+/// survives its own strict decoder, which rejects any remainder that does not
+/// reconcile exactly.
 fn assert_reconciles(run: &Run, label: &str) {
     let timings = timings(run);
     assert_eq!(timings.scope(), Scope::Library, "{label}");
+    let foreign: Vec<Stage> = all_stages(timings.spans()).into_iter().filter(|stage| NOT_LIBRARY.contains(stage)).collect();
+    assert!(foreign.is_empty(), "{label}: {foreign:?} in a library document");
     let json = timings.to_json();
     let decoded = Timings::from_json(&json).unwrap_or_else(|e| panic!("{label}: {e}: {timings:#?}"));
     assert_eq!(decoded.to_json(), json, "{label}: whole microseconds round-trip");
@@ -204,4 +233,61 @@ fn timings_on_and_off_do_the_same_work_and_show_the_same_facts() {
         )
     };
     assert_eq!(facts(off), facts(on));
+}
+
+/// A span tree without its durations: what two runs of one listing share.
+#[derive(Debug, PartialEq)]
+struct Shape {
+    stage: Stage,
+    git_calls: Option<u64>,
+    children: Vec<Shape>,
+}
+
+fn shape(spans: &[Span]) -> Vec<Shape> {
+    spans
+        .iter()
+        .map(|span| Shape { stage: span.stage(), git_calls: span.git_calls(), children: shape(span.children()) })
+        .collect()
+}
+
+/// A timed listing of `at` and its document's shape, from a cold cache.
+fn timed_shape(repo: &Repo, at: &Path, options: ListOptions) -> (Vec<Shape>, Vec<PathBuf>) {
+    repo.clear_cache();
+    let listing = gather(at, &timed(options), &mut |_| {}).expect("gather");
+    let paths = listing.list.entries().iter().map(|entry| entry.path.clone()).collect();
+    (shape(listing.timings.as_ref().expect("timed").spans()), paths)
+}
+
+/// Each call measures only itself: two timed listings of different
+/// repositories, run at once on two threads, give the same stages and `git`
+/// counts as each one run alone, and the current directory is untouched.
+#[test]
+#[serial_test::serial]
+fn concurrent_listings_of_two_repositories_mix_no_spans_or_counts() {
+    let (first, second) = (Repo::new(), Repo::new());
+    for repo in [&first, &second] {
+        run_git(&repo.main, &["remote", "remove", "origin"]);
+    }
+    run_git(&second.main, &["worktree", "add", "-q", "-b", "feature-b", second.main.with_file_name("b").to_str().unwrap()]);
+    let first_options = options(true, false, BUDGET);
+    let second_options = options(false, true, BUDGET);
+    let cwd = std::env::current_dir().expect("cwd");
+
+    let alone = [timed_shape(&first, &first.main, first_options), timed_shape(&second, &second.feature, second_options)];
+    let barrier = std::sync::Barrier::new(2);
+    let together = std::thread::scope(|scope| {
+        let one = scope.spawn(|| {
+            barrier.wait();
+            timed_shape(&first, &first.main, first_options)
+        });
+        let two = scope.spawn(|| {
+            barrier.wait();
+            timed_shape(&second, &second.feature, second_options)
+        });
+        [one.join().expect("first listing"), two.join().expect("second listing")]
+    });
+
+    assert_ne!(alone[0].0, alone[1].0, "the two listings differ, so a mix would show");
+    assert_eq!(together, alone);
+    assert_eq!(std::env::current_dir().expect("cwd"), cwd, "the current directory is untouched");
 }
