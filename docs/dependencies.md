@@ -170,6 +170,9 @@
 - `tree-hugger` uses `test-toolkit` only as a development dependency, for the
   `test_layout` gate in its consolidated `l1` test binary. It adds no crate to
   the workspace: every crate it brings is already in `Cargo.lock`.
+- `tree-hugger-cli` depends on `rayon` (the same `1.10` requirement as
+  `tree-hugger`) to analyze scanned files on worker threads; output order is
+  still file order. The lockfile gains one edge and no package.
 - `tree-hugger-cli` uses `biscuit-hash` (`blake3` feature) only as a
   development dependency, so its cache-upgrade test can compute the
   persistent-cache key `hug` used before the extractor revision existed
