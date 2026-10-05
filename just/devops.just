@@ -349,38 +349,17 @@ _install path pkg_name binary="" *args="":
     fi
     just _play drop-4 || exit 0
 
-# commits all the staged changes with OpenCode (model is MODEL or COMMIT_MODEL)
-[arg("agent")]
-[arg("model")]
-[arg("yolo")]
-commit yolo="true" agent="opencode" model="":
+# commits all the staged changes with the agent and model set in prompts/commit.md
+commit *args="":
     #!/usr/bin/env bash
     set -euo pipefail
-    model=""
-    if [[ ! -z "{{ model }}" ]]; then
-        model="--model {{ model }}"
-    else
-        if [[ "{{ agent }}" == "opencode" ]]; then
-            if [[ -z "{{ model }}" ]]; then
-                model="--model minimax/MiniMax-M3"
-            fi
-        fi
-    fi
-    yolo=""
-    if [[ "{{ yolo }}" == "true" ]]; then
-        yolo="-y"
-    fi
     echo ""
     echo -e "Committing staged changes in the {{ bold }}Rusty Biscuit{{ reset }} monorepo to git"
-    if [[ -z "$model" ]]; then
-        echo -e "{{ dim }}  - using the {{ italic }}default{{ reset }}{{ dim }}model for the agent{{ reset }}"
-    else
-        echo -e "{{ dim }}  - using the {{ italic }}{{ blue }}${model}{{ reset }}{{ dim }}model{{ reset }}"
-    fi
     echo ""
     echo -e "{{ bold }}{{ blue }}Staged Files:{{ reset }}"
     sniff repo staged-files || ( echo "No Staged Files! Nothing to do ..." )
-    claudine compose --{{ agent }} "@prompts/commit.md" --op "commit" --quiet ${yolo} ${model}
+    # `@` resolves from the repo root; a package area has no prompts/commit.md of its own
+    claudine compose "@prompts/commit.md" -y {{ args }}
     just _speak "git commits completed in the $(sniff repo package-area) package area of rusty biscuit"
     sniff repo git-status --compact 2>/dev/null || exit 0
     echo
