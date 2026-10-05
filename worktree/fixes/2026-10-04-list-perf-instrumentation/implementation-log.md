@@ -53,6 +53,29 @@ skills_files_updated_during_phase_4:
   - .claude/skills/worktree/list.md
   - .claude/skills/worktree/testing.md
   - .claude/skills/worktree/git-graph.md
+source_files_during_phase_5:
+  - worktree/lib/src/timing.rs
+  - worktree/lib/src/strict_json.rs
+  - worktree/lib/src/remote_head.rs
+  - worktree/lib/src/list.rs
+  - worktree/lib/src/list/wait.rs
+  - worktree/lib/src/list/wait/tests.rs
+  - worktree/lib/src/list/wait/tests/reports.rs
+  - worktree/lib/src/list/tests/pipeline.rs
+  - worktree/lib/src/list/tests/pipeline/timings.rs
+  - worktree/cli/src/args.rs
+  - worktree/cli/src/main.rs
+  - worktree/cli/src/commands/refresh_worker.rs
+  - worktree/cli/src/commands/list.rs
+  - worktree/cli/src/commands/list/tests.rs
+  - worktree/cli/tests/perf_flag.rs
+docs_updated_during_phase_5:
+  - worktree/docs/cli/list.md
+  - worktree/README.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .claude/skills/worktree/list-remote.md
+  - .claude/skills/os/build-hosts.md
 packages:
   - worktree
   - worktree-cli
@@ -585,3 +608,146 @@ walks ran beside it. It is an observation, not a gate.
   `testing.md` (the overlap seam is in the library; assert through
   `regathered`; read perf with `perf_timings`/`stage_at`), and
   `git-graph.md` (gather paths moved in Phase 3; graph timing stages).
+
+## Phase 5
+
+### Worker side (`cli/src/commands/refresh_worker.rs`, `cli/src/args.rs`, `cli/src/main.rs`)
+
+- `LaunchArgs` gained `timings: bool`, and the hidden subcommand gained
+  `--timings`. `worker_command` (split out of `spawn_worker` so its arguments
+  can be tested) passes the flag only when asked. `run(repo, attempt,
+  timings)` reads `Instant::now()` at entry only with timing on.
+- The report is `worker_setup` (entry until the halves start: checkout,
+  origin, preference, and receipt-target reads), then `worker_halves`
+  (concurrent) with `pr_refresh` and `head_refresh`. The total is read as
+  soon as both halves join, so the stale-receipt sweep, serialization, and
+  write are outside it.
+- Each half closure now takes `(main, Option<&Steps>)`. `Steps` is a per-thread
+  `Rc<RefCell<SpanList>>`, and `timed_half` wraps each half in its span.
+- **Ruling: time the library operations by wrapping the injected seams, not
+  by changing `pull_requests::refresh` or `remote_update::run_attempt`.**
+  `TimedPrSource` times `OpenPrSource::fetch` (`pr_request`).
+  `TimedBranchHeads` and `TimedGit::live_head` add to `head_check`.
+  `TimedGit::fetch` is `head_fetch`. Repeated runs (an API request and its
+  Git fallback, or `confirm_tip`'s recheck) are summed through
+  `SpanList::push`; the runs never overlap. The fallback's phase-record write
+  between the two calls falls in `head_refresh`'s remainder rather than in
+  `head_check`. The spec asks for the check's duration to "cover both"; it
+  covers both calls, without the store write between them. That keeps the
+  library API unchanged, so I chose it over threading a timer through `check`.
+- A half that panics returns no span. Its outcome is recorded as failed, as
+  before, and the report keeps only the other half. Durations hold only stage
+  ids and microseconds; a test asserts that the receipt's `durations` member
+  has no origin URL, host, key name, or repository.
+
+### Reader side (`lib/src/remote_head.rs`, `lib/src/list/wait.rs`, `lib/src/list.rs`, `lib/src/timing.rs`, `lib/src/strict_json.rs`)
+
+- `Receipt::durations: LaunchReport` (`#[serde(skip)]`, default `Missing`).
+  `write_receipt` adds a `durations` member only for a usable report, and
+  `RECEIPT_FORMAT_VERSION` stays 1.
+- `load_receipt` keeps the typed outcome reader unchanged. Only after the
+  outcome is accepted does `receipt_durations` read the member through
+  `strict_json::members` (new `Members::contains`):
+  - absent is `Missing`;
+  - a repeated top-level key, a member that repeats a key, or any decode
+    failure is `Invalid`.
+
+  The typed reader ignores unknown members, so a repeated `durations` key
+  gets past it, and the strict pass is what refuses last-wins.
+- **Ruling (gap in Phase 1): who decides `complete` vs `partial`.** The
+  reader infers it from the document. `LaunchReport::from_worker` gives
+  `Complete` when `worker_halves` holds both halves, `Partial` when one or
+  none is there, and `Invalid` without a `worker_halves` group. The worker
+  writes no status of its own. `decode_report` (the `WT_PERF_JSON` decoder)
+  now rejects a stated `complete`/`partial` that disagrees with the halves.
+  `WorkerTimings::to_value`/`from_value` let the receipt embed and read the
+  same version-1 worker document.
+- `WaitRequest::timings` sets `LaunchArgs::timings`. With timing on,
+  `launch_and_follow` adds a `Missing` entry per successful launch
+  (`launch_index` 0-based, `attempt_id` = the launched token). On every poll,
+  `Follow::keep_report` copies the first report the polled receipt carries.
+  That is the read the wait already makes, before `discard_receipt`, so
+  instrumentation adds no read, poll, or wait. `WaitEnd::worker_reports` is
+  empty unless timing was requested. A failed spawn has no entry.
+- `list::worker_reports` (private) builds the summary for `gather`'s
+  library document. It returns `None` without a wait. A changed origin gives
+  `OriginChanged` with no entries. Otherwise `adopted` is true when the
+  followed head's attempt id is not among the entries (every launch has one
+  when timed), and `summarize_worker_reports` decides the summary status.
+  `cli/src/commands/list.rs::run_pipeline` copies the library's reports and
+  status onto the command document. `perf.rs` already rendered them, so the
+  renderer is unchanged.
+
+### Requirement → test mapping
+
+| Requirement (plan Phase 5 / spec) | Test |
+| --- | --- |
+| Receipt v1 with and without durations; read/write/read round trip; `Missing`/`Invalid` write no member | `remote_head::tests::a_receipt_round_trips_with_and_without_the_workers_durations` |
+| attempt/origin/branch/age mismatch still rejected with durations present | `remote_head::tests::durations_never_rescue_a_receipt_for_another_attempt_origin_or_branch` |
+| Durations Input Robustness Matrix (166 cells plus a control row; outcome intact in every cell; absent → missing, everything else → invalid, one half → partial, unknown fields ignored, trailing content = the receipt's own matrix) | `remote_head::tests::the_receipt_durations_walk_the_input_robustness_matrix` |
+| Capture before deletion (no receipt read after a discard), same end time, same outcomes | `list::wait::tests::reports::a_report_is_taken_from_the_receipt_before_the_receipt_is_deleted` |
+| Early publication: ends early, report `missing` | `…::an_early_publication_ends_the_wait_with_the_report_missing` |
+| Timeout: report `missing`, budget unchanged | `…::a_timeout_leaves_the_report_missing` |
+| Adoption: an owned PR report still shows; without one the summary is `adopted` | `…::an_adopted_head_keeps_our_own_pr_report_and_is_adopted_without_one` |
+| Retry: two entries (0, 1), never summed; summary `partial` | `…::a_forced_retry_is_a_second_entry_never_summed_into_the_first` |
+| Half panic: `partial` beside the unchanged outcome | `…::a_half_that_panicked_is_a_partial_report_beside_the_unchanged_outcome` |
+| Malformed report: `invalid`, outcome stands | `…::an_unreadable_report_is_invalid_and_the_outcome_stands` |
+| Failed spawn: no entry, summary `missing` | `…::a_worker_that_cannot_start_has_no_entry` |
+| Changed origin suppresses reports; no wait → no section | `…::a_changed_origin_suppresses_every_report` |
+| Untimed wait asks for no timings and keeps none (every case above runs both ways) | `untimed_then_timed` helper in `list::wait::tests::reports` |
+| Library document carries the reports; no worker → no section; strict decode of the whole document | `list::tests::pipeline::timings::a_followed_wait_makes_the_remote_region_with_the_launch_and_the_follow`, `…::without_a_worker_the_stored_answers_are_read_inside_the_local_reads` |
+| `--timings` passed only when asked | `commands::refresh_worker::tests::the_launch_asks_for_timings_only_when_the_listing_does` |
+| Worker report shape, interval reconciles, outcome equals the untimed attempt's, no secrets in the document | `commands::refresh_worker::tests::a_timed_attempt_measures_itself_into_its_receipt` |
+| `pr_request` only when made | `commands::refresh_worker::tests::a_pr_request_is_recorded_only_when_it_is_made` |
+| A check's API request plus its Git fallback form one `head_check`, with no fetch after a failed check | `commands::refresh_worker::tests::a_check_that_falls_back_to_git_is_one_check_covering_both` |
+| A panicking half leaves a partial report and the other half measured | `commands::refresh_worker::tests::a_panicking_half_leaves_a_partial_report_and_the_other_half_measured` |
+| End to end through the shipped binary: `--perf=json` → real worker with `--timings` → receipt → wait → `WT_PERF_JSON` with `worker_reports` and `complete` | `perf_flag::a_perf_listing_carries_its_workers_own_report` |
+
+Mutation checks, run once and reverted: with `keep_report` disabled, 6 of the
+9 `reports` tests fail (the other 3 expect `missing` or no entry). With
+invalid durations read as `missing`, the matrix fails 156 of 166 cells.
+
+All new tests are L1. No path segment starts with a tier marker; the
+end-to-end test starts `a_perf_`, not `perf_`. The new module is declared
+with `mod reports;` in `lib/src/list/wait/tests.rs`, and
+`just check-tier-coverage worktree` reports nothing stranded.
+
+### Gates
+
+- `just lint` (worktree): clean.
+- `just test` (worktree): 1066/1066 passed, 32 skipped (Phase 4 ended at
+  1043).
+- `just test-l2`: 39/39 passed.
+- `just test-perf`: 32/32 passed. Wait budgets and timing behavior are
+  unchanged, including the held-request, held-check, and `--ff`
+  held-fetch bounds.
+- Cross-OS (Linux, `build-linux`): `just cross-check worktree --os linux`
+  failed again in archive mode on read-only `.rmeta` links in the
+  `fix-wt-skill` standing clone. That is the host trap in the `os` skill;
+  its fix deletes files over SSH, which this session is not authorized to
+  run. The skill's workaround, a build flag that forces the native path, ran
+  green: `just cross-check worktree --os linux --features count-git` passed
+  531/531, and `just cross-check worktree-cli --os linux --features
+  terminal-tests` passed (609 tests, including the new worker and
+  end-to-end tests). Windows and WSL2 were not run; per the repo's CI
+  schedule they come after merge. The new code has no `cfg` branches and no
+  path handling.
+
+### Docs, skill, and comment drift
+
+- `worktree/docs/cli/list.md`: a paragraph on the optional receipt timings
+  (read after the outcome, never cost the outcome, never extend the wait),
+  and the `--perf` row mentions the diagnostic worker section.
+- `worktree/README.md`: the `--perf` paragraph describes the worker section
+  and its statuses.
+- `.claude/skills/worktree/list-remote.md`: worker timing seams, the receipt's
+  optional `durations`, and the wait's capture rule. The page is now 300
+  lines, the router's threshold for a split, so the next addition should
+  give remote timing a page of its own.
+- **Drift fixed:** the `remote_head::tests::receipt_cells` doc named
+  `worktree-cli`'s `commands::list::wait::tests`. The wait moved to the
+  library in Phase 3, and the table is now walked in
+  `list::wait::tests::receipt_matrix`, so I corrected the path.
+- **Not updated (Phase 7):** `worktree/docs/performance-testing.md` still
+  needs the full rewrite Phase 7 schedules. It should now also describe the
+  worker section and the receipt `durations`.

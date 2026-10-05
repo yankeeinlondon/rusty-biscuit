@@ -54,6 +54,29 @@ skills_files_updated_during_phase_4:
   - .claude/skills/worktree/list.md
   - .claude/skills/worktree/testing.md
   - .claude/skills/worktree/git-graph.md
+source_files_during_phase_5:
+  - worktree/lib/src/timing.rs
+  - worktree/lib/src/strict_json.rs
+  - worktree/lib/src/remote_head.rs
+  - worktree/lib/src/list.rs
+  - worktree/lib/src/list/wait.rs
+  - worktree/lib/src/list/wait/tests.rs
+  - worktree/lib/src/list/wait/tests/reports.rs
+  - worktree/lib/src/list/tests/pipeline.rs
+  - worktree/lib/src/list/tests/pipeline/timings.rs
+  - worktree/cli/src/args.rs
+  - worktree/cli/src/main.rs
+  - worktree/cli/src/commands/refresh_worker.rs
+  - worktree/cli/src/commands/list.rs
+  - worktree/cli/src/commands/list/tests.rs
+  - worktree/cli/tests/perf_flag.rs
+docs_updated_during_phase_5:
+  - worktree/docs/cli/list.md
+  - worktree/README.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .claude/skills/worktree/list-remote.md
+  - .claude/skills/os/build-hosts.md
 packages:
   - worktree
   - worktree-cli
@@ -239,12 +262,12 @@ Depends on Phases 1 and 3 (wait core in library). Disjoint from Phase 4's render
 
 ### Wave 1 (parallel)
 
-- [ ] **Worker side** (agent A, `cli/src/commands/refresh_worker.rs`, hidden subcommand)
+- [x] **Worker side** (agent A, `cli/src/commands/refresh_worker.rs`, hidden subcommand)
   - Add an opt-in timing boolean to the injected launch arguments and the hidden subcommand. Only enabled attempts collect.
   - Record `worker_setup` then a concurrent `worker_halves` with children `pr_refresh` (lock, provider request, publication) and `head_refresh` (check and optional fetch). Record `pr_request`, `head_check`, `head_fetch` only when they run, covering API plus Git fallback for a check. Interval: worker entry to completion of both halves, excluding receipt serialization and write.
   - A half panic preserves the other half's outcome and measurements; absent is unknown, not zero. No credentials, URLs, or error text in the document.
   - Receipt gains optional `durations`; `RECEIPT_FORMAT_VERSION` stays 1.
-- [ ] **Reader side** (agent B, library wait core + receipt reader)
+- [x] **Reader side** (agent B, library wait core + receipt reader)
   - Decode `durations` separately after validating required outcome fields; missing/malformed/unsupported never invalidates a usable outcome.
   - Copy a validated report into the wait result **before** receipt deletion; bind via existing attempt id / origin digest / branch checks; suppress on origin-change guard failure.
   - Per-launch entries with `launch_index`, `attempt_id`, status and optional report; summary status per spec (`missing` for no `durations`; `adopted` rules; partial rules).
@@ -252,13 +275,13 @@ Depends on Phases 1 and 3 (wait core in library). Disjoint from Phase 4's render
 
 ### Wave 2
 
-- [ ] **Tests**: receipt v1 with and without durations; malformed/unsupported durations preserve outcome; attempt/origin/branch mismatch still rejected; wait tests (scripted `WaitEnv` clock) for capture before deletion, early publication, timeout, adoption, retry (two entries), changed origin, and a half panic, none extending a wait or altering winners.
+- [x] **Tests**: receipt v1 with and without durations; malformed/unsupported durations preserve outcome; attempt/origin/branch mismatch still rejected; wait tests (scripted `WaitEnv` clock) for capture before deletion, early publication, timeout, adoption, retry (two entries), changed origin, and a half panic, none extending a wait or altering winners.
   - **Durations matrix** (same outcome table as Phase 1, applied to the receipt's `durations` object; every cell yields the outcome intact and status `invalid`, except absent → `missing`); one test from a real receipt fixture with one edit per cell and a control row.
-- [ ] **CLI**: render worker reports beneath the diagnostic section and include `worker_reports` in the JSON.
+- [x] **CLI**: render worker reports beneath the diagnostic section and include `worker_reports` in the JSON.
 
 ### Checkpoint 5
 
-- [ ] `just test`, `just test-l2`, `just lint`. The wait budget/timing behavior of existing L1/L2 tests is unchanged.
+- [x] `just test`, `just test-l2`, `just lint`. The wait budget/timing behavior of existing L1/L2 tests is unchanged.
 
 ## Phase 6: Separate performance tests from functional tests
 

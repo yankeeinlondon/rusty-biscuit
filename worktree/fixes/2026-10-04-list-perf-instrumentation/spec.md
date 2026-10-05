@@ -28,34 +28,29 @@ clarified: false
 implemented: false
 human_review: false
 message_to_agent: |-
-    Phase 4 (done). Phase 3 had left the CLI running its own copy of the pipeline; Phase 4 finished
-    that: `cli/src/commands/list.rs` now calls `worktree::list::gather(&current_dir, &ListOptions, on_phase)`
-    and only renders, and the old CLI pipeline tests are deleted (the library has copies).
-    Timing API used by the pipeline (crate-private, in `lib/src/timing.rs`): `timing::measure(stage, f)`
-    returns `(T, Span)` with `git_calls` from a CallScope; `timing::record(steps: Option<&mut SpanList>, stage, f)`
-    records or, with None, only runs f (no clock, no scope); `timing::record_parent(steps, stage, kind, |children| ..)`.
-    Library document = `Listing::timings` (Scope::Library), on only with `ListOptions::timings`.
-    Region is `remote_and_local` only when `remote.waited.is_some()`, else `local_reads`; regather is
-    `prepare_local` then a `local_reads` concurrent group (`branch_comparisons` + history) - a ruling, logged.
-    For Phase 5: `wait::wait` now takes `impl FnMut(&Path, &LaunchArgs) -> io::Result<WorkerHandle>`
-    (fn items still work); `follow_remote_steps` wraps the launch in `LaunchClock` (lib/src/list.rs), which
-    times launches only when timing is on. The opt-in worker timing flag belongs in `LaunchArgs`
-    (set from `ListOptions::timings`), and `WaitEnd` is where the per-launch reports should travel; after
-    the wait, attach them with `Timings::with_worker_reports` where `gather` builds the document (the
-    end of `gather` in lib/src/list.rs). The CLI copies the library spans into its command document
-    in `run_pipeline` (cli/src/commands/list.rs) - copy the worker reports there too
-    (`Timings::with_worker_reports` on the command document). `cli/src/perf.rs::worker_tree` already
-    renders a worker section (no shares) from `worker_reports`/`worker_report_status`; it has unit tests in
-    cli/src/perf/tests.rs with a synthetic report.
-    For Phase 6: `perf_support::perf_timings`/`stage_at`/`local_gather` exist and EVERY consumer is
-    migrated to `--perf=json` already. Still to do there: delete `perf_rows`, `stage_from_perf`,
-    `list_gather_from_perf` and their self-tests (`perf_flag.rs` NESTED tests, `perf_support::tests`, which
-    run only in test-perf because the module name starts `perf_`), drop `--perf=json` and the
-    refresh_worker bound from the two `list_prs.rs` held-request functional tests (scripted wait clock
-    instead), and the remaining `perf_flag.rs` feature list (CRLF pty, misleading prefix in a commit message).
-    For Phase 7: `worktree/docs/performance-testing.md` still documents the old rows and `stage_from_perf`
-    (README and docs/cli/list.md `--perf` text are already updated). Plan/log frontmatter has no
-    `*_during_phase_3` keys (Phase 3 was never closed out); Phase 3's work is described in the Phase 4 log.
+    Phase 5 (done): worker durations travel in the receipt. `wt list --perf` passes `--timings` to the
+    worker (`LaunchArgs::timings`, set from `WaitRequest::timings` = `ListOptions::timings`). The worker
+    times setup and both halves, with `pr_request`, `head_check`, and `head_fetch` timed by wrapping the injected
+    seams (refresh_worker.rs `TimedPrSource`/`TimedBranchHeads`/`TimedGit`); half closures now take
+    `(main, Option<&Steps>)`. `Receipt::durations: LaunchReport` is decoded only after the outcome is
+    accepted (`remote_head::receipt_durations`); complete vs partial is inferred from which halves the
+    document holds (`LaunchReport::from_worker`), and `decode_report` rejects a stated status that disagrees.
+    The wait keeps each launch's report from the receipt it already polls (`Follow::keep_report`) into
+    `WaitEnd::worker_reports` (empty unless timed); `list::worker_reports` makes the summary
+    (adopted = followed head id has no entry; origin change empties it), and `run_pipeline` copies it onto
+    the command document. `perf_flag::a_perf_listing_carries_its_workers_own_report` is the end-to-end test.
+    Every existing WaitEnd/Receipt/LaunchArgs/WaitRequest literal in tests gained the new field.
+    For Phase 6 (unchanged from Phase 4's note): `perf_support::perf_timings`/`stage_at`/`local_gather` exist
+    and every consumer already reads `--perf=json`. Still to do: delete `perf_rows`, `stage_from_perf`,
+    `list_gather_from_perf` and their self-tests (`perf_flag.rs` NESTED tests, `perf_support::tests`), drop
+    `--perf=json` and the refresh_worker bound from the two `list_prs.rs` held-request functional tests
+    (scripted wait clock instead; `lib/src/list/wait/tests.rs` already has budget tests to point at), and
+    finish the `perf_flag.rs` feature list (CRLF pty, misleading prefix in a commit message).
+    For Phase 7: `worktree/docs/performance-testing.md` still needs its full rewrite and should now also
+    describe the worker section and the receipt `durations`; `.claude/skills/worktree/list-remote.md` is at
+    300 lines, so give remote timing its own page if more is added. `build-linux` cross-check still fails
+    in archive mode on read-only `.rmeta` links in the `fix-wt-skill` standing clone (os skill
+    build-hosts.md has the fix, which needs SSH); see the Phase 5 log for the native-path result.
 related:
     - 2026-06-14-perf-measurement
     - 2026-10-03-list-overlap-and-keyless-notice
