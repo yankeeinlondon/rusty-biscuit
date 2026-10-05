@@ -4,7 +4,7 @@ feature: symbol-filters-and-reports
 spec: spec.md
 total_phases: 7
 created: 2026-10-05
-phase: 5
+phase: 6
 agent: claude/sonnet
 yolo: true
 source_files_during_phase_1:
@@ -221,6 +221,33 @@ docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
   - .claude/skills/tree-hugger/SKILL.md
   - .claude/skills/tree-hugger/api-reference.md
+source_files_during_phase_6:
+  - tree-hugger/cli/src/output.rs
+  - tree-hugger/cli/src/stats.rs
+  - tree-hugger/cli/src/declarations.rs
+  - tree-hugger/cli/src/render.rs
+  - tree-hugger/cli/src/report.rs
+  - tree-hugger/cli/src/main.rs
+  - tree-hugger/cli/tests/symbols/reports.rs
+  - tree-hugger/cli/tests/symbols/main.rs
+  - tree-hugger/cli/tests/symbols/golden.rs
+  - tree-hugger/cli/tests/symbols/report.rs
+  - tree-hugger/cli/tests/symbols/wiring.rs
+  - tree-hugger/cli/tests/level2_declarations.rs
+  - tree-hugger/cli/tests/support/terminal_report.rs
+  - tree-hugger/cli/tests/fixtures/golden/symbols.table
+  - tree-hugger/cli/tests/fixtures/golden/symbols.tree
+  - tree-hugger/cli/tests/fixtures/golden/symbols.stats
+  - tree-hugger/cli/tests/fixtures/golden/symbols-stats.json
+  - tree-hugger/cli/tests/fixtures/golden/symbols.jsonl
+  - tree-hugger/cli/tests/fixtures/golden/symbols-signatures-full.plain
+docs_updated_during_phase_6:
+  - tree-hugger/docs/symbol-reports.md
+  - tree-hugger/README.md
+  - tree-hugger/cli/README.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+  - .claude/skills/tree-hugger/SKILL.md
 packages:
   - tree-hugger
   - tree-hugger-cli
@@ -653,7 +680,7 @@ restores the 8,593-line baseline set.
 
 ### Wave 1 (parallel; disjoint report shapes)
 
-- [ ] **6.1 JSON Lines** (`--jsonl`)
+- [x] **6.1 JSON Lines** (`--jsonl`)
     - One envelope per selected record: `report_schema_version`,
       `schema_version`, `file`, `language`, `completed_passes`,
       `completed_capabilities`, `record`; class lines add `members` (a list).
@@ -662,7 +689,7 @@ restores the 8,593-line baseline set.
       worker order. Broken pipe exits quietly; read/parse failures go to
       stderr with nonzero exit even after partial output; empty selection is
       zero lines. Always requests `Flags` (Phase 3.7 hook).
-- [ ] **6.2 Outline view** (`--tree`)
+- [x] **6.2 Outline view** (`--tree`)
     - Nest members under containers by container ID (out-of-body Rust impl
       and Go receivers included), repeated impls grouped, marked contextual
       heading for an excluded/outside-file parent (not counted), overloads in
@@ -670,10 +697,10 @@ restores the 8,593-line baseline set.
       separately, `--group-by-file` no-op, `--group-by-module` adds a
       directory heading, `--format plain` accepted, `--format table` and
       `--json`/`--json-full`/`--jsonl`/`--count`/`--stats` argument errors.
-- [ ] **6.3 Signature modes** (`--signatures full|short|none`)
+- [x] **6.3 Signature modes** (`--signatures full|short|none`)
     - `full` = `signature_text`; `short` default (field lists truncated past 4
       as `{ a, b, c, d, … +3 }`); `none` names only with location/container.
-- [ ] **6.4 Count and stats model**
+- [x] **6.4 Count and stats model**
     - `--count`: one decimal integer plus newline. Stats aggregation by kind,
       visibility, language, doc coverage (`documented` over known-docs
       `total`, `unavailable` separately, null `ratio` when `total` is 0),
@@ -682,7 +709,7 @@ restores the 8,593-line baseline set.
 
 ### Wave 2 (sequential; shared renderer)
 
-- [ ] **6.5 Renderer changes**
+- [x] **6.5 Renderer changes**
     - `UnorderedList`/`Prose` wrapping at terminal width with hanging indent
       for long signatures (inject dimensions for L1 tests); `--format plain`
       and `--plain`, redirected output and machine formats disable ANSI and
@@ -691,14 +718,14 @@ restores the 8,593-line baseline set.
       `Table` with Location (`file:line`, OSC 8 when interactive), Kind,
       Visibility, Name, Signature (wraps in column). No change to the
       `biscuit-terminal` package.
-- [ ] **6.6 Stats rendering**
+- [x] **6.6 Stats rendering**
     - Terminal: three `Table`s (kind, visibility, language) plus one
       doc-coverage line including `unavailable`; `--format table` identical,
       `--format plain` unstyled. JSON: `{report_schema_version, root_dir,
       stats:{by_kind,by_visibility,by_language,doc_coverage,
       synthetic_exports}, errors}` with trailing `errors`, no record
       `schema_version`, nonzero exit when `errors` is non-empty.
-- [ ] **6.7 Output-mode validation**
+- [x] **6.7 Output-mode validation**
     - Exactly one mode among terminal, `--json`, `--json-full`, `--jsonl`,
       `--count`, `--stats`, `--format`, except `--stats` composing with
       `--json`, default/`--format table`, or `--format plain`; `--stats`
@@ -707,11 +734,11 @@ restores the 8,593-line baseline set.
 
 ### Wave 3 (sequential)
 
-- [ ] **6.8 CLI goldens** (over the 16-language `multi/` tree, after
+- [x] **6.8 CLI goldens** (over the 16-language `multi/` tree, after
       `strip_ansi_codes` and path redaction): `--format table`,
       `--format plain`, `--jsonl`, `--tree`, `--stats`, `--stats --json`,
       `--signatures full`; `--count` asserted as one integer line.
-- [ ] **6.9 Focused report cases**
+- [x] **6.9 Focused report cases**
     - JSONL parsing/round-trip, envelope fields, class `members`, failure
       after partial output; `--jsonl --sort name|kind` over several files;
       `--stats --json` with a failing file; `doc_coverage.unavailable` from a
@@ -720,7 +747,7 @@ restores the 8,593-line baseline set.
       width wrapping with injected dimensions; escaped control sequences;
       `--json`/`--jsonl` carrying computed flags without a filter; stale
       `EXTRACTOR_REVISION` entry.
-- [ ] **6.10 L2 terminal test** (parallel with 6.9)
+- [x] **6.10 L2 terminal test** (parallel with 6.9)
     - Extend `level2_declarations` for table and wrapped rendering via the
       shared harness (`cli/tests/support/terminal_report.rs`); windows must
       not take focus; scope rows between markers, never a whole capture.
@@ -735,25 +762,25 @@ injected-width tests).
 
 ### Wave 1 (parallel documentation tasks; disjoint files)
 
-- [ ] **7.1 `docs/symbol-kinds-and-visibility.md`**: scope (parameters only
+- [x] **7.1 `docs/symbol-kinds-and-visibility.md`**: scope (parameters only
       where extracted; Bash/Zsh nested functions Local), `async`, test rules
       and the out-of-line `cfg(test)` limit, deprecation table, qualified-name
       spelling per language, `parameters`/`has_docs`, unsupported extraction.
-- [ ] **7.2 `docs/symbol-reports.md`**: every filter with an example, each
+- [x] **7.2 `docs/symbol-reports.md`**: every filter with an example, each
       format and view with a short sample, `--tree` combinations (Mermaid
       where a flow is clearer), the output-mode rule and `--stats` exception,
       JSONL ordering and both envelopes, the two `members` shapes. Written
       for a reader new to the repository; no link to this feature or spec.
-- [ ] **7.3 `docs/symbol-schema-design.md` and `docs/cache-design.md`**:
+- [x] **7.3 `docs/symbol-schema-design.md` and `docs/cache-design.md`**:
       additive fields, empty facets, library-only naming context, post-lookup
       prefix and why neither naming context nor scan root is a key input, the
       ID change, always-computed vs capability facts, metric absence
       semantics, and the new robustness-table rows.
-- [ ] **7.4 `README.md`, CLI help text, completions, `.claude/skills/tree-hugger/SKILL.md`
+- [x] **7.4 `README.md`, CLI help text, completions, `.claude/skills/tree-hugger/SKILL.md`
       and `api-reference.md`**: new flags, facets, `SymbolQuery` predicates.
-- [ ] **7.5 Release notes** with before/after examples for smart-case matching
+- [x] **7.5 Release notes** with before/after examples for smart-case matching
       and locals hidden by default in `hug symbols`.
-- [ ] **7.6 Unscheduled entries**: fix text under `features/_unscheduled/`
+- [x] **7.6 Unscheduled entries**: fix text under `features/_unscheduled/`
       that this feature's decisions made stale (for example the `lines`
       metric now belonging to `symbol-type-relations`). Check
       `docs/dependencies.md` only if a dependency declaration changed.
@@ -763,7 +790,7 @@ injected-width tests).
 
 ### Wave 2 (sequential)
 
-- [ ] **7.8 Performance sample**
+- [x] **7.8 Performance sample**
     - Re-run the symbol-improvements performance sample once: same host,
       commands and inputs, release build; record elapsed time, serialized
       bytes, peak RSS, build and cache state in `implementation-log.md`. No

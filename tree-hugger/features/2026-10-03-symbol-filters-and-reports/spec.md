@@ -40,25 +40,23 @@ depends-on:
   - 2026-10-03-visibility-and-kind
 human_review: false
 message_to_agent: |-
-  Phase 5 notes for Phase 6+ (details in implementation-log.md, Phases 4-5):
-  - All record selectors are on one path: cli/src/selection.rs (SelectionArgs/TargetArgs ->
-    Selection -> SymbolQuery predicates). Declarations::query(format, &Selection) builds the
-    analysis query; the library filters after the cache (SymbolQueryResult::finish). Only
-    --prelude is applied in declarations::prepare (it also runs query.selects/matches on the
-    prelude's synthetic exports). Do not reintroduce CLI-side name matching.
-  - `classes` uses classes::ClassSelection (boxed in Declarations::Classes): container
-    predicates + --kind, --in as the container's own name, shape predicates on members.
-    count/stats for classes (6.4) must count the containers ClassSelection selects.
-  - `symbols` defaults to Item+Member scopes (SYMBOLS_DEFAULT_SCOPES). Any new test or golden
-    that expects locals from `symbols` must pass --all-scopes (6.8 goldens over multi/ will
-    otherwise omit parameters). The current symbols.plain/json goldens are default-scope.
-  - `--json-full` rejection lists come from SelectionArgs::given_flags(); 6.7's output-mode
-    validation should live next to reject_json_full_misuse in main.rs.
-  - ReportFormat::always_computes_flags is the hook for --jsonl (6.1).
-  - `imports` now has its own ImportArgs (positional files, --file/--name/--exact,
-    ScanOptions); `imports --stats` (6.4) will need an argument error there.
-  - Windows evidence still missing: build-win-native fails _storage_preflight (disk headroom).
-    Linux cross-check passes for tree-hugger and tree-hugger-cli.
+  Phase 6 notes for Phase 7 (details in implementation-log.md, Phase 6):
+  - Report modes live in cli/src/output.rs (`resolve` is the one "exactly one mode" rule) and
+    cli/src/stats.rs; declarations.rs dispatches on `ReportFormat` (capabilities per format in
+    `ReportFormat::capabilities`). `--sort` is now `Option<SortOrder>`.
+  - docs/symbol-reports.md already describes every Phase 6 mode (new "Output modes" section,
+    JSON Lines and stats JSON under "JSON reports", wrapping/signatures/literal text under
+    "Terminal output", streaming and exit-status rows). 7.2 should polish and complete it (every
+    filter with an example, Mermaid where useful), not start over. README.md and cli/README.md
+    got one-line flag entries only.
+  - Interactive output wraps (stdout is a TTY or CLICOLOR_FORCE); a positive COLUMNS overrides
+    the detected width. Any test that forces color must pin COLUMNS. Release notes (7.5) should
+    mention that `CLICOLOR_FORCE` output now wraps and that `--json --json-full` together is an
+    argument error.
+  - biscuit-terminal hyphenates a token longer than the remaining width; recorded as a
+    departure, not changeable here.
+  - Windows evidence is still missing: cross-check builds and archives for windows-latest but
+    the consume step fails _storage_preflight (15 GiB free, needs 50). Linux passes (248).
 ---
 
 # Precise, filterable symbol reports

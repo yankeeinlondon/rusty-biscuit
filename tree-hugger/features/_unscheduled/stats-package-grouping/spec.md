@@ -30,4 +30,6 @@ needs; the ungrouped statistics answer the immediate question.
 
 - Synthetic export records stay reported separately from declaration doc
   coverage, as in ungrouped stats.
-- Zero matches in a group leaves its coverage unavailable rather than 0%.
+- Zero matches in a group gives a `null` coverage ratio rather than 0%, as
+  ungrouped stats do. (`doc_coverage.unavailable` is a different thing: the
+  count of declarations in languages without doc-comment detection.)

@@ -33,8 +33,12 @@ moved here by the author on 2026-10-04.
   and Python decorators, and Swift attributes, each recorded as
   `{name, value}` in source order using the full syntactic name and raw
   argument text, without evaluating arguments or expanding macros.
-  `2026-10-03-symbol-filters-and-reports` already parses these far enough to
-  derive `is_deprecated` and `is_test`; this item only populates the facet.
+  `2026-10-03-symbol-filters-and-reports` already parses Rust outer
+  attributes, C++ `[[…]]`, Java and Scala annotations, C# attribute lists,
+  Python decorators and Swift attributes far enough to derive `is_deprecated`
+  and `is_test` (`lib/src/file/extract/attributes.rs`, which fills no facet).
+  TS and JS decorators are not read yet and need a reader; for the others
+  this item only populates the facet.
 - **`lines` metric:** physical lines intersecting the half-open body span. A
   missing body gives `None`, an empty span gives `Some(0)`, and an end at
   column 1 excludes that line.
