@@ -118,3 +118,41 @@ export class BoundaryDecorated {
   @boundaryLogged
   decoratedMethod(): void {}
 }
+
+// ---- Scope, async and qualified names ----
+
+export async function asyncFunction(): Promise<void> {}
+
+export const asyncArrow = async (): Promise<number> => 1;
+
+class FirstShape {
+  async area(): Promise<number> {
+    return 1;
+  }
+}
+
+class SecondShape {
+  area(): number {
+    return 2;
+  }
+}
+
+// ---- Flags and metrics ----
+
+/** Documented, with two parameters. */
+export function documentedPair(first: number, second: number): void {}
+
+// deprecated: an ordinary comment, not a doc block
+function undocumentedNone(): void {}
+
+/** @deprecated use documentedPair */
+export function deprecatedApi(): void {}
+
+function testHelper(): void {}
+
+function variadic(first: number, ...rest: number[]): void {}
+
+class Receiver {
+  /** @deprecated */
+  withReceiver(only: number): void {}
+}

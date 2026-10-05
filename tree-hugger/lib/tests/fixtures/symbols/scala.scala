@@ -61,3 +61,28 @@ def boundaryMultiLineHeader(
 
 @deprecated("use something else", "1.0")
 def boundaryAnnotated(): Unit = ()
+
+// ---- Scope and qualified names ----
+
+class FirstShape {
+  def area: Int = 1
+}
+
+class SecondShape {
+  def area: Int = 2
+}
+
+// ---- Flags and metrics ----
+
+/** Documented, with two parameters. */
+def documentedPair(first: Int, second: Int): Unit = ()
+
+// deprecated: an ordinary comment
+def undocumentedNone(): Unit = ()
+
+@scala.deprecated
+def qualifiedDeprecated(): Unit = ()
+
+def testHelper(): Unit = ()
+
+def variadic(first: Int, rest: Int*): Unit = ()

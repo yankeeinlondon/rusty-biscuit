@@ -118,6 +118,15 @@ result.narrowed(&narrower_query);  // Some(exactly the narrower result) or None 
 | `Semantics` | References | semantic pass |
 | `StructuredDocs` | Declarations | docs pass |
 | `Diagnostics` | Declarations | diagnostics pass |
+| `Flags` | Declarations | `visibility.is_test` / `is_deprecated` while records are built (`extract/flags.rs`, `attributes.rs`) |
+| `Metrics` | Declarations | `metrics` facet while records are built (`extract/metrics.rs`) |
+
+Flags and metrics are filled in `TreeFile::records_from` (`RecordFacts`) for
+wanted kinds only; without the capability the flags are `false` and the facet
+absent, and `coverage::project` strips them. Both need the syntax tree, so a
+cache widening by either parses (`WidenedCapabilities { parsed: true }`).
+`symbols_query::flags_and_metrics_run_with_the_declarations_only` pins that
+neither runs another pass.
 
 Unselected kinds are still extracted light (identity, spans, container) and
 bound, then dropped; their metadata is skipped. Selecting a type kind keeps
@@ -199,6 +208,9 @@ Main symbol representation.
 pub struct SymbolInfo {
     pub name: String,
     pub kind: SymbolKind,
+    pub scope: SymbolScope,                      // Item | Member | Local (record: `scope`)
+    pub qualified_name: String,                  // in-file, native separators; drives the ID
+    pub is_namespace_rooted: bool,               // starts at a declared package/namespace
     pub range: CodeRange,
     pub language: ProgrammingLanguage,
     pub file: PathBuf,
@@ -208,6 +220,7 @@ pub struct SymbolInfo {
     pub visibility: Option<Visibility>,          // None = Unknown; the only home of a symbol's access level
     pub is_static: bool,                         // Member usable without an instance
     pub is_static_storage: bool,                 // Storage/linkage `static` (Rust static, C/C++); never implies is_static
+    pub is_async: bool,                          // Modifier::Async on the record
     pub signature: Option<FunctionSignature>,    // For functions/methods/constructors
     pub type_metadata: Option<TypeMetadata>,     // For types/classes/enums
 }
@@ -216,8 +229,16 @@ pub struct SymbolInfo {
 The v1 ↔ v2 adapter (`From<SymbolInfo> for SymbolRecord`,
 `TryFrom<SymbolRecord> for SymbolInfo`) is lossless for kind, visibility,
 `is_static` (`Modifier::Static`), `is_static_storage`
-(`Modifier::StaticStorage`) and container kind
-(`IdentityFacet::container_kind`). Every kind/visibility conversion is a
+(`Modifier::StaticStorage`), container kind
+(`IdentityFacet::container_kind`), `scope`, `is_async` (`Modifier::Async`),
+`qualified_name` and `is_namespace_rooted` (an empty v1 `qualified_name`
+converts as the bare name). Records also carry `visibility.is_test` and
+`is_deprecated` (`Capability::Flags`; `false` = not computed without it) and
+an optional `metrics` facet (`MetricsFacet { parameters, has_docs }`, each
+`Option` = unsupported; absent facet = not requested; `Capability::Metrics`).
+None of them exists on `SymbolInfo`, so the adapter does not carry them. The
+cache refuses a stored facet or a `true` flag whose capability the entry does
+not list, and a record without the facet under `metrics`. Every kind/visibility conversion is a
 wildcard-free `match`: adding a variant on one side is a compile error until
 the other side handles it. A converted record is never `is_exported` (export
 comes from declaration syntax, set by `symbol_records()` and the bind pass),

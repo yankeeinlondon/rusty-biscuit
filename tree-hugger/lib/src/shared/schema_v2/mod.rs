@@ -24,6 +24,7 @@ pub struct SymbolRecord {
     pub id: SymbolId,
     pub language: ProgrammingLanguage,
     pub kind: SymbolKindV2,
+    pub scope: SymbolScope,
     pub identity: IdentityFacet,
     pub source: SourceFacet,
     pub visibility: VisibilityFacet,
@@ -38,6 +39,13 @@ pub struct SymbolRecord {
     pub relations: RelationFacet,
     #[serde(default)]
     pub semantics: SemanticFacet,
+    /// Present only when metrics were requested.
+    #[serde(
+        default,
+        deserialize_with = "facets::present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub metrics: Option<MetricsFacet>,
     pub provenance: ProvenanceFacet,
     pub kind_data: SymbolKindData,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -324,6 +332,9 @@ fn modifiers_from_symbol(symbol: &SymbolInfo) -> Vec<Modifier> {
     if symbol.is_static_storage {
         modifiers.push(Modifier::StaticStorage);
     }
+    if symbol.is_async {
+        modifiers.push(Modifier::Async);
+    }
     modifiers
 }
 
@@ -355,17 +366,12 @@ impl From<SymbolInfo> for SymbolRecord {
     fn from(value: SymbolInfo) -> Self {
         let kind = SymbolKindV2::from(value.kind);
         let declaration_span = text_span_from_range(&value.range);
-        let qualified_name = value
-            .container_name
-            .as_ref()
-            .map(|container| format!("{container}::{}", value.name));
-        let stable_key = stable_symbol_key(
-            value.language,
-            &value.file,
-            kind,
-            qualified_name.as_deref().unwrap_or(&value.name),
-            0,
-        );
+        let qualified_name = if value.qualified_name.is_empty() {
+            value.name.clone()
+        } else {
+            value.qualified_name.clone()
+        };
+        let stable_key = stable_symbol_key(value.language, &value.file, kind, &qualified_name, 0);
         let level = VisibilityLevel::from(value.visibility);
 
         let mut comments = Vec::new();
@@ -417,10 +423,12 @@ impl From<SymbolInfo> for SymbolRecord {
             id: symbol_id_from_stable_key(&stable_key),
             language: value.language,
             kind,
+            scope: value.scope,
             identity: IdentityFacet {
                 name: value.name.clone(),
                 display_name: value.name,
                 qualified_name,
+                is_namespace_rooted: value.is_namespace_rooted,
                 container_name: value.container_name,
                 container_kind: value.container_kind.map(SymbolKindV2::from),
                 keyword: None,
@@ -450,6 +458,7 @@ impl From<SymbolInfo> for SymbolRecord {
                 is_synthetic: false,
                 is_deprecated: false,
                 is_experimental: false,
+                is_test: false,
             },
             docs: DocsFacet {
                 raw_doc,
@@ -461,6 +470,7 @@ impl From<SymbolInfo> for SymbolRecord {
             type_info,
             relations: RelationFacet::default(),
             semantics: SemanticFacet::default(),
+            metrics: None,
             provenance: ProvenanceFacet {
                 extractor: "tree-sitter".to_string(),
                 extractor_version: format!(
@@ -556,6 +566,10 @@ impl TryFrom<SymbolRecord> for SymbolInfo {
             .modifiers
             .iter()
             .any(|modifier| matches!(modifier, Modifier::StaticStorage));
+        let is_async = value
+            .modifiers
+            .iter()
+            .any(|modifier| matches!(modifier, Modifier::Async));
 
         // Every function-like kind carries a signature, even with no
         // parameters, so renderers print `tick()` rather than `tick`.
@@ -575,6 +589,9 @@ impl TryFrom<SymbolRecord> for SymbolInfo {
         Ok(Self {
             name,
             kind,
+            scope: value.scope,
+            qualified_name: value.identity.qualified_name,
+            is_namespace_rooted: value.identity.is_namespace_rooted,
             range: code_range_from_span(&value.source.declaration_span),
             language: value.language,
             file: value.source.file_path,
@@ -584,6 +601,7 @@ impl TryFrom<SymbolRecord> for SymbolInfo {
             visibility: value.visibility.level.into(),
             is_static,
             is_static_storage,
+            is_async,
             signature,
             type_metadata,
         })
@@ -614,6 +632,9 @@ mod tests {
         let symbol = SymbolInfo {
             name: "hello".to_string(),
             kind: SymbolKind::Function,
+            scope: SymbolScope::Item,
+            qualified_name: "hello".to_string(),
+            is_namespace_rooted: false,
             range: CodeRange {
                 start_line: 1,
                 start_column: 1,
@@ -630,6 +651,7 @@ mod tests {
             visibility: None,
             is_static: false,
             is_static_storage: false,
+            is_async: false,
             signature: Some(FunctionSignature::new()),
             type_metadata: None,
         };
@@ -646,6 +668,9 @@ mod tests {
         let symbol = SymbolInfo {
             name: "hello".to_string(),
             kind: SymbolKind::Function,
+            scope: SymbolScope::Item,
+            qualified_name: "hello".to_string(),
+            is_namespace_rooted: false,
             range: CodeRange {
                 start_line: 1,
                 start_column: 1,
@@ -662,6 +687,7 @@ mod tests {
             visibility: None,
             is_static: false,
             is_static_storage: false,
+            is_async: false,
             signature: None,
             type_metadata: None,
         };

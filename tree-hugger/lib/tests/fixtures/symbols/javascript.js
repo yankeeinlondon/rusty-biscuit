@@ -70,3 +70,45 @@ export class BoundaryDecorated {
   @boundaryLogged
   decoratedMethod() {}
 }
+
+// ---- Scope, async and qualified names ----
+
+export async function asyncFunction() {}
+
+export const asyncArrow = async () => 1;
+
+class FirstShape {
+  async area() {
+    return 1;
+  }
+}
+
+class SecondShape {
+  area() {
+    return 2;
+  }
+}
+
+// ---- Flags and metrics ----
+
+/** Documented, with two parameters. */
+function documentedPair(first, second) {}
+
+// deprecated: an ordinary comment, not a doc block
+function undocumentedNone() {}
+
+/**
+ * Old entry point.
+ * @deprecated use documentedPair
+ */
+function deprecatedApi() {}
+
+/** @deprecatedSoon is not the tag */
+function lookAlikeTag() {}
+
+function testHelper() {}
+
+function variadic(first, ...rest) {}
+
+/** A documented arrow function. */
+const documentedArrow = (only) => only;

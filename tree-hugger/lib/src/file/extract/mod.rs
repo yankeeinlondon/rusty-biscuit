@@ -6,15 +6,19 @@
 //! responsibility; all are re-exported here so each submodule can reach the
 //! others via `use super::*`.
 
+pub(crate) mod attributes;
 pub(crate) mod c_declarators;
 pub(crate) mod classify;
 pub(crate) mod declaration;
 pub(crate) mod doc_comments;
+pub(crate) mod flags;
 pub(crate) mod header;
+pub(crate) mod metrics;
+pub(crate) mod modifiers;
 pub(crate) mod navigation;
+pub(crate) mod qualified_name;
 pub(crate) mod rust_impl;
-#[cfg(test)]
-mod scope_dump;
+pub(crate) mod scope;
 pub(crate) mod signatures;
 pub(crate) mod static_flags;
 pub(crate) mod type_metadata;
@@ -24,9 +28,14 @@ pub(crate) use c_declarators::*;
 pub(crate) use classify::*;
 pub(crate) use declaration::*;
 pub(crate) use doc_comments::*;
+pub(crate) use flags::*;
 pub(crate) use header::*;
+pub(crate) use metrics::*;
+pub(crate) use modifiers::*;
 pub(crate) use navigation::*;
+pub(crate) use qualified_name::*;
 pub(crate) use rust_impl::*;
+pub(crate) use scope::*;
 pub(crate) use signatures::*;
 pub(crate) use static_flags::*;
 pub(crate) use type_metadata::*;

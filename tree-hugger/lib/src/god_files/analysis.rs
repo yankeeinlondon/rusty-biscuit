@@ -2278,10 +2278,12 @@ x = 1
             id: SymbolId(String::new()),
             language: ProgrammingLanguage::Rust,
             kind: SymbolKindV2::Function,
+            scope: crate::shared::SymbolScope::Item,
             identity: IdentityFacet {
                 name: String::new(),
                 display_name: String::new(),
-                qualified_name: None,
+                qualified_name: String::new(),
+                is_namespace_rooted: false,
                 container_name: None,
                 keyword: None,
                 container_kind: None,
@@ -2303,6 +2305,7 @@ x = 1
             type_info: TypeFacet::default(),
             relations: Default::default(),
             semantics: SemanticFacet::default(),
+            metrics: None,
             provenance: ProvenanceFacet {
                 extractor: String::new(),
                 extractor_version: String::new(),

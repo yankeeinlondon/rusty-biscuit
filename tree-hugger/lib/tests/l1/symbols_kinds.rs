@@ -98,7 +98,7 @@ pub const KIND_MATRIX: &[KindRow] = &[
     (L::JavaScript, "#hashPrivateProperty", Some("ExportedWidget"), K::Property, Some(K::Class)),
     // Go: structs and interfaces are `Type` (LIM)
     (L::Go, "ExportedFunction", None, K::Function, None),
-    (L::Go, "ExportedMethod", None, K::Method, None),
+    (L::Go, "ExportedMethod", Some("ExportedStruct"), K::Method, Some(K::Type)),
     (L::Go, "ExportedStruct", None, K::Type, None),
     (L::Go, "ExportedInterface", None, K::Type, None),
     (L::Go, "symbols", None, K::Namespace, None),

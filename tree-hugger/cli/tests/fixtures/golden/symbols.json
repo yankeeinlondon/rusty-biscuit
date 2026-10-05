@@ -3,7 +3,8 @@
   "files": [
     {
       "completed_capabilities": [
-        "declarations"
+        "declarations",
+        "flags"
       ],
       "completed_passes": [
         "Parse"
@@ -16,7 +17,9 @@
           "id": "<id-1>",
           "identity": {
             "display_name": "DEFAULT_TARGET",
+            "is_namespace_rooted": false,
             "name": "DEFAULT_TARGET",
+            "qualified_name": "DEFAULT_TARGET",
             "stable_key": "bash::bash.sh::Variable::DEFAULT_TARGET::0"
           },
           "kind": "Variable",
@@ -26,7 +29,7 @@
           "language": "Bash",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -34,6 +37,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Item",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -74,6 +78,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Unknown"
           }
         },
@@ -82,7 +87,9 @@
           "id": "<id-2>",
           "identity": {
             "display_name": "build_target",
+            "is_namespace_rooted": false,
             "name": "build_target",
+            "qualified_name": "build_target",
             "stable_key": "bash::bash.sh::Function::build_target::0"
           },
           "kind": "Function",
@@ -99,7 +106,7 @@
           "language": "Bash",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -107,6 +114,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Item",
           "semantics": {},
           "source": {
             "body_span": {
@@ -159,6 +167,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Unknown"
           }
         },
@@ -167,9 +176,11 @@
           "id": "<id-3>",
           "identity": {
             "display_name": "target",
+            "is_namespace_rooted": false,
             "keyword": "local",
             "name": "target",
-            "stable_key": "bash::bash.sh::Variable::target::0"
+            "qualified_name": "build_target.target",
+            "stable_key": "bash::bash.sh::Variable::build_target.target::0"
           },
           "kind": "Variable",
           "kind_data": {
@@ -178,7 +189,7 @@
           "language": "Bash",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -186,6 +197,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Local",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -226,6 +238,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Unknown"
           }
         },
@@ -234,8 +247,10 @@
           "id": "<id-4>",
           "identity": {
             "display_name": "clean_target",
+            "is_namespace_rooted": false,
             "keyword": "function",
             "name": "clean_target",
+            "qualified_name": "clean_target",
             "stable_key": "bash::bash.sh::Function::clean_target::0"
           },
           "kind": "Function",
@@ -252,7 +267,7 @@
           "language": "Bash",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -260,6 +275,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Item",
           "semantics": {},
           "source": {
             "body_span": {
@@ -312,6 +328,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Unknown"
           }
         }
@@ -319,7 +336,8 @@
     },
     {
       "completed_capabilities": [
-        "declarations"
+        "declarations",
+        "flags"
       ],
       "completed_passes": [
         "Parse"
@@ -328,14 +346,14 @@
       "language": "C",
       "symbols": [
         {
-          "docs": {
-            "raw_doc": "Multi-file fixture: C."
-          },
+          "docs": {},
           "id": "<id-5>",
           "identity": {
             "display_name": "point",
+            "is_namespace_rooted": false,
             "keyword": "struct",
             "name": "point",
+            "qualified_name": "point",
             "stable_key": "c::c.c::Type::point::0"
           },
           "kind": "Type",
@@ -370,7 +388,7 @@
           "language": "C",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -378,6 +396,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Item",
           "semantics": {},
           "source": {
             "body_span": {
@@ -430,6 +449,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Unknown"
           }
         },
@@ -440,9 +460,10 @@
             "container_kind": "Type",
             "container_name": "point",
             "display_name": "x",
+            "is_namespace_rooted": false,
             "name": "x",
-            "qualified_name": "point::x",
-            "stable_key": "c::c.c::Field::point::x::0"
+            "qualified_name": "point.x",
+            "stable_key": "c::c.c::Field::point.x::0"
           },
           "kind": "Field",
           "kind_data": {
@@ -459,7 +480,7 @@
           "language": "C",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -467,6 +488,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Member",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -507,6 +529,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Unknown"
           }
         },
@@ -517,9 +540,10 @@
             "container_kind": "Type",
             "container_name": "point",
             "display_name": "y",
+            "is_namespace_rooted": false,
             "name": "y",
-            "qualified_name": "point::y",
-            "stable_key": "c::c.c::Field::point::y::0"
+            "qualified_name": "point.y",
+            "stable_key": "c::c.c::Field::point.y::0"
           },
           "kind": "Field",
           "kind_data": {
@@ -536,7 +560,7 @@
           "language": "C",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -544,6 +568,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Member",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -584,6 +609,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Unknown"
           }
         },
@@ -592,8 +618,10 @@
           "id": "<id-8>",
           "identity": {
             "display_name": "point_t",
+            "is_namespace_rooted": false,
             "keyword": "typedef",
             "name": "point_t",
+            "qualified_name": "point_t",
             "stable_key": "c::c.c::TypeAlias::point_t::0"
           },
           "kind": "TypeAlias",
@@ -606,7 +634,7 @@
           "language": "C",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -614,6 +642,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Item",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -654,6 +683,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Unknown"
           }
         },
@@ -662,8 +692,10 @@
           "id": "<id-9>",
           "identity": {
             "display_name": "point",
+            "is_namespace_rooted": false,
             "keyword": "struct",
             "name": "point",
+            "qualified_name": "point",
             "stable_key": "c::c.c::Type::point::1"
           },
           "kind": "Type",
@@ -673,7 +705,7 @@
           "language": "C",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -681,6 +713,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Item",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -721,6 +754,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Unknown"
           }
         },
@@ -729,7 +763,9 @@
           "id": "<id-10>",
           "identity": {
             "display_name": "origin_count",
+            "is_namespace_rooted": false,
             "name": "origin_count",
+            "qualified_name": "origin_count",
             "stable_key": "c::c.c::Variable::origin_count::0"
           },
           "kind": "Variable",
@@ -744,7 +780,7 @@
           ],
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -752,6 +788,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Item",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -792,6 +829,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "ModulePrivate"
           }
         },
@@ -800,7 +838,9 @@
           "id": "<id-11>",
           "identity": {
             "display_name": "point_sum",
+            "is_namespace_rooted": false,
             "name": "point_sum",
+            "qualified_name": "point_sum",
             "stable_key": "c::c.c::Function::point_sum::0"
           },
           "kind": "Function",
@@ -829,7 +869,7 @@
           "language": "C",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -837,6 +877,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Item",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -889,6 +930,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Public"
           }
         },
@@ -897,9 +939,11 @@
           "id": "<id-12>",
           "identity": {
             "display_name": "point",
+            "is_namespace_rooted": false,
             "keyword": "struct",
             "name": "point",
-            "stable_key": "c::c.c::Type::point::2"
+            "qualified_name": "point_sum.point",
+            "stable_key": "c::c.c::Type::point_sum.point::0"
           },
           "kind": "Type",
           "kind_data": {
@@ -908,7 +952,7 @@
           "language": "C",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -916,6 +960,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Local",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -956,6 +1001,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Unknown"
           }
         },
@@ -964,8 +1010,10 @@
           "id": "<id-13>",
           "identity": {
             "display_name": "p",
+            "is_namespace_rooted": false,
             "name": "p",
-            "stable_key": "c::c.c::Parameter::p::0"
+            "qualified_name": "point_sum.p",
+            "stable_key": "c::c.c::Parameter::point_sum.p::0"
           },
           "kind": "Parameter",
           "kind_data": {
@@ -978,7 +1026,7 @@
           "language": "C",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -986,6 +1034,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Local",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -1026,6 +1075,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Unknown"
           }
         },
@@ -1034,7 +1084,9 @@
           "id": "<id-14>",
           "identity": {
             "display_name": "reset_origin",
+            "is_namespace_rooted": false,
             "name": "reset_origin",
+            "qualified_name": "reset_origin",
             "stable_key": "c::c.c::Function::reset_origin::0"
           },
           "kind": "Function",
@@ -1052,7 +1104,7 @@
           "language": "C",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -1060,6 +1112,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Item",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -1112,6 +1165,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Public"
           }
         }
@@ -1119,7 +1173,8 @@
     },
     {
       "completed_capabilities": [
-        "declarations"
+        "declarations",
+        "flags"
       ],
       "completed_passes": [
         "Parse"
@@ -1128,14 +1183,14 @@
       "language": "CSharp",
       "symbols": [
         {
-          "docs": {
-            "raw_doc": "Multi-file fixture: C#."
-          },
+          "docs": {},
           "id": "<id-15>",
           "identity": {
             "display_name": "Multi",
+            "is_namespace_rooted": true,
             "keyword": "namespace",
             "name": "Multi",
+            "qualified_name": "Multi",
             "stable_key": "c_sharp::c_sharp.cs::Namespace::Multi::0"
           },
           "kind": "Namespace",
@@ -1145,7 +1200,7 @@
           "language": "CSharp",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -1153,6 +1208,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Item",
           "semantics": {},
           "source": {
             "body_span": {
@@ -1205,6 +1261,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Unknown"
           }
         },
@@ -1215,10 +1272,11 @@
             "container_kind": "Namespace",
             "container_name": "Multi",
             "display_name": "Ledger",
+            "is_namespace_rooted": true,
             "keyword": "class",
             "name": "Ledger",
-            "qualified_name": "Multi::Ledger",
-            "stable_key": "c_sharp::c_sharp.cs::Class::Multi::Ledger::0"
+            "qualified_name": "Multi.Ledger",
+            "stable_key": "c_sharp::c_sharp.cs::Class::Multi.Ledger::0"
           },
           "kind": "Class",
           "kind_data": {
@@ -1254,7 +1312,7 @@
           "language": "CSharp",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -1262,6 +1320,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Item",
           "semantics": {},
           "source": {
             "body_span": {
@@ -1314,6 +1373,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Public"
           }
         },
@@ -1324,9 +1384,10 @@
             "container_kind": "Class",
             "container_name": "Ledger",
             "display_name": "total",
+            "is_namespace_rooted": true,
             "name": "total",
-            "qualified_name": "Ledger::total",
-            "stable_key": "c_sharp::c_sharp.cs::Field::Ledger::total::0"
+            "qualified_name": "Multi.Ledger.total",
+            "stable_key": "c_sharp::c_sharp.cs::Field::Multi.Ledger.total::0"
           },
           "kind": "Field",
           "kind_data": {
@@ -1343,7 +1404,7 @@
           "language": "CSharp",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -1351,6 +1412,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Member",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -1391,6 +1453,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Private"
           }
         },
@@ -1401,9 +1464,10 @@
             "container_kind": "Class",
             "container_name": "Ledger",
             "display_name": "Total",
+            "is_namespace_rooted": true,
             "name": "Total",
-            "qualified_name": "Ledger::Total",
-            "stable_key": "c_sharp::c_sharp.cs::Property::Ledger::Total::0"
+            "qualified_name": "Multi.Ledger.Total",
+            "stable_key": "c_sharp::c_sharp.cs::Property::Multi.Ledger.Total::0"
           },
           "kind": "Property",
           "kind_data": {
@@ -1420,7 +1484,7 @@
           "language": "CSharp",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -1428,6 +1492,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Member",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -1468,6 +1533,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Public"
           }
         },
@@ -1478,9 +1544,10 @@
             "container_kind": "Class",
             "container_name": "Ledger",
             "display_name": "Add",
+            "is_namespace_rooted": true,
             "name": "Add",
-            "qualified_name": "Ledger::Add",
-            "stable_key": "c_sharp::c_sharp.cs::Method::Ledger::Add::0"
+            "qualified_name": "Multi.Ledger.Add",
+            "stable_key": "c_sharp::c_sharp.cs::Method::Multi.Ledger.Add::0"
           },
           "kind": "Method",
           "kind_data": {
@@ -1508,7 +1575,7 @@
           "language": "CSharp",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -1516,6 +1583,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Member",
           "semantics": {},
           "source": {
             "body_span": {
@@ -1580,6 +1648,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Public"
           }
         },
@@ -1590,9 +1659,10 @@
             "container_kind": "Class",
             "container_name": "Ledger",
             "display_name": "amount",
+            "is_namespace_rooted": true,
             "name": "amount",
-            "qualified_name": "Ledger::amount",
-            "stable_key": "c_sharp::c_sharp.cs::Parameter::Ledger::amount::0"
+            "qualified_name": "Multi.Ledger.Add.amount",
+            "stable_key": "c_sharp::c_sharp.cs::Parameter::Multi.Ledger.Add.amount::0"
           },
           "kind": "Parameter",
           "kind_data": {
@@ -1605,7 +1675,7 @@
           "language": "CSharp",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -1613,6 +1683,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Local",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -1653,6 +1724,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Unknown"
           }
         },
@@ -1663,9 +1735,10 @@
             "container_kind": "Class",
             "container_name": "Ledger",
             "display_name": "Empty",
+            "is_namespace_rooted": true,
             "name": "Empty",
-            "qualified_name": "Ledger::Empty",
-            "stable_key": "c_sharp::c_sharp.cs::Method::Ledger::Empty::0"
+            "qualified_name": "Multi.Ledger.Empty",
+            "stable_key": "c_sharp::c_sharp.cs::Method::Multi.Ledger.Empty::0"
           },
           "kind": "Method",
           "kind_data": {
@@ -1687,7 +1760,7 @@
           ],
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -1695,6 +1768,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Member",
           "semantics": {},
           "source": {
             "body_span": {
@@ -1759,6 +1833,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Public"
           }
         },
@@ -1769,10 +1844,11 @@
             "container_kind": "Namespace",
             "container_name": "Multi",
             "display_name": "IAuditable",
+            "is_namespace_rooted": true,
             "keyword": "interface",
             "name": "IAuditable",
-            "qualified_name": "Multi::IAuditable",
-            "stable_key": "c_sharp::c_sharp.cs::Interface::Multi::IAuditable::0"
+            "qualified_name": "Multi.IAuditable",
+            "stable_key": "c_sharp::c_sharp.cs::Interface::Multi.IAuditable::0"
           },
           "kind": "Interface",
           "kind_data": {
@@ -1781,7 +1857,7 @@
           "language": "CSharp",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -1789,6 +1865,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Item",
           "semantics": {},
           "source": {
             "body_span": {
@@ -1841,6 +1918,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Public"
           }
         },
@@ -1851,9 +1929,10 @@
             "container_kind": "Interface",
             "container_name": "IAuditable",
             "display_name": "Audit",
+            "is_namespace_rooted": true,
             "name": "Audit",
-            "qualified_name": "IAuditable::Audit",
-            "stable_key": "c_sharp::c_sharp.cs::Method::IAuditable::Audit::0"
+            "qualified_name": "Multi.IAuditable.Audit",
+            "stable_key": "c_sharp::c_sharp.cs::Method::Multi.IAuditable.Audit::0"
           },
           "kind": "Method",
           "kind_data": {
@@ -1870,7 +1949,7 @@
           "language": "CSharp",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -1878,6 +1957,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Member",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -1930,6 +2010,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Public"
           }
         }
@@ -1937,7 +2018,8 @@
     },
     {
       "completed_capabilities": [
-        "declarations"
+        "declarations",
+        "flags"
       ],
       "completed_passes": [
         "Parse"
@@ -1950,8 +2032,10 @@
           "id": "<id-24>",
           "identity": {
             "display_name": "geometry",
+            "is_namespace_rooted": true,
             "keyword": "namespace",
             "name": "geometry",
+            "qualified_name": "geometry",
             "stable_key": "cpp::cpp.cpp::Namespace::geometry::0"
           },
           "kind": "Namespace",
@@ -1961,7 +2045,7 @@
           "language": "Cpp",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -1969,6 +2053,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Item",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -2009,6 +2094,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Unknown"
           }
         },
@@ -2019,6 +2105,7 @@
             "container_kind": "Namespace",
             "container_name": "geometry",
             "display_name": "Vector",
+            "is_namespace_rooted": true,
             "keyword": "class",
             "name": "Vector",
             "qualified_name": "geometry::Vector",
@@ -2058,7 +2145,7 @@
           "language": "Cpp",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -2066,6 +2153,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Item",
           "semantics": {},
           "source": {
             "body_span": {
@@ -2118,6 +2206,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Unknown"
           }
         },
@@ -2128,9 +2217,10 @@
             "container_kind": "Class",
             "container_name": "Vector",
             "display_name": "Vector",
+            "is_namespace_rooted": true,
             "name": "Vector",
-            "qualified_name": "Vector::Vector",
-            "stable_key": "cpp::cpp.cpp::Method::Vector::Vector::0"
+            "qualified_name": "geometry::Vector::Vector",
+            "stable_key": "cpp::cpp.cpp::Method::geometry::Vector::Vector::0"
           },
           "kind": "Method",
           "kind_data": {
@@ -2166,7 +2256,7 @@
           "language": "Cpp",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -2174,6 +2264,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Member",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -2214,6 +2305,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Public"
           }
         },
@@ -2224,9 +2316,10 @@
             "container_kind": "Class",
             "container_name": "Vector",
             "display_name": "x",
+            "is_namespace_rooted": true,
             "name": "x",
-            "qualified_name": "Vector::x",
-            "stable_key": "cpp::cpp.cpp::Parameter::Vector::x::0"
+            "qualified_name": "geometry::Vector::Vector::x",
+            "stable_key": "cpp::cpp.cpp::Parameter::geometry::Vector::Vector::x::0"
           },
           "kind": "Parameter",
           "kind_data": {
@@ -2239,7 +2332,7 @@
           "language": "Cpp",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -2247,6 +2340,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Local",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -2287,6 +2381,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Unknown"
           }
         },
@@ -2297,9 +2392,10 @@
             "container_kind": "Class",
             "container_name": "Vector",
             "display_name": "y",
+            "is_namespace_rooted": true,
             "name": "y",
-            "qualified_name": "Vector::y",
-            "stable_key": "cpp::cpp.cpp::Parameter::Vector::y::0"
+            "qualified_name": "geometry::Vector::Vector::y",
+            "stable_key": "cpp::cpp.cpp::Parameter::geometry::Vector::Vector::y::0"
           },
           "kind": "Parameter",
           "kind_data": {
@@ -2312,7 +2408,7 @@
           "language": "Cpp",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -2320,6 +2416,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Local",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -2360,6 +2457,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Unknown"
           }
         },
@@ -2370,9 +2468,10 @@
             "container_kind": "Class",
             "container_name": "Vector",
             "display_name": "length",
+            "is_namespace_rooted": true,
             "name": "length",
-            "qualified_name": "Vector::length",
-            "stable_key": "cpp::cpp.cpp::Method::Vector::length::0"
+            "qualified_name": "geometry::Vector::length",
+            "stable_key": "cpp::cpp.cpp::Method::geometry::Vector::length::0"
           },
           "kind": "Method",
           "kind_data": {
@@ -2389,7 +2488,7 @@
           "language": "Cpp",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -2397,6 +2496,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Member",
           "semantics": {},
           "source": {
             "body_span": {
@@ -2461,6 +2561,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Public"
           }
         },
@@ -2471,9 +2572,10 @@
             "container_kind": "Class",
             "container_name": "Vector",
             "display_name": "x_",
+            "is_namespace_rooted": true,
             "name": "x_",
-            "qualified_name": "Vector::x_",
-            "stable_key": "cpp::cpp.cpp::Field::Vector::x_::0"
+            "qualified_name": "geometry::Vector::x_",
+            "stable_key": "cpp::cpp.cpp::Field::geometry::Vector::x_::0"
           },
           "kind": "Field",
           "kind_data": {
@@ -2490,7 +2592,7 @@
           "language": "Cpp",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -2498,6 +2600,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Member",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -2538,6 +2641,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Private"
           }
         },
@@ -2548,9 +2652,10 @@
             "container_kind": "Class",
             "container_name": "Vector",
             "display_name": "y_",
+            "is_namespace_rooted": true,
             "name": "y_",
-            "qualified_name": "Vector::y_",
-            "stable_key": "cpp::cpp.cpp::Field::Vector::y_::0"
+            "qualified_name": "geometry::Vector::y_",
+            "stable_key": "cpp::cpp.cpp::Field::geometry::Vector::y_::0"
           },
           "kind": "Field",
           "kind_data": {
@@ -2567,7 +2672,7 @@
           "language": "Cpp",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -2575,6 +2680,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Member",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -2615,6 +2721,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Private"
           }
         },
@@ -2625,6 +2732,7 @@
             "container_kind": "Namespace",
             "container_name": "geometry",
             "display_name": "dot",
+            "is_namespace_rooted": true,
             "name": "dot",
             "qualified_name": "geometry::dot",
             "stable_key": "cpp::cpp.cpp::Function::geometry::dot::0"
@@ -2664,7 +2772,7 @@
           "language": "Cpp",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -2672,6 +2780,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Item",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -2724,6 +2833,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Public"
           }
         },
@@ -2734,9 +2844,10 @@
             "container_kind": "Namespace",
             "container_name": "geometry",
             "display_name": "a",
+            "is_namespace_rooted": true,
             "name": "a",
-            "qualified_name": "geometry::a",
-            "stable_key": "cpp::cpp.cpp::Parameter::geometry::a::0"
+            "qualified_name": "geometry::dot::a",
+            "stable_key": "cpp::cpp.cpp::Parameter::geometry::dot::a::0"
           },
           "kind": "Parameter",
           "kind_data": {
@@ -2749,7 +2860,7 @@
           "language": "Cpp",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -2757,6 +2868,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Local",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -2797,6 +2909,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Unknown"
           }
         },
@@ -2807,9 +2920,10 @@
             "container_kind": "Namespace",
             "container_name": "geometry",
             "display_name": "b",
+            "is_namespace_rooted": true,
             "name": "b",
-            "qualified_name": "geometry::b",
-            "stable_key": "cpp::cpp.cpp::Parameter::geometry::b::0"
+            "qualified_name": "geometry::dot::b",
+            "stable_key": "cpp::cpp.cpp::Parameter::geometry::dot::b::0"
           },
           "kind": "Parameter",
           "kind_data": {
@@ -2822,7 +2936,7 @@
           "language": "Cpp",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -2830,6 +2944,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Local",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -2870,6 +2985,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Unknown"
           }
         }
@@ -2877,7 +2993,8 @@
     },
     {
       "completed_capabilities": [
-        "declarations"
+        "declarations",
+        "flags"
       ],
       "completed_passes": [
         "Parse"
@@ -2890,8 +3007,10 @@
           "id": "<id-35>",
           "identity": {
             "display_name": "Counter",
+            "is_namespace_rooted": false,
             "keyword": "class",
             "name": "Counter",
+            "qualified_name": "Counter",
             "stable_key": "java::java.java::Class::Counter::0"
           },
           "kind": "Class",
@@ -2919,7 +3038,7 @@
           "language": "Java",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -2927,6 +3046,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Item",
           "semantics": {},
           "source": {
             "body_span": {
@@ -2979,6 +3099,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Public"
           }
         },
@@ -2989,9 +3110,10 @@
             "container_kind": "Class",
             "container_name": "Counter",
             "display_name": "count",
+            "is_namespace_rooted": false,
             "name": "count",
-            "qualified_name": "Counter::count",
-            "stable_key": "java::java.java::Field::Counter::count::0"
+            "qualified_name": "Counter.count",
+            "stable_key": "java::java.java::Field::Counter.count::0"
           },
           "kind": "Field",
           "kind_data": {
@@ -3008,7 +3130,7 @@
           "language": "Java",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -3016,6 +3138,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Member",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -3056,6 +3179,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Private"
           }
         },
@@ -3066,9 +3190,10 @@
             "container_kind": "Class",
             "container_name": "Counter",
             "display_name": "start",
+            "is_namespace_rooted": false,
             "name": "start",
-            "qualified_name": "Counter::start",
-            "stable_key": "java::java.java::Parameter::Counter::start::0"
+            "qualified_name": "Counter.Counter.start",
+            "stable_key": "java::java.java::Parameter::Counter.Counter.start::0"
           },
           "kind": "Parameter",
           "kind_data": {
@@ -3081,7 +3206,7 @@
           "language": "Java",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -3089,6 +3214,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Local",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -3129,6 +3255,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Unknown"
           }
         },
@@ -3139,9 +3266,10 @@
             "container_kind": "Class",
             "container_name": "Counter",
             "display_name": "increment",
+            "is_namespace_rooted": false,
             "name": "increment",
-            "qualified_name": "Counter::increment",
-            "stable_key": "java::java.java::Method::Counter::increment::0"
+            "qualified_name": "Counter.increment",
+            "stable_key": "java::java.java::Method::Counter.increment::0"
           },
           "kind": "Method",
           "kind_data": {
@@ -3158,7 +3286,7 @@
           "language": "Java",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -3166,6 +3294,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Member",
           "semantics": {},
           "source": {
             "body_span": {
@@ -3230,6 +3359,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Public"
           }
         },
@@ -3240,9 +3370,10 @@
             "container_kind": "Class",
             "container_name": "Counter",
             "display_name": "zero",
+            "is_namespace_rooted": false,
             "name": "zero",
-            "qualified_name": "Counter::zero",
-            "stable_key": "java::java.java::Method::Counter::zero::0"
+            "qualified_name": "Counter.zero",
+            "stable_key": "java::java.java::Method::Counter.zero::0"
           },
           "kind": "Method",
           "kind_data": {
@@ -3264,7 +3395,7 @@
           ],
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -3272,6 +3403,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Member",
           "semantics": {},
           "source": {
             "body_span": {
@@ -3336,6 +3468,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Public"
           }
         },
@@ -3344,8 +3477,10 @@
           "id": "<id-40>",
           "identity": {
             "display_name": "Resettable",
+            "is_namespace_rooted": false,
             "keyword": "interface",
             "name": "Resettable",
+            "qualified_name": "Resettable",
             "stable_key": "java::java.java::Interface::Resettable::0"
           },
           "kind": "Interface",
@@ -3355,7 +3490,7 @@
           "language": "Java",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -3363,6 +3498,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Item",
           "semantics": {},
           "source": {
             "body_span": {
@@ -3415,6 +3551,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Package"
           }
         },
@@ -3425,9 +3562,10 @@
             "container_kind": "Interface",
             "container_name": "Resettable",
             "display_name": "reset",
+            "is_namespace_rooted": false,
             "name": "reset",
-            "qualified_name": "Resettable::reset",
-            "stable_key": "java::java.java::Method::Resettable::reset::0"
+            "qualified_name": "Resettable.reset",
+            "stable_key": "java::java.java::Method::Resettable.reset::0"
           },
           "kind": "Method",
           "kind_data": {
@@ -3444,7 +3582,7 @@
           "language": "Java",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -3452,6 +3590,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Member",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -3504,6 +3643,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Public"
           }
         }
@@ -3511,7 +3651,8 @@
     },
     {
       "completed_capabilities": [
-        "declarations"
+        "declarations",
+        "flags"
       ],
       "completed_passes": [
         "Parse"
@@ -3520,14 +3661,14 @@
       "language": "JavaScript",
       "symbols": [
         {
-          "docs": {
-            "raw_doc": "Multi-file fixture: JavaScript."
-          },
+          "docs": {},
           "id": "<id-42>",
           "identity": {
             "display_name": "Button",
+            "is_namespace_rooted": false,
             "keyword": "class",
             "name": "Button",
+            "qualified_name": "Button",
             "stable_key": "javascript::javascript.js::Class::Button::0"
           },
           "kind": "Class",
@@ -3537,7 +3678,7 @@
           "language": "JavaScript",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -3545,6 +3686,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Item",
           "semantics": {},
           "source": {
             "body_span": {
@@ -3597,6 +3739,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Public"
           }
         },
@@ -3607,9 +3750,10 @@
             "container_kind": "Class",
             "container_name": "Button",
             "display_name": "constructor",
+            "is_namespace_rooted": false,
             "name": "constructor",
-            "qualified_name": "Button::constructor",
-            "stable_key": "javascript::javascript.js::Constructor::Button::constructor::0"
+            "qualified_name": "Button.constructor",
+            "stable_key": "javascript::javascript.js::Constructor::Button.constructor::0"
           },
           "kind": "Constructor",
           "kind_data": {
@@ -3635,7 +3779,7 @@
           "language": "JavaScript",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -3643,6 +3787,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Member",
           "semantics": {},
           "source": {
             "body_span": {
@@ -3695,6 +3840,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Public"
           }
         },
@@ -3705,9 +3851,10 @@
             "container_kind": "Class",
             "container_name": "Button",
             "display_name": "label",
+            "is_namespace_rooted": false,
             "name": "label",
-            "qualified_name": "Button::label",
-            "stable_key": "javascript::javascript.js::Parameter::Button::label::0"
+            "qualified_name": "Button.constructor.label",
+            "stable_key": "javascript::javascript.js::Parameter::Button.constructor.label::0"
           },
           "kind": "Parameter",
           "kind_data": {
@@ -3720,7 +3867,7 @@
           "language": "JavaScript",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -3728,6 +3875,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Local",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -3768,6 +3916,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Unknown"
           }
         },
@@ -3778,9 +3927,10 @@
             "container_kind": "Class",
             "container_name": "Button",
             "display_name": "press",
+            "is_namespace_rooted": false,
             "name": "press",
-            "qualified_name": "Button::press",
-            "stable_key": "javascript::javascript.js::Method::Button::press::0"
+            "qualified_name": "Button.press",
+            "stable_key": "javascript::javascript.js::Method::Button.press::0"
           },
           "kind": "Method",
           "kind_data": {
@@ -3796,7 +3946,7 @@
           "language": "JavaScript",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -3804,6 +3954,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Member",
           "semantics": {},
           "source": {
             "body_span": {
@@ -3856,6 +4007,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Public"
           }
         },
@@ -3864,8 +4016,10 @@
           "id": "<id-46>",
           "identity": {
             "display_name": "buildButton",
+            "is_namespace_rooted": false,
             "keyword": "function",
             "name": "buildButton",
+            "qualified_name": "buildButton",
             "stable_key": "javascript::javascript.js::Function::buildButton::0"
           },
           "kind": "Function",
@@ -3882,7 +4036,7 @@
           "language": "JavaScript",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -3890,6 +4044,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Item",
           "semantics": {},
           "source": {
             "body_span": {
@@ -3942,6 +4097,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Public"
           }
         },
@@ -3950,8 +4106,10 @@
           "id": "<id-47>",
           "identity": {
             "display_name": "DEFAULT_LABEL",
+            "is_namespace_rooted": false,
             "keyword": "const",
             "name": "DEFAULT_LABEL",
+            "qualified_name": "DEFAULT_LABEL",
             "stable_key": "javascript::javascript.js::Variable::DEFAULT_LABEL::0"
           },
           "kind": "Variable",
@@ -3961,7 +4119,7 @@
           "language": "JavaScript",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -3969,6 +4127,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Item",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -4009,6 +4168,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Public"
           }
         }
@@ -4016,7 +4176,8 @@
     },
     {
       "completed_capabilities": [
-        "declarations"
+        "declarations",
+        "flags"
       ],
       "completed_passes": [
         "Parse"
@@ -4029,8 +4190,10 @@
           "id": "<id-48>",
           "identity": {
             "display_name": "M",
+            "is_namespace_rooted": false,
             "keyword": "local",
             "name": "M",
+            "qualified_name": "M",
             "stable_key": "lua::lua.lua::Variable::M::0"
           },
           "kind": "Variable",
@@ -4040,7 +4203,7 @@
           "language": "Lua",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -4048,6 +4211,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Item",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -4088,6 +4252,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "ModulePrivate"
           }
         },
@@ -4096,8 +4261,10 @@
           "id": "<id-49>",
           "identity": {
             "display_name": "default_size",
+            "is_namespace_rooted": false,
             "keyword": "local",
             "name": "default_size",
+            "qualified_name": "default_size",
             "stable_key": "lua::lua.lua::Variable::default_size::0"
           },
           "kind": "Variable",
@@ -4107,7 +4274,7 @@
           "language": "Lua",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -4115,6 +4282,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Item",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -4155,6 +4323,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "ModulePrivate"
           }
         },
@@ -4162,10 +4331,14 @@
           "docs": {},
           "id": "<id-50>",
           "identity": {
+            "container_kind": "Variable",
+            "container_name": "M",
             "display_name": "new_bag",
+            "is_namespace_rooted": false,
             "keyword": "function",
             "name": "new_bag",
-            "stable_key": "lua::lua.lua::Function::new_bag::0"
+            "qualified_name": "M.new_bag",
+            "stable_key": "lua::lua.lua::Function::M.new_bag::0"
           },
           "kind": "Function",
           "kind_data": {
@@ -4191,7 +4364,7 @@
           "language": "Lua",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -4199,6 +4372,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Member",
           "semantics": {},
           "source": {
             "body_span": {
@@ -4251,6 +4425,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Unknown"
           }
         },
@@ -4259,8 +4434,10 @@
           "id": "<id-51>",
           "identity": {
             "display_name": "size",
+            "is_namespace_rooted": false,
             "name": "size",
-            "stable_key": "lua::lua.lua::Parameter::size::0"
+            "qualified_name": "M.new_bag.size",
+            "stable_key": "lua::lua.lua::Parameter::M.new_bag.size::0"
           },
           "kind": "Parameter",
           "kind_data": {
@@ -4273,7 +4450,7 @@
           "language": "Lua",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -4281,6 +4458,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Local",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -4321,6 +4499,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Unknown"
           }
         },
@@ -4328,10 +4507,14 @@
           "docs": {},
           "id": "<id-52>",
           "identity": {
+            "container_kind": "Variable",
+            "container_name": "M",
             "display_name": "describe",
+            "is_namespace_rooted": false,
             "keyword": "function",
             "name": "describe",
-            "stable_key": "lua::lua.lua::Method::describe::0"
+            "qualified_name": "M:describe",
+            "stable_key": "lua::lua.lua::Method::M:describe::0"
           },
           "kind": "Method",
           "kind_data": {
@@ -4347,7 +4530,7 @@
           "language": "Lua",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -4355,6 +4538,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Member",
           "semantics": {},
           "source": {
             "body_span": {
@@ -4407,6 +4591,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Unknown"
           }
         },
@@ -4415,8 +4600,10 @@
           "id": "<id-53>",
           "identity": {
             "display_name": "helper",
+            "is_namespace_rooted": false,
             "keyword": "function",
             "name": "helper",
+            "qualified_name": "helper",
             "stable_key": "lua::lua.lua::Function::helper::0"
           },
           "kind": "Function",
@@ -4433,7 +4620,7 @@
           "language": "Lua",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -4441,6 +4628,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Item",
           "semantics": {},
           "source": {
             "body_span": {
@@ -4493,6 +4681,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "ModulePrivate"
           }
         }
@@ -4500,7 +4689,8 @@
     },
     {
       "completed_capabilities": [
-        "declarations"
+        "declarations",
+        "flags"
       ],
       "completed_passes": [
         "Parse"
@@ -4509,12 +4699,16 @@
       "language": "Go",
       "symbols": [
         {
-          "docs": {},
+          "docs": {
+            "raw_doc": "Multi-file fixture: Go, in a nested directory."
+          },
           "id": "<id-54>",
           "identity": {
             "display_name": "nested",
+            "is_namespace_rooted": true,
             "keyword": "package",
             "name": "nested",
+            "qualified_name": "nested",
             "stable_key": "go::nested/go.go::Namespace::nested::0"
           },
           "kind": "Namespace",
@@ -4524,7 +4718,7 @@
           "language": "Go",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -4532,6 +4726,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Item",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -4572,6 +4767,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Unknown"
           }
         },
@@ -4582,9 +4778,11 @@
           "id": "<id-55>",
           "identity": {
             "display_name": "Widget",
+            "is_namespace_rooted": true,
             "keyword": "type",
             "name": "Widget",
-            "stable_key": "go::nested/go.go::Type::Widget::0"
+            "qualified_name": "nested.Widget",
+            "stable_key": "go::nested/go.go::Type::nested.Widget::0"
           },
           "kind": "Type",
           "kind_data": {
@@ -4611,7 +4809,7 @@
           "language": "Go",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -4619,6 +4817,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Item",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -4659,6 +4858,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Public"
           }
         },
@@ -4666,10 +4866,14 @@
           "docs": {},
           "id": "<id-56>",
           "identity": {
+            "container_kind": "Type",
+            "container_name": "Widget",
             "display_name": "Grow",
+            "is_namespace_rooted": true,
             "keyword": "func",
             "name": "Grow",
-            "stable_key": "go::nested/go.go::Method::Grow::0"
+            "qualified_name": "nested.Widget.Grow",
+            "stable_key": "go::nested/go.go::Method::nested.Widget.Grow::0"
           },
           "kind": "Method",
           "kind_data": {
@@ -4697,7 +4901,7 @@
           "language": "Go",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -4705,6 +4909,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Member",
           "semantics": {},
           "source": {
             "body_span": {
@@ -4769,6 +4974,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Public"
           }
         },
@@ -4777,8 +4983,10 @@
           "id": "<id-57>",
           "identity": {
             "display_name": "w",
+            "is_namespace_rooted": true,
             "name": "w",
-            "stable_key": "go::nested/go.go::Parameter::w::0"
+            "qualified_name": "nested.Widget.Grow.w",
+            "stable_key": "go::nested/go.go::Parameter::nested.Widget.Grow.w::0"
           },
           "kind": "Parameter",
           "kind_data": {
@@ -4791,7 +4999,7 @@
           "language": "Go",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -4799,6 +5007,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Local",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -4839,6 +5048,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Unknown"
           }
         },
@@ -4847,8 +5057,10 @@
           "id": "<id-58>",
           "identity": {
             "display_name": "amount",
+            "is_namespace_rooted": true,
             "name": "amount",
-            "stable_key": "go::nested/go.go::Parameter::amount::0"
+            "qualified_name": "nested.Widget.Grow.amount",
+            "stable_key": "go::nested/go.go::Parameter::nested.Widget.Grow.amount::0"
           },
           "kind": "Parameter",
           "kind_data": {
@@ -4861,7 +5073,7 @@
           "language": "Go",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -4869,6 +5081,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Local",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -4909,6 +5122,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Unknown"
           }
         },
@@ -4917,9 +5131,11 @@
           "id": "<id-59>",
           "identity": {
             "display_name": "MaxSize",
+            "is_namespace_rooted": true,
             "keyword": "const",
             "name": "MaxSize",
-            "stable_key": "go::nested/go.go::Constant::MaxSize::0"
+            "qualified_name": "nested.MaxSize",
+            "stable_key": "go::nested/go.go::Constant::nested.MaxSize::0"
           },
           "kind": "Constant",
           "kind_data": {
@@ -4928,7 +5144,7 @@
           "language": "Go",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -4936,6 +5152,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Item",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -4976,6 +5193,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Public"
           }
         },
@@ -4984,9 +5202,11 @@
           "id": "<id-60>",
           "identity": {
             "display_name": "BuildWidget",
+            "is_namespace_rooted": true,
             "keyword": "func",
             "name": "BuildWidget",
-            "stable_key": "go::nested/go.go::Function::BuildWidget::0"
+            "qualified_name": "nested.BuildWidget",
+            "stable_key": "go::nested/go.go::Function::nested.BuildWidget::0"
           },
           "kind": "Function",
           "kind_data": {
@@ -5003,7 +5223,7 @@
           "language": "Go",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -5011,6 +5231,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Item",
           "semantics": {},
           "source": {
             "body_span": {
@@ -5075,6 +5296,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Public"
           }
         }
@@ -5082,7 +5304,8 @@
     },
     {
       "completed_capabilities": [
-        "declarations"
+        "declarations",
+        "flags"
       ],
       "completed_passes": [
         "Parse"
@@ -5095,7 +5318,9 @@
           "id": "<id-61>",
           "identity": {
             "display_name": "MAX_SIZE",
+            "is_namespace_rooted": false,
             "name": "MAX_SIZE",
+            "qualified_name": "MAX_SIZE",
             "stable_key": "python::nested/python.py::Variable::MAX_SIZE::0"
           },
           "kind": "Variable",
@@ -5105,7 +5330,7 @@
           "language": "Python",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -5113,6 +5338,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Item",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -5153,18 +5379,21 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Unknown"
           }
         },
         {
           "docs": {
-            "raw_doc": "Multi-file fixture: Python, in a nested directory.\nMAX_SIZE = 10"
+            "raw_doc": "A gadget with a size."
           },
           "id": "<id-62>",
           "identity": {
             "display_name": "Gadget",
+            "is_namespace_rooted": false,
             "keyword": "class",
             "name": "Gadget",
+            "qualified_name": "Gadget",
             "stable_key": "python::nested/python.py::Class::Gadget::0"
           },
           "kind": "Class",
@@ -5174,7 +5403,7 @@
           "language": "Python",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -5182,6 +5411,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Item",
           "semantics": {},
           "source": {
             "body_span": {
@@ -5234,22 +5464,22 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Unknown"
           }
         },
         {
-          "docs": {
-            "raw_doc": "A gadget with a size."
-          },
+          "docs": {},
           "id": "<id-63>",
           "identity": {
             "container_kind": "Class",
             "container_name": "Gadget",
             "display_name": "__init__",
+            "is_namespace_rooted": false,
             "keyword": "def",
             "name": "__init__",
-            "qualified_name": "Gadget::__init__",
-            "stable_key": "python::nested/python.py::Method::Gadget::__init__::0"
+            "qualified_name": "Gadget.__init__",
+            "stable_key": "python::nested/python.py::Method::Gadget.__init__::0"
           },
           "kind": "Method",
           "kind_data": {
@@ -5283,7 +5513,7 @@
           "language": "Python",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -5291,6 +5521,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Member",
           "semantics": {},
           "source": {
             "body_span": {
@@ -5343,6 +5574,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Unknown"
           }
         },
@@ -5353,9 +5585,10 @@
             "container_kind": "Class",
             "container_name": "Gadget",
             "display_name": "self",
+            "is_namespace_rooted": false,
             "name": "self",
-            "qualified_name": "Gadget::self",
-            "stable_key": "python::nested/python.py::Parameter::Gadget::self::0"
+            "qualified_name": "Gadget.__init__.self",
+            "stable_key": "python::nested/python.py::Parameter::Gadget.__init__.self::0"
           },
           "kind": "Parameter",
           "kind_data": {
@@ -5368,7 +5601,7 @@
           "language": "Python",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -5376,6 +5609,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Local",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -5416,6 +5650,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Unknown"
           }
         },
@@ -5426,9 +5661,10 @@
             "container_kind": "Class",
             "container_name": "Gadget",
             "display_name": "size",
+            "is_namespace_rooted": false,
             "name": "size",
-            "qualified_name": "Gadget::size",
-            "stable_key": "python::nested/python.py::Parameter::Gadget::size::0"
+            "qualified_name": "Gadget.__init__.size",
+            "stable_key": "python::nested/python.py::Parameter::Gadget.__init__.size::0"
           },
           "kind": "Parameter",
           "kind_data": {
@@ -5441,7 +5677,7 @@
           "language": "Python",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -5449,6 +5685,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Local",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -5489,6 +5726,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Unknown"
           }
         },
@@ -5499,10 +5737,11 @@
             "container_kind": "Class",
             "container_name": "Gadget",
             "display_name": "grow",
+            "is_namespace_rooted": false,
             "keyword": "def",
             "name": "grow",
-            "qualified_name": "Gadget::grow",
-            "stable_key": "python::nested/python.py::Method::Gadget::grow::0"
+            "qualified_name": "Gadget.grow",
+            "stable_key": "python::nested/python.py::Method::Gadget.grow::0"
           },
           "kind": "Method",
           "kind_data": {
@@ -5536,7 +5775,7 @@
           "language": "Python",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -5544,6 +5783,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Member",
           "semantics": {},
           "source": {
             "body_span": {
@@ -5596,6 +5836,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Unknown"
           }
         },
@@ -5606,9 +5847,10 @@
             "container_kind": "Class",
             "container_name": "Gadget",
             "display_name": "self",
+            "is_namespace_rooted": false,
             "name": "self",
-            "qualified_name": "Gadget::self",
-            "stable_key": "python::nested/python.py::Parameter::Gadget::self::1"
+            "qualified_name": "Gadget.grow.self",
+            "stable_key": "python::nested/python.py::Parameter::Gadget.grow.self::0"
           },
           "kind": "Parameter",
           "kind_data": {
@@ -5621,7 +5863,7 @@
           "language": "Python",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -5629,6 +5871,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Local",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -5669,6 +5912,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Unknown"
           }
         },
@@ -5679,9 +5923,10 @@
             "container_kind": "Class",
             "container_name": "Gadget",
             "display_name": "amount",
+            "is_namespace_rooted": false,
             "name": "amount",
-            "qualified_name": "Gadget::amount",
-            "stable_key": "python::nested/python.py::Parameter::Gadget::amount::0"
+            "qualified_name": "Gadget.grow.amount",
+            "stable_key": "python::nested/python.py::Parameter::Gadget.grow.amount::0"
           },
           "kind": "Parameter",
           "kind_data": {
@@ -5694,7 +5939,7 @@
           "language": "Python",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -5702,6 +5947,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Local",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -5742,6 +5988,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Unknown"
           }
         },
@@ -5750,8 +5997,10 @@
           "id": "<id-69>",
           "identity": {
             "display_name": "build_gadget",
+            "is_namespace_rooted": false,
             "keyword": "def",
             "name": "build_gadget",
+            "qualified_name": "build_gadget",
             "stable_key": "python::nested/python.py::Function::build_gadget::0"
           },
           "kind": "Function",
@@ -5768,7 +6017,7 @@
           "language": "Python",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -5776,6 +6025,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Item",
           "semantics": {},
           "source": {
             "body_span": {
@@ -5828,6 +6078,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Unknown"
           }
         }
@@ -5835,7 +6086,8 @@
     },
     {
       "completed_capabilities": [
-        "declarations"
+        "declarations",
+        "flags"
       ],
       "completed_passes": [
         "Parse"
@@ -5848,8 +6100,10 @@
           "id": "<id-70>",
           "identity": {
             "display_name": "Multi::Queue",
+            "is_namespace_rooted": true,
             "keyword": "package",
             "name": "Multi::Queue",
+            "qualified_name": "Multi::Queue",
             "stable_key": "perl::perl.pl::Module::Multi::Queue::0"
           },
           "kind": "Module",
@@ -5859,7 +6113,7 @@
           "language": "Perl",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -5867,6 +6121,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Item",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -5907,6 +6162,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Unknown"
           }
         },
@@ -5917,6 +6173,7 @@
             "container_kind": "Module",
             "container_name": "Multi::Queue",
             "display_name": "$default_size",
+            "is_namespace_rooted": true,
             "keyword": "my",
             "name": "$default_size",
             "qualified_name": "Multi::Queue::$default_size",
@@ -5929,7 +6186,7 @@
           "language": "Perl",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -5937,6 +6194,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Item",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -5977,6 +6235,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Unknown"
           }
         },
@@ -5987,6 +6246,7 @@
             "container_kind": "Module",
             "container_name": "Multi::Queue",
             "display_name": "new_queue",
+            "is_namespace_rooted": true,
             "keyword": "sub",
             "name": "new_queue",
             "qualified_name": "Multi::Queue::new_queue",
@@ -6006,7 +6266,7 @@
           "language": "Perl",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -6014,6 +6274,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Item",
           "semantics": {},
           "source": {
             "body_span": {
@@ -6066,6 +6327,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Unknown"
           }
         },
@@ -6076,10 +6338,11 @@
             "container_kind": "Function",
             "container_name": "new_queue",
             "display_name": "$size",
+            "is_namespace_rooted": true,
             "keyword": "my",
             "name": "$size",
-            "qualified_name": "new_queue::$size",
-            "stable_key": "perl::perl.pl::Variable::new_queue::$size::0"
+            "qualified_name": "Multi::Queue::new_queue::$size",
+            "stable_key": "perl::perl.pl::Variable::Multi::Queue::new_queue::$size::0"
           },
           "kind": "Variable",
           "kind_data": {
@@ -6088,7 +6351,7 @@
           "language": "Perl",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -6096,6 +6359,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Local",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -6136,6 +6400,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Unknown"
           }
         },
@@ -6146,6 +6411,7 @@
             "container_kind": "Module",
             "container_name": "Multi::Queue",
             "display_name": "queue_size",
+            "is_namespace_rooted": true,
             "keyword": "sub",
             "name": "queue_size",
             "qualified_name": "Multi::Queue::queue_size",
@@ -6165,7 +6431,7 @@
           "language": "Perl",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -6173,6 +6439,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Item",
           "semantics": {},
           "source": {
             "body_span": {
@@ -6225,6 +6492,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Unknown"
           }
         },
@@ -6235,10 +6503,11 @@
             "container_kind": "Function",
             "container_name": "queue_size",
             "display_name": "$queue",
+            "is_namespace_rooted": true,
             "keyword": "my",
             "name": "$queue",
-            "qualified_name": "queue_size::$queue",
-            "stable_key": "perl::perl.pl::Variable::queue_size::$queue::0"
+            "qualified_name": "Multi::Queue::queue_size::$queue",
+            "stable_key": "perl::perl.pl::Variable::Multi::Queue::queue_size::$queue::0"
           },
           "kind": "Variable",
           "kind_data": {
@@ -6247,7 +6516,7 @@
           "language": "Perl",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -6255,6 +6524,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Local",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -6295,6 +6565,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Unknown"
           }
         }
@@ -6302,7 +6573,8 @@
     },
     {
       "completed_capabilities": [
-        "declarations"
+        "declarations",
+        "flags"
       ],
       "completed_passes": [
         "Parse"
@@ -6311,14 +6583,14 @@
       "language": "Php",
       "symbols": [
         {
-          "docs": {
-            "raw_doc": "Multi-file fixture: PHP."
-          },
+          "docs": {},
           "id": "<id-76>",
           "identity": {
             "display_name": "Account",
+            "is_namespace_rooted": false,
             "keyword": "class",
             "name": "Account",
+            "qualified_name": "Account",
             "stable_key": "php::php.php::Class::Account::0"
           },
           "kind": "Class",
@@ -6346,7 +6618,7 @@
           "language": "Php",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -6354,6 +6626,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Item",
           "semantics": {},
           "source": {
             "body_span": {
@@ -6406,6 +6679,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Public"
           }
         },
@@ -6416,6 +6690,7 @@
             "container_kind": "Class",
             "container_name": "Account",
             "display_name": "balance",
+            "is_namespace_rooted": false,
             "name": "balance",
             "qualified_name": "Account::balance",
             "stable_key": "php::php.php::Field::Account::balance::0"
@@ -6435,7 +6710,7 @@
           "language": "Php",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -6443,6 +6718,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Member",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -6483,6 +6759,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Private"
           }
         },
@@ -6493,6 +6770,7 @@
             "container_kind": "Class",
             "container_name": "Account",
             "display_name": "deposit",
+            "is_namespace_rooted": false,
             "keyword": "function",
             "name": "deposit",
             "qualified_name": "Account::deposit",
@@ -6524,7 +6802,7 @@
           "language": "Php",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -6532,6 +6810,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Member",
           "semantics": {},
           "source": {
             "body_span": {
@@ -6596,6 +6875,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Public"
           }
         },
@@ -6606,9 +6886,10 @@
             "container_kind": "Class",
             "container_name": "Account",
             "display_name": "amount",
+            "is_namespace_rooted": false,
             "name": "amount",
-            "qualified_name": "Account::amount",
-            "stable_key": "php::php.php::Parameter::Account::amount::0"
+            "qualified_name": "Account::deposit::amount",
+            "stable_key": "php::php.php::Parameter::Account::deposit::amount::0"
           },
           "kind": "Parameter",
           "kind_data": {
@@ -6621,7 +6902,7 @@
           "language": "Php",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -6629,6 +6910,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Local",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -6669,6 +6951,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Unknown"
           }
         },
@@ -6679,6 +6962,7 @@
             "container_kind": "Class",
             "container_name": "Account",
             "display_name": "open",
+            "is_namespace_rooted": false,
             "keyword": "function",
             "name": "open",
             "qualified_name": "Account::open",
@@ -6704,7 +6988,7 @@
           ],
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -6712,6 +6996,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Member",
           "semantics": {},
           "source": {
             "body_span": {
@@ -6776,6 +7061,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Public"
           }
         },
@@ -6784,8 +7070,10 @@
           "id": "<id-81>",
           "identity": {
             "display_name": "open_account",
+            "is_namespace_rooted": false,
             "keyword": "function",
             "name": "open_account",
+            "qualified_name": "open_account",
             "stable_key": "php::php.php::Function::open_account::0"
           },
           "kind": "Function",
@@ -6803,7 +7091,7 @@
           "language": "Php",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -6811,6 +7099,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Item",
           "semantics": {},
           "source": {
             "body_span": {
@@ -6875,6 +7164,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Public"
           }
         }
@@ -6882,7 +7172,8 @@
     },
     {
       "completed_capabilities": [
-        "declarations"
+        "declarations",
+        "flags"
       ],
       "completed_passes": [
         "Parse"
@@ -6892,13 +7183,15 @@
       "symbols": [
         {
           "docs": {
-            "raw_doc": "Multi-file fixture: Rust.\nA widget with a size."
+            "raw_doc": "A widget with a size."
           },
           "id": "<id-82>",
           "identity": {
             "display_name": "Widget",
+            "is_namespace_rooted": false,
             "keyword": "struct",
             "name": "Widget",
+            "qualified_name": "Widget",
             "stable_key": "rust::rust.rs::Type::Widget::0"
           },
           "kind": "Type",
@@ -6926,7 +7219,7 @@
           "language": "Rust",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -6934,6 +7227,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Item",
           "semantics": {},
           "source": {
             "body_span": {
@@ -6986,6 +7280,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Public"
           }
         },
@@ -6996,6 +7291,7 @@
             "container_kind": "Type",
             "container_name": "Widget",
             "display_name": "size",
+            "is_namespace_rooted": false,
             "name": "size",
             "qualified_name": "Widget::size",
             "stable_key": "rust::rust.rs::Field::Widget::size::0"
@@ -7015,7 +7311,7 @@
           "language": "Rust",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -7023,6 +7319,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Member",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -7063,6 +7360,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Public"
           }
         },
@@ -7073,6 +7371,7 @@
             "container_kind": "Type",
             "container_name": "Widget",
             "display_name": "new",
+            "is_namespace_rooted": false,
             "keyword": "fn",
             "name": "new",
             "qualified_name": "Widget::new",
@@ -7109,7 +7408,7 @@
           ],
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -7117,6 +7416,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Member",
           "semantics": {},
           "source": {
             "body_span": {
@@ -7181,6 +7481,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Public"
           }
         },
@@ -7191,9 +7492,10 @@
             "container_kind": "Type",
             "container_name": "Widget",
             "display_name": "size",
+            "is_namespace_rooted": false,
             "name": "size",
-            "qualified_name": "Widget::size",
-            "stable_key": "rust::rust.rs::Parameter::Widget::size::0"
+            "qualified_name": "Widget::new::size",
+            "stable_key": "rust::rust.rs::Parameter::Widget::new::size::0"
           },
           "kind": "Parameter",
           "kind_data": {
@@ -7206,7 +7508,7 @@
           "language": "Rust",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -7214,6 +7516,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Local",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -7254,6 +7557,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Unknown"
           }
         },
@@ -7264,6 +7568,7 @@
             "container_kind": "Type",
             "container_name": "Widget",
             "display_name": "grow",
+            "is_namespace_rooted": false,
             "keyword": "fn",
             "name": "grow",
             "qualified_name": "Widget::grow",
@@ -7303,7 +7608,7 @@
           "language": "Rust",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -7311,6 +7616,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Member",
           "semantics": {},
           "source": {
             "body_span": {
@@ -7375,6 +7681,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Public"
           }
         },
@@ -7385,9 +7692,10 @@
             "container_kind": "Type",
             "container_name": "Widget",
             "display_name": "self",
+            "is_namespace_rooted": false,
             "name": "self",
-            "qualified_name": "Widget::self",
-            "stable_key": "rust::rust.rs::Parameter::Widget::self::0"
+            "qualified_name": "Widget::grow::self",
+            "stable_key": "rust::rust.rs::Parameter::Widget::grow::self::0"
           },
           "kind": "Parameter",
           "kind_data": {
@@ -7400,7 +7708,7 @@
           "language": "Rust",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -7408,6 +7716,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Local",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -7448,6 +7757,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Unknown"
           }
         },
@@ -7458,9 +7768,10 @@
             "container_kind": "Type",
             "container_name": "Widget",
             "display_name": "amount",
+            "is_namespace_rooted": false,
             "name": "amount",
-            "qualified_name": "Widget::amount",
-            "stable_key": "rust::rust.rs::Parameter::Widget::amount::0"
+            "qualified_name": "Widget::grow::amount",
+            "stable_key": "rust::rust.rs::Parameter::Widget::grow::amount::0"
           },
           "kind": "Parameter",
           "kind_data": {
@@ -7473,7 +7784,7 @@
           "language": "Rust",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -7481,6 +7792,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Local",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -7521,6 +7833,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Unknown"
           }
         },
@@ -7529,8 +7842,10 @@
           "id": "<id-89>",
           "identity": {
             "display_name": "Shape",
+            "is_namespace_rooted": false,
             "keyword": "enum",
             "name": "Shape",
+            "qualified_name": "Shape",
             "stable_key": "rust::rust.rs::Enum::Shape::0"
           },
           "kind": "Enum",
@@ -7550,7 +7865,7 @@
           "language": "Rust",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -7558,6 +7873,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Item",
           "semantics": {},
           "source": {
             "body_span": {
@@ -7610,6 +7926,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Public"
           }
         },
@@ -7620,6 +7937,7 @@
             "container_kind": "Enum",
             "container_name": "Shape",
             "display_name": "Circle",
+            "is_namespace_rooted": false,
             "name": "Circle",
             "qualified_name": "Shape::Circle",
             "stable_key": "rust::rust.rs::EnumVariant::Shape::Circle::0"
@@ -7631,7 +7949,7 @@
           "language": "Rust",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -7639,6 +7957,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Member",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -7679,6 +7998,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Public"
           }
         },
@@ -7689,6 +8009,7 @@
             "container_kind": "Enum",
             "container_name": "Shape",
             "display_name": "Square",
+            "is_namespace_rooted": false,
             "name": "Square",
             "qualified_name": "Shape::Square",
             "stable_key": "rust::rust.rs::EnumVariant::Shape::Square::0"
@@ -7700,7 +8021,7 @@
           "language": "Rust",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -7708,6 +8029,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Member",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -7748,6 +8070,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Public"
           }
         },
@@ -7756,8 +8079,10 @@
           "id": "<id-92>",
           "identity": {
             "display_name": "MAX_SIZE",
+            "is_namespace_rooted": false,
             "keyword": "const",
             "name": "MAX_SIZE",
+            "qualified_name": "MAX_SIZE",
             "stable_key": "rust::rust.rs::Constant::MAX_SIZE::0"
           },
           "kind": "Constant",
@@ -7767,7 +8092,7 @@
           "language": "Rust",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -7775,6 +8100,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Item",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -7815,6 +8141,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Public"
           }
         },
@@ -7823,8 +8150,10 @@
           "id": "<id-93>",
           "identity": {
             "display_name": "build_widget",
+            "is_namespace_rooted": false,
             "keyword": "fn",
             "name": "build_widget",
+            "qualified_name": "build_widget",
             "stable_key": "rust::rust.rs::Function::build_widget::0"
           },
           "kind": "Function",
@@ -7842,7 +8171,7 @@
           "language": "Rust",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -7850,6 +8179,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Item",
           "semantics": {},
           "source": {
             "body_span": {
@@ -7914,6 +8244,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Public"
           }
         }
@@ -7921,7 +8252,8 @@
     },
     {
       "completed_capabilities": [
-        "declarations"
+        "declarations",
+        "flags"
       ],
       "completed_passes": [
         "Parse"
@@ -7934,9 +8266,11 @@
           "id": "<id-94>",
           "identity": {
             "display_name": "Named",
+            "is_namespace_rooted": true,
             "keyword": "trait",
             "name": "Named",
-            "stable_key": "scala::scala.scala::Trait::Named::0"
+            "qualified_name": "multi.Named",
+            "stable_key": "scala::scala.scala::Trait::multi.Named::0"
           },
           "kind": "Trait",
           "kind_data": {
@@ -7945,7 +8279,7 @@
           "language": "Scala",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -7953,6 +8287,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Item",
           "semantics": {},
           "source": {
             "body_span": {
@@ -8005,6 +8340,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Public"
           }
         },
@@ -8015,10 +8351,11 @@
             "container_kind": "Trait",
             "container_name": "Named",
             "display_name": "name",
+            "is_namespace_rooted": true,
             "keyword": "def",
             "name": "name",
-            "qualified_name": "Named::name",
-            "stable_key": "scala::scala.scala::Method::Named::name::0"
+            "qualified_name": "multi.Named.name",
+            "stable_key": "scala::scala.scala::Method::multi.Named.name::0"
           },
           "kind": "Method",
           "kind_data": {
@@ -8034,7 +8371,7 @@
           "language": "Scala",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -8042,6 +8379,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Member",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -8082,6 +8420,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Public"
           }
         },
@@ -8090,9 +8429,11 @@
           "id": "<id-96>",
           "identity": {
             "display_name": "Tag",
+            "is_namespace_rooted": true,
             "keyword": "class",
             "name": "Tag",
-            "stable_key": "scala::scala.scala::Class::Tag::0"
+            "qualified_name": "multi.Tag",
+            "stable_key": "scala::scala.scala::Class::multi.Tag::0"
           },
           "kind": "Class",
           "kind_data": {
@@ -8118,7 +8459,7 @@
           "language": "Scala",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -8126,6 +8467,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Item",
           "semantics": {},
           "source": {
             "body_span": {
@@ -8178,6 +8520,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Public"
           }
         },
@@ -8188,10 +8531,11 @@
             "container_kind": "Class",
             "container_name": "Tag",
             "display_name": "name",
+            "is_namespace_rooted": true,
             "keyword": "val",
             "name": "name",
-            "qualified_name": "Tag::name",
-            "stable_key": "scala::scala.scala::Parameter::Tag::name::0"
+            "qualified_name": "multi.Tag.name",
+            "stable_key": "scala::scala.scala::Parameter::multi.Tag.name::0"
           },
           "kind": "Parameter",
           "kind_data": {
@@ -8204,7 +8548,7 @@
           "language": "Scala",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -8212,6 +8556,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Local",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -8252,6 +8597,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Unknown"
           }
         },
@@ -8262,10 +8608,11 @@
             "container_kind": "Class",
             "container_name": "Tag",
             "display_name": "upper",
+            "is_namespace_rooted": true,
             "keyword": "def",
             "name": "upper",
-            "qualified_name": "Tag::upper",
-            "stable_key": "scala::scala.scala::Method::Tag::upper::0"
+            "qualified_name": "multi.Tag.upper",
+            "stable_key": "scala::scala.scala::Method::multi.Tag.upper::0"
           },
           "kind": "Method",
           "kind_data": {
@@ -8282,7 +8629,7 @@
           "language": "Scala",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -8290,6 +8637,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Member",
           "semantics": {},
           "source": {
             "body_span": {
@@ -8354,6 +8702,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Public"
           }
         },
@@ -8362,9 +8711,11 @@
           "id": "<id-99>",
           "identity": {
             "display_name": "Tag",
+            "is_namespace_rooted": true,
             "keyword": "object",
             "name": "Tag",
-            "stable_key": "scala::scala.scala::Module::Tag::0"
+            "qualified_name": "multi.Tag",
+            "stable_key": "scala::scala.scala::Module::multi.Tag::0"
           },
           "kind": "Module",
           "kind_data": {
@@ -8373,7 +8724,7 @@
           "language": "Scala",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -8381,6 +8732,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Item",
           "semantics": {},
           "source": {
             "body_span": {
@@ -8433,6 +8785,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Public"
           }
         },
@@ -8443,10 +8796,11 @@
             "container_kind": "Module",
             "container_name": "Tag",
             "display_name": "empty",
+            "is_namespace_rooted": true,
             "keyword": "def",
             "name": "empty",
-            "qualified_name": "Tag::empty",
-            "stable_key": "scala::scala.scala::Method::Tag::empty::0"
+            "qualified_name": "multi.Tag.empty",
+            "stable_key": "scala::scala.scala::Method::multi.Tag.empty::0"
           },
           "kind": "Method",
           "kind_data": {
@@ -8468,7 +8822,7 @@
           ],
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -8476,6 +8830,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Member",
           "semantics": {},
           "source": {
             "body_span": {
@@ -8540,6 +8895,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Public"
           }
         }
@@ -8547,7 +8903,8 @@
     },
     {
       "completed_capabilities": [
-        "declarations"
+        "declarations",
+        "flags"
       ],
       "completed_passes": [
         "Parse"
@@ -8556,14 +8913,14 @@
       "language": "Swift",
       "symbols": [
         {
-          "docs": {
-            "raw_doc": "Multi-file fixture: Swift."
-          },
+          "docs": {},
           "id": "<id-101>",
           "identity": {
             "display_name": "Meter",
+            "is_namespace_rooted": false,
             "keyword": "struct",
             "name": "Meter",
+            "qualified_name": "Meter",
             "stable_key": "swift::swift.swift::Type::Meter::0"
           },
           "kind": "Type",
@@ -8591,7 +8948,7 @@
           "language": "Swift",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -8599,6 +8956,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Item",
           "semantics": {},
           "source": {
             "body_span": {
@@ -8651,6 +9009,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Internal"
           }
         },
@@ -8661,10 +9020,11 @@
             "container_kind": "Type",
             "container_name": "Meter",
             "display_name": "reading",
+            "is_namespace_rooted": false,
             "keyword": "var",
             "name": "reading",
-            "qualified_name": "Meter::reading",
-            "stable_key": "swift::swift.swift::Field::Meter::reading::0"
+            "qualified_name": "Meter.reading",
+            "stable_key": "swift::swift.swift::Field::Meter.reading::0"
           },
           "kind": "Field",
           "kind_data": {
@@ -8681,7 +9041,7 @@
           "language": "Swift",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -8689,6 +9049,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Member",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -8729,6 +9090,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Internal"
           }
         },
@@ -8739,10 +9101,11 @@
             "container_kind": "Type",
             "container_name": "Meter",
             "display_name": "doubled",
+            "is_namespace_rooted": false,
             "keyword": "func",
             "name": "doubled",
-            "qualified_name": "Meter::doubled",
-            "stable_key": "swift::swift.swift::Method::Meter::doubled::0"
+            "qualified_name": "Meter.doubled",
+            "stable_key": "swift::swift.swift::Method::Meter.doubled::0"
           },
           "kind": "Method",
           "kind_data": {
@@ -8759,7 +9122,7 @@
           "language": "Swift",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -8767,6 +9130,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Member",
           "semantics": {},
           "source": {
             "body_span": {
@@ -8831,6 +9195,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Internal"
           }
         },
@@ -8839,8 +9204,10 @@
           "id": "<id-104>",
           "identity": {
             "display_name": "Readable",
+            "is_namespace_rooted": false,
             "keyword": "protocol",
             "name": "Readable",
+            "qualified_name": "Readable",
             "stable_key": "swift::swift.swift::Interface::Readable::0"
           },
           "kind": "Interface",
@@ -8850,7 +9217,7 @@
           "language": "Swift",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -8858,6 +9225,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Item",
           "semantics": {},
           "source": {
             "body_span": {
@@ -8910,6 +9278,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Internal"
           }
         },
@@ -8920,10 +9289,11 @@
             "container_kind": "Interface",
             "container_name": "Readable",
             "display_name": "read",
+            "is_namespace_rooted": false,
             "keyword": "func",
             "name": "read",
-            "qualified_name": "Readable::read",
-            "stable_key": "swift::swift.swift::Method::Readable::read::0"
+            "qualified_name": "Readable.read",
+            "stable_key": "swift::swift.swift::Method::Readable.read::0"
           },
           "kind": "Method",
           "kind_data": {
@@ -8940,7 +9310,7 @@
           "language": "Swift",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -8948,6 +9318,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Member",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -9000,6 +9371,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Internal"
           }
         },
@@ -9008,8 +9380,10 @@
           "id": "<id-106>",
           "identity": {
             "display_name": "buildMeter",
+            "is_namespace_rooted": false,
             "keyword": "func",
             "name": "buildMeter",
+            "qualified_name": "buildMeter",
             "stable_key": "swift::swift.swift::Function::buildMeter::0"
           },
           "kind": "Function",
@@ -9027,7 +9401,7 @@
           "language": "Swift",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -9035,6 +9409,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Item",
           "semantics": {},
           "source": {
             "body_span": {
@@ -9099,6 +9474,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Internal"
           }
         }
@@ -9106,7 +9482,8 @@
     },
     {
       "completed_capabilities": [
-        "declarations"
+        "declarations",
+        "flags"
       ],
       "completed_passes": [
         "Parse"
@@ -9115,14 +9492,14 @@
       "language": "TypeScript",
       "symbols": [
         {
-          "docs": {
-            "raw_doc": "Multi-file fixture: TypeScript."
-          },
+          "docs": {},
           "id": "<id-107>",
           "identity": {
             "display_name": "Sized",
+            "is_namespace_rooted": false,
             "keyword": "interface",
             "name": "Sized",
+            "qualified_name": "Sized",
             "stable_key": "typescript::typescript.ts::Interface::Sized::0"
           },
           "kind": "Interface",
@@ -9150,7 +9527,7 @@
           "language": "TypeScript",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -9158,6 +9535,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Item",
           "semantics": {},
           "source": {
             "body_span": {
@@ -9210,6 +9588,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Public"
           }
         },
@@ -9220,9 +9599,10 @@
             "container_kind": "Interface",
             "container_name": "Sized",
             "display_name": "size",
+            "is_namespace_rooted": false,
             "name": "size",
-            "qualified_name": "Sized::size",
-            "stable_key": "typescript::typescript.ts::Property::Sized::size::0"
+            "qualified_name": "Sized.size",
+            "stable_key": "typescript::typescript.ts::Property::Sized.size::0"
           },
           "kind": "Property",
           "kind_data": {
@@ -9239,7 +9619,7 @@
           "language": "TypeScript",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -9247,6 +9627,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Member",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -9287,6 +9668,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Public"
           }
         },
@@ -9295,8 +9677,10 @@
           "id": "<id-109>",
           "identity": {
             "display_name": "Size",
+            "is_namespace_rooted": false,
             "keyword": "type",
             "name": "Size",
+            "qualified_name": "Size",
             "stable_key": "typescript::typescript.ts::TypeAlias::Size::0"
           },
           "kind": "TypeAlias",
@@ -9310,7 +9694,7 @@
           "language": "TypeScript",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -9318,6 +9702,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Item",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -9358,6 +9743,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Public"
           }
         },
@@ -9366,8 +9752,10 @@
           "id": "<id-110>",
           "identity": {
             "display_name": "Panel",
+            "is_namespace_rooted": false,
             "keyword": "class",
             "name": "Panel",
+            "qualified_name": "Panel",
             "stable_key": "typescript::typescript.ts::Class::Panel::0"
           },
           "kind": "Class",
@@ -9395,7 +9783,7 @@
           "language": "TypeScript",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -9403,6 +9791,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Item",
           "semantics": {},
           "source": {
             "body_span": {
@@ -9455,6 +9844,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Public"
           }
         },
@@ -9465,9 +9855,10 @@
             "container_kind": "Class",
             "container_name": "Panel",
             "display_name": "size",
+            "is_namespace_rooted": false,
             "name": "size",
-            "qualified_name": "Panel::size",
-            "stable_key": "typescript::typescript.ts::Property::Panel::size::0"
+            "qualified_name": "Panel.size",
+            "stable_key": "typescript::typescript.ts::Property::Panel.size::0"
           },
           "kind": "Property",
           "kind_data": {
@@ -9484,7 +9875,7 @@
           "language": "TypeScript",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -9492,6 +9883,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Member",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -9532,6 +9924,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Public"
           }
         },
@@ -9542,9 +9935,10 @@
             "container_kind": "Class",
             "container_name": "Panel",
             "display_name": "constructor",
+            "is_namespace_rooted": false,
             "name": "constructor",
-            "qualified_name": "Panel::constructor",
-            "stable_key": "typescript::typescript.ts::Constructor::Panel::constructor::0"
+            "qualified_name": "Panel.constructor",
+            "stable_key": "typescript::typescript.ts::Constructor::Panel.constructor::0"
           },
           "kind": "Constructor",
           "kind_data": {
@@ -9571,7 +9965,7 @@
           "language": "TypeScript",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -9579,6 +9973,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Member",
           "semantics": {},
           "source": {
             "body_span": {
@@ -9631,6 +10026,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Public"
           }
         },
@@ -9641,9 +10037,10 @@
             "container_kind": "Class",
             "container_name": "Panel",
             "display_name": "size",
+            "is_namespace_rooted": false,
             "name": "size",
-            "qualified_name": "Panel::size",
-            "stable_key": "typescript::typescript.ts::Parameter::Panel::size::0"
+            "qualified_name": "Panel.constructor.size",
+            "stable_key": "typescript::typescript.ts::Parameter::Panel.constructor.size::0"
           },
           "kind": "Parameter",
           "kind_data": {
@@ -9656,7 +10053,7 @@
           "language": "TypeScript",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -9664,6 +10061,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Local",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -9704,6 +10102,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Unknown"
           }
         },
@@ -9714,9 +10113,10 @@
             "container_kind": "Class",
             "container_name": "Panel",
             "display_name": "grow",
+            "is_namespace_rooted": false,
             "name": "grow",
-            "qualified_name": "Panel::grow",
-            "stable_key": "typescript::typescript.ts::Method::Panel::grow::0"
+            "qualified_name": "Panel.grow",
+            "stable_key": "typescript::typescript.ts::Method::Panel.grow::0"
           },
           "kind": "Method",
           "kind_data": {
@@ -9744,7 +10144,7 @@
           "language": "TypeScript",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -9752,6 +10152,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Member",
           "semantics": {},
           "source": {
             "body_span": {
@@ -9816,6 +10217,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Public"
           }
         },
@@ -9826,9 +10228,10 @@
             "container_kind": "Class",
             "container_name": "Panel",
             "display_name": "amount",
+            "is_namespace_rooted": false,
             "name": "amount",
-            "qualified_name": "Panel::amount",
-            "stable_key": "typescript::typescript.ts::Parameter::Panel::amount::0"
+            "qualified_name": "Panel.grow.amount",
+            "stable_key": "typescript::typescript.ts::Parameter::Panel.grow.amount::0"
           },
           "kind": "Parameter",
           "kind_data": {
@@ -9841,7 +10244,7 @@
           "language": "TypeScript",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -9849,6 +10252,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Local",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -9889,6 +10293,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Unknown"
           }
         },
@@ -9897,8 +10302,10 @@
           "id": "<id-116>",
           "identity": {
             "display_name": "buildPanel",
+            "is_namespace_rooted": false,
             "keyword": "function",
             "name": "buildPanel",
+            "qualified_name": "buildPanel",
             "stable_key": "typescript::typescript.ts::Function::buildPanel::0"
           },
           "kind": "Function",
@@ -9916,7 +10323,7 @@
           "language": "TypeScript",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -9924,6 +10331,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Item",
           "semantics": {},
           "source": {
             "body_span": {
@@ -9988,6 +10396,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Public"
           }
         }
@@ -9995,7 +10404,8 @@
     },
     {
       "completed_capabilities": [
-        "declarations"
+        "declarations",
+        "flags"
       ],
       "completed_passes": [
         "Parse"
@@ -10008,8 +10418,10 @@
           "id": "<id-117>",
           "identity": {
             "display_name": "PROMPT_STYLE",
+            "is_namespace_rooted": false,
             "keyword": "typeset",
             "name": "PROMPT_STYLE",
+            "qualified_name": "PROMPT_STYLE",
             "stable_key": "zsh::zsh.zsh::Variable::PROMPT_STYLE::0"
           },
           "kind": "Variable",
@@ -10019,7 +10431,7 @@
           "language": "Zsh",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -10027,6 +10439,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Item",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -10067,6 +10480,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Unknown"
           }
         },
@@ -10075,7 +10489,9 @@
           "id": "<id-118>",
           "identity": {
             "display_name": "render_prompt",
+            "is_namespace_rooted": false,
             "name": "render_prompt",
+            "qualified_name": "render_prompt",
             "stable_key": "zsh::zsh.zsh::Function::render_prompt::0"
           },
           "kind": "Function",
@@ -10092,7 +10508,7 @@
           "language": "Zsh",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -10100,6 +10516,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Item",
           "semantics": {},
           "source": {
             "body_span": {
@@ -10152,6 +10569,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Unknown"
           }
         },
@@ -10160,9 +10578,11 @@
           "id": "<id-119>",
           "identity": {
             "display_name": "style",
+            "is_namespace_rooted": false,
             "keyword": "local",
             "name": "style",
-            "stable_key": "zsh::zsh.zsh::Variable::style::0"
+            "qualified_name": "render_prompt.style",
+            "stable_key": "zsh::zsh.zsh::Variable::render_prompt.style::0"
           },
           "kind": "Variable",
           "kind_data": {
@@ -10171,7 +10591,7 @@
           "language": "Zsh",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -10179,6 +10599,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Local",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -10219,6 +10640,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Unknown"
           }
         },
@@ -10227,8 +10649,10 @@
           "id": "<id-120>",
           "identity": {
             "display_name": "reset_prompt",
+            "is_namespace_rooted": false,
             "keyword": "function",
             "name": "reset_prompt",
+            "qualified_name": "reset_prompt",
             "stable_key": "zsh::zsh.zsh::Function::reset_prompt::0"
           },
           "kind": "Function",
@@ -10245,7 +10669,7 @@
           "language": "Zsh",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -10253,6 +10677,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Item",
           "semantics": {},
           "source": {
             "body_span": {
@@ -10305,6 +10730,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Unknown"
           }
         },
@@ -10313,8 +10739,10 @@
           "id": "<id-121>",
           "identity": {
             "display_name": "PROMPT_STYLE",
+            "is_namespace_rooted": false,
             "name": "PROMPT_STYLE",
-            "stable_key": "zsh::zsh.zsh::Variable::PROMPT_STYLE::1"
+            "qualified_name": "reset_prompt.PROMPT_STYLE",
+            "stable_key": "zsh::zsh.zsh::Variable::reset_prompt.PROMPT_STYLE::0"
           },
           "kind": "Variable",
           "kind_data": {
@@ -10323,7 +10751,7 @@
           "language": "Zsh",
           "provenance": {
             "extractor": "tree-sitter",
-            "extractor_version": "0.1.0+rev.6",
+            "extractor_version": "0.1.0+rev.8",
             "parse_pass": "parse"
           },
           "relations": {},
@@ -10331,6 +10759,7 @@
             "major": 4,
             "minor": 0
           },
+          "scope": "Local",
           "semantics": {},
           "source": {
             "declaration_span": {
@@ -10371,6 +10800,7 @@
             "is_imported": false,
             "is_reexported": false,
             "is_synthetic": false,
+            "is_test": false,
             "level": "Unknown"
           }
         }

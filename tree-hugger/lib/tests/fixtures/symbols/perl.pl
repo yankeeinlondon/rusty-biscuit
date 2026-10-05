@@ -56,3 +56,8 @@ sub boundary_multi_line_header
 }
 
 1;
+
+# ---- Flags and metrics ----
+
+# deprecated: a comment above a sub is not documentation here
+sub test_helper { return 1; }

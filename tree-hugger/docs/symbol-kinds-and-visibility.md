@@ -7,6 +7,8 @@ This page explains what Tree Hugger reports for each declaration it finds:
 - whether it is **`static`**, and which of the two meanings of `static` applies
 - its **container**, and the **declaration text**, **display header** and
   **declaring keyword** stored on its record
+- its **scope** (`Item`, `Member` or `Local`), its in-file **qualified name**
+  and whether it is declared **`async`**
 
 It covers all 16 supported languages. Read it to learn why `hug` prints
 `crate method new() [in type Point]`, why a declaration has no visibility
@@ -29,9 +31,11 @@ flowchart LR
     QUERY --> KIND["kind<br/>(capture + declaration node)"]
     KIND --> READERS["per-language readers:<br/>visibility, static, storage static"]
     READERS --> CONT["container name + container kind"]
-    CONT --> HEADER["declaration text, display header,<br/>declaring keyword"]
+    CONT --> QUAL["scope, qualified name, async"]
+    QUAL --> HEADER["declaration text, display header,<br/>declaring keyword"]
+    HEADER --> FACTS["on request: test and deprecation<br/>flags, metrics"]
     CONT --> V1["SymbolInfo<br/>TreeFile::symbols()"]
-    HEADER --> V2["SymbolRecord<br/>TreeFile::symbol_records()"]
+    FACTS --> V2["SymbolRecord<br/>TreeFile::symbol_records()"]
     V1 <-->|adapter| V2
     V2 --> CLI["hug output"]
 ```
@@ -40,14 +44,16 @@ The two models are:
 
 | Model | API | Where kind, visibility and `static` live |
 |---|---|---|
-| `SymbolInfo` (v1) | `TreeFile::symbols()` | `kind`, `visibility` (`None` = unknown), `is_static`, `is_static_storage`, `container_name`, `container_kind` |
-| `SymbolRecord` (schema 4.0) | `TreeFile::symbol_records()`, `symbol_index_v2()` | `kind`, `visibility.level`, `modifiers` (`Static`, `StaticStorage`), `identity.container_name`, `identity.container_kind`, `identity.keyword`, `source.declaration_text`, `source.signature_text`, `relations.implements` |
+| `SymbolInfo` (v1) | `TreeFile::symbols()` | `kind`, `scope`, `visibility` (`None` = unknown), `is_static`, `is_static_storage`, `is_async`, `container_name`, `container_kind`, `qualified_name`, `is_namespace_rooted` |
+| `SymbolRecord` (schema 4.0) | `TreeFile::symbol_records()`, `symbol_index_v2()` | `kind`, `scope`, `visibility.level`, `modifiers` (`Static`, `StaticStorage`, `Async`), `identity.container_name`, `identity.container_kind`, `identity.qualified_name`, `identity.is_namespace_rooted`, `identity.keyword`, `source.declaration_text`, `source.signature_text`, `relations.implements` |
 
 The adapter between them (`From<SymbolInfo> for SymbolRecord` and back)
-preserves kind, visibility, both `static` flags, container kind and the
-signature, with its parameters. The declaring keyword, declaration text,
-display header and `relations.implements` exist only on records, because
-`SymbolInfo` has no field for them.
+preserves kind, scope, visibility, both `static` flags, `async`, container
+kind, the qualified name and its namespace root, and the signature, with its
+parameters. The declaring keyword, declaration text,
+display header, `relations.implements`, the test and deprecation flags and
+the `metrics` facet exist only on records, because `SymbolInfo` has no field
+for them.
 
 Every change to what extraction produces bumps
 `tree_hugger::EXTRACTOR_REVISION`, including a repair made on a branch that has
@@ -261,6 +267,31 @@ declarations that **follow** them, up to the next package statement or the
 end of the enclosing block or file. The block form `package Foo { … }`
 contains only what is inside it.
 
+### Go receiver methods and Lua table members
+
+Two languages name a member's owner in the declaration itself rather than by
+nesting it. The container is that owner, found by name in the same file:
+
+```go
+type Point struct{ X int }
+func (p *Point) Move() {}        // Method, container Point, kind Type
+```
+
+```lua
+local M = {}
+function M.new() end             -- Function, container M, kind Variable
+function M:describe() end        -- Method, container M, kind Variable
+M.size = 1                       -- Variable, container M, kind Variable
+```
+
+- A Go receiver's base type is the container, through a pointer and generic
+  arguments (`func (p *Point[T]) M()` → `Point`). The receiver, the
+  parameters and the locals of a method have no container, as in any Go
+  function.
+- A Lua container is the table expression as written (`a.b` for
+  `function a.b.c()`). Its kind is the kind of the file-level declaration of
+  that name, and absent when there is none or they disagree.
+
 ### Rust `impl` members
 
 A member of an `impl` block names the **implemented type** as its container,
@@ -290,6 +321,225 @@ impl Foreign { fn f(&self) {} }                  // container Foreign, no kind
   trait's record ID when exactly one trait of that name is declared in the
   same file. Members of
   an inherent impl have an empty list.
+
+## Scope
+
+Every declaration has a **scope** that says where it sits, for presentation
+(hiding `Local` declarations from `hug symbols` by default is **planned**).
+It is decided by the nearest *semantic* declaration around it, not by the
+nearest brace:
+
+| Scope | Meaning | Examples |
+|---|---|---|
+| `Item` | at file level, or in a namespace, package or module body | free functions, types, top-level constants, Rust inline-module contents, C++/C# namespace contents |
+| `Member` | in a type, trait, interface, object or `impl` body | methods, fields, enum variants, associated constants |
+| `Local` | in a function body, or a parameter | `let`, `var`, `:=`, parameters, nested functions and types |
+
+```rust
+mod schema {
+    pub struct Record { id: u32 }      // Record: Item, id: Member
+    impl Record { fn load() {} }       // load: Member
+}
+fn build(width: u32) {                 // build: Item, width: Local
+    struct Scratch { cells: u8 }       // Scratch: Local, cells: Member
+    mod helpers { pub fn h() {} }      // helpers and h: Local
+}
+```
+
+Walking out from the declaration, the first function body decides `Local`
+and the first type, trait, interface, object or `impl` decides `Member`. A
+body is decided by what owns it, so a Rust `declaration_list` is `Item` space
+under a `mod` and `Member` space under an `impl` or `trait`. The rules
+below follow from that:
+
+- A member of a type declared inside a function is a `Member`; the type
+  itself is `Local`.
+- Members of unnamed owners (anonymous classes, object literals, class
+  expressions, Scala `given … with`) are `Member`, even though they have no
+  container.
+- A Go receiver method and a Lua `M.f`, `M:m` or `M.x = …` are `Member`
+  wherever they are written: they name their owner.
+- **Parameters are `Local` only where they are extracted**: 13 languages
+  produce `Parameter` records; Perl, Bash and Zsh produce none.
+- A C++ template type parameter is `Local`.
+- **Bash and Zsh functions defined inside a function body are `Local`,** even
+  though the shell makes them global once the outer function runs.
+- A block that computes a value (see [Containers](#containers)) is local
+  scope; a chunk-level Lua `if` or `do` block is not a function body, so its
+  `local` declarations stay `Item`.
+
+Scope is computed for every declaration, including those a kind selection
+leaves out of a report.
+
+## Qualified names
+
+`identity.qualified_name` is a readable lookup name built from the file's own
+source: the enclosing named declarations joined with the language's own
+separators, ending in the declaration's name. It is not unique (overloads and
+repeated locals share one); the record ID is.
+
+| Language | Separator | Example |
+|---|---|---|
+| Rust, C++, Perl | `::` | `schema::Record::load`, `ns::Widget::draw`, `Fixture::Greeter::greet` |
+| PHP | `\` after a namespace, `::` after a type | `App\Models\User::find` |
+| Lua | `.`, and `:` before a method | `Widget.new`, `Widget:describe` |
+| all others | `.` | `com.example.Point.area`, `Shape.area`, `outer.inner` |
+
+What becomes a segment:
+
+- extracted functions, types, modules and namespaces around the declaration;
+  a local's name includes its function (`Shape.area.self`)
+- a Rust `impl` block's implemented type (last path segment), a Go receiver's
+  base type and a Lua table, written in the declaration
+- a TypeScript `namespace`, a Swift extension's type and a named function that
+  is not extracted itself (a Java or C# constructor:
+  `com.example.Point.Point.x`)
+- nothing past an unnamed owner: a member of an anonymous class is qualified
+  by its own name alone
+
+**Explicit namespaces root the name.** A Java, Scala or Go `package`, a C# or
+PHP `namespace` (file-scoped or block), a named C++ `namespace` and a Perl
+`package` start the name, and `identity.is_namespace_rooted` is `true`
+(`com.example.symbols.PublicWidget`). A Rust inline `mod`, a TypeScript
+`namespace` and a type qualify the name but do not root it: `schema::Record`
+is not complete without its file. A Perl package name is absolute wherever it
+is written.
+
+The stored name is only the **in-file** part. Prefixing an unrooted name with
+its file (`src/symbol.rs#schema::Record`) or with a caller-supplied module
+path is **planned**: it is applied after a cache lookup, from query inputs
+that are not part of the cache key, so the stored name, the record ID and the
+cache entry never depend on where `hug` runs. `hug` will always use the file
+form for Rust and Python, because a file path alone cannot prove a module
+path.
+
+**IDs derive from the qualified name.** A record's ID is a digest of the
+language, the file's [identity](./cache-design.md#file-identity), the kind,
+the in-file qualified name and the declaration's order among records of the
+same kind and qualified name. Reading one file through two spellings of its
+path, or from two scan roots, gives the same IDs.
+
+## `async`
+
+A declaration written `async` carries `Modifier::Async` (`SymbolInfo::is_async`):
+
+| Language | Declarations |
+|---|---|
+| Rust | `async fn`, in and outside `impl` and `trait` blocks |
+| JavaScript, TypeScript | `async` functions, methods, function expressions and arrow functions, and a name bound to one (`const f = async () => …`, a class field holding one) |
+| Python | `async def`, decorated or not |
+| C# | `async` methods and local functions |
+| Swift | functions, methods, initializers and protocol requirements written `async` |
+
+Go, Java, C, C++, Scala, PHP, Perl, Lua, Bash and Zsh have no async
+declarations and never report it. An `async` block inside a function does not
+make the function async.
+
+## Documentation
+
+A declaration's documentation (`SymbolInfo::doc_comment`, the record's
+`docs.raw_doc`) is the run of **doc comments** directly before it, with their
+delimiters removed; ordinary comments are skipped, never read. Python reads
+the docstring instead.
+
+| Language | Documentation |
+|---|---|
+| Rust | `///` and `/** … */` (`//!` documents the enclosing module, not the next item); attributes between them and the item are skipped |
+| Go | every comment in the group that ends on the line before the declaration (a blank line ends the group) |
+| Java, JavaScript, TypeScript, PHP, Scala | `/** … */` |
+| C#, Swift | `///` and `/** … */` |
+| C, C++ | Doxygen's `///`, `//!`, `/** … */` and `/*! … */` |
+| Python | the string that is the first statement of a `def` or `class` body |
+| Lua, Perl, Bash, Zsh | none: these languages have no doc-comment detection |
+
+```ts
+/** Adds two numbers. */          // documents `add`
+export const add = (a: number, b: number) => a + b;
+
+// A plain comment documents nothing.
+function helper() {}
+```
+
+A declaration wrapped in `export`, a JavaScript or TypeScript variable
+statement or a C++ `template<…>` header is documented before the wrapper. A
+doc comment that is empty after its delimiters are removed is no
+documentation.
+
+## Deprecation and test flags
+
+Two flags are computed when a query asks for `Capability::Flags`, which
+`hug --json` and `--json-full` always do; without it both are `false`,
+meaning "not computed".
+
+**`visibility.is_deprecated`** is set by exactly these markers; every other
+language and form (including an ordinary comment that says "deprecated")
+leaves it `false`:
+
+| Language | Marker |
+|---|---|
+| Rust | `#[deprecated]`, with or without arguments |
+| Java | `@Deprecated` (or `@java.lang.Deprecated`), or a `@deprecated` tag in the doc comment |
+| C# | `[Obsolete]`, also qualified (`System.Obsolete`) or with the `Attribute` suffix |
+| JavaScript, TypeScript, PHP | a `@deprecated` tag on its own doc line |
+| Go | a doc paragraph that starts with `Deprecated:` |
+| Swift | `@available(*, deprecated…)` (a single-platform `@available(iOS, deprecated: 13)` does not count) |
+| Scala | `@deprecated` (or `@scala.deprecated`) |
+| C++ | `[[deprecated]]` (a vendor form such as `[[gnu::deprecated]]` does not count) |
+| Python | the `@deprecated` decorator, bare or as `typing_extensions.deprecated` or `warnings.deprecated` |
+
+```go
+// Deprecated: use NewPoint.      <- doc paragraph: is_deprecated = true
+func MakePoint() {}
+
+func run() {
+    // this path is deprecated      <- ordinary comment: no effect
+}
+```
+
+**`visibility.is_test`** means **test-only code**. It is `true` for:
+
+- every declaration of a test file, helpers included: Go `*_test.go`; Python
+  `test_*.py`, `*_test.py` and `conftest.py`; JavaScript and TypeScript
+  `*.test.*` and `*.spec.*`; Rust files below the `tests/` directory of the
+  nearest enclosing Cargo package (the nearest directory holding a
+  `Cargo.toml`; with none, the rule does not apply);
+- a declaration with a test attribute: Rust `#[test]` and `#[<path>::test]`
+  (`#[tokio::test]`), Java `@Test` (also qualified, `@org.junit.Test`), C#
+  `[Test]`, `[Fact]` and `[TestMethod]`;
+- everything inside a Rust item marked `#[cfg(test)]`, or a module or file
+  whose inner attributes say `#![cfg(test)]`, nested declarations included.
+
+```rust
+#[cfg(test)]
+mod tests {                 // is_test
+    fn helper() {}          // is_test (inside cfg(test))
+}
+
+#[cfg(any(test, feature = "x"))]
+fn shared() {}              // not a test: compiled outside tests too
+
+pub fn test_helper() {}     // not a test: the name decides nothing
+```
+
+The rules are a syntax and file-name heuristic, not a claim that a test
+runner executes the symbol. Only the attributes named here are read; nothing
+is resolved through imports, and other languages report `false`.
+
+## Metrics
+
+The `metrics` facet is present when a query asks for `Capability::Metrics`.
+An unsupported metric is `null`; a measured zero is `0`.
+
+| Metric | Definition | `null` when |
+|---|---|---|
+| `parameters` | the declared parameters of a function, method or constructor: its own parameter list, without a Rust `self` (a Go receiver is a separate list and never counted); a variadic parameter counts once; unnamed C, C++ and Go parameters count; `(void)` and `()` are `0` | the declaration is not a function, it has no parameter list (`def area: Int` in Scala), or the language is Perl, Bash or Zsh, whose parameters are not extracted |
+| `has_docs` | whether the declaration has [documentation](#documentation) | the language is Lua, Perl, Bash or Zsh |
+
+```python
+class Receiver:
+    def with_receiver(self, only):   # parameters = 2: `self` is an ordinary
+        """Documented."""            # parameter in Python; has_docs = true
+```
 
 ## Visibility
 
@@ -1025,7 +1275,11 @@ These are limits of the extractor today, not of the grammars:
 - **Constructors** are reported only for TypeScript and JavaScript. Python,
   Java, C#, C++, Swift and PHP constructors are Methods or are absent.
 - **Enum variants** are reported only for Rust and Swift.
-- **TypeScript and PHP namespaces** are not reported.
+- **TypeScript and PHP namespaces** are not reported as symbols (they still
+  qualify the names inside them).
+- **Qualified names of out-of-class C++ definitions** do not include the
+  class or namespace written in the definition's name (`void ns::W::f() {}`
+  qualifies its locals as `k`, not `ns::W::f::k`).
 - **Scala** fields are not reported.
 - **Destructuring members**: a Python class-body target nested more than one
   pattern deep or starred (`a, (b, c) = …`, `a, *rest = …`) and a Swift
@@ -1050,6 +1304,17 @@ These are limits of the extractor today, not of the grammars:
 - **Cross-file facts** are not resolved: out-of-line C++ member definitions
   get no class container, and a Rust `impl` for a type declared in another
   file has no container kind.
+- **Out-of-line `#[cfg(test)] mod tests;`** marks only the `mod`
+  declaration; the other file's declarations are tests only when its path
+  matches a file-name rule. `#[cfg(all(test, …))]` is not recognized either.
+- **Test attributes mark only their own declaration**: the parameters and
+  locals of a `#[test]` function are not tests (inside `#[cfg(test)]` they
+  are).
+- **Python test classes** (`unittest.TestCase` subclasses, `test_*`
+  functions) count as tests only in a file whose name matches a rule; PHP's
+  `#[\Deprecated]` attribute is not read (only the doc tag is).
+- **Python `self`** counts as a parameter, since nothing in the syntax sets
+  it apart.
 - **Adapter gaps**: converting a `SymbolInfo` to a record drops
   `TypeMetadata::type_parameters` and a TypeAlias's field metadata (C
   `typedef struct { … } Alias`).

@@ -30,6 +30,7 @@ const METHOD: &str = "instance_method";
 const STATIC_METHOD: &str = "static_method";
 const CLASS: &str = "PlainWidget";
 const FIELD: &str = "annotated_instance_field";
+const ASYNC_FUNCTION: &str = "async_function";
 const PLACEHOLDER: &str = "__matrix_edit__";
 
 #[derive(Debug, Clone, Copy)]
@@ -115,6 +116,13 @@ fn indexed_records(output: &Value) -> &Vec<Value> {
         .expect("indexes[0].symbols")
 }
 
+/// Whether the record's modifiers make it async.
+fn is_async(record: &Value) -> bool {
+    record["modifiers"]
+        .as_array()
+        .is_some_and(|modifiers| modifiers.iter().any(|modifier| modifier["type"] == "Async"))
+}
+
 /// Whether the record's modifiers make it static.
 fn is_static(record: &Value) -> bool {
     record["modifiers"]
@@ -188,6 +196,106 @@ fn columns() -> Vec<Column> {
                 R,
                 R,
             ],
+        },
+        // `async` lives in the same list: an absent or empty list is a
+        // declaration with no modifiers.
+        Column {
+            name: "modifiers (async)",
+            target: Target::Record(ASYNC_FUNCTION),
+            path: &["modifiers"],
+            control: None,
+            empty: None,
+            public: |out| json!(is_async(record(out, ASYNC_FUNCTION))),
+            outcomes: [
+                S(json!(true)),
+                S(json!(false)),
+                R,
+                R,
+                R,
+                R,
+                S(json!(false)),
+                R,
+                R,
+            ],
+        },
+        Column {
+            name: "scope",
+            target: Target::Record(METHOD),
+            path: &["scope"],
+            control: None,
+            empty: None,
+            public: |out| record(out, METHOD)["scope"].clone(),
+            outcomes: [S(json!("Member")), R, R, R, R, R, R, R, R],
+        },
+        // The in-file name is never empty; only the current-run value is
+        // servable.
+        Column {
+            name: "identity.qualified_name",
+            target: Target::Record(METHOD),
+            path: &["identity", "qualified_name"],
+            control: None,
+            empty: None,
+            public: |out| record(out, METHOD)["identity"]["qualified_name"].clone(),
+            outcomes: [S(json!("PlainWidget.instance_method")), R, R, R, R, R, R, R, R],
+        },
+        Column {
+            name: "identity.is_namespace_rooted",
+            target: Target::Record(METHOD),
+            path: &["identity", "is_namespace_rooted"],
+            control: None,
+            empty: None,
+            public: |out| record(out, METHOD)["identity"]["is_namespace_rooted"].clone(),
+            outcomes: [S(json!(false)), R, R, R, R, R, R, R, R],
+        },
+        Column {
+            name: "visibility.is_test",
+            target: Target::Record(METHOD),
+            path: &["visibility", "is_test"],
+            control: None,
+            empty: None,
+            public: |out| record(out, METHOD)["visibility"]["is_test"].clone(),
+            outcomes: [S(json!(false)), R, R, R, R, R, R, R, R],
+        },
+        // The entry claims the flags capability, so a set flag is served.
+        Column {
+            name: "visibility.is_deprecated",
+            target: Target::Record(METHOD),
+            path: &["visibility", "is_deprecated"],
+            control: Some(json!(true)),
+            empty: None,
+            public: |out| record(out, METHOD)["visibility"]["is_deprecated"].clone(),
+            outcomes: [S(json!(true)), R, R, R, R, R, R, R, R],
+        },
+        // The entry claims the metrics capability: every record must carry
+        // the facet, and inside it both metrics are required.
+        Column {
+            name: "metrics",
+            target: Target::Record(METHOD),
+            path: &["metrics"],
+            control: None,
+            empty: None,
+            public: |out| record(out, METHOD)["metrics"].clone(),
+            outcomes: [S(json!({ "parameters": 1, "has_docs": false })), R, R, R, R, R, R, R, R],
+        },
+        // `null` is a metric the language does not support, never "not
+        // computed".
+        Column {
+            name: "metrics.parameters",
+            target: Target::Record(METHOD),
+            path: &["metrics", "parameters"],
+            control: None,
+            empty: Some(json!("")),
+            public: |out| record(out, METHOD)["metrics"]["parameters"].clone(),
+            outcomes: [S(json!(1)), R, S(Value::Null), R, R, R, R, R, R],
+        },
+        Column {
+            name: "metrics.has_docs",
+            target: Target::Record(METHOD),
+            path: &["metrics", "has_docs"],
+            control: None,
+            empty: None,
+            public: |out| record(out, METHOD)["metrics"]["has_docs"].clone(),
+            outcomes: [S(json!(false)), R, S(Value::Null), R, R, R, R, R, R],
         },
         Column {
             name: "source.declaration_text",
@@ -448,7 +556,8 @@ fn edited_entry(base: &Value, column: &Column, shape: Shape, value: &Value) -> S
                 .remove(key);
         }
         Shape::Null => parent[key] = Value::Null,
-        Shape::WrongType => parent[key] = json!(123),
+        // A number's wrong type is a string; everything else's is a number.
+        Shape::WrongType => parent[key] = if value.is_number() { json!("123") } else { json!(123) },
         // An object's elements are its members: one, or every, member gets
         // a value of the wrong type.
         Shape::OneWrongElement => match value {
@@ -636,7 +745,9 @@ fn the_cache_entry_records_the_coverage_it_holds() {
             "references",
             "semantics",
             "structured_docs",
-            "diagnostics"
+            "diagnostics",
+            "flags",
+            "metrics"
         ])
     );
     assert!(entry["diagnostics_fingerprint"].is_string(), "diagnostics carry their fingerprint");

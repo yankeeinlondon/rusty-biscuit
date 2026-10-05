@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use tree_sitter::Language;
 
 use super::DiagnosticMetadata;
+use super::schema_v2::SymbolScope;
 
 /// Programming languages supported by tree-hugger.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -609,6 +610,14 @@ impl TypeMetadata {
 pub struct SymbolInfo {
     pub name: String,
     pub kind: SymbolKind,
+    /// Item, member or local, decided by the nearest semantic declaration.
+    pub scope: SymbolScope,
+    /// The in-file qualified name ([`IdentityFacet::qualified_name`](super::IdentityFacet::qualified_name));
+    /// the v2 adapter reads an empty one as `name`.
+    pub qualified_name: String,
+    /// [`IdentityFacet::is_namespace_rooted`](super::IdentityFacet::is_namespace_rooted).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub is_namespace_rooted: bool,
     pub range: CodeRange,
     pub language: ProgrammingLanguage,
     pub file: PathBuf,
@@ -634,6 +643,9 @@ pub struct SymbolInfo {
     /// function-local `static`).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub is_static_storage: bool,
+    /// Declared `async` (Rust, JavaScript, TypeScript, Python, C#, Swift).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub is_async: bool,
     /// Function/method signature information.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub signature: Option<FunctionSignature>,

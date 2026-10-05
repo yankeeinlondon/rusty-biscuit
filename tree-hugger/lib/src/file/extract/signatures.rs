@@ -37,6 +37,20 @@ pub(crate) fn extract_parameters(
     language: ProgrammingLanguage,
     source: &str,
 ) -> Vec<ParameterInfo> {
+    declared_parameters(node, name, language, source).unwrap_or_default()
+}
+
+/// The parameters of the declaration's own parameter list, or `None` when
+/// no parameter list was found: the declaration has none (a JavaScript
+/// `x => x` or a name bound to a function value), or the language's
+/// parameters are not extracted (Perl, Bash, Zsh). `Some` of an empty list
+/// is a known empty list.
+pub(crate) fn declared_parameters(
+    node: Node<'_>,
+    name: Node<'_>,
+    language: ProgrammingLanguage,
+    source: &str,
+) -> Option<Vec<ParameterInfo>> {
     let params_node_kind = match language {
         ProgrammingLanguage::Rust => "parameters",
         ProgrammingLanguage::Python | ProgrammingLanguage::Scala => "parameters",
@@ -47,26 +61,26 @@ pub(crate) fn extract_parameters(
         ProgrammingLanguage::Php => "formal_parameters",
         ProgrammingLanguage::Java => "formal_parameters",
         ProgrammingLanguage::CSharp => "parameter_list",
-        ProgrammingLanguage::Swift => return extract_swift_parameters(node, source),
-        ProgrammingLanguage::Lua => return extract_lua_parameters(node, source),
-        _ => return Vec::new(),
+        // A Swift function's parameters are children of the declaration,
+        // which always has its parentheses.
+        ProgrammingLanguage::Swift => return Some(extract_swift_parameters(node, source)),
+        ProgrammingLanguage::Lua => {
+            return node
+                .child_by_field_name("parameters")
+                .map(|_| extract_lua_parameters(node, source));
+        }
+        _ => return None,
     };
 
-    // A Go method has two parameter lists, the receiver first.
-    let params_node = if language == ProgrammingLanguage::Go && node.kind() == "method_declaration"
+    // An arrow function's lone unparenthesized parameter (`x => x`).
+    if matches!(language, ProgrammingLanguage::JavaScript | ProgrammingLanguage::TypeScript)
+        && let Some(parameter) = node.child_by_field_name("parameter")
     {
-        find_nth_child_by_kind(node, params_node_kind, 1) // 0-indexed, so 1 = second
-    } else if matches!(language, ProgrammingLanguage::C | ProgrammingLanguage::Cpp) {
-        declared_function_named(node, name)
-            .and_then(|declared| declared.function.child_by_field_name("parameters"))
-    } else {
-        find_child_by_kind(node, params_node_kind)
-    };
+        let name = parameter.utf8_text(source.as_bytes()).ok()?;
+        return Some(vec![ParameterInfo::new(name)]);
+    }
 
-    let params_node = match params_node {
-        Some(n) => n,
-        None => return Vec::new(),
-    };
+    let params_node = parameter_list_node(node, name, language, params_node_kind)?;
 
     let mut parameters = Vec::new();
     let mut cursor = params_node.walk();
@@ -81,7 +95,88 @@ pub(crate) fn extract_parameters(
         }
     }
 
-    parameters
+    Some(parameters)
+}
+
+/// The node holding the parameters of `node`'s own list, of kind
+/// `list_kind`: for a Go method the list after the receiver, for C/C++ the
+/// list of the function `name` declares.
+fn parameter_list_node<'tree>(
+    node: Node<'tree>,
+    name: Node<'tree>,
+    language: ProgrammingLanguage,
+    list_kind: &str,
+) -> Option<Node<'tree>> {
+    // A Go method has two parameter lists, the receiver first.
+    if language == ProgrammingLanguage::Go && node.kind() == "method_declaration" {
+        find_nth_child_by_kind(node, list_kind, 1) // 0-indexed, so 1 = second
+    } else if matches!(language, ProgrammingLanguage::C | ProgrammingLanguage::Cpp) {
+        declared_function_named(node, name)
+            .and_then(|declared| declared.function.child_by_field_name("parameters"))
+    } else {
+        find_child_by_kind(node, list_kind)
+    }
+}
+
+/// The number of parameters a C, C++ or Go declaration declares, named or
+/// not (`int f(int, char *)` declares two, which the signature cannot list
+/// by name); `(void)` declares none. `None` for another language, or when
+/// the declaration has no parameter list.
+pub(crate) fn declared_parameter_count(
+    node: Node<'_>,
+    name: Node<'_>,
+    language: ProgrammingLanguage,
+    source: &str,
+) -> Option<usize> {
+    if !matches!(
+        language,
+        ProgrammingLanguage::C | ProgrammingLanguage::Cpp | ProgrammingLanguage::Go
+    ) {
+        return None;
+    }
+    let list = parameter_list_node(node, name, language, "parameter_list")?;
+    let mut cursor = list.walk();
+    let children: Vec<Node<'_>> = list.children(&mut cursor).collect();
+    if language == ProgrammingLanguage::Go {
+        // `a, b int` declares two; `int` alone declares one.
+        return Some(
+            children
+                .iter()
+                .map(|child| match child.kind() {
+                    "parameter_declaration" => {
+                        let mut names = child.walk();
+                        child
+                            .children_by_field_name("name", &mut names)
+                            .count()
+                            .max(1)
+                    }
+                    "variadic_parameter_declaration" => 1,
+                    _ => 0,
+                })
+                .sum(),
+        );
+    }
+    let declarations: Vec<&Node<'_>> = children
+        .iter()
+        .filter(|child| {
+            matches!(
+                child.kind(),
+                "parameter_declaration"
+                    | "optional_parameter_declaration"
+                    | "variadic_parameter_declaration"
+                    | "variadic_parameter"
+                    | "..."
+            )
+        })
+        .collect();
+    let is_void = |child: &Node<'_>| {
+        child.kind() == "parameter_declaration"
+            && child.utf8_text(source.as_bytes()).is_ok_and(|text| text.trim() == "void")
+    };
+    Some(match declarations.as_slice() {
+        [only] if is_void(only) => 0,
+        all => all.len(),
+    })
 }
 
 /// Extracts a single parameter from a parameter node.
@@ -646,8 +741,12 @@ pub(crate) fn extract_java_parameter(node: Node<'_>, source: &str) -> Option<Par
 
     let is_variadic = kind == "spread_parameter";
 
-    // Find the identifier (parameter name)
+    // A spread parameter names itself through a variable declarator.
     let name = find_child_by_kind(node, "identifier")
+        .or_else(|| {
+            find_child_by_kind(node, "variable_declarator")
+                .and_then(|declarator| declarator.child_by_field_name("name"))
+        })
         .and_then(|n| n.utf8_text(source.as_bytes()).ok())
         .map(|s| s.to_string())?;
 
@@ -833,6 +932,22 @@ pub(crate) fn extract_c_return_type(node: Node<'_>, source: &str) -> Option<Stri
 ///   identifier
 /// ```
 pub(crate) fn extract_csharp_parameter(node: Node<'_>, source: &str) -> Option<ParameterInfo> {
+    // The grammar spells a `params` array as three children of the list:
+    // the `params` token, then its type and its name.
+    if node.kind() == "params" {
+        let type_node = node.next_named_sibling()?;
+        let name = type_node
+            .next_named_sibling()
+            .filter(|name| name.kind() == "identifier")?
+            .utf8_text(source.as_bytes())
+            .ok()?;
+        return Some(ParameterInfo {
+            name: name.to_string(),
+            type_annotation: type_node.utf8_text(source.as_bytes()).ok().map(str::to_string),
+            default_value: None,
+            is_variadic: true,
+        });
+    }
     if node.kind() != "parameter" {
         return None;
     }

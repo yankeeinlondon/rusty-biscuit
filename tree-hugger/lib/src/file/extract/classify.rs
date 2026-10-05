@@ -391,9 +391,12 @@ pub(crate) enum ContainerLookup<'tree> {
         node: Node<'tree>,
         fallback: SymbolKind,
     },
-    /// A Rust `impl` member: the implemented type, found by name among the
-    /// file's type declarations.
+    /// A Rust `impl` member or a Go receiver method: the implemented type,
+    /// found by name among the file's type declarations.
     SameFileType,
+    /// A Lua `M.f` / `M:m`: the table, found by name among the file's
+    /// item-scoped declarations.
+    SameFileTable,
 }
 
 /// The nearest declaration containing a symbol.
@@ -418,6 +421,16 @@ pub(crate) fn find_symbol_container<'tree>(
     // `package A` is `B`, not a member of `A`.
     if language == ProgrammingLanguage::Perl && declaration.kind() == "package_statement" {
         return None;
+    }
+
+    // A Go method's container is its receiver's type; what is declared
+    // inside the method (receiver, parameters, locals) has none, as in any
+    // Go function.
+    if language == ProgrammingLanguage::Go && declaration.kind() == "method_declaration" {
+        return go_receiver_type_name(declaration, source).map(|name| ContainerRef {
+            name,
+            lookup: ContainerLookup::SameFileType,
+        });
     }
 
     let mut child = declaration;
@@ -448,6 +461,27 @@ pub(crate) fn find_symbol_container<'tree>(
     None
 }
 
+/// The base type a Go method's receiver names (`func (p *Point[T]) M()` →
+/// `Point`).
+pub(crate) fn go_receiver_type_name(method: Node<'_>, source: &str) -> Option<String> {
+    let receiver = method.child_by_field_name("receiver")?;
+    let mut cursor = receiver.walk();
+    let parameter = receiver
+        .named_children(&mut cursor)
+        .find(|child| child.kind() == "parameter_declaration")?;
+    let mut node = parameter.child_by_field_name("type")?;
+    loop {
+        node = match node.kind() {
+            "pointer_type" => node.named_child(0)?,
+            "generic_type" => node.child_by_field_name("type")?,
+            "type_identifier" => {
+                return node.utf8_text(source.as_bytes()).ok().map(str::to_string);
+            }
+            _ => return None,
+        };
+    }
+}
+
 /// A type that owns the declarations in it but has no name to report: an
 /// anonymous class (Java, also an enum constant's body; PHP; Scala
 /// `new T { … }`, also a `given … with` instance), a JavaScript/TypeScript
@@ -458,7 +492,7 @@ pub(crate) fn find_symbol_container<'tree>(
 /// A tagless C/C++ `struct`/`union` that declares no member of its own
 /// (`union { int a; float b; };`) is an anonymous member: its fields are
 /// members of the enclosing type, so it is not a boundary.
-fn is_unnamed_type_owner(node: Node<'_>) -> bool {
+pub(crate) fn is_unnamed_type_owner(node: Node<'_>) -> bool {
     match node.kind() {
         "class" | "object" | "anonymous_class" | "anonymous_object_creation_expression" => true,
         "class_body" => node.parent().is_some_and(|parent| {
@@ -493,7 +527,7 @@ pub(crate) fn anonymous_member_declaration(specifier: Node<'_>) -> Option<Node<'
     })
 }
 
-fn ancestor_container<'tree>(
+pub(crate) fn ancestor_container<'tree>(
     node: Node<'tree>,
     language: ProgrammingLanguage,
     source: &str,

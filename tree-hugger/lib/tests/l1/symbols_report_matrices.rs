@@ -2,7 +2,11 @@
 //! skeletons: every language has a row, and each row names the phase that
 //! replaces it with real expectations. `symbols_coverage` fails on a missing
 //! or repeated row, so filling a matrix means rewriting rows, not adding
-//! tests beside it. A phase that fills a matrix moves it into its own test
+//! tests beside it. Filled so far, each in its own module: scope
+//! (`symbols_scope`), qualified names (`symbols_qualified_names`),
+//! containment (`symbols_containment`), flags (`async` in `symbols_async`,
+//! deprecation and test in `symbols_flags`), metrics (`symbols_metrics`) and
+//! kind coverage (`symbols_kind_coverage`). A phase that fills a matrix moves it into its own test
 //! module with a real row type; once every matrix is filled, [`Pending`] is
 //! deleted.
 
@@ -18,133 +22,7 @@ pub struct Pending {
 
 /// Every skeleton matrix, by name, for the coverage guard.
 pub const PENDING_MATRICES: &[(&str, &[(ProgrammingLanguage, Pending)])] = &[
-    ("SCOPE_MATRIX", SCOPE_MATRIX),
-    ("QUALIFIED_NAME_MATRIX", QUALIFIED_NAME_MATRIX),
-    ("CONTAINMENT_MATRIX", CONTAINMENT_MATRIX),
-    ("FLAGS_MATRIX", FLAGS_MATRIX),
-    ("METRICS_MATRIX", METRICS_MATRIX),
-    ("KIND_COVERAGE_MATRIX", KIND_COVERAGE_MATRIX),
     ("SELECTION_FILTER_MATRIX", SELECTION_FILTER_MATRIX),
-];
-
-/// Scope: one `Item`, `Member` (or n/a) and `Local` per language; parameters `Local` where extracted.
-pub const SCOPE_MATRIX: &[(ProgrammingLanguage, Pending)] = &[
-    (L::Rust, Pending { phase: 2 }),
-    (L::TypeScript, Pending { phase: 2 }),
-    (L::JavaScript, Pending { phase: 2 }),
-    (L::Go, Pending { phase: 2 }),
-    (L::Python, Pending { phase: 2 }),
-    (L::Java, Pending { phase: 2 }),
-    (L::CSharp, Pending { phase: 2 }),
-    (L::C, Pending { phase: 2 }),
-    (L::Cpp, Pending { phase: 2 }),
-    (L::Swift, Pending { phase: 2 }),
-    (L::Scala, Pending { phase: 2 }),
-    (L::Php, Pending { phase: 2 }),
-    (L::Perl, Pending { phase: 2 }),
-    (L::Lua, Pending { phase: 2 }),
-    (L::Bash, Pending { phase: 2 }),
-    (L::Zsh, Pending { phase: 2 }),
-];
-
-/// Qualified names: cached in-file names, explicit namespaces, file-qualified fallbacks, library-only context names.
-pub const QUALIFIED_NAME_MATRIX: &[(ProgrammingLanguage, Pending)] = &[
-    (L::Rust, Pending { phase: 2 }),
-    (L::TypeScript, Pending { phase: 2 }),
-    (L::JavaScript, Pending { phase: 2 }),
-    (L::Go, Pending { phase: 2 }),
-    (L::Python, Pending { phase: 2 }),
-    (L::Java, Pending { phase: 2 }),
-    (L::CSharp, Pending { phase: 2 }),
-    (L::C, Pending { phase: 2 }),
-    (L::Cpp, Pending { phase: 2 }),
-    (L::Swift, Pending { phase: 2 }),
-    (L::Scala, Pending { phase: 2 }),
-    (L::Php, Pending { phase: 2 }),
-    (L::Perl, Pending { phase: 2 }),
-    (L::Lua, Pending { phase: 2 }),
-    (L::Bash, Pending { phase: 2 }),
-    (L::Zsh, Pending { phase: 2 }),
-];
-
-/// Containment: members attach to the right container (Rust `impl`, TS classes, Go receivers, Python classes).
-pub const CONTAINMENT_MATRIX: &[(ProgrammingLanguage, Pending)] = &[
-    (L::Rust, Pending { phase: 2 }),
-    (L::TypeScript, Pending { phase: 2 }),
-    (L::JavaScript, Pending { phase: 2 }),
-    (L::Go, Pending { phase: 2 }),
-    (L::Python, Pending { phase: 2 }),
-    (L::Java, Pending { phase: 2 }),
-    (L::CSharp, Pending { phase: 2 }),
-    (L::C, Pending { phase: 2 }),
-    (L::Cpp, Pending { phase: 2 }),
-    (L::Swift, Pending { phase: 2 }),
-    (L::Scala, Pending { phase: 2 }),
-    (L::Php, Pending { phase: 2 }),
-    (L::Perl, Pending { phase: 2 }),
-    (L::Lua, Pending { phase: 2 }),
-    (L::Bash, Pending { phase: 2 }),
-    (L::Zsh, Pending { phase: 2 }),
-];
-
-/// Async, deprecation and test flags: set exactly by each language's markers and file-name rules.
-pub const FLAGS_MATRIX: &[(ProgrammingLanguage, Pending)] = &[
-    (L::Rust, Pending { phase: 3 }),
-    (L::TypeScript, Pending { phase: 3 }),
-    (L::JavaScript, Pending { phase: 3 }),
-    (L::Go, Pending { phase: 3 }),
-    (L::Python, Pending { phase: 3 }),
-    (L::Java, Pending { phase: 3 }),
-    (L::CSharp, Pending { phase: 3 }),
-    (L::C, Pending { phase: 3 }),
-    (L::Cpp, Pending { phase: 3 }),
-    (L::Swift, Pending { phase: 3 }),
-    (L::Scala, Pending { phase: 3 }),
-    (L::Php, Pending { phase: 3 }),
-    (L::Perl, Pending { phase: 3 }),
-    (L::Lua, Pending { phase: 3 }),
-    (L::Bash, Pending { phase: 3 }),
-    (L::Zsh, Pending { phase: 3 }),
-];
-
-/// Metrics: `parameters` and `has_docs` per fixture function, `None` where unsupported.
-pub const METRICS_MATRIX: &[(ProgrammingLanguage, Pending)] = &[
-    (L::Rust, Pending { phase: 3 }),
-    (L::TypeScript, Pending { phase: 3 }),
-    (L::JavaScript, Pending { phase: 3 }),
-    (L::Go, Pending { phase: 3 }),
-    (L::Python, Pending { phase: 3 }),
-    (L::Java, Pending { phase: 3 }),
-    (L::CSharp, Pending { phase: 3 }),
-    (L::C, Pending { phase: 3 }),
-    (L::Cpp, Pending { phase: 3 }),
-    (L::Swift, Pending { phase: 3 }),
-    (L::Scala, Pending { phase: 3 }),
-    (L::Php, Pending { phase: 3 }),
-    (L::Perl, Pending { phase: 3 }),
-    (L::Lua, Pending { phase: 3 }),
-    (L::Bash, Pending { phase: 3 }),
-    (L::Zsh, Pending { phase: 3 }),
-];
-
-/// Kind coverage: each deferred construct asserted as unsupported extraction, apart from constructs the language lacks.
-pub const KIND_COVERAGE_MATRIX: &[(ProgrammingLanguage, Pending)] = &[
-    (L::Rust, Pending { phase: 3 }),
-    (L::TypeScript, Pending { phase: 3 }),
-    (L::JavaScript, Pending { phase: 3 }),
-    (L::Go, Pending { phase: 3 }),
-    (L::Python, Pending { phase: 3 }),
-    (L::Java, Pending { phase: 3 }),
-    (L::CSharp, Pending { phase: 3 }),
-    (L::C, Pending { phase: 3 }),
-    (L::Cpp, Pending { phase: 3 }),
-    (L::Swift, Pending { phase: 3 }),
-    (L::Scala, Pending { phase: 3 }),
-    (L::Php, Pending { phase: 3 }),
-    (L::Perl, Pending { phase: 3 }),
-    (L::Lua, Pending { phase: 3 }),
-    (L::Bash, Pending { phase: 3 }),
-    (L::Zsh, Pending { phase: 3 }),
 ];
 
 /// Selection filters: each `SymbolQuery` predicate returns exactly the expected set, or nothing where n/a.

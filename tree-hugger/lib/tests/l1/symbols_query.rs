@@ -10,7 +10,7 @@ use std::path::Path;
 use serde_json::Value;
 use tempfile::TempDir;
 use tree_hugger::{
-    AnalysisPass, Capability, SourceFile, SymbolKindV2, SymbolQuery, SymbolRecord, TreeFile,
+    AnalysisPass, Capability, MetricsFacet, SourceFile, SymbolKindV2, SymbolQuery, SymbolRecord, TreeFile,
     TreeHuggerError, TriState, VisibilityLevel, WorkCounters, work_counters,
 };
 
@@ -202,6 +202,60 @@ fn passes_run_once_after_their_prerequisites() {
         [Capability::Declarations, Capability::StructuredDocs]
     );
     assert_eq!(SymbolQuery::complete_index().required_capabilities(), Capability::ALL);
+}
+
+/// Flags and metrics come with the declarations: no reference binding,
+/// semantics, structured docs or diagnostics run for them, and records of
+/// unselected kinds get neither.
+#[test]
+fn flags_and_metrics_run_with_the_declarations_only() {
+    let dir = TempDir::new().expect("tempdir");
+    let path = write(
+        &dir,
+        "flags.rs",
+        "/// Docs.\n#[deprecated]\nfn old(a: u8) { helper(); }\nfn helper() {}\nstruct S;\n",
+    );
+    let tree_file = TreeFile::new(&path).expect("parse");
+    let query = SymbolQuery::new()
+        .kinds([SymbolKindV2::Function])
+        .capabilities([Capability::Flags, Capability::Metrics]);
+    let (result, work) = counted(|| tree_file.query(&query).expect("query"));
+
+    assert_eq!(result.index.completed_passes, [AnalysisPass::Parse]);
+    assert_eq!(
+        result.completed_capabilities,
+        [Capability::Declarations, Capability::Flags, Capability::Metrics]
+    );
+    assert_eq!(work.diagnostics_runs, 0);
+    assert_eq!(work.definition_captures, 1);
+    let named = |name: &str| -> &SymbolRecord {
+        result
+            .index
+            .symbols
+            .iter()
+            .find(|record| record.identity.name == name)
+            .unwrap_or_else(|| panic!("no `{name}` record"))
+    };
+    let old = named("old");
+    assert!(old.visibility.is_deprecated);
+    assert!(!old.visibility.is_test, "a scratch file outside any package `tests/`");
+    assert_eq!(
+        old.metrics,
+        Some(MetricsFacet { parameters: Some(1), has_docs: Some(true) })
+    );
+    assert!(old.relations.references.is_empty(), "references were not bound");
+    assert!(old.relations.parent.is_none(), "containment was not requested");
+    assert_eq!(old.semantics.is_recursive, None, "semantics were not requested");
+    assert!(old.docs.parsed.is_none(), "structured docs were not requested");
+    assert_eq!(
+        named("helper").metrics,
+        Some(MetricsFacet { parameters: Some(0), has_docs: Some(false) })
+    );
+
+    let plain = tree_file.query(&SymbolQuery::new().kinds([SymbolKindV2::Function])).expect("query");
+    assert!(plain.index.symbols.iter().all(|record| record.metrics.is_none()
+        && !record.visibility.is_deprecated
+        && !record.visibility.is_test));
 }
 
 #[test]

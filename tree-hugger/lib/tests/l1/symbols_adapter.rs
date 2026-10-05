@@ -1,13 +1,15 @@
 //! Test 5 of `2026-10-03-visibility-and-kind`: the v1/v2 adapter preserves
 //! kind, visibility, `is_static`, `is_static_storage`, container kind and
-//! signature presence for every fixture symbol, in both directions.
+//! signature presence for every fixture symbol, in both directions; and,
+//! since `2026-10-03-symbol-filters-and-reports`, scope, the in-file
+//! qualified name, its namespace root and `async`.
 
 use std::path::PathBuf;
 
 use tree_hugger::{
     CodeRange, FunctionSignature, Modifier, ParameterInfo, ProgrammingLanguage, SchemaVersion,
-    SymbolInfo, SymbolKind, SymbolKindV2, SymbolRecord, TreeFile, TypeMetadata, Visibility,
-    VisibilityLevel,
+    SymbolInfo, SymbolKind, SymbolKindV2, SymbolRecord, SymbolScope, TreeFile, TypeMetadata,
+    Visibility, VisibilityLevel,
 };
 
 use crate::symbols_fixtures::{Extracted, all_fixtures, display_name, extract_inline, extract_primary};
@@ -56,6 +58,9 @@ fn symbol(name: &str, kind: SymbolKind) -> SymbolInfo {
     SymbolInfo {
         name: name.to_string(),
         kind,
+        scope: SymbolScope::Item,
+        qualified_name: name.to_string(),
+        is_namespace_rooted: false,
         range: CodeRange {
             start_line: 3,
             start_column: 5,
@@ -72,6 +77,7 @@ fn symbol(name: &str, kind: SymbolKind) -> SymbolInfo {
         visibility: None,
         is_static: false,
         is_static_storage: false,
+        is_async: false,
         signature: None,
         type_metadata: None,
     }
@@ -89,6 +95,55 @@ fn has_static(record: &SymbolRecord) -> bool {
 
 fn has_static_storage(record: &SymbolRecord) -> bool {
     record.modifiers.iter().any(|modifier| matches!(modifier, Modifier::StaticStorage))
+}
+
+fn has_async(record: &SymbolRecord) -> bool {
+    record.modifiers.iter().any(|modifier| matches!(modifier, Modifier::Async))
+}
+
+#[test]
+fn scope_qualified_name_and_async_survive_both_conversions() {
+    for scope in [SymbolScope::Item, SymbolScope::Member, SymbolScope::Local] {
+        for (is_async, is_namespace_rooted) in [(false, false), (true, false), (false, true)] {
+            let mut input = symbol("run", SymbolKind::Method);
+            input.scope = scope;
+            input.qualified_name = "com.example.Widget.run".to_string();
+            input.is_namespace_rooted = is_namespace_rooted;
+            input.is_async = is_async;
+            let (record, back) = round_trip(input);
+
+            let context = format!("{scope:?} async={is_async} rooted={is_namespace_rooted}");
+            assert_eq!(record.scope, scope, "{context}: record scope");
+            assert_eq!(record.identity.qualified_name, "com.example.Widget.run", "{context}");
+            assert_eq!(record.identity.is_namespace_rooted, is_namespace_rooted, "{context}");
+            assert_eq!(has_async(&record), is_async, "{context}: Modifier::Async");
+            assert_eq!(back.scope, scope, "{context}: restored scope");
+            assert_eq!(back.qualified_name, "com.example.Widget.run", "{context}");
+            assert_eq!(back.is_namespace_rooted, is_namespace_rooted, "{context}");
+            assert_eq!(back.is_async, is_async, "{context}: restored is_async");
+        }
+    }
+}
+
+/// The record ID hashes the in-file qualified name, not the container: two
+/// same-named methods of different types get different IDs, and the same
+/// qualified name gets the same ID whatever the container field says.
+#[test]
+fn the_record_id_derives_from_the_qualified_name() {
+    let id_of = |qualified: &str, container: Option<&str>| {
+        let mut input = symbol("area", SymbolKind::Method);
+        input.qualified_name = qualified.to_string();
+        input.container_name = container.map(str::to_string);
+        SymbolRecord::from(input).id
+    };
+    assert_ne!(id_of("Circle.area", Some("Circle")), id_of("Square.area", Some("Square")));
+    assert_eq!(id_of("Circle.area", Some("Circle")), id_of("Circle.area", None));
+
+    // A v1 symbol built by hand with no qualified name is qualified by its
+    // name alone.
+    let mut bare = symbol("area", SymbolKind::Method);
+    bare.qualified_name = String::new();
+    assert_eq!(SymbolRecord::from(bare).identity.qualified_name, "area");
 }
 
 #[test]
@@ -273,6 +328,10 @@ fn serialized_record_round_trips_the_new_fields() {
     input.container_kind = Some(SymbolKind::Class);
     input.visibility = Some(Visibility::ProtectedInternal);
     input.is_static_storage = true;
+    input.scope = SymbolScope::Member;
+    input.qualified_name = "Example.Widget.Widget".to_string();
+    input.is_namespace_rooted = true;
+    input.is_async = true;
     let record = SymbolRecord::from(input);
     assert_eq!(record.schema_version, SchemaVersion::V4_0);
 
@@ -288,9 +347,14 @@ fn serialized_record_round_trips_the_new_fields() {
         assert_eq!(record.identity.container_kind, Some(SymbolKindV2::Class));
         assert_eq!(record.visibility.level, VisibilityLevel::ProtectedInternal);
         assert!(has_static_storage(record) && !has_static(record));
+        assert_eq!(record.scope, SymbolScope::Member);
+        assert_eq!(record.identity.qualified_name, "Example.Widget.Widget");
+        assert!(record.identity.is_namespace_rooted && has_async(record));
+        assert_eq!(record.id, parsed.id, "the ID survives the round trip");
     }
     assert_eq!(back.visibility, Some(Visibility::ProtectedInternal));
     assert!(back.is_static_storage && !back.is_static);
+    assert!(back.is_async && back.is_namespace_rooted && back.scope == SymbolScope::Member);
 
     let mut free = SymbolRecord::from(symbol("free", SymbolKind::Function));
     free.identity.container_kind = None;
@@ -308,7 +372,7 @@ fn serialized_record_round_trips_the_new_fields() {
 fn symbol_info_json_defaults_and_omissions() {
     let mut input = symbol("item", SymbolKind::Field);
     let json = serde_json::to_value(&input).expect("serialize");
-    for key in ["visibility", "is_static", "is_static_storage"] {
+    for key in ["visibility", "is_static", "is_static_storage", "is_async", "is_namespace_rooted"] {
         assert!(json.get(key).is_none(), "{key} omitted when Unknown/false: {json}");
     }
     let parsed: SymbolInfo = serde_json::from_value(json).expect("deserialize");
@@ -355,6 +419,10 @@ fn adapter_agrees_with_extraction_for_every_fixture_symbol() {
                 "{label}: container kind"
             );
             assert_eq!(info.signature.is_some(), info.kind.is_function(), "{label}: signature");
+            assert_eq!(info.scope, record.scope, "{label}: scope");
+            assert_eq!(info.qualified_name, record.identity.qualified_name, "{label}: qualified name");
+            assert_eq!(info.is_namespace_rooted, record.identity.is_namespace_rooted, "{label}: rooted");
+            assert_eq!(info.is_async, has_async(&record), "{label}: async");
             checked += 1;
         }
 
@@ -378,6 +446,10 @@ fn adapter_agrees_with_extraction_for_every_fixture_symbol() {
                 symbol.container_kind.map(SymbolKindV2::from),
                 "{label}: container kind"
             );
+            assert_eq!(record.scope, symbol.scope, "{label}: scope");
+            assert_eq!(record.identity.qualified_name, symbol.qualified_name, "{label}: qualified name");
+            assert_eq!(record.identity.is_namespace_rooted, symbol.is_namespace_rooted, "{label}: rooted");
+            assert_eq!(has_async(&record), symbol.is_async, "{label}: async");
         }
     }
     assert!(checked > 100, "only {checked} fixture records checked");
@@ -601,4 +673,71 @@ fn every_fixture_symbol_round_trips_through_the_record() {
         ["c.c: TagAlias", "c.c: AnonymousStructAlias", "c.c: SameName"],
         "aliases whose v1 field metadata the record cannot carry"
     );
+}
+
+/// One edit to a serialized record.
+type Edit = dyn Fn(&mut serde_json::Value);
+
+/// Reader shapes of the record fields this feature adds, from a real record
+/// with one edit per cell. `metrics` is optional as a facet (absent = not
+/// requested) but each metric inside it is required and nullable (`null` =
+/// unsupported); the other fields are required.
+#[test]
+fn new_record_fields_read_per_shape() {
+    let fixture = crate::symbols_fixtures::primary_fixture(ProgrammingLanguage::Python).expect("fixture");
+    let record = TreeFile::new(&fixture)
+        .expect("parse")
+        .symbol_records()
+        .expect("records")
+        .into_iter()
+        .find(|record| record.identity.name == "instance_method")
+        .expect("instance_method record");
+    let control = serde_json::to_value(&record).expect("serialize");
+    assert!(control.get("metrics").is_none(), "an unrequested facet is not written");
+    let read = |edit: &dyn Fn(&mut serde_json::Value)| {
+        let mut value = control.clone();
+        edit(&mut value);
+        serde_json::from_value::<SymbolRecord>(value)
+    };
+
+    // Control: the unedited record reads back with no metrics.
+    let unedited = read(&|_| {}).expect("control");
+    assert!(unedited.metrics.is_none());
+    assert_eq!(unedited.scope, SymbolScope::Member);
+    assert_eq!(unedited.identity.qualified_name, "PlainWidget.instance_method");
+
+    // `metrics`: present values, and `null` metrics inside a present facet.
+    let both = read(&|value| value["metrics"] = serde_json::json!({ "parameters": 0, "has_docs": false }))
+        .expect("measured facet");
+    let metrics = both.metrics.expect("facet");
+    assert_eq!((metrics.parameters, metrics.has_docs), (Some(0), Some(false)));
+    let unsupported = read(&|value| value["metrics"] = serde_json::json!({ "parameters": null, "has_docs": null }))
+        .expect("unsupported metrics")
+        .metrics
+        .expect("facet");
+    assert_eq!((unsupported.parameters, unsupported.has_docs), (None, None));
+
+    let rejected: [(&str, Box<Edit>); 13] = [
+        ("metrics null", Box::new(|value| value["metrics"] = serde_json::Value::Null)),
+        ("metrics wrong type", Box::new(|value| value["metrics"] = serde_json::json!(123))),
+        ("metrics empty", Box::new(|value| value["metrics"] = serde_json::json!({}))),
+        ("metric absent", Box::new(|value| value["metrics"] = serde_json::json!({ "parameters": 1 }))),
+        ("metric wrong type", Box::new(|value| value["metrics"] = serde_json::json!({ "parameters": "one", "has_docs": true }))),
+        ("metric unknown", Box::new(|value| value["metrics"] = serde_json::json!({ "parameters": 1, "has_docs": true, "lines": 3 }))),
+        ("scope absent", Box::new(|value| { value.as_object_mut().expect("record").remove("scope"); })),
+        ("scope null", Box::new(|value| value["scope"] = serde_json::Value::Null)),
+        ("scope unknown", Box::new(|value| value["scope"] = serde_json::json!(""))),
+        ("qualified name absent", Box::new(|value| { value["identity"].as_object_mut().expect("identity").remove("qualified_name"); })),
+        ("qualified name empty", Box::new(|value| value["identity"]["qualified_name"] = serde_json::json!(""))),
+        ("rooted absent", Box::new(|value| { value["identity"].as_object_mut().expect("identity").remove("is_namespace_rooted"); })),
+        ("is_test absent", Box::new(|value| { value["visibility"].as_object_mut().expect("visibility").remove("is_test"); })),
+    ];
+    for (label, edit) in &rejected {
+        assert!(read(edit.as_ref()).is_err(), "{label} must not read");
+    }
+
+    // A repeated metric key is rejected, not last-wins.
+    let text = serde_json::to_string(&control).expect("serialize");
+    let duplicated = text.replacen("{", "{\"metrics\":{\"parameters\":1,\"parameters\":2,\"has_docs\":true},", 1);
+    assert!(serde_json::from_str::<SymbolRecord>(&duplicated).is_err(), "duplicate metric");
 }

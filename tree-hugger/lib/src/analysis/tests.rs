@@ -72,10 +72,12 @@ fn test_symbol(name: &str, start_byte: u32, end_byte: u32) -> SymbolRecord {
         id: SymbolId(name.to_string()),
         language: ProgrammingLanguage::Rust,
         kind: SymbolKindV2::Function,
+        scope: crate::shared::SymbolScope::Item,
         identity: IdentityFacet {
             name: name.to_string(),
             display_name: name.to_string(),
-            qualified_name: None,
+            qualified_name: name.to_string(),
+            is_namespace_rooted: false,
             container_name: None,
             keyword: None,
             container_kind: None,
@@ -97,6 +99,7 @@ fn test_symbol(name: &str, start_byte: u32, end_byte: u32) -> SymbolRecord {
         type_info: TypeFacet::default(),
         relations: Default::default(),
         semantics: SemanticFacet::default(),
+        metrics: None,
         provenance: ProvenanceFacet {
             extractor: "test".to_string(),
             extractor_version: "test".to_string(),

@@ -77,3 +77,70 @@ def boundary_marker(function):
 @boundary_marker
 def boundary_decorated() -> None:
     pass
+
+
+# ---- Scope, async and qualified names ----
+
+
+async def async_function() -> None:
+    pass
+
+
+class FirstShape:
+    async def area(self) -> int:
+        return 1
+
+
+class SecondShape:
+    def area(self) -> int:
+        return 2
+
+
+def outer_function() -> None:
+    def nested_function() -> None:
+        pass
+
+
+# ---- Flags and metrics ----
+
+
+def documented_pair(first, second):
+    """Documented, with two parameters."""
+
+
+# deprecated: an ordinary comment
+def undocumented_none():
+    pass
+
+
+@deprecated("use documented_pair")
+def deprecated_api():
+    pass
+
+
+@typing_extensions.deprecated("use documented_pair")
+def qualified_deprecated():
+    pass
+
+
+@warnings.deprecated("use documented_pair")
+def warnings_deprecated():
+    pass
+
+
+@not_deprecated
+def look_alike_decorator():
+    pass
+
+
+def test_helper():
+    pass
+
+
+def variadic(first, *rest, **options):
+    pass
+
+
+class Receiver:
+    def with_receiver(self, only):
+        pass

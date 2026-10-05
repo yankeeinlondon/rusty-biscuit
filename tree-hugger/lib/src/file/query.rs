@@ -14,6 +14,10 @@ use crate::shared::{AnalysisPass, FileSymbolIndex, SymbolKindV2};
 /// [`Containment`](Self::Containment), [`Semantics`](Self::Semantics) implies
 /// [`References`](Self::References), and every capability implies
 /// [`Declarations`](Self::Declarations).
+///
+/// [`Flags`](Self::Flags) and [`Metrics`](Self::Metrics) fill record fields
+/// that otherwise hold their defaults: an unrequested `false` flag or absent
+/// `metrics` facet means "not computed", never "computed and not set".
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Capability {
@@ -33,17 +37,26 @@ pub enum Capability {
     StructuredDocs,
     /// The diagnostics pass (lint and syntax diagnostics).
     Diagnostics,
+    /// `visibility.is_test` and `visibility.is_deprecated`, read from
+    /// attributes, doc comments and the file name while the declarations are
+    /// extracted.
+    Flags,
+    /// The `metrics` facet (`parameters` and `has_docs`), read while the
+    /// declarations are extracted.
+    Metrics,
 }
 
 impl Capability {
     /// Every capability, in canonical order.
-    pub const ALL: [Capability; 6] = [
+    pub const ALL: [Capability; 8] = [
         Capability::Declarations,
         Capability::Containment,
         Capability::References,
         Capability::Semantics,
         Capability::StructuredDocs,
         Capability::Diagnostics,
+        Capability::Flags,
+        Capability::Metrics,
     ];
 
     fn prerequisites(self) -> &'static [Capability] {
@@ -52,7 +65,10 @@ impl Capability {
             Capability::Containment => &[Capability::Declarations],
             Capability::References => &[Capability::Containment],
             Capability::Semantics => &[Capability::References],
-            Capability::StructuredDocs | Capability::Diagnostics => &[Capability::Declarations],
+            Capability::StructuredDocs
+            | Capability::Diagnostics
+            | Capability::Flags
+            | Capability::Metrics => &[Capability::Declarations],
         }
     }
 }

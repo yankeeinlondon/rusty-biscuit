@@ -12,7 +12,7 @@ pub mod tree_file;
 /// record's `provenance.extractor_version` names the rules that produced it.
 ///
 /// That includes repairs on an unreleased branch (a warm cache built from an
-/// earlier commit would otherwise keep serving the old records), `.scm` query
-/// edits and grammar crate upgrades: the CLI key holds no query hash or
-/// grammar version, so this constant is the only component that moves.
-pub const EXTRACTOR_REVISION: &str = "6";
+/// earlier commit would otherwise keep serving the old records). The cache
+/// key already digests the grammar and the effective query text, so this
+/// constant is what moves for a change in Rust extraction code.
+pub const EXTRACTOR_REVISION: &str = "8";

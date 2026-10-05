@@ -54,18 +54,25 @@ pub(crate) enum Declarations {
 }
 
 impl Declarations {
-    /// The command's fixed kind set and the capabilities it shows: only
-    /// `classes` needs containment, and no listing runs references,
-    /// semantics, structured docs or diagnostics.
-    pub(crate) fn query(&self) -> SymbolQuery {
-        match self {
-            Self::Functions => SymbolQuery::new().kinds(FUNCTION_KINDS),
-            Self::Types => SymbolQuery::new().kinds(TYPE_KINDS),
-            Self::Symbols => SymbolQuery::new(),
-            Self::Classes { .. } => SymbolQuery::new()
-                .kinds(classes::CONTAINER_KINDS.into_iter().chain(classes::MEMBER_KINDS))
-                .capabilities([Capability::Containment]),
+    /// The command's fixed kind set and the capabilities `format` shows:
+    /// only `classes` needs containment, machine-readable output always
+    /// computes the test and deprecation flags, and no listing runs
+    /// references, semantics, structured docs or diagnostics.
+    pub(crate) fn query(&self, format: ReportFormat) -> SymbolQuery {
+        let (query, mut capabilities) = match self {
+            Self::Functions => (SymbolQuery::new().kinds(FUNCTION_KINDS), vec![]),
+            Self::Types => (SymbolQuery::new().kinds(TYPE_KINDS), vec![]),
+            Self::Symbols => (SymbolQuery::new(), vec![]),
+            Self::Classes { .. } => (
+                SymbolQuery::new()
+                    .kinds(classes::CONTAINER_KINDS.into_iter().chain(classes::MEMBER_KINDS)),
+                vec![Capability::Containment],
+            ),
+        };
+        if format.always_computes_flags() {
+            capabilities.push(Capability::Flags);
         }
+        query.capabilities(capabilities)
     }
 }
 
@@ -77,6 +84,18 @@ pub(crate) enum ReportFormat {
     Json,
     /// Every file's complete index, diagnostics included (`--json-full`).
     JsonFull,
+}
+
+impl ReportFormat {
+    /// Whether records written in this format always carry computed
+    /// `is_test` and `is_deprecated`, so a `false` there means "not set",
+    /// never "not computed". JSON Lines joins `Json` here.
+    fn always_computes_flags(self) -> bool {
+        match self {
+            Self::Json | Self::JsonFull => true,
+            Self::Terminal { .. } => false,
+        }
+    }
 }
 
 /// Which declarations a run keeps, decided before the name filters.
@@ -127,7 +146,7 @@ struct FileOutcome {
 pub(crate) fn run(scan: DeclarationScan, analyzer: &Analyzer) -> Result<i32, TreeHuggerError> {
     let query = match scan.format {
         ReportFormat::JsonFull => SymbolQuery::complete_index(),
-        _ => scan.command.query(),
+        format => scan.command.query(format),
     };
     let mut files = scan.files.clone();
     let mut stats = CacheStats::new(analyzer.uses_cache());

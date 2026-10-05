@@ -35,7 +35,7 @@ pub const KEYWORD_MATRIX: &[KeywordRow] = &[
     // preceded by `// … fn struct enum trait const static`
     (L::Rust, "BOUNDARY_TABLE", None, Some("const")),
     (L::Go, "ExportedFunction", None, Some("func")),
-    (L::Go, "ExportedMethod", None, Some("func")),
+    (L::Go, "ExportedMethod", Some("ExportedStruct"), Some("func")),
     (L::Go, "ExportedStruct", None, Some("type")),
     (L::Go, "ExportedConstant", None, Some("const")),
     (L::Go, "ExportedVariable", None, Some("var")),
@@ -215,7 +215,7 @@ pub const SIGNATURE_MATRIX: &[SignatureRow] = &[
     (L::Rust, Shape::BodyIntroducer, Case::NotApplicable(NO_INTRODUCER)),
     (L::Rust, Shape::Terminator, is("required_trait_method", Some("PublicTrait"), "fn required_trait_method(&self) -> u32")),
 
-    (L::Go, Shape::FunctionHeader, is("ExportedMethod", None, "func (receiver *ExportedStruct) ExportedMethod() string")),
+    (L::Go, Shape::FunctionHeader, is("ExportedMethod", Some("ExportedStruct"), "func (receiver *ExportedStruct) ExportedMethod() string")),
     (L::Go, Shape::Initializer, is("boundaryTable", None, "boundaryTable")),
     (L::Go, Shape::MultiLineHeader, is("boundaryMultiLineHeader", None, "func boundaryMultiLineHeader(\n\tfirstValue int,\n\tsecondValue int,\n) int")),
     (L::Go, Shape::LeadingAnnotation, Case::NotApplicable(NO_ANNOTATIONS)),
@@ -324,7 +324,7 @@ pub const SIGNATURE_MATRIX: &[SignatureRow] = &[
 
     (L::Lua, Shape::FunctionHeader, is("chunkLocalFunction", None, "local function chunkLocalFunction()")),
     (L::Lua, Shape::Initializer, is("boundaryTable", None, "boundaryTable")),
-    (L::Lua, Shape::MultiLineHeader, is("boundaryMultiLineHeader", None, "function Widget.boundaryMultiLineHeader(\n  firstValue,\n  secondValue\n)")),
+    (L::Lua, Shape::MultiLineHeader, is("boundaryMultiLineHeader", Some("Widget"), "function Widget.boundaryMultiLineHeader(\n  firstValue,\n  secondValue\n)")),
     (L::Lua, Shape::LeadingAnnotation, Case::NotApplicable(NO_ANNOTATIONS)),
     (L::Lua, Shape::AnnotationBetweenModifiers, Case::NotApplicable(NO_ANNOTATIONS)),
     (L::Lua, Shape::BodyIntroducer, Case::NotApplicable(NO_INTRODUCER)),

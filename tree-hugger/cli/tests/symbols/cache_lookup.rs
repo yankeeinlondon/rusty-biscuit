@@ -207,3 +207,66 @@ fn complete_warm_hits_parse_nothing() {
         );
     }
 }
+
+/// The entry and the IDs do not depend on the directory `hug` runs from: a
+/// run from a subdirectory hits the entry a run from the repository root
+/// wrote, with the same IDs and in-file qualified names; only the
+/// scan-root-relative `file_path` differs.
+#[test]
+fn a_run_from_another_scan_root_hits_the_same_entry_with_the_same_ids() {
+    let scratch = Scratch::new(&[("sub/python.py", PYTHON_FIXTURE)]);
+    let run = |dir: &std::path::Path, file: &str| {
+        let args = ["--verbose", "--json", "symbols", file];
+        let output = scratch.process(&args).current_dir(dir).output().expect("run hug");
+        assert!(output.status.success(), "hug {args:?}: {}", String::from_utf8_lossy(&output.stderr));
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        (stderr, json_of(&String::from_utf8(output.stdout).expect("utf-8 stdout")))
+    };
+    let facts = |json: &Value| -> Vec<(Value, Value, Value)> {
+        json["files"]
+            .as_array()
+            .expect("files")
+            .iter()
+            .flat_map(|file| file["symbols"].as_array().expect("symbols").clone())
+            .map(|record| (record["id"].clone(), record["identity"]["qualified_name"].clone(), record["source"]["file_path"].clone()))
+            .collect()
+    };
+
+    let (cold_stats, from_root) = run(scratch.repo.path(), "sub/python.py");
+    assert!(cold_stats.starts_with("cache: 0 hits, 0 partial hits, 1 misses"), "{cold_stats}");
+    let (warm_stats, from_sub) = run(&scratch.repo.path().join("sub"), "python.py");
+    assert!(warm_stats.starts_with("cache: 1 hits, 0 partial hits, 0 misses; parsed 0 files"), "{warm_stats}");
+    assert_eq!(cache_entries(scratch.temp.path()).len(), 1, "one entry for one file");
+
+    let (root_facts, sub_facts) = (facts(&from_root), facts(&from_sub));
+    assert!(!root_facts.is_empty());
+    assert_eq!(root_facts.len(), sub_facts.len());
+    for ((root_id, root_name, root_path), (sub_id, sub_name, sub_path)) in root_facts.iter().zip(&sub_facts) {
+        assert_eq!(root_id, sub_id, "ID of {root_name}");
+        assert_eq!(root_name, sub_name);
+        assert_eq!(root_path, "sub/python.py");
+        assert_eq!(sub_path, "python.py");
+    }
+}
+
+/// `--json` asks for the flags a terminal listing did not compute: the entry
+/// is widened in place (a partial hit that parses the file once, never a
+/// miss), and both commands are then complete hits.
+#[test]
+fn a_json_run_after_a_listing_widens_the_entry_by_the_flags() {
+    let scratch = Scratch::new(&[(FILE, PYTHON_FIXTURE)]);
+    let temp = scratch.temp.path();
+    let listing = ["--verbose", "--plain", "symbols", FILE];
+    let json = ["--verbose", "--json", "symbols", FILE];
+
+    let cold = stderr_of_success(&scratch, temp, &listing);
+    assert!(cold.starts_with("cache: 0 hits, 0 partial hits, 1 misses; parsed 1 files"), "{cold}");
+    let widened = stderr_of_success(&scratch, temp, &json);
+    assert!(widened.starts_with("cache: 0 hits, 1 partial hits, 0 misses; parsed 1 files"), "{widened}");
+    let entry = read_json(&cache_entries(temp)[0]);
+    assert_eq!(entry["completed_capabilities"], serde_json::json!(["declarations", "flags"]));
+    for args in [&listing, &json] {
+        let warm = stderr_of_success(&scratch, temp, args);
+        assert!(warm.starts_with("cache: 1 hits, 0 partial hits, 0 misses; parsed 0 files"), "{args:?}: {warm}");
+    }
+}

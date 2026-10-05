@@ -62,7 +62,11 @@ fn the_json_envelope_holds_only_selected_records_and_ends_with_errors() {
         let name = file["file"].as_str().expect("file");
         assert!(!name.contains('\\') && !name.starts_with('/'), "{name}: portable and relative");
         assert_eq!(file["completed_passes"], serde_json::json!(["Parse"]), "{name}");
-        assert_eq!(file["completed_capabilities"], serde_json::json!(["declarations"]), "{name}");
+        assert_eq!(
+            file["completed_capabilities"],
+            serde_json::json!(["declarations", "flags"]),
+            "{name}: `--json` always computes the flags"
+        );
         assert!(file.get("members").is_none(), "{name}: only `classes` reports members");
         for record in file["symbols"].as_array().expect("symbols") {
             assert!(FUNCTION_KINDS.contains(&record["kind"].as_str().unwrap_or_default()), "{name}: {record}");
@@ -73,6 +77,10 @@ fn the_json_envelope_holds_only_selected_records_and_ends_with_errors() {
             }
             assert!(record["relations"].as_object().is_some_and(|map| map.is_empty()), "{name}: no relations");
             assert!(record["semantics"].as_object().is_some_and(|map| map.is_empty()), "{name}: no semantics");
+            for flag in ["is_test", "is_deprecated"] {
+                assert!(record["visibility"][flag].is_boolean(), "{name}: {flag}");
+            }
+            assert!(record.get("metrics").is_none(), "{name}: metrics were not requested");
             let parsed: SymbolRecord =
                 serde_json::from_value(record.clone()).expect("a report record is a SymbolRecord");
             assert_eq!(serde_json::to_value(&parsed).expect("serialize"), *record, "{name}: round trip");
@@ -636,4 +644,47 @@ fn a_json_report_without_entries_stops_at_a_failing_stdout() {
             assert_stopped_early(&args, &hug_into_closed_pipe(&scratch, &args), CHUNK);
         }
     }
+}
+
+/// `--json` always carries computed test and deprecation flags, without any
+/// filter asking for them: a file-name rule, a test attribute, `cfg(test)`
+/// and a deprecation marker set them, and look-alikes (`test_helper`,
+/// `latest.rs`, a deprecation word in an ordinary comment) do not.
+#[test]
+fn json_records_carry_computed_test_and_deprecation_flags() {
+    let scratch = Scratch::new(&[
+        ("pkg/Cargo.toml", "[package]\nname = \"pkg\"\n"),
+        (
+            "pkg/src/lib.rs",
+            "// deprecated: use new_api\npub fn test_helper() {}\n#[deprecated]\npub fn old_api() {}\n#[test]\nfn unit() {}\n#[cfg(test)]\nmod tests {\n    fn inner() {}\n}\n",
+        ),
+        ("pkg/src/latest.rs", "pub fn latest() {}\n"),
+        ("pkg/tests/it.rs", "fn integration_helper() {}\n"),
+    ]);
+    let json = json_of(&scratch.stdout(&["--json", "functions"]));
+    for file in json["files"].as_array().expect("files") {
+        assert_eq!(file["completed_capabilities"], serde_json::json!(["declarations", "flags"]));
+    }
+    let flags: Vec<(String, bool, bool)> = records(&json)
+        .into_iter()
+        .map(|record| {
+            (
+                record["identity"]["name"].as_str().expect("name").to_string(),
+                record["visibility"]["is_test"].as_bool().expect("is_test"),
+                record["visibility"]["is_deprecated"].as_bool().expect("is_deprecated"),
+            )
+        })
+        .collect();
+    let expected: Vec<(String, bool, bool)> = [
+        ("latest", false, false),
+        ("test_helper", false, false),
+        ("old_api", false, true),
+        ("unit", true, false),
+        ("inner", true, false),
+        ("integration_helper", true, false),
+    ]
+    .into_iter()
+    .map(|(name, is_test, is_deprecated)| (name.to_string(), is_test, is_deprecated))
+    .collect();
+    assert_eq!(flags, expected);
 }

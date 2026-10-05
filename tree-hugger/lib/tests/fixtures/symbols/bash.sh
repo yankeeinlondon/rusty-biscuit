@@ -32,3 +32,16 @@ boundary_multi_line_header ()
 {
   echo "header"
 }
+
+# ---- Scope and qualified names ----
+
+outer_function() {
+  nested_function() { echo "nested"; }
+}
+
+# ---- Flags and metrics ----
+
+# deprecated: a comment above a function is not documentation here
+test_helper() {
+  :
+}

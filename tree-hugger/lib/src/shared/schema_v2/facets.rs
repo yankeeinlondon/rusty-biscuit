@@ -10,8 +10,18 @@ use super::types::{SymbolId, TextSpan};
 pub struct IdentityFacet {
     pub name: String,
     pub display_name: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub qualified_name: Option<String>,
+    /// The in-file qualified name: the enclosing named declarations
+    /// (namespaces, packages, modules, types, `impl` targets, functions)
+    /// joined with the language's own separators, ending in `name`. Never
+    /// empty, and built from this file's source alone, so it does not depend
+    /// on where the file is read from.
+    #[serde(deserialize_with = "non_empty_string")]
+    pub qualified_name: String,
+    /// `qualified_name` starts at a namespace or package the source declares
+    /// (Java/Scala/Go `package`, C#/C++/PHP `namespace`, Perl `package`), so
+    /// it is complete without a file prefix. A Rust `mod` or a type does not
+    /// root a name.
+    pub is_namespace_rooted: bool,
     /// Name of the declaration that directly contains this one (a type,
     /// module, namespace or function); absent at file level.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -85,6 +95,9 @@ pub struct VisibilityFacet {
     pub is_synthetic: bool,
     pub is_deprecated: bool,
     pub is_experimental: bool,
+    /// Test-only code: a declaration in a recognized test file, with a test
+    /// attribute, or inside a Rust `#[cfg(test)]` item.
+    pub is_test: bool,
 }
 
 impl Default for VisibilityFacet {
@@ -100,6 +113,7 @@ impl Default for VisibilityFacet {
             is_synthetic: false,
             is_deprecated: false,
             is_experimental: false,
+            is_test: false,
         }
     }
 }
@@ -194,6 +208,49 @@ pub enum Modifier {
     Unsafe,
     Mut,
     Custom(String),
+}
+
+/// Per-symbol measurements, present on a record only when requested. Inside
+/// the facet each metric is required: `None` (serialized `null`) means the
+/// metric is unsupported for this declaration, never "not computed".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MetricsFacet {
+    /// Declared parameters, excluding a separate receiver; a variadic
+    /// parameter counts once.
+    #[serde(deserialize_with = "nullable")]
+    pub parameters: Option<u32>,
+    /// Non-empty attached documentation.
+    #[serde(deserialize_with = "nullable")]
+    pub has_docs: Option<bool>,
+}
+
+/// A required value that may be `null`; unlike a plain `Option` field, an
+/// absent key is an error rather than `None`.
+fn nullable<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer)
+}
+
+/// A present facet; `null` is an error rather than `None`. Pair with
+/// `#[serde(default)]` so an absent key reads as `None`.
+pub(crate) fn present<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    T::deserialize(deserializer).map(Some)
+}
+
+fn non_empty_string<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
+    let value = String::deserialize(deserializer)?;
+    if value.is_empty() {
+        return Err(serde::de::Error::invalid_length(0, &"a non-empty string"));
+    }
+    Ok(value)
 }
 
 /// Different projections for type strings.

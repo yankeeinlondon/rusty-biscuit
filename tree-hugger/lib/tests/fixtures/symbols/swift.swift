@@ -106,3 +106,30 @@ func boundaryMultiLineHeader(
 
 @available(*, deprecated)
 func boundaryAnnotated() {}
+
+// ---- Scope, async and qualified names ----
+
+func asyncFunction() async {}
+
+struct FirstShape {
+    func area() async -> Int { 1 }
+}
+
+struct SecondShape {
+    func area() -> Int { 2 }
+}
+
+// ---- Flags and metrics ----
+
+/// Documented, with two parameters.
+func documentedPair(first: Int, second: Int) {}
+
+// deprecated: an ordinary comment
+func undocumentedNone() {}
+
+@available(iOS, deprecated: 13)
+func platformDeprecated() {}
+
+func testHelper() {}
+
+func variadic(first: Int, rest: Int...) {}

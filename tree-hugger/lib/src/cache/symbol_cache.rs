@@ -586,6 +586,27 @@ impl StoredEntry {
                 "diagnostics stored without the diagnostics capability",
             ));
         }
+        // Without its capability a record holds no metrics facet and no set
+        // flag; a stored one would be served as computed when it was not.
+        let capabilities = &self.completed_capabilities.0;
+        if !capabilities.contains(&Capability::Metrics)
+            && self.records.iter().any(|record| record.metrics.is_some())
+        {
+            return Err(CacheMiss::Inconsistent("metrics stored without the metrics capability"));
+        }
+        if !capabilities.contains(&Capability::Flags)
+            && self
+                .records
+                .iter()
+                .any(|record| record.visibility.is_test || record.visibility.is_deprecated)
+        {
+            return Err(CacheMiss::Inconsistent("a flag set without the flags capability"));
+        }
+        if capabilities.contains(&Capability::Metrics)
+            && self.records.iter().any(|record| record.metrics.is_none())
+        {
+            return Err(CacheMiss::Inconsistent("a record without metrics under the metrics capability"));
+        }
         if let Some(kinds) = &self.covered_kinds.0
             && self.records.iter().any(|record| !kinds.contains(&record.kind))
         {

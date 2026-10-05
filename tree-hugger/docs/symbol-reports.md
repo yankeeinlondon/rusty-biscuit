@@ -250,16 +250,18 @@ orders the containers, and each container's method sections (and its JSON
       "file": "src/shapes.rs",
       "language": "Rust",
       "completed_passes": ["Parse"],
-      "completed_capabilities": ["declarations"],
+      "completed_capabilities": ["declarations", "flags"],
       "symbols": [
         {
           "schema_version": { "major": 4, "minor": 0 },
           "id": "65e1e0ed…",
           "language": "Rust",
           "kind": "Method",
+          "scope": "Member",
           "identity": {
             "name": "norm",
             "qualified_name": "Point::norm",
+            "is_namespace_rooted": false,
             "container_name": "Point",
             "container_kind": "Type",
             "keyword": "fn",
@@ -269,7 +271,7 @@ orders the containers, and each container's method sections (and its JSON
             "file_path": "src/shapes.rs",
             "signature_text": "pub fn norm(&self) -> f64"
           },
-          "visibility": { "level": "Public" },
+          "visibility": { "level": "Public", "is_test": false, "is_deprecated": false },
           "docs": { "raw_doc": "Distance from the origin." }
         }
       ]
@@ -280,8 +282,10 @@ orders the containers, and each container's method sections (and its JSON
 ```
 
 (Pretty-printed and abridged; `hug` writes the report on one line, and real
-records also carry spans, type information, kind-specific data and
-provenance.)
+records also carry spans, modifiers (`Static`, `Async`, …), the rest of the
+visibility facet, type information, kind-specific data and provenance.
+`scope` and `qualified_name` are described in
+[Symbol Kinds, Visibility and `static`](./symbol-kinds-and-visibility.md#scope).)
 
 | Field | Meaning |
 |---|---|
@@ -299,8 +303,12 @@ What a default report leaves out:
 - **Source text.** Records carry the declaration header
   (`source.signature_text`) but not `declaration_text`, the body or attached
   comments; the doc comment stays as `docs.raw_doc`.
-- **Work the command did not ask for.** No references, semantics or
-  diagnostics; `completed_passes` says so.
+- **Work the command did not ask for.** No references, semantics,
+  diagnostics or `metrics`; `completed_passes` and `completed_capabilities`
+  say so. The test and deprecation flags are the exception: `--json` always
+  computes them (the `flags` capability), so `"is_test": false` means "not
+  test-only code", never "not checked". Their rules are in
+  [Symbol Kinds, Visibility and `static`](./symbol-kinds-and-visibility.md#deprecation-and-test-flags).
 - **Timestamps.** Records have none, so the same files always produce the
   same bytes: cold or warm cache, one worker or many.
 
@@ -352,7 +360,8 @@ An empty selection is still a complete report:
 `--json-full` has the same envelope with `indexes` in place of `files`: one
 complete index per scanned file, whether or not anything matched, with every
 kind, every pass (`Parse`, `Bind`, `Semantic`, `Docs`, `Diagnostics`),
-imports, exports, diagnostics and `declaration_text`.
+every capability (the test and deprecation flags and the `metrics` facet
+included), imports, exports, diagnostics and `declaration_text`.
 
 Because it reports everything, `--json-full` rejects any flag that narrows
 records (exit `2`): a symbol-name filter, `--exclude-symbols`, `--exported`,

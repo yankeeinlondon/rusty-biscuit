@@ -192,3 +192,56 @@ pub fn boundary_multi_line_header(
 pub struct BoundaryAttributed {
     pub attributed_value: u32,
 }
+
+// ---- Scope, async and qualified names ----
+
+pub async fn async_function() {}
+
+pub mod schema {
+    pub struct Record;
+
+    impl Record {
+        pub async fn load() -> Self {
+            Record
+        }
+    }
+}
+
+fn function_with_nested_items() {
+    struct NestedLocalType {
+        nested_field: i32,
+    }
+    mod nested_local_module {
+        pub fn nested_module_function() {}
+    }
+}
+
+// ---- Flags and metrics ----
+
+/// Documented, with two parameters.
+pub fn documented_pair(first: u8, second: u8) {}
+
+// An ordinary comment: deprecated in all but name.
+pub fn undocumented_none() {}
+
+#[deprecated(note = "use documented_pair")]
+pub fn deprecated_api() {}
+
+pub fn test_helper() {}
+
+#[test]
+fn attribute_test() {}
+
+#[cfg(test)]
+mod cfg_test_module {
+    fn inside_cfg_test(cfg_flag: bool) {}
+}
+
+#[cfg(any(test, feature = "extra"))]
+fn any_test_helper() {}
+
+pub struct Receiver;
+
+impl Receiver {
+    pub fn with_receiver(&self, only: u8) {}
+}

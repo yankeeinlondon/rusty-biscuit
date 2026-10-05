@@ -65,3 +65,34 @@ func boundaryMultiLineHeader(
 ) int {
 	return firstValue + secondValue
 }
+
+// ---- Scope and qualified names ----
+
+func (receiver ExportedStruct) Area() int { return 1 }
+
+func (receiver packageStruct) Area() int { return 2 }
+
+// ---- Flags and metrics ----
+
+// DocumentedPair is documented, with two parameters.
+func DocumentedPair(first int, second int) {}
+
+// Deprecated: use DocumentedPair.
+func DeprecatedAPI() {}
+
+// DeprecatedLater has a notice in its second paragraph.
+//
+// Deprecated: use DocumentedPair.
+func DeprecatedLater() {}
+
+// A comment separated by a blank line documents nothing.
+
+func UndocumentedNone() {
+	// this path is deprecated
+}
+
+func TestHelper() {}
+
+func Variadic(first int, rest ...int) {}
+
+func (receiver ExportedStruct) WithReceiver(only int) {}

@@ -105,6 +105,9 @@ Symbols include rich metadata when available:
 pub struct SymbolInfo {
     pub name: String,
     pub kind: SymbolKind,
+    pub scope: SymbolScope,             // Item, Member or Local
+    pub qualified_name: String,         // in-file: `schema::Record::load`
+    pub is_namespace_rooted: bool,      // starts at a declared package/namespace
     pub range: CodeRange,
     pub language: ProgrammingLanguage,
     pub file: PathBuf,
@@ -114,6 +117,7 @@ pub struct SymbolInfo {
     pub visibility: Option<Visibility>, // None = unknown
     pub is_static: bool,                // member usable without an instance
     pub is_static_storage: bool,        // storage/linkage `static`
+    pub is_async: bool,                 // declared `async`
     pub signature: Option<FunctionSignature>,
     pub type_metadata: Option<TypeMetadata>,
 }
@@ -128,6 +132,11 @@ pub struct SymbolInfo {
   `is_static_storage`.
 - Every function-like symbol (Function, Method, Constructor) has a
   `signature`, with an empty parameter list when there are none.
+- `scope` is decided by the nearest semantic declaration (a parameter and
+  anything in a function body is `Local`); `qualified_name` joins the
+  enclosing named declarations with the language's own separators and is
+  what the record ID is derived from. Both are described in
+  [Symbol Kinds, Visibility and `static`](../docs/symbol-kinds-and-visibility.md#scope).
 
 ### Visibility
 
@@ -200,6 +209,18 @@ metadata and standalone symbols agree.
 - `visibility.is_exported` comes only from export syntax and the bind pass,
   never from a Public level; converting a `SymbolInfo` always yields
   `is_exported: false`.
+- `visibility.is_test` and `visibility.is_deprecated` are computed only with
+  `Capability::Flags`, and the `metrics` facet (`parameters`, `has_docs`) only
+  with `Capability::Metrics`:
+
+  ```rust
+  let query = SymbolQuery::new().capabilities([Capability::Flags, Capability::Metrics]);
+  let result = SourceFile::read("src/lib.rs")?.query(&query)?;
+  // each record: is_test / is_deprecated computed, metrics: Some(..)
+  ```
+
+  The rules are in
+  [Symbol Kinds, Visibility and `static`](../docs/symbol-kinds-and-visibility.md#deprecation-and-test-flags).
 
 The `From<SymbolInfo>` / `From<SymbolRecord>` adapters preserve kind,
 visibility, both `static` flags, container kind and signature presence.

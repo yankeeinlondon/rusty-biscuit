@@ -246,7 +246,7 @@ impl<W: Write> JsonReport<W> {
 mod tests {
     use super::*;
     use tree_hugger::{
-        CodeRange, SymbolInfo, SymbolKind, stable_symbol_key, symbol_id_from_stable_key,
+        CodeRange, SymbolInfo, SymbolKind, SymbolScope, stable_symbol_key, symbol_id_from_stable_key,
     };
 
     /// A canonical directory holding `repo/` (the scan root) and `vendor/`.
@@ -262,6 +262,9 @@ mod tests {
         let mut record = SymbolRecord::from(SymbolInfo {
             name: "Alias".into(),
             kind: SymbolKind::Enum,
+            scope: SymbolScope::Item,
+            qualified_name: "Alias".into(),
+            is_namespace_rooted: false,
             range: CodeRange {
                 start_line: 1,
                 start_column: 0,
@@ -278,6 +281,7 @@ mod tests {
             visibility: None,
             is_static: false,
             is_static_storage: false,
+            is_async: false,
             signature: None,
             type_metadata: None,
         });

@@ -33,3 +33,16 @@ BOUNDARY_TABLE=(
 boundary_header() {
   print -- "header"
 }
+
+# ---- Scope and qualified names ----
+
+outer_function() {
+  nested_function() { print -- "nested"; }
+}
+
+# ---- Flags and metrics ----
+
+# deprecated: a comment above a function is not documentation here
+test_helper() {
+  :
+}

@@ -11,7 +11,7 @@ use crate::analysis::counters::count_definition_capture;
 use crate::error::TreeHuggerError;
 use crate::file::extract::*;
 use crate::queries::{QueryKind, query_for};
-use crate::shared::SymbolKindV2;
+use crate::shared::{SymbolKindV2, SymbolScope};
 
 /// The kinds whose declarations get metadata (visibility, `static` flags,
 /// signature, type metadata, doc comment and the record's header texts).
@@ -53,6 +53,17 @@ impl MetadataSelection {
     }
 }
 
+/// The capability-computed facts [`TreeFile::records_from`] adds to the
+/// records of wanted kinds; without them those records keep `false` test and
+/// deprecation flags and no `metrics` facet.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct RecordFacts {
+    /// `Capability::Flags`.
+    pub(crate) flags: bool,
+    /// `Capability::Metrics`.
+    pub(crate) metrics: bool,
+}
+
 /// A symbol with the nodes it was extracted from.
 pub(crate) struct ExtractedSymbol<'tree> {
     pub(crate) symbol: SymbolInfo,
@@ -63,6 +74,8 @@ pub(crate) struct ExtractedSymbol<'tree> {
     /// The declaration the name belongs to: the source of visibility, static
     /// flags, signature and declaration text.
     pub(crate) declaration: Node<'tree>,
+    /// The captured name node.
+    pub(crate) name: Node<'tree>,
 }
 
 /// One definition capture, before any metadata is read from it.
@@ -207,6 +220,22 @@ impl TreeFile {
 
         align_field_metadata(&mut pending, selection);
 
+        let inputs: Vec<NamingInput<'_>> = pending
+            .iter()
+            .map(|entry| NamingInput {
+                name: &entry.extracted.symbol.name,
+                kind: entry.extracted.symbol.kind,
+                name_node: entry.extracted.name,
+                declaration: entry.extracted.declaration,
+                anchor: entry.extracted.anchor,
+            })
+            .collect();
+        let qualified = qualified_names(&inputs, self.language, &self.source);
+        for (entry, name) in pending.iter_mut().zip(qualified) {
+            entry.extracted.symbol.qualified_name = name.text;
+            entry.extracted.symbol.is_namespace_rooted = name.is_namespace_rooted;
+        }
+
         let mut kinds_by_node: HashMap<usize, SymbolKind> = HashMap::new();
         for entry in &pending {
             for node in [entry.extracted.declaration, entry.extracted.anchor] {
@@ -244,10 +273,22 @@ impl TreeFile {
         is_ecma_module: bool,
     ) -> PendingSymbol<'tree> {
         let winner = &group.winner;
-        let container = find_symbol_container(winner.declaration, self.language, &self.source);
+        let container = match lua_table_of_name(winner.name) {
+            Some((table, _)) if self.language == ProgrammingLanguage::Lua => {
+                table.utf8_text(self.source.as_bytes()).ok().map(|table| ContainerRef {
+                    name: table.to_string(),
+                    lookup: ContainerLookup::SameFileTable,
+                })
+            }
+            _ => find_symbol_container(winner.declaration, self.language, &self.source),
+        };
         let mut symbol = SymbolInfo {
             name,
             kind: winner.kind,
+            scope: symbol_scope(winner.declaration, winner.name, winner.kind, self.language),
+            // Built once every symbol is known (`qualified_names`).
+            qualified_name: String::new(),
+            is_namespace_rooted: false,
             range: range_for_node(winner.name),
             language: self.language,
             file: self.file.clone(),
@@ -258,6 +299,7 @@ impl TreeFile {
             visibility: None,
             is_static: false,
             is_static_storage: false,
+            is_async: is_async_declaration(winner.declaration, winner.name, self.language),
             signature: None,
             type_metadata: None,
         };
@@ -270,6 +312,7 @@ impl TreeFile {
                 symbol,
                 anchor: winner.anchor(),
                 declaration: winner.declaration,
+                name: winner.name,
             },
             container,
         }
@@ -294,7 +337,7 @@ impl TreeFile {
                 root,
                 is_ecma_module,
                 kind: candidate.kind,
-                is_local: is_local_declaration(candidate.declaration, self.language),
+                scope: symbol_scope(candidate.declaration, candidate.name, candidate.kind, self.language),
             };
             (
                 extract_visibility(candidate.declaration, &context),
@@ -319,12 +362,19 @@ impl TreeFile {
                 .then(|| extract_type_metadata(context, self.language, &self.source))
                 .flatten()
         };
+        let scope = symbol.scope;
         let doc_comment = |candidate: &Candidate<'_>| match candidate.context {
-            Some(context) => extract_doc_comment(context, self.language, &self.source),
-            // A typedef name behind a declarator (`typedef struct s *P;`) has
-            // no context capture; its doc comment precedes the typedef, but
-            // the aliased struct's fields are not its own.
-            None if is_c_typedef_name(self.language, candidate.kind, candidate.declaration) => {
+            // A C/C++ function's context is its declarator; the doc comment
+            // precedes the whole definition.
+            Some(context) => extract_doc_comment(
+                declaration_for_context(context),
+                self.language,
+                &self.source,
+            ),
+            // A name captured without a context (a JS/TS `const f = () => …`,
+            // a field, a typedef name behind a declarator) is documented
+            // before its declaration; a local is never documented that way.
+            None if scope != SymbolScope::Local => {
                 extract_doc_comment(candidate.declaration, self.language, &self.source)
             }
             None => None,
@@ -471,6 +521,17 @@ fn resolve_container_kind(
         }
         // Absent when the type is declared elsewhere, or when same-named
         // declarations in this file disagree on kind.
+        // The table's kind when the file's item-scoped declarations of
+        // that name agree on one.
+        ContainerLookup::SameFileTable => {
+            let mut kinds = symbols
+                .iter()
+                .map(|entry| &entry.extracted.symbol)
+                .filter(|symbol| symbol.scope == SymbolScope::Item && symbol.name == container.name)
+                .map(|symbol| symbol.kind);
+            let first = kinds.next()?;
+            kinds.all(|kind| kind == first).then_some(first)
+        }
         ContainerLookup::SameFileType => {
             let mut kinds = symbols
                 .iter()

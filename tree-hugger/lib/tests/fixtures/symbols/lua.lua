@@ -45,4 +45,21 @@ function Widget.boundaryMultiLineHeader(
   return firstValue + secondValue
 end
 
+-- ---- Scope and qualified names ----
+
+local Other = {}
+
+function Other:methodWithSelf()
+  return self
+end
+
+-- ---- Flags and metrics ----
+
+--- An LDoc comment is not detected as documentation.
+local function documented_pair(first, second) end
+
+local function variadic(first, ...) end
+
+local function test_helper() end
+
 return Widget

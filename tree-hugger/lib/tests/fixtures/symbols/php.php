@@ -97,3 +97,30 @@ function boundary_multi_line_header(
 function boundary_annotated(): void
 {
 }
+
+// ---- Flags and metrics ----
+
+/** Documented, with two parameters. */
+function documented_pair(int $first, int $second): void
+{
+}
+
+// deprecated: an ordinary comment
+function undocumented_none(): void
+{
+}
+
+/**
+ * @deprecated use documented_pair
+ */
+function deprecated_api(): void
+{
+}
+
+function test_helper(): void
+{
+}
+
+function variadic(int $first, int ...$rest): void
+{
+}

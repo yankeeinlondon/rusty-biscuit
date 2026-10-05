@@ -19,7 +19,7 @@ use crate::shared::{
 
 mod definitions;
 
-pub(crate) use definitions::{ExtractedSymbol, MetadataSelection};
+pub(crate) use definitions::{ExtractedSymbol, MetadataSelection, RecordFacts};
 
 /// Represents a parsed source file backed by tree-sitter.
 #[derive(Debug, Clone)]
@@ -1719,45 +1719,65 @@ impl TreeFile {
     /// Returns an error if symbol extraction or query compilation fails.
     pub fn symbol_records(&self) -> Result<Vec<SymbolRecord>, TreeHuggerError> {
         let selection = MetadataSelection::ALL;
-        Ok(self.records_from(self.definitions(&selection)?, &selection))
+        Ok(self.records_from(self.definitions(&selection)?, &selection, RecordFacts::default()))
     }
 
     /// Converts definitions to parse-pass records, in the same order.
     ///
     /// Every definition yields a record with its identity, ID, spans and
-    /// container; the header texts, keyword, type-alias target and
-    /// implemented trait are filled only for kinds `selection` wants.
+    /// container; the header texts, keyword, type-alias target, implemented
+    /// trait and the `facts` asked for are filled only for kinds `selection`
+    /// wants.
     pub(crate) fn records_from(
         &self,
         definitions: Vec<ExtractedSymbol<'_>>,
         selection: &MetadataSelection,
+        facts: RecordFacts,
     ) -> Vec<SymbolRecord> {
         let root = self.tree.root_node();
-        let mut ordinals: HashMap<(SymbolKindV2, Option<String>, String), u32> = HashMap::new();
+        let mut ordinals: HashMap<(SymbolKindV2, String), u32> = HashMap::new();
         let mut records = Vec::new();
         let mut implemented_traits = Vec::new();
+        let is_test_file = facts.flags && is_test_file(&self.file, self.language);
         for ExtractedSymbol {
             symbol,
             anchor,
             declaration,
+            name,
         } in definitions
         {
             let wanted = selection.wants(symbol.kind);
+            let metrics = (wanted && facts.metrics).then(|| {
+                symbol_metrics(
+                    symbol.kind,
+                    declaration,
+                    name,
+                    symbol.doc_comment.as_deref(),
+                    self.language,
+                    &self.source,
+                )
+            });
+            let flags = (wanted && facts.flags).then(|| {
+                let is_deprecated = is_deprecated(
+                    declaration,
+                    symbol.doc_comment.as_deref(),
+                    self.language,
+                    &self.source,
+                );
+                let is_test = is_test_file
+                    || has_test_attribute(declaration, self.language, &self.source)
+                    || (self.language == ProgrammingLanguage::Rust
+                        && is_in_rust_cfg_test(declaration, &self.source));
+                (is_test, is_deprecated)
+            });
             let name_span = text_span_from_code_range(&symbol.range);
             let name_bytes = symbol.range.start_byte..symbol.range.end_byte;
             let is_exported = is_exported_definition(&symbol, anchor, root);
             let mut record: SymbolRecord = symbol.into();
 
-            let qualified_or_name = record
-                .identity
-                .qualified_name
-                .clone()
-                .unwrap_or_else(|| record.identity.name.clone());
-            let ordinal_key = (
-                record.kind,
-                record.identity.container_name.clone(),
-                record.identity.name.clone(),
-            );
+            // Same-named declarations of one kind and qualified name (C++
+            // overloads, repeated locals) are told apart by their order.
+            let ordinal_key = (record.kind, record.identity.qualified_name.clone());
             let ordinal_slot = ordinals.entry(ordinal_key).or_insert(0);
             let sibling_ordinal = *ordinal_slot;
             *ordinal_slot += 1;
@@ -1766,11 +1786,16 @@ impl TreeFile {
             record.source.name_span = Some(name_span);
             record.source.body_span = body_span_for_declaration(anchor);
             record.visibility.is_exported = is_exported;
+            if let Some((is_test, is_deprecated)) = flags {
+                record.visibility.is_test = is_test;
+                record.visibility.is_deprecated = is_deprecated;
+            }
+            record.metrics = metrics;
             record.identity.stable_key = stable_symbol_key(
                 record.language,
                 &record.source.file_path,
                 record.kind,
-                &qualified_or_name,
+                &record.identity.qualified_name,
                 sibling_ordinal,
             );
             record.id = symbol_id_from_stable_key(&record.identity.stable_key);

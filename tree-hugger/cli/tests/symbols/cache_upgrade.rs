@@ -1,6 +1,7 @@
 //! Test 8: a persistent cache entry written under an earlier extractor
-//! fingerprint (the schema-2 literal key, or a schema-3 key at extractor
-//! revisions 1 to 4) is not served after the upgrade, and the entry written by the
+//! fingerprint (the schema-2 literal key, a schema-3 key at extractor
+//! revisions 1 to 4, or the computed key of revision 6) is not served after
+//! the upgrade, and the entry written by the
 //! upgraded run is served on the next run; records of another schema version
 //! are recomputed even under the current key. Works on the cache files directly,
 //! with `TMPDIR` (`TMP`/`TEMP` on Windows) pointed at a test-owned directory,
@@ -11,6 +12,8 @@ use std::path::{Path, PathBuf};
 use biscuit_hash::{blake3_hash, xx_hash};
 use serde_json::Value;
 use tempfile::TempDir;
+use tree_hugger::cache::{FingerprintInputs, canonical_digest};
+use tree_hugger::{EXTRACTOR_REVISION, ProgrammingLanguage, SourceFile};
 
 use crate::{PYTHON_FIXTURE, Scratch, TYPESCRIPT_FIXTURE, cache_entries, json_of, stdout_of};
 
@@ -234,8 +237,7 @@ fn warm_entry_from_the_previous_extractor_is_not_served_after_the_upgrade() {
 /// and how that revision's snapshot differs from the current one.
 struct StaleRevision {
     revision: &'static str,
-    /// The record schema of that revision's key (`3.0` through revision 4).
-    schema: &'static str,
+    key: OldKey,
     file: &'static str,
     language: &'static str,
     source: String,
@@ -245,6 +247,35 @@ struct StaleRevision {
     repaired: Value,
     stale: Value,
     revert: fn(&mut Value),
+}
+
+/// How an earlier revision's entry key is formed.
+enum OldKey {
+    /// The analyzer-fingerprint key of revisions 1 to 5, whose records
+    /// carried `schema` (`3.0` through revision 4, `4.0` from revision 5).
+    Analyzer { schema: &'static str },
+    /// The computed `SymbolCache` key (revision 6 on): it digests the grammar
+    /// and query text, so it cannot be hard-coded; [`computed_revision_key`]
+    /// rebuilds it with only the revision changed.
+    Computed,
+}
+
+/// The `SymbolCache` key of `file_path` (as an entry records it) when the
+/// extractor revision is `revision`; every other input is the shipped one.
+fn computed_revision_key(revision: &str, file_path: &str) -> String {
+    let source = SourceFile::read(Path::new(file_path)).expect("read scanned file");
+    let language = ProgrammingLanguage::from_path(Path::new(file_path)).expect("language");
+    let mut fingerprint = FingerprintInputs::shipped(language, source.path())
+        .expect("fingerprint inputs")
+        .records_fingerprint();
+    fingerprint.tree_hugger_version = format!("{}+rev.{revision}", env!("CARGO_PKG_VERSION"));
+    canonical_digest(&[
+        "symbols",
+        &file_path.replace('\\', "/"),
+        source.hash(),
+        "detected",
+        &fingerprint.digest(),
+    ])
 }
 
 /// The persistent-cache key `hug` used at an earlier extractor `revision`
@@ -311,7 +342,19 @@ fn assert_stale_revision_is_not_served(case: &StaleRevision) {
         .and_then(|stem| stem.to_str())
         .expect("entry key")
         .to_string();
-    let old_key = revision_key(case.schema, case.revision, &file_path, &case.source, case.language);
+    let old_key = match case.key {
+        OldKey::Analyzer { schema } => revision_key(schema, case.revision, &file_path, &case.source, case.language),
+        OldKey::Computed => {
+            // The formula must rebuild the key run 1 wrote before it can
+            // stand for an earlier revision's.
+            assert_eq!(
+                computed_revision_key(EXTRACTOR_REVISION, &file_path),
+                current_key,
+                "{label}: computed key formula"
+            );
+            computed_revision_key(case.revision, &file_path)
+        }
+    };
     assert_ne!(old_key, current_key, "{label}: the revision must differ from the current one");
 
     let mut stale = current_snapshot.clone();
@@ -370,7 +413,7 @@ fn decoy_is_static(json: &Value) -> Value {
 fn entry_from_extractor_revision_one_is_not_served_after_the_repairs() {
     assert_stale_revision_is_not_served(&StaleRevision {
         revision: "1",
-        schema: "3.0",
+        key: OldKey::Analyzer { schema: "3.0" },
         file: "python.py",
         language: "python",
         source: format!(
@@ -406,7 +449,7 @@ fn nested_scope_leak_visibility(json: &Value) -> Value {
 fn entry_from_extractor_revision_two_is_not_served_after_the_repairs() {
     assert_stale_revision_is_not_served(&StaleRevision {
         revision: "2",
-        schema: "3.0",
+        key: OldKey::Analyzer { schema: "3.0" },
         file: "linkage.cpp",
         language: "cpp",
         source: SCOPE_LEAK_SOURCE.to_string(),
@@ -454,7 +497,7 @@ fn trailing_differs_definition_visibility(json: &Value) -> Value {
 fn entry_from_extractor_revision_three_is_not_served_after_the_repairs() {
     assert_stale_revision_is_not_served(&StaleRevision {
         revision: "3",
-        schema: "3.0",
+        key: OldKey::Analyzer { schema: "3.0" },
         file: "templates.cpp",
         language: "cpp",
         source: TRAILING_RETURN_SOURCE.to_string(),
@@ -495,7 +538,7 @@ fn module_function_keyword(json: &Value) -> Value {
 fn entry_from_extractor_revision_four_is_not_served_after_the_repairs() {
     assert_stale_revision_is_not_served(&StaleRevision {
         revision: "4",
-        schema: "3.0",
+        key: OldKey::Analyzer { schema: "3.0" },
         file: "python.py",
         language: "python",
         source: PYTHON_FIXTURE.to_string(),
@@ -533,7 +576,7 @@ fn module_function_is_recursive(json: &Value) -> Value {
 fn entry_from_extractor_revision_five_is_not_served_after_the_repairs() {
     assert_stale_revision_is_not_served(&StaleRevision {
         revision: "5",
-        schema: "4.0",
+        key: OldKey::Analyzer { schema: "4.0" },
         file: "python.py",
         language: "python",
         source: PYTHON_FIXTURE.to_string(),
@@ -543,6 +586,81 @@ fn entry_from_extractor_revision_five_is_not_served_after_the_repairs() {
         stale: Value::from("No"),
         revert: |snapshot| {
             record_named(snapshot, "module_function")["semantics"]["is_recursive"] = Value::from("No");
+        },
+    });
+}
+
+/// The `identity.qualified_name` of the `instance_method` record in a
+/// `hug --json-full` report (`null` when absent).
+fn instance_method_qualified_name(json: &Value) -> Value {
+    let records: Vec<&Value> = json["indexes"]
+        .as_array()
+        .expect("indexes")
+        .iter()
+        .flat_map(|index| index["symbols"].as_array().expect("index symbols"))
+        .filter(|record| record["identity"]["name"] == "instance_method")
+        .collect();
+    assert_eq!(records.len(), 1, "expected one `instance_method` record");
+    records[0]["identity"].get("qualified_name").cloned().unwrap_or(Value::Null)
+}
+
+/// Revision 6 spelled every qualified name `container::name`, whatever the
+/// language; revision 7 builds the in-file name with the language's own
+/// separators (`PlainWidget.instance_method` in Python) and derives IDs from
+/// it.
+#[test]
+fn entry_from_extractor_revision_six_is_not_served_after_the_repairs() {
+    assert_stale_revision_is_not_served(&StaleRevision {
+        revision: "6",
+        key: OldKey::Computed,
+        file: "python.py",
+        language: "python",
+        source: PYTHON_FIXTURE.to_string(),
+        sentinel: "MODULE_CONSTANT",
+        probe: instance_method_qualified_name,
+        repaired: Value::from("PlainWidget.instance_method"),
+        stale: Value::from("PlainWidget::instance_method"),
+        revert: |snapshot| {
+            record_named(snapshot, "instance_method")["identity"]["qualified_name"] =
+                Value::from("PlainWidget::instance_method");
+        },
+    });
+}
+
+/// `documented_pair`'s attached documentation in a `hug --json-full` report.
+fn documented_pair_doc(output: &Value) -> Value {
+    let records: Vec<&Value> = output["indexes"]
+        .as_array()
+        .expect("indexes")
+        .iter()
+        .flat_map(|index| index["symbols"].as_array().expect("index symbols"))
+        .filter(|record| record["identity"]["name"] == "documented_pair")
+        .collect();
+    assert_eq!(records.len(), 1, "expected one `documented_pair` record");
+    records[0]["docs"].get("raw_doc").cloned().unwrap_or(Value::Null)
+}
+
+/// Revision 7 read a Python declaration's docs from the statements before
+/// it (so a function lost its own docstring and a method took its class's);
+/// revision 8 reads the docstring in the body, and attaches only doc-form
+/// comments elsewhere.
+#[test]
+fn entry_from_extractor_revision_seven_is_not_served_after_the_repairs() {
+    assert_stale_revision_is_not_served(&StaleRevision {
+        revision: "7",
+        key: OldKey::Computed,
+        file: "python.py",
+        language: "python",
+        source: PYTHON_FIXTURE.to_string(),
+        sentinel: "MODULE_CONSTANT",
+        probe: documented_pair_doc,
+        repaired: Value::from("Documented, with two parameters."),
+        stale: Value::Null,
+        revert: |snapshot| {
+            record_named(snapshot, "documented_pair")["docs"]
+                .as_object_mut()
+                .expect("docs object")
+                .remove("raw_doc");
         },
     });
 }

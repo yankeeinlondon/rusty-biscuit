@@ -7,7 +7,10 @@
 //! `relations.references`/`dependencies`/`referenced_by`, export targets and
 //! `is_exported` (to the value the declaration already had, since both come
 //! from the same export spans); the semantic pass sets `semantics` on
-//! functions and methods; the docs pass sets `docs.parsed`. Each pass also
+//! functions and methods; the docs pass sets `docs.parsed`. Flags and
+//! metrics are read from the syntax tree while records are built, so adding
+//! either needs a parse; without them a record's `is_test` and
+//! `is_deprecated` are `false` and it has no `metrics` facet. Each pass also
 //! stamps `provenance.parse_pass`, which [`stamp_parse_pass`] recomputes.
 //! `symbols_cache::projected_results_equal_uncached_queries` (and its `multi/` twin) pin the
 //! equivalence for every fixture.
@@ -24,7 +27,8 @@ use crate::shared::{AnalysisPass, FileSymbolIndex, SemanticFacet, SymbolKindV2};
 /// every kind) and `completed` from its records alone, without parsing.
 ///
 /// Containment needs every record as a candidate owner, so it needs a result
-/// of every kind; semantics needs the references binding produced.
+/// of every kind; semantics needs the references binding produced; flags and
+/// metrics need the syntax tree.
 pub(crate) fn record_passes_suffice(
     missing: &BTreeSet<Capability>,
     completed: &BTreeSet<Capability>,
@@ -34,7 +38,11 @@ pub(crate) fn record_passes_suffice(
         Capability::StructuredDocs => true,
         Capability::Semantics => completed.contains(&Capability::References),
         Capability::Containment => kinds.is_none(),
-        Capability::Declarations | Capability::References | Capability::Diagnostics => false,
+        Capability::Declarations
+        | Capability::References
+        | Capability::Diagnostics
+        | Capability::Flags
+        | Capability::Metrics => false,
     })
 }
 
@@ -83,6 +91,13 @@ pub(crate) fn project(mut index: FileSymbolIndex, query: &SymbolQuery) -> Symbol
         }
         if !query.requires(Capability::StructuredDocs) {
             symbol.docs.parsed = None;
+        }
+        if !query.requires(Capability::Flags) {
+            symbol.visibility.is_test = false;
+            symbol.visibility.is_deprecated = false;
+        }
+        if !query.requires(Capability::Metrics) {
+            symbol.metrics = None;
         }
     }
     if !references {

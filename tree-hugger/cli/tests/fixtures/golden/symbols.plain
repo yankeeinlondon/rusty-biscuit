@@ -50,9 +50,9 @@
   - public const DEFAULT_LABEL javascript.js:17:14
   - module-private local M lua.lua:3:7
   - module-private local default_size lua.lua:5:7
-  - function new_bag(size) lua.lua:7:1
+  - function new_bag(size) [in variable M] lua.lua:7:1
   - parameter size lua.lua:7:20
-  - method describe() lua.lua:11:1
+  - method describe() [in variable M] lua.lua:11:1
   - module-private function helper() lua.lua:15:1
   - module Multi::Queue perl.pl:2:1
   - my $default_size perl.pl:4:4
@@ -112,7 +112,7 @@ nested
 
   - namespace nested nested/go.go:2:9
   - public type Widget { Size int } nested/go.go:5:1
-  - public method Grow(amount int) (amount int) nested/go.go:9:1
+  - public method Grow(amount int) (amount int) [in type Widget] nested/go.go:9:1
   - parameter w nested/go.go:9:7
   - parameter amount nested/go.go:9:23
   - public const MaxSize nested/go.go:13:7

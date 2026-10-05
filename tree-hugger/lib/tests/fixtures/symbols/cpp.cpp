@@ -119,3 +119,35 @@ int boundaryMultiLineHeader(
 [[nodiscard]] int boundaryAnnotated() {
     return 0;
 }
+
+// ---- Scope and qualified names ----
+
+namespace outer_space {
+namespace inner_space {
+struct FirstShape {
+    int area();
+};
+}  // namespace inner_space
+}  // namespace outer_space
+
+struct SecondShape {
+    int area();
+};
+
+// ---- Flags and metrics ----
+
+/// Documented, with two parameters.
+void documented_pair(int first, int second) {}
+
+// deprecated: an ordinary comment
+void undocumented_none() {}
+
+[[deprecated("use documented_pair")]] void deprecated_api() {}
+
+[[gnu::deprecated]] void namespaced_attribute() {}
+
+void test_helper() {}
+
+void variadic(int first, ...) {}
+
+class [[deprecated]] DeprecatedClass {};

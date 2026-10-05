@@ -35,7 +35,7 @@ pub(crate) fn extract_visibility(
     declaration: Node<'_>,
     ctx: &DeclarationContext<'_>,
 ) -> Option<Visibility> {
-    if ctx.is_local || ctx.kind == SymbolKind::Parameter {
+    if ctx.is_local() || ctx.kind == SymbolKind::Parameter {
         return None;
     }
 

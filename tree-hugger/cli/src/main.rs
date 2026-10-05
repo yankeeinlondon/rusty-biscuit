@@ -772,12 +772,10 @@ fn main() -> Result<(), TreeHuggerError> {
         language,
     )?;
 
-    let symbol_cache = (!scan.no_cache).then(|| {
-        let project_id = pkg_root
-            .to_string_lossy()
-            .replace(['/', '\\', ':', ' ', '.'], "_");
-        SymbolCache::new(PersistentCache::default_cache(&project_id, true))
-    });
+    // One cache directory for every scan: the entry key names the file by
+    // its identity, so a file reached from two scan roots shares one entry.
+    let symbol_cache = (!scan.no_cache)
+        .then(|| SymbolCache::new(PersistentCache::default_cache(CACHE_PROJECT_ID, true)));
     let analyzer = Analyzer::new(symbol_cache, language, analysis_options.experimental_semantics);
 
     if let Some(command) = declarations_command(&command_kind) {
@@ -1009,6 +1007,10 @@ fn current_dir() -> Result<PathBuf, TreeHuggerError> {
             source,
         })
 }
+
+/// The persistent-cache directory `hug` uses under
+/// `<temp>/tree-hugger/cache/`, the same for every scan root.
+const CACHE_PROJECT_ID: &str = "hug";
 
 /// Directory names skipped when completing filter paths (build/dep output).
 const COMPLETION_SKIPPED_DIRS: &[&str] =

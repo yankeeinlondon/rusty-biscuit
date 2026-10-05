@@ -103,6 +103,7 @@ pub struct SymbolRecord {
     pub id: SymbolId,
     pub language: ProgrammingLanguage,
     pub kind: SymbolKindV2,
+    pub scope: SymbolScope,                 // Item, Member or Local
     pub identity: IdentityFacet,
     pub source: SourceFacet,
     pub visibility: VisibilityFacet,
@@ -112,11 +113,46 @@ pub struct SymbolRecord {
     pub type_info: TypeFacet,
     pub relations: RelationFacet,
     pub semantics: SemanticFacet,
+    pub metrics: Option<MetricsFacet>,      // absent unless requested
     pub provenance: ProvenanceFacet,
     pub kind_data: SymbolKindData,
     pub extensions: std::collections::BTreeMap<String, serde_json::Value>,
 }
 ```
+
+**Additive 4.x fields.** `scope`, `identity.qualified_name` (now always
+present), `identity.is_namespace_rooted`, the `Async` entry of `modifiers`,
+`visibility.is_test` and the `metrics` facet were added on top of 4.0 without
+a version bump; `EXTRACTOR_REVISION` moved on instead (it is 8 now), so no
+cache entry written without them is served. The `attributes`, `type_info.generic_params`
+and the inheritance lists of `relations` stay empty.
+
+| Fact | When computed |
+|---|---|
+| `scope`, the `async` modifier, the in-file `qualified_name` | always, for every declaration (also those a kind selection leaves out) |
+| `visibility.is_test`, `visibility.is_deprecated` | with `Capability::Flags`; without it both are `false`, meaning "not computed" (`hug --json` and `--json-full` always ask for it) |
+| `metrics` (`parameters`, `has_docs`) | with `Capability::Metrics`, on every selected record; without it the facet is absent |
+
+```rust
+pub enum SymbolScope { Item, Member, Local }
+
+pub struct MetricsFacet {
+    pub parameters: Option<u32>,  // `null` = unsupported for this declaration
+    pub has_docs: Option<bool>,   // `null` = no doc-comment detection
+}
+```
+
+Inside a present `metrics` facet both keys are required: `null` means the
+metric is unsupported, and an absent key is malformed. An absent facet means
+"not requested". `parameters` is the length of the declaration's own
+parameter list without a Rust `self` (a Go receiver has its own list), one
+variadic parameter counting once; it is `null` for a declaration that is not
+a function, one with no parameter list (`def area: Int` in Scala), and in
+Perl, Bash and Zsh. `has_docs` is whether `docs.raw_doc` is present; it is
+`null` in Lua, Perl, Bash and Zsh, which have no doc-comment detection. The
+flag rules and which comments count as documentation are in
+[Symbol Kinds, Visibility and `static`](./symbol-kinds-and-visibility.md#deprecation-and-test-flags). Scope rules and qualified-name spelling are in
+[Symbol Kinds, Visibility and `static`](./symbol-kinds-and-visibility.md#scope).
 
 ### Symbol Kind and Payload
 
@@ -174,15 +210,30 @@ pub struct ParameterSymbolData {
 pub struct IdentityFacet {
     pub name: String,
     pub display_name: String,
-    pub qualified_name: Option<String>,
+    pub qualified_name: String,                    // in-file name, never empty
+    pub is_namespace_rooted: bool,                 // starts at a declared namespace
     pub container_name: Option<String>,            // the container's name
     pub container_kind: Option<SymbolKindV2>,      // the container's kind
     pub keyword: Option<String>,                   // the declaring keyword
-    pub stable_key: String, // language + file + kind + lexical path
+    pub stable_key: String, // language + file + kind + qualified name + ordinal
 }
 ```
 
-`stable_key` is deterministic and used to produce `SymbolId`.
+`stable_key` is deterministic and used to produce `SymbolId`. It joins the
+language, the file's identity, the kind, the in-file `qualified_name` and the
+record's order among records of that kind and qualified name
+(`rust::/repo/src/shapes.rs::Method::Point::norm::0`), so IDs do not depend on
+the scan root or on how the file's path was spelled. Until revision 7 the key
+used `container::name` in every language; the native spelling changed every
+ID once.
+
+`qualified_name` is built from the file's own source with the language's
+separators (`schema::Record::load`, `com.example.Point.area`,
+`App\Models\User::find`). A file or module **prefix** is not stored: it is
+**planned** as a query input applied after the cache lookup, which is why
+neither the scan root nor a library caller's naming context is a cache-key
+input. `is_namespace_rooted` marks names that already start at a declared
+`package` or `namespace` and so will get no prefix.
 
 `container_name` holds the name of the symbol's nearest container (a class, trait,
 module, or the implemented type of a Rust `impl`), and `container_kind` holds
@@ -194,6 +245,7 @@ example a Rust `impl` for a type declared in another file:
 "identity": {
   "name": "fmt",
   "qualified_name": "PublicStruct::fmt",
+  "is_namespace_rooted": false,
   "container_name": "PublicStruct",
   "container_kind": "Type",
   "keyword": "fn"
@@ -312,6 +364,7 @@ pub struct VisibilityFacet {
     pub is_synthetic: bool,
     pub is_deprecated: bool,
     pub is_experimental: bool,
+    pub is_test: bool,          // test-only code (Capability::Flags)
 }
 ```
 
@@ -784,6 +837,8 @@ let result = SourceFile::read("src/lib.rs")?.query(&query)?;
 | `Semantics` | References | the semantic pass |
 | `StructuredDocs` | Declarations | the docs pass |
 | `Diagnostics` | Declarations | the diagnostics pass |
+| `Flags` | Declarations | `visibility.is_test` and `is_deprecated`, read while records are built (no extra pass) |
+| `Metrics` | Declarations | the `metrics` facet, read while records are built (no extra pass) |
 
 `completed_capabilities` records work narrower than a pass, such as
 containment without references, so an empty facet can be told apart from one

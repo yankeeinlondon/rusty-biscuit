@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::error::TreeHuggerError;
 use crate::file::query::{Capability, SymbolQuery, SymbolQueryResult};
-use crate::file::tree_file::{MetadataSelection, TreeFile};
+use crate::file::tree_file::{MetadataSelection, RecordFacts, TreeFile};
 use crate::shared::{
     AnalysisPass, CommentAttachment, DocsFacet, ExportRecord, FileSymbolIndex, ImportRecord,
     ImportSymbol, ParsedDocs, ReferencedSymbol, SemanticFacet, SymbolId, SymbolKindV2,
@@ -89,7 +89,11 @@ pub(crate) fn run_query(
         .exports_from(&definitions)
         .map(export_record)
         .collect();
-    let symbols = tree_file.records_from(definitions, &selection);
+    let facts = RecordFacts {
+        flags: query.requires(Capability::Flags),
+        metrics: query.requires(Capability::Metrics),
+    };
+    let symbols = tree_file.records_from(definitions, &selection, facts);
 
     let mut index = FileSymbolIndex {
         schema_version: crate::shared::SchemaVersion::V4_0,
@@ -279,7 +283,7 @@ fn bind_references(index: &mut FileSymbolIndex, names: &NameIndex, references: &
         if let Some(idx) = find_export_target(&index.symbols, names, export) {
             let symbol = &index.symbols[idx];
             export.symbol.id = Some(symbol.id.clone());
-            export.symbol.qualified_name = symbol.identity.qualified_name.clone();
+            export.symbol.qualified_name = Some(symbol.identity.qualified_name.clone());
             exported_ids.insert(symbol.id.clone());
         }
     }
@@ -344,7 +348,7 @@ fn symbol_ref(symbol: &SymbolRecord) -> SymbolRef {
     SymbolRef {
         id: Some(symbol.id.clone()),
         name: symbol.identity.name.clone(),
-        qualified_name: symbol.identity.qualified_name.clone(),
+        qualified_name: Some(symbol.identity.qualified_name.clone()),
     }
 }
 

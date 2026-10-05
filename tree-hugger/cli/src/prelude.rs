@@ -10,7 +10,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use tree_hugger::{
-    CodeRange, ImportRecord, ProgrammingLanguage, SymbolInfo, SymbolKind, SymbolKindData,
+    CodeRange, ImportRecord, ProgrammingLanguage, SymbolInfo, SymbolKind, SymbolKindData, SymbolScope,
     SymbolQuery, SymbolRecord, TextSpan, TreeHuggerError, file_identity, has_package_manifest,
     stable_symbol_key, symbol_id_from_stable_key,
 };
@@ -350,6 +350,10 @@ fn synthetic_export(
     let mut record = SymbolRecord::from(SymbolInfo {
         name: import.name.clone(),
         kind,
+        // A re-export is a file-level name of the prelude.
+        scope: SymbolScope::Item,
+        qualified_name: import.name.clone(),
+        is_namespace_rooted: false,
         range: code_range(span),
         language,
         file,
@@ -359,6 +363,7 @@ fn synthetic_export(
         visibility: None,
         is_static: false,
         is_static_storage: false,
+        is_async: false,
         signature: None,
         type_metadata: None,
     });

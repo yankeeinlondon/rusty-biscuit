@@ -181,13 +181,15 @@ fn assert_projections_equal_uncached_queries(fixtures: Vec<PathBuf>) {
     // member kind whose owners are unselected (the case that needs owners
     // from outside the selection) is checked at both ends.
     let method: &[SymbolKindV2] = &[SymbolKindV2::Method];
-    let cells: [(Option<&[SymbolKindV2]>, &[Capability]); 9] = [
+    let cells: [(Option<&[SymbolKindV2]>, &[Capability]); 11] = [
         (None, &[Capability::Declarations]),
         (None, &[Capability::Containment]),
         (None, &[Capability::References]),
         (None, &[Capability::Semantics]),
         (None, &[Capability::StructuredDocs]),
         (None, &[Capability::Diagnostics]),
+        (None, &[Capability::Flags]),
+        (None, &[Capability::Metrics]),
         (None, &Capability::ALL),
         (Some(method), &[Capability::Declarations]),
         (Some(method), &Capability::ALL),
@@ -197,6 +199,8 @@ fn assert_projections_equal_uncached_queries(fixtures: Vec<PathBuf>) {
     let mut compared = 0usize;
     let mut stripped_references = 0usize;
     let mut stripped_parsed_docs = 0usize;
+    let mut stripped_flags = 0usize;
+    let mut stripped_metrics = 0usize;
 
     let fixture_count = fixtures.len();
     for path in fixtures {
@@ -228,6 +232,15 @@ fn assert_projections_equal_uncached_queries(fixtures: Vec<PathBuf>) {
                     stripped_parsed_docs +=
                         count_records(&full, |record| !record["docs"]["parsed"].is_null());
                 }
+                if !query.requires(Capability::Flags) {
+                    stripped_flags += count_records(&full, |record| {
+                        record["visibility"]["is_test"] == json!(true)
+                            || record["visibility"]["is_deprecated"] == json!(true)
+                    });
+                }
+                if !query.requires(Capability::Metrics) {
+                    stripped_metrics += count_records(&full, |record| record["metrics"].is_object());
+                }
             }
         }
     }
@@ -235,6 +248,8 @@ fn assert_projections_equal_uncached_queries(fixtures: Vec<PathBuf>) {
     assert_eq!(compared, fixture_count * cells.len());
     assert!(stripped_references > 0, "no projection removed references");
     assert!(stripped_parsed_docs > 0, "no projection removed parsed docs");
+    assert!(stripped_flags > 0, "no projection removed a set flag");
+    assert!(stripped_metrics > 0, "no projection removed metrics");
 }
 
 fn count_records(result: &Value, predicate: impl Fn(&Value) -> bool) -> usize {
@@ -303,6 +318,22 @@ fn widening_capabilities_runs_only_the_missing_passes() {
             second: functions().capabilities([Capability::Diagnostics]),
             parsed: true,
             diagnostics_runs: 1,
+        },
+        // Flags and metrics are read from the syntax tree; neither runs
+        // diagnostics.
+        WideningRow {
+            language: ProgrammingLanguage::Rust,
+            first: SymbolQuery::new(),
+            second: SymbolQuery::new().capabilities([Capability::Flags]),
+            parsed: true,
+            diagnostics_runs: 0,
+        },
+        WideningRow {
+            language: ProgrammingLanguage::Go,
+            first: functions().capabilities([Capability::Flags]),
+            second: functions().capabilities([Capability::Metrics]),
+            parsed: true,
+            diagnostics_runs: 0,
         },
     ];
 
@@ -635,6 +666,88 @@ fn covered_kind_lists_are_served_only_in_canonical_form() {
         cached(&cache, read(&path), &query).0,
         CacheLookup::Miss(CacheMiss::Inconsistent("a record of a kind the entry does not cover"))
     );
+
+    // So do a metrics facet and a set flag that no capability of the entry
+    // computed; the result is recomputed, without them.
+    for (label, pointer, value, reason) in [
+        (
+            "metrics facet",
+            "/records/0/metrics",
+            json!({ "parameters": 1, "has_docs": false }),
+            "metrics stored without the metrics capability",
+        ),
+        ("is_test", "/records/0/visibility/is_test", json!(true), "a flag set without the flags capability"),
+        (
+            "is_deprecated",
+            "/records/0/visibility/is_deprecated",
+            json!(true),
+            "a flag set without the flags capability",
+        ),
+    ] {
+        let mut edited = original.clone();
+        let (parent, key) = pointer.rsplit_once('/').expect("pointer");
+        edited_object(&mut edited, parent).insert(key.to_string(), value);
+        write_entry(&entry_path, &edited);
+        let (lookup, result, _) = cached(&cache, read(&path), &query);
+        assert_eq!(lookup, CacheLookup::Miss(CacheMiss::Inconsistent(reason)), "{label}");
+        assert_eq!(result, uncached(&path, &query), "{label}");
+    }
+}
+
+fn edited_object<'a>(
+    value: &'a mut serde_json::Value,
+    pointer: &str,
+) -> &'a mut serde_json::Map<String, serde_json::Value> {
+    value
+        .pointer_mut(pointer)
+        .and_then(serde_json::Value::as_object_mut)
+        .expect("object at pointer")
+}
+
+/// An entry that claims flags and metrics serves the stored values as
+/// computed; one whose record lost its metrics facet contradicts the claim.
+#[test]
+fn flags_and_metrics_are_served_only_under_their_capabilities() {
+    let path = fixture(ProgrammingLanguage::Java);
+    let dir = TempDir::new().expect("temp");
+    let query = SymbolQuery::new()
+        .kinds(FUNCTION_KINDS)
+        .capabilities([Capability::Flags, Capability::Metrics]);
+    let cache = cache_in(&dir);
+    let (cold, _, _) = cached(&cache, read(&path), &query);
+    assert!(matches!(cold, CacheLookup::Miss(CacheMiss::Absent)), "{cold:?}");
+    let entry_path = only_entry(&dir);
+    let original = read_entry(&entry_path);
+    assert_eq!(
+        original["completed_capabilities"],
+        json!(["declarations", "flags", "metrics"])
+    );
+    let records = original["records"].as_array().expect("records");
+    assert!(records.iter().all(|record| record["metrics"].is_object()), "every record has metrics");
+    assert!(
+        records.iter().any(|record| record["visibility"]["is_deprecated"] == json!(true)),
+        "the Java fixture holds a deprecated method"
+    );
+
+    let (lookup, result, _) = cached(&cache, read(&path), &query);
+    assert_eq!(lookup, CacheLookup::Hit);
+    assert_eq!(result, uncached(&path, &query));
+
+    // Flags alone are served from the same entry, with metrics projected away.
+    let flags_only = SymbolQuery::new().kinds(FUNCTION_KINDS).capabilities([Capability::Flags]);
+    let (lookup, result, _) = cached(&cache, read(&path), &flags_only);
+    assert_eq!(lookup, CacheLookup::Hit);
+    assert_eq!(result, uncached(&path, &flags_only));
+
+    let mut edited = original.clone();
+    edited_object(&mut edited, "/records/0").remove("metrics");
+    write_entry(&entry_path, &edited);
+    let (lookup, result, _) = cached(&cache, read(&path), &query);
+    assert_eq!(
+        lookup,
+        CacheLookup::Miss(CacheMiss::Inconsistent("a record without metrics under the metrics capability"))
+    );
+    assert_eq!(result, uncached(&path, &query));
 }
 
 /// Writers racing on one file, each with its own cache handle (as separate

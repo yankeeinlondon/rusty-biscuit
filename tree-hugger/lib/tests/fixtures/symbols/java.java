@@ -107,3 +107,39 @@ class DeclarationBoundaries {
 
     public @Deprecated static void boundaryAnnotationBetweenModifiers() {}
 }
+
+// ---- Scope and qualified names ----
+
+class FirstShape {
+    int area() { return 1; }
+}
+
+class SecondShape {
+    int area() { return 2; }
+}
+
+// ---- Flags and metrics ----
+
+class FlagsAndMetrics {
+    /** Documented, with two parameters. */
+    void documentedPair(int first, int second) {}
+
+    // deprecated: an ordinary comment
+    void undocumentedNone() {}
+
+    /** @deprecated use documentedPair */
+    void deprecatedByTag() {}
+
+    @java.lang.Deprecated
+    void deprecatedQualified() {}
+
+    @Test
+    void annotatedTest() {}
+
+    @org.junit.jupiter.api.Test
+    void qualifiedTest() {}
+
+    void testHelper() {}
+
+    void variadic(int first, int... rest) {}
+}

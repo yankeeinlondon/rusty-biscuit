@@ -71,9 +71,24 @@ Entries are JSON files under the system temporary directory:
 <temp>/tree-hugger/cache/<project id>/<first two key characters>/<key>.json
 ```
 
-`<project id>` is the package root with path separators, `:`, spaces and dots
-replaced by `_`. `<temp>` comes from `TMPDIR` (`TMP`/`TEMP` on Windows), which
-is how the CLI tests isolate the cache. Old entries are never deleted by
+`<project id>` is the name a library caller passes to
+`PersistentCache::default_cache`; `hug` always uses `hug`, whatever directory
+it runs from. The key already names the file by its
+[identity](#file-identity), so a file reached from two scan roots (say
+`tree-hugger/` and `tree-hugger/lib/`) shares one entry, and the second run
+is a hit:
+
+```text
+cd tree-hugger     && hug --json symbols lib/src/symbol.rs   # miss: writes the entry
+cd tree-hugger/lib && hug --json symbols src/symbol.rs       # hit: same entry, same IDs
+```
+
+Nothing about the scan root reaches the stored records: JSON paths are made
+relative to it after the lookup ([symbol-reports.md](./symbol-reports.md)),
+and so will the planned file prefix of a qualified name
+([Qualified names](./symbol-kinds-and-visibility.md#qualified-names)); neither
+it nor a naming context is a key input. `<temp>` comes from `TMPDIR`
+(`TMP`/`TEMP` on Windows), which is how the CLI tests isolate the cache. Old entries are never deleted by
 `hug`; clearing the directory is always safe.
 
 ## One entry per file
@@ -127,8 +142,9 @@ and an undetectable language names it as well. The file's bytes are read
 once, through that spelling; resolving the identity reads no file contents.
 
 **IDs follow the identity.** A record's stable key and ID are built from the
-path as analyzed, which is the identity, so one file in one checkout has the
-same IDs whichever spelling named it. They are not equal across checkouts in
+path as analyzed, which is the identity, and the declaration's in-file
+qualified name, so one file in one checkout has the same IDs whichever
+spelling named it and whichever scan root reached it. They are not equal across checkouts in
 different directories, since the identity is absolute.
 
 The same identity is used everywhere `hug` compares files:
@@ -158,7 +174,7 @@ file's records, imports, exports and every analysis pass but diagnostics:
 | Input | Where it comes from | Changes when |
 |---|---|---|
 | schema version | `SchemaVersion::V4_0` | the record shape changes |
-| implementation version | crate version and `EXTRACTOR_REVISION` (`0.1.0+rev.6`) | extraction code changes |
+| implementation version | crate version and `EXTRACTOR_REVISION` (`0.1.0+rev.8`) | extraction code changes |
 | grammar identity | the compiled grammar: name, declared version (if any), ABI, node-kind, field and parse-state counts | a grammar crate is upgraded |
 | grammar ID | the grammar variant (`typescript` or `tsx`, …) | the file's grammar variant differs |
 | query text | the effective `locals`, `imports` and `references` query text, with inherited vendored queries and overlays resolved | a `.scm` file the analysis compiles changes |
@@ -243,10 +259,12 @@ flowchart TD
 
 The passes that work from stored records alone are the docs pass, the
 semantic pass (when references are stored) and containment (when every kind
-is stored, since a member's owner can be of any kind). References and
-diagnostics need the syntax tree, so they parse the file; the definitions
-query runs again with them, because binding and semantic lint consume its
-live result.
+is stored, since a member's owner can be of any kind). References,
+diagnostics, flags and metrics need the syntax tree (attributes, the
+declaration's parameter list), so they parse the file; the definitions query
+runs again with them, because binding and semantic lint consume its live
+result. A flag-only widening, such as `hug --json` after a terminal listing,
+is therefore a partial hit that parses once, never a miss.
 
 For example, over one unchanged `lib.rs`:
 
@@ -263,8 +281,9 @@ request for structured docs runs just the docs pass over the stored records
 
 Every result is **narrowed** to the request before it is returned: kinds that
 were not asked for are dropped, and relations, semantics, parsed docs,
-export targets, diagnostics and each record's `provenance.parse_pass` are
-reduced to what the requested passes produce. A narrow request served from a
+export targets, diagnostics, flags, metrics and each record's
+`provenance.parse_pass` are reduced to what the requested capabilities
+produce. A narrow request served from a
 wide entry is therefore identical to an uncached run of the narrow request.
 
 ## Writes are atomic
@@ -322,8 +341,17 @@ both of `major` and `minor` hold a non-number. A well-formed version other
 than 4.0 is a miss, as described above.
 
 A kind list must also be in ascending order with no repeats, and a
-capability list closed under prerequisites. A record of a kind the entry
-does not cover is refused.
+capability list closed under prerequisites. The records must agree with that
+coverage, or the entry is refused (`CacheMiss::Inconsistent`):
+
+- a record of a kind the entry does not cover;
+- a `metrics` facet, or a `true` `is_test` or `is_deprecated`, in an entry
+  that does not list `metrics` or `flags`: without the capability those
+  fields mean "not computed", so this cache never wrote such a value;
+- a record without a `metrics` facet in an entry that lists `metrics`.
+
+For example, an entry listing `["declarations"]` whose `deprecated_api` record
+says `"is_deprecated": true` is recomputed, and the output says `false`.
 
 ### Record fields
 
@@ -334,7 +362,7 @@ everything else refuses the entry.
 | Record field | Served when | Public result |
 |---|---|---|
 | `identity.container_kind` | absent or `null` | no container kind |
-| `modifiers` | absent or `[]` | no modifiers (not `static`) |
+| `modifiers` | absent or `[]` | no modifiers (not `static`, not `async`) |
 | `identity.keyword` | absent, `null` or `""` | no keyword, or the empty keyword |
 | `source.declaration_text` | absent, `null` or `""` | no text, or the empty text |
 | `source.signature_text` | absent, `null` or `""` | no header, or the empty header |
@@ -342,10 +370,19 @@ everything else refuses the entry.
 | `kind_data.data.fields` (type data) | absent or `[]` | empty field list |
 | field data `visibility` | absent or `null` | Unknown access |
 
-`schema_version`, `kind`, `visibility.level`, `kind_data.kind_data_type` and
-field data `is_static` are required: absent, `null`, `""` or `{}` refuses the
-entry, and a record `schema_version` other than exactly 4.0 refuses it too.
-For all thirteen record fields, a wrong type (`123`, or an array holding a wrong
+| `metrics.parameters`, `metrics.has_docs` | `null` | the metric is unsupported for that declaration |
+
+`schema_version`, `kind`, `scope`, `identity.qualified_name`,
+`identity.is_namespace_rooted`, `visibility.level`, `visibility.is_test`,
+`visibility.is_deprecated`, `kind_data.kind_data_type` and field data
+`is_static` are required: absent, `null`, `""` (an unknown scope, an empty
+qualified name) or `{}` refuses the entry, and a record `schema_version`
+other than exactly 4.0 refuses it too. In an entry that lists `metrics`, the
+`metrics` facet is required in the same way (absent, `null`, `{}` or a member
+of the wrong type refuses it), and so is each of its two keys (absent
+refuses; only `null` is served). For all twenty-two record fields
+(`modifiers` is checked twice, on a static and on an async declaration), a
+wrong type (`123`, or `"123"` for a number, or an array holding a wrong
 element), a duplicate key and invalid JSON refuse the entry. For example, an
 entry whose method record carries `"modifiers": null` is recomputed, while one
 with no `modifiers` key reports that method as an instance method.

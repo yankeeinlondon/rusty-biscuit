@@ -75,3 +75,15 @@ int boundary_multi_line_header(
 [[maybe_unused]] int boundary_annotated(void) {
     return 0;
 }
+
+/* ---- Flags and metrics ---- */
+
+/** Documented, with two parameters. */
+void documented_pair(int first, int second) {}
+
+/* deprecated: an ordinary comment */
+void undocumented_none(void) {}
+
+void variadic(int first, ...) {}
+
+void test_helper(void) {}

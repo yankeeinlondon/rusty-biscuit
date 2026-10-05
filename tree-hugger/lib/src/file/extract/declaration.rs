@@ -3,6 +3,7 @@
 //! to it, and its declaration text.
 
 use super::*;
+use crate::shared::SymbolScope;
 
 /// What visibility and static readers know about a declaration besides its node.
 #[derive(Debug, Clone, Copy)]
@@ -22,9 +23,15 @@ pub(crate) struct DeclarationContext<'tree> {
     pub is_ecma_module: bool,
     /// The final kind, after classification.
     pub kind: SymbolKind,
-    /// Inside a function body (a local variable, or a function nested in
-    /// another), where member and module access do not apply.
-    pub is_local: bool,
+    /// The declaration's [`symbol_scope`]: `Local` (a parameter, or inside a
+    /// function body) is where member and module access do not apply.
+    pub scope: SymbolScope,
+}
+
+impl DeclarationContext<'_> {
+    pub(crate) fn is_local(&self) -> bool {
+        self.scope == SymbolScope::Local
+    }
 }
 
 /// Node kinds of function-like constructs whose body makes the declarations
@@ -204,25 +211,6 @@ fn climb_declaration_wrapper(node: Node<'_>) -> Node<'_> {
     node
 }
 
-/// Whether `declaration` sits inside a function-like construct or a
-/// block-valued initializer or accessor, where member and module access do
-/// not apply. The nearest function, local scope or type owner decides, so a
-/// member of a class declared in a function (a Java local or anonymous class)
-/// keeps its access.
-pub(crate) fn is_local_declaration(declaration: Node<'_>, language: ProgrammingLanguage) -> bool {
-    let mut current = member_slot(declaration).parent();
-    while let Some(node) = current {
-        if is_member_owner_kind(node.kind()) {
-            return false;
-        }
-        if is_function_node_kind(node.kind()) || is_local_scope_kind(node.kind(), language) {
-            return true;
-        }
-        current = node.parent();
-    }
-    false
-}
-
 /// Bodies that are not functions but whose declarations are still local: a
 /// Scala block expression (a `val`, `var` or alias `given` initializer, a
 /// `match` arm), a Rust block expression (a `const` or `static`
@@ -285,9 +273,3 @@ pub(crate) fn implied_c_function_context<'tree>(
     }
 }
 
-/// Whether a C/C++ symbol is a `typedef` name.
-pub(crate) fn is_c_typedef_name(language: ProgrammingLanguage, kind: SymbolKind, declaration: Node<'_>) -> bool {
-    matches!(language, ProgrammingLanguage::C | ProgrammingLanguage::Cpp)
-        && kind == SymbolKind::TypeAlias
-        && declaration.kind() == "type_definition"
-}

@@ -121,3 +121,39 @@ class DeclarationBoundaries
     [Obsolete]
     void BoundaryAnnotated() { }
 }
+
+// ---- Scope, async and qualified names ----
+
+public class AsyncWork
+{
+    public async Task RunAsync() { }
+
+    public void RunSync() { }
+}
+
+// ---- Flags and metrics ----
+
+class FlagsAndMetrics
+{
+    /// <summary>Documented, with two parameters.</summary>
+    void DocumentedPair(int first, int second) { }
+
+    // deprecated: an ordinary comment
+    void UndocumentedNone() { }
+
+    [System.ObsoleteAttribute("use DocumentedPair")]
+    void ObsoleteQualified() { }
+
+    [Fact]
+    void FactTest() { }
+
+    [TestMethod]
+    void MethodTest() { }
+
+    [Test]
+    void PlainTest() { }
+
+    void TestHelper() { }
+
+    void Variadic(int first, params int[] rest) { }
+}
