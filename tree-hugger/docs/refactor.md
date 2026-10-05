@@ -6,7 +6,7 @@ The tree-hugger Library and CLI are working to some degree but they still pretty
 - Implemented: `exports` subcommand removal.
 - Implemented: positional filter classifier (`file` vs `symbol`) with automatic `*...*` wrapping.
 - Implemented: symbol filter combination semantics use logical OR.
-- Implemented: sorting/grouping switches (`--group-by-file`, `--group-by-module`, `--sort-by-kind`, `--sort-by-module`).
+- Implemented: sorting/grouping switches (`--group-by-file`, `--group-by-module`, `--sort-by-kind`, `--sort-by-module`). Since replaced: `--sort file|name|kind` (default `file`: by file, then source position) took the place of `--sort-by-kind` and `--sort-by-module`; grouping is unchanged and independent of `--sort`.
 - Implemented: Symbol Schema v2 foundations (`SymbolRecord`, `FileSymbolIndex`, staged passes, v1 adapters).
 
 ## CLI
@@ -62,6 +62,11 @@ The only other output format we provide is JSON:
 - the JSON output format should never be "lossy"
 
 ### Sorting and Grouping
+
+> **Superseded.** The ordering below was replaced by `--sort file|name|kind`:
+> declarations are listed by file, then source position, by default, and
+> `--sort-by-kind` / `--sort-by-module` no longer exist. The CLI README
+> describes the current behavior.
 
 The underlying static analysis is done with tree-sitter and it's approach is very "file" focused. From that technical analysis standpoint it might seem logical that we'd be interested in seeing the _results_ of this analysis also from a file based perspective but that is not always the case.
 

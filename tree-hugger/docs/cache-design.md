@@ -1,144 +1,252 @@
-# Cache Design for Tree Hugger Symbol Schema v2
+# Tree Hugger's Persistent Symbol Cache
 
-## Status
+`hug` keeps one cache entry per source file on disk, so a second run over
+unchanged files reads the stored analysis instead of parsing again. This page
+describes what is stored, when an entry is used, how it is widened and
+replaced, and which damaged entries are refused.
 
-Draft design for the upcoming major refactor.
+The same cache is available to library callers as
+`tree_hugger::cache::SymbolCache`.
 
-## Purpose
+## Using the cache
 
-This document describes a caching architecture that improves performance for the new symbol schema defined in `symbol-schema-design.md`.
+From the CLI there is nothing to do: every scanning command (`symbols`,
+`functions`, `types`, `classes`, `imports`, `lint`) uses the cache unless you
+pass `--no-cache`, which neither reads nor writes it.
 
-The goal is to make repeated analysis runs fast while preserving correctness when files, queries, grammar versions, or schema versions change.
+```sh
+hug --json symbols src/lib.rs            # cold: parses, analyzes, writes the entry
+hug --json symbols src/lib.rs            # warm: reads the entry, parses nothing
+hug --json symbols --no-cache src/lib.rs # never touches the cache
+```
 
-## Current Baseline
+The output of all three runs is byte-for-byte identical. Each command asks
+only for its own kinds and capabilities (`functions` for functions, methods
+and constructors; `classes` adds containment; `lint` and `--json-full` add
+diagnostics), and the file's one entry widens as other commands need more,
+so after `hug symbols`, `hug functions` is a complete hit.
 
-Today, `tree-hugger` already has:
+Cache use and cache failures print nothing unless `--verbose` is given: an
+entry that cannot be read is recomputed, and a write that fails is ignored.
+With `--verbose`, `hug` prints each such failure and ends with one stats
+line:
 
-1. Query compilation cache via `OnceLock<Mutex<HashMap<...>>>` in `lib/src/queries/mod.rs`.
-2. Per-file content hash generation in `TreeFile` (`hash` from file source).
-3. Small in-memory package module memoization in `TreePackage`.
+```text
+cache: src/lib.rs: malformed entry: expected value at line 1 column 1
+cache: 15 hits, 1 partial hits, 1 misses; parsed 2 files, 2 definition captures, 0 diagnostics runs
+```
 
-What is missing is persistent incremental caching for parsed file artifacts and enriched symbol metadata.
-
-## Performance Goals
-
-1. Warm-run speedup of at least 3x for unchanged repositories.
-2. Re-analysis cost proportional to changed files, not total files.
-3. Stable memory usage under large monorepos.
-4. Zero stale results after schema/query/grammar/config changes.
-
-## Design Principles
-
-1. Cache by pipeline stage, not only final output.
-2. Invalidate with deterministic fingerprints, not ad-hoc TTL.
-3. Keep cache entries content-addressed where possible.
-4. Separate local in-process cache (fast) from on-disk cache (persistent).
-5. Allow partial reuse of symbol facets across passes.
-
-## Pipeline and Cache Layers
-
-The new symbol pipeline has four passes: parse, bind, semantic, docs.
-
-Caching is applied per pass:
-
-1. `L0 Query Cache` (existing): compiled Tree-sitter queries by `(language, query_kind)`.
-2. `L1 Parse Cache`: file parse snapshot keyed by file hash and parser fingerprint.
-3. `L2 Symbol Facet Cache`: per-file `Vec<SymbolRecord>` with pass-specific completeness.
-4. `L3 Package Graph Cache`: cross-file binding edges and export/import resolution.
-5. `L4 Render Cache`: final CLI JSON summaries for exact command/config inputs.
-
-## Fingerprints and Cache Keys
-
-Correct invalidation depends on precise fingerprints.
-
-### Global Analyzer Fingerprint
-
-`AnalyzerFingerprint` is included in every cache key:
-
-1. `schema_version` (the symbol schema major/minor, currently `3.0`).
-2. `tree_hugger_version` (crate version).
-3. `grammar_fingerprint` (today the language's query name, such as
-   `typescript`; grammar versions/checksums are **planned**).
-4. `query_fingerprint`: `locals+imports+references;extractor-revision=<N>`,
-   where `<N>` is `tree_hugger::EXTRACTOR_REVISION`. The library bumps that
-   constant with any change to extracted records, including a repair on an
-   unreleased branch, a `.scm` query edit or a grammar crate upgrade, so a
-   warm cache written by older extraction rules is never served. Until the
-   planned query hash and grammar versions exist, the revision is the only
-   key component those changes move. A hash of the query sources is
-   **planned**.
-5. `config_fingerprint` (the CLI's analysis options: experimental semantics,
-   rule selectors, strict mode, external adapters).
-
-If any element changes, the key changes and the old entry is never read
-again. The old file stays on disk until the cache directory is cleared.
-
-For example, `hug symbols a.ts` before and after an `EXTRACTOR_REVISION` bump
-computes two different keys for the same unchanged `a.ts`: the second run
-misses, re-extracts, and writes a new entry beside the old one.
-
-### File-Level Key
-
-`FileCacheKey`:
-
-1. normalized absolute file path
-2. language
-3. file content hash
-4. analyzer fingerprint
-
-### Symbol-Level Key
-
-Use `SymbolId` from schema v2. For secondary caches:
-
-1. `symbol_id` + `type_view_kind` for canonical/resolved/expanded type views.
-2. `symbol_id` + `doc_hash` for parsed docs.
-3. `symbol_id` + `semantic_context_hash` for semantic inference.
-
-## Cached Artifacts
-
-### Parse Snapshot (L1)
-
-Stores parse-layer output only:
-
-1. root syntax diagnostics
-2. raw symbol boundaries/spans
-3. attached raw comments
-4. declaration/signature source slices
-
-This allows reuse when only later passes change.
-
-### Symbol Snapshot (L2)
-
-Stores per-file `SymbolRecord` values with pass completeness metadata.
+From the library, read the file once with `SourceFile` and hand it to the
+cache with a `SymbolQuery`:
 
 ```rust
-pub struct SymbolSnapshot {
-    pub key: FileCacheKey,
-    pub completed_passes: Vec<AnalysisPass>, // Parse, Bind, Semantic, Docs (never Diagnostics)
-    pub symbols: Vec<SymbolRecord>,
-    pub imports: Vec<ImportRecord>,
-    pub exports: Vec<ExportRecord>,
-    pub diagnostics: Vec<Diagnostic>,
+use tree_hugger::cache::{CacheLookup, PersistentCache, SymbolCache};
+use tree_hugger::{Capability, SourceFile, SymbolKindV2, SymbolQuery};
+
+let cache = SymbolCache::new(PersistentCache::default_cache("my-project", true));
+let query = SymbolQuery::new()
+    .kinds([SymbolKindV2::Function, SymbolKindV2::Method])
+    .capabilities([Capability::Containment]);
+let cached = cache.query(SourceFile::read("src/lib.rs")?, &query)?;
+if cached.lookup == CacheLookup::Hit {
+    // nothing was parsed or analyzed
+}
+let records = cached.result.index.symbols;
+```
+
+`cached.result` is exactly what `SourceFile::query` returns for the same
+query without a cache. `cached.lookup` says how the entry was used, and
+`cached.write_error` holds a failed write, if any.
+
+## Where entries live
+
+Entries are JSON files under the system temporary directory:
+
+```text
+<temp>/tree-hugger/cache/<project id>/<first two key characters>/<key>.json
+```
+
+`<project id>` is the package root with path separators, `:`, spaces and dots
+replaced by `_`. `<temp>` comes from `TMPDIR` (`TMP`/`TEMP` on Windows), which
+is how the CLI tests isolate the cache. Old entries are never deleted by
+`hug`; clearing the directory is always safe.
+
+## One entry per file
+
+The entry's **key** is a digest of four things:
+
+1. the file path as analyzed, with `\` written as `/`
+2. the xxHash of the file's text, computed from the same bytes that are
+   parsed (the file is read once)
+3. the language, when it was forced with `--language`; otherwise
+   `detected`
+4. the **records fingerprint** (below)
+
+Nothing about the request is in the key. `hug functions` and `hug lint` over
+the same unchanged file use the same entry; the entry records what it holds,
+and each command takes what it needs from it. Editing the file changes its
+hash, so the next run uses a new key and the old entry is never read again.
+
+Every digest is BLAKE3 from `biscuit-hash` over a canonical encoding:
+`canonical_digest` writes each field as its byte length, `:` and its bytes,
+so `["a|b", "c"]` and `["a", "b|c"]` can never collide.
+
+## The fingerprint
+
+The records fingerprint is a `PassFingerprint` computed from what decides a
+file's records, imports, exports and every analysis pass but diagnostics:
+
+| Input | Where it comes from | Changes when |
+|---|---|---|
+| schema version | `SchemaVersion::V4_0` | the record shape changes |
+| implementation version | crate version and `EXTRACTOR_REVISION` (`0.1.0+rev.6`) | extraction code changes |
+| grammar identity | the compiled grammar: name, declared version (if any), ABI, node-kind, field and parse-state counts | a grammar crate is upgraded |
+| grammar ID | the grammar variant (`typescript` or `tsx`, …) | the file's grammar variant differs |
+| query text | the effective `locals`, `imports` and `references` query text, with inherited vendored queries and overlays resolved | a `.scm` file the analysis compiles changes |
+
+A change to Rust extraction code cannot be seen in query text, so
+`EXTRACTOR_REVISION` must still be bumped with any change to extracted
+records, including a repair on an unreleased branch.
+
+Diagnostics depend on more inputs, which only diagnostics use. They have
+their own fingerprint, stored **inside** the entry rather than in the key:
+
+| Input | Changes when |
+|---|---|
+| the records fingerprint inputs | as above |
+| `lint` and `comments` query text | a lint pattern or the ignore-comment query changes |
+| built-in rule metadata (ID, version, category, default severity, confidence, languages, default enablement, experimental flag of every rule) | a rule is added or its metadata changes |
+| `experimental_semantics` | `hug lint --experimental-semantics` is toggled |
+
+Stored diagnostics with a different diagnostics fingerprint are treated as
+not computed: a symbol listing is still served from the entry, and a request
+that needs diagnostics recomputes them and rewrites the entry. Lint policy
+(`--deny`, `--warn`, `--allow`, `--strict`) and external adapters such as
+Oxlint run after the cache and are not inputs.
+
+The query text is an injectable input
+(`SymbolCache::with_query_text`, `FingerprintInputs::with_query_text`), so a
+test can change one query's text and watch the entry stop matching without
+rebuilding the crate.
+
+## What an entry holds
+
+```json
+{
+  "schema_version": { "major": 4, "minor": 0 },
+  "fingerprint": "<records fingerprint digest>",
+  "file": "src/lib.rs",
+  "language": "Rust",
+  "source_hash": "<xxHash>",
+  "covered_kinds": "all",
+  "completed_capabilities": ["declarations", "containment", "references"],
+  "diagnostics_fingerprint": null,
+  "records": [ ... ],
+  "imports": [ ... ],
+  "exports": [ ... ],
+  "diagnostics": []
 }
 ```
 
-`completed_passes` enables incremental upgrading of cache entries instead of full recompute.
-It lists only passes whose output the entry holds: the CLI recomputes
-diagnostics on every use, so an entry stores none and omits the `Diagnostics`
-pass, which is added back to the reported index with the fresh diagnostics.
+- `covered_kinds` is the string `"all"` or a non-empty list of symbol kinds
+  in ascending order, such as `["Function", "Method"]`. An empty list is
+  never written and never read as "all".
+- `completed_capabilities` lists the
+  [capabilities](./symbol-schema-design.md) whose results the entry holds, in
+  ascending order and closed under prerequisites, so it always contains
+  `declarations`.
+- `diagnostics_fingerprint` is `null` exactly when `diagnostics` is not
+  among the capabilities, and then `diagnostics` is empty.
+- `records` holds every record of the covered kinds, after the entry's
+  passes ran. `file` is the path exactly as analyzed, since the records
+  repeat it.
 
-#### Which entries are served
+An entry is internally consistent by construction, and the reader checks it:
+an entry whose contents contradict its coverage is refused.
 
-`hug` reads an entry with plain `serde_json` deserialization of the whole
-`SymbolSnapshot`. An entry that does not deserialize is ignored: the file is
-re-analyzed and the entry is overwritten, so the output is the same as a
-`--no-cache` run. An entry that deserializes is served as written; there is no
-second, semantic check.
+## How a lookup is decided
 
-So a field accepts exactly the shapes its schema type allows. Optional values
-and defaulted collections accept their defaults; everything else is rejected:
+```mermaid
+flowchart TD
+    Q["query(file, kinds, capabilities)"] --> R{"entry readable,<br/>well formed, and for<br/>this schema, fingerprint,<br/>file, language, hash?"}
+    R -- no --> M["Miss: parse, run the query,<br/>write an entry with its coverage"]
+    R -- yes --> D{"stored diagnostics made<br/>under the current rules?"}
+    D -- no --> X["treat diagnostics<br/>as not computed"] --> K
+    D -- yes --> K{"entry covers every<br/>requested kind?"}
+    K -- no --> WK["WidenedKinds: parse once for the union<br/>of stored and requested kinds and<br/>capabilities, rewrite the entry"]
+    K -- yes --> C{"entry covers every<br/>requested capability?"}
+    C -- yes --> H["Hit: no parsing, no analysis"]
+    C -- no --> P{"missing work needs<br/>only the stored records?"}
+    P -- yes --> WR["WidenedCapabilities { parsed: false }:<br/>run those passes over the records,<br/>rewrite the entry"]
+    P -- no --> WP["WidenedCapabilities { parsed: true }:<br/>parse, analyze for the union,<br/>rewrite the entry"]
+    M & WK & H & WR & WP --> N["narrow the result to exactly<br/>what was requested"]
+```
 
-| Field | Served when | Public result |
+The passes that work from stored records alone are the docs pass, the
+semantic pass (when references are stored) and containment (when every kind
+is stored, since a member's owner can be of any kind). References and
+diagnostics need the syntax tree, so they parse the file; the definitions
+query runs again with them, because binding and semantic lint consume its
+live result.
+
+For example, over one unchanged `lib.rs`:
+
+| Run | Entry before | Outcome | Entry after |
+|---|---|---|---|
+| `functions` (functions, methods, constructors; declarations) | none | Miss | those kinds; `declarations` |
+| `types` with containment | function kinds | WidenedKinds (one parse) | function and type kinds; `declarations`, `containment` |
+| `functions` again | as above | Hit | unchanged |
+| `types` with containment and references | as above | WidenedCapabilities, one parse | same kinds; adds `references` |
+
+And over a file whose entry covers every kind with `declarations` only, a
+request for structured docs runs just the docs pass over the stored records
+(WidenedCapabilities, no parse) and rewrites the entry with both.
+
+Every result is **narrowed** to the request before it is returned: kinds that
+were not asked for are dropped, and relations, semantics, parsed docs,
+export targets, diagnostics and each record's `provenance.parse_pass` are
+reduced to what the requested passes produce. A narrow request served from a
+wide entry is therefore identical to an uncached run of the narrow request.
+
+## Writes are atomic
+
+`PersistentCache::put` writes the new entry to `<key>.<process>.<n>.tmp` in
+the entry's directory and renames it over `<key>.json`. A reader sees the old
+entry or the complete new one, never a partial write. When two processes
+write the same entry at once, the last rename wins; that is safe because
+every entry, whichever survives, is complete and its coverage matches its
+contents. A failed write removes its temporary file and leaves the previous
+entry in place.
+
+## Which damaged entries are served
+
+The reader takes an entry only when it is valid JSON with no trailing
+content, has every entry field with the right type and no field twice or
+unknown, and matches the request (schema, fingerprint, file, language and
+source hash). Anything else is a `CacheMiss` with its reason, and the file is
+recomputed: never an empty result. `CacheMiss::Malformed` carries the
+decoder's message, which names the field and tells an absent field
+(`missing field`) from an explicit `null` (`invalid type: null`).
+
+No entry-level field has a default:
+
+| Entry field | absent | `null` | wrong type | one bad element | every element bad | empty | duplicate key | trailing content |
+|---|---|---|---|---|---|---|---|---|
+| `covered_kinds` | miss | miss | miss | miss | miss | miss (`[]` is not "all") | miss | miss |
+| `completed_capabilities` | miss | miss | miss | miss | miss | miss | miss | miss |
+| `schema_version`, `fingerprint`, `source_hash` | miss | miss | miss | miss | miss | miss | miss | miss |
+| `diagnostics_fingerprint` | miss | miss (contradicts `diagnostics`) | miss | miss | miss | diagnostics recomputed | miss | miss |
+| `records` | miss | miss | miss | miss | miss | **served**: no records of the covered kinds | miss | miss |
+
+A kind list must also be in ascending order with no repeats, and a
+capability list closed under prerequisites. A record of a kind the entry
+does not cover is refused.
+
+Inside a record, a field accepts exactly the shapes its schema type allows:
+optional values and defaulted collections accept their defaults, and
+everything else refuses the entry.
+
+| Record field | Served when | Public result |
 |---|---|---|
 | `identity.container_kind` | absent or `null` | no container kind |
 | `modifiers` | absent or `[]` | no modifiers (not `static`) |
@@ -150,241 +258,40 @@ and defaulted collections accept their defaults; everything else is rejected:
 | field data `visibility` | absent or `null` | Unknown access |
 
 `kind`, `visibility.level`, `kind_data.kind_data_type` and field data
-`is_static` are required: absent, `null` or `""` rejects the entry. For all
-twelve fields, a wrong type (`123`, or an array holding a wrong element), a duplicate
-key and invalid JSON reject the entry. For example, an entry whose method
-record carries `"modifiers": null` is recomputed, while one with no
-`modifiers` key reports that method as an instance method. The CLI test
-`cache_robustness` in `cli/tests/symbols/` pins this table.
-
-### Package Graph Snapshot (L3)
-
-Stores cross-file relationships:
-
-1. symbol reference edges
-2. import/export resolution map
-3. dependency fan-out per file
-
-This allows targeted invalidation when one file changes.
-
-### Render Snapshot (L4)
-
-Stores the final CLI output payload for exact command signatures:
-
-1. command (`symbols`, `types`, `imports`, `exports`, `lint`, etc.)
-2. glob set and ignore patterns
-3. output mode (`json`, `plain`)
-4. root dir + analyzer fingerprint + included file hashes
-
-## Storage Architecture
-
-Use a two-tier cache:
-
-1. In-memory cache for current process.
-2. Persistent disk cache for cross-process reuse.
-
-### In-Memory Tier
-
-Recommended:
-
-1. `DashMap` or sharded `Mutex<HashMap<...>>` for low-lock read paths.
-2. LRU bound by entry count and approximate bytes.
-3. `Arc` values to avoid cloning large symbol vectors.
-
-### Disk Tier
-
-Recommended default: SQLite with WAL mode.
-
-Reasons:
-
-1. Single-file store.
-2. Good concurrent read behavior.
-3. Transactional updates.
-4. Flexible indexing and metadata queries.
-
-Alternative backends like `redb` are viable, but SQLite is the safest default for tooling workflows and debugging.
-
-## Suggested SQLite Schema
-
-```sql
-CREATE TABLE cache_meta (
-  key TEXT PRIMARY KEY,
-  value TEXT NOT NULL
-);
-
-CREATE TABLE file_snapshots (
-  file_key TEXT PRIMARY KEY,
-  file_path TEXT NOT NULL,
-  language TEXT NOT NULL,
-  file_hash TEXT NOT NULL,
-  analyzer_fingerprint TEXT NOT NULL,
-  completed_passes TEXT NOT NULL, -- JSON array
-  payload BLOB NOT NULL,          -- compressed serde payload
-  created_at_ms INTEGER NOT NULL,
-  updated_at_ms INTEGER NOT NULL
-);
-
-CREATE INDEX idx_file_snapshots_path ON file_snapshots(file_path);
-CREATE INDEX idx_file_snapshots_hash ON file_snapshots(file_hash);
-
-CREATE TABLE package_graph_snapshots (
-  graph_key TEXT PRIMARY KEY,
-  root_dir TEXT NOT NULL,
-  analyzer_fingerprint TEXT NOT NULL,
-  included_file_hashes TEXT NOT NULL, -- sorted + hashed
-  payload BLOB NOT NULL,
-  created_at_ms INTEGER NOT NULL,
-  updated_at_ms INTEGER NOT NULL
-);
-
-CREATE TABLE render_snapshots (
-  render_key TEXT PRIMARY KEY,
-  command_sig TEXT NOT NULL,
-  analyzer_fingerprint TEXT NOT NULL,
-  input_hash TEXT NOT NULL,
-  payload BLOB NOT NULL,
-  created_at_ms INTEGER NOT NULL,
-  updated_at_ms INTEGER NOT NULL
-);
-```
-
-Payloads should be compressed (`zstd`) to reduce disk footprint.
-
-## Invalidation Strategy
-
-### Hard Invalidation Triggers
-
-1. Schema major version change.
-2. Analyzer crate version change (configurable, usually strict).
-3. Query fingerprint change.
-4. Tree-sitter grammar fingerprint change.
-
-### File-Level Invalidation
-
-1. File content hash change invalidates L1/L2 for that file.
-2. Deleted files remove entries.
-3. Renames move key by path update but preserve reuse if hash and content stay identical.
-
-### Dependency-Aware Invalidation
-
-Use package graph snapshot edges:
-
-1. If file `A` exports symbols consumed by file `B`, changing `A` invalidates bind/semantic results in `B`.
-2. Parse-layer artifacts for `B` remain valid unless `B` content changed.
-
-### Time-Based Eviction
-
-No TTL for correctness-sensitive entries.
-Optional TTL only for render snapshots (L4), because they are pure acceleration.
-
-## Incremental Update Algorithm
-
-On each run:
-
-1. Build analyzer fingerprint.
-2. Collect candidate files.
-3. Compute file hashes.
-4. For each file:
-   1. Try L2 `SymbolSnapshot` hit for required pass level.
-   2. If miss, try L1 parse snapshot.
-   3. Recompute only missing passes.
-   4. Persist upgraded snapshot.
-5. Rebuild or reuse L3 package graph based on included file hash set.
-6. Materialize output and optionally cache L4.
-
-This gives cheap warm runs and cheap partial reruns.
-
-## Facet-Level Reuse Opportunities
-
-The new schema facets allow narrow recomputation:
-
-1. `docs` facet:
-   1. key by raw doc hash.
-   2. parse once, reuse across unchanged comments.
-2. `type_info.views.canonical`:
-   1. key by declared type text hash.
-   2. avoids repeated normalization work.
-3. `semantics` facet:
-   1. key by `symbol_id` + local body hash + dependency summary hash.
-   2. only recompute when body or relevant callees changed.
-
-## CLI and UX Additions
-
-Recommended flags:
-
-1. `--cache` / `--no-cache` (default on).
-2. `--cache-dir <PATH>`.
-3. `--cache-reset` (clear all cache before run).
-4. `--cache-stats` (print hit/miss and timings).
-
-Recommended environment variables:
-
-1. `TREE_HUGGER_CACHE_DIR`
-2. `TREE_HUGGER_CACHE_DISABLE=1`
-
-## Concurrency Model
-
-1. Read-mostly operations should be lock-light.
-2. Use write transactions for snapshot updates.
-3. Apply single-flight deduplication so concurrent workers do not recompute the same file.
-4. Prefer atomic upsert semantics for snapshot writes.
-
-## Observability
-
-Emit metrics for:
-
-1. hit/miss rate by layer (`L1`, `L2`, `L3`, `L4`)
-2. parse/bind/semantic/docs pass durations
-3. bytes read/written and compression ratio
-4. invalidation reason counts
-
-Expose these metrics in debug logs and `--cache-stats` output.
-
-## Risks and Mitigations
-
-1. Risk: stale cache from incomplete fingerprinting.
-   1. Mitigation: include query, grammar, schema, and config fingerprints in all keys.
-2. Risk: disk bloat in large monorepos.
-   1. Mitigation: size-based eviction and optional retention windows.
-3. Risk: lock contention in parallel runs.
-   1. Mitigation: two-tier cache + sharded memory map + SQLite WAL.
-4. Risk: migration complexity from v1 schema.
-   1. Mitigation: dual-write mode during rollout and snapshot version tagging.
-
-## Rollout Plan
-
-1. Phase 1:
-   1. Keep current query cache.
-   2. Add disk-backed L2 file snapshots for parse pass only.
-2. Phase 2:
-   1. Add pass completeness tracking.
-   2. Enable bind/docs facet reuse.
-3. Phase 3:
-   1. Add package graph cache and dependency-aware invalidation.
-   2. Add render cache and CLI stats.
-4. Phase 4:
-   1. Tune eviction.
-   2. Stabilize public cache schema and document compatibility policy.
-
-## Testing Strategy
-
-1. Deterministic cache key tests for all fingerprint inputs.
-2. Golden tests for cache hit behavior with unchanged files.
-3. Mutation tests that verify correct invalidation on:
-   1. file content changes
-   2. query updates
-   3. schema version bumps
-4. Concurrency tests for duplicate-work suppression.
-5. Corruption recovery tests (bad payload, partial write, stale index).
-
-## Recommended Initial Implementation
-
-Start with the smallest high-impact slice:
-
-1. Add `AnalyzerFingerprint`.
-2. Add per-file `SymbolSnapshot` cache keyed by file hash and fingerprint.
-3. Cache parse + docs passes first.
-4. Add `--cache-stats` to prove speedup.
-
-Then expand to bind/semantic and package graph caching.
-
+`is_static` are required: absent, `null` or `""` refuses the entry. For all
+twelve record fields, a wrong type (`123`, or an array holding a wrong
+element), a duplicate key and invalid JSON refuse the entry. For example, an
+entry whose method record carries `"modifiers": null` is recomputed, while one
+with no `modifiers` key reports that method as an instance method.
+
+A stored diagnostic's metadata omits `is_enabled_by_default` and
+`requires_experimental_semantics` when they are `false`; an absent key reads
+as `false`.
+
+The CLI test `cache_robustness` in `cli/tests/symbols/` pins both tables by
+editing an entry `hug --json-full symbols` wrote, one cell at a time.
+
+## What is not cached
+
+- Parse trees: a widened entry parses the file again.
+- `--prelude` resolution (its files' analyses are reused within one run, and
+  each analysis goes through the cache like any other), and external lint
+  adapters such as Oxlint.
+- Anything across files: each entry describes one file.
+
+`InProcessCache` and `InMemorySymbolCache` remain in the library for callers
+that want an in-memory map, but `hug` no longer uses them: each file is
+visited once per run, so they only added copies.
+
+## Tests
+
+| Behavior | Test |
+|---|---|
+| Every fixture: cold miss, warm complete hit with no parse, equal to uncached | `lib/tests/l1/symbols_cache.rs` `every_fixture_is_a_complete_warm_hit_equal_to_an_uncached_run` |
+| A wide entry narrowed to any request equals the uncached request | `projected_results_equal_uncached_queries`, `projected_results_over_multi_equal_uncached_queries` |
+| Widening by capabilities and by kinds; the third narrow run is a hit | `widening_capabilities_runs_only_the_missing_passes`, `widening_kinds_reextracts_once_for_the_union` |
+| Query text, extractor revision, forced language, schema, rules and settings each miss | `each_key_input_and_stored_identity_decides_a_miss` |
+| Corrupt entries, absent vs `null` reasons, kind-list shapes | `a_corrupt_entry_is_a_miss_and_is_replaced`, `absent_and_null_entry_fields_report_different_reasons`, `covered_kind_lists_are_served_only_in_canonical_form` |
+| Concurrent writers (threads and processes) | `concurrent_writers_leave_a_readable_entry_whose_coverage_matches`, `cli/tests/symbols/cache_lookup.rs`, `lib/tests/l1/cache_tests.rs` |
+| Entry and record field shapes | `cli/tests/symbols/cache_robustness.rs` |
+| Old extractor revisions are never served | `cli/tests/symbols/cache_upgrade.rs` |

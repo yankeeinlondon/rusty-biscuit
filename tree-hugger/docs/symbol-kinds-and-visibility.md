@@ -920,8 +920,9 @@ comments are not included.
 
 Syntax the grammar places outside the declaration node, such as a Rust
 `#[…]` attribute, a Python decorator or a TypeScript `export` wrapper, is not
-included. The text appears in records and in the JSON `symbol_indexes`, not
-in `SymbolInfo`.
+included. The text appears in records, not in `SymbolInfo`. It is evidence
+rather than display, so the CLI's default `--json` report omits it and
+`--json-full` carries it.
 
 ## Display header
 

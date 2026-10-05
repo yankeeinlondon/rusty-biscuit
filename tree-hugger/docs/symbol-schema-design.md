@@ -784,7 +784,20 @@ let result = SourceFile::read("src/lib.rs")?.query(&query)?;
 
 `completed_capabilities` records work narrower than a pass, such as
 containment without references, so an empty facet can be told apart from one
-that was never computed.
+that was never computed. `selected_kinds` records the kind selection (`None`
+for every kind).
+
+A result can answer a narrower query without parsing again:
+`result.narrowed(&narrower)` returns exactly what `narrower` computes over
+the same source, or `None` when the result lacks one of its kinds or
+capabilities. `hug --prelude` uses it to reuse the prelude's every-kind
+analyses in the scan.
+
+The same query can be served from the persistent cache:
+`SymbolCache::query(SourceFile::read(path)?, &query)` returns exactly this
+result, reading the file's entry when it covers the query's kinds and
+capabilities and widening the entry when it does not (see
+[Cache Design](./cache-design.md)).
 
 Kind selection skips work but never data a selected record depends on.
 Declarations of unselected kinds are still extracted with their identity,
@@ -871,7 +884,7 @@ A record before and after 4.0 (other fields unchanged):
 Cache entries written under 3.0 are not migrated; their key no longer matches,
 so they are recomputed.
 
-The CLI cache key also contains `EXTRACTOR_REVISION`, so a change to
+The cache fingerprint also contains `EXTRACTOR_REVISION`, so a change to
 extraction rules invalidates cached records without a schema bump (see
 [Cache Design](./cache-design.md)).
 

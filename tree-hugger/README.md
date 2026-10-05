@@ -75,11 +75,12 @@ classified as:
 - `--exclude-files <GLOB>` - exclude files matching glob patterns
 - `--exclude-symbols <GLOB>` - exclude symbol names matching glob patterns
 - `--json` - output JSON format
+- `--json-full` - output every scanned file's complete index as JSON (declaration commands only; symbol selectors are rejected)
 - `--plain` - disable colors and hyperlinks
+- `--verbose` - print cache and work stats, and recoverable cache failures, to stderr
 - `--group-by-file` - group symbol output by file
 - `--group-by-module` - group symbol output by module (directory scope)
-- `--sort-by-kind` - sort symbols by kind then name
-- `--sort-by-module` - sort symbols by module then other keys
+- `--sort file|name|kind` - order of declarations (default `file`: by file, then source position); replaces the removed `--sort-by-kind` and `--sort-by-module`
 
 ### Examples
 
@@ -99,9 +100,9 @@ hug imports --json "tree-hugger/lib/tests/fixtures/**/*.js"
 # List types showing struct vs enum distinction
 hug types "src/main.rs" --plain
 # Output:
-#   - type Cli { ... } [21:8]
-#   - enum Command { ... } [64:6]
-#   - type OutputConfig { ... } [122:8]
+#   - struct Cli { ... } src/main.rs:21:8
+#   - enum Command { ... } src/main.rs:64:6
+#   - struct OutputConfig { ... } src/main.rs:122:8
 
 # List classes with members
 hug classes "src/**/*.ts" --name MyClass
@@ -112,41 +113,18 @@ hug lint "src/**/*.rs" --lint-only
 
 ## JSON Output
 
-When `--json` is selected, output includes v2 schema metadata and pass-aware symbol indexes:
+`functions`, `types`, `symbols` and `classes` print a versioned report:
+`report_schema_version` (`1`), `schema_version` (`4.0`, the records' schema),
+`root_dir`, `files` (one entry per file with a match: `file`, `language`,
+`completed_passes`, `completed_capabilities` and the selected `symbols`
+records; `classes` adds `members` keyed by container ID) and a trailing
+`errors` array that lists every file that could not be analyzed. Paths are
+`/`-separated and relative to `root_dir`. `--json-full` replaces `files` with
+every file's complete `indexes`. The CLI README has a sample.
 
-- `schema_version` - active symbol schema version (`3.0`)
-- `root_dir` - the directory scanned
-- `language` - primary language for the run
-- `files` - command-specific v1-compatible `FileSummary` list
-- `symbol_indexes` - per-file `FileSymbolIndex` with staged pass metadata
-
-Each `FileSummary` includes:
-
-- `file`, `language`, `hash`
-- `symbols` (for `functions`, `types`, or `symbols`) - each with a `kind` field, and a `visibility` field when the access level is known (omitted for Unknown); see [Symbol Kinds, Visibility and `static`](docs/symbol-kinds-and-visibility.md) for the per-language rules
-- `imports` (for `imports` and `symbols`)
-- `exports` (for `symbols`)
-- `locals` (for `symbols`)
-- `lint`, `syntax`
-
-### Example JSON Output
-
-```json
-{
-  "name": "Message",
-  "kind": "Enum",
-  "range": { "start_line": 11, "start_column": 10, ... },
-  "language": "Rust",
-  "doc_comment": "Message types for the application.",
-  "type_metadata": {
-    "variants": [
-      { "name": "Quit" },
-      { "name": "Write", "tuple_fields": ["String"] },
-      { "name": "Move", "struct_fields": [{ "name": "x", "type_annotation": "i32" }] }
-    ]
-  }
-}
-```
+`imports` and `lint` keep their own shape: `schema_version`, `root_dir`,
+`language`, `files` (v1 `FileSummary` entries with `imports`, `lint` and
+`syntax`), `symbol_indexes` and `adapter_metadata`.
 
 ## Query Vendoring
 

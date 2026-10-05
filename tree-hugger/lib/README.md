@@ -211,8 +211,12 @@ used by the CLI but are also available to library consumers.
 
 Schema output (version 4.0) is exposed via `SymbolRecord` and `FileSymbolIndex`, including `schema_version`
 and `completed_passes` metadata for staged analysis. A `SymbolQuery` result adds
-`completed_capabilities`. Pass dependencies, capabilities and kind selection
+`completed_capabilities` and `selected_kinds`, and `narrowed` answers a
+narrower query from it without parsing again. Pass dependencies, capabilities and kind selection
 are described in [Symbol Schema Design](../docs/symbol-schema-design.md#extraction-pipeline-contract).
+`cache::SymbolCache` serves the same queries from one persistent entry per
+file, parsing only when the entry lacks a requested kind or capability; see
+[Cache Design](../docs/cache-design.md).
 
 ## Testing
 

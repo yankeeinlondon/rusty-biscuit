@@ -32,11 +32,17 @@ hug imports --json "tests/fixtures/**/*.js"
 - `--exclude-files <GLOB>` - Exclude files matching glob patterns (in addition to the defaults below)
 - `--exclude-symbols <GLOB>` - Exclude symbol names matching glob patterns
 - `--json` - Output as JSON
+- `--json-full` - Output every scanned file's complete index as JSON, diagnostics included (`functions`, `types`, `symbols` and `classes` only; symbol selectors such as name filters, `--exported`, `--prelude` or `--static-only` are rejected)
 - `--plain` - Disable colors and hyperlinks
+- `--verbose` - Print the cache stats line (persistent-cache hits, partial hits and misses, plus files parsed, definition captures and diagnostics runs) and any recoverable cache failure to stderr
+- `--no-cache` - Neither read nor write the persistent symbol cache
 - `--group-by-file` - Group symbol output by file
-- `--group-by-module` - Group symbol output by module
-- `--sort-by-kind` - Sort symbols by kind then name
-- `--sort-by-module` - Sort symbols by module then other sort keys
+- `--group-by-module` - Group symbol output by module (the file's directory)
+- `--sort file|name|kind` - Order of the listed declarations (`functions`, `types`, `symbols` and `classes` only). `file` (the default) lists by file, then source position; `name` by the case-sensitive name; `kind` by kind (modules and types, then callables, then values). Ties fall back to file, position, kind and ID. Give it once; `lint` and `imports` reject it
+
+The old `--sort-by-kind` and `--sort-by-module` flags are gone: `--sort kind`
+replaces the first, and the default `--sort file` (portable path, then source
+position) covers the second.
 
 ## Default Scan Exclusions
 
@@ -66,6 +72,12 @@ container and location:
   - private type alias PrivateAlias src/rust.rs:30:1
 ```
 
+Declarations are listed by file, then source position; `--sort name` and
+`--sort kind` change that, also within `--group-by-file` and
+`--group-by-module` groups. The word before the name is the declaring keyword
+for types, variables, fields and constants (`struct`, `let`, `const`, `my`,
+`local`, ...), read from the record, and the kind otherwise.
+
 #### Visibility labels
 
 The label is the access declared or implied at the declaration:
@@ -86,53 +98,60 @@ a Rust `impl` block are grouped under the implemented type, so a method in
 
 ### JSON Output
 
-With `--json`, output is one document stamped `"schema_version": {"major": 4, "minor": 0}`.
-`files[].symbols` holds the v1 symbols and `symbol_indexes` holds the full
-schema records (with `visibility.level`, `modifiers`, `identity.container_name`,
-`identity.container_kind`, `identity.keyword`, `source.declaration_text`,
-`source.signature_text` and `relations.implements`). Records carry no
-timestamps, so two runs over the same files print the same bytes:
+With `--json`, `functions`, `types`, `symbols` and `classes` print one report:
 
 ```json
 {
+  "report_schema_version": 1,
   "schema_version": { "major": 4, "minor": 0 },
   "root_dir": "/path/to/project",
-  "language": "Rust",
   "files": [
     {
-      "file": "/path/to/src/rust.rs",
+      "file": "src/rust.rs",
+      "language": "Rust",
+      "completed_passes": ["Parse"],
+      "completed_capabilities": ["declarations"],
       "symbols": [
         {
-          "name": "new_associated_function",
+          "id": "…",
           "kind": "Method",
-          "range": { "start_line": 94, "start_column": 5 },
-          "container_name": "PublicStruct",
-          "container_kind": "Type",
-          "visibility": "Public",
-          "is_static": true,
-          "signature": { "return_type": "Self", "is_static": true }
-        },
-        {
-          "name": "PRIVATE_STATIC_MUT",
-          "kind": "Variable",
-          "range": { "start_line": 26, "start_column": 1 },
-          "visibility": "Private",
-          "is_static_storage": true
+          "identity": { "name": "new_associated_function", "container_name": "PublicStruct", "container_kind": "Type", "keyword": "fn" },
+          "source": { "file_path": "src/rust.rs", "signature_text": "pub fn new_associated_function() -> Self" },
+          "visibility": { "level": "Public" },
+          "modifiers": [{ "type": "Static" }]
         }
       ]
     }
   ],
-  "symbol_indexes": [ { "schema_version": { "major": 4, "minor": 0 }, "symbols": [] } ]
+  "errors": []
 }
 ```
 
-- `visibility` is a top-level symbol field (it used to be
-  `signature.visibility`) and is omitted when the level is unknown.
-- `is_static` marks a member usable without an instance; `is_static_storage`
-  marks storage or linkage `static` (C `static`, Rust `static` items). Both
-  are omitted when `false`.
-- Every function, method and constructor has a `signature`, even with no
-  parameters or return type.
+(Records are shown abridged.)
+
+- `symbols` holds only the command's records, as schema 4.0 `SymbolRecord`s,
+  ordered by `--sort` within each file. File entries are always in portable
+  path order, and a file with no match has no entry; an empty selection is
+  `files: []`.
+- `classes` entries add `members`: each container's displayed methods and
+  constructors, keyed by the container's ID (`--static-only` and
+  `--instance-only` apply). Fields stay in the container's `kind_data`.
+- Records carry the declaration header (`source.signature_text`) but not the
+  declaration's source text, attached comments or work the command did not
+  ask for (references, semantics); `completed_passes` and
+  `completed_capabilities` say what was computed. `--json-full` has the same
+  envelope with complete per-file `indexes` (every kind, every pass,
+  diagnostics and `declaration_text`) in place of `files`.
+- Every path is `/`-separated and relative to `root_dir`; record IDs are
+  unchanged by that.
+- `errors` is always present and always last. Each failed file is one entry
+  (`file`, `kind` — the error variant in snake case such as `io` — and
+  `message`), is also written to stderr, and makes `hug` exit `1`.
+- Records carry no timestamps, so two runs over the same files print the same
+  bytes, with or without the cache and whatever the number of workers.
+
+`imports` and `lint` keep their own JSON shape: `files` (per-file summaries
+of imports or diagnostics), `symbol_indexes` and `adapter_metadata`.
 
 ## Symbol Kinds
 
