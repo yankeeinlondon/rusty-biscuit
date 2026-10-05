@@ -24,6 +24,17 @@
 (method_declaration
   name: (identifier) @local.definition.method) @local.definition.method.context
 
+; Explicit instance constructors; a static constructor (`static C() {}`)
+; is not captured.
+((constructor_declaration
+  (modifier)* @_modifier
+  name: (identifier) @local.definition.constructor) @local.definition.constructor.context
+  (#not-eq? @_modifier "static"))
+
+; Enum members
+(enum_member_declaration
+  name: (identifier) @local.definition.enum_variant) @local.definition.enum_variant.context
+
 ; Local functions - capture full node for signature extraction
 (local_function_statement
   name: (identifier) @local.definition.method) @local.definition.method.context

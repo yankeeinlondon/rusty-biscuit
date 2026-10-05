@@ -1809,7 +1809,7 @@ impl TreeFile {
                 record.identity.keyword = declaration_keyword(declaration, self.language);
                 if record.kind == SymbolKindV2::TypeAlias {
                     record.kind_data = SymbolKindData::TypeAlias(TypeAliasData {
-                        aliased_type_text: extract_type_alias_target(declaration, &self.source),
+                        aliased_type_text: extract_type_alias_target(declaration, self.language, &self.source),
                         aliased_type_ast: None,
                         is_recursive: false,
                     });

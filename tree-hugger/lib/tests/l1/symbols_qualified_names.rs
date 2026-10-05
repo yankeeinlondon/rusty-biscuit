@@ -59,9 +59,10 @@ pub const QUALIFIED_NAME_MATRIX: &[QualifiedNameRow] = &[
             ("exportedFunction", None, "exportedFunction", false),
             ("publicMethod", Some("ExportedWidget"), "ExportedWidget.publicMethod", false),
             ("initialValue", Some("ExportedWidget"), "ExportedWidget.constructor.initialValue", false),
-            // A TypeScript namespace qualifies from source but does not root
-            // the name: the file fallback still applies.
-            ("namespaceFunction", None, "ExportedNamespace.namespaceFunction", false),
+            // A TypeScript namespace qualifies from source and contains its
+            // members, but does not root the name: the file fallback still
+            // applies.
+            ("namespaceFunction", Some("ExportedNamespace"), "ExportedNamespace.namespaceFunction", false),
             ("localValue", None, "moduleFunction.localValue", false),
         ],
         same_named_method: Ok("area"),

@@ -35,6 +35,19 @@
   (type_spec
     name: (type_identifier) @local.definition.type)) @local.definition.type.context
 
+; Type aliases (`type A = B`), alone or grouped
+(type_declaration
+  (type_alias
+    name: (type_identifier) @local.definition.type_alias)) @local.definition.type_alias.context
+
+; Named fields of a named struct type. Embedded fields have no name, and the
+; fields of an anonymous `struct { … }` are not captured.
+(type_spec
+  type: (struct_type
+    (field_declaration_list
+      (field_declaration
+        name: (field_identifier) @local.definition.field) @local.definition.field.context)))
+
 ; reference
 (identifier) @local.reference
 

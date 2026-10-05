@@ -18,8 +18,9 @@ pub(crate) fn extract_ts_visibility(node: Node<'_>, source: &str) -> Option<Visi
 ///
 /// - class members: an access keyword, Private for a `#name`, else Public;
 /// - interface members: Public;
-/// - top-level declarations: Public when exported, else ModulePrivate in a
-///   module file and Unknown in a classic or global script;
+/// - enum members: the owning enum's level;
+/// - top-level declarations, namespaces included: Public when exported, else
+///   ModulePrivate in a module file and Unknown in a classic or global script;
 /// - anything else (declarations inside a namespace body, for example): Unknown.
 pub(super) fn extract_ecma_visibility(
     declaration: Node<'_>,
@@ -42,6 +43,7 @@ pub(super) fn extract_ecma_visibility(
             })
         }
         "interface_body" => Some(Visibility::Public),
+        "enum_body" => extract_ecma_visibility(parent.parent()?, ctx),
         _ => top_level_visibility(declaration, ctx.is_ecma_module),
     }
 }
@@ -60,6 +62,8 @@ fn top_level_visibility(declaration: Node<'_>, is_module: bool) -> Option<Visibi
             // `const a = 1, b = 2;` declares each name in a declarator, and
             // `const f = () => …` declares a function as a declarator's value.
             "variable_declarator" | "lexical_declaration" | "variable_declaration" => current = parent,
+            // `namespace A {}` parses as an expression statement.
+            "expression_statement" if current.kind() == "internal_module" => current = parent,
             _ => return None,
         }
     }

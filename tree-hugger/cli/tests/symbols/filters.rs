@@ -9,7 +9,7 @@ use std::path::Path;
 
 use serde_json::Value;
 
-use crate::{Scratch, json_of, stdout_of};
+use crate::{Scratch, TYPESCRIPT_FIXTURE, json_of, stdout_of};
 
 const APP_PY: &str = r#""""Module docs."""
 from os.path import join as pjoin
@@ -562,6 +562,64 @@ fn marker_filters_follow_source_boundaries() {
         let args: Vec<&str> = selection.iter().copied().chain(["--count", "--no-cache"]).collect();
         assert_eq!(scratch.stdout(&args).trim(), expected, "hug {}", args.join(" "));
     }
+}
+
+/// TypeScript doc text appended to the primary fixture: in `fence_decoy`
+/// the `@deprecated` line sits inside a four-backtick fence that a
+/// three-backtick line does not close; in `fence_real` it follows the actual
+/// close.
+pub(crate) const FENCED_DEPRECATION_TS: &str = concat!(
+    "\n/**\n * ````text\n * ```\n * @deprecated example text\n * ````\n */\nexport function fence_decoy() {}\n",
+    "\n/**\n * ````text\n * ```\n * example text\n * ````\n * @deprecated use another function\n */\nexport function fence_real() {}\n",
+);
+
+/// `--deprecated` honors fence boundaries: a tag inside an example is not a
+/// tag, and a tag after the example's real closing fence is.
+#[test]
+fn deprecated_filter_follows_fence_boundaries() {
+    let source = format!("{TYPESCRIPT_FIXTURE}{FENCED_DEPRECATION_TS}");
+    let scratch = Scratch::new(&[("typescript.ts", source.as_str())]);
+    for (name, expected) in [("fence_decoy", "0"), ("fence_real", "1")] {
+        let args = [
+            "functions", "--file", "typescript.ts", "--name", name, "--deprecated", "--count", "--no-cache",
+        ];
+        assert_eq!(scratch.stdout(&args).trim(), expected, "hug {}", args.join(" "));
+    }
+}
+
+/// A Go file whose `ReviewLiteral` doc is a starred `Deprecated:` (text, not
+/// a marker), `ReviewMarked` a real marker, and `ReviewBlockStar` and
+/// `ReviewLineStar` star-only docs.
+pub(crate) const GO_DOC_STARS: &str = concat!(
+    "package stars\n\n",
+    "/* *Deprecated: this is literal starred text. */\nfunc ReviewLiteral() {}\n\n",
+    "/* Deprecated: use New. */\nfunc ReviewMarked() {}\n\n",
+    "/* * */\nfunc ReviewBlockStar() {}\n\n",
+    "// *\nfunc ReviewLineStar() {}\n",
+);
+
+/// Go comments carry no decoration: a `*` after `/*` or `//` is doc text, so
+/// a starred `Deprecated:` is no marker and a star-only comment still
+/// documents its function, for `--deprecated`, `--undocumented` and the doc
+/// coverage of `--stats`.
+#[test]
+fn go_doc_stars_are_text_for_deprecated_undocumented_and_stats() {
+    let scratch = Scratch::new(&[("stars.go", GO_DOC_STARS)]);
+    let count = |args: &[&str]| scratch.stdout(args).trim().to_string();
+    for (name, expected) in [("ReviewLiteral", "0"), ("ReviewMarked", "1")] {
+        let args = ["functions", "--file", "stars.go", "--name", name, "--deprecated", "--count", "--no-cache"];
+        assert_eq!(count(&args), expected, "hug {}", args.join(" "));
+    }
+    let star_only = ["functions", "--file", "stars.go", "--name", "*Star", "--undocumented", "--count", "--no-cache"];
+    assert_eq!(count(&star_only), "0", "hug {}", star_only.join(" "));
+
+    let stats = json_of(&scratch.stdout(&[
+        "functions", "--file", "stars.go", "--name", "*Star", "--stats", "--json", "--no-cache",
+    ]));
+    let coverage = &stats["stats"]["doc_coverage"];
+    assert_eq!(coverage["documented"], 2, "{coverage}");
+    assert_eq!(coverage["total"], 2, "{coverage}");
+    assert_eq!(coverage["ratio"].as_f64(), Some(1.0), "{coverage}");
 }
 
 /// Only a nonempty `str` constant is a Python docstring: a formatted or a

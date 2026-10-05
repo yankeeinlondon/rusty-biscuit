@@ -28,7 +28,8 @@ impl MetadataSelection {
 
     /// Selects `kinds` (`None`: every kind), widened by the members whose
     /// access and `static` flags a selected type's field list copies
-    /// ([`align_field_metadata`]).
+    /// ([`align_field_metadata`]) and whose doc comments a selected type's
+    /// variant list copies ([`align_variant_metadata`]).
     pub(crate) fn for_kinds(kinds: Option<Vec<SymbolKindV2>>) -> Self {
         let Some(kinds) = kinds else {
             return Self::ALL;
@@ -43,6 +44,12 @@ impl MetadataSelection {
                 SymbolKindV2::Property,
                 SymbolKindV2::Constant,
             ]);
+        }
+        if kinds
+            .iter()
+            .any(|kind| completes_variant_list(SymbolKind::from(*kind)))
+        {
+            kinds.insert(SymbolKindV2::EnumVariant);
         }
         Self { kinds: Some(kinds) }
     }
@@ -154,6 +161,8 @@ impl TreeFile {
                 let Some(base_kind) = symbol_kind_from_capture(capture_name) else {
                     continue;
                 };
+                let context_capture = context_capture
+                    .map(|context| context_for_name(context, capture.node, self.language));
                 let declaration = context_capture.map_or_else(
                     || resolve_declaration_node(capture.node),
                     declaration_for_context,
@@ -220,6 +229,7 @@ impl TreeFile {
             .collect();
 
         align_field_metadata(&mut pending, selection);
+        align_variant_metadata(&mut pending, selection, &self.source);
 
         let inputs: Vec<NamingInput<'_>> = pending
             .iter()
@@ -424,12 +434,12 @@ fn completes_field_list(kind: SymbolKind) -> bool {
 /// symbols) list the same members with the same flags:
 ///
 /// - an entry with a standalone symbol of the same name copies its access and
-///   member `static` (the k-th entry of a name pairs with the k-th symbol of
-///   that name);
+///   member `static`, and its doc comment when the reader read none (the k-th
+///   entry of a name pairs with the k-th symbol of that name);
 /// - a standalone member no metadata reader listed is added, with its doc
 ///   comment and no type annotation;
 /// - entries with no standalone symbol (record components, Rust tuple
-///   positions, Go fields, Scala class parameters) keep what the reader read.
+///   positions, Scala class parameters) keep what the reader read.
 ///
 /// The result is in source order: an entry without a standalone symbol stays
 /// after the entry the reader listed before it. Enum owners are not
@@ -492,6 +502,9 @@ fn align_field_metadata(pending: &mut [PendingSymbol<'_>], selection: &MetadataS
                 paired[index] = true;
                 field.visibility = own[index].visibility;
                 field.is_static = own[index].is_static;
+                if field.doc_comment.is_none() {
+                    field.doc_comment = own[index].doc_comment.clone();
+                }
                 last_start = own[index].start;
             }
             positioned.push((last_start, field));
@@ -511,6 +524,100 @@ fn align_field_metadata(pending: &mut [PendingSymbol<'_>], selection: &MetadataS
         positioned.sort_by_key(|(start, _)| *start);
         metadata.fields = positioned.into_iter().map(|(_, field)| field).collect();
     }
+}
+
+/// Whether a kind's type metadata lists variants that
+/// [`align_variant_metadata`] completes. Only an enum's record carries a
+/// variant list; a Swift enum is extracted as `Type`, whose record has none,
+/// so completing its metadata would make the two paths disagree.
+fn completes_variant_list(kind: SymbolKind) -> bool {
+    kind == SymbolKind::Enum
+}
+
+/// A type's variant list is completed from, and agrees with, the standalone
+/// `EnumVariant` symbols the type directly contains, so the enum's variant
+/// list and `hug symbols` name the same variants ([`reconcile_variants`]).
+/// Variants never enter the field list, and an owner with no standalone
+/// variant keeps what its reader listed. Owners `selection` does not want
+/// are skipped; [`MetadataSelection::for_kinds`] keeps the variants of the
+/// owners it wants.
+fn align_variant_metadata(pending: &mut [PendingSymbol<'_>], selection: &MetadataSelection, source: &str) {
+    let mut by_owner: HashMap<usize, Vec<(usize, VariantInfo)>> = HashMap::new();
+    for entry in pending.iter() {
+        let symbol = &entry.extracted.symbol;
+        if symbol.kind != SymbolKind::EnumVariant {
+            continue;
+        }
+        let Some(ContainerLookup::Node { node, .. }) =
+            entry.container.as_ref().map(|container| container.lookup)
+        else {
+            continue;
+        };
+        let mut variant = VariantInfo::unit(symbol.name.clone());
+        variant.discriminant = variant_discriminant(entry.extracted.declaration, source);
+        variant.doc_comment = symbol.doc_comment.clone();
+        by_owner
+            .entry(node.id())
+            .or_default()
+            .push((symbol.range.start_byte, variant));
+    }
+    if by_owner.is_empty() {
+        return;
+    }
+
+    for entry in pending.iter_mut() {
+        let symbol = &mut entry.extracted.symbol;
+        if !completes_variant_list(symbol.kind) || !selection.wants(symbol.kind) {
+            continue;
+        }
+        let standalone: Vec<(usize, VariantInfo)> = [entry.extracted.declaration.id(), entry.extracted.anchor.id()]
+            .into_iter()
+            .collect::<BTreeSet<usize>>()
+            .into_iter()
+            .filter_map(|owner| by_owner.remove(&owner))
+            .flatten()
+            .collect();
+        if standalone.is_empty() {
+            continue;
+        }
+        let metadata = symbol.type_metadata.get_or_insert_with(TypeMetadata::new);
+        let listed = std::mem::take(&mut metadata.variants);
+        metadata.variants = reconcile_variants(listed, standalone);
+    }
+}
+
+/// Merges a reader's variant list with the standalone variants of the same
+/// type (`(start byte, variant)`):
+///
+/// - the k-th listed variant of a name pairs with the k-th standalone variant
+///   of that name, keeping the reader's payload and taking a discriminant or
+///   doc comment only where the reader has none;
+/// - a standalone variant the reader did not list is added at its source
+///   position;
+/// - a listed variant with no standalone symbol stays after the variant the
+///   reader listed before it.
+fn reconcile_variants(listed: Vec<VariantInfo>, mut standalone: Vec<(usize, VariantInfo)>) -> Vec<VariantInfo> {
+    standalone.sort_by_key(|(start, _)| *start);
+    let mut paired = vec![false; standalone.len()];
+    let mut positioned: Vec<(usize, VariantInfo)> = Vec::new();
+    let mut last_start = 0;
+    for mut variant in listed {
+        if let Some(index) =
+            (0..standalone.len()).find(|&index| !paired[index] && standalone[index].1.name == variant.name)
+        {
+            paired[index] = true;
+            let (start, own) = &standalone[index];
+            variant.discriminant = variant.discriminant.or_else(|| own.discriminant.clone());
+            variant.doc_comment = variant.doc_comment.or_else(|| own.doc_comment.clone());
+            last_start = *start;
+        }
+        positioned.push((last_start, variant));
+    }
+    for ((start, variant), _) in standalone.into_iter().zip(paired).filter(|(_, paired)| !paired) {
+        positioned.push((start, variant));
+    }
+    positioned.sort_by_key(|(start, _)| *start);
+    positioned.into_iter().map(|(_, variant)| variant).collect()
 }
 
 /// The container's kind is the kind extracted for the container's own
@@ -561,5 +668,84 @@ fn resolve_container_kind(
             let first = kinds.next()?;
             kinds.all(|kind| kind == first).then_some(first)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn variant(name: &str, discriminant: Option<&str>, doc: Option<&str>) -> VariantInfo {
+        let mut variant = VariantInfo::unit(name);
+        variant.discriminant = discriminant.map(str::to_string);
+        variant.doc_comment = doc.map(str::to_string);
+        variant
+    }
+
+    fn summary(variants: &[VariantInfo]) -> Vec<(&str, Option<&str>, Option<&str>)> {
+        variants
+            .iter()
+            .map(|variant| {
+                (
+                    variant.name.as_str(),
+                    variant.discriminant.as_deref(),
+                    variant.doc_comment.as_deref(),
+                )
+            })
+            .collect()
+    }
+
+    /// Paired variants keep the reader's data and take only what it lacks;
+    /// a standalone variant the reader missed is added at its position; a
+    /// listed variant with no standalone symbol is kept; no name appears
+    /// twice unless declared twice.
+    #[test]
+    fn variant_lists_merge_standalone_variants_without_duplicates() {
+        let mut listed_payload = variant("Tuple", None, Some("reader doc"));
+        listed_payload.tuple_fields = vec!["i32".to_string()];
+        let listed = vec![
+            variant("A", Some("1"), None),
+            listed_payload,
+            variant("OnlyListed", None, None),
+        ];
+        let standalone = vec![
+            (40, variant("Missed", Some("7"), Some("missed doc"))),
+            (10, variant("A", Some("ignored"), Some("a doc"))),
+            (20, variant("Tuple", Some("2"), Some("standalone doc"))),
+        ];
+
+        let merged = reconcile_variants(listed, standalone);
+        assert_eq!(
+            summary(&merged),
+            [
+                ("A", Some("1"), Some("a doc")),
+                ("Tuple", Some("2"), Some("reader doc")),
+                ("OnlyListed", None, None),
+                ("Missed", Some("7"), Some("missed doc")),
+            ]
+        );
+        assert_eq!(merged[1].tuple_fields, ["i32"]);
+    }
+
+    /// A reader that lists nothing (or reads no metadata) yields the
+    /// standalone variants in source order; repeated names pair in order.
+    #[test]
+    fn variant_lists_are_built_from_standalone_variants_alone() {
+        let standalone = vec![
+            (30, variant("Value", None, None)),
+            (10, variant("Red", None, None)),
+            (20, variant("Blue", Some("2"), None)),
+        ];
+        assert_eq!(
+            summary(&reconcile_variants(Vec::new(), standalone)),
+            [("Red", None, None), ("Blue", Some("2"), None), ("Value", None, None)]
+        );
+
+        let repeated = reconcile_variants(
+            vec![variant("Same", Some("1"), None), variant("Same", None, None)],
+            vec![(5, variant("Same", None, None)), (9, variant("Same", Some("2"), None))],
+        );
+        assert_eq!(summary(&repeated), [("Same", Some("1"), None), ("Same", Some("2"), None)]);
+        assert!(reconcile_variants(Vec::new(), Vec::new()).is_empty());
     }
 }

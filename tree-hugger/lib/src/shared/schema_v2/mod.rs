@@ -297,7 +297,7 @@ fn type_kind_data(metadata: &Option<TypeMetadata>, kind: SymbolKind) -> SymbolKi
                 .iter()
                 .map(|variant| EnumVariantData {
                     name: variant.name.clone(),
-                    discriminant: None,
+                    discriminant: variant.discriminant.clone(),
                     tuple_fields: variant.tuple_fields.clone(),
                     struct_fields: variant
                         .struct_fields
@@ -539,6 +539,7 @@ fn type_metadata_from_kind_data(kind_data: SymbolKindData) -> Option<TypeMetadat
                             is_static: field.is_static,
                         })
                         .collect(),
+                    discriminant: variant.discriminant,
                     doc_comment: variant.docs,
                 })
                 .collect(),

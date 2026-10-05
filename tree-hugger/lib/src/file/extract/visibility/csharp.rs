@@ -37,8 +37,8 @@ pub(crate) fn extract_csharp_visibility(node: Node<'_>, source: &str) -> Option<
 
 /// C# visibility: access keywords first, then the defaults of the C#
 /// reference. An explicit interface implementation is Private; any member of
-/// an interface (default-implemented, static and nested types included) is
-/// Public; a class, struct or record member is Private; a top-level type is
+/// an interface (default-implemented, static and nested types included) and
+/// every enum member is Public; a class, struct or record member is Private; a top-level type is
 /// Internal. Namespaces have no access level. The owner is read from the
 /// [`member_slot`], so `#if`/`#elif`/`#else` around a declaration never hide
 /// it.
@@ -46,11 +46,11 @@ pub(super) fn extract_csharp_declaration_visibility(
     declaration: Node<'_>,
     ctx: &DeclarationContext<'_>,
 ) -> Option<Visibility> {
-    if matches!(
-        declaration.kind(),
-        "namespace_declaration" | "file_scoped_namespace_declaration"
-    ) {
-        return None;
+    match declaration.kind() {
+        "namespace_declaration" | "file_scoped_namespace_declaration" => return None,
+        // Enum members take no access keyword and are always public members.
+        "enum_member_declaration" => return Some(Visibility::Public),
+        _ => {}
     }
     if let Some(level) = extract_csharp_visibility(declaration, ctx.source) {
         return Some(level);

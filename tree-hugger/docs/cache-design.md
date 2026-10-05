@@ -335,6 +335,23 @@ Cargo.toml added at the root:    helper  is_test true    (Hit, same entry)
 tests/Cargo.toml added too:      helper  is_test false   (Hit, same entry)
 ```
 
+The same split holds for a finished result reused through
+`SymbolQueryResult::narrowed` (what `hug --prelude` does): `finish` remembers
+which records only the file-wide rule made tests, and every later `finish`
+first undoes exactly that before deciding the rule again. A record whose
+source marks it a test stays one; a record only the old layout marked follows
+the new one:
+
+```text
+tests/probe.rs: pub fn helper() {}  #[test] fn marked() {}
+result made under Cargo.toml:        helper true   marked true
+Cargo.toml removed, then narrowed:   helper false  marked true   (= fresh query)
+```
+
+A result already filtered by `--tests-only`/`--exclude-tests` lost the records
+the old decision dropped, so it narrows only while that decision still holds;
+otherwise `narrowed` returns `None` and the caller analyzes the file again.
+
 The name rules depend only on the path, which is a key input, so storing them
 would be correct; they are applied after lookup with the Rust rule because
 they are one classification. The rule costs one file-name check and, for

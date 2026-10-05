@@ -608,12 +608,48 @@ leaves it `false`:
 | Rust | `#[deprecated]`, with or without arguments |
 | Java | `@Deprecated` (or `@java.lang.Deprecated`), or a doc line that starts with the `@deprecated` tag |
 | C# | `[Obsolete]`, also qualified (`System.Obsolete`) or with the `Attribute` suffix |
-| JavaScript, TypeScript, PHP | a doc line that starts with the `@deprecated` tag (`@deprecated use load()` counts; `@deprecatedSoon`, a mid-line mention, a quoted or backticked `@deprecated` and a line inside a fenced code block do not) |
-| Go | a doc paragraph that starts with `Deprecated:`, in `//` or `/* */` docs alike (a blank line starts a paragraph) |
+| JavaScript, TypeScript, PHP | a doc line that starts with the `@deprecated` tag (`@deprecated use load()` counts; `@deprecatedSoon`, a mid-line mention, a quoted or backticked `@deprecated` and a line inside a fenced code block do not; fences are described below the table) |
+| Go | a doc paragraph that starts with `Deprecated:`, in `//` or `/* */` docs alike (a blank line starts a paragraph; an indented line is a code block, not a paragraph) |
 | Swift | `@available(*, deprecated…)`: a top-level `deprecated` argument (a single-platform `@available(iOS, deprecated: 13)` and the word inside `message: "…"` do not count) |
 | Scala | `@deprecated` (or `@scala.deprecated`) |
 | C++ | `[[deprecated]]` (a vendor form such as `[[gnu::deprecated]]` does not count) |
 | Python | the `@deprecated` decorator, bare or as `typing_extensions.deprecated` or `warnings.deprecated` |
+
+A fenced code block in a Java, JavaScript, TypeScript or PHP doc block
+follows CommonMark, read after the leading `*` and spaces of each line are
+removed:
+
+- a fence opens on a line starting with three or more backticks or three
+  or more tildes; a backtick fence's info string cannot contain a backtick,
+  so a backtick run followed by text holding another backtick opens nothing;
+- it closes only on a line made of the **same** character, at least as many
+  as the opening run, followed by nothing but whitespace;
+- every other line is example text: a shorter run, the other character, or
+  a run followed by text (```` ```text ```` inside an open fence);
+- a fence that never closes runs to the end of the doc block;
+- a `@deprecated` line after the real closing fence is a tag again.
+
+```text
+/**
+ * ````text
+ * ```                      <- three backticks: content, the fence stays open
+ * @deprecated example      <- inside the example: no effect
+ * ````                     <- closes the four-backtick fence
+ * @deprecated use other    <- a tag: is_deprecated = true
+ */
+```
+
+A Go doc is read as Go reads it (`go/ast`'s `CommentGroup.Text`, then
+`go/doc/comment`). Go defines no comment decoration, so only the delimiters
+go: `//` and one space after it, or `/*` (with the whitespace after it on
+its line) and `*/`. Every other character is doc text, including a third
+opening `*` and a `*` at the start of a line: `/* *Deprecated: … */`,
+`/**Deprecated: … */` and a body line ` * Deprecated: …` are not markers,
+and a comment holding only `*` (`/* * */`, `// *`) documents its
+declaration. The whitespace prefix that every nonblank line shares is then
+removed, and a line still indented after that is a code block, so an
+indented `Deprecated:` line is example text. The first unindented line after
+a code block starts a new paragraph.
 
 Attributes are read from the syntax tree, not their text: a comment inside
 an attribute is ignored (`#[deprecated /* why */]`, `[Obsolete /* why */]`

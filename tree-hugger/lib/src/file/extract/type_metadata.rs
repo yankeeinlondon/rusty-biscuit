@@ -268,6 +268,18 @@ const RUST_TYPE_KINDS: &[&str] = &[
     "macro_invocation",
 ];
 
+/// The explicit value of an enum member as written (`2` in `B = 2`): the
+/// `value` field of a Rust `enum_variant`, a C/C++ `enumerator`, a C#
+/// `enum_member_declaration`, a TypeScript `enum_assignment` or a PHP
+/// `enum_case`.
+pub(crate) fn variant_discriminant(member: Node<'_>, source: &str) -> Option<String> {
+    member
+        .child_by_field_name("value")?
+        .utf8_text(source.as_bytes())
+        .ok()
+        .map(str::to_string)
+}
+
 /// Extracts variants from a Rust enum_variant_list.
 pub(crate) fn extract_rust_enum_variants(node: Node<'_>, source: &str) -> Vec<VariantInfo> {
     let mut variants = Vec::new();
@@ -287,6 +299,7 @@ pub(crate) fn extract_rust_enum_variants(node: Node<'_>, source: &str) -> Vec<Va
         if let Some(name) = name {
             let mut variant = VariantInfo::unit(&name);
             variant.doc_comment = doc_comment;
+            variant.discriminant = variant_discriminant(child, source);
 
             // Check for tuple variant: Variant(Type1, Type2)
             if let Some(tuple_fields) = find_child_by_kind(child, "ordered_field_declaration_list")
@@ -497,7 +510,9 @@ pub(crate) fn extract_typescript_enum_variants(node: Node<'_>, source: &str) -> 
         };
 
         if let Some(name) = name {
-            variants.push(VariantInfo::unit(name));
+            let mut variant = VariantInfo::unit(name);
+            variant.discriminant = variant_discriminant(child, source);
+            variants.push(variant);
         }
     }
 
@@ -1088,7 +1103,9 @@ pub(crate) fn extract_c_enum_variants(node: Node<'_>, source: &str) -> Vec<Varia
         if let Some(name_node) = find_child_by_kind(child, "identifier")
             && let Ok(name) = name_node.utf8_text(source.as_bytes())
         {
-            variants.push(VariantInfo::unit(name));
+            let mut variant = VariantInfo::unit(name);
+            variant.discriminant = variant_discriminant(child, source);
+            variants.push(variant);
         }
     }
 
@@ -1349,7 +1366,9 @@ pub(crate) fn extract_csharp_enum_variants(node: Node<'_>, source: &str) -> Vec<
         if let Some(name_node) = find_child_by_kind(child, "identifier")
             && let Ok(name) = name_node.utf8_text(source.as_bytes())
         {
-            variants.push(VariantInfo::unit(name));
+            let mut variant = VariantInfo::unit(name);
+            variant.discriminant = variant_discriminant(child, source);
+            variants.push(variant);
         }
     }
 
@@ -1634,10 +1653,13 @@ pub(crate) fn extract_scala_type_metadata(
     }
 
     match node_kind {
-        "class_definition" => {
+        "class_definition" | "trait_definition" | "object_definition" => {
             // Class parameters are in class_parameters
             if let Some(params) = find_child_by_kind(node, "class_parameters") {
                 metadata.fields = extract_scala_class_parameters(params, source);
+            }
+            if let Some(body) = node.child_by_field_name("body") {
+                metadata.fields.extend(extract_scala_body_fields(body, source));
             }
         }
         "enum_definition" => {
@@ -1670,6 +1692,31 @@ pub(crate) fn extract_scala_type_parameters(node: Node<'_>, source: &str) -> Vec
     }
 
     params
+}
+
+/// The `val`/`var` definitions and declarations directly in a Scala
+/// template body, each with its written type; a destructuring pattern
+/// (`val (a, b) = …`) declares no listed field.
+fn extract_scala_body_fields(body: Node<'_>, source: &str) -> Vec<FieldInfo> {
+    let text = |node: Node<'_>| node.utf8_text(source.as_bytes()).ok().map(str::to_string);
+    let mut cursor = body.walk();
+    body.named_children(&mut cursor)
+        .filter_map(|member| {
+            let name = match member.kind() {
+                "val_definition" | "var_definition" => member.child_by_field_name("pattern"),
+                "val_declaration" | "var_declaration" => member.child_by_field_name("name"),
+                _ => None,
+            }
+            .filter(|name| name.kind() == "identifier")?;
+            Some(FieldInfo {
+                name: text(name)?,
+                type_annotation: member.child_by_field_name("type").and_then(text),
+                doc_comment: None,
+                visibility: None,
+                is_static: false,
+            })
+        })
+        .collect()
 }
 
 /// Extracts class parameters from Scala class_parameters.
@@ -1831,7 +1878,9 @@ pub(crate) fn extract_php_enum_cases(node: Node<'_>, source: &str) -> Vec<Varian
         if let Some(name_node) = find_child_by_kind(child, "name")
             && let Ok(name) = name_node.utf8_text(source.as_bytes())
         {
-            variants.push(VariantInfo::unit(name));
+            let mut variant = VariantInfo::unit(name);
+            variant.discriminant = variant_discriminant(child, source);
+            variants.push(variant);
         }
     }
 

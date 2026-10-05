@@ -393,14 +393,9 @@ fn scala_enum_given_and_extension_members_belong_to_their_owner() {
     scala.assert_kind("planetProbe", Some("Planet"), K::Method, Some(K::Enum));
     scala.assert_kind("bracelessProbe", Some("Braceless"), K::Method, Some(K::Enum));
     scala.assert_kind("Color", Some("Host"), K::Enum, Some(K::Module));
-    // Enum cases are not reported (yet), and never as members.
-    for case in ["Red", "Green", "Earth", "Only"] {
-        assert!(
-            scala.symbols.iter().all(|symbol| symbol.name != case),
-            "{}: enum case `{case}` must not be reported: {:#?}",
-            scala.label,
-            scala.symbols
-        );
+    // Enum cases are variants of their own enum, never members.
+    for (case, owner) in [("Red", "Color"), ("Green", "Color"), ("Earth", "Planet"), ("Only", "Braceless")] {
+        scala.assert_kind(case, Some(owner), K::EnumVariant, Some(K::Enum));
     }
 
     scala.assert_kind("givenProbe", None, K::Method, None);

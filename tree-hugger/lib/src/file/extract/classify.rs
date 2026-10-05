@@ -98,18 +98,17 @@ fn classify_symbol_kind(
         {
             return SymbolKind::Field;
         }
+        // A `val`/`var` declared directly in a class, trait, object or enum
+        // body is a field; one in a method or block stays a variable.
+        (
+            ProgrammingLanguage::Scala,
+            "val_definition" | "var_definition" | "val_declaration" | "var_declaration",
+        ) if kind == SymbolKind::Variable && is_direct_member(declaration) => {
+            return SymbolKind::Field;
+        }
         (_, "public_field_definition" | "property_definition" | "property_signature")
         | (ProgrammingLanguage::JavaScript, "field_definition") => {
             return SymbolKind::Property;
-        }
-        // An object literal's `constructor()` is an ordinary method.
-        (_, "method_definition")
-            if node_text(name, source) == Some("constructor")
-                && declaration
-                    .parent()
-                    .is_some_and(|parent| parent.kind() == "class_body") =>
-        {
-            return SymbolKind::Constructor;
         }
         _ => {}
     }
@@ -127,9 +126,69 @@ fn classify_symbol_kind(
     };
 
     match kind {
+        SymbolKind::Function | SymbolKind::Method
+            if is_constructor_declaration(name, declaration, language, source) =>
+        {
+            SymbolKind::Constructor
+        }
         SymbolKind::Function if is_direct_member(declaration) => SymbolKind::Method,
         SymbolKind::Variable => refine_variable_kind(name, declaration, language),
         _ => kind,
+    }
+}
+
+/// Whether a function or method declaration is its type's constructor: the
+/// one place a captured function-like declaration becomes `Constructor`.
+///
+/// Membership is established first, from the declaration's place in a type
+/// body ([`is_direct_member`], except where an arm says otherwise); only then
+/// may a rule read the name (`constructor`). A constructor in a function body
+/// is still demoted afterward ([`refine_symbol_kind`]).
+fn is_constructor_declaration(
+    name: Node<'_>,
+    declaration: Node<'_>,
+    language: ProgrammingLanguage,
+    source: &str,
+) -> bool {
+    match language {
+        // A class body is the membership test: it also covers a class
+        // expression, which is not a member container. An object literal's
+        // `constructor()` is an ordinary method.
+        ProgrammingLanguage::JavaScript | ProgrammingLanguage::TypeScript => {
+            declaration.kind() == "method_definition"
+                && declaration
+                    .parent()
+                    .is_some_and(|parent| parent.kind() == "class_body")
+                && node_text(name, source) == Some("constructor")
+        }
+        // A decorated `__init__` keeps its membership through the decorator.
+        ProgrammingLanguage::Python => {
+            declaration.kind() == "function_definition"
+                && is_direct_member(declaration)
+                && node_text(name, source) == Some("__init__")
+        }
+        // PHP method names are case-insensitive; the source spelling is kept.
+        ProgrammingLanguage::Php => {
+            declaration.kind() == "method_declaration"
+                && is_direct_member(declaration)
+                && node_text(name, source).is_some_and(|text| text.eq_ignore_ascii_case("__construct"))
+        }
+        // A class member with no return type whose declarator declares a
+        // plain identifier: a destructor (`destructor_name`), a conversion
+        // operator (`operator_cast`) and an out-of-class `C::C()`
+        // (`qualified_identifier`) do not qualify, and the name is never
+        // compared with the class's.
+        ProgrammingLanguage::Cpp => {
+            matches!(declaration.kind(), "declaration" | "field_declaration" | "function_definition")
+                && declaration.child_by_field_name("type").is_none()
+                && is_direct_member(declaration)
+                && declaration
+                    .child_by_field_name("declarator")
+                    .filter(|declarator| declarator.kind() == "function_declarator")
+                    .and_then(|declarator| declarator.child_by_field_name("declarator"))
+                    .is_some_and(|declared| declared.kind() == "identifier" && declared == name)
+        }
+        _ => false,
     }
 }
 
@@ -264,12 +323,17 @@ fn is_member_container_kind(kind: &str) -> bool {
     )
 }
 
-/// Body nodes between a member and its container.
+/// Body nodes between a member and its container. A Java enum's members
+/// after its constants sit in `enum_body_declarations` inside `enum_body`.
 fn is_member_body_kind(kind: &str) -> bool {
     kind.ends_with("_body")
         || matches!(
             kind,
-            "block" | "declaration_list" | "field_declaration_list" | "template_body"
+            "block"
+                | "declaration_list"
+                | "field_declaration_list"
+                | "template_body"
+                | "enum_body_declarations"
         )
 }
 
@@ -486,9 +550,10 @@ pub(crate) fn go_receiver_type_name(method: Node<'_>, source: &str) -> Option<St
 /// A type that owns the declarations in it but has no name to report: an
 /// anonymous class (Java, also an enum constant's body; PHP; Scala
 /// `new T { … }`, also a `given … with` instance), a JavaScript/TypeScript
-/// class expression or object literal, a C# anonymous object, and a C/C++ `struct`/`class`/`union`
-/// without a tag. A declaration inside one has no container rather than the
-/// named type around it.
+/// class expression or object literal, a C# anonymous object, a C/C++ `struct`/`class`/`union`
+/// without a tag, and a Go `struct { … }` type that is not a `type_spec`'s
+/// own (a field's type, a composite literal, an alias target). A declaration
+/// inside one has no container rather than the named type around it.
 ///
 /// A tagless C/C++ `struct`/`union` that declares no name of its own
 /// (`union { int a; float b; };`) is an anonymous member: its fields are
@@ -509,6 +574,7 @@ pub(crate) fn is_unnamed_type_owner(node: Node<'_>) -> bool {
             node.child_by_field_name("name").is_none()
                 && anonymous_member_declaration(node).is_none()
         }
+        "struct_type" => node.parent().is_none_or(|parent| parent.kind() != "type_spec"),
         _ => false,
     }
 }
@@ -558,6 +624,17 @@ pub(crate) fn ancestor_container<'tree>(
                 _ => None,
             };
         }
+        ProgrammingLanguage::Go => return go_type_container(node, source),
+        // `module A {}` declares a namespace, as `namespace A {}` does; a
+        // string-named ambient `declare module "x" {}` stays a module.
+        ProgrammingLanguage::TypeScript
+            if node.kind() == "module"
+                && node
+                    .child_by_field_name("name")
+                    .is_some_and(|name| name.kind() != "string") =>
+        {
+            &[("module", SymbolKind::Namespace)]
+        }
         _ => &[
             ("class_declaration", SymbolKind::Class),
             ("class_definition", SymbolKind::Class),
@@ -577,12 +654,41 @@ pub(crate) fn ancestor_container<'tree>(
             ("record_declaration", SymbolKind::Type),
             ("namespace_declaration", SymbolKind::Namespace),
             ("namespace_definition", SymbolKind::Namespace),
+            ("internal_module", SymbolKind::Namespace),
             ("module", SymbolKind::Module),
-            ("type_declaration", SymbolKind::Type),
         ],
     };
 
     named_container_ref(node, source, kind_map)
+}
+
+/// A Go type declared by `node`, a `type_spec`, as the container of what its
+/// body declares. The container node is the one the type's own symbol is
+/// extracted at ([`context_for_name`]): the `type_declaration` of an
+/// ungrouped `type S struct { … }`, the spec itself in a grouped
+/// `type ( … )` block.
+fn go_type_container<'tree>(node: Node<'tree>, source: &str) -> Option<ContainerRef<'tree>> {
+    if node.kind() != "type_spec" {
+        return None;
+    }
+    let name = node
+        .child_by_field_name("name")?
+        .utf8_text(source.as_bytes())
+        .ok()?
+        .to_string();
+    let owner = node
+        .parent()
+        .filter(|declaration| {
+            declaration.kind() == "type_declaration" && !is_grouped_go_type_declaration(*declaration)
+        })
+        .unwrap_or(node);
+    Some(ContainerRef {
+        name,
+        lookup: ContainerLookup::Node {
+            node: owner,
+            fallback: SymbolKind::Type,
+        },
+    })
 }
 
 fn named_container_ref<'tree>(
@@ -836,25 +942,40 @@ pub(crate) fn body_node_for_declaration(node: Node<'_>) -> Option<Node<'_>> {
         .or_else(|| find_child_by_kind(node, "object_type"))
 }
 
-/// The right-hand side of a type alias declaration (TypeScript `type A = …`,
-/// Rust `type A = …`).
-pub(crate) fn extract_type_alias_target(node: Node<'_>, source: &str) -> Option<String> {
-    if node.kind() == "type_item" {
-        return node
-            .child_by_field_name("type")
-            .and_then(|target| target.utf8_text(source.as_bytes()).ok())
-            .map(str::to_string);
-    }
-    if node.kind() != "type_alias_declaration" {
-        return None;
-    }
-
-    node.child_by_field_name("value")
-        .or_else(|| {
+/// The right-hand side of a type alias declaration as written (TypeScript,
+/// Rust, Go and Scala `type A = …`, Swift `typealias A = …`), generic
+/// parameters left unresolved. `None` for a declaration with no right-hand
+/// side, such as an abstract Scala `type Element`.
+pub(crate) fn extract_type_alias_target(
+    node: Node<'_>,
+    language: ProgrammingLanguage,
+    source: &str,
+) -> Option<String> {
+    let target = match (language, node.kind()) {
+        (ProgrammingLanguage::Rust, "type_item")
+        | (ProgrammingLanguage::Go, "type_alias")
+        | (ProgrammingLanguage::Scala, "type_definition") => node.child_by_field_name("type"),
+        // An ungrouped `type A = B` is its `type_declaration`
+        // ([`context_for_name`]).
+        (ProgrammingLanguage::Go, "type_declaration") => {
+            find_child_by_kind(node, "type_alias")?.child_by_field_name("type")
+        }
+        // The alias and its target are both under the `name` field; the
+        // target is the node after `=`.
+        (ProgrammingLanguage::Swift, "typealias_declaration") => {
+            let mut cursor = node.walk();
+            node.children(&mut cursor)
+                .skip_while(|child| child.kind() != "=")
+                .find(|child| child.is_named())
+        }
+        (_, "type_alias_declaration") => node.child_by_field_name("value").or_else(|| {
             let mut cursor = node.walk();
             node.children(&mut cursor)
                 .find(|child| child.kind() == "object_type" || child.kind().ends_with("type"))
-        })
+        }),
+        _ => None,
+    };
+    target
         .and_then(|target| target.utf8_text(source.as_bytes()).ok())
         .map(str::to_string)
 }
@@ -1059,8 +1180,8 @@ mod tests {
         let root = tree.root_node();
         let meters = find_node(root, "type_item", "pub type Meters", source).expect("Meters");
         let pair = find_node(root, "type_item", "type Pair", source).expect("Pair");
-        assert_eq!(extract_type_alias_target(meters, source).as_deref(), Some("u32"));
-        assert_eq!(extract_type_alias_target(pair, source).as_deref(), Some("(T, T)"));
+        assert_eq!(extract_type_alias_target(meters, ProgrammingLanguage::Rust, source).as_deref(), Some("u32"));
+        assert_eq!(extract_type_alias_target(pair, ProgrammingLanguage::Rust, source).as_deref(), Some("(T, T)"));
 
         let name = meters.child_by_field_name("name").expect("name");
         assert_eq!(
@@ -1093,5 +1214,262 @@ mod tests {
             refine_symbol_kind(SymbolKind::Constant, name, item, ProgrammingLanguage::Rust, source),
             SymbolKind::Variable
         );
+    }
+
+    /// The right-hand side as written, for every alias form the deferred
+    /// kinds use, and nothing for a declaration without one.
+    #[test]
+    fn alias_targets_are_the_written_right_hand_side() {
+        use ProgrammingLanguage as L;
+        // `(language, file, source, declaration node kind, its text prefix,
+        // target)`.
+        type Case = (L, &'static str, &'static str, &'static str, &'static str, Option<&'static str>);
+        let cases: [Case; 11] = [
+            (L::Go, "a.go", "package p\n\ntype Alias = int\n", "type_alias", "Alias", Some("int")),
+            (L::Go, "a.go", "package p\n\ntype Alias = int\n", "type_declaration", "type Alias", Some("int")),
+            (L::Go, "a.go", "package p\n\ntype (\n\tGrouped = string\n\tDefined int\n)\n", "type_alias", "Grouped", Some("string")),
+            (L::Go, "a.go", "package p\n\ntype GenAlias[T any] = []T\n", "type_alias", "GenAlias", Some("[]T")),
+            (L::Go, "a.go", "package p\n\ntype Defined int\n", "type_declaration", "type Defined", None),
+            (L::Swift, "a.swift", "typealias Alias = Int\n", "typealias_declaration", "typealias Alias", Some("Int")),
+            (L::Swift, "a.swift", "public typealias G<T> = Array<T>\n", "typealias_declaration", "public typealias", Some("Array<T>")),
+            (L::Scala, "a.scala", "object O {\n  type Alias = Int\n}\n", "type_definition", "type Alias", Some("Int")),
+            (L::Scala, "a.scala", "object O {\n  type Gen[A] = List[A]\n}\n", "type_definition", "type Gen", Some("List[A]")),
+            (L::Scala, "a.scala", "trait T {\n  type Element\n}\n", "type_definition", "type Element", None),
+            // A C typedef's `type` field is only the base type of its declarator.
+            (L::C, "a.c", "typedef int *IntPtr;\n", "type_definition", "typedef", None),
+        ];
+        for (language, file, source, kind, prefix, expected) in cases {
+            let tree = parse(language, file, source);
+            let node = find_node(tree.root_node(), kind, prefix, source)
+                .unwrap_or_else(|| panic!("no {kind} at {prefix:?} in {source:?}"));
+            assert_eq!(
+                extract_type_alias_target(node, language, source).as_deref(),
+                expected,
+                "{language:?} {source:?}"
+            );
+        }
+    }
+
+    /// Declaration nodes of the deferred kinds are found from their names; a
+    /// bare TypeScript enum member, which has no node of its own, is its own
+    /// declaration, and a TypeScript `module` is a declaration rather than a
+    /// file root.
+    #[test]
+    fn deferred_declarations_resolve_from_their_names() {
+        use ProgrammingLanguage as L;
+        // `(language, file, source, name node kind, name, declaration kind)`.
+        type Case = (L, &'static str, &'static str, &'static str, &'static str, &'static str);
+        let cases: [Case; 9] = [
+            (L::TypeScript, "a.ts", "enum E { Red, Blue = 2 }\n", "property_identifier", "Red", "property_identifier"),
+            (L::TypeScript, "a.ts", "enum E { Red, Blue = 2 }\n", "property_identifier", "Blue", "enum_assignment"),
+            (L::TypeScript, "a.ts", "namespace Space { const inside = 1; }\n", "identifier", "Space", "internal_module"),
+            (L::TypeScript, "a.ts", "module Mod { const inside = 1; }\n", "identifier", "Mod", "module"),
+            (L::Go, "a.go", "package p\n\ntype Alias = int\n", "type_identifier", "Alias", "type_alias"),
+            (L::Php, "a.php", "<?php\nenum Suit: string { case Hearts = 'h'; }\n", "name", "Hearts", "enum_case"),
+            (L::Scala, "a.scala", "enum Color {\n  case Red, Blue\n  case Value(x: Int)\n}\n", "identifier", "Red", "simple_enum_case"),
+            (L::Scala, "a.scala", "enum Color {\n  case Red, Blue\n  case Value(x: Int)\n}\n", "identifier", "Value", "full_enum_case"),
+            // A parameter of a Scala enum case is still its own declaration.
+            (L::Scala, "a.scala", "enum Color {\n  case Red, Blue\n  case Value(x: Int)\n}\n", "identifier", "x", "class_parameter"),
+        ];
+        for (language, file, source, name_kind, name, declaration_kind) in cases {
+            let tree = parse(language, file, source);
+            let name_node = find_node(tree.root_node(), name_kind, name, source)
+                .unwrap_or_else(|| panic!("no {name_kind} {name:?} in {source:?}"));
+            assert_eq!(
+                resolve_declaration_node(name_node).kind(),
+                declaration_kind,
+                "{language:?} `{name}`"
+            );
+        }
+    }
+
+    /// A Go field's container is its type, found at the node the type's own
+    /// symbol is extracted at; a field of an anonymous struct type has none.
+    #[test]
+    fn go_fields_are_contained_by_the_type_that_declares_them() {
+        let source = "package p\n\ntype S struct {\n\tX, Y int\n\tanon struct{ Inner int }\n}\n\ntype (\n\tA struct{ P int }\n\tB struct{ Q int }\n)\n\ntype Al = struct{ R int }\n\nfunc f() {\n\tv := struct{ L int }{1}\n\t_ = v\n}\n";
+        let tree = parse(ProgrammingLanguage::Go, "a.go", source);
+        let root = tree.root_node();
+        let field = |prefix: &str| {
+            find_node(root, "field_declaration", prefix, source)
+                .unwrap_or_else(|| panic!("no field {prefix:?}"))
+        };
+        let container = |declaration: Node<'_>| {
+            find_symbol_container(declaration, ProgrammingLanguage::Go, source).map(|container| {
+                let ContainerLookup::Node { node, fallback } = container.lookup else {
+                    panic!("Go type containers are nodes");
+                };
+                assert_eq!(fallback, SymbolKind::Type);
+                (container.name, node.kind(), source[node.byte_range()].to_string())
+            })
+        };
+
+        let (name, kind, text) = container(field("X, Y")).expect("S");
+        assert_eq!((name.as_str(), kind), ("S", "type_declaration"));
+        assert!(text.starts_with("type S struct"));
+        assert_eq!(container(field("anon")).map(|found| found.0).as_deref(), Some("S"));
+
+        // In a group, each type is its own spec.
+        assert_eq!(
+            container(field("P int")).map(|(name, kind, _)| (name, kind)),
+            Some(("A".to_string(), "type_spec"))
+        );
+        assert_eq!(
+            container(field("Q int")).map(|(name, kind, _)| (name, kind)),
+            Some(("B".to_string(), "type_spec"))
+        );
+
+        for anonymous in ["Inner int", "R int", "L int"] {
+            assert!(container(field(anonymous)).is_none(), "{anonymous}");
+        }
+
+        // The type's own symbol is extracted at that same node.
+        let grouped = find_node(root, "type_declaration", "type (", source).expect("group");
+        let b_name = find_node(root, "type_identifier", "B", source).expect("B");
+        assert_eq!(context_for_name(grouped, b_name, ProgrammingLanguage::Go).kind(), "type_spec");
+        let single = find_node(root, "type_declaration", "type S", source).expect("S");
+        let s_name = find_node(root, "type_identifier", "S", source).expect("S name");
+        assert_eq!(context_for_name(single, s_name, ProgrammingLanguage::Go), single);
+    }
+
+    /// A TypeScript namespace contains its members, nested namespaces
+    /// included, and is never its own container. A string-named ambient
+    /// module stays a module.
+    #[test]
+    fn typescript_namespaces_contain_their_members() {
+        let source = "namespace Space {\n  function inside() {}\n  namespace Inner {\n    function deep() {}\n  }\n}\nmodule Mod {\n  function inMod() {}\n}\ndeclare module \"x\" {\n  function ambient(): void;\n}\n";
+        let tree = parse(ProgrammingLanguage::TypeScript, "a.ts", source);
+        let root = tree.root_node();
+        let container = |kind: &str, prefix: &str| {
+            let node = find_node(root, kind, prefix, source).unwrap_or_else(|| panic!("no {prefix:?}"));
+            find_symbol_container(node, ProgrammingLanguage::TypeScript, source).map(|container| {
+                let ContainerLookup::Node { fallback, .. } = container.lookup else {
+                    panic!("namespace containers are nodes");
+                };
+                (container.name, fallback)
+            })
+        };
+        let namespace = |name: &str| Some((name.to_string(), SymbolKind::Namespace));
+
+        assert_eq!(container("function_declaration", "function inside"), namespace("Space"));
+        assert_eq!(container("internal_module", "namespace Inner"), namespace("Space"));
+        assert_eq!(container("function_declaration", "function deep"), namespace("Inner"));
+        assert_eq!(container("function_declaration", "function inMod"), namespace("Mod"));
+        assert_eq!(container("internal_module", "namespace Space"), None);
+        assert_eq!(container("module", "module Mod"), None);
+        assert_eq!(
+            container("function_signature", "function ambient"),
+            Some(("\"x\"".to_string(), SymbolKind::Module))
+        );
+    }
+
+    /// A namespace record qualifies its members once: adding it leaves every
+    /// other name as it was without it.
+    #[test]
+    fn namespace_records_qualify_their_members_once() {
+        use ProgrammingLanguage as L;
+        // `(language, file, source, (namespace node kind, prefix), member
+        // (node kind, prefix, name), expected names)`.
+        type Case = (L, &'static str, &'static str, (&'static str, &'static str), (&'static str, &'static str, &'static str), [&'static str; 2]);
+        let cases: [Case; 4] = [
+            (L::TypeScript, "a.ts", "namespace Space {\n  function inside() {}\n}\n", ("internal_module", "namespace Space"), ("function_declaration", "function inside", "inside"), ["Space", "Space.inside"]),
+            (L::TypeScript, "a.ts", "module Mod {\n  function inside() {}\n}\n", ("module", "module Mod"), ("function_declaration", "function inside", "inside"), ["Mod", "Mod.inside"]),
+            (L::Php, "a.php", "<?php\nnamespace App;\nfunction inside() {}\n", ("namespace_definition", "namespace App"), ("function_definition", "function inside", "inside"), ["App", "App\\inside"]),
+            (L::Php, "a.php", "<?php\nnamespace App\\Braced {\n  function inside() {}\n}\n", ("namespace_definition", "namespace App"), ("function_definition", "function inside", "inside"), ["App\\Braced", "App\\Braced\\inside"]),
+        ];
+        for (language, file, source, (namespace_kind, namespace_prefix), (member_kind, member_prefix, member_name), expected) in cases {
+            let tree = parse(language, file, source);
+            let root = tree.root_node();
+            let namespace = find_node(root, namespace_kind, namespace_prefix, source).expect("namespace");
+            let namespace_name = namespace.child_by_field_name("name").expect("namespace name");
+            let member = find_node(root, member_kind, member_prefix, source).expect("member");
+            let member_input = NamingInput {
+                name: member_name,
+                kind: SymbolKind::Function,
+                name_node: member.child_by_field_name("name").expect("member name"),
+                declaration: member,
+                anchor: member,
+            };
+            let namespace_input = NamingInput {
+                name: &source[namespace_name.byte_range()],
+                kind: SymbolKind::Namespace,
+                name_node: namespace_name,
+                declaration: namespace,
+                anchor: namespace,
+            };
+
+            let without = qualified_names(std::slice::from_ref(&member_input), language, source);
+            let with = qualified_names(&[namespace_input, member_input], language, source);
+            let names: Vec<&str> = with.iter().map(|name| name.text.as_str()).collect();
+            assert_eq!(names, expected, "{source:?}");
+            assert_eq!(with[1], without[0], "{source:?}: the member's name is unchanged");
+        }
+    }
+
+    /// The constructor hook keeps the JavaScript/TypeScript rule: a class
+    /// body's `constructor` (also a class expression's) is a constructor, an
+    /// object literal's is a method.
+    #[test]
+    fn ecma_constructors_are_class_body_members_named_constructor() {
+        let source = "class C { constructor() {} other() {} }\nconst K = class { constructor() {} };\nconst o = { constructor() {} };\nfunction f() { class Local { constructor() {} } }\n";
+        let tree = parse(ProgrammingLanguage::TypeScript, "a.ts", source);
+        let root = tree.root_node();
+        let mut cursor = root.walk();
+        let mut methods = Vec::new();
+        collect_kind(root, "method_definition", &mut cursor, &mut methods);
+        let kinds: Vec<(String, SymbolKind)> = methods
+            .into_iter()
+            .map(|method| {
+                let name = method.child_by_field_name("name").expect("name");
+                // A class's methods sit in its `class_body`; an object
+                // literal's directly in the `object`.
+                let owner = method
+                    .parent()
+                    .and_then(|parent| if parent.kind() == "class_body" { parent.parent() } else { Some(parent) })
+                    .map(|owner| owner.kind())
+                    .unwrap_or_default();
+                (
+                    format!("{owner}.{}", &source[name.byte_range()]),
+                    refine_symbol_kind(SymbolKind::Method, name, method, ProgrammingLanguage::TypeScript, source),
+                )
+            })
+            .collect();
+        assert_eq!(
+            kinds,
+            [
+                ("class_declaration.constructor".to_string(), SymbolKind::Constructor),
+                ("class_declaration.other".to_string(), SymbolKind::Method),
+                ("class.constructor".to_string(), SymbolKind::Constructor),
+                ("object.constructor".to_string(), SymbolKind::Method),
+                ("class_declaration.constructor".to_string(), SymbolKind::Constructor),
+            ]
+        );
+    }
+
+    /// A Java enum's members after its constants are direct members.
+    #[test]
+    fn java_enum_body_declarations_hold_direct_members() {
+        let source = "enum E { A; E() {} void m() {} }\n";
+        let tree = parse(ProgrammingLanguage::Java, "E.java", source);
+        let root = tree.root_node();
+        for (kind, prefix) in [("constructor_declaration", "E()"), ("method_declaration", "void m")] {
+            let declaration = find_node(root, kind, prefix, source).expect("member");
+            assert!(is_direct_member(declaration), "{prefix}");
+        }
+    }
+
+    fn collect_kind<'tree>(
+        node: Node<'tree>,
+        kind: &str,
+        cursor: &mut tree_sitter::TreeCursor<'tree>,
+        found: &mut Vec<Node<'tree>>,
+    ) {
+        if node.kind() == kind {
+            found.push(node);
+        }
+        let children: Vec<Node<'tree>> = node.children(cursor).collect();
+        for child in children {
+            collect_kind(child, kind, cursor, found);
+        }
     }
 }

@@ -36,6 +36,18 @@
 (enum_definition
   name: (identifier) @local.definition.enum) @local.definition.enum.context
 
+; Enum cases (`case Red, Blue`, `case Value(x: Int)`)
+(simple_enum_case
+  name: (identifier) @local.definition.enum_variant) @local.definition.enum_variant.context
+
+(full_enum_case
+  name: (identifier) @local.definition.enum_variant) @local.definition.enum_variant.context
+
+; Type aliases; an abstract `type Element` has no right-hand side
+(type_definition
+  name: (type_identifier) @local.definition.type_alias
+  type: (_)) @local.definition.type_alias.context
+
 (parameter
   name: (identifier) @local.definition.parameter)
 

@@ -22,13 +22,14 @@
   - public method Audit() -> void [in interface IAuditable] c_sharp.cs:24:9
   - namespace geometry cpp.cpp:3:11
   - class Vector { x_: int, y_: int } cpp.cpp:5:1
-  - public method Vector(x: int, y: int) [in class Vector] cpp.cpp:7:5
+  - public constructor Vector(x: int, y: int) [in class Vector] cpp.cpp:7:5
   - public method length() -> int [in class Vector] cpp.cpp:9:5
   - private field x_ [in class Vector] cpp.cpp:12:9
   - private field y_ [in class Vector] cpp.cpp:13:9
   - public function dot(a: Vector, b: Vector) -> int [in namespace geometry] cpp.cpp:16:5
   - public class Counter { count: int } java.java:3:1
   - private field count [in class Counter] java.java:4:17
+  - public constructor Counter(start: int) [in class Counter] java.java:6:5
   - public method increment() -> void [in class Counter] java.java:10:5
   - public method zero() -> Counter [in class Counter] java.java:14:5
   - package interface Resettable java.java:19:1
@@ -90,12 +91,13 @@ nested
 
   - namespace nested nested/go.go:2:9
   - public type Widget { Size int } nested/go.go:5:1
+  - public field Size [in type Widget] nested/go.go:6:2
   - public method Grow(amount int) [in type Widget] nested/go.go:9:1
   - public const MaxSize nested/go.go:13:7
   - public function BuildWidget() Widget nested/go.go:15:1
   - variable MAX_SIZE nested/python.py:3:1
   - class Gadget nested/python.py:6:1
-  - method __init__(self, size) [in class Gadget] nested/python.py:9:5
+  - constructor __init__(self, size) [in class Gadget] nested/python.py:9:5
   - method grow(self, amount) [in class Gadget] nested/python.py:12:5
   - function build_gadget() nested/python.py:16:1
 

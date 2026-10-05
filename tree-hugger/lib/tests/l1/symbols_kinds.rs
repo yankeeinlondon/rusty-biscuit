@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 
-use tree_hugger::{ProgrammingLanguage, SymbolKind, SymbolKindV2, TreeFile};
+use tree_hugger::{ProgrammingLanguage, SymbolKind, SymbolKindV2, SymbolScope, TreeFile};
 
 use ProgrammingLanguage as L;
 use SymbolKind as K;
@@ -88,6 +88,8 @@ pub const KIND_MATRIX: &[KindRow] = &[
     (L::TypeScript, "publicProperty", Some("ExportedWidget"), K::Property, Some(K::Class)),
     (L::TypeScript, "staticProperty", Some("ExportedWidget"), K::Property, Some(K::Class)),
     (L::TypeScript, "#hashPrivateProperty", Some("ExportedWidget"), K::Property, Some(K::Class)),
+    // a namespace contains its members
+    (L::TypeScript, "namespaceFunction", Some("ExportedNamespace"), K::Function, Some(K::Namespace)),
     // JavaScript
     (L::JavaScript, "exportedFunction", None, K::Function, None),
     (L::JavaScript, "ExportedWidget", None, K::Class, None),
@@ -236,6 +238,281 @@ fn kind_matrix_holds_through_both_paths() {
             extracted.assert_kind(name, *container, *kind, *container_kind);
         }
     }
+}
+
+/// One inline kind assertion: `(language, source, name, kind, container,
+/// container kind)`, held on `symbols()` and `symbol_index_v2()` alike.
+pub type InlineKindRow = (
+    ProgrammingLanguage,
+    &'static str,
+    &'static str,
+    SymbolKind,
+    Option<&'static str>,
+    Option<SymbolKind>,
+);
+
+/// One counterexample: `(language, source, name, kind)`. No symbol or
+/// record named `name` has `kind`; the name may be absent or another kind.
+pub type InlineNegativeRow = (ProgrammingLanguage, &'static str, &'static str, SymbolKind);
+
+/// Precise kinds of declarations once deferred, one section per language;
+/// a language's rows are added to its own section only.
+pub const DEFERRED_KIND_ROWS: &[InlineKindRow] = &[
+    // TypeScript
+    (L::TypeScript, "class C { constructor(x: number) {} }\n", "constructor", K::Constructor, Some("C"), Some(K::Class)),
+    (L::TypeScript, "const Anonymous = class { constructor() {} };\n", "constructor", K::Constructor, None, None),
+    (L::TypeScript, "enum E { Red, Blue = 2 }\n", "Red", K::EnumVariant, Some("E"), Some(K::Enum)),
+    (L::TypeScript, "enum E { Red, Blue = 2 }\n", "Blue", K::EnumVariant, Some("E"), Some(K::Enum)),
+    (L::TypeScript, "export const enum CE { A = \"a\" }\n", "A", K::EnumVariant, Some("CE"), Some(K::Enum)),
+    (L::TypeScript, "enum Q { \"quoted\" = 1 }\n", "quoted", K::EnumVariant, Some("Q"), Some(K::Enum)),
+    (L::TypeScript, "function f() {\n  enum Local { L1 }\n}\n", "L1", K::EnumVariant, Some("Local"), Some(K::Enum)),
+    (L::TypeScript, "namespace Space {}\n", "Space", K::Namespace, None, None),
+    (L::TypeScript, "module Space {}\n", "Space", K::Namespace, None, None),
+    (L::TypeScript, "declare namespace D {\n  function f(): void;\n}\n", "D", K::Namespace, None, None),
+    (L::TypeScript, "namespace Space {\n  namespace Inner {\n    function deep() {}\n  }\n}\n", "Inner", K::Namespace, Some("Space"), Some(K::Namespace)),
+    (L::TypeScript, "namespace Space {\n  namespace Inner {\n    function deep() {}\n  }\n}\n", "deep", K::Function, Some("Inner"), Some(K::Namespace)),
+    (L::TypeScript, "export namespace A.B {\n  export const v = 1;\n}\n", "A.B", K::Namespace, None, None),
+    // Go: a field's container is its struct, which reports `Type` (R1).
+    (L::Go, "package p\n\ntype Alias = int\n", "Alias", K::TypeAlias, None, None),
+    (L::Go, "package p\n\ntype (\n\tGrouped = string\n\tDefined int\n)\n", "Grouped", K::TypeAlias, None, None),
+    (L::Go, "package p\n\ntype (\n\tGrouped = string\n\tDefined int\n)\n", "Defined", K::Type, None, None),
+    (L::Go, "package p\n\ntype GenAlias[T any] = []T\n", "GenAlias", K::TypeAlias, None, None),
+    (L::Go, "package p\n\ntype S struct {\n\tX, Y int\n}\n", "X", K::Field, Some("S"), Some(K::Type)),
+    (L::Go, "package p\n\ntype S struct {\n\tX, Y int\n}\n", "Y", K::Field, Some("S"), Some(K::Type)),
+    (L::Go, "package p\n\ntype (\n\tA struct{ P int }\n\tB struct{ Q int }\n)\n", "Q", K::Field, Some("B"), Some(K::Type)),
+    (L::Go, "package p\n\ntype G[T any] struct {\n\tVal T\n}\n", "Val", K::Field, Some("G"), Some(K::Type)),
+    (L::Go, "package p\n\nfunc f() {\n\ttype Local struct{ In int }\n\t_ = Local{}\n}\n", "In", K::Field, Some("Local"), Some(K::Type)),
+    // Python
+    (L::Python, "class C:\n    def __init__(self, value):\n        pass\n", "__init__", K::Constructor, Some("C"), Some(K::Class)),
+    (L::Python, "class D:\n    @decorate\n    def __init__(self):\n        pass\n", "__init__", K::Constructor, Some("D"), Some(K::Class)),
+    (L::Python, "def f():\n    class Inner:\n        def __init__(self):\n            pass\n", "__init__", K::Constructor, Some("Inner"), Some(K::Class)),
+    (L::Python, "if True:\n    class Cond:\n        def __init__(self):\n            pass\n", "__init__", K::Constructor, Some("Cond"), Some(K::Class)),
+    (L::Python, "class C:\n    def __new__(cls):\n        pass\n", "__new__", K::Method, Some("C"), Some(K::Class)),
+    // Java
+    (L::Java, "class C { C(int x) {} }\n", "C", K::Constructor, Some("C"), Some(K::Class)),
+    (L::Java, "enum E { RED, BLUE; E() {} }\n", "E", K::Constructor, Some("E"), Some(K::Enum)),
+    (L::Java, "enum E { RED, BLUE }\n", "RED", K::EnumVariant, Some("E"), Some(K::Enum)),
+    (L::Java, "enum E { RED, BLUE }\n", "BLUE", K::EnumVariant, Some("E"), Some(K::Enum)),
+    (L::Java, "enum E { RED(1) { void inBody() {} }; E(int v) {} }\n", "RED", K::EnumVariant, Some("E"), Some(K::Enum)),
+    // A method of a constant's body is not a member of the enum.
+    (L::Java, "enum E { RED(1) { void inBody() {} }; E(int v) {} }\n", "inBody", K::Method, None, None),
+    (L::Java, "record R(int x) { R(String s) { this(1); } }\n", "R", K::Constructor, Some("R"), Some(K::Type)),
+    (L::Java, "class Outer { void f() { class Local { Local() {} } } }\n", "Local", K::Constructor, Some("Local"), Some(K::Class)),
+    (L::Java, "interface I { enum Nested { N1 } }\n", "N1", K::EnumVariant, Some("Nested"), Some(K::Enum)),
+    // C#
+    (L::CSharp, "class C { public C(int x) {} }\n", "C", K::Constructor, Some("C"), Some(K::Class)),
+    (L::CSharp, "struct S { public int X; public S(int x) => X = x; }\n", "S", K::Constructor, Some("S"), Some(K::Type)),
+    (L::CSharp, "record Rec(int A, int B) { public Rec(int a) : this(a, 0) {} }\n", "Rec", K::Constructor, Some("Rec"), Some(K::Type)),
+    (L::CSharp, "enum E { Red, Blue = 2 }\n", "Red", K::EnumVariant, Some("E"), Some(K::Enum)),
+    (L::CSharp, "enum E { Red, Blue = 2 }\n", "Blue", K::EnumVariant, Some("E"), Some(K::Enum)),
+    (L::CSharp, "namespace N { enum Hidden : byte { [Obsolete] H } }\n", "H", K::EnumVariant, Some("Hidden"), Some(K::Enum)),
+    // C#: a primary constructor's parameters keep their records.
+    (L::CSharp, "class P(int x) { }\n", "x", K::Parameter, Some("P"), Some(K::Class)),
+    // C: an anonymous enum gives its enumerators no container.
+    (L::C, "enum E { RED, BLUE = 2 };\n", "RED", K::EnumVariant, Some("E"), Some(K::Enum)),
+    (L::C, "enum E { RED, BLUE = 2 };\n", "BLUE", K::EnumVariant, Some("E"), Some(K::Enum)),
+    (L::C, "enum { ANON_A, ANON_B };\n", "ANON_B", K::EnumVariant, None, None),
+    (L::C, "typedef enum { T_A } TEnum;\n", "T_A", K::EnumVariant, None, None),
+    (L::C, "struct Holder { enum Inner { IN_A } kind; };\n", "IN_A", K::EnumVariant, Some("Inner"), Some(K::Enum)),
+    (L::C, "void f(void) { enum Local { L_A }; }\n", "L_A", K::EnumVariant, Some("Local"), Some(K::Enum)),
+    // C++: constructors are recognized by syntax alone, never by comparing
+    // names; enumerators come from the shared C capture.
+    (L::Cpp, "class C {\npublic:\n    C();\n};\n", "C", K::Constructor, Some("C"), Some(K::Class)),
+    (L::Cpp, "class C {\n    C(int x) {}\n};\n", "C", K::Constructor, Some("C"), Some(K::Class)),
+    (L::Cpp, "struct S {\n    S() = default;\n};\n", "S", K::Constructor, Some("S"), Some(K::Type)),
+    (L::Cpp, "class C {\n    C(C&&) = delete;\n};\n", "C", K::Constructor, Some("C"), Some(K::Class)),
+    (L::Cpp, "class C {\n    template <typename T> C(T t) {}\n};\n", "C", K::Constructor, Some("C"), Some(K::Class)),
+    (L::Cpp, "class C {\n    explicit C(double d);\n};\n", "C", K::Constructor, Some("C"), Some(K::Class)),
+    (L::Cpp, "template <typename T>\nclass TC {\n    TC();\n};\n", "TC", K::Constructor, Some("TC"), Some(K::Class)),
+    (L::Cpp, "template <typename T>\nstruct TS {\n    template <typename U> TS(U u);\n};\n", "TS", K::Constructor, Some("TS"), Some(K::Type)),
+    (L::Cpp, "namespace N {\nclass K {\n    K();\n};\n}\n", "K", K::Constructor, Some("K"), Some(K::Class)),
+    (L::Cpp, "void f() {\n    struct Local { Local() {} };\n}\n", "Local", K::Constructor, Some("Local"), Some(K::Type)),
+    (L::Cpp, "enum Unscoped { U_A, U_B = 2 };\n", "U_B", K::EnumVariant, Some("Unscoped"), Some(K::Enum)),
+    (L::Cpp, "enum class Scoped : int { S_A };\n", "S_A", K::EnumVariant, Some("Scoped"), Some(K::Enum)),
+    (L::Cpp, "class C {\n    enum Inner { IA };\n};\n", "IA", K::EnumVariant, Some("Inner"), Some(K::Enum)),
+    // C++: already landed elsewhere, kept as regression.
+    (L::Cpp, "using Alias = int;\n", "Alias", K::TypeAlias, None, None),
+    (L::Cpp, "namespace space {\nint inside;\n}\n", "space", K::Namespace, None, None),
+    // Swift: classes, structs and enums report `Type` (R1), so they own
+    // initializers as `Type`.
+    (L::Swift, "class C {\n    init() {}\n}\n", "init", K::Constructor, Some("C"), Some(K::Type)),
+    (L::Swift, "struct S {\n    init?(s: String) { return nil }\n}\n", "init", K::Constructor, Some("S"), Some(K::Type)),
+    (L::Swift, "class C {\n    init!(z: Int) {}\n}\n", "init", K::Constructor, Some("C"), Some(K::Type)),
+    (L::Swift, "struct S {}\nextension S {\n    init(w: String) {}\n}\n", "init", K::Constructor, Some("S"), Some(K::Type)),
+    (L::Swift, "enum En {\n    case a\n    init(raw: Int) { self = .a }\n}\n", "init", K::Constructor, Some("En"), Some(K::Type)),
+    (L::Swift, "protocol P {\n    init(p: Int)\n}\n", "init", K::Constructor, Some("P"), Some(K::Interface)),
+    (L::Swift, "typealias Alias = Int\n", "Alias", K::TypeAlias, None, None),
+    (L::Swift, "public typealias G<T> = Array<T>\n", "G", K::TypeAlias, None, None),
+    (L::Swift, "enum En {\n    case a\n    typealias Raw = Int\n}\n", "Raw", K::TypeAlias, Some("En"), Some(K::Type)),
+    // Scala: object fields are `Module` members, class and trait fields
+    // instance members.
+    (L::Scala, "enum Color {\n  case Red, Blue\n  case Value(x: Int)\n}\n", "Red", K::EnumVariant, Some("Color"), Some(K::Enum)),
+    (L::Scala, "enum Color {\n  case Red, Blue\n  case Value(x: Int)\n}\n", "Blue", K::EnumVariant, Some("Color"), Some(K::Enum)),
+    (L::Scala, "enum Color {\n  case Red, Blue\n  case Value(x: Int)\n}\n", "Value", K::EnumVariant, Some("Color"), Some(K::Enum)),
+    (L::Scala, "enum Color:\n  case Up\n  case Down\n", "Down", K::EnumVariant, Some("Color"), Some(K::Enum)),
+    (L::Scala, "object O {\n  type Alias = Int\n}\n", "Alias", K::TypeAlias, Some("O"), Some(K::Module)),
+    (L::Scala, "trait T {\n  type Gen[A] = List[A]\n}\n", "Gen", K::TypeAlias, Some("T"), Some(K::Trait)),
+    (L::Scala, "object O {\n  val a = 1\n  var b: Int = 2\n}\n", "a", K::Field, Some("O"), Some(K::Module)),
+    (L::Scala, "object O {\n  val a = 1\n  var b: Int = 2\n}\n", "b", K::Field, Some("O"), Some(K::Module)),
+    (L::Scala, "trait T {\n  val c: Int\n  var d: Int\n}\n", "c", K::Field, Some("T"), Some(K::Trait)),
+    (L::Scala, "class K {\n  lazy val e = 1\n}\n", "e", K::Field, Some("K"), Some(K::Class)),
+    (L::Scala, "enum Color {\n  case Red\n  val code = 1\n}\n", "code", K::Field, Some("Color"), Some(K::Enum)),
+    // A case's parameter is named under the case (`Color.Value.x`).
+    (L::Scala, "enum Color {\n  case Value(x: Int)\n}\n", "x", K::Parameter, Some("Color"), Some(K::Enum)),
+    // PHP: a semicolon namespace contains nothing; a braced one contains its
+    // members.
+    (L::Php, "<?php\nclass C {\n    public function __construct($x = 1) {}\n}\n", "__construct", K::Constructor, Some("C"), Some(K::Class)),
+    (L::Php, "<?php\nclass D {\n    function __Construct() {}\n}\n", "__Construct", K::Constructor, Some("D"), Some(K::Class)),
+    (L::Php, "<?php\ntrait T {\n    protected function __CONSTRUCT() {}\n}\n", "__CONSTRUCT", K::Constructor, Some("T"), Some(K::Trait)),
+    (L::Php, "<?php\nenum Suit {\n    case Hearts;\n    case Spades;\n}\n", "Hearts", K::EnumVariant, Some("Suit"), Some(K::Enum)),
+    (L::Php, "<?php\nenum Backed: string {\n    case H = 'h';\n}\n", "H", K::EnumVariant, Some("Backed"), Some(K::Enum)),
+    (L::Php, "<?php\nnamespace App;\n\nfunction inside() {}\n", "App", K::Namespace, None, None),
+    (L::Php, "<?php\nnamespace App;\n\nfunction inside() {}\n", "inside", K::Function, None, None),
+    (L::Php, "<?php\nnamespace App\\Braced {\n    function inside() {}\n}\n", "App\\Braced", K::Namespace, None, None),
+    (L::Php, "<?php\nnamespace App\\Braced {\n    function inside() {}\n}\n", "inside", K::Function, Some("App\\Braced"), Some(K::Namespace)),
+];
+
+/// Counterexamples of the deferred kinds, one section per language: uses,
+/// imports and look-alike declarations that keep their kinds.
+pub const DEFERRED_KIND_NEGATIVES: &[InlineNegativeRow] = &[
+    // TypeScript
+    (L::TypeScript, "class K { Red = 1 }\n", "Red", K::EnumVariant),
+    (L::TypeScript, "const o = { constructor() {} };\n", "constructor", K::Constructor),
+    (L::TypeScript, "export * as Star from \"./x\";\n", "Star", K::Namespace),
+    (L::TypeScript, "import * as Imp from \"./x\";\nexport const v = Imp;\n", "Imp", K::Namespace),
+    (L::TypeScript, "declare module \"x\" {\n  function y(): void;\n}\n", "\"x\"", K::Namespace),
+    (L::TypeScript, "declare module \"x\" {\n  function y(): void;\n}\n", "x", K::Namespace),
+    (L::TypeScript, "const E = { Red: 1 };\nlet r = E.Red;\n", "Red", K::EnumVariant),
+    (L::TypeScript, "interface I { Red: number }\n", "Red", K::EnumVariant),
+    // Go
+    (L::Go, "package p\n\ntype Defined int\n", "Defined", K::TypeAlias),
+    (L::Go, "package p\n\ntype I interface{ M() }\n", "M", K::Field),
+    (L::Go, "package p\n\ntype T struct{}\n\nfunc (r *T) m(p int) {}\n", "r", K::Field),
+    (L::Go, "package p\n\ntype T struct{}\n\nfunc (r *T) m(p int) {}\n", "p", K::Field),
+    (L::Go, "package p\n\ntype Embedded struct{}\n\ntype S struct {\n\tEmbedded\n}\n", "Embedded", K::Field),
+    (L::Go, "package p\n\ntype S struct {\n\tanon struct{ Inner int }\n}\n", "Inner", K::Field),
+    (L::Go, "package p\n\ntype Al = struct{ R int }\n", "R", K::Field),
+    (L::Go, "package p\n\nfunc f() {\n\tv := struct{ L int }{1}\n\t_ = v\n}\n", "L", K::Field),
+    (L::Go, "package p\n\ntype S struct{ X int }\n\nvar s = S{X: 1}\n", "s", K::Field),
+    (L::Go, "package p\n\ntype T = S\n\ntype S struct{}\n", "S", K::TypeAlias),
+    // Python
+    (L::Python, "def __init__():\n    pass\n", "__init__", K::Constructor),
+    (L::Python, "def f():\n    def __init__(self):\n        pass\n", "__init__", K::Constructor),
+    (L::Python, "class C:\n    def __new__(cls):\n        pass\n", "__new__", K::Constructor),
+    (L::Python, "class C:\n    @classmethod\n    def make(cls):\n        pass\n", "make", K::Constructor),
+    (L::Python, "class C:\n    def __init_subclass__(cls):\n        pass\n", "__init_subclass__", K::Constructor),
+    (L::Python, "class C:\n    def init(self):\n        pass\n", "init", K::Constructor),
+    (L::Python, "class C:\n    __init__ = None\n", "__init__", K::Constructor),
+    // Java
+    (L::Java, "class C { void C() {} }\n", "C", K::Constructor),
+    (L::Java, "record R(int x) { R { } }\n", "R", K::Constructor),
+    (L::Java, "class C { { } static { } }\n", "C", K::Constructor),
+    (L::Java, "class C { static C make() { return new C(); } }\n", "make", K::Constructor),
+    (L::Java, "class C { static final int RED = 1; }\n", "RED", K::EnumVariant),
+    (L::Java, "class C { int f() { return E.RED.ordinal(); } }\n", "RED", K::EnumVariant),
+    // C#
+    (L::CSharp, "class C { public int C() { return 0; } }\n", "C", K::Constructor),
+    (L::CSharp, "class C { static C() {} }\n", "C", K::Constructor),
+    (L::CSharp, "class C { ~C() {} }\n", "C", K::Constructor),
+    (L::CSharp, "class P(int x) { }\n", "P", K::Constructor),
+    (L::CSharp, "class C { public static C Make() => new C(); }\n", "Make", K::Constructor),
+    (L::CSharp, "class C { const int Red = 1; }\n", "Red", K::EnumVariant),
+    // C
+    (L::C, "enum E { RED };\nint x = RED;\n", "x", K::EnumVariant),
+    (L::C, "enum E { RED };\nint f(void) { return RED; }\n", "f", K::EnumVariant),
+    (L::C, "#define RED 1\n", "RED", K::EnumVariant),
+    // C++
+    (L::Cpp, "class C {\n  ~C();\n};\n", "C", K::Constructor),
+    (L::Cpp, "class C {\n  operator bool() const;\n};\n", "C", K::Constructor),
+    (L::Cpp, "class C {\n  void method();\n};\n", "method", K::Constructor),
+    (L::Cpp, "class C {};\nC::C() {}\n", "C", K::Constructor),
+    (L::Cpp, "class C {\n    static C make();\n};\n", "make", K::Constructor),
+    (L::Cpp, "class C {\n    C &operator=(const C &other);\n};\n", "operator=", K::Constructor),
+    (L::Cpp, "C make();\n", "make", K::Constructor),
+    (L::Cpp, "enum E { RED };\nint x = RED;\n", "x", K::EnumVariant),
+    // Swift
+    (L::Swift, "class C {\n  deinit {}\n}\n", "deinit", K::Constructor),
+    (L::Swift, "class C {\n  static func make() -> C { return C() }\n}\n", "make", K::Constructor),
+    (L::Swift, "protocol P {\n  associatedtype Element\n}\n", "Element", K::TypeAlias),
+    (L::Swift, "protocol P {\n  associatedtype E2 = Int\n}\n", "E2", K::TypeAlias),
+    (L::Swift, "class C {\n  func initialize() {}\n}\n", "initialize", K::Constructor),
+    (L::Swift, "class C {\n  func make() -> C { return C() }\n  init() {}\n}\n", "make", K::Constructor),
+    // Scala
+    (L::Scala, "trait T {\n  type Element\n}\n", "Element", K::TypeAlias),
+    (L::Scala, "class K {\n  def m() = { val local = 1; local }\n}\n", "local", K::Field),
+    (L::Scala, "class K(p: Int)\n", "p", K::Field),
+    (L::Scala, "class K(val q: Int)\n", "q", K::Field),
+    (L::Scala, "class K {\n  def g(): Int = { var inner = 1; inner }\n}\n", "inner", K::Field),
+    (L::Scala, "val top = 1\n", "top", K::Field),
+    (L::Scala, "class K {\n  val (d1, d2) = (1, 2)\n}\n", "d1", K::Field),
+    (L::Scala, "object O {\n  def m(): Int = 1\n}\n", "m", K::Field),
+    // PHP
+    (L::Php, "<?php\nfunction __construct() {}\n", "__construct", K::Constructor),
+    (L::Php, "<?php\nclass Legacy { function Legacy() {} }\n", "Legacy", K::Constructor),
+    (L::Php, "<?php\nuse Foo\\Bar;\n", "Bar", K::Namespace),
+    (L::Php, "<?php\nuse Foo\\Bar;\n", "Foo\\Bar", K::Namespace),
+    (L::Php, "<?php\nclass C {\n    public static function make(): static { return new static(); }\n}\n", "make", K::Constructor),
+    (L::Php, "<?php\nclass C {\n    function __constructor() {}\n}\n", "__constructor", K::Constructor),
+    (L::Php, "<?php\nenum E {\n    case A;\n    const B = 1;\n}\n", "B", K::EnumVariant),
+    (L::Php, "<?php\nnamespace {\n    function global_fn() {}\n}\n", "global_fn", K::Namespace),
+];
+
+/// Asserts each row's kind and container on both public paths, from its
+/// source written to a file with the language's extension.
+pub fn assert_inline_kind_rows(rows: &[InlineKindRow]) {
+    for &(language, source, name, kind, container, container_kind) in rows {
+        let extracted = extract_inline(source, language.extensions()[0]);
+        extracted.assert_kind(name, container, kind, container_kind);
+    }
+}
+
+/// Asserts that no symbol or record named as a row says has its kind.
+pub fn assert_inline_negative_rows(rows: &[InlineNegativeRow]) {
+    for &(language, source, name, kind) in rows {
+        let extracted = extract_inline(source, language.extensions()[0]);
+        for symbol in extracted.symbols.iter().filter(|symbol| symbol.name == name) {
+            assert_ne!(symbol.kind, kind, "{language:?} {source:?}: `{name}` in symbols()");
+        }
+        for record in extracted.records.iter().filter(|record| record.identity.name == name) {
+            assert_ne!(
+                record.kind,
+                SymbolKindV2::from(kind),
+                "{language:?} {source:?}: `{name}` in symbol_index_v2()"
+            );
+        }
+    }
+}
+
+#[test]
+fn deferred_kinds_hold_through_both_paths() {
+    assert_inline_kind_rows(DEFERRED_KIND_ROWS);
+}
+
+/// The scope of each deferred row's record: constructors, variants and
+/// fields are members; an alias is a member of a type around it, else an
+/// item; a namespace is an item.
+#[test]
+fn deferred_kinds_get_their_scope() {
+    for &(language, source, name, kind, container, container_kind) in DEFERRED_KIND_ROWS {
+        let expected = match kind {
+            K::Constructor | K::EnumVariant | K::Field => SymbolScope::Member,
+            K::TypeAlias if container_kind.is_some_and(|owner| owner != K::Namespace) => SymbolScope::Member,
+            K::TypeAlias | K::Namespace => SymbolScope::Item,
+            _ => continue,
+        };
+        let extracted = extract_inline(source, language.extensions()[0]);
+        assert_eq!(
+            extracted.record(name, container).scope,
+            expected,
+            "{language:?} {source:?}: `{name}` scope"
+        );
+        assert_eq!(extracted.symbol(name, container).scope, expected, "{language:?} {source:?}: `{name}` v1 scope");
+    }
+}
+
+#[test]
+fn deferred_kind_counterexamples_keep_their_kinds() {
+    assert_inline_negative_rows(DEFERRED_KIND_NEGATIVES);
 }
 
 /// Test 6: no symbol of any fixture reports `SymbolKind::Unknown`. An entry
@@ -640,9 +917,10 @@ fn functions_declared_directly_in_a_type_body_are_methods() {
     swift.assert_kind("unmarkedMethodInPlainStruct", Some("PlainStruct"), Method, Some(Type));
     swift.assert_kind("publicFunction", None, Function, None);
 
+    // A C++ constructor is a direct member, and a Constructor.
     let cpp = extract_primary(ProgrammingLanguage::Cpp);
     let cpp_class = cpp.symbol("AccessWidget", Some("fixture_space")).kind;
-    cpp.assert_kind("AccessWidget", Some("AccessWidget"), Method, Some(cpp_class));
+    cpp.assert_kind("AccessWidget", Some("AccessWidget"), SymbolKind::Constructor, Some(cpp_class));
 }
 
 #[test]

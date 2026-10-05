@@ -246,7 +246,9 @@ used by the CLI but are also available to library consumers.
 Schema output (version 4.0) is exposed via `SymbolRecord` and `FileSymbolIndex`, including `schema_version`
 and `completed_passes` metadata for staged analysis. A `SymbolQuery` result adds
 `completed_capabilities`, `selected_kinds` and `name_prefix()`, and `narrowed` answers a
-narrower query from it without parsing again. The predicates (`scopes`,
+narrower query from it without parsing again (it re-decides the file-wide test
+rules and the name prefix, and returns `None` when it cannot match a fresh
+query). The predicates (`scopes`,
 `visibility`, `exported`, `exclude_tests`/`tests_only`, `undocumented`,
 `deprecated`, `is_async`, `returns`, `param_type`, `min_params`,
 `in_container`, `name`, `exclude_name`) and the matchers (`NamePattern`,

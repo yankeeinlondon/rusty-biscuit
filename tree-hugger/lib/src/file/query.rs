@@ -3,7 +3,7 @@
 //! predicates and naming inputs applied to the result after analysis and
 //! cache lookup.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
@@ -13,7 +13,8 @@ use crate::file::filter::{FUNCTION_LIKE_KINDS, RecordFilter};
 use crate::file::naming::{Naming, NamingContext};
 use crate::file::pattern::NamePattern;
 use crate::shared::{
-    AnalysisPass, FileSymbolIndex, SymbolKindV2, SymbolRecord, SymbolScope, VisibilityLevel,
+    AnalysisPass, FileSymbolIndex, SymbolId, SymbolKindV2, SymbolRecord, SymbolScope,
+    VisibilityLevel,
 };
 
 /// A unit of analysis a query can require.
@@ -437,6 +438,10 @@ pub struct SymbolQueryResult {
     name_prefix: Option<String>,
     /// The predicates applied, when any were.
     filter: Option<RecordFilter>,
+    /// `Some` when `finish` found the file a test file by a file-wide rule,
+    /// holding the records that rule (not a source attribute) made tests, so
+    /// the decision can be undone exactly when the package layout changes.
+    file_wide_tests: Option<HashSet<SymbolId>>,
 }
 
 impl SymbolQueryResult {
@@ -453,6 +458,7 @@ impl SymbolQueryResult {
             selected_kinds,
             name_prefix: None,
             filter: None,
+            file_wide_tests: None,
         }
     }
 
@@ -469,15 +475,25 @@ impl SymbolQueryResult {
     /// The file-wide test rules ([`is_test_file`]) read the file's path and,
     /// for Rust, the nearest `Cargo.toml` above it. Neither analysis nor the
     /// cache stores their outcome (a manifest can appear, move or vanish
-    /// while the source and its entry stay unchanged), so they are applied
-    /// here, once per result, before the predicates read `is_test`.
+    /// while the source and its entry stay unchanged), so they are decided
+    /// here, on every call, before the predicates read `is_test`: a record is
+    /// a test when its source marks it (attribute, Rust `cfg(test)`) or the
+    /// file is a test file now. An earlier call's file-wide decision is
+    /// undone first, so a source-marked record stays a test and a record
+    /// only that decision marked does not.
     pub(crate) fn finish(mut self, query: &SymbolQuery) -> Self {
+        self.undo_file_wide_tests();
         if self.completed_capabilities.contains(&Capability::Flags)
             && is_test_file(&self.index.file, self.index.language)
         {
+            let mut marked = HashSet::new();
             for record in &mut self.index.symbols {
-                record.visibility.is_test = true;
+                if !record.visibility.is_test {
+                    record.visibility.is_test = true;
+                    marked.insert(record.id.clone());
+                }
             }
+            self.file_wide_tests = Some(marked);
         }
         if self.name_prefix.is_none() {
             let prefix = query.naming.prefix_for(&self.index.file, self.index.language);
@@ -495,8 +511,22 @@ impl SymbolQueryResult {
         self
     }
 
-    /// This result with in-file qualified names again.
-    fn without_prefix(mut self) -> Self {
+    /// Restores each record's source-derived `is_test`.
+    fn undo_file_wide_tests(&mut self) {
+        if let Some(marked) = self.file_wide_tests.take() {
+            for record in &mut self.index.symbols {
+                if marked.contains(&record.id) {
+                    record.visibility.is_test = false;
+                }
+            }
+        }
+    }
+
+    /// This result's index as analysis or the cache produced it: in-file
+    /// qualified names and source-derived test flags (the predicates' drops
+    /// stay dropped).
+    fn into_unfinished_index(mut self) -> FileSymbolIndex {
+        self.undo_file_wide_tests();
         if let Some(prefix) = self.name_prefix.take() {
             for record in &mut self.index.symbols {
                 if !record.identity.is_namespace_rooted
@@ -506,17 +536,23 @@ impl SymbolQueryResult {
                 }
             }
         }
-        self
+        self.index
     }
 
     /// This result reduced to exactly what `query` computes over the same
     /// source, or `None` when `query` selects a kind or requires a capability
-    /// this result lacks, or this result was filtered by other predicates or
-    /// under another prefix. Qualified names are re-prefixed for `query`'s
-    /// naming inputs.
+    /// this result lacks, or this result was filtered by other predicates,
+    /// under another prefix, or by a test selector under a file-wide test
+    /// decision that no longer holds. Qualified names are re-prefixed for
+    /// `query`'s naming inputs.
     ///
     /// Lets a caller that analyzed a file once for a wide query answer a
-    /// narrower one without parsing it again.
+    /// narrower one without parsing it again. The reuse contract: the
+    /// narrowed result equals a fresh `query` over the same source *now*.
+    /// Facts read from the source are reused; the file-wide test rules and
+    /// the name prefix, which read the filesystem, are decided again, so a
+    /// `Cargo.toml` added or removed since this result was made is honored.
+    /// A `None` means "analyze again", never "nothing matches".
     pub fn narrowed(self, query: &SymbolQuery) -> Option<SymbolQueryResult> {
         let covers_kinds = match (&self.selected_kinds, query.kind_set()) {
             (None, _) => true,
@@ -530,13 +566,19 @@ impl SymbolQueryResult {
         // Filtered records are gone, and a qualified-name predicate matched
         // them under this result's prefix: only the same predicates under the
         // same prefix can be answered.
+        // A test selector dropped records under this result's file-wide
+        // test decision; if that decision changed, a dropped record may now
+        // match.
         let covers_records = self.filter.as_ref().is_none_or(|filter| {
             *filter == query.filter
                 && self.name_prefix.as_deref()
                     == Some(query.naming.prefix_for(&self.index.file, self.index.language).as_str())
+                && (filter.is_test.is_none()
+                    || self.file_wide_tests.is_some()
+                        == is_test_file(&self.index.file, self.index.language))
         });
         (covers_kinds && covers_capabilities && covers_records).then(|| {
-            crate::analysis::coverage::project(self.without_prefix().index, query).finish(query)
+            crate::analysis::coverage::project(self.into_unfinished_index(), query).finish(query)
         })
     }
 }

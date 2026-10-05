@@ -11,6 +11,14 @@
 (class_declaration
   name: (type_identifier) @local.definition.type) @local.definition.type.context
 
+; Initializers (`init`, `init?`, `init!`): the name is the `init` keyword
+(init_declaration
+  name: "init" @local.definition.constructor) @local.definition.constructor.context
+
+; Type aliases; an `associatedtype` is not one
+(typealias_declaration
+  name: (type_identifier) @local.definition.type_alias) @local.definition.type_alias.context
+
 ; Protocols (Swift's interfaces) - capture full node for context
 (protocol_declaration
   name: (type_identifier) @local.definition.interface) @local.definition.interface.context

@@ -792,3 +792,86 @@ fn entry_from_extractor_revision_ten_is_not_served_after_the_repairs() {
         },
     });
 }
+
+/// The public `is_deprecated` of `fence_decoy` and `fence_real` in a
+/// `hug --json-full` report.
+fn fenced_deprecation(output: &Value) -> Value {
+    let flag = |name: &str| -> Value {
+        let records: Vec<&Value> = output["indexes"]
+            .as_array()
+            .expect("indexes")
+            .iter()
+            .flat_map(|index| index["symbols"].as_array().expect("index symbols"))
+            .filter(|record| record["identity"]["name"] == name)
+            .collect();
+        assert_eq!(records.len(), 1, "expected one `{name}` record");
+        records[0]["visibility"]["is_deprecated"].clone()
+    };
+    Value::from(vec![flag("fence_decoy"), flag("fence_real")])
+}
+
+/// Revision 11 toggled its code-fence state on any fence-looking doc line,
+/// so a tag inside a four-backtick example deprecated `fence_decoy` and a
+/// tag after the example's close was missed on `fence_real`; revision 12
+/// closes a fence only on a matching run.
+#[test]
+fn entry_from_extractor_revision_eleven_is_not_served_after_the_repairs() {
+    assert_stale_revision_is_not_served(&StaleRevision {
+        revision: "11",
+        key: OldKey::Computed,
+        file: FILE,
+        language: "typescript",
+        source: format!("{TYPESCRIPT_FIXTURE}{}", crate::filters::FENCED_DEPRECATION_TS),
+        sentinel: "exportedFunction",
+        probe: fenced_deprecation,
+        repaired: Value::from(vec![false, true]),
+        stale: Value::from(vec![true, false]),
+        revert: |snapshot| {
+            record_named(snapshot, "fence_decoy")["visibility"]["is_deprecated"] = Value::from(true);
+            record_named(snapshot, "fence_real")["visibility"]["is_deprecated"] = Value::from(false);
+        },
+    });
+}
+
+/// The public `is_deprecated` of `ReviewLiteral` and `has_docs` of
+/// `ReviewBlockStar` in a `hug --json-full` report.
+fn go_doc_star_facts(output: &Value) -> Value {
+    let record = |name: &str| -> Value {
+        let records: Vec<&Value> = output["indexes"]
+            .as_array()
+            .expect("indexes")
+            .iter()
+            .flat_map(|index| index["symbols"].as_array().expect("index symbols"))
+            .filter(|record| record["identity"]["name"] == name)
+            .collect();
+        assert_eq!(records.len(), 1, "expected one `{name}` record");
+        records[0].clone()
+    };
+    Value::from(vec![
+        record("ReviewLiteral")["visibility"]["is_deprecated"].clone(),
+        record("ReviewBlockStar")["metrics"]["has_docs"].clone(),
+    ])
+}
+
+/// Revision 12 cleaned Go comments with Javadoc decoration rules, so a
+/// starred `*Deprecated:` deprecated `ReviewLiteral` and the star-only
+/// `/* * */` left `ReviewBlockStar` undocumented; revision 13 keeps every
+/// `*` after `/*` as text.
+#[test]
+fn entry_from_extractor_revision_twelve_is_not_served_after_the_repairs() {
+    assert_stale_revision_is_not_served(&StaleRevision {
+        revision: "12",
+        key: OldKey::Computed,
+        file: "stars.go",
+        language: "go",
+        source: crate::filters::GO_DOC_STARS.to_string(),
+        sentinel: "ReviewLineStar",
+        probe: go_doc_star_facts,
+        repaired: Value::from(vec![false, true]),
+        stale: Value::from(vec![true, false]),
+        revert: |snapshot| {
+            record_named(snapshot, "ReviewLiteral")["visibility"]["is_deprecated"] = Value::from(true);
+            record_named(snapshot, "ReviewBlockStar")["metrics"]["has_docs"] = Value::from(false);
+        },
+    });
+}

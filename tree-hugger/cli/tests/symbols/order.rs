@@ -196,9 +196,9 @@ fn json_full_default_order_lists_nested_declarations_by_position() {
     }
 }
 
-/// A Go grouped `type ( … )` gives every spec the whole group as its
-/// declaration span, so the grouped types tie on path, start, end and kind
-/// and only the record ID orders them. Every output branch must reach it.
+/// A C `typedef int A, B, …;` gives every alias the whole typedef as its
+/// declaration span, so the aliases tie on path, start, end and kind and
+/// only the record ID orders them. Every output branch must reach it.
 ///
 /// IDs hash the scratch directory's absolute path, so the expected order is
 /// computed from the output's own IDs. Eight types make it near certain
@@ -208,11 +208,8 @@ fn json_full_default_order_lists_nested_declarations_by_position() {
 #[test]
 fn equal_declaration_spans_fall_through_to_the_id_tie_breaker() {
     const NAMES: [&str; 8] = ["Alpha", "Beta", "Gamma", "Delta", "Epsilon", "Zeta", "Eta", "Theta"];
-    let source = format!(
-        "package group\n\ntype (\n{})\n",
-        NAMES.iter().map(|name| format!("\t{name} int\n")).collect::<String>()
-    );
-    let scratch = Scratch::new(&[("group.go", source.as_str())]);
+    let source = format!("typedef int {};\n", NAMES.join(", "));
+    let scratch = Scratch::new(&[("group.c", source.as_str())]);
     let names = |records: &[&Value]| -> Vec<String> {
         records.iter().map(|record| record["identity"]["name"].as_str().expect("name").to_string()).collect()
     };
@@ -228,7 +225,7 @@ fn equal_declaration_spans_fall_through_to_the_id_tie_breaker() {
 
     let full = json_of(&scratch.stdout(&["--json-full", "types"]));
     let types = grouped(&full, "indexes");
-    assert_eq!(types.len(), NAMES.len(), "every grouped type is a record");
+    assert_eq!(types.len(), NAMES.len(), "every alias is a record");
     let tie = |record: &Value| {
         let span = &record["source"]["declaration_span"];
         (
@@ -240,7 +237,7 @@ fn equal_declaration_spans_fall_through_to_the_id_tie_breaker() {
     };
     assert!(
         types.iter().all(|record| tie(record) == tie(&types[0])),
-        "the grouped types tie on file, start, end and kind: {:?}",
+        "the aliases tie on file, start, end and kind: {:?}",
         types.iter().map(tie).collect::<Vec<_>>()
     );
     let mut by_id: Vec<&Value> = types.iter().collect();

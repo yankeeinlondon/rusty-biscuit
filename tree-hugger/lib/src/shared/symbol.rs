@@ -532,6 +532,10 @@ pub struct VariantInfo {
     /// For struct variants, the named fields.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub struct_fields: Vec<FieldInfo>,
+    /// The explicit value as written (`2` in `B = 2`); `None` when the
+    /// variant states none.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub discriminant: Option<String>,
     /// Documentation comment for the variant.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub doc_comment: Option<String>,
@@ -544,6 +548,7 @@ impl VariantInfo {
             name: name.into(),
             tuple_fields: Vec::new(),
             struct_fields: Vec::new(),
+            discriminant: None,
             doc_comment: None,
         }
     }
@@ -554,6 +559,7 @@ impl VariantInfo {
             name: name.into(),
             tuple_fields: fields,
             struct_fields: Vec::new(),
+            discriminant: None,
             doc_comment: None,
         }
     }
@@ -564,6 +570,7 @@ impl VariantInfo {
             name: name.into(),
             tuple_fields: Vec::new(),
             struct_fields: fields,
+            discriminant: None,
             doc_comment: None,
         }
     }

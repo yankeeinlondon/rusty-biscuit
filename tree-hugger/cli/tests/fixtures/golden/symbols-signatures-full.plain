@@ -29,6 +29,7 @@
   - int dot(const Vector &a, const Vector &b) [in namespace geometry] cpp.cpp:16:5
   - public class Counter java.java:3:1
   - private int count [in class Counter] java.java:4:17
+  - public Counter(int start) [in class Counter] java.java:6:5
   - public void increment() [in class Counter] java.java:10:5
   - public static Counter zero() [in class Counter] java.java:14:5
   - interface Resettable java.java:19:1
@@ -90,6 +91,7 @@ nested
 
   - package nested nested/go.go:2:9
   - type Widget struct nested/go.go:5:1
+  - Size int [in type Widget] nested/go.go:6:2
   - func (w *Widget) Grow(amount int) [in type Widget] nested/go.go:9:1
   - MaxSize nested/go.go:13:7
   - func BuildWidget() Widget nested/go.go:15:1

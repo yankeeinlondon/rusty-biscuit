@@ -281,16 +281,21 @@ fn c_and_cpp_attributed_fields_are_listed() {
     );
 }
 
-/// An attributed enumerator keeps the kind of a plain one.
+/// The pinned C and C++ grammars do not parse an attributed enumerator
+/// (`RED [[deprecated]]`): the enum closes after `RED`, which stays its
+/// variant, and error recovery never makes the names after it variants of
+/// `Color`.
 #[test]
-fn c_and_cpp_attributed_enumerators_match_plain_ones() {
+fn c_and_cpp_attributed_enumerators_do_not_parse() {
     for extension in C_AND_CPP {
         let extracted = extract_inline("enum Color { RED [[deprecated]], GREEN };\n", extension);
-        let kind_of = |name: &str| {
-            let found: Vec<_> = extracted.symbols.iter().filter(|symbol| symbol.name == name).collect();
-            assert_eq!(found.len(), 1, ".{extension}: one `{name}`: {found:?}");
-            found[0].kind
-        };
-        assert_eq!(kind_of("RED"), kind_of("GREEN"), ".{extension}: enumerator kinds");
+        extracted.assert_kind("RED", Some("Color"), K::EnumVariant, Some(K::Enum));
+        assert!(
+            extracted
+                .symbols
+                .iter()
+                .all(|symbol| symbol.name != "GREEN" || symbol.container_name.as_deref() != Some("Color")),
+            ".{extension}: `GREEN` is not parsed as a member of `Color`"
+        );
     }
 }

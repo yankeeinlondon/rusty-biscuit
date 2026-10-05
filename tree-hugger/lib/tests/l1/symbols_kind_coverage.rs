@@ -3,10 +3,11 @@
 //! visibility-and-kind fix's kind matrix) is asserted as unsupported
 //! extraction, separately from the kinds a language has no construct for
 //! (its `—` cells). Landing a deferred construct moves its entry out of
-//! `unsupported`.
+//! `unsupported`; a form the pinned grammar cannot parse is a
+//! [`GRAMMAR_LIMITS`] entry, demonstrated by its own failing parse.
 
 use tempfile::TempDir;
-use tree_hugger::{ProgrammingLanguage, SymbolKindV2, TreeFile};
+use tree_hugger::{ProgrammingLanguage, SymbolKindV2, TreeFile, VisibilityLevel};
 
 use crate::symbols_fixtures::extract_primary;
 
@@ -64,7 +65,8 @@ pub const KIND_COVERAGE_MATRIX: &[KindCoverageRow] = &[
     },
     KindCoverageRow {
         language: L::TypeScript,
-        unsupported: &[
+        unsupported: &[],
+        landed: &[
             Construct {
                 construct: "enum member",
                 extension: "ts",
@@ -79,8 +81,14 @@ pub const KIND_COVERAGE_MATRIX: &[KindCoverageRow] = &[
                 name: "Space",
                 deferred: K::Namespace,
             },
+            Construct {
+                construct: "namespace (`module`)",
+                extension: "ts",
+                source: "module Space { export const inside = 1; }\n",
+                name: "Space",
+                deferred: K::Namespace,
+            },
         ],
-        landed: &[],
         no_construct: &[K::Type],
     },
     KindCoverageRow {
@@ -100,7 +108,8 @@ pub const KIND_COVERAGE_MATRIX: &[KindCoverageRow] = &[
     },
     KindCoverageRow {
         language: L::Go,
-        unsupported: &[
+        unsupported: &[],
+        landed: &[
             Construct {
                 construct: "type alias",
                 extension: "go",
@@ -115,20 +124,26 @@ pub const KIND_COVERAGE_MATRIX: &[KindCoverageRow] = &[
                 name: "Inside",
                 deferred: K::Field,
             },
+            Construct {
+                construct: "grouped type alias",
+                extension: "go",
+                source: "package p\n\ntype (\n\tAlias = int\n)\n",
+                name: "Alias",
+                deferred: K::TypeAlias,
+            },
         ],
-        landed: &[],
         no_construct: &[K::Constructor, K::Class, K::Enum, K::EnumVariant],
     },
     KindCoverageRow {
         language: L::Python,
-        unsupported: &[Construct {
+        unsupported: &[],
+        landed: &[Construct {
             construct: "constructor",
             extension: "py",
             source: "class C:\n    def __init__(self):\n        pass\n",
             name: "__init__",
             deferred: K::Constructor,
         }],
-        landed: &[],
         no_construct: &[
             K::Interface,
             K::Trait,
@@ -142,7 +157,8 @@ pub const KIND_COVERAGE_MATRIX: &[KindCoverageRow] = &[
     },
     KindCoverageRow {
         language: L::Java,
-        unsupported: &[
+        unsupported: &[],
+        landed: &[
             Construct {
                 construct: "constructor",
                 extension: "java",
@@ -158,12 +174,12 @@ pub const KIND_COVERAGE_MATRIX: &[KindCoverageRow] = &[
                 deferred: K::EnumVariant,
             },
         ],
-        landed: &[],
         no_construct: &[K::Function, K::TypeAlias],
     },
     KindCoverageRow {
         language: L::CSharp,
-        unsupported: &[
+        unsupported: &[],
+        landed: &[
             Construct {
                 construct: "constructor",
                 extension: "cs",
@@ -178,20 +194,35 @@ pub const KIND_COVERAGE_MATRIX: &[KindCoverageRow] = &[
                 name: "Red",
                 deferred: K::EnumVariant,
             },
+            Construct {
+                construct: "expression-bodied struct constructor",
+                extension: "cs",
+                source: "struct S\n{\n    public int X;\n    public S(int x) => X = x;\n}\n",
+                name: "S",
+                deferred: K::Constructor,
+            },
         ],
-        landed: &[],
         no_construct: &[K::TypeAlias],
     },
     KindCoverageRow {
         language: L::C,
-        unsupported: &[Construct {
-            construct: "enumerator",
-            extension: "c",
-            source: "enum color { RED };\n",
-            name: "RED",
-            deferred: K::EnumVariant,
-        }],
-        landed: &[],
+        unsupported: &[],
+        landed: &[
+            Construct {
+                construct: "enumerator",
+                extension: "c",
+                source: "enum color { RED };\n",
+                name: "RED",
+                deferred: K::EnumVariant,
+            },
+            Construct {
+                construct: "enumerator of an anonymous enum",
+                extension: "c",
+                source: "enum { ANON };\n",
+                name: "ANON",
+                deferred: K::EnumVariant,
+            },
+        ],
         no_construct: &[
             K::Method,
             K::Constructor,
@@ -204,11 +235,19 @@ pub const KIND_COVERAGE_MATRIX: &[KindCoverageRow] = &[
     },
     KindCoverageRow {
         language: L::Cpp,
-        unsupported: &[
+        unsupported: &[],
+        landed: &[
             Construct {
                 construct: "constructor",
                 extension: "cpp",
                 source: "class C {\npublic:\n    C();\n};\n",
+                name: "C",
+                deferred: K::Constructor,
+            },
+            Construct {
+                construct: "template-wrapped constructor",
+                extension: "cpp",
+                source: "class C {\npublic:\n    template <typename T> C(T t) {}\n};\n",
                 name: "C",
                 deferred: K::Constructor,
             },
@@ -219,8 +258,13 @@ pub const KIND_COVERAGE_MATRIX: &[KindCoverageRow] = &[
                 name: "RED",
                 deferred: K::EnumVariant,
             },
-        ],
-        landed: &[
+            Construct {
+                construct: "scoped enumerator",
+                extension: "cpp",
+                source: "enum class E { RED };\n",
+                name: "RED",
+                deferred: K::EnumVariant,
+            },
             Construct {
                 construct: "type alias (`using`)",
                 extension: "cpp",
@@ -240,7 +284,8 @@ pub const KIND_COVERAGE_MATRIX: &[KindCoverageRow] = &[
     },
     KindCoverageRow {
         language: L::Swift,
-        unsupported: &[
+        unsupported: &[],
+        landed: &[
             Construct {
                 construct: "initializer",
                 extension: "swift",
@@ -255,13 +300,20 @@ pub const KIND_COVERAGE_MATRIX: &[KindCoverageRow] = &[
                 name: "Alias",
                 deferred: K::TypeAlias,
             },
+            Construct {
+                construct: "failable initializer",
+                extension: "swift",
+                source: "struct S {\n    init?(s: String) { return nil }\n}\n",
+                name: "init",
+                deferred: K::Constructor,
+            },
         ],
-        landed: &[],
         no_construct: &[K::Module, K::Namespace],
     },
     KindCoverageRow {
         language: L::Scala,
-        unsupported: &[
+        unsupported: &[],
+        landed: &[
             Construct {
                 construct: "enum case",
                 extension: "scala",
@@ -283,13 +335,27 @@ pub const KIND_COVERAGE_MATRIX: &[KindCoverageRow] = &[
                 name: "inside",
                 deferred: K::Field,
             },
+            Construct {
+                construct: "enum case with parameters",
+                extension: "scala",
+                source: "enum Color {\n  case Value(x: Int)\n}\n",
+                name: "Value",
+                deferred: K::EnumVariant,
+            },
+            Construct {
+                construct: "trait field declaration",
+                extension: "scala",
+                source: "trait T {\n  var d: Int\n}\n",
+                name: "d",
+                deferred: K::Field,
+            },
         ],
-        landed: &[],
         no_construct: &[K::Constructor],
     },
     KindCoverageRow {
         language: L::Php,
-        unsupported: &[
+        unsupported: &[],
+        landed: &[
             Construct {
                 construct: "constructor",
                 extension: "php",
@@ -311,8 +377,21 @@ pub const KIND_COVERAGE_MATRIX: &[KindCoverageRow] = &[
                 name: "App",
                 deferred: K::Namespace,
             },
+            Construct {
+                construct: "braced namespace",
+                extension: "php",
+                source: "<?php\nnamespace App\\Braced {\n    function inside() {}\n}\n",
+                name: "App\\Braced",
+                deferred: K::Namespace,
+            },
+            Construct {
+                construct: "backed enum case",
+                extension: "php",
+                source: "<?php\nenum Suit: string\n{\n    case Hearts = 'h';\n}\n",
+                name: "Hearts",
+                deferred: K::EnumVariant,
+            },
         ],
-        landed: &[],
         no_construct: &[K::Type, K::TypeAlias],
     },
     KindCoverageRow {
@@ -371,6 +450,56 @@ pub const KIND_COVERAGE_MATRIX: &[KindCoverageRow] = &[
         no_construct: SHELL_NO_CONSTRUCT,
     },
 ];
+
+/// A form of a deferred cell the pinned grammar cannot parse: the snippet
+/// has syntax errors, and `remaining` is what the extractor still reports.
+pub struct GrammarLimit {
+    pub language: ProgrammingLanguage,
+    pub construct: &'static str,
+    pub extension: &'static str,
+    pub source: &'static str,
+    pub grammar: &'static str,
+    pub reason: &'static str,
+    /// `(name, kind, access)` of each record the extractor still reports.
+    pub remaining: &'static [(&'static str, SymbolKindV2, VisibilityLevel)],
+}
+
+pub const GRAMMAR_LIMITS: &[GrammarLimit] = &[GrammarLimit {
+    language: L::Scala,
+    construct: "enum case of an access-modified enum",
+    extension: "scala",
+    source: "object W {\n  private enum Hidden {\n    case H\n  }\n}\n",
+    grammar: "tree-sitter-scala 0.24.0",
+    reason: "an access modifier before `enum` parses as an ERROR node followed by the enum, so the modifier is lost and the case inherits Public",
+    remaining: &[
+        ("Hidden", K::Enum, VisibilityLevel::Public),
+        ("H", K::EnumVariant, VisibilityLevel::Public),
+    ],
+}];
+
+/// Each recorded grammar limit is demonstrated: its snippet does not parse
+/// cleanly, and the extractor reports what the limit says it does.
+#[test]
+fn grammar_limits_are_demonstrated() {
+    for limit in GRAMMAR_LIMITS {
+        let label = format!("{} {} ({}): {}", limit.language.name(), limit.construct, limit.grammar, limit.reason);
+        let dir = TempDir::new().expect("temp dir");
+        let path = dir.path().join(format!("snippet.{}", limit.extension));
+        std::fs::write(&path, limit.source).expect("write snippet");
+        let tree_file = TreeFile::new(&path).expect("parse snippet");
+        assert_eq!(tree_file.language, limit.language, "{label}");
+        assert!(!tree_file.syntax_diagnostics().is_empty(), "{label}: the snippet now parses; land the form");
+        let records = tree_file.symbol_index_v2().expect("index").symbols;
+        for &(name, kind, access) in limit.remaining {
+            assert!(
+                records
+                    .iter()
+                    .any(|record| record.identity.name == name && record.kind == kind && record.visibility.level == access),
+                "{label}: `{name}` is not {kind:?} with {access:?}"
+            );
+        }
+    }
+}
 
 /// The languages with a kind-coverage row, for the coverage guard.
 pub fn kind_coverage_matrix_languages() -> Vec<ProgrammingLanguage> {

@@ -200,30 +200,72 @@ fn is_swift_unconditional_deprecation(attribute: &SyntacticAttribute) -> bool {
 }
 
 /// A doc line (after the comment delimiters) that is a `@deprecated` tag.
-/// Lines inside a fenced code block (`` ``` `` or `~~~`) are example text,
-/// not tags.
+/// Lines inside a fenced code block are example text, not tags (see
+/// [`lines_outside_fences`]).
 fn has_deprecated_tag(doc: &str) -> bool {
-    let mut in_fence = false;
-    doc.lines().any(|line| {
-        let line = line.trim();
-        if line.starts_with("```") || line.starts_with("~~~") {
-            in_fence = !in_fence;
-            return false;
-        }
-        !in_fence
-            && line
-                .strip_prefix("@deprecated")
-                .is_some_and(|rest| rest.is_empty() || rest.starts_with(char::is_whitespace))
+    lines_outside_fences(doc).any(|line| {
+        line.strip_prefix("@deprecated")
+            .is_some_and(|rest| rest.is_empty() || rest.starts_with(char::is_whitespace))
     })
 }
 
-/// A Go doc paragraph (the first line, or a line after a blank one) that
-/// starts with `Deprecated:`.
+/// The trimmed lines of `doc` outside every CommonMark fenced code block
+/// (the fence lines themselves are inside).
+///
+/// A fence opens on a run of three or more backticks or tildes (a backtick
+/// fence's info string cannot contain a backtick) and closes only on a line
+/// holding a run of the same character at least as long, followed by nothing
+/// but whitespace. Any other line, including a shorter run, the other
+/// character or a run followed by text, is content. An unclosed fence runs to
+/// the end of `doc`. Indentation is not read: the doc cleanup has already
+/// removed the comment's leading `*` and spaces.
+fn lines_outside_fences(doc: &str) -> impl Iterator<Item = &str> {
+    let mut open: Option<Fence> = None;
+    doc.lines().map(str::trim).filter(move |line| match open {
+        Some(fence) => {
+            if fence.closed_by(line) {
+                open = None;
+            }
+            false
+        }
+        None => {
+            open = Fence::opened_by(line);
+            open.is_none()
+        }
+    })
+}
+
+#[derive(Clone, Copy)]
+struct Fence {
+    marker: char,
+    length: usize,
+}
+
+impl Fence {
+    fn opened_by(line: &str) -> Option<Self> {
+        let marker = line.chars().next().filter(|first| matches!(first, '`' | '~'))?;
+        // Both markers are one byte, so the run length is a byte offset.
+        let length = line.chars().take_while(|&character| character == marker).count();
+        let info = &line[length..];
+        (length >= 3 && !(marker == '`' && info.contains('`'))).then_some(Self { marker, length })
+    }
+
+    fn closed_by(self, line: &str) -> bool {
+        let length = line.chars().take_while(|&character| character == self.marker).count();
+        length >= self.length && line[length..].trim().is_empty()
+    }
+}
+
+/// A Go doc paragraph (the first line, or a line after a blank one or after
+/// a code block) that starts with `Deprecated:`.
+///
+/// `doc` is already unindented by its common prefix (as `go/doc/comment`
+/// does; see `extract_doc_comment`), so a line that is still indented
+/// belongs to a code block, never to a paragraph.
 fn has_deprecated_paragraph(doc: &str) -> bool {
     let mut paragraph_start = true;
     for line in doc.lines() {
-        let line = line.trim();
-        if line.is_empty() {
+        if line.trim().is_empty() || line.starts_with([' ', '\t']) {
             paragraph_start = true;
             continue;
         }

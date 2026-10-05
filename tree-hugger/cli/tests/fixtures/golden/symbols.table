@@ -32,28 +32,29 @@
 │ c_sharp.cs:24 │ method    │ public     │ Audit      │ () -> void                 │
 └───────────────┴───────────┴────────────┴────────────┴────────────────────────────┘
 
-┌────────────┬───────────┬────────────┬──────────┬───────────────────────────────┐
-│ Location   │ Kind      │ Visibility │ Name     │ Signature                     │
-├────────────┼───────────┼────────────┼──────────┼───────────────────────────────┤
-│ cpp.cpp:3  │ namespace │            │ geometry │                               │
-│ cpp.cpp:5  │ class     │            │ Vector   │ { x_: int, y_: int }          │
-│ cpp.cpp:7  │ method    │ public     │ Vector   │ (x: int, y: int)              │
-│ cpp.cpp:9  │ method    │ public     │ length   │ () -> int                     │
-│ cpp.cpp:12 │ field     │ private    │ x_       │                               │
-│ cpp.cpp:13 │ field     │ private    │ y_       │                               │
-│ cpp.cpp:16 │ function  │ public     │ dot      │ (a: Vector, b: Vector) -> int │
-└────────────┴───────────┴────────────┴──────────┴───────────────────────────────┘
+┌────────────┬─────────────┬────────────┬──────────┬───────────────────────────────┐
+│ Location   │ Kind        │ Visibility │ Name     │ Signature                     │
+├────────────┼─────────────┼────────────┼──────────┼───────────────────────────────┤
+│ cpp.cpp:3  │ namespace   │            │ geometry │                               │
+│ cpp.cpp:5  │ class       │            │ Vector   │ { x_: int, y_: int }          │
+│ cpp.cpp:7  │ constructor │ public     │ Vector   │ (x: int, y: int)              │
+│ cpp.cpp:9  │ method      │ public     │ length   │ () -> int                     │
+│ cpp.cpp:12 │ field       │ private    │ x_       │                               │
+│ cpp.cpp:13 │ field       │ private    │ y_       │                               │
+│ cpp.cpp:16 │ function    │ public     │ dot      │ (a: Vector, b: Vector) -> int │
+└────────────┴─────────────┴────────────┴──────────┴───────────────────────────────┘
 
-┌──────────────┬───────────┬────────────┬────────────┬────────────────┐
-│ Location     │ Kind      │ Visibility │ Name       │ Signature      │
-├──────────────┼───────────┼────────────┼────────────┼────────────────┤
-│ java.java:3  │ class     │ public     │ Counter    │ { count: int } │
-│ java.java:4  │ field     │ private    │ count      │                │
-│ java.java:10 │ method    │ public     │ increment  │ () -> void     │
-│ java.java:14 │ method    │ public     │ zero       │ () -> Counter  │
-│ java.java:19 │ interface │ package    │ Resettable │                │
-│ java.java:20 │ method    │ public     │ reset      │ () -> void     │
-└──────────────┴───────────┴────────────┴────────────┴────────────────┘
+┌──────────────┬─────────────┬────────────┬────────────┬────────────────┐
+│ Location     │ Kind        │ Visibility │ Name       │ Signature      │
+├──────────────┼─────────────┼────────────┼────────────┼────────────────┤
+│ java.java:3  │ class       │ public     │ Counter    │ { count: int } │
+│ java.java:4  │ field       │ private    │ count      │                │
+│ java.java:6  │ constructor │ public     │ Counter    │ (start: int)   │
+│ java.java:10 │ method      │ public     │ increment  │ () -> void     │
+│ java.java:14 │ method      │ public     │ zero       │ () -> Counter  │
+│ java.java:19 │ interface   │ package    │ Resettable │                │
+│ java.java:20 │ method      │ public     │ reset      │ () -> void     │
+└──────────────┴─────────────┴────────────┴────────────┴────────────────┘
 
 ┌──────────────────┬─────────────┬────────────┬───────────────┬───────────┐
 │ Location         │ Kind        │ Visibility │ Name          │ Signature │
@@ -80,20 +81,21 @@
 ├─────────────────┼───────────┼────────────┼─────────────┼──────────────┤
 │ nested/go.go:2  │ namespace │            │ nested      │              │
 │ nested/go.go:5  │ type      │ public     │ Widget      │ { Size int } │
+│ nested/go.go:6  │ field     │ public     │ Size        │              │
 │ nested/go.go:9  │ method    │ public     │ Grow        │ (amount int) │
 │ nested/go.go:13 │ constant  │ public     │ MaxSize     │              │
 │ nested/go.go:15 │ function  │ public     │ BuildWidget │ () Widget    │
 └─────────────────┴───────────┴────────────┴─────────────┴──────────────┘
 
-┌─────────────────────┬──────────┬────────────┬──────────────┬────────────────┐
-│ Location            │ Kind     │ Visibility │ Name         │ Signature      │
-├─────────────────────┼──────────┼────────────┼──────────────┼────────────────┤
-│ nested/python.py:3  │ variable │            │ MAX_SIZE     │                │
-│ nested/python.py:6  │ class    │            │ Gadget       │                │
-│ nested/python.py:9  │ method   │            │ __init__     │ (self, size)   │
-│ nested/python.py:12 │ method   │            │ grow         │ (self, amount) │
-│ nested/python.py:16 │ function │            │ build_gadget │ ()             │
-└─────────────────────┴──────────┴────────────┴──────────────┴────────────────┘
+┌─────────────────────┬─────────────┬────────────┬──────────────┬────────────────┐
+│ Location            │ Kind        │ Visibility │ Name         │ Signature      │
+├─────────────────────┼─────────────┼────────────┼──────────────┼────────────────┤
+│ nested/python.py:3  │ variable    │            │ MAX_SIZE     │                │
+│ nested/python.py:6  │ class       │            │ Gadget       │                │
+│ nested/python.py:9  │ constructor │            │ __init__     │ (self, size)   │
+│ nested/python.py:12 │ method      │            │ grow         │ (self, amount) │
+│ nested/python.py:16 │ function    │            │ build_gadget │ ()             │
+└─────────────────────┴─────────────┴────────────┴──────────────┴────────────────┘
 
 ┌────────────┬──────────┬────────────┬───────────────┬───────────┐
 │ Location   │ Kind     │ Visibility │ Name          │ Signature │

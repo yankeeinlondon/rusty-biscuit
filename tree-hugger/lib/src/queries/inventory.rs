@@ -159,6 +159,7 @@ fn populate_locals_captures(inventory: &mut LanguageInventory, _language: Progra
         ("local.definition", "scope/definition captures"),
         ("local.definition.function", "function definitions"),
         ("local.definition.method", "method definitions"),
+        ("local.definition.constructor", "constructor definitions"),
         ("local.definition.type", "type definitions"),
         ("local.definition.enum", "enum definitions"),
         ("local.definition.trait", "trait definitions"),

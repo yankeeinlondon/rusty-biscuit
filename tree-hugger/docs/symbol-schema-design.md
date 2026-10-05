@@ -367,9 +367,13 @@ reader needs to recognize the symbol. It is always a contiguous part of
 - an annotation written between modifiers stays, because removing it would
   break contiguity
 - it is omitted when no contiguous header can be isolated: a C/C++
-  declaration whose type carries a body (`typedef struct { … } Point;`), a
-  grouped Go `type ( … )` block, or a second name that an earlier name's
-  initializer would cut off (`int a = 1, b = 2;` for `b`)
+  declaration whose type carries a body (`typedef struct { … } Point;`), or a
+  second name that an earlier name's initializer would cut off
+  (`int a = 1, b = 2;` for `b`)
+- each type of a grouped Go `type ( … )` block is declared by its own spec,
+  so `Second` in `type ( First struct{ a int }; Second int )` has the
+  declaration text, header and span `Second int`; the `type` keyword is
+  still its `keyword`
 
 The three fields have distinct contracts: `declaration_text` is evidence,
 `signature_text` is display, and `keyword` comes from the syntax tree rather
@@ -909,9 +913,14 @@ for every kind).
 
 A result can answer a narrower query without parsing again:
 `result.narrowed(&narrower)` returns exactly what `narrower` computes over
-the same source, or `None` when the result lacks one of its kinds or
-capabilities. `hug --prelude` uses it to reuse the prelude's every-kind
-analyses in the scan.
+the same source *now*, or `None` when the result lacks one of its kinds or
+capabilities. Facts read from the source are reused; the file-wide test
+rules and the name prefix, which read the filesystem, are decided again, so a
+`Cargo.toml` added or removed since the result was made is honored (see
+[Cache Design](./cache-design.md#test-flags-source-facts-are-stored-file-wide-rules-are-not)).
+A `None` means "analyze again"; `hug --prelude` uses `narrowed` to reuse the
+prelude's every-kind analyses in the scan and analyzes the file when it gets
+`None`.
 
 The same query can be served from the persistent cache:
 `SymbolCache::query(SourceFile::read(path)?, &query)` returns exactly this
@@ -961,8 +970,10 @@ case-sensitive. `SymbolQuery::matches(record)` applies the same predicates to
 any record.
 
 A filtered result narrows (`narrowed`) only to a query with the same
-predicates and the same prefix; an unfiltered one narrows to any covered
-query and is re-prefixed for it.
+predicates and the same prefix and, when a test selector filtered it, only
+while the file-wide test decision it was filtered under still holds (a record
+the selector dropped could match now); an unfiltered one narrows to any
+covered query and is re-prefixed for it.
 
 Kind selection skips work but never data a selected record depends on.
 Declarations of unselected kinds are still extracted with their identity,

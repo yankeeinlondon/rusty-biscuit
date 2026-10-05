@@ -90,11 +90,15 @@ fn collect_doc_comments(
     }
 
     comments.reverse();
-    let cleaned: Vec<String> = comments
-        .iter()
-        .map(|comment| clean_doc_comment(comment, language))
-        .collect();
-    let joined = cleaned.join("\n");
+    let joined = if language == ProgrammingLanguage::Go {
+        go_comment_group_text(&comments)
+    } else {
+        comments
+            .iter()
+            .map(|comment| clean_doc_comment(comment))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
     (!joined.trim().is_empty()).then_some(joined)
 }
 
@@ -219,49 +223,85 @@ fn is_unicode_python_literal(string: Node<'_>, source: &str) -> bool {
         .all(|character| matches!(character.to_ascii_lowercase(), 'r' | 'u'))
 }
 
-/// Removes a doc comment's delimiters.
-fn clean_doc_comment(comment: &str, language: ProgrammingLanguage) -> String {
+/// Removes a doc comment's delimiters and its Javadoc/Doxygen decoration
+/// (a third opening `*` or `!`, a leading `*` on each line). Go comments
+/// never come here: see [`go_comment_group_text`].
+fn clean_doc_comment(comment: &str) -> String {
     let trimmed = comment.trim();
     if trimmed.starts_with("/*") && trimmed.ends_with("*/") && trimmed.len() >= 4 {
         let opener = if trimmed.starts_with("/**") || trimmed.starts_with("/*!") { 3 } else { 2 };
-        return clean_block_comment(
-            &trimmed[opener.min(trimmed.len() - 2)..trimmed.len() - 2],
-            language,
-        );
+        return clean_block_comment(&trimmed[opener.min(trimmed.len() - 2)..trimmed.len() - 2]);
     }
     let line = ["///", "//!", "//"]
         .iter()
         .find_map(|prefix| trimmed.strip_prefix(prefix))
         .unwrap_or(trimmed);
-    // A Go doc paragraph break is an empty `//` line; keep it empty.
-    if language == ProgrammingLanguage::Go {
-        return line.strip_prefix(' ').unwrap_or(line).trim_end().to_string();
-    }
     line.trim().to_string()
 }
 
-/// The lines of a block comment's body without their leading `*`. Blank
-/// lines are dropped, except that Go keeps those between text lines: they
-/// separate the paragraphs its `Deprecated:` rule reads.
-fn clean_block_comment(body: &str, language: ProgrammingLanguage) -> String {
-    let lines: Vec<&str> = body
-        .lines()
+/// The nonblank lines of a block comment's body, trimmed and without their
+/// leading `*`.
+fn clean_block_comment(body: &str) -> String {
+    body.lines()
         .map(|line| {
-            let line = line.trim();
-            line.strip_prefix('*').map_or(line, str::trim)
+            let trimmed = line.trim();
+            trimmed.strip_prefix('*').map_or(trimmed, str::trim)
         })
-        .collect();
-    if language != ProgrammingLanguage::Go {
-        return lines
-            .into_iter()
-            .filter(|line| !line.is_empty())
-            .collect::<Vec<_>>()
-            .join("\n");
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The text of a Go comment group as `go/ast`'s `CommentGroup.Text` and
+/// `go/doc/comment` read it. Go defines no decoration: a `//` comment loses
+/// its marker and one following space, a block loses exactly `/*` and `*/`
+/// (plus the whitespace that follows `/*` on its line), and every other
+/// character, a third opening `*` or a leading `*` on a line included, is
+/// text. Trailing whitespace and the group's leading and trailing blank
+/// lines are dropped, then the whitespace prefix common to every nonblank
+/// line is removed; any indentation left marks a code block, which the
+/// `Deprecated:` paragraph rule depends on.
+fn go_comment_group_text(comments: &[&str]) -> String {
+    let mut lines: Vec<&str> = Vec::new();
+    for comment in comments {
+        let comment = comment.trim();
+        if let Some(body) = comment.strip_prefix("/*").and_then(|rest| rest.strip_suffix("*/")) {
+            // The space after `/*` separates the text from the delimiter, so
+            // the first line's indentation is not compared with the others'
+            // (`/* Intro\nDeprecated: …` is one paragraph, not a code line
+            // and a marker). Only whitespace goes: a `*` there is text.
+            let mut body_lines = body.lines().map(str::trim_end);
+            if let Some(first) = body_lines.next() {
+                lines.push(first.trim_start_matches([' ', '\t']));
+            }
+            lines.extend(body_lines);
+        } else {
+            let line = comment.strip_prefix("//").unwrap_or(comment);
+            lines.push(line.strip_prefix(' ').unwrap_or(line).trim_end());
+        }
     }
-    let first = lines.iter().position(|line| !line.is_empty());
-    let last = lines.iter().rposition(|line| !line.is_empty());
-    match (first, last) {
-        (Some(first), Some(last)) => lines[first..=last].join("\n"),
-        _ => String::new(),
-    }
+    let Some(first) = lines.iter().position(|line| !line.is_empty()) else {
+        return String::new();
+    };
+    let last = lines.iter().rposition(|line| !line.is_empty()).unwrap_or(first);
+    let lines = &lines[first..=last];
+    let indentation = |line: &str| line.len() - line.trim_start_matches([' ', '\t']).len();
+    let common = lines
+        .iter()
+        .filter(|line| !line.is_empty())
+        .map(|line| &line[..indentation(line)])
+        .reduce(|common, prefix| {
+            let shared = common
+                .bytes()
+                .zip(prefix.bytes())
+                .take_while(|(left, right)| left == right)
+                .count();
+            &common[..shared]
+        })
+        .unwrap_or("");
+    lines
+        .iter()
+        .map(|line| line.get(common.len()..).unwrap_or(""))
+        .collect::<Vec<_>>()
+        .join("\n")
 }

@@ -503,7 +503,6 @@ fn headers_that_cannot_be_isolated_are_none() {
         Inline { extension: "ts", source: "const first = 1, second = 2;\n", name: "second", container: None, expected: None },
         Inline { extension: "py", source: "first = second = 0\n", name: "second", container: None, expected: None },
         Inline { extension: "swift", source: "var first = 1, second = 2\n", name: "second", container: None, expected: None },
-        Inline { extension: "go", source: "package p\n\ntype (\n\tFirst struct{ a int }\n\tSecond int\n)\n", name: "Second", container: None, expected: None },
     ];
     for case in &cases {
         let extracted = extract_inline(case.source, case.extension);
@@ -511,6 +510,32 @@ fn headers_that_cannot_be_isolated_are_none() {
             extracted.record(case.name, case.container).source.signature_text.as_deref(),
             case.expected,
             "{case:?}"
+        );
+    }
+}
+
+/// Each type of a grouped Go `type ( … )` block is declared by its own spec:
+/// its own header, declaration text and span, with the group's `type`
+/// keyword. An ungrouped type keeps the `type` keyword in its texts.
+#[test]
+fn grouped_go_types_have_their_own_headers_and_spans() {
+    let source = "package p\n\ntype (\n\tFirst struct{ a int }\n\tSecond int\n)\n\ntype Single struct{ b int }\n";
+    let extracted = extract_inline(source, "go");
+    let cases = [
+        ("First", "First struct{ a int }", "First struct"),
+        ("Second", "Second int", "Second int"),
+        ("Single", "type Single struct{ b int }", "type Single struct"),
+    ];
+    for (name, declaration_text, signature_text) in cases {
+        let record = extracted.record(name, None);
+        assert_eq!(record.source.declaration_text.as_deref(), Some(declaration_text), "{name}");
+        assert_eq!(record.source.signature_text.as_deref(), Some(signature_text), "{name}");
+        assert_eq!(record.identity.keyword.as_deref(), Some("type"), "{name}");
+        let span = &record.source.declaration_span;
+        assert_eq!(
+            &source[span.start_byte as usize..span.end_byte as usize],
+            declaration_text,
+            "{name}: the span is the type's own"
         );
     }
 }

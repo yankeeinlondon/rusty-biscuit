@@ -78,6 +78,15 @@
 (method_declaration
   name: (identifier) @local.definition.method) @local.definition.method.context
 
+; Explicit constructors; a record's compact constructor has no parameter list
+; and is not captured.
+(constructor_declaration
+  name: (identifier) @local.definition.constructor) @local.definition.constructor.context
+
+; Enum constants
+(enum_constant
+  name: (identifier) @local.definition.enum_variant) @local.definition.enum_variant.context
+
 (local_variable_declaration
   declarator: (variable_declarator
     name: (identifier) @local.definition.var))

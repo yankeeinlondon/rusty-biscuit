@@ -1013,18 +1013,31 @@ pub(crate) fn extract_csharp_return_type(node: Node<'_>, source: &str) -> Option
 ///   user_type
 ///   function_body { ... }
 /// ```
+///
+/// A default (`y: Int = 2`) follows its parameter as a sibling: `=`, then
+/// the declaration's `default_value` field.
 pub(crate) fn extract_swift_parameters(node: Node<'_>, source: &str) -> Vec<ParameterInfo> {
-    let mut parameters = Vec::new();
+    let mut parameters: Vec<ParameterInfo> = Vec::new();
     let mut cursor = node.walk();
-
-    for child in node.children(&mut cursor) {
-        if child.kind() == "parameter"
-            && let Some(param) = extract_swift_single_parameter(child, source)
+    if !cursor.goto_first_child() {
+        return parameters;
+    }
+    loop {
+        let child = cursor.node();
+        if child.kind() == "parameter" {
+            if let Some(param) = extract_swift_single_parameter(child, source) {
+                parameters.push(param);
+            }
+        } else if cursor.field_name() == Some("default_value")
+            && let Some(last) = parameters.last_mut()
+            && last.default_value.is_none()
         {
-            parameters.push(param);
+            last.default_value = child.utf8_text(source.as_bytes()).ok().map(str::to_string);
+        }
+        if !cursor.goto_next_sibling() {
+            break;
         }
     }
-
     parameters
 }
 

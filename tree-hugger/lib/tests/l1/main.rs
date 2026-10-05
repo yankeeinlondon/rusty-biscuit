@@ -22,6 +22,7 @@ mod symbols_containment;
 mod symbols_coverage;
 mod symbols_decl_text;
 mod symbols_declarator_wrappers;
+mod symbols_deferred_metadata;
 mod symbols_export;
 mod symbols_field_lists;
 mod symbols_flags;

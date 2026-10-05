@@ -203,6 +203,14 @@ impl<'tree> Builder<'_, 'tree> {
                         return Prefix::Named { segments, node };
                     }
                     if let Some(container) = ancestor_container(node, self.language, self.source) {
+                        // An ungrouped Go `type_spec` names the type whose
+                        // symbol is extracted at its `type_declaration`.
+                        if let ContainerLookup::Node { node: container_node, .. } = container.lookup
+                            && let Some(&owner) = self.owners.get(&container_node.id())
+                            && owner != index
+                        {
+                            return Prefix::Symbol(owner);
+                        }
                         let segments = vec![Segment {
                             text: container.name,
                             is_namespace: is_namespace_node_kind(node.kind()),

@@ -185,6 +185,57 @@ fn walk_json(dir: &Path) -> Vec<PathBuf> {
     found
 }
 
+/// Kinds are settled before kind selection: a narrow query sees the same
+/// `Constructor` records a full query with the same capabilities does,
+/// class expressions included, and `Method` excludes them. Parameters,
+/// selected while their constructor is extracted light, match too.
+#[test]
+fn constructor_kind_is_settled_before_kind_selection() {
+    let source = "export class Widget {\n  constructor(initialValue: number) {}\n  render(): void {}\n}\nexport const Anonymous = class {\n  constructor(seed: string) {}\n};\n";
+    let dir = TempDir::new().expect("tempdir");
+    let path = write(dir.path(), "widget.ts", source);
+    let kinds_of = |result: &SymbolQueryResult| -> Vec<(String, SymbolKindV2)> {
+        result.index.symbols.iter().map(|record| (record.identity.name.clone(), record.kind)).collect()
+    };
+    let capability_sets: [&[Capability]; 3] =
+        [&[Capability::Declarations], &[Capability::Containment], &Capability::ALL];
+    for capabilities in capability_sets {
+        let full = query(&path, &SymbolQuery::new().capabilities(capabilities.iter().copied()));
+        for kinds in [&[SymbolKindV2::Constructor][..], &[SymbolKindV2::Method], &[SymbolKindV2::Parameter]] {
+            let narrow = query(
+                &path,
+                &SymbolQuery::new().kinds(kinds.iter().copied()).capabilities(capabilities.iter().copied()),
+            );
+            let expected: Vec<Value> = full
+                .index
+                .symbols
+                .iter()
+                .filter(|record| kinds.contains(&record.kind))
+                .map(|record| serde_json::to_value(record).expect("serialize"))
+                .collect();
+            let actual: Vec<Value> = narrow
+                .index
+                .symbols
+                .iter()
+                .map(|record| serde_json::to_value(record).expect("serialize"))
+                .collect();
+            assert_eq!(actual, expected, "{kinds:?} with {capabilities:?}");
+        }
+
+        let constructors = query(
+            &path,
+            &SymbolQuery::new().kinds([SymbolKindV2::Constructor]).capabilities(capabilities.iter().copied()),
+        );
+        let constructor = (String::from("constructor"), SymbolKindV2::Constructor);
+        assert_eq!(kinds_of(&constructors), [constructor.clone(), constructor], "{capabilities:?}");
+        let methods = query(
+            &path,
+            &SymbolQuery::new().kinds([SymbolKindV2::Method]).capabilities(capabilities.iter().copied()),
+        );
+        assert_eq!(kinds_of(&methods), [(String::from("render"), SymbolKindV2::Method)], "{capabilities:?}");
+    }
+}
+
 /// A wide result narrows to a filtered, re-rooted query exactly as an
 /// uncached run of it; a result filtered by other predicates cannot answer.
 #[test]

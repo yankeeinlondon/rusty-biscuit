@@ -20,6 +20,15 @@
   name: (name) @local.definition.enum) @local.scope @local.definition.enum.context
   (#set! definition.enum.scope "parent"))
 
+; Enum cases, unit and backed
+(enum_case
+  name: (name) @local.definition.enum_variant) @local.definition.enum_variant.context
+
+; Named namespaces, semicolon and braced; a global `namespace { … }` has no
+; name and declares none
+(namespace_definition
+  name: (namespace_name) @local.definition.namespace) @local.definition.namespace.context
+
 ; Methods - capture full node for signature extraction
 ((method_declaration
   name: (name) @local.definition.method) @local.scope @local.definition.method.context

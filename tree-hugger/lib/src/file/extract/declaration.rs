@@ -81,6 +81,18 @@ const EXACT_DECLARATION_KINDS: &[&str] = &[
     "enum_entry",
     "enumerator",
     "enum_constant",
+    // PHP `case A;`, Scala `case A, B` and `case C(x: Int)`, TypeScript
+    // `A = 1` (a bare TypeScript member has no node of its own: its
+    // declaration is the name).
+    "enum_case",
+    "simple_enum_case",
+    "full_enum_case",
+    "enum_assignment",
+    // Go `type A = B`.
+    "type_alias",
+    // TypeScript `namespace A {}` and `module A {}`.
+    "internal_module",
+    "module",
     "associated_type",
     "assignment",
     "assignment_statement",
@@ -112,6 +124,9 @@ fn is_declaration_kind(kind: &str) -> bool {
 /// A node at which the search for a name's declaration stops: a body, block
 /// or file root. Crossing it would attribute the name to the enclosing
 /// declaration.
+///
+/// Python's root is a `module` node, a boundary as every root is; a
+/// TypeScript `module A {}` is a declaration, so `module` is not listed.
 fn is_scope_boundary(node: Node<'_>) -> bool {
     let kind = node.kind();
     node.parent().is_none()
@@ -119,7 +134,6 @@ fn is_scope_boundary(node: Node<'_>) -> bool {
         || matches!(
             kind,
             "program"
-                | "module"
                 | "translation_unit"
                 | "compilation_unit"
                 | "chunk"
@@ -182,6 +196,33 @@ pub(crate) fn declaration_for_context(context: Node<'_>) -> Node<'_> {
         }
     }
     context
+}
+
+/// The context capture that stands for `name` alone. A grouped Go
+/// `type ( A …; B … )` block is the context of every type it declares, so
+/// each name's own `type_spec` or `type_alias` stands in for it: the types of
+/// a group never share a span, header, field list or container identity. An
+/// ungrouped `type A …` keeps its `type_declaration`, which holds the `type`
+/// keyword its header starts with.
+pub(crate) fn context_for_name<'tree>(
+    context: Node<'tree>,
+    name: Node<'tree>,
+    language: ProgrammingLanguage,
+) -> Node<'tree> {
+    if language == ProgrammingLanguage::Go
+        && is_grouped_go_type_declaration(context)
+        && let Some(spec) = name
+            .parent()
+            .filter(|spec| matches!(spec.kind(), "type_spec" | "type_alias") && spec.parent() == Some(context))
+    {
+        return spec;
+    }
+    context
+}
+
+/// A Go `type ( … )` block, which can declare several types.
+pub(crate) fn is_grouped_go_type_declaration(node: Node<'_>) -> bool {
+    node.kind() == "type_declaration" && find_child_by_kind(node, "(").is_some()
 }
 
 /// C# keeps access and storage modifiers on the statement that wraps a

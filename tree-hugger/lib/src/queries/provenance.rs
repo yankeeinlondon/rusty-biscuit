@@ -126,6 +126,7 @@ fn vendored_locals_changes(language: ProgrammingLanguage) -> &'static [&'static 
         ProgrammingLanguage::Java => &[
             "classes captured as `@local.definition.class`; added `interface_declaration` and interface-constant (`constant_declaration`) patterns",
             "`package_declaration` also matches a dotted `scoped_identifier` name",
+            "added explicit constructors (`constructor_declaration`) as `@local.definition.constructor` and enum constants as `@local.definition.enum_variant`, each with a context capture",
         ],
         ProgrammingLanguage::Python => &[
             "classes captured as `@local.definition.class`",
@@ -137,10 +138,11 @@ fn vendored_locals_changes(language: ProgrammingLanguage) -> &'static [&'static 
         ProgrammingLanguage::Swift => &[
             "enum cases captured as `@local.definition.enum_variant`",
             "added protocol function and property requirement patterns",
+            "added initializers (`init`, `init?`, `init!`, named by the `init` keyword) as `@local.definition.constructor` and `typealias` declarations as `@local.definition.type_alias`, each with a context capture",
         ],
         ProgrammingLanguage::C => &[
             "added `union_specifier` and field-name patterns under any pointer, array or parenthesized declarator (`**p`, `a[3]`, `(*callback)(int)`), replacing the field-level pointer pattern",
-            "typedefs captured as `@local.definition.type_alias`",
+            "typedefs captured as `@local.definition.type_alias`; enumerators as `@local.definition.enum_variant` with a context capture (C++ inherits both)",
             "added name patterns under an attributed declarator (`int x [[maybe_unused]];`) and variable names under a parenthesized declarator; a name whose declarator declares a function (`int f [[deprecated]] (int);`, `int (f)(int);`) is reclassified as a function",
             "added typedef-name patterns under pointer, array, function, parenthesized and attributed declarators (`typedef int *P;`, `typedef int (*Fn)(int);`)",
         ],
@@ -152,13 +154,19 @@ fn vendored_locals_changes(language: ProgrammingLanguage) -> &'static [&'static 
         ProgrammingLanguage::CSharp => &[
             "properties captured as `@local.definition.property`",
             "added block-scoped and file-scoped namespace patterns",
+            "added explicit instance constructors (a `static` one excluded) as `@local.definition.constructor` and enum members as `@local.definition.enum_variant`, each with a context capture",
         ],
         ProgrammingLanguage::Php => &[
             "added a `const_declaration` pattern (class, interface, trait, enum and top-level constants) in the inherited `php_only` query",
+            "added enum cases (`enum_case`) as `@local.definition.enum_variant` and named namespaces (`namespace_definition`) as `@local.definition.namespace`, each with a context capture, in the inherited `php_only` query",
+        ],
+        ProgrammingLanguage::Go => &[
+            "added type-alias patterns (`type A = B`, alone or grouped) as `@local.definition.type_alias`, and named fields of a named struct type as `@local.definition.field`",
+        ],
+        ProgrammingLanguage::Scala => &[
+            "added Scala 3 enum cases (`simple_enum_case`, `full_enum_case`) as `@local.definition.enum_variant` and concrete `type` definitions as `@local.definition.type_alias`, each with a context capture",
         ],
         ProgrammingLanguage::TypeScript
-        | ProgrammingLanguage::Go
-        | ProgrammingLanguage::Scala
         | ProgrammingLanguage::Lua
         | ProgrammingLanguage::Perl
         | ProgrammingLanguage::Bash
@@ -279,6 +287,8 @@ mod tests {
             ProgrammingLanguage::Cpp,
             ProgrammingLanguage::CSharp,
             ProgrammingLanguage::Php,
+            ProgrammingLanguage::Go,
+            ProgrammingLanguage::Scala,
         ] {
             let prov = vendor_query_provenance(language, QueryKind::Locals).expect("provenance");
             assert_eq!(
@@ -289,8 +299,8 @@ mod tests {
             assert!(prov.notes.len() > 2, "{language}: {:?}", prov.notes);
         }
 
-        let unchanged = vendor_query_provenance(ProgrammingLanguage::Go, QueryKind::Locals)
-            .expect("go provenance");
+        let unchanged = vendor_query_provenance(ProgrammingLanguage::Lua, QueryKind::Locals)
+            .expect("lua provenance");
         assert_eq!(unchanged.translation_status, TranslationStatus::CapturesRenamed);
         assert_eq!(unchanged.source_project, "nvim-treesitter");
     }

@@ -63,7 +63,7 @@ pub const SCOPE_MATRIX: &[ScopeRow] = &[
             ("exportedFunction", None, Item),
             ("ExportedWidget", None, Item),
             // Namespace contents are items.
-            ("namespaceFunction", None, Item),
+            ("namespaceFunction", Some("ExportedNamespace"), Item),
             ("publicMethod", Some("ExportedWidget"), Member),
             ("staticProperty", Some("ExportedWidget"), Member),
             ("interfaceProperty", Some("ExportedInterface"), Member),

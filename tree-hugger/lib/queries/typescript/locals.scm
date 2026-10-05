@@ -45,3 +45,36 @@
 (public_field_definition
   name: (string
     (string_fragment) @local.definition.field)) @local.definition.field.context
+
+; Enum members. A bare member has no node of its own: its name is its
+; declaration.
+(enum_body
+  (property_identifier) @local.definition.enum_variant)
+
+(enum_body
+  (enum_assignment
+    name: (property_identifier) @local.definition.enum_variant) @local.definition.enum_variant.context)
+
+; A quoted member is reported without its quotes.
+(enum_body
+  (string
+    (string_fragment) @local.definition.enum_variant))
+
+(enum_body
+  (enum_assignment
+    name: (string
+      (string_fragment) @local.definition.enum_variant)) @local.definition.enum_variant.context)
+
+; Named namespaces: `namespace A {}`, `namespace A.B {}` and `module A {}`.
+; A string-named ambient `declare module "x" {}` declares no namespace.
+(internal_module
+  name: [
+    (identifier)
+    (nested_identifier)
+  ] @local.definition.namespace) @local.definition.namespace.context
+
+(module
+  name: [
+    (identifier)
+    (nested_identifier)
+  ] @local.definition.namespace) @local.definition.namespace.context

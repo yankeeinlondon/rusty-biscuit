@@ -130,7 +130,7 @@ pub struct SymbolQueryResult {
     // private: the applied prefix and predicates
 }
 result.name_prefix();              // prefix on every name not namespace-rooted
-result.narrowed(&narrower_query);  // Some(exactly the narrower result) or None if not covered
+result.narrowed(&narrower_query);  // Some(= a fresh narrower query now) or None: analyze again
 ```
 
 Predicates push down only what they read (`file/filter.rs::RecordFilter`,
@@ -308,7 +308,8 @@ container kind is the kind extracted for the container's own declaration.
 lists, the `=`/`=>`/`:` that introduces a body and a `;`/Lua `end`
 terminator removed; an annotation between modifiers stays. It is `None` when
 no contiguous part names the symbol alone (C/C++ type with an inline body,
-grouped Go `type ( … )`, a later name cut off by an earlier initializer).
+a later name cut off by an earlier initializer). A type in a grouped Go
+`type ( … )` is declared by its own spec (`Second int`).
 `identity.keyword` is one anonymous grammar token from a per-language
 `(language, declaration kind) → site` table (`header/keyword.rs`): a direct
 child, a token inside a named wrapper (Perl `scope`, Swift

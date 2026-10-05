@@ -22,8 +22,8 @@ const INTERNAL: Option<Visibility> = Some(Visibility::Internal);
 const PACKAGE: Option<Visibility> = Some(Visibility::Package);
 
 /// Whether a source-declared member also has a standalone record. Record
-/// components and parameters (Java/C# records, Scala class parameters), Rust
-/// tuple-struct positions and Go struct fields are listed in metadata only.
+/// components and parameters (Java/C# records, Scala class parameters) and
+/// Rust tuple-struct positions are listed in metadata only.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Standalone {
     Yes,
@@ -481,11 +481,177 @@ fn php_go_and_scala_controls_keep_their_lists() {
         ],
     );
 
-    // Go struct fields and Scala class parameters are listed in metadata only.
+    // Go struct fields are standalone fields too. A Scala class parameter is
+    // listed in metadata only; a body `val`/`var` is a standalone field that
+    // completes the list.
     let go = extract_inline("package p\ntype Pair struct { A, b int }\n", "go");
-    assert_field_lists(&go, &[("Pair", &[("A", false, PUBLIC, No), ("b", false, PACKAGE, No)])]);
+    assert_field_lists(&go, &[("Pair", &[("A", false, PUBLIC, Yes), ("b", false, PACKAGE, Yes)])]);
     let scala = extract_inline("class Holder(val a: Int) { var b = 2 }\n", "scala");
-    assert_field_lists(&scala, &[("Holder", &[("a", false, None, No)])]);
+    assert_field_lists(&scala, &[("Holder", &[("a", false, None, No), ("b", false, PUBLIC, Yes)])]);
+}
+
+/// Each type of a grouped Go `type ( … )` lists only its own fields: the
+/// types of one block no longer share one declaration (`B` used to list
+/// `A`'s fields).
+#[test]
+fn grouped_go_types_list_only_their_own_fields() {
+    let go = extract_inline(
+        "package p\n\ntype (\n\tA struct{ X, Y int }\n\tB struct{ z string }\n\tC int\n)\n",
+        "go",
+    );
+    assert_field_lists(
+        &go,
+        &[
+            ("A", &[("X", false, PUBLIC, Yes), ("Y", false, PUBLIC, Yes)]),
+            ("B", &[("z", false, PACKAGE, Yes)]),
+        ],
+    );
+    let defined = type_symbol(&go, "C");
+    assert!(
+        defined.type_metadata.as_ref().is_none_or(|metadata| metadata.fields.is_empty()),
+        "`C int` lists no fields: {:?}",
+        defined.type_metadata
+    );
+}
+
+/// A Go struct's named fields are standalone fields paired with its field
+/// list, once each and with their written types; embedded fields stay out
+/// of both, and an anonymous struct type's fields are not the struct's. An
+/// interface's method elements are never Field records, nor (since the
+/// grammar's `method_elem` is not read) field-list entries.
+#[test]
+fn go_struct_fields_pair_with_the_field_list_and_keep_their_types() {
+    let source = "package p\n\ntype S struct {\n\tX, Y int\n\tz    string `json:\"z\"`\n\tÜber bool\n\tanon struct{ Inner int }\n\tEmbedded\n\t*Ptr\n}\n\ntype G[T any] struct {\n\tVal T\n}\n\ntype I interface{ M() }\n\ntype Embedded struct{}\ntype Ptr struct{}\n";
+    let go = extract_inline(source, "go");
+    assert_field_lists(
+        &go,
+        &[
+            (
+                "S",
+                &[
+                    ("X", false, PUBLIC, Yes),
+                    ("Y", false, PUBLIC, Yes),
+                    ("z", false, PACKAGE, Yes),
+                    ("Über", false, PUBLIC, Yes),
+                    ("anon", false, PACKAGE, Yes),
+                ],
+            ),
+            ("G", &[("Val", false, PUBLIC, Yes)]),
+        ],
+    );
+
+    let types: Vec<(String, Option<String>)> = type_symbol(&go, "S")
+        .type_metadata
+        .as_ref()
+        .expect("S metadata")
+        .fields
+        .iter()
+        .map(|field| (field.name.clone(), field.type_annotation.clone()))
+        .collect();
+    let expected = [("X", "int"), ("Y", "int"), ("z", "string"), ("Über", "bool"), ("anon", "struct{ Inner int }")]
+        .map(|(name, annotation)| (name.to_string(), Some(annotation.to_string())));
+    assert_eq!(types, expected, "S field types");
+
+    for absent in ["Inner", "M"] {
+        assert!(
+            go.symbols.iter().all(|symbol| symbol.name != absent || symbol.kind != SymbolKind::Field),
+            "`{absent}` is not a field of a named type"
+        );
+    }
+    assert!(
+        type_symbol(&go, "I").type_metadata.as_ref().is_none_or(|metadata| metadata.fields.is_empty()),
+        "{:?}",
+        type_symbol(&go, "I").type_metadata
+    );
+}
+
+/// A Scala type body's `val`/`var` definitions and declarations are
+/// standalone fields paired with the owner's field list, once each, with
+/// their written types: static in an object, instance members of a class
+/// or trait. Class parameters stay metadata only, and method locals stay
+/// out.
+#[test]
+fn scala_body_fields_pair_with_the_field_list() {
+    let scala = extract_inline(
+        "trait T {\n  /** C doc. */\n  val c: Int\n  var d: String\n}\n\nclass K(p: Int) {\n  val e = 1\n  protected var f: Long = 2\n  def g(): Int = { val local = 1; local }\n}\n",
+        "scala",
+    );
+    assert_field_lists(
+        &scala,
+        &[
+            ("T", &[("c", false, PUBLIC, Yes), ("d", false, PUBLIC, Yes)]),
+            ("K", &[("p", false, None, No), ("e", false, PUBLIC, Yes), ("f", false, PROTECTED, Yes)]),
+        ],
+    );
+    let types: Vec<(String, Option<String>, Option<String>)> = type_symbol(&scala, "T")
+        .type_metadata
+        .as_ref()
+        .expect("T metadata")
+        .fields
+        .iter()
+        .map(|field| (field.name.clone(), field.type_annotation.clone(), field.doc_comment.clone()))
+        .collect();
+    assert_eq!(
+        types,
+        [
+            ("c".to_string(), Some("Int".to_string()), Some("C doc.".to_string())),
+            ("d".to_string(), Some("String".to_string()), None),
+        ],
+        "T field types and docs"
+    );
+}
+
+/// An enum's variant list keeps each variant's explicit value as written,
+/// on `symbols()`, on the record and after the round trip back; a member
+/// without one, and a Java constant's constructor arguments, have none.
+/// Variants never enter a field list.
+#[test]
+fn enum_variant_lists_keep_discriminant_text() {
+    type Variants = &'static [(&'static str, Option<&'static str>)];
+    let cases: [(&str, &str, &str, Variants); 7] = [
+        ("rs", "pub enum R { A, B = 2, C }\n", "R", &[("A", None), ("B", Some("2")), ("C", None)]),
+        ("c", "enum E { RED, BLUE = 2 };\n", "E", &[("RED", None), ("BLUE", Some("2"))]),
+        ("cpp", "enum class Scoped { S_A, S_B = 1 << 2 };\n", "Scoped", &[("S_A", None), ("S_B", Some("1 << 2"))]),
+        ("cs", "enum E { Red, Blue = 2 }\n", "E", &[("Red", None), ("Blue", Some("2"))]),
+        ("ts", "enum E { Red, Blue = 2, Green = \"g\" }\n", "E", &[("Red", None), ("Blue", Some("2")), ("Green", Some("\"g\""))]),
+        ("php", "<?php\nenum Suit: string { case Hearts = 'h'; case Spades = 's'; }\n", "Suit", &[("Hearts", Some("'h'")), ("Spades", Some("'s'"))]),
+        ("java", "enum Planet { MERCURY(1.0), VENUS(2.0); Planet(double m) {} }\n", "Planet", &[("MERCURY", None), ("VENUS", None)]),
+    ];
+    for (extension, source, enum_name, expected) in cases {
+        let extracted = extract_inline(source, extension);
+        let label = format!("{extension}: `{enum_name}`");
+        let expected: Vec<(String, Option<String>)> = expected
+            .iter()
+            .map(|(name, value)| (name.to_string(), value.map(str::to_string)))
+            .collect();
+        let of_metadata = |metadata: Option<&TypeMetadata>| -> Vec<(String, Option<String>)> {
+            let metadata = metadata.unwrap_or_else(|| panic!("{label}: no metadata"));
+            assert!(metadata.fields.is_empty(), "{label}: variants never enter the field list");
+            metadata
+                .variants
+                .iter()
+                .map(|variant| (variant.name.clone(), variant.discriminant.clone()))
+                .collect()
+        };
+
+        let symbol = type_symbol(&extracted, enum_name);
+        assert_eq!(symbol.kind, SymbolKind::Enum, "{label}");
+        assert_eq!(of_metadata(symbol.type_metadata.as_ref()), expected, "{label}: symbols()");
+
+        let record = extracted.record(enum_name, symbol.container_name.as_deref());
+        let tree_hugger::SymbolKindData::Enum(data) = &record.kind_data else {
+            panic!("{label}: enum payload, got {:?}", record.kind_data);
+        };
+        let from_record: Vec<(String, Option<String>)> = data
+            .variants
+            .iter()
+            .map(|variant| (variant.name.clone(), variant.discriminant.clone()))
+            .collect();
+        assert_eq!(from_record, expected, "{label}: symbol_index_v2()");
+
+        let round_trip = SymbolInfo::try_from(record.clone()).expect("round trip");
+        assert_eq!(of_metadata(round_trip.type_metadata.as_ref()), expected, "{label}: round trip");
+    }
 }
 
 /// Members the language makes static without a `static` keyword are Static

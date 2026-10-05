@@ -38,9 +38,9 @@
   name: (_) @local.definition.enum
   (enumerator_list)) @local.definition.enum.context
 
-; Enum enumerators - capture as variables
+; Enum enumerators
 (enumerator
-  name: (identifier) @local.definition.var)
+  name: (identifier) @local.definition.enum_variant) @local.definition.enum_variant.context
 
 ; Type / Struct / Enum
 (field_declaration

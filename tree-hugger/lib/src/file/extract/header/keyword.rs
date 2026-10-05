@@ -106,6 +106,8 @@ fn keyword_site(declaration: Node<'_>, language: ProgrammingLanguage) -> Keyword
         (L::Swift, "class_declaration" | "protocol_declaration") => Field("declaration_kind"),
         (L::Swift, "function_declaration" | "protocol_function_declaration") => Child(&["func"]),
         (L::Swift, "enum_entry") => Child(&["case"]),
+        (L::Swift, "init_declaration") => Child(&["init"]),
+        (L::Swift, "typealias_declaration") => Child(&["typealias"]),
         (L::Swift, "property_declaration") => Wrapped("value_binding_pattern"),
         // The binding sits inside the name pattern (`var name: T { get }`).
         (L::Swift, "protocol_property_declaration") => WrappedInField {
@@ -121,12 +123,21 @@ fn keyword_site(declaration: Node<'_>, language: ProgrammingLanguage) -> Keyword
         (L::Scala, "trait_definition") => Child(&["trait"]),
         (L::Scala, "enum_definition") => Child(&["enum"]),
         (L::Scala, "class_parameter") => Child(&["val", "var"]),
+        (L::Scala, "type_definition") => Child(&["type"]),
+        // `case Red, Blue` declares each name in its own node.
+        (L::Scala, "simple_enum_case" | "full_enum_case") => Parent {
+            parents: &["enum_case_definitions"],
+            list: None,
+            tokens: &["case"],
+        },
 
         (L::TypeScript | L::JavaScript, "function_declaration" | "function_signature") => Child(&["function"]),
         (L::TypeScript | L::JavaScript, "class_declaration" | "abstract_class_declaration") => Child(&["class"]),
         (L::TypeScript, "interface_declaration") => Child(&["interface"]),
         (L::TypeScript, "enum_declaration") => Child(&["enum"]),
         (L::TypeScript, "type_alias_declaration") => Child(&["type"]),
+        (L::TypeScript, "internal_module") => Child(&["namespace"]),
+        (L::TypeScript, "module") => Child(&["module"]),
         (L::TypeScript | L::JavaScript, "lexical_declaration") => Field("kind"),
         (L::TypeScript | L::JavaScript, "variable_declaration") => Child(&["var"]),
 
@@ -160,6 +171,8 @@ fn keyword_site(declaration: Node<'_>, language: ProgrammingLanguage) -> Keyword
         (L::Php, "trait_declaration") => Child(&["trait"]),
         (L::Php, "enum_declaration") => Child(&["enum"]),
         (L::Php, "const_declaration") => Child(&["const"]),
+        (L::Php, "enum_case") => Child(&["case"]),
+        (L::Php, "namespace_definition") => Child(&["namespace"]),
         // Only the legacy `var $name;` form has a keyword.
         (L::Php, "property_declaration") => KeywordSite::Marker {
             kind: "var_modifier",

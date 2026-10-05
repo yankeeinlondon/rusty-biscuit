@@ -30,10 +30,11 @@ const CUT_FIELDS: &[&str] = &["body", "value", "accessors", "computed_value", "d
 const CUT_KINDS: &[&str] = &["protocol_property_requirements", "arrow_expression_clause"];
 
 /// Child kinds that hold one declared name and its initializer (`int a = 1`
-/// in C, `x = 1` in a Java or JavaScript declarator, PHP `$x = 1`), searched
-/// for the initializer token.
+/// in C, `x = 1` in a Java or JavaScript declarator, PHP `$x = 1`, the alias
+/// of a Go `type A = B`), searched for the initializer token.
 const DECLARATOR_KINDS: &[&str] = &[
     "init_declarator",
+    "type_alias",
     "variable_declarator",
     "variable_declaration",
     "equals_value_clause",
@@ -44,16 +45,18 @@ const DECLARATOR_KINDS: &[&str] = &[
 /// The display header of `declaration`, whose captured name spans `name`.
 ///
 /// `None` when the header cannot be isolated: a C/C++ declaration whose type
-/// carries a body (`typedef struct { … } Alias;`), a grouped Go `type ( … )`
-/// block, or a name the header would not contain because an earlier name's
-/// initializer ends it (`int a = 1, b = 2;` for `b`).
+/// carries a body (`typedef struct { … } Alias;`), or a name the header would
+/// not contain because an earlier name's initializer ends it
+/// (`int a = 1, b = 2;` for `b`). A type of a grouped Go `type ( … )` block is
+/// declared by its own spec ([`context_for_name`]), so its header is the
+/// spec's.
 pub(crate) fn signature_text(
     declaration: Node<'_>,
     name: Range<usize>,
     language: ProgrammingLanguage,
     source: &str,
 ) -> Option<String> {
-    if has_inline_type_body(declaration, language) || is_grouped_go_type(declaration, language) {
+    if has_inline_type_body(declaration, language) {
         return None;
     }
 
@@ -101,16 +104,16 @@ fn header_start(declaration: Node<'_>, language: ProgrammingLanguage) -> usize {
 /// Where the header ends: the earliest cut among the body, a cut field or
 /// kind, an initializer token and a trailing terminator.
 fn header_end(declaration: Node<'_>, language: ProgrammingLanguage) -> usize {
+    let parameter_defaults = has_inline_parameter_defaults(declaration, language);
     let mut end = declaration.end_byte();
     let mut previous: Option<Node<'_>> = None;
     let mut cursor = declaration.walk();
     if cursor.goto_first_child() {
         loop {
             let child = cursor.node();
-            let is_cut = cursor
-                .field_name()
-                .is_some_and(|field| CUT_FIELDS.contains(&field))
-                || CUT_KINDS.contains(&child.kind());
+            let is_cut = cursor.field_name().is_some_and(|field| {
+                CUT_FIELDS.contains(&field) && !(parameter_defaults && field == "default_value")
+            }) || CUT_KINDS.contains(&child.kind());
             if is_cut {
                 let introducer = previous
                     .filter(|token| !token.is_named() && INTRODUCER_TOKENS.contains(&token.kind()));
@@ -127,7 +130,7 @@ fn header_end(declaration: Node<'_>, language: ProgrammingLanguage) -> usize {
     if let Some(body) = body_node_for_declaration(declaration) {
         end = end.min(body.start_byte());
     }
-    if let Some(token) = initializer_token(declaration) {
+    if !parameter_defaults && let Some(token) = initializer_token(declaration) {
         end = end.min(token.start_byte());
     }
     if let Some(nested) = go_type_body(declaration, language) {
@@ -141,6 +144,17 @@ fn header_end(declaration: Node<'_>, language: ProgrammingLanguage) -> usize {
         end = last.start_byte();
     }
     end
+}
+
+/// tree-sitter-swift places a parameter's default (`y: Int = 2`) and its
+/// `=` directly in the function or initializer, beside the parameter, so
+/// there they belong to the parameter list rather than introduce a body.
+fn has_inline_parameter_defaults(declaration: Node<'_>, language: ProgrammingLanguage) -> bool {
+    language == ProgrammingLanguage::Swift
+        && matches!(
+            declaration.kind(),
+            "function_declaration" | "init_declaration" | "protocol_function_declaration"
+        )
 }
 
 /// The first `=` or `:=` binding an initializer, as a direct child of
@@ -176,14 +190,6 @@ fn go_type_body(declaration: Node<'_>, language: ProgrammingLanguage) -> Option<
         .children(&mut cursor)
         .find(|child| child.kind() == "field_declaration_list" || child.kind() == "{");
     brace.map(|brace| brace.start_byte())
-}
-
-/// A grouped Go `type ( A …; B … )` block declares several types; no single
-/// contiguous header names one of them.
-fn is_grouped_go_type(declaration: Node<'_>, language: ProgrammingLanguage) -> bool {
-    language == ProgrammingLanguage::Go
-        && declaration.kind() == "type_declaration"
-        && find_child_by_kind(declaration, "(").is_some()
 }
 
 /// A C/C++ declaration whose type specifier carries its own body
