@@ -1,11 +1,13 @@
 //! The declaration commands' JSON report: the envelope and its records, the
-//! command kind sets, `--json-full`, failed files, and output failures.
+//! command kind sets, `--json-full`, failed files, files outside the scan
+//! root, and output failures.
 
 use std::io::Read;
+use std::path::PathBuf;
 use std::process::{Output, Stdio};
 
 use serde_json::Value;
-use tree_hugger::SymbolRecord;
+use tree_hugger::{SymbolRecord, file_identity, symbol_id_from_stable_key};
 
 use crate::golden::MULTI_FIXTURES;
 use crate::{Scratch, json_of};
@@ -259,6 +261,119 @@ fn json_full_rejects_symbol_selectors_and_other_commands() {
     assert_eq!(file_names(&json, "indexes"), ["lib.rs"], "file selectors and --sort are allowed");
 }
 
+/// The multi/ Rust fixture, for writing outside the scan root.
+fn multi_rust() -> &'static str {
+    MULTI_FIXTURES
+        .iter()
+        .find(|(name, _)| *name == "rust.rs")
+        .map(|(_, contents)| *contents)
+        .expect("multi/ has rust.rs")
+}
+
+/// `external.rs` in a test-owned directory beside the scratch repository,
+/// returned with the path a report must give it: `../{dir}/external.rs`.
+fn external_file(scratch: &Scratch, contents: &[u8]) -> (PathBuf, String) {
+    let repo = biscuit_file::canonicalize_simplified(scratch.repo.path()).expect("canonical repo");
+    let beside = biscuit_file::canonicalize_simplified(scratch.home.path()).expect("canonical home");
+    assert_eq!(repo.parent(), beside.parent(), "both scratch directories share the temp root");
+    let dir_name = beside.file_name().expect("dir name").to_string_lossy().into_owned();
+    // Written through the uncanonicalized temp path (`/var/...` on macOS),
+    // so the run sees another spelling of the root's parent.
+    let file = scratch.home.path().join("external.rs");
+    std::fs::write(&file, contents).expect("write external file");
+    (file, format!("../{dir_name}/external.rs"))
+}
+
+/// Every record of a report: `files[].symbols`, `files[].members` and
+/// `indexes[].symbols`.
+fn report_records(json: &Value) -> Vec<&Value> {
+    let mut found = Vec::new();
+    for key in ["files", "indexes"] {
+        for entry in json[key].as_array().into_iter().flatten() {
+            found.extend(entry["symbols"].as_array().into_iter().flatten());
+            for members in entry["members"].as_object().into_iter().flat_map(|map| map.values()) {
+                found.extend(members.as_array().expect("members"));
+            }
+        }
+    }
+    found
+}
+
+/// The file segment of a stable key (`{language}::{file}::{kind}::...`).
+fn key_file(record: &Value) -> String {
+    let key = record["identity"]["stable_key"].as_str().expect("stable_key");
+    let kind = record["kind"].as_str().expect("kind");
+    let rest = key.strip_prefix("rust::").unwrap_or_else(|| panic!("a Rust key: {key}"));
+    let end = rest.find(&format!("::{kind}::")).unwrap_or_else(|| panic!("{key} names its kind"));
+    rest[..end].to_string()
+}
+
+/// A file outside the scan root is reported relative to `root_dir` for all
+/// four commands in both JSON modes: its entry, each record's file and its
+/// stable key's file. IDs stay those of the key as analyzed.
+#[test]
+fn a_file_outside_the_root_is_reported_relative_to_it() {
+    let scratch = Scratch::new(&[("rust.rs", multi_rust())]);
+    let (external, expected) = external_file(&scratch, multi_rust().as_bytes());
+    let external_arg = external.to_str().expect("utf-8 temp path");
+    // The file as `hug` analyzed it (its identity, with symlinks such as
+    // macOS `/var` resolved), which its IDs were derived from.
+    let analyzed = file_identity(&external).to_string_lossy().replace('\\', "/");
+
+    for command in ["symbols", "functions", "types", "classes"] {
+        for (mode, key) in [("--json", "files"), ("--json-full", "indexes")] {
+            let args = [mode, command, "--language", "rust", "--no-cache", "rust.rs", external_arg];
+            let json = json_of(&scratch.stdout(&args));
+            let mut names = file_names(&json, key);
+            names.sort();
+            let mut wanted = vec![expected.clone(), "rust.rs".to_string()];
+            wanted.sort();
+            assert_eq!(names, wanted, "hug {args:?}: entry paths");
+
+            let records = report_records(&json);
+            let outside: Vec<&&Value> =
+                records.iter().filter(|record| record["source"]["file_path"] == expected.as_str()).collect();
+            assert!(!outside.is_empty(), "hug {args:?}: records of the outside file");
+            for record in records.iter() {
+                let file = record["source"]["file_path"].as_str().expect("file_path");
+                assert!(file == expected || file == "rust.rs", "hug {args:?}: record path {file}");
+                assert_eq!(key_file(record), file, "hug {args:?}: key path of {record}");
+            }
+            for record in outside {
+                let key = record["identity"]["stable_key"].as_str().expect("stable_key");
+                let as_analyzed = key.replacen(&format!("::{expected}::"), &format!("::{analyzed}::"), 1);
+                let id = serde_json::to_value(symbol_id_from_stable_key(&as_analyzed)).expect("id");
+                assert_eq!(record["id"], id, "hug {args:?}: the ID is unchanged by the projection");
+            }
+        }
+    }
+}
+
+/// A file outside the scan root that cannot be read is listed in `errors`
+/// relative to `root_dir`, and the run exits 1, for all four commands in both
+/// JSON modes.
+#[test]
+fn a_failed_file_outside_the_root_is_reported_relative_to_it() {
+    let scratch = Scratch::new(&[("good.rs", "pub fn listed() {}\n")]);
+    let mut contents = multi_rust().as_bytes().to_vec();
+    contents.push(0xff);
+    let (external, expected) = external_file(&scratch, &contents);
+    let external_arg = external.to_str().expect("utf-8 temp path");
+
+    for command in ["symbols", "functions", "types", "classes"] {
+        for mode in ["--json", "--json-full"] {
+            let args = [mode, command, "--language", "rust", "--no-cache", external_arg];
+            let output = scratch.hug(&args);
+            assert_eq!(output.status.code(), Some(1), "hug {args:?} exits 1");
+            let json = json_of(&String::from_utf8(output.stdout).expect("utf-8"));
+            let errors = json["errors"].as_array().expect("errors");
+            assert_eq!(errors.len(), 1, "hug {args:?}: {errors:?}");
+            assert_eq!(errors[0]["file"], expected.as_str(), "hug {args:?}");
+            assert_eq!(errors[0]["kind"], "io");
+        }
+    }
+}
+
 /// A reader that closes the pipe early ends `hug` quietly and successfully,
 /// in JSON and terminal output alike.
 #[test]
@@ -284,5 +399,241 @@ fn a_closed_stdout_ends_the_run_quietly() {
         let stderr = stderr_of(&output);
         assert!(!stderr.contains("panicked"), "hug {args:?} panicked: {stderr}");
         assert_eq!(output.status.code(), Some(0), "hug {args:?}: {stderr}");
+    }
+}
+
+/// The module copied to build trees that span many chunks.
+const PYTHON_MODULE: &str = include_str!("../../../lib/tests/fixtures/symbols/multi/nested/python.py");
+
+/// Copies of [`PYTHON_MODULE`] in the scale trees: twelve chunks.
+const COPIES: usize = 96;
+
+/// Files per analysis chunk with the harness's two rayon workers.
+const CHUNK: usize = 8;
+
+/// A tree of [`COPIES`] copies of [`PYTHON_MODULE`], spread evenly over
+/// `directories` directories (`1` puts them all at the root), plus `extra`.
+fn python_copies(directories: usize, extra: &[(&str, &str)]) -> Scratch {
+    let names: Vec<String> = (0..COPIES)
+        .map(|index| match directories {
+            1 => format!("m{index:03}.py"),
+            _ => format!("d{:02}/m{index:03}.py", index / (COPIES / directories)),
+        })
+        .collect();
+    let mut files: Vec<(&str, &str)> = names.iter().map(|name| (name.as_str(), PYTHON_MODULE)).collect();
+    files.extend_from_slice(extra);
+    Scratch::new(&files)
+}
+
+/// The file count of the `--verbose` work-counter line.
+fn parsed_files(stderr: &str) -> usize {
+    let line = stderr
+        .lines()
+        .rfind(|line| line.starts_with("cache: "))
+        .unwrap_or_else(|| panic!("no work-counter line: {stderr}"));
+    line.split("parsed ")
+        .nth(1)
+        .and_then(|rest| rest.split(' ').next())
+        .and_then(|count| count.parse().ok())
+        .unwrap_or_else(|| panic!("no parsed count: {line}"))
+}
+
+/// Runs `hug` with stdout a pipe whose reader closed before it started, so
+/// its first write fails whatever the timing.
+fn hug_into_closed_pipe(scratch: &Scratch, args: &[&str]) -> Output {
+    let (reader, writer) = std::io::pipe().expect("create a pipe");
+    drop(reader);
+    scratch
+        .process(args)
+        .stdin(Stdio::null())
+        .stdout(writer)
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn hug")
+        .wait_with_output()
+        .expect("wait for hug")
+}
+
+/// Asserts a quiet, successful exit that parsed at most `bound` files.
+fn assert_stopped_early(args: &[&str], output: &Output, bound: usize) {
+    let stderr = stderr_of(output);
+    assert!(!stderr.contains("panicked"), "hug {args:?} panicked: {stderr}");
+    assert_eq!(output.status.code(), Some(0), "hug {args:?}: {stderr}");
+    let parsed = parsed_files(&stderr);
+    assert!(parsed <= bound, "hug {args:?} parsed {parsed} files (at most {bound} expected)");
+}
+
+/// The terminal listing streams: a reader that closes after the first bytes
+/// stops the scan long before its end, for every declaration command. The
+/// writer can run ahead of the reader's close by a few chunks, so the bound
+/// is half the tree rather than an exact count.
+#[test]
+fn a_reader_closing_early_stops_the_terminal_scan() {
+    let scratch = python_copies(1, &[]);
+    for command in ["functions", "types", "symbols", "classes"] {
+        let args = ["--plain", command, "--no-cache", "--verbose"];
+        let mut child = scratch
+            .process(&args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn hug");
+        let mut first = [0u8; 16];
+        child
+            .stdout
+            .take()
+            .expect("stdout")
+            .read_exact(&mut first)
+            .expect("read the first bytes");
+        // Dropping the pipe's read end closes it while `hug` is still scanning.
+        let output = child.wait_with_output().expect("wait for hug");
+        assert_stopped_early(&args, &output, COPIES / 2);
+    }
+}
+
+/// A failing stdout stops scheduling at the first chunk whose output is
+/// flushed: the first chunk for a per-file listing, the second when the
+/// first chunk is one unit still held (one directory group).
+#[test]
+fn a_failing_stdout_stops_every_streamed_layout_within_two_chunks() {
+    let flat = python_copies(1, &[]);
+    for command in ["functions", "types", "symbols", "classes"] {
+        let args = ["--plain", command, "--no-cache", "--verbose"];
+        assert_stopped_early(&args, &hug_into_closed_pipe(&flat, &args), CHUNK);
+    }
+
+    // Twelve directories of one chunk each, one package.
+    let grouped = python_copies(12, &[("Cargo.toml", "[package]\nname = \"copies\"\nversion = \"0.0.0\"\n")]);
+    for grouping in [&["--group-by-file"][..], &["--group-by-module"], &["--group-by-module", "--group-by-file"]] {
+        let mut args = vec!["--plain", "symbols", "--no-cache", "--verbose"];
+        args.extend_from_slice(grouping);
+        assert_stopped_early(&args, &hug_into_closed_pipe(&grouped, &args), 2 * CHUNK);
+    }
+
+    // Without a manifest every directory is its own package: sections.
+    let sectioned = python_copies(12, &[]);
+    let args = ["--plain", "symbols", "--no-cache", "--verbose"];
+    assert_stopped_early(&args, &hug_into_closed_pipe(&sectioned, &args), 2 * CHUNK);
+}
+
+/// Runs `hug` with stdout a pipe whose reader takes the first 16 bytes and
+/// then closes it while `hug` is still scanning.
+fn hug_until_reader_closes(scratch: &Scratch, args: &[&str]) -> Output {
+    let mut child = scratch
+        .process(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn hug");
+    let mut first = [0u8; 16];
+    child
+        .stdout
+        .take()
+        .expect("stdout")
+        .read_exact(&mut first)
+        .expect("read the first bytes");
+    child.wait_with_output().expect("wait for hug")
+}
+
+/// Package `a` holds all [`COPIES`] copies, eight per directory, so it spans
+/// every chunk; later packages follow it in listing order: `b` declares,
+/// `c` has only a comment. With `declaring: false`, `b` is left out.
+fn uneven_packages(declaring: bool) -> Scratch {
+    let manifest = |name: &str| format!("[package]\nname = \"{name}\"\nversion = \"0.0.0\"\n");
+    let manifests = [manifest("a"), manifest("b"), manifest("c")];
+    let names: Vec<String> = (0..COPIES)
+        .map(|index| format!("a/d{:02}/m{index:03}.py", index / CHUNK))
+        .collect();
+    let mut files: Vec<(&str, &str)> = names.iter().map(|name| (name.as_str(), PYTHON_MODULE)).collect();
+    files.extend([
+        ("a/Cargo.toml", manifests[0].as_str()),
+        ("c/Cargo.toml", manifests[2].as_str()),
+        ("c/empty.py", "# no declarations\n"),
+    ]);
+    if declaring {
+        files.extend([("b/Cargo.toml", manifests[1].as_str()), ("b/last.py", PYTHON_MODULE)]);
+    }
+    Scratch::new(&files)
+}
+
+const GROUPINGS: [&[&str]; 4] = [&[], &["--group-by-file"], &["--group-by-module"], &["--group-by-module", "--group-by-file"]];
+
+/// The files a grouping holds before its first unit is written: one chunk,
+/// or two when a unit is one directory (here exactly one chunk) that is
+/// written when the next directory's first file arrives.
+fn chunk_bound(grouping: &[&str]) -> usize {
+    if grouping.contains(&"--group-by-module") { 2 * CHUNK } else { CHUNK }
+}
+
+/// A large first package is written as it is analyzed, in every listing
+/// layout: the package heading never waits for a later package, so a failing
+/// stdout stops the scan within the grouping's chunk bound, whether the
+/// later packages declare something or not. `classes` and both JSON
+/// reports over the same tree are controls.
+#[test]
+fn an_uneven_first_package_stops_at_a_failing_stdout() {
+    for declaring in [true, false] {
+        let scratch = uneven_packages(declaring);
+        for command in ["functions", "types", "symbols"] {
+            for grouping in GROUPINGS {
+                let mut args = vec!["--plain", command, "--no-cache", "--verbose"];
+                args.extend_from_slice(grouping);
+                assert_stopped_early(&args, &hug_into_closed_pipe(&scratch, &args), chunk_bound(grouping));
+            }
+        }
+        for format in ["--plain", "--json", "--json-full"] {
+            let args = [format, "classes", "--no-cache", "--verbose"];
+            assert_stopped_early(&args, &hug_into_closed_pipe(&scratch, &args), CHUNK);
+        }
+        for format in ["--json", "--json-full"] {
+            for command in ["functions", "types", "symbols"] {
+                let args = [format, command, "--no-cache", "--verbose"];
+                assert_stopped_early(&args, &hug_into_closed_pipe(&scratch, &args), CHUNK);
+            }
+        }
+    }
+}
+
+/// The same uneven tree with a reader that closes after the first bytes.
+/// The writer can run ahead of the reader's close by a few chunks, so the
+/// bound is half the tree rather than an exact count; holding package `a`
+/// until `b` is seen parses all of it.
+#[test]
+fn an_uneven_first_package_streams_to_a_reader_closing_early() {
+    let scratch = uneven_packages(true);
+    for command in ["functions", "types", "symbols"] {
+        for grouping in GROUPINGS {
+            let mut args = vec!["--plain", command, "--no-cache", "--verbose"];
+            args.extend_from_slice(grouping);
+            assert_stopped_early(&args, &hug_until_reader_closes(&scratch, &args), COPIES / 2);
+        }
+    }
+    for format in ["--plain", "--json", "--json-full"] {
+        let args = [format, "classes", "--no-cache", "--verbose"];
+        assert_stopped_early(&args, &hug_until_reader_closes(&scratch, &args), COPIES / 2);
+    }
+    for format in ["--json", "--json-full"] {
+        for command in ["functions", "types", "symbols"] {
+            let args = [format, command, "--no-cache", "--verbose"];
+            assert_stopped_early(&args, &hug_until_reader_closes(&scratch, &args), COPIES / 2);
+        }
+    }
+}
+
+/// JSON output is flushed at every chunk end, so a failing stdout is
+/// noticed within one chunk of the envelope's first bytes even when the
+/// files contribute no entries to fill the output buffer.
+#[test]
+fn a_json_report_without_entries_stops_at_a_failing_stdout() {
+    let names: Vec<String> = (0..COPIES).map(|index| format!("m{index:03}.py")).collect();
+    let files: Vec<(&str, &str)> = names.iter().map(|name| (name.as_str(), "# no declarations\n")).collect();
+    let scratch = Scratch::new(&files);
+    for format in ["--json", "--json-full"] {
+        for command in ["functions", "types", "symbols", "classes"] {
+            let args = [format, command, "--no-cache", "--verbose"];
+            assert_stopped_early(&args, &hug_into_closed_pipe(&scratch, &args), CHUNK);
+        }
     }
 }

@@ -461,6 +461,61 @@ fn each_key_input_and_stored_identity_decides_a_miss() {
     assert_eq!(cached(&cache, read(&path), &query).0, CacheLookup::Miss(CacheMiss::Absent));
 }
 
+/// A record whose `schema_version` is not exactly the current one makes the
+/// whole entry a miss, for the same request and for a wider one (never
+/// widened), whichever record carries it; the rewritten entry holds only
+/// current records and is a hit next time.
+#[test]
+fn incompatible_record_schema_versions_are_misses_never_served_or_widened() {
+    let path = fixture(ProgrammingLanguage::Python);
+    let narrow = SymbolQuery::new().kinds(FUNCTION_KINDS);
+    let complete = SymbolQuery::complete_index();
+    let current = json!({ "major": 4, "minor": 0 });
+    for version in [
+        json!({ "major": 2, "minor": 0 }),
+        json!({ "major": 3, "minor": 0 }),
+        json!({ "major": 4, "minor": 1 }),
+        json!({ "major": 5, "minor": 0 }),
+    ] {
+        for (position, request) in [("first", &narrow), ("last", &narrow), ("first", &complete)] {
+            let label = format!("record {version} on the {position} record, request {request:?}");
+            let dir = TempDir::new().expect("temp");
+            let cache = cache_in(&dir);
+            cached(&cache, read(&path), &narrow);
+            let entry_path = only_entry(&dir);
+            let mut entry = read_entry(&entry_path);
+            let records = entry["records"].as_array_mut().expect("entry records");
+            assert!(records.len() > 1, "{label}: the fixture stores several records");
+            let record = if position == "first" {
+                records.first_mut()
+            } else {
+                records.last_mut()
+            };
+            record.expect("a record")["schema_version"] = version.clone();
+            write_entry(&entry_path, &entry);
+
+            let (lookup, served, _) = cached(&cache, read(&path), request);
+            assert_eq!(
+                lookup,
+                CacheLookup::Miss(CacheMiss::Mismatched("record schema version")),
+                "{label}"
+            );
+            assert_eq!(served, uncached(&path, request), "{label}");
+
+            let rewritten = read_entry(&entry_path);
+            assert!(
+                rewritten["records"]
+                    .as_array()
+                    .expect("rewritten records")
+                    .iter()
+                    .all(|record| record["schema_version"] == current),
+                "{label}: the rewritten entry holds only current records"
+            );
+            assert_eq!(cached(&cache, read(&path), request).0, CacheLookup::Hit, "{label}");
+        }
+    }
+}
+
 #[test]
 fn a_corrupt_entry_is_a_miss_and_is_replaced() {
     let path = fixture(ProgrammingLanguage::Python);

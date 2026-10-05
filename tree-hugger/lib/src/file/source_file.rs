@@ -2,6 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
+use biscuit_file::canonicalize_simplified;
 use biscuit_hash::xx_hash;
 use tree_sitter::Parser;
 
@@ -11,11 +12,29 @@ use crate::file::query::{SymbolQuery, SymbolQueryResult};
 use crate::file::tree_file::TreeFile;
 use crate::shared::ProgrammingLanguage;
 
+/// The one path every spelling of an existing file analyzes under: absolute,
+/// with `.`/`..` and every symlink resolved, and on Windows in its legacy
+/// (non-`\\?\`) spelling.
+///
+/// A symlink and its target therefore share one identity. A path that cannot
+/// be resolved (it does not exist, or a component is unreadable) falls back
+/// to its absolute spelling against the working directory, unresolved.
+/// `docs/cache-design.md#file-identity` records the policy.
+pub fn file_identity(path: &Path) -> PathBuf {
+    canonicalize_simplified(path)
+        .or_else(|_| std::path::absolute(path))
+        .unwrap_or_else(|_| path.to_path_buf())
+}
+
 /// A file's text, language and content hash, read once.
 ///
 /// [`hash`](Self::hash) describes exactly the text [`parse`](Self::parse)
 /// parses: the file is never read again, so an edit made after
 /// [`read`](Self::read) cannot be analyzed under the earlier hash.
+///
+/// [`path`](Self::path) is the file's [`file_identity`], not the spelling it
+/// was read through, so records, IDs and cache entries are the same for
+/// every spelling of one file.
 #[derive(Debug, Clone)]
 pub struct SourceFile {
     path: PathBuf,
@@ -28,13 +47,13 @@ pub struct SourceFile {
 }
 
 impl SourceFile {
-    /// Reads `path` and detects its language from the path.
+    /// Reads `path` and detects its language from its [`file_identity`].
     ///
     /// ## Errors
     ///
     /// Returns [`TreeHuggerError::Io`] when the file cannot be read or is not
     /// UTF-8, and [`TreeHuggerError::UnsupportedLanguage`] when no language
-    /// matches the path.
+    /// matches the path. Both name `path` as given.
     pub fn read<P: AsRef<Path>>(path: P) -> Result<Self, TreeHuggerError> {
         Self::read_with_language(path, None)
     }
@@ -48,16 +67,22 @@ impl SourceFile {
         path: P,
         language: Option<ProgrammingLanguage>,
     ) -> Result<Self, TreeHuggerError> {
-        let path = path.as_ref().to_path_buf();
+        let supplied = path.as_ref();
         let forced_language = language.is_some();
-        let source = std::fs::read_to_string(&path).map_err(|source| TreeHuggerError::Io {
-            path: path.clone(),
+        let source = std::fs::read_to_string(supplied).map_err(|source| TreeHuggerError::Io {
+            path: supplied.to_path_buf(),
             source,
         })?;
+        // Resolved after the read so a missing file keeps its I/O error; the
+        // bytes already read are the ones hashed and parsed.
+        let path = file_identity(supplied);
         let language = match language {
             Some(language) => language,
-            None => ProgrammingLanguage::from_path(&path)
-                .ok_or_else(|| TreeHuggerError::UnsupportedLanguage { path: path.clone() })?,
+            None => ProgrammingLanguage::from_path(&path).ok_or_else(|| {
+                TreeHuggerError::UnsupportedLanguage {
+                    path: supplied.to_path_buf(),
+                }
+            })?,
         };
         let hash = format!("{:x}", xx_hash(&source));
 

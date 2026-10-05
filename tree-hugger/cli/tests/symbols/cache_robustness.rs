@@ -9,7 +9,9 @@
 //!
 //! The accepted record shapes are the schema's own defaults (optional values,
 //! default empty collections, an empty declaration text); no entry-level
-//! field has a default. See `docs/cache-design.md`.
+//! field has a default. A `schema_version`, on the entry or on a record, is
+//! served only when it is exactly the current version. See
+//! `docs/cache-design.md`.
 
 use std::path::Path;
 
@@ -41,6 +43,10 @@ enum Shape {
     Empty,
     DuplicateKey,
     TrailingInvalid,
+    /// A well-formed version whose major differs from the current one.
+    IncompatibleMajor,
+    /// A well-formed version with the current major and another minor.
+    IncompatibleMinor,
 }
 
 const SHAPES: [Shape; 9] = [
@@ -54,6 +60,10 @@ const SHAPES: [Shape; 9] = [
     Shape::DuplicateKey,
     Shape::TrailingInvalid,
 ];
+
+/// Extra shapes for a `schema_version` column. The cache serves only the
+/// current version, exactly, so every one of these cells is rejected.
+const VERSION_SHAPES: [Shape; 2] = [Shape::IncompatibleMajor, Shape::IncompatibleMinor];
 
 /// `Served(value)`: the entry is read and the field's public value is `value`.
 /// `ServedEmpty`: the entry is read and lists no symbols (so no sentinel).
@@ -325,6 +335,15 @@ fn columns() -> Vec<Column> {
             public: |out| record(out, FIELD)["kind_data"]["data"]["is_static"].clone(),
             outcomes: [S(json!(true)), R, R, R, R, R, R, R, R],
         },
+        Column {
+            name: "record schema_version",
+            target: Target::Record(METHOD),
+            path: &["schema_version"],
+            control: None,
+            empty: None,
+            public: |out| record(out, METHOD)["schema_version"].clone(),
+            outcomes: [S(json!({ "major": 4, "minor": 0 })), R, R, R, R, R, R, R, R],
+        },
         // Entry-level fields: none has a default; only an empty record
         // list under valid coverage is a servable shape (a file with no
         // records of the covered kinds).
@@ -335,6 +354,14 @@ fn columns() -> Vec<Column> {
         entry_column("source_hash", None, [S(json!(true)), R, R, R, R, R, R, R, R]),
         entry_column("diagnostics_fingerprint", None, [S(json!(true)), R, R, R, R, R, R, R, R]),
         entry_column("records", None, [S(json!(true)), R, R, R, R, R, E, R, R]),
+        // `""` names another file or no language, so the entry is for other
+        // inputs.
+        entry_column("file", None, [S(json!(true)), R, R, R, R, R, R, R, R]),
+        entry_column("language", None, [S(json!(true)), R, R, R, R, R, R, R, R]),
+        // An empty list is a file with none of them; elements are records.
+        entry_column("imports", None, [S(json!(true)), R, R, R, R, R, S(json!(true)), R, R]),
+        entry_column("exports", None, [S(json!(true)), R, R, R, R, R, S(json!(true)), R, R]),
+        entry_column("diagnostics", None, [S(json!(true)), R, R, R, R, R, S(json!(true)), R, R]),
     ]
 }
 
@@ -352,6 +379,11 @@ fn entry_column(name: &'static str, empty: Option<Value>, outcomes: [Outcome; 9]
             "source_hash" => &["source_hash"],
             "diagnostics_fingerprint" => &["diagnostics_fingerprint"],
             "records" => &["records"],
+            "file" => &["file"],
+            "language" => &["language"],
+            "imports" => &["imports"],
+            "exports" => &["exports"],
+            "diagnostics" => &["diagnostics"],
             other => panic!("no entry column {other}"),
         },
         control: None,
@@ -417,14 +449,29 @@ fn edited_entry(base: &Value, column: &Column, shape: Shape, value: &Value) -> S
         }
         Shape::Null => parent[key] = Value::Null,
         Shape::WrongType => parent[key] = json!(123),
-        Shape::OneWrongElement => {
-            let mut items = elements;
-            items.push(json!(123));
-            parent[key] = Value::Array(items);
-        }
-        Shape::EveryElementWrong => {
-            parent[key] = Value::Array(vec![json!(123); elements.len().max(1)]);
-        }
+        // An object's elements are its members: one, or every, member gets
+        // a value of the wrong type.
+        Shape::OneWrongElement => match value {
+            Value::Object(members) => {
+                let mut members = members.clone();
+                let last = members.keys().next_back().expect("a member").clone();
+                members.insert(last, json!("bad"));
+                parent[key] = Value::Object(members);
+            }
+            _ => {
+                let mut items = elements;
+                items.push(json!(123));
+                parent[key] = Value::Array(items);
+            }
+        },
+        Shape::EveryElementWrong => match value {
+            Value::Object(members) => {
+                parent[key] = members.keys().map(|member| (member.clone(), json!("bad"))).collect();
+            }
+            _ => parent[key] = Value::Array(vec![json!(123); elements.len().max(1)]),
+        },
+        Shape::IncompatibleMajor => parent[key] = json!({ "major": 3, "minor": 0 }),
+        Shape::IncompatibleMinor => parent[key] = json!({ "major": 4, "minor": 1 }),
         Shape::Empty => {
             parent[key] = match (&column.empty, value) {
                 (Some(empty), _) => empty.clone(),
@@ -519,7 +566,16 @@ fn check_column(
     std::fs::create_dir_all(entry.parent().expect("entry parent")).expect("create shard");
     let (base, value) = column_base(original, column);
     let mut failures = Vec::new();
-    for (shape, outcome) in SHAPES.iter().zip(&column.outcomes) {
+    let version_cells = if column.path == ["schema_version"] {
+        &VERSION_SHAPES[..]
+    } else {
+        &[]
+    };
+    let cells = SHAPES
+        .iter()
+        .zip(&column.outcomes)
+        .chain(version_cells.iter().zip(std::iter::repeat(&Outcome::Rejected)));
+    for (shape, outcome) in cells {
         std::fs::write(&entry, edited_entry(&base, column, *shape, &value))
             .expect("write cache entry");
         let output = json_of(&stdout_of(

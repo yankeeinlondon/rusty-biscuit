@@ -5,6 +5,8 @@ use std::collections::HashMap;
 
 use tree_hugger::{FieldData, Modifier, SymbolKindData, SymbolKindV2, SymbolRecord};
 
+use crate::order::{SortOrder, sort_file_records};
+
 /// The kinds `classes` summarizes.
 pub(crate) const CONTAINER_KINDS: [SymbolKindV2; 4] = [
     SymbolKindV2::Class,
@@ -46,7 +48,7 @@ impl ClassSummary {
             .chain(&self.instance_methods)
             .cloned()
             .collect();
-        members.sort_by_key(|member| member.source.declaration_span.start_byte);
+        sort_file_records(&mut members, "", SortOrder::File);
         members
     }
 }
@@ -86,6 +88,11 @@ pub(crate) fn summarize(records: &[SymbolRecord], filter: MemberFilter) -> Vec<C
                 _ => (Vec::new(), Vec::new()),
             };
 
+        // Members keep source order whatever `--sort` says, with the shared
+        // tie-breakers rather than the order containment linked them in.
+        sort_file_records(&mut static_methods, "", SortOrder::File);
+        sort_file_records(&mut instance_methods, "", SortOrder::File);
+
         if filter.static_only {
             instance_methods.clear();
             instance_fields.clear();
@@ -112,4 +119,45 @@ fn is_static(record: &SymbolRecord) -> bool {
         .modifiers
         .iter()
         .any(|modifier| matches!(modifier, Modifier::Static))
+}
+
+#[cfg(test)]
+mod tests {
+    use tree_hugger::{Capability, SourceFile, SymbolQuery};
+
+    use super::*;
+
+    /// Containment links members in extraction order; the sections and the
+    /// JSON members list them by source position instead.
+    #[test]
+    fn members_are_listed_in_source_order_not_link_order() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("Shapes.java");
+        std::fs::write(
+            &path,
+            "class Shapes {\n  void beta() {}\n  static void alpha() {}\n  void gamma() {}\n  static void delta() {}\n}\n",
+        )
+        .expect("write");
+        let query = SymbolQuery::new()
+            .kinds(CONTAINER_KINDS.into_iter().chain(MEMBER_KINDS))
+            .capabilities([Capability::Containment]);
+        let mut records = SourceFile::read(&path).expect("read").query(&query).expect("query").index.symbols;
+        let container = records
+            .iter_mut()
+            .find(|record| record.kind == SymbolKindV2::Class)
+            .expect("the class");
+        assert_eq!(container.relations.members.len(), 4, "four linked members");
+        container.relations.members.reverse();
+
+        let summaries = summarize(&records, MemberFilter::default());
+        let names = |members: &[SymbolRecord]| -> Vec<String> {
+            members.iter().map(|member| member.identity.name.clone()).collect()
+        };
+        assert_eq!(names(&summaries[0].static_methods), ["alpha", "delta"]);
+        assert_eq!(names(&summaries[0].instance_methods), ["beta", "gamma"]);
+        assert_eq!(
+            names(&summaries[0].displayed_members()),
+            ["beta", "alpha", "gamma", "delta"]
+        );
+    }
 }

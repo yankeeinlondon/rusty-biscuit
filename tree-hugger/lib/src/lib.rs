@@ -29,7 +29,7 @@ pub use error::TreeHuggerError;
 pub use analysis::counters::{WorkCounters, work_counters};
 pub use file::EXTRACTOR_REVISION;
 pub use file::query::{Capability, SymbolQuery, SymbolQueryResult};
-pub use file::source_file::SourceFile;
+pub use file::source_file::{SourceFile, file_identity};
 pub use file::tree_file::TreeFile;
 pub use ignore_directives::IgnoreDirectives;
 pub use package::tree_package::{

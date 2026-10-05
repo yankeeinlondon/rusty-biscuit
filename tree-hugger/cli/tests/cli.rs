@@ -1006,8 +1006,8 @@ fn test_functions_prelude_from_package_area_root_discovers_child_package_prelude
     .unwrap();
 
     // `cli` child: scanned as a second package but exports no prelude, so it
-    // contributes no symbols. This keeps the multi-package code path live while
-    // proving single-package output is not split with per-package headings.
+    // contributes no symbols. The scan spans two packages, so each is a
+    // section, `cli`'s with `(no symbols)`.
     std::fs::create_dir_all(root.join("cli/src")).unwrap();
     std::fs::write(
         root.join("cli/Cargo.toml"),
@@ -1023,18 +1023,15 @@ fn test_functions_prelude_from_package_area_root_discovers_child_package_prelude
     let mut cmd = hug_cmd();
     cmd.current_dir(root)
         .args(["functions", "--prelude", "--plain"])
-        // A single child package supplies the prelude symbols, so output must
-        // not be split into per-package sections.
         .assert()
         .success()
-        .stdout(predicate::str::contains("\n\nlib\n\n").not())
-        .stdout(predicate::str::contains("\n\ncli\n\n").not())
-        // Discovered through `lib/`'s prelude.
-        .stdout(predicate::str::contains("parse_width_spec"))
-        // Not prelude-exported, so excluded.
-        .stdout(predicate::str::contains("not_in_prelude").not())
-        .stdout(predicate::str::contains("run_cli").not())
-        .stdout(predicate::str::contains("(no symbols)").not());
+        // `parse_width_spec` is discovered through `lib/`'s prelude;
+        // `not_in_prelude` and `run_cli` are not prelude-exported.
+        .stdout(
+            "\ncli\n\n(no symbols)\n\n\
+             \nlib\n\n  - public function parse_width_spec(spec: &str) -> usize \
+             lib/src/components/width.rs:1:1\n\n",
+        );
 }
 
 #[test]

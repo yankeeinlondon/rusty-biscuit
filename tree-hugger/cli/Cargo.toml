@@ -11,7 +11,9 @@ path = "src/main.rs"
 terminal-tests = ["dep:biscuit-test-harness", "dep:test-toolkit"]
 
 [dependencies]
-biscuit-file = { path = "../../biscuit-file/lib", default-features = false }
+biscuit-file = { path = "../../biscuit-file/lib", default-features = false, features = [
+    "file-reference",
+] }
 biscuit-terminal = { path = "../../biscuit-terminal/lib" }
 clap = { version = "4.5.54", features = ["derive", "wrap_help"] }
 clap_complete = { version = "4.6", features = ["unstable-dynamic"] }
@@ -35,6 +37,10 @@ tempfile = "3.15"
 
 [[test]]
 name = "level2_god_files"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "level2_declarations"
 required-features = ["terminal-tests"]
 
 # CI policy: tree-hugger-cli owns the area's L2 (real-terminal) tier tests.

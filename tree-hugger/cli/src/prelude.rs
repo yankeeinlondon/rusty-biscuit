@@ -11,8 +11,8 @@ use std::path::{Path, PathBuf};
 
 use tree_hugger::{
     CodeRange, ImportRecord, ProgrammingLanguage, SymbolInfo, SymbolKind, SymbolKindData,
-    SymbolQuery, SymbolRecord, TextSpan, TreeHuggerError, has_package_manifest, stable_symbol_key,
-    symbol_id_from_stable_key,
+    SymbolQuery, SymbolRecord, TextSpan, TreeHuggerError, file_identity, has_package_manifest,
+    stable_symbol_key, symbol_id_from_stable_key,
 };
 
 use crate::scan::{Analyzed, Analyzer};
@@ -53,6 +53,9 @@ pub(crate) fn resolve_prelude_symbols(
     let mut exports_by_file: HashMap<PathBuf, Vec<SymbolRecord>> = HashMap::new();
 
     for candidate in discover_prelude_files(root_dir)? {
+        // Keyed by identity so the scan finds the analysis under whatever
+        // spelling it lists the file.
+        let candidate = file_identity(&candidate);
         let source = std::fs::read_to_string(&candidate).map_err(|source| TreeHuggerError::Io {
             path: candidate.clone(),
             source,
@@ -242,6 +245,7 @@ fn resolve_prelude_export(
         if !candidate.is_file() {
             continue;
         }
+        let candidate = file_identity(&candidate);
 
         // Exported declarations first, as the module's public surface; a
         // module with none falls back to every declaration.

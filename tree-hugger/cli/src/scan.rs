@@ -2,7 +2,7 @@
 //! chunks, with every result delivered in file order so output never depends
 //! on scheduling.
 
-use std::io::Write;
+use std::io::{self, Write};
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 
@@ -89,22 +89,36 @@ impl Analyzer {
 /// Runs `work` over `files` on rayon workers and hands each result to
 /// `deliver` in file order, stopping early when `deliver` breaks.
 ///
-/// Files are processed in chunks of four per worker thread, and a chunk is
-/// delivered before the next starts, so at most one chunk of results is held
-/// at a time.
+/// Files are processed in chunks of [`chunk_size`], and a chunk is delivered
+/// before the next starts, so at most one chunk of results is held at a
+/// time.
 pub(crate) fn in_file_order<T: Send, B>(
     files: &[PathBuf],
     work: impl Fn(&Path) -> T + Sync,
     mut deliver: impl FnMut(&Path, T) -> ControlFlow<B>,
 ) -> ControlFlow<B> {
-    let chunk_size = 4 * rayon::current_num_threads().max(1);
-    for chunk in files.chunks(chunk_size) {
+    for chunk in files.chunks(chunk_size()) {
         let results: Vec<T> = chunk.par_iter().map(|file| work(file)).collect();
         for (file, result) in chunk.iter().zip(results) {
             deliver(file, result)?;
         }
     }
     ControlFlow::Continue(())
+}
+
+/// Files per [`in_file_order`] chunk: four per worker thread.
+pub(crate) fn chunk_size() -> usize {
+    4 * rayon::current_num_threads().max(1)
+}
+
+/// Flushes `out` once the last file of an [`in_file_order`] chunk has been
+/// delivered, before the next chunk is analyzed.
+pub(crate) fn flush_at_chunk_end(out: &mut dyn Write, delivered: usize, chunk: usize, total: usize) -> io::Result<()> {
+    if delivered.is_multiple_of(chunk) || delivered == total {
+        out.flush()
+    } else {
+        Ok(())
+    }
 }
 
 /// What the persistent cache did over a run, for `--verbose`.

@@ -11,15 +11,19 @@
 //!  "root_dir":"/repo","files":[{"file":"src/lib.rs", ...}],"errors":[]}
 //! ```
 
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::io::{self, Write};
-use std::path::{Path, PathBuf};
+use std::ops::Range;
+use std::path::{Component, Path, PathBuf};
 
-use biscuit_file::to_portable_string;
+use biscuit_file::{
+    PathIdentity, RelativeRoute, canonicalize_simplified, to_portable_string, try_portable_string,
+};
 use serde::Serialize;
 use tree_hugger::{
-    AnalysisPass, Capability, FileSymbolIndex, ProgrammingLanguage, SchemaVersion, SymbolRecord,
-    TreeHuggerError,
+    AnalysisPass, Capability, FileSymbolIndex, ProgrammingLanguage, SchemaVersion, SymbolKindV2,
+    SymbolRecord, TreeHuggerError,
 };
 
 /// Version of the envelope itself; the records inside carry `schema_version`.
@@ -94,8 +98,15 @@ pub(crate) fn error_kind(error: &TreeHuggerError) -> &'static str {
     }
 }
 
-/// `path` relative to `root`, `/`-separated. A relative `path` is taken
-/// from the working directory; a path outside `root` stays whole.
+/// `path` as a portable path relative to the scan root `root`: `src/lib.rs`
+/// beneath it, `../vendor/lib.rs` beside it. A relative `path` is taken from
+/// the working directory.
+///
+/// A path that does not lexically lie beneath `root` is compared again with
+/// both sides resolved through symlinks (the file's directory, not the file),
+/// so `/var/...` and `/private/var/...` spellings of one location agree. When
+/// no relative route exists (another Windows drive or share), the result is
+/// the file's absolute path in portable form, such as `D:/vendor/lib.rs`.
 pub(crate) fn portable_relative(path: &Path, root: &Path) -> String {
     let absolute = if path.is_absolute() {
         path.to_path_buf()
@@ -104,10 +115,42 @@ pub(crate) fn portable_relative(path: &Path, root: &Path) -> String {
             .map(|cwd| cwd.join(path))
             .unwrap_or_else(|_| path.to_path_buf())
     };
-    match absolute.strip_prefix(root) {
-        Ok(relative) => to_portable_string(relative),
-        Err(_) => to_portable_string(path),
+    // A `..` is only collapsed after resolution: lexically it would step out
+    // of a symlinked directory the wrong way.
+    let has_parent_hop = absolute.components().any(|part| part == Component::ParentDir);
+    if !has_parent_hop
+        && let Some(route) = PathIdentity::new(&absolute).relative_from(&PathIdentity::new(root))
+        && route.parent_hops() == 0
+    {
+        return route_text(&route);
     }
+    let resolved_root = canonicalize_simplified(root).unwrap_or_else(|_| root.to_path_buf());
+    let resolved = resolve_directory(&absolute);
+    match PathIdentity::new(&resolved).relative_from(&PathIdentity::new(&resolved_root)) {
+        Some(route) => route_text(&route),
+        // Resolution turns a share into a verbatim `\\?\UNC\...` path; keep
+        // the spelling the file was named by instead.
+        None => try_portable_string(&resolved).unwrap_or_else(|| to_portable_string(&absolute)),
+    }
+}
+
+/// `path` with its directory resolved through symlinks; the final name is
+/// kept as spelled. Unchanged when the directory cannot be resolved.
+fn resolve_directory(path: &Path) -> PathBuf {
+    match (path.parent(), path.file_name()) {
+        (Some(parent), Some(name)) => canonicalize_simplified(parent)
+            .map(|parent| parent.join(name))
+            .unwrap_or_else(|_| path.to_path_buf()),
+        _ => path.to_path_buf(),
+    }
+}
+
+/// `route` `/`-separated. A literal `..` name, possible only under a Windows
+/// `\\?\` prefix, would read as a hop; canonical paths never contain one.
+fn route_text(route: &RelativeRoute) -> String {
+    let hops = std::iter::repeat_n(Cow::Borrowed(".."), route.parent_hops());
+    let names = route.forward().iter().map(|name| name.to_string_lossy());
+    hops.chain(names).collect::<Vec<_>>().join("/")
 }
 
 /// Prepares a record for a default `--json` report: its paths made portable
@@ -131,21 +174,29 @@ pub(crate) fn relativize_index(index: &mut FileSymbolIndex, root: &Path) {
     }
 }
 
-/// Rewrites the record's file path, and the path segment of its stable key,
-/// scan-root-relative. The ID was derived from the key as analyzed and is
-/// left unchanged, so it still matches the cache and other runs over the
-/// same checkout.
+/// Rewrites the record's file path, and the file segment of its stable key,
+/// scan-root-relative. The two are projected separately because they can name
+/// different files: a resolved prelude alias is located at its target's
+/// declaration but keyed by the prelude file. The ID was derived from the key
+/// as analyzed and is left unchanged, so it still matches the cache and other
+/// runs over the same checkout.
 fn relativize_record(record: &mut SymbolRecord, root: &Path) {
-    let analyzed = record.source.file_path.to_string_lossy().replace('\\', "/");
-    let relative = portable_relative(&record.source.file_path, root);
-    let key_segment = format!("::{}::", analyzed.trim());
-    if let Some(at) = record.identity.stable_key.find(&key_segment) {
-        record
-            .identity
-            .stable_key
-            .replace_range(at..at + key_segment.len(), &format!("::{relative}::"));
+    if let Some(segment) = key_file_segment(&record.identity.stable_key, record.kind) {
+        let relative = portable_relative(Path::new(&record.identity.stable_key[segment.clone()]), root);
+        record.identity.stable_key.replace_range(segment, &relative);
     }
-    record.source.file_path = PathBuf::from(relative);
+    record.source.file_path = PathBuf::from(portable_relative(&record.source.file_path, root));
+}
+
+/// The byte range of the file in a stable key
+/// (`{language}::{file}::{kind}::{name}::{ordinal}`, see
+/// `tree_hugger::stable_symbol_key`), or `None` when `key` has another shape.
+/// The file ends at the first `::{kind}::` after the language, since a
+/// qualified name may itself contain `::`.
+fn key_file_segment(key: &str, kind: SymbolKindV2) -> Option<Range<usize>> {
+    let start = key.find("::")? + 2;
+    let end = start + key[start..].find(&format!("::{kind:?}::"))?;
+    (end > start).then_some(start..end)
 }
 
 /// A report being written to `out`.
@@ -175,11 +226,153 @@ impl<W: Write> JsonReport<W> {
         Ok(())
     }
 
+    /// Flushes once the last file of a scan chunk has been delivered, so a
+    /// failed write stops the scan before the next chunk; see
+    /// [`crate::scan::flush_at_chunk_end`].
+    pub(crate) fn flush_at_chunk_end(&mut self, delivered: usize, chunk: usize, total: usize) -> io::Result<()> {
+        crate::scan::flush_at_chunk_end(&mut self.out, delivered, chunk, total)
+    }
+
     /// Closes the entries array, writes `errors` and flushes.
     pub(crate) fn finish(mut self, errors: &[ReportError]) -> io::Result<()> {
         self.out.write_all(b"],\"errors\":")?;
         serde_json::to_writer(&mut self.out, errors)?;
         self.out.write_all(b"}\n")?;
         self.out.flush()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tree_hugger::{
+        CodeRange, SymbolInfo, SymbolKind, stable_symbol_key, symbol_id_from_stable_key,
+    };
+
+    /// A canonical directory holding `repo/` (the scan root) and `vendor/`.
+    fn layout() -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let base = canonicalize_simplified(dir.path()).expect("canonical temp dir");
+        std::fs::create_dir_all(base.join("repo/src")).expect("repo dir");
+        std::fs::create_dir_all(base.join("vendor")).expect("vendor dir");
+        (dir, base)
+    }
+
+    fn record_at(file: &Path, key_file: &Path) -> SymbolRecord {
+        let mut record = SymbolRecord::from(SymbolInfo {
+            name: "Alias".into(),
+            kind: SymbolKind::Enum,
+            range: CodeRange {
+                start_line: 1,
+                start_column: 0,
+                end_line: 1,
+                end_column: 1,
+                start_byte: 0,
+                end_byte: 1,
+            },
+            language: ProgrammingLanguage::Rust,
+            file: file.to_path_buf(),
+            container_name: None,
+            container_kind: None,
+            doc_comment: None,
+            visibility: None,
+            is_static: false,
+            is_static_storage: false,
+            signature: None,
+            type_metadata: None,
+        });
+        record.identity.stable_key = stable_symbol_key(
+            ProgrammingLanguage::Rust,
+            key_file,
+            record.kind,
+            "prelude-export::Alias",
+            0,
+        );
+        record.id = symbol_id_from_stable_key(&record.identity.stable_key);
+        record
+    }
+
+    #[test]
+    fn a_path_beneath_the_root_is_relative_to_it() {
+        let (_dir, base) = layout();
+        let root = base.join("repo");
+        assert_eq!(portable_relative(&root.join("src").join("lib.rs"), &root), "src/lib.rs");
+        assert_eq!(
+            portable_relative(&root.join("src").join("..").join("src").join("lib.rs"), &root),
+            "src/lib.rs",
+            "a `..` is resolved, not kept"
+        );
+    }
+
+    #[test]
+    fn a_path_beside_the_root_climbs_out_of_it() {
+        let (_dir, base) = layout();
+        let root = base.join("repo");
+        assert_eq!(portable_relative(&base.join("vendor").join("x.rs"), &root), "../vendor/x.rs");
+        assert_eq!(portable_relative(&base.join("x.rs"), &root), "../x.rs");
+        assert_eq!(
+            portable_relative(&root.join("..").join("vendor").join("x.rs"), &root),
+            "../vendor/x.rs"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_spellings_of_one_location_agree() {
+        let (_dir, base) = layout();
+        let root = base.join("repo");
+        std::os::unix::fs::symlink(&base, base.join("alias")).expect("symlink");
+        let alias = base.join("alias");
+        assert_eq!(portable_relative(&alias.join("repo/src/lib.rs"), &root), "src/lib.rs");
+        assert_eq!(portable_relative(&alias.join("vendor/x.rs"), &root), "../vendor/x.rs");
+        assert_eq!(
+            portable_relative(&base.join("vendor/x.rs"), &alias.join("repo")),
+            "../vendor/x.rs",
+            "a symlinked root resolves too"
+        );
+    }
+
+    /// With no relative route between them the file keeps its absolute path,
+    /// `/`-separated.
+    #[cfg(windows)]
+    #[test]
+    fn another_drive_keeps_its_absolute_path() {
+        let root = Path::new(r"C:\no-such-repo");
+        assert_eq!(portable_relative(Path::new(r"D:\no-such-vendor\x.rs"), root), "D:/no-such-vendor/x.rs");
+        assert_eq!(
+            portable_relative(Path::new(r"c:\no-such-repo\src\lib.rs"), root),
+            "src/lib.rs",
+            "drive letters compare without case"
+        );
+    }
+
+    #[test]
+    fn the_key_file_is_found_before_the_kind() {
+        let kind = SymbolKindV2::Function;
+        let key = "rust::/repo/src/lib.rs::Function::outer::inner::Function::0";
+        assert_eq!(&key[key_file_segment(key, kind).expect("segment")], "/repo/src/lib.rs");
+        let windows = "rust::C:/repo/src/lib.rs::Function::f::0";
+        assert_eq!(&windows[key_file_segment(windows, kind).expect("segment")], "C:/repo/src/lib.rs");
+        assert_eq!(key_file_segment("rust::/repo/src/lib.rs::Enum::f::0", kind), None, "another kind");
+        assert_eq!(key_file_segment("no separators", kind), None);
+    }
+
+    /// A prelude alias is located at its target but keyed by the prelude file:
+    /// each path is projected from its own file, and the ID is kept.
+    #[test]
+    fn record_and_key_paths_are_projected_from_their_own_files() {
+        let (_dir, base) = layout();
+        let root = base.join("repo");
+        let mut record = record_at(&root.join("src/alpha.rs"), &root.join("src/prelude.rs"));
+        let id = record.id.clone();
+        relativize_record(&mut record, &root);
+        assert_eq!(record.source.file_path, Path::new("src/alpha.rs"));
+        assert_eq!(record.identity.stable_key, "rust::src/prelude.rs::Enum::prelude-export::Alias::0");
+        assert_eq!(record.id, id);
+
+        let mut external = record_at(&base.join("vendor/x.rs"), &base.join("vendor/x.rs"));
+        relativize_record(&mut external, &root);
+        assert_eq!(external.source.file_path, Path::new("../vendor/x.rs"));
+        assert_eq!(external.identity.stable_key, "rust::../vendor/x.rs::Enum::prelude-export::Alias::0");
     }
 }

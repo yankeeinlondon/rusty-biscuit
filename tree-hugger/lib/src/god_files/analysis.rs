@@ -9,6 +9,7 @@ use biscuit_file::FileReference;
 use rayon::prelude::*;
 use tree_sitter::Node;
 
+use crate::file::source_file::file_identity;
 use crate::file::tree_file::TreeFile;
 use crate::scanner::collect_files;
 use crate::shared::{ProgrammingLanguage, SymbolKind, SymbolKindV2, SymbolRecord};
@@ -39,7 +40,8 @@ impl GodFiles {
     }
 
     /// All candidate god files (>= 400 *physical* lines), discovered by a
-    /// cheap parallel newline scan. Cached after first call.
+    /// cheap parallel newline scan, as file identities
+    /// ([`file_identity`]). Cached after first call.
     pub fn candidates(&self) -> &Vec<PathBuf> {
         self.candidates
             .get_or_init(|| discover_candidates(&self.root))
@@ -51,7 +53,9 @@ impl GodFiles {
     pub fn analysis(&self) -> &Vec<GodAnalysis> {
         self.analysis.get_or_init(|| {
             let candidates = self.candidates().to_vec();
-            let root = self.root.clone();
+            // Candidates are file identities, so the root they are reported
+            // relative to must be one too.
+            let root = file_identity(&self.root);
 
             let mut analyses: Vec<GodAnalysis> = candidates
                 .into_par_iter()

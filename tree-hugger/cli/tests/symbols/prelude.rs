@@ -3,6 +3,7 @@
 //! the scan, and one parse per file across the prelude and scan phases.
 
 use serde_json::Value;
+use tree_hugger::file_identity;
 
 use crate::{Scratch, json_of, stdout_of};
 
@@ -67,6 +68,18 @@ fn prelude_exports_are_synthetic_records_at_their_declarations() {
     assert_eq!(alias["visibility"]["is_reexported"], true);
     assert!(alias["docs"]["raw_doc"].as_str().is_some_and(|doc| doc.contains("Enum exported through")));
     assert!(alias["kind_data"]["data"].is_null(), "the alias carries none of the target's own data");
+
+    // Located at the target, keyed by the prelude: both paths root-relative.
+    for name in ["ElevatedEnum", "VerboseType"] {
+        let alias = record(exports, name);
+        assert_eq!(alias["source"]["file_path"], "src/alpha.rs", "{name}");
+        let key = alias["identity"]["stable_key"].as_str().expect("stable_key");
+        let kind = alias["kind"].as_str().expect("kind");
+        assert!(
+            key.starts_with(&format!("rust::src/prelude.rs::{kind}::prelude-export::{name}::")),
+            "{name}: {key}"
+        );
+    }
 
     let ghost = record(exports, "Ghost");
     assert_eq!(ghost["kind"], "Unknown", "an unresolved re-export keeps an unknown kind");
@@ -133,4 +146,39 @@ fn prelude_and_scan_parse_each_file_once() {
     assert!(cold.contains("parsed 4 files"), "{cold}");
     let warm = stats(&["--verbose", "--json", "functions", "--prelude"]);
     assert!(warm.contains("parsed 0 files"), "a warm prelude run parses nothing: {warm}");
+}
+
+/// A forced-language explicit file is reused from the prelude phase under
+/// every spelling of it, for all four commands: the run parses the prelude
+/// and `alpha.rs` once each, and the report (IDs included) does not depend
+/// on the spelling. The canonical absolute spelling is the control.
+#[test]
+fn prelude_reuse_holds_for_every_spelling_of_an_explicit_file() {
+    let scratch = package();
+    let canonical = file_identity(&scratch.repo.path().join("src/alpha.rs"));
+    let as_given = scratch.repo.path().join("src").join("alpha.rs");
+    let spellings = [
+        "src/alpha.rs".to_string(),
+        "src/../src/alpha.rs".to_string(),
+        as_given.to_str().expect("utf-8 temp path").to_string(),
+        canonical.to_str().expect("utf-8 temp path").to_string(),
+    ];
+    for command in ["functions", "types", "symbols", "classes"] {
+        let mut reports = Vec::new();
+        for spelling in &spellings {
+            let args = ["--json", command, "--prelude", "--language", "rust", spelling.as_str(), "--no-cache", "--verbose"];
+            let output = scratch.hug(&args);
+            assert!(output.status.success(), "hug {args:?}: {}", String::from_utf8_lossy(&output.stderr));
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let line = stderr.lines().find(|line| line.starts_with("cache: ")).unwrap_or_else(|| panic!("stats line in {stderr}"));
+            // `symbols` also lists the prelude file, so it reuses two.
+            let reused = if command == "symbols" { 2 } else { 1 };
+            assert!(line.contains(&format!(", {reused} reused in this run; parsed 2 files")), "hug {args:?}: {line}");
+            reports.push(stdout_of(output, &args));
+        }
+        let control = reports.last().expect("the canonical control ran");
+        for (spelling, report) in spellings.iter().zip(&reports) {
+            assert_eq!(report, control, "hug {command} {spelling}: same report as the canonical spelling");
+        }
+    }
 }

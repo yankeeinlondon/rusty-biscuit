@@ -1,7 +1,8 @@
 //! Test 8: a persistent cache entry written under an earlier extractor
 //! fingerprint (the schema-2 literal key, or a schema-3 key at extractor
 //! revisions 1 to 4) is not served after the upgrade, and the entry written by the
-//! upgraded run is served on the next run. Works on the cache files directly,
+//! upgraded run is served on the next run; records of another schema version
+//! are recomputed even under the current key. Works on the cache files directly,
 //! with `TMPDIR` (`TMP`/`TEMP` on Windows) pointed at a test-owned directory,
 //! so a stale entry can be seeded under its historical key.
 
@@ -62,14 +63,12 @@ pub(crate) fn rename_record(snapshot: &mut Value, from: &str, to: &str) {
     record["identity"]["display_name"] = Value::from(to);
 }
 
-/// An entry whose records are recognizably stale: record schema `2.0`, every
-/// access Unknown, no `static` modifier, and one record renamed. The entry's
-/// own `schema_version` stays current, so the payload stays servable.
+/// An entry whose records are recognizably stale: every access Unknown, no
+/// `static` modifier, and one record renamed. The entry and its records keep
+/// the current `schema_version`, so the payload stays servable.
 fn stale_snapshot(current: &Value) -> Value {
     let mut snapshot = current.clone();
-    let old_schema = serde_json::json!({ "major": 2, "minor": 0 });
     for record in snapshot["records"].as_array_mut().expect("entry records") {
-        record["schema_version"] = old_schema.clone();
         record["visibility"]["level"] = Value::from("Unknown");
         if let Some(object) = record.as_object_mut() {
             object.remove("modifiers");
@@ -155,6 +154,26 @@ fn warm_entry_from_the_previous_extractor_is_not_served_after_the_upgrade() {
         "control: a stale payload under the current key must be served (names: {:?})",
         names(&served)
     );
+
+    // The same payload with records of an earlier or later schema is not
+    // served even under the current key: the records are recomputed.
+    for version in [
+        serde_json::json!({ "major": 2, "minor": 0 }),
+        serde_json::json!({ "major": 3, "minor": 0 }),
+        serde_json::json!({ "major": 4, "minor": 1 }),
+    ] {
+        let mut incompatible = stale.clone();
+        for record in incompatible["records"].as_array_mut().expect("entry records") {
+            record["schema_version"] = version.clone();
+        }
+        let temp = TempDir::new().expect("incompatible temp");
+        write_json(&entry_path(&temp.path().join(&relative_project), &new_key), &incompatible);
+        let recomputed = json_of(&stdout_of(scratch.hug_with_temp(temp.path(), &ARGS), &ARGS));
+        assert_eq!(
+            recomputed, fresh,
+            "records of schema {version} under the current key must be recomputed"
+        );
+    }
 
     // Seed the old-format entry where a pre-upgrade `hug` would have left it.
     let project_dir = scratch.temp.path().join(&relative_project);

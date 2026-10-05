@@ -9,18 +9,18 @@ use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 
 use tree_hugger::{
-    Capability, ProgrammingLanguage, SymbolKindV2, SymbolQuery, SymbolQueryResult, SymbolRecord,
+    Capability, SymbolKindV2, SymbolQuery, SymbolQueryResult, SymbolRecord,
     TreeHuggerError,
 };
 
 use crate::classes::{self, ClassSummary, MemberFilter};
 use crate::order::{compare, portable_path_cmp, sort_file_records};
 use crate::prelude::{PreludeFilter, resolve_prelude_symbols};
-use crate::render::{FileListing, ListingOptions, Renderer};
+use crate::render::{FileListing, ListingOptions, ListingStream, Renderer, listing_order};
 use crate::report::{
     Entries, FileEntry, JsonReport, ReportError, portable_relative, relativize_index, trim_record,
 };
-use crate::scan::{Analyzed, Analyzer, CacheStats, CacheUse, in_file_order};
+use crate::scan::{Analyzed, Analyzer, CacheStats, CacheUse, chunk_size, flush_at_chunk_end, in_file_order};
 use crate::scanner::matches_symbol_filters;
 
 /// Kinds `functions` lists.
@@ -155,12 +155,14 @@ pub(crate) fn run(scan: DeclarationScan, analyzer: &Analyzer) -> Result<i32, Tre
         None
     };
 
-    files.sort_by(|left, right| {
-        portable_path_cmp(
-            &portable_relative(left, &scan.scan_root),
-            &portable_relative(right, &scan.scan_root),
-        )
-    });
+    // Projected once per file: a path outside the scan root is resolved
+    // through the filesystem.
+    let mut keyed: Vec<(String, PathBuf)> = files
+        .into_iter()
+        .map(|file| (portable_relative(&file, &scan.scan_root), file))
+        .collect();
+    keyed.sort_by(|(left, _), (right, _)| portable_path_cmp(left, right));
+    let mut files: Vec<PathBuf> = keyed.into_iter().map(|(_, file)| file).collect();
     files.dedup();
 
     let work = |file: &Path| -> FileOutcome {
@@ -258,21 +260,22 @@ fn write_json(
     let root_dir = biscuit_file::to_portable_string(&scan.scan_root);
     let mut report = JsonReport::begin(&mut *out, &root_dir, entries)?;
 
+    let chunk = chunk_size();
+    let mut delivered = 0;
     let flow = in_file_order(files, work, |_, outcome| {
+        delivered += 1;
         let Some((display, prepared)) = settle(outcome, errors, stats, scan.verbose, stderr) else {
-            return ControlFlow::Continue(());
+            return as_flow(report.flush_at_chunk_end(delivered, chunk, files.len()));
         };
         let written = if full {
             let mut index = prepared.result.index;
             relativize_index(&mut index, &scan.scan_root);
+            sort_file_records(&mut index.symbols, &display, scan.listing.sort);
             report.entry(&index)
         } else {
             json_file_entry(scan, &mut report, &display, prepared)
         };
-        match written {
-            Ok(()) => ControlFlow::Continue(()),
-            Err(error) => ControlFlow::Break(error),
-        }
+        as_flow(written.and_then(|()| report.flush_at_chunk_end(delivered, chunk, files.len())))
     });
     if let ControlFlow::Break(error) = flow {
         return Err(error);
@@ -322,6 +325,8 @@ fn json_file_entry(
     })
 }
 
+/// Writes the terminal report as results arrive, flushing after each chunk,
+/// so a closed or failing stdout stops the scan before the next chunk.
 #[allow(clippy::too_many_arguments)]
 fn write_terminal(
     scan: &DeclarationScan,
@@ -333,41 +338,77 @@ fn write_terminal(
     stats: &mut CacheStats,
     stderr: &mut dyn Write,
 ) -> io::Result<()> {
-    let mut listings: Vec<FileListing> = Vec::new();
-    let mut class_files: Vec<(PathBuf, ProgrammingLanguage, Vec<ClassSummary>)> = Vec::new();
-    let _ = in_file_order::<_, ()>(files, work, |file, outcome| {
+    let chunk = chunk_size();
+    let mut delivered = 0;
+    if matches!(scan.command, Declarations::Classes { .. }) {
+        let flow = in_file_order(files, work, |file, outcome| {
+            delivered += 1;
+            let mut written = Ok(());
+            if let Some((_, prepared)) = settle(outcome, errors, stats, scan.verbose, stderr) {
+                written = write_classes(scan, renderer, &mut *out, file, prepared);
+            }
+            as_flow(written.and_then(|()| flush_at_chunk_end(&mut *out, delivered, chunk, files.len())))
+        });
+        if let ControlFlow::Break(error) = flow {
+            return Err(error);
+        }
+        return out.flush();
+    }
+
+    // Files are analyzed in listing order (package, directory, path), which
+    // can differ from the scan order, so each unit is complete on arrival.
+    let (ordered, packages) = listing_order(renderer, files, &scan.git_root, scan.listing);
+    let (package_roots, ordered): (Vec<PathBuf>, Vec<PathBuf>) = ordered.into_iter().unzip();
+    let per_package = scan.membership == Membership::Prelude;
+    let mut stream = ListingStream::new(renderer, scan.listing, packages, per_package);
+    let flow = in_file_order(&ordered, work, |_, outcome| {
+        let package_root = &package_roots[delivered];
+        delivered += 1;
+        let mut written = Ok(());
         if let Some((_, prepared)) = settle(outcome, errors, stats, scan.verbose, stderr) {
             let index = prepared.result.index;
-            match prepared.classes {
-                Some(summaries) if !summaries.is_empty() => {
-                    class_files.push((file.to_path_buf(), index.language, summaries));
-                }
-                Some(_) => {}
-                None => listings.push(FileListing {
-                    file: index.file,
-                    records: index.symbols,
-                }),
-            }
+            let listing = FileListing {
+                file: index.file,
+                records: index.symbols,
+            };
+            written = stream.push(&mut *out, package_root, listing);
         }
-        ControlFlow::Continue(())
+        as_flow(written.and_then(|()| flush_at_chunk_end(&mut *out, delivered, chunk, ordered.len())))
     });
-
-    if matches!(scan.command, Declarations::Classes { .. }) {
-        for (file, language, mut summaries) in class_files {
-            let display = renderer.display(&file);
-            summaries.sort_by(|left, right| {
-                compare(
-                    scan.listing.sort,
-                    (&display, &left.container),
-                    (&display, &right.container),
-                )
-            });
-            renderer.classes(out, &file, language, &summaries)?;
-        }
-    } else {
-        renderer.listing(out, &listings, &scan.git_root, scan.listing)?;
+    if let ControlFlow::Break(error) = flow {
+        return Err(error);
     }
+    stream.finish(out)?;
     out.flush()
+}
+
+fn as_flow(result: io::Result<()>) -> ControlFlow<io::Error> {
+    match result {
+        Ok(()) => ControlFlow::Continue(()),
+        Err(error) => ControlFlow::Break(error),
+    }
+}
+
+/// Writes one file's `classes` report; a file without containers has none.
+fn write_classes(
+    scan: &DeclarationScan,
+    renderer: &Renderer,
+    out: &mut dyn Write,
+    file: &Path,
+    prepared: Prepared,
+) -> io::Result<()> {
+    let Some(mut summaries) = prepared.classes.filter(|summaries| !summaries.is_empty()) else {
+        return Ok(());
+    };
+    let display = renderer.display(file);
+    summaries.sort_by(|left, right| {
+        compare(
+            scan.listing.sort,
+            (&display, &left.container),
+            (&display, &right.container),
+        )
+    });
+    renderer.classes(out, file, prepared.result.index.language, &summaries)
 }
 
 /// Applies membership (`--exported`, `--prelude`), then the name filters,

@@ -5,7 +5,9 @@
 //! concurrent `hug` processes sharing one entry and `--verbose` cache
 //! reporting, plus the declaration reports: the `hug symbols` goldens over
 //! the 16-language `multi/` fixture tree, the JSON envelope and its errors,
-//! `--sort` and grouping, `classes` and `--prelude`.
+//! `--sort` and grouping, `classes`, `--prelude`, and equivalent spellings
+//! of one file sharing its cache entry and listing; and the marker-scoped
+//! report reader the `level2_*` terminal tests share.
 
 mod cache_lookup;
 mod cache_robustness;
@@ -15,7 +17,15 @@ mod golden;
 mod order;
 mod prelude;
 mod report;
+mod spelling;
+mod terminal_scope;
 mod wiring;
+
+// The `level2_*` binaries' report reader; `terminal_scope` tests it here,
+// where no terminal is needed. Parts it does not exercise go unused.
+#[allow(dead_code)]
+#[path = "../support/terminal_report.rs"]
+mod terminal_report;
 
 use std::path::{Path, PathBuf};
 use std::process::Output;

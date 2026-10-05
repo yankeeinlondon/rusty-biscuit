@@ -21,7 +21,7 @@ use tree_hugger::{
     Capability, CodeRange, Diagnostic, DiagnosticKind, DiagnosticSeverity, FileSummary,
     FileSymbolIndex, ImportSymbol, LintDiagnostic, ProgrammingLanguage, RuleRegistry,
     RuleSelector, SchemaVersion, SourceContext, SymbolQuery, SyntaxDiagnostic, TreeHuggerError,
-    find_git_root, find_package_root,
+    file_identity, find_git_root, find_package_root,
 };
 use tree_hugger::god_files::{GodAnalysis, GodFiles, RefactorHint, RiskBand, SymbolBlock};
 use url::Url;
@@ -997,11 +997,17 @@ fn reject_json_full_misuse(command: &Command, scan_filters: &ScanFilters) {
     }
 }
 
+/// The working directory as a [`file_identity`], so the scan, git and
+/// package roots are spelled like every analyzed file (Windows reports the
+/// working directory in whatever spelling it was given, such as an 8.3 short
+/// name, while file identities use long names).
 fn current_dir() -> Result<PathBuf, TreeHuggerError> {
-    std::env::current_dir().map_err(|source| TreeHuggerError::Io {
-        path: PathBuf::from("."),
-        source,
-    })
+    std::env::current_dir()
+        .map(|dir| file_identity(&dir))
+        .map_err(|source| TreeHuggerError::Io {
+            path: PathBuf::from("."),
+            source,
+        })
 }
 
 /// Directory names skipped when completing filter paths (build/dep output).

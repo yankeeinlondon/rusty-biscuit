@@ -209,8 +209,8 @@ pub enum CacheMiss {
     /// a duplicate key, or a field absent, null or of the wrong shape. The
     /// text is the decoder's, naming the field.
     Malformed(String),
-    /// A well-formed entry made for other inputs (schema, fingerprint, file,
-    /// language or source hash).
+    /// A well-formed entry made for other inputs (the entry's or any record's
+    /// schema version, fingerprint, file, language or source hash).
     Mismatched(&'static str),
     /// A well-formed entry whose contents do not match its recorded coverage.
     Inconsistent(&'static str),
@@ -475,8 +475,8 @@ impl SymbolCache {
     }
 }
 
-/// The file as the entry names it: the path exactly as analyzed, since the
-/// records repeat it.
+/// The file as the entry names it: the path exactly as analyzed (the file's
+/// identity, see [`crate::file_identity`]), since the records repeat it.
 fn entry_file(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
@@ -552,6 +552,16 @@ impl StoredEntry {
     fn validate(&self, source: &SourceFile, fingerprint: &str) -> Result<(), CacheMiss> {
         if self.schema_version != SchemaVersion::V4_0 {
             return Err(CacheMiss::Mismatched("schema version"));
+        }
+        // Records are served as they are stored, inside a current-version
+        // index, so each must be exactly the current version too; the cache
+        // never translates between versions, minor ones included.
+        if self
+            .records
+            .iter()
+            .any(|record| record.schema_version != SchemaVersion::V4_0)
+        {
+            return Err(CacheMiss::Mismatched("record schema version"));
         }
         if self.fingerprint != fingerprint {
             return Err(CacheMiss::Mismatched("fingerprint"));

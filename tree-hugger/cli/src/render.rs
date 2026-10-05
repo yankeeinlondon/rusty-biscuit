@@ -7,7 +7,7 @@
 //! terminal width is pinned far beyond any line (wrapping arrives with the
 //! later report work).
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
@@ -82,44 +82,7 @@ impl Renderer {
         }
     }
 
-    /// The `functions`, `types` and `symbols` listing: one flat list (or file
-    /// and directory groups), split into packages when more than one package
-    /// has declarations.
-    pub(crate) fn listing(
-        &self,
-        out: &mut dyn Write,
-        files: &[FileListing],
-        git_root: &Path,
-        options: ListingOptions,
-    ) -> io::Result<()> {
-        let mut packages: BTreeMap<PathBuf, Vec<&FileListing>> = BTreeMap::new();
-        for listing in files {
-            let start = listing.file.parent().unwrap_or(listing.file.as_path());
-            packages
-                .entry(find_package_root(start, git_root))
-                .or_default()
-                .push(listing);
-        }
-        let packages_with_symbols = packages
-            .values()
-            .filter(|listings| listings.iter().any(|listing| !listing.records.is_empty()))
-            .count();
-
-        if packages.len() <= 1 || packages_with_symbols <= 1 {
-            let all: Vec<&FileListing> = files.iter().collect();
-            return self.package_listing(out, &all, options);
-        }
-        for (package_root, listings) in packages {
-            writeln!(out)?;
-            let heading = Prose::escape_text(&self.display(&package_root));
-            self.line(out, 0, &format!("<blue><b>{heading}</b></blue>"))?;
-            writeln!(out)?;
-            self.package_listing(out, &listings, options)?;
-            writeln!(out)?;
-        }
-        Ok(())
-    }
-
+    /// One package's listing, or one unit of it (see [`ListingStream`]).
     fn package_listing(
         &self,
         out: &mut dyn Write,
@@ -370,6 +333,193 @@ impl Renderer {
             writeln!(out, "{padding}{line}")?;
         }
         Ok(())
+    }
+}
+
+/// The `functions`, `types` and `symbols` listing, written as files arrive:
+/// one flat list (or file and directory groups), split into package sections
+/// when the scan's files span more than one package.
+///
+/// Files must arrive in [`listing_order`]. Each arriving file joins the
+/// current unit, and a unit is rendered as soon as a file of another unit
+/// arrives, so only the current unit is held:
+///
+/// - `--sort file` without groups, or `--group-by-file` alone: one file
+/// - `--group-by-module`: one directory
+/// - `--sort name|kind` without groups, or `--prelude`: one package (a
+///   prelude file lists records declared in other files)
+///
+/// Sections are decided from the package count before the first file is
+/// analyzed, never from declarations found later, so no layout decision
+/// holds output beyond the current unit.
+pub(crate) struct ListingStream<'r> {
+    renderer: &'r Renderer,
+    options: ListingOptions,
+    per_package: bool,
+    sections: bool,
+    current: Option<OpenPackage>,
+    /// Flat output only: whether any declaration was written.
+    wrote_any: bool,
+}
+
+struct OpenPackage {
+    root: PathBuf,
+    unit: Option<String>,
+    pending: Vec<FileListing>,
+    has_symbols: bool,
+}
+
+/// Orders `files` for [`ListingStream`] and pairs each with its package
+/// root: by package root, then (with `--group-by-module`) directory, then
+/// display path. Returns the ordered files and the number of packages.
+pub(crate) fn listing_order(
+    renderer: &Renderer,
+    files: &[PathBuf],
+    git_root: &Path,
+    options: ListingOptions,
+) -> (Vec<(PathBuf, PathBuf)>, usize) {
+    let mut keyed: Vec<(PathBuf, String, String, PathBuf)> = files
+        .iter()
+        .map(|file| {
+            let start = file.parent().unwrap_or(file.as_path());
+            let display = renderer.display(file);
+            let module = if options.group_by_module {
+                module_key(&display)
+            } else {
+                String::new()
+            };
+            (find_package_root(start, git_root), module, display, file.clone())
+        })
+        .collect();
+    keyed.sort_by(|left, right| {
+        left.0
+            .cmp(&right.0)
+            .then_with(|| portable_path_cmp(&left.1, &right.1))
+            .then_with(|| portable_path_cmp(&left.2, &right.2))
+    });
+    let mut packages = 0;
+    let mut previous: Option<&PathBuf> = None;
+    for (package, ..) in &keyed {
+        if previous != Some(package) {
+            packages += 1;
+            previous = Some(package);
+        }
+    }
+    let ordered = keyed.into_iter().map(|(package, _, _, file)| (package, file)).collect();
+    (ordered, packages)
+}
+
+impl<'r> ListingStream<'r> {
+    /// A stream over files from `packages` package roots, sectioned when
+    /// there are two or more. `per_package` holds each package whole
+    /// (required by `--prelude`).
+    pub(crate) fn new(renderer: &'r Renderer, options: ListingOptions, packages: usize, per_package: bool) -> Self {
+        let per_package =
+            per_package || (!options.group_by_file && !options.group_by_module && options.sort != SortOrder::File);
+        Self {
+            renderer,
+            options,
+            per_package,
+            sections: packages > 1,
+            current: None,
+            wrote_any: false,
+        }
+    }
+
+    /// Adds the next file's listing, writing whatever it completes.
+    pub(crate) fn push(&mut self, out: &mut dyn Write, package_root: &Path, listing: FileListing) -> io::Result<()> {
+        if self.current.as_ref().is_none_or(|open| open.root != package_root) {
+            self.close_package(out)?;
+            self.open_package(out, package_root.to_path_buf())?;
+        }
+        let unit = if self.per_package {
+            None
+        } else {
+            let display = self.renderer.display(&listing.file);
+            Some(if self.options.group_by_module {
+                module_key(&display)
+            } else {
+                display
+            })
+        };
+        if self.current.as_ref().is_some_and(|open| open.unit != unit) {
+            self.flush_unit(out)?;
+        }
+        let Some(open) = self.current.as_mut() else {
+            unreachable!("a package was opened above");
+        };
+        open.unit = unit;
+        open.has_symbols |= !listing.records.is_empty();
+        open.pending.push(listing);
+        Ok(())
+    }
+
+    /// Writes the last unit and the `(no symbols)` footer of a flat listing
+    /// that had no declarations.
+    pub(crate) fn finish(mut self, out: &mut dyn Write) -> io::Result<()> {
+        self.close_package(out)?;
+        if self.sections || self.wrote_any {
+            Ok(())
+        } else {
+            self.no_symbols(out)
+        }
+    }
+
+    fn open_package(&mut self, out: &mut dyn Write, root: PathBuf) -> io::Result<()> {
+        if self.sections {
+            self.section_heading(out, &root)?;
+        }
+        self.current = Some(OpenPackage {
+            root,
+            unit: None,
+            pending: Vec::new(),
+            has_symbols: false,
+        });
+        Ok(())
+    }
+
+    fn close_package(&mut self, out: &mut dyn Write) -> io::Result<()> {
+        self.flush_unit(out)?;
+        let Some(open) = self.current.take() else {
+            return Ok(());
+        };
+        if self.sections {
+            self.section_end(out, open.has_symbols)
+        } else {
+            self.wrote_any |= open.has_symbols;
+            Ok(())
+        }
+    }
+
+    /// Renders the current unit; a unit without declarations writes nothing.
+    fn flush_unit(&mut self, out: &mut dyn Write) -> io::Result<()> {
+        let Some(open) = self.current.as_mut() else {
+            return Ok(());
+        };
+        if open.pending.iter().any(|listing| !listing.records.is_empty()) {
+            let listings: Vec<&FileListing> = open.pending.iter().collect();
+            self.renderer.package_listing(out, &listings, self.options)?;
+        }
+        open.pending.clear();
+        Ok(())
+    }
+
+    fn section_heading(&self, out: &mut dyn Write, root: &Path) -> io::Result<()> {
+        writeln!(out)?;
+        let heading = Prose::escape_text(&self.renderer.display(root));
+        self.renderer.line(out, 0, &format!("<blue><b>{heading}</b></blue>"))?;
+        writeln!(out)
+    }
+
+    fn section_end(&self, out: &mut dyn Write, has_symbols: bool) -> io::Result<()> {
+        if !has_symbols {
+            self.no_symbols(out)?;
+        }
+        writeln!(out)
+    }
+
+    fn no_symbols(&self, out: &mut dyn Write) -> io::Result<()> {
+        self.renderer.line(out, 0, "<dim>(no symbols)</dim>")
     }
 }
 

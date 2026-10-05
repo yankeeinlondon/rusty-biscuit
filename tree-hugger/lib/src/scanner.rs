@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use ignore::WalkBuilder;
 use ignore::overrides::OverrideBuilder;
 
-use crate::{ProgrammingLanguage, TreeHuggerError};
+use crate::{ProgrammingLanguage, TreeHuggerError, file_identity};
 
 /// Directories that hold test *data* rather than compiled source. Diagnostics on
 /// these are meaningless (a fixture's unused import is the point), so a default
@@ -41,7 +41,9 @@ pub fn resolve_explicit_file(input: &str) -> Option<PathBuf> {
 ///   `None`, any supported programming language is eligible.
 ///
 /// Honors `.gitignore`, excludes fixture directories by default, and sorts the
-/// result deterministically.
+/// result deterministically. Every file is returned as its [`file_identity`],
+/// so a file named explicitly and also found by the walk, or named twice
+/// under different spellings, is listed once.
 pub fn collect_files(
     root: &Path,
     inputs: &[String],
@@ -130,6 +132,7 @@ pub fn collect_files(
         }
     }
 
+    let mut files: Vec<PathBuf> = files.iter().map(|file| file_identity(file)).collect();
     files.sort();
     files.dedup();
 
