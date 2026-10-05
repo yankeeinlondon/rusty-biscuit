@@ -109,7 +109,7 @@ via `skip_with_reason("<X>")` when it returns `false`. No `#[ignore]`.
 | Harness | `available()` requires |
 |---------|------------------------|
 | `TmuxHarness` | `tmux` on `$PATH`. Nothing else. |
-| `WezTermHarness` | `wezterm` on `$PATH` **and** `WEZTERM_UNIX_SOCKET` set. |
+| `WezTermHarness` | `wezterm` on `$PATH`, `WEZTERM_UNIX_SOCKET` set, **and** `wezterm cli list` answering within 5 s. A later answer (a busy or hung GUI) counts as available only when `BISCUIT_TEST_REQUIRED_BACKENDS` lists `wezterm`, where "unavailable" would fail the test anyway. |
 | `KittyHarness` | `kitty` on `$PATH` **and** `KITTY_LISTEN_ON` set. |
 | `KittyInstance` (macOS) | `can_launch()`: macOS with `kitty`, `open`, `screencapture`. No host Kitty session needed. |
 | `AppleTerminalHarness` | macOS, `CI` not truthy, `osascript` can reach Terminal.app. |

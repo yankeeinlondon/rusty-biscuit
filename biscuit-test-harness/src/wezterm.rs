@@ -218,7 +218,9 @@ impl WezTermHarness {
     ///    means the suite is not running inside WezTerm.
     /// 2. `wezterm` binary is on `$PATH`.
     /// 3. A live `wezterm cli list --format json` round-trip succeeds
-    ///    within [`AVAILABLE_PROBE_TIMEOUT`].
+    ///    within [`AVAILABLE_PROBE_TIMEOUT`], or answers late in a run whose
+    ///    `BISCUIT_TEST_REQUIRED_BACKENDS` lists `wezterm` (where reporting
+    ///    "unavailable" would fail the test anyway).
     ///
     /// ## Why the probe is necessary
     ///
@@ -260,7 +262,18 @@ impl WezTermHarness {
     /// // … proceed with WezTerm-backed assertions …
     /// ```
     pub fn available() -> bool {
-        env::var_os("WEZTERM_UNIX_SOCKET").is_some() && which("wezterm") && wezterm_gui_reachable()
+        if env::var_os("WEZTERM_UNIX_SOCKET").is_none() || !which("wezterm") {
+            return false;
+        }
+        match wezterm_gui_probe() {
+            Probe::Answered => true,
+            Probe::Refused => false,
+            // A late answer is a busy GUI or a hung one. Skipping is the
+            // cheap answer for an optional backend, but a run that requires
+            // WezTerm fails on "unavailable" anyway, so it lets the test try:
+            // under parallel self-spawn load a healthy GUI often answers late.
+            Probe::Late => wezterm_required(),
+        }
     }
 
     /// Returns the active pane id (panicking if the harness has not
@@ -1002,18 +1015,14 @@ fn which(bin: &str) -> bool {
 /// `wezterm cli list --format json` round-trip under a short
 /// wall-clock timeout.
 ///
-/// Returns `true` only when the probe exits successfully. Returns
-/// `false` on any of:
-///
-/// - **Timeout** — the GUI is hung or the socket is stale. This is
-///   the failure mode that motivates the helper; without it,
-///   [`WezTermHarness::available`] would say `true` and every
-///   subsequent spawn would burn [`SPAWN_TIMEOUT`] before erroring.
-/// - **Non-zero exit** — wezterm CLI rejected the invocation (e.g.
-///   "no mux server") without hanging.
-/// - **Spawn error** — the binary could not be launched at all
-///   (covered by the `which` gate in [`WezTermHarness::available`],
-///   but defended here so the helper is robust in isolation).
+/// [`Probe::Answered`] when the probe exits successfully, and
+/// [`Probe::Late`] on a timeout: the GUI is busy or hung. Without that
+/// outcome [`WezTermHarness::available`] would say `true` for a hung GUI
+/// and every subsequent spawn would burn [`SPAWN_TIMEOUT`] before erroring.
+/// [`Probe::Refused`] on a non-zero exit (e.g. "no mux server", or a dead
+/// socket's connect retries giving up) or a binary that cannot be launched
+/// (covered by the `which` gate, but defended here so the helper is robust
+/// in isolation).
 ///
 /// ## Output handling
 ///
@@ -1028,15 +1037,34 @@ fn which(bin: &str) -> bool {
 /// [`WezTermHarness::available`] composes those gates around it; the
 /// helper's contract is "run the probe and report its outcome", so
 /// callers can unit-test the probe surface in isolation.
-fn wezterm_gui_reachable() -> bool {
+fn wezterm_gui_probe() -> Probe {
     let Ok((mut cmd, _config)) = wezterm_command() else {
-        return false;
+        return Probe::Refused;
     };
     cmd.args(["cli", "list", "--format", "json"]);
     match run_with_timeout(&mut cmd, AVAILABLE_PROBE_TIMEOUT) {
-        Ok(out) => out.status.success(),
-        Err(_) => false,
+        Ok(out) if out.status.success() => Probe::Answered,
+        Err(err) if err.kind() == io::ErrorKind::TimedOut => Probe::Late,
+        _ => Probe::Refused,
     }
+}
+
+/// How the GUI met [`wezterm_gui_probe`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Probe {
+    Answered,
+    /// No answer within [`AVAILABLE_PROBE_TIMEOUT`]: busy or hung.
+    Late,
+    /// The CLI failed or gave up connecting (a dead socket gives up inside
+    /// the timeout).
+    Refused,
+}
+
+/// Whether `BISCUIT_TEST_REQUIRED_BACKENDS` lists `wezterm`. test-toolkit
+/// owns that variable's grammar; this reads only the one name it needs.
+fn wezterm_required() -> bool {
+    env::var("BISCUIT_TEST_REQUIRED_BACKENDS")
+        .is_ok_and(|list| list.split(',').any(|name| name.trim().eq_ignore_ascii_case("wezterm")))
 }
 
 #[cfg(test)]
@@ -1123,9 +1151,9 @@ mod tests {
         );
     }
 
-    /// Direct unit test of [`wezterm_gui_reachable`]: when the env var
-    /// is missing, `wezterm cli list` cannot address the GUI and the
-    /// probe must return `false` (either by erroring or by timing out).
+    /// Direct unit test of [`wezterm_gui_probe`]: when the env var is
+    /// missing, `wezterm cli list` cannot address the GUI, so the probe
+    /// must not report an answer.
     ///
     /// On hosts where `wezterm` autodiscovers a socket via some other
     /// mechanism, this test may surface a true positive — in that case
@@ -1140,7 +1168,7 @@ mod tests {
         unsafe {
             env::remove_var("WEZTERM_UNIX_SOCKET");
         }
-        let reachable = wezterm_gui_reachable();
+        let reachable = wezterm_gui_probe() == Probe::Answered;
         unsafe {
             match prev {
                 Some(v) => env::set_var("WEZTERM_UNIX_SOCKET", v),
@@ -1156,13 +1184,12 @@ mod tests {
         }
         assert!(
             !reachable,
-            "wezterm_gui_reachable() must return false when WEZTERM_UNIX_SOCKET is unset",
+            "wezterm_gui_probe() must not answer when WEZTERM_UNIX_SOCKET is unset",
         );
     }
 
-    /// Direct unit test of [`wezterm_gui_reachable`]: when the `wezterm`
-    /// binary is not on `$PATH`, the probe must return `false` (spawn
-    /// failure, caught and reported as unreachable).
+    /// Direct unit test of [`wezterm_gui_probe`]: when the `wezterm`
+    /// binary is not on `$PATH`, the spawn failure is reported as refused.
     ///
     /// Sets `WEZTERM_UNIX_SOCKET` to a plausible value so the env gate
     /// would otherwise pass — we want to isolate the binary gate.
@@ -1180,7 +1207,7 @@ mod tests {
                 "/tmp/biscuit-test-harness-fake-socket",
             );
         }
-        let reachable = wezterm_gui_reachable();
+        let probe = wezterm_gui_probe();
         unsafe {
             match prev_path {
                 Some(v) => env::set_var("PATH", v),
@@ -1191,10 +1218,32 @@ mod tests {
                 None => env::remove_var("WEZTERM_UNIX_SOCKET"),
             }
         }
-        assert!(
-            !reachable,
-            "wezterm_gui_reachable() must return false when the wezterm binary is not on PATH",
-        );
+        assert_eq!(probe, Probe::Refused, "the wezterm binary is not on PATH");
+    }
+
+    /// A late probe counts as available only for a run that requires
+    /// WezTerm, read from the comma list test-toolkit defines.
+    #[test]
+    #[serial_test::serial]
+    fn wezterm_is_required_only_when_listed() {
+        let prev = env::var_os("BISCUIT_TEST_REQUIRED_BACKENDS");
+        let mut seen = Vec::new();
+        for value in [None, Some("tmux"), Some("tmux, WezTerm"), Some("wezterm")] {
+            unsafe {
+                match value {
+                    Some(v) => env::set_var("BISCUIT_TEST_REQUIRED_BACKENDS", v),
+                    None => env::remove_var("BISCUIT_TEST_REQUIRED_BACKENDS"),
+                }
+            }
+            seen.push(wezterm_required());
+        }
+        unsafe {
+            match prev {
+                Some(v) => env::set_var("BISCUIT_TEST_REQUIRED_BACKENDS", v),
+                None => env::remove_var("BISCUIT_TEST_REQUIRED_BACKENDS"),
+            }
+        }
+        assert_eq!(seen, [false, false, true, true]);
     }
 
     /// The critical regression test for the review's "skip cleanly rather
