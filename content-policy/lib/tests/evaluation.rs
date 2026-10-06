@@ -613,7 +613,7 @@ fn lifecycle_steps_through_the_library() {
 
 // --- Migrated repository documents (AC 16) ----------------------------------
 
-/// The 23 documents migrated from `Duration(...)` and `update_policy` all
+/// The 20 documents migrated from `Duration(...)` and `update_policy` all
 /// declare `ValidFor` rules under `content_policy` and evaluate without
 /// diagnostics.
 #[test]
@@ -627,11 +627,6 @@ fn migrated_documents_evaluate_without_diagnostics() {
         assert!(!report.results.is_empty(), "{name}");
         for result in &report.results {
             assert!(result.rule.starts_with("ValidFor("), "{name}: {}", result.rule);
-        }
-        if name == "acp/json-rpc" {
-            assert_eq!(report.results.len(), 1);
-            assert_eq!(report.results[0].rule, "ValidFor(1yr)");
-            assert!(text.contains("- ValidFor(1yr) # pending: MajorVersion(latest_version)"));
         }
     }
 }

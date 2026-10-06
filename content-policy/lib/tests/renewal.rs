@@ -685,7 +685,7 @@ fn lifecycle_steps_through_the_library() {
 
 // --- Migrated repository documents ------------------------------------------
 
-/// Renewing each of the 23 migrated documents in a temporary copy changes
+/// Renewing each of the 20 migrated documents in a temporary copy changes
 /// only the `last_updated` value, plus the listed tab repair in the eight
 /// tab-indented documents.
 #[test]

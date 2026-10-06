@@ -3,7 +3,7 @@
 
 mod common;
 
-// The library's list of the 23 migrated repository documents. Declared here,
+// The library's list of the 20 migrated repository documents. Declared here,
 // not in `common`, so CI's test-input index schedules only this binary when
 // one of them changes.
 #[path = "../../lib/tests/common/mod.rs"]

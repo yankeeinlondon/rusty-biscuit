@@ -77,12 +77,13 @@ impl FileAdapter {
         let reference = reference_for(request.path)?;
         let boundary = self.boundary(request.base_dir)?;
         let context = FileResolutionContext::from_snapshot(&boundary.base, None, HashMap::new())
-            .with_repository_scope_catalog(scope_catalog(&boundary)?);
+            .with_repository_scope_catalog(scope_catalog(&boundary)?)
+            .with_base_dir(&boundary.root);
 
         if reference.class().kind == FileReferenceKind::ExplicitRelative {
             let plan = reference
                 .candidate_plan(&context)
-                .map_err(|error| unreadable("the path cannot be resolved", &error))?;
+                .map_err(|error| resolution_failure(&boundary, &error))?;
             for candidate in &plan {
                 reference
                     .validate_contained_candidate(candidate.path(), &boundary.root)
@@ -110,10 +111,7 @@ impl FileAdapter {
                 })
             }
             DetailedOutcome::Failed(_) => match detailed.error() {
-                Some(FileReferenceError::RepositoryEscape {
-                    escaped_candidate, ..
-                }) => Err(escape(&boundary, escaped_candidate)),
-                Some(error) => Err(unreadable("the path cannot be resolved", error)),
+                Some(error) => Err(resolution_failure(&boundary, error)),
                 None => Err(FileObservation::Unreadable(
                     "the path cannot be resolved".to_string(),
                 )),
@@ -229,6 +227,23 @@ fn escape(boundary: &Boundary, candidate: &Path) -> FileObservation {
         candidate.display(),
         boundary.root.display()
     ))
+}
+
+fn resolution_failure(boundary: &Boundary, error: &FileReferenceError) -> FileObservation {
+    match error {
+        FileReferenceError::RepositoryEscape {
+            escaped_candidate, ..
+        }
+        | FileReferenceError::RelativeTreeEscape {
+            candidate: escaped_candidate,
+            ..
+        } => escape(boundary, escaped_candidate),
+        // A dangling symlink: its target does not exist.
+        FileReferenceError::Io { source, .. } if source.kind() == io::ErrorKind::NotFound => {
+            FileObservation::Missing
+        }
+        other => unreadable("the path cannot be resolved", other),
+    }
 }
 
 fn unreadable(what: &str, error: &dyn std::fmt::Display) -> FileObservation {
