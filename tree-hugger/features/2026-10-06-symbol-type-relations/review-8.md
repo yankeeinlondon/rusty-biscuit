@@ -20,6 +20,7 @@ implemented_by: claude/opus
 description: "A **feature** review of `2026-10-06-symbol-type-relations/spec.md`"
 feature: 2026-10-06-symbol-type-relations/review-8.md
 previous: 2026-10-06-symbol-type-relations/review-7.md
+next: 2026-10-06-symbol-type-relations/review-9.md
 ---
 
 # Review of Symbol Type Relations — Iteration 8
