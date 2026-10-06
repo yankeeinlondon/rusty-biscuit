@@ -74,9 +74,7 @@ fn main_worktree_name() -> Result<String, WorktreeError> {
 
 /// Run `git rev-parse` with the given argument and return trimmed stdout.
 fn git_rev_parse(arg: &str) -> Result<String, WorktreeError> {
-    let output = Command::new("git")
-        .args(["rev-parse", arg])
-        .output()
+    let output = calls::output(Command::new("git").args(["rev-parse", arg]))
         .map_err(|e| WorktreeError::GitCommand(e.to_string()))?;
 
     if !output.status.success() {
@@ -86,19 +84,32 @@ fn git_rev_parse(arg: &str) -> Result<String, WorktreeError> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-/// Run an arbitrary git command and return trimmed stdout.
+/// Run an arbitrary git command in the current directory and return trimmed
+/// stdout.
 pub fn git_command(args: &[&str]) -> Result<String, WorktreeError> {
-    git_command_status(args, false).map(Option::unwrap_or_default)
+    git_command_status(None, args, false).map(Option::unwrap_or_default)
 }
 
 /// Like [`git_command`], but exit code 1 is `Ok(None)`: the answer "no" of
 /// commands such as `merge-base --is-ancestor`, or `merge-base` finding no
 /// common ancestor. Any other failure is still `Err`.
 pub fn git_command_allow_no_match(args: &[&str]) -> Result<Option<String>, WorktreeError> {
-    git_command_status(args, true)
+    git_command_status(None, args, true)
 }
 
-fn git_command_status(args: &[&str], allow_no_match: bool) -> Result<Option<String>, WorktreeError> {
+/// [`git_command`] with `dir` as the process's working directory.
+pub fn git_command_in(dir: &Path, args: &[&str]) -> Result<String, WorktreeError> {
+    git_command_status(Some(dir), args, false).map(Option::unwrap_or_default)
+}
+
+/// [`git_command_allow_no_match`] with `dir` as the process's working
+/// directory.
+pub fn git_command_in_allow_no_match(dir: &Path, args: &[&str]) -> Result<Option<String>, WorktreeError> {
+    git_command_status(Some(dir), args, true)
+}
+
+/// Runs Git in `dir`, or in the current directory for `None`.
+fn git_command_status(dir: Option<&Path>, args: &[&str], allow_no_match: bool) -> Result<Option<String>, WorktreeError> {
     #[cfg(any(test, feature = "count-git"))]
     {
         recorder::record(args);
@@ -107,10 +118,11 @@ fn git_command_status(args: &[&str], allow_no_match: bool) -> Result<Option<Stri
         }
     }
 
-    let output = Command::new("git")
-        .args(args)
-        .output()
-        .map_err(|e| WorktreeError::GitCommand(e.to_string()))?;
+    let mut command = Command::new("git");
+    if let Some(dir) = dir {
+        command.current_dir(dir);
+    }
+    let output = calls::output(command.args(args)).map_err(|e| WorktreeError::GitCommand(e.to_string()))?;
 
     if !output.status.success() {
         if allow_no_match && output.status.code() == Some(1) {
@@ -121,25 +133,6 @@ fn git_command_status(args: &[&str], allow_no_match: bool) -> Result<Option<Stri
     }
 
     Ok(Some(String::from_utf8_lossy(&output.stdout).trim().to_string()))
-}
-
-/// Run a git command in a specific directory.
-pub fn git_command_in(dir: &std::path::Path, args: &[&str]) -> Result<String, WorktreeError> {
-    #[cfg(any(test, feature = "count-git"))]
-    recorder::record(args);
-
-    let output = Command::new("git")
-        .current_dir(dir)
-        .args(args)
-        .output()
-        .map_err(|e| WorktreeError::GitCommand(e.to_string()))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        return Err(WorktreeError::GitCommand(stderr));
-    }
-
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
 /// Run `git -C <dir> <args>` with `base` as the process's working directory,
@@ -183,14 +176,15 @@ pub(crate) fn git_from_output(base: &Path, dir: &Path, args: &[&OsStr]) -> std::
         recorder::record(&lossy.iter().map(String::as_str).collect::<Vec<_>>());
     }
 
-    Command::new("git")
-        .current_dir(base)
-        .arg("-C")
-        .arg(dir)
-        .args(args)
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .stdin(std::process::Stdio::null())
-        .output()
+    calls::output(
+        Command::new("git")
+            .current_dir(base)
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .stdin(std::process::Stdio::null()),
+    )
 }
 
 /// Like [`git_from_bytes`], but accepts Git's no-matches exit code.
@@ -211,6 +205,7 @@ fn git_from_bytes_status(base: &Path, dir: &Path, args: &[&str], stdin: Option<&
     let mut child = command
         .spawn()
         .map_err(|e| WorktreeError::GitCommand(e.to_string()))?;
+    calls::started();
     let output = std::thread::scope(|scope| {
         let writer = stdin.map(|bytes| {
             let mut pipe = child.stdin.take().expect("piped stdin");
@@ -231,6 +226,185 @@ fn git_from_bytes_status(base: &Path, dir: &Path, args: &[&str], stdin: Option<&
     }
 
     Ok(output.stdout)
+}
+
+/// Scoped counts of the Git processes a region of code started, for timing
+/// reports.
+///
+/// Every helper that starts Git counts once, after the process has started:
+/// a failed spawn or an injected failure counts nothing, and a process that
+/// exits nonzero counts. This is separate from [`recorder`], which logs every
+/// requested call (failed spawns and injected failures included) into one
+/// process-global log for tests.
+///
+/// Scopes live on a per-thread stack, so two listings on different threads
+/// never mix counts. A [`CallScope`] counts its own thread's calls and, when
+/// it ends, adds its total to the scope it was opened inside, so nested
+/// scopes each include their descendants and every call is counted once.
+/// Another thread is not counted unless the code that spawns it passes a
+/// [`TaskHandle`] in and adds the returned count back after joining:
+///
+/// ```no_run
+/// use worktree::git::{calls, git_command};
+///
+/// let scope = calls::CallScope::enter();
+/// let handle = calls::TaskHandle::current();
+/// let head = std::thread::scope(|threads| {
+///     let task = threads.spawn(move || handle.run(|| git_command(&["rev-parse", "HEAD"])));
+///     calls::joined(task.join().expect("task panicked"))
+/// });
+/// assert_eq!(scope.finish(), 1);
+/// # let _ = head;
+/// ```
+///
+/// With no scope open on a thread, counting a start is one thread-local read.
+pub mod calls {
+    use std::cell::RefCell;
+    use std::io;
+    use std::marker::PhantomData;
+    use std::process::{Command, Output, Stdio};
+
+    thread_local! {
+        /// The open scopes' running counts, innermost last.
+        static SCOPES: RefCell<Vec<u64>> = const { RefCell::new(Vec::new()) };
+    }
+
+    /// Counts one started Git process into this thread's innermost scope.
+    pub(crate) fn started() {
+        SCOPES.with_borrow_mut(|scopes| {
+            if let Some(innermost) = scopes.last_mut() {
+                *innermost += 1;
+            }
+        });
+    }
+
+    /// [`Command::output`] for Git with stdin closed, counting the process
+    /// once it has started.
+    pub(crate) fn output(command: &mut Command) -> io::Result<Output> {
+        let child = command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()?;
+        started();
+        child.wait_with_output()
+    }
+
+    /// Whether a scope is open on this thread.
+    pub fn is_counting() -> bool {
+        SCOPES.with_borrow(|scopes| !scopes.is_empty())
+    }
+
+    /// Adds `calls` counted on another thread to this thread's innermost
+    /// scope; nothing when no scope is open.
+    pub fn add_joined(calls: u64) {
+        SCOPES.with_borrow_mut(|scopes| {
+            if let Some(innermost) = scopes.last_mut() {
+                *innermost += calls;
+            }
+        });
+    }
+
+    /// The value of a [`TaskHandle::run`] result, after adding its count to
+    /// this thread's innermost scope.
+    pub fn joined<T>((value, calls): (T, u64)) -> T {
+        add_joined(calls);
+        value
+    }
+
+    /// An open counting scope on the current thread. It ends when
+    /// [`CallScope::finish`] is called or it drops, adding its count to the
+    /// scope it was opened inside.
+    #[must_use = "the scope counts only while it is held"]
+    #[derive(Debug)]
+    pub struct CallScope {
+        depth: usize,
+        closed: bool,
+        /// Scopes belong to the thread whose stack holds them.
+        _thread_bound: PhantomData<*const ()>,
+    }
+
+    impl CallScope {
+        /// Opens a scope inside any scope already open on this thread.
+        pub fn enter() -> Self {
+            let depth = SCOPES.with_borrow_mut(|scopes| {
+                scopes.push(0);
+                scopes.len()
+            });
+            Self { depth, closed: false, _thread_bound: PhantomData }
+        }
+
+        /// Git processes started in this scope so far, including scopes that
+        /// have ended inside it.
+        pub fn calls(&self) -> u64 {
+            SCOPES.with_borrow(|scopes| scopes.get(self.depth - 1).copied().unwrap_or(0))
+        }
+
+        /// Ends the scope and returns its count.
+        pub fn finish(mut self) -> u64 {
+            self.close()
+        }
+
+        fn close(&mut self) -> u64 {
+            if std::mem::replace(&mut self.closed, true) {
+                return 0;
+            }
+            SCOPES.with_borrow_mut(|scopes| {
+                // An inner scope leaked with `mem::forget` is folded into this
+                // one rather than left open to absorb later calls.
+                while scopes.len() > self.depth {
+                    let inner = scopes.pop().unwrap_or(0);
+                    if let Some(enclosing) = scopes.last_mut() {
+                        *enclosing += inner;
+                    }
+                }
+                if scopes.len() < self.depth {
+                    return 0;
+                }
+                let own = scopes.pop().unwrap_or(0);
+                if let Some(enclosing) = scopes.last_mut() {
+                    *enclosing += own;
+                }
+                own
+            })
+        }
+    }
+
+    impl Drop for CallScope {
+        fn drop(&mut self) {
+            self.close();
+        }
+    }
+
+    /// Whether the spawning thread was counting, carried into a spawned task.
+    /// Take it on the spawning thread, before spawning.
+    #[derive(Debug, Clone, Copy)]
+    pub struct TaskHandle {
+        counting: bool,
+    }
+
+    impl TaskHandle {
+        /// The handle for tasks spawned from this thread now.
+        pub fn current() -> Self {
+            Self { counting: is_counting() }
+        }
+
+        /// Runs `task` and returns its value with the Git processes it
+        /// started: inside a scope of its own when the spawner was counting,
+        /// otherwise uncounted with a count of 0. Pass the result to
+        /// [`joined`] on the spawning thread.
+        ///
+        /// On a thread that already has a scope open (the task was not
+        /// spawned after all) the open scope counts the task's calls, so the
+        /// returned count is 0 and [`joined`] adds nothing twice.
+        pub fn run<T>(self, task: impl FnOnce() -> T) -> (T, u64) {
+            if !self.counting || is_counting() {
+                return (task(), 0);
+            }
+            let scope = CallScope::enter();
+            let value = task();
+            (value, scope.finish())
+        }
+    }
+
+    #[cfg(test)]
+    mod tests;
 }
 
 #[cfg(any(test, feature = "count-git"))]
@@ -349,14 +523,19 @@ mod tests {
         let path = dir.path();
 
         run_git(path, &["init", "-b", "main"]);
-        run_git(path, &["config", "user.email", "test@example.com"]);
-        run_git(path, &["config", "user.name", "Test User"]);
-        run_git(path, &["config", "commit.gpgsign", "false"]);
-        // Suppress background/detached git work so nextest leak detection
-        // sees no lingering child processes after the test returns.
-        run_git(path, &["config", "gc.auto", "0"]);
-        run_git(path, &["config", "core.fsmonitor", "false"]);
-        run_git(path, &["config", "core.commitGraph", "false"]);
+        crate::test_support::configure(
+            path,
+            &[
+                ("user.email", "test@example.com"),
+                ("user.name", "Test User"),
+                ("commit.gpgsign", "false"),
+                // Suppress background/detached git work so nextest leak detection
+                // sees no lingering child processes after the test returns.
+                ("gc.auto", "0"),
+                ("core.fsmonitor", "false"),
+                ("core.commitGraph", "false"),
+            ],
+        );
 
         fs::write(path.join("file.txt"), "1\n").unwrap();
         run_git(path, &["add", "."]);

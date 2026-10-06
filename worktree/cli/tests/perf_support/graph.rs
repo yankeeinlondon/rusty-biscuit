@@ -1,5 +1,5 @@
-//! Repositories for measuring the `graph gather` and
-//! `graph image render (biscuit-terminal)` stages of `wt list --perf`.
+//! Repositories for measuring the `graph_history` and `graph_render` stages
+//! of `wt list --perf=json`.
 //!
 //! Each fixture is built once through `git fast-import` (so a 9,000-commit
 //! history costs well under a second) and never changes afterward: the

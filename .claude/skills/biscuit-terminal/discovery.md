@@ -245,6 +245,22 @@ if let Some(bg) = bg_color() {
 }
 ```
 
+### Live query cost contract
+
+Every live query (OSC 10/11/12, CSI 14 t, DSR `CSI 6 n`) goes through one
+engine, `discovery::tty_query::round_trip`, which appends a DA1 (`CSI c`)
+sentinel and reads with `select(2)` against a deadline. A terminal silent for
+the 500 ms local budget is marked silent for the whole process (nothing is
+written again; do not shrink the budget, WezTerm answers in 170-200 ms); a query answered only by DA1 is never re-sent. `bg_color()`
+and `text_color()` share one batched, cached request. Remote sessions
+(`SSH_CLIENT`, Mosh) get the full timeout; `BISCUIT_TERMINAL_QUERY_SILENCE_MS`
+overrides the budget. Full contract: `biscuit-terminal/docs/discovery/terminal-queries.md`.
+
+Add any new terminal query through `round_trip`, never a hand-rolled read
+loop: a private loop forgets the silent memo, and one unanswering pty then pays
+every timeout in turn (`wt list` once spent ~3.3 s and ~2 s of startup on two
+1 s OSC waits, three CSI 14 t waits, and a 1 s DSR wait).
+
 ## Clipboard (OSC52)
 
 ```rust

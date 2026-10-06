@@ -21,7 +21,7 @@
 //! branches between the `symbolic-ref` check and the merge.
 
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Command;
 
 use crate::git::{git_from, git_from_bytes_allow_no_match};
 use crate::live_remote::is_valid_branch_name;
@@ -196,16 +196,16 @@ fn merge_ff_only(main: &Path, checkout: &Path, default: &str, old: &str, new: &s
     crate::git::recorder::record(&args);
     // A raw command: `git_from` sets no locale, and the refusal is only
     // recognizable from `LC_ALL=C` stderr.
-    let output = Command::new("git")
-        .current_dir(main)
-        .arg("-C")
-        .arg(checkout)
-        .args(args)
-        .env("LC_ALL", "C")
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .stdin(Stdio::null())
-        .output()
-        .map_err(|_| FfRefusal::Other)?;
+    let output = crate::git::calls::output(
+        Command::new("git")
+            .current_dir(main)
+            .arg("-C")
+            .arg(checkout)
+            .args(args)
+            .env("LC_ALL", "C")
+            .env("GIT_TERMINAL_PROMPT", "0"),
+    )
+    .map_err(|_| FfRefusal::Other)?;
     if !output.status.success() {
         return Err(if String::from_utf8_lossy(&output.stderr).contains("would be overwritten") {
             FfRefusal::DirtyCheckout

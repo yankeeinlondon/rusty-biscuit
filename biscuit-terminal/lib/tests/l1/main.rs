@@ -28,6 +28,7 @@ mod level1_cursor;
 mod level1_mode_2027;
 #[cfg(unix)]
 mod level1_osc_queries;
+mod level1_query_budget;
 mod level1_terminal_init;
 mod level1_terminal_osc_cache;
 mod list_parity;

@@ -11,7 +11,7 @@ use crate::listing::{
     BranchComparisons, Caption, ParentComparison, RefSnapshot, RefTips, TreeRow, build_tree, compare_cached, line_steps_cached,
 };
 use crate::availability::{self, Availability};
-use crate::git::{git_command, git_command_in, git_from, repo_info};
+use crate::git::{calls, git_command, git_command_in, git_from, repo_info};
 use crate::include::{IncludeRules, copy::{self, RealCopyOps, SkipReason}};
 use crate::util::dasherize;
 
@@ -142,7 +142,13 @@ pub fn default_branch_in(repo: &Path) -> Result<String, WorktreeError> {
 /// per entry; should two appear, both reasons are kept, joined by `"; "`, so
 /// neither silently wins.
 pub fn parse_worktree_list(porcelain_output: &str) -> Vec<WorktreeEntry> {
-    let cwd = std::env::current_dir().unwrap_or_default();
+    parse_worktree_list_from(porcelain_output, &std::env::current_dir().unwrap_or_default())
+}
+
+/// [`parse_worktree_list`], marking as current the entry that contains `cwd`
+/// instead of the process's current directory.
+pub fn parse_worktree_list_from(porcelain_output: &str, cwd: &Path) -> Vec<WorktreeEntry> {
+    let cwd = cwd.to_path_buf();
     let cwd_canonical = std::fs::canonicalize(&cwd).unwrap_or(cwd.clone());
 
     let mut entries = Vec::new();
@@ -227,6 +233,9 @@ fn is_current_worktree(cwd: &Path, cwd_canonical: &Path, worktree_path: &Path) -
 #[derive(Debug)]
 pub struct WorktreeList {
     pub default_branch: String,
+    /// Where every Git call of this listing runs, and the location that
+    /// decides [`WorktreeEntry::is_current`].
+    repo: PathBuf,
     entries: Vec<WorktreeEntry>,
     /// The parse step's read until [`WorktreeList::commit`] adopts the
     /// accepted one.
@@ -266,14 +275,23 @@ pub fn list_worktrees() -> Result<WorktreeList, WorktreeError> {
     Ok(list)
 }
 
+/// [`parse_worktree_state_in`] the current directory.
+pub fn parse_worktree_state() -> Result<WorktreeList, WorktreeError> {
+    parse_worktree_state_in(&std::env::current_dir()?)
+}
+
 /// Parse the cheap git state needed before per-worktree status analysis:
 /// `worktree list`, the default branch, one `for-each-ref`, and the
-/// fork-origin records.
-pub fn parse_worktree_state() -> Result<WorktreeList, WorktreeError> {
-    let porcelain = git_command(&["worktree", "list", "--porcelain"])?;
-    let entries = parse_worktree_list(&porcelain);
-    let default_branch = default_branch()?;
-    let refs = RefSnapshot::read();
+/// fork-origin records, for the repository containing `repo`.
+///
+/// Every later Git call of the returned list also runs in `repo`, and the
+/// entry containing `repo` is the current one; the process's current
+/// directory is never read.
+pub fn parse_worktree_state_in(repo: &Path) -> Result<WorktreeList, WorktreeError> {
+    let porcelain = git_command_in(repo, &["worktree", "list", "--porcelain"])?;
+    let entries = parse_worktree_list_from(&porcelain, repo);
+    let default_branch = default_branch_in(repo)?;
+    let refs = RefSnapshot::read_in(repo);
     let main_path = entries.first().map(|entry| entry.path.clone());
     let cache_file = main_path.as_deref().and_then(|path| cache_path(path).ok());
     if let Some(parent) = cache_file.as_ref().and_then(|path| path.parent()) {
@@ -289,6 +307,7 @@ pub fn parse_worktree_state() -> Result<WorktreeList, WorktreeError> {
 
     Ok(WorktreeList {
         default_branch,
+        repo: repo.to_path_buf(),
         entries,
         refs,
         forks,
@@ -316,14 +335,15 @@ pub fn fill_worktree_statuses(list: &mut WorktreeList) -> Result<(), WorktreeErr
 /// Every entry's dirtiness, one `git status` per entry on its own thread, in
 /// entry order. Independent of every ref.
 pub fn gather_dirtiness(entries: &[WorktreeEntry]) -> Vec<DirtyStatus> {
+    let counted = calls::TaskHandle::current();
     std::thread::scope(|scope| {
         let handles: Vec<_> = entries
             .iter()
-            .map(|entry| scope.spawn(move || entry_dirtiness(entry)))
+            .map(|entry| scope.spawn(move || counted.run(|| entry_dirtiness(entry))))
             .collect();
         handles
             .into_iter()
-            .map(|handle| handle.join().expect("dirty_status thread panicked"))
+            .map(|handle| calls::joined(handle.join().expect("dirty_status thread panicked")))
             .collect()
     })
 }
@@ -332,6 +352,7 @@ pub fn gather_dirtiness(entries: &[WorktreeEntry]) -> Vec<DirtyStatus> {
 /// when its tree parent is another existing branch, with that parent. Each
 /// branch runs on its own thread.
 fn compare_tree<'scope>(
+    repo: &'scope Path,
     tree: &[TreeRow],
     refs: &'scope RefTips,
     default_branch: &str,
@@ -339,6 +360,7 @@ fn compare_tree<'scope>(
     cache: &'scope Mutex<Cache>,
     scope: &'scope std::thread::Scope<'scope, '_>,
 ) -> HashMap<String, BranchComparisons> {
+    let counted = calls::TaskHandle::current();
     let mut seen = HashSet::new();
     let mut handles = Vec::new();
     for row in tree {
@@ -357,22 +379,27 @@ fn compare_tree<'scope>(
             _ => Err(ParentComparison::NotApplicable),
         };
         let branch = branch.to_string();
-        handles.push(scope.spawn(move || {
-            let target = target_sha.and_then(|sha| compare_cached(cache, &sha, tip));
+        handles.push(scope.spawn(move || counted.run(|| {
+            let target = target_sha.and_then(|sha| compare_cached(repo, cache, &sha, tip));
             let parent = match parent {
-                Ok(parent_sha) => ParentComparison::Compared(compare_cached(cache, &parent_sha, tip)),
+                Ok(parent_sha) => ParentComparison::Compared(compare_cached(repo, cache, &parent_sha, tip)),
                 Err(fixed) => fixed,
             };
             (branch, BranchComparisons { target, parent })
-        }));
+        })));
     }
     handles
         .into_iter()
-        .map(|handle| handle.join().expect("comparison thread panicked"))
+        .map(|handle| calls::joined(handle.join().expect("comparison thread panicked")))
         .collect()
 }
 
 impl WorktreeList {
+    /// Where this listing runs Git.
+    pub fn repo(&self) -> &Path {
+        &self.repo
+    }
+
     /// Worktree entries parsed before status analysis.
     pub fn entries(&self) -> &[WorktreeEntry] {
         &self.entries
@@ -405,10 +432,11 @@ impl WorktreeList {
     /// ([`WorktreeList::gather_ref_facts`]) for `refs`, measured concurrently.
     /// Writes nothing persistent.
     pub fn gather_local(&self, refs: &RefTips, cache: &Mutex<Cache>) -> (Vec<DirtyStatus>, RefFacts) {
+        let counted = calls::TaskHandle::current();
         std::thread::scope(|scope| {
-            let dirty = scope.spawn(|| gather_dirtiness(&self.entries));
+            let dirty = scope.spawn(|| counted.run(|| gather_dirtiness(&self.entries)));
             let facts = self.gather_ref_facts(refs, cache);
-            (dirty.join().expect("dirtiness thread panicked"), facts)
+            (calls::joined(dirty.join().expect("dirtiness thread panicked")), facts)
         })
     }
 
@@ -425,7 +453,7 @@ impl WorktreeList {
         let remote_name = format!("origin/{default_branch}");
         let remote_tip = refs.remote(&remote_name).map(str::to_string);
         let caption = local_tip.as_deref().zip(remote_tip.as_deref()).and_then(|(local, remote)| {
-            compare_cached(cache, remote, local).map(|comparison| Caption {
+            compare_cached(&self.repo, cache, remote, local).map(|comparison| Caption {
                 local: default_branch.to_string(),
                 remote: remote_name.clone(),
                 tracking_sha: remote.to_string(),
@@ -434,7 +462,7 @@ impl WorktreeList {
                 // Only a strictly-behind caption explains its count: then the
                 // remote tip descends from the local one.
                 behind_on_line: (comparison.behind > 0 && comparison.ahead == 0)
-                    .then(|| line_steps_cached(cache, remote, local))
+                    .then(|| line_steps_cached(&self.repo, cache, remote, local))
                     .flatten(),
             })
         });
@@ -445,12 +473,12 @@ impl WorktreeList {
                 // local side is 0 ahead, and vice versa.
                 Some(caption) if refs.remote(&remote_name) == Some(ancestor) => caption.behind == 0,
                 Some(caption) if refs.remote(&remote_name) == Some(descendant) => caption.ahead == 0,
-                _ => git_command(&["merge-base", "--is-ancestor", ancestor, descendant]).is_ok(),
+                _ => git_command_in(&self.repo, &["merge-base", "--is-ancestor", ancestor, descendant]).is_ok(),
             }
         });
 
         let comparisons = std::thread::scope(|scope| {
-            compare_tree(&tree, refs, default_branch, target.as_ref(), cache, scope)
+            compare_tree(&self.repo, &tree, refs, default_branch, target.as_ref(), cache, scope)
         });
         RefFacts { caption, target, tree, comparisons }
     }
@@ -479,7 +507,8 @@ impl WorktreeList {
             let pruned = stored.prune(|branch, origin| {
                 local.contains_key(branch)
                     || (origin.created_at >= refs_read_at
-                        && git_command(&["rev-parse", "--verify", "--quiet", &format!("refs/heads/{branch}")]).is_ok())
+                        && git_command_in(&self.repo, &["rev-parse", "--verify", "--quiet", &format!("refs/heads/{branch}")])
+                            .is_ok())
             });
             if pruned > 0 {
                 let _ = stored.save_atomic(path);
@@ -938,12 +967,17 @@ branch refs/heads/fix/bug-42
         let path = dir.path();
 
         run_git(path, &["init", "-b", "main"]);
-        run_git(path, &["config", "user.email", "test@example.com"]);
-        run_git(path, &["config", "user.name", "Test User"]);
-        run_git(path, &["config", "commit.gpgsign", "false"]);
-        run_git(path, &["config", "gc.auto", "0"]);
-        run_git(path, &["config", "core.fsmonitor", "false"]);
-        run_git(path, &["config", "core.commitGraph", "false"]);
+        crate::test_support::configure(
+            path,
+            &[
+                ("user.email", "test@example.com"),
+                ("user.name", "Test User"),
+                ("commit.gpgsign", "false"),
+                ("gc.auto", "0"),
+                ("core.fsmonitor", "false"),
+                ("core.commitGraph", "false"),
+            ],
+        );
 
         fs::write(path.join("file.txt"), "base\n").expect("write base file");
         run_git(path, &["add", "."]);

@@ -69,7 +69,7 @@ impl MetricValue {
 /// column.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum MetricShare {
-    /// The report root — always rendered `100%`.
+    /// The report root — rendered `100%`.
     Full,
     /// A fraction in `0.0..=1.0` of the report total. Sub-one-percent slivers
     /// render `<1%` (so the column never fills with `0%`); a measured share
@@ -257,6 +257,8 @@ pub struct MetricsTree {
     notes: Vec<String>,
     /// The highlight label following the marker glyph (default `HOT`).
     highlight_label: String,
+    /// Render the root's own share instead of `100%`.
+    given_root_share: bool,
     layout: Layout,
 }
 
@@ -267,6 +269,7 @@ impl MetricsTree {
             root,
             notes: Vec::new(),
             highlight_label: "HOT".to_string(),
+            given_root_share: false,
             layout: Layout::default(),
         }
     }
@@ -283,6 +286,17 @@ impl MetricsTree {
         self
     }
 
+    /// Render the root row with its own [`MetricShare`] instead of `100%`.
+    ///
+    /// By default the root reads `100%` whatever share it carries, since it is
+    /// usually the report total. Opt in when the root is not a total, such as
+    /// a heading over rows that have no common denominator: a root carrying
+    /// [`MetricShare::Unknown`] then reads `—` like any other row.
+    pub fn with_given_root_share(mut self) -> Self {
+        self.given_root_share = true;
+        self
+    }
+
     /// Assemble the Prose-markup body for the whole report.
     ///
     /// Connectors and glyphs fold to ASCII when `unicode` is false; the visible
@@ -294,7 +308,8 @@ impl MetricsTree {
         let glyphs = Glyphs::for_terminal(unicode);
 
         let mut rows = Vec::new();
-        collect_rows(&self.root, String::new(), String::new(), true, unicode, &glyphs, &mut rows);
+        let root_share = (!self.given_root_share).then_some(MetricShare::Full);
+        collect_rows(&self.root, String::new(), String::new(), root_share, unicode, &glyphs, &mut rows);
 
         let raw_label_w = rows.iter().map(|r| r.label.chars().count()).max().unwrap_or(0);
         let num_w = rows.iter().map(|r| r.num.chars().count()).max().unwrap_or(0);
@@ -453,22 +468,19 @@ impl Glyphs {
 }
 
 /// Walk the tree depth-first, emitting one [`RenderRow`] per node with
-/// box-drawing connectors derived from depth.
+/// box-drawing connectors derived from depth. `share_override` replaces
+/// `node`'s own share on its row only.
 fn collect_rows(
     node: &MetricNode,
     label_prefix: String,
     children_base: String,
-    is_root: bool,
+    share_override: Option<MetricShare>,
     unicode: bool,
     glyphs: &Glyphs,
     rows: &mut Vec<RenderRow>,
 ) {
     let (num, unit) = node.value.parts(unicode);
-    let share = if is_root {
-        MetricShare::Full.render(unicode)
-    } else {
-        node.share.render(unicode)
-    };
+    let share = share_override.unwrap_or(node.share).render(unicode);
     rows.push(RenderRow {
         label: format!("{label_prefix}{}", node.label),
         num,
@@ -488,7 +500,7 @@ fn collect_rows(
             child,
             format!("{children_base}{connector}"),
             format!("{children_base}{cont}"),
-            false,
+            None,
             unicode,
             glyphs,
             rows,
@@ -851,6 +863,35 @@ mod tests {
         // The 45µs leaf is well under 1% of 100ms.
         let parse = plain.lines().find(|l| l.contains("parse")).unwrap();
         assert!(parse.contains("<1%"), "sub-percent share must read <1%; got: {parse:?}");
+    }
+
+    #[test]
+    fn the_root_reads_full_share_unless_its_given_share_is_requested() {
+        let heading = || {
+            MetricNode::branch(
+                "Diagnostics",
+                MetricValue::Placeholder,
+                MetricShare::Unknown,
+                vec![MetricNode::leaf(
+                    "child",
+                    MetricValue::Duration(Duration::from_millis(5)),
+                    MetricShare::Unknown,
+                )],
+            )
+        };
+        let root_row = |tree: MetricsTree| {
+            let plain = strip_ansi(&tree.render_optimistic(Some(80)));
+            plain.lines().next().unwrap().to_string()
+        };
+
+        let forced = root_row(MetricsTree::new(heading()));
+        let given = root_row(MetricsTree::new(heading()).with_given_root_share());
+        let given_full = root_row(MetricsTree::new(sample_tree()).with_given_root_share());
+
+        assert!(forced.contains("100%"), "the default root reads 100%: {forced:?}");
+        assert!(!given.contains('%'), "an unknown root share shows no percentage: {given:?}");
+        assert!(given.trim_end().ends_with('—'), "an unknown root share reads as a dash: {given:?}");
+        assert!(given_full.contains("100%"), "a root given Full still reads 100%: {given_full:?}");
     }
 
     #[test]

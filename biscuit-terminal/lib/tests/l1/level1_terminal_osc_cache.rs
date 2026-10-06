@@ -37,7 +37,8 @@ mod unix {
     use std::time::Duration;
 
     use super::common::pty::{
-        OSC10_QUERY, OSC11_QUERY, ProbeAnswer, count_occurrences, drive_probe, spawn_with_env,
+        DA1_QUERY, DA1_REPLY, OSC10_QUERY, OSC11_QUERY, ProbeAnswer, count_occurrences,
+        drive_probe, spawn_with_env,
     };
 
     /// A distinctive manufactured foreground reply, `rgb:1234/5678/9abc`.
@@ -114,6 +115,7 @@ mod unix {
         let mut answers = [
             ProbeAnswer::new(OSC11_QUERY, OSC11_REPLY),
             ProbeAnswer::new(OSC10_QUERY, OSC10_REPLY),
+            ProbeAnswer::every(DA1_QUERY, DA1_REPLY),
         ];
 
         let collected = drive_probe(
@@ -198,6 +200,7 @@ mod unix {
         let mut answers = [
             ProbeAnswer::new(OSC11_QUERY, OSC11_REPLY),
             ProbeAnswer::new(OSC10_QUERY, OSC10_REPLY),
+            ProbeAnswer::every(DA1_QUERY, DA1_REPLY),
         ];
 
         let collected = drive_probe(

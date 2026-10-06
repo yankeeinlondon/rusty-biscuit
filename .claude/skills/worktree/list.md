@@ -7,16 +7,19 @@ wait, load [list-remote.md](list-remote.md). For the graph, load
 
 ## Pipeline
 
-`list::gather_listing` (CLI) gathers; `run_pipeline` renders its `Listing`
-once.
+`worktree::list::gather(repo, &ListOptions, on_phase)` (library) gathers;
+the CLI's `commands::list::run_pipeline` builds `ListOptions` from its flags,
+drives the spinner from `on_phase` (`WaitProgress::Started` / `Phase` /
+`Finished`), and renders the returned `Listing` once. The library never reads
+the process's current directory; the CLI passes `current_dir()` in.
 
 ```mermaid
 flowchart TD
   A[parse_worktree_state<br/>worktree list, default branch,<br/>initial RefSnapshot, fork-origin store] --> P[prepare_remote<br/>origin lookup, --ignore-api write]
   P --> S{std::thread::scope}
-  S --> W[calling thread: follow_remote<br/>launch + list/wait.rs + spinner]
-  S --> L[scoped: WorktreeList::gather_local<br/>dirtiness ∥ gather_ref_facts]
-  S --> G[scoped: git_graph::gather<br/>graph and/or verbose]
+  S --> W[calling thread: follow_remote<br/>launch + list/wait.rs, on_phase]
+  S --> L[scoped: gather_local<br/>dirtiness ∥ gather_ref_facts]
+  S --> G[scoped: graph::gather<br/>graph and/or verbose]
   W --> J[join]
   L --> J
   G --> J
@@ -24,7 +27,7 @@ flowchart TD
   F --> R[RefSnapshot::read, when waited or --ff]
   R --> E{initial.matches final?}
   E -- yes --> K[keep first gather]
-  E -- no --> X[regather: gather_ref_facts + git_graph::gather<br/>from the final read]
+  E -- no --> X[regather: gather_ref_facts + graph::gather<br/>from the final read]
   K --> C[WorktreeList::commit<br/>cache save, fork prune, copy prune]
   X --> C
   C --> D[refresh_dirty_status for FfResult::Moved checkout]
@@ -68,22 +71,49 @@ flowchart TD
   `commit` onto `WorktreeStatus::availability` from `symlink_metadata` alone.
   Only `NotFound` counts as absence, and a link or reparse point is Other.
   Never read Git's reason text for a decision; it is localized.
-- Scoped tasks never print; the spinner lives on the calling thread and is
-  cleared inside `follow_remote`. A scoped panic surfaces at `join` after the
-  wait.
+- Scoped tasks never print; the spinner is the CLI's, driven on the calling
+  thread through `on_phase` and cleared at `WaitProgress::Finished`. A scoped
+  panic surfaces at `join` after the wait.
 - **Prune only after a successful `for-each-ref`**; an empty ref set would make
   every record look deleted.
-- `--perf` rows (`perf::PerfCollector`): top-level `pre-dispatch`,
-  `pr gather` (origin lookup only), then the group
-  `remote wait ‖ local gather` (`local gather` without remote work) with
-  children `remote wait`, `pr reread`, `list gather`,
-  `graph gather`/`verbose gather`; then `fast-forward`, a `regather` group
-  (`list regather`, `graph regather`/`verbose regather`), and
-  `checkout status refresh`. `record_group` takes the group's own measured
-  span; children are diagnostic (no share, never summed). Top-level rows are
-  sequential, so they plus `unattributed` equal the total exactly; an excess
-  is shown as `perf::OVER_ATTRIBUTED`, never clipped. Record new overlapping
-  work as a group child, never as a top-level row.
+- `--perf` measures through `worktree::timing`; `ListOptions::timings`
+  turns it on and `Listing::timings` carries a `Scope::Library` document. The
+  CLI pushes `startup`, then the library's top-level spans (never a span for
+  the library total), then its render stages, and builds a `Scope::Command`
+  document ending after the listing's write; `cli/src/perf.rs` only renders
+  (`human_report`, `json_record`). Stage ids are the contract; labels are
+  display only and no test reads them. biscuit-terminal's `MetricsTree`
+  prints `100%` on its root row whatever `MetricShare` it is given unless
+  built with `with_given_root_share()`; the worker section uses it so its
+  heading shows `—`. Foreground and worker rows share one projection
+  (`span_node`/`remainder_row`) that differs only in `Shares::Shown`/`Hidden`,
+  so worker parents reconcile with share-less remainder rows.
+- Pipeline shape: `read_worktrees`, `origin_lookup`, `prepare_local`, then a
+  concurrent region, `remote_and_local` **only when a wait ran** (else
+  `local_reads`), holding `refresh_worker` (`worker_launch`, `worker_wait`;
+  no `git_calls`, the work is in another process), `pr_cache_read`,
+  `local_gather` (`worktree_status` ∥ `branch_comparisons`), and
+  `graph_history` or `verbose_history`; then `fast_forward`, `ref_reread`,
+  `regather` (`prepare_local`, then a `local_reads` group of
+  `branch_comparisons` ∥ history; never dirtiness), `commit`,
+  `checkout_refresh`. Steps that did not run are omitted.
+- Disabled timing reads no clock and opens no count scope: library steps go
+  through `timing::record(steps.as_mut(), stage, ..)` (a no-op wrapper for
+  `None`), `timing::record_parent` for a parent whose children are pushed
+  inside, and `timing::measure` where a span is returned from a task. A
+  region's `CallScope` must be **entered before** `TaskHandle::current()` is
+  taken, or the tasks count into nothing.
+- `worktree::timing` traps: `SpanList::push` of a stage already present
+  **adds into it**, so only push non-overlapping repeats; remainders are
+  computed in whole microseconds, and only a span with sequential children
+  reconciles (a leaf or a concurrent parent carries zero remainders);
+  `Timings::from_json` rejects repeated keys, unknown stage ids, and any
+  remainder that does not reconcile, so build documents through the
+  builder, never by hand. A round trip drops sub-microsecond precision:
+  compare `to_json()` output, not the decoded `Timings`. The equation is
+  checked exactly in `u128`, never against a value clamped to `u64::MAX`, so
+  `Timings::new`/`WorkerTimings::new` are fallible (`Unrepresentable`) and a
+  test of an extreme value must state an excess that fits in `u64`.
 
 ## Comparison cache (`worktree::cache`)
 

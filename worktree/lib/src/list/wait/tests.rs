@@ -2,13 +2,11 @@
 //! clock that advances only when the wait sleeps.
 
 use std::cell::{Cell, RefCell};
-use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use worktree::pull_requests::StoredPublication;
-use worktree::remote_head::{
+use crate::pull_requests::StoredPublication;
+use crate::remote_head::{
     Attempt, CheckFailure, CredentialEvidence, FallbackReason, FetchFailure, HeadStatus, Outcome, Phase, PrFailure, PrStatus, Receipt, StoreState,
 };
 
@@ -67,7 +65,7 @@ fn launches() -> Vec<LaunchArgs> {
 }
 
 fn launched(id: &str) -> LaunchArgs {
-    LaunchArgs { attempt: id.into() }
+    LaunchArgs { attempt: id.into(), timings: false }
 }
 
 type Script<T> = Box<dyn Fn(Duration) -> T>;
@@ -241,6 +239,7 @@ fn receipt(id: &str, head: HeadStatus, prs: PrStatus) -> Receipt {
         finished_at: STARTED + 1,
         head,
         prs,
+        durations: LaunchReport::Missing,
     }
 }
 
@@ -250,11 +249,11 @@ fn receipt_at(at: Duration, prs: PrStatus) -> impl Fn(Duration, &Attempt) -> Opt
 }
 
 fn ended(head: HeadEnd, prs: PrEnd) -> WaitEnd {
-    WaitEnd { head, prs, pr_credentials: CredentialEvidence::Unknown, timed_out: false }
+    WaitEnd { head, prs, pr_credentials: CredentialEvidence::Unknown, timed_out: false, worker_reports: Vec::new() }
 }
 
 fn timed_out(head: HeadEnd, prs: PrEnd) -> WaitEnd {
-    WaitEnd { head, prs, pr_credentials: CredentialEvidence::Unknown, timed_out: true }
+    WaitEnd { head, prs, pr_credentials: CredentialEvidence::Unknown, timed_out: true, worker_reports: Vec::new() }
 }
 
 fn other() -> PrEnd {
@@ -268,6 +267,7 @@ fn request(force: bool) -> WaitRequest<'static> {
         branch: BRANCH,
         force,
         budget: if force { FORCED_BUDGET } else { ORDINARY_BUDGET },
+        timings: false,
     }
 }
 
@@ -1236,7 +1236,7 @@ fn a_finished_heads_phase_gives_way_to_updating_while_prs_are_pending_on_every_r
 mod stored_prs {
     use std::process::Command;
 
-    use worktree::pull_requests::{
+    use crate::pull_requests::{
         FetchedPrs, OpenPrSource, OpenPullRequest, PrRequestError, RefreshOutcome, origin_digest, refresh,
     };
 
@@ -1379,7 +1379,7 @@ fn a_contending_holders_failed_real_refresh_is_never_a_publication() {
 /// another origin never do.
 #[test]
 fn only_a_new_usable_publication_id_counts_for_a_contended_half() {
-    use worktree::pull_requests::origin_digest;
+    use crate::pull_requests::origin_digest;
 
     // In the past, so a later stamp is not in the future.
     let seeded_at = unix_now() - 10;
@@ -1419,8 +1419,8 @@ fn latest_launch_in_sync() -> StoreState {
 /// branch, an older one, or a malformed file is missing, and a missing
 /// receipt is a bounded generic failure.
 mod receipt_files {
-    use worktree::pull_requests::origin_digest;
-    use worktree::remote_head::{begin_attempt, finish_attempt, receipt_path_beside, write_receipt};
+    use crate::pull_requests::origin_digest;
+    use crate::remote_head::{begin_attempt, finish_attempt, receipt_path_beside, write_receipt};
 
     use super::*;
 
@@ -1453,6 +1453,7 @@ mod receipt_files {
             finished_at: unix_now(),
             head: HeadStatus::Ok,
             prs: PrStatus::Failed { failure: PrFailure::CredentialsRejected { key: None } },
+            durations: LaunchReport::Missing,
         };
         let spoil = SPOIL.with(|spoil| spoil.borrow().clone());
         if let Some(spoil) = spoil {
@@ -1472,7 +1473,7 @@ mod receipt_files {
         HEAD.with(|stored| *stored.borrow_mut() = Some(head.clone()));
         SPOIL.with(|stored| *stored.borrow_mut() = spoil);
         let digest = origin_digest(ORIGIN);
-        let request = WaitRequest { main: Path::new("/repo"), origin_digest: &digest, branch: BRANCH, force: false, budget: ORDINARY_BUDGET };
+        let request = WaitRequest { main: Path::new("/repo"), origin_digest: &digest, branch: BRANCH, force: false, budget: ORDINARY_BUDGET, timings: false };
         let env = StoreEnv::new(head, dir.path().join("abc.prs.json"), ORIGIN.into());
         let end = wait(request, &env, worker, &mut |_| {});
         let left = std::fs::read_dir(dir.path())
@@ -1663,7 +1664,7 @@ mod receipt_matrix {
 fn every_malformed_receipt_through_the_wait_keeps_the_head_and_is_a_generic_failure() {
     use std::rc::Rc;
 
-    use worktree::remote_head::write_receipt;
+    use crate::remote_head::write_receipt;
 
     let mut wrong = Vec::new();
     let mut walked = 0;
@@ -1706,8 +1707,8 @@ fn every_malformed_receipt_through_the_wait_keeps_the_head_and_is_a_generic_fail
 /// its own receipt after A's. With one receipt file per repository B's write
 /// replaced A's, and A lost its PR failure line.
 mod overlapping_runs {
-    use worktree::pull_requests::origin_digest;
-    use worktree::remote_head::{begin_attempt, finish_attempt, receipt_path_beside, write_receipt};
+    use crate::pull_requests::origin_digest;
+    use crate::remote_head::{begin_attempt, finish_attempt, receipt_path_beside, write_receipt};
 
     use super::*;
 
@@ -1735,11 +1736,12 @@ mod overlapping_runs {
             finished_at: unix_now(),
             head,
             prs,
+            durations: LaunchReport::Missing,
         }
     }
 
     fn forced(digest: &str) -> WaitRequest<'_> {
-        WaitRequest { main: Path::new("/repo"), origin_digest: digest, branch: BRANCH, force: true, budget: FORCED_BUDGET }
+        WaitRequest { main: Path::new("/repo"), origin_digest: digest, branch: BRANCH, force: true, budget: FORCED_BUDGET, timings: false }
     }
 
     /// Run A's worker: checks in sync, fails its PR half, writes its receipt;
@@ -1796,17 +1798,9 @@ fn overlapping_forced_runs_each_read_their_own_receipt() {
     let HeadEnd::Finished(followed_by_a) = &a.head else {
         panic!("run A followed no attempt: {a:?}");
     };
+    // The CLI turns this failure into run A's credentials line
+    // (`worktree-cli`: `a_pr_failure_this_run_observed_gives_a_line_only_for_a_confirmed_condition`).
     assert_eq!(a.prs, PrEnd::Failed(overlapping_runs::credentials_rejected()));
-    assert!(
-        super::super::credential_line(
-            overlapping_runs::ORIGIN,
-            None,
-            Some(&overlapping_runs::credentials_rejected()),
-            false
-        )
-            .is_some(),
-        "run A still gets its PR failure line"
-    );
 
     let HeadEnd::Finished(followed_by_b) = &b.head else {
         panic!("run B followed no attempt: {b:?}");
@@ -1938,8 +1932,8 @@ fn a_wait_that_ends_on_its_receipt_deletes_it() {
 /// sweeps and writes as `refresh_worker::run_and_record` does, and the file
 /// stays until a later worker's sweep finds it older than `ATTEMPT_MAX_AGE`.
 mod late_receipt {
-    use worktree::pull_requests::origin_digest;
-    use worktree::remote_head::{begin_attempt, finish_attempt, receipt_path_beside};
+    use crate::pull_requests::origin_digest;
+    use crate::remote_head::{begin_attempt, finish_attempt, receipt_path_beside};
 
     use super::*;
 
@@ -1967,7 +1961,7 @@ mod late_receipt {
         let prs = dir.join("abc.prs.json");
         STORES.with(|stores| *stores.borrow_mut() = Some((head.clone(), prs.clone())));
         let digest = origin_digest(stored_prs::ORIGIN);
-        let request = WaitRequest { main: Path::new("/repo"), origin_digest: &digest, branch: BRANCH, force: false, budget: ORDINARY_BUDGET };
+        let request = WaitRequest { main: Path::new("/repo"), origin_digest: &digest, branch: BRANCH, force: false, budget: ORDINARY_BUDGET, timings: false };
         let env = StoreEnv::new(head.clone(), prs, stored_prs::ORIGIN.into());
         (wait(request, &env, worker, &mut |_| {}), head)
     }
@@ -1977,8 +1971,8 @@ mod late_receipt {
 fn a_receipt_written_after_an_early_success_is_left_for_the_stale_sweep() {
     use std::time::SystemTime;
 
-    use worktree::pull_requests::origin_digest;
-    use worktree::remote_head::{ATTEMPT_MAX_AGE, remove_stale_receipts, write_receipt};
+    use crate::pull_requests::origin_digest;
+    use crate::remote_head::{ATTEMPT_MAX_AGE, remove_stale_receipts, write_receipt};
 
     let dir = tempfile::tempdir().expect("temp dir");
     let (end, head) = late_receipt::run(dir.path());
@@ -1999,6 +1993,7 @@ fn a_receipt_written_after_an_early_success_is_left_for_the_stale_sweep() {
         finished_at: unix_now(),
         head: HeadStatus::Ok,
         prs: PrStatus::Ok,
+        durations: LaunchReport::Missing,
     };
     write_receipt(&path, &late).expect("receipt");
     assert_eq!(load_receipt(&path, followed), Some(late), "a complete receipt, left behind");
@@ -2009,66 +2004,6 @@ fn a_receipt_written_after_an_early_success_is_left_for_the_stale_sweep() {
     assert!(path.exists(), "kept while younger than ATTEMPT_MAX_AGE");
     remove_stale_receipts(&next, SystemTime::now() + ATTEMPT_MAX_AGE + Duration::from_secs(1));
     assert!(!path.exists(), "swept once older than ATTEMPT_MAX_AGE");
-}
-
-#[test]
-fn the_spinner_text_follows_the_phase() {
-    assert_eq!(phase_text(Phase::Checking), "updating");
-    assert_eq!(
-        phase_text(Phase::CheckingFallback { reason: FallbackReason::NoKey }),
-        "no API key, using fallback method"
-    );
-    assert_eq!(
-        phase_text(Phase::CheckingFallback { reason: FallbackReason::NotVisible }),
-        "no API key, using fallback method"
-    );
-    assert_eq!(
-        phase_text(Phase::CheckingFallback { reason: FallbackReason::RateLimited }),
-        "rate limited, using fallback method"
-    );
-    assert_eq!(phase_text(Phase::CheckingFallback { reason: FallbackReason::Rejected }), "updating");
-    assert_eq!(phase_text(Phase::CheckingFallback { reason: FallbackReason::Other }), "updating");
-    assert_eq!(phase_text(Phase::Fetching), "pulling remote updates");
-}
-
-#[derive(Clone, Default)]
-struct Captured(Arc<Mutex<Vec<u8>>>);
-
-impl Write for Captured {
-    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-        self.0.lock().unwrap().extend_from_slice(bytes);
-        Ok(bytes.len())
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
-#[test]
-fn the_spinner_writes_nothing_when_its_output_is_not_a_terminal() {
-    let captured = Captured::default();
-    let progress = Progress::on(captured.clone(), false);
-    for phase in [Phase::Checking, Phase::Fetching] {
-        progress.show(phase);
-    }
-    std::thread::sleep(SPINNER_DELAY + ms(100));
-    progress.finish();
-
-    assert!(captured.0.lock().unwrap().is_empty());
-}
-
-#[test]
-fn the_spinner_draws_the_phase_text_and_clears_its_line_on_a_terminal() {
-    let captured = Captured::default();
-    let progress = Progress::on(captured.clone(), true);
-    progress.show(Phase::Fetching);
-    std::thread::sleep(SPINNER_DELAY + ms(200));
-    progress.finish();
-
-    let written = String::from_utf8(captured.0.lock().unwrap().clone()).unwrap();
-    assert!(written.contains("pulling remote updates"), "{written:?}");
-    assert!(written.ends_with(biscuit_terminal::components::spinner::CLEAR_LINE), "{written:?}");
 }
 
 #[test]
@@ -2087,3 +2022,5 @@ fn a_launched_process_reports_its_exit() {
     assert!(handle.has_exited(), "exit stays reported");
 }
 
+
+mod reports;

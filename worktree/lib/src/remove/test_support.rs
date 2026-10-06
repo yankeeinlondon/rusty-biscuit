@@ -24,15 +24,16 @@ fn run(cwd: &Path, args: &[&str]) -> Result<String, String> {
 }
 
 fn configure(path: &Path) {
-    for (key, value) in [
-        ("user.email", "test@example.com"),
-        ("user.name", "Test User"),
-        ("commit.gpgsign", "false"),
-        ("tag.gpgsign", "false"),
-        ("gc.auto", "0"),
-    ] {
-        run(path, &["config", key, value]).unwrap();
-    }
+    crate::test_support::configure(
+        path,
+        &[
+            ("user.email", "test@example.com"),
+            ("user.name", "Test User"),
+            ("commit.gpgsign", "false"),
+            ("tag.gpgsign", "false"),
+            ("gc.auto", "0"),
+        ],
+    );
 }
 
 impl TestRepo {
@@ -44,7 +45,7 @@ impl TestRepo {
         run(&repo, &["init", "-b", "main"]).unwrap();
         configure(&repo);
         let this = Self { dir };
-        this.commit("README.md");
+        this.add_and_commit(&this.path(), "README.md");
         this
     }
 
@@ -53,7 +54,11 @@ impl TestRepo {
         let this = Self::new();
         let origin = this.origin_path();
         run(this.dir.path(), &["init", "--bare", "-b", "main", origin.to_str().unwrap()]).unwrap();
-        this.git(&["remote", "add", "origin", origin.to_str().unwrap()]);
+        // What `git remote add origin <path>` writes.
+        crate::test_support::configure(
+            &this.path(),
+            &[("remote.origin.url", origin.to_str().unwrap()), ("remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")],
+        );
         this.git(&["push", "-q", "-u", "origin", "main"]);
         this
     }
@@ -81,7 +86,7 @@ impl TestRepo {
     pub fn with_global_excludes(&self, contents: &[u8]) -> PathBuf {
         let path = self.dir.path().join("global-excludes");
         fs::write(&path, contents).unwrap();
-        self.git(&["config", "core.excludesFile", path.to_str().unwrap()]);
+        crate::test_support::configure(&self.path(), &[("core.excludesFile", path.to_str().unwrap())]);
         path
     }
 
@@ -111,18 +116,24 @@ impl TestRepo {
     }
 
     pub fn commit_in(&self, dir: &Path, file: &str) -> String {
+        self.add_and_commit(dir, file);
+        self.git_in(dir, &["rev-parse", "HEAD"])
+    }
+
+    /// [`TestRepo::commit_in`] without reading back the new SHA.
+    fn add_and_commit(&self, dir: &Path, file: &str) {
         fs::write(dir.join(file), format!("{file}\n")).unwrap();
         self.git_in(dir, &["add", file]);
         self.git_in(dir, &["commit", "-q", "-m", &format!("add {file}")]);
-        self.git_in(dir, &["rev-parse", "HEAD"])
     }
 
     /// Adds a linked worktree for a new `branch` forked from `start`, in a
     /// sibling directory of the main checkout (never nested inside it).
     pub fn add_worktree(&self, branch: &str, dir_name: &str, start: &str) -> PathBuf {
         let path = self.dir.path().join("wts").join(dir_name);
+        // No `configure`: a linked worktree shares the main repository's
+        // config, which already holds every fixture setting.
         self.git(&["worktree", "add", "-q", "-b", branch, path.to_str().unwrap(), start]);
-        configure(&path);
         path
     }
 

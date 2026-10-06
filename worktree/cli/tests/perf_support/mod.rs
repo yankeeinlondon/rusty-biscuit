@@ -1,4 +1,4 @@
-//! Shared fixtures and `--perf` parsing for the cache SLA and PR integration
+//! Shared fixtures and the `--perf=json` reader for the cache SLA and PR integration
 //! tests, plus the local network stand-ins ([`ProxyStub`], [`FakeGitea`],
 //! [`HoldingOrigin`]) and refresh-worker helpers the PR tests use.
 //!
@@ -14,10 +14,10 @@
 //! A directly spawned `wt` belongs in a [`KillOnDrop`].
 //!
 //! Both `cache_warm_path.rs` and `cache_cold_path.rs` build the same mixed
-//! multi-worktree repo and assert on the `list gather` stage timing parsed
-//! from `wt list --perf` — the stage the spec targets (it dominates a cold
+//! multi-worktree repo and assert on the `local_gather` stage read from
+//! `wt list --perf=json` — the stage the spec targets (it dominates a cold
 //! `wt list`). Asserting full-command wall-clock alone could pass while
-//! `list gather` regresses, so these helpers measure the stage directly.
+//! `local_gather` regresses, so these helpers measure the stage directly.
 //!
 //! The fixture is *mixed* on purpose: several divergent branches (the warm
 //! cache collapses their `rev-list` + `merge-tree` cost) plus fast-forward and
@@ -42,6 +42,7 @@ use worktree::pull_requests::{
     FetchedPrs, OpenPrSource, PrRequestError, RefreshOutcome, SniffOpenPrSource, pr_lock_path, refresh, unix_now,
 };
 use worktree::remote_head::{PrFailure, refresh_lock_held, remote_head_lock_path, remote_head_store_path};
+use worktree::timing::{Stage, Timings};
 
 pub mod graph;
 
@@ -64,7 +65,10 @@ pub struct MixedFixture {
     xdg_cache: tempfile::TempDir,
     main: PathBuf,
     worktrees: Vec<PathBuf>,
+    teardown_nudge: TeardownNudge,
 }
+
+type TeardownNudge = Mutex<Option<Box<dyn FnMut() + Send>>>;
 
 impl MixedFixture {
     pub fn new() -> Self {
@@ -80,19 +84,27 @@ impl MixedFixture {
             .into_owned();
 
         run_git(&main, &["init", "-b", "main"]);
-        run_git(&main, &["config", "user.email", "test@example.com"]);
-        run_git(&main, &["config", "user.name", "Test User"]);
-        run_git(&main, &["config", "commit.gpgsign", "false"]);
-        run_git(&main, &["config", "gc.auto", "0"]);
-        run_git(&main, &["config", "core.untrackedCache", "true"]);
+        append_git_config(
+            &main.join(".git").join("config"),
+            &[
+                ("user.email", "test@example.com"),
+                ("user.name", "Test User"),
+                ("commit.gpgsign", "false"),
+                ("gc.auto", "0"),
+                ("core.untrackedCache", "true"),
+            ],
+        );
 
-        commit(&main, "base.txt", "base", "base");
+        // One `git fast-import` writes every commit and branch below, in
+        // place of a checkout, add, and commit process per commit.
+        let mut history = FastImport::default();
+        let base = history.commit("refs/heads/main", None, "base.txt", "base", "base");
 
         // Behind-only branches: forked at base and never advanced.
         let mut branches = Vec::new();
         for i in 0..BEHIND_BRANCHES {
             let name = format!("behind-{i}");
-            run_git(&main, &["branch", &name]);
+            history.branch(&name, &base);
             branches.push(name);
         }
 
@@ -100,24 +112,23 @@ impl MixedFixture {
         // below (behind).
         for i in 0..DIVERGENT_BRANCHES {
             let name = format!("divergent-{i}");
-            run_git(&main, &["checkout", "-b", &name, "main"]);
-            commit(&main, &format!("{name}.txt"), "x", "divergent commit");
-            run_git(&main, &["checkout", "main"]);
+            history.commit(&format!("refs/heads/{name}"), Some(&base), &format!("{name}.txt"), "x", "divergent commit");
             branches.push(name);
         }
 
         // Advance `main`: behind-* are now behind by one; divergent-* diverge.
-        commit(&main, "main-advance.txt", "advance", "advance main");
+        let advanced = history.commit("refs/heads/main", Some(&base), "main-advance.txt", "advance", "advance main");
 
         // Fast-forward branches: forked at the advanced `main` tip with one
         // commit (ahead, not behind). `main` does not move afterward.
         for i in 0..FAST_FORWARD_BRANCHES {
             let name = format!("fast-forward-{i}");
-            run_git(&main, &["checkout", "-b", &name, "main"]);
-            commit(&main, &format!("{name}.txt"), "x", "fast-forward commit");
-            run_git(&main, &["checkout", "main"]);
+            history.commit(&format!("refs/heads/{name}"), Some(&advanced), &format!("{name}.txt"), "x", "fast-forward commit");
             branches.push(name);
         }
+        history.run(&main);
+        // The main checkout, still on `main`, takes its files and index.
+        run_git(&main, &["reset", "-q", "--hard", "main"]);
 
         let mut worktrees = Vec::new();
         for name in &branches {
@@ -132,11 +143,12 @@ impl MixedFixture {
             xdg_cache,
             main,
             worktrees,
+            teardown_nudge: Mutex::new(None),
         }
     }
 
     /// Prime git's untracked-files cache in every checkout so the live dirty
-    /// walk is steady-state and does not skew the `list gather` measurement.
+    /// walk is steady-state and does not skew the `local_gather` measurement.
     pub fn warm_untracked_cache(&self) {
         let args = &["-c", "core.untrackedCache=true", "status", "--porcelain"];
         run_git(&self.main, args);
@@ -151,7 +163,10 @@ impl MixedFixture {
         command
             .current_dir(&self.main)
             .env("HOME", self.home.path())
-            .env("XDG_CACHE_HOME", self.xdg_cache.path());
+            .env("XDG_CACHE_HOME", self.xdg_cache.path())
+            // A value exported in the caller's shell would silently shorten
+            // every listing that is meant to wait the real budget.
+            .env_remove(worktree_cli::env::TEST_WAIT_BUDGET_VAR);
         command
     }
 
@@ -424,6 +439,13 @@ impl MixedFixture {
         wait_for_workers(&self.worker_paths(), limit, nudge)
     }
 
+    /// Calls `nudge` before each probe `Drop` makes while it waits for the
+    /// fixture's workers, so a test can hold a worker until teardown is
+    /// waiting for it.
+    pub fn on_teardown_wait(&self, nudge: impl FnMut() + Send + 'static) {
+        *self.teardown_nudge.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Box::new(nudge));
+    }
+
     /// The repository and stores a worker for this fixture uses, computed
     /// without panicking so `Drop` can use it while unwinding.
     fn worker_paths(&self) -> WorkerPaths {
@@ -444,11 +466,11 @@ impl MixedFixture {
         let _ = fs::remove_dir_all(self.xdg_cache.path().join("worktree"));
     }
 
-    /// Run `wt list --perf` and return the parsed `list gather` stage duration.
+    /// Run `wt list --perf=json` and return its `local_gather` stage.
     pub fn list_gather_duration(&self) -> Duration {
         let output = self
             .wt_command()
-            .args(["list", "--perf"])
+            .args(["list", "--perf=json"])
             .env_remove("TERM_PROGRAM")
             .env_remove("KITTY_WINDOW_ID")
             .output()
@@ -459,9 +481,8 @@ impl MixedFixture {
             output.status
         );
         let stderr = String::from_utf8_lossy(&output.stderr);
-        list_gather_from_perf(&stderr).unwrap_or_else(|| {
-            panic!("could not find `list gather` stage in --perf output:\n{stderr}")
-        })
+        local_gather(&perf_timings(&stderr))
+            .unwrap_or_else(|| panic!("no `local_gather` stage in --perf=json output:\n{stderr}"))
     }
 }
 
@@ -474,7 +495,12 @@ impl Default for MixedFixture {
 impl Drop for MixedFixture {
     fn drop(&mut self) {
         let paths = self.worker_paths();
-        let finished = reap_workers(&paths, || {});
+        let mut nudge = self.teardown_nudge.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take();
+        let finished = reap_workers(&paths, || {
+            if let Some(nudge) = nudge.as_mut() {
+                nudge();
+            }
+        });
         paths.remove_stores();
         if !std::thread::panicking() {
             assert!(finished, "a refresh worker outlived the test or kept a lock; release its request first");
@@ -773,10 +799,77 @@ pub fn wait_for_refresh_workers(main: &Path, count: usize, limit: Duration) -> V
     }
 }
 
-fn commit(repo: &Path, file: &str, contents: &str, message: &str) {
-    fs::write(repo.join(file), format!("{contents}\n")).expect("write commit file");
-    run_git(repo, &["add", "."]);
-    run_git(repo, &["commit", "-m", message]);
+/// Commits and branches for one `git fast-import` run, each commit adding
+/// one file to its parent's tree, by the fixture identity, dated now.
+#[derive(Default)]
+struct FastImport {
+    stream: String,
+    marks: usize,
+}
+
+impl FastImport {
+    /// Queues a commit on `refname` (after `parent`, a mark from this import,
+    /// or a root commit) that adds `file` holding `contents` and a newline;
+    /// returns its mark.
+    fn commit(&mut self, refname: &str, parent: Option<&str>, file: &str, contents: &str, message: &str) -> String {
+        self.marks += 1;
+        let mark = format!(":{}", self.marks);
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).expect("clock").as_secs();
+        let message = format!("{message}\n");
+        let contents = format!("{contents}\n");
+        self.stream.push_str(&format!(
+            "commit {refname}\nmark {mark}\ncommitter Test User <test@example.com> {now} +0000\ndata {}\n{message}",
+            message.len()
+        ));
+        if let Some(parent) = parent {
+            self.stream.push_str(&format!("from {parent}\n"));
+        }
+        self.stream.push_str(&format!("M 100644 inline {file}\ndata {}\n{contents}\n", contents.len()));
+        mark
+    }
+
+    /// Queues branch `name` at `target`, a mark from this import.
+    fn branch(&mut self, name: &str, target: &str) {
+        self.stream.push_str(&format!("reset refs/heads/{name}\nfrom {target}\n\n"));
+    }
+
+    fn run(self, repo: &Path) {
+        let mut child = Command::new("git")
+            .current_dir(repo)
+            .args(["fast-import", "--quiet"])
+            .stdin(Stdio::piped())
+            .spawn()
+            .expect("git should be installed");
+        child.stdin.take().expect("stdin").write_all(self.stream.as_bytes()).expect("write fast-import stream");
+        let status = child.wait().expect("fast-import ran");
+        assert!(status.success(), "git fast-import failed in {repo:?}:\n{}", self.stream);
+    }
+}
+
+/// Appends `entries` (`section[.subsection].name`, value) to the git config
+/// file `config`, as one `git config <key> <value>` each would set them,
+/// without a `git` process per key.
+pub fn append_git_config(config: &Path, entries: &[(&str, &str)]) {
+    assert!(config.is_file(), "no git config at {config:?}");
+    // Windows paths carry backslashes, which a config file reads as escapes.
+    let quoted = |value: &str| format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""));
+    let mut text = String::new();
+    let mut current_header = String::new();
+    for (key, value) in entries {
+        let (section, rest) = key.split_once('.').unwrap_or_else(|| panic!("config key {key:?} has no section"));
+        let (header, name) = match rest.rsplit_once('.') {
+            Some((subsection, name)) => (format!("[{section} {}]", quoted(subsection)), name),
+            None => (format!("[{section}]"), rest),
+        };
+        if header != current_header {
+            text.push_str(&header);
+            text.push('\n');
+            current_header = header;
+        }
+        text.push_str(&format!("\t{name} = {}\n", quoted(value)));
+    }
+    let mut file = fs::OpenOptions::new().append(true).open(config).expect("open git config");
+    file.write_all(text.as_bytes()).expect("append git config");
 }
 
 fn run_git(repo: &Path, args: &[&str]) {
@@ -788,53 +881,34 @@ fn run_git(repo: &Path, args: &[&str]) {
     assert!(status.success(), "git {args:?} failed in {repo:?}");
 }
 
-/// Extract the `list gather` stage duration from rendered `--perf` output.
-pub fn list_gather_from_perf(stderr: &str) -> Option<Duration> {
-    stage_from_perf(stderr, "list gather")
-}
-
-/// One row of a rendered `--perf` report.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PerfRow {
-    /// 0 for the `Performance` root, 1 for a top-level stage or group, 2 for
-    /// a group's child.
-    pub depth: usize,
-    pub label: String,
-    pub duration: Duration,
-}
-
-/// Every report row in rendered `--perf` output, in order. Lines that are not
-/// report rows (the listing above the report) are skipped.
-pub fn perf_rows(stderr: &str) -> Vec<PerfRow> {
-    strip_ansi(stderr).lines().filter_map(perf_row).collect()
-}
-
-/// A report row: the quote border, then tree connectors (three columns per
-/// level), the label, and the duration as the first token that parses as one.
-fn perf_row(line: &str) -> Option<PerfRow> {
-    let body = line.trim_start().strip_prefix('▌')?.trim_start_matches(' ');
-    let connectors = body.chars().take_while(|c| matches!(c, '│' | '├' | '└' | '─' | ' ')).count();
-    let rest: String = body.chars().skip(connectors).collect();
-    let tokens: Vec<&str> = rest.split_whitespace().collect();
-    let at = tokens.iter().position(|token| parse_perf_duration(token).is_some())?;
-    (at > 0).then(|| PerfRow {
-        depth: connectors.div_ceil(3),
-        label: tokens[..at].join(" "),
-        duration: parse_perf_duration(tokens[at]).expect("position found a duration"),
-    })
-}
-
-/// The duration of the one row labeled exactly `stage`, at any depth.
+/// The `wt list --perf=json` record in `output`: its final nonempty line,
+/// split on LF or CRLF (a pseudo-terminal's), without the `WT_PERF_JSON `
+/// prefix. Earlier output is never searched, so listing text that resembles
+/// the prefix cannot be taken for the record.
 ///
-/// Labels are matched whole, so a group such as `remote wait ‖ local gather`
-/// is never read as its `remote wait` child. Panics when two rows share the
-/// label, rather than picking one.
-pub fn stage_from_perf(stderr: &str, stage: &str) -> Option<Duration> {
-    let rows = perf_rows(stderr);
-    let mut matching = rows.iter().filter(|row| row.label == stage);
-    let found = matching.next()?;
-    assert!(matching.next().is_none(), "two `{stage}` rows in the --perf report:\n{rows:#?}");
-    Some(found.duration)
+/// Panics when the final line is not a record or does not decode.
+pub fn perf_timings(output: &str) -> Timings {
+    let last = output
+        .split('\n')
+        .map(|line| line.strip_suffix('\r').unwrap_or(line))
+        .rfind(|line| !line.trim().is_empty())
+        .unwrap_or_else(|| panic!("no output, so no --perf=json record"));
+    let document = last
+        .strip_prefix("WT_PERF_JSON ")
+        .unwrap_or_else(|| panic!("the final line is not a --perf=json record: {last:?}\n{output}"));
+    Timings::from_json(document).unwrap_or_else(|e| panic!("malformed --perf=json record ({e}): {document}"))
+}
+
+/// The elapsed time of the span at `path` of stage ids.
+pub fn stage_at(timings: &Timings, path: &[Stage]) -> Option<Duration> {
+    timings.span(path).map(|span| span.elapsed())
+}
+
+/// The `local_gather` stage, under whichever region ran: the one beside the
+/// refresh worker, or the local-only one.
+pub fn local_gather(timings: &Timings) -> Option<Duration> {
+    stage_at(timings, &[Stage::RemoteAndLocal, Stage::LocalGather])
+        .or_else(|| stage_at(timings, &[Stage::LocalReads, Stage::LocalGather]))
 }
 
 /// A local stand-in for an HTTPS proxy, so a PR request never leaves the host.
@@ -1470,86 +1544,4 @@ fn gitea_pulls_json(prs: &[(u64, &str)]) -> String {
         })
         .collect();
     serde_json::Value::Array(pulls).to_string()
-}
-
-/// Parse a metrics-tree duration token such as `216.0ms`, `39.0µs`, or `1.2s`.
-///
-/// ## Returns
-///
-/// `None` for tokens that are not durations (e.g. the trailing `64%` share).
-pub fn parse_perf_duration(token: &str) -> Option<Duration> {
-    // `ms` / `µs` / `us` / `ns` must be tried before the bare `s` suffix, which
-    // would otherwise strip the trailing `s` of `ms` and misparse the rest.
-    let (number, divisor) = if let Some(rest) = token.strip_suffix("ms") {
-        (rest, 1e3)
-    } else if let Some(rest) = token.strip_suffix("µs") {
-        (rest, 1e6)
-    } else if let Some(rest) = token.strip_suffix("us") {
-        (rest, 1e6)
-    } else if let Some(rest) = token.strip_suffix("ns") {
-        (rest, 1e9)
-    } else {
-        (token.strip_suffix('s')?, 1.0)
-    };
-    let value: f64 = number.parse().ok()?;
-    Some(Duration::from_secs_f64(value / divisor))
-}
-
-/// Remove ANSI CSI/OSC escape sequences, preserving multibyte glyphs.
-fn strip_ansi(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    let mut chars = input.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c != '\u{1b}' {
-            out.push(c);
-            continue;
-        }
-        match chars.peek() {
-            // CSI: ESC [ ... <final letter>
-            Some('[') => {
-                chars.next();
-                while let Some(&next) = chars.peek() {
-                    chars.next();
-                    if next.is_ascii_alphabetic() {
-                        break;
-                    }
-                }
-            }
-            // OSC: ESC ] ... BEL
-            Some(']') => {
-                chars.next();
-                while let Some(&next) = chars.peek() {
-                    chars.next();
-                    if next == '\u{07}' {
-                        break;
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-    out
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parses_known_duration_units() {
-        assert_eq!(parse_perf_duration("216.0ms"), Some(Duration::from_micros(216_000)));
-        assert_eq!(parse_perf_duration("39.0µs"), Some(Duration::from_nanos(39_000)));
-        assert_eq!(parse_perf_duration("1.5s"), Some(Duration::from_millis(1500)));
-        assert_eq!(parse_perf_duration("64%"), None);
-        assert_eq!(parse_perf_duration("gather"), None);
-    }
-
-    #[test]
-    fn finds_list_gather_line_in_rendered_perf() {
-        let sample = "\u{1b}[33m▌\u{1b}[0m ├─ list gather   \u{1b}[1m216.0ms\u{1b}[0m   64%\n";
-        assert_eq!(
-            list_gather_from_perf(sample),
-            Some(Duration::from_micros(216_000))
-        );
-    }
 }

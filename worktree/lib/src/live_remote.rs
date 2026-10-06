@@ -251,6 +251,7 @@ pub fn run_transport(base: &Path, args: &[&str], deadline: Duration) -> Result<S
         command.process_group(0);
     }
     let mut child = command.spawn().map_err(|e| TransportError::other(format!("could not run git: {e}")))?;
+    crate::git::calls::started();
     let stdout = drain(child.stdout.take());
     let stderr = drain(child.stderr.take());
 
