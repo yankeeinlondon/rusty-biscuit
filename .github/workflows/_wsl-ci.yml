@@ -69,6 +69,10 @@ env:
   # compiles, so this is belt and braces.
   RUSTC_WRAPPER: ""
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  # CI's Python prints non-ASCII (`completion.py`'s check mark). On a Windows
+  # runner a piped stdout is cp1252 without UTF-8 mode, so the print raised
+  # UnicodeEncodeError and failed every Windows cell whose tests all passed.
+  PYTHONUTF8: "1"
   COLORTERM: truecolor
   NEXTEST_PROFILE: ci
   # Used for both the host and guest so they run the same recipes. The guest
