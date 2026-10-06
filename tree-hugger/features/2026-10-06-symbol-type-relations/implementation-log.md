@@ -3,11 +3,78 @@ spec: "/Volumes/coding/wt/rusty-biscuit/feat-symbols/tree-hugger/features/2026-1
 plan: "tree-hugger/features/2026-10-06-symbol-type-relations/plan.md"
 implemented_by: "claude/opus"
 started_phase: "1"
-packages: []
+packages:
+  - tree-hugger
+  - tree-hugger-cli
 source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - tree-hugger/lib/src/shared/schema_v2/types.rs
+  - tree-hugger/lib/src/shared/schema_v2/facets.rs
+  - tree-hugger/lib/src/shared/schema_v2/mod.rs
+  - tree-hugger/lib/src/file/mod.rs
+  - tree-hugger/lib/src/file/tree_file.rs
+  - tree-hugger/lib/src/file/extract/attributes.rs
+  - tree-hugger/lib/src/file/extract/flags.rs
+  - tree-hugger/lib/src/file/extract/metrics.rs
+  - tree-hugger/lib/src/cache/symbol_cache.rs
+  - tree-hugger/lib/src/cache/mod.rs
+  - tree-hugger/lib/src/analysis/mod.rs
+  - tree-hugger/lib/src/analysis/tests.rs
+  - tree-hugger/lib/src/god_files/analysis.rs
+  - tree-hugger/lib/tests/l1/cache_tests.rs
+  - tree-hugger/lib/tests/l1/symbols_adapter.rs
+  - tree-hugger/lib/tests/l1/symbols_cache.rs
+  - tree-hugger/lib/tests/l1/symbols_metrics.rs
+  - tree-hugger/lib/tests/l1/symbols_query.rs
+  - tree-hugger/cli/src/declarations.rs
+  - tree-hugger/cli/src/main.rs
+  - tree-hugger/cli/src/report.rs
+  - tree-hugger/cli/src/stats.rs
+  - tree-hugger/cli/tests/symbols/cache_robustness.rs
+  - tree-hugger/cli/tests/symbols/cache_upgrade.rs
+  - tree-hugger/cli/tests/symbols/report.rs
+  - tree-hugger/cli/tests/symbols/reports.rs
+  - tree-hugger/cli/tests/symbols/wiring.rs
+  - tree-hugger/cli/tests/fixtures/golden/symbols.json
+  - tree-hugger/cli/tests/fixtures/golden/symbols.jsonl
+docs_updated_during_phase_2:
+  - tree-hugger/README.md
+  - tree-hugger/lib/README.md
+  - tree-hugger/cli/README.md
+  - tree-hugger/docs/cache-design.md
+  - tree-hugger/docs/symbol-kinds-and-visibility.md
+  - tree-hugger/docs/symbol-reports.md
+  - tree-hugger/docs/symbol-schema-design.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+  - .claude/skills/tree-hugger/SKILL.md
+  - .claude/skills/tree-hugger/api-reference.md
+source_files_during_phase_3:
+  - tree-hugger/lib/src/file/extract/generics.rs
+  - tree-hugger/lib/src/file/extract/mod.rs
+  - tree-hugger/lib/src/file/tree_file.rs
+  - tree-hugger/lib/src/file/mod.rs
+  - tree-hugger/lib/src/analysis/mod.rs
+  - tree-hugger/lib/src/error.rs
+  - tree-hugger/lib/tests/l1/symbols_generics.rs
+  - tree-hugger/lib/tests/l1/main.rs
+  - tree-hugger/lib/tests/l1/symbols_coverage.rs
+  - tree-hugger/cli/src/report.rs
+  - tree-hugger/cli/tests/symbols/report.rs
+  - tree-hugger/cli/tests/symbols/cache_upgrade.rs
+  - tree-hugger/cli/tests/fixtures/golden/symbols.json
+  - tree-hugger/cli/tests/fixtures/golden/symbols.jsonl
+docs_updated_during_phase_3:
+  - tree-hugger/docs/symbol-schema-design.md
+  - tree-hugger/docs/symbol-reports.md
+  - tree-hugger/docs/cache-design.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+  - .claude/skills/tree-hugger/SKILL.md
+  - .claude/skills/tree-hugger/api-reference.md
 ---
 
 # Implementation Log for 2026-10-06-symbol-type-relations (9 phases)
@@ -238,3 +305,320 @@ open and gates only tasks 6.5–6.7:
 - No tests were added or changed: Phase 1 changes no behavior.
 - Skipped: nothing. Pre-existing failures: none (one load-induced timeout
   noted above, passed on rerun).
+
+## Phase 2
+
+Schema 4.1, extractor revision 18, the `metrics.lines` key, one attribute
+parse per declaration and the modifier normalizer. Single owner, no
+parallel work. `lines` is plumbed but always `null`; Phase 5 computes it.
+
+### 2.1 `lines` key
+
+- `MetricsFacet` gained `lines: Option<u32>` with `deserialize_with =
+  "nullable"` like its siblings (`facets.rs`): absent key → error, `null` →
+  `None`, no `#[serde(default)]`. Every constructor sets `lines: None`
+  (`metrics.rs::symbol_metrics`, `cli/src/stats.rs` test, two L1 tests).
+
+### 2.2 Version bumps
+
+- `SchemaVersion::V4_1` added; `V4_0` kept as a documented historical
+  constant (like `V2_0`/`V3_0`). Every emitter and the exact-version checks
+  in `cache/symbol_cache.rs` now use `V4_1` (records, file indexes, CLI
+  envelope in `report.rs`, fingerprints, god-files, `main.rs`,
+  `declarations.rs`).
+- `EXTRACTOR_REVISION` `"17"` → `"18"`.
+- "4.1 is incompatible" examples replaced: the CLI matrix's
+  `IncompatibleMinor` is now the previous `4.0`; the lib record-version test
+  walks 2.0, 3.0, 4.0, 4.2, 5.0; the entry-version test adds 4.0; the CLI
+  upgrade test walks 2.0, 3.0, 4.0, 5.0. `symbols_adapter::new_record_fields_read_per_shape`
+  used `"lines": 3` as its *unknown metric key* example; it now uses
+  `"bogus"` and gained the `lines` rows below.
+- **Revision 17 test departs from the `StaleRevision` pattern.** That helper
+  requires the stale payload to be servable under the current key (its
+  control). A revision 17 entry (4.0 records, metrics without `lines`) is
+  not servable by revision 18 at all, so
+  `cache_upgrade::entry_from_extractor_revision_seventeen_is_not_served_after_the_schema_bump`
+  checks by hand: rejected and recomputed under the current key, never read
+  under its own computed key, rewritten as 4.1 with `lines`, and hit on
+  run 2.
+- **IDs:** `schema_v2::tests::symbol_ids_survive_schema_and_revision_bumps`
+  pins `rust::src/lib.rs::Function::hello::0` → `7d883dc4…a7a4` literally.
+  The ID formula reads neither version; goldens normalize IDs, and their
+  diff shows no other change.
+
+### 2.3 Shared parsed attributes
+
+- `is_deprecated(&[SyntacticAttribute], doc, language)` and
+  `has_test_attribute(&[SyntacticAttribute], language)` no longer read the
+  tree; `records_from` calls `declaration_attributes` once per selected
+  declaration (inside the Flags branch, since nothing else reads them yet)
+  and passes the slice to both. Previously each reader parsed separately.
+- `SyntacticAttribute` gained `value: Option<String>`: the raw source
+  between the outer delimiters, trimmed, comments and inner whitespace kept;
+  `None` exactly when `arguments` is; `Some("")` for `()`; Rust `= value`
+  gives the value text. `impl From<&SyntacticAttribute> for Attribute` is the
+  record conversion Phase 4 uses.
+- **Not done here (Phase 4.2):** filling `record.attributes`, TS/JS
+  decorators, the "unusual decorator expression" name rule. When 4.2 fills
+  the facet for every `wanted` record, hoist the `declaration_attributes`
+  call out of the Flags closure so flags and the facet share it (clippy's
+  `obfuscated_if_else` rejected the `then(..).unwrap_or_default()` form;
+  use an `if`).
+
+### 2.4 Modifier normalizer
+
+- `Modifier` derives `PartialEq, Eq, PartialOrd, Ord`; the variant order is
+  the spec order, so `normalize_modifiers` (`facets.rs`, `pub(crate)`) is
+  sort + dedup. It runs once per record in `records_from`, after every
+  modifier contribution and before relations are attached. Phase 4 readers
+  push in any order before that line.
+- Existing Static/StaticStorage/Async sets are unchanged (they were already
+  in order; every existing test passes).
+
+### Input robustness matrix (`metrics.lines`)
+
+| Shape | Edit | Outcome | Test |
+|---|---|---|---|
+| control | `lines: 3` | served, `3` | CLI `cache_robustness` column `metrics.lines` |
+| absent | key removed | rejected → recompute | same column; lib `lines absent` |
+| explicit null | `null` | served, `null` | same column |
+| wrong type | `"3"` | rejected | same column; lib `lines wrong type` |
+| wrong number | `3.5`, `-1`, `4294967296` | rejected | `cache_robustness::metrics_lines_serves_only_a_u32_count`; lib `lines fraction`/`lines negative` |
+| boundary | `4294967295` | served | `metrics_lines_serves_only_a_u32_count` |
+| one / every element wrong | `[3, 123]` / `[123]` | rejected | matrix column; lib `lines one wrong element` |
+| empty | `0` | served, `0` (distinct from `null`) | matrix column; lib `empty_body` |
+| duplicate key | `lines` twice | rejected | matrix column; lib `duplicate lines` |
+| trailing content | valid entry + garbage | rejected | matrix column; lib `trailing content` |
+| facet absent, entry lists `metrics` | `metrics` removed | rejected (`Inconsistent`, existing contract) | matrix column `metrics` / Absent |
+| facet absent, entry without `metrics` | entry from `hug --json functions` | served to a non-metrics request; a metrics request recomputes the whole facet with `lines` | `cache_robustness::an_absent_metrics_facet_is_not_requested_never_computed_null` |
+| old version | 4.0 entry / record | rejected → recompute | matrix `IncompatibleMinor`; lib version tests; revision 17 test |
+
+The plan's "facet absent → accepted as not requested" row holds only for an
+entry that does not list `metrics`; an entry that lists it and lacks the
+facet stays `Inconsistent`, as the cache design already required. Smell grep
+(`#[serde(default)]` on `lines`, `unwrap_or_default`/`.ok()` in the cache
+reader): none.
+
+### 2.5 Foundation tests and goldens
+
+- `golden/symbols.json` and `symbols.jsonl` regenerated
+  (`HUG_UPDATE_GOLDEN=1`); the diff is only `"minor": 0 → 1` and
+  `rev.17 → rev.18` (95–96 lines each kind).
+- `just test`: **1027 / 1027 passed** (baseline 1021 + 6 new tests).
+  `just lint`: green.
+- No rendering change, so `just test-l2` was not run. No OS-specific code
+  changed (no paths, `cfg`, or process handling), so no cross-check.
+
+### Requirement → test
+
+| Requirement | Test |
+|---|---|
+| `lines` required, nullable, strict | `symbols_adapter::new_record_fields_read_per_shape`, CLI `cache_robustness` (matrix + two new tests) |
+| 4.1 everywhere, older versions recomputed | `wiring::json_symbols_carry_visibility_and_current_schema`, `reports`/`report` envelope prefixes, `symbols_cache::incompatible_record_schema_versions_*`, CLI matrix version cells |
+| revision bump invalidates old entries | `cache_upgrade::entry_from_extractor_revision_seventeen_is_not_served_after_the_schema_bump` |
+| IDs unchanged | `schema_v2::tests::symbol_ids_survive_schema_and_revision_bumps`, golden diff |
+| raw attribute value, conversion | `attributes::tests::attributes_keep_their_raw_argument_text` (Rust, Java, C#, Python, C++, Scala, Swift) |
+| flags unchanged by the shared parse | every existing `symbols_flags` test (unchanged, passing) |
+| modifier order and dedup | `schema_v2::tests::modifiers_normalize_to_one_order_without_repeats` |
+
+### Docs and skill
+
+READMEs (area, lib, CLI), `cache-design.md` (versions, `rev.18`, `lines`
+rows, twenty-three columns), `symbol-schema-design.md` (4.1 history row,
+`lines` **planned**, modifier order), `symbol-kinds-and-visibility.md`
+(`lines` row **planned**), `symbol-reports.md` (envelope versions). Skill:
+`SKILL.md` (4.1, revision 18, attribute sharing, modifier order) and
+`api-reference.md`. The area README's historical release-note snippet still
+shows the 4.0 envelope it shipped with, on purpose.
+
+### Notes
+
+- Files under `features/2026-10-03-symbol-filters-and-reports/` changed
+  during this session from another process (historical log content); they
+  are not part of this phase and were left alone.
+- Skipped: nothing. Pre-existing failures: none.
+
+## Phase 3
+
+Structured generic parameters, extractor revision 19. One owner; the four
+language groups were done in one pass because they share one new reader
+module and one matrix file.
+
+### 3.1 Shared generic reader
+
+- New `lib/src/file/extract/generics.rs`: `declared_generics(declaration,
+  name, language, source) -> Result<DeclaredGenerics, GenericParamOverflow>`
+  returns `params: Vec<GenericParam>` and declaration-level `constraints`.
+  One function per language with a node table taken from the Phase 1 probe,
+  re-probed this phase with a throwaway in-crate test (deleted) that printed
+  each capture's `declaration` node, its parent and the sexp.
+- Which node owns the list (the probe settled it):
+    - Rust/TS/Java/Python: `type_parameters` field of the declaration
+      itself; a TS `const f = <T,>() => …` record's declaration is the
+      `arrow_function`, so it is covered.
+    - Go: the declaration is the whole `type_declaration`; the list is on
+      the name's parent `type_spec`/`type_alias` (so each spec of a group
+      gets its own list); `function_declaration` directly. A method's
+      receiver `[K, V]` are type arguments, not parameters.
+    - C#: unfielded `type_parameter_list` on classes/structs/records,
+      fielded on interfaces/methods; `type_parameter_constraints_clause`
+      siblings attach to the named parameter.
+    - C++: only the `template_declaration` that is the declaration's
+      **direct parent**, so a member template does not inherit the class
+      template's list and `template <class T> template <class U> void
+      A<T>::f(U)` reads `U`.
+    - Swift: unfielded `type_parameters` / `type_constraints`; the inline
+      bound is under field `name:` (grammar quirk).
+    - Scala: found by kind (a function's list is under field
+      `parameters:`); invariant parameters are flat `name:` + `bound:`
+      siblings, variant ones wrapped.
+- Rules as encoded: source order; `position` = index in the written list
+  (an unnamed C++ `typename` keeps its slot and has no entry); Rust
+  lifetimes keep `'`; `const`/non-type parameters are `Const` and their type
+  is not a constraint; bounds are grammar entries (comment children such as
+  Rust `/* … */` inside `trait_bounds` skipped), outer whitespace trimmed;
+  defaults exclude `=`; variance as written.
+- `where`/requirement routing: a predicate whose subject is a bare declared
+  parameter name (Rust `type_identifier`/`lifetime`, Swift
+  `inheritance_constraint`, C# clause identifier) appends to that
+  parameter after its inline bounds; anything else goes to
+  `type_info.constraints` once, as written: Rust `T::Item: Copy`,
+  `Vec<K>: Send`, `for<'b> …`, a method's `where T: …` on its impl's `T`;
+  Swift `U == Int` (an equality requirement is not a bound); C++ `requires`
+  (after the template header and trailing after the function declarator);
+  a C# clause naming no declared parameter (text without `where`).
+- **Decision (carried open from Phase 1): C++ concept-constrained type
+  parameters stay conservative.** `template <std::integral T>` is read as
+  `Const` with no constraint, because tree-sitter-cpp 0.23.4 gives it the
+  exact shape of `template <MyEnum E>`. Resolving against a same-file
+  `concept` was rejected: it never helps the common `std::` concepts and it
+  needs a per-file concept index for one rare case. Documented as a grammar
+  limit and pinned by the matrix's limit row.
+- **Decision: Scala bounds keep their operator** (`>: Null`, `<: AnyRef`,
+  `: Ordering`) because one list mixes lower, upper and context bounds; the
+  context bound's `:` is a separate `bound:`-fielded token, so the text is
+  sliced from it. Other languages list only upper bounds and drop the
+  keyword.
+- **Decision: Python packs are named without stars** (`*Ts` → `Ts`, `**P`
+  → `P`), kind `Type`; the schema has no pack/param-spec flag.
+- **Older name lists left alone (plan: "only where behavior is
+  preserved").** `type_metadata.rs`'s `extract_*_type_parameters` differ
+  from the new reader (Rust drops `const` parameters, Scala lists only
+  invariant names, Swift may pick a bound's identifier), so projecting them
+  would change `TypeMetadata::type_parameters`. Their tests are untouched
+  and pass.
+- **Ruling 7 (`u16` overflow):** `TreeHuggerError::TooManyGenericParameters
+  { path, symbol, count }`; `records_from` now returns `Result` (both
+  callers already did). The representable boundary is 65 536 parameters
+  (positions 0..=65535); the 65 537th is the error. The plan's "more than
+  65 535 parameters" wording was one off; the spec's "unrepresentable"
+  wording is what is implemented. The CLI maps it to `errors[].kind =
+  "too_many_generic_parameters"` (`cli/src/report.rs::error_kind`).
+
+### 3.2 Record wiring
+
+- `records_from` (`tree_file.rs`) fills `type_info.generic_params` and
+  `type_info.constraints` inside the existing `if wanted` block: every
+  selected record, no capability, so a declarations-only query carries
+  them. Unselected records stay light; `coverage::project` drops
+  unselected records outright, so no projection change was needed.
+- `EXTRACTOR_REVISION` `"18"` → `"19"`; revision 18 added as a
+  `StaleRevision` (`OldKey::Computed`) in `cli/tests/symbols/cache_upgrade.rs`
+  (`entry_from_extractor_revision_eighteen_is_not_served_after_the_repairs`:
+  a revision-18 entry without `generic_params` is not served; the repaired
+  value is `[["T", ["Clone"], "String", 0]]`, then a warm hit).
+- Goldens regenerated: diff against the Phase 2 state is only
+  `rev.18 → rev.19` (verified by rewriting HEAD's goldens and diffing). The
+  `multi/` tree declares no generics.
+- Schema stays 4.1 (filling existing fields is not a shape change).
+
+### 3.3–3.6 Language groups and 3.7 coverage
+
+`lib/tests/l1/symbols_generics.rs`, `GENERICS_MATRIX`, one row per language
+(16), each `Supported` or `Absent(reason)` with declarations asserted on the
+complete index **and** on a declarations-only `SymbolQuery::kinds([kind])`
+(which must run only the parse pass), plus `limits`.
+`symbols_coverage::every_language_has_one_row_in_each_report_matrix` now
+requires a `GENERICS_MATRIX` row per language.
+
+| Language | Status | Positive | Negative |
+|---|---|---|---|
+| Rust | supported | `Bag<T: Clone = String>`; trait `'a`, `K: 'a + Ord` + `where K: Clone`, `const N: usize = 4`; alias default `B = A`; method `where U: Copy` | impl `T` on neither type nor method; `size` empty; `T::Item`, `Vec<K>: Send`, `for<'b>` → declaration constraints; comment inside bounds skipped |
+| TypeScript | supported | class bound+default, interface `string \| number`, alias `keyof T` default, nested `Array<Map<…>>`, arrow function | `size`, `infer` empty |
+| JavaScript | absent | — | class, method, function with JSDoc `@template` → empty |
+| Go | supported | struct, alias, functions, `K, V any`, union/`~` constraint text, group spec | receiver method `Key`, non-generic interface, plain group spec |
+| Python | supported | `T: (int, str)`, `*Ts`, `**P`, method/function lists | `Generic[T]` base → empty; `infer` |
+| Java | supported | `T extends Comparable<T> & Cloneable`, method/constructor lists, interface, record | `size` |
+| C# | supported | `in`/`out` variance, `where T : class, IComparable<T>, new()`, method `where V : notnull`, struct, record | `Size` |
+| C | absent | — | struct, function → empty |
+| C++ | supported | type/non-type/pack with defaults, member template, `requires` (both positions), alias template, template template, unnamed slot | `size` gets no class params; `infer` |
+| Swift | supported | inline + `where` bounds, protocol composition bound, function, alias | `U == Int` on the class's `U` → method constraint; `size` |
+| Scala | supported | `+`/`-` variance, `>: <: :` bounds with operators, context bound on a function, trait, alias | `F[_ <: AnyRef]`'s nested bound not on `F`; `size` |
+| PHP | absent | — | class with PHPDoc `@template`, method → empty |
+| Perl, Bash, Zsh, Lua | absent | — | function → empty |
+
+Demonstrated grammar limits (rows assert they still hold):
+
+| Grammar | Snippet | Observation |
+|---|---|---|
+| tree-sitter-typescript 0.23.2 | `interface Variant<in T> {}` | syntax error (TS 4.7 variance) |
+| tree-sitter-python 0.25.0 | `class Defaulted[T = str]: pass` | syntax error (PEP 696 default) |
+| tree-sitter-cpp 0.23.4 | `template <std::integral T> void constrained(T)` | parses as non-type `parameter_declaration` → `Const`, no constraint |
+
+Extractor gaps, not grammar limits, recorded in the docs: Python
+`type A[T] = …` and C# `delegate` produce no record at all, so they carry no
+generics (the spec forbids adding records only to fill a metadata cell).
+
+### Requirement → test
+
+| Requirement | Test |
+|---|---|
+| per-language parameters, bounds, defaults, variance, positions, declaration constraints; ownership; no inference | `symbols_generics::generics_matrix_holds_on_complete_and_declarations_only_paths` |
+| declarations-only query equals the complete index and runs only parse | same test (selective path per declaration) |
+| grammar limits | `symbols_generics::generics_grammar_limits_hold_for_the_pinned_grammars` |
+| `u16` boundary and explicit error; unselected oversized declaration does not fail | `symbols_generics::a_generic_list_beyond_u16_positions_is_an_analysis_error` |
+| 16-language row guard | `symbols_coverage::every_language_has_one_row_in_each_report_matrix` |
+| JSON / JSONL / `--json-full` carry it (normal invocation, persistent cache on) | CLI `report::generic_parameters_reach_every_json_format` |
+| CLI error kind, exit 1, non-selecting command unaffected | CLI `report::an_unrepresentable_generic_list_fails_only_a_command_that_selects_it` |
+| revision bump invalidates old entries; warm hit after | CLI `cache_upgrade::entry_from_extractor_revision_eighteen_is_not_served_after_the_repairs` |
+| older name lists unchanged | existing `TypeMetadata` tests, unchanged and passing |
+
+Input robustness matrix: not applicable this phase. No reader of a file
+format changed; `GenericParam`/`TypeFacet` deserialization is unchanged
+(their pre-existing `#[serde(default)]` on `generic_params`,
+`constraints` and `GenericParam::constraints` means absent = empty, which is
+the serialization's `skip_serializing_if = "Vec::is_empty"` encoding). Phase
+7's cache robustness rows own stating that.
+
+### Gates
+
+- `just test`: **1035 / 1035 passed** (Phase 2: 1027; +3 lib generics
+  tests, +2 CLI report tests, +1 cache-upgrade test = 1033; the other two
+  are not this phase's, most likely the concurrent session's below).
+    - One earlier run in this phase reported the known load-sensitive
+      `TIMEOUT` of `file_identity::god_files_paths_are_relative_to_any_spelling_of_the_root`
+      (Phase 1 note); alone it passes in 6 s, and the two final full runs
+      passed it.
+- `just lint`: **fails, not from this phase.** The only clippy error is
+  `type_complexity` at `lib/src/file/extract/visibility/mod.rs:81`
+  (`VisibilityMemo::cpp_sections`), plus a `dead_code` warning at
+  `qualified_name.rs:132` (`file_namespaces`). Both files were unmodified
+  at the start of this session and were edited by another process during it
+  (mtime 17:19 PDT, mid-phase), alongside `classify.rs`, `declaration.rs`
+  and `static_flags/mod.rs`. Left untouched. Clippy run non-fatally over
+  `--all-targets` of both crates reports nothing in any file this phase
+  changed.
+- No rendering change, so `just test-l2` was not run. No OS-specific code
+  (no paths, `cfg`, processes), so no cross-check. The overflow tests parse
+  a ~460 KB generated file (4.7 s locally for two parses in the lib test,
+  1.6 s in the CLI test); slower CI hosts stay well under the 30 s limit.
+
+### Docs and skill
+
+- `docs/symbol-schema-design.md`: new "Generic parameters" section (rules,
+  example, per-language table, limits, adapter loss), the "still empty"
+  paragraph and the "when computed" table corrected.
+- `docs/symbol-reports.md`: `too_many_generic_parameters` error kind.
+- `docs/cache-design.md`: `rev.19`.
+- Skill: `SKILL.md` (generics bullet, revision 19, stale-revision list),
+  `api-reference.md` (record facets filled by extraction).

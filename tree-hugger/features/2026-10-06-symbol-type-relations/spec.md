@@ -9,43 +9,42 @@ reviewed_on: 2026-10-05
 review_iterations: 0
 human_review: false
 message_to_agent: |-
-  Phase 1 (gate) is done; read `## Phase 1` of implementation-log.md before
-  starting. Key facts:
+  Phases 1-3 are done; read `## Phase 2` and `## Phase 3` of
+  implementation-log.md. Facts that matter for Phase 4 and later:
 
-  - Baseline on macOS: `just test` 1021/1021 green, `just lint` green. One
-    load-sensitive test (`file_identity::god_files_paths_are_relative_to_any_spelling_of_the_root`)
-    timed out at 30 s only while another cargo build ran; it passed on rerun.
-  - Versions: schema is still `SchemaVersion::V4_0`, so Phase 2 adds `V4_1`.
-    `EXTRACTOR_REVISION` is "17" (lib/src/file/mod.rs:24), not "10" as the
-    plan says: bump to "18" and add revision 17 as a `StaleRevision` with
-    `OldKey::Computed` in the CLI cache-upgrade tests.
-  - Rulings 2-9 proceed on the plan defaults. Ruling 1 (C#/Swift/Scala mixed
-    base lists) is still OPEN: the author has not accepted the spec's
-    recommendation. It blocks only tasks 6.5-6.7. If no answer has been
-    recorded by Phase 6, build everything else and leave those three open.
-  - Demonstrated grammar limits: Python PEP 696 type-parameter defaults
-    (tree-sitter-python 0.25.0) and TypeScript `in`/`out` variance
-    (tree-sitter-typescript 0.23.2) do not parse.
-  - Open design point for Phase 3: tree-sitter-cpp 0.23.4 parses a
-    concept-constrained parameter `template <std::integral T>` as a plain
-    `parameter_declaration`, the same shape as a non-type `template <int N>`.
-    Syntax alone cannot tell them apart when the declared type is a named
-    (non-primitive) type. Do not guess a kind from spelling. Either leave
-    such parameters at the conservative reading and record it as a
-    documented limitation, or resolve the type against a same-file `concept`
-    declaration only. Log whichever you choose.
-  - Grammar quirks the generic and relation readers must handle are listed in
-    the probe tables. Swift puts a type-parameter bound and a function return
-    type under a field misnamed `name`. Scala invariant type parameters have
-    no wrapper node, and a Scala function's type parameters sit under the
-    field `parameters:`. In a Scala `extends_clause`, the anonymous `with`
-    tokens also carry field `type:`. A TS `extends_clause` splits the target
-    into `value:` and `type_arguments:`. A TS exported class's decorator
-    sits on the `export_statement`. On a Python `type` alias, only the
-    `left:` side holds parameters (the right side also produces
-    `type_parameter` nodes). C# class type parameters have no field name,
-    while interface ones do. A C# `arrow_expression_clause` body includes
-    `=>`.
+  - `EXTRACTOR_REVISION` is now "19" (schema stays 4.1). Each phase that
+    changes extracted records bumps it again (20, ...) and adds the previous
+    revision as a `StaleRevision` (`OldKey::Computed`) in
+    `cli/tests/symbols/cache_upgrade.rs`; see the revision-18 test added in
+    Phase 3 for the smallest example. Regenerate goldens with
+    `HUG_UPDATE_GOLDEN=1` and confirm the diff is only the revision unless
+    the multi tree really changes.
+  - `TreeFile::records_from` now returns `Result<Vec<SymbolRecord>,
+    TreeHuggerError>`. Generics are filled inside its `if wanted` block via
+    `extract/generics.rs::declared_generics`; per-record facts for Phase 4
+    (modifiers, attributes) belong in the same block, before the
+    `normalize_modifiers` call.
+  - `declaration_attributes` is still called inside the Flags closure; Phase
+    4.2 must hoist it out of that closure so flags and the `attributes`
+    facet share one parse (use an `if`, clippy rejects
+    `.then(..).unwrap_or_default()`).
+  - The `declaration` node per capture was probed in Phase 3 (log, 3.1):
+    C++ members/functions sit under a `template_declaration` parent, Go
+    `type` records' declaration is the whole `type_declaration` (use the
+    name's parent spec), a TS variable-declared arrow function's
+    declaration is the `arrow_function`, an exported TS class's
+    declaration is the `class_declaration` whose parent is
+    `export_statement` (its decorator lives on that wrapper).
+  - `just lint` was red at the end of Phase 3 from another process's
+    concurrent, uncommitted edits in this worktree (`type_complexity` at
+    `lib/src/file/extract/visibility/mod.rs:81`, `dead_code` at
+    `qualified_name.rs:132`); nothing in Phase 3's files. If it is still
+    red, check `git diff` for those files before assuming it is yours.
+  - Carried from Phase 1: ruling 1 (mixed C#/Swift/Scala base lists) is
+    still unanswered and gates only tasks 6.5-6.7. Grammar quirks for the
+    relation readers are in the Phase 1 probe tables (Scala `with` tokens
+    carry field `type:`; a TS `extends_clause` splits `value:` and
+    `type_arguments:`; Swift puts a bound under field `name:`).
 $schema:
   status: |-
     enum(

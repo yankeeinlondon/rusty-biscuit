@@ -7,11 +7,78 @@ created: 2026-10-05
 phase: 1
 agent: claude/sonnet
 yolo: true
-packages: []
+packages:
+  - tree-hugger
+  - tree-hugger-cli
 source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - tree-hugger/lib/src/shared/schema_v2/types.rs
+  - tree-hugger/lib/src/shared/schema_v2/facets.rs
+  - tree-hugger/lib/src/shared/schema_v2/mod.rs
+  - tree-hugger/lib/src/file/mod.rs
+  - tree-hugger/lib/src/file/tree_file.rs
+  - tree-hugger/lib/src/file/extract/attributes.rs
+  - tree-hugger/lib/src/file/extract/flags.rs
+  - tree-hugger/lib/src/file/extract/metrics.rs
+  - tree-hugger/lib/src/cache/symbol_cache.rs
+  - tree-hugger/lib/src/cache/mod.rs
+  - tree-hugger/lib/src/analysis/mod.rs
+  - tree-hugger/lib/src/analysis/tests.rs
+  - tree-hugger/lib/src/god_files/analysis.rs
+  - tree-hugger/lib/tests/l1/cache_tests.rs
+  - tree-hugger/lib/tests/l1/symbols_adapter.rs
+  - tree-hugger/lib/tests/l1/symbols_cache.rs
+  - tree-hugger/lib/tests/l1/symbols_metrics.rs
+  - tree-hugger/lib/tests/l1/symbols_query.rs
+  - tree-hugger/cli/src/declarations.rs
+  - tree-hugger/cli/src/main.rs
+  - tree-hugger/cli/src/report.rs
+  - tree-hugger/cli/src/stats.rs
+  - tree-hugger/cli/tests/symbols/cache_robustness.rs
+  - tree-hugger/cli/tests/symbols/cache_upgrade.rs
+  - tree-hugger/cli/tests/symbols/report.rs
+  - tree-hugger/cli/tests/symbols/reports.rs
+  - tree-hugger/cli/tests/symbols/wiring.rs
+  - tree-hugger/cli/tests/fixtures/golden/symbols.json
+  - tree-hugger/cli/tests/fixtures/golden/symbols.jsonl
+docs_updated_during_phase_2:
+  - tree-hugger/README.md
+  - tree-hugger/lib/README.md
+  - tree-hugger/cli/README.md
+  - tree-hugger/docs/cache-design.md
+  - tree-hugger/docs/symbol-kinds-and-visibility.md
+  - tree-hugger/docs/symbol-reports.md
+  - tree-hugger/docs/symbol-schema-design.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+  - .claude/skills/tree-hugger/SKILL.md
+  - .claude/skills/tree-hugger/api-reference.md
+source_files_during_phase_3:
+  - tree-hugger/lib/src/file/extract/generics.rs
+  - tree-hugger/lib/src/file/extract/mod.rs
+  - tree-hugger/lib/src/file/tree_file.rs
+  - tree-hugger/lib/src/file/mod.rs
+  - tree-hugger/lib/src/analysis/mod.rs
+  - tree-hugger/lib/src/error.rs
+  - tree-hugger/lib/tests/l1/symbols_generics.rs
+  - tree-hugger/lib/tests/l1/main.rs
+  - tree-hugger/lib/tests/l1/symbols_coverage.rs
+  - tree-hugger/cli/src/report.rs
+  - tree-hugger/cli/tests/symbols/report.rs
+  - tree-hugger/cli/tests/symbols/cache_upgrade.rs
+  - tree-hugger/cli/tests/fixtures/golden/symbols.json
+  - tree-hugger/cli/tests/fixtures/golden/symbols.jsonl
+docs_updated_during_phase_3:
+  - tree-hugger/docs/symbol-schema-design.md
+  - tree-hugger/docs/symbol-reports.md
+  - tree-hugger/docs/cache-design.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+  - .claude/skills/tree-hugger/SKILL.md
+  - .claude/skills/tree-hugger/api-reference.md
 ---
 
 # Plan: generics, inheritance, modifiers, attributes and body line counts
@@ -180,14 +247,14 @@ so it is not parallelized. Later phases then work on disjoint files.
 
 ### Wave 1 (sequential)
 
-- [ ] **2.1 `lines` key**
+- [x] **2.1 `lines` key**
     - Add `lines: Option<u32>` to `MetricsFacet` with the same
       `deserialize_with = "nullable"` strictness as its siblings, so a missing
       or wrongly typed key is rejected and an old two-key metrics object is
       never defaulted.
     - Update every constructor of `MetricsFacet` (compile-driven) to set
       `lines: None` for now.
-- [ ] **2.2 Version bumps**
+- [x] **2.2 Version bumps**
     - Introduce the next-minor `SchemaVersion` variant; update cache entries,
       per-record versions, file indexes, CLI envelopes, fingerprints and the
       exact-version check in `cache/symbol_cache.rs` (current check at the
@@ -197,13 +264,13 @@ so it is not parallelized. Later phases then work on disjoint files.
     - Update version-sensitive tests, including `tests/symbols/cache_upgrade.rs`
       in the CLI crate, replacing the "4.1 is incompatible" example with a
       genuinely different version.
-- [ ] **2.3 Shared parsed attributes**
+- [x] **2.3 Shared parsed attributes**
     - Make `declaration_attributes` return a structure holding the raw
       attribute list (name, value) once per declaration, shared by the flag
       readers and the new `attributes` population, so one analysis parses each
       attribute once. Keep `is_test` / `is_deprecated` behavior and tests
       unchanged.
-- [ ] **2.4 Declaration modifier normalizer**
+- [x] **2.4 Declaration modifier normalizer**
     - Add the single normalizer that dedups and orders modifiers per ruling 5.
       Existing Static/StaticStorage/Async sets must be unchanged.
 
@@ -232,7 +299,7 @@ state of the others.
 
 ### Wave 2 (sequential)
 
-- [ ] **2.5 Foundation tests and goldens**
+- [x] **2.5 Foundation tests and goldens**
     - Run `just test` in `tree-hugger/`; fix compile-driven fallout only.
       Regenerate golden files **only** for the version/shape change and review
       the diff.
@@ -248,7 +315,7 @@ phase the language groups are parallel.
 
 ### Wave 1 (single owner)
 
-- [ ] **3.1 Shared generic reader**
+- [x] **3.1 Shared generic reader**
     - Add a syntactic reader (new module beside `type_metadata.rs`) returning
       `Vec<GenericParam>` plus declaration-level constraints, driven by a
       per-language node-kind table from the Phase 1 probe.
@@ -266,24 +333,24 @@ phase the language groups are parallel.
       parameters to the implemented type.
     - Project the older name lists (`type_metadata.rs`) from the new reader only
       where behavior is preserved; otherwise leave the older readers alone.
-- [ ] **3.2 Record wiring**
+- [x] **3.2 Record wiring**
     - Populate `type_info.generic_params` and `type_info.constraints` in record
       construction (`tree_file.rs`) as a declarations-capability fact.
 
 ### Wave 2 (parallel by language group; disjoint test and query files)
 
-- [ ] **3.3 Group A: Rust, C++** — lifetime/const/type, defaults, `where`;
+- [x] **3.3 Group A: Rust, C++** — lifetime/const/type, defaults, `where`;
   C++ template type and non-type parameters, defaults, representable
   constraints. Spec example: `struct Bag<T: Clone = String>`; `fn get<U>` owns
   only `U`.
-- [ ] **3.4 Group B: TypeScript, Java, C#, Scala** — bounds, defaults,
+- [x] **3.4 Group B: TypeScript, Java, C#, Scala** — bounds, defaults,
   variance (C# `in`/`out`, Scala `+`/`-`), C# `where` constraints, aliases,
   callables, constructors.
-- [ ] **3.5 Group C: Go, Python, Swift** — Go type/callable parameters with
+- [x] **3.5 Group C: Go, Python, Swift** — Go type/callable parameters with
   constraint text (a union or `~` term is retained as constraint text);
   Python explicit class/function/type-alias syntax if the pinned grammar has it;
   Swift parameters and explicit requirements.
-- [ ] **3.6 Group D: JavaScript, C, PHP, Perl, Bash, Zsh, Lua** — assert empty
+- [x] **3.6 Group D: JavaScript, C, PHP, Perl, Bash, Zsh, Lua** — assert empty
   generics and add matrix rows classifying each as an absent construct.
 - Each group adds fixtures to a new generics matrix under the existing symbols
   matrix framework: positive, negative (ownership, no copy to methods, no
@@ -291,7 +358,7 @@ phase the language groups are parallel.
 
 ### Wave 3 (sequential)
 
-- [ ] **3.7 Merge and verify** — run `just test`; extend
+- [x] **3.7 Merge and verify** — run `just test`; extend
   `tests/l1/symbols_coverage.rs` so the generics matrix has a row for all 16
   languages (supported / absent / grammar-limit).
 
