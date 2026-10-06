@@ -16,6 +16,10 @@ mod identity;
 // against a synthetic `/proc` tree.
 #[cfg(any(target_os = "linux", all(test, unix)))]
 mod linux;
+// The classification logic runs against a scripted source in Unix test
+// builds; the `libproc` calls themselves are macOS-only.
+#[cfg(any(target_os = "macos", all(test, unix)))]
+mod macos;
 mod matching;
 mod native;
 mod options;
@@ -23,11 +27,19 @@ mod process;
 mod report;
 mod root;
 mod tree;
+// The module classification runs against a scripted source in every test
+// build; the Win32 calls themselves are Windows-only.
+#[cfg(any(windows, test))]
+mod win32;
 
 #[cfg(test)]
 mod tests;
 #[cfg(all(test, unix))]
 mod linux_tests;
+#[cfg(all(test, unix))]
+mod macos_tests;
+#[cfg(test)]
+mod win32_tests;
 
 pub use identity::FileIdentity;
 pub use native::NativeString;

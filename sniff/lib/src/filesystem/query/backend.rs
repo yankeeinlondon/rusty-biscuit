@@ -4,13 +4,17 @@
 //! merging, enrichment ordering, coverage, and the outcome. Tests drive the
 //! query through a fake backend that replays injected observations.
 
-// Until a native backend is built, only the tests' fake backend constructs
-// the inspection side of this seam.
-#![cfg_attr(not(test), allow(dead_code))]
+// Each backend leaves some of the shared helpers unused (only Linux uses the
+// watch fields, only the Unix backends use `Tally::note`), so non-test builds,
+// and Windows test builds, which compile no Unix backend, would warn.
+#![cfg_attr(any(not(test), windows), allow(dead_code))]
 
 use super::budget::Budget;
 use super::matching::{self, ObjectMatch, ObservedObject};
-use super::report::{Access, EvidenceKind, Limitation, Mechanism, WatchInfo};
+use super::report::{
+    Access, EvidenceKind, Limitation, LimitationExample, LimitationKind, Limitations, Mechanism,
+    WatchInfo,
+};
 use super::root::Root;
 use super::tree::TreeIndex;
 use chrono::{DateTime, Utc};
@@ -160,6 +164,90 @@ pub(crate) trait UsageBackend {
     }
 }
 
+/// Per-mechanism results for one process.
+pub(crate) struct Tally {
+    pub(crate) mechanism: Mechanism,
+    pub(crate) pid: u32,
+    pub(crate) evidence: Vec<RawEvidence>,
+    pub(crate) limitations: Limitations,
+    /// Records read and classified (descriptors, registrations, the cwd).
+    pub(crate) successes: u64,
+    pub(crate) denials: u64,
+    /// Unusable records other than denials.
+    pub(crate) failures: u64,
+    /// A failure that prevented the whole mechanism for this process.
+    pub(crate) whole: Option<InspectionResult>,
+}
+
+impl Tally {
+    pub(crate) fn new(mechanism: Mechanism, pid: u32) -> Self {
+        Self {
+            mechanism,
+            pid,
+            evidence: Vec::new(),
+            limitations: Limitations::default(),
+            successes: 0,
+            denials: 0,
+            failures: 0,
+            whole: None,
+        }
+    }
+
+    fn example(&self, detail: Option<String>) -> LimitationExample {
+        let example = LimitationExample::pid(self.pid);
+        match detail {
+            Some(detail) => example.with_detail(detail),
+            None => example,
+        }
+    }
+
+    /// A gap that makes this process's inspection partial.
+    pub(crate) fn problem(&mut self, kind: LimitationKind, message: &str, detail: Option<String>) {
+        if kind == LimitationKind::PermissionDenied {
+            self.denials += 1;
+        } else {
+            self.failures += 1;
+        }
+        let example = self.example(detail);
+        self.limitations.record(kind, message, 1, Some(example));
+    }
+
+    /// A scope note that does not make the inspection partial.
+    pub(crate) fn note(&mut self, kind: LimitationKind, message: &str, detail: Option<String>) {
+        let example = self.example(detail);
+        self.limitations.record(kind, message, 1, Some(example));
+    }
+
+    pub(crate) fn vanished(self) -> MechanismInspection {
+        MechanismInspection {
+            mechanism: self.mechanism,
+            result: InspectionResult::Vanished,
+            evidence: Vec::new(),
+            limitations: Vec::new(),
+        }
+    }
+
+    /// Complete with no gaps; denied or failed when gaps left nothing
+    /// readable; partial otherwise.
+    pub(crate) fn finish(self) -> MechanismInspection {
+        let result = match self.whole {
+            Some(result) => result,
+            None if self.denials + self.failures == 0 => InspectionResult::Complete,
+            None if self.successes == 0 && self.failures == 0 => InspectionResult::Denied,
+            None if self.successes == 0 => {
+                InspectionResult::Failed("no record could be read".to_string())
+            }
+            None => InspectionResult::Partial,
+        };
+        MechanismInspection {
+            mechanism: self.mechanism,
+            result,
+            evidence: self.evidence,
+            limitations: self.limitations.into_vec(),
+        }
+    }
+}
+
 /// Reads name, executable, and user for one PID through `sysinfo`, without a
 /// full refresh, thread listing, command line, or environment.
 pub(crate) fn sysinfo_details(pid: u32) -> Result<ProcessDetails, String> {
@@ -199,30 +287,37 @@ pub(crate) fn platform() -> super::linux::ProcBackend {
 }
 
 /// The backend for this OS.
-///
-/// No native mechanism is implemented here yet, so every usage mechanism
-/// reports `unsupported` and a query's outcome is `unsupported`.
-#[cfg(not(target_os = "linux"))]
-pub(crate) fn platform() -> PlatformBackend {
-    PlatformBackend
+#[cfg(target_os = "macos")]
+pub(crate) fn platform() -> super::macos::LibprocBackend<super::macos::ffi::Libproc> {
+    super::macos::LibprocBackend::new()
 }
 
-#[cfg(not(target_os = "linux"))]
-pub(crate) struct PlatformBackend;
+/// The backend for this OS.
+#[cfg(windows)]
+pub(crate) fn platform() -> super::win32::ModuleBackend<super::win32::ffi::Win32> {
+    super::win32::ModuleBackend::new()
+}
 
-#[cfg(not(target_os = "linux"))]
-const NOT_IMPLEMENTED: &str = "this build of sniff does not implement this mechanism yet";
+/// The backend for an OS without a native one: only polling is listed, so a
+/// query's outcome is `unsupported`.
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+pub(crate) fn platform() -> UnsupportedBackend {
+    UnsupportedBackend
+}
 
-#[cfg(not(target_os = "linux"))]
-impl UsageBackend for PlatformBackend {
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+pub(crate) struct UnsupportedBackend;
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+impl UsageBackend for UnsupportedBackend {
     type Payload = ();
 
     fn mechanisms(&self) -> Vec<MechanismSupport> {
-        platform_mechanisms()
+        vec![MechanismSupport::unsupported(Mechanism::Polling, POLLING_UNSUPPORTED)]
     }
 
     fn enumerate(&mut self, _budget: &Budget) -> Result<Enumeration<()>, String> {
-        Err(NOT_IMPLEMENTED.to_string())
+        Err("this OS has no usage backend".to_string())
     }
 
     fn inspect(
@@ -235,39 +330,5 @@ impl UsageBackend for PlatformBackend {
 
     fn creation_token(&mut self, _pid: u32) -> Option<u64> {
         None
-    }
-}
-
-#[cfg(not(target_os = "linux"))]
-fn platform_mechanisms() -> Vec<MechanismSupport> {
-    use Mechanism::*;
-    let polling = MechanismSupport::unsupported(Polling, POLLING_UNSUPPORTED);
-    if cfg!(target_os = "macos") {
-        vec![
-            MechanismSupport::unsupported(OpenHandles, NOT_IMPLEMENTED),
-            MechanismSupport::unsupported(WorkingDirectories, NOT_IMPLEMENTED),
-            MechanismSupport::unsupported(
-                Fsevents,
-                "macOS offers no supported systemwide inventory of FSEvents subscriptions",
-            ),
-            polling,
-        ]
-    } else if cfg!(windows) {
-        vec![
-            MechanismSupport::unsupported(OpenHandles, NOT_IMPLEMENTED),
-            MechanismSupport::unsupported(LoadedModules, NOT_IMPLEMENTED),
-            MechanismSupport::unsupported(
-                WorkingDirectories,
-                "a working directory is indistinguishable from other directory handles without \
-                 reading another process's memory",
-            ),
-            MechanismSupport::unsupported(
-                DirectoryChangeSubscriptions,
-                "handle ownership does not identify a ReadDirectoryChangesW subscription",
-            ),
-            polling,
-        ]
-    } else {
-        vec![polling]
     }
 }

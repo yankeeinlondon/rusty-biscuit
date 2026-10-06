@@ -82,6 +82,10 @@ pub const QUERY_DESCRIPTOR_INSPECTIONS: &str = "filesystem.query.descriptor_insp
 /// inotify `fdinfo` read), including failed reads.
 pub const QUERY_WATCH_REGISTRATION_READS: &str = "filesystem.query.watch_registration_reads";
 
+/// Loaded modules read by the Windows usage-query backend, including failed
+/// reads.
+pub const QUERY_MODULE_INSPECTIONS: &str = "filesystem.query.module_inspections";
+
 /// Process identity enrichments attempted for matching processes.
 pub const QUERY_IDENTITY_ENRICHMENTS: &str = "filesystem.query.identity_enrichments";
 

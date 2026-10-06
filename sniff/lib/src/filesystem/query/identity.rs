@@ -69,6 +69,9 @@ mod platform {
 }
 
 #[cfg(windows)]
+pub(crate) use platform::io_error;
+
+#[cfg(windows)]
 mod platform {
     use super::*;
     use std::os::windows::ffi::OsStrExt;
@@ -83,7 +86,7 @@ mod platform {
     /// `io::Error::from(windows::core::Error)` keeps the HRESULT as the raw OS
     /// error, so `kind()` never reports `NotFound`; unwrap `FACILITY_WIN32`
     /// HRESULTs back to their Win32 code first.
-    fn io_error(error: windows::core::Error) -> io::Error {
+    pub(crate) fn io_error(error: windows::core::Error) -> io::Error {
         let code = error.code().0 as u32;
         if code & 0xFFFF_0000 == 0x8007_0000 {
             io::Error::from_raw_os_error((code & 0xFFFF) as i32)

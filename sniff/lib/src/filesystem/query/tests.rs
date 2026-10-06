@@ -532,20 +532,6 @@ fn a_partial_enumeration_with_nothing_inspected_is_unavailable() {
     assert_eq!(report.outcome, Outcome::Unavailable);
 }
 
-#[cfg(not(target_os = "linux"))]
-#[test]
-fn the_shipped_backend_reports_unsupported_until_a_native_backend_exists() {
-    let tree = tree();
-    let report = query_path_usage(&tree.root, &PathUsageOptions::default()).expect("report");
-    assert_eq!(report.outcome, Outcome::Unsupported);
-    let enumeration = coverage(&report, Mechanism::ProcessEnumeration);
-    assert_eq!(enumeration.status, CoverageStatus::NotAttempted);
-    for record in report.coverage.iter().filter(|c| !c.mechanism.is_prerequisite()) {
-        assert_eq!(record.status, CoverageStatus::Unsupported, "{:?}", record.mechanism);
-        assert!(record.reason.as_deref().is_some_and(|r| !r.is_empty()));
-    }
-}
-
 fn record(mechanism: Mechanism, status: CoverageStatus, succeeded: Option<u64>) -> Coverage {
     Coverage {
         mechanism,

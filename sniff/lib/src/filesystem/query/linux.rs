@@ -11,7 +11,7 @@
 
 use super::backend::{
     Enumeration, InspectionContext, InspectionResult, MechanismInspection, MechanismSupport,
-    ProcessCandidate, ProcessDetails, RawEvidence, UsageBackend,
+    ProcessCandidate, ProcessDetails, RawEvidence, Tally, UsageBackend,
 };
 use super::budget::Budget;
 use super::identity::{self, FileIdentity};
@@ -424,60 +424,7 @@ fn inspect_cwd(dir: &Path, context: &InspectionContext<'_>, cwd: &mut Tally) {
     });
 }
 
-/// Per-mechanism results for one process.
-struct Tally {
-    mechanism: Mechanism,
-    pid: u32,
-    evidence: Vec<RawEvidence>,
-    limitations: Limitations,
-    /// Records read and classified (descriptors, registrations, the cwd).
-    successes: u64,
-    denials: u64,
-    /// Unusable records other than denials.
-    failures: u64,
-    /// A failure that prevented the whole mechanism for this process.
-    whole: Option<InspectionResult>,
-}
-
 impl Tally {
-    fn new(mechanism: Mechanism, pid: u32) -> Self {
-        Self {
-            mechanism,
-            pid,
-            evidence: Vec::new(),
-            limitations: Limitations::default(),
-            successes: 0,
-            denials: 0,
-            failures: 0,
-            whole: None,
-        }
-    }
-
-    fn example(&self, detail: Option<String>) -> LimitationExample {
-        let example = LimitationExample::pid(self.pid);
-        match detail {
-            Some(detail) => example.with_detail(detail),
-            None => example,
-        }
-    }
-
-    /// A gap that makes this process's inspection partial.
-    fn problem(&mut self, kind: LimitationKind, message: &str, detail: Option<String>) {
-        if kind == LimitationKind::PermissionDenied {
-            self.denials += 1;
-        } else {
-            self.failures += 1;
-        }
-        let example = self.example(detail);
-        self.limitations.record(kind, message, 1, Some(example));
-    }
-
-    /// A scope note that does not make the inspection partial.
-    fn note(&mut self, kind: LimitationKind, message: &str, detail: Option<String>) {
-        let example = self.example(detail);
-        self.limitations.record(kind, message, 1, Some(example));
-    }
-
     fn io_problem(&mut self, error: &io::Error, fd: u64) {
         if error.kind() == io::ErrorKind::PermissionDenied {
             self.problem(
@@ -502,35 +449,6 @@ impl Tally {
         } else {
             InspectionResult::Failed(error.to_string())
         });
-    }
-
-    fn vanished(self) -> MechanismInspection {
-        MechanismInspection {
-            mechanism: self.mechanism,
-            result: InspectionResult::Vanished,
-            evidence: Vec::new(),
-            limitations: Vec::new(),
-        }
-    }
-
-    /// Complete with no gaps; denied or failed when gaps left nothing
-    /// readable; partial otherwise.
-    fn finish(self) -> MechanismInspection {
-        let result = match self.whole {
-            Some(result) => result,
-            None if self.denials + self.failures == 0 => InspectionResult::Complete,
-            None if self.successes == 0 && self.failures == 0 => InspectionResult::Denied,
-            None if self.successes == 0 => {
-                InspectionResult::Failed("no record could be read".to_string())
-            }
-            None => InspectionResult::Partial,
-        };
-        MechanismInspection {
-            mechanism: self.mechanism,
-            result,
-            evidence: self.evidence,
-            limitations: self.limitations.into_vec(),
-        }
     }
 }
 
