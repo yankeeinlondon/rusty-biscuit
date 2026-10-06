@@ -109,7 +109,9 @@ Once a scope binds the first segment, outer scopes are never tried, even when
 the full path does not exist there. A scope binds a name when it declares it
 in the name group the lookup asks for, when the name qualifies a declaration
 there (a package or namespace that has no record of its own), or when one of
-its imports, patterns or type parameters names it.
+its imports, patterns or type parameters names it. In C# a declaration binds
+only the generic argument count it declares, so a nearer `Base<T>` does not
+bind a written `Base` ([C# generic arity](#c-generic-arity-selects-the-declaration)).
 
 The rules, with an example of each:
 
@@ -426,6 +428,42 @@ share it (a `partial class H` beside a `partial struct H`, two non-`partial`
 the arity it writes: `class C : Base<int>` never takes the ID of a
 non-generic `Base`. A target declared in several fragments of one type has
 no single declaration, so it keeps its text with no ID.
+
+#### C# generic arity selects the declaration
+
+In C# the number of generic arguments a name is written with is part of
+the name. `Base`, `Base<T>` and `Base<T, U>` are three different types, so
+declaring one never hides, and never competes with, another. Every step of
+a lookup uses the written count:
+
+- **the final target**, bare, namespace-qualified (`N.Base<int>`), nested
+  (`H.Base<int>`) or rooted (`global::Base<int>`): only declarations of
+  that arity are candidates;
+- **a member of the owner a lookup is made in**, as the target or as an
+  intermediate segment (`H<int>.Base` from inside the type holding every
+  `H`);
+- **the outward search**: a nearer type or namespace that declares the name
+  only with other arities does not stop the search, which continues to the
+  enclosing scopes.
+
+```csharp
+class Base {}
+class Base<T> {}
+interface IBase<T> {}
+interface IBase<T, U> {}
+class Child : Base<int>, IBase<int> {}  // extends Base<T>, implements IBase<T>
+class Holder {
+    class Base<T> {}
+    class Inner : Base {}               // the file-level Base: Holder's Base<T>
+}                                       // cannot be the one written here
+```
+
+The usual rules still apply within one arity: two declarations of the
+written arity (two non-`partial` `Base<T>`, or a `partial` type split in
+several fragments) leave the base as text with no ID; a count no
+declaration has names nothing; and a `using` alias, an import or a type
+parameter spelled like the name still ends the lookup as text, whatever
+count is written.
 
 ### Paths through local owners
 

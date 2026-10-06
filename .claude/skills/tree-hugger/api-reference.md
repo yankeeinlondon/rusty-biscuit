@@ -372,8 +372,10 @@ of several same-named owners (two Rust modules, Scala objects, C# types that
 are not fragments of one type) reads only that owner's members, imports,
 wildcard/unrecorded bindings, bases and Swift raw-type shadowing; reopened
 namespaces and the C# `partial` fragments of one type (same category, generic
-arity and enclosing owner) share one lookup, and a qualified C# path reads the
-type whose generic arity it writes. A Rust `impl` member's
+arity and enclosing owner) share one lookup, and a C# name selects only the
+declarations of the generic arity it is written with, at every step (final
+target, owner members, outward search, qualified and `global::` paths), so
+`Base<int>` beside `Base` names `Base<T>`. A Rust `impl` member's
 `identity.container_name` is the implemented type's last path segment without
 generics; its container kind is the kind of the declaration the self type
 resolves to by the relation resolver (`relations::impl_self_types`, called
