@@ -38,6 +38,7 @@ log: 2026-10-06-symbol-type-relations/log.md
 description: "A **feature** review of `2026-10-06-symbol-type-relations/spec.md`"
 feature: 2026-10-06-symbol-type-relations/review-2.md
 previous: 2026-10-06-symbol-type-relations/review-1.md
+next: 2026-10-06-symbol-type-relations/review-3.md
 ---
 
 # Review of Symbol Type Relations — Iteration 2
