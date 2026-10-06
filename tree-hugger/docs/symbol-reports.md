@@ -757,7 +757,7 @@ orders the containers, and each container's method sections (and its JSON
 ```json
 {
   "report_schema_version": 1,
-  "schema_version": { "major": 4, "minor": 1 },
+  "schema_version": { "major": 5, "minor": 0 },
   "root_dir": "/private/tmp/sample",
   "files": [
     {
@@ -767,7 +767,7 @@ orders the containers, and each container's method sections (and its JSON
       "completed_capabilities": ["declarations", "flags"],
       "symbols": [
         {
-          "schema_version": { "major": 4, "minor": 1 },
+          "schema_version": { "major": 5, "minor": 0 },
           "id": "65e1e0ed…",
           "language": "Rust",
           "kind": "Method",
@@ -808,7 +808,7 @@ cache entry stay the same.)
 | Field | Meaning |
 |---|---|
 | `report_schema_version` | version of this envelope (`1`) |
-| `schema_version` | version of the records inside (`4.1`); the record format is described in [Symbol Schema Design](./symbol-schema-design.md) |
+| `schema_version` | version of the records inside (`5.0`); the record format is described in [Symbol Schema Design](./symbol-schema-design.md) |
 | `root_dir` | the scan root; every path in the report is relative to it |
 | `files` | one entry per file with at least one listed record, in path order |
 | `files[].completed_passes`, `completed_capabilities` | the analysis that was actually done for this file |
@@ -879,7 +879,7 @@ One line per selected declaration, each a complete envelope, so a saved or
 piped line is usable without the rest of the output:
 
 ```json
-{"report_schema_version":1,"schema_version":{"major":4,"minor":1},"file":"src/shapes.rs","language":"Rust","completed_passes":["Parse"],"completed_capabilities":["declarations","flags"],"record":{…}}
+{"report_schema_version":1,"schema_version":{"major":5,"minor":0},"file":"src/shapes.rs","language":"Rust","completed_passes":["Parse"],"completed_capabilities":["declarations","flags"],"record":{…}}
 ```
 
 - `report_schema_version` and `schema_version` mean what they mean in the
@@ -1019,3 +1019,4 @@ reads `parsed 0 files`; any listing reads `0 diagnostics runs`.
 - [CLI README](../cli/README.md): every flag, with examples.
 - [Cache Design](./cache-design.md): cache keys, coverage and robustness.
 - [Symbol Schema Design](./symbol-schema-design.md): the record format.
+- [Scope-Aware References](./references.md#hug-refs): `hug refs`, the per-declaration reference report.

@@ -4,7 +4,7 @@
 
 Draft design for a major refactor, partly implemented. `SymbolRecord` and
 `FileSymbolIndex` ship in `lib/src/shared/schema_v2/` and serialize as schema
-**4.3** (the Rust module and type names keep their historical `v2`). Sections
+**5.0** (the Rust module and type names keep their historical `v2`). Sections
 below describe the implemented shape unless marked **planned**. Per-language
 extraction rules for kinds, visibility and `static` are in
 [Symbol Kinds, Visibility and `static`](./symbol-kinds-and-visibility.md).
@@ -1111,10 +1111,11 @@ pub struct FileSymbolIndex {
 `ImportRecord` and `ExportRecord` carry a `symbol: SymbolRef`, aligned with `RelationFacet`.
 
 `occurrences` and `reference_coverage` are the per-reference evidence
-described in [Scope-Aware References](./references.md). Today
-`TreeFile::reference_evidence()` computes them for a whole file and
-`TreeFile::query` leaves both empty, so serialized indexes do not change;
-filling them through a query capability and the cache is **planned**.
+described in [Scope-Aware References](./references.md). A query fills them
+only under `Capability::Occurrences` (so a complete index and `--json-full`
+carry them); otherwise both are empty and omitted. The symbol cache stores
+them in a strict form that writes every key (see
+[the cache design](./cache-design.md#reference-evidence)).
 
 ## ID Strategy
 
@@ -1371,7 +1372,8 @@ Version history:
 | 4.0 | `identity.module_path` renamed `container_name`; `identity.keyword` added; `source.signature_text` filled; `provenance.created_at_epoch_ms` and `updated_at_epoch_ms` removed. Later extended, still as 4.0, with the [additive 4.x fields](#top-level-symbol-record); no longer emitted |
 | 4.1 | the required `metrics.lines` key inside a present `metrics` facet; no longer emitted |
 | 4.2 | `relations.unclassified_bases` and the optional `source_span` on a relation's `SymbolRef`; no longer emitted |
-| 4.3 (current) | the required `metrics.cyclomatic` key inside a present `metrics` facet. Emitted on records, file indexes, CLI envelopes and analyzer fingerprints |
+| 4.3 | the required `metrics.cyclomatic` key inside a present `metrics` facet; no longer emitted |
+| 5.0 (current) | `relations.references`, `dependencies`, `referenced_by` and `semantics.is_recursive` are derived from [scoped reference occurrences](./references.md) instead of the first same-named declaration (a change of meaning, so a major bump); a file index may carry `occurrences` and `reference_coverage`. Emitted on records, file indexes, CLI envelopes and analyzer fingerprints |
 
 The additive 4.x fields did not follow the minor-bump rule: records still
 said 4.0. `metrics.lines` and `metrics.cyclomatic` do follow it, so 4.1
@@ -1403,6 +1405,23 @@ A record before and after 4.0 (other fields unchanged):
 
 Cache entries written under 3.0 or 4.0 are not migrated; their key no longer
 matches, so they are recomputed.
+
+5.0 keeps every 4.3 key and declaration ID; what changed is what the
+reference summaries say. A 4.3 summary bound a name to the first declaration
+spelled that way anywhere in the file; a 5.0 summary names only a target the
+language's scope rules establish:
+
+```rust
+fn first() { let total = 1; }
+fn second(total: u32) -> u32 { total }
+// 4.3: second.references = [first::total]   (first `total` in the file)
+// 5.0: second.references = [second::total]  (the parameter in scope)
+```
+
+Languages without resolver rules have no summary edges at all in 5.0, and
+`is_recursive` is `Unknown` wherever the evidence cannot prove `Yes` or `No`.
+Cache entries of 4.3 are recomputed under the exact-version rule (and their
+extractor revision differs, so their key no longer matches either).
 
 The cache fingerprint also contains `EXTRACTOR_REVISION`, so a change to
 extraction rules invalidates cached records without a schema bump (see
@@ -1441,7 +1460,7 @@ converted to `SymbolInfo` and back therefore has none of these.
 2. Add adapters:
    1. `impl From<SymbolInfo> for SymbolRecord`.
    2. `impl TryFrom<SymbolRecord> for SymbolInfo` (best effort).
-3. Update CLI `--json` to emit the schema version (done; currently 4.3).
+3. Update CLI `--json` to emit the schema version (done; currently 5.0).
 4. The v1 API (`TreeFile::symbols()`, `SymbolInfo`) and both adapters are
    retained; removing v1 is a separate decision.
 

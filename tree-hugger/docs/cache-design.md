@@ -193,8 +193,8 @@ file's records, imports, exports and every analysis pass but diagnostics:
 
 | Input | Where it comes from | Changes when |
 |---|---|---|
-| schema version | `SchemaVersion::CURRENT` (4.3) | the record shape changes |
-| implementation version | crate version and `EXTRACTOR_REVISION` (`0.1.0+rev.30`) | extraction code changes |
+| schema version | `SchemaVersion::CURRENT` (5.0) | the record shape or meaning changes |
+| implementation version | crate version and `EXTRACTOR_REVISION` (`0.1.0+rev.36`) | extraction code changes |
 | grammar identity | the compiled grammar: name, declared version (if any), ABI, node-kind, field and parse-state counts | a grammar crate is upgraded |
 | grammar ID | the grammar variant (`typescript` or `tsx`, …) | the file's grammar variant differs |
 | query text | the effective `locals`, `imports` and `references` query text, with inherited vendored queries and overlays resolved | a `.scm` file the analysis compiles changes |
@@ -232,7 +232,7 @@ rebuilding the crate.
 
 ```json
 {
-  "schema_version": { "major": 4, "minor": 1 },
+  "schema_version": { "major": 5, "minor": 0 },
   "fingerprint": "<records fingerprint digest>",
   "file": "src/lib.rs",
   "language": "Rust",
@@ -261,9 +261,10 @@ rebuilding the crate.
 - `occurrences` and `reference_coverage` hold the whole file's
   [reference evidence](./references.md) when `occurrences` is among the
   capabilities, and are empty otherwise; under that capability
-  `reference_coverage` always has at least the file-level region. Both keys
-  are required. Stricter checks of their contents (spans, confidence and
-  target consistency) are **planned** with the next record schema.
+  `reference_coverage` always starts with the file-level region. Both keys
+  are required, and so is every key inside them: unlike the public index,
+  the entry writes an absent owner or ID as `null` and an empty candidate or
+  reason list as `[]` (see [Reference evidence](#reference-evidence)).
 - `records` holds every record of the covered kinds, after the entry's
   passes ran. `file` is the path exactly as analyzed (the file's identity),
   since the records repeat it.
@@ -293,9 +294,10 @@ flowchart TD
 The passes that work from stored records alone are the docs pass, the
 semantic pass (when occurrences are stored: the reference edges alone
 cannot tell a proven self-call from a same-named one) and containment (when every kind
-is stored, since a member's owner can be of any kind, and the file is not
-Rust: a Rust impl member's owner is its impl's resolved self type, which no
-record retains, see [Declared Type Relations](./type-relations.md#rust-impls)).
+is stored, since a member's owner can be of any kind, and the file is
+neither Rust nor Swift: a Rust impl member's owner is its impl's resolved
+self type and a Swift extension member's the extension's resolved owner,
+which no record retains, see [Declared Type Relations](./type-relations.md#rust-impls)).
 References, occurrences,
 diagnostics, flags and metrics need the syntax tree (attributes, the
 declaration's parameter list), so they parse the file; the definitions query
@@ -410,7 +412,7 @@ decoder's message, which names the field and tells an absent field
 
 An entry is served only when its own `schema_version` **and the
 `schema_version` of every record in it** are exactly the current version
-(4.3). The records are returned as stored, inside an index that claims the
+(5.0). The records are returned as stored, inside an index that claims the
 current version, and the cache never translates between versions, so a
 different minor version is a miss just like a different major one: an older
 minor lacks fields the current version adds, and a newer one carries fields
@@ -418,12 +420,16 @@ this reader would drop. One record of another version is enough to make the
 whole entry a `CacheMiss::Mismatched("record schema version")`; the file is
 analyzed again and the entry rewritten, and the stale entry is never widened.
 
-For example, an entry written as 4.3 whose `instance_method` record was edited
+For example, an entry written as 5.0 whose `instance_method` record was edited
 to `"schema_version": {"major": 3, "minor": 0}` (or the previous
-`{"major": 4, "minor": 2}`) is recomputed; the output equals an uncached run.
-An entry written before 4.1 also lacks `metrics.lines`, and one written
-before 4.3 lacks `metrics.cyclomatic`, either of which refuses it on its own
-(see [Record fields](#record-fields)).
+`{"major": 4, "minor": 3}`) is recomputed; the output equals an uncached run.
+An entry written before 4.1 also lacks `metrics.lines`, one written before
+4.3 lacks `metrics.cyclomatic`, and one written before 5.0 lacks
+`occurrences` and `reference_coverage`, any of which refuses it on its own
+(see [Record fields](#record-fields)). Schema 5.0 changed what the reference
+summaries mean (they come from scoped occurrences, so a 4.3 entry's
+`references` may name the wrong same-named declaration), which is why an
+older entry is never served even where its shape would read.
 
 ### Entry fields
 
@@ -441,7 +447,7 @@ No entry-level field has a default:
 
 For a version object, "one bad element" and "every element bad" mean one or
 both of `major` and `minor` hold a non-number. A well-formed version other
-than 4.3 is a miss, as described above.
+than 5.0 is a miss, as described above.
 
 A kind list must also be in ascending order with no repeats, and a
 capability list closed under prerequisites. The records must agree with that
@@ -456,6 +462,70 @@ coverage, or the entry is refused (`CacheMiss::Inconsistent`):
 For example, an entry listing `["declarations"]` whose `deprecated_api` record
 says `"is_deprecated": true` is recomputed, and the output says `false`.
 
+### Reference evidence
+
+The public `Occurrence` and `ReferenceCoverage` leave out an absent owner or
+ID and an empty candidate or reason list, and read a missing key as empty.
+The entry cannot rely on that: an entry claiming `occurrences` whose
+`candidates` key was lost would read as "no candidates". So the entry writes
+every key, and its reader requires every key and refuses an unknown one:
+
+```json
+{
+  "owner": { "id": "<id>", "name": "module_function", "qualified_name": "module_function" },
+  "owner_span": { "start": { "line": 2, "column": 1 }, "end": { "line": 2, "column": 56 }, "start_byte": 40, "end_byte": 95 },
+  "target": { "id": "<id>", "name": "helper", "qualified_name": null },
+  "candidates": [],
+  "span": { "start": { "line": 2, "column": 45 }, "end": { "line": 2, "column": 51 }, "start_byte": 84, "end_byte": 90 },
+  "kind": "Call",
+  "confidence": "Scoped"
+}
+```
+
+Each field's shapes, in an entry that lists `occurrences`:
+
+| Evidence field | absent | `null` | wrong type | one bad element | every element bad | empty | duplicate key | trailing content |
+|---|---|---|---|---|---|---|---|---|
+| `occurrences` | miss | miss | miss | miss | miss | miss when a record keeps an edge an occurrence made; **served** for a file with none | miss | miss |
+| `reference_coverage` | miss | miss | miss | miss | miss | miss (the file region is required) | miss | miss |
+| occurrence `confidence` | miss | miss | miss | miss | miss | miss | miss | miss |
+| occurrence `target.id` | miss | miss when the occurrence made an edge | miss | miss | miss | miss | miss | miss |
+| occurrence `candidates` | miss | miss | miss | miss | miss | miss for `NameOnly` | miss | miss |
+| occurrence `span` | miss | miss | miss | miss | miss | miss | miss | miss |
+| occurrence `owner` | miss | miss for a named owner | miss | miss | miss | miss | miss | miss |
+| coverage `reasons` | miss | miss | miss | miss | miss | miss for a `Limited` region | miss | miss |
+
+Well-formed evidence is then checked against the source, itself, the
+capability claim and the records (`CacheMiss::Inconsistent`). Each of these
+refuses the entry:
+
+- evidence in an entry that does not list `occurrences`, or no coverage in
+  one that does;
+- a first region that is not the whole file with no owner;
+- a span past the source, off a character boundary or ending before it
+  starts, or whose line and column are not those of its byte offsets
+  (one-based line, one-based byte column); an empty occurrence span; an
+  occurrence outside its owner's region;
+- an occurrence whose `target.name` is not the source text at its span;
+- an occurrence whose owner and owner span are not one of the coverage
+  regions, or an owner or candidate whose name and qualified name are not
+  its stored record's;
+- `Scoped` with candidates; `NameOnly` with a target ID, no candidates, a
+  candidate without an ID or a repeated one; `Unresolved` with either;
+- occurrences out of their canonical order or repeated; coverage out of
+  order; reasons that are not ascending and distinct, or present on a
+  `Complete` region or missing from a `Limited` one;
+- a record's in-file `references` or `referenced_by` edge with no `Scoped`
+  occurrence that made it, or `is_recursive: Yes` with no `Scoped` call of
+  the record itself.
+
+For example, an entry whose `helper` call lost its target ID is recomputed:
+`module_function`'s record still references `helper`, and no occurrence
+says so. What these checks cannot see without parsing is an occurrence
+removed while nothing derived from it remains (a call with no in-file
+target). The entry's key includes the source hash, so an entry is only ever
+read for the text it was written from.
+
 ### Record fields
 
 Inside a record, a field accepts exactly the shapes its schema type allows:
@@ -467,6 +537,8 @@ everything else refuses the entry.
 | `identity.container_kind` | absent or `null` | no container kind |
 | `modifiers` | absent or `[]` | no modifiers (not `static`, not `async`, none written) |
 | `attributes` | absent or `[]` | no attributes |
+| attribute `value` | absent or `null` | no argument list |
+| attribute `name`, attribute `value`, `Custom` modifier `value` | `""` | the empty string, as written |
 | `identity.keyword` | absent, `null` or `""` | no keyword, or the empty keyword |
 | `source.declaration_text` | absent, `null` or `""` | no text, or the empty text |
 | `source.signature_text` | absent, `null` or `""` | no header, or the empty header |
@@ -476,6 +548,7 @@ everything else refuses the entry.
 | relation target `id`, `qualified_name`, `source_span` | absent or `null` | no value |
 | generic parameter `name`, relation target `name` | `""` | empty string |
 | generic parameter `position` | `0` | first position |
+| relation target `source_span` members (`start.line`, `start.column`, `end.line`, `end.column`, `start_byte`, `end_byte`) | `0` | the stored `0`, as written |
 | `kind_data.data.fields` (type data) | absent or `[]` | empty field list |
 | field data `visibility` | absent or `null` | Unknown access |
 | `metrics.parameters`, `metrics.has_docs`, `metrics.lines`, `metrics.cyclomatic` | `null` | the metric is unsupported (`cyclomatic`: unavailable) for that declaration |
@@ -486,7 +559,7 @@ everything else refuses the entry.
 `visibility.is_deprecated`, `kind_data.kind_data_type` and field data
 `is_static` are required: absent, `null`, `""` (an unknown scope, an empty
 qualified name) or `{}` refuses the entry, and a record `schema_version`
-other than exactly 4.3 refuses it too. In an entry that lists `metrics`, the
+other than exactly 5.0 refuses it too. In an entry that lists `metrics`, the
 `metrics` facet is required in the same way (absent, `null`, `{}` or a member
 of the wrong type refuses it), and so is each of its four keys (absent
 refuses, so a 4.0 facet without `lines` or a 4.2 facet without `cyclomatic`
@@ -496,6 +569,16 @@ element), a duplicate key and invalid JSON refuse the entry. For example, an
 entry whose method record carries `"modifiers": null` is recomputed, while one
 with no `modifiers` key reports that method as an instance method.
 
+Inside the `attributes` and `modifiers` lists, an attribute's `name` and a
+modifier's `type` tag are required, and so is a `Custom` modifier's `value`:
+absent, `null`, a wrong type, a duplicate key or trailing invalid JSON
+refuses the entry, and so does an empty tag, which names no modifier. For
+example, an entry whose `final class` stores `{"type": "Custom"}` with no
+`value` is recomputed, while one whose `@Marker("x")` attribute lost its
+`value` is served as `@Marker` with no arguments. The permanent CLI matrix
+has one column per member, with both a `Custom` and a fixed-tag (`Static`)
+modifier.
+
 Generic parameter `name`, `kind` and `position` and relation target `name`
 are required. Their absence or `null` refuses an entry. A null collection,
 a wrongly typed element, a duplicate key or trailing invalid JSON also
@@ -503,13 +586,23 @@ refuses the entry. Empty optional strings are served literally; an empty
 parameter kind is rejected. The permanent CLI matrix includes every nested
 generic field and relation-target field, plus the three relation lists.
 
+A relation target's `source_span` may be absent or `null`, but a stored span
+needs all six members as unsigned integers. A missing member, `null`, a
+string, an array, a duplicate member or trailing invalid JSON refuses the
+entry; `{}` refuses it too. `0` is served as written: the reader checks the
+type, not that a position is one-based. For example, an `extends` target
+whose span lost `end_byte` is recomputed. The byte members matter to the
+report: `hug --signatures full` compares them with the owner's declaration
+span to decide whether a Swift conformance is already in the header. The
+matrix has one column per member.
+
 A stored diagnostic's metadata omits `is_enabled_by_default` and
 `requires_experimental_semantics` when they are `false`; an absent key reads
 as `false`.
 
-The CLI test `cache_robustness` in `cli/tests/symbols/` pins both tables, and
-the incompatible 3.0 and 4.0 versions on the entry and on a record, by editing
-an entry `hug --json-full symbols` wrote, one cell at a time.
+The CLI test `cache_robustness` in `cli/tests/symbols/` pins these tables,
+and incompatible versions on the entry and on a record, by editing an entry
+`hug --json-full symbols` wrote, one cell at a time.
 
 ## What is not cached
 
@@ -531,12 +624,15 @@ visited once per run, so they only added copies.
 | A wide entry narrowed to any request equals the uncached request | `projected_results_equal_uncached_queries`, `projected_results_over_multi_equal_uncached_queries` |
 | Widening by capabilities and by kinds; the third narrow run is a hit | `widening_capabilities_runs_only_the_missing_passes`, `widening_kinds_reextracts_once_for_the_union` |
 | Query text, extractor revision, forced language, schema, rules and settings each miss | `each_key_input_and_stored_identity_decides_a_miss` |
-| A record of another schema version (2.0, 3.0, 4.0, 4.1, 4.2, 4.4, 5.0) misses for the same and a wider request, never widened | `incompatible_record_schema_versions_are_misses_never_served_or_widened` |
+| A record of another schema version (2.0, 3.0, 4.0, 4.1, 4.2, 4.3, 5.1, 6.0) misses for the same and a wider request, never widened | `incompatible_record_schema_versions_are_misses_never_served_or_widened` |
 | Corrupt entries, absent vs `null` reasons, kind-list shapes | `a_corrupt_entry_is_a_miss_and_is_replaced`, `absent_and_null_entry_fields_report_different_reasons`, `covered_kind_lists_are_served_only_in_canonical_form` |
 | A metrics facet or a set flag without its capability, or a record without metrics under `metrics`, is `Inconsistent`; a flags-and-metrics entry serves a flags-only request | `covered_kind_lists_are_served_only_in_canonical_form`, `flags_and_metrics_are_served_only_under_their_capabilities` |
 | A filtered, prefixed query writes in-file names and every record; another scan root is a Hit with the same IDs | `lib/tests/l1/symbols_query_filters.rs` `predicates_and_prefixes_never_reach_the_cache_entry` |
 | Concurrent writers (threads and processes) | `concurrent_writers_leave_a_readable_entry_whose_coverage_matches`, `cli/tests/symbols/cache_lookup.rs`, `lib/tests/l1/cache_tests.rs` |
 | Entry and record field shapes | `cli/tests/symbols/cache_robustness.rs` |
+| Attribute `name`/`value` and modifier `type`/`Custom` `value` shapes, from real Java extraction | `cache_robustness::attribute_and_modifier_members_are_served_or_recomputed_per_shape` |
+| Reference evidence: every shape of every evidence field, each inconsistent edit, and a file with no occurrences served | `cache_robustness::reference_evidence_is_served_only_when_consistent` |
+| An entry from before schema 5.0 (revision 30, no evidence keys) is recomputed under both keys | `cache_upgrade::entry_from_extractor_revision_thirty_is_not_served_after_the_scoped_references_bump` |
 | Widening an entry by `metrics` parses once and walks each measured callable once; every `cyclomatic` value, `null` included, is stored, and a warm request is a `Hit` that walks nothing | `complexity_is_stored_once_and_served_on_warm_hits` |
 | Old extractor revisions and records of other schema versions are never served | `cli/tests/symbols/cache_upgrade.rs` |
 | A kind-narrowed entry never claims complete coverage; widening to every kind and capability, then a warm `Hit` with zero work counters, equals an uncached run | `deferred_kind_entries_never_claim_complete_coverage_and_warm_hits_do_no_work` |

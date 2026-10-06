@@ -316,7 +316,7 @@ the other side handles it. A converted record is never `is_exported` (export
 comes from declaration syntax, set by `symbol_records()` and the bind pass),
 and a function-like kind always converts back with `Some(signature)`.
 Records, file indexes and analyzer fingerprints carry `SchemaVersion::CURRENT`
-(4.3):
+(5.0):
 no timestamps in `provenance`, the container in `identity.container_name`
 (formerly `module_path`).
 
@@ -344,9 +344,13 @@ generics; its container kind is the kind of the declaration the self type
 resolves to by the relation resolver (`relations::impl_self_types`, called
 from `definitions.rs::resolve_container_kind`, so `symbols()` agrees),
 absent when it does not resolve (`impl ::ext::B`, an enclosing generic `T`,
-a type declared elsewhere). Under Containment its `relations.container` is the self
-type resolved by full written path, or the self type as written with no ID. Every other
-container kind is the kind extracted for the container's own declaration.
+a type declared elsewhere, a path through two same-named modules). Under
+Containment its `relations.container` is the self type resolved by full written
+path, or the self type as written with no ID. A Swift extension member's
+`relations.container` follows the extension's conformance decision: the one
+resolved owner, or the extended type as written with no ID and no parent
+(external, aliased, imported or ambiguous owners). Every other container kind
+is the kind extracted for the container's own declaration.
 
 `source.signature_text` is the display header: a contiguous part of
 `declaration_text` with leading in-node annotations, initializers (first
@@ -607,7 +611,7 @@ pub enum TreeHuggerError {
 
 The declaration commands (`functions`, `types`, `symbols`, `classes`) do not
 use these types: their `--json` report is a CLI-local envelope
-(`cli/src/report.rs`) of schema 4.3 `SymbolRecord`s, described in
+(`cli/src/report.rs`) of schema 5.0 `SymbolRecord`s, described in
 `tree-hugger/docs/symbol-reports.md`. `PackageSummary` remains the shape of
 `hug imports --json` and `hug lint --json` and of library callers:
 

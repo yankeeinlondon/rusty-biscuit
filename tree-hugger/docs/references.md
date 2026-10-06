@@ -1,10 +1,8 @@
 # Scope-Aware References
 
-> **Status: partly built.** Occurrences, coverage, the relationship
-> summaries derived from them and `semantics.is_recursive` are built and
-> described below. Still **planned**: storing the evidence under the next
-> record schema (today's cache entries carry it without strict validation)
-> and the `hug refs` command.
+Occurrences, coverage, the relationship summaries derived from them,
+`semantics.is_recursive`, their cache storage (record schema 5.0) and the
+[`hug refs`](#hug-refs) command are described below.
 
 Tree Hugger reports every reference it finds in a file as an
 **occurrence**: where the name is written, which declaration owns the code
@@ -250,6 +248,10 @@ let index = file.query(&query)?.index;
 - Declaration and containment queries run no reference work at all.
 - `TreeFile::reference_evidence()` is a shortcut for an `Occurrences`
   query that selects no declarations.
+- The persistent cache stores the evidence with the entry and serves it only
+  after checking it against the source and the records; damaged evidence is
+  recomputed, never read as "no references" (see
+  [the cache design](./cache-design.md#reference-evidence)).
 
 ## Relationship summaries
 
@@ -312,3 +314,147 @@ fn a() { b() } fn b() { a() }         // No, No: mutual recursion is not direct
 ```
 
 A proven self-call is `Yes` even when the rest of the body is uncertain.
+
+## `hug refs`
+
+`hug refs` shows the evidence above for one declaration: where it is
+referenced, or which calls it makes, with each row's confidence.
+
+```sh
+hug refs parse 'src/**'                                  # references to `parse`
+hug refs 'src/parser.rs#Parser::parse' --callers 'src/**' # incoming calls only
+hug refs --id <ID> --callees 'src/**'                     # calls `parse` makes
+```
+
+```text
+References to private function parse() -> u32 src/a.rs:3:1
+References are resolved within one file: only the declaration's own file is searched, so a caller in another file is never listed, even when it uses the same name.
+
+Established (Scoped to this declaration)
+  src/a.rs#run 4:1
+    - Call parse 9:5
+    - Usage parse 13:5
+  file-level code [1:1–16:1]
+    - Call parse 15:17
+```
+
+### Selecting the declaration
+
+Give exactly one selector: a name, or `--id <ID>`. The first value after
+`refs` is the name, and the rest are file filters (`--id` makes every value
+a file filter). Discovery works as for the declaration commands: `.gitignore`,
+the default test-data exclusions, `--exclude-files`, `--language` and
+`--no-cache` all apply.
+
+| Selector | Matches |
+|---|---|
+| `parse` | Every declaration named exactly `parse`, of any kind and scope (locals and parameters included). All-lowercase ignores case, so `parse` also matches `Parse`. |
+| `Parse` | Only `Parse`: an uppercase letter makes the name case-sensitive. |
+| `Parser::parse`, `src/parser.rs#Parser::parse` | The qualified name, with the language's separator; the `file#` prefix is the scan-root-relative path. |
+| `--id 3f…` | The record with that ID, compared case-sensitively (IDs come from any `--json` report). |
+
+The selector is checked across every scanned file before anything is
+printed:
+
+```mermaid
+flowchart TD
+    A[Analyze every scanned file] --> B{How many declarations match?}
+    B -->|none| E[Empty report, exit 0]
+    B -->|one| R[Report from that declaration's file]
+    B -->|more than one| X[Error on stderr listing each location and ID, nothing on stdout, exit 1]
+```
+
+```text
+$ hug refs shared
+error: `shared` names 2 declarations; select one with `--id` or a file-prefixed qualified name:
+  one.ts:1:8  function one.ts#shared  6c1e…
+  two.ts:1:8  function two.ts#shared  a04b…
+```
+
+### What is listed
+
+| Flag | Lists |
+|---|---|
+| (none) | Incoming `Call` and `Usage` occurrences. |
+| `--callers` | Incoming `Call` occurrences only. |
+| `--callees` | The `Call` occurrences the declaration's own body owns, whatever their confidence. Calls inside a nested closure belong to the closure, not to the declaration. |
+
+`--callers` and `--callees` cannot be combined.
+
+Incoming rows come in two separate groups:
+
+- **Established**: `Scoped` occurrences whose target ID is the declaration's.
+- **Name-only suggestions**: `NameOnly` occurrences that list the declaration
+  among their candidates. They are not proven to refer to it. An `Unresolved`
+  occurrence with the same name is never attached, and selecting by `--id`
+  never makes a suggestion established.
+
+Every call site is its own row (two calls on one line are two rows), grouped
+under the region that owns it: a declaration by its qualified name, file-level
+code as `file-level code [span]`, and an anonymous callable or an initializer
+as `code without a declaration owner [span]`. When regions of the file have
+`Limited` coverage, the report says how many, since a reference there may be
+uncertain and so not established.
+
+`--callees` explains every row without a target ID:
+
+```text
+Callees of private function run(n: u32) -> u32 src/a.rs:4:1
+coverage: limited (indirect_dispatch)
+
+  - Call fs::read 6:9 — Unresolved (no binding or same-named declaration in this file)
+  - Call slurp 7:5 — Scoped to an import (outside this file, no ID)
+  - Call parse 9:5
+  - Call other.parse 11:11 — Unresolved (no binding or same-named declaration in this file)
+```
+
+| `absent_id` | Text | Meaning |
+|---|---|---|
+| `import` | Scoped to an import | Bound to one of the owner's imports (its `relations.dependencies`): it names something outside the file. |
+| `binding_without_record` | Scoped to a binding that is not a declaration record | Bound to a local such as a `for…of` or `catch` binding that has no record. |
+| `name_only` | NameOnly, candidates: … | The candidates are suggestions, not a target. |
+| `unresolved` | Unresolved | No supported binding and no same-named declaration in the file. |
+
+### The file-local boundary
+
+Resolution never leaves a file, so only the selected declaration's own file
+can reference it. `hug refs parse` over a tree where `other.ts` imports and
+calls `parse` lists nothing from `other.ts`: that call is bound to an import,
+not to the declaration. Every report states this boundary, including an
+empty one.
+
+### JSON
+
+`--json` writes one envelope. The declaration's file is the only entry in
+`files`, and `errors` comes last:
+
+```json
+{"report_schema_version":1,"schema_version":{"major":5,"minor":0},
+ "root_dir":"/work/repo",
+ "boundary":"References are resolved within one file: …",
+ "selector":{"name":"parse"},"direction":"references",
+ "declaration":{"id":"a992…","kind":"Function","identity":{"qualified_name":"src/a.rs#parse"}},
+ "files":[{"file":"src/a.rs","language":"Rust",
+   "completed_capabilities":["declarations","containment","references","occurrences"],
+   "occurrences":[{"owner":{"id":"b73a…","name":"run","qualified_name":"src/a.rs#run"},
+     "owner_span":{…},"target":{"id":"a992…","name":"parse"},"span":{…},
+     "kind":"Call","confidence":"Scoped"}],
+   "name_only_suggestions":[],
+   "coverage":[{"owner":{…},"span":{…},"state":"Limited","reasons":["indirect_dispatch"]}],
+   "limited_regions":1}],
+ "errors":[]}
+```
+
+- `selector` is `{"name": …}` or `{"id": …}`; `direction` is `references`,
+  `callers` or `callees`.
+- `declaration` is the selected record, trimmed and scan-root-relative like
+  `--json` records, or `null` when nothing matched (then `files` is `[]`).
+- Each row is an occurrence as above, plus `absent_id` when it has no target
+  ID. Owner and candidate `qualified_name`s carry the `file#` prefix, like
+  record names; the target keeps the name as written.
+- `coverage` holds the region of every listed row, and for `--callees` the
+  declaration's own region. `limited_regions` (incoming only) counts the
+  file's `Limited` regions.
+- A file that cannot be analyzed is listed in `errors` and makes the exit
+  status 1. `--json-full`, `--jsonl`, `--format`, `--count`, `--stats` and
+  the declaration selectors (`--kind`, `--name`, …) are rejected.

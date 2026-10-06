@@ -121,7 +121,7 @@ hug lint "src/**/*.rs" --lint-only
 ## JSON Output
 
 `functions`, `types`, `symbols` and `classes` print a versioned report:
-`report_schema_version` (`1`), `schema_version` (`4.3`, the records' schema),
+`report_schema_version` (`1`), `schema_version` (`5.0`, the records' schema),
 `root_dir`, `files` (one entry per file with a match: `file`, `language`,
 `completed_passes`, `completed_capabilities` and the selected `symbols`
 records; `classes` adds `members` keyed by container ID) and a trailing
@@ -177,7 +177,7 @@ syntax tree in the same single parse (no compiler, no extra pass):
   - class Square extends Base<number>; implements Shape, Comparable<Square> [3:1]
   ```
 
-The record schema is now **4.3** (unclassified bases, relation source spans and the required cyclomatic metric). Cache entries written by
+These facts arrived with record schemas **4.2** and **4.3** (unclassified bases, relation source spans and the required cyclomatic metric). Cache entries written by
 earlier versions are re-analyzed once. Records converted to the older
 `SymbolInfo` model lose these facts, since that model has no field for them.
 

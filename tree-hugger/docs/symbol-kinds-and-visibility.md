@@ -45,7 +45,7 @@ The two models are:
 | Model | API | Where kind, visibility and `static` live |
 |---|---|---|
 | `SymbolInfo` (v1) | `TreeFile::symbols()` | `kind`, `scope`, `visibility` (`None` = unknown), `is_static`, `is_static_storage`, `is_async`, `container_name`, `container_kind`, `qualified_name`, `is_namespace_rooted` |
-| `SymbolRecord` (schema 4.3) | `TreeFile::symbol_records()`, `symbol_index_v2()` | `kind`, `scope`, `visibility.level`, `modifiers` (`Static`, `StaticStorage`, `Async`, and the written `Const`, `Readonly`, `Unsafe`, `Mut` and `Custom` keywords), `attributes`, `identity.container_name`, `identity.container_kind`, `identity.qualified_name`, `identity.is_namespace_rooted`, `identity.keyword`, `source.declaration_text`, `source.signature_text`, `relations.extends`, `relations.implements`, `relations.unclassified_bases` |
+| `SymbolRecord` (schema 5.0) | `TreeFile::symbol_records()`, `symbol_index_v2()` | `kind`, `scope`, `visibility.level`, `modifiers` (`Static`, `StaticStorage`, `Async`, and the written `Const`, `Readonly`, `Unsafe`, `Mut` and `Custom` keywords), `attributes`, `identity.container_name`, `identity.container_kind`, `identity.qualified_name`, `identity.is_namespace_rooted`, `identity.keyword`, `source.declaration_text`, `source.signature_text`, `relations.extends`, `relations.implements`, `relations.unclassified_bases` |
 
 The adapter between them (`From<SymbolInfo> for SymbolRecord` and back)
 preserves kind, scope, visibility, both `static` flags, `async`, container
@@ -366,19 +366,52 @@ M.size = 1                       -- Variable, container M, kind Variable
   `function a.b.c()`). Its kind is the kind of the file-level declaration of
   that name, and absent when there is none or they disagree. When two tables
   share a name (`local M = {}` in two `do … end` blocks), a member is linked
-  to the nearest one declared before it.
+  to the nearest one declared before it. Two Go types of one name are
+  competing declarations instead: a receiver method of that name joins
+  neither.
 
 ### Swift extension members
 
 A member of an extension names the extended type as written as its
-container, and is linked to that type's record when the file declares it,
-by qualified name, so same-named nested types stay apart:
+container, and is linked to that type's record when the extended path names
+exactly one type of the file, by the same lookup that decides the
+extension's conformances ([Declared Type Relations](./type-relations.md#c-swift-and-scala)),
+so same-named nested types stay apart:
 
 ```swift
 class Left { class Repeated {} }
 class Right { class Repeated {} }
 extension Left.Repeated { func a() {} }    // Left.Repeated.a -> Left.Repeated
 extension Right.Repeated { func b() {} }   // Right.Repeated.b -> Right.Repeated
+```
+
+When the path names no such type, the member keeps its container name and
+`container_kind`, and its `relations.container` is the extended type as
+written with no ID and no `parent`; no local type lists it. That is the
+case for an external owner, an alias, a selective type import of the name,
+and two same-named owners anywhere along the path. An extension is written
+at file scope, so a type declared in a function, a closure or a block, or
+nested in such a type, is never its owner, whatever its qualified name ends
+with:
+
+```swift
+func f() { class Local {} }
+extension Local { func c() {} }            // Local.c -> container `Local`, no owner (f.Local is out of view)
+struct Holder { struct Base {} }
+struct Holder {}
+extension Holder.Base { func e() {} }      // Holder.Base.e -> container `Holder.Base`, no owner: two Holders
+```
+
+"Nested in such a type" is decided by where the declaration is written,
+not by its qualified name. A closure's type has no function name in front
+of it, so a closure's `Holder` and a file-level `Holder` share the name
+`Holder`, and so do their nested types. Only the closure's types are out of
+view; the file-level nested type still owns the extension's members:
+
+```swift
+struct Holder { struct Inner {} }
+let make = { struct Holder { struct Inner {} } }
+extension Holder.Inner { func d() {} }     // Holder.Inner.d -> the file-level Holder.Inner
 ```
 
 ### Rust `impl` members
@@ -426,10 +459,10 @@ impl Foreign { fn f(&self) {} }                  // container Foreign, no kind
   never join a local type. Such a member keeps its qualified name
   (`other::W::probe`) and `container_name`, and its `relations.container`
   is the self type as written (`other::W`) with no ID and no parent. The
-  same rule holds for a Swift `extension External.Owner` and a Lua
-  `function External.Owner.f()` beside a local `Owner`, which get no
-  container at all. If the same-named declarations disagree on kind, the
-  container kind is left absent.
+  same rule holds for a Swift `extension External.Owner` (a textual
+  container, as above) and a Lua `function External.Owner.f()` beside a
+  local `Owner`, which gets no container at all. If the same-named
+  declarations disagree on kind, the container kind is left absent.
 - The trait of a trait impl is not part of the container. Each member of
   `impl Trait for Type` records it in `relations.implements` as written
   (`fmt::Display` above), with the trait's record ID only when that path
