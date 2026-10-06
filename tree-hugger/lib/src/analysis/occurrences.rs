@@ -176,7 +176,7 @@ impl<'tree> OccurrenceSyntax<'tree> {
 }
 
 /// The canonical order: span, owner span, kind, written target, confidence.
-fn occurrence_order(occurrence: &Occurrence) -> (u32, u32, u32, u32, OccurrenceKind, &str, Option<&str>, Confidence) {
+pub(crate) fn occurrence_order(occurrence: &Occurrence) -> (u32, u32, u32, u32, OccurrenceKind, &str, Option<&str>, Confidence) {
     (
         occurrence.span.start_byte,
         occurrence.span.end_byte,
@@ -190,7 +190,7 @@ fn occurrence_order(occurrence: &Occurrence) -> (u32, u32, u32, u32, OccurrenceK
 }
 
 /// The span of the whole source: the region of file-level code.
-fn whole_file_span(source: &str) -> TextSpan {
+pub(crate) fn whole_file_span(source: &str) -> TextSpan {
     let line = source.matches('\n').count() as u32 + 1;
     let line_start = source.rfind('\n').map_or(0, |newline| newline + 1);
     TextSpan {

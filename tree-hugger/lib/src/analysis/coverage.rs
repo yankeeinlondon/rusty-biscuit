@@ -37,8 +37,10 @@ use crate::shared::{AnalysisPass, FileSymbolIndex, ProgrammingLanguage, Semantic
 /// every kind) and `completed` from its records alone, without parsing.
 ///
 /// Containment needs every record as a candidate owner, so it needs a result
-/// of every kind, and in Rust the syntax tree: an impl member's container is
-/// its impl's self type as written and resolved, which no record retains;
+/// of every kind, and in Rust and Swift the syntax tree: an impl member's
+/// container is its impl's self type as written and resolved, and a Swift
+/// extension member's the extension's owner as resolved, which no record
+/// retains;
 /// semantics needs the stored occurrences and coverage (the reference edges
 /// alone cannot tell a proven self-call from a same-named one); occurrences,
 /// flags and metrics need the syntax tree.
@@ -51,7 +53,9 @@ pub(crate) fn record_passes_suffice(
     missing.iter().all(|capability| match capability {
         Capability::StructuredDocs => true,
         Capability::Semantics => completed.contains(&Capability::Occurrences),
-        Capability::Containment => kinds.is_none() && language != ProgrammingLanguage::Rust,
+        Capability::Containment => {
+            kinds.is_none() && !matches!(language, ProgrammingLanguage::Rust | ProgrammingLanguage::Swift)
+        }
         Capability::Declarations
         | Capability::References
         | Capability::Occurrences

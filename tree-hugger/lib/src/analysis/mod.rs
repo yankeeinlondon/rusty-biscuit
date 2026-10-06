@@ -14,7 +14,7 @@ use crate::file::query::{Capability, SymbolQuery, SymbolQueryResult};
 use crate::file::tree_file::{MetadataSelection, RecordFacts, TreeFile};
 use crate::shared::{
     AnalysisPass, CommentAttachment, Confidence, CoverageState, DocsFacet, ExportRecord,
-    FileSymbolIndex, ImportRecord, ImportSymbol, Occurrence, OccurrenceKind, ParsedDocs,
+    FileSymbolIndex, ImportRecord, ImportSymbol, Occurrence, OccurrenceKind, ParsedDocs, ProgrammingLanguage,
     ReferenceCoverage, SemanticFacet, SymbolId, SymbolKindV2, SymbolRecord, SymbolRef, TriState,
 };
 
@@ -249,9 +249,10 @@ impl NameIndex {
 /// Containment: each record's parent and container, and each container's
 /// members.
 ///
-/// A record that already has a container (a Rust impl member, linked by
-/// `TreeFile::records_from` from its impl's resolved self type) keeps it
-/// and its parent, and joins its parent's members in record order.
+/// A record that already has a container (a Rust impl member or a Swift
+/// extension member, linked by `TreeFile::records_from` from its impl's
+/// resolved self type or its extension's resolved owner) keeps it and its
+/// parent, and joins its parent's members in record order.
 fn link_containers(symbols: &mut [SymbolRecord], names: &NameIndex) {
     let mut parents: Vec<Option<usize>> = vec![None; symbols.len()];
     for (child_idx, parent_idx) in resolve_containers(symbols, names) {
@@ -441,6 +442,9 @@ fn semantic_pass(index: &mut FileSymbolIndex) {
         .filter_map(|region| Some((region.owner.as_ref()?.id.as_ref()?, region)))
         .collect();
 
+    // Each import's (local, original) names, read once for every call.
+    let imports: HashSet<(&str, &str)> =
+        index.imports.iter().map(|import| (import_local_name(import), import_original_name(import))).collect();
     let recursion: Vec<Option<TriState>> = index
         .symbols
         .iter()
@@ -450,7 +454,7 @@ fn semantic_pass(index: &mut FileSymbolIndex) {
                     symbol,
                     regions.get(&symbol.id).copied(),
                     calls_by_owner.get(&symbol.id).map_or(&[][..], Vec::as_slice),
-                    &index.imports,
+                    &imports,
                 )
             })
         })
@@ -496,7 +500,7 @@ fn direct_recursion(
     symbol: &SymbolRecord,
     region: Option<&ReferenceCoverage>,
     calls: &[&Occurrence],
-    imports: &[ImportRecord],
+    imports: &HashSet<(&str, &str)>,
 ) -> TriState {
     if calls.iter().any(|call| {
         call.confidence == Confidence::Scoped && call.target.id.as_ref() == Some(&symbol.id)
@@ -517,7 +521,7 @@ fn direct_recursion(
 /// (`use crate::f as g;` inside `f`), which no file-local rule can tell
 /// apart from another module's `f`, or, for a constructor, a call of its own
 /// class (`new C()` inside `C`'s constructor), which targets the class.
-fn may_call_itself(symbol: &SymbolRecord, call: &Occurrence, imports: &[ImportRecord]) -> bool {
+fn may_call_itself(symbol: &SymbolRecord, call: &Occurrence, imports: &HashSet<(&str, &str)>) -> bool {
     let name = symbol.identity.name.as_str();
     let class = (symbol.kind == SymbolKindV2::Constructor)
         .then(|| symbol.relations.parent.as_ref().and_then(|parent| parent.id.as_ref()))
@@ -528,9 +532,7 @@ fn may_call_itself(symbol: &SymbolRecord, call: &Occurrence, imports: &[ImportRe
         Confidence::Unresolved => call.target.name == name,
         Confidence::Scoped => match &call.target.id {
             Some(id) => Some(id) == class,
-            None => imports.iter().any(|import| {
-                import_local_name(import) == call.target.name && import_original_name(import) == name
-            }),
+            None => imports.contains(&(call.target.name.as_str(), name)),
         },
     }
 }
@@ -723,8 +725,10 @@ impl<'a> OwnerIndex<'a> {
 }
 
 /// The remaining rules of a child's container, for a member declared
-/// outside its type (a Rust `impl` member, a Swift extension member), which
-/// is matched by identity: among the records of the recorded container kind,
+/// outside its type (a Go receiver method, a Lua table function), which is
+/// matched by identity (Rust `impl` and Swift extension members arrive
+/// linked from the relation resolver's owner decision, which no by-name
+/// rule may replace): among the records of the recorded container kind,
 /// the one whose in-file qualified name qualifies the child's (longest
 /// first, see [`nearest_qualifying_owner`]), else the only one whose
 /// qualified name agrees with the child's owner path
@@ -734,7 +738,7 @@ impl<'a> OwnerIndex<'a> {
 /// overrides an explicit qualification that names another owner
 /// (`impl other::W` beside a local `W` has no same-file container).
 ///
-/// A qualified `container_name` (Swift `extension Left.Repeated`) that no
+/// A qualified `container_name` (Lua `function Left.Repeated.f()`) that no
 /// record is called is looked up by its last segment and, without a
 /// qualifying match, must be the tail of the candidate's qualified name.
 fn find_container_by_identity(
@@ -794,9 +798,11 @@ pub(crate) fn owner_path(qualified_name: &str) -> Option<&str> {
 
 /// Of the records called `bare` of kind `kind`, the owner whose qualified
 /// name qualifies the child's: the longest such name, and among equal names
-/// (two Lua `local M = {}` tables in different blocks) the nearest
-/// declaration before the child, else the first after it (the last in
-/// record order among equal starts).
+/// the nearest declaration before the child, else the first after it (the
+/// last in record order among equal starts), where equal names may be one
+/// owner declared again ([`repeats_one_owner`]). Elsewhere equal names are
+/// competing owners (two Go types of one name): proximity proves none of
+/// them, and no shorter name is tried.
 fn nearest_qualifying_owner(
     owners: &OwnerIndex<'_>,
     bare: &str,
@@ -804,18 +810,29 @@ fn nearest_qualifying_owner(
     child: &SymbolRecord,
 ) -> Option<usize> {
     let child_start = child.source.declaration_span.start_byte;
-    qualifying_prefixes(&child.identity.qualified_name).find_map(|prefix| {
+    let bucket = qualifying_prefixes(&child.identity.qualified_name).find_map(|prefix| {
         count_shared_context_steps(1);
-        let bucket = owners.by_qualified.get(&(bare, kind, prefix))?;
-        let before = bucket.partition_point(|&(start, _)| start <= child_start);
-        let nearest = if before > 0 {
-            before - 1
-        } else {
-            let first_start = bucket.first()?.0;
-            bucket.partition_point(|&(start, _)| start <= first_start) - 1
-        };
-        Some(bucket[nearest].1)
-    })
+        owners.by_qualified.get(&(bare, kind, prefix))
+    })?;
+    if bucket.len() > 1 && !repeats_one_owner(child.language) {
+        return None;
+    }
+    let before = bucket.partition_point(|&(start, _)| start <= child_start);
+    let nearest = if before > 0 {
+        before - 1
+    } else {
+        let first_start = bucket.first()?.0;
+        bucket.partition_point(|&(start, _)| start <= first_start) - 1
+    };
+    Some(bucket[nearest].1)
+}
+
+/// Whether same-named owners of one qualified name may be one owner
+/// declared again, so the nearest one before a member is its owner: a Lua
+/// `local M = {}` in force until the next, a C++ class's forward
+/// declarations and definition.
+pub(crate) fn repeats_one_owner(language: ProgrammingLanguage) -> bool {
+    matches!(language, ProgrammingLanguage::Lua | ProgrammingLanguage::Cpp)
 }
 
 /// Every whole-segment prefix of `member` that [`qualifies`] it, longest

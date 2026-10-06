@@ -15,7 +15,10 @@
 //! retain uncertain entries separately when syntax and local declarations
 //! cannot establish their category.
 
+use std::collections::HashSet;
+
 use super::*;
+use crate::analysis::counters::count_shared_context_steps;
 
 /// A base type as written in a declaration's header.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -93,6 +96,9 @@ pub(crate) fn declared_bases(name: Node<'_>, language: ProgrammingLanguage, sour
         ProgrammingLanguage::Swift => swift_bases(owner, source, &mut bases),
         ProgrammingLanguage::Scala => scala_bases(owner, source, &mut bases),
         _ => {}
+    }
+    for list in [&mut bases.extends, &mut bases.implements, &mut bases.unclassified] {
+        dedupe(list);
     }
     bases
 }
@@ -207,7 +213,7 @@ fn collect_segments(node: Node<'_>, source: &str, segments: &mut Vec<String>) ->
         // excluded.
         "scoped_type_identifier" | "scoped_identifier" | "member_expression" | "nested_type_identifier"
         | "qualified_name" | "alias_qualified_name" | "namespace_name" | "qualified_identifier" | "attribute"
-        | "qualified_type" | "user_type" | "stable_type_identifier" => {
+        | "qualified_type" | "user_type" | "stable_type_identifier" | "stable_identifier" | "nested_identifier" => {
             let mut cursor = node.walk();
             let mut any = false;
             for child in node.named_children(&mut cursor) {
@@ -223,12 +229,18 @@ fn collect_segments(node: Node<'_>, source: &str, segments: &mut Vec<String>) ->
     }
 }
 
+/// Adds a base; [`dedupe`] later keeps the first of equal written
+/// expressions in each list.
 fn push_unique(list: &mut Vec<WrittenBase>, base: Option<WrittenBase>) {
-    if let Some(base) = base
-        && !list.iter().any(|existing| existing.text == base.text)
-    {
-        list.push(base);
-    }
+    list.extend(base);
+}
+
+/// Keeps the first of each written expression, in order: one membership
+/// check per base, however many a list holds.
+fn dedupe(list: &mut Vec<WrittenBase>) {
+    count_shared_context_steps(list.len());
+    let mut seen: HashSet<String> = HashSet::with_capacity(list.len());
+    list.retain(|base| seen.insert(base.text.clone()));
 }
 
 fn named_entries<'tree>(node: Node<'tree>) -> Vec<Node<'tree>> {
@@ -238,16 +250,25 @@ fn named_entries<'tree>(node: Node<'tree>) -> Vec<Node<'tree>> {
         .collect()
 }
 
+/// Whether a C# declaration declares a value type: a `struct` or a
+/// `record struct`. A `record` and a `record class` are classes, although
+/// all three report the `Type` kind.
+pub(crate) fn is_csharp_struct(declaration: Node<'_>) -> bool {
+    match declaration.kind() {
+        "struct_declaration" => true,
+        "record_declaration" => {
+            let mut cursor = declaration.walk();
+            declaration.children(&mut cursor).any(|child| child.kind() == "struct")
+        }
+        _ => false,
+    }
+}
+
 fn csharp_bases(owner: Node<'_>, source: &str, bases: &mut DeclaredBases) {
     let Some(list) = find_child_by_kind(owner, "base_list") else { return };
     if owner.kind() == "enum_declaration" { return; }
     let is_interface = owner.kind() == "interface_declaration";
-    let is_struct = owner.kind() == "struct_declaration"
-        || declaration_keyword(owner, ProgrammingLanguage::CSharp).as_deref() == Some("struct")
-        || {
-            let mut cursor = owner.walk();
-            owner.children(&mut cursor).any(|child| child.kind() == "struct")
-        };
+    let is_struct = is_csharp_struct(owner);
     let entries = named_entries(list);
     let mut position = 0;
     let mut index = 0;
@@ -559,11 +580,15 @@ fn rust_supertraits(owner: Node<'_>, language: ProgrammingLanguage, source: &str
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum ImportBinding<'source> {
     /// The names bound, as written (alias, else the last imported
-    /// segment; a Python `import a.b` binds `a`).
-    Names(Vec<&'source str>),
-    /// A wildcard import, a C++ using-directive or an import whose names
-    /// cannot be read: any name may be bound, so no lookup through this
-    /// scope can be proved.
+    /// segment; a Python `import a.b` binds `a`), and the name groups
+    /// (`analysis::scope` `TYPE`/`VALUE` bits) they are bound in: a Swift
+    /// `import func`/`let`/`var` binds a value, `import class`/`struct`/
+    /// `enum`/`protocol`/`typealias` and a Java single-type import a type,
+    /// every other import every group.
+    Names(Vec<&'source str>, u8),
+    /// A wildcard import, a C++ using-directive, a Go dot import or an
+    /// import whose names cannot be read: any name may be bound, so no
+    /// lookup through this scope can be proved.
     Opaque,
     /// A Swift whole-module import (`import Foundation`): like
     /// [`Self::Opaque`] for a lookup, but it names no single binding that
@@ -571,13 +596,24 @@ pub(crate) enum ImportBinding<'source> {
     Module,
 }
 
+/// Every name group a binding can occupy.
+const ANY_GROUP: u8 = crate::analysis::scope::ANY_CATEGORY | RELATION_NAMESPACE;
+
+/// The group of a TypeScript namespace: the only binding a qualifier in a
+/// type position (`implements ns.I`) looks up besides imports.
+pub(crate) const RELATION_NAMESPACE: u8 = 8;
+
 /// The binding `node` makes when it is an import statement of `language`
-/// whose bound names can coexist with a same-file declaration of a farther
-/// scope (Rust `use`, C++ `using` and namespace aliases, PHP `use`, Python
+/// (Rust `use`, C++ `using` and namespace aliases, PHP `use`, Python
 /// imports, JS/TS imports and TS `import x =`, C# `using` aliases, Swift
-/// selective imports, every expression of a Scala `import`). Java and Go
-/// imports bind only file-level names a same-file declaration would
-/// conflict with, so they are not read.
+/// selective imports, every expression of a Scala `import`, Java single,
+/// static and on-demand imports, Go package imports). A Java or Go import
+/// binds a file-level name, so it decides a qualifier such as `Entry` in
+/// `Entry.Base` before the file's own package name is tried.
+///
+/// An unaliased Go import binds the package name Go tools assume for its
+/// path: the last element, without a `.vN` suffix, or the element before a
+/// `/vN` major-version element.
 ///
 /// An import whose bound names cannot all be read is
 /// [`ImportBinding::Opaque`], never a shorter name list: a missed binding
@@ -589,7 +625,52 @@ pub(crate) fn import_binding<'source>(
 ) -> Option<ImportBinding<'source>> {
     let text = |node: Node<'_>| node.utf8_text(source.as_bytes()).ok().map(str::trim).filter(|text| !text.is_empty());
     let mut names = Vec::new();
+    let mut categories = ANY_GROUP;
     match (language, node.kind()) {
+        (ProgrammingLanguage::Java, "import_declaration") => {
+            let mut cursor = node.walk();
+            let children: Vec<Node<'_>> = node.children(&mut cursor).collect();
+            if children.iter().any(|child| child.kind() == "asterisk") {
+                return Some(ImportBinding::Opaque);
+            }
+            // A static import may name a member type as well as a field or
+            // method; a single-type import names a type.
+            if !children.iter().any(|child| child.kind() == "static") {
+                categories = crate::analysis::scope::TYPE;
+            }
+            let bound = children.iter().find(|child| matches!(child.kind(), "scoped_identifier" | "identifier"))
+                .and_then(|path| match path.kind() {
+                    "scoped_identifier" => path.child_by_field_name("name"),
+                    _ => Some(*path),
+                })
+                .and_then(text);
+            let Some(bound) = bound else { return Some(ImportBinding::Opaque) };
+            names.push(bound);
+        }
+        (ProgrammingLanguage::Go, "import_declaration") => {
+            let mut specs = named_entries(node);
+            if let Some(list) = specs.iter().position(|spec| spec.kind() == "import_spec_list") {
+                let list = specs.remove(list);
+                specs.extend(named_entries(list));
+            }
+            for spec in specs.into_iter().filter(|spec| spec.kind() == "import_spec") {
+                match spec.child_by_field_name("name") {
+                    Some(name) if name.kind() == "dot" => return Some(ImportBinding::Opaque),
+                    Some(name) if name.kind() == "blank_identifier" => {}
+                    Some(name) => names.extend(text(name)),
+                    None => {
+                        let path = spec
+                            .child_by_field_name("path")
+                            .and_then(|path| named_entries(path).into_iter().next())
+                            .and_then(text);
+                        let Some(bound) = path.and_then(go_package_name) else {
+                            return Some(ImportBinding::Opaque);
+                        };
+                        names.push(bound);
+                    }
+                }
+            }
+        }
         (ProgrammingLanguage::CSharp, "using_directive") => {
             if let Some(alias) = node.child_by_field_name("name") {
                 names.extend(text(alias));
@@ -599,10 +680,13 @@ pub(crate) fn import_binding<'source>(
         }
         (ProgrammingLanguage::Swift, "import_declaration") => {
             let mut cursor = node.walk();
-            let selective = node.children(&mut cursor).any(|child| {
-                matches!(child.kind(), "typealias" | "struct" | "class" | "enum" | "protocol" | "let" | "var" | "func")
+            let selective = node.children(&mut cursor).find_map(|child| match child.kind() {
+                "typealias" | "struct" | "class" | "enum" | "protocol" => Some(crate::analysis::scope::TYPE),
+                "let" | "var" | "func" => Some(crate::analysis::scope::VALUE),
+                _ => None,
             });
-            if !selective { return Some(ImportBinding::Module); }
+            let Some(group) = selective else { return Some(ImportBinding::Module) };
+            categories = group;
             // A selective import whose name cannot be read binds an
             // unknown name: opaque, never absent.
             let Some(bound) = find_child_by_kind(node, "identifier")
@@ -719,7 +803,28 @@ pub(crate) fn import_binding<'source>(
         }
         _ => return None,
     }
-    Some(ImportBinding::Names(names))
+    Some(ImportBinding::Names(names, categories))
+}
+
+/// The package name an unaliased Go import path is assumed to bind, `None`
+/// when it is not an identifier.
+fn go_package_name(path: &str) -> Option<&str> {
+    let is_major_version = |element: &str| {
+        element.strip_prefix('v').is_some_and(|digits| !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit()))
+    };
+    let mut elements = path.rsplit('/');
+    let mut last = elements.next()?;
+    if is_major_version(last) {
+        last = elements.next()?;
+    }
+    if let Some((stem, suffix)) = last.rsplit_once('.')
+        && is_major_version(suffix)
+    {
+        last = stem;
+    }
+    let mut chars = last.chars();
+    let starts = chars.next().is_some_and(|first| first == '_' || first.is_alphabetic());
+    (starts && chars.all(|rest| rest == '_' || rest.is_alphanumeric())).then_some(last)
 }
 
 /// Collects the names a Scala `import` binds; `false` when any of its

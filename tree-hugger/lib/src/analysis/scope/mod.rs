@@ -1,6 +1,9 @@
 //! Lexical scopes of one file and name lookup through them, for the
 //! languages whose binding rules are supported (Rust, TypeScript and
-//! JavaScript).
+//! JavaScript). The declared-relation resolver builds the same tree over
+//! its own scope set for every language with declared bases
+//! (`file/tree_file/relations/lexical.rs`) and reuses the Rust and ECMA
+//! binding sites.
 //!
 //! A scope is a syntax node: every `@local.scope` capture of the effective
 //! locals query, the file root, and the language's extra scope kinds
@@ -150,7 +153,9 @@ impl LanguageRules {
 
 /// A file's scopes, bindings and their per-scope name index.
 pub(crate) struct ScopeTree<'tree> {
-    rules: LanguageRules,
+    /// The language whose function scopes a [`Placement::FunctionScope`]
+    /// binding climbs to; without rules every binding is innermost.
+    rules: Option<LanguageRules>,
     nodes: Vec<Node<'tree>>,
     parents: Vec<Option<usize>>,
     by_node: HashMap<usize, usize>,
@@ -179,11 +184,29 @@ impl<'tree> ScopeTree<'tree> {
         root: Node<'tree>,
         scope_nodes: impl IntoIterator<Item = Node<'tree>>,
     ) -> Self {
+        Self::with_rules(Some(rules), root, scope_nodes)
+    }
+
+    /// [`Self::new`] for a scope set chosen by the caller: the relation
+    /// resolver builds one for every language with declared bases, most of
+    /// which have no [`LanguageRules`].
+    pub(crate) fn with_rules(
+        rules: Option<LanguageRules>,
+        root: Node<'tree>,
+        scope_nodes: impl IntoIterator<Item = Node<'tree>>,
+    ) -> Self {
         let mut nodes: Vec<Node<'tree>> = std::iter::once(root).chain(scope_nodes).collect();
         // Outer scopes first, so parents precede children and the order
-        // never depends on capture order.
+        // never depends on capture order. Depth breaks a tie between nested
+        // nodes of one range (a Python class body and its only statement);
+        // a node id is an address, never an order.
         nodes.sort_by_key(|node| (node.start_byte(), std::cmp::Reverse(node.end_byte()), node.id()));
         nodes.dedup_by_key(|node| node.id());
+        for run in nodes.chunk_by_mut(|a, b| a.byte_range() == b.byte_range()) {
+            if run.len() > 1 {
+                run.sort_by_cached_key(|node| ancestors(*node).count());
+            }
+        }
         let by_node: HashMap<usize, usize> =
             nodes.iter().enumerate().map(|(idx, node)| (node.id(), idx)).collect();
         let parents = nodes
@@ -216,20 +239,63 @@ impl<'tree> ScopeTree<'tree> {
 
     /// Places a binding of `name` (whose text is `text`).
     pub(crate) fn bind(&mut self, name: Node<'tree>, text: &'tree str, rule: BindingRule, target: BindingTarget) {
+        let scope = self.placement(name, rule);
+        self.bind_in(scope, name.start_byte(), text, rule, target);
+    }
+
+    /// The scope a binding of `name` under `rule` is placed in.
+    pub(crate) fn placement(&self, name: Node<'_>, rule: BindingRule) -> usize {
         let mut scope = self.scope_around(name);
         if rule.placement == Placement::Innermost && self.names_itself(scope, name) {
             scope = self.parents[scope].unwrap_or(scope);
         }
-        if rule.placement == Placement::FunctionScope {
+        if rule.placement == Placement::FunctionScope
+            && let Some(rules) = self.rules
+        {
             while let Some(parent) = self.parents[scope]
-                && !self.rules.is_function_scope(self.nodes[scope].kind())
+                && !rules.is_function_scope(self.nodes[scope].kind())
             {
                 scope = parent;
             }
         }
+        scope
+    }
+
+    /// Places a binding of `text`, whose name starts at `name_start`, in
+    /// `scope`.
+    pub(crate) fn bind_in(
+        &mut self,
+        scope: usize,
+        name_start: usize,
+        text: &'tree str,
+        rule: BindingRule,
+        target: BindingTarget,
+    ) {
         let idx = self.bindings.len();
-        self.bindings.push(Binding { name_start: name.start_byte(), rule, target });
+        self.bindings.push(Binding { name_start, rule, target });
         self.table.entry((scope, text)).or_default().push(idx);
+    }
+
+    /// The scope `node` itself is, if it is one.
+    pub(crate) fn scope_of(&self, node: Node<'_>) -> Option<usize> {
+        self.by_node.get(&node.id()).copied()
+    }
+
+    pub(crate) fn node(&self, scope: usize) -> Node<'tree> {
+        self.nodes[scope]
+    }
+
+    pub(crate) fn parent(&self, scope: usize) -> Option<usize> {
+        self.parents[scope]
+    }
+
+    /// The number of scopes, the root included; scope indexes are below it.
+    pub(crate) fn len(&self) -> usize {
+        self.nodes.len()
+    }
+
+    pub(crate) fn has_glob(&self, scope: usize) -> bool {
+        self.has_glob[scope]
     }
 
     /// The scope node `scope` declares `name` as its own name (`fn f`,
@@ -254,19 +320,8 @@ impl<'tree> ScopeTree<'tree> {
     pub(crate) fn lookup_from(&self, scope: usize, position: usize, name: &str, categories: u8) -> Lookup {
         let mut scope = Some(scope);
         while let Some(current) = scope {
-            if let Some(bucket) = self.table.get(&(current, name)) {
-                let visible = bucket.iter().copied().filter(|&idx| {
-                    let rule = self.bindings[idx].rule;
-                    rule.categories & categories != 0 && rule.visible_from <= position
-                });
-                let (ordered, free): (Vec<usize>, Vec<usize>) =
-                    visible.partition(|&idx| self.bindings[idx].rule.ordered);
-                if let Some(&latest) = ordered.iter().max_by_key(|&&idx| self.bindings[idx].name_start) {
-                    return Lookup::Found(vec![latest]);
-                }
-                if !free.is_empty() {
-                    return Lookup::Found(free);
-                }
+            if let Some(found) = self.visible_in(current, position, name, categories) {
+                return Lookup::Found(found);
             }
             if self.has_glob[current] {
                 return Lookup::Glob;
@@ -274,6 +329,22 @@ impl<'tree> ScopeTree<'tree> {
             scope = self.parents[current];
         }
         Lookup::NotFound
+    }
+
+    /// The bindings of `name` in `scope` alone (no climbing) that are
+    /// visible at byte `position` in the given categories, `None` when it
+    /// binds no such name: among ordered ones (Rust `let`) the latest wins.
+    pub(crate) fn visible_in(&self, scope: usize, position: usize, name: &str, categories: u8) -> Option<Vec<usize>> {
+        let bucket = self.table.get(&(scope, name))?;
+        let visible = bucket.iter().copied().filter(|&idx| {
+            let rule = self.bindings[idx].rule;
+            rule.categories & categories != 0 && rule.visible_from <= position
+        });
+        let (ordered, free): (Vec<usize>, Vec<usize>) = visible.partition(|&idx| self.bindings[idx].rule.ordered);
+        if let Some(&latest) = ordered.iter().max_by_key(|&&idx| self.bindings[idx].name_start) {
+            return Some(vec![latest]);
+        }
+        (!free.is_empty()).then_some(free)
     }
 }
 

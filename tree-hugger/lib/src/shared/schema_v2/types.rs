@@ -31,11 +31,16 @@ impl SchemaVersion {
     /// Shape with unclassified bases and optional relation source spans,
     /// before `metrics.cyclomatic`; no longer emitted.
     pub const V4_2: Self = Self { major: 4, minor: 2 };
-    /// Shape with the required `metrics.cyclomatic` key.
+    /// Shape with the required `metrics.cyclomatic` key, whose reference
+    /// summaries bound the first same-named declaration; no longer emitted.
     pub const V4_3: Self = Self { major: 4, minor: 3 };
+    /// Reference summaries and `semantics.is_recursive` are derived from
+    /// scoped per-occurrence evidence, and a file index may carry
+    /// `occurrences` and `reference_coverage`.
+    pub const V5_0: Self = Self { major: 5, minor: 0 };
     /// The shape records, file indexes, CLI envelopes and cache entries are
     /// written in, and the only one the cache serves.
-    pub const CURRENT: Self = Self::V4_3;
+    pub const CURRENT: Self = Self::V5_0;
 }
 
 /// 1-based text location.

@@ -1771,6 +1771,7 @@ impl TreeFile {
             declaration,
             name,
             container_impl,
+            container_extension,
         } in definitions
         {
             let wanted = selection.wants(symbol.kind);
@@ -1882,6 +1883,7 @@ impl TreeFile {
                 name,
                 wanted,
                 container_impl,
+                container_extension,
             });
             records.push(record);
         }

@@ -35,9 +35,13 @@ pub struct WorkCounters {
     /// package segments, same-file owners and members, the records a
     /// member's container or an export's target resolves to, and the records
     /// a god-file container call-out reads), counting both building that
-    /// context and each declaration's lookup in it. It grows
-    /// linearly with a file's declarations; a per-declaration rescan of the
-    /// file or module shows up here as quadratic growth.
+    /// context and each declaration's lookup in it. Relation resolution
+    /// also counts each lookup segment, candidate visited, inline-namespace
+    /// step, member-range comparison and written-target insertion, plus
+    /// generic parameter reads, name-set/index construction and bound-subject
+    /// lookup. It grows with declarations, written paths and parameter lists,
+    /// including those on unselected or record-less owners; a per-declaration
+    /// rescan of the file or module shows up here as quadratic growth.
     pub shared_context_steps: u64,
     /// Runs of a file's relation linker, which builds the file's declaration
     /// index and, in Rust, walks its impls. One analysis runs it once,

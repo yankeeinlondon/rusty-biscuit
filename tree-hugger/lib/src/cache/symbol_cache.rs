@@ -12,6 +12,9 @@ use serde::ser::Serializer;
 use serde::{Deserialize, Serialize};
 use tree_sitter::Language;
 
+use super::stored_evidence::{
+    nullable, read_coverage, read_occurrences, validate_evidence, write_coverage, write_occurrences,
+};
 use super::{CacheError, PassFingerprint, PersistentCache, canonical_digest};
 use crate::analysis::coverage::{add_record_passes, project, record_passes_suffice};
 use crate::error::TreeHuggerError;
@@ -514,7 +517,11 @@ struct WrittenEntry<'a> {
     imports: &'a [ImportRecord],
     exports: &'a [ExportRecord],
     diagnostics: &'a [Diagnostic],
+    /// Every key written, `null` and empty lists included
+    /// (`stored_evidence`).
+    #[serde(serialize_with = "write_occurrences")]
     occurrences: &'a [Occurrence],
+    #[serde(serialize_with = "write_coverage")]
     reference_coverage: &'a [ReferenceCoverage],
 }
 
@@ -545,15 +552,18 @@ struct StoredEntry {
     covered_kinds: CoveredKinds,
     completed_capabilities: CompletedCapabilities,
     /// Required but nullable: `null` when the entry holds no diagnostics.
-    #[serde(deserialize_with = "nullable_string")]
+    #[serde(deserialize_with = "nullable")]
     diagnostics_fingerprint: Option<String>,
     records: Vec<SymbolRecord>,
     imports: Vec<ImportRecord>,
     exports: Vec<ExportRecord>,
     diagnostics: Vec<Diagnostic>,
-    /// Required (an empty list is a file with none); non-empty only under
-    /// the occurrences capability.
+    /// Required (an empty list is a file with none), in the strict form
+    /// `stored_evidence` reads; non-empty only under the occurrences
+    /// capability.
+    #[serde(deserialize_with = "read_occurrences")]
     occurrences: Vec<Occurrence>,
+    #[serde(deserialize_with = "read_coverage")]
     reference_coverage: Vec<ReferenceCoverage>,
 }
 
@@ -616,15 +626,14 @@ impl StoredEntry {
         {
             return Err(CacheMiss::Inconsistent("a record without metrics under the metrics capability"));
         }
-        if !capabilities.contains(&Capability::Occurrences)
-            && (!self.occurrences.is_empty() || !self.reference_coverage.is_empty())
-        {
-            return Err(CacheMiss::Inconsistent("occurrences stored without the occurrences capability"));
-        }
-        if capabilities.contains(&Capability::Occurrences) && self.reference_coverage.is_empty() {
-            // Every analysis has at least the file-level region.
-            return Err(CacheMiss::Inconsistent("no reference coverage under the occurrences capability"));
-        }
+        validate_evidence(
+            source.source(),
+            capabilities.contains(&Capability::Occurrences),
+            &self.occurrences,
+            &self.reference_coverage,
+            &self.records,
+        )
+        .map_err(CacheMiss::Inconsistent)?;
         if let Some(kinds) = &self.covered_kinds.0
             && self.records.iter().any(|record| !kinds.contains(&record.kind))
         {
@@ -752,10 +761,4 @@ where
         return Err(de::Error::invalid_length(0, expected));
     }
     Ok(items)
-}
-
-/// A string or `null`; unlike a plain `Option` field, an absent key is an
-/// error rather than `None`.
-fn nullable_string<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<String>, D::Error> {
-    Option::<String>::deserialize(deserializer)
 }

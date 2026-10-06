@@ -21,18 +21,26 @@ use crate::symbols_fixtures::in_file_name;
 use ProgrammingLanguage as L;
 
 /// One written target: its text and, when it resolves, the in-file
-/// qualified name of the declaration it names.
+/// qualified name of the declaration it names, plus that declaration's line
+/// when several declarations share the name.
+#[derive(Clone, Copy)]
 pub struct Target {
     pub name: &'static str,
     pub resolves_to: Option<&'static str>,
+    pub line: Option<u32>,
 }
 
 const fn to(name: &'static str, resolves_to: &'static str) -> Target {
-    Target { name, resolves_to: Some(resolves_to) }
+    Target { name, resolves_to: Some(resolves_to), line: None }
+}
+
+/// A target among same-named declarations: the one declared on `line`.
+const fn to_at(name: &'static str, resolves_to: &'static str, line: u32) -> Target {
+    Target { name, resolves_to: Some(resolves_to), line: Some(line) }
 }
 
 const fn text(name: &'static str) -> Target {
-    Target { name, resolves_to: None }
+    Target { name, resolves_to: None, line: None }
 }
 
 /// An owner (by in-file qualified name) and its relations.
@@ -364,7 +372,9 @@ pub struct FactSource {
 }
 
 /// Every source of the generics, modifiers, body-lines (LF and CRLF),
-/// relations and path-meaning matrices, plus the Rust impl source: the forms whose generic
+/// relations, path-meaning and Swift nested-shadow and unproved owner
+/// matrices, plus the
+/// Rust impl source: the forms whose generic
 /// parameters, modifiers, attributes, relations and `metrics.lines` the
 /// query and cache equivalence tests compare.
 pub fn declaration_fact_sources() -> Vec<FactSource> {
@@ -390,7 +400,21 @@ pub fn declaration_fact_sources() -> Vec<FactSource> {
         push("relations", row.language, row.extension, row.source.to_string());
     }
     push("rust impls", ProgrammingLanguage::Rust, "rs", RUST_IMPLS.to_string());
-    for row in PATH_MEANING_MATRIX {
+    for row in crate::symbols_owner_identity::NESTED_SHADOW_MATRIX {
+        sources.push(FactSource {
+            label: format!("owner identity Swift: {}", row.label),
+            extension: "swift",
+            source: row.source.to_string(),
+        });
+    }
+    for row in crate::symbols_owner_identity::UNPROVED_OWNER_MATRIX {
+        sources.push(FactSource {
+            label: format!("owner identity Swift unproved: {}", row.label),
+            extension: "swift",
+            source: row.source.to_string(),
+        });
+    }
+    for row in path_meaning_rows() {
         sources.push(FactSource {
             label: format!("path meaning {}: {}", row.language.name(), row.label),
             extension: row.extension,
@@ -433,14 +457,30 @@ fn is_type_like(kind: SymbolKindV2) -> bool {
     )
 }
 
-/// The one type-like record of `index` with this in-file qualified name.
+/// The one type-like record of `index` with this in-file qualified name; a
+/// Scala `object` only when no class, trait or type shares its name (a
+/// companion's base clause names the type).
 fn type_record<'a>(index: &'a FileSymbolIndex, label: &str, qualified_name: &str) -> &'a SymbolRecord {
-    let found: Vec<&SymbolRecord> = index
-        .symbols
-        .iter()
-        .filter(|record| in_file_name(record) == qualified_name && (is_type_like(record.kind)
-            || (record.language == L::Scala && record.kind == SymbolKindV2::Module)))
-        .collect();
+    type_record_at(index, label, qualified_name, None)
+}
+
+/// [`type_record`], among the same-named declarations the one declared on
+/// `line` when given.
+fn type_record_at<'a>(
+    index: &'a FileSymbolIndex,
+    label: &str,
+    qualified_name: &str,
+    line: Option<u32>,
+) -> &'a SymbolRecord {
+    let named = || {
+        index.symbols.iter().filter(|record| in_file_name(record) == qualified_name).filter(|record| {
+            line.is_none_or(|line| record.source.declaration_span.start.line == line)
+        })
+    };
+    let mut found: Vec<&SymbolRecord> = named().filter(|record| is_type_like(record.kind)).collect();
+    if found.is_empty() {
+        found = named().filter(|record| record.language == L::Scala && record.kind == SymbolKindV2::Module).collect();
+    }
     assert_eq!(
         found.len(),
         1,
@@ -467,7 +507,7 @@ fn assert_targets(
     assert_eq!(actual, wanted, "{label}: {relation}");
     for target in expected {
         if let Some(qualified_name) = target.resolves_to {
-            let _ = type_record(complete, label, qualified_name);
+            let _ = type_record_at(complete, label, qualified_name, target.line);
         }
     }
 }
@@ -498,7 +538,26 @@ fn check_owners(label: &str, extension: &str, source: &str, owners: &[Owner]) ->
         check_owner_targets(&format!("{label} declarations-only"), &complete, &selective, std::slice::from_ref(owner));
     }
     check_owner_targets(&format!("{label} complete"), &complete, &complete, owners);
+    check_written_spans(label, source, &complete, owners);
     complete
+}
+
+/// Each written target that records a source span (Swift) covers its
+/// written text there.
+fn check_written_spans(label: &str, source: &str, index: &FileSymbolIndex, owners: &[Owner]) {
+    for owner in owners {
+        let record = type_record(index, label, owner.qualified_name);
+        let relations = &record.relations;
+        for target in relations.extends.iter().chain(&relations.implements).chain(&relations.unclassified_bases) {
+            let Some(span) = target.source_span.as_ref() else { continue };
+            assert_eq!(
+                source.get(span.start_byte as usize..span.end_byte as usize),
+                Some(target.name.as_str()),
+                "{label} `{}`: written span",
+                owner.qualified_name
+            );
+        }
+    }
 }
 
 /// Checks that each owner in `index` reports exactly its written bases, a
@@ -517,8 +576,9 @@ pub fn check_owner_targets(label: &str, complete: &FileSymbolIndex, index: &File
             .chain(&record.relations.implements).chain(&record.relations.unclassified_bases)
             .zip(owner.extends.iter().chain(owner.implements).chain(owner.unclassified))
         {
-            let expected_id =
-                expected.resolves_to.map(|qualified_name| type_record(complete, &label, qualified_name).id.clone());
+            let expected_id = expected
+                .resolves_to
+                .map(|qualified_name| type_record_at(complete, &label, qualified_name, expected.line).id.clone());
             assert_eq!(target.id, expected_id, "{label}: `{}` target ID", target.name);
         }
     }
@@ -701,6 +761,167 @@ macro_rules! swift_standard_raw_type_row {
     };
 }
 
+macro_rules! go_sibling_block_row {
+    ($($name:literal),+) => {
+        row("Go finished blocks declare interfaces named like predeclared types", L::Go, "go",
+            concat!("package shapes\n\nfunc f() {\n",
+                $("\t{\n\t\ttype ", $name, " interface{ M() }\n\t}\n\ttype Child_", $name, " interface{ ", $name, " }\n"),+, "}\n"),
+            &[$(bases(concat!("shapes.f.Child_", $name), &[])),+])
+    };
+}
+
+macro_rules! swift_do_block_alias_row {
+    ($($name:literal),+) => {
+        row("Swift finished `do` blocks alias standard raw-type names", L::Swift, "swift",
+            concat!("func f() {\n",
+                $("    do { typealias ", $name, " = String }\n    enum E_", $name, ": ", $name, " { case a }\n"),+,
+                "    do { enum Unicode { typealias Scalar = String } }\n    enum E_Scalar: Unicode.Scalar { case a }\n}\n"),
+            &[$(bases(concat!("f.E_", $name), &[])),+, bases("f.E_Scalar", &[])])
+    };
+}
+
+macro_rules! swift_value_import_row {
+    ($label:literal, $keyword:literal, $($name:literal),+) => {
+        row($label, L::Swift, "swift",
+            concat!($("import ", $keyword, " Lib.", $name, "\n"),+, "import ", $keyword, " Lib.Unicode\n",
+                $("enum E_", $name, ": ", $name, " { case a }\n"),+, "enum E_Scalar: Unicode.Scalar { case a }\n"),
+            &[$(bases(concat!("E_", $name), &[])),+, bases("E_Scalar", &[])])
+    };
+}
+
+macro_rules! swift_value_import_func_row {
+    ($($name:literal),+) => { swift_value_import_row!("Swift `import func` never hides a raw type", "func", $($name),+) };
+}
+
+macro_rules! swift_value_import_let_row {
+    ($($name:literal),+) => { swift_value_import_row!("Swift `import let` never hides a raw type", "let", $($name),+) };
+}
+
+macro_rules! swift_value_import_var_row {
+    ($($name:literal),+) => { swift_value_import_row!("Swift `import var` never hides a raw type", "var", $($name),+) };
+}
+
+/// A Python `global` probe: `reviewOuter.reviewProbe` declares the
+/// directive, then `$body` (lines indented eight spaces), and the readers
+/// are a class in the probe, one in `reviewOuter` and one at the module.
+macro_rules! python_global_row {
+    ($label:literal, $body:literal, $owners:expr) => {
+        row(concat!("Python `global` ", $label), L::Python, "py",
+            concat!("class ReviewBase:\n    pass\n\n\
+                def reviewOuter():\n    def reviewProbe(external):\n        global ReviewBase\n", $body,
+                "        class ReviewChild(ReviewBase):\n            pass\n\n\
+                \x20   class ReviewOuterChild(ReviewBase):\n        pass\n\n\
+                class ReviewModuleChild(ReviewBase):\n    pass\n"),
+            $owners)
+    };
+}
+
+/// The `nonlocal` form of [`python_global_row`]: `reviewOuter` declares
+/// its own `ReviewBase`, the directive's destination.
+macro_rules! python_nonlocal_row {
+    ($label:literal, $body:literal, $owners:expr) => {
+        row(concat!("Python `nonlocal` ", $label), L::Python, "py",
+            concat!("class ReviewBase:\n    pass\n\n\
+                def reviewOuter():\n    class ReviewBase:\n        pass\n\n\
+                \x20   def reviewProbe(external):\n        nonlocal ReviewBase\n", $body,
+                "        class ReviewChild(ReviewBase):\n            pass\n\n\
+                \x20   class ReviewOuterChild(ReviewBase):\n        pass\n\n\
+                class ReviewModuleChild(ReviewBase):\n    pass\n"),
+            $owners)
+    };
+}
+
+/// A write under `global` rebinds the module's name: no reader that sees
+/// the module binding has a proved target, wherever it is.
+const PY_GLOBAL_WRITTEN: &[Owner] = &[bases("reviewOuter.reviewProbe.ReviewChild", &[text("ReviewBase")]),
+          bases("reviewOuter.ReviewOuterChild", &[text("ReviewBase")]),
+          bases("ReviewModuleChild", &[text("ReviewBase")])];
+
+const PY_GLOBAL_KEPT: &[Owner] = &[bases("reviewOuter.reviewProbe.ReviewChild", &[to_at("ReviewBase", "ReviewBase", 1)]),
+          bases("reviewOuter.ReviewOuterChild", &[to_at("ReviewBase", "ReviewBase", 1)]),
+          bases("ReviewModuleChild", &[to_at("ReviewBase", "ReviewBase", 1)])];
+
+/// A write under `nonlocal` rebinds `reviewOuter`'s name: its readers lose
+/// the target, the module's reader keeps the module class.
+const PY_NONLOCAL_WRITTEN: &[Owner] = &[bases("reviewOuter.reviewProbe.ReviewChild", &[text("ReviewBase")]),
+          bases("reviewOuter.ReviewOuterChild", &[text("ReviewBase")]),
+          bases("ReviewModuleChild", &[to_at("ReviewBase", "ReviewBase", 1)])];
+
+const PY_NONLOCAL_KEPT: &[Owner] = &[
+          bases("reviewOuter.reviewProbe.ReviewChild", &[to_at("ReviewBase", "reviewOuter.ReviewBase", 5)]),
+          bases("reviewOuter.ReviewOuterChild", &[to_at("ReviewBase", "reviewOuter.ReviewBase", 5)]),
+          bases("ReviewModuleChild", &[to_at("ReviewBase", "ReviewBase", 1)])];
+
+/// TypeScript and JavaScript binding patterns, each checked in both languages:
+/// a name a pattern binds keeps an outer class from the base, a plain
+/// binding of another name does not.
+const ECMA_PARAMETER_PATTERNS: &str = "class ReviewBase {}\n\
+         function nestedObject({ a: { ReviewBase } }) { class ReviewChild extends ReviewBase {} }\n\
+         function nestedArray([[ReviewBase]]) { class ReviewChild extends ReviewBase {} }\n\
+         function objectDefault({ ReviewBase = 1 }) { class ReviewChild extends ReviewBase {} }\n\
+         function nestedRenamed({ a: { b: ReviewBase } }) { class ReviewChild extends ReviewBase {} }\n\
+         function objectRest({ ...ReviewBase }) { class ReviewChild extends ReviewBase {} }\n\
+         function arrayRest([...ReviewBase]) { class ReviewChild extends ReviewBase {} }\n\
+         function control(other) { class ReviewChild extends ReviewBase {} }\n\
+         function flatObject({ ReviewBase }) { class ReviewChild extends ReviewBase {} }\n\
+         function flatArray([ReviewBase]) { class ReviewChild extends ReviewBase {} }\n\
+         function flatRenamed({ a: ReviewBase }) { class ReviewChild extends ReviewBase {} }\n\
+         function withDefault(ReviewBase = 1) { class ReviewChild extends ReviewBase {} }\n\
+         function bareRest(...ReviewBase) { class ReviewChild extends ReviewBase {} }\n\
+         const assigned = (ReviewBase) => { class ReviewArrowChild extends ReviewBase {} };\n\
+         [1].map(ReviewBase => { class ReviewAnonymousChild extends ReviewBase {} });\n";
+
+const ECMA_PARAMETER_OWNERS: &[Owner] = &[bases("nestedObject.ReviewChild", &[text("ReviewBase")]),
+          bases("nestedArray.ReviewChild", &[text("ReviewBase")]),
+          bases("objectDefault.ReviewChild", &[text("ReviewBase")]),
+          bases("nestedRenamed.ReviewChild", &[text("ReviewBase")]),
+          bases("objectRest.ReviewChild", &[text("ReviewBase")]),
+          bases("arrayRest.ReviewChild", &[text("ReviewBase")]),
+          bases("control.ReviewChild", &[to("ReviewBase", "ReviewBase")]),
+          bases("flatObject.ReviewChild", &[text("ReviewBase")]),
+          bases("flatArray.ReviewChild", &[text("ReviewBase")]),
+          bases("flatRenamed.ReviewChild", &[text("ReviewBase")]),
+          bases("withDefault.ReviewChild", &[text("ReviewBase")]),
+          bases("bareRest.ReviewChild", &[text("ReviewBase")]),
+          bases("assigned.ReviewArrowChild", &[text("ReviewBase")]),
+          bases("ReviewAnonymousChild", &[text("ReviewBase")])];
+
+const ECMA_VARIABLE_PATTERNS: &str = "class ReviewBase {}\n\
+         function flatRenamed(x) { const { a: ReviewBase } = x; class ReviewChild extends ReviewBase {} }\n\
+         function nestedObject(x) { const { a: { ReviewBase } } = x; class ReviewChild extends ReviewBase {} }\n\
+         function flatArray(x) { const [ReviewBase] = x; class ReviewChild extends ReviewBase {} }\n\
+         function nestedArray(x) { const [[ReviewBase]] = x; class ReviewChild extends ReviewBase {} }\n\
+         function objectDefault(x) { const { ReviewBase = 1 } = x; class ReviewChild extends ReviewBase {} }\n\
+         function objectRest(x) { const { ...ReviewBase } = x; class ReviewChild extends ReviewBase {} }\n\
+         function arrayRest(x) { const [...ReviewBase] = x; class ReviewChild extends ReviewBase {} }\n\
+         function simple(x) { const ReviewBase = x; class ReviewChild extends ReviewBase {} }\n";
+
+const ECMA_VARIABLE_OWNERS: &[Owner] = &[bases("flatRenamed.ReviewChild", &[text("ReviewBase")]),
+          bases("nestedObject.ReviewChild", &[text("ReviewBase")]),
+          bases("flatArray.ReviewChild", &[text("ReviewBase")]),
+          bases("nestedArray.ReviewChild", &[text("ReviewBase")]),
+          bases("objectDefault.ReviewChild", &[text("ReviewBase")]),
+          bases("objectRest.ReviewChild", &[text("ReviewBase")]),
+          bases("arrayRest.ReviewChild", &[text("ReviewBase")]),
+          bases("simple.ReviewChild", &[text("ReviewBase")])];
+
+const ECMA_CATCH_AND_FOR_PATTERNS: &str = "class ReviewBase {}\n\
+         function catchName() { try {} catch (ReviewBase) { class ReviewChild extends ReviewBase {} } }\n\
+         function catchObject() { try {} catch ({ ReviewBase }) { class ReviewChild extends ReviewBase {} } }\n\
+         function catchNested() { try {} catch ({ a: { ReviewBase } }) { class ReviewChild extends ReviewBase {} } }\n\
+         function forName(xs) { for (const ReviewBase of xs) { class ReviewChild extends ReviewBase {} } }\n\
+         function forObject(xs) { for (const { ReviewBase } of xs) { class ReviewChild extends ReviewBase {} } }\n\
+         function forNested(xs) { for (const { a: { ReviewBase } } of xs) { class ReviewChild extends ReviewBase {} } }\n\
+         function forControl(xs) { for (const other of xs) { class ReviewChild extends ReviewBase {} } }\n";
+
+const ECMA_CATCH_AND_FOR_OWNERS: &[Owner] = &[bases("catchName.ReviewChild", &[text("ReviewBase")]),
+          bases("catchObject.ReviewChild", &[text("ReviewBase")]),
+          bases("catchNested.ReviewChild", &[text("ReviewBase")]),
+          bases("forName.ReviewChild", &[text("ReviewBase")]),
+          bases("forObject.ReviewChild", &[text("ReviewBase")]),
+          bases("forNested.ReviewChild", &[text("ReviewBase")]),
+          bases("forControl.ReviewChild", &[to("ReviewBase", "ReviewBase")])];
+
 /// A target resolves only when its root, every intermediate owner and the
 /// first segment's nearest binding all lead to the declaration: a leading
 /// `::` is global in C++ and external in Rust, a PHP relative name stays in
@@ -722,6 +943,40 @@ pub const PATH_MEANING_MATRIX: &[PathMeaningRow] = &[
     row("C# inherited member type", L::CSharp, "cs",
         "class Base {}\nclass Super {}\nclass Outer : Super { class Child : Base {} }\n",
         &[Owner { qualified_name: "Outer.Child", extends: &[], implements: &[], unclassified: &[text("Base")] }]),
+    // A C# record and record class are classes, though every record reports
+    // the `Type` kind; a struct and a record struct are never superclasses.
+    row("C# implicit record class target", L::CSharp, "cs",
+        "record ReviewBase;\nrecord ReviewChild : ReviewBase;\n",
+        &[bases("ReviewChild", &[to("ReviewBase", "ReviewBase")])]),
+    row("C# explicit record class target", L::CSharp, "cs",
+        "record class ReviewBase;\nrecord ReviewChild : ReviewBase;\nclass ReviewClassChild : ReviewBase {}\n",
+        &[bases("ReviewChild", &[to("ReviewBase", "ReviewBase")]),
+          bases("ReviewClassChild", &[to("ReviewBase", "ReviewBase")])]),
+    row("C# positional record class target", L::CSharp, "cs",
+        "record ReviewBase(int X = 0);\nrecord ReviewChild : ReviewBase;\n",
+        &[bases("ReviewChild", &[to("ReviewBase", "ReviewBase")])]),
+    row("C# generic record class target", L::CSharp, "cs",
+        "record ReviewBase<T>;\nrecord ReviewChild : ReviewBase<int>;\n",
+        &[bases("ReviewChild", &[to("ReviewBase<int>", "ReviewBase")])]),
+    row("C# namespace-qualified record class target", L::CSharp, "cs",
+        "namespace ReviewNS { record ReviewBase; }\nrecord ReviewChild : ReviewNS.ReviewBase;\n",
+        &[bases("ReviewChild", &[to("ReviewNS.ReviewBase", "ReviewNS.ReviewBase")])]),
+    row("C# ordinary class and interface targets beside a record", L::CSharp, "cs",
+        "class ReviewClass {}\ninterface ReviewInterface {}\nrecord ReviewRecord;\n\
+         class ReviewChild : ReviewClass, ReviewInterface {}\nrecord ReviewConforming : ReviewInterface;\n",
+        &[Owner { qualified_name: "ReviewChild", extends: &[to("ReviewClass", "ReviewClass")],
+                  implements: &[to("ReviewInterface", "ReviewInterface")], unclassified: &[] },
+          implementing("ReviewConforming", &[to("ReviewInterface", "ReviewInterface")])]),
+    row("C# struct and record struct targets", L::CSharp, "cs",
+        "struct ReviewStruct {}\nrecord struct ReviewRecordStruct;\n\
+         class ReviewChild : ReviewStruct {}\nrecord ReviewRecordChild : ReviewRecordStruct;\n",
+        &[unclassified("ReviewChild", &[to("ReviewStruct", "ReviewStruct")]),
+          unclassified("ReviewRecordChild", &[to("ReviewRecordStruct", "ReviewRecordStruct")])]),
+    row("C# aliased and duplicate record targets", L::CSharp, "cs",
+        "using ReviewAlias = Lib.ReviewBase;\nrecord ReviewAlias;\nrecord ReviewDuplicate;\nrecord ReviewDuplicate;\n\
+         record ReviewAliasChild : ReviewAlias;\nrecord ReviewDuplicateChild : ReviewDuplicate;\n",
+        &[unclassified("ReviewAliasChild", &[text("ReviewAlias")]),
+          unclassified("ReviewDuplicateChild", &[text("ReviewDuplicate")])]),
     row("Swift local protocol shadows a standard raw-type name", L::Swift, "swift",
         "protocol Int {}\nenum E: Int { case a }\n",
         &[Owner { qualified_name: "E", extends: &[], implements: &[to("Int", "Int")], unclassified: &[] }]),
@@ -1159,13 +1414,2025 @@ pub const PATH_MEANING_MATRIX: &[PathMeaningRow] = &[
         "enum Swift { protocol Int {} }\nenum E: Swift.Int { case a }\nenum F: Swift.Double { case a }\n",
         &[implementing("E", &[to("Swift.Int", "Swift.Int")]), unclassified("F", &[text("Swift.Double")])],
     ),
+    // --- Lexical binding evidence: block boundaries and declaration
+    // position. A finished or sibling block's declarations are out of view;
+    // a Go, C++ or Java local type is in view only after its name.
+    row("Rust blocks", L::Rust, "rs",
+        "trait ReviewBase {}\n\
+         fn inner() { { trait ReviewBase {} } trait ReviewChild: ReviewBase {} }\n\
+         fn sibling() { { trait ReviewBase {} } { trait ReviewChild: ReviewBase {} } }\n\
+         fn own_block() { { trait ReviewBase {} trait ReviewChild: ReviewBase {} } }\n\
+         fn same_scope() { trait ReviewBase {} trait ReviewChild: ReviewBase {} }\n\
+         fn none() { trait ReviewChild: ReviewBase {} }\n",
+        &[bases("inner::ReviewChild", &[to("ReviewBase", "ReviewBase")]),
+          bases("sibling::ReviewChild", &[to("ReviewBase", "ReviewBase")]),
+          bases("own_block::ReviewChild", &[to("ReviewBase", "own_block::ReviewBase")]),
+          bases("same_scope::ReviewChild", &[to("ReviewBase", "same_scope::ReviewBase")]),
+          bases("none::ReviewChild", &[to("ReviewBase", "ReviewBase")])]),
+    row("Rust sibling block holds the only declaration", L::Rust, "rs",
+        "fn sibling() { { trait ReviewBase {} } { trait ReviewChild: ReviewBase {} } }\n",
+        &[bases("sibling::ReviewChild", &[text("ReviewBase")])]),
+    row("Go blocks", L::Go, "go",
+        "package shapes\n\ntype ReviewBase interface{ M() }\n\n\
+         func inner() {\n\t{\n\t\ttype ReviewBase interface{ M() }\n\t}\n\ttype ReviewChild interface{ ReviewBase }\n}\n\n\
+         func sibling() {\n\t{\n\t\ttype ReviewBase interface{ M() }\n\t}\n\t{\n\t\ttype ReviewChild interface{ ReviewBase }\n\t}\n}\n\n\
+         func ownBlock() {\n\t{\n\t\ttype ReviewBase interface{ M() }\n\t\ttype ReviewChild interface{ ReviewBase }\n\t}\n}\n\n\
+         func sameScope() {\n\ttype ReviewBase interface{ M() }\n\ttype ReviewChild interface{ ReviewBase }\n}\n\n\
+         func none() {\n\ttype ReviewChild interface{ ReviewBase }\n}\n",
+        &[bases("shapes.inner.ReviewChild", &[to("ReviewBase", "shapes.ReviewBase")]),
+          bases("shapes.sibling.ReviewChild", &[to("ReviewBase", "shapes.ReviewBase")]),
+          bases("shapes.ownBlock.ReviewChild", &[to("ReviewBase", "shapes.ownBlock.ReviewBase")]),
+          bases("shapes.sameScope.ReviewChild", &[to("ReviewBase", "shapes.sameScope.ReviewBase")]),
+          bases("shapes.none.ReviewChild", &[to("ReviewBase", "shapes.ReviewBase")])]),
+    row("Go sibling block holds the only declaration", L::Go, "go",
+        "package shapes\n\nfunc sibling() {\n\t{\n\t\ttype ReviewBase interface{ M() }\n\t}\n\t{\n\t\ttype ReviewChild interface{ ReviewBase }\n\t}\n}\n",
+        &[bases("shapes.sibling.ReviewChild", &[text("ReviewBase")])]),
+    row("C++ blocks", L::Cpp, "cpp",
+        "struct ReviewBase {};\n\
+         void inner() { { struct ReviewBase {}; } struct ReviewChild : ReviewBase {}; }\n\
+         void sibling() { { struct ReviewBase {}; } { struct ReviewChild : ReviewBase {}; } }\n\
+         void own_block() { { struct ReviewBase {}; struct ReviewChild : ReviewBase {}; } }\n\
+         void same_scope() { struct ReviewBase {}; struct ReviewChild : ReviewBase {}; }\n\
+         void none() { struct ReviewChild : ReviewBase {}; }\n",
+        &[bases("inner::ReviewChild", &[to("ReviewBase", "ReviewBase")]),
+          bases("sibling::ReviewChild", &[to("ReviewBase", "ReviewBase")]),
+          bases("own_block::ReviewChild", &[to("ReviewBase", "own_block::ReviewBase")]),
+          bases("same_scope::ReviewChild", &[to("ReviewBase", "same_scope::ReviewBase")]),
+          bases("none::ReviewChild", &[to("ReviewBase", "ReviewBase")])]),
+    row("C++ sibling block holds the only declaration", L::Cpp, "cpp",
+        "void sibling() { { struct ReviewBase {}; } { struct ReviewChild : ReviewBase {}; } }\n",
+        &[bases("sibling::ReviewChild", &[text("ReviewBase")])]),
+    row("Java blocks", L::Java, "java",
+        "class ReviewBase {}\nclass Holder {\n\
+         void inner() { { class ReviewBase {} } class ReviewChild extends ReviewBase {} }\n\
+         void sibling() { { class ReviewBase {} } { class ReviewChild extends ReviewBase {} } }\n\
+         void ownBlock() { { class ReviewBase {} class ReviewChild extends ReviewBase {} } }\n\
+         void sameScope() { class ReviewBase {} class ReviewChild extends ReviewBase {} }\n\
+         void none() { class ReviewChild extends ReviewBase {} }\n}\n",
+        &[bases("Holder.inner.ReviewChild", &[to("ReviewBase", "ReviewBase")]),
+          bases("Holder.sibling.ReviewChild", &[to("ReviewBase", "ReviewBase")]),
+          bases("Holder.ownBlock.ReviewChild", &[to("ReviewBase", "Holder.ownBlock.ReviewBase")]),
+          bases("Holder.sameScope.ReviewChild", &[to("ReviewBase", "Holder.sameScope.ReviewBase")]),
+          bases("Holder.none.ReviewChild", &[to("ReviewBase", "ReviewBase")])]),
+    row("Java sibling block holds the only declaration", L::Java, "java",
+        "class Holder { void sibling() { { class ReviewBase {} } { class ReviewChild extends ReviewBase {} } } }\n",
+        &[bases("Holder.sibling.ReviewChild", &[text("ReviewBase")])]),
+    row("TypeScript blocks", L::TypeScript, "ts",
+        "class ReviewBase {}\n\
+         function inner() { { class ReviewBase {} } class ReviewChild extends ReviewBase {} }\n\
+         function sibling() { { class ReviewBase {} } { class ReviewChild extends ReviewBase {} } }\n\
+         function ownBlock() { { class ReviewBase {} class ReviewChild extends ReviewBase {} } }\n\
+         function sameScope() { class ReviewBase {} class ReviewChild extends ReviewBase {} }\n\
+         function none() { class ReviewChild extends ReviewBase {} }\n",
+        &[bases("inner.ReviewChild", &[to("ReviewBase", "ReviewBase")]),
+          bases("sibling.ReviewChild", &[to("ReviewBase", "ReviewBase")]),
+          bases("ownBlock.ReviewChild", &[to("ReviewBase", "ownBlock.ReviewBase")]),
+          bases("sameScope.ReviewChild", &[to("ReviewBase", "sameScope.ReviewBase")]),
+          bases("none.ReviewChild", &[to("ReviewBase", "ReviewBase")])]),
+    row("TypeScript sibling block holds the only declaration", L::TypeScript, "ts",
+        "function sibling() { { class ReviewBase {} } { class ReviewChild extends ReviewBase {} } }\n",
+        &[bases("sibling.ReviewChild", &[text("ReviewBase")])]),
+    row("JavaScript blocks", L::JavaScript, "js",
+        "class ReviewBase {}\n\
+         function inner() { { class ReviewBase {} } class ReviewChild extends ReviewBase {} }\n\
+         function sibling() { { class ReviewBase {} } { class ReviewChild extends ReviewBase {} } }\n\
+         function ownBlock() { { class ReviewBase {} class ReviewChild extends ReviewBase {} } }\n\
+         function sameScope() { class ReviewBase {} class ReviewChild extends ReviewBase {} }\n\
+         function none() { class ReviewChild extends ReviewBase {} }\n",
+        &[bases("inner.ReviewChild", &[to("ReviewBase", "ReviewBase")]),
+          bases("sibling.ReviewChild", &[to("ReviewBase", "ReviewBase")]),
+          bases("ownBlock.ReviewChild", &[to("ReviewBase", "ownBlock.ReviewBase")]),
+          bases("sameScope.ReviewChild", &[to("ReviewBase", "sameScope.ReviewBase")]),
+          bases("none.ReviewChild", &[to("ReviewBase", "ReviewBase")])]),
+    row("JavaScript sibling block holds the only declaration", L::JavaScript, "js",
+        "function sibling() { { class ReviewBase {} } { class ReviewChild extends ReviewBase {} } }\n",
+        &[bases("sibling.ReviewChild", &[text("ReviewBase")])]),
+    row("Swift `do` blocks", L::Swift, "swift",
+        "class ReviewBase {}\n\
+         func inner() {\n    do { class ReviewBase {} }\n    class ReviewChild: ReviewBase {}\n}\n\
+         func sibling() {\n    do { class ReviewBase {} }\n    do { class ReviewChild: ReviewBase {} }\n}\n\
+         func ownBlock() {\n    do {\n        class ReviewBase {}\n        class ReviewChild: ReviewBase {}\n    }\n}\n\
+         func sameScope() {\n    class ReviewBase {}\n    class ReviewChild: ReviewBase {}\n}\n\
+         func none() {\n    class ReviewChild: ReviewBase {}\n}\n",
+        &[bases("inner.ReviewChild", &[to("ReviewBase", "ReviewBase")]),
+          bases("sibling.ReviewChild", &[to("ReviewBase", "ReviewBase")]),
+          bases("ownBlock.ReviewChild", &[to("ReviewBase", "ownBlock.ReviewBase")]),
+          bases("sameScope.ReviewChild", &[to("ReviewBase", "sameScope.ReviewBase")]),
+          bases("none.ReviewChild", &[to("ReviewBase", "ReviewBase")])]),
+    row("Swift sibling `do` block holds the only declaration", L::Swift, "swift",
+        "func sibling() {\n    do { class ReviewBase {} }\n    do { class ReviewChild: ReviewBase {} }\n}\n",
+        &[unclassified("sibling.ReviewChild", &[text("ReviewBase")])]),
+    row("Scala blocks", L::Scala, "scala",
+        "class ReviewBase\nobject Holder {\n\
+         \x20 def inner(): Unit = {\n    { class ReviewBase }\n    class ReviewChild extends ReviewBase\n  }\n\
+         \x20 def sibling(): Unit = {\n    { class ReviewBase }\n    { class ReviewChild extends ReviewBase }\n  }\n\
+         \x20 def ownBlock(): Unit = {\n    { class ReviewBase; class ReviewChild extends ReviewBase }\n  }\n\
+         \x20 def sameScope(): Unit = {\n    class ReviewBase\n    class ReviewChild extends ReviewBase\n  }\n\
+         \x20 def none(): Unit = {\n    class ReviewChild extends ReviewBase\n  }\n}\n",
+        &[bases("Holder.inner.ReviewChild", &[to("ReviewBase", "ReviewBase")]),
+          bases("Holder.sibling.ReviewChild", &[to("ReviewBase", "ReviewBase")]),
+          bases("Holder.ownBlock.ReviewChild", &[to("ReviewBase", "Holder.ownBlock.ReviewBase")]),
+          bases("Holder.sameScope.ReviewChild", &[to("ReviewBase", "Holder.sameScope.ReviewBase")]),
+          bases("Holder.none.ReviewChild", &[to("ReviewBase", "ReviewBase")])]),
+    row("Scala sibling block holds the only declaration", L::Scala, "scala",
+        "object Holder {\n  def sibling(): Unit = {\n    { class ReviewBase }\n    { class ReviewChild extends ReviewBase }\n  }\n}\n",
+        &[unclassified("Holder.sibling.ReviewChild", &[text("ReviewBase")])]),
+    row("Rust import in a finished block", L::Rust, "rs",
+        "trait ReviewBase {}\nfn f() { { use other::ReviewBase; } trait ReviewChild: ReviewBase {} }\n",
+        &[bases("f::ReviewChild", &[to("ReviewBase", "ReviewBase")])]),
+    row("C++ using-declaration in a finished block", L::Cpp, "cpp",
+        "struct ReviewBase {};\nvoid f() { { using other::ReviewBase; } struct ReviewChild : ReviewBase {}; }\n",
+        &[bases("f::ReviewChild", &[to("ReviewBase", "ReviewBase")])]),
+    row("Scala import in a finished block", L::Scala, "scala",
+        "class ReviewBase\nobject Holder {\n  def f(): Unit = {\n    { import lib.ReviewBase }\n    class ReviewChild extends ReviewBase\n  }\n}\n",
+        &[bases("Holder.f.ReviewChild", &[to("ReviewBase", "ReviewBase")])]),
+    row("Rust value in a finished block", L::Rust, "rs",
+        "trait ReviewBase {}\nfn f() { { let ReviewBase = 1; } trait ReviewChild: ReviewBase {} }\n",
+        &[bases("f::ReviewChild", &[to("ReviewBase", "ReviewBase")])]),
+    row("C++ value in a finished block", L::Cpp, "cpp",
+        "struct ReviewBase {};\nvoid f() { { int ReviewBase = 0; } struct ReviewChild : ReviewBase {}; }\n",
+        &[bases("f::ReviewChild", &[to("ReviewBase", "ReviewBase")])]),
+    row("Java value in a finished block", L::Java, "java",
+        "class ReviewBase {}\nclass Holder { void f() { { int ReviewBase = 0; } class ReviewChild extends ReviewBase {} } }\n",
+        &[bases("Holder.f.ReviewChild", &[to("ReviewBase", "ReviewBase")])]),
+    row("TypeScript value in a finished block", L::TypeScript, "ts",
+        "class ReviewBase {}\nfunction f() { { let ReviewBase = 1; } class ReviewChild extends ReviewBase {} }\n",
+        &[bases("f.ReviewChild", &[to("ReviewBase", "ReviewBase")])]),
+    row("JavaScript value in a finished block", L::JavaScript, "js",
+        "class ReviewBase {}\nfunction f() { { let ReviewBase = 1; } class ReviewChild extends ReviewBase {} }\n",
+        &[bases("f.ReviewChild", &[to("ReviewBase", "ReviewBase")])]),
+    row("Swift value in a finished `do` block", L::Swift, "swift",
+        "class ReviewBase {}\nfunc f() {\n    do { let ReviewBase = 1 }\n    class ReviewChild: ReviewBase {}\n}\n",
+        &[bases("f.ReviewChild", &[to("ReviewBase", "ReviewBase")])]),
+    row("Scala value in a finished block", L::Scala, "scala",
+        "class ReviewBase\nobject Holder {\n  def f(): Unit = {\n    { val ReviewBase = 1 }\n    class ReviewChild extends ReviewBase\n  }\n}\n",
+        &[bases("Holder.f.ReviewChild", &[to("ReviewBase", "ReviewBase")])]),
+    go_predeclared_names!(go_sibling_block_row),
+    swift_raw_type_names!(swift_do_block_alias_row),
+    row("Go local type declared after its use", L::Go, "go",
+        "package shapes\n\ntype ReviewBase interface{ M() }\n\n\
+         func f() {\n\ttype ReviewChild interface{ ReviewBase }\n\ttype ReviewBase interface{ M() }\n}\n",
+        &[bases("shapes.f.ReviewChild", &[to("ReviewBase", "shapes.ReviewBase")])]),
+    row("C++ local type declared after its use", L::Cpp, "cpp",
+        "struct ReviewBase {};\nvoid f() { struct ReviewChild : ReviewBase {}; struct ReviewBase {}; }\n",
+        &[bases("f::ReviewChild", &[to("ReviewBase", "ReviewBase")])]),
+    row("Java local class declared after its use", L::Java, "java",
+        "class ReviewBase {}\nclass Holder { void f() { class ReviewChild extends ReviewBase {} class ReviewBase {} } }\n",
+        &[bases("Holder.f.ReviewChild", &[to("ReviewBase", "ReviewBase")])]),
+    row("Rust local item declared after its use", L::Rust, "rs",
+        "trait ReviewBase {}\nfn f() { trait ReviewChild: ReviewBase {} trait ReviewBase {} }\n",
+        &[bases("f::ReviewChild", &[to("ReviewBase", "f::ReviewBase")])]),
+    row("Swift local type declared after its use", L::Swift, "swift",
+        "class ReviewBase {}\nfunc f() {\n    class ReviewChild: ReviewBase {}\n    class ReviewBase {}\n}\n",
+        &[bases("f.ReviewChild", &[to("ReviewBase", "f.ReviewBase")])]),
+    row("Scala local class declared after its use", L::Scala, "scala",
+        "class ReviewBase\nobject Holder {\n  def f(): Unit = {\n    class ReviewChild extends ReviewBase\n    class ReviewBase\n  }\n}\n",
+        &[bases("Holder.f.ReviewChild", &[to("ReviewBase", "Holder.f.ReviewBase")])]),
+    row("Python suites are no scope; a nested function is", L::Python, "py",
+        "class ReviewBase:\n    pass\n\n\
+         def suite(flag):\n    if flag:\n        class ReviewBase:\n            pass\n    class ReviewChild(ReviewBase):\n        pass\n\n\
+         def nested():\n    def g():\n        class ReviewBase:\n            pass\n    class ReviewChild(ReviewBase):\n        pass\n",
+        &[bases("suite.ReviewChild", &[to("ReviewBase", "suite.ReviewBase")]),
+          bases("nested.ReviewChild", &[to("ReviewBase", "ReviewBase")])]),
+    row("C# separate and rooted namespaces", L::CSharp, "cs",
+        "namespace A { class ReviewBase {} }\nnamespace B { class ReviewChild : ReviewBase {} }\n",
+        &[unclassified("B.ReviewChild", &[text("ReviewBase")])]),
+    row("C# rooted name in a file-scoped namespace", L::CSharp, "cs",
+        "namespace Example.Symbols;\nclass ReviewBase {}\nclass ReviewChild : global::Example.Symbols.ReviewBase {}\n",
+        &[bases("Example.Symbols.ReviewChild", &[to("global::Example.Symbols.ReviewBase", "Example.Symbols.ReviewBase")])]),
+    row("PHP class declared in a function names its namespace's class", L::Php, "php",
+        "<?php\nnamespace App;\nclass ReviewBase {}\nfunction f() {\n    class ReviewChild extends ReviewBase {}\n}\n\
+         if (true) {\n    class ReviewConditional extends ReviewBase {}\n}\n",
+        &[bases("App\\f::ReviewChild", &[to("ReviewBase", "App\\ReviewBase")]),
+          bases("App\\ReviewConditional", &[to("ReviewBase", "App\\ReviewBase")])]),
+
+    // --- PHP class namespaces: a class, interface, trait or enum declared
+    // in a function, method, closure or conditional belongs to the
+    // namespace, whatever the function prefix its displayed name carries.
+    row("PHP class bases declared in the same function", L::Php, "php",
+        "<?php\nnamespace Example\\Symbols;\nfunction reviewProbe() {\n    class ReviewBase {}\n    interface ReviewContract {}\n\
+         \x20   class ReviewChild extends ReviewBase implements ReviewContract {}\n\
+         \x20   interface ReviewSub extends ReviewContract {}\n\
+         \x20   enum ReviewEnum implements ReviewContract { case A; }\n}\n",
+        &[Owner { qualified_name: "Example\\Symbols\\reviewProbe::ReviewChild",
+                  extends: &[to("ReviewBase", "Example\\Symbols\\reviewProbe::ReviewBase")],
+                  implements: &[to("ReviewContract", "Example\\Symbols\\reviewProbe::ReviewContract")], unclassified: &[] },
+          bases("Example\\Symbols\\reviewProbe::ReviewSub",
+                &[to("ReviewContract", "Example\\Symbols\\reviewProbe::ReviewContract")]),
+          implementing("Example\\Symbols\\reviewProbe::ReviewEnum",
+                &[to("ReviewContract", "Example\\Symbols\\reviewProbe::ReviewContract")])]),
+    row("PHP class bases declared in a function, named from the namespace", L::Php, "php",
+        "<?php\nnamespace Example\\Symbols;\nfunction reviewProbe() {\n    class ReviewBase {}\n    interface ReviewContract {}\n}\n\
+         class ReviewChild extends ReviewBase implements ReviewContract {}\n\
+         interface ReviewSub extends ReviewContract {}\n\
+         enum ReviewEnum implements ReviewContract { case A; }\n\
+         function reviewOther() {\n    class ReviewOtherChild extends ReviewBase {}\n}\n",
+        &[Owner { qualified_name: "Example\\Symbols\\ReviewChild",
+                  extends: &[to("ReviewBase", "Example\\Symbols\\reviewProbe::ReviewBase")],
+                  implements: &[to("ReviewContract", "Example\\Symbols\\reviewProbe::ReviewContract")], unclassified: &[] },
+          bases("Example\\Symbols\\ReviewSub", &[to("ReviewContract", "Example\\Symbols\\reviewProbe::ReviewContract")]),
+          implementing("Example\\Symbols\\ReviewEnum",
+                &[to("ReviewContract", "Example\\Symbols\\reviewProbe::ReviewContract")]),
+          bases("Example\\Symbols\\reviewOther::ReviewOtherChild",
+                &[to("ReviewBase", "Example\\Symbols\\reviewProbe::ReviewBase")])]),
+    row("PHP rooted and relative qualified names of a class declared in a function", L::Php, "php",
+        "<?php\nnamespace Example\\Symbols;\nfunction reviewProbe() {\n    class ReviewBase {}\n}\n\
+         class ReviewChild extends \\Example\\Symbols\\ReviewBase {}\n\
+         namespace Example;\nclass ReviewRelativeChild extends Symbols\\ReviewBase {}\n\
+         namespace Other;\nclass ReviewRootedChild extends \\Example\\Symbols\\ReviewBase {}\n\
+         class ReviewWrongChild extends Symbols\\ReviewBase {}\n",
+        &[bases("Example\\Symbols\\ReviewChild", &[to("\\Example\\Symbols\\ReviewBase", "Example\\Symbols\\reviewProbe::ReviewBase")]),
+          bases("Example\\ReviewRelativeChild", &[to("Symbols\\ReviewBase", "Example\\Symbols\\reviewProbe::ReviewBase")]),
+          bases("Other\\ReviewRootedChild", &[to("\\Example\\Symbols\\ReviewBase", "Example\\Symbols\\reviewProbe::ReviewBase")]),
+          bases("Other\\ReviewWrongChild", &[text("Symbols\\ReviewBase")])]),
+    row("PHP class bases declared in a method, a closure and a nested function", L::Php, "php",
+        "<?php\nnamespace Example\\Symbols;\nclass ReviewHolder {\n    function make() {\n        class ReviewMethodBase {}\n    }\n}\n\
+         $make = function () {\n    class ReviewClosureBase {}\n};\n\
+         function reviewOuter() {\n    function reviewInner() {\n        class ReviewNestedBase {}\n    }\n}\n\
+         class ReviewMethodChild extends ReviewMethodBase {}\n\
+         class ReviewClosureChild extends ReviewClosureBase {}\n\
+         class ReviewNestedChild extends ReviewNestedBase {}\n",
+        &[bases("Example\\Symbols\\ReviewMethodChild",
+                &[to("ReviewMethodBase", "Example\\Symbols\\ReviewHolder::make::ReviewMethodBase")]),
+          bases("Example\\Symbols\\ReviewClosureChild", &[to("ReviewClosureBase", "Example\\Symbols\\ReviewClosureBase")]),
+          bases("Example\\Symbols\\ReviewNestedChild",
+                &[to("ReviewNestedBase", "Example\\Symbols\\reviewOuter::reviewInner::ReviewNestedBase")])]),
+    row("PHP class bases declared in a function of a braced namespace", L::Php, "php",
+        "<?php\nnamespace Example\\Symbols {\n    function reviewProbe() {\n        class ReviewBase {}\n\
+         \x20       class ReviewChild extends ReviewBase {}\n    }\n    class ReviewOuterChild extends ReviewBase {}\n}\n",
+        &[bases("Example\\Symbols\\reviewProbe::ReviewChild", &[to("ReviewBase", "Example\\Symbols\\reviewProbe::ReviewBase")]),
+          bases("Example\\Symbols\\ReviewOuterChild", &[to("ReviewBase", "Example\\Symbols\\reviewProbe::ReviewBase")])]),
+    row("PHP competing function-declared classes stay text", L::Php, "php",
+        "<?php\nnamespace Example\\Symbols;\nfunction reviewFirst() {\n    class ReviewBase {}\n}\n\
+         function reviewSecond() {\n    class ReviewBase {}\n    class ReviewChild extends ReviewBase {}\n}\n\
+         class ReviewOuterChild extends ReviewBase {}\n\
+         function reviewThird() {\n    class ReviewOther {}\n}\n\
+         class ReviewOther {}\nclass ReviewOtherChild extends ReviewOther {}\n",
+        &[bases("Example\\Symbols\\reviewSecond::ReviewChild", &[text("ReviewBase")]),
+          bases("Example\\Symbols\\ReviewOuterChild", &[text("ReviewBase")]),
+          bases("Example\\Symbols\\ReviewOtherChild", &[text("ReviewOther")])]),
+    row("PHP function-declared class of another namespace stays text", L::Php, "php",
+        "<?php\nnamespace A;\nfunction reviewProbe() {\n    class ReviewBase {}\n}\n\
+         namespace B;\nclass ReviewChild extends ReviewBase {}\n\
+         function reviewProbe() {\n    class ReviewInner extends ReviewBase {}\n}\n\
+         class ReviewRootedChild extends \\A\\ReviewBase {}\n",
+        &[bases("B\\ReviewChild", &[text("ReviewBase")]),
+          bases("B\\reviewProbe::ReviewInner", &[text("ReviewBase")]),
+          bases("B\\ReviewRootedChild", &[to("\\A\\ReviewBase", "A\\reviewProbe::ReviewBase")])]),
+    row("PHP conditional class bases control", L::Php, "php",
+        "<?php\nnamespace Example\\Symbols;\nif (true) {\n    class ReviewBase {}\n    class ReviewChild extends ReviewBase {}\n}\n",
+        &[bases("Example\\Symbols\\ReviewChild", &[to("ReviewBase", "Example\\Symbols\\ReviewBase")])]),
+    row("PHP function declared in a function never hides a class", L::Php, "php",
+        "<?php\nnamespace Example\\Symbols;\nclass ReviewBase {}\nfunction reviewProbe() {\n    function ReviewBase() {}\n\
+         \x20   class ReviewChild extends ReviewBase {}\n}\n",
+        &[bases("Example\\Symbols\\reviewProbe::ReviewChild", &[to("ReviewBase", "Example\\Symbols\\ReviewBase")])]),
+    // A C++ inline namespace's members are members of the enclosing
+    // namespace too, though they display under the inline namespace.
+    row("C++ inline namespace members belong to the enclosing namespace", L::Cpp, "cpp",
+        "namespace ns {\ninline namespace v1 {\nstruct ReviewBase {};\ninline namespace v2 { struct ReviewDeep {}; }\n\
+         namespace v3 { struct ReviewPlain {}; }\n}\n\
+         struct ReviewChild : ReviewBase {};\nstruct ReviewDeepChild : ReviewDeep {};\n\
+         struct ReviewDeepPathChild : v2::ReviewDeep {};\nstruct ReviewPlainChild : v3::ReviewPlain {};\n\
+         struct ReviewHiddenChild : ReviewPlain {};\n}\n\
+         struct ReviewRootedChild : ns::ReviewBase {};\nstruct ReviewFullChild : ::ns::v1::ReviewBase {};\n",
+        &[bases("ns::ReviewChild", &[to("ReviewBase", "ns::v1::ReviewBase")]),
+          bases("ns::ReviewDeepChild", &[to("ReviewDeep", "ns::v1::v2::ReviewDeep")]),
+          bases("ns::ReviewDeepPathChild", &[to("v2::ReviewDeep", "ns::v1::v2::ReviewDeep")]),
+          bases("ns::ReviewPlainChild", &[to("v3::ReviewPlain", "ns::v1::v3::ReviewPlain")]),
+          bases("ns::ReviewHiddenChild", &[text("ReviewPlain")]),
+          bases("ReviewRootedChild", &[to("ns::ReviewBase", "ns::v1::ReviewBase")]),
+          bases("ReviewFullChild", &[to("::ns::v1::ReviewBase", "ns::v1::ReviewBase")])]),
+    row("C++ inline namespace member beside a same-named member stays text", L::Cpp, "cpp",
+        "namespace ns {\nstruct ReviewBase {};\ninline namespace v1 { struct ReviewBase {}; }\nstruct ReviewChild : ReviewBase {};\n}\n\
+         struct ReviewOuterChild : ns::ReviewBase {};\nstruct ReviewInnerChild : ns::v1::ReviewBase {};\n",
+        &[bases("ns::ReviewChild", &[text("ReviewBase")]),
+          bases("ReviewOuterChild", &[text("ns::ReviewBase")]),
+          bases("ReviewInnerChild", &[to("ns::v1::ReviewBase", "ns::v1::ReviewBase")])]),
+    // A Scala `package object q` has no record, and its members display
+    // under the enclosing package, but they belong to package `q`.
+    row("Scala package object members belong to its package", L::Scala, "scala",
+        "package example\nclass ReviewTop\npackage object reviewPkg {\n  class ReviewBase\n  class ReviewChild extends ReviewBase\n\
+         \x20 class ReviewUpChild extends ReviewTop\n\
+         \x20 object ReviewHolder { class ReviewNested }\n  class ReviewHeldChild extends ReviewHolder.ReviewNested\n}\n\
+         class ReviewOuterChild extends reviewPkg.ReviewBase\n\
+         class ReviewWrongChild extends ReviewBase\n\
+         class ReviewNestedChild extends reviewPkg.ReviewHolder.ReviewNested\n",
+        &[bases("example.ReviewChild", &[to("ReviewBase", "example.ReviewBase")]),
+          bases("example.ReviewUpChild", &[to("ReviewTop", "example.ReviewTop")]),
+          bases("example.ReviewHeldChild", &[to("ReviewHolder.ReviewNested", "example.ReviewHolder.ReviewNested")]),
+          bases("example.ReviewOuterChild", &[to("reviewPkg.ReviewBase", "example.ReviewBase")]),
+          unclassified("example.ReviewWrongChild", &[text("ReviewBase")]),
+          bases("example.ReviewNestedChild",
+                &[to("reviewPkg.ReviewHolder.ReviewNested", "example.ReviewHolder.ReviewNested")])]),
+    row("Scala package object imports bind in its package", L::Scala, "scala",
+        "package example\nclass ReviewBase\npackage object reviewPkg {\n  import lib.ReviewBase\n  class ReviewChild extends ReviewBase\n}\n\
+         class ReviewOuterChild extends ReviewBase\n",
+        &[unclassified("example.ReviewChild", &[text("ReviewBase")]),
+          bases("example.ReviewOuterChild", &[to("ReviewBase", "example.ReviewBase")])]),
+    row("Scala package object in a block package", L::Scala, "scala",
+        "package example {\n  package object reviewPkg {\n    class ReviewBase\n  }\n  class ReviewChild extends reviewPkg.ReviewBase\n\
+         \x20 class ReviewWrongChild extends ReviewBase\n}\n",
+        &[bases("example.ReviewChild", &[to("reviewPkg.ReviewBase", "example.ReviewBase")]),
+          unclassified("example.ReviewWrongChild", &[text("ReviewBase")])]),
+
+    // --- Type names and value names: a base clause looks up a type, so a
+    // value of the same spelling never hides it; a JS/TS class `extends`
+    // looks up a value.
+    row("Rust values never hide a trait", L::Rust, "rs",
+        "trait ReviewBase {}\nconst ReviewBase: usize = 0;\ntrait ReviewChild: ReviewBase {}\n\
+         fn param(ReviewBase: u8) { trait ReviewChild: ReviewBase {} }\n\
+         fn local() { let ReviewBase = 1; trait ReviewChild: ReviewBase {} }\n\
+         fn function() { fn ReviewBase() {} trait ReviewChild: ReviewBase {} }\n\
+         fn constant() { const ReviewBase: u8 = 0; trait ReviewChild: ReviewBase {} }\n\
+         fn statics() { static ReviewBase: u8 = 0; trait ReviewChild: ReviewBase {} }\n\
+         fn generic<const ReviewBase: usize>() { trait ReviewChild: ReviewBase {} }\n",
+        &[bases("ReviewChild", &[to("ReviewBase", "ReviewBase")]),
+          bases("param::ReviewChild", &[to("ReviewBase", "ReviewBase")]),
+          bases("local::ReviewChild", &[to("ReviewBase", "ReviewBase")]),
+          bases("function::ReviewChild", &[to("ReviewBase", "ReviewBase")]),
+          bases("constant::ReviewChild", &[to("ReviewBase", "ReviewBase")]),
+          bases("statics::ReviewChild", &[to("ReviewBase", "ReviewBase")]),
+          bases("generic::ReviewChild", &[to("ReviewBase", "ReviewBase")])]),
+    row("Rust module qualifier beside a same-named function", L::Rust, "rs",
+        "mod m { pub trait ReviewBase {} }\nfn m() {}\ntrait ReviewChild: m::ReviewBase {}\n",
+        &[bases("ReviewChild", &[to("m::ReviewBase", "m::ReviewBase")])]),
+    PathMeaningRow {
+        label: "Rust impl in a function whose parameters spell its self type and trait",
+        language: L::Rust,
+        extension: "rs",
+        source: "pub struct ReviewSelf;\npub trait ReviewTrait {}\n\
+                 fn f(ReviewSelf: u8, ReviewTrait: u8) { impl ReviewTrait for ReviewSelf { fn probe(&self) {} } }\n",
+        owners: &[implementing("ReviewSelf", &[to("ReviewTrait", "ReviewTrait")])],
+        impl_members: &[ImplMember {
+            method: "probe",
+            container: "ReviewSelf",
+            owner: Some("ReviewSelf"),
+            implements: Some(to("ReviewTrait", "ReviewTrait")),
+            container_kind: Some(SymbolKindV2::Type),
+        }],
+        untouched: &[],
+    },
+    row("C++ non-types never hide a base type", L::Cpp, "cpp",
+        "struct ReviewBase {};\nint ReviewBase;\nstruct ReviewChild : ReviewBase {};\n\
+         void variable() { int ReviewBase = 0; struct ReviewChild : ReviewBase {}; }\n\
+         void function() { void ReviewBase(); struct ReviewChild : ReviewBase {}; }\n\
+         template <int ReviewBase> struct ReviewTemplateChild : ReviewBase {};\n",
+        &[bases("ReviewChild", &[to("ReviewBase", "ReviewBase")]),
+          bases("variable::ReviewChild", &[to("ReviewBase", "ReviewBase")]),
+          bases("function::ReviewChild", &[to("ReviewBase", "ReviewBase")]),
+          bases("ReviewTemplateChild", &[to("ReviewBase", "ReviewBase")])]),
+    row("C++ type qualifier beside a same-named function", L::Cpp, "cpp",
+        "struct Outer { struct ReviewBase {}; };\nvoid Outer(int);\nstruct ReviewChild : Outer::ReviewBase {};\n",
+        &[bases("ReviewChild", &[to("Outer::ReviewBase", "Outer::ReviewBase")])]),
+    row("Java values never hide a superclass", L::Java, "java",
+        "class ReviewBase {}\nclass Holder {\n  int ReviewBase;\n  void ReviewBase() {}\n\
+         \x20 class FieldChild extends ReviewBase {}\n\
+         \x20 void param(int ReviewBase) { class ReviewChild extends ReviewBase {} }\n\
+         \x20 void local() { int ReviewBase = 0; class ReviewChild extends ReviewBase {} }\n}\n",
+        &[bases("Holder.FieldChild", &[to("ReviewBase", "ReviewBase")]),
+          bases("Holder.param.ReviewChild", &[to("ReviewBase", "ReviewBase")]),
+          bases("Holder.local.ReviewChild", &[to("ReviewBase", "ReviewBase")])]),
+    row("C# members never hide a base class", L::CSharp, "cs",
+        "class ReviewBase {}\ninterface IReviewOther {}\n\
+         class FieldHolder { int ReviewBase; class ReviewChild : ReviewBase, IReviewOther {} }\n\
+         class PropertyHolder { int ReviewBase { get; set; } class ReviewChild : ReviewBase, IReviewOther {} }\n\
+         class MethodHolder { void ReviewBase() {} class ReviewChild : ReviewBase, IReviewOther {} }\n",
+        &[Owner { qualified_name: "FieldHolder.ReviewChild", extends: &[to("ReviewBase", "ReviewBase")],
+                  implements: &[to("IReviewOther", "IReviewOther")], unclassified: &[] },
+          Owner { qualified_name: "PropertyHolder.ReviewChild", extends: &[to("ReviewBase", "ReviewBase")],
+                  implements: &[to("IReviewOther", "IReviewOther")], unclassified: &[] },
+          Owner { qualified_name: "MethodHolder.ReviewChild", extends: &[to("ReviewBase", "ReviewBase")],
+                  implements: &[to("IReviewOther", "IReviewOther")], unclassified: &[] }]),
+    row("Swift values never hide a superclass", L::Swift, "swift",
+        "class ReviewBase {}\n\
+         func param(ReviewBase: Int) {\n    class ReviewChild: ReviewBase {}\n}\n\
+         func local() {\n    let ReviewBase = 1\n    class ReviewChild: ReviewBase {}\n}\n",
+        &[bases("param.ReviewChild", &[to("ReviewBase", "ReviewBase")]),
+          bases("local.ReviewChild", &[to("ReviewBase", "ReviewBase")])]),
+    row("Scala terms never hide a class", L::Scala, "scala",
+        "class ReviewBase\n\
+         object ValHolder {\n  val ReviewBase = 1\n  class ReviewChild extends ReviewBase\n}\n\
+         object DefHolder {\n  def ReviewBase = 1\n  class ReviewChild extends ReviewBase\n}\n",
+        &[bases("ValHolder.ReviewChild", &[to("ReviewBase", "ReviewBase")]),
+          bases("DefHolder.ReviewChild", &[to("ReviewBase", "ReviewBase")])]),
+    row("Scala companions", L::Scala, "scala",
+        "class ReviewBase\nobject ReviewBase\ntrait ReviewTrait\nobject ReviewTrait\n\
+         class ReviewChild extends ReviewBase with ReviewTrait\nclass ReviewTraitChild extends ReviewTrait\n",
+        &[Owner { qualified_name: "ReviewChild", extends: &[to("ReviewBase", "ReviewBase")],
+                  implements: &[to("ReviewTrait", "ReviewTrait")], unclassified: &[] },
+          implementing("ReviewTraitChild", &[to("ReviewTrait", "ReviewTrait")])]),
+    row("TypeScript type relations never see values", L::TypeScript, "ts",
+        "interface ReviewBase {}\n\
+         function param(ReviewBase: number) { class ReviewChild implements ReviewBase {} interface ReviewChildType extends ReviewBase {} }\n\
+         function local() { let ReviewBase = 1; class ReviewChild implements ReviewBase {} interface ReviewChildType extends ReviewBase {} }\n",
+        &[implementing("param.ReviewChild", &[to("ReviewBase", "ReviewBase")]),
+          bases("param.ReviewChildType", &[to("ReviewBase", "ReviewBase")]),
+          implementing("local.ReviewChild", &[to("ReviewBase", "ReviewBase")]),
+          bases("local.ReviewChildType", &[to("ReviewBase", "ReviewBase")])]),
+    row("TypeScript namespace path of several segments", L::TypeScript, "ts",
+        "namespace ReviewOuter { export namespace ReviewInner { export interface ReviewBase {} } }\n\
+         namespace ReviewDotted.ReviewPart { export interface ReviewBase {} }\n\
+         class ReviewChild implements ReviewOuter.ReviewInner.ReviewBase {}\n\
+         class ReviewDottedChild implements ReviewDotted.ReviewPart.ReviewBase {}\n\
+         class ReviewMissingChild implements ReviewOuter.ReviewOther.ReviewBase {}\n",
+        &[implementing("ReviewChild", &[to("ReviewOuter.ReviewInner.ReviewBase", "ReviewOuter.ReviewInner.ReviewBase")]),
+          implementing("ReviewDottedChild", &[to("ReviewDotted.ReviewPart.ReviewBase", "ReviewDotted.ReviewPart.ReviewBase")]),
+          implementing("ReviewMissingChild", &[text("ReviewOuter.ReviewOther.ReviewBase")])]),
+    // A `declare global` interface merges with every global declaration of
+    // that name in the program, so one file never proves it.
+    row("TypeScript `declare global` declarations stay text", L::TypeScript, "ts",
+        "export {};\ndeclare global {\n  interface ReviewGlobal {}\n}\nclass ReviewChild implements ReviewGlobal {}\n",
+        &[implementing("ReviewChild", &[text("ReviewGlobal")])]),
+    row("TypeScript namespace qualifier in a type beside a value parameter", L::TypeScript, "ts",
+        "namespace ns { export interface ReviewBase {} }\nfunction f(ns: number) { class ReviewChild implements ns.ReviewBase {} }\n",
+        &[implementing("f.ReviewChild", &[to("ns.ReviewBase", "ns.ReviewBase")])]),
+    row("PHP functions never hide a class", L::Php, "php",
+        "<?php\nnamespace App;\nclass ReviewBase {}\nfunction ReviewBase() {}\n$ReviewBase = 1;\nclass ReviewChild extends ReviewBase {}\n",
+        &[bases("App\\ReviewChild", &[to("ReviewBase", "App\\ReviewBase")])]),
+    row("TypeScript class `extends` is a value", L::TypeScript, "ts",
+        "class ReviewBase {}\nfunction f(ReviewBase: any) { class ReviewChild extends ReviewBase {} }\n",
+        &[bases("f.ReviewChild", &[text("ReviewBase")])]),
+    row("JavaScript class `extends` is a value", L::JavaScript, "js",
+        "class ReviewBase {}\nfunction f(ReviewBase) { class ReviewChild extends ReviewBase {} }\n",
+        &[bases("f.ReviewChild", &[text("ReviewBase")])]),
+    row("Python simple parameter", L::Python, "py",
+        "class ReviewBase:\n    pass\n\ndef f(ReviewBase):\n    class ReviewChild(ReviewBase):\n        pass\n",
+        &[bases("f.ReviewChild", &[text("ReviewBase")])]),
+    row("Go value binding keeps the base unresolved", L::Go, "go",
+        "package shapes\n\ntype ReviewBase interface{ M() }\n\n\
+         func f() {\n\tvar ReviewBase = 1\n\t_ = ReviewBase\n\ttype ReviewChild interface{ ReviewBase }\n}\n",
+        &[bases("shapes.f.ReviewChild", &[text("ReviewBase")])]),
+
+    // --- Binding patterns no record reports, and anonymous owners.
+    row("TypeScript parameter patterns", L::TypeScript, "ts", ECMA_PARAMETER_PATTERNS, ECMA_PARAMETER_OWNERS),
+    row("JavaScript parameter patterns", L::JavaScript, "js", ECMA_PARAMETER_PATTERNS, ECMA_PARAMETER_OWNERS),
+    row("TypeScript variable patterns", L::TypeScript, "ts", ECMA_VARIABLE_PATTERNS, ECMA_VARIABLE_OWNERS),
+    row("JavaScript variable patterns", L::JavaScript, "js", ECMA_VARIABLE_PATTERNS, ECMA_VARIABLE_OWNERS),
+    row("TypeScript catch and for-of patterns", L::TypeScript, "ts", ECMA_CATCH_AND_FOR_PATTERNS, ECMA_CATCH_AND_FOR_OWNERS),
+    row("JavaScript catch and for-of patterns", L::JavaScript, "js", ECMA_CATCH_AND_FOR_PATTERNS, ECMA_CATCH_AND_FOR_OWNERS),
+    row("Python pattern bindings", L::Python, "py",
+        "class ReviewBase:\n    pass\n\n\
+         def nested_tuple(x):\n    (a, (ReviewBase, b)) = x\n    class ReviewChild(ReviewBase):\n        pass\n\n\
+         def nested_list(x):\n    [a, [ReviewBase]] = x\n    class ReviewChild(ReviewBase):\n        pass\n\n\
+         def starred(x):\n    a, *ReviewBase = x\n    class ReviewChild(ReviewBase):\n        pass\n\n\
+         def for_tuple(xs):\n    for a, (ReviewBase, b) in xs:\n        pass\n    class ReviewChild(ReviewBase):\n        pass\n\n\
+         def with_tuple(x):\n    with x as (a, (ReviewBase, b)):\n        pass\n    class ReviewChild(ReviewBase):\n        pass\n\n\
+         def match_capture(x):\n    match x:\n        case ReviewBase:\n            pass\n    class ReviewChild(ReviewBase):\n        pass\n\n\
+         def match_nested(x):\n    match x:\n        case (a, [ReviewBase]):\n            pass\n    class ReviewChild(ReviewBase):\n        pass\n\n\
+         def flat_tuple(x):\n    a, ReviewBase = x\n    class ReviewChild(ReviewBase):\n        pass\n\n\
+         def except_alias():\n    try:\n        pass\n    except Exception as ReviewBase:\n        pass\n    class ReviewChild(ReviewBase):\n        pass\n\n\
+         def walrus(x):\n    if (ReviewBase := x):\n        pass\n    class ReviewChild(ReviewBase):\n        pass\n\n\
+         def simple_assignment(x):\n    ReviewBase = x\n    class ReviewChild(ReviewBase):\n        pass\n\n\
+         def simple_for(xs):\n    for ReviewBase in xs:\n        pass\n    class ReviewChild(ReviewBase):\n        pass\n\n\
+         def simple_with(x):\n    with x as ReviewBase:\n        pass\n    class ReviewChild(ReviewBase):\n        pass\n\n\
+         def match_value(x):\n    match x:\n        case ReviewBase.attr:\n            pass\n    class ReviewChild(ReviewBase):\n        pass\n",
+        &[bases("nested_tuple.ReviewChild", &[text("ReviewBase")]),
+          bases("nested_list.ReviewChild", &[text("ReviewBase")]),
+          bases("starred.ReviewChild", &[text("ReviewBase")]),
+          bases("for_tuple.ReviewChild", &[text("ReviewBase")]),
+          bases("with_tuple.ReviewChild", &[text("ReviewBase")]),
+          bases("match_capture.ReviewChild", &[text("ReviewBase")]),
+          bases("match_nested.ReviewChild", &[text("ReviewBase")]),
+          bases("flat_tuple.ReviewChild", &[text("ReviewBase")]),
+          bases("except_alias.ReviewChild", &[text("ReviewBase")]),
+          bases("walrus.ReviewChild", &[text("ReviewBase")]),
+          bases("simple_assignment.ReviewChild", &[text("ReviewBase")]),
+          bases("simple_for.ReviewChild", &[text("ReviewBase")]),
+          bases("simple_with.ReviewChild", &[text("ReviewBase")]),
+          bases("match_value.ReviewChild", &[to("ReviewBase", "ReviewBase")])]),
+    row("Python `global` and `nonlocal` directives", L::Python, "py",
+        "class ReviewBase:\n    pass\n\n\
+         def outer():\n    class ReviewBase:\n        pass\n\n\
+         \x20   def by_global():\n        global ReviewBase\n        class ReviewChild(ReviewBase):\n            pass\n\n\
+         \x20   def by_nonlocal():\n        nonlocal ReviewBase\n        class ReviewChild(ReviewBase):\n            pass\n",
+        &[bases("outer.by_global.ReviewChild", &[to("ReviewBase", "ReviewBase")]),
+          bases("outer.by_nonlocal.ReviewChild", &[to("ReviewBase", "outer.ReviewBase")])]),
+    python_global_row!("write: simple assignment", "        ReviewBase = external\n", PY_GLOBAL_WRITTEN),
+    python_nonlocal_row!("write: simple assignment", "        ReviewBase = external\n", PY_NONLOCAL_WRITTEN),
+    python_global_row!("write: nested tuple target", "        (a, (ReviewBase, b)) = external\n", PY_GLOBAL_WRITTEN),
+    python_nonlocal_row!("write: nested tuple target", "        (a, (ReviewBase, b)) = external\n", PY_NONLOCAL_WRITTEN),
+    python_global_row!("write: nested list target", "        [a, [ReviewBase]] = external\n", PY_GLOBAL_WRITTEN),
+    python_nonlocal_row!("write: nested list target", "        [a, [ReviewBase]] = external\n", PY_NONLOCAL_WRITTEN),
+    python_global_row!("write: starred target", "        a, *ReviewBase = external\n", PY_GLOBAL_WRITTEN),
+    python_nonlocal_row!("write: starred target", "        a, *ReviewBase = external\n", PY_NONLOCAL_WRITTEN),
+    python_global_row!("write: augmented assignment", "        ReviewBase += external\n", PY_GLOBAL_WRITTEN),
+    python_nonlocal_row!("write: augmented assignment", "        ReviewBase += external\n", PY_NONLOCAL_WRITTEN),
+    python_global_row!("write: `from` import", "        from external import ReviewBase\n", PY_GLOBAL_WRITTEN),
+    python_nonlocal_row!("write: `from` import", "        from external import ReviewBase\n", PY_NONLOCAL_WRITTEN),
+    python_global_row!("write: aliased import", "        import external as ReviewBase\n", PY_GLOBAL_WRITTEN),
+    python_nonlocal_row!("write: aliased import", "        import external as ReviewBase\n", PY_NONLOCAL_WRITTEN),
+    python_global_row!("write: class declared after the directive", "        class ReviewBase:\n            pass\n", PY_GLOBAL_WRITTEN),
+    python_nonlocal_row!("write: class declared after the directive", "        class ReviewBase:\n            pass\n", PY_NONLOCAL_WRITTEN),
+    python_global_row!("write: function declared after the directive", "        def ReviewBase():\n            pass\n", PY_GLOBAL_WRITTEN),
+    python_nonlocal_row!("write: function declared after the directive", "        def ReviewBase():\n            pass\n", PY_NONLOCAL_WRITTEN),
+    python_global_row!("write: nested `for` target", "        for a, (ReviewBase, b) in external:\n            pass\n", PY_GLOBAL_WRITTEN),
+    python_nonlocal_row!("write: nested `for` target", "        for a, (ReviewBase, b) in external:\n            pass\n", PY_NONLOCAL_WRITTEN),
+    python_global_row!("write: nested `with` target", "        with external as (a, (ReviewBase, b)):\n            pass\n", PY_GLOBAL_WRITTEN),
+    python_nonlocal_row!("write: nested `with` target", "        with external as (a, (ReviewBase, b)):\n            pass\n", PY_NONLOCAL_WRITTEN),
+    python_global_row!("write: `except` alias", "        try:\n            pass\n        except Exception as ReviewBase:\n            pass\n", PY_GLOBAL_WRITTEN),
+    python_nonlocal_row!("write: `except` alias", "        try:\n            pass\n        except Exception as ReviewBase:\n            pass\n", PY_NONLOCAL_WRITTEN),
+    python_global_row!("write: walrus", "        if (ReviewBase := external):\n            pass\n", PY_GLOBAL_WRITTEN),
+    python_nonlocal_row!("write: walrus", "        if (ReviewBase := external):\n            pass\n", PY_NONLOCAL_WRITTEN),
+    python_global_row!("write: walrus in a comprehension", "        xs = [(ReviewBase := y) for y in external]\n", PY_GLOBAL_WRITTEN),
+    python_nonlocal_row!("write: walrus in a comprehension", "        xs = [(ReviewBase := y) for y in external]\n", PY_NONLOCAL_WRITTEN),
+    python_global_row!("write: `del`", "        del ReviewBase\n", PY_GLOBAL_WRITTEN),
+    python_nonlocal_row!("write: `del`", "        del ReviewBase\n", PY_NONLOCAL_WRITTEN),
+    python_global_row!("control: read only", "        external(ReviewBase)\n", PY_GLOBAL_KEPT),
+    python_nonlocal_row!("control: read only", "        external(ReviewBase)\n", PY_NONLOCAL_KEPT),
+    python_global_row!("control: unrelated assignment", "        other = external\n", PY_GLOBAL_KEPT),
+    python_nonlocal_row!("control: unrelated assignment", "        other = external\n", PY_NONLOCAL_KEPT),
+    python_global_row!("control: comprehension target", "        xs = [ReviewBase for ReviewBase in external]\n", PY_GLOBAL_KEPT),
+    python_nonlocal_row!("control: comprehension target", "        xs = [ReviewBase for ReviewBase in external]\n", PY_NONLOCAL_KEPT),
+    python_global_row!("control: write in a nested function", "        def reviewInner():\n            ReviewBase = external\n", PY_GLOBAL_KEPT),
+    python_nonlocal_row!("control: write in a nested function", "        def reviewInner():\n            ReviewBase = external\n", PY_NONLOCAL_KEPT),
+    row("Python augmented assignment and `del` targets bind without a directive", L::Python, "py",
+        "class ReviewBase:\n    pass\n\n\
+         def augmented(x):\n    ReviewBase += x\n    class ReviewChild(ReviewBase):\n        pass\n\n\
+         def deleted():\n    del ReviewBase\n    class ReviewChild(ReviewBase):\n        pass\n\n\
+         def deleted_item(x):\n    del x[ReviewBase]\n    class ReviewChild(ReviewBase):\n        pass\n",
+        &[bases("augmented.ReviewChild", &[text("ReviewBase")]),
+          bases("deleted.ReviewChild", &[text("ReviewBase")]),
+          bases("deleted_item.ReviewChild", &[to("ReviewBase", "ReviewBase")])]),
+    row("Python `global` write in a module-level function", L::Python, "py",
+        "class ReviewBase:\n    pass\n\n\
+         def reviewProbe(external):\n    global ReviewBase\n    ReviewBase = external\n    class ReviewChild(ReviewBase):\n        pass\n",
+        &[bases("reviewProbe.ReviewChild", &[text("ReviewBase")])]),
+    row("Python `global` class with no module declaration", L::Python, "py",
+        "def reviewProbe():\n    global ReviewBase\n    class ReviewBase:\n        pass\n    class ReviewChild(ReviewBase):\n        pass\n\n\
+         class ReviewModuleChild(ReviewBase):\n    pass\n",
+        &[bases("reviewProbe.ReviewChild", &[text("ReviewBase")]), bases("ReviewModuleChild", &[text("ReviewBase")])]),
+    row("Python `global` write in a module-level class body", L::Python, "py",
+        "class ReviewBase:\n    pass\n\n\
+         class ReviewHolder:\n    global ReviewBase\n    ReviewBase = 1\n\n\
+         class ReviewModuleChild(ReviewBase):\n    pass\n",
+        &[bases("ReviewModuleChild", &[text("ReviewBase")])]),
+    row("Python `nonlocal` write in a class body", L::Python, "py",
+        "def reviewOuter():\n    class ReviewBase:\n        pass\n\n\
+         \x20   class ReviewHolder:\n        nonlocal ReviewBase\n        ReviewBase = 1\n\n\
+         \x20   class ReviewOuterChild(ReviewBase):\n        pass\n",
+        &[bases("reviewOuter.ReviewOuterChild", &[text("ReviewBase")])]),
+    row("Python chained `nonlocal` write", L::Python, "py",
+        "def reviewOuter():\n    class ReviewBase:\n        pass\n\n\
+         \x20   def reviewMiddle():\n        nonlocal ReviewBase\n\n\
+         \x20       def reviewInner(external):\n            nonlocal ReviewBase\n            ReviewBase = external\n\n\
+         \x20       class ReviewMiddleChild(ReviewBase):\n            pass\n\n\
+         \x20   class ReviewOuterChild(ReviewBase):\n        pass\n",
+        &[bases("reviewOuter.reviewMiddle.ReviewMiddleChild", &[text("ReviewBase")]),
+          bases("reviewOuter.ReviewOuterChild", &[text("ReviewBase")])]),
+    row("Python `nonlocal` skips a function that does not bind the name", L::Python, "py",
+        "def reviewOuter():\n    class ReviewBase:\n        pass\n\n\
+         \x20   def reviewMiddle():\n        class ReviewMiddleChild(ReviewBase):\n            pass\n\n\
+         \x20       def reviewInner(external):\n            nonlocal ReviewBase\n            ReviewBase = external\n\n\
+         \x20   class ReviewOuterChild(ReviewBase):\n        pass\n",
+        &[bases("reviewOuter.reviewMiddle.ReviewMiddleChild", &[text("ReviewBase")]),
+          bases("reviewOuter.ReviewOuterChild", &[text("ReviewBase")])]),
+    row("Python `global` dictionary `match` capture", L::Python, "py",
+        "class ReviewBase:\n    pass\n\n\
+         def reviewProbe(external):\n    global ReviewBase\n    match external:\n        case {\"k\": ReviewBase}:\n\
+         \x20           class ReviewChild(ReviewBase):\n                pass\n",
+        &[bases("reviewProbe.ReviewChild", &[text("ReviewBase")])]),
+    row("Python `nonlocal` dictionary `match` capture", L::Python, "py",
+        "class ReviewBase:\n    pass\n\n\
+         def reviewOuter():\n    class ReviewBase:\n        pass\n\n\
+         \x20   def reviewProbe(external):\n        nonlocal ReviewBase\n        match external:\n            case {\"k\": ReviewBase}:\n\
+         \x20               class ReviewChild(ReviewBase):\n                    pass\n\n\
+         class ReviewModuleChild(ReviewBase):\n    pass\n",
+        &[bases("reviewOuter.reviewProbe.ReviewChild", &[text("ReviewBase")]),
+          bases("ReviewModuleChild", &[to_at("ReviewBase", "ReviewBase", 1)])]),
+    row("Scala pattern-bound qualifiers", L::Scala, "scala",
+        "object reviewNs { class ReviewBase }\nobject Holder {\n\
+         \x20 def tuple(): Unit = {\n    val (a, reviewNs) = (1, 2)\n    class ReviewChild extends reviewNs.ReviewBase\n  }\n\
+         \x20 def nested(): Unit = {\n    val (a, (b, reviewNs)) = (1, (2, 3))\n    class ReviewChild extends reviewNs.ReviewBase\n  }\n\
+         \x20 def extractor(): Unit = {\n    val Some(reviewNs) = Option(1)\n    class ReviewChild extends reviewNs.ReviewBase\n  }\n\
+         \x20 def forName(xs: List[Int]): Unit = {\n    for (reviewNs <- xs) { class ReviewChild extends reviewNs.ReviewBase }\n  }\n\
+         \x20 def forNested(xs: List[(Int, (Int, Int))]): Unit = {\n    for ((a, (b, reviewNs)) <- xs) { class ReviewChild extends reviewNs.ReviewBase }\n  }\n\
+         \x20 def capture(x: Int): Unit = x match {\n    case reviewNs => { class ReviewChild extends reviewNs.ReviewBase }\n  }\n\
+         \x20 def nestedCapture(x: (Int, Int)): Unit = x match {\n    case (a, reviewNs) => { class ReviewChild extends reviewNs.ReviewBase }\n  }\n\
+         \x20 def simple(): Unit = {\n    val reviewNs = 1\n    class ReviewChild extends reviewNs.ReviewBase\n  }\n\
+         \x20 def forTuple(xs: List[(Int, Int)]): Unit = {\n    for ((a, reviewNs) <- xs) { class ReviewChild extends reviewNs.ReviewBase }\n  }\n\
+         \x20 def plain(): Unit = {\n    class ReviewChild extends reviewNs.ReviewBase\n  }\n}\n",
+        &[unclassified("Holder.tuple.ReviewChild", &[text("reviewNs.ReviewBase")]),
+          unclassified("Holder.nested.ReviewChild", &[text("reviewNs.ReviewBase")]),
+          unclassified("Holder.extractor.ReviewChild", &[text("reviewNs.ReviewBase")]),
+          unclassified("Holder.forName.ReviewChild", &[text("reviewNs.ReviewBase")]),
+          unclassified("Holder.forNested.ReviewChild", &[text("reviewNs.ReviewBase")]),
+          unclassified("Holder.capture.ReviewChild", &[text("reviewNs.ReviewBase")]),
+          unclassified("Holder.nestedCapture.ReviewChild", &[text("reviewNs.ReviewBase")]),
+          unclassified("Holder.simple.ReviewChild", &[text("reviewNs.ReviewBase")]),
+          unclassified("Holder.forTuple.ReviewChild", &[text("reviewNs.ReviewBase")]),
+          bases("Holder.plain.ReviewChild", &[to("reviewNs.ReviewBase", "reviewNs.ReviewBase")])]),
+    row("Scala typed lambda parameter qualifier", L::Scala, "scala",
+        "object reviewNs { class ReviewBase }\nobject Holder {\n  val f = (reviewNs: Int) => { class ReviewChild extends reviewNs.ReviewBase }\n}\n",
+        &[unclassified("Holder.ReviewChild", &[text("reviewNs.ReviewBase")])]),
+    row("TypeScript anonymous generic class", L::TypeScript, "ts",
+        "interface ReviewBase {}\n\
+         const Box = class<ReviewBase> { method() { class ReviewChild implements ReviewBase {} } };\n\
+         const Plain = class { other() { class ReviewPlainChild implements ReviewBase {} } };\n",
+        &[implementing("method.ReviewChild", &[text("ReviewBase")]),
+          implementing("other.ReviewPlainChild", &[to("ReviewBase", "ReviewBase")])]),
+    row("C++ generic lambda template parameter", L::Cpp, "cpp",
+        "struct ReviewBase {};\n\
+         void f() {\n  auto generic = []<class ReviewBase>() { struct ReviewChild : ReviewBase {}; };\n\
+         \x20 auto plain = []() { struct ReviewPlainChild : ReviewBase {}; };\n}\n",
+        &[bases("f::ReviewChild", &[text("ReviewBase")]),
+          bases("f::ReviewPlainChild", &[to("ReviewBase", "ReviewBase")])]),
+    row("C++ template parameter of another template is no target", L::Cpp, "cpp",
+        "template <class ReviewBase> struct Wrapper {};\nstruct ReviewChild : ReviewBase {};\n",
+        &[bases("ReviewChild", &[text("ReviewBase")])]),
+    row("Scala polymorphic lambda", L::Scala, "scala",
+        "class ReviewBase\nobject Holder {\n  def f(): Unit = {\n    val g = [ReviewBase] => () => { class ReviewChild extends ReviewBase }\n  }\n}\n",
+        &[unclassified("Holder.f.ReviewChild", &[text("ReviewBase")])]),
+    row("Swift extension of a generic owner", L::Swift, "swift",
+        "class ReviewBase {}\nstruct ReviewBox<ReviewBase> {}\nextension ReviewBox {\n    class ReviewChild: ReviewBase {}\n}\n\
+         struct ReviewPlain {}\nextension ReviewPlain {\n    class ReviewChild: ReviewBase {}\n}\n",
+        &[unclassified("ReviewBox.ReviewChild", &[text("ReviewBase")]),
+          bases("ReviewPlain.ReviewChild", &[to("ReviewBase", "ReviewBase")])]),
+    row("Java anonymous class inherits member types", L::Java, "java",
+        "class ReviewBase {}\nclass External {}\n\
+         class Holder {\n  Object field = new External() { class ReviewChild extends ReviewBase {} };\n\
+         \x20 void m() { Object local = new External() { class ReviewLocalChild extends ReviewBase {} }; }\n}\n",
+        &[bases("ReviewChild", &[text("ReviewBase")]), bases("ReviewLocalChild", &[text("ReviewBase")])]),
+    row("C++ anonymous struct inherits member types", L::Cpp, "cpp",
+        "struct ReviewBase {};\nstruct External {};\n\
+         struct : External { struct ReviewChild : ReviewBase {}; } inherited;\n\
+         struct { struct ReviewPlainChild : ReviewBase {}; } plain;\n",
+        &[bases("ReviewChild", &[text("ReviewBase")]), bases("ReviewPlainChild", &[to("ReviewBase", "ReviewBase")])]),
+    row("Scala anonymous class inherits member types", L::Scala, "scala",
+        "class ReviewBase\nclass External\nobject Holder {\n  val o = new External { class ReviewChild extends ReviewBase }\n}\n",
+        &[unclassified("ReviewChild", &[text("ReviewBase")])]),
+
+    // --- Imports decide qualifiers and name groups.
+    row("Go imported package named like the file's package", L::Go, "go",
+        "package symbols\n\nimport symbols \"io\"\n\ntype Reader interface{ M() }\n\ntype Child interface{ symbols.Reader }\n",
+        &[bases("symbols.Child", &[text("symbols.Reader")])]),
+    row("Java imported type named like the file's package", L::Java, "java",
+        "package Entry;\nimport java.util.Map.Entry;\nclass ReviewBase {}\nclass Child extends Entry.ReviewBase {}\n",
+        &[bases("Entry.Child", &[text("Entry.ReviewBase")])]),
+    row("Java package-qualified name without an import", L::Java, "java",
+        "package Entry;\nclass ReviewBase {}\nclass Child extends Entry.ReviewBase {}\n",
+        &[bases("Entry.Child", &[to("Entry.ReviewBase", "Entry.ReviewBase")])]),
+    row("Java on-demand import keeps local types", L::Java, "java",
+        "import java.util.*;\nclass ReviewBase {}\nclass Child extends ReviewBase {}\n",
+        &[bases("Child", &[to("ReviewBase", "ReviewBase")])]),
+    swift_raw_type_names!(swift_value_import_func_row),
+    swift_raw_type_names!(swift_value_import_let_row),
+    swift_raw_type_names!(swift_value_import_var_row),
+    row("Swift value imports never hide a local class", L::Swift, "swift",
+        "import func Lib.ReviewBase\nimport let Lib.ReviewOther\nimport var Lib.ReviewThird\n\
+         class ReviewBase {}\nclass ReviewOther {}\nclass ReviewThird {}\n\
+         class ReviewChild: ReviewBase {}\nclass ReviewOtherChild: ReviewOther {}\nclass ReviewThirdChild: ReviewThird {}\n",
+        &[bases("ReviewChild", &[to("ReviewBase", "ReviewBase")]),
+          bases("ReviewOtherChild", &[to("ReviewOther", "ReviewOther")]),
+          bases("ReviewThirdChild", &[to("ReviewThird", "ReviewThird")])]),
+    row("Swift type imports bind the name", L::Swift, "swift",
+        "import struct Lib.ReviewS\nimport enum Lib.ReviewE\nimport protocol Lib.ReviewP\nimport typealias Lib.ReviewT\n\
+         class ReviewS {}\nclass ReviewE {}\nclass ReviewP {}\nclass ReviewT {}\n\
+         class ChildS: ReviewS {}\nclass ChildE: ReviewE {}\nclass ChildP: ReviewP {}\nclass ChildT: ReviewT {}\n",
+        &[unclassified("ChildS", &[text("ReviewS")]), unclassified("ChildE", &[text("ReviewE")]),
+          unclassified("ChildP", &[text("ReviewP")]), unclassified("ChildT", &[text("ReviewT")])]),
+
+    // --- Rust impl consumers: a sibling block's types never own an impl.
+    PathMeaningRow {
+        label: "Rust impl beside a sibling block's same-named enum and trait",
+        language: L::Rust,
+        extension: "rs",
+        source: "pub struct ReviewSelf;\npub trait ReviewTrait {}\n\
+                 fn f() {\n    { enum ReviewSelf {} trait ReviewTrait {} }\n    \
+                 impl ReviewTrait for ReviewSelf { fn probe(&self) {} }\n}\n",
+        owners: &[implementing("ReviewSelf", &[to("ReviewTrait", "ReviewTrait")])],
+        impl_members: &[ImplMember {
+            method: "probe",
+            container: "ReviewSelf",
+            owner: Some("ReviewSelf"),
+            implements: Some(to("ReviewTrait", "ReviewTrait")),
+            container_kind: Some(SymbolKindV2::Type),
+        }],
+        untouched: &["f::ReviewSelf"],
+    },
+
+    // --- Qualified continuation stays inside the owner the first segment
+    // selected: a same-named owner in a sibling block contributes nothing,
+    // whether or not it declares the member. Equal names are told apart by
+    // the target's declaration line.
+    row("C++ local owner paths keep the selected owner", L::Cpp, "cpp",
+        "void one() { struct ReviewHolder { struct ReviewBase {}; }; struct ReviewChild : ReviewHolder::ReviewBase {}; }\n\
+         void both() {\n\
+         { struct ReviewHolder { struct ReviewBase {}; }; }\n\
+         { struct ReviewHolder { struct ReviewBase {}; };\n\
+         struct ReviewChild : ReviewHolder::ReviewBase {}; }\n\
+         }\n\
+         void lacks() {\n\
+         { struct ReviewHolder { struct ReviewBase {}; }; }\n\
+         { struct ReviewHolder {};\n\
+         struct ReviewChild : ReviewHolder::ReviewBase {}; }\n\
+         }\n\
+         void other() { { struct ReviewOther { struct ReviewBase {}; }; } struct ReviewHolder { struct ReviewBase {}; }; struct ReviewChild : ReviewHolder::ReviewBase {}; }\n",
+        &[bases("one::ReviewChild", &[to("ReviewHolder::ReviewBase", "one::ReviewHolder::ReviewBase")]),
+          bases("both::ReviewChild", &[to_at("ReviewHolder::ReviewBase", "both::ReviewHolder::ReviewBase", 4)]),
+          bases("lacks::ReviewChild", &[text("ReviewHolder::ReviewBase")]),
+          bases("other::ReviewChild", &[to("ReviewHolder::ReviewBase", "other::ReviewHolder::ReviewBase")])]),
+    row("C++ three-segment local owner paths keep the selected owner", L::Cpp, "cpp",
+        "void one() { struct ReviewHolder { struct ReviewMiddle { struct ReviewBase {}; }; }; struct ReviewChild : ReviewHolder::ReviewMiddle::ReviewBase {}; }\n\
+         void both() {\n\
+         { struct ReviewHolder { struct ReviewMiddle { struct ReviewBase {}; }; }; }\n\
+         { struct ReviewHolder { struct ReviewMiddle { struct ReviewBase {}; }; };\n\
+         struct ReviewChild : ReviewHolder::ReviewMiddle::ReviewBase {}; }\n\
+         }\n\
+         void lacks() {\n\
+         { struct ReviewHolder { struct ReviewMiddle { struct ReviewBase {}; }; }; }\n\
+         { struct ReviewHolder { struct ReviewMiddle {}; };\n\
+         struct ReviewChild : ReviewHolder::ReviewMiddle::ReviewBase {}; }\n\
+         }\n\
+         void lacksMiddle() {\n\
+         { struct ReviewHolder { struct ReviewMiddle { struct ReviewBase {}; }; }; }\n\
+         { struct ReviewHolder {};\n\
+         struct ReviewChild : ReviewHolder::ReviewMiddle::ReviewBase {}; }\n\
+         }\n\
+         void other() { { struct ReviewOther { struct ReviewMiddle { struct ReviewBase {}; }; }; } struct ReviewHolder { struct ReviewMiddle { struct ReviewBase {}; }; }; struct ReviewChild : ReviewHolder::ReviewMiddle::ReviewBase {}; }\n",
+        &[bases("one::ReviewChild", &[to("ReviewHolder::ReviewMiddle::ReviewBase", "one::ReviewHolder::ReviewMiddle::ReviewBase")]),
+          bases("both::ReviewChild", &[to_at("ReviewHolder::ReviewMiddle::ReviewBase", "both::ReviewHolder::ReviewMiddle::ReviewBase", 4)]),
+          bases("lacks::ReviewChild", &[text("ReviewHolder::ReviewMiddle::ReviewBase")]),
+          bases("lacksMiddle::ReviewChild", &[text("ReviewHolder::ReviewMiddle::ReviewBase")]),
+          bases("other::ReviewChild", &[to("ReviewHolder::ReviewMiddle::ReviewBase", "other::ReviewHolder::ReviewMiddle::ReviewBase")])]),
+    row("Java local owner paths keep the selected owner", L::Java, "java",
+        "class Probe {\n\
+         void one() { class ReviewHolder { class ReviewBase {} } class ReviewChild extends ReviewHolder.ReviewBase {} }\n\
+         void both() {\n\
+         { class ReviewHolder { class ReviewBase {} } }\n\
+         { class ReviewHolder { class ReviewBase {} }\n\
+         class ReviewChild extends ReviewHolder.ReviewBase {} }\n\
+         }\n\
+         void lacks() {\n\
+         { class ReviewHolder { class ReviewBase {} } }\n\
+         { class ReviewHolder {}\n\
+         class ReviewChild extends ReviewHolder.ReviewBase {} }\n\
+         }\n\
+         void other() { { class ReviewOther { class ReviewBase {} } } class ReviewHolder { class ReviewBase {} } class ReviewChild extends ReviewHolder.ReviewBase {} }\n\
+         }\n",
+        &[bases("Probe.one.ReviewChild", &[to("ReviewHolder.ReviewBase", "Probe.one.ReviewHolder.ReviewBase")]),
+          bases("Probe.both.ReviewChild", &[to_at("ReviewHolder.ReviewBase", "Probe.both.ReviewHolder.ReviewBase", 5)]),
+          bases("Probe.lacks.ReviewChild", &[text("ReviewHolder.ReviewBase")]),
+          bases("Probe.other.ReviewChild", &[to("ReviewHolder.ReviewBase", "Probe.other.ReviewHolder.ReviewBase")])]),
+    row("Java three-segment local owner paths keep the selected owner", L::Java, "java",
+        "class Probe {\n\
+         void one() { class ReviewHolder { class ReviewMiddle { class ReviewBase {} } } class ReviewChild extends ReviewHolder.ReviewMiddle.ReviewBase {} }\n\
+         void both() {\n\
+         { class ReviewHolder { class ReviewMiddle { class ReviewBase {} } } }\n\
+         { class ReviewHolder { class ReviewMiddle { class ReviewBase {} } }\n\
+         class ReviewChild extends ReviewHolder.ReviewMiddle.ReviewBase {} }\n\
+         }\n\
+         void lacks() {\n\
+         { class ReviewHolder { class ReviewMiddle { class ReviewBase {} } } }\n\
+         { class ReviewHolder { class ReviewMiddle {} }\n\
+         class ReviewChild extends ReviewHolder.ReviewMiddle.ReviewBase {} }\n\
+         }\n\
+         void other() { { class ReviewOther { class ReviewMiddle { class ReviewBase {} } } } class ReviewHolder { class ReviewMiddle { class ReviewBase {} } } class ReviewChild extends ReviewHolder.ReviewMiddle.ReviewBase {} }\n\
+         }\n",
+        &[bases("Probe.one.ReviewChild", &[to("ReviewHolder.ReviewMiddle.ReviewBase", "Probe.one.ReviewHolder.ReviewMiddle.ReviewBase")]),
+          bases("Probe.both.ReviewChild", &[to_at("ReviewHolder.ReviewMiddle.ReviewBase", "Probe.both.ReviewHolder.ReviewMiddle.ReviewBase", 5)]),
+          bases("Probe.lacks.ReviewChild", &[text("ReviewHolder.ReviewMiddle.ReviewBase")]),
+          bases("Probe.other.ReviewChild", &[to("ReviewHolder.ReviewMiddle.ReviewBase", "Probe.other.ReviewHolder.ReviewMiddle.ReviewBase")])]),
+    row("Swift local owner paths keep the selected owner", L::Swift, "swift",
+        "func one() {\n\
+         class ReviewHolder { class ReviewBase {} }\n\
+         class ReviewChild: ReviewHolder.ReviewBase {}\n\
+         }\n\
+         func both() {\n\
+         do { class ReviewHolder { class ReviewBase {} } }\n\
+         do {\n\
+         class ReviewHolder { class ReviewBase {} }\n\
+         class ReviewChild: ReviewHolder.ReviewBase {}\n\
+         }\n\
+         }\n\
+         func lacks() {\n\
+         do { class ReviewHolder { class ReviewBase {} } }\n\
+         do {\n\
+         class ReviewHolder {}\n\
+         class ReviewChild: ReviewHolder.ReviewBase {}\n\
+         }\n\
+         }\n\
+         func other() {\n\
+         do { class ReviewOther { class ReviewBase {} } }\n\
+         class ReviewHolder { class ReviewBase {} }\n\
+         class ReviewChild: ReviewHolder.ReviewBase {}\n\
+         }\n",
+        &[bases("one.ReviewChild", &[to("ReviewHolder.ReviewBase", "one.ReviewHolder.ReviewBase")]),
+          bases("both.ReviewChild", &[to_at("ReviewHolder.ReviewBase", "both.ReviewHolder.ReviewBase", 8)]),
+          unclassified("lacks.ReviewChild", &[text("ReviewHolder.ReviewBase")]),
+          bases("other.ReviewChild", &[to("ReviewHolder.ReviewBase", "other.ReviewHolder.ReviewBase")])]),
+    row("Swift three-segment local owner paths keep the selected owner", L::Swift, "swift",
+        "func one() {\n\
+         class ReviewHolder { class ReviewMiddle { class ReviewBase {} } }\n\
+         class ReviewChild: ReviewHolder.ReviewMiddle.ReviewBase {}\n\
+         }\n\
+         func both() {\n\
+         do { class ReviewHolder { class ReviewMiddle { class ReviewBase {} } } }\n\
+         do {\n\
+         class ReviewHolder { class ReviewMiddle { class ReviewBase {} } }\n\
+         class ReviewChild: ReviewHolder.ReviewMiddle.ReviewBase {}\n\
+         }\n\
+         }\n\
+         func lacks() {\n\
+         do { class ReviewHolder { class ReviewMiddle { class ReviewBase {} } } }\n\
+         do {\n\
+         class ReviewHolder { class ReviewMiddle {} }\n\
+         class ReviewChild: ReviewHolder.ReviewMiddle.ReviewBase {}\n\
+         }\n\
+         }\n\
+         func other() {\n\
+         do { class ReviewOther { class ReviewMiddle { class ReviewBase {} } } }\n\
+         class ReviewHolder { class ReviewMiddle { class ReviewBase {} } }\n\
+         class ReviewChild: ReviewHolder.ReviewMiddle.ReviewBase {}\n\
+         }\n",
+        &[bases("one.ReviewChild", &[to("ReviewHolder.ReviewMiddle.ReviewBase", "one.ReviewHolder.ReviewMiddle.ReviewBase")]),
+          bases("both.ReviewChild", &[to_at("ReviewHolder.ReviewMiddle.ReviewBase", "both.ReviewHolder.ReviewMiddle.ReviewBase", 8)]),
+          unclassified("lacks.ReviewChild", &[text("ReviewHolder.ReviewMiddle.ReviewBase")]),
+          bases("other.ReviewChild", &[to("ReviewHolder.ReviewMiddle.ReviewBase", "other.ReviewHolder.ReviewMiddle.ReviewBase")])]),
+    row("Scala local object paths keep the selected owner", L::Scala, "scala",
+        "object Probe {\n\
+         def one(): Unit = {\n\
+         object reviewHolder { class ReviewBase }\n\
+         class ReviewChild extends reviewHolder.ReviewBase\n\
+         }\n\
+         def both(): Unit = {\n\
+         { object reviewHolder { class ReviewBase } }\n\
+         {\n\
+         object reviewHolder { class ReviewBase }\n\
+         class ReviewChild extends reviewHolder.ReviewBase\n\
+         }\n\
+         }\n\
+         def lacks(): Unit = {\n\
+         { object reviewHolder { class ReviewBase } }\n\
+         {\n\
+         object reviewHolder\n\
+         class ReviewChild extends reviewHolder.ReviewBase\n\
+         }\n\
+         }\n\
+         def other(): Unit = {\n\
+         { object reviewOther { class ReviewBase } }\n\
+         object reviewHolder { class ReviewBase }\n\
+         class ReviewChild extends reviewHolder.ReviewBase\n\
+         }\n\
+         }\n",
+        &[bases("Probe.one.ReviewChild", &[to("reviewHolder.ReviewBase", "Probe.one.reviewHolder.ReviewBase")]),
+          bases("Probe.both.ReviewChild", &[to_at("reviewHolder.ReviewBase", "Probe.both.reviewHolder.ReviewBase", 9)]),
+          unclassified("Probe.lacks.ReviewChild", &[text("reviewHolder.ReviewBase")]),
+          bases("Probe.other.ReviewChild", &[to("reviewHolder.ReviewBase", "Probe.other.reviewHolder.ReviewBase")])]),
+    row("Scala three-segment local object paths keep the selected owner", L::Scala, "scala",
+        "object Probe {\n\
+         def one(): Unit = {\n\
+         object reviewHolder { object reviewMiddle { class ReviewBase } }\n\
+         class ReviewChild extends reviewHolder.reviewMiddle.ReviewBase\n\
+         }\n\
+         def both(): Unit = {\n\
+         { object reviewHolder { object reviewMiddle { class ReviewBase } } }\n\
+         {\n\
+         object reviewHolder { object reviewMiddle { class ReviewBase } }\n\
+         class ReviewChild extends reviewHolder.reviewMiddle.ReviewBase\n\
+         }\n\
+         }\n\
+         def lacks(): Unit = {\n\
+         { object reviewHolder { object reviewMiddle { class ReviewBase } } }\n\
+         {\n\
+         object reviewHolder { object reviewMiddle }\n\
+         class ReviewChild extends reviewHolder.reviewMiddle.ReviewBase\n\
+         }\n\
+         }\n\
+         def other(): Unit = {\n\
+         { object reviewOther { object reviewMiddle { class ReviewBase } } }\n\
+         object reviewHolder { object reviewMiddle { class ReviewBase } }\n\
+         class ReviewChild extends reviewHolder.reviewMiddle.ReviewBase\n\
+         }\n\
+         }\n",
+        &[bases("Probe.one.ReviewChild", &[to("reviewHolder.reviewMiddle.ReviewBase", "Probe.one.reviewHolder.reviewMiddle.ReviewBase")]),
+          bases("Probe.both.ReviewChild", &[to_at("reviewHolder.reviewMiddle.ReviewBase", "Probe.both.reviewHolder.reviewMiddle.ReviewBase", 9)]),
+          unclassified("Probe.lacks.ReviewChild", &[text("reviewHolder.reviewMiddle.ReviewBase")]),
+          bases("Probe.other.ReviewChild", &[to("reviewHolder.reviewMiddle.ReviewBase", "Probe.other.reviewHolder.reviewMiddle.ReviewBase")])]),
+    row("Scala three-segment object paths in named scopes", L::Scala, "scala",
+        "object reviewHolder { object reviewMiddle { class ReviewBase } }\n\
+         class ReviewChild extends reviewHolder.reviewMiddle.ReviewBase\n\
+         object reviewOther { object reviewMiddle }\n\
+         class ReviewOtherChild extends reviewOther.reviewMiddle.ReviewBase\n",
+        &[bases("ReviewChild", &[to("reviewHolder.reviewMiddle.ReviewBase", "reviewHolder.reviewMiddle.ReviewBase")]),
+          unclassified("ReviewOtherChild", &[text("reviewOther.reviewMiddle.ReviewBase")])]),
+    row("Rust local module paths keep the selected module", L::Rust, "rs",
+        "fn one() {\n\
+         mod reviewHolder { pub trait ReviewBase {} }\n\
+         trait ReviewChild: reviewHolder::ReviewBase {}\n\
+         }\n\
+         fn both() {\n\
+         { mod reviewHolder { pub trait ReviewBase {} } }\n\
+         {\n\
+         mod reviewHolder { pub trait ReviewBase {} }\n\
+         trait ReviewChild: reviewHolder::ReviewBase {}\n\
+         }\n\
+         }\n\
+         fn lacks() {\n\
+         { mod reviewHolder { pub trait ReviewBase {} } }\n\
+         {\n\
+         mod reviewHolder {}\n\
+         trait ReviewChild: reviewHolder::ReviewBase {}\n\
+         }\n\
+         }\n\
+         fn deeper() {\n\
+         mod reviewHolder { pub mod reviewMiddle { pub trait ReviewBase {} } }\n\
+         trait ReviewChild: reviewHolder::reviewMiddle::ReviewBase {}\n\
+         }\n\
+         fn deeper_lacks() {\n\
+         { mod reviewHolder { pub mod reviewMiddle { pub trait ReviewBase {} } } }\n\
+         mod reviewHolder { pub mod reviewMiddle {} }\n\
+         trait ReviewChild: reviewHolder::reviewMiddle::ReviewBase {}\n\
+         }\n\
+         fn other() {\n\
+         { mod reviewOther { pub trait ReviewBase {} } }\n\
+         mod reviewHolder { pub trait ReviewBase {} }\n\
+         trait ReviewChild: reviewHolder::ReviewBase {}\n\
+         }\n",
+        &[bases("one::ReviewChild", &[to("reviewHolder::ReviewBase", "one::reviewHolder::ReviewBase")]),
+          bases("both::ReviewChild", &[to_at("reviewHolder::ReviewBase", "both::reviewHolder::ReviewBase", 8)]),
+          bases("lacks::ReviewChild", &[text("reviewHolder::ReviewBase")]),
+          bases("deeper::ReviewChild", &[to("reviewHolder::reviewMiddle::ReviewBase", "deeper::reviewHolder::reviewMiddle::ReviewBase")]),
+          bases("deeper_lacks::ReviewChild", &[text("reviewHolder::reviewMiddle::ReviewBase")]),
+          bases("other::ReviewChild", &[to("reviewHolder::ReviewBase", "other::reviewHolder::ReviewBase")])]),
+    row("Rust paths inside local modules", L::Rust, "rs",
+        "trait ReviewBase {}\n\
+         fn self_path() {\n\
+         mod reviewHolder { pub trait ReviewBase {} pub trait ReviewChild: self::ReviewBase {} }\n\
+         }\n\
+         fn super_path() {\n\
+         mod reviewHolder { pub trait ReviewBase {} pub mod reviewInner { pub trait ReviewChild: super::ReviewBase {} } }\n\
+         }\n\
+         fn bare() {\n\
+         mod reviewHolder { pub trait ReviewBase {} pub trait ReviewChild: ReviewBase {} }\n\
+         }\n\
+         fn crate_path() {\n\
+         mod reviewHolder { pub trait ReviewBase {} pub trait ReviewChild: crate::ReviewBase {} }\n\
+         }\n\
+         fn outer_super() {\n\
+         trait ReviewBase {}\n\
+         mod reviewHolder { pub trait ReviewChild: super::ReviewBase {} }\n\
+         }\n",
+        &[bases("self_path::reviewHolder::ReviewChild", &[to("self::ReviewBase", "self_path::reviewHolder::ReviewBase")]),
+          bases("super_path::reviewHolder::reviewInner::ReviewChild",
+                &[to("super::ReviewBase", "super_path::reviewHolder::ReviewBase")]),
+          bases("bare::reviewHolder::ReviewChild", &[to("ReviewBase", "bare::reviewHolder::ReviewBase")]),
+          bases("crate_path::reviewHolder::ReviewChild", &[to("crate::ReviewBase", "ReviewBase")]),
+          bases("outer_super::reviewHolder::ReviewChild", &[to("super::ReviewBase", "ReviewBase")])]),
+    row("Python local owner paths keep the selected owner", L::Python, "py",
+        concat!(
+            "def one():\n",
+            "    class ReviewHolder:\n",
+            "        class ReviewBase:\n",
+            "            pass\n",
+            "    class ReviewChild(ReviewHolder.ReviewBase):\n",
+            "        pass\n",
+            "\n",
+            "def lacks():\n",
+            "    def other():\n",
+            "        class ReviewHolder:\n",
+            "            class ReviewBase:\n",
+            "                pass\n",
+            "    class ReviewHolder:\n",
+            "        pass\n",
+            "    class ReviewChild(ReviewHolder.ReviewBase):\n",
+            "        pass\n",
+            "\n",
+            "def has():\n",
+            "    def other():\n",
+            "        class ReviewHolder:\n",
+            "            class ReviewBase:\n",
+            "                pass\n",
+            "    class ReviewHolder:\n",
+            "        class ReviewBase:\n",
+            "            pass\n",
+            "    class ReviewChild(ReviewHolder.ReviewBase):\n",
+            "        pass\n",
+        ),
+        &[bases("one.ReviewChild", &[to("ReviewHolder.ReviewBase", "one.ReviewHolder.ReviewBase")]),
+          bases("lacks.ReviewChild", &[text("ReviewHolder.ReviewBase")]),
+          bases("has.ReviewChild", &[to("ReviewHolder.ReviewBase", "has.ReviewHolder.ReviewBase")])]),
+    row("TypeScript local class fields holding class expressions stay written", L::TypeScript, "ts",
+        "function one() {\n  class ReviewHolder { static ReviewBase = class {}; }\n  class ReviewChild extends ReviewHolder.ReviewBase {}\n}\n\
+         function both() {\n  { class ReviewHolder { static ReviewBase = class {}; } }\n  \
+         { class ReviewHolder { static ReviewBase = class {}; }\n    class ReviewChild extends ReviewHolder.ReviewBase {} }\n}\n",
+        &[bases("one.ReviewChild", &[text("ReviewHolder.ReviewBase")]),
+          bases("both.ReviewChild", &[text("ReviewHolder.ReviewBase")])]),
+    row("JavaScript local class fields holding class expressions stay written", L::JavaScript, "js",
+        "function one() {\n  class ReviewHolder { static ReviewBase = class {}; }\n  class ReviewChild extends ReviewHolder.ReviewBase {}\n}\n\
+         function both() {\n  { class ReviewHolder { static ReviewBase = class {}; } }\n  \
+         { class ReviewHolder { static ReviewBase = class {}; }\n    class ReviewChild extends ReviewHolder.ReviewBase {} }\n}\n",
+        &[bases("one.ReviewChild", &[text("ReviewHolder.ReviewBase")]),
+          bases("both.ReviewChild", &[text("ReviewHolder.ReviewBase")])]),
+
+    // --- Rust impl consumers through a function's local module.
+    PathMeaningRow {
+        label: "Rust impl of a local module's self type",
+        language: L::Rust,
+        extension: "rs",
+        source: "pub struct ReviewSelf;\npub trait ReviewTrait {}\n\
+                 fn f() {\n    mod reviewHolder { pub struct ReviewSelf; }\n    \
+                 impl ReviewTrait for reviewHolder::ReviewSelf { fn probe(&self) {} }\n}\n",
+        owners: &[implementing("f::reviewHolder::ReviewSelf", &[to("ReviewTrait", "ReviewTrait")])],
+        impl_members: &[ImplMember {
+            method: "probe",
+            container: "reviewHolder::ReviewSelf",
+            owner: Some("f::reviewHolder::ReviewSelf"),
+            implements: Some(to("ReviewTrait", "ReviewTrait")),
+            container_kind: Some(SymbolKindV2::Type),
+        }],
+        untouched: &["ReviewSelf"],
+    },
+    PathMeaningRow {
+        label: "Rust impl of a local module's trait",
+        language: L::Rust,
+        extension: "rs",
+        source: "pub struct ReviewSelf;\npub trait ReviewTrait {}\n\
+                 fn f() {\n    mod reviewHolder { pub trait ReviewTrait {} }\n    struct ReviewSelf;\n    \
+                 impl reviewHolder::ReviewTrait for ReviewSelf { fn probe(&self) {} }\n}\n",
+        owners: &[implementing("f::ReviewSelf", &[to("reviewHolder::ReviewTrait", "f::reviewHolder::ReviewTrait")])],
+        impl_members: &[ImplMember {
+            method: "probe",
+            container: "ReviewSelf",
+            owner: Some("f::ReviewSelf"),
+            implements: Some(to("reviewHolder::ReviewTrait", "f::reviewHolder::ReviewTrait")),
+            container_kind: Some(SymbolKindV2::Type),
+        }],
+        untouched: &["ReviewSelf"],
+    },
+    PathMeaningRow {
+        label: "Rust impl of a local module's trait for its type",
+        language: L::Rust,
+        extension: "rs",
+        source: "pub struct ReviewSelf;\npub trait ReviewTrait {}\n\
+                 fn f() {\n    mod reviewHolder { pub struct ReviewSelf; pub trait ReviewTrait {} }\n    \
+                 impl reviewHolder::ReviewTrait for reviewHolder::ReviewSelf { fn probe(&self) {} }\n}\n",
+        owners: &[implementing("f::reviewHolder::ReviewSelf",
+                               &[to("reviewHolder::ReviewTrait", "f::reviewHolder::ReviewTrait")])],
+        impl_members: &[ImplMember {
+            method: "probe",
+            container: "reviewHolder::ReviewSelf",
+            owner: Some("f::reviewHolder::ReviewSelf"),
+            implements: Some(to("reviewHolder::ReviewTrait", "f::reviewHolder::ReviewTrait")),
+            container_kind: Some(SymbolKindV2::Type),
+        }],
+        untouched: &["ReviewSelf"],
+    },
+    PathMeaningRow {
+        label: "Rust impl of a local module's missing self type beside a sibling block's",
+        language: L::Rust,
+        extension: "rs",
+        source: "pub trait ReviewTrait {}\n\
+                 fn f() {\n    { mod reviewHolder { pub struct ReviewSelf; } }\n    mod reviewHolder {}\n    \
+                 impl ReviewTrait for reviewHolder::ReviewSelf { fn probe(&self) {} }\n}\n",
+        owners: &[],
+        impl_members: &[ImplMember {
+            method: "probe",
+            container: "reviewHolder::ReviewSelf",
+            owner: None,
+            implements: Some(to("ReviewTrait", "ReviewTrait")),
+            container_kind: None,
+        }],
+        untouched: &["f::reviewHolder::ReviewSelf"],
+    },
+    // --- Bindings no record reports keep their scope and name groups
+    // outside lexical scopes: an impl's parameters bind only inside it, and a
+    // value (a `const` parameter, a destructured or pattern-bound value)
+    // never hides a type.
+    row("Rust impl type parameter before the trait's user at the root", L::Rust, "rs",
+        "trait ReviewBase {}\nstruct ReviewHolder<T>(T);\n\
+         impl<ReviewBase> ReviewHolder<ReviewBase> {}\ntrait ReviewChild: ReviewBase {}\n",
+        &[bases("ReviewChild", &[to("ReviewBase", "ReviewBase")])]),
+    row("Rust impl type parameter after the trait's user at the root", L::Rust, "rs",
+        "trait ReviewBase {}\nstruct ReviewHolder<T>(T);\n\
+         trait ReviewChild: ReviewBase {}\nimpl<ReviewBase> ReviewHolder<ReviewBase> {}\n",
+        &[bases("ReviewChild", &[to("ReviewBase", "ReviewBase")])]),
+    row("Rust impl type parameter before the trait's user in a module", L::Rust, "rs",
+        "mod reviewScope {\n    pub trait ReviewBase {}\n    pub struct ReviewHolder<T>(T);\n    \
+         impl<ReviewBase> ReviewHolder<ReviewBase> {}\n    pub trait ReviewChild: ReviewBase {}\n}\n",
+        &[bases("reviewScope::ReviewChild", &[to("ReviewBase", "reviewScope::ReviewBase")])]),
+    row("Rust impl type parameter after the trait's user in a module", L::Rust, "rs",
+        "mod reviewScope {\n    pub trait ReviewBase {}\n    pub struct ReviewHolder<T>(T);\n    \
+         pub trait ReviewChild: ReviewBase {}\n    impl<ReviewBase> ReviewHolder<ReviewBase> {}\n}\n",
+        &[bases("reviewScope::ReviewChild", &[to("ReviewBase", "reviewScope::ReviewBase")])]),
+    row("Rust impl const parameter before the trait's user at the root", L::Rust, "rs",
+        "trait ReviewBase {}\nstruct ReviewHolder<const N: usize>;\n\
+         impl<const ReviewBase: usize> ReviewHolder<{ ReviewBase }> {}\ntrait ReviewChild: ReviewBase {}\n",
+        &[bases("ReviewChild", &[to("ReviewBase", "ReviewBase")])]),
+    row("Rust impl const parameter after the trait's user at the root", L::Rust, "rs",
+        "trait ReviewBase {}\nstruct ReviewHolder<const N: usize>;\n\
+         trait ReviewChild: ReviewBase {}\nimpl<const ReviewBase: usize> ReviewHolder<{ ReviewBase }> {}\n",
+        &[bases("ReviewChild", &[to("ReviewBase", "ReviewBase")])]),
+    row("Rust impl const parameter before the trait's user in a module", L::Rust, "rs",
+        "mod reviewScope {\n    pub trait ReviewBase {}\n    pub struct ReviewHolder<const N: usize>;\n    \
+         impl<const ReviewBase: usize> ReviewHolder<{ ReviewBase }> {}\n    pub trait ReviewChild: ReviewBase {}\n}\n",
+        &[bases("reviewScope::ReviewChild", &[to("ReviewBase", "reviewScope::ReviewBase")])]),
+    row("Rust impl const parameter after the trait's user in a module", L::Rust, "rs",
+        "mod reviewScope {\n    pub trait ReviewBase {}\n    pub struct ReviewHolder<const N: usize>;\n    \
+         pub trait ReviewChild: ReviewBase {}\n    impl<const ReviewBase: usize> ReviewHolder<{ ReviewBase }> {}\n}\n",
+        &[bases("reviewScope::ReviewChild", &[to("ReviewBase", "reviewScope::ReviewBase")])]),
+    row("Rust impl parameter named like an unrelated module qualifier", L::Rust, "rs",
+        "mod reviewHolder { pub trait ReviewBase {} }\nstruct ReviewWrap<T>(T);\n\
+         impl<reviewHolder> ReviewWrap<reviewHolder> {}\ntrait ReviewChild: reviewHolder::ReviewBase {}\n",
+        &[bases("ReviewChild", &[to("reviewHolder::ReviewBase", "reviewHolder::ReviewBase")])]),
+    row("Rust impl parameters in a function bind only inside the impl", L::Rust, "rs",
+        "fn types() {\n    trait ReviewBase {}\n    struct ReviewHolder<T>(T);\n    \
+         trait ReviewBefore: ReviewBase {}\n    impl<ReviewBase> ReviewHolder<ReviewBase> {}\n    \
+         trait ReviewAfter: ReviewBase {}\n}\n\
+         fn consts() {\n    trait ReviewBase {}\n    struct ReviewHolder<const N: usize>;\n    \
+         trait ReviewBefore: ReviewBase {}\n    impl<const ReviewBase: usize> ReviewHolder<{ ReviewBase }> {}\n    \
+         trait ReviewAfter: ReviewBase {}\n}\n",
+        &[bases("types::ReviewBefore", &[to("ReviewBase", "types::ReviewBase")]),
+          bases("types::ReviewAfter", &[to("ReviewBase", "types::ReviewBase")]),
+          bases("consts::ReviewBefore", &[to("ReviewBase", "consts::ReviewBase")]),
+          bases("consts::ReviewAfter", &[to("ReviewBase", "consts::ReviewBase")])]),
+    row("Rust named trait's const parameter never hides a trait in its members", L::Rust, "rs",
+        "trait ReviewBase {}\n\
+         trait ReviewOwner<const ReviewBase: usize> { fn member() { trait ReviewChild: ReviewBase {} } }\n",
+        &[bases("ReviewOwner::member::ReviewChild", &[to("ReviewBase", "ReviewBase")])]),
+    row("Rust named struct's const parameter never hides a trait in its fields", L::Rust, "rs",
+        "trait ReviewBase {}\n\
+         struct ReviewOwner<const ReviewBase: usize> { field: [u8; { trait ReviewChild: ReviewBase {} 0 }] }\n",
+        &[bases("ReviewOwner::ReviewChild", &[to("ReviewBase", "ReviewBase")])]),
+    row("Rust const parameter of the declaration or its function", L::Rust, "rs",
+        "trait ReviewBase {}\ntrait ReviewChild<const ReviewBase: usize>: ReviewBase {}\n\
+         fn probe<const ReviewBase: usize>() { trait ReviewInner: ReviewBase {} }\n",
+        &[bases("ReviewChild", &[to("ReviewBase", "ReviewBase")]),
+          bases("probe::ReviewInner", &[to("ReviewBase", "ReviewBase")])]),
+    row("Rust named owner's type parameter hides a trait in its members", L::Rust, "rs",
+        "trait ReviewBase {}\n\
+         trait ReviewOwner<ReviewBase> { fn member() { trait ReviewChild: ReviewBase {} } }\n",
+        &[bases("ReviewOwner::member::ReviewChild", &[text("ReviewBase")])]),
+    row("Rust empty impl in a member of a named const-generic trait", L::Rust, "rs",
+        "pub struct ReviewSelf;\npub trait ReviewTrait {}\n\
+         trait ReviewOwner<const ReviewSelf: usize> { fn member() { impl ReviewTrait for ReviewSelf {} } }\n",
+        &[implementing("ReviewSelf", &[to("ReviewTrait", "ReviewTrait")])]),
+    PathMeaningRow {
+        label: "Rust impl in a member of a named const-generic trait",
+        language: L::Rust,
+        extension: "rs",
+        source: "pub struct ReviewSelf;\npub trait ReviewTrait {}\n\
+                 trait ReviewOwner<const ReviewSelf: usize> {\n    \
+                 fn member() { impl ReviewTrait for ReviewSelf { fn probe(&self) {} } }\n}\n",
+        owners: &[implementing("ReviewSelf", &[to("ReviewTrait", "ReviewTrait")])],
+        impl_members: &[ImplMember {
+            method: "probe",
+            container: "ReviewSelf",
+            owner: Some("ReviewSelf"),
+            implements: Some(to("ReviewTrait", "ReviewTrait")),
+            container_kind: Some(SymbolKindV2::Type),
+        }],
+        untouched: &[],
+    },
+    row("TypeScript module-level flat array binding is a value", L::TypeScript, "ts",
+        "interface ReviewBase {}\nconst [ReviewBase] = external;\nclass ReviewChild implements ReviewBase {}\n",
+        &[implementing("ReviewChild", &[to("ReviewBase", "ReviewBase")])]),
+    row("TypeScript module-level nested array binding is a value", L::TypeScript, "ts",
+        "interface ReviewBase {}\nconst [[ReviewBase]] = external;\nclass ReviewChild implements ReviewBase {}\n",
+        &[implementing("ReviewChild", &[to("ReviewBase", "ReviewBase")])]),
+    row("TypeScript module-level nested object binding is a value", L::TypeScript, "ts",
+        "interface ReviewBase {}\nconst { x: { ReviewBase } } = external;\nclass ReviewChild implements ReviewBase {}\n",
+        &[implementing("ReviewChild", &[to("ReviewBase", "ReviewBase")])]),
+    row("TypeScript module-level flat shorthand binding", L::TypeScript, "ts",
+        "interface ReviewBase {}\nexport const { ReviewBase } = external;\nclass ReviewChild implements ReviewBase {}\n",
+        &[implementing("ReviewChild", &[to("ReviewBase", "ReviewBase")])]),
+    row("TypeScript module-level nested binding of another name", L::TypeScript, "ts",
+        "interface ReviewBase {}\nconst { x: { reviewOther } } = external;\nclass ReviewChild implements ReviewBase {}\n",
+        &[implementing("ReviewChild", &[to("ReviewBase", "ReviewBase")])]),
+    row("TypeScript nested bindings in functions are values", L::TypeScript, "ts",
+        "interface ReviewBase {}\n\
+         function object() { const { x: { ReviewBase } } = external; class ReviewChild implements ReviewBase {} }\n\
+         function array() { const [[ReviewBase]] = external; class ReviewChild implements ReviewBase {} }\n",
+        &[implementing("object.ReviewChild", &[to("ReviewBase", "ReviewBase")]),
+          implementing("array.ReviewChild", &[to("ReviewBase", "ReviewBase")])]),
+    row("TypeScript ambient function's type parameter binds only in its signature", L::TypeScript, "ts",
+        "interface ReviewBase {}\ndeclare function reviewDeclared<ReviewBase>(): void;\n\
+         class ReviewChild implements ReviewBase {}\n",
+        &[implementing("ReviewChild", &[to("ReviewBase", "ReviewBase")])]),
+    row("TypeScript overload signature's type parameter binds only in its signature", L::TypeScript, "ts",
+        "interface ReviewBase {}\nfunction reviewOverload<ReviewBase>(x: ReviewBase): void;\n\
+         function reviewOverload(x: any) {}\nclass ReviewChild implements ReviewBase {}\n",
+        &[implementing("ReviewChild", &[to("ReviewBase", "ReviewBase")])]),
+    row("TypeScript method signature's type parameter binds only in its signature", L::TypeScript, "ts",
+        "interface ReviewBase {}\ninterface ReviewShape { m<ReviewBase>(): void; }\n\
+         class ReviewChild implements ReviewBase {}\n",
+        &[implementing("ReviewChild", &[to("ReviewBase", "ReviewBase")])]),
+    row("JavaScript module-level destructuring of another name", L::JavaScript, "js",
+        "class ReviewBase {}\nconst { x: { reviewOther } } = external;\nclass ReviewChild extends ReviewBase {}\n",
+        &[bases("ReviewChild", &[to("ReviewBase", "ReviewBase")])]),
+    row("JavaScript module-level destructuring binds the base's value", L::JavaScript, "js",
+        "class ReviewBase {}\nconst { x: { ReviewBase } } = external;\nclass ReviewChild extends ReviewBase {}\n",
+        &[bases("ReviewChild", &[text("ReviewBase")])]),
+    row("Python module-level tuple target binds the base's name", L::Python, "py",
+        "class ReviewBase:\n    pass\n\nreviewOther, ReviewBase = external\n\nclass ReviewChild(ReviewBase):\n    pass\n",
+        &[bases("ReviewChild", &[text("ReviewBase")])]),
+    row("Python module-level tuple target of another name", L::Python, "py",
+        "class ReviewBase:\n    pass\n\nreviewOther, reviewThird = external\n\nclass ReviewChild(ReviewBase):\n    pass\n",
+        &[bases("ReviewChild", &[to("ReviewBase", "ReviewBase")])]),
+    row("Scala package-level tuple binding is a term", L::Scala, "scala",
+        "package reviewPkg\nclass reviewBase\nval (reviewBase, reviewOther) = (1, 2)\nclass ReviewChild extends reviewBase\n",
+        &[bases("reviewPkg.ReviewChild", &[to("reviewBase", "reviewPkg.reviewBase")])]),
+    row("Scala package-level nested tuple binding is a term", L::Scala, "scala",
+        "package reviewPkg\nclass reviewBase\nval ((reviewBase, reviewOther), reviewThird) = ((1, 2), 3)\n\
+         class ReviewChild extends reviewBase\n",
+        &[bases("reviewPkg.ReviewChild", &[to("reviewBase", "reviewPkg.reviewBase")])]),
+    row("Scala package-level extractor binding is a term", L::Scala, "scala",
+        "package reviewPkg\nclass reviewBase\nval Some(reviewBase) = Option(1)\nclass ReviewChild extends reviewBase\n",
+        &[bases("reviewPkg.ReviewChild", &[to("reviewBase", "reviewPkg.reviewBase")])]),
+    row("Scala object tuple binding is a term", L::Scala, "scala",
+        "object reviewHolder {\n  class reviewBase\n  val (reviewBase, reviewOther) = (1, 2)\n  \
+         class ReviewChild extends reviewBase\n}\n",
+        &[bases("reviewHolder.ReviewChild", &[to("reviewBase", "reviewHolder.reviewBase")])]),
+    row("Scala object nested tuple binding is a term", L::Scala, "scala",
+        "object reviewHolder {\n  class reviewBase\n  val ((reviewBase, reviewOther), reviewThird) = ((1, 2), 3)\n  \
+         class ReviewChild extends reviewBase\n}\n",
+        &[bases("reviewHolder.ReviewChild", &[to("reviewBase", "reviewHolder.reviewBase")])]),
+    row("Scala object extractor binding is a term", L::Scala, "scala",
+        "object reviewHolder {\n  class reviewBase\n  val Some(reviewBase) = Option(1)\n  \
+         class ReviewChild extends reviewBase\n}\n",
+        &[bases("reviewHolder.ReviewChild", &[to("reviewBase", "reviewHolder.reviewBase")])]),
+    row("Scala simple vals beside a class", L::Scala, "scala",
+        "package reviewPkg\nclass reviewBase\nval reviewBase = 1\nclass ReviewChild extends reviewBase\n\
+         object reviewHolder {\n  class reviewBase\n  val reviewBase = 1\n  class ReviewChild extends reviewBase\n}\n",
+        &[bases("reviewPkg.ReviewChild", &[to("reviewBase", "reviewPkg.reviewBase")]),
+          bases("reviewPkg.reviewHolder.ReviewChild", &[to("reviewBase", "reviewPkg.reviewHolder.reviewBase")])]),
+    row("Scala pattern bindings in a function are terms", L::Scala, "scala",
+        "class reviewBase\nobject reviewProbe {\n  def tuple(): Unit = {\n    val (reviewBase, reviewOther) = (1, 2)\n    \
+         class ReviewChild extends reviewBase\n  }\n  def nested(): Unit = {\n    \
+         val ((reviewBase, reviewOther), reviewThird) = ((1, 2), 3)\n    class ReviewChild extends reviewBase\n  }\n  \
+         def extractor(): Unit = {\n    val Some(reviewBase) = Option(1)\n    class ReviewChild extends reviewBase\n  }\n}\n",
+        &[bases("reviewProbe.tuple.ReviewChild", &[to("reviewBase", "reviewBase")]),
+          bases("reviewProbe.nested.ReviewChild", &[to("reviewBase", "reviewBase")]),
+          bases("reviewProbe.extractor.ReviewChild", &[to("reviewBase", "reviewBase")])]),
 ];
 
-/// Every [`PATH_MEANING_MATRIX`] row's owners hold on the complete index and
+/// Where a [`PythonMemberShape`] is written.
+#[derive(Clone, Copy, PartialEq)]
+enum PythonContexts {
+    /// At module level and again inside `def reviewProbe(external):`.
+    Both,
+    /// Only inside the function (a `nonlocal` directive needs one).
+    FunctionOnly,
+}
+
+/// A Python path through a class's members, written once at module level:
+/// `source` ends with `class ReviewChild(<path>)`, and the member the path
+/// names is the type declared on `line` (`target`), or nothing when the
+/// shape leaves it unproved. [`python_member_rows`] writes every shape at
+/// module level and inside a function, so each binding decision is checked
+/// for a named owner and for a lexical (syntax) owner.
+struct PythonMemberShape {
+    label: &'static str,
+    source: &'static str,
+    path: &'static str,
+    /// The named member's in-file qualified name and declaration line at
+    /// module level.
+    target: Option<(&'static str, u32)>,
+    contexts: PythonContexts,
+}
+
+/// A two-segment shape: `ReviewHolder` declares `class ReviewBase` on line
+/// 2, then `$body` (class-body lines, indented four spaces), then `$after`
+/// (module-level lines) before the child.
+macro_rules! py_holder {
+    ($label:literal, $body:literal, $after:literal, $target:expr) => {
+        PythonMemberShape {
+            label: $label,
+            source: concat!(
+                "class ReviewHolder:\n    class ReviewBase:\n        pass\n", $body, $after,
+                "class ReviewChild(ReviewHolder.ReviewBase):\n    pass\n"
+            ),
+            path: "ReviewHolder.ReviewBase",
+            target: $target,
+            contexts: PythonContexts::Both,
+        }
+    };
+}
+
+/// A three-segment shape: `ReviewHolder.ReviewMiddle` declares `class
+/// ReviewBase` on line 3; `$middle` is written in the middle class's body
+/// (eight spaces), `$body` in the holder's and `$after` at module level.
+macro_rules! py_middle {
+    ($label:literal, $middle:literal, $body:literal, $after:literal, $target:expr) => {
+        PythonMemberShape {
+            label: $label,
+            source: concat!(
+                "class ReviewHolder:\n    class ReviewMiddle:\n        class ReviewBase:\n            pass\n",
+                $middle, $body, $after,
+                "class ReviewChild(ReviewHolder.ReviewMiddle.ReviewBase):\n    pass\n"
+            ),
+            path: "ReviewHolder.ReviewMiddle.ReviewBase",
+            target: $target,
+            contexts: PythonContexts::Both,
+        }
+    };
+}
+
+/// A shape whose holder writes only `$body`, with no member of its own
+/// before it.
+macro_rules! py_directive {
+    ($label:literal, $body:literal) => {
+        PythonMemberShape {
+            label: $label,
+            source: concat!("class ReviewHolder:\n", $body, "class ReviewChild(ReviewHolder.ReviewBase):\n    pass\n"),
+            path: "ReviewHolder.ReviewBase",
+            target: None,
+            contexts: PythonContexts::Both,
+        }
+    };
+}
+
+const PY_BASE: Option<(&str, u32)> = Some(("ReviewHolder.ReviewBase", 2));
+const PY_MIDDLE_BASE: Option<(&str, u32)> = Some(("ReviewHolder.ReviewMiddle.ReviewBase", 3));
+
+/// Every binding of a class member after the member's declaration that
+/// leaves the member unproved, and the controls that keep it.
+const PYTHON_MEMBER_SHAPES: &[PythonMemberShape] = &[
+    // The member rebound in the class body by a binding no record reports.
+    py_holder!("aliased `from` import", "    from builtins import object as ReviewBase\n", "", None),
+    py_holder!("`from` import", "    from external import ReviewBase\n", "", None),
+    py_holder!("aliased module import", "    import external as ReviewBase\n", "", None),
+    py_holder!("star import", "    from external import *\n", "", None),
+    py_holder!("deletion", "    del ReviewBase\n", "", None),
+    py_holder!("augmented assignment", "    ReviewBase += external\n", "", None),
+    py_holder!("nested tuple target", "    (reviewFirst, (ReviewBase, reviewSecond)) = external\n", "", None),
+    py_holder!("nested list target", "    [reviewFirst, [ReviewBase, reviewSecond]] = external\n", "", None),
+    py_holder!("starred target", "    reviewFirst, *ReviewBase = external\n", "", None),
+    py_holder!("dictionary `match` capture",
+        "    match external:\n        case {\"base\": ReviewBase}:\n            pass\n", "", None),
+    // Records that conflict with the member (clean before the repair).
+    py_holder!("simple assignment", "    ReviewBase = external\n", "", None),
+    py_holder!("flat tuple target", "    reviewFirst, ReviewBase = external\n", "", None),
+    py_holder!("flat list target", "    [reviewFirst, ReviewBase] = external\n", "", None),
+    py_holder!("`for` target", "    for ReviewBase in external:\n        pass\n", "", None),
+    py_holder!("`with` target", "    with external as ReviewBase:\n        pass\n", "", None),
+    py_holder!("`except` alias",
+        "    try:\n        pass\n    except external as ReviewBase:\n        pass\n", "", None),
+    py_holder!("walrus", "    (ReviewBase := external)\n", "", None),
+    py_holder!("same-named `def`", "    def ReviewBase(self):\n        pass\n", "", None),
+    py_holder!("second same-named class", "    class ReviewBase:\n        pass\n", "", None),
+    // Positive controls.
+    py_holder!("unedited holder", "", "", PY_BASE),
+    py_holder!("unrelated import", "    from external import ReviewOther\n", "", PY_BASE),
+    py_holder!("unrelated deletion", "    del ReviewOther\n", "", PY_BASE),
+    py_holder!("unrelated qualified write", "", "ReviewHolder.ReviewOther = external\n", PY_BASE),
+    py_holder!("qualified write through another owner", "", "ReviewOtherHolder.ReviewBase = external\n", PY_BASE),
+    // Explicit writes through the proved owner path.
+    py_holder!("qualified assignment", "", "ReviewHolder.ReviewBase = external\n", None),
+    py_holder!("qualified augmented assignment", "", "ReviewHolder.ReviewBase += external\n", None),
+    py_holder!("qualified deletion", "", "del ReviewHolder.ReviewBase\n", None),
+    py_holder!("qualified write in a function", "",
+        "def reviewWriter(external):\n    ReviewHolder.ReviewBase = external\n", None),
+    // Three segments: the final member and the owner passed through.
+    py_middle!("three segments, unedited", "", "", "", PY_MIDDLE_BASE),
+    py_middle!("three segments, final member imported", "        from external import ReviewBase\n", "", "", None),
+    py_middle!("three segments, final member deleted", "        del ReviewBase\n", "", "", None),
+    py_middle!("three segments, middle owner imported", "", "    from external import ReviewMiddle\n", "", None),
+    py_middle!("three segments, middle owner deleted", "", "    del ReviewMiddle\n", "", None),
+    py_middle!("three segments, final member written", "", "",
+        "ReviewHolder.ReviewMiddle.ReviewBase = external\n", None),
+    py_middle!("three segments, middle owner written", "", "", "del ReviewHolder.ReviewMiddle\n", None),
+    // A directive places the class-body declaration at its destination.
+    py_directive!("`global` before a class", "    global ReviewBase\n    class ReviewBase:\n        pass\n"),
+    py_directive!("`global` before a `def`", "    global ReviewBase\n    def ReviewBase():\n        pass\n"),
+    py_directive!("`global` before an import", "    global ReviewBase\n    from external import ReviewBase\n"),
+    py_directive!("`global` before an assignment", "    global ReviewBase\n    ReviewBase = external\n"),
+    py_directive!("`global` before a tuple assignment",
+        "    global ReviewBase\n    reviewFirst, ReviewBase = external\n"),
+    py_directive!("`global` before a deletion", "    global ReviewBase\n    del ReviewBase\n"),
+    PythonMemberShape {
+        label: "`global` class's nested class",
+        source: "class ReviewHolder:\n    global ReviewBase\n    class ReviewBase:\n        class ReviewDeep:\n\
+                 \x20           pass\nclass ReviewChild(ReviewHolder.ReviewBase.ReviewDeep):\n    pass\n",
+        path: "ReviewHolder.ReviewBase.ReviewDeep",
+        target: None,
+        contexts: PythonContexts::Both,
+    },
+    PythonMemberShape {
+        label: "`nonlocal` before a class",
+        source: "ReviewBase = external\nclass ReviewHolder:\n    nonlocal ReviewBase\n    class ReviewBase:\n\
+                 \x20       pass\nclass ReviewChild(ReviewHolder.ReviewBase):\n    pass\n",
+        path: "ReviewHolder.ReviewBase",
+        target: None,
+        contexts: PythonContexts::FunctionOnly,
+    },
+    PythonMemberShape {
+        label: "`nonlocal` before a `def`",
+        source: "ReviewBase = external\nclass ReviewHolder:\n    nonlocal ReviewBase\n    def ReviewBase():\n\
+                 \x20       pass\nclass ReviewChild(ReviewHolder.ReviewBase):\n    pass\n",
+        path: "ReviewHolder.ReviewBase",
+        target: None,
+        contexts: PythonContexts::FunctionOnly,
+    },
+    PythonMemberShape {
+        label: "`nonlocal` class's nested class",
+        source: "ReviewBase = external\nclass ReviewHolder:\n    nonlocal ReviewBase\n    class ReviewBase:\n\
+                 \x20       class ReviewDeep:\n            pass\n\
+                 class ReviewChild(ReviewHolder.ReviewBase.ReviewDeep):\n    pass\n",
+        path: "ReviewHolder.ReviewBase.ReviewDeep",
+        target: None,
+        contexts: PythonContexts::FunctionOnly,
+    },
+];
+
+/// [`PYTHON_MEMBER_SHAPES`] as path-meaning rows: each shape at module
+/// level (a named owner) and inside `def reviewProbe(external):` (a lexical
+/// owner, one line down, every name under `reviewProbe`).
+fn python_member_rows() -> Vec<PathMeaningRow> {
+    fn leak(text: String) -> &'static str {
+        Box::leak(text.into_boxed_str())
+    }
+    let mut rows = Vec::new();
+    for shape in PYTHON_MEMBER_SHAPES {
+        let contexts: &[bool] = match shape.contexts {
+            PythonContexts::Both => &[false, true],
+            PythonContexts::FunctionOnly => &[true],
+        };
+        for &in_function in contexts {
+            let (source, prefix, offset, place) = if in_function {
+                let body: String = shape
+                    .source
+                    .lines()
+                    .map(|line| if line.is_empty() { "\n".to_string() } else { format!("    {line}\n") })
+                    .collect();
+                (leak(format!("def reviewProbe(external):\n{body}")), "reviewProbe.", 1, "function-local holder")
+            } else {
+                (shape.source, "", 0, "module-level holder")
+            };
+            let target = match shape.target {
+                Some((qualified_name, line)) => {
+                    to_at(shape.path, leak(format!("{prefix}{qualified_name}")), line + offset)
+                }
+                None => text(shape.path),
+            };
+            let owners: &'static [Owner] =
+                Box::leak(vec![bases(leak(format!("{prefix}ReviewChild")), Box::leak(Box::new([target])))].into_boxed_slice());
+            rows.push(row(leak(format!("Python member binding, {place}: {}", shape.label)), L::Python, "py", source, owners));
+        }
+    }
+    rows
+}
+
+static PYTHON_MEMBER_ROWS: std::sync::LazyLock<Vec<PathMeaningRow>> = std::sync::LazyLock::new(python_member_rows);
+
+/// Separately written nested Swift owners retain generic bindings from
+/// every enclosing declaration, without importing ordinary members.
+fn swift_nested_generic_rows() -> Vec<PathMeaningRow> {
+    fn leak(value: String) -> &'static str { Box::leak(value.into_boxed_str()) }
+    let mut rows = Vec::new();
+    let mut add = |label: &str, source: String, owner: &str, target: Target, conformance: bool| {
+        let targets = Box::leak(vec![target].into_boxed_slice());
+        let owners = Box::leak(vec![Owner {
+            qualified_name: leak(owner.to_string()), extends: &[],
+            implements: if conformance { targets } else { &[] },
+            unclassified: if conformance { &[] } else { targets },
+        }].into_boxed_slice());
+        rows.push(row(leak(format!("Swift nested generic extension: {label}")), L::Swift, "swift", leak(source), owners));
+    };
+    for (label, owner, declaration) in [
+        ("outer parameter", "ReviewOuter.ReviewInner", "struct ReviewOuter<ReviewBase> { struct ReviewInner {} }"),
+        ("three-segment outer parameter", "ReviewOuter.ReviewMiddle.ReviewInner", "struct ReviewOuter<ReviewBase> { struct ReviewMiddle { struct ReviewInner {} } }"),
+        ("middle parameter", "ReviewOuter.ReviewMiddle.ReviewInner", "struct ReviewOuter { struct ReviewMiddle<ReviewBase> { struct ReviewInner {} } }"),
+        ("own parameter control", "ReviewOuter.ReviewInner", "struct ReviewOuter { struct ReviewInner<ReviewBase> {} }"),
+    ] {
+        add(label, format!("class ReviewBase {{}}\n{declaration}\nextension {owner} {{ class ReviewChild: ReviewBase {{}} }}\n"),
+            &format!("{owner}.ReviewChild"), text("ReviewBase"), false);
+        add(&format!("{label} conformance"), format!("protocol ReviewBase {{}}\n{declaration}\nextension {owner}: ReviewBase {{}}\n"), owner, text("ReviewBase"), true);
+    }
+    add("qualified parameter", "struct ReviewHolder { class ReviewBase {} }\nstruct ReviewOuter<ReviewHolder> { struct ReviewInner {} }\nextension ReviewOuter.ReviewInner { class ReviewChild: ReviewHolder.ReviewBase {} }\n".into(),
+        "ReviewOuter.ReviewInner.ReviewChild", text("ReviewHolder.ReviewBase"), false);
+    for body in ["func probe() { class ReviewChild: ReviewBase {} }", "func probe() { let callback = { class ReviewChild: ReviewBase {} } }"] {
+        add(body, format!("class ReviewBase {{}}\nstruct ReviewOuter<ReviewBase> {{ struct ReviewInner {{}} }}\nextension ReviewOuter.ReviewInner {{ {body} }}\n"),
+            "ReviewOuter.ReviewInner.probe.ReviewChild", text("ReviewBase"), false);
+    }
+    add("ordinary owner member is not a header binding", "struct ReviewOuter { protocol ReviewBase {}\nstruct ReviewInner {} }\nextension ReviewOuter.ReviewInner: ReviewBase {}\n".into(),
+        "ReviewOuter.ReviewInner", text("ReviewBase"), true);
+    for name in ["Int", "Int8", "Int16", "Int32", "Int64", "UInt", "UInt8", "UInt16", "UInt32", "UInt64", "String", "Character", "Float", "Double"] {
+        for qualified in [false, true] {
+            let parameter = if qualified { "Swift" } else { name };
+            let target = if qualified { leak(format!("Swift.{name}")) } else { name };
+            add(target, format!("struct ReviewOuter<{parameter}> {{ struct ReviewInner {{}} }}\nextension ReviewOuter.ReviewInner {{ enum ReviewChild: {target} {{ case a }} }}\n"),
+                "ReviewOuter.ReviewInner.ReviewChild", text(target), false);
+        }
+    }
+    for (parameter, target) in [("Swift", "Swift.Unicode.Scalar"), ("Unicode", "Unicode.Scalar")] {
+        add(target, format!("struct ReviewOuter<{parameter}> {{ struct ReviewInner {{}} }}\nextension ReviewOuter.ReviewInner {{ enum ReviewChild: {target} {{ case a }} }}\n"),
+            "ReviewOuter.ReviewInner.ReviewChild", text(target), false);
+    }
+    for (label, source, owner, extends, implements) in [
+        ("nongeneric nested body", "class ReviewBase {}\nstruct ReviewOuter { struct ReviewInner {} }\nextension ReviewOuter.ReviewInner { class ReviewChild: ReviewBase {} }\n", "ReviewOuter.ReviewInner.ReviewChild", &[to("ReviewBase", "ReviewBase")][..], &[][..]),
+        ("nongeneric nested conformance", "protocol ReviewBase {}\nstruct ReviewOuter { struct ReviewInner {} }\nextension ReviewOuter.ReviewInner: ReviewBase {}\n", "ReviewOuter.ReviewInner", &[][..], &[to("ReviewBase", "ReviewBase")][..]),
+        ("nearer method-local class", "class ReviewBase {}\nstruct ReviewOuter<ReviewBase> { struct ReviewInner {} }\nextension ReviewOuter.ReviewInner { func probe() { class ReviewBase {}\nclass ReviewChild: ReviewBase {} } }\n", "ReviewOuter.ReviewInner.probe.ReviewChild", &[to("ReviewBase", "ReviewOuter.ReviewInner.probe.ReviewBase")][..], &[][..]),
+        ("unshadowed raw type", "struct ReviewOuter { struct ReviewInner {} }\nextension ReviewOuter.ReviewInner { enum ReviewChild: Int { case a } }\n", "ReviewOuter.ReviewInner.ReviewChild", &[][..], &[][..]),
+    ] {
+        let owners = Box::leak(vec![Owner { qualified_name: owner,
+            extends: Box::leak(extends.to_vec().into_boxed_slice()),
+            implements: Box::leak(implements.to_vec().into_boxed_slice()), unclassified: &[],
+        }].into_boxed_slice());
+        rows.push(row(leak(format!("Swift nested generic extension control: {label}")), L::Swift, "swift", source, owners));
+    }
+    rows
+}
+
+static SWIFT_NESTED_GENERIC_ROWS: std::sync::LazyLock<Vec<PathMeaningRow>> = std::sync::LazyLock::new(swift_nested_generic_rows);
+
+/// Distinct owners that share one spelling, and the reopenings that do
+/// not: a path continues through an intermediate owner only when the
+/// language and the canonical owner path prove one owner (a reopened C++,
+/// TypeScript, C# or PHP namespace, one canonical inline namespace), and
+/// stops, text only, at competing owners (C++ namespaces reached through
+/// different inline namespaces, a direct and an injected owner, two Rust
+/// modules, two Scala objects), however unique the final name is. A lookup
+/// made inside one of the competing owners reads that owner's own members.
+/// The Rust impl rows check every impl consumer: self type, trait, members,
+/// empty and inherent impls.
+const OWNER_AMBIGUITY_MATRIX: &[PathMeaningRow] = &[
+    // --- C++ inline namespaces: canonical identity decides merging.
+    row(
+        "C++ intermediate namespace injected from two inline namespaces",
+        L::Cpp,
+        "cpp",
+        "namespace ReviewNs {\n\
+         \x20   inline namespace a { namespace Shared { struct ReviewBase {}; } }\n\
+         \x20   inline namespace b { namespace Shared {} }\n\
+         }\n\
+         struct ReviewChild : ReviewNs::Shared::ReviewBase {};\n\
+         struct ReviewRooted : ::ReviewNs::Shared::ReviewBase {};\n\
+         struct ReviewExplicit : ReviewNs::a::Shared::ReviewBase {};\n\
+         namespace ReviewNs { struct ReviewBare : Shared::ReviewBase {}; }\n",
+        &[
+            bases("ReviewChild", &[text("ReviewNs::Shared::ReviewBase")]),
+            bases("ReviewRooted", &[text("::ReviewNs::Shared::ReviewBase")]),
+            bases("ReviewExplicit", &[to_at("ReviewNs::a::Shared::ReviewBase", "ReviewNs::a::Shared::ReviewBase", 2)]),
+            bases("ReviewNs::ReviewBare", &[text("Shared::ReviewBase")]),
+        ],
+    ),
+    row(
+        "C++ direct and injected owners of one spelling",
+        L::Cpp,
+        "cpp",
+        "namespace ReviewNs {\n\
+         \x20   namespace Shared { struct ReviewBase {}; }\n\
+         \x20   inline namespace a { namespace Shared {} }\n\
+         }\n\
+         struct ReviewChild : ReviewNs::Shared::ReviewBase {};\n",
+        &[bases("ReviewChild", &[text("ReviewNs::Shared::ReviewBase")])],
+    ),
+    row(
+        "C++ ambiguity under a nested inline namespace stops every later segment",
+        L::Cpp,
+        "cpp",
+        "namespace ReviewNs {\n\
+         \x20   inline namespace a { inline namespace c { namespace Shared {\n\
+         \x20       struct ReviewBase {};\n\
+         \x20       namespace Inner { struct ReviewBase {}; }\n\
+         \x20   } } }\n\
+         \x20   inline namespace b { namespace Shared {} }\n\
+         }\n\
+         struct ReviewChild : ReviewNs::Shared::ReviewBase {};\n\
+         struct ReviewDeeper : ReviewNs::Shared::Inner::ReviewBase {};\n",
+        &[
+            bases("ReviewChild", &[text("ReviewNs::Shared::ReviewBase")]),
+            bases("ReviewDeeper", &[text("ReviewNs::Shared::Inner::ReviewBase")]),
+        ],
+    ),
+    row(
+        "C++ ordinary namespace reopened (control)",
+        L::Cpp,
+        "cpp",
+        "namespace ReviewNs { namespace Shared { struct ReviewBase {}; } }\n\
+         namespace ReviewNs { namespace Shared {} }\n\
+         struct ReviewChild : ReviewNs::Shared::ReviewBase {};\n",
+        &[bases("ReviewChild", &[to_at("ReviewNs::Shared::ReviewBase", "ReviewNs::Shared::ReviewBase", 1)])],
+    ),
+    row(
+        "C++ one canonical inline namespace defined twice (control)",
+        L::Cpp,
+        "cpp",
+        "namespace ReviewNs { inline namespace a { namespace Shared { struct ReviewBase {}; } } }\n\
+         namespace ReviewNs { inline namespace a { namespace Shared {} } }\n\
+         struct ReviewChild : ReviewNs::Shared::ReviewBase {};\n",
+        &[bases("ReviewChild", &[to_at("ReviewNs::Shared::ReviewBase", "ReviewNs::a::Shared::ReviewBase", 1)])],
+    ),
+    row(
+        "C++ differently named injected namespace (control)",
+        L::Cpp,
+        "cpp",
+        "namespace ReviewNs {\n\
+         \x20   inline namespace a { namespace Shared { struct ReviewBase {}; } }\n\
+         \x20   inline namespace b { namespace Other {} }\n\
+         }\n\
+         struct ReviewChild : ReviewNs::Shared::ReviewBase {};\n",
+        &[bases("ReviewChild", &[to_at("ReviewNs::Shared::ReviewBase", "ReviewNs::a::Shared::ReviewBase", 2)])],
+    ),
+    row(
+        "C++ two injected final names and two injected struct owners (control)",
+        L::Cpp,
+        "cpp",
+        "namespace ReviewNs {\n\
+         \x20   inline namespace a { struct ReviewBase {}; struct Shared { struct ReviewInner {}; }; }\n\
+         \x20   inline namespace b { struct ReviewBase {}; struct Shared {}; }\n\
+         }\n\
+         struct ReviewChild : ReviewNs::ReviewBase {};\n\
+         struct ReviewOwned : ReviewNs::Shared::ReviewInner {};\n",
+        &[
+            bases("ReviewChild", &[text("ReviewNs::ReviewBase")]),
+            bases("ReviewOwned", &[text("ReviewNs::Shared::ReviewInner")]),
+        ],
+    ),
+    row(
+        "C++ duplicate type owners with a member in one (control)",
+        L::Cpp,
+        "cpp",
+        "struct ReviewHolder { struct ReviewBase {}; };\n\
+         struct ReviewHolder {};\n\
+         struct ReviewChild : ReviewHolder::ReviewBase {};\n",
+        &[bases("ReviewChild", &[text("ReviewHolder::ReviewBase")])],
+    ),
+    // --- Rust modules never merge.
+    row(
+        "Rust two modules of one name, the base in only one",
+        L::Rust,
+        "rs",
+        "mod ReviewHolder { pub trait ReviewBase {} pub mod Inner { pub trait ReviewBase {} } }\n\
+         mod ReviewHolder {}\n\
+         trait ReviewChild: ReviewHolder::ReviewBase {}\n\
+         trait ReviewRooted: crate::ReviewHolder::ReviewBase {}\n\
+         trait ReviewDeeper: ReviewHolder::Inner::ReviewBase {}\n",
+        &[
+            bases("ReviewChild", &[text("ReviewHolder::ReviewBase")]),
+            bases("ReviewRooted", &[text("crate::ReviewHolder::ReviewBase")]),
+            bases("ReviewDeeper", &[text("ReviewHolder::Inner::ReviewBase")]),
+        ],
+    ),
+    row(
+        "Rust modules of one name under opposite cfg attributes",
+        L::Rust,
+        "rs",
+        "#[cfg(unix)]\n\
+         mod ReviewHolder { pub trait ReviewBase {} }\n\
+         #[cfg(not(unix))]\n\
+         mod ReviewHolder {}\n\
+         trait ReviewChild: ReviewHolder::ReviewBase {}\n",
+        &[bases("ReviewChild", &[text("ReviewHolder::ReviewBase")])],
+    ),
+    row(
+        "Rust lookup inside one of two same-named modules reads its own members",
+        L::Rust,
+        "rs",
+        "mod ReviewHolder {\n\
+         \x20   pub trait ReviewBase {}\n\
+         \x20   pub trait ReviewChild: ReviewBase {}\n\
+         \x20   pub trait ReviewSelf: self::ReviewBase {}\n\
+         \x20   mod inner { pub trait ReviewUp: super::ReviewBase {} }\n\
+         }\n\
+         mod ReviewHolder { pub trait ReviewBase {} }\n",
+        &[
+            bases("ReviewHolder::ReviewChild", &[to_at("ReviewBase", "ReviewHolder::ReviewBase", 2)]),
+            bases("ReviewHolder::ReviewSelf", &[to_at("self::ReviewBase", "ReviewHolder::ReviewBase", 2)]),
+            bases("ReviewHolder::inner::ReviewUp", &[to_at("super::ReviewBase", "ReviewHolder::ReviewBase", 2)]),
+        ],
+    ),
+    row(
+        "Rust duplicate local modules (control)",
+        L::Rust,
+        "rs",
+        "fn review_scope() {\n\
+         \x20   mod ReviewHolder { pub trait ReviewBase {} pub trait ReviewSelf: self::ReviewBase {} }\n\
+         \x20   mod ReviewHolder { pub trait ReviewBase {} }\n\
+         \x20   trait ReviewChild: ReviewHolder::ReviewBase {}\n\
+         }\n",
+        &[
+            bases("review_scope::ReviewChild", &[text("ReviewHolder::ReviewBase")]),
+            bases(
+                "review_scope::ReviewHolder::ReviewSelf",
+                &[to_at("self::ReviewBase", "review_scope::ReviewHolder::ReviewBase", 2)],
+            ),
+        ],
+    ),
+    PathMeaningRow {
+        label: "Rust impl of a self type through two same-named modules",
+        language: L::Rust,
+        extension: "rs",
+        source: "mod ReviewHolder { pub struct ReviewBase; }\n\
+                 mod ReviewHolder {}\n\
+                 pub trait ReviewTrait {}\n\
+                 impl ReviewTrait for ReviewHolder::ReviewBase { fn review_probe(&self) {} }\n",
+        owners: &[implementing("ReviewHolder::ReviewBase", &[])],
+        impl_members: &[ImplMember {
+            method: "review_probe",
+            container: "ReviewHolder::ReviewBase",
+            owner: None,
+            implements: Some(to_at("ReviewTrait", "ReviewTrait", 3)),
+            container_kind: None,
+        }],
+        untouched: &["ReviewHolder::ReviewBase"],
+    },
+    PathMeaningRow {
+        label: "Rust impl of a trait through two same-named modules",
+        language: L::Rust,
+        extension: "rs",
+        source: "mod ReviewHolder { pub trait ReviewTrait {} }\n\
+                 mod ReviewHolder {}\n\
+                 pub struct ReviewBase;\n\
+                 impl ReviewHolder::ReviewTrait for ReviewBase { fn review_probe(&self) {} }\n",
+        owners: &[implementing("ReviewBase", &[text("ReviewHolder::ReviewTrait")])],
+        impl_members: &[ImplMember {
+            method: "review_probe",
+            container: "ReviewBase",
+            owner: Some("ReviewBase"),
+            implements: Some(text("ReviewHolder::ReviewTrait")),
+            container_kind: Some(SymbolKindV2::Type),
+        }],
+        untouched: &[],
+    },
+    PathMeaningRow {
+        label: "Rust impl of a self type and a trait through two same-named modules",
+        language: L::Rust,
+        extension: "rs",
+        source: "mod ReviewHolder { pub struct ReviewBase; pub trait ReviewTrait {} }\n\
+                 mod ReviewHolder {}\n\
+                 impl ReviewHolder::ReviewTrait for ReviewHolder::ReviewBase { fn review_probe(&self) {} }\n",
+        owners: &[implementing("ReviewHolder::ReviewBase", &[])],
+        impl_members: &[ImplMember {
+            method: "review_probe",
+            container: "ReviewHolder::ReviewBase",
+            owner: None,
+            implements: Some(text("ReviewHolder::ReviewTrait")),
+            container_kind: None,
+        }],
+        untouched: &["ReviewHolder::ReviewBase"],
+    },
+    PathMeaningRow {
+        label: "Rust empty impl of a self type through two same-named modules",
+        language: L::Rust,
+        extension: "rs",
+        source: "mod ReviewHolder { pub struct ReviewBase; }\n\
+                 mod ReviewHolder {}\n\
+                 pub trait ReviewTrait {}\n\
+                 impl ReviewTrait for ReviewHolder::ReviewBase {}\n",
+        owners: &[implementing("ReviewHolder::ReviewBase", &[])],
+        impl_members: &[],
+        untouched: &["ReviewHolder::ReviewBase"],
+    },
+    PathMeaningRow {
+        label: "Rust inherent impl of a self type through two same-named modules",
+        language: L::Rust,
+        extension: "rs",
+        source: "mod ReviewHolder { pub struct ReviewBase; }\n\
+                 mod ReviewHolder {}\n\
+                 impl ReviewHolder::ReviewBase { fn review_probe(&self) {} }\n",
+        owners: &[implementing("ReviewHolder::ReviewBase", &[])],
+        impl_members: &[ImplMember {
+            method: "review_probe",
+            container: "ReviewHolder::ReviewBase",
+            owner: None,
+            implements: None,
+            container_kind: None,
+        }],
+        untouched: &["ReviewHolder::ReviewBase"],
+    },
+    PathMeaningRow {
+        label: "Rust impl of a self type through one module (control)",
+        language: L::Rust,
+        extension: "rs",
+        source: "mod ReviewHolder { pub struct ReviewBase; }\n\
+                 pub trait ReviewTrait {}\n\
+                 impl ReviewTrait for ReviewHolder::ReviewBase { fn review_probe(&self) {} }\n",
+        owners: &[implementing("ReviewHolder::ReviewBase", &[to_at("ReviewTrait", "ReviewTrait", 2)])],
+        impl_members: &[ImplMember {
+            method: "review_probe",
+            container: "ReviewHolder::ReviewBase",
+            owner: Some("ReviewHolder::ReviewBase"),
+            implements: Some(to_at("ReviewTrait", "ReviewTrait", 2)),
+            container_kind: Some(SymbolKindV2::Type),
+        }],
+        untouched: &[],
+    },
+    // --- Scala objects never merge.
+    row(
+        "Scala two objects of one name, the base in only one",
+        L::Scala,
+        "scala",
+        "object ReviewHolder { class ReviewBase; object Inner { class ReviewBase } }\n\
+         object ReviewHolder\n\
+         class ReviewChild extends ReviewHolder.ReviewBase\n\
+         class ReviewDeeper extends ReviewHolder.Inner.ReviewBase\n",
+        &[
+            unclassified("ReviewChild", &[text("ReviewHolder.ReviewBase")]),
+            unclassified("ReviewDeeper", &[text("ReviewHolder.Inner.ReviewBase")]),
+        ],
+    ),
+    row(
+        "Scala lookup inside one of two same-named objects reads its own members",
+        L::Scala,
+        "scala",
+        "object ReviewHolder {\n\
+         \x20 class ReviewBase\n\
+         \x20 class ReviewChild extends ReviewBase\n\
+         }\n\
+         object ReviewHolder { class ReviewBase }\n",
+        &[bases("ReviewHolder.ReviewChild", &[to_at("ReviewBase", "ReviewHolder.ReviewBase", 2)])],
+    ),
+    row(
+        "Scala duplicate local objects (control)",
+        L::Scala,
+        "scala",
+        "object ReviewScope {\n\
+         \x20 def review(): Unit = {\n\
+         \x20   object ReviewHolder { class ReviewBase }\n\
+         \x20   object ReviewHolder { class ReviewOther }\n\
+         \x20   class ReviewChild extends ReviewHolder.ReviewBase\n\
+         \x20 }\n\
+         }\n",
+        &[unclassified("ReviewScope.review.ReviewChild", &[text("ReviewHolder.ReviewBase")])],
+    ),
+    row(
+        "Scala companion class and object, the base in the object (control)",
+        L::Scala,
+        "scala",
+        "class ReviewHolder\n\
+         object ReviewHolder {\n\
+         \x20 class ReviewBase\n\
+         \x20 class ReviewInside extends ReviewBase\n\
+         }\n\
+         class ReviewChild extends ReviewHolder.ReviewBase\n",
+        &[
+            bases("ReviewHolder.ReviewInside", &[to_at("ReviewBase", "ReviewHolder.ReviewBase", 3)]),
+            bases("ReviewChild", &[to_at("ReviewHolder.ReviewBase", "ReviewHolder.ReviewBase", 3)]),
+        ],
+    ),
+    // --- Namespace reopenings that merge (controls).
+    row(
+        "TypeScript namespace reopened (control)",
+        L::TypeScript,
+        "ts",
+        "namespace ReviewNs { export class ReviewBase {} }\n\
+         namespace ReviewNs { export class ReviewOther {} }\n\
+         class ReviewChild extends ReviewNs.ReviewBase {}\n",
+        &[bases("ReviewChild", &[to_at("ReviewNs.ReviewBase", "ReviewNs.ReviewBase", 1)])],
+    ),
+    row(
+        "C# namespace reopened (control)",
+        L::CSharp,
+        "cs",
+        "namespace ReviewNs { class ReviewBase {} }\n\
+         namespace ReviewNs { class ReviewOther {} }\n\
+         class ReviewChild : ReviewNs.ReviewBase {}\n",
+        &[bases("ReviewChild", &[to_at("ReviewNs.ReviewBase", "ReviewNs.ReviewBase", 1)])],
+    ),
+    row(
+        "PHP block namespace reopened, rooted target (control)",
+        L::Php,
+        "php",
+        "<?php\n\
+         namespace ReviewNs { class ReviewBase {} }\n\
+         namespace ReviewNs { class ReviewOther {} }\n\
+         namespace ReviewUse { class ReviewChild extends \\ReviewNs\\ReviewBase {} }\n",
+        &[bases("ReviewUse\\ReviewChild", &[to_at("\\ReviewNs\\ReviewBase", "ReviewNs\\ReviewBase", 2)])],
+    ),
+    row(
+        "PHP statement namespace reopened, rooted target (control)",
+        L::Php,
+        "php",
+        "<?php\n\
+         namespace ReviewNs;\n\
+         class ReviewBase {}\n\
+         namespace ReviewUse;\n\
+         class ReviewChild extends \\ReviewNs\\ReviewBase {}\n\
+         namespace ReviewNs;\n\
+         class ReviewSibling extends ReviewBase {}\n",
+        &[
+            bases("ReviewUse\\ReviewChild", &[to_at("\\ReviewNs\\ReviewBase", "ReviewNs\\ReviewBase", 3)]),
+            bases("ReviewNs\\ReviewSibling", &[to_at("ReviewBase", "ReviewNs\\ReviewBase", 3)]),
+        ],
+    ),
+    // --- Duplicate ordinary owners (controls).
+    row(
+        "Java duplicate classes with a member in one (control)",
+        L::Java,
+        "java",
+        "class ReviewHolder { static class ReviewBase {} }\n\
+         class ReviewHolder {}\n\
+         class ReviewChild extends ReviewHolder.ReviewBase {}\n",
+        &[bases("ReviewChild", &[text("ReviewHolder.ReviewBase")])],
+    ),
+    row(
+        "Swift duplicate types with a member in one (control)",
+        L::Swift,
+        "swift",
+        "struct ReviewHolder { class ReviewBase {} }\n\
+         struct ReviewHolder {}\n\
+         class ReviewChild: ReviewHolder.ReviewBase {}\n",
+        &[unclassified("ReviewChild", &[text("ReviewHolder.ReviewBase")])],
+    ),
+    row(
+        "TypeScript duplicate classes before a qualified base (control)",
+        L::TypeScript,
+        "ts",
+        "class ReviewHolder {}\n\
+         class ReviewHolder {}\n\
+         class ReviewChild extends ReviewHolder.ReviewBase {}\n",
+        &[bases("ReviewChild", &[text("ReviewHolder.ReviewBase")])],
+    ),
+    row(
+        "JavaScript duplicate classes before a qualified base (control)",
+        L::JavaScript,
+        "js",
+        "class ReviewHolder {}\n\
+         class ReviewHolder {}\n\
+         class ReviewChild extends ReviewHolder.ReviewBase {}\n",
+        &[bases("ReviewChild", &[text("ReviewHolder.ReviewBase")])],
+    ),
+    row(
+        "Python duplicate classes before a qualified base (control)",
+        L::Python,
+        "py",
+        "class ReviewHolder:\n    class ReviewBase:\n        pass\n\
+         class ReviewHolder:\n    pass\n\
+         class ReviewChild(ReviewHolder.ReviewBase):\n    pass\n",
+        &[bases("ReviewChild", &[text("ReviewHolder.ReviewBase")])],
+    ),
+    row(
+        "Go duplicate interfaces before an embedding (control)",
+        L::Go,
+        "go",
+        "package shapes\n\ntype ReviewBase interface{ M() }\ntype ReviewBase interface{ N() }\n\
+         type ReviewChild interface{ ReviewBase }\n",
+        &[bases("shapes.ReviewChild", &[text("ReviewBase")])],
+    ),
+];
+
+/// Swift declarations inside an extension whose owner is not proved
+/// (ambiguous, aliased, imported, external): the owner's generic
+/// parameters and member types are unknown, so a base the lexical scopes
+/// leave unbound keeps its text and its uncertain category, a raw-type
+/// spelling included; a nearer lexical declaration still decides.
+fn swift_unproved_owner_rows() -> Vec<PathMeaningRow> {
+    fn leak(value: String) -> &'static str { Box::leak(value.into_boxed_str()) }
+    let mut rows = Vec::new();
+    let mut add = |label: &str, source: String, owner: &str, target: Target, resolved: bool| {
+        let targets: &'static [Target] = Box::leak(vec![target].into_boxed_slice());
+        let owners = Box::leak(vec![Owner {
+            qualified_name: leak(owner.to_string()),
+            extends: if resolved { targets } else { &[] },
+            implements: &[],
+            unclassified: if resolved { &[] } else { targets },
+        }].into_boxed_slice());
+        rows.push(row(leak(format!("Swift unproved extension owner: {label}")), L::Swift, "swift", leak(source), owners));
+    };
+    const AMBIGUOUS: &str = "struct ReviewHolder<ReviewBase> { struct ReviewInner {} }\nstruct ReviewHolder {}\n";
+    add("ambiguous nested owner with a possible parameter",
+        format!("class ReviewBase {{}}\n{AMBIGUOUS}extension ReviewHolder.ReviewInner {{ class ReviewChild: ReviewBase {{}} }}\n"),
+        "ReviewHolder.ReviewInner.ReviewChild", text("ReviewBase"), false);
+    add("alias-blocked owner",
+        "class ReviewBase {}\ntypealias ReviewHolder = External\nextension ReviewHolder.ReviewInner { class ReviewChild: ReviewBase {} }\n".into(),
+        "ReviewHolder.ReviewInner.ReviewChild", text("ReviewBase"), false);
+    add("selectively imported owner",
+        "import struct Lib.ReviewHolder\nclass ReviewBase {}\nextension ReviewHolder { class ReviewChild: ReviewBase {} }\n".into(),
+        "ReviewHolder.ReviewChild", text("ReviewBase"), false);
+    add("external owner",
+        "class ReviewBase {}\nextension External { class ReviewChild: ReviewBase {} }\n".into(),
+        "External.ReviewChild", text("ReviewBase"), false);
+    add("nearer method-local class under an ambiguous owner",
+        format!("class ReviewBase {{}}\n{AMBIGUOUS}extension ReviewHolder.ReviewInner {{ func probe() {{ class ReviewBase {{}}\nclass ReviewChild: ReviewBase {{}} }} }}\n"),
+        "ReviewHolder.ReviewInner.probe.ReviewChild", to_at("ReviewBase", "ReviewHolder.ReviewInner.probe.ReviewBase", 4), true);
+    add("nearer method-local class under an external owner",
+        "class ReviewBase {}\nextension External { func probe() { class ReviewBase {}\nclass ReviewChild: ReviewBase {} } }\n".into(),
+        "External.probe.ReviewChild", to_at("ReviewBase", "External.probe.ReviewBase", 2), true);
+    let simple = ["Int", "Int8", "Int16", "Int32", "Int64", "UInt", "UInt8", "UInt16", "UInt32", "UInt64", "String", "Character", "Float", "Double"];
+    let spellings = simple
+        .iter()
+        .flat_map(|name| [(*name, *name), ("Swift", leak(format!("Swift.{name}")))])
+        .chain([("Unicode", "Unicode.Scalar"), ("Swift", "Swift.Unicode.Scalar")]);
+    for (parameter, target) in spellings {
+        add(&format!("raw type {target}"),
+            format!("struct ReviewHolder<{parameter}> {{ struct ReviewInner {{}} }}\nstruct ReviewHolder {{}}\n\
+                extension ReviewHolder.ReviewInner {{ enum ReviewChild: {target} {{ case a }} }}\n"),
+            "ReviewHolder.ReviewInner.ReviewChild", text(target), false);
+    }
+    rows
+}
+
+static SWIFT_UNPROVED_OWNER_ROWS: std::sync::LazyLock<Vec<PathMeaningRow>> =
+    std::sync::LazyLock::new(swift_unproved_owner_rows);
+
+/// Every path-meaning row: [`PATH_MEANING_MATRIX`], the generated Python
+/// member-binding rows ([`PYTHON_MEMBER_SHAPES`]), the Swift nested generic
+/// rows, [`OWNER_AMBIGUITY_MATRIX`] and the Swift unproved-owner rows.
+pub fn path_meaning_rows() -> impl Iterator<Item = &'static PathMeaningRow> {
+    PATH_MEANING_MATRIX
+        .iter()
+        .chain(PYTHON_MEMBER_ROWS.iter())
+        .chain(SWIFT_NESTED_GENERIC_ROWS.iter())
+        .chain(OWNER_AMBIGUITY_MATRIX)
+        .chain(SWIFT_UNPROVED_OWNER_ROWS.iter())
+}
+
+/// Every path-meaning row's ([`path_meaning_rows`]) owners hold on the complete index and
 /// on a declarations-only query of the owner's kind.
 #[test]
 fn path_meaning_matrix_holds_on_complete_and_declarations_only_paths() {
-    let failed = failing_rows(PATH_MEANING_MATRIX.iter(), |row| {
+    let failed = failing_rows(path_meaning_rows(), |row| {
         let label = format!("{}: {}", row.language.name(), row.label);
         check_owners(&label, row.extension, row.source, row.owners);
     });
@@ -1230,7 +3497,7 @@ pub fn check_impl_facts(
 /// type gains nothing.
 #[test]
 fn path_meaning_impl_rows_hold_on_complete_and_method_only_queries() {
-    let impl_rows = || PATH_MEANING_MATRIX.iter().filter(|row| !row.impl_members.is_empty());
+    let impl_rows = || path_meaning_rows().filter(|row| !row.impl_members.is_empty());
     let failed = failing_rows(impl_rows(), |row| {
         let file = write_temp(row.source, row.extension);
         let tree_file = TreeFile::new(file.path()).expect("parse");
@@ -1465,7 +3732,13 @@ const RELATION_SHAPES: &[RelationShape] = &[
 /// checked at both sizes so the shapes are known to produce relations.
 #[test]
 fn relation_resolution_grows_linearly_with_declarations() {
-    use crate::symbols_shared_context::{LARGE, SMALL, grows_linearly};
+    use crate::symbols_shared_context::{LARGE, SMALL, grows_linearly_within};
+
+    // Relation resolution counts every lookup segment, candidate visit and
+    // written-target insertion: a record writing three bases, each looked
+    // up through a module path, takes more than the shared-context budget
+    // of 16 steps. The doubling bound is what proves linear growth.
+    const STEPS_PER_RECORD: u64 = 32;
 
     let dir = tempfile::TempDir::new().expect("temp");
     let mut failures = Vec::new();
@@ -1495,7 +3768,7 @@ fn relation_resolution_grows_linearly_with_declarations() {
         let [(small_steps, _), (large_steps, large_records)] = measured[..] else {
             unreachable!("two sizes")
         };
-        if !grows_linearly(small_steps, large_steps, large_records) {
+        if !grows_linearly_within(small_steps, large_steps, large_records, STEPS_PER_RECORD) {
             failures.push(format!(
                 "{}: {small_steps} steps for {SMALL} declarations, {large_steps} for {LARGE} ({large_records} records)",
                 shape.label
@@ -1742,4 +4015,23 @@ fn an_oversized_enclosing_generic_list_still_owns_its_impls() {
         "{}: the selected owner overflows",
         row.label
     );
+}
+
+/// Lookup reads every enclosing parameter name even when its position
+/// cannot be serialized and the owner is outside the selected kinds.
+#[test]
+fn swift_nested_extension_sees_unnumbered_enclosing_parameters() {
+    let mut names = (0..=u16::MAX as usize).map(|i| format!("T{i}")).collect::<Vec<_>>();
+    names.push("ReviewBase".to_string());
+    let source = format!("class ReviewBase {{}}\nstruct ReviewOuter<{}> {{ struct ReviewInner {{}} }}\nextension ReviewOuter.ReviewInner {{ protocol ReviewChild: ReviewBase {{}} }}\n", names.join(","));
+    let file = write_temp(&source, "swift");
+    let tree = TreeFile::new(file.path()).expect("parse");
+    let result = tree.query(&SymbolQuery::new().kinds([SymbolKindV2::Interface])).expect("unselected oversized struct owner");
+    let child = type_record(&result.index, "oversized Swift owner", "ReviewOuter.ReviewInner.ReviewChild");
+    assert!(child.relations.unclassified_bases.is_empty());
+    assert_eq!(child.relations.extends.len(), 1);
+    assert_eq!(child.relations.extends[0].name, "ReviewBase");
+    assert!(child.relations.extends[0].id.is_none());
+    assert!(child.relations.extends[0].qualified_name.is_none());
+    assert!(child.type_info.generic_params.is_empty(), "enclosing parameters are lookup context only");
 }

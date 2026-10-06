@@ -162,6 +162,47 @@ fn every_fixture_is_a_complete_warm_hit_equal_to_an_uncached_run() {
     assert!(files_with_extension(dir.path(), "tmp").is_empty(), "no temporary file left");
 }
 
+/// Reference evidence survives repeated persistence: for every fixture, a
+/// functions-only `Occurrences` entry is written, read and widened to the
+/// complete index (rewritten), then read again as a `Hit`; each result equals
+/// an uncached run, and both writes store the same whole-file evidence.
+#[test]
+fn stored_reference_evidence_round_trips_through_rewrites() {
+    let narrow = SymbolQuery::new().kinds(FUNCTION_KINDS).capabilities([Capability::Occurrences]);
+    let complete = SymbolQuery::complete_index();
+    let evidence = |entry: &Value| json!([entry["occurrences"], entry["reference_coverage"]]);
+    let fixtures: Vec<PathBuf> = all_fixtures().into_iter().chain(multi_fixtures()).collect();
+
+    for path in &fixtures {
+        let label = display_name(path);
+        let dir = TempDir::new().expect("temp");
+        let cache = cache_in(&dir);
+
+        let (lookup, served, _) = cached(&cache, read(path), &narrow);
+        assert_eq!(lookup, CacheLookup::Miss(CacheMiss::Absent), "{label}: narrow write");
+        assert_eq!(served, uncached(path, &narrow), "{label}: narrow result");
+        let first = evidence(&read_entry(&only_entry(&dir)));
+        assert!(
+            first[1].as_array().is_some_and(|coverage| !coverage.is_empty()),
+            "{label}: the entry stores coverage"
+        );
+
+        let (lookup, served, _) = cached(&cache, read(path), &narrow);
+        assert_eq!(lookup, CacheLookup::Hit, "{label}: narrow read");
+        assert_eq!(served, uncached(path, &narrow), "{label}: narrow read result");
+
+        let (lookup, served, _) = cached(&cache, read(path), &complete);
+        assert_eq!(lookup, CacheLookup::WidenedKinds, "{label}: widened");
+        assert_eq!(served, uncached(path, &complete), "{label}: widened result");
+        assert_eq!(evidence(&read_entry(&only_entry(&dir))), first, "{label}: rewritten evidence");
+
+        let (lookup, served, work) = cached(&cache, read(path), &complete);
+        assert_eq!(lookup, CacheLookup::Hit, "{label}: complete read");
+        assert_eq!(served, uncached(path, &complete), "{label}: complete read result");
+        assert_eq!(work, WorkCounters::default(), "{label}: a hit did work");
+    }
+}
+
 /// A complete entry serves every narrower query exactly as an uncached query
 /// of that query computes it: unselected kinds dropped, and relations,
 /// semantics, parsed docs, export targets, diagnostics and each record's
@@ -510,6 +551,7 @@ fn each_key_input_and_stored_identity_decides_a_miss() {
     for (field, value, reason) in [
         ("schema_version", json!({ "major": 3, "minor": 0 }), "schema version"),
         ("schema_version", json!({ "major": 4, "minor": 0 }), "schema version"),
+        ("schema_version", json!({ "major": 4, "minor": 3 }), "schema version"),
         ("fingerprint", json!("0000"), "fingerprint"),
         ("source_hash", json!("0000"), "source hash"),
         ("file", json!("elsewhere.rs"), "file"),
@@ -537,15 +579,16 @@ fn incompatible_record_schema_versions_are_misses_never_served_or_widened() {
     let path = fixture(ProgrammingLanguage::Python);
     let narrow = SymbolQuery::new().kinds(FUNCTION_KINDS);
     let complete = SymbolQuery::complete_index();
-    let current = json!({ "major": 4, "minor": 3 });
+    let current = json!({ "major": 5, "minor": 0 });
     for version in [
         json!({ "major": 2, "minor": 0 }),
         json!({ "major": 3, "minor": 0 }),
         json!({ "major": 4, "minor": 0 }),
         json!({ "major": 4, "minor": 1 }),
         json!({ "major": 4, "minor": 2 }),
-        json!({ "major": 4, "minor": 4 }),
-        json!({ "major": 5, "minor": 0 }),
+        json!({ "major": 4, "minor": 3 }),
+        json!({ "major": 5, "minor": 1 }),
+        json!({ "major": 6, "minor": 0 }),
     ] {
         for (position, request) in [("first", &narrow), ("last", &narrow), ("first", &complete)] {
             let label = format!("record {version} on the {position} record, request {request:?}");
@@ -1130,8 +1173,9 @@ fn declaration_fact_sources_are_warm_hits_and_project_to_uncached_queries() {
 }
 
 /// Widening a declarations-only entry of the same sources: Containment is
-/// added from the stored records alone, except in Rust, where an impl
-/// member's container is its impl's resolved self type, which no record
+/// added from the stored records alone, except in Rust and Swift, where an
+/// impl member's container is its impl's resolved self type and an
+/// extension member's its extension's resolved owner, which no record
 /// retains, so it parses once; Metrics always parses once. Each widened
 /// result equals an uncached query, the entry then records every request,
 /// and each request (and the declarations-only narrowing) is a `Hit` with
@@ -1147,11 +1191,12 @@ fn declaration_fact_entries_widen_by_containment_and_metrics() {
     for (label, path) in crate::symbols_relations::write_declaration_fact_sources(sources.path()) {
         let is_rust = path.extension().is_some_and(|extension| extension == "rs");
         rust_rows += usize::from(is_rust);
+        let needs_tree = is_rust || path.extension().is_some_and(|extension| extension == "swift");
         let dir = TempDir::new().expect("temp");
         let cache = cache_in(&dir);
         cached(&cache, read(&path), &declarations);
 
-        for (query, parsed) in [(&containment, is_rust), (&metrics, true)] {
+        for (query, parsed) in [(&containment, needs_tree), (&metrics, true)] {
             let cell = format!("{label}: widen to {query:?}");
             let (lookup, widened, work) = cached(&cache, read(&path), query);
             assert_eq!(lookup, CacheLookup::WidenedCapabilities { parsed }, "{cell}");
@@ -1206,13 +1251,13 @@ fn a_declaration_fact_entry_of_an_older_record_schema_is_a_miss() {
 /// `Hit` with no work and the same facts.
 #[test]
 fn path_meaning_impl_rows_widen_to_containment_with_the_same_facts() {
-    use crate::symbols_relations::{PATH_MEANING_MATRIX, check_impl_facts};
+    use crate::symbols_relations::{check_impl_facts, path_meaning_rows};
 
     let sources = TempDir::new().expect("sources");
     let declarations = SymbolQuery::new();
     let containment = SymbolQuery::new().capabilities([Capability::Containment]);
     let mut rows = 0;
-    for (idx, row) in PATH_MEANING_MATRIX.iter().filter(|row| !row.impl_members.is_empty()).enumerate() {
+    for (idx, row) in path_meaning_rows().filter(|row| !row.impl_members.is_empty()).enumerate() {
         rows += 1;
         let path = sources.path().join(format!("impl_row_{idx}.{}", row.extension));
         std::fs::write(&path, row.source).expect("write row source");
@@ -1237,19 +1282,19 @@ fn path_meaning_impl_rows_widen_to_containment_with_the_same_facts() {
     assert!(rows >= 5, "the impl rows ran ({rows})");
 }
 
-/// Every [`PATH_MEANING_MATRIX`](crate::symbols_relations::PATH_MEANING_MATRIX)
-/// row with written bases, stored complete, is served warm as a real `Hit`
+/// Every path-meaning row ([`path_meaning_rows`](crate::symbols_relations::path_meaning_rows))
+/// with written bases, stored complete, is served warm as a real `Hit`
 /// on the complete index and on a type-only query, and each owner keeps
 /// exactly its uncached targets and target IDs.
 #[test]
 fn path_meaning_rows_hold_on_warm_hits() {
-    use crate::symbols_relations::{PATH_MEANING_MATRIX, check_owner_targets};
+    use crate::symbols_relations::{check_owner_targets, path_meaning_rows};
 
     let sources = TempDir::new().expect("sources");
     let complete_query = SymbolQuery::complete_index();
     let types_only = SymbolQuery::new().kinds(TYPE_KINDS);
     let mut rows = 0;
-    for (idx, row) in PATH_MEANING_MATRIX.iter().filter(|row| !row.owners.is_empty()).enumerate() {
+    for (idx, row) in path_meaning_rows().filter(|row| !row.owners.is_empty()).enumerate() {
         rows += 1;
         let path = sources.path().join(format!("row_{idx}.{}", row.extension));
         std::fs::write(&path, row.source).expect("write row source");
@@ -1266,6 +1311,106 @@ fn path_meaning_rows_hold_on_warm_hits() {
         }
     }
     assert!(rows >= 30, "the written-base rows ran ({rows})");
+}
+
+/// The member-binding repairs through the cache: a Python member rebound
+/// by a class-body import (module-level and function-local holder) and a
+/// Swift extension member beside a closure's same-named owner, stored
+/// declarations-only, widen to Containment (Python from the stored records,
+/// Swift by one parse: an extension member's owner is resolved from the
+/// tree), then to the complete index, and are served as a real `Hit`; every step keeps the
+/// uncached facts (no target ID for the rebound member, the extension
+/// method under the file-level type).
+#[test]
+fn member_binding_repairs_hold_through_widening_and_warm_hits() {
+    use crate::symbols_owner_identity::{NESTED_SHADOW_MATRIX, check_nested_shadow};
+    use crate::symbols_relations::{check_owner_targets, path_meaning_rows};
+
+    let sources = TempDir::new().expect("sources");
+    let declarations = SymbolQuery::new();
+    let containment = SymbolQuery::new().capabilities([Capability::Containment]);
+    let complete_query = SymbolQuery::complete_index();
+    let python: Vec<_> =
+        path_meaning_rows().filter(|row| row.label.ends_with("holder: aliased `from` import")).collect();
+    assert_eq!(python.len(), 2, "module-level and function-local import rows");
+    let swift = &NESTED_SHADOW_MATRIX[0];
+    let mut cases: Vec<(String, &str, &str)> =
+        python.iter().map(|row| (row.label.to_string(), row.extension, row.source)).collect();
+    cases.push((format!("Swift: {}", swift.label), "swift", swift.source));
+
+    for (idx, (label, extension, source)) in cases.iter().enumerate() {
+        let path = sources.path().join(format!("member_{idx}.{extension}"));
+        std::fs::write(&path, source).expect("write source");
+        let complete = read(&path).query(&complete_query).expect("complete").index;
+        let check = |step: &str, result: &SymbolQueryResult| {
+            let step = format!("{label}: {step}");
+            match python.get(idx) {
+                Some(row) => check_owner_targets(&step, &complete, &result.index, row.owners),
+                None => check_nested_shadow(&step, swift, &result.index.symbols),
+            }
+        };
+        let dir = TempDir::new().expect("temp");
+        let cache = cache_in(&dir);
+        cached(&cache, read(&path), &declarations);
+
+        let widened = cache.query(read(&path), &containment).expect("containment");
+        let parsed = *extension == "swift";
+        assert_eq!(widened.lookup, CacheLookup::WidenedCapabilities { parsed }, "{label}: containment");
+        assert_eq!(as_value(&widened.result), uncached(&path, &containment), "{label}: containment equals uncached");
+        check("containment widened", &widened.result);
+
+        let widened = cache.query(read(&path), &complete_query).expect("complete");
+        assert!(matches!(widened.lookup, CacheLookup::WidenedCapabilities { .. }), "{label}: {:?}", widened.lookup);
+        assert_eq!(as_value(&widened.result), uncached(&path, &complete_query), "{label}: complete equals uncached");
+        check("complete widened", &widened.result);
+
+        for query in [&containment, &complete_query] {
+            let (warm, work) = counted(|| cache.query(read(&path), query).expect("warm"));
+            assert_eq!(warm.lookup, CacheLookup::Hit, "{label}: warm {query:?}");
+            assert_eq!(work, WorkCounters::default(), "{label}: warm {query:?} did work");
+            check("warm", &warm.result);
+        }
+    }
+}
+
+/// Unproved Swift extension owners through the cache: each source, stored
+/// declarations-only, widens to Containment by one parse (the owner
+/// decision needs the tree), then to the complete index, and is served as a
+/// real `Hit` for both; every step leaves the method with a textual
+/// container, no parent and no local membership, and `ReviewP` on no type.
+#[test]
+fn unproved_swift_extension_owners_hold_through_widening_and_warm_hits() {
+    use crate::symbols_owner_identity::{UNPROVED_OWNER_MATRIX, check_unproved_owner};
+
+    let sources = TempDir::new().expect("sources");
+    let declarations = SymbolQuery::new();
+    let containment = SymbolQuery::new().capabilities([Capability::Containment]);
+    let complete_query = SymbolQuery::complete_index();
+    for (idx, row) in UNPROVED_OWNER_MATRIX.iter().enumerate() {
+        let path = sources.path().join(format!("unproved_{idx}.swift"));
+        std::fs::write(&path, row.source).expect("write source");
+        let dir = TempDir::new().expect("temp");
+        let cache = cache_in(&dir);
+        cached(&cache, read(&path), &declarations);
+
+        let (widened, work) = counted(|| cache.query(read(&path), &containment).expect("containment"));
+        assert_eq!(widened.lookup, CacheLookup::WidenedCapabilities { parsed: true }, "{}: containment", row.label);
+        assert_eq!(work.parser_constructions, 1, "{}: one parse", row.label);
+        assert_eq!(as_value(&widened.result), uncached(&path, &containment), "{}: containment equals uncached", row.label);
+        check_unproved_owner("containment widened", row, &widened.result.index.symbols);
+
+        let widened = cache.query(read(&path), &complete_query).expect("complete");
+        assert!(matches!(widened.lookup, CacheLookup::WidenedCapabilities { .. }), "{}: {:?}", row.label, widened.lookup);
+        assert_eq!(as_value(&widened.result), uncached(&path, &complete_query), "{}: complete equals uncached", row.label);
+        check_unproved_owner("complete widened", row, &widened.result.index.symbols);
+
+        for query in [&containment, &complete_query] {
+            let (warm, work) = counted(|| cache.query(read(&path), query).expect("warm"));
+            assert_eq!(warm.lookup, CacheLookup::Hit, "{}: warm {query:?}", row.label);
+            assert_eq!(work, WorkCounters::default(), "{}: warm {query:?} did work", row.label);
+            check_unproved_owner("warm", row, &warm.result.index.symbols);
+        }
+    }
 }
 
 /// Complexity through the cache: a declarations-only entry widened by
@@ -1388,4 +1533,41 @@ fn an_oversized_owner_impl_row_widens_and_hits_with_the_same_facts() {
     assert_eq!(warm.lookup, CacheLookup::Hit, "warm");
     assert_eq!(work, WorkCounters::default(), "warm: no work");
     check_impl_facts("warm", &row, &warm.result.index, &warm.result.index, true);
+}
+
+/// Restored Swift generic contexts survive parsed containment widening,
+/// parsed complete widening, and complete/type-only genuine warm hits.
+#[test]
+fn swift_nested_generic_extensions_hold_through_widening_and_warm_hits() {
+    use crate::symbols_relations::{check_owner_targets, path_meaning_rows};
+    let sources = TempDir::new().expect("sources");
+    let declarations = SymbolQuery::new();
+    let containment = SymbolQuery::new().capabilities([Capability::Containment]);
+    let complete_query = SymbolQuery::complete_index();
+    let types = SymbolQuery::new().kinds(TYPE_KINDS);
+    let labels = ["outer parameter", "outer parameter conformance", "Int"];
+    for label in labels {
+        let full_label = format!("Swift nested generic extension: {label}");
+        let row = path_meaning_rows().find(|row| row.label == full_label).expect("shared Swift regression");
+        let path = sources.path().join(format!("{}.swift", label.replace(' ', "_")));
+        std::fs::write(&path, row.source).expect("write source");
+        let complete = read(&path).query(&complete_query).expect("complete").index;
+        let dir = TempDir::new().expect("cache");
+        let cache = cache_in(&dir);
+        cached(&cache, read(&path), &declarations);
+        let widened = cache.query(read(&path), &containment).expect("containment");
+        assert_eq!(widened.lookup, CacheLookup::WidenedCapabilities { parsed: true });
+        check_owner_targets(label, &complete, &widened.result.index, row.owners);
+        assert_eq!(as_value(&widened.result), uncached(&path, &containment));
+        let widened = cache.query(read(&path), &complete_query).expect("complete widening");
+        assert_eq!(widened.lookup, CacheLookup::WidenedCapabilities { parsed: true });
+        check_owner_targets(label, &complete, &widened.result.index, row.owners);
+        for query in [&complete_query, &types] {
+            let (warm, work) = counted(|| cache.query(read(&path), query).expect("warm"));
+            assert_eq!(warm.lookup, CacheLookup::Hit);
+            assert_eq!(work, WorkCounters::default());
+            check_owner_targets(label, &complete, &warm.result.index, row.owners);
+            assert_eq!(as_value(&warm.result), uncached(&path, query));
+        }
+    }
 }

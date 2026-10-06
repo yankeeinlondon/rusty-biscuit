@@ -40,6 +40,7 @@ mod symbols_metrics;
 mod symbols_owner_identity;
 mod symbols_qualified_names;
 mod symbols_reference_summaries;
+mod symbols_relation_work;
 mod symbols_relations;
 mod symbols_query;
 mod symbols_query_filters;

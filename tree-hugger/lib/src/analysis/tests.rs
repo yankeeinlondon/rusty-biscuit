@@ -176,23 +176,30 @@ fn scan_container_symbol(
 }
 
 /// The scan of every candidate `nearest_qualifying_owner` did before the
-/// owner index: the longest qualifying name, then the nearest declaration
-/// before the child, else the first after it.
+/// owner index: the longest qualifying name, then (where one owner may be
+/// declared again) the nearest declaration before the child, else the first
+/// after it; several of the longest name elsewhere are no owner.
 fn scan_nearest_qualifying_owner(
     symbols: &[SymbolRecord],
     child: &SymbolRecord,
     candidates: &[usize],
 ) -> Option<usize> {
     let child_start = i64::from(child.source.declaration_span.start_byte);
-    candidates
+    let qualifying: Vec<usize> = candidates
         .iter()
         .copied()
         .filter(|&idx| qualifies(&symbols[idx].identity.qualified_name, &child.identity.qualified_name))
-        .max_by_key(|&idx| {
-            let start = i64::from(symbols[idx].source.declaration_span.start_byte);
-            let nearness = if start <= child_start { start } else { -start - 1 };
-            (symbols[idx].identity.qualified_name.len(), start <= child_start, nearness)
-        })
+        .collect();
+    let longest = qualifying.iter().map(|&idx| symbols[idx].identity.qualified_name.len()).max()?;
+    let tied = qualifying.iter().filter(|&&idx| symbols[idx].identity.qualified_name.len() == longest).count();
+    if tied > 1 && !super::repeats_one_owner(child.language) {
+        return None;
+    }
+    qualifying.into_iter().max_by_key(|&idx| {
+        let start = i64::from(symbols[idx].source.declaration_span.start_byte);
+        let nearness = if start <= child_start { start } else { -start - 1 };
+        (symbols[idx].identity.qualified_name.len(), start <= child_start, nearness)
+    })
 }
 
 /// Every child's container by the scan, in record order, as

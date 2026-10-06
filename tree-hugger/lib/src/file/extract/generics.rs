@@ -10,6 +10,9 @@
 //! name lists in `type_metadata.rs` are separate readers with their own
 //! (narrower) coverage and are not projected from this one.
 
+use std::collections::HashMap;
+
+use crate::analysis::counters::count_shared_context_steps;
 use crate::shared::schema_v2::{GenericParam, GenericParamKind};
 
 use super::*;
@@ -38,6 +41,8 @@ struct Param {
     variance: Option<String>,
     /// Index in the written list; unnamed C++ parameters keep their slot.
     index: usize,
+    /// The parameter may name a type (see [`declared_generic_names`]).
+    may_name_type: bool,
 }
 
 impl Param {
@@ -49,6 +54,7 @@ impl Param {
             default: None,
             variance: None,
             index,
+            may_name_type: kind == GenericParamKind::Type,
         }
     }
 }
@@ -95,6 +101,13 @@ pub(crate) fn declared_generics(
 /// [`declared_generics`] but never numbered: name lookup needs the binding
 /// whatever its position, so a list too long for `GenericParam::position`
 /// still shadows every name it declares.
+///
+/// Only parameters that can name a type are returned: a lifetime, a Rust
+/// `const` parameter and a C++ non-type parameter of a built-in type
+/// (`template <int N>`) bind a value, which never hides a base type. A C++
+/// parameter whose declared type is itself a name (`template <C N>`) reads
+/// as `Const` but may be a concept-constrained type parameter, so it is
+/// returned.
 pub(crate) fn declared_generic_names(
     declaration: Node<'_>,
     name: Node<'_>,
@@ -103,6 +116,7 @@ pub(crate) fn declared_generic_names(
 ) -> Vec<String> {
     written_params(declaration, name, language, source, &mut Vec::new())
         .into_iter()
+        .filter(|param| param.may_name_type)
         .map(|param| param.name)
         .collect()
 }
@@ -116,7 +130,7 @@ fn written_params(
     source: &str,
     constraints: &mut Vec<String>,
 ) -> Vec<Param> {
-    match language {
+    let params = match language {
         ProgrammingLanguage::Rust => rust_generics(declaration, source, constraints),
         ProgrammingLanguage::TypeScript => typescript_generics(declaration, source),
         ProgrammingLanguage::Go => go_generics(declaration, name, source),
@@ -129,7 +143,9 @@ fn written_params(
         // No declared generic parameters: JavaScript, C, PHP, Perl, Bash,
         // Zsh and Lua.
         _ => Vec::new(),
-    }
+    };
+    count_shared_context_steps(params.len());
+    params
 }
 
 fn text(node: Node<'_>, source: &str) -> String {
@@ -163,12 +179,22 @@ fn entries(list: Node<'_>, source: &str) -> Vec<String> {
         .collect()
 }
 
-/// Appends `bounds` to the declared parameter `subject` names, or returns
-/// `false` when no parameter has that name.
-fn attach(params: &mut [Param], subject: &str, bounds: Vec<String>) -> bool {
-    match params.iter_mut().find(|param| param.name == subject) {
-        Some(param) => {
-            param.constraints.extend(bounds);
+/// Duplicate subjects keep the first parameter, matching source lookup.
+fn parameter_positions(params: &[Param]) -> HashMap<String, usize> {
+    let mut positions = HashMap::new();
+    for (position, param) in params.iter().enumerate() {
+        count_shared_context_steps(1);
+        positions.entry(param.name.clone()).or_insert(position);
+    }
+    positions
+}
+
+/// Appends separately written bounds through the list's subject index.
+fn attach(params: &mut [Param], positions: &HashMap<String, usize>, subject: &str, bounds: Vec<String>) -> bool {
+    count_shared_context_steps(1 + bounds.len());
+    match positions.get(subject) {
+        Some(&position) => {
+            params[position].constraints.extend(bounds);
             true
         }
         None => false,
@@ -209,6 +235,7 @@ fn rust_generics(declaration: Node<'_>, source: &str, constraints: &mut Vec<Stri
         }
     }
     if let Some(clause) = find_child_by_kind(declaration, "where_clause") {
+        let positions = parameter_positions(&params);
         for predicate in named_children(clause) {
             if predicate.kind() != "where_predicate" {
                 continue;
@@ -221,7 +248,7 @@ fn rust_generics(declaration: Node<'_>, source: &str, constraints: &mut Vec<Stri
                 (Some(subject), Some(bounds))
                     if matches!(subject.kind(), "type_identifier" | "lifetime") =>
                 {
-                    attach(&mut params, &text(subject, source), entries(bounds, source))
+                    attach(&mut params, &positions, &text(subject, source), entries(bounds, source))
                 }
                 _ => false,
             };
@@ -381,6 +408,7 @@ fn csharp_generics(declaration: Node<'_>, source: &str, constraints: &mut Vec<St
         .children(&mut cursor)
         .filter(|child| child.kind() == "type_parameter_constraints_clause")
         .collect();
+    let positions = parameter_positions(&params);
     for clause in clauses {
         let parts = named_children(clause);
         let Some(subject) = parts.first() else {
@@ -391,7 +419,7 @@ fn csharp_generics(declaration: Node<'_>, source: &str, constraints: &mut Vec<St
             .filter(|part| part.kind() == "type_parameter_constraint")
             .map(|part| text(*part, source))
             .collect();
-        if !attach(&mut params, &text(*subject, source), bounds) {
+        if !attach(&mut params, &positions, &text(*subject, source), bounds) {
             // The clause without its `where`, as written.
             constraints.push(source[subject.start_byte()..clause.end_byte()].trim().to_string());
         }
@@ -477,7 +505,18 @@ fn cpp_param(entry: Node<'_>, index: usize, source: &str) -> Option<Param> {
     let mut param = Param::new(&text(name, source), kind, index);
     param.default = field_text(declared, "default_type", source)
         .or_else(|| field_text(declared, "default_value", source));
+    param.may_name_type = kind == GenericParamKind::Type || cpp_param_may_name_type(entry);
     Some(param)
+}
+
+/// Whether a C++ `parameter_declaration` in a template parameter list may
+/// declare a type: its declared type is a name (`template <C T>`, a
+/// concept-constrained type parameter in the pinned grammar), not a
+/// built-in type or `auto`.
+pub(crate) fn cpp_param_may_name_type(entry: Node<'_>) -> bool {
+    entry.child_by_field_name("type").is_none_or(|declared| {
+        !matches!(declared.kind(), "primitive_type" | "sized_type_specifier" | "placeholder_type_specifier")
+    })
 }
 
 // ============================================================================
@@ -510,6 +549,7 @@ fn swift_generics(declaration: Node<'_>, source: &str, constraints: &mut Vec<Str
         .and_then(|list| find_child_by_kind(list, "type_constraints"))
         .into_iter()
         .chain(find_child_by_kind(declaration, "type_constraints"));
+    let positions = parameter_positions(&params);
     for clause in clauses {
         for constraint in named_children(clause) {
             if constraint.kind() != "type_constraint" {
@@ -525,7 +565,7 @@ fn swift_generics(declaration: Node<'_>, source: &str, constraints: &mut Vec<Str
                 .and_then(|requirement| {
                     let subject = requirement.child_by_field_name("constrained_type")?;
                     let bound = requirement.child_by_field_name("name")?;
-                    Some(attach(&mut params, &text(subject, source), vec![text(bound, source)]))
+                    Some(attach(&mut params, &positions, &text(subject, source), vec![text(bound, source)]))
                 })
                 .unwrap_or(false);
             if !attached {

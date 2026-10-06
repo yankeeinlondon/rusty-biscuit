@@ -114,14 +114,15 @@ pub(crate) fn impl_header(impl_item: Node<'_>, source: &str) -> Option<ImplHeade
     })
 }
 
-/// The names of `impl_item`'s own type parameters (`impl<T, 'a>` → `T`,
-/// `'a`).
+/// The names of `impl_item`'s own type parameters (`impl<T, 'a, const N:
+/// usize>` → `T`): a lifetime or `const` parameter names no type.
 pub(crate) fn impl_type_parameters(impl_item: Node<'_>, source: &str) -> Vec<String> {
     impl_item
         .child_by_field_name("type_parameters")
         .map(|list| {
             let mut cursor = list.walk();
             list.named_children(&mut cursor)
+                .filter(|param| param.kind() == "type_parameter")
                 .filter_map(|param| param.child_by_field_name("name"))
                 .filter_map(|name| name.utf8_text(source.as_bytes()).ok())
                 .map(str::to_string)

@@ -181,7 +181,12 @@ fn analyze(shape: &Shape, declarations: usize, analysis: Analysis) -> (u64, Vec<
 /// per-declaration rescan would quadruple them. The steps per record are
 /// bounded whatever the shape.
 pub fn grows_linearly(small_steps: u64, large_steps: u64, large_records: usize) -> bool {
-    large_steps <= 2 * small_steps + 64 && large_steps <= 16 * large_records as u64
+    grows_linearly_within(small_steps, large_steps, large_records, 16)
+}
+
+/// [`grows_linearly`] with `per_record` steps allowed per record.
+pub fn grows_linearly_within(small_steps: u64, large_steps: u64, large_records: usize, per_record: u64) -> bool {
+    large_steps <= 2 * small_steps + 64 && large_steps <= per_record * large_records as u64
 }
 
 #[test]

@@ -72,7 +72,8 @@ pub(crate) struct RecordFacts {
     /// `Capability::Metrics`.
     pub(crate) metrics: bool,
     /// `Capability::Containment`: Rust impl members arrive linked to their
-    /// impl's self type, which only the syntax tree can resolve.
+    /// impl's self type and Swift extension members to their extension's
+    /// owner, which only the syntax tree can resolve.
     pub(crate) containment: bool,
 }
 
@@ -90,6 +91,9 @@ pub(crate) struct ExtractedSymbol<'tree> {
     pub(crate) name: Node<'tree>,
     /// The Rust `impl` whose self type names this symbol's container.
     pub(crate) container_impl: Option<Node<'tree>>,
+    /// The Swift extension whose body declares this symbol: its owner, as
+    /// the relation resolver decides it, is the symbol's container.
+    pub(crate) container_extension: Option<Node<'tree>>,
 }
 
 /// One definition capture, before any metadata is read from it.
@@ -324,10 +328,16 @@ impl TreeFile {
             .map(|(entry, container_kind)| {
                 let mut extracted = entry.extracted;
                 extracted.symbol.container_kind = container_kind;
-                extracted.container_impl = match entry.container.map(|container| container.lookup) {
-                    Some(ContainerLookup::SameFileType { impl_item }) => impl_item,
-                    _ => None,
-                };
+                match entry.container.map(|container| container.lookup) {
+                    Some(ContainerLookup::SameFileType { impl_item }) => extracted.container_impl = impl_item,
+                    Some(ContainerLookup::Node { node, .. })
+                        if self.language == ProgrammingLanguage::Swift
+                            && declaration_keyword(node, self.language).as_deref() == Some("extension") =>
+                    {
+                        extracted.container_extension = Some(node);
+                    }
+                    _ => {}
+                }
                 extracted
             })
             .collect())
@@ -390,6 +400,7 @@ impl TreeFile {
                 name: winner.name,
                 // Read from `container` once every symbol is known.
                 container_impl: None,
+                container_extension: None,
             },
             container,
         }

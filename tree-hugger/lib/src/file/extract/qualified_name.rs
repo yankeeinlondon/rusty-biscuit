@@ -383,13 +383,16 @@ pub(crate) fn file_namespace_index(
 ) -> HashMap<usize, Option<Rc<str>>> {
     let mut index = HashMap::new();
     let mut in_force: Option<Rc<str>> = None;
-    let mut scala_clauses: Vec<String> = Vec::new();
+    let mut scala_clauses = String::new();
     let mut cursor = root.walk();
     for child in root.children(&mut cursor) {
         if let Some(name) = file_level_namespace(child, language, source) {
             in_force = Some(if language == ProgrammingLanguage::Scala {
-                scala_clauses.push(name);
-                scala_clauses.join(".").into()
+                if !scala_clauses.is_empty() {
+                    scala_clauses.push('.');
+                }
+                scala_clauses.push_str(&name);
+                scala_clauses.as_str().into()
             } else {
                 name.into()
             });
