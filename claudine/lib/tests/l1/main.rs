@@ -7,6 +7,7 @@
 //! not declared below never compiles; `test_layout.rs` rejects one.
 
 mod agent_errors_fleet;
+mod assistant_stream_width;
 mod boundary_lint;
 mod canonical_dispatch;
 mod context_construction_guard;
