@@ -65,6 +65,18 @@ Use module-level APIs when a caller needs one bounded fact, such as
 `GitRepo::discover`, `current_user_id`, or a focused provider query. Do not use
 full host detection as a convenience wrapper around one fact.
 
+`sniff::filesystem::query::query_path_usage` is the focused "which processes
+use this path" query: one shared budget that stops scheduling work (never a
+return-time guarantee), one tree walk per query, identity-first matching,
+and library-owned `outcome`/coverage. OS backends implement the crate-private
+`UsageBackend` trait in `filesystem/query/backend.rs`; tests drive the query
+through a fake backend in `filesystem/query/tests.rs`. The Linux/WSL2 backend
+(`filesystem/query/linux.rs`) reads a configurable proc root: its tests build a
+synthetic `/proc` from symlinks (`stat`/`readlink` treat them like magic links)
+so the `fdinfo` matrix runs on every Unix host, while live controlled children
+(`linux_tests::live`) run on Linux only. Contract:
+`sniff/docs/topics/filesystem-query.md`.
+
 `SniffConfig` remains a compatibility surface, but new code should use request
 plans.
 

@@ -64,6 +64,15 @@ hold the rest:
   child alone (2026-09-22). Verify a host with `IsProcessInJob` before
   blaming the code. Tests that spawn through a Job therefore behave
   differently over `just cross-check` than in an interactive session.
+- **`io::Error::from(windows::core::Error)` keeps the HRESULT as the raw OS
+  error**, so `e.kind()` is never `NotFound` for a missing file: it reports
+  `os error -2147024894` (`0x80070002`) with an uncategorized kind. Code that
+  branches on `ErrorKind` must unwrap a `FACILITY_WIN32` HRESULT
+  (`code & 0xFFFF0000 == 0x80070000`) to `from_raw_os_error(code & 0xFFFF)`
+  first; see `io_error` in `sniff/lib/src/filesystem/query/identity.rs`. It
+  passed every macOS and Linux run and was found by the first native-Windows
+  run of the query's root recheck (2026-10-05), which reported a deleted
+  root as "unverified" instead of "changed".
 - **Overriding `USERPROFILE` alone breaks the per-user known folders.**
   `dirs::data_local_dir()` / `data_dir()` go through `SHGetKnownFolderPath`,
   which resolves `LocalAppData`/`RoamingAppData` *beneath `USERPROFILE`* and
