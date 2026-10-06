@@ -3,8 +3,10 @@
 pub(crate) mod env;
 pub(crate) mod exec;
 pub(crate) mod live_semantic_sink;
+pub(crate) mod output_worker;
 pub(crate) mod profile;
 pub(crate) mod provider_overlay;
+pub(crate) mod run_scope;
 pub(crate) mod runaway_guard;
 pub(crate) mod section;
 pub(crate) mod session_report;

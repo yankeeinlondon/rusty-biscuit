@@ -21,6 +21,8 @@ use biscuit_terminal::terminal::Terminal;
 use claudine::stream::parser::SemanticStreamParser;
 use claudine::stream::summary::StreamExecutionSummary;
 
+use super::super::run_scope::ResultSnapshot;
+
 /// How long a reader may stay blocked on its pipe after the child exited.
 pub(crate) const READER_PIPE_CAP: Duration = Duration::from_secs(5);
 
@@ -322,22 +324,14 @@ pub(crate) type ParserSlot = Arc<Mutex<Option<Box<dyn SemanticStreamParser>>>>;
 
 /// Summary source used when the stdout reader did not hand its parser back.
 pub(crate) struct FallbackParser {
-    exit_code: i32,
-    error_kind: &'static str,
-    message: String,
+    summary: StreamExecutionSummary,
 }
 
 impl SemanticStreamParser for FallbackParser {
     fn feed_line(&mut self, _line: &str) {}
 
     fn finish(self: Box<Self>, _exit_code: i32) -> StreamExecutionSummary {
-        StreamExecutionSummary {
-            is_error: true,
-            error_kind: Some(self.error_kind.into()),
-            error_message: Some(self.message),
-            exit_code: self.exit_code,
-            ..Default::default()
-        }
+        self.summary
     }
 }
 
@@ -346,11 +340,25 @@ impl SemanticStreamParser for FallbackParser {
 /// A reader that timed out after feeding its parser every line, and so was
 /// stuck only in its final render, still yields the real summary: the child's
 /// outcome is known, and only the terminal output may be incomplete.
+///
+/// A reader that timed out while still holding its parser has published what
+/// the provider had reported by then in `snapshot`:
+///
+/// - a terminal error is kept as the run's error;
+/// - a completed turn with the child exiting 0 is kept as a successful run,
+///   without the assistant text, which only the parser accumulated;
+/// - anything else is an incomplete stream. No result is invented from lines
+///   the reader never handled.
+///
+/// A panic stays a `parse_failure`. Early terminations (provider timeout, rate
+/// limit) and the termination label are applied by the caller afterward, so a
+/// reader warning never replaces them.
 pub(crate) fn settle_parser(
     outcome: JoinOutcome<()>,
     slot: &ParserSlot,
     exit_code: i32,
     budget: ReaderBudget,
+    snapshot: &ResultSnapshot,
 ) -> (Box<dyn SemanticStreamParser>, Option<String>) {
     let parsed = || {
         slot.lock()
@@ -361,7 +369,7 @@ pub(crate) fn settle_parser(
         JoinOutcome::Joined(()) => match parsed() {
             Some(parser) => (parser, None),
             None => (
-                fallback(
+                failed(
                     exit_code,
                     "parse_failure",
                     "The stream parser thread ended without its parser".into(),
@@ -372,39 +380,65 @@ pub(crate) fn settle_parser(
         JoinOutcome::Panicked(_) => {
             let failure = reader_failure(ReaderStream::Output, &outcome, budget)
                 .expect("a panic is a failure");
-            (fallback(exit_code, failure.error_kind, failure.message), None)
+            (failed(exit_code, failure.error_kind, failure.message), None)
         }
         JoinOutcome::TimedOut(_) => {
             let failure = reader_failure(ReaderStream::Output, &outcome, budget)
                 .expect("a timeout is a failure");
-            match parsed() {
-                Some(parser) => (
-                    parser,
-                    Some(format!(
-                        "{}. The run's result is kept; its output may be incomplete",
-                        failure.message
-                    )),
-                ),
-                None => (
-                    fallback(exit_code, failure.error_kind, failure.message.clone()),
-                    Some(failure.message),
-                ),
+            if let Some(parser) = parsed() {
+                let warning = format!(
+                    "{}. The run's result is kept; its output may be incomplete",
+                    failure.message
+                );
+                return (parser, Some(warning));
             }
+            if let Some((kind, message)) = &snapshot.terminal_error {
+                let warning = format!("{}. The provider's error is kept", failure.message);
+                return (failed_with(exit_code, kind.clone(), message.clone()), Some(warning));
+            }
+            if let (Some(turn), 0) = (&snapshot.turn_complete, exit_code) {
+                let warning = format!(
+                    "{}. The run's result is kept; its output may be incomplete",
+                    failure.message
+                );
+                let summary = StreamExecutionSummary {
+                    provider_status: turn.provider_status.clone(),
+                    duration_ms: turn.duration_ms,
+                    exit_code,
+                    ..Default::default()
+                };
+                return (Box::new(FallbackParser { summary }), Some(warning));
+            }
+            (
+                failed(exit_code, failure.error_kind, failure.message.clone()),
+                Some(failure.message),
+            )
         }
     }
 }
 
-fn fallback(
+fn failed(exit_code: i32, error_kind: &str, message: String) -> Box<dyn SemanticStreamParser> {
+    failed_with(exit_code, error_kind.to_string(), message)
+}
+
+fn failed_with(
     exit_code: i32,
-    error_kind: &'static str,
+    error_kind: String,
     message: String,
 ) -> Box<dyn SemanticStreamParser> {
     Box::new(FallbackParser {
-        exit_code,
-        error_kind,
-        message,
+        summary: StreamExecutionSummary {
+            is_error: true,
+            error_kind: Some(error_kind),
+            error_message: Some(message),
+            exit_code,
+            ..Default::default()
+        },
     })
 }
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod matrix;

@@ -23,6 +23,7 @@ use claudine::stream::summary::StreamExecutionSummary;
 use color_eyre::eyre::Result;
 use tracing::{Span, info_span};
 
+use super::super::super::run_scope::RunScope;
 use super::super::control::StdioControl;
 use super::super::stream_capture::StreamCapture;
 use super::super::subagent_watchdog::WatchdogState;
@@ -342,10 +343,13 @@ pub(crate) fn run_child_stream_semantic(
     let stdout_progress = ReaderProgress::default();
     let stdout_reader_progress = stdout_progress.clone();
     let parser_slot: ParserSlot = Arc::new(Mutex::new(None));
+    let run_scope = RunScope::default();
+    let reader_run_scope = run_scope.clone();
     let reader_parser_slot = Arc::clone(&parser_slot);
     let stdout_handle = thread::spawn(move || {
         let _stream_guard = stream_span.enter();
         let _parse_span = info_span!("stream_parse").entered();
+        let _scope_guard = reader_run_scope.enter();
         let mut out = stdout_output.stdout_writer();
 
         let text_renderer = stdout_renderer;
@@ -659,7 +663,17 @@ pub(crate) fn run_child_stream_semantic(
     let reader_budget = ReaderBudget::default();
     let readers_since = Instant::now();
     let stdout_outcome = join_reader(stdout_handle, &stdout_progress, reader_budget, readers_since);
-    let (parser, stdout_warning) = settle_parser(stdout_outcome, &parser_slot, exit_code, reader_budget);
+    let (parser, stdout_warning) = settle_parser(
+        stdout_outcome,
+        &parser_slot,
+        exit_code,
+        reader_budget,
+        &run_scope.snapshot(),
+    );
+    // The summary is settled. A reader still running past this point is
+    // abandoned: its output and lifecycle events are discarded, so it can
+    // neither write into the next iteration nor emit for a finished run.
+    run_scope.close();
     let stderr_outcome = join_reader(stderr_handle, &stderr_progress, reader_budget, readers_since);
     let stderr_warning = reader_failure(ReaderStream::Stderr, &stderr_outcome, reader_budget)
         .map(|failure| failure.message);
@@ -674,8 +688,13 @@ pub(crate) fn run_child_stream_semantic(
         stream_output.emit_stderr_line(&reader_warning_line(warning, &termination_term));
     }
     if suppress_stderr_on_success && exit_code != 0 && !captured.is_empty() {
-        eprintln!("{captured}");
+        stream_output.emit_stderr_undecorated(&captured);
     }
+    // Everything queued so far gets until the same clock the readers were
+    // joined against; the trailer written after this run waits on what is left.
+    let output_deadline = readers_since + reader_budget.drain_limit;
+    stream_output.set_drain_deadline(output_deadline);
+    stream_output.drain(output_deadline);
 
     // Exit source (E5): synthesize the ratified
     // `{exit_code, stdout_tail, stderr_tail}` payload once per run. This is

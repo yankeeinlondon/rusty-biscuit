@@ -440,6 +440,24 @@ fn emit_stream_summary_inner(
         }
     }
 
+    // Terminal output the run could not deliver, recorded where the trailer
+    // that would have said so cannot go.
+    let output_loss_extra = section_stream
+        .and_then(|stream| stream.output_loss())
+        .map(|loss| {
+            let mut extra = context_extra.cloned().unwrap_or_default();
+            extra.insert(
+                "output_incomplete".to_string(),
+                serde_json::json!({
+                    "dropped_frames": loss.dropped_frames,
+                    "rejected_frames": loss.rejected_frames,
+                    "stalled": loss.stalled,
+                }),
+            );
+            extra
+        });
+    let context_extra = output_loss_extra.as_ref().or(context_extra);
+
     // Write synthetic summary event to JSONL (best-effort)
     if let Some(protocol) = profile.stream_protocol() {
         // Stamp only when the REQUESTED model is a marked rolling alias;

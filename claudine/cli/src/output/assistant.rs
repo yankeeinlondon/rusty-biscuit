@@ -12,7 +12,9 @@ use crate::commands::wrap::section::SectionStream;
 ///
 /// When `section_stream` is provided, the `FinalStdout` section transition
 /// is recorded first so section spacing stays consistent with the live
-/// stream (the capture path has no section stream and passes `None`).
+/// stream (the capture path has no section stream and passes `None`). With a
+/// section stream the bytes are queued on the run's output worker, like the
+/// rest of the run's output; without one they are written directly.
 pub(crate) fn emit_final_message(
     text: &str,
     term: &Terminal,
@@ -21,18 +23,22 @@ pub(crate) fn emit_final_message(
     if let Some(stream) = section_stream {
         stream.enter_final_stdout();
     }
-    let mut stdout = std::io::stdout();
-    if stdout.is_terminal() {
+    let is_terminal = std::io::stdout().is_terminal();
+    let mut out: Box<dyn Write> = match section_stream {
+        Some(stream) => Box::new(stream.stdout_writer()),
+        None => Box::new(std::io::stdout()),
+    };
+    if is_terminal {
         let rendered = FinalMessage::new(text).render(term);
-        stdout.write_all(rendered.as_bytes())?;
+        out.write_all(rendered.as_bytes())?;
         if !rendered.ends_with('\n') {
-            stdout.write_all(b"\n")?;
+            out.write_all(b"\n")?;
         }
     } else {
-        stdout.write_all(text.as_bytes())?;
+        out.write_all(text.as_bytes())?;
         if !text.ends_with('\n') {
-            stdout.write_all(b"\n")?;
+            out.write_all(b"\n")?;
         }
     }
-    stdout.flush()
+    out.flush()
 }

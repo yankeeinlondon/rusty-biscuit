@@ -318,6 +318,7 @@ pub(crate) fn execute_harness_attempt(
             &stream_result.signals,
             run_model.as_deref(),
         );
+        section_stream.drain_final();
 
         let effective_response = {
             let details = summary_details.lock().unwrap();

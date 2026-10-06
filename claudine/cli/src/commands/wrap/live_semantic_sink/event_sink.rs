@@ -3,6 +3,7 @@
 //! status rendering, dispatch, and JSONL logging for [`LiveSemanticSink`].
 
 use super::LiveSemanticSink;
+use super::super::run_scope::{self, TurnResult};
 use super::Section;
 use claudine::events::AgenticEvent;
 use claudine::render::StreamRenderable;
@@ -11,6 +12,38 @@ use serde_json::Value;
 
 impl SemanticEventSink for LiveSemanticSink {
     fn on_semantic_event(&mut self, event: SemanticEvent) {
+        // The run this reader belongs to has ended (its wrapper stopped waiting
+        // and settled the summary). A late event must not render, dispatch a
+        // lifecycle hook, or log into a run that is over or into the next
+        // iteration of a loop.
+        if run_scope::current_closed() {
+            return;
+        }
+
+        // Published before anything renders: if this reader later stalls, the
+        // wrapper still knows what the provider reported.
+        match &event {
+            SemanticEvent::TurnComplete {
+                provider_status,
+                duration_ms,
+                ..
+            } => run_scope::publish(|snapshot| {
+                snapshot.turn_complete = Some(TurnResult {
+                    provider_status: provider_status.clone(),
+                    duration_ms: *duration_ms,
+                });
+            }),
+            SemanticEvent::Error {
+                message,
+                terminal: true,
+                kind,
+                ..
+            } => run_scope::publish(|snapshot| {
+                snapshot.terminal_error = Some((kind.as_str().to_string(), message.clone()));
+            }),
+            _ => {}
+        }
+
         // 0. Boundary flush: a buffered thought coalesces and renders before
         //    any non-`Reasoning` event, so a tool call / output text / turn
         //    end never interleaves mid-thought. Mirrors the `task_progress`

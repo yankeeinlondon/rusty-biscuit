@@ -65,7 +65,7 @@ fn a_reader_blocked_on_its_pipe_past_the_cap_times_out_rather_than_panicking() {
         matches!(outcome, JoinOutcome::TimedOut(ReaderStall::PipeOpen)),
         "{outcome:?}"
     );
-    let (parser, warning) = settle_parser(outcome, &empty_slot(), 0, BUDGET);
+    let (parser, warning) = settle_parser(outcome, &empty_slot(), 0, BUDGET, &ResultSnapshot::default());
     let summary = parser.finish(0);
     assert_eq!(summary.error_kind.as_deref(), Some("stream_reader_timeout"));
     let message = summary.error_message.expect("a timeout explains itself");
@@ -92,7 +92,7 @@ fn a_panicking_reader_reports_its_payload() {
 
     let outcome = join_reader(handle, &progress, BUDGET, Instant::now());
 
-    let (parser, warning) = settle_parser(outcome, &empty_slot(), 0, BUDGET);
+    let (parser, warning) = settle_parser(outcome, &empty_slot(), 0, BUDGET, &ResultSnapshot::default());
     let summary = parser.finish(0);
     assert!(summary.is_error);
     assert_eq!(summary.error_kind.as_deref(), Some("parse_failure"));
@@ -129,7 +129,7 @@ fn a_reader_slow_after_eof_within_the_drain_limit_yields_the_real_summary() {
     let outcome = join_reader(handle, &progress, BUDGET, Instant::now());
 
     assert!(matches!(outcome, JoinOutcome::Joined(())), "{outcome:?}");
-    let (parser, warning) = settle_parser(outcome, &slot, 0, BUDGET);
+    let (parser, warning) = settle_parser(outcome, &slot, 0, BUDGET, &ResultSnapshot::default());
     let summary = parser.finish(0);
     assert_eq!(summary.exit_code, 0);
     assert!(!summary.is_error);
@@ -206,7 +206,7 @@ fn a_reader_past_the_drain_limit_after_feeding_every_line_keeps_the_real_summary
         matches!(outcome, JoinOutcome::TimedOut(ReaderStall::Processing)),
         "{outcome:?}"
     );
-    let (parser, warning) = settle_parser(outcome, &slot, 0, budget);
+    let (parser, warning) = settle_parser(outcome, &slot, 0, budget, &ResultSnapshot::default());
     let summary = parser.finish(0);
     assert_eq!(summary.exit_code, 0);
     assert!(!summary.is_error);
@@ -268,4 +268,82 @@ fn the_warning_line_carries_the_message_through_the_status_component() {
     let term = Terminal::default();
     let line = reader_warning_line("output may be incomplete", &term);
     assert!(line.contains("output may be incomplete"), "{line}");
+}
+
+/// A reader that timed out while it still held its parser, with the result
+/// line already seen by the provider's sink.
+fn stalled_with_empty_slot() -> JoinOutcome<()> {
+    JoinOutcome::TimedOut(ReaderStall::Processing)
+}
+
+#[test]
+fn a_stalled_reader_with_a_published_turn_and_exit_zero_keeps_the_result() {
+    let snapshot = ResultSnapshot {
+        turn_complete: Some(crate::commands::wrap::run_scope::TurnResult {
+            provider_status: Some("success".into()),
+            duration_ms: Some(1200),
+        }),
+        terminal_error: None,
+    };
+
+    let (parser, warning) =
+        settle_parser(stalled_with_empty_slot(), &empty_slot(), 0, BUDGET, &snapshot);
+
+    let summary = parser.finish(0);
+    assert!(!summary.is_error);
+    assert_eq!(summary.error_kind, None);
+    assert_eq!(summary.exit_code, 0);
+    assert_eq!(summary.provider_status.as_deref(), Some("success"));
+    assert_eq!(summary.duration_ms, Some(1200));
+    let warning = warning.expect("the lost output is announced");
+    assert!(warning.contains("its output may be incomplete"), "{warning}");
+}
+
+#[test]
+fn a_stalled_reader_keeps_the_provider_error_it_had_published() {
+    let snapshot = ResultSnapshot {
+        turn_complete: None,
+        terminal_error: Some(("api_remote".into(), "overloaded".into())),
+    };
+
+    let (parser, warning) =
+        settle_parser(stalled_with_empty_slot(), &empty_slot(), 1, BUDGET, &snapshot);
+
+    let summary = parser.finish(1);
+    assert!(summary.is_error);
+    assert_eq!(summary.error_kind.as_deref(), Some("api_remote"));
+    assert_eq!(summary.error_message.as_deref(), Some("overloaded"));
+    assert!(warning.is_some());
+}
+
+#[test]
+fn a_stalled_reader_with_no_published_result_is_an_incomplete_stream() {
+    let (parser, warning) = settle_parser(
+        stalled_with_empty_slot(),
+        &empty_slot(),
+        0,
+        BUDGET,
+        &ResultSnapshot::default(),
+    );
+
+    let summary = parser.finish(0);
+    assert!(summary.is_error);
+    assert_eq!(summary.error_kind.as_deref(), Some("stream_reader_timeout"));
+    assert!(warning.is_some());
+}
+
+#[test]
+fn a_published_turn_does_not_turn_a_nonzero_exit_into_success() {
+    let snapshot = ResultSnapshot {
+        turn_complete: Some(Default::default()),
+        terminal_error: None,
+    };
+
+    let (parser, _warning) =
+        settle_parser(stalled_with_empty_slot(), &empty_slot(), 2, BUDGET, &snapshot);
+
+    let summary = parser.finish(2);
+    assert!(summary.is_error);
+    assert_eq!(summary.error_kind.as_deref(), Some("stream_reader_timeout"));
+    assert_eq!(summary.exit_code, 2);
 }
