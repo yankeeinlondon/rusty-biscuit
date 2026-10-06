@@ -547,14 +547,14 @@ fn check_outline<H: TerminalHarness>(harness: &mut H, pane: &Pane<H>) {
         UNWRAPPED,
         "symbols --tree --sort name --group-by-module geometry.ts widgets/index.js",
     );
-    const SHAPE: &str = "public class Shape { count: number, size: number } [10:8]";
+    const SHAPE: &str = "public class Shape { count: number, size: number } implements Sized [10:8]";
     assert_eq!(
         shown_rows(&report),
         [
             "(root)",
             "geometry.ts",
             "  public type alias Area [8:8]",
-            "  public class Shape { count: number, size: number } [10:8]",
+            "  public class Shape { count: number, size: number } implements Sized [10:8]",
             "    public method area(scale: number): Area [18:3]",
             "    public property count [11:3]",
             "    public method create(size: number): Shape [14:3]",
@@ -573,6 +573,8 @@ fn check_outline<H: TerminalHarness>(harness: &mut H, pane: &Pane<H>) {
     assert_style(&report, "widgets", "widgets", &["1"], &[], "a bold module heading");
     assert_style(&report, SHAPE, "class", &["35"], &["2"], "a magenta label on a selected parent");
     assert_style(&report, SHAPE, "Shape { count: number, size: number }", &["1"], &["2"], "a bold selected parent");
+    assert_style(&report, SHAPE, "implements Sized", &[], &["1", "2"], "a plain declared-bases clause");
+    assert_style(&report, SHAPE, "[10:8]", &["2"], &["1"], "a dim location after the bases");
 
     // Narrow: each member wraps under its own text, four columns past the
     // member's indent, and keeps its styles on the continuation row.
@@ -595,6 +597,21 @@ fn check_outline<H: TerminalHarness>(harness: &mut H, pane: &Pane<H>) {
     assert_style(&report, CONTEXT, CONTEXT, &["2"], &["1"], "a dim contextual heading");
     assert_style(&report, "number): Shape [14:3]", "number): Shape", &["1"], &["2"], "a bold wrapped signature");
     assert_style(&report, "number): Shape [14:3]", "[14:3]", &["2"], &["1"], "a dim location on the wrapped row");
+
+    // A type row's declared bases wrap with it, under the same hanging indent.
+    let report = run_hug(harness, pane, &fixture, "COLUMNS=36", "types --tree --name Shape geometry.ts");
+    assert_eq!(
+        shown_rows(&report),
+        [
+            "geometry.ts",
+            "  public class Shape { count:",
+            "      number, size: number }",
+            "      implements Sized [10:8]",
+        ],
+        "report:\n{}",
+        report.plain(),
+    );
+    assert_style(&report, "implements Sized [10:8]", "[10:8]", &["2"], &["1"], "a dim location after wrapped bases");
 }
 
 /// `--stats`: three bordered count tables (kind, visibility, language) and

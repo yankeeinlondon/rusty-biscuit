@@ -1803,7 +1803,7 @@ kind, and a record without a keyword, is labeled with its kind (`function`,
 ## Current limitations
 
 These are limits of the extractor today, not of the grammars, except the
-one [grammar limit](#grammar-limits) below:
+[grammar limits](#grammar-limits) below:
 
 - **Swift** structs, classes and enums all report Type, and **Go** structs
   and interfaces both report Type. So a Go field's or a Swift initializer's
@@ -1868,6 +1868,12 @@ one [grammar limit](#grammar-limits) below:
   `#[\Deprecated]` attribute is not read (only the doc tag is).
 - **Python `self`** counts as a parameter, since nothing in the syntax sets
   it apart.
+- **C#, Swift and Scala base lists** are not read yet (**planned**): their
+  records have empty `relations.extends` and `relations.implements`. See
+  [Declared Type Relations](./type-relations.md#c-swift-and-scala).
+- **Declarations with no record carry no generics**: a Python
+  `type A[T] = …` statement and a C# `delegate` produce no record, so their
+  type parameters are not reported anywhere.
 - **Adapter gaps**: converting a `SymbolInfo` to a record drops
   `TypeMetadata::type_parameters` and a TypeAlias's field metadata (C
   `typedef struct { … } Alias`). Converting a record to `SymbolInfo` drops
@@ -1877,11 +1883,17 @@ one [grammar limit](#grammar-limits) below:
 
 ### Grammar limits
 
-One form cannot be represented by the pinned grammar, so it cannot be
-reported correctly until the grammar changes:
+These forms cannot be represented by the pinned grammars, so they cannot be
+reported correctly until the grammar changes. Each row is pinned by a test
+that fails once a grammar upgrade lifts the limit (`symbols_kind_coverage`,
+`symbols_generics`, `symbols_modifiers`):
 
 | Snippet | Grammar | Observed | What is reported |
 |---|---|---|---|
+| `class Defaulted[T = str]: pass` (a type-parameter default, PEP 696) | tree-sitter-python 0.25.0 | `type_parameter` holds `ERROR(identifier "T", '=')` then `type "str"`; the file has a parse error | no default; Python generic parameters never carry one |
+| `interface Variant<in T> {}` (also `out`, `in out`) | tree-sitter-typescript 0.23.2 | `type_parameter "in"` followed by an `ERROR`; the file has a parse error | no variance; TypeScript generic parameters never carry one |
+| `template <std::integral T> void constrained(T)` | tree-sitter-cpp 0.23.4 | parses cleanly, but as `parameter_declaration(type: qualified_identifier, declarator: identifier)`, the same node as the non-type `template <MyEnum E>` | `T` is a `Const` parameter with no bound; a `typename T` with a `requires` clause is read exactly |
+| `class A { @(flag ? one : two) m() {} }` | tree-sitter-typescript 0.23.2, tree-sitter-javascript 0.25.0 | the decorator becomes `parenthesized_expression(identifier, ERROR(…))`; the grammars accept only a path, a call of a path, or a parenthesized one of those | the file has a parse error; a TS/JS decorator is always a path or a call of one, so only Python keeps an arbitrary decorator expression as the attribute name |
 | `object W { private enum Hidden { case H } }` (also `protected`, also at the top level) | tree-sitter-scala 0.24.0 | `ERROR(access_modifier)` followed by a separate `enum_definition`; the file has a parse error | `Hidden` is an Enum with access Public (the modifier is lost), and its case `H` an EnumVariant with the same Public access |
 
 A Scala enum written without an access modifier is parsed and reported

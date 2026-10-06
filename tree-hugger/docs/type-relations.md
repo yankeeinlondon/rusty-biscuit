@@ -14,7 +14,9 @@ to.
 
 These facts come from the syntax tree alone, during the parse pass. A
 declarations-only query returns them, and no references, semantic, docs or
-diagnostics pass is involved.
+diagnostics pass is involved. `hug types --tree` and `hug symbols --tree`
+show both lists at the end of each type's row (see
+[Symbol Reports](./symbol-reports.md#declared-bases-on-type-rows)).
 
 ```typescript
 interface Shape {}
@@ -45,7 +47,7 @@ written text.
 | Java | class `extends`, interface `extends` | class, enum and record `implements` | |
 | C++ | every base specifier, private and `virtual` bases included | — | the `public`/`private`/`virtual` keywords (not part of the text) |
 | PHP | class and interface `extends` | class and enum `implements` | trait `use` (composition) |
-| C#, Swift, Scala | **planned**: these base lists mix inheritance and conformance; nothing is recorded until their classification is decided | | |
+| C#, Swift, Scala | **planned** (see [below](#c-swift-and-scala)): nothing is recorded yet | | |
 | C, Bash, Zsh | — (no inheritance) | — | |
 | Perl | — | — | `@ISA`, `use parent` |
 | Lua | — | — | metatables |
@@ -145,9 +147,36 @@ file once (`CacheLookup::WidenedCapabilities { parsed: true }`) instead of
 guessing a container from records. Other languages still add Containment
 from stored records. See [Cache design](./cache-design.md).
 
+## C#, Swift and Scala
+
+**Planned.** These three languages write a type's base class and the
+interfaces, protocols or traits it conforms to in one list:
+
+```csharp
+class Child : Base, IDisposable {}   // C#
+```
+
+```swift
+struct Point: Codable {}             // Swift
+extension Point: Equatable {}        // Swift: conformance added elsewhere
+```
+
+```scala
+class Child extends Base with Logging   // Scala
+```
+
+When a listed type is declared in another file, the source alone does not
+say whether it is a class (inheritance) or an interface/protocol/trait
+(conformance), and the meaning of `extends` for such an entry has not been
+decided. Until it is, records in these languages have empty
+`relations.extends` and `relations.implements`, and their outline rows show
+no bases. Every other fact (generics, modifiers, attributes, body lines) is
+read for them as for any other language.
+
 ## Limitations
 
-- C#, Swift and Scala base lists are not read yet (**planned**).
+- C#, Swift and Scala base lists are not read yet (**planned**, see
+  [above](#c-swift-and-scala)).
 - Go: a named type embedded in an interface constraint cannot be told apart
   from an embedded interface by syntax. Only the predeclared non-interface
   types (`bool`, `int`, `string`, …) are excluded.

@@ -1728,8 +1728,9 @@ impl TreeFile {
     ///
     /// Every definition yields a record with its identity, ID, spans and
     /// container; the header texts, keyword, type-alias target, generic
-    /// parameters, implemented trait and the `facts` asked for are filled
-    /// only for kinds `selection` wants.
+    /// parameters, attributes, written modifiers, declared bases and the
+    /// `facts` asked for are filled only for kinds `selection` wants. Base
+    /// targets resolve against every record, wanted or not.
     ///
     /// ## Errors
     ///

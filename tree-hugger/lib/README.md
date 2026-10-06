@@ -214,6 +214,13 @@ metadata and standalone symbols agree.
 - `attributes` holds the declaration's own attributes, annotations and
   decorators in source order: `#[tokio::test]` is `{name: "tokio::test"}`,
   `@Deprecated(since = "9")` is `{name: "Deprecated", value: "since = \"9\""}`.
+- `type_info.generic_params` holds the declaration's own generic parameters
+  in written order (`name`, `kind` = `Type`/`Lifetime`/`Const`, bounds as
+  `constraints`, `default`, `variance`, `position`); `type_info.constraints`
+  holds requirements on anything else (`where T::Item: Copy`, a C++
+  `requires` clause). `struct Bag<T: Clone = String>` gives
+  `{name: "T", kind: "Type", constraints: ["Clone"], default: "String", position: 0}`.
+  See [Symbol Schema Design](../docs/symbol-schema-design.md#generic-parameters).
 - `identity.container_kind` holds the container's kind next to
   `identity.container_name` (the container name).
 - `identity.keyword` holds the declaring keyword (`fn`, `struct`, `def`,
@@ -228,14 +235,17 @@ metadata and standalone symbols agree.
 - `relations.extends` and `relations.implements` list the base types a
   declaration writes, as written, with a same-file ID only where the name
   provably resolves; a Rust trait impl adds its trait to its members and to
-  the resolved self type. See
+  the resolved self type. C#, Swift and Scala base lists are not read yet
+  (**planned**). See
   [Declared Type Relations](../docs/type-relations.md).
 - `visibility.is_exported` comes only from export syntax and the bind pass,
   never from a Public level; converting a `SymbolInfo` always yields
   `is_exported: false`.
 - `visibility.is_test` and `visibility.is_deprecated` are computed only with
   `Capability::Flags`, and the `metrics` facet (`parameters`, `has_docs`,
-  `lines`) only with `Capability::Metrics`:
+  `lines`) only with `Capability::Metrics`; `lines` counts the lines a
+  function, method or constructor's body spans and is `null` for any other
+  kind or a declaration without a body:
 
   ```rust
   let query = SymbolQuery::new().capabilities([Capability::Flags, Capability::Metrics]);
@@ -248,6 +258,9 @@ metadata and standalone symbols agree.
 
 The `From<SymbolInfo>` / `From<SymbolRecord>` adapters preserve kind,
 visibility, both `static` flags, container kind and signature presence.
+Converting a record to `SymbolInfo` drops its generic parameters and
+constraints, `extends`/`implements`, attributes, `metrics` and every modifier
+except `static` and `async`: the older model has no field for them.
 
 ## JSON Summaries
 

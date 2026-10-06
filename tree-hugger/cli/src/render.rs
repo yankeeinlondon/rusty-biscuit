@@ -347,6 +347,7 @@ impl Renderer {
     /// heading, which is not itself a listed declaration; a member with no
     /// same-file container is headed by its in-file owner path
     /// (`[in other::W]` for `impl other::W`, never the local `W`).
+    /// A type row ends with its declared bases ([`Self::declared_bases`]).
     /// `name_prefix` is the prefix the records' qualified names carry.
     /// Siblings are ordered by `sort`. Returns whether anything was written.
     pub(crate) fn outline(
@@ -396,8 +397,9 @@ impl Renderer {
         let start = &record.source.declaration_span.start;
         let location = format!("[{}:{}]", start.line, start.column);
         let markup = format!(
-            "{} <dim>{}</dim>{}",
+            "{}{} <dim>{}</dim>{}",
             self.declaration(record, false),
+            self.declared_bases(record),
             self.link(&record.source.file_path, start.line, &literal(&location)),
             self.doc_lines(record.docs.raw_doc.as_deref()),
         );
@@ -406,6 +408,35 @@ impl Renderer {
             self.outline_node(out, outline, *child, depth + 1, written)?;
         }
         Ok(())
+    }
+
+    /// ` extends A, B; implements C` for a type row of `--tree`: the
+    /// record's `relations.extends` and `relations.implements` as written,
+    /// in source order, empty lists left out. Only type kinds get one, so a
+    /// Rust method's trait relation never heads its row. A list the
+    /// `--signatures full` header already writes is not repeated.
+    fn declared_bases(&self, record: &SymbolRecord) -> String {
+        if !SymbolKind::from(record.kind).is_type() {
+            return String::new();
+        }
+        let shows_header = self.signatures == SignatureMode::Full && record.source.signature_text.is_some();
+        let relations = &record.relations;
+        let clauses: Vec<String> = [
+            ("extends", &relations.extends, BaseList::Extends),
+            ("implements", &relations.implements, BaseList::Implements),
+        ]
+        .into_iter()
+        .filter(|(_, bases, list)| !bases.is_empty() && !(shows_header && header_writes(record.language, *list)))
+        .map(|(keyword, bases, _)| {
+            let names: Vec<String> = bases.iter().map(|base| literal(&base.name)).collect();
+            format!("{keyword} {}", names.join(", "))
+        })
+        .collect();
+        if clauses.is_empty() {
+            String::new()
+        } else {
+            format!(" {}", clauses.join("; "))
+        }
     }
 
     fn method_section(&self, out: &mut dyn Write, title: &str, methods: &[SymbolRecord]) -> io::Result<()> {
@@ -961,6 +992,24 @@ fn label(record: &SymbolRecord) -> String {
         Some(keyword) if keyword_names_it => keyword.clone(),
         _ => SymbolKind::from(record.kind).to_string(),
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum BaseList {
+    Extends,
+    Implements,
+}
+
+/// Whether the extractor reads `list` from the type's own header, so that
+/// `source.signature_text` already writes every entry. Two lists come from
+/// elsewhere: a Rust type's `implements` from its `impl` blocks, and Go's
+/// `extends` from the embeds in an interface body. Deciding by text instead
+/// would hide `impl Display for W` behind `struct W<T: Display>`.
+fn header_writes(language: ProgrammingLanguage, list: BaseList) -> bool {
+    !matches!(
+        (language, list),
+        (ProgrammingLanguage::Rust, BaseList::Implements) | (ProgrammingLanguage::Go, _)
+    )
 }
 
 fn visibility(record: &SymbolRecord) -> Option<Visibility> {

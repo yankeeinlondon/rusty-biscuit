@@ -289,7 +289,11 @@ an optional `metrics` facet (`MetricsFacet { parameters, has_docs, lines }`,
 each `Option` = unsupported, every key required (schema 4.1 added `lines`:
 a function, method or constructor's body lines, counted from its
 `source.body_span`); absent facet = not requested; `Capability::Metrics`).
-None of them exists on `SymbolInfo`, so the adapter does not carry them. The
+None of them exists on `SymbolInfo`, so the adapter does not carry them;
+nor does it carry `type_info.generic_params`/`constraints`,
+`relations.extends`/`implements`, `attributes` or modifiers other than
+`Static`/`StaticStorage`/`Async`
+(`symbols_adapter::record_only_declaration_facts_are_lost_through_the_older_model`). The
 cache refuses a stored facet or a `true` flag whose capability the entry does
 not list, and a record without the facet under `metrics`. Every kind/visibility conversion is a
 wildcard-free `match`: adding a variant on one side is a compile error until
@@ -316,7 +320,8 @@ and the written `modifiers` (`Const`, `Unsafe`, `Readonly`, `Mut`,
 as written, `id` and in-file `qualified_name` only when the path names exactly
 one eligible same-file declaration; a Rust trait impl adds its trait as written
 to each member and to the resolved self type; see
-`tree-hugger/docs/type-relations.md`). A Rust `impl` member's
+`tree-hugger/docs/type-relations.md`; C#/Swift/Scala lists are not read yet,
+**planned**). A Rust `impl` member's
 `identity.container_name` is the implemented type's last path segment without
 generics; its container kind is that type's same-file kind, absent when
 declared elsewhere. Under Containment its `relations.container` is the self

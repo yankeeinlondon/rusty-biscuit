@@ -20,6 +20,7 @@ mod classes;
 mod filters;
 mod golden;
 mod order;
+mod outline;
 mod prelude;
 mod report;
 mod reports;

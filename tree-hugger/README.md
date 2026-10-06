@@ -143,6 +143,37 @@ and tie-breakers, `--json-full` and `--verbose`.
 records, when a base gets a same-file ID, and how Rust impls attach to their
 self type.
 
+## Release Notes: generics, base types, modifiers, attributes and body lines
+
+Records now fill fields that were declared but empty, all read from the
+syntax tree in the same single parse (no compiler, no extra pass):
+
+- **Generic parameters** (`type_info.generic_params`): name, kind (`Type`,
+  `Lifetime`, `Const`), bounds and default as written, variance and position,
+  for Rust, TypeScript, Go, Python, Java, C#, C++, Swift and Scala.
+  Requirements on anything other than a declared parameter (`where T::Item:
+  Copy`, a C++ `requires` clause) go to `type_info.constraints`.
+- **Base types** (`relations.extends`, `relations.implements`): each base as
+  written, with a same-file `id` only when the name names exactly one
+  declaration. A Rust trait impl adds its trait to its members and to the
+  type it implements. C#, Swift and Scala are **planned**.
+- **Modifiers and attributes**: `const fn`, `unsafe`, `mut`, `readonly`,
+  `abstract`, `final`, `override`, `virtual`, `sealed`, `mutating`, in one
+  fixed order; `attributes` lists the declaration's own attributes,
+  annotations and decorators with their raw arguments.
+- **Body size**: `metrics.lines` counts the lines of a function, method or
+  constructor's body (`null` for other kinds and bodiless declarations).
+- **Outline rows show bases**: `hug types --tree` and `hug symbols --tree`
+  end a type's row with them.
+
+  ```text
+  - class Square extends Base<number>; implements Shape, Comparable<Square> [3:1]
+  ```
+
+The record schema is now **4.1** (the `lines` key). Cache entries written by
+earlier versions are re-analyzed once. Records converted to the older
+`SymbolInfo` model lose these facts, since that model has no field for them.
+
 ## Release Notes: precise, filterable symbol reports
 
 The declaration commands (`functions`, `types`, `symbols`, `classes`) gain

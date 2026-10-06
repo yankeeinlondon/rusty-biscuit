@@ -810,7 +810,8 @@ one eligible declaration. A Rust trait impl adds its trait to each of its
 members and to the resolved self type. The per-language table, the
 resolution rules and Rust impl ownership are in
 [Declared Type Relations](./type-relations.md). C#, Swift and Scala base
-lists are not read yet (**planned**).
+lists are not read yet (**planned**; see
+[C#, Swift and Scala](./type-relations.md#c-swift-and-scala)).
 
 ### Semantic Facet
 

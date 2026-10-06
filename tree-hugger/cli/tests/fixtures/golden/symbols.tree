@@ -114,7 +114,7 @@ typescript.ts
   public interface Sized { size: number } [3:8]
     public property size [4:3]
   public type alias Size [7:8]
-  public class Panel { size: Size } [9:8]
+  public class Panel { size: Size } implements Sized [9:8]
     public property size [10:3]
     public constructor constructor(size: Size) [12:3]
     public method grow(amount: number): void [16:3]

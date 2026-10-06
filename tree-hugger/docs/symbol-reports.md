@@ -558,6 +558,46 @@ separate rows in source order. Containment covers declarations the library
 links; a parameter is placed under the container its record names, which
 for a Rust method's parameters is the `impl` type.
 
+#### Declared bases on type rows
+
+A type row (class, interface, trait, type, enum) ends with the bases its
+record declares: `extends` then `implements`, each as written, in source
+order, joined by `; `. A list that is empty is left out, so a type with no
+bases looks as it always did. The row shows its bases even when no member
+of it is listed, as in `hug types --tree`:
+
+```text
+shapes.ts
+  interface Shape [1:1]
+  class Base [2:1]
+  class Square extends Base<number>; implements Shape, Comparable<Square> [3:1]
+lib.rs
+  public trait Shown extends Base, std::fmt::Debug [2:1]
+  public struct W { 0: T } implements std::fmt::Display, Base [3:1]
+```
+
+- Only type rows show bases. A Rust method keeps the trait of its `impl` in
+  its JSON record, but its row does not show it, and a `[in …]` heading
+  never shows bases. `hug functions --tree` lists no type row, so it shows
+  none.
+- Selectors are not widened: a base is named on the row, never added as a
+  row of its own, and a type a selector dropped is not brought back to show
+  its bases.
+- `--signatures none` and `short` show both lists. `--signatures full` shows
+  the declaration header as written, which already writes most base lists
+  (`class Square extends Base<number> implements Shape, …`); a list the
+  header writes is not repeated. Two lists are read from elsewhere and so
+  still follow the header: a Rust type's `implements`, which comes from its
+  `impl` blocks (`pub struct W<T: std::fmt::Display> implements
+  std::fmt::Display, Base`), and a Go interface's `extends`, which comes from
+  the interfaces embedded in its body.
+- Bases wrap with the row, under the same hanging indent, and are text: the
+  `<…>` of `Comparable<Square>` is never read as markup.
+- `--count` and `--stats` gain no category for bases. The same lists are in
+  `relations.extends` and `relations.implements` of the `--json`, `--jsonl`
+  and `--json-full` records; see [Declared Type Relations](./type-relations.md)
+  for what each language records.
+
 | Combination | Behavior |
 |---|---|
 | `--tree` alone | files in path order; containers and members in source order |
