@@ -1862,6 +1862,81 @@ fn entry_from_extractor_revision_thirty_eight_is_not_served_after_the_partial_id
     });
 }
 
+/// Revision 39 chose among same-named C# types before applying the written
+/// generic argument count, so `ReviewChild : ReviewBase<int>` beside a
+/// non-generic `ReviewBase` kept only its base text; revision 40 selects the
+/// one-parameter `ReviewBase` and proves the superclass.
+#[test]
+fn entry_from_extractor_revision_thirty_nine_is_not_served_after_the_written_arity_repair() {
+    assert_stale_revision_is_not_served(&StaleRevision {
+        revision: "39",
+        key: OldKey::Computed,
+        file: "arities.cs",
+        language: "c_sharp",
+        source: "class ReviewBase {}\nclass ReviewBase<T> {}\nclass ReviewChild : ReviewBase<int> {}\nclass Sentinel {}\n"
+            .to_string(),
+        sentinel: "Sentinel",
+        probe: |out| go_record(out, "ReviewChild")["relations"]["extends"][0]["qualified_name"].clone(),
+        repaired: Value::from("ReviewBase"),
+        stale: Value::Null,
+        revert: |snapshot| {
+            let relations = &mut record_named(snapshot, "ReviewChild")["relations"];
+            let mut target = relations["extends"][0].clone();
+            target["id"] = Value::Null;
+            target["qualified_name"] = Value::Null;
+            relations.as_object_mut().expect("relations").remove("extends");
+            relations["unclassified_bases"] = Value::Array(vec![target]);
+        },
+    });
+}
+
+/// Revision 40 placed a body `var` in the scope its function's parameter
+/// defaults read, so the default's `f()` in `function g(x = f()) { var f; }`
+/// bound the body's `f`; revision 41 keeps the body's `var`s apart and binds
+/// the outer function.
+#[test]
+fn entry_from_extractor_revision_forty_is_not_served_after_the_parameter_environment_repair() {
+    assert_stale_revision_is_not_served(&StaleRevision {
+        revision: "40",
+        key: OldKey::Computed,
+        file: "defaults.js",
+        language: "javascript",
+        source: "function f() {}\nfunction g(x = f()) { var f = () => {}; }\nfunction Sentinel() {}\n".to_string(),
+        sentinel: "Sentinel",
+        probe: |out| go_record(out, "g")["relations"]["references"][0]["qualified_name"].clone(),
+        repaired: Value::from("f"),
+        stale: Value::from("g.f"),
+        revert: |snapshot| {
+            let records = snapshot["records"].as_array_mut().expect("entry records");
+            let reference = |record: &Value| {
+                serde_json::json!({
+                    "id": record["id"].clone(),
+                    "name": record["identity"]["name"].clone(),
+                    "qualified_name": record["identity"]["qualified_name"].clone(),
+                })
+            };
+            let position = |qualified: &str| {
+                records
+                    .iter()
+                    .position(|record| record["identity"]["qualified_name"] == qualified)
+                    .unwrap_or_else(|| panic!("a `{qualified}` record"))
+            };
+            let (outer, local, caller) = (position("f"), position("g.f"), position("g"));
+            let (local_ref, caller_ref) = (reference(&records[local]), reference(&records[caller]));
+            records[caller]["relations"]["references"] = Value::Array(vec![local_ref.clone()]);
+            records[outer]["relations"].as_object_mut().expect("relations").remove("referenced_by");
+            records[local]["relations"]["referenced_by"] = Value::Array(vec![caller_ref]);
+            let call = snapshot["occurrences"]
+                .as_array_mut()
+                .expect("occurrences")
+                .iter_mut()
+                .find(|occurrence| occurrence["target"]["name"] == "f")
+                .expect("the default's call");
+            call["target"]["id"] = local_ref["id"].clone();
+        },
+    });
+}
+
 /// An earlier revision that wrote another schema, and what its entries
 /// lacked.
 struct SchemaBump {

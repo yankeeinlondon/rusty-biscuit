@@ -254,7 +254,7 @@ impl<'tree> Walk<'tree> {
         if rules.extra_scope(node) {
             self.extra_scopes.push(node);
         }
-        rules.binding_sites(node, source, &mut self.sites);
+        rules.binding_sites(node, &mut self.sites);
         if rules.is_glob_import(node) {
             self.globs.push(node);
         }

@@ -2034,6 +2034,30 @@ pub const PATH_MEANING_MATRIX: &[PathMeaningRow] = &[
           bases("ReviewBase.ReviewGenerator", &[text("ReviewBase")]),
           bases("ReviewUnnamed", &[to("ReviewBase", "ReviewBase")]),
           bases("m.ReviewClass", &[text("ReviewBase")])]),
+    row("JavaScript parameter defaults never see the body's `var`", L::JavaScript, "js",
+        "class ReviewBase {}\n\
+         function g(x = function () { class ReviewDefault extends ReviewBase {} }) { var ReviewBase = 1; }\n\
+         function h(x = 1) { var ReviewBase = 1; class ReviewBody extends ReviewBase {} }\n",
+        &[bases("g.ReviewDefault", &[to("ReviewBase", "ReviewBase")]),
+          bases("h.ReviewBody", &[text("ReviewBase")])]),
+    row("TypeScript parameter defaults never see the body's `var`", L::TypeScript, "ts",
+        "class ReviewBase {}\n\
+         function g(x = function () { class ReviewDefault extends ReviewBase {} }) { var ReviewBase = 1; }\n\
+         function h(x = 1) { var ReviewBase = 1; class ReviewBody extends ReviewBase {} }\n",
+        &[bases("g.ReviewDefault", &[to("ReviewBase", "ReviewBase")]),
+          bases("h.ReviewBody", &[text("ReviewBase")])]),
+    row("C++ parameter defaults never see the body's declarations", L::Cpp, "cpp",
+        "struct ReviewBase {};\n\
+         void g(int x = [] { struct ReviewDefault : ReviewBase {}; return 0; }()) { struct ReviewBase {}; }\n",
+        &[bases("g::ReviewDefault", &[to("ReviewBase", "ReviewBase")])]),
+    row("Scala parameter defaults never see the body's declarations", L::Scala, "scala",
+        "class ReviewBase\n\
+         object O {\n  def g(x: Any = { class ReviewDefault extends ReviewBase; 1 }): Int = { class ReviewBase; 2 }\n}\n",
+        &[bases("O.g.ReviewDefault", &[to("ReviewBase", "ReviewBase")])]),
+    row("Swift parameter defaults never see the body's declarations", L::Swift, "swift",
+        "class ReviewBase {}\n\
+         func g(x: Int = { class ReviewDefault: ReviewBase {}; return 0 }()) { class ReviewBase {} }\n",
+        &[bases("g.ReviewDefault", &[to("ReviewBase", "ReviewBase")])]),
     row("Python simple parameter", L::Python, "py",
         "class ReviewBase:\n    pass\n\ndef f(ReviewBase):\n    class ReviewChild(ReviewBase):\n        pass\n",
         &[bases("f.ReviewChild", &[text("ReviewBase")])]),
@@ -4008,6 +4032,313 @@ fn csharp_partial_identity_keeps_source_contained_memberships() {
     }
 }
 
+/// Generic parameter lists of arity 0, 1 and 2, as declared and as written.
+const CSHARP_DECLARED_ARITY: [&str; 3] = ["", "<T>", "<T, U>"];
+const CSHARP_WRITTEN_ARITY: [&str; 3] = ["", "<int>", "<int, string>"];
+
+/// The lookup sites a C# written generic argument count must reach, each
+/// built for every target form, `partial` or not.
+#[derive(Clone, Copy, Debug)]
+enum ArityLookup {
+    /// `ReviewBase<…>` beside every arity of `ReviewBase`.
+    Bare,
+    /// `ReviewSpace.ReviewBase<…>` into a namespace holding every arity.
+    NamespaceQualified,
+    /// `ReviewHolder.ReviewBase<…>` into the one `ReviewHolder`.
+    Nested,
+    /// `ReviewBase<…>` from inside `ReviewHolder`, which holds every arity
+    /// and competes with an outside `ReviewHolder<T>`.
+    AnchoredMember,
+    /// `ReviewHolder<…>.ReviewBase` from inside `ReviewOuter`, which holds
+    /// `ReviewHolder` of every arity and competes with `ReviewOuter<T>`; the
+    /// form is the intermediate owner's.
+    AnchoredIntermediate,
+    /// `ReviewBase<…>` from inside the one `ReviewHolder`, which holds only
+    /// one arity, beside a file-level `ReviewBase` of every arity.
+    OutwardFromType,
+    /// The same inside a `ReviewHolder` competing with `ReviewHolder<T>`.
+    OutwardFromAnchoredType,
+    /// The same inside `namespace ReviewSpace`.
+    OutwardFromNamespace,
+    /// `global::ReviewBase<…>` from inside a `ReviewHolder` holding one
+    /// arity of its own.
+    Rooted,
+}
+
+const ARITY_LOOKUPS: [ArityLookup; 9] = [
+    ArityLookup::Bare,
+    ArityLookup::NamespaceQualified,
+    ArityLookup::Nested,
+    ArityLookup::AnchoredMember,
+    ArityLookup::AnchoredIntermediate,
+    ArityLookup::OutwardFromType,
+    ArityLookup::OutwardFromAnchoredType,
+    ArityLookup::OutwardFromNamespace,
+    ArityLookup::Rooted,
+];
+
+/// A generated C# source: its lines, and for each `ReviewChild{arity}` the
+/// target its one written base must name.
+#[derive(Default)]
+struct ArityRowBuilder {
+    lines: Vec<String>,
+    children: Vec<(String, Target)>,
+}
+
+impl ArityRowBuilder {
+    fn leak(value: String) -> &'static str { Box::leak(value.into_boxed_str()) }
+
+    /// Appends `line`, returning its one-based number.
+    fn line(&mut self, line: String) -> u32 {
+        self.lines.push(line);
+        u32::try_from(self.lines.len()).expect("small source")
+    }
+
+    /// A `ReviewChild{arity}` (in-file name `owner`) writing `written`,
+    /// which names the declaration `target` on `line` or (`None`) nothing.
+    fn child(&mut self, indent: &str, owner: String, written: String, target: Option<(String, u32)>) {
+        let name = owner.rsplit('.').next().expect("name").to_string();
+        self.line(format!("{indent}class {name} : {written} {{}}"));
+        let written = Self::leak(written);
+        let target = match target {
+            Some((qualified_name, line)) => to_at(written, Self::leak(qualified_name), line),
+            None => text(written),
+        };
+        self.children.push((owner, target));
+    }
+
+    /// The row: a class child's base is `extends` for a class, `record` or
+    /// `record class` target, `implements` for an interface, uncertain for
+    /// a struct or `record struct` (the C# classification rules); an
+    /// unresolved base is uncertain.
+    fn row(self, label: String, form: &str) -> PathMeaningRow {
+        let owners: Vec<Owner> = self
+            .children
+            .into_iter()
+            .map(|(owner, target)| {
+                let targets: &'static [Target] = Box::leak(vec![target].into_boxed_slice());
+                let qualified_name = Self::leak(owner);
+                match (target.resolves_to, form) {
+                    (Some(_), "class" | "record" | "record class") => bases(qualified_name, targets),
+                    (Some(_), "interface") => implementing(qualified_name, targets),
+                    _ => unclassified(qualified_name, targets),
+                }
+            })
+            .collect();
+        let source = Self::leak(self.lines.join("\n") + "\n");
+        row(Self::leak(format!("C# written arity: {label}")), L::CSharp, "cs", source, Box::leak(owners.into_boxed_slice()))
+    }
+}
+
+/// One row per [`ArityLookup`] site, target form and `partial` state:
+/// every arity of the target family is declared, each on its own line, and
+/// `ReviewChild0..2` write the counts 0, 1 and 2, so each must name the one
+/// declaration of its arity (a same-named declaration of another arity
+/// neither competes nor hides it). Outward sites put one arity, `near`,
+/// in the nearer scope (two different `near` per form across the
+/// `partial` states, so every outer arity is reached outward): the child
+/// writing `near` takes the nearer one, the others the file's.
+fn csharp_written_arity_rows() -> Vec<PathMeaningRow> {
+    let mut rows = Vec::new();
+    for lookup in ARITY_LOOKUPS {
+        for (form_index, form) in CSHARP_PARTIAL_FORMS.into_iter().enumerate() {
+            for partial in [false, true] {
+                let near = (form_index + usize::from(partial)) % 3;
+                let keyword = if partial { format!("partial {form}") } else { form.to_string() };
+                let declare = |name: &str, arity: usize| format!("{keyword} {name}{} {{}}", CSHARP_DECLARED_ARITY[arity]);
+                let mut source = ArityRowBuilder::default();
+                let family = |source: &mut ArityRowBuilder, indent: &str| -> [u32; 3] {
+                    [0, 1, 2].map(|arity| source.line(format!("{indent}{}", declare("ReviewBase", arity))))
+                };
+                match lookup {
+                    ArityLookup::Bare => {
+                        let lines = family(&mut source, "");
+                        for arity in 0..3 {
+                            source.child("", format!("ReviewChild{arity}"),
+                                format!("ReviewBase{}", CSHARP_WRITTEN_ARITY[arity]), Some(("ReviewBase".into(), lines[arity])));
+                        }
+                    }
+                    ArityLookup::NamespaceQualified | ArityLookup::Nested => {
+                        let owner = if matches!(lookup, ArityLookup::Nested) { "class ReviewHolder" } else { "namespace ReviewSpace" };
+                        let prefix = if matches!(lookup, ArityLookup::Nested) { "ReviewHolder" } else { "ReviewSpace" };
+                        source.line(format!("{owner} {{"));
+                        let lines = family(&mut source, "    ");
+                        source.line("}".into());
+                        for arity in 0..3 {
+                            source.child("", format!("ReviewChild{arity}"),
+                                format!("{prefix}.ReviewBase{}", CSHARP_WRITTEN_ARITY[arity]),
+                                Some((format!("{prefix}.ReviewBase"), lines[arity])));
+                        }
+                    }
+                    ArityLookup::AnchoredMember => {
+                        source.line("class ReviewHolder {".into());
+                        let lines = family(&mut source, "    ");
+                        for arity in 0..3 {
+                            source.child("    ", format!("ReviewHolder.ReviewChild{arity}"),
+                                format!("ReviewBase{}", CSHARP_WRITTEN_ARITY[arity]),
+                                Some(("ReviewHolder.ReviewBase".into(), lines[arity])));
+                        }
+                        source.line("}".into());
+                        source.line("class ReviewHolder<T> {}".into());
+                    }
+                    ArityLookup::AnchoredIntermediate => {
+                        source.line("class ReviewOuter {".into());
+                        let lines = [0, 1, 2].map(|arity| {
+                            let line = source.line(format!("    {keyword} ReviewHolder{} {{", CSHARP_DECLARED_ARITY[arity]));
+                            source.line("        public class ReviewBase {}".into());
+                            source.line("    }".into());
+                            line + 1
+                        });
+                        for arity in 0..3 {
+                            source.child("    ", format!("ReviewOuter.ReviewChild{arity}"),
+                                format!("ReviewHolder{}.ReviewBase", CSHARP_WRITTEN_ARITY[arity]),
+                                Some(("ReviewOuter.ReviewHolder.ReviewBase".into(), lines[arity])));
+                        }
+                        source.line("}".into());
+                        source.line("class ReviewOuter<T> {}".into());
+                    }
+                    ArityLookup::OutwardFromType | ArityLookup::OutwardFromAnchoredType | ArityLookup::OutwardFromNamespace
+                    | ArityLookup::Rooted => {
+                        let outer = family(&mut source, "");
+                        let (open, scope) = match lookup {
+                            ArityLookup::OutwardFromNamespace => ("namespace ReviewSpace {", "ReviewSpace"),
+                            _ => ("class ReviewHolder {", "ReviewHolder"),
+                        };
+                        source.line(open.into());
+                        let nearer = source.line(format!("    {}", declare("ReviewBase", near)));
+                        for arity in 0..3 {
+                            let rooted = matches!(lookup, ArityLookup::Rooted);
+                            let target = if arity == near && !rooted {
+                                (format!("{scope}.ReviewBase"), nearer)
+                            } else {
+                                ("ReviewBase".to_string(), outer[arity])
+                            };
+                            source.child("    ", format!("{scope}.ReviewChild{arity}"),
+                                format!("{}ReviewBase{}", if rooted { "global::" } else { "" }, CSHARP_WRITTEN_ARITY[arity]),
+                                Some(target));
+                        }
+                        source.line("}".into());
+                        if matches!(lookup, ArityLookup::OutwardFromAnchoredType) {
+                            source.line("class ReviewHolder<T> {}".into());
+                        }
+                    }
+                }
+                // The intermediate site's targets are its owners' classes.
+                let target_form = if matches!(lookup, ArityLookup::AnchoredIntermediate) { "class" } else { form };
+                rows.push(source.row(format!("{lookup:?} {keyword}"), target_form));
+            }
+        }
+    }
+    rows.extend(csharp_written_arity_controls());
+    rows
+}
+
+/// The barriers and competitions the written count does not lift: two
+/// declarations of the written arity (non-`partial` duplicates or repeated
+/// `partial` fragments, bare, nested and in an anchored owner) name
+/// nothing, a count no declaration has names nothing, a using alias or a
+/// type parameter of the name ends the lookup; and the clean named
+/// intermediate paths.
+fn csharp_written_arity_controls() -> Vec<PathMeaningRow> {
+    let written = |arity: usize| format!("ReviewBase{}", CSHARP_WRITTEN_ARITY[arity]);
+    let mut rows = Vec::new();
+    for (label, partial) in [("two non-partial ReviewBase<T>", ""), ("repeated partial ReviewBase<T> fragments", "partial ")] {
+        let mut source = ArityRowBuilder::default();
+        let lines = [
+            source.line(format!("{partial}class ReviewBase {{}}")),
+            source.line(format!("{partial}class ReviewBase<T> {{}}")),
+            source.line(format!("{partial}class ReviewBase<T, U> {{}}")),
+        ];
+        source.line(format!("{partial}class ReviewBase<T> {{}}"));
+        for (arity, line) in lines.into_iter().enumerate() {
+            let target = (arity != 1).then(|| ("ReviewBase".to_string(), line));
+            source.child("", format!("ReviewChild{arity}"), written(arity), target);
+        }
+        rows.push(source.row(format!("same-arity competition, {label}"), "class"));
+    }
+    let mut source = ArityRowBuilder::default();
+    source.line("class ReviewHolder {".into());
+    let zero = source.line("    class ReviewBase {}".into());
+    source.line("    class ReviewBase<T> {}".into());
+    source.line("    class ReviewBase<T> {}".into());
+    source.child("    ", "ReviewHolder.ReviewChild0".into(), written(0), Some(("ReviewHolder.ReviewBase".into(), zero)));
+    source.child("    ", "ReviewHolder.ReviewChild1".into(), written(1), None);
+    source.line("}".into());
+    source.line("class ReviewHolder<T> {}".into());
+    rows.push(source.row("same-arity competition in an anchored owner".into(), "class"));
+    let mut source = ArityRowBuilder::default();
+    source.line("class ReviewHolder {".into());
+    let zero = source.line("    public class ReviewBase {}".into());
+    source.line("    public class ReviewBase<T> {}".into());
+    source.line("    public class ReviewBase<T> {}".into());
+    source.line("}".into());
+    source.child("", "ReviewChild0".into(), "ReviewHolder.ReviewBase".into(), Some(("ReviewHolder.ReviewBase".into(), zero)));
+    source.child("", "ReviewChild1".into(), "ReviewHolder.ReviewBase<int>".into(), None);
+    rows.push(source.row("same-arity competition through a nested path".into(), "class"));
+    let mut source = ArityRowBuilder::default();
+    let one = source.line("class ReviewBase<T> {}".into());
+    source.child("", "ReviewChild0".into(), written(0), None);
+    source.child("", "ReviewChild1".into(), written(1), Some(("ReviewBase".into(), one)));
+    source.child("", "ReviewChild2".into(), written(2), None);
+    rows.push(source.row("wrong-arity negatives beside the only declaration".into(), "class"));
+    let mut source = ArityRowBuilder::default();
+    source.line("class ReviewBase<T, U> {}".into());
+    source.line("class ReviewHolder {".into());
+    let near = source.line("    class ReviewBase<T> {}".into());
+    source.child("    ", "ReviewHolder.ReviewChild0".into(), written(0), None);
+    source.child("    ", "ReviewHolder.ReviewChild1".into(), written(1), Some(("ReviewHolder.ReviewBase".into(), near)));
+    source.line("}".into());
+    rows.push(source.row("outward lookup finds no declaration of the written arity".into(), "class"));
+    let mut source = ArityRowBuilder::default();
+    source.line("using ReviewBase = System.Object;".into());
+    source.line("class ReviewBase<T> {}".into());
+    source.child("", "ReviewChild1".into(), written(1), None);
+    rows.push(source.row("a using alias of the name stays a barrier".into(), "class"));
+    let mut source = ArityRowBuilder::default();
+    source.line("class ReviewBase<T> {}".into());
+    source.line("class ReviewHolder<ReviewBase> {".into());
+    source.child("    ", "ReviewHolder.ReviewChild1".into(), written(1), None);
+    source.line("}".into());
+    rows.push(source.row("a type parameter of the name stays a barrier".into(), "class"));
+    let mut source = ArityRowBuilder::default();
+    source.line("class ReviewOuter {".into());
+    let lines = [0, 1, 2].map(|arity| {
+        let line = source.line(format!("    public class ReviewHolder{} {{", CSHARP_DECLARED_ARITY[arity]));
+        source.line("        public class ReviewBase {}".into());
+        source.line("    }".into());
+        line + 1
+    });
+    source.line("}".into());
+    for arity in 0..3 {
+        source.child("", format!("ReviewChild{arity}"),
+            format!("ReviewOuter.ReviewHolder{}.ReviewBase", CSHARP_WRITTEN_ARITY[arity]),
+            Some(("ReviewOuter.ReviewHolder.ReviewBase".into(), lines[arity])));
+    }
+    for (arity, arguments) in CSHARP_WRITTEN_ARITY.into_iter().enumerate() {
+        source.child("", format!("ReviewDirect{arity}"), format!("ReviewHolder{arguments}.ReviewBase"), None);
+    }
+    rows.push(source.row("named intermediate owners of every arity (control)".into(), "class"));
+    rows
+}
+
+static CSHARP_WRITTEN_ARITY_ROWS: std::sync::LazyLock<Vec<PathMeaningRow>> =
+    std::sync::LazyLock::new(csharp_written_arity_rows);
+
+/// Every [`ArityLookup`] site has a row for each of the six forms in both
+/// `partial` states, plus the nine barrier, competition and intermediate
+/// controls; every source parses (checked by the path-meaning consumers).
+#[test]
+fn csharp_written_arity_rows_cover_every_swept_site() {
+    let rows = &*CSHARP_WRITTEN_ARITY_ROWS;
+    for lookup in ARITY_LOOKUPS {
+        let prefix = format!("C# written arity: {lookup:?} ");
+        assert_eq!(rows.iter().filter(|row| row.label.starts_with(&prefix)).count(), 12, "{lookup:?}");
+    }
+    assert_eq!(rows.len(), 9 * 12 + 9);
+    let children: usize = rows.iter().map(|row| row.owners.len()).sum();
+    assert!(children >= 9 * 12 * 3, "every written arity at every site ({children})");
+}
+
 /// The source-owner rows cover all four Rust impl consumers and all 30
 /// Swift raw-type spellings.
 #[test]
@@ -4020,7 +4351,7 @@ fn source_owner_rows_cover_every_swept_site() {
 /// member-binding rows ([`PYTHON_MEMBER_SHAPES`]), the Swift nested generic
 /// rows, [`OWNER_AMBIGUITY_MATRIX`], the Swift unproved-owner rows and the
 /// source-owner rows ([`SOURCE_OWNER_MATRIX`], the Swift sibling-shadow
-/// rows) and the C# `partial` identity rows.
+/// rows), the C# `partial` identity rows and the C# written-arity rows.
 pub fn path_meaning_rows() -> impl Iterator<Item = &'static PathMeaningRow> {
     PATH_MEANING_MATRIX
         .iter()
@@ -4031,6 +4362,7 @@ pub fn path_meaning_rows() -> impl Iterator<Item = &'static PathMeaningRow> {
         .chain(SOURCE_OWNER_MATRIX)
         .chain(SWIFT_SIBLING_SHADOW_ROWS.iter())
         .chain(CSHARP_PARTIAL_IDENTITY_ROWS.iter())
+        .chain(CSHARP_WRITTEN_ARITY_ROWS.iter())
 }
 
 declaration_fact_group_tests!(shared path_meaning_matrix_holds_on_complete_and_declarations_only_paths => owners_hold_on_complete_and_declarations_only_paths);

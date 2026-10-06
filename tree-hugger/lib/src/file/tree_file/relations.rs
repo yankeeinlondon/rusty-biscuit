@@ -448,6 +448,37 @@ impl Few {
     }
 }
 
+/// Declarations of one name split by the generic arity they declare: a
+/// C# type's parameter count (a namespace's is zero) is part of its
+/// identity, so `Base` and `Base<T>` never compete for a written
+/// `Base<int>`. Everything else (every declaration in other languages, C#
+/// members that are no type or namespace) is `free` and matches any
+/// written count. Indexed before [`Few`] truncates, so three or more
+/// arities of one name each keep their own candidates.
+#[derive(Debug, Default, Clone)]
+struct ByArity {
+    free: Few,
+    declared: HashMap<usize, Few>,
+}
+
+impl ByArity {
+    fn add(&mut self, idx: usize, groups: u8, arity: Option<usize>) {
+        match arity {
+            Some(arity) => self.declared.entry(arity).or_default().add(idx, groups),
+            None => self.free.add(idx, groups),
+        }
+    }
+
+    /// [`Few::collect`] over the declarations a name written with `arity`
+    /// generic arguments may denote.
+    fn collect(&self, groups: u8, arity: usize, found: &mut Vec<usize>) {
+        self.free.collect(groups, found);
+        if let Some(few) = self.declared.get(&arity) {
+            few.collect(groups, found);
+        }
+    }
+}
+
 /// The only declaration `found` holds.
 fn only(found: &[usize]) -> Option<usize> {
     match found {
@@ -462,6 +493,9 @@ fn only(found: &[usize]) -> Option<usize> {
 struct NameSummary {
     /// The named-scope ([`Reach::Qualified`]) declarations, by group.
     qualified: Few,
+    /// C#: the same declarations by declared arity ([`ByArity`]); empty
+    /// in other languages.
+    written: ByArity,
     /// Groups in which some named-scope declaration is no path owner
     /// ([`is_path_owner_kind`]); and groups in which the declarations are
     /// not all one owner group ([`OwnerGroups`]): one merges with nothing (a
@@ -544,7 +578,7 @@ struct Declarations<'a> {
     summaries: OnceCell<HashMap<Cow<'a, str>, NameSummary>>,
     /// Each lexical owner's own declarations ([`Self::members`]), by owner
     /// and the rest of their bound name after the owner's.
-    direct_members: OnceCell<HashMap<(usize, String), Few>>,
+    direct_members: OnceCell<HashMap<(usize, String), ByArity>>,
     scopes_by_node: HashMap<usize, usize>,
     language: ProgrammingLanguage,
     root: Node<'a>,
@@ -995,6 +1029,9 @@ impl<'a> Declarations<'a> {
                 }
                 let groups = kind_categories(self.language, entry.kind);
                 summary.qualified.add(idx, groups);
+                if self.language == ProgrammingLanguage::CSharp {
+                    summary.written.add(idx, groups, self.declared_arity(idx));
+                }
                 if !is_path_owner_kind(entry.kind) {
                     summary.not_owner |= groups;
                 }
@@ -1133,14 +1170,24 @@ impl<'a> Declarations<'a> {
         }
     }
 
-    /// Whether a C# path segment with `arity` written generic arguments may
-    /// name the type-like declaration `idx`: the counts agree. Always true
-    /// for other kinds and languages.
-    fn arity_fits(&self, idx: usize, arity: usize) -> bool {
+    /// The generic arity that is part of declaration `idx`'s identity: a
+    /// C# type's parameter count, zero for a C# namespace; `None` for any
+    /// other kind or language, which a name written with any count may
+    /// denote.
+    fn declared_arity(&self, idx: usize) -> Option<usize> {
         let entry = &self.entries[idx];
-        self.language != ProgrammingLanguage::CSharp
-            || !is_type_like_kind(entry.kind)
-            || csharp_arity(entry.declaration) == arity
+        match entry.kind {
+            _ if self.language != ProgrammingLanguage::CSharp => None,
+            SymbolKindV2::Namespace => Some(0),
+            kind if is_type_like_kind(kind) => Some(csharp_arity(entry.declaration)),
+            _ => None,
+        }
+    }
+
+    /// Whether a path segment with `arity` written generic arguments may
+    /// name declaration `idx` ([`Self::declared_arity`]).
+    fn arity_fits(&self, idx: usize, arity: usize) -> bool {
+        self.declared_arity(idx).is_none_or(|declared| declared == arity)
     }
 
     /// The scope facts of one owner group: its declaration's, or every
@@ -1225,6 +1272,21 @@ impl<'a> Declarations<'a> {
         found
     }
 
+    /// [`Self::named`] for a name written with `arity` generic arguments:
+    /// in C# only the declarations of that arity ([`ByArity`]), so a
+    /// same-named declaration of another arity neither competes with nor
+    /// stands in for the one the count denotes.
+    fn named_written(&self, name: &str, categories: u8, arity: usize) -> Vec<usize> {
+        if self.language != ProgrammingLanguage::CSharp {
+            return self.named(name, categories);
+        }
+        let mut found = Vec::new();
+        if let Some(summary) = self.summaries().get(name) {
+            summary.written.collect(categories, arity, &mut found);
+        }
+        found
+    }
+
     /// Whether any declaration bound as the named scope `prefix` is
     /// type-like, a type-like one writing bases, or a module.
     fn scope_flags(&self, prefix: &str) -> (bool, bool, bool) {
@@ -1243,12 +1305,13 @@ impl<'a> Declarations<'a> {
     /// between. Identity is the owner group ([`OwnerGroups`]), so a
     /// same-named owner elsewhere contributes nothing, and both owners and
     /// members are groups: a member written in several fragments of one
-    /// group is one member, with no one ID ([`Self::sole`]). At most two per
-    /// group, as [`Few`].
-    fn members(&self, owner: usize, segment: &str, categories: u8) -> Vec<usize> {
+    /// group is one member, with no one ID ([`Self::sole`]). Only members a
+    /// name written with `arity` generic arguments may denote
+    /// ([`ByArity`]); at most two per group, as [`Few`].
+    fn members(&self, owner: usize, segment: &str, categories: u8, arity: usize) -> Vec<usize> {
         let mut found = Vec::new();
-        if let Some(few) = self.direct_members().get(&(owner, segment.to_string())) {
-            few.collect(categories, &mut found);
+        if let Some(members) = self.direct_members().get(&(owner, segment.to_string())) {
+            members.collect(categories, arity, &mut found);
         }
         found
     }
@@ -1257,10 +1320,10 @@ impl<'a> Declarations<'a> {
     /// ([`Self::direct_owner`]), keyed by the rest of its bound name; one
     /// ancestor walk per declaration, built on the first syntax-owner
     /// lookup.
-    fn direct_members(&self) -> &HashMap<(usize, String), Few> {
+    fn direct_members(&self) -> &HashMap<(usize, String), ByArity> {
         self.direct_members.get_or_init(|| {
             let separator = path_separator(self.language);
-            let mut index: HashMap<(usize, String), Few> = HashMap::new();
+            let mut index: HashMap<(usize, String), ByArity> = HashMap::new();
             for (idx, entry) in self.entries.iter().enumerate() {
                 if matches!(self.reach(idx), Reach::GenericParam | Reach::Redirected) {
                     continue;
@@ -1277,7 +1340,7 @@ impl<'a> Declarations<'a> {
                     index
                         .entry((owner, rest.to_string()))
                         .or_default()
-                        .add(self.group_of(idx), kind_categories(self.language, entry.kind));
+                        .add(self.group_of(idx), kind_categories(self.language, entry.kind), self.declared_arity(idx));
                 }
             }
             index
@@ -1447,11 +1510,16 @@ impl<'a> Declarations<'a> {
         found
     }
 
-    /// Whether `name` is declared in a named scope in the given groups, or
-    /// qualifies a declared name.
-    fn is_bound(&self, name: &str, categories: u8) -> bool {
-        !self.named(name, categories).is_empty()
-            || self.qualifies(name)
+    /// Whether `name`, written with `arity` generic arguments, is declared
+    /// in a named scope in the given groups, or qualifies a declared name.
+    /// In C# a declaration of another arity binds nothing, and a name that
+    /// only qualifies others binds only unwritten arguments when no type or
+    /// namespace declares it: `H` qualifying `H<T>`'s members is no `H`.
+    fn is_bound(&self, name: &str, categories: u8, arity: usize) -> bool {
+        !self.named_written(name, categories, arity).is_empty()
+            || (self.qualifies(name)
+                && (self.language != ProgrammingLanguage::CSharp
+                    || (arity == 0 && matches!(self.written_group(name, 0), WrittenGroup::Undeclared))))
     }
 
     /// Whether a path may continue through the scope called `name`: it
@@ -1557,7 +1625,18 @@ impl<'a> Declarations<'a> {
     /// owner group `at` lies in: its own members ([`Scope::Anchored`]), imports,
     /// wildcard and unrecorded bindings, kind and bases
     /// ([`Self::scope_at`]), never those of the bound name both share.
-    fn binding_scope<'s>(&self, first: &str, scopes: &[&'s str], at: Node<'_>, categories: u8) -> Option<Scope<'s>> {
+    ///
+    /// A C# declaration whose generic arity differs from the `arity` the
+    /// segment is written with is no binding: `Base` inside `H` beside `H`'s
+    /// own `Base<T>` keeps looking outward.
+    fn binding_scope<'s>(
+        &self,
+        first: &str,
+        scopes: &[&'s str],
+        at: Node<'_>,
+        categories: u8,
+        arity: usize,
+    ) -> Option<Scope<'s>> {
         for (position, &prefix) in scopes.iter().enumerate() {
             count_shared_context_steps(1);
             let (anchor, (is_class, with_bases, is_module)) = self.scope_at(prefix, at);
@@ -1571,11 +1650,13 @@ impl<'a> Declarations<'a> {
                 return None;
             }
             match anchor {
-                Some(owner) if !self.members(owner, first, categories).is_empty() => {
+                Some(owner) if !self.members(owner, first, categories, arity).is_empty() => {
                     return Some(Scope::Anchored(owner));
                 }
                 Some(_) => {}
-                None if self.is_bound(&self.join(prefix, first), categories) => return Some(Scope::Named(prefix)),
+                None if self.is_bound(&self.join(prefix, first), categories, arity) => {
+                    return Some(Scope::Named(prefix));
+                }
                 None => {}
             }
             if opaque {
@@ -1597,8 +1678,9 @@ impl<'a> Declarations<'a> {
     /// whole-module imports, inherited member types and declarations in
     /// other files are not evidence. A scope competing owners share is read
     /// as the one the site lies in, as in [`Self::binding_scope`], so a
-    /// same-named owner elsewhere is no evidence either.
-    fn may_bind(&self, first: &str, site: &Site<'_, 'a>, categories: u8) -> bool {
+    /// same-named owner elsewhere is no evidence either, nor is a C#
+    /// declaration of another generic `arity`.
+    fn may_bind(&self, first: &str, site: &Site<'_, 'a>, categories: u8, arity: usize) -> bool {
         let walk = self.walk();
         if walk.lexical.may_bind(first, site.at, site.position, categories)
             || self.owner_binds(first, site.at, categories)
@@ -1614,8 +1696,8 @@ impl<'a> Declarations<'a> {
             self.scope_facts(anchor.map_or(FactsOf::Named(prefix), FactsOf::Owner)).is_some_and(|facts| {
                 facts.imports_name(first, categories) || facts.binds_unrecorded(first, categories) || facts.unreadable
             }) || match anchor {
-                Some(owner) => !self.members(owner, first, categories).is_empty(),
-                None => self.is_bound(&self.join(prefix, first), categories),
+                Some(owner) => !self.members(owner, first, categories, arity).is_empty(),
+                None => self.is_bound(&self.join(prefix, first), categories, arity),
             }
         })
     }
@@ -1652,8 +1734,12 @@ impl<'a> Declarations<'a> {
     /// denotes one owner group (`H.Base` the non-generic `H`, `H<int>.Base`
     /// the one-parameter `H`), it is that owner group's own members
     /// ([`Owner::Anchored`]); a C# name no owner group of that arity
-    /// declares stops the path, and a C# type target must have the written
-    /// arity. Under any owner a segment is unproved when the owner binds its
+    /// declares stops the path. In C# the written generic argument count is
+    /// part of every segment's name at every step: the first segment's
+    /// binding scope, each member and the final candidates are only the
+    /// declarations of that arity ([`Self::declared_arity`]), so `Base<int>`
+    /// beside `Base` and `Base<T, U>` names `Base<T>`, and a nearer `Base<T>`
+    /// never hides an outer `Base`. Under any owner a segment is unproved when the owner binds its
     /// name by anything but that one declaration (an import, a deletion, a
     /// pattern target, a Python attribute write through the owner's path:
     /// [`Self::named_member_rebound`], [`Self::syntax_member_rebound`]), and
@@ -1661,6 +1747,8 @@ impl<'a> Declarations<'a> {
     /// The complete name resolves only if it is the only declaration of
     /// that name in the base's name groups and `eligible` accepts its kind.
     fn resolve(&self, path: &BasePath, site: &Site<'_, 'a>, eligible: fn(SymbolKindV2) -> bool) -> Option<usize> {
+        // The named and member lookups select by arity already; a lexical
+        // binding (never a C# type) is checked here.
         self.resolve_path(path, site, eligible, true)
             .filter(|&found| self.arity_fits(found, path.arities.last().copied().unwrap_or(0)))
     }
@@ -1678,6 +1766,7 @@ impl<'a> Declarations<'a> {
         let final_groups = final_categories(self.language, site.value);
         let qualifier_groups = qualifier_categories(self.language, site.value);
         let first_groups = if rest.is_empty() { final_groups } else { qualifier_groups };
+        let first_arity = path.arities.first().copied().unwrap_or(0);
         // The module `self::`/`super::` names (`None`: the file root), and
         // where its path continues from.
         let module_at = |out: usize| match out.cmp(&site.modules.len()) {
@@ -1708,14 +1797,14 @@ impl<'a> Declarations<'a> {
                     (Owner::Syntax(idx), rest)
                 }
                 Local::Unresolved => return None,
-                Local::Global => enter(self.binding_scope(first, &[""], site.at, first_groups)?),
+                Local::Global => enter(self.binding_scope(first, &[""], site.at, first_groups, first_arity)?),
                 Local::Continue => {
                     if site.type_params.contains(first)
                         || self.owner_binds(first, site.at, first_groups)
                     {
                         return None;
                     }
-                    enter(self.binding_scope(first, &site.scopes, site.at, first_groups)?)
+                    enter(self.binding_scope(first, &site.scopes, site.at, first_groups, first_arity)?)
                 }
             },
             PathAnchor::Root => (Owner::Named(first.clone()), rest),
@@ -1743,7 +1832,7 @@ impl<'a> Declarations<'a> {
             }
             current = match current {
                 Owner::Syntax(owner) => {
-                    let [only] = self.members(owner, segment, groups)[..] else { return None };
+                    let [only] = self.members(owner, segment, groups, arity)[..] else { return None };
                     if self.syntax_member_rebound(owner, only, segment, groups, writes) {
                         return None;
                     }
@@ -1751,7 +1840,7 @@ impl<'a> Declarations<'a> {
                     if last {
                         return self.sole(only).filter(|_| eligible(kind));
                     }
-                    if !is_path_owner_kind(kind) || !self.arity_fits(only, arity) {
+                    if !is_path_owner_kind(kind) {
                         return None;
                     }
                     Owner::Syntax(only)
@@ -1759,7 +1848,7 @@ impl<'a> Declarations<'a> {
                 Owner::Anchored(owner) => {
                     // The members of every fragment of the owner group, by
                     // group: a nested `partial` type is one member.
-                    let [only] = self.members(owner, segment, groups)[..] else { return None };
+                    let [only] = self.members(owner, segment, groups, arity)[..] else { return None };
                     // The anchored group's own bindings, not those of
                     // every same-named owner or namespace its spelling
                     // reaches.
@@ -1770,7 +1859,7 @@ impl<'a> Declarations<'a> {
                     if last {
                         return self.sole(only).filter(|_| eligible(kind));
                     }
-                    if !is_path_owner_kind(kind) || !self.arity_fits(only, arity) {
+                    if !is_path_owner_kind(kind) {
                         return None;
                     }
                     if self.anchors_members(only) {
@@ -1788,7 +1877,8 @@ impl<'a> Declarations<'a> {
             };
         }
         let Owner::Named(current) = current else { return None };
-        only(&self.named(&current, final_groups)).filter(|&found| eligible(self.entries[found].kind))
+        let last_arity = path.arities.last().copied().unwrap_or(0);
+        only(&self.named_written(&current, final_groups, last_arity)).filter(|&found| eligible(self.entries[found].kind))
     }
 
     /// The relation target for `base`; `records` are the declarations'
@@ -2142,11 +2232,16 @@ fn written_bases<'a>(
                 && let Some(path) = base.path.as_ref()
                 && let Some(first) = path.segments.first()
                 && !type_params.contains(first)
-                && !declarations.may_bind(first, &site, if path.segments.len() == 1 {
-                    final_categories(language, value)
-                } else {
-                    qualifier_categories(language, value)
-                })
+                && !declarations.may_bind(
+                    first,
+                    &site,
+                    if path.segments.len() == 1 {
+                        final_categories(language, value)
+                    } else {
+                        qualifier_categories(language, value)
+                    },
+                    path.arities.first().copied().unwrap_or(0),
+                )
             {
                 continue;
             }

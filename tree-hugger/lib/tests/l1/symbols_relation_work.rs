@@ -3,8 +3,9 @@
 //! Each shape repeats one name so that every lookup would meet an
 //! input-sized bucket if it scanned one: record-less owners binding the same
 //! parameter name, same-named owners in sibling blocks, a reopened
-//! namespace, C# `partial` fragments of one or several type identities, a
-//! growing written-base list. The counted work
+//! namespace, C# `partial` fragments of one or several type identities,
+//! one C# name declared at three generic arities, a growing written-base
+//! list. The counted work
 //! (`shared_context_steps`, which also counts candidate visits and
 //! deduplication) must grow with the file, never with the bucket, and the
 //! results must stay exact: every target ID and its source order is checked
@@ -31,6 +32,10 @@ enum Expect {
     /// The only child resolves every `base` record, in source order.
     OneToAll,
     Unresolved,
+    /// There are `count(n)` `base` records, and the k-th child (source
+    /// order) resolves the `target(k, n)`-th of them (source order): one
+    /// declaration among same-named ones of several generic arities.
+    Indexed { count: fn(usize) -> usize, target: fn(usize, usize) -> usize },
 }
 
 pub struct WorkShape {
@@ -501,6 +506,50 @@ pub const WORK_SHAPES: &[WorkShape] = &[
         child: "ReviewChild", base: "ReviewBase", expect: Expect::EachToItsOwn,
         parameter_units: 1,
     },
+    // One C# bound name at three generic arities, repeated: the written
+    // argument count selects among candidates indexed by arity before any
+    // truncation, so every lookup still meets a bounded set.
+    WorkShape {
+        label: "C# competing owners each holding three arities: anchored final member", extension: "cs",
+        source: |n| repeat("", |i| format!("class ReviewHolder {{ class ReviewBase {{}}\nclass ReviewBase<T> {{}}\n\
+            class ReviewBase<T, U> {{}}\nclass ReviewChild{i} : ReviewBase<int> {{}} }}\n"), "", n),
+        child: "ReviewChild", base: "ReviewBase",
+        expect: Expect::Indexed { count: |n| 3 * n, target: |k, _| 3 * k + 1 },
+        parameter_units: 3,
+    },
+    WorkShape {
+        label: "C# competing owners each holding three arities: anchored intermediate member", extension: "cs",
+        source: |n| repeat("", |i| format!("class ReviewOuter {{ class ReviewHolder {{ class ReviewBase {{}} }}\n\
+            class ReviewHolder<T> {{ class ReviewBase {{}} }}\nclass ReviewHolder<T, U> {{ class ReviewBase {{}} }}\n\
+            class ReviewChild{i} : ReviewHolder<int, string>.ReviewBase {{}} }}\n"), "", n),
+        child: "ReviewChild", base: "ReviewBase",
+        expect: Expect::Indexed { count: |n| 3 * n, target: |k, _| 3 * k + 2 },
+        parameter_units: 3,
+    },
+    WorkShape {
+        label: "C# outward past a nearer wrong arity in competing owners", extension: "cs",
+        source: |n| repeat("", |i| format!("class ReviewHolder {{ class ReviewBase<T> {{}}\nclass ReviewBase<T, U> {{}}\n\
+            class ReviewChild{i} : ReviewBase {{}} }}\n"), "class ReviewBase {}\n", n),
+        child: "ReviewChild", base: "ReviewBase",
+        expect: Expect::Indexed { count: |n| 2 * n + 1, target: |_, n| 2 * n },
+        parameter_units: 3,
+    },
+    WorkShape {
+        label: "C# rooted path past nearer declarations of every arity", extension: "cs",
+        source: |n| repeat("class ReviewBase {}\nclass ReviewBase<T> {}\nclass ReviewBase<T, U> {}\n",
+            |i| format!("class ReviewHolder {{ class ReviewBase {{}}\nclass ReviewBase<T> {{}}\n\
+            class ReviewChild{i} : global::ReviewBase<int, string> {{}} }}\n"), "", n),
+        child: "ReviewChild", base: "ReviewBase",
+        expect: Expect::Indexed { count: |n| 2 * n + 3, target: |_, _| 2 },
+        parameter_units: 1,
+    },
+    WorkShape {
+        label: "C# reopened namespace redeclaring three arities: same-arity competition", extension: "cs",
+        source: |n| repeat("", |i| format!("namespace ReviewSpace {{ class ReviewBase {{}} class ReviewBase<T> {{}} \
+            class ReviewBase<T, U> {{}} }}\nclass ReviewChild{i} : ReviewSpace.ReviewBase<int> {{}}\n"), "", n),
+        child: "ReviewChild", base: "ReviewBase", expect: Expect::Unresolved,
+        parameter_units: 3,
+    },
 ];
 
 fn is_type_kind(kind: SymbolKindV2) -> bool {
@@ -557,6 +606,16 @@ fn check(shape: &WorkShape, records: &[SymbolRecord], n: usize) -> Result<(), St
             for child in children {
                 if ids(child) != [None] || bases(child)[0].qualified_name.is_some() {
                     return Err(format!("`{}` must retain an ambiguous textual base", child.identity.name));
+                }
+            }
+        }
+        Expect::Indexed { count, target } => {
+            if children.len() != n || targets.len() != count(n) {
+                return Err(format!("{} children and {} bases for {n}", children.len(), targets.len()));
+            }
+            for (position, child) in children.iter().enumerate() {
+                if ids(child) != [Some(targets[target(position, n)].id.clone())] {
+                    return Err(format!("child {position} resolves {:?}, not base {}", ids(child), target(position, n)));
                 }
             }
         }
@@ -628,6 +687,11 @@ crate::symbols_shared_context::shape_tests!(repeated_names_keep_relation_work_li
     csharp_partials_of_two_arities => "C# repeated partial fragments of two arities",
     csharp_partials_beside_incompatible => "C# compatible fragments beside incompatible categories and arities",
     csharp_outside_paths_by_arity => "C# outside paths through repeated fragments of two arities",
+    csharp_anchored_member_by_arity => "C# competing owners each holding three arities: anchored final member",
+    csharp_anchored_intermediate_by_arity => "C# competing owners each holding three arities: anchored intermediate member",
+    csharp_outward_past_wrong_arity => "C# outward past a nearer wrong arity in competing owners",
+    csharp_rooted_past_every_arity => "C# rooted path past nearer declarations of every arity",
+    csharp_reopened_namespace_arities => "C# reopened namespace redeclaring three arities: same-arity competition",
 });
 
 /// The shape labeled `label`, measured at both sizes: its results are exact

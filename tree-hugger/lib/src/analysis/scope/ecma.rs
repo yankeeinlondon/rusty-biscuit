@@ -3,8 +3,10 @@
 //!
 //! `let`, `const`, `class` and block-level `function` are block scoped and
 //! hide an outer name for the whole block (the temporal dead zone); `var`
-//! belongs to the enclosing function; `function` and `var` are hoisted. So
-//! every binding is visible throughout its scope. TypeScript `interface` and
+//! belongs to the enclosing function, or to its body when the parameter list
+//! holds an expression (a separate var environment the parameters' defaults
+//! cannot see, [`var_body`]); `function` and `var` are hoisted. So every
+//! binding is visible throughout its scope. TypeScript `interface` and
 //! `type` are types only, `class`, `enum` and `namespace` both; JavaScript
 //! has values only.
 //!
@@ -78,6 +80,43 @@ pub(super) fn is_function_scope(kind: &str) -> bool {
     )
 }
 
+/// The body block of the function `node` when its parameter list holds an
+/// expression (ECMAScript's `ContainsExpression`: an initializer, or a
+/// computed key in a pattern), whose `var`s are then out of the parameters'
+/// reach.
+pub(super) fn var_body(node: Node<'_>) -> Option<Node<'_>> {
+    if !is_function_scope(node.kind()) {
+        return None;
+    }
+    let parameters = node.child_by_field_name("parameters")?;
+    let mut stack = vec![parameters];
+    let mut contains_expression = false;
+    while let Some(current) = stack.pop() {
+        match current.kind() {
+            "assignment_pattern" | "object_assignment_pattern" | "computed_property_name" => {
+                contains_expression = true;
+                break;
+            }
+            "required_parameter" | "optional_parameter" if current.child_by_field_name("value").is_some() => {
+                contains_expression = true;
+                break;
+            }
+            // Only patterns are walked: an expression is reached only
+            // through an initializer or a computed key, which decide first.
+            "formal_parameters" | "required_parameter" | "optional_parameter" | "object_pattern" | "array_pattern"
+            | "pair_pattern" | "rest_pattern" => {
+                let mut cursor = current.walk();
+                stack.extend(current.named_children(&mut cursor));
+            }
+            _ => {}
+        }
+    }
+    contains_expression
+        .then(|| node.child_by_field_name("body"))
+        .flatten()
+        .filter(|body| body.kind() == "statement_block")
+}
+
 const fn declared(categories: u8, callable: bool) -> BindingRule {
     BindingRule {
         categories,
@@ -87,6 +126,7 @@ const fn declared(categories: u8, callable: bool) -> BindingRule {
         local: false,
         ordered: false,
         callable,
+        pattern_constant: false,
     }
 }
 
@@ -165,7 +205,7 @@ pub(super) fn binding_sites<'tree>(node: Node<'tree>, typed: bool, sites: &mut V
             let mut cursor = node.walk();
             for child in node.named_children(&mut cursor) {
                 import_names(child, &mut |name| {
-                    sites.push(BindingSite { name, rule: declared(ANY_CATEGORY, true), is_import: true });
+                    sites.push(BindingSite { name, rule: declared(ANY_CATEGORY, true), is_import: true, bare_pattern: None });
                 });
             }
         }
@@ -174,7 +214,7 @@ pub(super) fn binding_sites<'tree>(node: Node<'tree>, typed: bool, sites: &mut V
     sites.extend(
         bindings
             .into_iter()
-            .map(|(name, rule)| BindingSite { name, rule, is_import: false }),
+            .map(|(name, rule)| BindingSite { name, rule, is_import: false, bare_pattern: None }),
     );
 }
 

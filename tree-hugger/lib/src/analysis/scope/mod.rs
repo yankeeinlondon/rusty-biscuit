@@ -48,7 +48,9 @@ pub(crate) enum Placement {
     /// itself (`fn f`, `class C`) puts its name in the enclosing scope.
     Innermost,
     /// The nearest enclosing function scope, else the file (JavaScript
-    /// `var`).
+    /// `var`). A function whose parameters hold an expression keeps its
+    /// body's `var`s in the body ([`LanguageRules::var_body`]), out of reach
+    /// of those expressions.
     FunctionScope,
 }
 
@@ -73,6 +75,10 @@ pub(crate) struct BindingRule {
     /// Calling the name invokes the declaration itself (a function, a
     /// constructor, an import), not whatever a variable holds.
     pub(crate) callable: bool,
+    /// A bare identifier pattern that reaches this binding names it instead
+    /// of binding a new name: a Rust `const`, unit struct or `const`
+    /// generic parameter.
+    pub(crate) pattern_constant: bool,
 }
 
 /// A binding site found in the syntax tree.
@@ -81,6 +87,24 @@ pub(crate) struct BindingSite<'tree> {
     pub(crate) name: Node<'tree>,
     pub(crate) rule: BindingRule,
     pub(crate) is_import: bool,
+    /// A Rust identifier pattern written without `mut`, `ref` or `@`: it
+    /// binds only when the name, looked up where it is written, does not
+    /// reach a [`BindingRule::pattern_constant`] binding (rustc's rule; the
+    /// spelling decides nothing). `None` for every other site.
+    pub(crate) bare_pattern: Option<Refutability>,
+}
+
+/// Where a bare pattern name is written, which decides how an identity the
+/// file cannot establish is read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Refutability {
+    /// A `let` without `else`, a parameter or a `for` pattern: a constant
+    /// there compiles only when its type has a single value (a unit struct,
+    /// `const C: () = ()`), so an unestablished name is read as a binding.
+    Irrefutable,
+    /// A `match` arm, `if let`, `while let`, `let … else`: an unestablished
+    /// name may as well be a constant, and stays unknown.
+    Refutable,
 }
 
 /// What a binding names.
@@ -93,6 +117,10 @@ pub(crate) enum BindingTarget {
     /// A local binding no record reports (a destructured or `catch`
     /// binding the locals query does not capture).
     Unreported,
+    /// A bare Rust pattern name whose identity the file cannot establish:
+    /// an import or a glob in view may supply a constant of that name, so
+    /// it is a new binding or a reference. Whatever reaches it is uncertain.
+    Unknown,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -153,14 +181,9 @@ impl LanguageRules {
     }
 
     /// The binding sites `node` declares (visited once per node).
-    pub(crate) fn binding_sites<'tree>(
-        self,
-        node: Node<'tree>,
-        source: &str,
-        sites: &mut Vec<BindingSite<'tree>>,
-    ) {
+    pub(crate) fn binding_sites<'tree>(self, node: Node<'tree>, sites: &mut Vec<BindingSite<'tree>>) {
         match self {
-            Self::Rust => rust::binding_sites(node, source, sites),
+            Self::Rust => rust::binding_sites(node, sites),
             Self::Ecma { typed } => ecma::binding_sites(node, typed, sites),
         }
     }
@@ -203,6 +226,17 @@ impl LanguageRules {
             Self::Ecma { .. } => ecma::is_function_scope(kind),
         }
     }
+
+    /// The body of the function scope `node` when its `var`s live apart
+    /// from its parameters: ECMAScript gives a function whose parameter
+    /// list holds an expression (a default, a computed key) a separate var
+    /// environment, so `function g(x = f()) { var f; }` calls the outer `f`.
+    fn var_body(self, node: Node<'_>) -> Option<Node<'_>> {
+        match self {
+            Self::Rust => None,
+            Self::Ecma { .. } => ecma::var_body(node),
+        }
+    }
 }
 
 /// A file's scopes, bindings and their per-scope name index.
@@ -215,6 +249,9 @@ pub(crate) struct ScopeTree<'tree> {
     by_node: HashMap<usize, usize>,
     /// What leaving each scope for its parent leaves behind.
     boundaries: Vec<Boundary>,
+    /// Per function scope, the body scope its [`Placement::FunctionScope`]
+    /// bindings go to instead ([`LanguageRules::var_body`]).
+    var_bodies: Vec<Option<usize>>,
     has_glob: Vec<bool>,
     bindings: Vec<Binding>,
     /// `(scope, name)` → binding indexes, in binding order, not position
@@ -289,9 +326,17 @@ impl<'tree> ScopeTree<'tree> {
                     })
             })
             .collect();
+        let var_bodies = nodes
+            .iter()
+            .map(|node| {
+                let body = rules?.var_body(*node)?;
+                by_node.get(&body.id()).copied()
+            })
+            .collect();
         Self {
             rules,
             boundaries,
+            var_bodies,
             has_glob: vec![false; nodes.len()],
             nodes,
             parents,
@@ -329,6 +374,7 @@ impl<'tree> ScopeTree<'tree> {
                     local: false,
                     ordered: false,
                     callable: false,
+                    pattern_constant: false,
                 };
                 Some(self.placement(node, rule)).filter(|&scope| scope != 0)
             }
@@ -353,10 +399,17 @@ impl<'tree> ScopeTree<'tree> {
         if rule.placement == Placement::FunctionScope
             && let Some(rules) = self.rules
         {
+            let mut below = None;
             while let Some(parent) = self.parents[scope]
                 && !rules.is_function_scope(self.nodes[scope].kind())
             {
+                below = Some(scope);
                 scope = parent;
+            }
+            if let Some(body) = below
+                && self.var_bodies[scope] == Some(body)
+            {
+                return body;
             }
         }
         scope

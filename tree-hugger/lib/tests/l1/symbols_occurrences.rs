@@ -1121,6 +1121,142 @@ fn expression_local_names_bind_only_inside_their_expression() {
     assert_bound_rows(EXPRESSION_NAME_MATRIX);
 }
 
+// ---- Parameter and body environments ---------------------------------------
+
+/// Every ECMA callable form, as `(label, header, closing)`: the header opens
+/// the body on line 2 with a parameter default calling `f`.
+const PARAMETER_DEFAULT_FORMS: &[(&str, &str, &str)] = &[
+    ("function declaration", "function g(x = f()) {", "}"),
+    ("arrow function", "const g = (x = f()) => {", "};"),
+    ("function expression", "const g = function (x = f()) {", "};"),
+    ("generator declaration", "function* g(x = f()) {", "}"),
+    ("generator expression", "const g = function* (x = f()) {", "};"),
+    ("method", "class C { g(x = f()) {", "} }"),
+    ("constructor", "class C { constructor(x = f()) {", "} }"),
+];
+
+/// The body declarations of `f` on line 4, as `(label, line 4)`: `var` (at
+/// the body's top level and in a nested block) is the finding, the others
+/// are controls that were always block scoped.
+const BODY_DECLARATIONS: &[(&str, &str)] = &[
+    ("var", "  var f = () => {};"),
+    ("var in a nested block", "  { var f = () => {}; }"),
+    ("let (control)", "  let f = () => {};"),
+    ("const (control)", "  const f = () => {};"),
+    ("function (control)", "  function f() {}"),
+];
+
+/// A parameter default is evaluated before the body, in an environment
+/// that holds the parameters but none of the body's declarations: the
+/// default's `f()` (line 2) calls the outer `f`, while the body's calls
+/// before and after the declaration (lines 3 and 5, hoisting) and inside a
+/// closure in the body (line 6) bind the body's `f`.
+#[test]
+fn parameter_defaults_never_see_the_body_declarations() {
+    for (form, header, closing) in PARAMETER_DEFAULT_FORMS {
+        for (declaration, line4) in BODY_DECLARATIONS {
+            let source = format!(
+                "function f() {{}}\n{header}\n  f();\n{line4}\n  f();\n  const h = () => f();\n{closing}\nf();\n"
+            );
+            for extension in ["ts", "js"] {
+                let label: &'static str = Box::leak(format!("{extension} {form} with a body {declaration}").into_boxed_str());
+                let source: &'static str = Box::leak(source.clone().into_boxed_str());
+                assert_bound_rows(&[(
+                    label,
+                    extension,
+                    source,
+                    &[
+                        (2, "f", 0, Bound::To("f", 1)),
+                        (3, "f", 0, Bound::To("f", 4)),
+                        (5, "f", 0, Bound::To("f", 4)),
+                        (6, "f", 0, Bound::To("f", 4)),
+                        (8, "f", 0, Bound::To("f", 1)),
+                    ],
+                )]);
+            }
+        }
+    }
+}
+
+/// The parameter environment's other readers and writers: parameters stay
+/// visible to later defaults and to the body, every parameter expression
+/// (a destructuring default, a computed key, a typed default, a closure in
+/// a default) separates the body's `var`s, and a body's direct `eval` limits
+/// only the body.
+const PARAMETER_ENVIRONMENT_MATRIX: &[BoundaryRow] = &[
+    (
+        "a parameter is visible to a later default and to the body",
+        "js",
+        "function f() {}\nfunction g(f = 1, x = f) {\n  f;\n  var y = 1;\n}\n",
+        &[(2, "f", 0, Bound::To("f", 2)), (3, "f", 0, Bound::To("f", 2))],
+    ),
+    (
+        "a body `var` named like a parameter is the body's own binding",
+        "js",
+        "function g(f, x = 1) {\n  var f = 2;\n  f;\n}\n",
+        &[(3, "f", 0, Bound::To("f", 2))],
+    ),
+    (
+        "a destructuring default does not see a body `var`",
+        "js",
+        "function f() {}\nfunction g({ a = f() }) {\n  var f = () => {};\n}\n",
+        &[(2, "f", 0, Bound::To("f", 1))],
+    ),
+    (
+        "a computed key does not see a body `var`",
+        "ts",
+        "function f() {}\nfunction g({ [f()]: a }) {\n  var f = () => {};\n}\n",
+        &[(2, "f", 0, Bound::To("f", 1))],
+    ),
+    (
+        "a typed default does not see a body `var`",
+        "ts",
+        "function f() { return 1; }\nfunction g(x: number = f()) {\n  var f = () => 2;\n}\n",
+        &[(2, "f", 0, Bound::To("f", 1))],
+    ),
+    (
+        "a closure in a default does not see a body `var`",
+        "js",
+        "function f() {}\nfunction g(x = () => f()) {\n  var f = () => {};\n}\n",
+        &[(2, "f", 0, Bound::To("f", 1))],
+    ),
+    (
+        "a `for … in` `var` in the body stays in the body",
+        "js",
+        "function f() {}\nfunction g(x = f()) {\n  for (var f in {}) {}\n  f;\n}\n",
+        &[(2, "f", 0, Bound::To("f", 1)), (4, "f", 0, Bound::Established)],
+    ),
+    (
+        "a destructured body `var` stays in the body",
+        "js",
+        "function f() {}\nfunction g(x = f()) {\n  var { f } = {};\n  f;\n}\n",
+        &[(2, "f", 0, Bound::To("f", 1)), (4, "f", 0, Bound::Established)],
+    ),
+    (
+        "a direct `eval` in the body limits the body, not the defaults",
+        "js",
+        "function f() {}\nfunction g(x = f()) {\n  eval(\"var f = 1\");\n  f();\n}\n",
+        &[(2, "f", 0, Bound::To("f", 1)), (4, "f", 0, Bound::Uncertain)],
+    ),
+    (
+        "without parameter expressions a body `var` redeclares the parameter (control)",
+        "js",
+        "function g(f) {\n  var f = 1;\n  f;\n}\n",
+        &[(3, "f", 0, Bound::Uncertain)],
+    ),
+    (
+        "a body `var` is hoisted without parameter expressions (control)",
+        "js",
+        "function f() {}\nfunction g(x) {\n  f();\n  var f = () => {};\n}\n",
+        &[(3, "f", 0, Bound::To("f", 4))],
+    ),
+];
+
+#[test]
+fn the_parameter_environment_holds_parameters_but_not_body_vars() {
+    assert_bound_rows(PARAMETER_ENVIRONMENT_MATRIX);
+}
+
 // ---- Invocation forms ----------------------------------------------------------
 
 const CALL: OccurrenceKind = OccurrenceKind::Call;

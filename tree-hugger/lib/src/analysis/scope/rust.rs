@@ -98,28 +98,29 @@ fn is_associated(node: Node<'_>) -> bool {
     })
 }
 
-pub(super) fn binding_sites<'tree>(node: Node<'tree>, source: &str, sites: &mut Vec<BindingSite<'tree>>) {
+pub(super) fn binding_sites<'tree>(node: Node<'tree>, sites: &mut Vec<BindingSite<'tree>>) {
     let mut push = |name: Option<Node<'tree>>, rule: BindingRule| {
         if let Some(name) = name {
-            sites.push(BindingSite { name, rule, is_import: false });
+            sites.push(BindingSite { name, rule, is_import: false, bare_pattern: None });
         }
     };
     let name = node.child_by_field_name("name");
     match node.kind() {
         "function_item" | "function_signature_item" if !is_associated(node) => push(name, item(VALUE, true)),
-        "const_item" | "static_item" if !is_associated(node) => push(name, item(VALUE, false)),
+        "const_item" if !is_associated(node) => push(name, BindingRule { pattern_constant: true, ..item(VALUE, false) }),
+        "static_item" if !is_associated(node) => push(name, item(VALUE, false)),
         "struct_item" => {
-            // A tuple or unit struct also names its constructor.
-            let constructs = node
-                .child_by_field_name("body")
-                .is_none_or(|body| body.kind() != "field_declaration_list");
+            // A tuple or unit struct also names its constructor; a bare
+            // pattern naming a unit struct matches it.
+            let body = node.child_by_field_name("body").map(|body| body.kind());
+            let constructs = body != Some("field_declaration_list");
             let categories = if constructs { TYPE | VALUE } else { TYPE };
-            push(name, item(categories, constructs));
+            push(name, BindingRule { pattern_constant: body.is_none(), ..item(categories, constructs) });
         }
         "union_item" | "enum_item" | "trait_item" | "mod_item" => push(name, item(TYPE, false)),
         "type_item" if !is_associated(node) => push(name, item(TYPE, false)),
         "type_parameter" => push(name, local(TYPE)),
-        "const_parameter" => push(name, local(VALUE)),
+        "const_parameter" => push(name, BindingRule { pattern_constant: true, ..local(VALUE) }),
         "macro_definition" => push(
             name,
             BindingRule {
@@ -128,24 +129,28 @@ pub(super) fn binding_sites<'tree>(node: Node<'tree>, source: &str, sites: &mut 
                 ..item(MACRO, false)
             },
         ),
+        _ => {}
+    }
+    match node.kind() {
         "let_declaration" => {
             let rule = BindingRule {
                 visible_from: node.end_byte(),
                 ordered: true,
                 ..local(VALUE)
             };
-            pattern_names(node.child_by_field_name("pattern"), false, source, &mut |name| push(Some(name), rule));
+            // `let mut x`: the grammar puts the `mut` beside the pattern.
+            let written_mut = has_child(node, "mutable_specifier");
+            pattern_sites(node.child_by_field_name("pattern"), rule, written_mut, sites);
         }
         "parameter" => {
-            pattern_names(node.child_by_field_name("pattern"), false, source, &mut |name| {
-                push(Some(name), local(VALUE));
-            });
+            let written_mut = has_child(node, "mutable_specifier");
+            pattern_sites(node.child_by_field_name("pattern"), local(VALUE), written_mut, sites);
         }
         "closure_parameters" => {
             let mut cursor = node.walk();
             for child in node.named_children(&mut cursor) {
                 if child.kind() != "parameter" {
-                    pattern_names(Some(child), false, source, &mut |name| push(Some(name), local(VALUE)));
+                    pattern_sites(Some(child), local(VALUE), false, sites);
                 }
             }
         }
@@ -154,7 +159,7 @@ pub(super) fn binding_sites<'tree>(node: Node<'tree>, source: &str, sites: &mut 
                 .child_by_field_name("body")
                 .map_or(node.end_byte(), |body| body.start_byte());
             let rule = BindingRule { visible_from, ..local(VALUE) };
-            pattern_names(node.child_by_field_name("pattern"), false, source, &mut |name| push(Some(name), rule));
+            pattern_sites(node.child_by_field_name("pattern"), rule, false, sites);
         }
         "match_pattern" => {
             // The guard (`condition`) reads the bindings; it binds none.
@@ -162,7 +167,7 @@ pub(super) fn binding_sites<'tree>(node: Node<'tree>, source: &str, sites: &mut 
                 node.child_by_field_name("condition")
                     .is_none_or(|condition| condition.id() != pattern.id())
             });
-            pattern_names(pattern, true, source, &mut |name| push(Some(name), local(VALUE)));
+            pattern_sites(pattern, local(VALUE), false, sites);
         }
         "let_condition" => {
             let rule = BindingRule {
@@ -170,21 +175,42 @@ pub(super) fn binding_sites<'tree>(node: Node<'tree>, source: &str, sites: &mut 
                 visible_until: conditional_end(node),
                 ..local(VALUE)
             };
-            pattern_names(node.child_by_field_name("pattern"), true, source, &mut |name| push(Some(name), rule));
+            pattern_sites(node.child_by_field_name("pattern"), rule, false, sites);
         }
         "use_declaration" => {
             use_names(node.child_by_field_name("argument"), &mut |name| {
-                sites.push(BindingSite { name, rule: item(ANY_CATEGORY, true), is_import: true });
+                sites.push(BindingSite { name, rule: item(ANY_CATEGORY, true), is_import: true, bare_pattern: None });
             });
         }
         "extern_crate_declaration" => {
             let bound = node.child_by_field_name("alias").or(name);
             if let Some(name) = bound {
-                sites.push(BindingSite { name, rule: item(ANY_CATEGORY, true), is_import: true });
+                sites.push(BindingSite { name, rule: item(ANY_CATEGORY, true), is_import: true, bare_pattern: None });
             }
         }
         _ => {}
     }
+}
+
+/// Whether `node` has an unnamed or named child of `kind`.
+fn has_child(node: Node<'_>, kind: &str) -> bool {
+    let mut cursor = node.walk();
+    node.children(&mut cursor).any(|child| child.kind() == kind)
+}
+
+/// The binding sites of `pattern`. `written_mut`: a `mut` written before
+/// the whole pattern (`let mut x`, a `mut x` parameter), which the grammar
+/// keeps beside it, so an identifier pattern is then an explicit binding.
+fn pattern_sites<'tree>(
+    pattern: Option<Node<'tree>>,
+    rule: BindingRule,
+    written_mut: bool,
+    sites: &mut Vec<BindingSite<'tree>>,
+) {
+    pattern_names(pattern, &mut |name, bare_pattern| {
+        let bare_pattern = bare_pattern && !(written_mut && pattern.is_some_and(|pattern| pattern.id() == name.id()));
+        sites.push(BindingSite { name, rule, is_import: false, bare_pattern });
+    });
 }
 
 /// The names a `use` tree binds: a path's last segment, an alias, every
@@ -216,32 +242,58 @@ fn use_names<'tree>(node: Option<Node<'tree>>, bind: &mut impl FnMut(Node<'tree>
     }
 }
 
-/// The identifiers a pattern binds. In a refutable pattern (`match` arm,
-/// `if let`) a bare capitalized identifier is read as a constant or unit
-/// variant, as rustc does for names in scope, and binds nothing.
-fn pattern_names<'tree>(
-    pattern: Option<Node<'tree>>,
-    refutable: bool,
-    source: &str,
-    bind: &mut impl FnMut(Node<'tree>),
-) {
+/// The identifiers a pattern binds or may bind, each with whether it is
+/// bare. An identifier written with `mut`, `ref` or `x @ …`, and a struct
+/// field shorthand written with them, always binds; a bare one binds only
+/// when it names no constant in view ([`BindingSite::bare_pattern`]),
+/// in every pattern position alike (`let`, parameters, `for`, `match`,
+/// `if let`/`while let`), since rustc resolves them all the same way.
+fn pattern_names<'tree>(pattern: Option<Node<'tree>>, bind: &mut impl FnMut(Node<'tree>, bool)) {
     let Some(pattern) = pattern else { return };
-    let mut stack = vec![pattern];
-    while let Some(node) = stack.pop() {
+    // `(node, explicit)`: whether a binding mode or `@` was written for it.
+    let mut stack = vec![(pattern, false)];
+    while let Some((node, explicit)) = stack.pop() {
         match node.kind() {
-            "identifier" => {
-                let capitalized = source
-                    .get(node.start_byte()..node.end_byte())
-                    .and_then(|text| text.chars().next())
-                    .is_some_and(char::is_uppercase);
-                if !(refutable && capitalized) {
-                    bind(node);
+            "identifier" => bind(node, !explicit),
+            "field_pattern" => {
+                let mut cursor = node.walk();
+                let moded = node
+                    .children(&mut cursor)
+                    .any(|child| matches!(child.kind(), "ref" | "mutable_specifier"));
+                match node.child_by_field_name("pattern") {
+                    Some(pattern) => stack.push((pattern, false)),
+                    None => {
+                        if let Some(name) = node
+                            .child_by_field_name("name")
+                            .filter(|name| name.kind() == "shorthand_field_identifier")
+                        {
+                            bind(name, !moded);
+                        }
+                    }
                 }
             }
-            "shorthand_field_identifier" => bind(node),
-            // Paths, types and literals name no binding.
-            "scoped_identifier" | "scoped_type_identifier" | "type_identifier" | "generic_type"
-            | "range_pattern" | "macro_invocation" | "field_identifier" => {}
+            "mut_pattern" | "ref_pattern" => {
+                let mut cursor = node.walk();
+                let children: Vec<Node<'tree>> = node.named_children(&mut cursor).collect();
+                for child in children {
+                    if child.kind() != "mutable_specifier" {
+                        stack.push((child, true));
+                    }
+                }
+            }
+            "captured_pattern" => {
+                let mut cursor = node.walk();
+                let children: Vec<Node<'tree>> = node.named_children(&mut cursor).collect();
+                for (index, child) in children.into_iter().enumerate() {
+                    // The name before `@` binds; the pattern after it is
+                    // read like any other.
+                    stack.push((child, index == 0));
+                }
+            }
+            // Paths, types, literals and expressions name no binding; a
+            // generic path (`None::<u8>`) is a path.
+            "scoped_identifier" | "scoped_type_identifier" | "type_identifier" | "generic_type" | "generic_pattern"
+            | "range_pattern" | "macro_invocation" | "field_identifier" | "const_block" | "closure_expression" => {}
             _ => {
                 let path = match node.kind() {
                     "tuple_struct_pattern" | "struct_pattern" => node.child_by_field_name("type"),
@@ -250,7 +302,7 @@ fn pattern_names<'tree>(
                 let mut cursor = node.walk();
                 for child in node.named_children(&mut cursor) {
                     if path.is_none_or(|path| path.id() != child.id()) {
-                        stack.push(child);
+                        stack.push((child, false));
                     }
                 }
             }

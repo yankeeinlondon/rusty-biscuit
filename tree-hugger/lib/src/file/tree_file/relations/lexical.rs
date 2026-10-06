@@ -171,6 +171,7 @@ const fn rule(categories: u8, visible_from: usize) -> BindingRule {
         local: false,
         ordered: false,
         callable: false,
+        pattern_constant: false,
     }
 }
 
@@ -215,7 +216,7 @@ impl<'a> Lexical<'a> {
             }
             if let Some(rules) = rules {
                 shared.clear();
-                rules.binding_sites(node, source, &mut shared);
+                rules.binding_sites(node, &mut shared);
                 dynamics.extend(rules.dynamic(node, source));
                 sites.extend(shared.drain(..).filter(|site| !site.is_import).map(|mut site| {
                     // A type parameter never resolves, in a type or a value
@@ -871,7 +872,7 @@ fn body_barrier(language: ProgrammingLanguage, body: Node<'_>, source: &str) -> 
 /// (`writes`, [`Collected::qualified_writes`]).
 fn python_sites<'a>(node: Node<'a>, source: &str, sites: &mut Vec<Site<'a>>, writes: &mut Vec<Node<'a>>) {
     let mut bind = |name: Node<'a>, hint: Option<Node<'a>>, directive: Option<Directive>| {
-        sites.push(Site { site: BindingSite { name, rule: rule(ALL, 0), is_import: false }, scope_hint: hint, directive });
+        sites.push(Site { site: BindingSite { name, rule: rule(ALL, 0), is_import: false, bare_pattern: None }, scope_hint: hint, directive });
     };
     match node.kind() {
         "assignment" | "augmented_assignment" | "for_statement" | "for_in_clause" => {
@@ -995,7 +996,7 @@ fn python_captures<'a>(pattern: Node<'a>, source: &str, bind: &mut impl FnMut(No
 /// parameters.
 fn scala_sites<'a>(node: Node<'a>, source: &str, sites: &mut Vec<Site<'a>>) {
     let mut bind = |name: Node<'a>, categories: u8| {
-        sites.push(Site { site: BindingSite { name, rule: rule(categories, 0), is_import: false }, scope_hint: None, directive: None });
+        sites.push(Site { site: BindingSite { name, rule: rule(categories, 0), is_import: false, bare_pattern: None }, scope_hint: None, directive: None });
     };
     match node.kind() {
         "val_definition" | "var_definition" => {

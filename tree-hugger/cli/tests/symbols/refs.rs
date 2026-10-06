@@ -541,6 +541,75 @@ fn named_function_expressions_never_call_the_outer_declaration() {
     }
 }
 
+/// A parameter default is evaluated before the body and cannot see the
+/// body's `var`: in every callable form, the default's call is a caller of
+/// the outer `f` and a callee of the callable bound to that `f`, while the
+/// body's call binds the body's own `f`.
+#[test]
+fn parameter_defaults_call_the_outer_declaration_not_a_body_var() {
+    // (file stem, header, closing, the callable's selector); a function or
+    // generator expression is an anonymous owner and a generator
+    // declaration is not extracted, so neither has a callees report.
+    let forms: &[(&str, &str, &str, Option<&str>)] = &[
+        ("declaration", "function g(x = f()) {", "}", Some("g")),
+        ("arrow", "const g = (x = f()) => {", "};", Some("g")),
+        ("expression", "const g = function (x = f()) {", "};", None),
+        ("generator", "function* g(x = f()) {", "}", None),
+        ("generator_expression", "const g = function* (x = f()) {", "};", None),
+        ("method", "class C { g(x = f()) {", "} }", Some("C.g")),
+        ("constructor", "class C { constructor(x = f()) {", "} }", Some("C.constructor")),
+    ];
+    let sources: Vec<(String, String)> = forms
+        .iter()
+        .flat_map(|(stem, header, closing, _)| {
+            let source = format!("function f() {{}}\n{header}\n  f();\n  var f = () => {{}};\n{closing}\nf();\n");
+            ["ts", "js"].map(|extension| (format!("{stem}.{extension}"), source.clone()))
+        })
+        .collect();
+    let files: Vec<(&str, &str)> = sources.iter().map(|(name, source)| (name.as_str(), source.as_str())).collect();
+    let scratch = Scratch::new(&files);
+
+    for (stem, header, _, callable) in forms {
+        let column = header.find("f()").expect("default call") + 1;
+        for extension in ["ts", "js"] {
+            let file = format!("{stem}.{extension}");
+            // `f` names the outer function and the body `var` (an anonymous
+            // callable gives its locals no prefix): select the outer one by ID.
+            let listing = scratch.hug(&["refs", "f", &file]);
+            assert_eq!(listing.status.code(), Some(1), "{file}: two declarations named `f`");
+            let listing = stderr_of(&listing);
+            let outer = listing
+                .lines()
+                .find(|line| line.trim_start().starts_with(&format!("{file}:1:1 ")))
+                .and_then(|line| line.split_whitespace().last())
+                .unwrap_or_else(|| panic!("{file}: outer `f` in {listing}"))
+                .to_string();
+            let callers = refs_json(&scratch, &["--id", &outer, "--callers", &file]);
+            assert_eq!(
+                rows(&callers, "occurrences"),
+                vec![row("Call", "f", &format!("2:{column}"), "Scoped"), row("Call", "f", "6:1", "Scoped")],
+                "{file}: {callers}"
+            );
+            assert!(rows(&callers, "name_only_suggestions").is_empty(), "{file}: {callers}");
+
+            let Some(callable) = callable else { continue };
+            let callees = refs_json(&scratch, &[&format!("{file}#{callable}"), "--callees", &file]);
+            let calls = callees["files"][0]["occurrences"].as_array().unwrap_or_else(|| panic!("{file}: {callees}"));
+            let targets: Vec<(String, Option<&str>)> = calls
+                .iter()
+                .map(|call| {
+                    let line = &call["span"]["start"]["line"];
+                    (format!("{line}:{}", call["confidence"]), call["target"]["id"].as_str())
+                })
+                .collect();
+            assert_eq!(targets.len(), 2, "{file}: {callees}");
+            assert_eq!(targets[0], ("2:\"Scoped\"".to_string(), Some(outer.as_str())), "{file}: {callees}");
+            assert_eq!(targets[1].0, "3:\"Scoped\"", "{file}: {callees}");
+            assert!(targets[1].1.is_some_and(|id| id != outer), "the body call binds the body `var`: {callees}");
+        }
+    }
+}
+
 /// A call through transparent wrappers is a call in every report direction:
 /// established in a resolved language, a name-only suggestion in a limited
 /// one. A wrapped name passed as an argument stays a usage.
