@@ -457,6 +457,15 @@ jobs:
       - name: Set up the pinned Rust toolchain
         if: ${{ steps.cell.outputs.requires_toolchain == 'true' }}
         run: rustup show
+      # Those suites run `cargo metadata`, which on a fresh runner first
+      # downloads every dependency's sources. Inside the suite that download
+      # landed on whichever tests reached it first, serialized the rest on
+      # Cargo's package-cache lock, and pushed planner tests that take ~4 s
+      # warm past their 90 s timeouts (70-99 s, windows-latest worst). Fetch
+      # once here, outside every test's clock; `cargo fetch` compiles nothing.
+      - name: Fetch the locked dependency sources
+        if: ${{ steps.cell.outputs.requires_toolchain == 'true' }}
+        run: cargo fetch --locked
       - name: Install native prerequisites
         shell: bash
         env:
