@@ -64,6 +64,16 @@ Three traps when asserting against it:
 
 The structured `performance` field in `--json` is unaffected by any of this.
 
+## File association reports
+
+`sniff files` requests Git identity, structure-only repository membership, and
+file inventory, with docs and formatting disabled. This makes the shared walk
+package/base-scoped. Do not use the default full filesystem request here:
+filtering a capped repository-wide inventory afterward produces a changing
+sample of the requested directory. `--association` preserves percentages of
+all scanned files; `-v` changes only display detail. Capped text reports must
+disclose the partial sample, even when the association filter matches nothing.
+
 ## Common host commands
 
 ```text
