@@ -51,6 +51,37 @@ docs_updated_during_phase_3:
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
   - .claude/skills/sniff/SKILL.md
+source_files_during_phase_4:
+  - sniff/lib/src/filesystem/query/macos.rs
+  - sniff/lib/src/filesystem/query/macos_tests.rs
+  - sniff/lib/src/filesystem/query/backend.rs
+  - sniff/lib/src/filesystem/query/linux.rs
+  - sniff/lib/src/filesystem/query/mod.rs
+  - sniff/lib/src/filesystem/query/tests.rs
+docs_updated_during_phase_4:
+  - sniff/docs/topics/filesystem-query.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/sniff/SKILL.md
+  - .claude/skills/os/macos.md
+source_files_during_phase_5:
+  - sniff/lib/Cargo.toml
+  - sniff/lib/src/performance/counters.rs
+  - sniff/lib/src/os/mod.rs
+  - sniff/lib/src/os/user.rs
+  - sniff/lib/src/filesystem/query/win32.rs
+  - sniff/lib/src/filesystem/query/win32_tests.rs
+  - sniff/lib/src/filesystem/query/backend.rs
+  - sniff/lib/src/filesystem/query/identity.rs
+  - sniff/lib/src/filesystem/query/mod.rs
+  - sniff/lib/src/filesystem/query/tests.rs
+docs_updated_during_phase_5:
+  - sniff/docs/topics/filesystem-query.md
+  - sniff/docs/dependencies.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .claude/skills/sniff/SKILL.md
+  - .claude/skills/os/windows.md
 ---
 
 # Implementation Log for 2026-10-05-filesystem-watchers (7 phases)
@@ -694,3 +725,306 @@ and default features. `linux_tests` runs on every Unix host;
   build-linux` in the clone that `cross-check` had just synced. Both are
   clean. This matters because `linux.rs` non-test code compiles only there.
 - No pre-existing failures; no skipped requirement.
+
+## Phase 4
+
+Phase 4 builds the macOS backend, `LibprocBackend` in
+`sniff/lib/src/filesystem/query/macos.rs`, and returns it from
+`backend::platform()` on macOS. Windows keeps the interim `PlatformBackend`
+(now `#[cfg(not(any(target_os = "linux", target_os = "macos")))]`). It uses
+direct `libc` FFI plus two local `#[repr(C)]` structs and two constants, as
+S1 decided. No new runtime or dev dependency is added.
+
+### What was built
+
+| File | Contents |
+| --- | --- |
+| `macos.rs` | `LibprocBackend<S: Source>`: enumeration with start-time tokens and names, descriptor listing with buffer growth, per-vnode classification (access, `event_only`, unlinked flag), cwd, and the post-inspection start-time check. `Source` is a five-method trait over the `libproc` calls. `ffi::Libproc` (macOS only) implements it with `proc_listallpids`, `proc_pidinfo` (`PROC_PIDTBSDINFO`, `PROC_PIDLISTFDS`, `PROC_PIDVNODEPATHINFO`), and `proc_pidfdinfo` (`PROC_PIDFDVNODEPATHINFO`) |
+| `macos_tests.rs` | 15 scripted-source tests that run on every Unix host, plus 4 live tests in `macos_tests::live` (macOS) and the `#[ignore]` child fixture `usage_child` |
+| `backend.rs` | Shared `Tally`, moved from `linux.rs`; `platform()` arm for macOS; interim backend narrowed to non-Linux, non-macOS; the macOS branch of `platform_mechanisms` removed; the `dead_code` comment updated |
+| `linux.rs` | Uses the shared `Tally`; keeps its `io::Error` helpers (`io_problem`, `whole`) in a local `impl Tally` |
+| `mod.rs` | `mod macos` (`any(target_os = "macos", all(test, unix))`) and `mod macos_tests` (`all(test, unix)`) |
+| `tests.rs` | `the_shipped_backend_reports_unsupported_until_a_native_backend_exists` gated to non-Linux, non-macOS |
+
+Per process the backend does this:
+
+1. The task info (`PROC_PIDTBSDINFO`) read during enumeration gives the
+   creation token (start time in microseconds), the name (`pbi_name`, else
+   `pbi_comm`), and `pbi_nfiles`.
+2. List descriptors with a capacity of `pbi_nfiles + 16`, or 256 when the
+   task info was unreadable. Double the capacity while the list comes back
+   full, up to 2^20 entries.
+3. For each vnode descriptor, `PROC_PIDFDVNODEPATHINFO` gives `(dev, ino)`,
+   the link count, the kernel's path, and `fi_openflags`. Access comes from
+   `FREAD`/`FWRITE`; `event_only` comes from `O_EVTONLY` (`0x8000`). Every
+   macOS handle carries `event_only: Some(true|false)`; Linux keeps `None`.
+   A vnode with no links left is marked deleted, so its former path is
+   never used as a match.
+4. `PROC_PIDVNODEPATHINFO` gives the cwd. No cwd vnode (the kernel task)
+   counts as inspected with no evidence.
+5. Re-read the start time. If it changed or the process is gone, both
+   mechanisms report `Vanished` and nothing read is kept.
+
+### Decisions and departures from the plan
+
+- **Candidate source: not used.** As S1 found, `proc_listpidspath` matches
+  only the queried vnode, never a tree. A full descriptor and cwd scan runs
+  instead. The plan task is checked off with this resolution.
+- **Another user's process has no creation token.** A live probe on this host
+  showed that `PROC_PIDTBSDINFO` returns `EPERM` for PID 1, just like the
+  descriptor and cwd flavors. `PROC_PIDT_SHORTBSDINFO` succeeds but carries
+  no start time. Such a process stays a candidate with no token and *no*
+  enumeration limitation: the PID list is whole, and the same check denies its
+  detail, so it cannot contribute evidence. Inspection reports it as
+  `permission_denied` on `open_handles` and `working_directories`, which are
+  then `partial` for any non-root caller. A task-info failure other than
+  `EPERM`/`ESRCH` is an `identity_uncertain` enumeration limitation, as on
+  Linux.
+- **Device encoding.** `vst_dev` is `u32`, while `std`'s
+  `MetadataExt::dev()` sign-extends macOS's `i32` `st_dev`. The FFI layer
+  converts with `as i32 as u64`, so a device with the high bit set still
+  matches the tree index. The live test asserts identity equality against
+  `std::fs::metadata`. No local device has the high bit set, so the
+  sign-extension case is covered by reasoning, not a test.
+- **`libproc` failure convention.** These calls return 0 and set `errno`.
+  The FFI layer zeroes `errno` before each call, so a `PROC_PIDLISTFDS`
+  result of 0 with `errno` 0 is an empty table, not an error. `EPERM`/`EACCES`
+  map to denied; `ESRCH`/`EBADF`/`ENOENT` map to gone. Short writes and other
+  errors are failures carrying the OS message.
+- **Non-vnode descriptors** (sockets, pipes, kqueues) count as inspected
+  successes and increment `descriptor_inspections`, mirroring Linux, which
+  counts every `/proc/<pid>/fd` entry.
+- **Self-inspection.** No `libproc` call opens a handle, and the tree walk
+  has closed before inspection. So the backend has nothing of its own to
+  omit; the live test asserts that the querying process reports exactly its
+  genuine open file.
+- **Alias test location.** The plan's `/var` vs `/private/var` test creates
+  its scene in `/var/tmp` rather than `$TMPDIR`. A CI runner may point
+  `$TMPDIR` outside `/var`; `/var/tmp` always lives behind the `/var` link.
+- **`Tally` is shared.** Phase 3's hand-off suggested reusing it. Moving it
+  to `backend.rs` changes no Linux behavior; all 75 earlier query tests
+  still pass on Linux and WSL2-equivalent paths.
+
+### Requirement-to-test mapping
+
+All tests are L1 unit tests in the `sniff` lib target, with no tier marker
+and default features. `macos_tests` runs on every Unix host;
+`macos_tests::live` runs on macOS.
+
+| Requirement | Tests |
+| --- | --- |
+| Controlled child: open file and cwd found, with the correct dev/inode | `live::a_controlled_child_is_found_by_its_descriptors_and_cwd_through_the_var_alias` |
+| `/var` vs `/private/var` alias: requested and resolved spellings kept; kernel path canonical | same live test |
+| Event-only opens stay `open_handle` with `event_only` | same live test, `open_vnodes_and_the_cwd_are_matched_by_identity_with_access_and_event_only` |
+| Access from open flags (read, write, read-write) | `open_vnodes_and_the_cwd_are_matched_by_identity_with_access_and_event_only`, live test |
+| Sibling-prefix (`app-copy`) and ancestor rejection | `open_vnodes_...` (scripted), live test (both open in the child) |
+| FSEvents and polling `unsupported` with a reason; mechanism order | `open_vnodes_...`, `live::the_shipped_macos_backend_inventories_descriptors_and_cwd` |
+| Target-only keeps the target and drops descendants and cwd | `target_only_ignores_descendant_handles_and_cwd`, `live::target_only_reports_the_target_and_not_descendant_usage` |
+| Hard-link alias outside the tree | `a_hard_link_outside_the_tree_reports_the_in_scope_path_and_the_alias` |
+| Unlinked vnode never matched by its former path | `an_unlinked_file_is_matched_by_identity_and_not_by_its_former_path` |
+| Permission denial recorded, never "no matches" | `a_denied_process_is_a_visible_gap_not_an_empty_result`, `only_denied_processes_make_the_outcome_unavailable`, `live::the_shipped_macos_backend_...` (non-root: denial count > 0) |
+| Denied or failed descriptors inside a listed table; a closed descriptor is not a gap | `denied_and_failed_descriptors_inside_a_listed_table_are_counted`, `a_closed_descriptor_alone_leaves_coverage_complete` |
+| Buffer grows while the descriptor list is full | `a_full_descriptor_list_is_reread_with_a_larger_buffer`, `an_unreadable_table_size_starts_from_the_default_capacity` |
+| Enumeration failure and races | `a_failed_process_list_fails_enumeration_and_attempts_nothing`, `a_process_that_exits_after_listing_is_not_a_candidate`, `an_unreadable_table_size_...` (identity uncertain) |
+| PID reuse and exit during inspection | `a_reused_pid_discards_everything_read_during_inspection`, `a_process_that_exits_during_inspection_has_vanished` |
+| Budget expiring between descriptors | `a_budget_expiring_between_descriptors_keeps_what_was_read` |
+| Genuine caller usage kept, nothing of the query's own | `live::the_querying_process_keeps_its_genuine_usage_only` |
+| Counters: every listed descriptor counts once | `open_vnodes_...` |
+| No test depends on a live FSEvents watcher being invisible (spec item 5) | none creates one |
+
+The Input Robustness Matrix does not apply. The backend reads fixed-layout
+kernel structs through FFI, not a file format or configuration; each
+malformed outcome (short write, `errno` class) has a defined fault and is
+covered above.
+
+Mutation checks: making the descriptor listing never re-read fails
+`a_full_descriptor_list_is_reread_with_a_larger_buffer`. Hard-coding
+`event_only: Some(false)` fails four tests, two of them live. Both checks
+were restored.
+
+### Gates run
+
+- macOS (local): `just test` in `sniff/` passed, 3222 run, 3222 passed,
+  33 skipped. `just lint` is clean. `cargo clippy -p sniff --all-targets
+  [--features remote] -- -D warnings` and `cargo clippy -p sniff-cli
+  --all-targets -- -D warnings` are clean after one fix
+  (`cloned_ref_to_slice_refs` in `macos_tests.rs`). The query tests passed
+  three repeated runs (89/89), including the live tests.
+- Linux (`just cross-check sniff --os linux filesystem::query::`): 90/90,
+  including the scripted macOS tests and the Linux live tests on the shared
+  `Tally`. Strict clippy (`--all-targets` and `--lib`, `-D warnings`) ran over
+  `ssh -o BatchMode=yes build-linux` in the synced clone
+  (`.../shazam--fix-wt-message/rusty-biscuit`) and is clean.
+- Native Windows (`just cross-check sniff --os windows filesystem::query::`):
+  52/52. Neither Unix backend compiles there; the interim backend still
+  reports `unsupported`.
+- WSL2 was not re-run: no Linux code path changed apart from the `Tally`
+  move, which the Linux leg covers.
+- `just check-tier-coverage sniff`: nothing stranded.
+- An accidental `just lint` from the repository root (monorepo-wide) was
+  stopped part way; it was not a gate for this phase and its partial output
+  was discarded.
+- No pre-existing failures; no skipped requirement.
+
+## Phase 5
+
+Phase 5 builds the native Windows backend, `ModuleBackend` in
+`sniff/lib/src/filesystem/query/win32.rs`, and returns it from
+`backend::platform()` on Windows. The interim `PlatformBackend` is gone;
+an `UnsupportedBackend` (polling only, outcome `unsupported`) remains for
+targets that are none of Linux, macOS, and Windows, so they still compile.
+
+**The R2 decision is still unanswered, so the Handle owners task was not
+built.** The spec's second `human_review_items` entry (Option A: omit
+Windows handle evidence; Option B: a killable helper process) has no author
+answer. Phase 4 left the instruction "if you are started anyway without an
+answer, stop and report rather than picking one". This phase therefore built
+only what both options need: loaded modules, process identity through a
+retained handle, and the unsupported records. `open_handles` keeps reporting
+`unsupported` on Windows, as it did before this phase, now with the hang as
+its reason. That is the current state under either option, not a choice of
+Option A: Option B would add handle evidence on top of this backend, and
+Option A would leave it as is. The spec keeps `human_review: true`.
+
+### What was built
+
+| File | Contents |
+| --- | --- |
+| `win32.rs` | `ModuleBackend<S: Source>`: enumeration that opens each PID once (creation `FILETIME` token, image name, `start_time`), module listing with a size-retry loop, per-module path reads, a component-aware pre-filter, exit detection on failure, handle retention through enrichment, and `details` read through the held handle. `Source` is a seven-method trait; `ffi::Win32` (Windows only) implements it with `EnumProcesses`, `OpenProcess`, `GetProcessTimes`, `QueryFullProcessImageNameW`, `GetExitCodeProcess`, `EnumProcessModulesEx(LIST_MODULES_ALL)`, `GetModuleFileNameExW`, and the token SID reader |
+| `win32_tests.rs` | 18 scripted-source tests that run on every host, 3 Windows-only spelling tests in `win32_tests::spellings`, 2 live tests in `win32_tests::live`, and the `#[ignore]` child fixture `usage_child` |
+| `backend.rs` | Windows `platform()` arm; interim backend replaced by `UnsupportedBackend` for other targets; `dead_code` allowance extended to Windows test builds (no Unix backend compiles there, so `Tally::note`/`vanished` are unused) |
+| `mod.rs` | `mod win32` (`any(windows, test)`) and `mod win32_tests` (`test`) |
+| `identity.rs` | `io_error` (HRESULT unwrapping) made `pub(crate)` for the FFI fault mapping |
+| `tests.rs` | `the_shipped_backend_reports_unsupported_until_a_native_backend_exists` deleted; `win32_tests::live::the_shipped_windows_backend_inventories_loaded_modules` replaces it |
+| `os/user.rs`, `os/mod.rs` | The Windows token reader is generalized to `process_user_sid(HANDLE)`; `current_user_id` calls it with the current process and behaves as before |
+| `performance/counters.rs` | `filesystem.query.module_inspections` |
+| `Cargo.toml` | `windows` feature `Win32_System_ProcessStatus` |
+
+Per process the backend does this:
+
+1. At enumeration, `OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION |
+   PROCESS_VM_READ)`, falling back to the limited right alone when memory
+   access is denied. The handle is kept in the backend. An invalid-PID error
+   (an exited process, or PID 0) drops the candidate. A denial keeps it
+   with no token. Any other failure keeps it with no token and an
+   `identity_uncertain` enumeration limitation.
+2. At inspection, list modules with a capacity of 256. While the reported
+   count exceeds the buffer, re-read at the count plus 16, up to 8 reads and
+   65,536 modules; past either bound, the process fails rather than
+   silently dropping modules.
+3. Read each module path. A path whose components cannot lie under a root
+   spelling is dropped without a lookup; the rest become path-only
+   `loaded_module` evidence that the core looks up by identity.
+4. If the process holds nothing in scope, close its handle now. Otherwise
+   keep it until the query returns, so enrichment's `details` (image and
+   token SID) and the creation-time recheck read the same lifetime.
+
+### Decisions and departures from the plan
+
+- **Handle owners not built (R2 unanswered).** See above. The plan task is
+  left unchecked with a "Blocked" note. The Windows tests task is left
+  unchecked with a "Partly done" note, because its open-file and
+  directory-handle child test needs handle owners.
+- **No post-inspection start-time check.** The Unix backends re-read the
+  start time after inspection to catch PID reuse. Windows cannot reuse a PID
+  while a handle to the process is open, and the backend holds one through
+  inspection. Instead, a failed module read checks `GetExitCodeProcess`:
+  after an exit it is `Vanished` (`process_disappeared`), otherwise
+  `inspection_failed`.
+- **Enrichment through the handle, not `sysinfo`.** The plan requires the
+  handle to be retained for the lifetime of enrichment. `details` therefore
+  reads the image and the token's account SID through the held handle and
+  never looks the PID up again. A process without a held handle cannot be
+  enriched; that case is unreachable for a process with evidence.
+- **Pre-filter, not a match, inside the backend.** `macos.rs` calls
+  `match_object` per vnode, which is a cheap identity check there. For a
+  path-only module, the same call would be a filesystem lookup, run again by
+  the core, doubling `path_lookups`. The backend uses
+  `matching::may_contain` against the root spellings instead, so each
+  candidate module is looked up exactly once.
+- **Module name `win32`, not `windows`.** A local module named `windows`
+  would shadow the `windows` crate wherever `use super::*` brings it into
+  scope.
+- **Architecture failures.** `ERROR_PARTIAL_COPY` (299) while the process is
+  running is reported as `inspection_failed`, with a detail naming the
+  likely causes (starting, protected, or another architecture). A 64-bit
+  build reads 32-bit (WOW64) modules through `LIST_MODULES_ALL`, so only a
+  32-bit build reading a 64-bit process hits the architecture case. No
+  32-bit build exists to test it.
+- **New counter** `filesystem.query.module_inspections`. The existing
+  `descriptor_inspections` is documented as descriptors or handles, and a
+  module is neither.
+- **UNC spelling** is covered by the Phase 2 pre-filter test
+  (`windows_spellings_are_compared_by_component_not_by_string`). It is not
+  covered by a live lookup, which would depend on administrative shares
+  (`\\localhost\C$`).
+- **Case-sensitive directory test fails rather than skips** where
+  `fsutil file setCaseSensitiveInfo` is refused, because an L1 skip reads as
+  a pass (`rust-testing`). It passes on build-win-native. Whether hosted
+  `windows-latest` allows it is unverified; Windows runs on pushes to `main`,
+  so a failure there is fixed forward.
+
+### Requirement-to-test mapping
+
+All tests are L1 unit tests in the `sniff` lib target, with no tier marker
+and default features. `win32_tests` runs on every host;
+`win32_tests::spellings` and `win32_tests::live` run on Windows.
+
+| Requirement | Tests |
+| --- | --- |
+| Modules from the tree are `loaded_module` evidence; sibling-prefix and parent modules are not; counters | `modules_loaded_from_the_tree_are_evidence_and_others_are_not` |
+| Distinct `loaded_modules` coverage; fixed unsupported records (open handles, cwd, `ReadDirectoryChangesW`, polling) with reasons; order | `the_windows_mechanisms_are_fixed_with_reasons_for_each_unsupported_one`, `live::the_shipped_windows_backend_inventories_loaded_modules` |
+| Size retry; no silently dropped modules | `a_module_list_larger_than_the_buffer_is_reread_in_full`, `a_module_list_that_never_fits_fails_instead_of_dropping_modules` |
+| Access denied recorded, never "no matches" | `a_process_that_cannot_be_opened_is_a_visible_gap_not_an_empty_result`, `only_denied_processes_make_the_outcome_unavailable`, `a_process_opened_without_memory_access_keeps_its_identity_and_denies_its_modules`, `live::the_shipped_windows_backend_...` (System process gap) |
+| Per-module faults; unloaded module is not a gap | `module_read_faults_inside_a_listed_set_are_counted`, `a_module_unloaded_since_the_listing_leaves_coverage_complete` |
+| Process exited vs inspection failed | `a_module_failure_after_the_process_exits_is_a_disappearance_not_a_failure`, `a_process_that_exits_before_it_is_opened_is_not_a_candidate` |
+| Enumeration failure and open failure | `a_failed_process_list_leaves_modules_not_attempted`, `an_open_failure_is_an_identity_uncertain_enumeration_gap` |
+| Creation time as the token; `start_time` | `creation_filetimes_convert_to_start_times`, `modules_loaded_from_the_tree_...`, live child test |
+| Handle retained through enrichment; closed early otherwise; no reopen | `handles_close_after_inspection_unless_the_process_holds_something_in_scope`, `a_process_opened_without_memory_access_...` |
+| Lifetime check at enrichment keeps evidence without new identity | `a_changed_creation_time_at_enrichment_keeps_evidence_without_new_identity` |
+| Target-only | `target_only_matches_a_module_that_is_the_target_file` |
+| Budget expiring between modules | `a_budget_expiring_between_modules_keeps_what_was_read` |
+| Verbatim, case-variant, and 8.3 short-name spellings | `spellings::verbatim_case_variant_and_short_name_module_paths_match_the_long_path` |
+| Case-sensitive directory | `spellings::a_case_sensitive_directory_matches_only_the_module_its_spelling_names` |
+| UTF-16 path with an unpaired surrogate (matching, Windows) | `spellings::a_module_path_with_an_unpaired_surrogate_matches_and_round_trips`; serialization on any host stays `foreign_native_encodings_decode_only_when_representable` (Phase 2) |
+| Controlled child (handshake, guard cleanup) found with correct identity | `live::a_controlled_child_is_found_by_its_loaded_executable` |
+| No thread or worker | by construction: the backend spawns nothing; no test needed |
+| Controlled child with open file and directory handle | **not built** (Handle owners, R2) |
+
+The Input Robustness Matrix does not apply. The backend reads Win32 call
+results through FFI, not a file format or configuration. Each fault class
+(denied, gone, failed, undersized buffer) has a defined outcome tested above.
+
+Mutation checks: making `list_modules` never re-read fails both size-retry
+tests. Never retaining a handle fails three tests: the handle test, the
+first module test (its `user` is no longer filled), and the enrichment
+lifetime test. Both checks were restored, and 18/18 pass.
+
+### Gates run
+
+- macOS (local): `just test` in `sniff/` passed, 3240 run, 3240 passed,
+  33 skipped. `just lint` is clean. `cargo clippy -p sniff --all-targets
+  [--features remote] -- -D warnings` and `cargo clippy -p sniff-cli
+  --all-targets -- -D warnings` are clean after two test-only fixes
+  (`needless_borrow`, `field_reassign_with_default`).
+- Native Windows (`just cross-check sniff --os windows filesystem::query::`):
+  74/74, including the spelling, case-sensitivity, and live tests. The first
+  run failed 8 tests because `matched_paths` are under the verbatim
+  `\\?\` canonical root on Windows (existing core behavior); the tests now
+  compare against `canonicalize()`. Recorded in the `os` skill.
+- Windows clippy (`ssh -o BatchMode=yes build-win-native`, PowerShell, in the
+  synced clone): `cargo clippy -p sniff --lib -- -D warnings` is clean, so
+  `win32::ffi` lints cleanly. `--all-targets` fails only on lints in
+  unrelated files that predate this phase (`KEY_ALL_ACCESS` in
+  `programs/windows_apps.rs`, unused `index` in `executable_index.rs`,
+  `stage_raw_path` and `set_readonly(false)` in `git_parity.rs`,
+  `merge_conflict_prediction.rs`, and `remote_refresh.rs`). CI lints on Linux
+  only.
+- Linux (`just cross-check sniff --os linux filesystem::query::`): 108/108,
+  including the scripted Windows-backend tests. Strict clippy (`--all-targets`
+  and `--lib`, `-D warnings`) over `ssh -o BatchMode=yes build-linux` is clean.
+- WSL2 not run: no Linux code path changed, and the scripted Windows tests
+  ran on Linux.
+- `just check-tier-coverage sniff`: nothing stranded.
+- No pre-existing failures in the tests run; no requirement skipped except
+  the R2-blocked handle-owner work.

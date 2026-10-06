@@ -48,6 +48,8 @@ human_review_items:
   - |-
     **Windows: how to read which file another program has open without risking a hang (needed before Phase 5, the Windows backend)**
 
+    **Update after Phase 5 (2026-10-06):** without your answer, Phase 5 built everything on Windows that both options need: Sniff finds programs and libraries (DLLs) loaded from inside a folder, and reliably identifies each process. It does **not** yet find files that other programs hold open on Windows; it says so in every report ("unsupported", with the reason). That is exactly what Option A ships, so choosing A needs no more code. Choosing B means adding the helper on top of what exists. Phase 6 (the command-line tool) does not depend on this choice, but the open-file test on Windows and the Phase 5 "Handle owners" task stay unfinished until you answer.
+
     A test on the Windows build machine found a problem. To learn which file another program's handle points to, Sniff must ask Windows for the file's ID. If that other program is itself waiting on the same file (for example, waiting for a file lock), the question hangs until the other program stops waiting, which might be never. Windows' "cancel" call does not help. The spec forbids leaving a stuck background thread behind and forbids killing threads inside the caller.
 
     A follow-up test showed that putting the question in a small separate helper process works: the helper can be killed at a deadline in about 1 ms, and the other program is unaffected (7 of 7 trials).
@@ -64,16 +66,16 @@ human_review_items:
 
     **Recommendation: Option B**, because it keeps the feature useful on Windows without breaking the spec's safety rules. If the packaging cost is not acceptable for this release, choose **Option A** and treat Windows handle discovery as a follow-up feature; do not choose Option C.
 message_to_agent: |-
-  Phases 2 and 3 are built: the platform-neutral core and the Linux/WSL2 backend in `sniff/lib/src/filesystem/query/`. Read the Phase 3 section of `implementation-log.md` first; it lists every departure and the requirement-to-test table.
+  Phases 2-5 are built in `sniff/lib/src/filesystem/query/`: the core, Linux/WSL2 (`linux.rs`), macOS (`macos.rs`), and the Windows loaded-module backend (`win32.rs`, module `win32` so it does not shadow the `windows` crate). Read the Phase 5 section of `implementation-log.md` first.
 
-  For Phase 4 (macOS backend):
-  - Follow the Linux pattern. `linux.rs` implements `UsageBackend`, and `backend::platform()` is now `#[cfg]`-split. Add a `#[cfg(target_os = "macos")]` arm returning your backend, and narrow the `PlatformBackend`/`platform_mechanisms`/`NOT_IMPLEMENTED` cfgs to exclude macOS (they are currently `not(target_os = "linux")`). Keep FSEvents and polling `unsupported`; `POLLING_UNSUPPORTED` is a shared constant in `backend.rs`.
-  - Gate `the_shipped_backend_reports_unsupported_until_a_native_backend_exists` (`tests.rs`) to Windows only once macOS has a backend.
-  - Reusable pieces: `Tally` in `linux.rs` (per-mechanism successes/denials/failures -> `InspectionResult`), the post-inspection start-token re-check (PID reuse -> `Vanished`, nothing kept), and the self-inspection rule (collect the descriptor list and release it before reading entries).
-  - Coverage: a limitation of kind `AncestorWatch` is a scope note, not a gap (`Limitations::has_gaps`). Every other limitation on a mechanism makes it `partial`.
-  - Test seam: `linux_tests.rs` runs the backend against a synthetic `/proc` on any Unix host, and live controlled children re-exec the test binary (`#[ignore]` fixture `usage_child`, readiness line on stdout, kill+wait guard). The macOS backend calls `proc_pidinfo` directly, so it cannot use a synthetic tree. Inject failures through a small trait or closure, or test the classification helpers through the report.
-  - `just cross-check` has no lint mode. For Linux clippy, run `ssh -o BatchMode=yes build-linux` in the clone that `cross-check` just synced (path printed as `clone:`).
-  - R1 (deadline semantics) and the Windows per-handle hang (R2) still await the author. Phase 4 is not blocked; Phase 5 must not start until R2 is answered.
+  Phase 5 is only partly done. The "Handle owners" task (Windows open-handle evidence) and the open-file/directory-handle child test are BLOCKED on the author's answer to the second `human_review_items` entry (R2). Windows reports `open_handles` as `unsupported`, with the hang as its reason. Do not build handle inspection, and do not choose Option A or B yourself. If the author answers B, the helper is added on top of `ModuleBackend`. If A, nothing more is needed beyond checking the task off with that resolution.
+
+  For Phase 6 (CLI):
+  - R1 (first review item: "stops scheduling work" vs a hard return deadline) gates the `--timeout` help text. If it is still unanswered, write the option-1 wording ("stops scheduling work after"), never "returns within", and keep the item open.
+  - The CLI renders whatever mechanisms a report carries. On Windows that is `loaded_modules` evidence (`kind: loaded_module`, no `access`/`descriptor`), and four `unsupported` records with `reason` text. Do not special-case per OS in the CLI; render `coverage` generically.
+  - On Windows, `matched_paths` are under the verbatim `\\?\` canonical root (existing core behavior); `observed_path` keeps the OS spelling. Human rendering may want `biscuit_file::canonicalize_simplified`-style display, but JSON must stay the report as captured.
+  - `win32_tests::spellings::a_case_sensitive_directory_...` fails (rather than skips) where `fsutil file setCaseSensitiveInfo` is refused. It passes on build-win-native; hosted `windows-latest` is unverified. If it is red after a push to `main`, see the `os` skill (`windows.md`) before changing it.
+  - `just cross-check` has no lint mode. On build-win-native the SSH shell is PowerShell (`Set-Location B:\coding\<clone>`, not `cd /d`). Windows `clippy --all-targets -D warnings` fails on pre-existing lints in unrelated files (listed in the log); `--lib` is clean.
 ---
 
 # Filesystem process and watcher discovery

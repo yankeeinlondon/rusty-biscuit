@@ -52,6 +52,37 @@ docs_updated_during_phase_3:
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
   - .claude/skills/sniff/SKILL.md
+source_files_during_phase_4:
+  - sniff/lib/src/filesystem/query/macos.rs
+  - sniff/lib/src/filesystem/query/macos_tests.rs
+  - sniff/lib/src/filesystem/query/backend.rs
+  - sniff/lib/src/filesystem/query/linux.rs
+  - sniff/lib/src/filesystem/query/mod.rs
+  - sniff/lib/src/filesystem/query/tests.rs
+docs_updated_during_phase_4:
+  - sniff/docs/topics/filesystem-query.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/sniff/SKILL.md
+  - .claude/skills/os/macos.md
+source_files_during_phase_5:
+  - sniff/lib/Cargo.toml
+  - sniff/lib/src/performance/counters.rs
+  - sniff/lib/src/os/mod.rs
+  - sniff/lib/src/os/user.rs
+  - sniff/lib/src/filesystem/query/win32.rs
+  - sniff/lib/src/filesystem/query/win32_tests.rs
+  - sniff/lib/src/filesystem/query/backend.rs
+  - sniff/lib/src/filesystem/query/identity.rs
+  - sniff/lib/src/filesystem/query/mod.rs
+  - sniff/lib/src/filesystem/query/tests.rs
+docs_updated_during_phase_5:
+  - sniff/docs/topics/filesystem-query.md
+  - sniff/docs/dependencies.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .claude/skills/sniff/SKILL.md
+  - .claude/skills/os/windows.md
 ---
 
 # Plan: Filesystem process and watcher discovery
@@ -400,17 +431,17 @@ Gated `#[cfg(target_os = "macos")]`. Depends on Wave 3 and S1.
 
 ### Wave 5 (parallel, with Phases 3 and 5)
 
-- [ ] **Descriptor and cwd inspection** - per-process vnode descriptor listing and
+- [x] **Descriptor and cwd inspection** - per-process vnode descriptor listing and
       cwd via `libproc` (or bindings per S1); identity from the vnode info
       (dev/ino) matched against the collected tree identities; `open_handle` and
       `working_directory` evidence; event-only opens stay `open_handle` with an
       `event_only` attribute; permission denial (other users' processes) recorded.
-- [ ] **Candidate source** - if S1 shows `pids_by_type_and_path` is useful, use it
+- [x] **Candidate source** - if S1 shows `pids_by_type_and_path` is useful, use it
       only as a candidate PID source; candidates are validated through descriptor/
       cwd evidence; volume-wide matches never reported as tree matches.
-- [ ] **FSEvents coverage** - fixed `unsupported` record with the capability
+- [x] **FSEvents coverage** - fixed `unsupported` record with the capability
       explanation ("no supported systemwide FSEvents subscription inventory").
-- [ ] **macOS tests** - controlled child with open file and cwd (handshake and
+- [x] **macOS tests** - controlled child with open file and cwd (handshake and
       cleanup as in Phase 3); `/var` vs `/private/var` alias test via the
       symlinked temp dir trap in the `os` skill; assert the FSEvents record is
       `unsupported`; no test depends on a live FSEvents watcher being invisible
@@ -431,13 +462,17 @@ Gated `#[cfg(windows)]`. Depends on Wave 3, R2, and S2. Not WSL2.
       compare by file id + volume serial where possible, else Windows-aware path
       comparison; evidence `open_handle`; protected-process and architecture
       (WOW64) inspection failures recorded as limitations, never swallowed.
-- [ ] **Loaded modules** - enumerate modules per candidate process as a distinct
+      **Blocked (Phase 5):** awaits the author's R2 answer (spec
+      `human_review_items`, in-process omission vs a killable helper). Until
+      then `open_handles` reports `unsupported` on Windows with the hang as its
+      reason; no option was chosen.
+- [x] **Loaded modules** - enumerate modules per candidate process as a distinct
       `loaded_module` mechanism with its own coverage record; handle failures
       (access denied, process exited) recorded.
-- [ ] **Unsupported records** - cwd and `ReadDirectoryChangesW` subscription
+- [x] **Unsupported records** - cwd and `ReadDirectoryChangesW` subscription
       inspection reported `unsupported` with explanations; state that a matched
       handle does not establish deletion blocking.
-- [ ] **Identity and cancellation** - process creation time as the native
+- [x] **Identity and cancellation** - process creation time as the native
       creation token; open process handle retained for the lifetime of
       enrichment; no threads terminated, no worker left running past return
       (any worker used must be cooperatively cancelled and joined, with counter
@@ -447,6 +482,10 @@ Gated `#[cfg(windows)]`. Depends on Wave 3, R2, and S2. Not WSL2.
       short-name spelling tests; UTF-16 path with an unpaired surrogate round-trip
       (serialization test runs on any host; matching test Windows-gated).
       Reach the Windows host per the `os` skill.
+      **Partly done (Phase 5):** case-sensitive, verbatim, case-variant,
+      short-name, and unpaired-surrogate tests exist for module paths, plus a
+      live child found by its loaded executable. The open-file and
+      directory-handle child test waits on the Handle owners task (R2).
 
 Checkpoint: Windows L1 tests green on the native Windows host; any capability
 omitted under R2 documented as a limitation in report output and tests.
