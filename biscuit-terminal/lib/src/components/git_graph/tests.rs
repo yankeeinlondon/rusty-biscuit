@@ -1206,6 +1206,28 @@ fn the_height_cap_adds_lanes_in_activity_order_until_one_does_not_fit() {
 }
 
 #[test]
+fn a_lane_that_does_not_fit_gives_way_to_one_active_in_the_same_second() {
+    // 15 rows fit the default lane and one more (12.5). `feat/child` ties
+    // `feat/e` and comes first in lane order, but needs its parent's lane too
+    // (18.75); `feat/e`, equally recent, is drawn instead of nothing.
+    let graph = GitGraph::new("main", commits(&["1111111"]))
+        .with_ref("main", sha("1111111"))
+        .with_line(line("feat/a", None, "aaaaaaa", 10))
+        .with_line(line("feat/parent", None, "ppppppp", 5))
+        .with_line(line("feat/child", Some(("feat/parent", "ppppppp")), "ccccccc", 90))
+        .with_line(line("feat/e", None, "eeeeeee", 90))
+        .with_current_branch("main")
+        .with_max_rows(15);
+    let planned = plan(&graph, viewport(200, 200));
+    let text = &planned.mermaid;
+    assert!(text.contains("branch feat/e"), "{text}");
+    for hidden in ["feat/a", "feat/parent", "feat/child"] {
+        assert!(!text.contains(hidden), "{hidden} hidden: {text}");
+    }
+    assert_eq!(planned.hidden_lanes, 3);
+}
+
+#[test]
 fn with_max_rows_replaces_the_half_height_cap() {
     // 40 rows would cap at 20; 30 rows fit four lanes (25), as a 60-row
     // viewport's default cap does.
