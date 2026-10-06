@@ -1,5 +1,5 @@
 //! Level 2 tests for the declaration commands (`functions`, `types`,
-//! `symbols`, `classes`) rendered in a real terminal.
+//! `symbols`, `classes`) and the `refs` report rendered in a real terminal.
 //!
 //! The Level 1 tests pin the plain goldens and the forced-color bytes from a
 //! captured pipe. Only a real terminal exercises the path users see: `hug`
@@ -851,6 +851,79 @@ fn check_classes_table<H: TerminalHarness>(harness: &mut H, pane: &Pane<H>) {
     }
 }
 
+/// The boundary every `refs` report states.
+const REFS_BOUNDARY: &str = "References are resolved within one file: only the declaration's own file is \
+searched, so a caller in another file is never listed, even when it uses the same name.";
+
+/// Whether `text` is one logical row of `report`, rejoining the rows a
+/// backend's capture split at the pane edge.
+fn has_logical<H: TerminalHarness>(harness: &mut H, pane: &Pane<H>, report: &Report, text: &str) -> bool {
+    match (pane.wrap_cols)(harness) {
+        Some(cols) => report.has_logical_row(text, cols),
+        None => report.has_row(text),
+    }
+}
+
+/// `refs`: the heading, the boundary (also on an empty report), established
+/// rows grouped under their owners with bold names, dim locations linked to
+/// their lines, the callees view's dim explanations, and `hug`'s own
+/// wrapping of the boundary at an injected width.
+fn check_refs<H: TerminalHarness>(harness: &mut H, pane: &Pane<H>) {
+    let fixture = Fixture::new();
+
+    let report = run_hug(harness, pane, &fixture, UNWRAPPED, "refs Shape geometry.ts");
+    const CALL: &str = "- Call Shape 15:16";
+    report.assert_rows_in_order(&[
+        "Established (Scoped to this declaration)",
+        "geometry.ts#Shape.create 14:3",
+        "- Usage Shape 14:32",
+        CALL,
+        "geometry.ts#buildShape 23:8",
+        "- Usage Shape 23:31",
+        "- Usage Shape 24:10",
+    ]);
+    for row in [
+        "References to public class Shape { count: number, size: number } geometry.ts:10:8",
+        REFS_BOUNDARY,
+    ] {
+        assert!(has_logical(harness, pane, &report, row), "expected the row {row:?}.\nreport:\n{}", report.plain());
+    }
+    report.assert_styled("Established (Scoped to this declaration)", "Established", &["1"], "a bold group heading");
+    report.assert_styled("Established (Scoped to this declaration)", "(Scoped", &["2"], "a dim group note");
+    report.assert_styled("geometry.ts#Shape.create 14:3", "geometry.ts#Shape.create", &["1"], "a bold owner");
+    report.assert_styled(CALL, "Shape", &["1"], "a bold target");
+    report.assert_styled(CALL, "15:16", &["2"], "a dim location");
+    if pane.osc8 {
+        let row = report.row(CALL);
+        assert!(
+            row.raw.contains("/geometry.ts#L15\x1b\\15:16"),
+            "expected the location linked to geometry.ts#L15.\nrow:\n{:?}",
+            row.raw,
+        );
+    }
+
+    let report = run_hug(harness, pane, &fixture, UNWRAPPED, "refs buildShape --callees geometry.ts");
+    const CALLEE: &str = "- Call Shape.create 24:16";
+    report.assert_rows_in_order(&["coverage: limited (indirect_dispatch)", CALLEE]);
+    report.assert_styled(CALLEE, "— NameOnly", &["2"], "a dim explanation");
+
+    let report = run_hug(harness, pane, &fixture, UNWRAPPED, "refs nowhere geometry.ts");
+    assert!(report.has_row("No declaration named nowhere in the scanned files."), "report:\n{}", report.plain());
+    assert!(
+        has_logical(harness, pane, &report, REFS_BOUNDARY),
+        "an empty report states the boundary.\nreport:\n{}",
+        report.plain()
+    );
+
+    // `hug` wraps the boundary itself at an injected width.
+    let report = run_hug(harness, pane, &fixture, "COLUMNS=60", "refs nowhere geometry.ts");
+    let rows = shown_rows(&report);
+    assert!(rows.len() > 2, "the boundary wraps at 60 columns: {rows:?}");
+    assert!(rows.iter().all(|row| row.chars().count() <= 60), "no row past 60 columns: {rows:?}");
+    let joined = rows[1..].iter().map(|row| row.trim()).collect::<Vec<_>>().join(" ");
+    assert_eq!(joined, REFS_BOUNDARY);
+}
+
 // ------------------------------------------------------------------
 // tmux — headless; capture keeps SGR but not OSC 8
 // ------------------------------------------------------------------
@@ -869,6 +942,7 @@ fn level2_declarations_in_tmux() {
     check_stats(&mut harness, &pane);
     check_signature_modes(&mut harness, &pane);
     check_classes_table(&mut harness, &pane);
+    check_refs(&mut harness, &pane);
 }
 
 /// tmux: `-S -` reads the whole history and `-J` rejoins rows tmux
@@ -920,6 +994,7 @@ fn level2_declarations_in_wezterm() {
     check_stats(harness, &pane);
     check_signature_modes(harness, &pane);
     check_classes_table(harness, &pane);
+    check_refs(harness, &pane);
 }
 
 // ------------------------------------------------------------------
@@ -947,4 +1022,5 @@ fn level2_declarations_in_kitty() {
     check_stats(harness, &pane);
     check_signature_modes(harness, &pane);
     check_classes_table(harness, &pane);
+    check_refs(harness, &pane);
 }

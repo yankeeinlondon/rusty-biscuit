@@ -25,13 +25,13 @@
     "language": "Bash",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Item",
     "semantics": {},
@@ -80,8 +80,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -119,13 +119,13 @@
     "language": "Bash",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Item",
     "semantics": {},
@@ -186,8 +186,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -226,13 +226,13 @@
     "language": "Bash",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Item",
     "semantics": {},
@@ -293,8 +293,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -351,13 +351,13 @@
     "language": "C",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Item",
     "semantics": {},
@@ -418,8 +418,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -460,13 +460,13 @@
     "language": "C",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Member",
     "semantics": {},
@@ -515,8 +515,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -557,13 +557,13 @@
     "language": "C",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Member",
     "semantics": {},
@@ -612,8 +612,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -648,13 +648,13 @@
     "language": "C",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Item",
     "semantics": {},
@@ -703,8 +703,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -736,13 +736,13 @@
     "language": "C",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Item",
     "semantics": {},
@@ -791,8 +791,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -828,13 +828,13 @@
     ],
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Item",
     "semantics": {},
@@ -883,8 +883,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -934,13 +934,13 @@
     "language": "C",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Item",
     "semantics": {},
@@ -1013,8 +1013,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -1053,13 +1053,13 @@
     "language": "C",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Item",
     "semantics": {},
@@ -1132,8 +1132,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -1165,13 +1165,13 @@
     "language": "CSharp",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Item",
     "semantics": {},
@@ -1232,8 +1232,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -1294,13 +1294,13 @@
     "language": "CSharp",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Item",
     "semantics": {},
@@ -1361,8 +1361,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -1403,13 +1403,13 @@
     "language": "CSharp",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Member",
     "semantics": {},
@@ -1458,8 +1458,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -1500,13 +1500,13 @@
     "language": "CSharp",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Member",
     "semantics": {},
@@ -1555,8 +1555,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -1608,13 +1608,13 @@
     "language": "CSharp",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Member",
     "semantics": {},
@@ -1687,8 +1687,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -1734,13 +1734,13 @@
     ],
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Member",
     "semantics": {},
@@ -1813,8 +1813,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -1848,13 +1848,13 @@
     "language": "CSharp",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Item",
     "semantics": {},
@@ -1915,8 +1915,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -1957,13 +1957,13 @@
     "language": "CSharp",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Member",
     "semantics": {},
@@ -2024,8 +2024,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -2057,13 +2057,13 @@
     "language": "Cpp",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Item",
     "semantics": {},
@@ -2112,8 +2112,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -2174,13 +2174,13 @@
     "language": "Cpp",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Item",
     "semantics": {},
@@ -2241,8 +2241,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -2302,13 +2302,13 @@
     "language": "Cpp",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Member",
     "semantics": {},
@@ -2369,8 +2369,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -2411,13 +2411,13 @@
     "language": "Cpp",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Member",
     "semantics": {},
@@ -2490,8 +2490,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -2532,13 +2532,13 @@
     "language": "Cpp",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Member",
     "semantics": {},
@@ -2587,8 +2587,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -2629,13 +2629,13 @@
     "language": "Cpp",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Member",
     "semantics": {},
@@ -2684,8 +2684,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -2746,13 +2746,13 @@
     "language": "Cpp",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Item",
     "semantics": {},
@@ -2825,8 +2825,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -2876,13 +2876,13 @@
     "language": "Java",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Item",
     "semantics": {},
@@ -2943,8 +2943,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -2985,13 +2985,13 @@
     "language": "Java",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Member",
     "semantics": {},
@@ -3040,8 +3040,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -3092,13 +3092,13 @@
     "language": "Java",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Member",
     "semantics": {},
@@ -3159,8 +3159,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -3201,13 +3201,13 @@
     "language": "Java",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Member",
     "semantics": {},
@@ -3280,8 +3280,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -3327,13 +3327,13 @@
     ],
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Member",
     "semantics": {},
@@ -3406,8 +3406,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -3439,13 +3439,13 @@
     "language": "Java",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Item",
     "semantics": {},
@@ -3506,8 +3506,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -3548,13 +3548,13 @@
     "language": "Java",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Member",
     "semantics": {},
@@ -3615,8 +3615,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -3648,13 +3648,13 @@
     "language": "JavaScript",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Item",
     "semantics": {},
@@ -3715,8 +3715,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -3766,13 +3766,13 @@
     "language": "JavaScript",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Member",
     "semantics": {},
@@ -3833,8 +3833,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -3874,13 +3874,13 @@
     "language": "JavaScript",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Member",
     "semantics": {},
@@ -3941,8 +3941,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -3981,13 +3981,13 @@
     "language": "JavaScript",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Item",
     "semantics": {},
@@ -4048,8 +4048,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -4081,13 +4081,13 @@
     "language": "JavaScript",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Item",
     "semantics": {},
@@ -4136,8 +4136,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -4169,13 +4169,13 @@
     "language": "Lua",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Item",
     "semantics": {},
@@ -4224,8 +4224,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -4257,13 +4257,13 @@
     "language": "Lua",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Item",
     "semantics": {},
@@ -4312,8 +4312,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -4364,13 +4364,13 @@
     "language": "Lua",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Member",
     "semantics": {},
@@ -4431,8 +4431,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -4473,13 +4473,13 @@
     "language": "Lua",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Member",
     "semantics": {},
@@ -4540,8 +4540,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -4580,13 +4580,13 @@
     "language": "Lua",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Item",
     "semantics": {},
@@ -4647,8 +4647,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -4682,13 +4682,13 @@
     "language": "Go",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Item",
     "semantics": {},
@@ -4737,8 +4737,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -4790,13 +4790,13 @@
     "language": "Go",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Item",
     "semantics": {},
@@ -4845,8 +4845,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -4887,13 +4887,13 @@
     "language": "Go",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Member",
     "semantics": {},
@@ -4942,8 +4942,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -4995,13 +4995,13 @@
     "language": "Go",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Member",
     "semantics": {},
@@ -5062,8 +5062,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -5095,13 +5095,13 @@
     "language": "Go",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Item",
     "semantics": {},
@@ -5150,8 +5150,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -5191,13 +5191,13 @@
     "language": "Go",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Item",
     "semantics": {},
@@ -5270,8 +5270,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -5302,13 +5302,13 @@
     "language": "Python",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Item",
     "semantics": {},
@@ -5357,8 +5357,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -5392,13 +5392,13 @@
     "language": "Python",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Item",
     "semantics": {},
@@ -5459,8 +5459,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -5519,13 +5519,13 @@
     "language": "Python",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Member",
     "semantics": {},
@@ -5586,8 +5586,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -5646,13 +5646,13 @@
     "language": "Python",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Member",
     "semantics": {},
@@ -5713,8 +5713,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -5753,13 +5753,13 @@
     "language": "Python",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Item",
     "semantics": {},
@@ -5820,8 +5820,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -5853,13 +5853,13 @@
     "language": "Perl",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Item",
     "semantics": {},
@@ -5908,8 +5908,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -5943,13 +5943,13 @@
     "language": "Perl",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Item",
     "semantics": {},
@@ -5998,8 +5998,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -6040,13 +6040,13 @@
     "language": "Perl",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Item",
     "semantics": {},
@@ -6107,8 +6107,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -6149,13 +6149,13 @@
     "language": "Perl",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Item",
     "semantics": {},
@@ -6216,8 +6216,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -6267,13 +6267,13 @@
     "language": "Php",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Item",
     "semantics": {},
@@ -6334,8 +6334,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -6376,13 +6376,13 @@
     "language": "Php",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Member",
     "semantics": {},
@@ -6431,8 +6431,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -6485,13 +6485,13 @@
     "language": "Php",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Member",
     "semantics": {},
@@ -6564,8 +6564,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -6612,13 +6612,13 @@
     ],
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Member",
     "semantics": {},
@@ -6691,8 +6691,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -6732,13 +6732,13 @@
     "language": "Php",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Item",
     "semantics": {},
@@ -6811,8 +6811,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -6864,13 +6864,13 @@
     "language": "Rust",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Item",
     "semantics": {},
@@ -6931,8 +6931,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -6973,13 +6973,13 @@
     "language": "Rust",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Member",
     "semantics": {},
@@ -7028,8 +7028,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -7087,13 +7087,13 @@
     ],
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Member",
     "semantics": {},
@@ -7166,8 +7166,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -7232,13 +7232,13 @@
     ],
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Member",
     "semantics": {},
@@ -7299,8 +7299,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -7342,13 +7342,13 @@
     "language": "Rust",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Item",
     "semantics": {},
@@ -7409,8 +7409,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -7443,13 +7443,13 @@
     "language": "Rust",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Member",
     "semantics": {},
@@ -7498,8 +7498,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -7532,13 +7532,13 @@
     "language": "Rust",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Member",
     "semantics": {},
@@ -7587,8 +7587,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -7620,13 +7620,13 @@
     "language": "Rust",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Item",
     "semantics": {},
@@ -7675,8 +7675,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -7716,13 +7716,13 @@
     "language": "Rust",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Item",
     "semantics": {},
@@ -7795,8 +7795,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -7828,13 +7828,13 @@
     "language": "Scala",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Item",
     "semantics": {},
@@ -7895,8 +7895,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -7937,13 +7937,13 @@
     "language": "Scala",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Member",
     "semantics": {},
@@ -7992,8 +7992,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -8042,7 +8042,7 @@
     "language": "Scala",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {
@@ -8055,8 +8055,8 @@
       ]
     },
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Item",
     "semantics": {},
@@ -8117,8 +8117,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -8160,13 +8160,13 @@
     "language": "Scala",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Member",
     "semantics": {},
@@ -8239,8 +8239,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -8272,13 +8272,13 @@
     "language": "Scala",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Item",
     "semantics": {},
@@ -8339,8 +8339,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -8387,13 +8387,13 @@
     ],
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Member",
     "semantics": {},
@@ -8466,8 +8466,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -8517,13 +8517,13 @@
     "language": "Swift",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Item",
     "semantics": {},
@@ -8584,8 +8584,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -8627,13 +8627,13 @@
     "language": "Swift",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Member",
     "semantics": {},
@@ -8682,8 +8682,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -8725,13 +8725,13 @@
     "language": "Swift",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Member",
     "semantics": {},
@@ -8804,8 +8804,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -8837,13 +8837,13 @@
     "language": "Swift",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Item",
     "semantics": {},
@@ -8904,8 +8904,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -8947,13 +8947,13 @@
     "language": "Swift",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Member",
     "semantics": {},
@@ -9014,8 +9014,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -9055,13 +9055,13 @@
     "language": "Swift",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Item",
     "semantics": {},
@@ -9134,8 +9134,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -9185,13 +9185,13 @@
     "language": "TypeScript",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Item",
     "semantics": {},
@@ -9252,8 +9252,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -9294,13 +9294,13 @@
     "language": "TypeScript",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Member",
     "semantics": {},
@@ -9349,8 +9349,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -9386,13 +9386,13 @@
     "language": "TypeScript",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Item",
     "semantics": {},
@@ -9441,8 +9441,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -9492,7 +9492,7 @@
     "language": "TypeScript",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {
@@ -9505,8 +9505,8 @@
       ]
     },
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Item",
     "semantics": {},
@@ -9567,8 +9567,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -9609,13 +9609,13 @@
     "language": "TypeScript",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Member",
     "semantics": {},
@@ -9664,8 +9664,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -9716,13 +9716,13 @@
     "language": "TypeScript",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Member",
     "semantics": {},
@@ -9783,8 +9783,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -9836,13 +9836,13 @@
     "language": "TypeScript",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Member",
     "semantics": {},
@@ -9915,8 +9915,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -9956,13 +9956,13 @@
     "language": "TypeScript",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Item",
     "semantics": {},
@@ -10035,8 +10035,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -10068,13 +10068,13 @@
     "language": "Zsh",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Item",
     "semantics": {},
@@ -10123,8 +10123,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -10162,13 +10162,13 @@
     "language": "Zsh",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Item",
     "semantics": {},
@@ -10229,8 +10229,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 
@@ -10269,13 +10269,13 @@
     "language": "Zsh",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.30",
+      "extractor_version": "0.1.0+rev.36",
       "parse_pass": "parse"
     },
     "relations": {},
     "schema_version": {
-      "major": 4,
-      "minor": 3
+      "major": 5,
+      "minor": 0
     },
     "scope": "Item",
     "semantics": {},
@@ -10336,8 +10336,8 @@
   },
   "report_schema_version": 1,
   "schema_version": {
-    "major": 4,
-    "minor": 3
+    "major": 5,
+    "minor": 0
   }
 }
 

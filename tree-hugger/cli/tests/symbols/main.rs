@@ -8,7 +8,7 @@
 //! `--sort` and grouping, `classes`, the record selectors (`filters`), the
 //! report formats and views (`reports`: JSON Lines, count, stats, table,
 //! outline, signature modes, wrapping),
-//! `--prelude`, and equivalent spellings
+//! `--prelude`, `refs` (reference reports), and equivalent spellings
 //! of one file sharing its cache entry and listing; and the marker-scoped
 //! report reader the `level2_*` terminal tests share.
 
@@ -22,6 +22,7 @@ mod golden;
 mod order;
 mod outline;
 mod prelude;
+mod refs;
 mod report;
 mod reports;
 mod spelling;

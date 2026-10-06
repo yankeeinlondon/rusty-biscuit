@@ -19,7 +19,7 @@ use serde_json::{Value, json};
 use tempfile::TempDir;
 
 use crate::cache_upgrade::{only_entry, read_json, rename_record};
-use crate::{PYTHON_FIXTURE, Scratch, json_of, stdout_of};
+use crate::{JAVA_FIXTURE, PYTHON_FIXTURE, Scratch, json_of, stdout_of};
 
 const FILE: &str = "python.py";
 const CACHED_ARGS: [&str; 3] = ["--json-full", "symbols", FILE];
@@ -278,6 +278,15 @@ fn columns() -> Vec<Column> {
             public: |out| record(out, GENERIC)["relations"]["extends"][0]["source_span"].clone(),
             outcomes: [S(json!({ "start": { "line": 1, "column": 1 }, "end": { "line": 1, "column": 2 }, "start_byte": 0, "end_byte": 1 })), S(Value::Null), S(Value::Null), R, R, R, R, R, R],
         },
+        // Every span member is required; `0` is served as written (the
+        // decoder reads an unsigned integer, not a 1-based position). The
+        // byte members decide the Swift `--signatures full` outline label.
+        span_member_column("target source_span.start.line", &["relations", "extends", "0", "source_span", "start", "line"], 2, |out| target_span(out)["start"]["line"].clone()),
+        span_member_column("target source_span.start.column", &["relations", "extends", "0", "source_span", "start", "column"], 3, |out| target_span(out)["start"]["column"].clone()),
+        span_member_column("target source_span.end.line", &["relations", "extends", "0", "source_span", "end", "line"], 4, |out| target_span(out)["end"]["line"].clone()),
+        span_member_column("target source_span.end.column", &["relations", "extends", "0", "source_span", "end", "column"], 5, |out| target_span(out)["end"]["column"].clone()),
+        span_member_column("target source_span.start_byte", &["relations", "extends", "0", "source_span", "start_byte"], 6, |out| target_span(out)["start_byte"].clone()),
+        span_member_column("target source_span.end_byte", &["relations", "extends", "0", "source_span", "end_byte"], 7, |out| target_span(out)["end_byte"].clone()),
         Column {
             name: "kind",
             target: Target::Record(METHOD),
@@ -643,7 +652,7 @@ fn columns() -> Vec<Column> {
             control: None,
             empty: None,
             public: |out| record(out, METHOD)["schema_version"].clone(),
-            outcomes: [S(json!({ "major": 4, "minor": 3 })), R, R, R, R, R, R, R, R],
+            outcomes: [S(json!({ "major": 5, "minor": 0 })), R, R, R, R, R, R, R, R],
         },
         // Entry-level fields: none has a default; only an empty record
         // list under valid coverage is a servable shape (a file with no
@@ -664,6 +673,36 @@ fn columns() -> Vec<Column> {
         entry_column("exports", None, [S(json!(true)), R, R, R, R, R, S(json!(true)), R, R]),
         entry_column("diagnostics", None, [S(json!(true)), R, R, R, R, R, S(json!(true)), R, R]),
     ]
+}
+
+/// The populated span on `MatrixGeneric`'s first `extends` target: every
+/// member distinct and nonzero, so a served member is told apart from its
+/// neighbors, from the `0` cell and from a recomputed `null` span.
+static TARGET_SPAN: std::sync::LazyLock<Value> = std::sync::LazyLock::new(|| {
+    json!({ "start": { "line": 2, "column": 3 }, "end": { "line": 4, "column": 5 }, "start_byte": 6, "end_byte": 7 })
+});
+
+fn target_span(output: &Value) -> &Value {
+    &record(output, GENERIC)["relations"]["extends"][0]["source_span"]
+}
+
+/// One required numeric member of the populated [`TARGET_SPAN`], whose
+/// stored value is `populated`.
+fn span_member_column(
+    name: &'static str,
+    path: &'static [&'static str],
+    populated: u64,
+    public: fn(&Value) -> Value,
+) -> Column {
+    Column {
+        name,
+        target: Target::Record(GENERIC),
+        path,
+        control: None,
+        empty: Some(json!(0)),
+        public,
+        outcomes: [S(json!(populated)), R, R, R, R, R, S(json!(0)), R, R],
+    }
 }
 
 /// A top-level entry field whose served public value is the sentinel's
@@ -724,13 +763,20 @@ fn parent_mut<'a>(snapshot: &'a mut Value, column: &Column) -> (&'a mut Value, &
 /// the field's value in it.
 fn column_base(original: &Value, column: &Column) -> (Value, Value) {
     let mut base = original.clone();
-    rename_record(&mut base, SENTINEL_FROM, SENTINEL_TO);
     let parameter = &mut record_mut(&mut base, GENERIC)["type_info"]["generic_params"][0];
     parameter["default"] = json!("MatrixBase");
     parameter["variance"] = json!("out");
     let target = &mut record_mut(&mut base, GENERIC)["relations"]["extends"][0];
     target["id"] = json!("matrix-id");
     target["qualified_name"] = json!("MatrixBase");
+    target["source_span"] = TARGET_SPAN.clone();
+    field_base(base, column)
+}
+
+/// `snapshot` with the sentinel renamed and the column's control value set,
+/// and the field's value in it.
+fn field_base(mut base: Value, column: &Column) -> (Value, Value) {
+    rename_record(&mut base, SENTINEL_FROM, SENTINEL_TO);
     let (parent, key) = parent_mut(&mut base, column);
     if let Some(control) = &column.control {
         parent[key] = control.clone();
@@ -783,7 +829,7 @@ fn edited_entry(base: &Value, column: &Column, shape: Shape, value: &Value) -> S
             _ => parent[key] = Value::Array(vec![json!(123); elements.len().max(1)]),
         },
         Shape::IncompatibleMajor => parent[key] = json!({ "major": 3, "minor": 0 }),
-        Shape::IncompatibleMinor => parent[key] = json!({ "major": 4, "minor": 1 }),
+        Shape::IncompatibleMinor => parent[key] = json!({ "major": 5, "minor": 1 }),
         Shape::Empty => {
             parent[key] = match (&column.empty, value) {
                 (Some(empty), _) => empty.clone(),
@@ -849,7 +895,8 @@ fn persisted_symbol_fields_are_served_or_recomputed_per_shape() {
                 let (scratch, original, uncached) = (&scratch, &original, &uncached);
                 let relative_entry = relative_entry.as_path();
                 scope.spawn(move || {
-                    check_column(scratch, original, uncached, relative_entry, column)
+                    let base = column_base(original, column);
+                    check_column(scratch, &CACHED_ARGS, &base, uncached, relative_entry, column)
                 })
             })
             .collect();
@@ -865,11 +912,122 @@ fn persisted_symbol_fields_are_served_or_recomputed_per_shape() {
     );
 }
 
+const MEMBER_FILE: &str = "java.java";
+const MEMBER_ARGS: [&str; 3] = ["--json-full", "symbols", MEMBER_FILE];
+/// Appended to the Java fixture: a raw attribute with an argument, a Custom
+/// modifier and a fixed-tag modifier, all as extraction writes them, plus a
+/// `module_function` record to serve as the sentinel.
+const MEMBER_SOURCE: &str = "\n@ReviewAttr(\"raw value\")\nfinal class MatrixSubject { static void unit_subject() {} }\n\nclass MatrixSentinel { void module_function() {} }\n";
+const SUBJECT: &str = "MatrixSubject";
+const STATIC_SUBJECT: &str = "unit_subject";
+
+/// One column per member of a stored `Attribute` and `Modifier`, with
+/// controls written by extraction (no control overrides). An absent or
+/// `null` attribute `value` is the Option's `None`; every other member is
+/// required, and an empty modifier tag names no variant.
+fn member_columns() -> Vec<Column> {
+    vec![
+        Column {
+            name: "attribute name",
+            target: Target::Record(SUBJECT),
+            path: &["attributes", "0", "name"],
+            control: None,
+            empty: None,
+            public: |out| record(out, SUBJECT)["attributes"][0]["name"].clone(),
+            outcomes: [S(json!("ReviewAttr")), R, R, R, R, R, S(json!("")), R, R],
+        },
+        Column {
+            name: "attribute value",
+            target: Target::Record(SUBJECT),
+            path: &["attributes", "0", "value"],
+            control: None,
+            empty: None,
+            public: |out| record(out, SUBJECT)["attributes"][0]["value"].clone(),
+            outcomes: [S(json!("\"raw value\"")), S(Value::Null), S(Value::Null), R, R, R, S(json!("")), R, R],
+        },
+        Column {
+            name: "modifier type (Custom)",
+            target: Target::Record(SUBJECT),
+            path: &["modifiers", "0", "type"],
+            control: None,
+            empty: None,
+            public: |out| record(out, SUBJECT)["modifiers"][0]["type"].clone(),
+            outcomes: [S(json!("Custom")), R, R, R, R, R, R, R, R],
+        },
+        Column {
+            name: "modifier Custom value",
+            target: Target::Record(SUBJECT),
+            path: &["modifiers", "0", "value"],
+            control: None,
+            empty: None,
+            public: |out| record(out, SUBJECT)["modifiers"][0]["value"].clone(),
+            outcomes: [S(json!("final")), R, R, R, R, R, S(json!("")), R, R],
+        },
+        Column {
+            name: "modifier type (Static)",
+            target: Target::Record(STATIC_SUBJECT),
+            path: &["modifiers", "0", "type"],
+            control: None,
+            empty: None,
+            public: |out| record(out, STATIC_SUBJECT)["modifiers"][0]["type"].clone(),
+            outcomes: [S(json!("Static")), R, R, R, R, R, R, R, R],
+        },
+    ]
+}
+
+/// The same reader contract as
+/// [`persisted_symbol_fields_are_served_or_recomputed_per_shape`], for each
+/// member of a stored attribute and modifier.
+#[test]
+fn attribute_and_modifier_members_are_served_or_recomputed_per_shape() {
+    let source = format!("{JAVA_FIXTURE}{MEMBER_SOURCE}");
+    let scratch = Scratch::new(&[(MEMBER_FILE, &source)]);
+    let uncached = json_of(&scratch.stdout(&["--json-full", "symbols", "--no-cache", MEMBER_FILE]));
+    assert_eq!(json_of(&scratch.stdout(&MEMBER_ARGS)), uncached, "the cache-writing run");
+    let written = |name: &str| record(&uncached, name).clone();
+    assert_eq!(
+        (written(SUBJECT)["attributes"].clone(), written(SUBJECT)["modifiers"].clone()),
+        (
+            json!([{ "name": "ReviewAttr", "value": "\"raw value\"" }]),
+            json!([{ "type": "Custom", "value": "final" }])
+        ),
+        "the controls come from extraction"
+    );
+    assert_eq!(written(STATIC_SUBJECT)["modifiers"], json!([{ "type": "Static" }]));
+    let entry = only_entry(scratch.temp.path());
+    let relative_entry = entry
+        .strip_prefix(scratch.temp.path())
+        .expect("entry under the scratch temp directory")
+        .to_path_buf();
+    let original = read_json(&entry);
+
+    let columns = member_columns();
+    let failures: Vec<String> = std::thread::scope(|scope| {
+        let handles: Vec<_> = columns
+            .iter()
+            .map(|column| {
+                let (scratch, original, uncached) = (&scratch, &original, &uncached);
+                let relative_entry = relative_entry.as_path();
+                scope.spawn(move || {
+                    let base = field_base(original.clone(), column);
+                    check_column(scratch, &MEMBER_ARGS, &base, uncached, relative_entry, column)
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .flat_map(|handle| handle.join().expect("column thread"))
+            .collect()
+    });
+    assert!(failures.is_empty(), "attribute and modifier member matrix:\n{}", failures.join("\n"));
+}
+
 /// Runs every cell of `column`, returning one message per cell whose outcome
 /// differs from the table.
 fn check_column(
     scratch: &Scratch,
-    original: &Value,
+    args: &[&str],
+    (base, value): &(Value, Value),
     uncached: &Value,
     relative_entry: &Path,
     column: &Column,
@@ -877,7 +1035,6 @@ fn check_column(
     let temp = TempDir::new().expect("column temp");
     let entry = temp.path().join(relative_entry);
     std::fs::create_dir_all(entry.parent().expect("entry parent")).expect("create shard");
-    let (base, value) = column_base(original, column);
     let mut failures = Vec::new();
     let version_cells = if column.path == ["schema_version"] {
         &VERSION_SHAPES[..]
@@ -889,12 +1046,9 @@ fn check_column(
         .zip(&column.outcomes)
         .chain(version_cells.iter().zip(std::iter::repeat(&Outcome::Rejected)));
     for (shape, outcome) in cells {
-        std::fs::write(&entry, edited_entry(&base, column, *shape, &value))
+        std::fs::write(&entry, edited_entry(base, column, *shape, value))
             .expect("write cache entry");
-        let output = json_of(&stdout_of(
-            scratch.hug_with_temp(temp.path(), &CACHED_ARGS),
-            &CACHED_ARGS,
-        ));
+        let output = json_of(&stdout_of(scratch.hug_with_temp(temp.path(), args), args));
         let cell = format!("{} / {shape:?}", column.name);
         match outcome {
             Outcome::Served(expected) => {
@@ -961,6 +1115,15 @@ fn the_cache_entry_records_the_coverage_it_holds() {
         entry["reference_coverage"].as_array().is_some_and(|regions| !regions.is_empty()),
         "the entry stores the coverage, the file-level region at least"
     );
+    // The entry writes every key, so absent, `null` and empty differ.
+    assert_eq!(entry["reference_coverage"][0]["owner"], Value::Null, "the file region has a null owner");
+    assert!(
+        entry["reference_coverage"][0].as_object().is_some_and(|region| region.contains_key("owner")),
+        "the null owner is written, not omitted"
+    );
+    let public_coverage: Vec<tree_hugger::ReferenceCoverage> =
+        serde_json::from_value(entry["reference_coverage"].clone()).expect("stored coverage reads publicly");
+    let public_coverage = serde_json::to_value(public_coverage).expect("public coverage");
     let stored_rules: Vec<&str> = entry["diagnostics"]
         .as_array()
         .expect("entry diagnostics")
@@ -979,8 +1142,7 @@ fn the_cache_entry_records_the_coverage_it_holds() {
             "{label}"
         );
         assert_eq!(
-            index["reference_coverage"],
-            entry["reference_coverage"],
+            index["reference_coverage"], public_coverage,
             "{label}: the complete index reports the stored coverage"
         );
         let rules: Vec<&str> = index["diagnostics"]
@@ -1087,4 +1249,243 @@ fn an_absent_metrics_facet_is_not_requested_never_computed_null() {
         json!({ "parameters": 1, "has_docs": false, "lines": 2, "cyclomatic": null }),
         "the facet is computed with every key"
     );
+}
+
+/// A TypeScript file whose evidence has every confidence, an in-file edge,
+/// a limited region, direct recursion and a non-ASCII character.
+const EVIDENCE_FILE: &str = "evidence.ts";
+const EVIDENCE_SOURCE: &str = "function helper(): number { return 1; }\n\
+    function module_function(): number { return helper(); }\n\
+    class Box { size(): number { return 1; } }\n\
+    function caller(box: Box): number { return box.size() + missing(); }\n\
+    function again(n: number): number { return again(n); }\n\
+    // café\n";
+const EVIDENCE_ARGS: [&str; 3] = ["--json-full", "symbols", EVIDENCE_FILE];
+/// `occurrences[0]`: the `Scoped` call of `helper` in `module_function`.
+const SCOPED: &str = "0";
+/// `occurrences[3]`: the `NameOnly` member call `box.size()`.
+const NAME_ONLY: &str = "3";
+/// `occurrences[4]`: the `Unresolved` call of `missing`.
+const UNRESOLVED: &str = "4";
+/// `reference_coverage[4]`: `caller`'s region, limited by `box.size()`.
+const LIMITED: &str = "4";
+
+/// A column over the entry's reference evidence, served only unedited.
+fn evidence_column(name: &'static str, path: &'static [&'static str]) -> Column {
+    Column {
+        name,
+        target: Target::Entry,
+        path,
+        control: None,
+        empty: None,
+        public: |out| json!(has_sentinel(out)),
+        outcomes: [S(json!(true)), R, R, R, R, R, R, R, R],
+    }
+}
+
+/// Every evidence field the cache reader decides on. No cell but the control
+/// is servable: each edit leaves evidence a fresh analysis cannot produce
+/// (`[]` occurrences while a record keeps the edge they made; a `null`
+/// target ID on the `Scoped` occurrence that made that edge; a `NameOnly`
+/// with no candidates; a `Limited` region with no reason).
+fn evidence_columns() -> Vec<Column> {
+    vec![
+        evidence_column("occurrences", &["occurrences"]),
+        evidence_column("reference_coverage", &["reference_coverage"]),
+        evidence_column("occurrence confidence", &["occurrences", SCOPED, "confidence"]),
+        evidence_column("occurrence target.id", &["occurrences", SCOPED, "target", "id"]),
+        evidence_column("occurrence candidates", &["occurrences", NAME_ONLY, "candidates"]),
+        evidence_column("occurrence span", &["occurrences", SCOPED, "span"]),
+        evidence_column("occurrence owner", &["occurrences", SCOPED, "owner"]),
+        evidence_column("coverage reasons", &["reference_coverage", LIMITED, "reasons"]),
+    ]
+}
+
+fn occurrence<'a>(entry: &'a mut Value, index: &str) -> &'a mut Value {
+    &mut entry["occurrences"][index.parse::<usize>().expect("index")]
+}
+
+/// A labeled edit to a cache entry.
+type EntryEdit = (&'static str, fn(&mut Value));
+
+/// Edits whose evidence is well-formed JSON but contradicts the source,
+/// itself, the capability claim or the records derived from it.
+const INCONSISTENT_EVIDENCE: &[EntryEdit] = &[
+    ("zero-length span", |entry| {
+        let span = &mut occurrence(entry, SCOPED)["span"];
+        span["end"] = span["start"].clone();
+        span["end_byte"] = span["start_byte"].clone();
+    }),
+    ("span ending before it starts", |entry| {
+        let span = &mut occurrence(entry, SCOPED)["span"];
+        let (start, start_byte) = (span["start"].clone(), span["start_byte"].clone());
+        span["start"] = span["end"].clone();
+        span["start_byte"] = span["end_byte"].clone();
+        span["end"] = start;
+        span["end_byte"] = start_byte;
+    }),
+    ("span past the end of the source", |entry| {
+        let span = &mut occurrence(entry, SCOPED)["span"];
+        span["end_byte"] = json!(EVIDENCE_SOURCE.len() + 1);
+    }),
+    ("span off a character boundary", |entry| {
+        let inside = EVIDENCE_SOURCE.find('é').expect("é") + 1;
+        let span = &mut entry["reference_coverage"][0]["span"];
+        span["end_byte"] = json!(inside);
+    }),
+    ("span points that disagree with its offsets", |entry| {
+        let span = &mut occurrence(entry, SCOPED)["span"];
+        span["start"]["column"] = json!(span["start"]["column"].as_u64().expect("column") + 1);
+    }),
+    ("target name that is not the text at its span", |entry| {
+        occurrence(entry, SCOPED)["target"]["name"] = json!("other");
+    }),
+    ("Scoped with candidates", |entry| {
+        let candidates = occurrence(entry, NAME_ONLY)["candidates"].clone();
+        occurrence(entry, SCOPED)["candidates"] = candidates;
+    }),
+    ("NameOnly with a target ID", |entry| {
+        let id = occurrence(entry, SCOPED)["target"]["id"].clone();
+        occurrence(entry, NAME_ONLY)["target"]["id"] = id;
+    }),
+    ("NameOnly with a repeated candidate", |entry| {
+        let candidates = occurrence(entry, NAME_ONLY)["candidates"].as_array_mut().expect("candidates");
+        candidates.push(candidates[0].clone());
+    }),
+    ("Unresolved with a target ID", |entry| {
+        let id = occurrence(entry, SCOPED)["target"]["id"].clone();
+        occurrence(entry, UNRESOLVED)["target"]["id"] = id;
+    }),
+    ("Unresolved with candidates", |entry| {
+        let candidates = occurrence(entry, NAME_ONLY)["candidates"].clone();
+        occurrence(entry, UNRESOLVED)["candidates"] = candidates;
+    }),
+    ("a repeated occurrence", |entry| {
+        let list = entry["occurrences"].as_array_mut().expect("occurrences");
+        list.insert(1, list[0].clone());
+    }),
+    ("occurrences out of order", |entry| {
+        entry["occurrences"].as_array_mut().expect("occurrences").swap(0, 1);
+    }),
+    ("an owner that owns no coverage region", |entry| {
+        let other = occurrence(entry, NAME_ONLY)["owner"].clone();
+        occurrence(entry, SCOPED)["owner"] = other;
+    }),
+    ("a region owner whose name is not its record's", |entry| {
+        entry["reference_coverage"][LIMITED.parse::<usize>().expect("index")]["owner"]["qualified_name"] =
+            json!("elsewhere");
+    }),
+    ("a candidate whose name is not its record's", |entry| {
+        occurrence(entry, NAME_ONLY)["candidates"][0]["name"] = json!("elsewhere");
+    }),
+    ("Complete coverage with a reason", |entry| {
+        entry["reference_coverage"][1]["reasons"] = json!(["indirect_dispatch"]);
+    }),
+    ("repeated coverage reasons", |entry| {
+        entry["reference_coverage"][LIMITED.parse::<usize>().expect("index")]["reasons"] =
+            json!(["indirect_dispatch", "indirect_dispatch"]);
+    }),
+    ("no file-level region", |entry| {
+        entry["reference_coverage"].as_array_mut().expect("coverage").remove(0);
+    }),
+    ("coverage out of order", |entry| {
+        entry["reference_coverage"].as_array_mut().expect("coverage").swap(1, 2);
+    }),
+    ("evidence without the occurrences capability", |entry| {
+        entry["completed_capabilities"]
+            .as_array_mut()
+            .expect("capabilities")
+            .retain(|capability| capability != "occurrences" && capability != "semantics");
+    }),
+    ("a reference edge whose occurrence is gone", |entry| {
+        entry["occurrences"].as_array_mut().expect("occurrences").remove(0);
+    }),
+    ("a referenced-by edge no occurrence made", |entry| {
+        let caller = record_mut(entry, "caller")["id"].clone();
+        record_mut(entry, "size")["relations"]["referenced_by"] = json!([{ "id": caller, "name": "caller" }]);
+    }),
+    ("direct recursion with no call to itself", |entry| {
+        record_mut(entry, "helper")["semantics"]["is_recursive"] = json!("Yes");
+    }),
+];
+
+/// The cache reader's contract for the reference evidence of an entry that
+/// claims the occurrences capability: each matrix shape of each evidence
+/// field, and each internally inconsistent edit, is a miss whose output
+/// equals an uncached run, never evidence read as empty; the unedited entry,
+/// and a file that truly has no occurrences, are served.
+#[test]
+fn reference_evidence_is_served_only_when_consistent() {
+    let scratch = Scratch::new(&[(EVIDENCE_FILE, EVIDENCE_SOURCE)]);
+    let uncached = json_of(&scratch.stdout(&["--json-full", "symbols", "--no-cache", EVIDENCE_FILE]));
+    assert_eq!(json_of(&scratch.stdout(&EVIDENCE_ARGS)), uncached, "the cache-writing run");
+    let entry = only_entry(scratch.temp.path());
+    let relative_entry = entry
+        .strip_prefix(scratch.temp.path())
+        .expect("entry under the scratch temp directory")
+        .to_path_buf();
+    let original = read_json(&entry);
+
+    // The cells name these entries by position.
+    let stored = |list: &str, index: &str| original[list][index.parse::<usize>().expect("index")].clone();
+    assert_eq!(
+        (stored("occurrences", SCOPED)["target"]["name"].clone(), stored("occurrences", SCOPED)["confidence"].clone()),
+        (json!("helper"), json!("Scoped"))
+    );
+    assert_eq!(stored("occurrences", NAME_ONLY)["confidence"], "NameOnly");
+    assert_eq!(stored("occurrences", UNRESOLVED)["confidence"], "Unresolved");
+    assert_eq!(
+        (stored("reference_coverage", LIMITED)["owner"]["name"].clone(), stored("reference_coverage", LIMITED)["state"].clone()),
+        (json!("caller"), json!("Limited"))
+    );
+    assert_eq!(record(&uncached, "again")["semantics"]["is_recursive"], "Yes");
+
+    let columns = evidence_columns();
+    let mut failures: Vec<String> = std::thread::scope(|scope| {
+        let handles: Vec<_> = columns
+            .iter()
+            .map(|column| {
+                let (scratch, original, uncached) = (&scratch, &original, &uncached);
+                let relative_entry = relative_entry.as_path();
+                scope.spawn(move || {
+                    let base = field_base(original.clone(), column);
+                    check_column(scratch, &EVIDENCE_ARGS, &base, uncached, relative_entry, column)
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .flat_map(|handle| handle.join().expect("column thread"))
+            .collect()
+    });
+
+    let temp = TempDir::new().expect("edit temp");
+    let edited_path = temp.path().join(&relative_entry);
+    std::fs::create_dir_all(edited_path.parent().expect("entry parent")).expect("create shard");
+    let mut base = original.clone();
+    rename_record(&mut base, SENTINEL_FROM, SENTINEL_TO);
+    for (label, edit) in INCONSISTENT_EVIDENCE {
+        let mut edited = base.clone();
+        edit(&mut edited);
+        std::fs::write(&edited_path, serde_json::to_string(&edited).expect("serialize")).expect("write entry");
+        let output = json_of(&stdout_of(scratch.hug_with_temp(temp.path(), &EVIDENCE_ARGS), &EVIDENCE_ARGS));
+        if has_sentinel(&output) {
+            failures.push(format!("{label}: expected rejected, entry was served"));
+        } else if output != uncached {
+            failures.push(format!("{label}: rejected, but output differs from an uncached run"));
+        }
+    }
+    assert!(failures.is_empty(), "reference evidence matrix:\n{}", failures.join("\n"));
+
+    // An empty list is servable when the file truly has no occurrences.
+    let quiet = Scratch::new(&[("quiet.ts", "function module_function(): void {}\n")]);
+    let quiet_args = ["--json-full", "symbols", "quiet.ts"];
+    let cold = json_of(&quiet.stdout(&quiet_args));
+    let quiet_entry = only_entry(quiet.temp.path());
+    let mut written = read_json(&quiet_entry);
+    assert_eq!(written["occurrences"], json!([]), "the file has no occurrences");
+    assert_eq!(cold["indexes"][0]["reference_coverage"][0]["state"], "Complete");
+    rename_record(&mut written, SENTINEL_FROM, SENTINEL_TO);
+    std::fs::write(&quiet_entry, serde_json::to_string(&written).expect("serialize")).expect("write entry");
+    assert!(has_sentinel(&json_of(&quiet.stdout(&quiet_args))), "empty evidence of a quiet file is served");
 }

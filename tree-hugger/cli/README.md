@@ -24,6 +24,7 @@ hug imports --json "tests/fixtures/**/*.js"
 - `symbols` - List all discovered symbols
 - `imports` - List imported symbols
 - `classes` - List classes, structs, interfaces and traits with members partitioned by static/instance
+- `refs` - List the references to one declaration within its file, or its callers or callees (see [Refs Command](#refs-command))
 - `lint` - Run lint and syntax diagnostics
 
 ## Options
@@ -148,7 +149,7 @@ With `--json`, `functions`, `types`, `symbols` and `classes` print one report:
 ```json
 {
   "report_schema_version": 1,
-  "schema_version": { "major": 4, "minor": 1 },
+  "schema_version": { "major": 5, "minor": 0 },
   "root_dir": "/path/to/project",
   "files": [
     {
@@ -174,7 +175,7 @@ With `--json`, `functions`, `types`, `symbols` and `classes` print one report:
 
 (Records are shown abridged.)
 
-- `symbols` holds only the command's records, as schema 4.3 `SymbolRecord`s,
+- `symbols` holds only the command's records, as schema 5.0 `SymbolRecord`s,
   ordered by `--sort` within each file. File entries are always in portable
   path order, and a file with no match has no entry; an empty selection is
   `files: []`.
@@ -324,6 +325,29 @@ Options:
 - `--name <FILTER>` - Filter classes by name (substring match)
 - `--static-only` - Show only static members
 - `--instance-only` - Show only instance members
+
+## Refs Command
+
+`hug refs` lists where one declaration is referenced, with how sure the
+analysis is about each reference:
+
+```sh
+hug refs parse 'src/**'                                  # incoming calls and usages
+hug refs 'src/parser.rs#Parser::parse' --callers 'src/**' # incoming calls only
+hug refs --id <ID> --callees 'src/**'                     # calls its body makes
+```
+
+- The first value is the declaration's name (exact, smart case, every kind
+  and scope, locals included); the rest are file filters. `--id` selects by
+  record ID instead, and then every value is a file filter.
+- A name matching several declarations is an error (exit 1) listing each
+  one's location and ID; an unknown name or ID is an empty report.
+- References are resolved within one file, so a caller in another file is
+  never listed, even under the same name. Every report says so.
+- Text and `--json` only; `--exclude-files`, `--language` and `--no-cache`
+  work as for the other commands.
+
+The full contract is in [`docs/references.md`](../docs/references.md#hug-refs).
 
 ## Lint Command
 

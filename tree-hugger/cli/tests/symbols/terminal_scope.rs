@@ -170,6 +170,24 @@ fn soft_wrapped_rows_are_rejoined_inside_the_report() {
     assert!(!report.has_row("- abcdefghijklmnopq rs tuvwxyz0123456789AB"));
 }
 
+/// WezTerm pads the last piece of a soft-wrapped line to the pane width; that
+/// piece still ends the line, so the next row is not joined to it.
+#[test]
+fn a_padded_last_piece_ends_its_logical_row() {
+    let markers = ReportMarkers::with_id("7-0");
+    let pane = format!(
+        "{}\nabcdefghijklmnopqrst\nuv{}\nnext row\n{}\n",
+        markers.begin(),
+        " ".repeat(18),
+        markers.end()
+    );
+
+    let report = scope(&pane, &markers);
+
+    assert!(report.has_logical_row("abcdefghijklmnopqrstuv", 20));
+    assert!(report.has_logical_row("next row", 20));
+}
+
 #[test]
 fn a_style_carried_over_from_the_previous_row_is_the_cells_style() {
     // tmux re-emits only what changed: the file heading under a bold blue

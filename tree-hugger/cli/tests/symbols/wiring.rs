@@ -745,13 +745,13 @@ fn json_symbols_carry_visibility_and_current_schema() {
     // `--all-scopes`: the local `localValue` is asserted below.
     let json = json_of(&scratch.stdout(&["--json", "symbols", "--all-scopes", "typescript.ts"]));
 
-    let schema = serde_json::json!({ "major": 4, "minor": 3 });
+    let schema = serde_json::json!({ "major": 5, "minor": 0 });
     assert_eq!(json["report_schema_version"], 1, "TypeScript: report_schema_version");
     assert_eq!(json["schema_version"], schema, "TypeScript: envelope schema_version");
     let records = report_records(&json);
     assert!(
         records.iter().all(|record| record["schema_version"] == schema),
-        "TypeScript: every record is schema 4.3"
+        "TypeScript: every record is schema 5.0"
     );
 
     let make = named(&records, "privateStaticMethod", "TypeScript");

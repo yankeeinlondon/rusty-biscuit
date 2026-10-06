@@ -506,7 +506,7 @@ impl Renderer {
 
     /// `text` as an OSC 8 link to `path` at `line` when the terminal follows
     /// links, else `text` alone. `text` must already be escaped.
-    fn link(&self, path: &Path, line: u32, text: &str) -> String {
+    pub(crate) fn link(&self, path: &Path, line: u32, text: &str) -> String {
         match file_url(path).filter(|_| self.term.osc_link_support && self.styled) {
             Some(url) => format!("<a href={}>{text}</a>", Prose::quoted_attr(&format!("{url}#L{line}"))),
             None => text.to_string(),
@@ -535,12 +535,12 @@ impl Renderer {
             .unwrap_or_default()
     }
 
-    fn list(&self, out: &mut dyn Write, indent: usize, list: &UnorderedList) -> io::Result<()> {
+    pub(crate) fn list(&self, out: &mut dyn Write, indent: usize, list: &UnorderedList) -> io::Result<()> {
         let rendered = list.render(&self.term_at(indent));
         self.write_indented(out, indent, &rendered)
     }
 
-    fn line(&self, out: &mut dyn Write, indent: usize, markup: &str) -> io::Result<()> {
+    pub(crate) fn line(&self, out: &mut dyn Write, indent: usize, markup: &str) -> io::Result<()> {
         self.hanging_line(out, indent, 2, markup)
     }
 
@@ -558,7 +558,7 @@ impl Renderer {
     /// none was extracted); otherwise the visibility, the label and the
     /// name with the mode's signature. `with_container` appends the
     /// `[in <kind> <container>]` suffix of flat listings.
-    fn declaration(&self, record: &SymbolRecord, with_container: bool) -> String {
+    pub(crate) fn declaration(&self, record: &SymbolRecord, with_container: bool) -> String {
         match shown(record, self.signatures, with_container) {
             Shown::Header(header) => format!("<b>{}</b>", literal(&header)),
             Shown::Named(named) => {
@@ -985,7 +985,7 @@ fn module_title(module: &str) -> &str {
 /// The word before a declaration's name: its declaring keyword for the
 /// kinds whose syntax names them (`struct`, `let`, `const`, ...), else the
 /// kind.
-fn label(record: &SymbolRecord) -> String {
+pub(crate) fn label(record: &SymbolRecord) -> String {
     let keyword_names_it = matches!(
         record.kind,
         SymbolKindV2::Type | SymbolKindV2::Variable | SymbolKindV2::Field | SymbolKindV2::Constant

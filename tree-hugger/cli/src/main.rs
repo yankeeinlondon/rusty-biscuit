@@ -31,6 +31,7 @@ mod import_format;
 mod order;
 mod output;
 mod prelude;
+mod refs;
 mod render;
 mod report;
 mod scan;
@@ -78,9 +79,9 @@ struct Cli {
     command: Command,
 }
 
-/// Scan options shared by symbol-listing subcommands.
+/// File discovery and cache options shared by every scanning subcommand.
 #[derive(clap::Args, Debug, Clone)]
-struct ScanOptions {
+struct DiscoveryArgs {
     /// Glob patterns for files to exclude from scanning
     #[arg(
         long,
@@ -90,11 +91,6 @@ struct ScanOptions {
         add = ArgValueCompleter::new(complete_source_path),
     )]
     exclude_files: Vec<String>,
-
-    /// Name patterns of symbols to exclude from output (the `--name` rules;
-    /// a trailing `!` is exact). An exclusion wins over every inclusion
-    #[arg(long, value_name = "PATTERN", display_order = 11)]
-    exclude_symbols: Vec<String>,
 
     /// Force a specific language. Explicitly named files are parsed with this
     /// language even when their extension maps elsewhere or is absent; directory
@@ -108,6 +104,18 @@ struct ScanOptions {
     /// run's.
     #[arg(long)]
     no_cache: bool,
+}
+
+/// Scan options shared by symbol-listing subcommands.
+#[derive(clap::Args, Debug, Clone)]
+struct ScanOptions {
+    #[clap(flatten)]
+    discovery: DiscoveryArgs,
+
+    /// Name patterns of symbols to exclude from output (the `--name` rules;
+    /// a trailing `!` is exact). An exclusion wins over every inclusion
+    #[arg(long, value_name = "PATTERN", display_order = 11)]
+    exclude_symbols: Vec<String>,
 
     /// Show symbol-level documentation comments in output
     #[arg(long)]
@@ -330,6 +338,62 @@ struct LintArgs {
     scan: ScanOptions,
 }
 
+/// Arguments for the refs command
+#[derive(clap::Args, Debug, Clone)]
+struct RefsArgs {
+    /// The declaration's name, then file path or glob filters (with `--id`,
+    /// every value is a filter)
+    ///
+    /// The name is matched exactly under smart case (all-lowercase ignores
+    /// case) against every kind and scope, locals included. A qualified
+    /// name uses the language's separators and may start with its
+    /// scan-root-relative file: `src/parser.rs#Parser::parse`.
+    #[arg(
+        value_name = "SYMBOL|FILTER",
+        num_args = 0..,
+        value_hint = ValueHint::AnyPath,
+        add = ArgValueCompleter::new(complete_source_path),
+    )]
+    targets: Vec<String>,
+
+    /// Select the declaration by its record ID (case-sensitive), as `--json`
+    /// reports print it, instead of by name
+    #[arg(long, value_name = "ID")]
+    id: Option<String>,
+
+    /// List only incoming calls
+    #[arg(long, conflicts_with = "callees")]
+    callers: bool,
+
+    /// List only the calls the declaration's own body makes, uncertain and
+    /// external ones included
+    #[arg(long)]
+    callees: bool,
+
+    #[clap(flatten)]
+    discovery: DiscoveryArgs,
+}
+
+impl RefsArgs {
+    /// The selector and the file filters, or a usage message when neither a
+    /// name nor `--id` is given.
+    fn split(&self) -> Result<(refs::Selector, Vec<String>), &'static str> {
+        match (&self.id, self.targets.split_first()) {
+            (Some(id), _) => Ok((refs::Selector::Id(id.clone()), self.targets.clone())),
+            (None, Some((name, filters))) => Ok((refs::Selector::Name(name.clone()), filters.to_vec())),
+            (None, None) => Err("`refs` needs a declaration: give its name or `--id <ID>`"),
+        }
+    }
+
+    fn direction(&self) -> refs::Direction {
+        match (self.callers, self.callees) {
+            (true, _) => refs::Direction::Callers,
+            (_, true) => refs::Direction::Callees,
+            _ => refs::Direction::References,
+        }
+    }
+}
+
 /// Arguments for the completions command
 #[derive(clap::Args, Debug, Clone)]
 struct CompletionsArgs {
@@ -364,6 +428,19 @@ enum Command {
     Classes(ClassArgs),
     /// Run lint diagnostics on the file(s)
     Lint(LintArgs),
+    /// List the references to one declaration, or its calls, within its file
+    ///
+    /// Resolution is file-local: only the declaration's own file is searched,
+    /// so a caller in another file is never listed, even under the same
+    /// name. Established (Scoped) references are listed apart from
+    /// name-only suggestions. Text and `--json` output only.
+    #[command(after_help = "\
+Examples:
+  hug refs parse 'src/**'
+  hug refs 'src/parser.rs#Parser::parse' --callers 'src/**'
+  hug refs --id <ID> --callees 'src/**'
+")]
+    Refs(RefsArgs),
     /// Generate shell completions
     ///
     /// Emits a dynamic-completion registration script. The script delegates
@@ -398,7 +475,7 @@ impl Command {
             Self::Imports(args) => &args.filters,
             Self::Lint(args) => &args.filters,
             Self::Classes(args) => &args.filters,
-            Self::Completions(_) | Self::GodFiles(_) => &[],
+            Self::Refs(_) | Self::Completions(_) | Self::GodFiles(_) => &[],
         }
     }
 
@@ -407,7 +484,7 @@ impl Command {
         match self {
             Self::Functions(args) | Self::Types(args) | Self::Symbols(args) => args.common.exported,
             Self::Classes(args) => args.exported,
-            Self::Imports(_) | Self::Lint(_) | Self::Completions(_) | Self::GodFiles(_) => false,
+            Self::Imports(_) | Self::Lint(_) | Self::Refs(_) | Self::Completions(_) | Self::GodFiles(_) => false,
         }
     }
 
@@ -416,7 +493,7 @@ impl Command {
         match self {
             Self::Functions(args) | Self::Types(args) | Self::Symbols(args) => args.common.prelude,
             Self::Classes(args) => args.prelude,
-            Self::Imports(_) | Self::Lint(_) | Self::Completions(_) | Self::GodFiles(_) => false,
+            Self::Imports(_) | Self::Lint(_) | Self::Refs(_) | Self::Completions(_) | Self::GodFiles(_) => false,
         }
     }
 
@@ -427,7 +504,7 @@ impl Command {
             Self::Imports(args) => Some(&args.scan),
             Self::Classes(args) => Some(&args.scan),
             Self::Lint(args) => Some(&args.scan),
-            Self::Completions(_) | Self::GodFiles(_) => None,
+            Self::Refs(_) | Self::Completions(_) | Self::GodFiles(_) => None,
         }
     }
 
@@ -436,7 +513,7 @@ impl Command {
         match self {
             Self::Functions(args) | Self::Types(args) | Self::Symbols(args) => args.order.sort,
             Self::Classes(args) => args.order.sort,
-            Self::Imports(_) | Self::Lint(_) | Self::Completions(_) | Self::GodFiles(_) => None,
+            Self::Imports(_) | Self::Lint(_) | Self::Refs(_) | Self::Completions(_) | Self::GodFiles(_) => None,
         }
     }
 
@@ -445,7 +522,7 @@ impl Command {
         match self {
             Self::Functions(args) | Self::Types(args) | Self::Symbols(args) => Some(&args.report),
             Self::Classes(args) => Some(&args.report),
-            Self::Imports(_) | Self::Lint(_) | Self::Completions(_) | Self::GodFiles(_) => None,
+            Self::Imports(_) | Self::Lint(_) | Self::Refs(_) | Self::Completions(_) | Self::GodFiles(_) => None,
         }
     }
 
@@ -454,7 +531,7 @@ impl Command {
         match self {
             Self::Functions(args) | Self::Types(args) | Self::Symbols(args) => Some(&args.common.selection),
             Self::Classes(args) => Some(&args.selection),
-            Self::Imports(_) | Self::Lint(_) | Self::Completions(_) | Self::GodFiles(_) => None,
+            Self::Imports(_) | Self::Lint(_) | Self::Refs(_) | Self::Completions(_) | Self::GodFiles(_) => None,
         }
     }
 
@@ -515,7 +592,7 @@ impl Command {
                 static_only: args.static_only,
                 instance_only: args.instance_only,
             }),
-            Self::Completions(_) | Self::GodFiles(_) => None,
+            Self::Refs(_) | Self::Completions(_) | Self::GodFiles(_) => None,
         }
     }
 }
@@ -808,6 +885,10 @@ fn main() -> Result<(), TreeHuggerError> {
         return Ok(());
     }
 
+    if let Command::Refs(args) = &cli.command {
+        return run_refs(&cli, args, git_root, pkg_root);
+    }
+
     // Exactly one output mode, checked before any file is read.
     let output_mode = cli.command.report_args().map(|report| {
         let given = GivenOutput::new(
@@ -844,7 +925,7 @@ fn main() -> Result<(), TreeHuggerError> {
         .command
         .scan_options()
         .expect("every scanning subcommand carries scan options");
-    let language = scan.language.map(ProgrammingLanguage::from);
+    let language = scan.discovery.language.map(ProgrammingLanguage::from);
     let output_config = OutputConfig::new(output_format);
 
     let scan_filters = classify_filters(cli.command.filters(), &command_kind, language);
@@ -868,15 +949,11 @@ fn main() -> Result<(), TreeHuggerError> {
         &pkg_root,
         &file_filters,
         &explicit_files,
-        &scan.exclude_files,
+        &scan.discovery.exclude_files,
         language,
     )?;
 
-    // One cache directory for every scan: the entry key names the file by
-    // its identity, so a file reached from two scan roots shares one entry.
-    let symbol_cache = (!scan.no_cache)
-        .then(|| SymbolCache::new(PersistentCache::default_cache(CACHE_PROJECT_ID, true)));
-    let analyzer = Analyzer::new(symbol_cache, language, analysis_options.experimental_semantics);
+    let analyzer = Analyzer::new(symbol_cache(&scan.discovery), language, analysis_options.experimental_semantics);
 
     let selection = cli.command.selection_args().map(|args| {
         Selection::new(args, &scan_filters.symbol_names, &scan.exclude_symbols, cli.command.exported())
@@ -1071,6 +1148,66 @@ fn main() -> Result<(), TreeHuggerError> {
         std::process::exit(1);
     }
 
+    Ok(())
+}
+
+/// The persistent cache, unless `--no-cache`. One cache directory serves
+/// every scan: the entry key names the file by its identity, so a file
+/// reached from two scan roots shares one entry.
+fn symbol_cache(discovery: &DiscoveryArgs) -> Option<SymbolCache> {
+    (!discovery.no_cache).then(|| SymbolCache::new(PersistentCache::default_cache(CACHE_PROJECT_ID, true)))
+}
+
+/// `hug refs`: exits with the report's status. Only text and `--json` are
+/// reported; `--json-full` is rejected before any file is read.
+fn run_refs(
+    cli: &Cli,
+    args: &RefsArgs,
+    git_root: PathBuf,
+    pkg_root: PathBuf,
+) -> Result<(), TreeHuggerError> {
+    if cli.json_full {
+        Cli::command()
+            .error(
+                clap::error::ErrorKind::ArgumentConflict,
+                "`refs` reports text or `--json`; `--json-full` applies only to `functions`, `types`, `symbols` and `classes`",
+            )
+            .exit();
+    }
+    let (selector, filters) = args.split().unwrap_or_else(|message| {
+        Cli::command()
+            .error(clap::error::ErrorKind::MissingRequiredArgument, message)
+            .exit()
+    });
+    let language = args.discovery.language.map(ProgrammingLanguage::from);
+    let files = collect_selected_files(&pkg_root, &filters, &[], &args.discovery.exclude_files, language)?;
+    let analyzer = Analyzer::new(symbol_cache(&args.discovery), language, false);
+    let format = if cli.json {
+        refs::RefsFormat::Json
+    } else {
+        let plain = cli.plain || !OutputConfig::new(cli.output_format()).use_colors;
+        refs::RefsFormat::Terminal(RenderOptions {
+            styled: !plain,
+            show_comments: false,
+            width: (!cli.plain).then(wrap_width).flatten(),
+            signatures: SignatureMode::default(),
+        })
+    };
+    let status = refs::run(
+        refs::RefsScan {
+            selector,
+            direction: args.direction(),
+            files,
+            scan_root: pkg_root,
+            git_root,
+            format,
+            verbose: cli.verbose,
+        },
+        &analyzer,
+    )?;
+    if status != 0 {
+        std::process::exit(status);
+    }
     Ok(())
 }
 

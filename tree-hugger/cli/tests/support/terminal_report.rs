@@ -155,14 +155,18 @@ impl Report {
     /// that splits soft-wrapped rows (WezTerm's `get-text`) of a pane
     /// `cols` wide: a row that fills the pane is joined to the next, and a
     /// row one column short also joins, with the space the capture trimmed
-    /// put back. Only a whole-line check can use this: a row that happens to
-    /// be one column short is joined too. A row `hug` itself broke never
-    /// matches, since its continuation starts with the list's hanging indent.
+    /// put back. Widths are measured without trailing spaces, because the
+    /// capture pads a wrapped line's last piece to the pane width, and that
+    /// piece ends the line. Only a whole-line check can use this: a row that
+    /// happens to be one column short is joined too. A row `hug` itself broke
+    /// never matches, since its continuation starts with the list's hanging
+    /// indent.
     pub fn has_logical_row(&self, text: &str, cols: usize) -> bool {
         let mut joined = String::new();
         for row in &self.rows {
-            joined.push_str(&row.plain);
-            match row.plain.chars().count() {
+            let shown = row.plain.trim_end();
+            joined.push_str(shown);
+            match shown.chars().count() {
                 width if width >= cols => {}
                 width if width + 1 == cols => joined.push(' '),
                 _ => joined.push('\n'),

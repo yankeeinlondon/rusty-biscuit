@@ -56,7 +56,8 @@ fn write_json(path: &Path, value: &Value) {
     std::fs::write(path, serde_json::to_vec(value).expect("serialize")).expect("write entry");
 }
 
-/// Renames the record called `from` (name and display name) in a snapshot.
+/// Renames the record called `from` (name and display name) in a snapshot,
+/// and the reference evidence owners and candidates naming it.
 pub(crate) fn rename_record(snapshot: &mut Value, from: &str, to: &str) {
     let record = snapshot["records"]
         .as_array_mut()
@@ -66,6 +67,48 @@ pub(crate) fn rename_record(snapshot: &mut Value, from: &str, to: &str) {
         .unwrap_or_else(|| panic!("snapshot has no `{from}` record"));
     record["identity"]["name"] = Value::from(to);
     record["identity"]["display_name"] = Value::from(to);
+    let id = record["id"].clone();
+    set_evidence_references(snapshot, &id, "name", Value::from(to));
+}
+
+/// Sets `field` of every reference evidence owner and candidate naming the
+/// record `id`. They repeat the record's name and qualified name, and the
+/// reader checks that they do; a target keeps the name as written.
+fn set_evidence_references(snapshot: &mut Value, id: &Value, field: &str, value: Value) {
+    let mut references: Vec<&mut Value> = Vec::new();
+    for (key, list) in snapshot.as_object_mut().expect("entry object") {
+        let Some(list) = list.as_array_mut() else { continue };
+        match key.as_str() {
+            "occurrences" => {
+                for occurrence in list {
+                    let occurrence = occurrence.as_object_mut().expect("occurrence object");
+                    for (name, reference) in occurrence.iter_mut() {
+                        match name.as_str() {
+                            "owner" => references.push(reference),
+                            "candidates" => references.extend(reference.as_array_mut().into_iter().flatten()),
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            "reference_coverage" => references.extend(list.iter_mut().map(|region| &mut region["owner"])),
+            _ => {}
+        }
+    }
+    for reference in references {
+        if reference["id"] == *id {
+            reference[field] = value.clone();
+        }
+    }
+}
+
+/// Sets the in-file qualified name of the record called `name`, and of the
+/// evidence references naming it.
+fn set_qualified_name(snapshot: &mut Value, name: &str, qualified_name: &str) {
+    let record = record_named(snapshot, name);
+    record["identity"]["qualified_name"] = Value::from(qualified_name);
+    let id = record["id"].clone();
+    set_evidence_references(snapshot, &id, "qualified_name", Value::from(qualified_name));
 }
 
 /// An entry whose records are recognizably stale: every access Unknown, no
@@ -166,7 +209,8 @@ fn warm_entry_from_the_previous_extractor_is_not_served_after_the_upgrade() {
         serde_json::json!({ "major": 2, "minor": 0 }),
         serde_json::json!({ "major": 3, "minor": 0 }),
         serde_json::json!({ "major": 4, "minor": 0 }),
-        serde_json::json!({ "major": 5, "minor": 0 }),
+        serde_json::json!({ "major": 4, "minor": 3 }),
+        serde_json::json!({ "major": 6, "minor": 0 }),
     ] {
         let mut incompatible = stale.clone();
         for record in incompatible["records"].as_array_mut().expect("entry records") {
@@ -624,8 +668,7 @@ fn entry_from_extractor_revision_six_is_not_served_after_the_repairs() {
         repaired: Value::from("python.py#PlainWidget.instance_method"),
         stale: Value::from("python.py#PlainWidget::instance_method"),
         revert: |snapshot| {
-            record_named(snapshot, "instance_method")["identity"]["qualified_name"] =
-                Value::from("PlainWidget::instance_method");
+            set_qualified_name(snapshot, "instance_method", "PlainWidget::instance_method");
         },
     });
 }
@@ -1134,9 +1177,8 @@ fn entry_from_extractor_revision_twenty_is_not_served_after_the_repairs() {
         stale: serde_json::json!([["blocks.scala#UpgradeW", false], ["blocks.scala#UpgradeW.probe", false]]),
         revert: |snapshot| {
             for (name, in_file) in [("UpgradeW", "UpgradeW"), ("probe", "UpgradeW.probe")] {
-                let identity = &mut record_named(snapshot, name)["identity"];
-                identity["qualified_name"] = Value::from(in_file);
-                identity["is_namespace_rooted"] = Value::from(false);
+                set_qualified_name(snapshot, name, in_file);
+                record_named(snapshot, name)["identity"]["is_namespace_rooted"] = Value::from(false);
             }
         },
     });
@@ -1341,14 +1383,48 @@ fn entry_from_extractor_revision_thirteen_is_not_served_after_the_repairs() {
 /// revision 18 writes schema 4.1 with the key.
 #[test]
 fn entry_from_extractor_revision_seventeen_is_not_served_after_the_schema_bump() {
-    assert_schema_bump_entry_is_not_served("17", serde_json::json!({ "major": 4, "minor": 0 }), "lines");
+    assert_schema_bump_entry_is_not_served(&SchemaBump {
+        revision: "17",
+        schema: serde_json::json!({ "major": 4, "minor": 0 }),
+        lacks: "`metrics.lines`",
+        revert: |entry| remove_metric(entry, "lines"),
+        is_current: |entry| every_record_has_metric(entry, "lines"),
+    });
 }
 
 /// Revision 26 wrote schema 4.2 records whose `metrics` had no `cyclomatic`
 /// key; revision 27 writes schema 4.3 with the key.
 #[test]
 fn entry_from_extractor_revision_twenty_six_is_not_served_after_the_schema_bump() {
-    assert_schema_bump_entry_is_not_served("26", serde_json::json!({ "major": 4, "minor": 2 }), "cyclomatic");
+    assert_schema_bump_entry_is_not_served(&SchemaBump {
+        revision: "26",
+        schema: serde_json::json!({ "major": 4, "minor": 2 }),
+        lacks: "`metrics.cyclomatic`",
+        revert: |entry| remove_metric(entry, "cyclomatic"),
+        is_current: |entry| every_record_has_metric(entry, "cyclomatic"),
+    });
+}
+
+/// Revision 30 wrote schema 4.3 entries with no `occurrences` or
+/// `reference_coverage` keys, whose reference summaries bound the first
+/// same-named declaration; revision 31 writes schema 5.0 with both keys and
+/// summaries derived from scoped occurrences.
+#[test]
+fn entry_from_extractor_revision_thirty_is_not_served_after_the_scoped_references_bump() {
+    assert_schema_bump_entry_is_not_served(&SchemaBump {
+        revision: "30",
+        schema: serde_json::json!({ "major": 4, "minor": 3 }),
+        lacks: "`occurrences` and `reference_coverage`",
+        revert: |entry| {
+            let entry = entry.as_object_mut().expect("entry object");
+            entry.remove("occurrences");
+            entry.remove("reference_coverage");
+        },
+        is_current: |entry| {
+            entry["occurrences"].as_array().is_some_and(|list| !list.is_empty())
+                && entry["reference_coverage"].as_array().is_some_and(|list| !list.is_empty())
+        },
+    });
 }
 
 /// Revision 27 counted cyclomatic complexity for Rust only, so a JavaScript
@@ -1482,13 +1558,221 @@ fn entry_from_extractor_revision_twenty_nine_is_not_served_with_an_aliased_swift
     });
 }
 
-/// An entry an earlier `revision` wrote in `schema`, whose `metrics` lacked
-/// the `metric` key the bump added. Unlike the repairs above, the old payload
-/// is not readable even under the current key (its versions and metrics
-/// shape are rejected), so it is recomputed both there and under its own
-/// key, and the rewritten entry holds current records with the key.
-fn assert_schema_bump_entry_is_not_served(revision: &str, schema: Value, metric: &str) {
+/// Revision 29 left a C# base naming a same-file record class in
+/// `unclassified_bases`, although the target's declaration proves a class.
+#[test]
+fn entry_from_extractor_revision_twenty_nine_is_not_served_with_an_unclassified_record_base() {
+    assert_stale_revision_is_not_served(&StaleRevision {
+        revision: "29",
+        key: OldKey::Computed,
+        file: "records.cs",
+        language: "c_sharp",
+        source: "record ReviewBase;\nrecord ReviewChild : ReviewBase;\nclass Sentinel {}\n".to_string(),
+        sentinel: "Sentinel",
+        probe: |out| go_record(out, "ReviewChild")["relations"]["extends"][0]["qualified_name"].clone(),
+        repaired: Value::from("ReviewBase"),
+        stale: Value::Null,
+        revert: |snapshot| {
+            let relations = &mut record_named(snapshot, "ReviewChild")["relations"];
+            let target = relations["extends"][0].clone();
+            relations.as_object_mut().expect("relations").remove("extends");
+            relations["unclassified_bases"] = Value::Array(vec![target]);
+        },
+    });
+}
+
+/// Revision 31 looked a written base up by displayed qualified name, so a
+/// trait declared in a finished block of `factory` (`factory::ReviewBase`)
+/// claimed the later `trait ReviewChild: ReviewBase` written beside it;
+/// revision 32 decides the name through the lexical scopes in view and
+/// resolves the file-level trait.
+#[test]
+fn entry_from_extractor_revision_thirty_one_is_not_served_after_the_lexical_binding_repairs() {
+    assert_stale_revision_is_not_served(&StaleRevision {
+        revision: "31",
+        key: OldKey::Computed,
+        file: "blocks.rs",
+        language: "rust",
+        source: "trait ReviewBase {}\nfn factory() {\n    { trait ReviewBase {} }\n    trait ReviewChild: ReviewBase {}\n}\n\
+                 struct Sentinel;\n"
+            .to_string(),
+        sentinel: "Sentinel",
+        probe: |out| go_record(out, "ReviewChild")["relations"]["extends"][0]["qualified_name"].clone(),
+        repaired: Value::from("ReviewBase"),
+        stale: Value::from("factory::ReviewBase"),
+        revert: |snapshot| {
+            let inner = snapshot["records"]
+                .as_array()
+                .expect("entry records")
+                .iter()
+                .find(|record| record["identity"]["qualified_name"] == "factory::ReviewBase")
+                .expect("the block's trait")
+                .clone();
+            let target = &mut record_named(snapshot, "ReviewChild")["relations"]["extends"][0];
+            target["id"] = inner["id"].clone();
+            target["qualified_name"] = inner["identity"]["qualified_name"].clone();
+        },
+    });
+}
+
+/// Revision 32 continued a qualified path below a function-local owner by
+/// displayed name, so `ReviewHolder::ReviewBase` written beside a
+/// `ReviewHolder` without that member claimed the member of a same-named
+/// `ReviewHolder` in a finished block; revision 33 looks the member up in the
+/// selected owner's own declarations and keeps the base as written.
+#[test]
+fn entry_from_extractor_revision_thirty_two_is_not_served_after_the_owner_identity_repairs() {
+    assert_stale_revision_is_not_served(&StaleRevision {
+        revision: "32",
+        key: OldKey::Computed,
+        file: "owners.cpp",
+        language: "cpp",
+        source: "void factory() {\n    { struct ReviewHolder { struct ReviewBase {}; }; }\n    \
+                 { struct ReviewHolder {};\n      struct ReviewChild : ReviewHolder::ReviewBase {}; }\n}\n\
+                 struct Sentinel {};\n"
+            .to_string(),
+        sentinel: "Sentinel",
+        probe: |out| go_record(out, "ReviewChild")["relations"]["extends"][0]["qualified_name"].clone(),
+        repaired: Value::Null,
+        stale: Value::from("factory::ReviewHolder::ReviewBase"),
+        revert: |snapshot| {
+            let sibling = snapshot["records"]
+                .as_array()
+                .expect("entry records")
+                .iter()
+                .find(|record| record["identity"]["qualified_name"] == "factory::ReviewHolder::ReviewBase")
+                .expect("the finished block's member")
+                .clone();
+            let target = &mut record_named(snapshot, "ReviewChild")["relations"]["extends"][0];
+            target["id"] = sibling["id"].clone();
+            target["qualified_name"] = sibling["identity"]["qualified_name"].clone();
+        },
+    });
+}
+
+/// Revision 33 continued a qualified path past its first name without the
+/// selected owner's bindings, so a Python nested class that a later
+/// class-body import rebinds still gave `ReviewHolder.ReviewBase` the old
+/// class's ID; revision 34 reads every segment's bindings and keeps the base
+/// as written.
+#[test]
+fn entry_from_extractor_revision_thirty_three_is_not_served_after_the_member_binding_repairs() {
+    assert_stale_revision_is_not_served(&StaleRevision {
+        revision: "33",
+        key: OldKey::Computed,
+        file: "members.py",
+        language: "python",
+        source: "class ReviewHolder:\n    class ReviewBase:\n        pass\n    \
+                 from builtins import object as ReviewBase\n\
+                 class ReviewChild(ReviewHolder.ReviewBase):\n    pass\n\
+                 class Sentinel:\n    pass\n"
+            .to_string(),
+        sentinel: "Sentinel",
+        probe: |out| go_record(out, "ReviewChild")["relations"]["extends"][0]["qualified_name"].clone(),
+        repaired: Value::Null,
+        stale: Value::from("ReviewHolder.ReviewBase"),
+        revert: |snapshot| {
+            let member = snapshot["records"]
+                .as_array()
+                .expect("entry records")
+                .iter()
+                .find(|record| record["identity"]["qualified_name"] == "ReviewHolder.ReviewBase")
+                .expect("the rebound nested class")
+                .clone();
+            let target = &mut record_named(snapshot, "ReviewChild")["relations"]["extends"][0];
+            target["id"] = member["id"].clone();
+            target["qualified_name"] = member["identity"]["qualified_name"].clone();
+        },
+    });
+}
+
+/// Revision 34 lost the outer parameters of nested Swift extension owners.
+#[test]
+fn entry_from_extractor_revision_thirty_four_is_not_served_after_nested_swift_generic_context_repair() {
+    assert_stale_revision_is_not_served(&StaleRevision {
+        revision: "34", key: OldKey::Computed, file: "nested.swift", language: "swift",
+        source: "class ReviewBase {}\nstruct ReviewOuter<ReviewBase> { struct ReviewInner {} }\nextension ReviewOuter.ReviewInner { class ReviewChild: ReviewBase {} }\nstruct Sentinel {}\n".into(),
+        sentinel: "Sentinel",
+        probe: |out| go_record(out, "ReviewChild")["relations"]["extends"][0]["qualified_name"].clone(),
+        repaired: Value::Null, stale: Value::from("ReviewBase"),
+        revert: |snapshot| {
+            let base = record_named(snapshot, "ReviewBase").clone();
+            let relations = &mut record_named(snapshot, "ReviewChild")["relations"];
+            let mut target = relations["unclassified_bases"][0].clone();
+            target["id"] = base["id"].clone();
+            target["qualified_name"] = Value::from("ReviewBase");
+            relations.as_object_mut().expect("relations").remove("unclassified_bases");
+            relations["extends"] = Value::Array(vec![target]);
+        },
+    });
+}
+
+/// Revision 35 continued a path through either of two same-named Rust
+/// modules as if they were one reopened namespace, so `ReviewHolder::ReviewBase`
+/// took the ID of the one module's trait; revision 36 stops at the competing
+/// owners and keeps the base as written.
+#[test]
+fn entry_from_extractor_revision_thirty_five_is_not_served_after_the_owner_ambiguity_repair() {
+    assert_stale_revision_is_not_served(&StaleRevision {
+        revision: "35",
+        key: OldKey::Computed,
+        file: "owners.rs",
+        language: "rust",
+        source: "mod ReviewHolder { pub trait ReviewBase {} }
+mod ReviewHolder {}
+\
+                 trait ReviewChild: ReviewHolder::ReviewBase {}
+struct Sentinel;
+"
+            .to_string(),
+        sentinel: "Sentinel",
+        probe: |out| go_record(out, "ReviewChild")["relations"]["extends"][0]["qualified_name"].clone(),
+        repaired: Value::Null,
+        stale: Value::from("ReviewHolder::ReviewBase"),
+        revert: |snapshot| {
+            let base = record_named(snapshot, "ReviewBase").clone();
+            let target = &mut record_named(snapshot, "ReviewChild")["relations"]["extends"][0];
+            target["id"] = base["id"].clone();
+            target["qualified_name"] = base["identity"]["qualified_name"].clone();
+        },
+    });
+}
+
+/// An earlier revision that wrote another schema, and what its entries
+/// lacked.
+struct SchemaBump {
+    revision: &'static str,
+    schema: Value,
+    lacks: &'static str,
+    /// Removes from a current entry what `revision` did not write.
+    revert: fn(&mut Value),
+    /// Whether an entry holds what the bump added.
+    is_current: fn(&Value) -> bool,
+}
+
+fn remove_metric(entry: &mut Value, metric: &str) {
+    for record in entry["records"].as_array_mut().expect("entry records") {
+        record["metrics"]
+            .as_object_mut()
+            .expect("a complete index stores metrics on every record")
+            .remove(metric);
+    }
+}
+
+fn every_record_has_metric(entry: &Value, metric: &str) -> bool {
+    entry["records"].as_array().expect("records").iter().all(|record| {
+        record["metrics"].as_object().is_some_and(|metrics| metrics.contains_key(metric))
+    })
+}
+
+/// An entry an earlier revision wrote in its schema, without what the bump
+/// added. Unlike the repairs above, the old payload is not readable even
+/// under the current key (its versions and shape are rejected), so it is
+/// recomputed both there and under its own key, and the rewritten entry
+/// holds current records and what the bump added.
+fn assert_schema_bump_entry_is_not_served(bump: &SchemaBump) {
     const PROBE: &str = "python.py";
+    let (revision, schema, lacks) = (bump.revision, &bump.schema, bump.lacks);
     let label = format!("revision {revision}");
     let args = ["--json-full", "symbols", PROBE];
     let scratch = Scratch::new(&[(PROBE, PYTHON_FIXTURE)]);
@@ -1517,11 +1801,8 @@ fn assert_schema_bump_entry_is_not_served(revision: &str, schema: Value, metric:
     stale["schema_version"] = schema.clone();
     for record in stale["records"].as_array_mut().expect("entry records") {
         record["schema_version"] = schema.clone();
-        record["metrics"]
-            .as_object_mut()
-            .expect("a complete index stores metrics on every record")
-            .remove(metric);
     }
+    (bump.revert)(&mut stale);
     rename_record(&mut stale, "module_function", STALE_NAME);
 
     // Under the current key: rejected, recomputed.
@@ -1541,12 +1822,14 @@ fn assert_schema_bump_entry_is_not_served(revision: &str, schema: Value, metric:
     let current_schema = serde_json::to_value(tree_hugger::SchemaVersion::CURRENT).expect("schema");
     assert_eq!(written["schema_version"], current_schema, "the rewritten entry is current");
     assert!(
-        written["records"].as_array().expect("records").iter().all(|record| {
-            record["schema_version"] == current_schema
-                && record["metrics"].as_object().is_some_and(|metrics| metrics.contains_key(metric))
-        }),
-        "every rewritten record is current with a `{metric}` key"
+        written["records"]
+            .as_array()
+            .expect("records")
+            .iter()
+            .all(|record| record["schema_version"] == current_schema),
+        "every rewritten record is current"
     );
+    assert!((bump.is_current)(&written), "the rewritten entry holds {lacks}");
 
     // Run 2 hits the rewritten entry.
     let mut renamed = written.clone();
