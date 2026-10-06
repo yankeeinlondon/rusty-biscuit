@@ -6080,35 +6080,6 @@ fn an_archive_consumer_verifies_first_and_never_reaches_a_compiler() {
     }
 }
 
-/// A `requires-toolchain` suite fetches its dependency sources before any test
-/// clock starts.
-///
-/// Its tests run `cargo metadata`, which on a fresh runner first downloads
-/// every dependency. Left to the suite, that download serialized the tests on
-/// Cargo's package-cache lock and pushed ~4 s planner tests past their 90 s
-/// timeouts on CI, worst on windows-latest.
-#[test]
-fn a_toolchain_suite_fetches_its_sources_before_any_test_clock() {
-    let test_job = job_block("_package-ci.yml", "  test:");
-    let all = steps(&test_job);
-    let fetch = step_named(&all, "Fetch the locked dependency sources")
-        .expect("the consumer must fetch a toolchain suite's sources in a named step");
-    assert!(
-        fetch.contains("if: ${{ steps.cell.outputs.requires_toolchain == 'true' }}"),
-        "the fetch belongs to the cells that provision a toolchain, and to no other"
-    );
-    assert!(fetch.contains("run: cargo fetch --locked"), "the fetch downloads the locked graph, nothing else");
-    let index = |name: &str| {
-        all.iter()
-            .position(|step| step.starts_with(&format!("      - name: {name}\n")))
-            .unwrap_or_else(|| panic!("the test job must define the `{name}` step"))
-    };
-    let fetched = index("Fetch the locked dependency sources");
-    assert!(index("Set up the pinned Rust toolchain") < fetched, "the fetch needs the pinned toolchain");
-    assert!(fetched < index("List this cell's expected tests"), "listing runs each test binary");
-    assert!(fetched < index("Tests"), "the sources must be in place before the suite starts");
-}
-
 /// An artifact that is missing, corrupt, or refused must stop the cell — never
 /// silently start a build that produces a second, unverified set of binaries.
 #[test]
@@ -6543,12 +6514,8 @@ fn no_test_tier_carries_a_compile_in_place_path() {
             if !line.contains("cargo ") {
                 continue;
             }
-            // `cargo fetch` downloads sources and compiles nothing
-            // (`a_toolchain_suite_fetches_its_sources_before_any_test_clock`).
             assert!(
-                line.contains("just _ci_build_counter")
-                    || line.contains("cargo-nextest")
-                    || line == "run: cargo fetch --locked",
+                line.contains("just _ci_build_counter") || line.contains("cargo-nextest"),
                 "{header}: `{line}` is a compiler invocation in an archive consumer"
             );
         }

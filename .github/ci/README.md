@@ -577,12 +577,8 @@ declaration is what makes the consumer run `rustup show` before the suite
 (the cell's `requires_toolchain`, which `cell_contract.py` hands the job): the archive brings no
 toolchain, and a hosted runner's rustup proxy would otherwise install the pin
 from inside whichever tests reach `cargo` first — concurrently, which corrupted
-rustup's download directory on run 35326800778. The same cells then run
-`cargo fetch --locked`, so the dependency sources `cargo metadata` needs are
-on disk before any test's clock starts: left to the suite, the download
-serialized tests on Cargo's package-cache lock and pushed ~4 s planner tests
-past their 90 s timeouts. That toolchain is for the suite to drive; the
-recipe still compiles nothing.
+rustup's download directory on run 35326800778. That toolchain is for the
+suite to drive; the recipe still compiles nothing.
 
 `[package.metadata.ci.native]`: a map of runner OS (`ubuntu-latest`,
 `windows-latest`, `macos-latest`) → system packages needed to build/test. The
@@ -854,7 +850,7 @@ outranks the plumbing diagnostic.
 
 **Consumers verify, then run.** A tier whose `{environment, gate}` appears in a
 record's `consumers` installs no toolchain (except the one a
-`requires-toolchain` suite drives itself, with its fetched sources), restores no Cargo cache, downloads
+`requires-toolchain` suite drives itself), restores no Cargo cache, downloads
 the artifact, and runs `ci-build verify` — plan key, realized digest, source
 identity, producer/execution compatibility, archive and sidecar checksums,
 expected binaries, and the host's own runtime ABI — *before* anything is
