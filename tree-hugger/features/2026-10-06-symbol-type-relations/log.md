@@ -89,3 +89,86 @@ The files changed in this cycle are:
 - this implementation is attempting to implement _all_ of the review findings found in 'tree-hugger/features/2026-10-06-symbol-type-relations/review-2.md'
 - this is iteration 2 of the review-to-implement cycle
 - starting the work on 'Python nested class scopes still assign incorrect base identities' at 20:32:14
+
+
+## Author decision and Option B follow-up
+
+The author accepted **Option B**: `extends` retains inheritance semantics,
+`implements` retains conformance semantics, and `unclassified_bases` retains
+written bases whose category cannot be established. Source syntax can prove
+conformance without proving a same-file target ID. Swift extensions attach
+only to uniquely resolved same-file owners; conformances on external or
+ambiguous owners cannot be represented on a local record and are documented.
+
+The implementation adds the third list under schema 4.2 and bumps the
+extractor revision from 25 to 26. Swift relation targets carry optional
+`source_span` evidence so full-signature rendering can distinguish the type's
+own header from conformance added by an extension without searching text.
+The original spec body remains a snapshot of the proposal; this decision
+supersedes its recommendation of Option A.
+
+### Review findings and implementation outcome
+
+- The review-2 Python scope repair was present when this follow-up began.
+  Nested classes and methods skip nonlexical enclosing class scopes, while
+  a header written directly in a class body can use that body's names.
+  Added a permanent revision-24 upgrade regression proving a cache entry
+  with the old incorrect identity is rejected.
+- Implemented tasks 6.5–6.7. C#, Swift and Scala retain written bases in the
+  accepted three lists. Syntax establishes categories where possible;
+  otherwise an unambiguous local declaration can classify the target.
+  Imports, aliases, generic parameters, inherited member names and namespace
+  roots participate in the shared conservative resolver. Constructor
+  arguments remain in C# primary-constructor and Scala base text. Scala
+  objects retain their parents on their Module records.
+- Swift local-owner extensions add conformances without creating a duplicate
+  type record. Header entries precede extension entries, and equal written
+  expressions are deduplicated. Full-signature outlines use persisted source
+  spans to show extension additions without repeating header conformances.
+- The permanent cache robustness matrix now covers the relation collections,
+  generic-parameter collections and nested fields, and nested relation
+  target fields against every existing malformed-value shape. A revision-25
+  upgrade regression verifies that pre-reader results are not served for the
+  new language behavior. Controls use an independent sentinel record.
+- Replaced pending language rows with positive and negative extraction cases;
+  the shared fact corpus exercises complete and selective indexes, projection,
+  widening and real warm-cache hits. Added plain/full-signature Swift outline
+  cases and real-terminal relation-style checks.
+- Current docs, READMEs and the tree-hugger skill describe Option B. The plan
+  records the three tasks as done. The original spec body is unchanged;
+  frontmatter records the accepted decision and implementation status.
+
+### Validation
+
+Local macOS evidence:
+
+- `just test`: **1,092 passed, 0 skipped**.
+- `just lint`: passed for both packages.
+- `just test-l2`: **6 test entry points passed**. tmux and WezTerm exercised
+  the new relation rendering; Kitty used the unavailable-backend skip path.
+  Harness execution preserves foreground focus. The first run exposed an
+  incorrect test row matcher, which was corrected before the passing run.
+- Golden regeneration: **14 passed**; intended relation output and Swift
+  target spans are retained alongside the current schema and provenance.
+- After adding a Scala object case to the shared matrix, the relation matrix,
+  declaration fact consistency, query work-counter, cache projection and
+  older-model adapter checks passed again (**5 tests**).
+- `just check-tier-coverage tree-hugger`: no stranded tiers.
+- `git diff --check`: passed.
+
+A concurrent cyclomatic-metrics session is using the same working tree and
+advanced schema 4.2/revision 26 to **schema 4.3/revision 27**. Relation fields
+are preserved in that shape, and emitters use `SchemaVersion::CURRENT`.
+Validation above ran against the integrated shape. This follow-up made no
+commits and did not run `cargo fmt`.
+
+### Remaining limits and review state
+
+An external, aliased or ambiguous Swift extension owner has no local record
+on which to attach its conformances. Conditional extension requirements are
+not represented as relation edge conditions. External first entries remain
+unclassified when neither syntax nor an unambiguous local target establishes
+their category. These are documented boundaries of the accepted behavior.
+
+**Implementation complete, ready for review.** The feature remains active;
+the author closes the review cycle and moves it when appropriate.

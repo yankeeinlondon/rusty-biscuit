@@ -2,85 +2,22 @@
 kind: feature
 name: symbol-type-relations
 date: 2026-10-06
-status: draft-spec
+status: implemented
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-05
 review_iterations: 2
-human_review: true
-human_review_items:
-  - |-
-    **How should C#, Swift and Scala base lists be recorded?** (the spec's Open Question, "ruling 1")
-
-    In C#, Swift and Scala one list after the type name mixes the class a type
-    inherits from with the interfaces/protocols/traits it conforms to, for
-    example `class Child : Base, IDisposable` or Swift `struct S: Codable`.
-    When a listed type is declared in another file, the source alone does not
-    say which is which. Every other language's relations are now recorded;
-    these three are still empty, and tasks 6.5-6.7 are waiting on this answer.
-    All nine phases are now done except these three languages, and this is
-    the one thing standing between the feature and review: the docs say
-    "planned" for them, and the review cannot sign off on the per-language
-    table while three cells have no decision. Once you choose, a short
-    follow-up implements tasks 6.5-6.7 and replaces "planned" in the docs
-    with the chosen meaning. (`hug types --tree` already prints whatever
-    lists exist, so options A and C need no output change, while option B
-    would add a cache column, a schema bump and a third label on outline
-    rows.) If you would rather review the rest now, you can also accept the
-    three languages as a documented gap for this feature and schedule them
-    separately.
-
-    - **Option A: put every listed type in `extends`, except entries proved to be conformance.**
-      An entry goes to `implements` only when this file declares it as an
-      interface/protocol/trait and the owner is a concrete type. Interface,
-      protocol and trait inheritance stays `extends`. Swift `extension X: P`
-      entries go to `implements` on `X`, but only when `X` is declared in this
-      file; otherwise they cannot be attached and are documented as lost.
-      - Pros: keeps every written base; no schema change; matches how the
-        other languages are already stored.
-      - Cons: for these languages `extends` means "written base", not
-        strictly "class inheritance", so consumers must accept the broader
-        meaning; extensions of external types lose their conformances.
-    - **Option B: add a new "unclassified base" list to the record.**
-      - Pros: `extends` and `implements` keep exact meanings.
-      - Cons: a schema change (version bump, cache column, another output
-        label, more consumer handling).
-    - **Option C: record only the entries whose category can be proved.**
-      - Pros: precise fields; no schema change.
-      - Cons: silently drops most real-world bases (anything from a library),
-        which defeats the purpose of recording written bases.
-
-    **Recommendation: Option A.** It is what the spec recommends, it keeps
-    every fact the source states, and it needs no schema change. If you
-    accept it, please also confirm that Swift extension conformances on a
-    type declared in another file may be dropped (documented as a
-    limitation) rather than attached to a same-named local type.
+human_review: false
+human_review_items: []
 message_to_agent: |-
-  Phases 1-9 are done (read `## Phase 9` of implementation-log.md). The
-  only open work is tasks 6.5-6.7 (C#, Swift, Scala base lists), blocked on
-  ruling 1 (see human_review_items). `implemented: true` reflects that all
-  phases ran; the plan's first success item and 6.5-6.7 stay unchecked with
-  an "Open" note.
-
-  If the author accepts Option A and asks for 6.5-6.7:
-  - readers go in `lib/src/file/extract/relations.rs::declared_bases`
-    (one function per language, like the others); resolution reuses
-    `tree_file/relations.rs::Declarations::resolve` (an entry goes to
-    `implements` only when it resolves to a same-file
-    Interface/Trait/protocol and the owner is concrete).
-  - Swift `extension X: P` entries attach to a uniquely resolved local `X`
-    only; they are not in `X`'s header, so update
-    `cli/src/render.rs::header_writes` and add a row to
-    `cli/tests/symbols/outline.rs`.
-  - replace the Pending rows in `symbols_relations::RELATIONS_MATRIX`,
-    bump `EXTRACTOR_REVISION` (now "23") with a `StaleRevision`
-    (`OldKey::Computed`) in `cli/tests/symbols/cache_upgrade.rs`, and
-    regenerate goldens only if the multi fixtures change.
-  - docs: replace the "C#, Swift and Scala" section of
-    `docs/type-relations.md` (and the "planned" mentions in
-    `symbol-schema-design.md`, `symbol-kinds-and-visibility.md`,
-    `lib/README.md`, the area README release note, and the skill's Known
-    Limitations / api-reference) with the accepted meaning.
+  The author accepted Option B in this conversation: retain precise extends
+  and implements lists and add relations.unclassified_bases for ambiguous
+  written bases. Classification may be proved by declaration syntax without
+  resolving a target ID. Swift extension conformances attach only to a
+  uniquely resolved same-file owner; external owners remain a documented gap.
+  The accepted decision and follow-up implementation are recorded in log.md.
+  Tasks 6.5-6.7 and the review-2 cache robustness matrix are implemented.
+  Local verification and remaining limitations are recorded in log.md.
 implemented: true
 implemented_by: "claude/opus"
 $schema:

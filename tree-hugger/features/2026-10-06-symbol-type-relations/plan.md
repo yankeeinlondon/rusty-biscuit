@@ -4,7 +4,7 @@ feature: symbol-type-relations
 spec: spec.md
 total_phases: 9
 created: 2026-10-05
-phase: 1
+phase: 9
 agent: claude/sonnet
 yolo: true
 packages:
@@ -302,20 +302,21 @@ adds `metrics.lines`. Seven strands of work:
 6. **Query/cache equivalence** — declarations-only, containment and metrics
    capabilities agree between a complete index, a selective query, a cache hit,
    narrowing and widening.
-7. **Outline output and docs** — `extends X; implements Y` on container rows of
+7. **Outline output and docs** — `extends X; implements Y; unclassified bases Z` on container rows of
    `hug types --tree` / `hug symbols --tree`, golden updates, docs and skill.
 
 ### What "done" looks like
 
 Implementation complete, ready for review (the agent never closes the feature):
 
-- [ ] Every cell of the per-language table (16 languages) is either supported
+- [x] Every cell of the per-language table (16 languages) is either supported
       and tested positive/negative, marked an absent language construct, or
       carries a *demonstrated* grammar limit (snippet, pinned grammar identity
       and node observation) in the implementation log and current docs. An
       unfinished extractor is not a grammar limit.
-    - **Open:** every cell holds except C#, Swift and Scala relations
-      (6.5–6.7), which wait on ruling 1; see the implementation log, Phase 9.
+    - **Author follow-up:** Option B is accepted and C#, Swift and Scala
+      relations (6.5–6.7) are implemented. See `log.md` for the decision,
+      verification and remaining Swift extension limitations.
 - [x] `metrics.lines` exists, is required inside a present facet, serializes
       `None` as `null`, and the whole facet stays absent when unrequested.
 - [x] Schema is 4.1 (or the next minor if 4.0 is no longer current) on records,
@@ -707,13 +708,13 @@ after Phases 3–5 merge to avoid conflicts in `tree_file.rs`.
       `tree_file.rs` with the shared resolver so an explicitly external trait
       is no longer linked to a local declaration.
 
-### Wave 3 (blocked on ruling 1; parallel by language once unblocked)
+### Wave 3 (author accepted Option B; implemented)
 
-- [ ] **6.5 C# base lists** — per accepted ruling; record examples.
-- [ ] **6.6 Swift lists and extensions** — struct/protocol/class/extension
+- [x] **6.5 C# base lists** — per accepted ruling; record examples.
+- [x] **6.6 Swift lists and extensions** — struct/protocol/class/extension
   cases; extension entries as `implements` on a uniquely resolved local self
   type with no new type record; document the unresolved-owner limitation.
-- [ ] **6.7 Scala `extends`/`with`** — trait bases per ruling.
+- [x] **6.7 Scala `extends`/`with`** — trait bases per ruling.
 
 ### Wave 4 (sequential)
 
@@ -726,8 +727,8 @@ after Phases 3–5 merge to avoid conflicts in `tree_file.rs`.
       dedup of equal expressions, and the accepted mixed-list cases.
     - Extend `symbols_coverage.rs`.
 
-**Validation checkpoint:** relations matrix green (6.5–6.7 pending only if
-ruling 1 is unanswered, and then listed as an open item, not skipped silently).
+**Validation checkpoint:** relations matrix green, including the accepted
+Option B cases for 6.5–6.7. Current validation is recorded in `log.md`.
 
 ## Phase 7: Capabilities, cache and query/index equivalence
 
