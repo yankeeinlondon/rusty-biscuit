@@ -34,6 +34,92 @@ reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-05
 review_iterations: 0
+human_review: true
+human_review_items:
+  - |-
+    **Accept (or change) how complexity is counted, and the rules for Rust,
+    JavaScript and TypeScript.**
+
+    *Why now:* the next phase writes the counting code and its tests with
+    exact expected numbers. If a counting rule changes later, those numbers
+    and the published docs have to be redone, and cached results need
+    another invalidation. The spec makes your acceptance a condition of
+    completion, and this session could not ask you.
+
+    The full rule tables, with worked examples, are in this feature's
+    `implementation-log.md` under "Phase 1". The basic convention is the one
+    the spec recommends: start at 1, and add 1 for each `if`/else-if, loop
+    with a condition, ternary, `&&`/`||`/`??`, `match`/`switch` arm, guard
+    and `catch`. Plain `else`, `finally`, `loop`/`for(;;)` and Rust `?` add 0.
+
+    Looking at the real parse trees raised six smaller questions the spec does
+    not answer. Recommended answers:
+
+    - **R1. Rust `match`:** count every arm except the last (a Rust `match`
+      must cover every case, so its last arm acts as the default). This
+      makes a two-arm `match` score the same as `if`/`else`. The alternative
+      counts every arm except a literal `_`, which scores an exhaustive
+      `match` one higher than the equivalent `if` chain.
+    - **R2. Rust `let Some(x) = y else { return }`:** +1. It tests a pattern
+      and exits early, like `if let`. The alternative is 0.
+    - **R3. Rust `async { }`, labeled or `unsafe` blocks inside a function:**
+      count them as part of the function. The alternative treats `async`
+      blocks as separate, like closures.
+    - **R4. A Rust `const`/`static` item declared inside a function:** not
+      counted. It is compile-time code, not code that runs on each call.
+    - **R5. JS/TS object literals `{ p: a ? 1 : 2 }`:** count the values,
+      because they run right there. Methods inside the literal are separate
+      functions. The alternative skips the whole literal.
+    - **R6. TS `namespace N { }` inside a function:** not counted.
+
+    Options:
+
+    - **Accept as drafted (recommended).** Phase 2 proceeds unchanged. Pros:
+      no delay; every choice is one table entry, so it is easy to change
+      later. Cons: any later flip means revised expected numbers, a cache
+      invalidation and a docs update.
+    - **Accept, flipping some of R1–R6.** Name the ones to flip. Pros: the
+      numbers match your preferred reading from the start. Cons: none beyond
+      a short reply.
+    - **Choose a different basic convention** (for example, count only
+      branch statements and not `&&`/`||`). Pros: simpler numbers. Cons: the
+      tables need rework before Phase 2, and complex conditions are hidden.
+
+    I recommend accepting as drafted. It follows the spec's recommendation;
+    R1 keeps Rust `match` in line with `if`/`else`, and the rest exclude only
+    code that does not run as part of the call.
+message_to_agent: |-
+  Phase 1 findings for the Phase 2 implementer:
+
+  1. The prerequisite (2026-10-06-symbol-type-relations) has landed: emitted
+     schema is V4_1, EXTRACTOR_REVISION is "25", and MetricsFacet has `lines`.
+     Its review fixes are still uncommitted in this worktree. Read both values
+     from the tree when you start; this feature uses the next minor (V4_2)
+     and the current revision + 1.
+  2. The plan names the wrong body reader. `source.body_span` and
+     `metrics.lines` come from `classify.rs::callable_body_span` ->
+     `callable_body_extent`, not `body_node_for_declaration` (that one falls
+     back to type bodies and is for declaration-text cuts). The spec requires
+     the same body as `lines`. `callable_body_extent` returns a span: for
+     Rust/JS/TS the body is one node (the `body` field, or the C#
+     arrow-clause expression), but for Python and Lua it is a run of sibling
+     children. Refactor it to return the body nodes and derive the span from
+     them, so traversal and `lines` share one reader. Do not add a second
+     discovery path.
+  3. The rule tables (Rust, JS, TS), with node kinds, fields, tokens and
+     worked examples with expected totals, are in implementation-log.md under
+     Phase 1. The Rust `&&` inside `let_chain` is an unfielded anonymous
+     child, not a `binary_expression` operator, so match it separately.
+     Macro `token_tree`s must be pruned (they contain `if`/`&&` tokens).
+  4. Author acceptance of the convention and of residual choices R1-R6 is
+     pending (spec human_review). Implement per the drafted tables; if the
+     author flips a choice, only that rule entry and its expectations change.
+  5. At the end of Phase 1, `just test` had 2 failures that predate it:
+     golden::json_symbols_over_multi_match_the_golden and
+     golden::jsonl_symbols_over_multi_match_the_golden. They come from the
+     prerequisite's uncommitted review edits to the goldens and extractor.
+     Confirm they are green, or owned by that review, before you regenerate
+     goldens for `cyclomatic`.
 ---
 
 # Spec: Per-Symbol Cyclomatic Complexity

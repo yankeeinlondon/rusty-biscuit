@@ -7,6 +7,11 @@ phase: 1
 total_phases: 5
 agent: claude/sonnet
 yolo: true
+packages: []
+source_files_during_phase_1: []
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
 ---
 
 # Plan: Per-Symbol Cyclomatic Complexity
@@ -92,7 +97,7 @@ are what the plan assumes if the author accepts without change.
 
 One spike, run once, before Phase 2 rule work. No re-check later.
 
-- [ ] **Grammar shape dump**: for each candidate language (Rust, JavaScript,
+- [x] **Grammar shape dump**: for each candidate language (Rust, JavaScript,
   TypeScript first), print the pinned-grammar parse of one small fixture per
   inventory category (if/else-if, loops, switch/match with guards, ternary,
   `&&`/`||`/`??`, try/catch/finally, nested fn/closure/class, expression-body
@@ -106,16 +111,17 @@ One spike, run once, before Phase 2 rule work. No re-check later.
 
 ### Tasks
 
-- [ ] **Confirm prerequisite**: check that `lines`, the shared body reader and
+- [x] **Confirm prerequisite**: check that `lines`, the shared body reader and
   the next schema minor have landed; if not, do Phases 1 and 2 and hold Phase 3.
-- [ ] **Record rulings**: write the accepted answers to rules 1–4 into
+- [x] **Record rulings**: write the accepted answers to rules 1–4 into
   `implementation-log.md` before engine code is merged.
-- [ ] **Run grammar spike** (above) and save the draft per-language rule tables.
-- [ ] **Finalize rule tables**: for each selected language, a compact table of
+- [x] **Run grammar spike** (above) and save the draft per-language rule tables.
+- [x] **Finalize rule tables**: for each selected language, a compact table of
   pinned node/field/operator matches, contribution, exclusions, and source
   examples with expected totals; every category listed in the spec's inventory
   section is classified as contributes / zero by design / unavailable.
-  Checkpoint: the author accepts the tables (rule 2 gate).
+  Checkpoint: the author accepts the tables (rule 2 gate). Tables drafted in
+  the implementation log; author acceptance is pending (spec `human_review`).
 
 ### Input robustness matrix (deserialization of `metrics.cyclomatic`)
 
