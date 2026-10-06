@@ -1232,8 +1232,9 @@ equal priority) supplies each field, and a later equal-priority capture is
 read only for a field the winner lacks.
 
 `tree_hugger::work_counters()` counts lint-diagnostics runs, parser
-constructions, definition-query executions and shared-context steps
-process-wide (atomics, so work on any thread is counted); tests compare two
+constructions, definition-query executions, shared-context steps and
+relation-linker runs (one per analysis: the declaration index for
+`extends`/`implements` and, in Rust, the impl walk) process-wide (atomics, so work on any thread is counted); tests compare two
 snapshots with `WorkCounters::since`.
 
 Context that many declarations of one file share is derived once per file,
@@ -1366,9 +1367,12 @@ Both kind and visibility conversions are wildcard-free `match`es, so a new
 variant on one side fails to compile until the other side handles it. The
 adapter does not carry `keyword`, `declaration_text`, `signature_text`,
 `relations` or `semantics` (v1 has no field for them, so in particular no
-recursion flag), the `is_test` and `is_deprecated` flags, the `metrics`
-facet, `attributes`, any modifier other than `Static`, `StaticStorage` and
-`Async`, `TypeMetadata::type_parameters`, or a TypeAlias's field metadata.
+recursion flag; `extends`/`implements` included), the `is_test` and
+`is_deprecated` flags, the `metrics` facet (`lines` included), `attributes`,
+any modifier other than `Static`, `StaticStorage` and `Async`,
+`type_info.generic_params` and `type_info.constraints`,
+`TypeMetadata::type_parameters`, or a TypeAlias's field metadata. A record
+converted to `SymbolInfo` and back therefore has none of these.
 
 ### Recommended migration phases
 
@@ -1376,7 +1380,7 @@ facet, `attributes`, any modifier other than `Static`, `StaticStorage` and
 2. Add adapters:
    1. `impl From<SymbolInfo> for SymbolRecord`.
    2. `impl TryFrom<SymbolRecord> for SymbolInfo` (best effort).
-3. Update CLI `--json` to emit the schema version (done; currently 4.0).
+3. Update CLI `--json` to emit the schema version (done; currently 4.1).
 4. The v1 API (`TreeFile::symbols()`, `SymbolInfo`) and both adapters are
    retained; removing v1 is a separate decision.
 

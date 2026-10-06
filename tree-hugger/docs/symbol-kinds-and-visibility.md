@@ -1870,7 +1870,10 @@ one [grammar limit](#grammar-limits) below:
   it apart.
 - **Adapter gaps**: converting a `SymbolInfo` to a record drops
   `TypeMetadata::type_parameters` and a TypeAlias's field metadata (C
-  `typedef struct { … } Alias`).
+  `typedef struct { … } Alias`). Converting a record to `SymbolInfo` drops
+  its generic parameters and constraints, `extends`/`implements`,
+  attributes, `metrics` and every modifier except `static` (both kinds) and
+  `async`, since the older model has no field for them.
 
 ### Grammar limits
 
