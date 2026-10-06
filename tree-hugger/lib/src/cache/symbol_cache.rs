@@ -20,8 +20,8 @@ use crate::file::source_file::SourceFile;
 use crate::queries::{QueryKind, resolve_query_text};
 use crate::rule_registry::RuleRegistry;
 use crate::shared::{
-    Diagnostic, ExportRecord, FileSymbolIndex, ImportRecord, ProgrammingLanguage, SchemaVersion,
-    SymbolKindV2, SymbolRecord,
+    Diagnostic, ExportRecord, FileSymbolIndex, ImportRecord, Occurrence, ProgrammingLanguage,
+    ReferenceCoverage, SchemaVersion, SymbolKindV2, SymbolRecord,
 };
 
 /// The queries whose text decides a file's records, imports and references.
@@ -471,6 +471,8 @@ impl SymbolCache {
                 imports: &index.imports,
                 exports: &index.exports,
                 diagnostics: &index.diagnostics,
+                occurrences: &index.occurrences,
+                reference_coverage: &index.reference_coverage,
             },
         )
     }
@@ -512,6 +514,8 @@ struct WrittenEntry<'a> {
     imports: &'a [ImportRecord],
     exports: &'a [ExportRecord],
     diagnostics: &'a [Diagnostic],
+    occurrences: &'a [Occurrence],
+    reference_coverage: &'a [ReferenceCoverage],
 }
 
 /// Every kind is the string `"all"`, never an empty list.
@@ -547,6 +551,10 @@ struct StoredEntry {
     imports: Vec<ImportRecord>,
     exports: Vec<ExportRecord>,
     diagnostics: Vec<Diagnostic>,
+    /// Required (an empty list is a file with none); non-empty only under
+    /// the occurrences capability.
+    occurrences: Vec<Occurrence>,
+    reference_coverage: Vec<ReferenceCoverage>,
 }
 
 impl StoredEntry {
@@ -608,6 +616,15 @@ impl StoredEntry {
         {
             return Err(CacheMiss::Inconsistent("a record without metrics under the metrics capability"));
         }
+        if !capabilities.contains(&Capability::Occurrences)
+            && (!self.occurrences.is_empty() || !self.reference_coverage.is_empty())
+        {
+            return Err(CacheMiss::Inconsistent("occurrences stored without the occurrences capability"));
+        }
+        if capabilities.contains(&Capability::Occurrences) && self.reference_coverage.is_empty() {
+            // Every analysis has at least the file-level region.
+            return Err(CacheMiss::Inconsistent("no reference coverage under the occurrences capability"));
+        }
         if let Some(kinds) = &self.covered_kinds.0
             && self.records.iter().any(|record| !kinds.contains(&record.kind))
         {
@@ -633,6 +650,8 @@ impl StoredEntry {
             imports: self.imports,
             exports: self.exports,
             diagnostics: self.diagnostics,
+            occurrences: self.occurrences,
+            reference_coverage: self.reference_coverage,
         };
         (coverage, self.diagnostics_fingerprint, index)
     }

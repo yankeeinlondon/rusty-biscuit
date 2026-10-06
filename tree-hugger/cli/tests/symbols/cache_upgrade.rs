@@ -1405,6 +1405,83 @@ fn entry_from_extractor_revision_twenty_eight_is_not_served_after_the_complexity
     }
 }
 
+/// Revision 29 read only the last expression of a Scala `import` and no
+/// unbraced `as` rename, so `import lib.ReviewBase, lib.Other` did not bind
+/// `ReviewBase` and the child's base took the file-level class's ID; from
+/// revision 30 the imported name keeps its text alone.
+#[test]
+fn entry_from_extractor_revision_twenty_nine_is_not_served_after_the_binding_evidence_repairs() {
+    assert_stale_revision_is_not_served(&StaleRevision {
+        revision: "29",
+        key: OldKey::Computed,
+        file: "imported.scala",
+        language: "scala",
+        source: "class ReviewBase\nobject ReviewOuter {\n  import lib.ReviewBase, lib.Other\n  \
+                 class ReviewChild extends ReviewBase\n}\nclass Sentinel\n"
+            .to_string(),
+        sentinel: "Sentinel",
+        probe: |out| go_record(out, "ReviewChild")["relations"]["extends"][0]["qualified_name"].clone(),
+        repaired: Value::Null,
+        stale: Value::from("ReviewBase"),
+        revert: |snapshot| {
+            let base = record_named(snapshot, "ReviewBase");
+            let (id, qualified_name) = (base["id"].clone(), base["identity"]["qualified_name"].clone());
+            let relations = &mut record_named(snapshot, "ReviewChild")["relations"];
+            let mut target = relations["unclassified_bases"][0].clone();
+            target["id"] = id;
+            target["qualified_name"] = qualified_name;
+            relations.as_object_mut().expect("relations").remove("unclassified_bases");
+            relations["extends"] = Value::Array(vec![target]);
+        },
+    });
+}
+
+/// Revision 29 dropped a Go interface element spelled like a predeclared
+/// type even when a same-file declaration redeclares that name.
+#[test]
+fn entry_from_extractor_revision_twenty_nine_is_not_served_with_a_shadowed_go_universe_name() {
+    assert_stale_revision_is_not_served(&StaleRevision {
+        revision: "29",
+        key: OldKey::Computed,
+        file: "universe.go",
+        language: "go",
+        source: "package review\n\ntype int interface{ M() }\ntype ReviewChild interface{ int }\n\
+                 type Sentinel struct{}\n"
+            .to_string(),
+        sentinel: "Sentinel",
+        probe: |out| go_record(out, "ReviewChild")["relations"]["extends"][0]["qualified_name"].clone(),
+        repaired: Value::from("review.int"),
+        stale: Value::Null,
+        revert: |snapshot| {
+            let relations = &mut record_named(snapshot, "ReviewChild")["relations"];
+            relations.as_object_mut().expect("relations").remove("extends");
+        },
+    });
+}
+
+/// Revision 29 dropped a Swift enum's first base spelled like a standard
+/// raw-value type even when a same-file alias redeclares that name.
+#[test]
+fn entry_from_extractor_revision_twenty_nine_is_not_served_with_an_aliased_swift_raw_type_name() {
+    assert_stale_revision_is_not_served(&StaleRevision {
+        revision: "29",
+        key: OldKey::Computed,
+        file: "aliased.swift",
+        language: "swift",
+        source: "protocol ReviewProtocol {}\ntypealias Int = ReviewProtocol\nenum ReviewChild: Int { case a }\n\
+                 struct Sentinel {}\n"
+            .to_string(),
+        sentinel: "Sentinel",
+        probe: |out| go_record(out, "ReviewChild")["relations"]["unclassified_bases"][0]["name"].clone(),
+        repaired: Value::from("Int"),
+        stale: Value::Null,
+        revert: |snapshot| {
+            let relations = &mut record_named(snapshot, "ReviewChild")["relations"];
+            relations.as_object_mut().expect("relations").remove("unclassified_bases");
+        },
+    });
+}
+
 /// An entry an earlier `revision` wrote in `schema`, whose `metrics` lacked
 /// the `metric` key the bump added. Unlike the repairs above, the old payload
 /// is not readable even under the current key (its versions and metrics

@@ -11,7 +11,7 @@ use serde_json::Value;
 use tempfile::TempDir;
 use tree_hugger::{
     AnalysisPass, Capability, MetricsFacet, SourceFile, SymbolId, SymbolKindV2, SymbolQuery, SymbolRecord, TreeFile,
-    TreeHuggerError, TriState, VisibilityLevel, WorkCounters, work_counters,
+    TreeHuggerError, VisibilityLevel, WorkCounters, work_counters,
 };
 
 use crate::symbols_fixtures::{all_fixtures, display_name, multi_fixtures};
@@ -183,6 +183,17 @@ fn passes_run_once_after_their_prerequisites() {
             "requested {requested:?}: diagnostics run only when planned"
         );
         assert_eq!(work.definition_captures, 1, "requested {requested:?}");
+        let binds = completed.contains(&AnalysisPass::Bind);
+        assert_eq!(
+            work.reference_captures,
+            u64::from(binds || completed.contains(&AnalysisPass::Diagnostics)),
+            "requested {requested:?}: one references run serves the occurrences and the diagnostics"
+        );
+        assert_eq!(
+            work.occurrence_resolutions,
+            u64::from(binds),
+            "requested {requested:?}: edges and recursion read one resolution"
+        );
     }
 
     assert_eq!(
@@ -193,7 +204,19 @@ fn passes_run_once_after_their_prerequisites() {
             Capability::Declarations,
             Capability::Containment,
             Capability::References,
+            Capability::Occurrences,
             Capability::Semantics,
+        ]
+    );
+    assert_eq!(
+        SymbolQuery::new()
+            .capabilities([Capability::Occurrences])
+            .required_capabilities(),
+        [
+            Capability::Declarations,
+            Capability::Containment,
+            Capability::References,
+            Capability::Occurrences,
         ]
     );
     assert_eq!(
@@ -653,12 +676,12 @@ fn deferred_kind_queries_equal_the_same_kind_of_a_full_query() {
 }
 
 #[test]
-fn distinct_unresolved_references_are_all_kept() {
+fn distinct_import_references_are_all_kept() {
     let dir = TempDir::new().expect("tempdir");
     let path = write(
         &dir,
-        "two_imports.py",
-        "from os import path\nfrom sys import argv\n\n\ndef run():\n    path.join(\"a\")\n    path.join(\"b\")\n    return argv\n",
+        "two_imports.ts",
+        "import { path } from \"os\";\nimport { argv } from \"sys\";\n\nfunction run() {\n    path.join(\"a\");\n    path.join(\"b\");\n    return argv;\n}\n",
     );
     let index = TreeFile::new(&path).expect("parse").symbol_index_v2().expect("index");
     let run = index
@@ -670,45 +693,8 @@ fn distinct_unresolved_references_are_all_kept() {
         refs.iter().map(|r| (r.name.clone(), r.id.is_some())).collect()
     };
     let expected = [("path".to_string(), false), ("argv".to_string(), false)];
-    assert_eq!(names(&run.relations.references), expected, "both unresolved imports, `path` once");
+    assert_eq!(names(&run.relations.references), expected, "both bound imports, `path` once");
     assert_eq!(names(&run.relations.dependencies), expected);
-}
-
-#[test]
-fn is_recursive_is_unknown_when_semantics_run_and_absent_otherwise() {
-    let dir = TempDir::new().expect("tempdir");
-    let path = write(
-        &dir,
-        "recursion.rs",
-        "fn countdown(n: u32) -> u32 { if n == 0 { 0 } else { countdown(n - 1) } }\nfn leaf() -> u32 { 1 }\nstruct Holder;\n",
-    );
-    let tree_file = TreeFile::new(&path).expect("parse");
-    let recursion = |records: &[SymbolRecord]| -> Vec<(String, Option<TriState>)> {
-        records
-            .iter()
-            .map(|record| (record.identity.name.clone(), record.semantics.is_recursive))
-            .collect()
-    };
-
-    let with_semantics = tree_file.symbol_index_v2().expect("index");
-    assert_eq!(
-        recursion(&with_semantics.symbols),
-        [
-            ("countdown".to_string(), Some(TriState::Unknown)),
-            ("n".to_string(), None),
-            ("leaf".to_string(), Some(TriState::Unknown)),
-            ("Holder".to_string(), None),
-        ],
-        "a guessed Yes (countdown) or No (leaf) is never reported"
-    );
-
-    let without = tree_file
-        .query(&SymbolQuery::new().capabilities([Capability::References]))
-        .expect("query");
-    assert!(
-        recursion(&without.index.symbols).iter().all(|(_, value)| value.is_none()),
-        "no semantics requested, no value"
-    );
 }
 
 /// A wide result narrowed to a query equals that query run uncached, for

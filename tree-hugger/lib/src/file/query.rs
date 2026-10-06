@@ -21,8 +21,9 @@ use crate::shared::{
 ///
 /// Requiring a capability also requires its prerequisites:
 /// [`References`](Self::References) implies
-/// [`Containment`](Self::Containment), [`Semantics`](Self::Semantics) implies
-/// [`References`](Self::References), and every capability implies
+/// [`Containment`](Self::Containment), [`Occurrences`](Self::Occurrences)
+/// implies [`References`](Self::References), [`Semantics`](Self::Semantics)
+/// implies [`Occurrences`](Self::Occurrences), and every capability implies
 /// [`Declarations`](Self::Declarations).
 ///
 /// [`Flags`](Self::Flags) and [`Metrics`](Self::Metrics) fill record fields
@@ -43,9 +44,17 @@ pub enum Capability {
     /// including Rust impl members linked to their impl's resolved self type.
     Containment,
     /// The bind pass: containment plus reference, dependency and
-    /// referenced-by edges and resolved export targets.
+    /// referenced-by edges and resolved export targets. The edges are
+    /// derived from the file's reference occurrences, which are resolved
+    /// either way and kept in the result only under
+    /// [`Occurrences`](Self::Occurrences).
     References,
-    /// The semantic pass (`semantics` facet of functions and methods).
+    /// The file's reference occurrences and their coverage
+    /// (`FileSymbolIndex::occurrences` and `reference_coverage`), over the
+    /// whole file whatever kinds are selected.
+    Occurrences,
+    /// The semantic pass (`semantics` facet of functions, methods and
+    /// constructors), read from the occurrences.
     Semantics,
     /// The docs pass (`docs.parsed`).
     StructuredDocs,
@@ -64,10 +73,11 @@ pub enum Capability {
 
 impl Capability {
     /// Every capability, in canonical order.
-    pub const ALL: [Capability; 8] = [
+    pub const ALL: [Capability; 9] = [
         Capability::Declarations,
         Capability::Containment,
         Capability::References,
+        Capability::Occurrences,
         Capability::Semantics,
         Capability::StructuredDocs,
         Capability::Diagnostics,
@@ -80,7 +90,8 @@ impl Capability {
             Capability::Declarations => &[],
             Capability::Containment => &[Capability::Declarations],
             Capability::References => &[Capability::Containment],
-            Capability::Semantics => &[Capability::References],
+            Capability::Occurrences => &[Capability::References],
+            Capability::Semantics => &[Capability::Occurrences],
             Capability::StructuredDocs
             | Capability::Diagnostics
             | Capability::Flags

@@ -140,6 +140,26 @@ impl TreeFile {
         &self,
         selection: &MetadataSelection,
     ) -> Result<Vec<ExtractedSymbol<'_>>, TreeHuggerError> {
+        self.capture_definitions(selection, None)
+    }
+
+    /// [`Self::definitions`], also returning the query's `@local.scope`
+    /// nodes in match order (repeats included), which only reference
+    /// resolution reads.
+    pub(crate) fn definitions_with_scopes(
+        &self,
+        selection: &MetadataSelection,
+    ) -> Result<(Vec<ExtractedSymbol<'_>>, Vec<Node<'_>>), TreeHuggerError> {
+        let mut scopes = Vec::new();
+        let definitions = self.capture_definitions(selection, Some(&mut scopes))?;
+        Ok((definitions, scopes))
+    }
+
+    fn capture_definitions<'tree>(
+        &'tree self,
+        selection: &MetadataSelection,
+        mut scopes: Option<&mut Vec<Node<'tree>>>,
+    ) -> Result<Vec<ExtractedSymbol<'tree>>, TreeHuggerError> {
         count_definition_capture();
         let query = query_for(self.grammar_ref(), QueryKind::Locals)?;
         let mut cursor = QueryCursor::new();
@@ -172,6 +192,12 @@ impl TreeFile {
                     .unwrap_or_default();
 
                 if capture_name == "local.definition.import" {
+                    continue;
+                }
+                if capture_name == "local.scope" {
+                    if let Some(scopes) = scopes.as_deref_mut() {
+                        scopes.push(capture.node);
+                    }
                     continue;
                 }
 

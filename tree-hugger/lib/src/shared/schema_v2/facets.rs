@@ -338,7 +338,7 @@ pub struct TypeFacet {
 }
 
 /// Reference to another symbol.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SymbolRef {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<SymbolId>,
@@ -398,6 +398,10 @@ pub struct SemanticFacet {
     pub may_throw: Option<TriState>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub may_panic: Option<TriState>,
+    /// Direct recursion: `Yes` only for a `Scoped` call to the callable's
+    /// own ID, `No` only with complete call coverage and no call that might
+    /// be to itself, otherwise `Unknown`; `None` when semantics were not
+    /// computed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_recursive: Option<TriState>,
     #[serde(skip_serializing_if = "Option::is_none")]

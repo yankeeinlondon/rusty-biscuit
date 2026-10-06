@@ -157,8 +157,9 @@ projection, shared by the prefix and the CLI.
 |---|---|---|
 | `Declarations` | (always on) | parse pass: records, cheap metadata, imports, exports |
 | `Containment` | Declarations | parent/container/members only, no reference query |
-| `References` | Containment | full bind pass |
-| `Semantics` | References | semantic pass |
+| `References` | Containment | full bind pass: resolves occurrences, derives the edges, drops the evidence |
+| `Occurrences` | References | keeps `occurrences` + `reference_coverage` (whole file) in the index |
+| `Semantics` | Occurrences | semantic pass (recursion read from the occurrences) |
 | `StructuredDocs` | Declarations | docs pass |
 | `Diagnostics` | Declarations | diagnostics pass |
 | `Flags` | Declarations | `visibility.is_test` / `is_deprecated` while records are built (`extract/flags.rs`, `attributes.rs`) |
@@ -185,15 +186,24 @@ only cache the CLI uses; see `tree-hugger/docs/cache-design.md`.
 `AnalyzerFingerprint` are still exported for library callers but are off the
 CLI path.
 
-`semantics.is_recursive` is `Some(TriState::Unknown)` whenever the semantic
-pass runs and `None` when it was not requested (v1 `SymbolInfo` has no
-recursion field, so nothing to map).
+`semantics.is_recursive` (functions, methods, constructors) is `Yes` only
+for a `Scoped` call to the record's own ID, `No` only with a `Complete` own
+region and no call that might be to itself (`may_call_itself`: a `NameOnly`
+candidate, an `Unresolved` same-name call, an import whose original name is
+the record's, a constructor's own class), else `Unknown`; `None` when not
+requested (v1 `SymbolInfo` has no recursion field, so nothing to map).
+`symbols_reference_summaries::RECURSION_MATRIX` is the row table to extend.
 
 ### Work Counters
 
 `work_counters()` returns process-wide atomic counts (`diagnostics_runs`,
 `parser_constructions`, `definition_captures`, `shared_context_steps`,
-`relation_links`, `complexity_walks`); diff two snapshots with `WorkCounters::since`.
+`relation_links`, `complexity_walks`, `reference_captures`,
+`occurrence_resolutions`); diff two snapshots with `WorkCounters::since`.
+`reference_captures` counts references-query runs (at most one per analysis,
+shared by occurrences and diagnostics; none for declaration/containment
+queries) and `occurrence_resolutions` the occurrence resolutions (one per
+analysis that binds).
 `relation_links` counts runs of the per-file relation linker (declaration
 index build plus the Rust impl walk), one per analysis. `complexity_walks`
 counts callable bodies walked for `metrics.cyclomatic`: one per measured

@@ -68,20 +68,7 @@ pub(crate) fn declared_generics(
     source: &str,
 ) -> Result<DeclaredGenerics, GenericParamOverflow> {
     let mut constraints = Vec::new();
-    let params = match language {
-        ProgrammingLanguage::Rust => rust_generics(declaration, source, &mut constraints),
-        ProgrammingLanguage::TypeScript => typescript_generics(declaration, source),
-        ProgrammingLanguage::Go => go_generics(declaration, name, source),
-        ProgrammingLanguage::Python => python_generics(declaration, source),
-        ProgrammingLanguage::Java => java_generics(declaration, source),
-        ProgrammingLanguage::CSharp => csharp_generics(declaration, source, &mut constraints),
-        ProgrammingLanguage::Cpp => cpp_generics(declaration, name, source, &mut constraints),
-        ProgrammingLanguage::Swift => swift_generics(declaration, source, &mut constraints),
-        ProgrammingLanguage::Scala => scala_generics(declaration, source),
-        // No declared generic parameters: JavaScript, C, PHP, Perl, Bash,
-        // Zsh and Lua.
-        _ => Vec::new(),
-    };
+    let params = written_params(declaration, name, language, source, &mut constraints);
     let params = params
         .into_iter()
         .map(|param| {
@@ -102,6 +89,47 @@ pub(crate) fn declared_generics(
         params,
         constraints,
     })
+}
+
+/// The names `declaration`'s generic parameter list binds, read like
+/// [`declared_generics`] but never numbered: name lookup needs the binding
+/// whatever its position, so a list too long for `GenericParam::position`
+/// still shadows every name it declares.
+pub(crate) fn declared_generic_names(
+    declaration: Node<'_>,
+    name: Node<'_>,
+    language: ProgrammingLanguage,
+    source: &str,
+) -> Vec<String> {
+    written_params(declaration, name, language, source, &mut Vec::new())
+        .into_iter()
+        .map(|param| param.name)
+        .collect()
+}
+
+/// Every parameter the language's reader finds in the declaration's own
+/// list, with its written index.
+fn written_params(
+    declaration: Node<'_>,
+    name: Node<'_>,
+    language: ProgrammingLanguage,
+    source: &str,
+    constraints: &mut Vec<String>,
+) -> Vec<Param> {
+    match language {
+        ProgrammingLanguage::Rust => rust_generics(declaration, source, constraints),
+        ProgrammingLanguage::TypeScript => typescript_generics(declaration, source),
+        ProgrammingLanguage::Go => go_generics(declaration, name, source),
+        ProgrammingLanguage::Python => python_generics(declaration, source),
+        ProgrammingLanguage::Java => java_generics(declaration, source),
+        ProgrammingLanguage::CSharp => csharp_generics(declaration, source, constraints),
+        ProgrammingLanguage::Cpp => cpp_generics(declaration, name, source, constraints),
+        ProgrammingLanguage::Swift => swift_generics(declaration, source, constraints),
+        ProgrammingLanguage::Scala => scala_generics(declaration, source),
+        // No declared generic parameters: JavaScript, C, PHP, Perl, Bash,
+        // Zsh and Lua.
+        _ => Vec::new(),
+    }
 }
 
 fn text(node: Node<'_>, source: &str) -> String {

@@ -4,11 +4,14 @@
 //!
 //! Both rely on how each pass changes a record, as [`run_query`] runs them:
 //! containment sets `relations.parent`/`container`/`members` (a Rust impl
-//! member's from its impl, while records are built); binding sets
-//! `relations.references`/`dependencies`/`referenced_by`, export targets and
-//! `is_exported` (to the value the declaration already had, since both come
-//! from the same export spans); the semantic pass sets `semantics` on
-//! functions and methods; the docs pass sets `docs.parsed`. Flags and
+//! member's from its impl, while records are built); binding resolves the
+//! file's occurrences and sets `relations.references`/`dependencies`/
+//! `referenced_by` from them, export targets and `is_exported` (to the
+//! value the declaration already had, since both come from the same export
+//! spans); the occurrences and their coverage stay in the index only under
+//! `Occurrences` and describe the whole file whatever kinds are selected;
+//! the semantic pass sets `semantics` on functions, methods and
+//! constructors from those occurrences; the docs pass sets `docs.parsed`. Flags and
 //! metrics are read from the syntax tree while records are built, so adding
 //! either needs a parse; without them a record's `is_test` and
 //! `is_deprecated` are `false` and it has no `metrics` facet. Generic
@@ -26,7 +29,7 @@
 
 use std::collections::BTreeSet;
 
-use super::{NameIndex, PassPlan, docs_pass, link_containers, semantic_pass};
+use super::{NameIndex, PassPlan, docs_pass, has_semantics, link_containers, semantic_pass};
 use crate::file::query::{Capability, SymbolQuery, SymbolQueryResult};
 use crate::shared::{AnalysisPass, FileSymbolIndex, ProgrammingLanguage, SemanticFacet, SymbolKindV2};
 
@@ -36,8 +39,9 @@ use crate::shared::{AnalysisPass, FileSymbolIndex, ProgrammingLanguage, Semantic
 /// Containment needs every record as a candidate owner, so it needs a result
 /// of every kind, and in Rust the syntax tree: an impl member's container is
 /// its impl's self type as written and resolved, which no record retains;
-/// semantics needs the references binding produced; flags and metrics need
-/// the syntax tree.
+/// semantics needs the stored occurrences and coverage (the reference edges
+/// alone cannot tell a proven self-call from a same-named one); occurrences,
+/// flags and metrics need the syntax tree.
 pub(crate) fn record_passes_suffice(
     missing: &BTreeSet<Capability>,
     completed: &BTreeSet<Capability>,
@@ -46,10 +50,11 @@ pub(crate) fn record_passes_suffice(
 ) -> bool {
     missing.iter().all(|capability| match capability {
         Capability::StructuredDocs => true,
-        Capability::Semantics => completed.contains(&Capability::References),
+        Capability::Semantics => completed.contains(&Capability::Occurrences),
         Capability::Containment => kinds.is_none() && language != ProgrammingLanguage::Rust,
         Capability::Declarations
         | Capability::References
+        | Capability::Occurrences
         | Capability::Diagnostics
         | Capability::Flags
         | Capability::Metrics => false,
@@ -117,6 +122,10 @@ pub(crate) fn project(mut index: FileSymbolIndex, query: &SymbolQuery) -> Symbol
             export.symbol.qualified_name = None;
         }
     }
+    if !query.requires(Capability::Occurrences) {
+        index.occurrences.clear();
+        index.reference_coverage.clear();
+    }
     if !query.requires(Capability::Diagnostics) {
         index.diagnostics.clear();
     }
@@ -131,9 +140,7 @@ fn stamp_parse_pass(index: &mut FileSymbolIndex, query: &SymbolQuery) {
     for symbol in &mut index.symbols {
         let pass = if query.requires(Capability::StructuredDocs) {
             AnalysisPass::Docs
-        } else if query.requires(Capability::Semantics)
-            && matches!(symbol.kind, SymbolKindV2::Function | SymbolKindV2::Method)
-        {
+        } else if query.requires(Capability::Semantics) && has_semantics(symbol.kind) {
             AnalysisPass::Semantic
         } else if query.requires(Capability::References) {
             AnalysisPass::Bind

@@ -28,6 +28,12 @@ pub(crate) struct WrittenBase {
     pub(crate) source_span: Option<TextSpan>,
     /// Restores written order when independently classified lists are merged.
     pub(crate) start_byte: usize,
+    /// The spelling also names a built-in type that is no base (a Go
+    /// predeclared non-interface type, a Swift standard raw-value type).
+    /// The spelling alone proves nothing: the linker drops the base only
+    /// when no binding visible at the declaration can give the path's first
+    /// segment another meaning.
+    pub(crate) builtin_spelling: bool,
 }
 
 /// A written name path, without generic arguments: `pkg.Base<T>` is
@@ -99,6 +105,7 @@ pub(crate) fn written_base(node: Node<'_>, language: ProgrammingLanguage, source
         path: base_path(node, language, source),
         source_span: (language == ProgrammingLanguage::Swift).then(|| text_span_for_node(node)),
         start_byte: node.start_byte(),
+        builtin_spelling: false,
     })
 }
 
@@ -263,15 +270,42 @@ fn csharp_bases(owner: Node<'_>, source: &str, bases: &mut DeclaredBases) {
     }
 }
 
+/// Swift standard raw-value types an enum's first entry may name without
+/// a case writing a raw value.
+const SWIFT_STANDARD_RAW_TYPES: [&str; 14] = [
+    "Int", "Int8", "Int16", "Int32", "Int64", "UInt", "UInt8", "UInt16", "UInt32", "UInt64", "String",
+    "Character", "Float", "Double",
+];
+
+/// Whether `path` spells a Swift standard raw-value type: one of
+/// [`SWIFT_STANDARD_RAW_TYPES`] or `Unicode.Scalar`, bare or qualified by
+/// the `Swift` module.
+fn is_swift_standard_raw_type(path: &BasePath) -> bool {
+    let segments: Vec<&str> = path.segments.iter().map(String::as_str).collect();
+    let unqualified = match segments.as_slice() {
+        ["Swift", rest @ ..] => rest,
+        all => all,
+    };
+    path.anchor == PathAnchor::Relative
+        && match unqualified {
+            [name] => SWIFT_STANDARD_RAW_TYPES.contains(name),
+            ["Unicode", "Scalar"] => true,
+            _ => false,
+        }
+}
+
 /// Swift uses the same node for classes, structs, enums and extensions.
-/// Enum raw-value types are storage declarations, not inheritance.
+/// Enum raw-value types are storage declarations, not inheritance: an
+/// explicit raw value proves one by syntax, a standard raw-type spelling
+/// only once the linker finds no binding that shadows it.
 fn swift_bases(owner: Node<'_>, source: &str, bases: &mut DeclaredBases) {
     let kind = declaration_keyword(owner, ProgrammingLanguage::Swift);
     let mut cursor = owner.walk();
     let entries = owner.named_children(&mut cursor).filter(|child| child.kind() == "inheritance_specifier");
     for (position, entry) in entries.enumerate() {
         let Some(target) = entry.named_child(0) else { continue };
-        if kind.as_deref() == Some("enum") && position == 0 {
+        let raw_type_slot = kind.as_deref() == Some("enum") && position == 0;
+        if raw_type_slot {
             // An explicit raw value establishes a raw-value enum even when
             // its raw type is a user-defined literal-convertible type.
             if owner.child_by_field_name("body").is_some_and(|body| {
@@ -287,7 +321,11 @@ fn swift_bases(owner: Node<'_>, source: &str, bases: &mut DeclaredBases) {
             Some("class" | "enum") if position > 0 => &mut bases.implements,
             _ => &mut bases.unclassified,
         };
-        push_unique(list, written_base(target, ProgrammingLanguage::Swift, source));
+        let base = written_base(target, ProgrammingLanguage::Swift, source).map(|mut base| {
+            base.builtin_spelling = raw_type_slot && base.path.as_ref().is_some_and(is_swift_standard_raw_type);
+            base
+        });
+        push_unique(list, base);
     }
 }
 
@@ -385,6 +423,7 @@ fn base_spanning(value: Node<'_>, end: usize, language: ProgrammingLanguage, sou
         path: base_path(value, language, source),
         source_span: None,
         start_byte: value.start_byte(),
+        builtin_spelling: false,
     })
 }
 
@@ -444,17 +483,20 @@ fn python_bases(owner: Node<'_>, language: ProgrammingLanguage, source: &str, ba
     }
 }
 
-/// Go predeclared types that are not interfaces: as an interface element
-/// they are type-set terms, not embedded interfaces.
+/// Go predeclared types that are not interfaces: unless a declaration
+/// shadows the name, such an interface element is a type-set term, not an
+/// embedded interface.
 const GO_PREDECLARED_NON_INTERFACE: [&str; 19] = [
     "bool", "byte", "complex64", "complex128", "float32", "float64", "int", "int8", "int16", "int32",
     "int64", "rune", "string", "uint", "uint8", "uint16", "uint32", "uint64", "uintptr",
 ];
 
 /// Go interface elements that embed a named type (`Base`, `fmt.Stringer`,
-/// `G[int]`). A union, a `~` term, a predeclared non-interface type and any
-/// type literal are constraint terms, and embedded struct fields are
-/// composition.
+/// `G[int]`). A union, a `~` term and any type literal are constraint terms,
+/// and embedded struct fields are composition. A name spelled like a
+/// predeclared non-interface type is kept with
+/// [`WrittenBase::builtin_spelling`]: Go's universe names can be redeclared,
+/// so only the linker, which sees the bindings, can drop it.
 fn go_bases(owner: Node<'_>, language: ProgrammingLanguage, source: &str, bases: &mut DeclaredBases) {
     let Some(interface) = owner.child_by_field_name("type").filter(|node| node.kind() == "interface_type") else {
         return;
@@ -467,16 +509,15 @@ fn go_bases(owner: Node<'_>, language: ProgrammingLanguage, source: &str, bases:
         let [term] = terms.as_slice() else {
             continue;
         };
-        let is_named = match term.kind() {
-            "type_identifier" => term
-                .utf8_text(source.as_bytes())
-                .is_ok_and(|text| !GO_PREDECLARED_NON_INTERFACE.contains(&text.trim())),
-            "qualified_type" | "generic_type" => true,
-            _ => false,
-        };
-        if is_named {
-            push_unique(&mut bases.extends, written_base(*term, language, source));
+        if !matches!(term.kind(), "type_identifier" | "qualified_type" | "generic_type") {
+            continue;
         }
+        let base = written_base(*term, language, source).map(|mut base| {
+            base.builtin_spelling =
+                term.kind() == "type_identifier" && GO_PREDECLARED_NON_INTERFACE.contains(&base.text.as_str());
+            base
+        });
+        push_unique(&mut bases.extends, base);
     }
 }
 
@@ -520,17 +561,27 @@ pub(crate) enum ImportBinding<'source> {
     /// The names bound, as written (alias, else the last imported
     /// segment; a Python `import a.b` binds `a`).
     Names(Vec<&'source str>),
-    /// A wildcard import or C++ using-directive: any name may be bound, so
-    /// no lookup through this scope can be proved.
+    /// A wildcard import, a C++ using-directive or an import whose names
+    /// cannot be read: any name may be bound, so no lookup through this
+    /// scope can be proved.
     Opaque,
+    /// A Swift whole-module import (`import Foundation`): like
+    /// [`Self::Opaque`] for a lookup, but it names no single binding that
+    /// could shadow a standard-library spelling.
+    Module,
 }
 
 /// The binding `node` makes when it is an import statement of `language`
 /// whose bound names can coexist with a same-file declaration of a farther
 /// scope (Rust `use`, C++ `using` and namespace aliases, PHP `use`, Python
-/// imports, JS/TS imports and TS `import x =`). Java and Go imports bind
-/// only file-level names a same-file declaration would conflict with, so
-/// they are not read.
+/// imports, JS/TS imports and TS `import x =`, C# `using` aliases, Swift
+/// selective imports, every expression of a Scala `import`). Java and Go
+/// imports bind only file-level names a same-file declaration would
+/// conflict with, so they are not read.
+///
+/// An import whose bound names cannot all be read is
+/// [`ImportBinding::Opaque`], never a shorter name list: a missed binding
+/// would let a farther declaration claim the name.
 pub(crate) fn import_binding<'source>(
     node: Node<'_>,
     language: ProgrammingLanguage,
@@ -551,37 +602,27 @@ pub(crate) fn import_binding<'source>(
             let selective = node.children(&mut cursor).any(|child| {
                 matches!(child.kind(), "typealias" | "struct" | "class" | "enum" | "protocol" | "let" | "var" | "func")
             });
-            if !selective { return Some(ImportBinding::Opaque); }
-            let identifier = find_child_by_kind(node, "identifier")?;
-            names.extend(named_entries(identifier).last().copied().and_then(text));
+            if !selective { return Some(ImportBinding::Module); }
+            // A selective import whose name cannot be read binds an
+            // unknown name: opaque, never absent.
+            let Some(bound) = find_child_by_kind(node, "identifier")
+                .and_then(|identifier| named_entries(identifier).last().copied())
+                .and_then(text)
+            else {
+                return Some(ImportBinding::Opaque);
+            };
+            names.push(bound);
         }
         (ProgrammingLanguage::Scala, "import_declaration") => {
-            let entries = named_entries(node);
-            if let Some(selectors) = entries.iter().find(|entry| entry.kind() == "namespace_selectors") {
-                for selector in named_entries(*selectors) {
-                    match selector.kind() {
-                        "arrow_renamed_identifier" => {
-                            let renamed = selector.named_child(1)?;
-                            if text(renamed) != Some("_") { names.extend(text(renamed)); }
-                        }
-                        "identifier" => names.extend(text(selector)),
-                        _ => return Some(ImportBinding::Opaque),
-                    }
-                }
-                let mut cursor = selectors.walk();
-                if selectors.children(&mut cursor).any(|child| matches!(child.kind(), "_" | "*")) {
-                    return Some(ImportBinding::Opaque);
-                }
-            } else {
-                let mut cursor = node.walk();
-                if node.children(&mut cursor).any(|child| matches!(child.kind(), "_" | "*" | "namespace_wildcard")) {
-                    return Some(ImportBinding::Opaque);
-                }
-                names.extend(entries.last().copied().and_then(text));
+            if !scala_import_names(node, source, &mut names) {
+                return Some(ImportBinding::Opaque);
             }
         }
         (ProgrammingLanguage::Rust, "use_declaration") => {
-            if !rust_use_names(node.child_by_field_name("argument")?, None, source, &mut names) {
+            let complete = node
+                .child_by_field_name("argument")
+                .is_some_and(|argument| rust_use_names(argument, None, source, &mut names));
+            if !complete {
                 return Some(ImportBinding::Opaque);
             }
         }
@@ -591,8 +632,15 @@ pub(crate) fn import_binding<'source>(
                 return Some(ImportBinding::Opaque);
             }
             let mut cursor = node.walk();
-            let target = node.named_children(&mut cursor).find(|child| child.kind() != "comment")?;
-            names.extend(last_segment(target).and_then(text));
+            let bound = node
+                .named_children(&mut cursor)
+                .find(|child| child.kind() != "comment")
+                .and_then(last_segment)
+                .and_then(text);
+            let Some(bound) = bound else {
+                return Some(ImportBinding::Opaque);
+            };
+            names.push(bound);
         }
         (ProgrammingLanguage::Cpp, "namespace_alias_definition") => {
             names.extend(node.child_by_field_name("name").and_then(text));
@@ -672,6 +720,74 @@ pub(crate) fn import_binding<'source>(
         _ => return None,
     }
     Some(ImportBinding::Names(names))
+}
+
+/// Collects the names a Scala `import` binds; `false` when any of its
+/// expressions may bind names it does not spell (a wildcard, a `given`
+/// selector) or cannot be read.
+///
+/// The clause's expressions are flat siblings separated by `,` tokens: each
+/// is a `path` ending in nothing (its last segment is bound), a wildcard,
+/// a selector group, or an unbraced `as` rename. A rename binds its alias;
+/// an exclusion (`Other => _`, `Other as _`) binds nothing.
+fn scala_import_names<'source>(node: Node<'_>, source: &'source str, names: &mut Vec<&'source str>) -> bool {
+    let text = |node: Node<'_>| node.utf8_text(source.as_bytes()).ok().map(str::trim).filter(|text| !text.is_empty());
+    let renamed = |selector: Node<'_>, names: &mut Vec<&'source str>| match selector.child_by_field_name("alias") {
+        Some(alias) if alias.kind() == "wildcard" => true,
+        Some(alias) => text(alias).map(|alias| names.push(alias)).is_some(),
+        None => false,
+    };
+    // The last `path` segment of the expression being read, until a suffix
+    // (selectors, wildcard, rename) says the path is not itself bound.
+    let mut bare_path: Option<Node<'_>> = None;
+    let mut cursor = node.walk();
+    for (index, child) in node.children(&mut cursor).enumerate() {
+        if node.field_name_for_child(index as u32) == Some("path") {
+            if child.is_named() {
+                bare_path = Some(child);
+            }
+            continue;
+        }
+        match child.kind() {
+            "import" | "." | "comment" | "block_comment" => {}
+            "," => {
+                if let Some(path) = bare_path.take() {
+                    match text(path) {
+                        Some(bound) => names.push(bound),
+                        None => return false,
+                    }
+                }
+            }
+            "as_renamed_identifier" => {
+                bare_path = None;
+                if !renamed(child, names) {
+                    return false;
+                }
+            }
+            "namespace_selectors" => {
+                bare_path = None;
+                for selector in named_entries(child) {
+                    let complete = match selector.kind() {
+                        "identifier" | "operator_identifier" => text(selector).map(|bound| names.push(bound)).is_some(),
+                        "arrow_renamed_identifier" | "as_renamed_identifier" => renamed(selector, names),
+                        "comment" | "block_comment" => true,
+                        // A wildcard, or a `given` selector, imports names
+                        // the clause does not spell.
+                        _ => false,
+                    };
+                    if !complete {
+                        return false;
+                    }
+                }
+            }
+            // `namespace_wildcard`, and anything this reader does not know.
+            _ => return false,
+        }
+    }
+    match bare_path {
+        Some(path) => text(path).map(|bound| names.push(bound)).is_some(),
+        None => true,
+    }
 }
 
 /// The last name of a C++ (possibly qualified) name.

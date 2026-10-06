@@ -183,10 +183,11 @@ fn assert_projections_equal_uncached_queries(fixtures: Vec<PathBuf>) {
     // member kind whose owners are unselected (the case that needs owners
     // from outside the selection) is checked at both ends.
     let method: &[SymbolKindV2] = &[SymbolKindV2::Method];
-    let cells: [(Option<&[SymbolKindV2]>, &[Capability]); 11] = [
+    let cells: [(Option<&[SymbolKindV2]>, &[Capability]); 13] = [
         (None, &[Capability::Declarations]),
         (None, &[Capability::Containment]),
         (None, &[Capability::References]),
+        (None, &[Capability::Occurrences]),
         (None, &[Capability::Semantics]),
         (None, &[Capability::StructuredDocs]),
         (None, &[Capability::Diagnostics]),
@@ -194,12 +195,15 @@ fn assert_projections_equal_uncached_queries(fixtures: Vec<PathBuf>) {
         (None, &[Capability::Metrics]),
         (None, &Capability::ALL),
         (Some(method), &[Capability::Declarations]),
+        // Occurrences describe the whole file under any kind selection.
+        (Some(method), &[Capability::Semantics]),
         (Some(method), &Capability::ALL),
     ];
     let dir = TempDir::new().expect("temp");
     let cache = cache_in(&dir);
     let mut compared = 0usize;
     let mut stripped_references = 0usize;
+    let mut stripped_occurrences = 0usize;
     let mut stripped_parsed_docs = 0usize;
     let mut stripped_flags = 0usize;
     let mut stripped_metrics = 0usize;
@@ -230,6 +234,9 @@ fn assert_projections_equal_uncached_queries(fixtures: Vec<PathBuf>) {
                         record["relations"]["references"].as_array().is_some_and(|refs| !refs.is_empty())
                     });
                 }
+                if !query.requires(Capability::Occurrences) {
+                    stripped_occurrences += full["index"]["occurrences"].as_array().map_or(0, Vec::len);
+                }
                 if !query.requires(Capability::StructuredDocs) {
                     stripped_parsed_docs +=
                         count_records(&full, |record| !record["docs"]["parsed"].is_null());
@@ -249,6 +256,7 @@ fn assert_projections_equal_uncached_queries(fixtures: Vec<PathBuf>) {
     assert!(fixture_count >= 16, "only {fixture_count} fixtures");
     assert_eq!(compared, fixture_count * cells.len());
     assert!(stripped_references > 0, "no projection removed references");
+    assert!(stripped_occurrences > 0, "no projection removed occurrences");
     assert!(stripped_parsed_docs > 0, "no projection removed parsed docs");
     assert!(stripped_flags > 0, "no projection removed a set flag");
     assert!(stripped_metrics > 0, "no projection removed metrics");
@@ -285,11 +293,27 @@ fn widening_capabilities_runs_only_the_missing_passes() {
             parsed: false,
             diagnostics_runs: 0,
         },
+        // Recursion is read from the occurrences: reference edges alone
+        // cannot tell a proven self-call from a same-named one.
         WideningRow {
             language: ProgrammingLanguage::TypeScript,
             first: SymbolQuery::new().capabilities([Capability::References]),
             second: SymbolQuery::new().capabilities([Capability::Semantics]),
+            parsed: true,
+            diagnostics_runs: 0,
+        },
+        WideningRow {
+            language: ProgrammingLanguage::Rust,
+            first: SymbolQuery::new().capabilities([Capability::Occurrences]),
+            second: SymbolQuery::new().capabilities([Capability::Semantics]),
             parsed: false,
+            diagnostics_runs: 0,
+        },
+        WideningRow {
+            language: ProgrammingLanguage::TypeScript,
+            first: functions().capabilities([Capability::References]),
+            second: functions().capabilities([Capability::Occurrences]),
+            parsed: true,
             diagnostics_runs: 0,
         },
         WideningRow {
@@ -1288,4 +1312,80 @@ fn complexity_is_stored_once_and_served_on_warm_hits() {
             assert_eq!(served, uncached(&path, query), "{name}: then {query:?}");
         }
     }
+}
+
+/// A selective entry of a source whose unselected owner declares 65,537
+/// generic parameters is stored from the first query and served warm as a
+/// real `Hit`, and the inner type's base keeps the owner's shadowing (no
+/// target ID) both times.
+fn check_oversized_owner_warm_hit(language: ProgrammingLanguage) {
+    use crate::symbols_relations::{OVERFLOWS, boundary_query, boundary_row, boundary_source, check_boundary_child};
+
+    let row = boundary_row(language);
+    let sources = TempDir::new().expect("sources");
+    let path = sources.path().join(format!("boundary.{}", row.extension));
+    std::fs::write(&path, boundary_source(row, OVERFLOWS)).expect("write source");
+    let dir = TempDir::new().expect("temp");
+    let cache = cache_in(&dir);
+    let query = boundary_query(row);
+    let cold = cache.query(read(&path), &query).expect("cold");
+    assert!(matches!(cold.lookup, CacheLookup::Miss(_)), "{}: cold {:?}", language.name(), cold.lookup);
+    check_boundary_child(&format!("{} cold", language.name()), row, &cold.result.index);
+    let (warm, work) = counted(|| cache.query(read(&path), &query).expect("warm"));
+    let label = format!("{} warm", language.name());
+    assert_eq!(warm.lookup, CacheLookup::Hit, "{label}");
+    assert_eq!(work, WorkCounters::default(), "{label}: no work");
+    check_boundary_child(&label, row, &warm.result.index);
+}
+
+/// One test per generic reader; each analyzes a source of about half a
+/// megabyte once.
+mod oversized_owner_warm_hits {
+    use super::*;
+
+    #[test]
+    fn rust() { check_oversized_owner_warm_hit(ProgrammingLanguage::Rust) }
+    #[test]
+    fn typescript() { check_oversized_owner_warm_hit(ProgrammingLanguage::TypeScript) }
+    #[test]
+    fn go() { check_oversized_owner_warm_hit(ProgrammingLanguage::Go) }
+    #[test]
+    fn python() { check_oversized_owner_warm_hit(ProgrammingLanguage::Python) }
+    #[test]
+    fn java() { check_oversized_owner_warm_hit(ProgrammingLanguage::Java) }
+    #[test]
+    fn swift() { check_oversized_owner_warm_hit(ProgrammingLanguage::Swift) }
+    #[test]
+    fn scala() { check_oversized_owner_warm_hit(ProgrammingLanguage::Scala) }
+    #[test]
+    fn csharp() { check_oversized_owner_warm_hit(ProgrammingLanguage::CSharp) }
+    #[test]
+    fn cpp() { check_oversized_owner_warm_hit(ProgrammingLanguage::Cpp) }
+}
+
+/// The Rust impl inside an oversized generic function, stored by a
+/// method-only query and widened by Containment, keeps a textual container
+/// and no parent, and the next Containment request is a real `Hit` with
+/// the same facts.
+#[test]
+fn an_oversized_owner_impl_row_widens_and_hits_with_the_same_facts() {
+    use crate::symbols_relations::{check_impl_facts, oversized_impl_row};
+
+    let row = oversized_impl_row();
+    let sources = TempDir::new().expect("sources");
+    let path = sources.path().join("oversized_impl.rs");
+    std::fs::write(&path, row.source).expect("write source");
+    let dir = TempDir::new().expect("temp");
+    let cache = cache_in(&dir);
+    let methods = SymbolQuery::new().kinds([SymbolKindV2::Method]);
+    let contained = methods.clone().capabilities([Capability::Containment]);
+    let (_, cold, _) = cached(&cache, read(&path), &methods);
+    assert!(cold["index"]["symbols"].as_array().is_some_and(|symbols| !symbols.is_empty()), "stored");
+    let widened = cache.query(read(&path), &contained).expect("widen");
+    assert_eq!(widened.lookup, CacheLookup::WidenedCapabilities { parsed: true }, "widened");
+    check_impl_facts("widened", &row, &widened.result.index, &widened.result.index, true);
+    let (warm, work) = counted(|| cache.query(read(&path), &contained).expect("warm"));
+    assert_eq!(warm.lookup, CacheLookup::Hit, "warm");
+    assert_eq!(work, WorkCounters::default(), "warm: no work");
+    check_impl_facts("warm", &row, &warm.result.index, &warm.result.index, true);
 }

@@ -919,7 +919,10 @@ means exit status `1`.
 complete index per scanned file, whether or not anything matched, with every
 kind, every pass (`Parse`, `Bind`, `Semantic`, `Docs`, `Diagnostics`),
 every capability (the test and deprecation flags and the `metrics` facet
-included), imports, exports, diagnostics and `declaration_text`. A
+included), imports, exports, diagnostics, `declaration_text`, and the
+file's reference `occurrences` and `reference_coverage` (see
+[Scope-Aware References](./references.md); their names stay in-file, without
+the file prefix records carry). A
 callable's `metrics.lines` and `metrics.cyclomatic` therefore appear on every
 `--json-full` record, but on `--json`/`--jsonl` records only when
 `--undocumented` or `--min-params` asked for metrics (see

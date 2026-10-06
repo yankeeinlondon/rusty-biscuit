@@ -947,6 +947,7 @@ fn the_cache_entry_records_the_coverage_it_holds() {
             "declarations",
             "containment",
             "references",
+            "occurrences",
             "semantics",
             "structured_docs",
             "diagnostics",
@@ -955,6 +956,11 @@ fn the_cache_entry_records_the_coverage_it_holds() {
         ])
     );
     assert!(entry["diagnostics_fingerprint"].is_string(), "diagnostics carry their fingerprint");
+    assert!(entry["occurrences"].is_array(), "the entry stores the occurrences");
+    assert!(
+        entry["reference_coverage"].as_array().is_some_and(|regions| !regions.is_empty()),
+        "the entry stores the coverage, the file-level region at least"
+    );
     let stored_rules: Vec<&str> = entry["diagnostics"]
         .as_array()
         .expect("entry diagnostics")
@@ -971,6 +977,11 @@ fn the_cache_entry_records_the_coverage_it_holds() {
             index["completed_passes"],
             json!(["Parse", "Bind", "Semantic", "Docs", "Diagnostics"]),
             "{label}"
+        );
+        assert_eq!(
+            index["reference_coverage"],
+            entry["reference_coverage"],
+            "{label}: the complete index reports the stored coverage"
         );
         let rules: Vec<&str> = index["diagnostics"]
             .as_array()

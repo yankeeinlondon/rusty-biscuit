@@ -14,6 +14,8 @@ static DEFINITION_CAPTURES: AtomicU64 = AtomicU64::new(0);
 static SHARED_CONTEXT_STEPS: AtomicU64 = AtomicU64::new(0);
 static RELATION_LINKS: AtomicU64 = AtomicU64::new(0);
 static COMPLEXITY_WALKS: AtomicU64 = AtomicU64::new(0);
+static REFERENCE_CAPTURES: AtomicU64 = AtomicU64::new(0);
+static OCCURRENCE_RESOLUTIONS: AtomicU64 = AtomicU64::new(0);
 
 /// A snapshot of the process-wide work counts.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -45,6 +47,14 @@ pub struct WorkCounters {
     /// measured callable of a language with counting rules, and none for a
     /// query without metrics or a language without rules.
     pub complexity_walks: u64,
+    /// Executions of a file's references query. One analysis runs it at
+    /// most once, for the occurrences and the diagnostics together, and not
+    /// at all without references or diagnostics.
+    pub reference_captures: u64,
+    /// Resolutions of a file's reference occurrences (scope tree, lookup,
+    /// coverage): one per analysis that binds references, from which the
+    /// reference edges and recursion are both read.
+    pub occurrence_resolutions: u64,
 }
 
 impl WorkCounters {
@@ -57,6 +67,8 @@ impl WorkCounters {
             shared_context_steps: self.shared_context_steps - earlier.shared_context_steps,
             relation_links: self.relation_links - earlier.relation_links,
             complexity_walks: self.complexity_walks - earlier.complexity_walks,
+            reference_captures: self.reference_captures - earlier.reference_captures,
+            occurrence_resolutions: self.occurrence_resolutions - earlier.occurrence_resolutions,
         }
     }
 }
@@ -76,6 +88,8 @@ pub fn work_counters() -> WorkCounters {
         shared_context_steps: SHARED_CONTEXT_STEPS.load(Ordering::Relaxed),
         relation_links: RELATION_LINKS.load(Ordering::Relaxed),
         complexity_walks: COMPLEXITY_WALKS.load(Ordering::Relaxed),
+        reference_captures: REFERENCE_CAPTURES.load(Ordering::Relaxed),
+        occurrence_resolutions: OCCURRENCE_RESOLUTIONS.load(Ordering::Relaxed),
     }
 }
 
@@ -101,4 +115,12 @@ pub(crate) fn count_relation_link() {
 
 pub(crate) fn count_complexity_walk() {
     COMPLEXITY_WALKS.fetch_add(1, Ordering::Relaxed);
+}
+
+pub(crate) fn count_reference_capture() {
+    REFERENCE_CAPTURES.fetch_add(1, Ordering::Relaxed);
+}
+
+pub(crate) fn count_occurrence_resolution() {
+    OCCURRENCE_RESOLUTIONS.fetch_add(1, Ordering::Relaxed);
 }

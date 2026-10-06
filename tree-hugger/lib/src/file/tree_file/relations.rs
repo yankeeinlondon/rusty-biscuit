@@ -19,7 +19,7 @@ use crate::analysis::counters::{count_relation_link, count_shared_context_steps}
 use crate::analysis::qualifying_prefixes;
 use crate::file::extract::{
     BasePath, ImplHeader, ImportBinding, PathAnchor, WrittenBase, declared_bases, declaration_keyword, base_path,
-    declared_generics, file_namespace_index, namespace_name, impl_header, impl_of_member, impl_type_parameters, import_binding,
+    declared_generic_names, file_namespace_index, namespace_name, impl_header, impl_of_member, impl_type_parameters, import_binding,
 };
 use crate::shared::{ProgrammingLanguage, SymbolKindV2, SymbolRecord, SymbolRef};
 
@@ -150,8 +150,11 @@ fn reads_imports(language: ProgrammingLanguage) -> bool {
 struct FileWalk<'a, 'tree> {
     /// Names imported at each in-file scope (`""` for the root).
     imports: HashMap<String, HashSet<&'a str>>,
-    /// Scopes holding a wildcard import or C++ using-directive.
+    /// Scopes holding a wildcard import, C++ using-directive or Swift
+    /// whole-module import.
     opaque: HashSet<String>,
+    /// Scopes holding an import whose bound names cannot be read.
+    unreadable: HashSet<String>,
     /// Rust `impl` blocks in source order.
     impls: Vec<Node<'tree>>,
     extensions: Vec<Node<'tree>>,
@@ -314,6 +317,10 @@ impl<'a, 'tree> Declarations<'a, 'tree> {
                     match binding {
                         ImportBinding::Names(names) => walk.imports.entry(scope).or_default().extend(names),
                         ImportBinding::Opaque => {
+                            walk.unreadable.insert(scope.clone());
+                            walk.opaque.insert(scope);
+                        }
+                        ImportBinding::Module => {
                             walk.opaque.insert(scope);
                         }
                     }
@@ -411,6 +418,29 @@ impl<'a, 'tree> Declarations<'a, 'tree> {
         None
     }
 
+    /// Whether a binding visible from `scopes` may give `first` a meaning
+    /// of this file: a declaration or qualifier of that name in any lexical
+    /// scope out to the root, an import that names it, or an import whose
+    /// names cannot be read. Unlike [`Self::binding_scope`] nothing ends the
+    /// walk early, so `false` proves that no same-file binding exists;
+    /// wildcard and whole-module imports, inherited member types and
+    /// declarations in other files are not evidence.
+    fn may_bind(&self, first: &str, scopes: &[&str]) -> bool {
+        let walk = self.walk();
+        scopes.iter().enumerate().any(|(position, &prefix)| {
+            count_shared_context_steps(1);
+            let is_class = self.by_qualified.get(prefix).is_some_and(|owners| {
+                owners.iter().any(|&idx| is_type_like_kind(self.entries[idx].kind))
+            });
+            if is_class && !class_scope_is_lexical(self.language, position == 0) {
+                return false;
+            }
+            walk.imports.get(prefix).is_some_and(|names| names.contains(first))
+                || walk.unreadable.contains(prefix)
+                || self.is_bound(&self.join(prefix, first))
+        })
+    }
+
     /// The record a written path names, if exactly one eligible declaration
     /// of this file is that name.
     ///
@@ -494,6 +524,11 @@ impl<'a, 'tree> Declarations<'a, 'tree> {
     /// Java inner class of a generic class, a Rust item inside a generic
     /// function) and, in Rust, of every enclosing `impl`. `skip` is the
     /// record `node` declares, whose own list `own` already holds.
+    ///
+    /// Names are read without numbering them: an enclosing owner whose list
+    /// is too long for `GenericParam::position` still binds every name it
+    /// declares. Whether that owner's record can be built is decided only
+    /// where the owner is selected, never here.
     fn type_parameters_around(&self, node: Node<'_>, skip: Option<usize>, mut own: Vec<String>) -> Vec<String> {
         let mut previous = skip;
         let mut ancestor = node.parent();
@@ -502,9 +537,7 @@ impl<'a, 'tree> Declarations<'a, 'tree> {
                 && Some(owner) != previous
             {
                 let entry = &self.entries[owner];
-                if let Ok(generics) = declared_generics(entry.declaration, entry.name, self.language, self.source) {
-                    own.extend(generics.params.into_iter().map(|param| param.name));
-                }
+                own.extend(declared_generic_names(entry.declaration, entry.name, self.language, self.source));
                 previous = Some(owner);
             } else if self.language == ProgrammingLanguage::Rust && current.kind() == "impl_item" {
                 own.extend(impl_type_parameters(current, self.source));
@@ -635,17 +668,20 @@ fn written_bases(
             .chain(bases.unclassified.iter().map(|base| (base, BaseRelation::Unclassified))).collect();
         ordered.sort_by_key(|(base, _)| base.start_byte);
         for (base, mut category) in ordered {
+            // A built-in spelling (Go `int`, Swift `Int`, `Swift.Int`,
+            // `Unicode.Scalar`) is no relation only when nothing in view
+            // rebinds its first segment; a shadowed one is kept, resolved
+            // when the lookup proves a declaration and as written otherwise.
+            if base.builtin_spelling
+                && let Some(first) = base.path.as_ref().and_then(|path| path.segments.first())
+                && !type_params.contains(first)
+                && !declarations.may_bind(first, &scopes)
+            {
+                continue;
+            }
             let resolved = base.path.as_ref().and_then(|path| {
                 declarations.resolve(path, &scopes, &modules, &type_params, is_base_kind)
             });
-            if language == ProgrammingLanguage::Swift && resolved.is_none()
-                && declaration_keyword(input.declaration, language).as_deref() == Some("enum")
-                && matches!(category, BaseRelation::Unclassified)
-                && matches!(base.text.as_str(), "Int" | "Int8" | "Int16" | "Int32" | "Int64"
-                    | "UInt" | "UInt8" | "UInt16" | "UInt32" | "UInt64" | "String" | "Character"
-                    | "Float" | "Double" | "Unicode.Scalar") {
-                continue;
-            }
             let target = SymbolRef {
                 id: resolved.map(|owner| records[owner].id.clone()),
                 name: base.text.clone(),

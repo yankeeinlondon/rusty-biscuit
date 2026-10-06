@@ -11,10 +11,12 @@ use super::{
 
 mod facets;
 mod kinds;
+mod occurrences;
 mod types;
 
 pub use facets::*;
 pub use kinds::*;
+pub use occurrences::*;
 pub use types::*;
 
 /// Top-level v2 symbol record.
@@ -90,6 +92,14 @@ pub struct FileSymbolIndex {
     pub exports: Vec<ExportRecord>,
     #[serde(default)]
     pub diagnostics: Vec<Diagnostic>,
+    /// Every reference in the file, whatever kinds were selected; empty
+    /// unless `Capability::Occurrences` was computed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub occurrences: Vec<Occurrence>,
+    /// The coverage of each owning region of the file, beside
+    /// `occurrences` (empty exactly when they were not computed).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reference_coverage: Vec<ReferenceCoverage>,
 }
 
 /// Deterministic stable symbol key used to derive `SymbolId`.

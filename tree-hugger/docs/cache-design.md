@@ -194,7 +194,7 @@ file's records, imports, exports and every analysis pass but diagnostics:
 | Input | Where it comes from | Changes when |
 |---|---|---|
 | schema version | `SchemaVersion::CURRENT` (4.3) | the record shape changes |
-| implementation version | crate version and `EXTRACTOR_REVISION` (`0.1.0+rev.29`) | extraction code changes |
+| implementation version | crate version and `EXTRACTOR_REVISION` (`0.1.0+rev.30`) | extraction code changes |
 | grammar identity | the compiled grammar: name, declared version (if any), ABI, node-kind, field and parse-state counts | a grammar crate is upgraded |
 | grammar ID | the grammar variant (`typescript` or `tsx`, …) | the file's grammar variant differs |
 | query text | the effective `locals`, `imports` and `references` query text, with inherited vendored queries and overlays resolved | a `.scm` file the analysis compiles changes |
@@ -243,7 +243,9 @@ rebuilding the crate.
   "records": [ ... ],
   "imports": [ ... ],
   "exports": [ ... ],
-  "diagnostics": []
+  "diagnostics": [],
+  "occurrences": [],
+  "reference_coverage": []
 }
 ```
 
@@ -256,6 +258,12 @@ rebuilding the crate.
   `declarations`.
 - `diagnostics_fingerprint` is `null` exactly when `diagnostics` is not
   among the capabilities, and then `diagnostics` is empty.
+- `occurrences` and `reference_coverage` hold the whole file's
+  [reference evidence](./references.md) when `occurrences` is among the
+  capabilities, and are empty otherwise; under that capability
+  `reference_coverage` always has at least the file-level region. Both keys
+  are required. Stricter checks of their contents (spans, confidence and
+  target consistency) are **planned** with the next record schema.
 - `records` holds every record of the covered kinds, after the entry's
   passes ran. `file` is the path exactly as analyzed (the file's identity),
   since the records repeat it.
@@ -283,11 +291,12 @@ flowchart TD
 ```
 
 The passes that work from stored records alone are the docs pass, the
-semantic pass (when references are stored) and containment (when every kind
+semantic pass (when occurrences are stored: the reference edges alone
+cannot tell a proven self-call from a same-named one) and containment (when every kind
 is stored, since a member's owner can be of any kind, and the file is not
 Rust: a Rust impl member's owner is its impl's resolved self type, which no
 record retains, see [Declared Type Relations](./type-relations.md#rust-impls)).
-References,
+References, occurrences,
 diagnostics, flags and metrics need the syntax tree (attributes, the
 declaration's parameter list), so they parse the file; the definitions query
 runs again with them, because binding and semantic lint consume its live
@@ -308,8 +317,9 @@ request for structured docs runs just the docs pass over the stored records
 (WidenedCapabilities, no parse) and rewrites the entry with both.
 
 Every result is **narrowed** to the request before it is returned: kinds that
-were not asked for are dropped, and relations, semantics, parsed docs,
-export targets, diagnostics, flags, metrics and each record's
+were not asked for are dropped, and relations, occurrences and coverage,
+semantics, parsed docs, export targets, diagnostics, flags, metrics and each
+record's
 `provenance.parse_pass` are reduced to what the requested capabilities
 produce. A narrow request served from a
 wide entry is therefore identical to an uncached run of the narrow request.

@@ -586,6 +586,17 @@ const fn bases(qualified_name: &'static str, extends: &'static [Target]) -> Owne
     Owner { unclassified: &[], qualified_name, extends, implements: &[] }
 }
 
+/// `ReviewOuter.ReviewChild`, whose single written base lands in `extends`
+/// when it resolves to a class and is unclassified otherwise.
+const fn scala_child(base: &'static [Target]) -> Owner {
+    match base {
+        [Target { resolves_to: Some(_), .. }] => {
+            Owner { qualified_name: "ReviewOuter.ReviewChild", extends: base, implements: &[], unclassified: &[] }
+        }
+        _ => Owner { qualified_name: "ReviewOuter.ReviewChild", extends: &[], implements: &[], unclassified: base },
+    }
+}
+
 /// A row of written bases alone.
 const fn row(
     label: &'static str,
@@ -595,6 +606,99 @@ const fn row(
     owners: &'static [Owner],
 ) -> PathMeaningRow {
     PathMeaningRow { label, language, extension, source, owners, impl_members: &[], untouched: &[] }
+}
+
+const fn implementing(qualified_name: &'static str, implements: &'static [Target]) -> Owner {
+    Owner { qualified_name, extends: &[], implements, unclassified: &[] }
+}
+
+const fn unclassified(qualified_name: &'static str, unclassified: &'static [Target]) -> Owner {
+    Owner { qualified_name, extends: &[], implements: &[], unclassified }
+}
+
+/// Invokes `$row!` with every Go predeclared non-interface type name.
+macro_rules! go_predeclared_names {
+    ($row:ident) => {
+        $row!("bool", "byte", "complex64", "complex128", "float32", "float64", "int", "int8", "int16", "int32",
+            "int64", "rune", "string", "uint", "uint8", "uint16", "uint32", "uint64", "uintptr")
+    };
+}
+
+/// Invokes `$row!` with every simple Swift standard raw-value type name;
+/// `Unicode.Scalar` is written out by each row.
+macro_rules! swift_raw_type_names {
+    ($row:ident) => {
+        $row!("Int", "Int8", "Int16", "Int32", "Int64", "UInt", "UInt8", "UInt16", "UInt32", "UInt64", "String",
+            "Character", "Float", "Double")
+    };
+}
+
+macro_rules! go_local_interface_row {
+    ($($name:literal),+) => {
+        row("Go same-file interfaces named like predeclared types", L::Go, "go",
+            concat!("package shapes\n", $("\ntype ", $name, " interface{ M() }\ntype Child_", $name, " interface{ ", $name, " }\n"),+),
+            &[$(bases(concat!("shapes.Child_", $name), &[to($name, concat!("shapes.", $name))])),+])
+    };
+}
+
+macro_rules! go_alias_row {
+    ($($name:literal),+) => {
+        row("Go aliases named like predeclared types", L::Go, "go",
+            concat!("package shapes\n\ntype Target interface{ M() }\n",
+                $("\ntype ", $name, " = Target\ntype Child_", $name, " interface{ ", $name, " }\n"),+),
+            &[$(bases(concat!("shapes.Child_", $name), &[text($name)])),+])
+    };
+}
+
+macro_rules! go_function_local_row {
+    ($($name:literal),+) => {
+        row("Go function-local interfaces named like predeclared types", L::Go, "go",
+            concat!("package shapes\n\nfunc Scope() {\n",
+                $("\ttype ", $name, " interface{ M() }\n\ttype Child_", $name, " interface{ ", $name, " }\n"),+, "}\n"),
+            &[$(bases(concat!("shapes.Scope.Child_", $name), &[to($name, concat!("shapes.Scope.", $name))])),+])
+    };
+}
+
+macro_rules! swift_alias_row {
+    ($($name:literal),+) => {
+        row("Swift aliases named like standard raw types", L::Swift, "swift",
+            concat!("protocol Target {}\n", $("typealias ", $name, " = Target\nenum E_", $name, ": ", $name, " { case a }\n"),+,
+                "enum Unicode { typealias Scalar = Target }\nenum E_Scalar: Unicode.Scalar { case a }\n"),
+            &[$(unclassified(concat!("E_", $name), &[text($name)])),+,
+              unclassified("E_Scalar", &[text("Unicode.Scalar")])])
+    };
+}
+
+macro_rules! swift_selective_import_row {
+    ($($name:literal),+) => {
+        row("Swift selective imports named like standard raw types", L::Swift, "swift",
+            concat!("import Foundation\n", $("import protocol Lib.", $name, "\n"),+, "import enum Lib.Unicode\n",
+                $("enum E_", $name, ": ", $name, " { case a }\n"),+, "enum E_Scalar: Unicode.Scalar { case a }\n"),
+            &[$(unclassified(concat!("E_", $name), &[text($name)])),+,
+              unclassified("E_Scalar", &[text("Unicode.Scalar")])])
+    };
+}
+
+macro_rules! swift_local_protocol_row {
+    ($($name:literal),+) => {
+        row("Swift same-file protocols named like standard raw types", L::Swift, "swift",
+            concat!($("protocol ", $name, " {}\nenum E_", $name, ": ", $name, " { case a }\n"),+,
+                "enum Unicode { protocol Scalar {} }\nenum E_Scalar: Unicode.Scalar { case a }\n"),
+            &[$(implementing(concat!("E_", $name), &[to($name, $name)])),+,
+              implementing("E_Scalar", &[to("Unicode.Scalar", "Unicode.Scalar")])])
+    };
+}
+
+macro_rules! swift_standard_raw_type_row {
+    ($($name:literal),+) => {
+        row("Swift unshadowed standard raw types, bare and module-qualified", L::Swift, "swift",
+            concat!("import Foundation\n",
+                $("enum E_", $name, ": ", $name, " { case a }\nenum Q_", $name, ": Swift.", $name, " { case a }\n"),+,
+                "enum E_Scalar: Unicode.Scalar { case a }\nenum Q_Scalar: Swift.Unicode.Scalar { case a }\n",
+                "enum RawCase: Swift.Int { case a = 1 }\nenum RawScalar: Unicode.Scalar { case a = \"x\" }\n"),
+            &[$(bases(concat!("E_", $name), &[]), bases(concat!("Q_", $name), &[])),+,
+              bases("E_Scalar", &[]), bases("Q_Scalar", &[]), bases("RawCase", &[]), bases("RawScalar", &[])])
+    };
 }
 
 /// A target resolves only when its root, every intermediate owner and the
@@ -645,6 +749,62 @@ pub const PATH_MEANING_MATRIX: &[PathMeaningRow] = &[
     row("Scala imported alias in a block package", L::Scala, "scala",
         "package sample { import lib.{Other => Base}; class Base; class Child extends Base }\n",
         &[Owner { qualified_name: "sample.Child", extends: &[], implements: &[], unclassified: &[text("Base")] }]),
+    // Every expression of a Scala `import` binds, in both rename forms; a
+    // finite rename or exclusion hides nothing else, only a wildcard does.
+    row("Scala single import", L::Scala, "scala",
+        "class ReviewBase\nobject ReviewOuter {\n  import lib.ReviewBase\n  class ReviewChild extends ReviewBase\n}\n",
+        &[scala_child(&[text("ReviewBase")])]),
+    row("Scala comma-separated imports", L::Scala, "scala",
+        "class ReviewBase\ntrait ReviewOther\nobject ReviewOuter {\n  import lib.ReviewBase, lib.ReviewOther\n  \
+         class ReviewChild extends ReviewBase with ReviewOther\n}\n",
+        &[Owner { qualified_name: "ReviewOuter.ReviewChild", extends: &[], implements: &[text("ReviewOther")],
+                  unclassified: &[text("ReviewBase")] }]),
+    row("Scala plain import before a selector group", L::Scala, "scala",
+        "class ReviewBase\nobject ReviewOuter {\n  import lib.ReviewBase, other.{Other}\n  class ReviewChild extends ReviewBase\n}\n",
+        &[scala_child(&[text("ReviewBase")])]),
+    row("Scala second selector group", L::Scala, "scala",
+        "class ReviewBase\nobject ReviewOuter {\n  import lib.{Other}, lib.{ReviewBase}\n  class ReviewChild extends ReviewBase\n}\n",
+        &[scala_child(&[text("ReviewBase")])]),
+    row("Scala selector group before a plain import", L::Scala, "scala",
+        "class ReviewBase\nobject ReviewOuter {\n  import lib.{ReviewBase}, other.Other\n  class ReviewChild extends ReviewBase\n}\n",
+        &[scala_child(&[text("ReviewBase")])]),
+    row("Scala arrow rename", L::Scala, "scala",
+        "class ReviewBase\nobject ReviewOuter {\n  import lib.{Other => ReviewBase}\n  class ReviewChild extends ReviewBase\n}\n",
+        &[scala_child(&[text("ReviewBase")])]),
+    row("Scala unbraced `as` rename", L::Scala, "scala",
+        "class ReviewBase\nobject ReviewOuter {\n  import lib.Other as ReviewBase\n  class ReviewChild extends ReviewBase\n}\n",
+        &[scala_child(&[text("ReviewBase")])]),
+    row("Scala braced `as` rename", L::Scala, "scala",
+        "class ReviewBase\nobject ReviewOuter {\n  import lib.{Other as ReviewBase}\n  class ReviewChild extends ReviewBase\n}\n",
+        &[scala_child(&[text("ReviewBase")])]),
+    row("Scala braced `as` rename of an unrelated name", L::Scala, "scala",
+        "class ReviewBase\nobject ReviewOuter {\n  import lib.{Other as Renamed}\n  class ReviewChild extends ReviewBase\n}\n",
+        &[scala_child(&[to("ReviewBase", "ReviewBase")])]),
+    row("Scala braced `as _` exclusion", L::Scala, "scala",
+        "class ReviewBase\nobject ReviewOuter {\n  import lib.{Other as _}\n  class ReviewChild extends ReviewBase\n}\n",
+        &[scala_child(&[to("ReviewBase", "ReviewBase")])]),
+    row("Scala arrow exclusion", L::Scala, "scala",
+        "class ReviewBase\nobject ReviewOuter {\n  import lib.{Other => _}\n  class ReviewChild extends ReviewBase\n}\n",
+        &[scala_child(&[to("ReviewBase", "ReviewBase")])]),
+    row("Scala unbraced `as _` exclusion", L::Scala, "scala",
+        "class ReviewBase\nobject ReviewOuter {\n  import lib.Other as _\n  class ReviewChild extends ReviewBase\n}\n",
+        &[scala_child(&[to("ReviewBase", "ReviewBase")])]),
+    row("Scala renamed selectors beside a plain import of an unrelated name", L::Scala, "scala",
+        "class ReviewBase\nobject ReviewOuter {\n  import lib.{Other as Renamed, Third => _}, other.Fourth\n  \
+         class ReviewChild extends ReviewBase\n}\n",
+        &[scala_child(&[to("ReviewBase", "ReviewBase")])]),
+    row("Scala alias with a wildcard and an outer-only base", L::Scala, "scala",
+        "class ReviewBase\nobject ReviewOuter {\n  import lib.{Other => Alias, _}\n  class ReviewChild extends ReviewBase\n}\n",
+        &[scala_child(&[text("ReviewBase")])]),
+    row("Scala wildcard in a later expression", L::Scala, "scala",
+        "class ReviewBase\nobject ReviewOuter {\n  import lib.Other, other.*\n  class ReviewChild extends ReviewBase\n}\n",
+        &[scala_child(&[text("ReviewBase")])]),
+    row("Scala wildcard with a stronger local base", L::Scala, "scala",
+        "class ReviewBase\nobject ReviewOuter {\n  import lib._\n  class ReviewBase\n  class ReviewChild extends ReviewBase\n}\n",
+        &[scala_child(&[to("ReviewBase", "ReviewOuter.ReviewBase")])]),
+    row("Scala no-import control", L::Scala, "scala",
+        "class ReviewBase\nobject ReviewOuter {\n  class ReviewChild extends ReviewBase\n}\n",
+        &[scala_child(&[to("ReviewBase", "ReviewBase")])]),
     row("Scala constructor arguments stay written", L::Scala, "scala",
         "class Base[A](x: Int)\ntrait T\nclass Child extends Base[Int](1) with T\n",
         &[Owner { qualified_name: "Child", extends: &[to("Base[Int](1)", "Base")], implements: &[to("T", "T")], unclassified: &[] }]),
@@ -970,6 +1130,34 @@ pub const PATH_MEANING_MATRIX: &[PathMeaningRow] = &[
         "go",
         "package shapes\n\ntype Base interface{ M() }\n\ntype Iface[Base any] interface {\n\tBase\n}\n",
         &[bases("shapes.Iface", &[text("Base")])],
+    ),
+    // A built-in spelling is no relation only when no binding in view gives
+    // it another meaning: a same-file declaration (package-level or in an
+    // enclosing function) keeps and resolves the base, an alias or import
+    // keeps it as written.
+    go_predeclared_names!(go_local_interface_row),
+    go_predeclared_names!(go_alias_row),
+    go_predeclared_names!(go_function_local_row),
+    row(
+        "Go predeclared types and constraint terms",
+        L::Go,
+        "go",
+        "package shapes\n\ntype Plain interface{ int }\ntype Tilde interface{ ~string }\n\
+         type Union interface{ int8 | uint16 }\n\nfunc Elsewhere() {\n\ttype rune interface{ M() }\n}\n\n\
+         type Outside interface{ rune }\n",
+        &[bases("shapes.Plain", &[]), bases("shapes.Tilde", &[]), bases("shapes.Union", &[]),
+          bases("shapes.Outside", &[])],
+    ),
+    swift_raw_type_names!(swift_alias_row),
+    swift_raw_type_names!(swift_selective_import_row),
+    swift_raw_type_names!(swift_local_protocol_row),
+    swift_raw_type_names!(swift_standard_raw_type_row),
+    row(
+        "Swift module-qualified raw type under a same-file Swift owner",
+        L::Swift,
+        "swift",
+        "enum Swift { protocol Int {} }\nenum E: Swift.Int { case a }\nenum F: Swift.Double { case a }\n",
+        &[implementing("E", &[to("Swift.Int", "Swift.Int")]), unclassified("F", &[text("Swift.Double")])],
     ),
 ];
 
@@ -1315,4 +1503,243 @@ fn relation_resolution_grows_linearly_with_declarations() {
         }
     }
     assert!(failures.is_empty(), "relation resolution grew faster than the declarations:\n{}", failures.join("\n"));
+}
+
+/// One generic reader at the `u16` position boundary: an enclosing owner
+/// whose list starts with `ReviewBase` and holds `count` parameters in all,
+/// around a type whose base is written `ReviewBase` while a file-level
+/// `ReviewBase` also exists. The parameter shadows it whatever the list's
+/// length, so the base never gets the file-level declaration's ID.
+pub struct GenericBoundaryRow {
+    pub language: ProgrammingLanguage,
+    pub extension: &'static str,
+    /// The source, `{params}` standing for the comma-separated list.
+    pub template: &'static str,
+    /// The oversized owner's name, as the analysis error reports it.
+    pub owner: &'static str,
+    /// The kinds a selective query asks for: the inner type's, never the
+    /// owner's.
+    pub kinds: &'static [SymbolKindV2],
+    pub child: Owner,
+}
+
+const TYPE_KINDS: &[SymbolKindV2] = &[
+    SymbolKindV2::Type,
+    SymbolKindV2::Class,
+    SymbolKindV2::Interface,
+    SymbolKindV2::Enum,
+    SymbolKindV2::Trait,
+];
+
+const fn boundary(
+    language: ProgrammingLanguage,
+    extension: &'static str,
+    template: &'static str,
+    owner: &'static str,
+    child: Owner,
+) -> GenericBoundaryRow {
+    GenericBoundaryRow { language, extension, template, owner, kinds: TYPE_KINDS, child }
+}
+
+/// One row per language with an explicit generic-parameter reader.
+pub const GENERIC_BOUNDARY_ROWS: &[GenericBoundaryRow] = &[
+    boundary(L::Rust, "rs",
+        "pub trait ReviewBase {}\nfn factory<{params}>() { trait ReviewChild: ReviewBase {} }\n",
+        "factory", bases("factory::ReviewChild", &[text("ReviewBase")])),
+    boundary(L::TypeScript, "ts",
+        "class ReviewBase {}\nfunction factory<{params}>() { class ReviewChild extends ReviewBase {} }\n",
+        "factory", bases("factory.ReviewChild", &[text("ReviewBase")])),
+    boundary(L::Go, "go",
+        "package shapes\n\ntype ReviewBase interface{ M() }\n\n\
+         func factory[{params} any]() {\n\ttype ReviewChild interface{ ReviewBase }\n}\n",
+        "factory", bases("shapes.factory.ReviewChild", &[text("ReviewBase")])),
+    boundary(L::Python, "py",
+        "class ReviewBase:\n    pass\n\ndef factory[{params}]():\n    class ReviewChild(ReviewBase):\n        pass\n",
+        "factory", bases("factory.ReviewChild", &[text("ReviewBase")])),
+    boundary(L::Java, "java",
+        "class ReviewBase {}\nclass Holder { <{params}> void factory() { class ReviewChild extends ReviewBase {} } }\n",
+        "factory", bases("Holder.factory.ReviewChild", &[text("ReviewBase")])),
+    boundary(L::Swift, "swift",
+        "class ReviewBase {}\nfunc factory<{params}>() { class ReviewChild: ReviewBase {} }\n",
+        "factory",
+        Owner { qualified_name: "factory.ReviewChild", extends: &[], implements: &[], unclassified: &[text("ReviewBase")] }),
+    boundary(L::Scala, "scala",
+        "class ReviewBase\nobject Holder {\n  def factory[{params}](): Unit = {\n    class ReviewChild extends ReviewBase\n  }\n}\n",
+        "factory",
+        Owner { qualified_name: "Holder.factory.ReviewChild", extends: &[], implements: &[], unclassified: &[text("ReviewBase")] }),
+    // A C# method cannot declare a type, so the owner is a generic class and
+    // the query selects interfaces only.
+    GenericBoundaryRow {
+        language: L::CSharp,
+        extension: "cs",
+        template: "interface ReviewBase {}\nclass Holder<{params}> { interface IReviewChild : ReviewBase {} }\n",
+        owner: "Holder",
+        kinds: &[SymbolKindV2::Interface],
+        child: bases("Holder.IReviewChild", &[text("ReviewBase")]),
+    },
+    boundary(L::Cpp, "cpp",
+        "struct ReviewBase {};\ntemplate <{params}> void factory() { struct ReviewChild : ReviewBase {}; }\n",
+        "factory", bases("factory::ReviewChild", &[text("ReviewBase")])),
+];
+
+/// The parameter list of `count` names, `ReviewBase` first, spelled for
+/// `language`.
+pub fn boundary_params(language: ProgrammingLanguage, count: usize) -> String {
+    let keyword = if language == L::Cpp { "typename " } else { "" };
+    std::iter::once("ReviewBase".to_string())
+        .chain((0..count - 1).map(|index| format!("T{index}")))
+        .map(|name| format!("{keyword}{name}"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// The largest list `GenericParam::position` numbers, and one more.
+pub const FITS: usize = u16::MAX as usize + 1;
+pub const OVERFLOWS: usize = FITS + 1;
+
+pub fn boundary_source(row: &GenericBoundaryRow, count: usize) -> String {
+    row.template.replace("{params}", &boundary_params(row.language, count))
+}
+
+/// The selective query of a boundary row: its inner type's kinds only.
+pub fn boundary_query(row: &GenericBoundaryRow) -> SymbolQuery {
+    SymbolQuery::new().kinds(row.kinds.iter().copied())
+}
+
+/// Checks the row's inner type in `index`: its base keeps its text and no
+/// target ID, so the file-level `ReviewBase` is never claimed.
+pub fn check_boundary_child(label: &str, row: &GenericBoundaryRow, index: &FileSymbolIndex) {
+    check_owner_targets(label, index, index, std::slice::from_ref(&row.child));
+}
+
+/// The [`GENERIC_BOUNDARY_ROWS`] row of `language`.
+pub fn boundary_row(language: ProgrammingLanguage) -> &'static GenericBoundaryRow {
+    GENERIC_BOUNDARY_ROWS.iter().find(|row| row.language == language).expect("a boundary row")
+}
+
+/// With 65,536 parameters (last position `u16::MAX`) the parameter
+/// shadows the file-level declaration on the complete index (`complete`)
+/// or on a selective query that does not select the owner.
+fn check_boundary_fits(language: ProgrammingLanguage, complete: bool) {
+    let row = boundary_row(language);
+    let label = format!("{} {FITS} {}", language.name(), if complete { "complete" } else { "selective" });
+    let fits = write_temp(&boundary_source(row, FITS), row.extension);
+    let tree_file = TreeFile::new(fits.path()).expect("parse");
+    assert!(tree_file.syntax_diagnostics().is_empty(), "{label}: {:?}", tree_file.syntax_diagnostics());
+    let index = if complete {
+        tree_file.symbol_index_v2().expect("a full u16 list is representable")
+    } else {
+        tree_file.query(&boundary_query(row)).expect("selective").index
+    };
+    check_boundary_child(&label, row, &index);
+}
+
+/// With 65,537 parameters a selective query, which does not select the
+/// owner, still sees the binding (`complete` false), and the complete
+/// index, which does, reports the overflow instead of a truncated list.
+fn check_boundary_overflows(language: ProgrammingLanguage, complete: bool) {
+    let row = boundary_row(language);
+    let label = language.name();
+    let overflows = write_temp(&boundary_source(row, OVERFLOWS), row.extension);
+    let tree_file = TreeFile::new(overflows.path()).expect("parse");
+    if !complete {
+        let selective = tree_file.query(&boundary_query(row)).expect("the owner is not selected").index;
+        check_boundary_child(&format!("{label} {OVERFLOWS} selective"), row, &selective);
+        return;
+    }
+    match tree_file.symbol_index_v2() {
+        Err(tree_hugger::TreeHuggerError::TooManyGenericParameters { symbol, count, .. }) => {
+            assert_eq!((symbol.as_str(), count), (row.owner, OVERFLOWS), "{label}: overflow");
+        }
+        other => panic!("{label}: expected TooManyGenericParameters, got {:?}", other.map(|_| ())),
+    }
+}
+
+/// One test per reader and check: each analyzes a source of about half a
+/// megabyte once.
+mod generic_boundary {
+    use super::*;
+
+    macro_rules! sides {
+        ($($reader:ident => $language:expr),* $(,)?) => {
+            $(mod $reader {
+                use super::*;
+                #[test]
+                fn fits_complete() { check_boundary_fits($language, true) }
+                #[test]
+                fn fits_selective() { check_boundary_fits($language, false) }
+                #[test]
+                fn overflows_complete() { check_boundary_overflows($language, true) }
+                #[test]
+                fn overflows_selective() { check_boundary_overflows($language, false) }
+            })*
+        };
+    }
+
+    sides! {
+        rust => L::Rust,
+        typescript => L::TypeScript,
+        go => L::Go,
+        python => L::Python,
+        java => L::Java,
+        swift => L::Swift,
+        scala => L::Scala,
+        csharp => L::CSharp,
+        cpp => L::Cpp,
+    }
+
+    #[test]
+    fn every_generic_reader_has_a_row() {
+        let languages: Vec<_> = GENERIC_BOUNDARY_ROWS.iter().map(|row| row.language).collect();
+        assert_eq!(languages, [L::Rust, L::TypeScript, L::Go, L::Python, L::Java, L::Swift, L::Scala, L::CSharp, L::Cpp]);
+    }
+}
+
+/// A Rust impl inside a function whose oversized generic list declares the
+/// impl's self type name: the impl attaches to no file-level declaration on
+/// a type-only query, a method-only query, and one with Containment.
+pub fn oversized_impl_row() -> PathMeaningRow {
+    let source = format!(
+        "pub trait Base {{}}\npub struct ReviewBase;\n\
+         fn factory<{}>() {{ impl Base for ReviewBase {{ fn probe(&self) {{}} }} }}\n",
+        boundary_params(L::Rust, OVERFLOWS)
+    );
+    PathMeaningRow {
+        label: "Rust impl of an oversized enclosing function's generic parameter",
+        language: L::Rust,
+        extension: "rs",
+        source: Box::leak(source.into_boxed_str()),
+        owners: &[],
+        impl_members: OVERSIZED_IMPL_MEMBERS,
+        untouched: &["ReviewBase"],
+    }
+}
+
+const OVERSIZED_IMPL_MEMBERS: &[ImplMember] = &[ImplMember {
+    method: "probe",
+    container: "ReviewBase",
+    owner: None,
+    implements: Some(to("Base", "Base")),
+    container_kind: None,
+}];
+
+#[test]
+fn an_oversized_enclosing_generic_list_still_owns_its_impls() {
+    let row = oversized_impl_row();
+    let file = write_temp(row.source, row.extension);
+    let tree_file = TreeFile::new(file.path()).expect("parse");
+    let types = tree_file.query(&SymbolQuery::new().kinds(TYPE_KINDS.iter().copied())).expect("types").index;
+    let base = types.symbols.iter().find(|record| record.identity.name == "ReviewBase").expect("the struct");
+    assert!(base.relations.implements.is_empty(), "{} (type-only): `ReviewBase` implements nothing", row.label);
+    let methods = SymbolQuery::new().kinds([SymbolKindV2::Method]);
+    let contained = methods.clone().capabilities([tree_hugger::Capability::Containment]);
+    for (path, query, containment) in [("method-only", methods, false), ("method-only with containment", contained, true)] {
+        let index = tree_file.query(&query).expect("query").index;
+        check_impl_facts(&format!("{} ({path})", row.label), &row, &index, &index, containment);
+    }
+    assert!(
+        matches!(tree_file.symbol_index_v2(), Err(tree_hugger::TreeHuggerError::TooManyGenericParameters { .. })),
+        "{}: the selected owner overflows",
+        row.label
+    );
 }

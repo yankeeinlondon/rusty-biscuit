@@ -7,18 +7,21 @@ use std::cell::OnceCell;
 use std::cmp::Reverse;
 use std::collections::{HashMap, HashSet};
 
-use crate::analysis::counters::count_shared_context_steps;
+use crate::analysis::counters::{count_occurrence_resolution, count_shared_context_steps};
+use crate::analysis::occurrences::OccurrenceSyntax;
 use crate::error::TreeHuggerError;
 use crate::file::query::{Capability, SymbolQuery, SymbolQueryResult};
 use crate::file::tree_file::{MetadataSelection, RecordFacts, TreeFile};
 use crate::shared::{
-    AnalysisPass, CommentAttachment, DocsFacet, ExportRecord, FileSymbolIndex, ImportRecord,
-    ImportSymbol, ParsedDocs, ReferencedSymbol, SemanticFacet, SymbolId, SymbolKindV2,
-    SymbolRecord, SymbolRef, TriState,
+    AnalysisPass, CommentAttachment, Confidence, CoverageState, DocsFacet, ExportRecord,
+    FileSymbolIndex, ImportRecord, ImportSymbol, Occurrence, OccurrenceKind, ParsedDocs,
+    ReferenceCoverage, SemanticFacet, SymbolId, SymbolKindV2, SymbolRecord, SymbolRef, TriState,
 };
 
 pub mod counters;
 pub(crate) mod coverage;
+pub(crate) mod occurrences;
+pub(crate) mod scope;
 
 /// Runs the requested passes, after their prerequisites, over every kind, as
 /// [`TreeFile::query`] does.
@@ -34,8 +37,11 @@ pub fn analyze_file(
 struct PassPlan {
     /// Parent and member links only, without the reference query.
     containment: bool,
-    /// The full bind pass (containment, references, export targets).
+    /// The full bind pass (containment, references, export targets), which
+    /// resolves the file's occurrences to derive the reference edges.
     bind: bool,
+    /// The occurrences and their coverage stay in the result.
+    occurrences: bool,
     semantic: bool,
     docs: bool,
     diagnostics: bool,
@@ -46,6 +52,7 @@ impl PassPlan {
         Self {
             containment: query.requires(Capability::Containment),
             bind: query.requires(Capability::References),
+            occurrences: query.requires(Capability::Occurrences),
             semantic: query.requires(Capability::Semantics),
             docs: query.requires(Capability::StructuredDocs),
             diagnostics: query.requires(Capability::Diagnostics),
@@ -68,9 +75,10 @@ impl PassPlan {
 }
 
 /// Runs `query` over `tree_file`: the definition query runs once and its
-/// result feeds the records, the references and the diagnostics. The result
-/// is unfinished (in-file qualified names, no predicate applied), as the
-/// cache stores it.
+/// result feeds the records, the occurrences and the diagnostics, and the
+/// references query runs at most once for the occurrences and the
+/// diagnostics. The result is unfinished (in-file qualified names, no
+/// predicate applied), as the cache stores it.
 pub(crate) fn run_query(
     tree_file: &TreeFile,
     query: &SymbolQuery,
@@ -78,19 +86,38 @@ pub(crate) fn run_query(
     let plan = PassPlan::for_query(query);
     let selection = MetadataSelection::for_kinds(query.selected_kinds());
 
-    let definitions = tree_file.definitions(&selection)?;
+    let (definitions, scope_nodes) = if plan.bind {
+        tree_file.definitions_with_scopes(&selection)?
+    } else {
+        (tree_file.definitions(&selection)?, Vec::new())
+    };
     let imports = tree_file.imported_symbols()?;
-    let references = if plan.bind || plan.diagnostics {
-        Some(tree_file.references_from(&definitions, &imports)?)
+    let captures = if plan.bind || plan.diagnostics {
+        tree_file.reference_captures()?
     } else {
         None
     };
-    let diagnostics = match &references {
-        Some(references) if plan.diagnostics => {
-            tree_file.diagnostics_from(&definitions, &imports, references)?
-        }
-        _ => Vec::new(),
+    let diagnostics = if plan.diagnostics {
+        let references = captures.as_deref().map_or_else(Vec::new, |captures| {
+            tree_file.references_from_captures(captures, &definitions, &imports)
+        });
+        tree_file.diagnostics_from(&definitions, &imports, &references)?
+    } else {
+        Vec::new()
     };
+    // Occurrence syntax is read from the definitions' nodes, which the
+    // records below consume; records keep the definitions' order.
+    let occurrence_syntax = plan.bind.then(|| {
+        OccurrenceSyntax::new(
+            tree_file.language,
+            tree_file.source(),
+            tree_file.root_node(),
+            &definitions,
+            scope_nodes,
+            &imports,
+            captures,
+        )
+    });
     let exports = tree_file
         .exports_from(&definitions)
         .map(export_record)
@@ -112,14 +139,21 @@ pub(crate) fn run_query(
         imports: imports.into_iter().map(import_record).collect(),
         exports,
         diagnostics,
+        occurrences: Vec::new(),
+        reference_coverage: Vec::new(),
     };
 
     let names = NameIndex::new(&index.symbols);
     if plan.containment {
         link_containers(&mut index.symbols, &names);
     }
-    if plan.bind {
-        bind_references(&mut index, &names, references.as_deref().unwrap_or_default());
+    if let Some(syntax) = occurrence_syntax {
+        // Resolved against every record, before unselected ones are dropped.
+        count_occurrence_resolution();
+        let resolved = syntax.resolve(&index.symbols);
+        index.occurrences = resolved.evidence.occurrences;
+        index.reference_coverage = resolved.evidence.reference_coverage;
+        bind_references(&mut index, &resolved.bound_imports);
     }
 
     // Unselected records were needed only as owners, containers and
@@ -128,6 +162,10 @@ pub(crate) fn run_query(
 
     if plan.semantic {
         semantic_pass(&mut index);
+    }
+    if !plan.occurrences {
+        index.occurrences.clear();
+        index.reference_coverage.clear();
     }
     if plan.docs {
         docs_pass(&mut index);
@@ -307,52 +345,51 @@ fn find_container_symbol(
 }
 
 /// The rest of the bind pass, after [`link_containers`]: reference,
-/// dependency and referenced-by edges by name, and export targets.
-fn bind_references(index: &mut FileSymbolIndex, names: &NameIndex, references: &[ReferencedSymbol]) {
-    let import_refs_by_name: HashMap<_, _> = index
-        .imports
+/// dependency and referenced-by edges, and export targets.
+///
+/// The edges come from the occurrences alone, in first-occurrence order:
+/// an owner's `references` are its `Scoped` targets with an in-file ID and
+/// its occurrences bound to an import (`bound_imports`, aligned with
+/// `index.occurrences`), `dependencies` only the latter, and a target's
+/// `referenced_by` the owners of its `Scoped` occurrences. `NameOnly` and
+/// `Unresolved` occurrences make no edge, and an occurrence without an owner
+/// (file-level code, an initializer, an anonymous callable) makes none
+/// either.
+fn bind_references(index: &mut FileSymbolIndex, bound_imports: &[Option<usize>]) {
+    let by_id: HashMap<&SymbolId, usize> = index
+        .symbols
         .iter()
-        .map(|import| {
-            (
-                import.name.clone(),
-                SymbolRef {
-                    source_span: None,
-                    id: import.symbol.id.clone(),
-                    name: import.name.clone(),
-                    qualified_name: import.symbol.qualified_name.clone(),
-                },
-            )
-        })
+        .enumerate()
+        .map(|(idx, symbol)| (&symbol.id, idx))
         .collect();
-
     let mut references_by_owner: Vec<RefSet> = vec![RefSet::default(); index.symbols.len()];
     let mut dependencies_by_owner: Vec<RefSet> = vec![RefSet::default(); index.symbols.len()];
-    let mut referenced_by_target: HashMap<SymbolId, RefSet> = HashMap::new();
-    let owner_index = OwnerSymbolIndex::new(&index.symbols);
+    let mut referenced_by_target: Vec<RefSet> = vec![RefSet::default(); index.symbols.len()];
 
-    for reference in references {
-        let Some(owner_idx) = owner_index.find(
-            reference.range.start_byte as u32,
-            reference.range.end_byte as u32,
-        ) else {
-            continue;
-        };
-
-        let owner_ref = symbol_ref(&index.symbols[owner_idx]);
-
-        if let Some(&target_idx) = names.named(&reference.name).first() {
-            let target = &index.symbols[target_idx];
-            references_by_owner[owner_idx].push(symbol_ref(target));
-            referenced_by_target
-                .entry(target.id.clone())
-                .or_default()
-                .push(owner_ref);
+    for (occurrence, import) in index.occurrences.iter().zip(bound_imports) {
+        if occurrence.confidence != Confidence::Scoped {
             continue;
         }
-
-        if let Some(import_ref) = import_refs_by_name.get(&reference.name) {
+        let Some(&owner_idx) = occurrence
+            .owner
+            .as_ref()
+            .and_then(|owner| owner.id.as_ref())
+            .and_then(|id| by_id.get(id))
+        else {
+            continue;
+        };
+        if let Some(&target_idx) = occurrence.target.id.as_ref().and_then(|id| by_id.get(id)) {
+            references_by_owner[owner_idx].push(symbol_ref(&index.symbols[target_idx]));
+            referenced_by_target[target_idx].push(symbol_ref(&index.symbols[owner_idx]));
+        } else if let Some(import) = import.and_then(|idx| index.imports.get(idx)) {
+            let import_ref = SymbolRef {
+                source_span: None,
+                id: import.symbol.id.clone(),
+                name: import.name.clone(),
+                qualified_name: import.symbol.qualified_name.clone(),
+            };
             references_by_owner[owner_idx].push(import_ref.clone());
-            dependencies_by_owner[owner_idx].push(import_ref.clone());
+            dependencies_by_owner[owner_idx].push(import_ref);
         }
     }
 
@@ -367,27 +404,60 @@ fn bind_references(index: &mut FileSymbolIndex, names: &NameIndex, references: &
         }
     }
 
-    for ((symbol, references), dependencies) in index
+    for (((symbol, references), dependencies), referenced_by) in index
         .symbols
         .iter_mut()
         .zip(references_by_owner)
         .zip(dependencies_by_owner)
+        .zip(referenced_by_target)
     {
         symbol.relations.references = references.refs;
         symbol.relations.dependencies = dependencies.refs;
-        symbol.relations.referenced_by = referenced_by_target
-            .remove(&symbol.id)
-            .map(|set| set.refs)
-            .unwrap_or_default();
+        symbol.relations.referenced_by = referenced_by.refs;
         symbol.visibility.is_exported = exported_ids.contains(&symbol.id);
         symbol.provenance.parse_pass = AnalysisPass::Bind.as_str().to_string();
     }
 }
 
-/// Semantic pass: fills initial low-risk semantic flags.
+/// The kinds the semantic pass evaluates.
+pub(crate) fn has_semantics(kind: SymbolKindV2) -> bool {
+    matches!(kind, SymbolKindV2::Function | SymbolKindV2::Method | SymbolKindV2::Constructor)
+}
+
+/// Semantic pass: fills initial low-risk semantic flags, `is_recursive`
+/// from the index's occurrences and coverage.
 fn semantic_pass(index: &mut FileSymbolIndex) {
-    for symbol in &mut index.symbols {
-        if !matches!(symbol.kind, SymbolKindV2::Function | SymbolKindV2::Method) {
+    let mut calls_by_owner: HashMap<&SymbolId, Vec<&Occurrence>> = HashMap::new();
+    for occurrence in &index.occurrences {
+        if occurrence.kind == OccurrenceKind::Call
+            && let Some(owner) = occurrence.owner.as_ref().and_then(|owner| owner.id.as_ref())
+        {
+            calls_by_owner.entry(owner).or_default().push(occurrence);
+        }
+    }
+    let regions: HashMap<&SymbolId, &ReferenceCoverage> = index
+        .reference_coverage
+        .iter()
+        .filter_map(|region| Some((region.owner.as_ref()?.id.as_ref()?, region)))
+        .collect();
+
+    let recursion: Vec<Option<TriState>> = index
+        .symbols
+        .iter()
+        .map(|symbol| {
+            has_semantics(symbol.kind).then(|| {
+                direct_recursion(
+                    symbol,
+                    regions.get(&symbol.id).copied(),
+                    calls_by_owner.get(&symbol.id).map_or(&[][..], Vec::as_slice),
+                    &index.imports,
+                )
+            })
+        })
+        .collect();
+
+    for (symbol, is_recursive) in index.symbols.iter_mut().zip(recursion) {
+        if !has_semantics(symbol.kind) {
             continue;
         }
 
@@ -398,9 +468,7 @@ fn semantic_pass(index: &mut FileSymbolIndex) {
             .any(|reference| reference.name == "panic" || reference.name == "panic!");
 
         symbol.semantics = SemanticFacet {
-            // Name-only binding can neither prove that a same-named call
-            // targets this function nor that none does.
-            is_recursive: Some(TriState::Unknown),
+            is_recursive,
             may_panic: Some(if panics {
                 TriState::Yes
             } else {
@@ -415,6 +483,68 @@ fn semantic_pass(index: &mut FileSymbolIndex) {
     }
 }
 
+/// Whether `symbol` calls itself directly, from the calls its own region
+/// owns (a nested callable's calls belong to that callable):
+///
+/// - `Yes`: a `Scoped` call whose target ID is `symbol`'s, whatever else is
+///   uncertain;
+/// - `Unknown`: no body region (a bodyless declaration), a `Limited`
+///   region, or a call that might be to `symbol` (see
+///   [`may_call_itself`]);
+/// - `No`: a `Complete` region and none of that.
+fn direct_recursion(
+    symbol: &SymbolRecord,
+    region: Option<&ReferenceCoverage>,
+    calls: &[&Occurrence],
+    imports: &[ImportRecord],
+) -> TriState {
+    if calls.iter().any(|call| {
+        call.confidence == Confidence::Scoped && call.target.id.as_ref() == Some(&symbol.id)
+    }) {
+        return TriState::Yes;
+    }
+    let complete = region.is_some_and(|region| region.state == CoverageState::Complete);
+    if !complete || calls.iter().any(|call| may_call_itself(symbol, call, imports)) {
+        TriState::Unknown
+    } else {
+        TriState::No
+    }
+}
+
+/// Whether `call` (not a proven self-call) might still invoke `symbol`: a
+/// `NameOnly` call whose candidates include it, an `Unresolved` call of its
+/// name, a `Scoped` call through an import whose original name is its name
+/// (`use crate::f as g;` inside `f`), which no file-local rule can tell
+/// apart from another module's `f`, or, for a constructor, a call of its own
+/// class (`new C()` inside `C`'s constructor), which targets the class.
+fn may_call_itself(symbol: &SymbolRecord, call: &Occurrence, imports: &[ImportRecord]) -> bool {
+    let name = symbol.identity.name.as_str();
+    let class = (symbol.kind == SymbolKindV2::Constructor)
+        .then(|| symbol.relations.parent.as_ref().and_then(|parent| parent.id.as_ref()))
+        .flatten();
+    let is_own = |id: Option<&SymbolId>| id.is_some_and(|id| *id == symbol.id || Some(id) == class);
+    match call.confidence {
+        Confidence::NameOnly => call.candidates.iter().any(|candidate| is_own(candidate.id.as_ref())),
+        Confidence::Unresolved => call.target.name == name,
+        Confidence::Scoped => match &call.target.id {
+            Some(id) => Some(id) == class,
+            None => imports.iter().any(|import| {
+                import_local_name(import) == call.target.name && import_original_name(import) == name
+            }),
+        },
+    }
+}
+
+/// The name an import binds in the file.
+fn import_local_name(import: &ImportRecord) -> &str {
+    import.alias.as_deref().unwrap_or(&import.name)
+}
+
+/// The last segment of the name an import brings in.
+fn import_original_name(import: &ImportRecord) -> &str {
+    last_name_segment(import.symbol.qualified_name.as_deref().unwrap_or(&import.name))
+}
+
 /// Docs pass: parses the extractor's cleaned `raw_doc` into structured
 /// `ParsedDocs`.
 fn docs_pass(index: &mut FileSymbolIndex) {
@@ -424,7 +554,7 @@ fn docs_pass(index: &mut FileSymbolIndex) {
     }
 }
 
-fn symbol_ref(symbol: &SymbolRecord) -> SymbolRef {
+pub(crate) fn symbol_ref(symbol: &SymbolRecord) -> SymbolRef {
     SymbolRef {
         source_span: None,
         id: Some(symbol.id.clone()),
@@ -458,133 +588,6 @@ impl RefSet {
         if self.seen.insert(key) {
             self.refs.push(candidate);
         }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-struct OwnerSymbolEntry {
-    idx: usize,
-    start_byte: u32,
-    end_byte: u32,
-}
-
-impl OwnerSymbolEntry {
-    fn contains(self, start_byte: u32, end_byte: u32) -> bool {
-        self.start_byte <= start_byte && self.end_byte >= end_byte
-    }
-
-    fn len(self) -> u32 {
-        self.end_byte.saturating_sub(self.start_byte)
-    }
-}
-
-#[derive(Debug)]
-struct OwnerSymbolIndex {
-    root: Option<Box<OwnerSymbolNode>>,
-}
-
-impl OwnerSymbolIndex {
-    fn new(symbols: &[SymbolRecord]) -> Self {
-        let entries = symbols
-            .iter()
-            .enumerate()
-            .map(|(idx, symbol)| {
-                let span = &symbol.source.declaration_span;
-                OwnerSymbolEntry {
-                    idx,
-                    start_byte: span.start_byte,
-                    end_byte: span.end_byte,
-                }
-            })
-            .collect();
-
-        Self {
-            root: OwnerSymbolNode::build(entries),
-        }
-    }
-
-    fn find(&self, start_byte: u32, end_byte: u32) -> Option<usize> {
-        self.root
-            .as_ref()
-            .and_then(|root| root.find(start_byte, end_byte).map(|entry| entry.idx))
-    }
-}
-
-#[derive(Debug)]
-struct OwnerSymbolNode {
-    center: u32,
-    spanning: Vec<OwnerSymbolEntry>,
-    left: Option<Box<OwnerSymbolNode>>,
-    right: Option<Box<OwnerSymbolNode>>,
-}
-
-impl OwnerSymbolNode {
-    fn build(mut entries: Vec<OwnerSymbolEntry>) -> Option<Box<Self>> {
-        if entries.is_empty() {
-            return None;
-        }
-
-        entries.sort_by_key(|entry| (entry.start_byte, entry.end_byte, entry.idx));
-        let center = entries[entries.len() / 2].start_byte;
-
-        let mut left = Vec::new();
-        let mut spanning = Vec::new();
-        let mut right = Vec::new();
-
-        for entry in entries {
-            if entry.end_byte < center {
-                left.push(entry);
-            } else if entry.start_byte > center {
-                right.push(entry);
-            } else {
-                spanning.push(entry);
-            }
-        }
-
-        spanning.sort_by_key(|entry| (entry.len(), entry.start_byte, entry.end_byte, entry.idx));
-
-        Some(Box::new(Self {
-            center,
-            spanning,
-            left: Self::build(left),
-            right: Self::build(right),
-        }))
-    }
-
-    fn find(&self, start_byte: u32, end_byte: u32) -> Option<OwnerSymbolEntry> {
-        let mut best = self
-            .spanning
-            .iter()
-            .copied()
-            .find(|entry| entry.contains(start_byte, end_byte));
-
-        let child = if end_byte < self.center {
-            self.left.as_ref()
-        } else if start_byte > self.center {
-            self.right.as_ref()
-        } else {
-            None
-        };
-
-        if let Some(candidate) = child.and_then(|node| node.find(start_byte, end_byte))
-            && best.is_none_or(|current| {
-                (
-                    candidate.len(),
-                    candidate.start_byte,
-                    candidate.end_byte,
-                    candidate.idx,
-                ) < (
-                    current.len(),
-                    current.start_byte,
-                    current.end_byte,
-                    current.idx,
-                )
-            })
-        {
-            best = Some(candidate);
-        }
-
-        best
     }
 }
 

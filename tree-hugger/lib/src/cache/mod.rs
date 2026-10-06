@@ -583,6 +583,8 @@ impl From<SymbolSnapshot> for FileSymbolIndex {
             imports: snapshot.imports,
             exports: snapshot.exports,
             diagnostics: snapshot.diagnostics,
+            occurrences: Vec::new(),
+            reference_coverage: Vec::new(),
         }
     }
 }

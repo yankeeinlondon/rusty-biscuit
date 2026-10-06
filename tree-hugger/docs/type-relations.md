@@ -43,7 +43,7 @@ written text.
 | Rust | trait supertraits (`trait A: B + c::D<u8>`) | trait impls, on each member and on the resolved self type (see [Rust impls](#rust-impls)) | lifetime bounds (`'a`), `?Sized` |
 | TypeScript | class `extends`, interface `extends` | class `implements` | |
 | JavaScript | the class `extends` expression, as written | — | |
-| Go | named types embedded in an `interface` (`Base`, `fmt.Stringer`, `G[int]`) | — | unions, `~T` terms, predeclared non-interface types (`int`, `string`, …), embedded struct fields (composition) |
+| Go | named types embedded in an `interface` (`Base`, `fmt.Stringer`, `G[int]`) | — | unions, `~T` terms, unshadowed predeclared non-interface types (`int`, `string`, …), embedded struct fields (composition) |
 | Python | positional class bases, `*bases` kept as written | — | `metaclass=` and other keyword arguments, `**options` |
 | Java | class `extends`, interface `extends` | class, enum and record `implements` | |
 | C++ | every base specifier, private and `virtual` bases included | — | the `public`/`private`/`virtual` keywords (not part of the text) |
@@ -117,11 +117,14 @@ The rules, with an example of each:
 | A parameter is a binding | TypeScript `function f(ns: any) { class C extends ns.Inner {} }` next to `namespace ns` | text only |
 | A function is not a namespace: its local classes are not reachable through its name | JavaScript `function outer() { class Local {} }` … `class C extends outer.Local {}` | text only |
 | A type parameter shadows a local type, the enclosing declarations' included | C++ `template <class T> struct P : T` next to a `struct T` | text only |
+| An enclosing declaration's type parameters shadow even when a query does not select it and its list is too long to number | Python `def factory[Base, T0, …, T65535]()` (65,537 parameters) with `class C(Base)` inside, next to a module-level `Base`, queried for types only | text only; a complete index, which selects `factory`, fails with `too_many_generic_parameters` |
 | An alias would need expansion | TypeScript `implements Alias` where `type Alias = Root` | text only |
 | Two declarations share the name (ambiguity) | Rust `#[cfg(a)] trait Amb` / `#[cfg(not(a))] trait Amb` | text only |
 | An imported name has no declaration at its scope | Rust `use m::V; impl Tr for V` | text only |
 | An import binds its name in the scope that holds it | Python `def g(): from lib import Base` then `class C(Base)` inside `g`, next to a module-level `Base` | text only |
 | A wildcard import or C++ `using namespace` may bind any name | C++ `namespace n { using namespace other; struct C : B {}; }` next to a global `B` | text only |
+| Every expression of a Scala `import` binds its name, and a rename binds its alias | Scala `import lib.Base, lib.Other`, `import lib.{Other}, lib.{Base}`, `import lib.Other as Base` or `import lib.{Other => Base}`, then `class C extends Base`, next to an outer `Base` | text only |
+| A Scala exclusion or a rename to another name binds nothing else; only a wildcard (`_`, `*`, `given`) may bind any name | Scala `import lib.{Other as Renamed}` or `import lib.{Other => _}`, then `class C extends Base`, next to an outer `Base` | the outer `Base` |
 | A Java, C++, C#, Swift or Scala type with bases may inherit the name, so lookup stops there | Java `class Sub extends A { class C extends Base {} }`, where `A` declares `Base` | text only |
 | A class body is never a lexical scope in JS/TS | TypeScript `class Outer { Base = 1; m() { class C extends Base {} } }` | the module-level `Base` |
 | A Python class body is a lexical scope only for code written directly in it: a nested class, method or function skips every enclosing class body, with its classes, variables and imports, and continues to the enclosing functions and the module | Python `class Outer: class Base` … `class Middle: class C(Base)`, or `def m(self): class C(Base)` | the module-level `Base`; text only when the module has none |
@@ -232,6 +235,49 @@ conformance. A class's first entry is classified only when its target is
 proved; later entries are protocols. Protocol inheritance stays in `extends`.
 Enum raw-value types established by raw-value cases or standard raw-type
 names are excluded; a same-file protocol can classify an enum's first entry.
+A standard raw-type name is excluded only while nothing in the file
+redeclares it; see [Built-in spellings](#built-in-spellings).
+
+### Built-in spellings
+
+Two readers drop a written entry because its spelling names a built-in type
+that is no base: a Go interface element spelled like a predeclared
+non-interface type (`bool`, `byte`, `complex64`, `complex128`, `float32`,
+`float64`, `int`, `int8`, `int16`, `int32`, `int64`, `rune`, `string`,
+`uint`, `uint8`, `uint16`, `uint32`, `uint64`, `uintptr`), and a Swift
+enum's first entry spelled like a standard raw-value type (`Int`, `Int8`,
+`Int16`, `Int32`, `Int64`, `UInt`, `UInt8`, `UInt16`, `UInt32`, `UInt64`,
+`String`, `Character`, `Float`, `Double`, `Unicode.Scalar`, each also
+qualified as `Swift.Int`, `Swift.Unicode.Scalar`).
+
+Both languages let a program redeclare those names, so the spelling alone
+proves nothing. The entry is dropped only when no binding in view gives the
+path's first segment (`int`, `Int`, `Unicode`, `Swift`) another meaning:
+
+| Binding of the first segment | Result |
+|---|---|
+| none in this file | dropped: no relation |
+| a same-file type declaration, in the declaring scope or any enclosing one (a Go function body included) | kept, with the declaration's `id` when the lookup proves it |
+| a same-file alias, a Swift selective import of that name (`import protocol M.Int`), an import whose names cannot be read, a type parameter, or several declarations | kept as written, no `id` (Swift: in `unclassified_bases`) |
+
+```go
+type int interface{ M() }
+type Child interface{ int }   // extends int, with the local interface's id
+type Plain interface{ int }   // in a file without that declaration: no relation
+```
+
+```swift
+protocol P {}
+typealias Int = P
+enum Child: Int { case a }        // unclassified_bases: Int, no id
+enum Code: Swift.Int { case a }   // no relation
+```
+
+Only same-file evidence counts. A Swift whole-module import
+(`import Foundation`), a member type inherited from a base, and a
+declaration in another file of the Go package are not read, so they never
+keep an entry. An explicit raw value (`case a = 1`) still proves a Swift
+raw-value enum by syntax, whatever its first entry is named.
 
 Extension conformances attach only to a uniquely resolved local class,
 struct or enum. A qualified external owner, alias, or ambiguous name never
@@ -284,11 +330,15 @@ third list `unclassified bases External`; JSON and JSONL expose
   cannot establish its category. This preserves the source fact.
 - Go: a named type embedded in an interface constraint cannot be told apart
   from an embedded interface by syntax. Only the predeclared non-interface
-  types (`bool`, `int`, `string`, …) are excluded.
+  types (`bool`, `int`, `string`, …) are excluded, and only when no same-file
+  declaration redeclares the name; a redeclaration in another file of the
+  package is not seen.
 - Name lookup is a bounded source lookup, not compiler resolution. Imports
   are read only as bindings that hide a declaration further out: an imported
   base never resolves, even when an unrelated local declaration has the same
-  last segment. Java and Go imports are not read, since a same-file
+  last segment. An import whose bound names cannot all be read counts as a
+  wildcard, so lookup through its scope stays unresolved rather than
+  guessing. Java and Go imports are not read, since a same-file
   declaration of an imported name does not compile.
 - Python and TypeScript names are looked up without regard to statement
   order: a binding later in a scope hides an outer declaration just as an

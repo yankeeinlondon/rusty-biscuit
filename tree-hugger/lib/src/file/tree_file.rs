@@ -3,17 +3,17 @@ use std::path::{Path, PathBuf};
 
 use tree_sitter::{Node, QueryCursor, StreamingIterator};
 
-use crate::analysis::counters::count_diagnostics_run;
+use crate::analysis::counters::{count_diagnostics_run, count_reference_capture};
 use crate::error::TreeHuggerError;
 use crate::file::extract::attributes::declaration_attributes;
 use crate::file::extract::*;
-use crate::file::query::{SymbolQuery, SymbolQueryResult};
+use crate::file::query::{Capability, SymbolQuery, SymbolQueryResult};
 use crate::file::source_file::SourceFile;
 use crate::queries::{GrammarRef, QueryKind, format_rule_message, query_for, severity_for_rule};
 use crate::rule_registry::{RuleRegistry, diagnostic_metadata_from_rule};
 use crate::shared::{
     AnalysisPass, Attribute, CodeBlock, CodeRange, Diagnostic, DiagnosticSeverity, FileSymbolIndex,
-    ImportSymbol, LintDiagnostic, ProgrammingLanguage, ReferencedSymbol, SourceContext, SymbolInfo,
+    ImportSymbol, LintDiagnostic, ProgrammingLanguage, ReferenceEvidence, ReferencedSymbol, SourceContext, SymbolInfo,
     SymbolKind, SymbolKindData, SymbolKindV2, SymbolRecord, SyntaxDiagnostic,
     normalize_modifiers, stable_symbol_key, symbol_id_from_stable_key,
 };
@@ -253,86 +253,102 @@ impl TreeFile {
         definitions: &[ExtractedSymbol<'_>],
         imports: &[ImportSymbol],
     ) -> Result<Vec<ReferencedSymbol>, TreeHuggerError> {
-        let query = query_for(self.grammar_ref(), QueryKind::References)?;
-
-        // Empty query means no reference rules defined for this language
-        if query.pattern_count() == 0 {
+        let Some(captures) = self.reference_captures()? else {
             return Ok(Vec::new());
+        };
+        Ok(self.references_from_captures(&captures, definitions, imports))
+    }
+
+    /// [`Self::references_from`] over the captures of one
+    /// [`Self::reference_captures`] run.
+    pub(crate) fn references_from_captures(
+        &self,
+        captures: &[ReferenceCapture<'_>],
+        definitions: &[ExtractedSymbol<'_>],
+        imports: &[ImportSymbol],
+    ) -> Vec<ReferencedSymbol> {
+        let definition_ranges = definition_ranges(definitions, imports);
+        captures
+            .iter()
+            .filter(|capture| capture.is_reference)
+            .filter_map(|capture| self.referenced_symbol(capture.node, &definition_ranges))
+            .collect()
+    }
+
+    /// The `@reference` usage `node` names, unless it is a definition's or
+    /// import's own name, definition-like, or empty.
+    fn referenced_symbol(
+        &self,
+        node: Node<'_>,
+        definition_ranges: &HashSet<(usize, usize)>,
+    ) -> Option<ReferencedSymbol> {
+        let range = range_for_node(node);
+        if definition_ranges.contains(&(range.start_byte, range.end_byte))
+            || is_definition_like_reference(node, self.language)
+        {
+            return None;
+        }
+        let name = node
+            .utf8_text(self.source.as_bytes())
+            .map(str::to_string)
+            .unwrap_or_default();
+        if name.is_empty() {
+            return None;
+        }
+        let (is_qualified, qualifier) = self.detect_qualified_reference(node);
+        Some(ReferencedSymbol {
+            name,
+            range,
+            language: self.language,
+            file: self.file.clone(),
+            is_qualified,
+            qualifier,
+        })
+    }
+
+    /// Runs the references query once: one capture per captured node span,
+    /// in first-match order. `None` when the language's query has no
+    /// patterns.
+    pub(crate) fn reference_captures(
+        &self,
+    ) -> Result<Option<Vec<ReferenceCapture<'_>>>, TreeHuggerError> {
+        let query = query_for(self.grammar_ref(), QueryKind::References)?;
+        if query.pattern_count() == 0 {
+            return Ok(None);
         }
 
+        count_reference_capture();
         let mut cursor = QueryCursor::new();
-        let root = self.tree.root_node();
         let capture_names = query.capture_names();
-        let mut references = Vec::new();
-        let mut seen_ranges = HashSet::new();
-        let mut definition_ranges = HashSet::new();
-
-        for extracted in definitions {
-            let range = &extracted.symbol.range;
-            definition_ranges.insert((range.start_byte, range.end_byte));
-        }
-
-        for import in imports {
-            definition_ranges.insert((import.range.start_byte, import.range.end_byte));
-        }
-
-        let mut matches = cursor.matches(query.as_ref(), root, self.source.as_bytes());
+        let mut captures: Vec<ReferenceCapture<'_>> = Vec::new();
+        let mut by_range: HashMap<(usize, usize), usize> = HashMap::new();
+        let mut matches = cursor.matches(query.as_ref(), self.tree.root_node(), self.source.as_bytes());
         matches.advance();
 
         while let Some(query_match) = matches.get() {
             for capture in query_match.captures {
-                let capture_name = capture_names
-                    .get(capture.index as usize)
-                    .copied()
-                    .unwrap_or_default();
-
-                // Only process @reference captures
-                if capture_name != "reference" {
-                    continue;
-                }
-
+                let (is_reference, is_member) = match capture_names.get(capture.index as usize) {
+                    Some(&"reference") => (true, false),
+                    Some(&"reference.member") => (false, true),
+                    _ => continue,
+                };
                 let node = capture.node;
-                let range = range_for_node(node);
-
-                // Deduplicate based on byte range (same node captured multiple times)
-                let range_key = (range.start_byte, range.end_byte);
-                if !seen_ranges.insert(range_key) {
-                    continue;
+                let range = (node.start_byte(), node.end_byte());
+                match by_range.get(&range) {
+                    Some(&idx) => {
+                        captures[idx].is_reference |= is_reference;
+                        captures[idx].is_member |= is_member;
+                    }
+                    None => {
+                        by_range.insert(range, captures.len());
+                        captures.push(ReferenceCapture { node, is_reference, is_member });
+                    }
                 }
-
-                if definition_ranges.contains(&range_key)
-                    || is_definition_like_reference(node, self.language)
-                {
-                    continue;
-                }
-
-                let name = node
-                    .utf8_text(self.source.as_bytes())
-                    .map(str::to_string)
-                    .unwrap_or_default();
-
-                // Skip empty names
-                if name.is_empty() {
-                    continue;
-                }
-
-                // Detect if this is a qualified reference
-                let (is_qualified, qualifier) = self.detect_qualified_reference(node);
-
-                references.push(ReferencedSymbol {
-                    name,
-                    range,
-                    language: self.language,
-                    file: self.file.clone(),
-                    is_qualified,
-                    qualifier,
-                });
             }
-
             matches.advance();
         }
 
-        Ok(references)
+        Ok(Some(captures))
     }
 
     /// Detects if a node is part of a qualified reference.
@@ -1913,6 +1929,28 @@ impl TreeFile {
         crate::analysis::analyze_file(self, passes)
     }
 
+    /// Every reference in this file as an occurrence (owner, kind, target
+    /// and confidence), with the coverage of each owning region, over the
+    /// whole file. Rust, TypeScript and JavaScript resolve names through
+    /// their lexical scopes; every other language reports occurrences that
+    /// are never `Scoped` and `Limited` coverage.
+    ///
+    /// Owner, target and candidate IDs are those of [`Self::symbol_index_v2`].
+    ///
+    /// ## Errors
+    /// Returns an error if a query fails to compile or a record cannot be
+    /// built.
+    pub fn reference_evidence(&self) -> Result<ReferenceEvidence, TreeHuggerError> {
+        let query = SymbolQuery::new()
+            .kinds([])
+            .capabilities([Capability::Occurrences]);
+        let index = crate::analysis::run_query(self, &query)?.index;
+        Ok(ReferenceEvidence {
+            occurrences: index.occurrences,
+            reference_coverage: index.reference_coverage,
+        })
+    }
+
     /// Runs `query`: plans the passes its capabilities need and returns the
     /// selected records that pass its predicates, with what was computed and
     /// qualified names prefixed per its naming inputs.
@@ -1922,4 +1960,29 @@ impl TreeFile {
     pub fn query(&self, query: &SymbolQuery) -> Result<SymbolQueryResult, TreeHuggerError> {
         Ok(crate::analysis::run_query(self, query)?.finish(query))
     }
+}
+
+/// One node the references query captured.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ReferenceCapture<'tree> {
+    pub(crate) node: Node<'tree>,
+    /// Captured as `@reference`: an identifier usage, read by the
+    /// diagnostics and by reference occurrences.
+    pub(crate) is_reference: bool,
+    /// Captured as `@reference.member`: a method-call or constructor member
+    /// name, read only by reference occurrences.
+    pub(crate) is_member: bool,
+}
+
+/// The name spans of `definitions` and `imports`, which are never
+/// references.
+pub(crate) fn definition_ranges(
+    definitions: &[ExtractedSymbol<'_>],
+    imports: &[ImportSymbol],
+) -> HashSet<(usize, usize)> {
+    definitions
+        .iter()
+        .map(|extracted| (extracted.symbol.range.start_byte, extracted.symbol.range.end_byte))
+        .chain(imports.iter().map(|import| (import.range.start_byte, import.range.end_byte)))
+        .collect()
 }

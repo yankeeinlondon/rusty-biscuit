@@ -22,3 +22,14 @@
 ; Generic type arguments
 (type_arguments
   (type_identifier) @reference)
+
+; Method-call names (`x.f()`, `x.f::<T>()`), which no pattern above
+; captures. Read only by reference occurrences, never as `@reference`.
+(call_expression
+  function: (field_expression
+    field: (field_identifier) @reference.member))
+
+(call_expression
+  function: (generic_function
+    function: (field_expression
+      field: (field_identifier) @reference.member)))

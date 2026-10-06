@@ -5,7 +5,7 @@ use tempfile::TempDir;
 
 use crate::TreeFile;
 use crate::analysis::{
-    NameIndex, OwnerSymbolIndex, RefSet, agrees_with_owner_path, analyze_file, ends_with_segments,
+    NameIndex, RefSet, agrees_with_owner_path, analyze_file, ends_with_segments,
     ExportTargets, export_record, find_container_symbol, last_name_segment, owner_path,
     qualifies, resolve_containers,
 };
@@ -47,24 +47,6 @@ fn pipeline_marks_completed_passes() {
         ]
     );
     assert!(!index.symbols.is_empty());
-}
-
-#[test]
-fn owner_symbol_index_picks_smallest_containing_span_with_equal_starts() {
-    let symbols = vec![
-        test_symbol("module", 0, 200),
-        test_symbol("function", 0, 120),
-        test_symbol("block", 0, 80),
-        test_symbol("inner", 20, 40),
-        test_symbol("sibling", 100, 140),
-    ];
-    let index = OwnerSymbolIndex::new(&symbols);
-
-    assert_eq!(index.find(24, 30), Some(3));
-    assert_eq!(index.find(70, 75), Some(2));
-    assert_eq!(index.find(90, 95), Some(1));
-    assert_eq!(index.find(180, 190), Some(0));
-    assert_eq!(index.find(205, 210), None);
 }
 
 fn test_symbol(name: &str, start_byte: u32, end_byte: u32) -> SymbolRecord {
@@ -132,8 +114,8 @@ fn fixture_files() -> Vec<PathBuf> {
     found
 }
 
-/// A reference's target found by a full scan instead of the name index: the
-/// first record with the name.
+/// The first record with the name, found by a full scan instead of the name
+/// index.
 fn scan_reference_target(symbols: &[SymbolRecord], name: &str) -> Option<usize> {
     symbols.iter().position(|symbol| symbol.identity.name == name)
 }

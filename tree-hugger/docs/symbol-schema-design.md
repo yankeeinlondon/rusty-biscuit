@@ -778,7 +778,9 @@ The rules, each visible in the example:
   not a parameter: in `<#[cfg(feature = "x")] T, U>`, `T` is position 0. A selected declaration with more
   than 65 536 parameters fails its file with
   `TreeHuggerError::TooManyGenericParameters` (`hug` reports
-  `too_many_generic_parameters`); positions are never truncated.
+  `too_many_generic_parameters`); positions are never truncated. A query
+  that does not select it succeeds, and its parameter names still shadow
+  same-named declarations in relation lookup.
 
 | Language | Parameters read from | Bounds | Defaults | Variance | `constraints` |
 |---|---|---|---|---|---|
@@ -882,15 +884,16 @@ pub struct SemanticFacet {
 
 `Option<TriState>` intentionally distinguishes "not analyzed" from "analyzed unknown".
 
-`is_recursive` is `Some(Unknown)` on every function and method whenever the
-semantic pass runs, and `None` when it did not run. References are bound by
-name only (see [Extraction Pipeline Contract](#extraction-pipeline-contract)),
-which can neither prove that a same-named call targets the enclosing function
-nor that none does, so a `Yes` or `No` would be a guess:
+The semantic pass fills functions, methods and constructors, and reads
+`is_recursive` from the file's reference occurrences: `Yes` only for a
+`Scoped` call to the callable's own ID, `No` only when its region's call
+coverage is `Complete` and no call might be to itself, otherwise `Unknown`
+(rules and examples in [Scope-Aware References](./references.md#direct-recursion)).
+It is `None` when the pass did not run:
 
 ```rust
 fn countdown(n: u32) -> u32 { if n == 0 { 0 } else { countdown(n - 1) } }
-// semantic pass ran:     "semantics": { "is_recursive": "Unknown", ... }
+// semantic pass ran:     "semantics": { "is_recursive": "Yes", ... }
 // semantic pass not run: "semantics": {}
 ```
 
@@ -1100,10 +1103,18 @@ pub struct FileSymbolIndex {
     pub imports: Vec<ImportRecord>,
     pub exports: Vec<ExportRecord>,
     pub diagnostics: Vec<Diagnostic>,
+    pub occurrences: Vec<Occurrence>,                 // omitted when empty
+    pub reference_coverage: Vec<ReferenceCoverage>,   // omitted when empty
 }
 ```
 
 `ImportRecord` and `ExportRecord` carry a `symbol: SymbolRef`, aligned with `RelationFacet`.
+
+`occurrences` and `reference_coverage` are the per-reference evidence
+described in [Scope-Aware References](./references.md). Today
+`TreeFile::reference_evidence()` computes them for a whole file and
+`TreeFile::query` leaves both empty, so serialized indexes do not change;
+filling them through a query capability and the cache is **planned**.
 
 ## ID Strategy
 
@@ -1117,8 +1128,9 @@ A file is analyzed in up to five passes (`AnalysisPass`):
 
 1. **Parse** (Tree-sitter): identity, source, modifiers, declared signatures,
    raw comments, and the file's import and export records.
-2. **Bind**: parent/container and members, references, dependencies,
-   referenced-by edges, export targets.
+2. **Bind**: parent/container and members, the file's reference occurrences
+   and their coverage, the references, dependencies and referenced-by edges
+   read from them, export targets.
 3. **Semantic**: inferred flags (panics, recursion; see
    [Semantic Facet](#semantic-facet)).
 4. **Docs**: doc comments parsed into structured `ParsedDocs`.
@@ -1173,8 +1185,9 @@ let result = SourceFile::read("src/lib.rs")?.query(&query)?;
 |---|---|---|
 | `Declarations` (always) | — | the parse pass |
 | `Containment` | Declarations | `relations.parent`, `container`, `members` only; no reference query |
-| `References` | Containment | the bind pass |
-| `Semantics` | References | the semantic pass |
+| `References` | Containment | the bind pass (edges; the occurrences are resolved and dropped) |
+| `Occurrences` | References | `occurrences` and `reference_coverage` kept in the index, over the whole file |
+| `Semantics` | Occurrences | the semantic pass |
 | `StructuredDocs` | Declarations | the docs pass |
 | `Diagnostics` | Declarations | the diagnostics pass |
 | `Flags` | Declarations | `visibility.is_test` and `is_deprecated`, read while records are built (no extra pass) |
@@ -1315,24 +1328,25 @@ quadratic growth: `symbols_shared_context` doubles the declarations of each
 generated shape, repeated names included, and requires the steps no more
 than to double, with at most 16 per record.
 
-### Binding by name
+### Reference edges
 
-References bind by name only: a reference targets the first record with that
-name in the file, found through a name index built once per file rather than
-a scan per reference. An owner's `references`, `dependencies` and
-`referenced_by` list each target once: resolved references repeat when their
-IDs are equal, unresolved ones (no ID, such as an import) when their name and
-qualified name are equal. Two unresolved references are never equal just
-because both lack an ID:
+An owner's `references`, `dependencies` and `referenced_by` are read from
+the file's `Scoped` reference occurrences (see
+[Scope-Aware References](./references.md#relationship-summaries)); a
+name-only or unresolved occurrence makes no edge. Each target is listed once:
+resolved references repeat when their IDs are equal, those without an ID
+(an import) when their name and qualified name are equal. Two references
+without an ID are never equal just because both lack one:
 
-```python
-from os import path
-from sys import argv
+```ts
+import { path } from "os";
+import { argv } from "sys";
 
-def run():          # references: path, argv (both unresolved, path once)
-    path.join("a")
-    path.join("b")
-    return argv
+function run() {    // references: path, argv (both imports, path once)
+    path.join("a");
+    path.join("b");
+    return argv;
+}
 ```
 
 ## Serialization and Compatibility
