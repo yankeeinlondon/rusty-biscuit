@@ -45,13 +45,13 @@ The two models are:
 | Model | API | Where kind, visibility and `static` live |
 |---|---|---|
 | `SymbolInfo` (v1) | `TreeFile::symbols()` | `kind`, `scope`, `visibility` (`None` = unknown), `is_static`, `is_static_storage`, `is_async`, `container_name`, `container_kind`, `qualified_name`, `is_namespace_rooted` |
-| `SymbolRecord` (schema 4.1) | `TreeFile::symbol_records()`, `symbol_index_v2()` | `kind`, `scope`, `visibility.level`, `modifiers` (`Static`, `StaticStorage`, `Async`, and the written `Const`, `Readonly`, `Unsafe`, `Mut` and `Custom` keywords), `attributes`, `identity.container_name`, `identity.container_kind`, `identity.qualified_name`, `identity.is_namespace_rooted`, `identity.keyword`, `source.declaration_text`, `source.signature_text`, `relations.implements` |
+| `SymbolRecord` (schema 4.1) | `TreeFile::symbol_records()`, `symbol_index_v2()` | `kind`, `scope`, `visibility.level`, `modifiers` (`Static`, `StaticStorage`, `Async`, and the written `Const`, `Readonly`, `Unsafe`, `Mut` and `Custom` keywords), `attributes`, `identity.container_name`, `identity.container_kind`, `identity.qualified_name`, `identity.is_namespace_rooted`, `identity.keyword`, `source.declaration_text`, `source.signature_text`, `relations.extends`, `relations.implements` |
 
 The adapter between them (`From<SymbolInfo> for SymbolRecord` and back)
 preserves kind, scope, visibility, both `static` flags, `async`, container
 kind, the qualified name and its namespace root, and the signature, with its
 parameters. The declaring keyword, declaration text,
-display header, `relations.implements`, the test and deprecation flags and
+display header, `relations.extends` and `relations.implements`, the test and deprecation flags and
 the `metrics` facet exist only on records, because `SymbolInfo` has no field
 for them.
 
@@ -417,21 +417,24 @@ impl Foreign { fn f(&self) {} }                  // container Foreign, no kind
   ```
 
   A member whose qualified name names none of several same-named types (the
-  last line) has no owner. With only one type of that name in the file, that
-  type is the owner only when the `impl` path agrees with it: `impl W`,
-  `impl crate::W` from a nested module, and `impl V` after `use a::V` all
-  link, but `impl other::W` (a `W` declared in another file) never joins a
-  local `W`; it keeps the qualified name `other::W::probe` and has no
-  owner. The same rule holds for a Swift `extension External.Owner` and a
-  Lua `function External.Owner.f()` beside a local `Owner`. If the
-  same-named declarations disagree on kind, the container kind is left
-  absent.
+  last line) has no owner. A Rust impl member's owner is the impl's self
+  type resolved by its full written path in the impl's module
+  ([Declared Type Relations](./type-relations.md#rust-impls)): `impl W` and
+  `impl crate::W` from a nested module link to the local `W`, but
+  `impl other::W` (a `W` declared in another file), `impl V` after
+  `use a::V` (an imported name) and `impl Tr for &W` (a reference type)
+  never join a local type. Such a member keeps its qualified name
+  (`other::W::probe`) and `container_name`, and its `relations.container`
+  is the self type as written (`other::W`) with no ID and no parent. The
+  same rule holds for a Swift `extension External.Owner` and a Lua
+  `function External.Owner.f()` beside a local `Owner`, which get no
+  container at all. If the same-named declarations disagree on kind, the
+  container kind is left absent.
 - The trait of a trait impl is not part of the container. Each member of
-  `impl Trait for Type` records it in `relations.implements`: one entry named
-  after the trait's last path segment (`Display` above), whose `id` is the
-  trait's record ID when exactly one trait of that name is declared in the
-  same file. Members of
-  an inherent impl have an empty list.
+  `impl Trait for Type` records it in `relations.implements` as written
+  (`fmt::Display` above), with the trait's record ID only when that path
+  names exactly one same-file trait; the resolved self type lists the
+  trait too. Members of an inherent impl have an empty list.
 
 ## Scope
 

@@ -225,7 +225,11 @@ metadata and standalone symbols agree.
   without leading annotations, initializers, accessors or a terminator
   (`pub const TABLE: [u8; 4] = [...];` has the header
   `pub const TABLE: [u8; 4]`).
-- `relations.implements` lists the trait of a Rust trait-impl member.
+- `relations.extends` and `relations.implements` list the base types a
+  declaration writes, as written, with a same-file ID only where the name
+  provably resolves; a Rust trait impl adds its trait to its members and to
+  the resolved self type. See
+  [Declared Type Relations](../docs/type-relations.md).
 - `visibility.is_exported` comes only from export syntax and the bind pass,
   never from a Public level; converting a `SymbolInfo` always yields
   `is_exported: false`.

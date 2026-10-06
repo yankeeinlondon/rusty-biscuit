@@ -138,6 +138,11 @@ every file's complete `indexes`. The CLI README has a sample.
 commands end to end: kind sets, the JSON report and its `errors`, ordering
 and tie-breakers, `--json-full` and `--verbose`.
 
+[Declared Type Relations](./docs/type-relations.md) describes the
+`extends`/`implements` lists on each type record: what each language
+records, when a base gets a same-file ID, and how Rust impls attach to their
+self type.
+
 ## Release Notes: precise, filterable symbol reports
 
 The declaration commands (`functions`, `types`, `symbols`, `classes`) gain

@@ -131,8 +131,8 @@ field (`type_info.generic_params` and `type_info.constraints`, see
 [Generic parameters](#generic-parameters); `attributes` and the written
 modifiers, see [Attributes and Modifiers](#attributes-and-modifiers))
 changes no shape and only moves `EXTRACTOR_REVISION`. One part of the
-record is declared but still empty on every record: the type links of
-`relations` (`extends`, `overrides`, and `implements` outside Rust; see
+record is declared but still empty on every record: `relations.overrides`,
+and `extends`/`implements` in C#, Swift and Scala (**planned**; see
 [Relation Facet](#relation-facet)).
 
 | Fact | When computed |
@@ -803,13 +803,14 @@ pub struct RelationFacet {
 }
 ```
 
-`implements` is filled for Rust trait-impl members: each member of
-`impl Trait for Type` carries one entry named after the trait's last path
-segment without generic arguments (`impl fmt::Display for Point` gives
-`Display`), with `id` set when exactly one trait of that name is declared in
-the same file. Members
-of an inherent impl have an empty list, and the trait never appears in the
-container. Other languages do not fill it yet (**planned**).
+`extends` and `implements` hold the base types a declaration writes in its
+own header, each as written (`pkg.Base<T>`, `fmt::Display`), with a
+same-file `id` and in-file `qualified_name` only when the path names exactly
+one eligible declaration. A Rust trait impl adds its trait to each of its
+members and to the resolved self type. The per-language table, the
+resolution rules and Rust impl ownership are in
+[Declared Type Relations](./type-relations.md). C#, Swift and Scala base
+lists are not read yet (**planned**).
 
 ### Semantic Facet
 
@@ -1243,9 +1244,31 @@ container before each node, a Rust root's or module's inner
 `#![cfg(test)]`, a C++ class body's access sections, the file's Rust traits,
 its C/C++ `static` function declarations and C++ namespaces, its Scala
 package segments, and the same-file owners and members that complete
-containers and field lists. `shared_context_steps` counts that work, so a
-per-declaration rescan shows up as quadratic growth
-(`symbols_shared_context` holds the regression).
+containers and field lists.
+
+Names repeat in ordinary source: a trait `Probe` or a `struct Probe` in every
+module, a `local Probe` table redeclared down a Lua file, a `static void
+probe()` in every C++ namespace or overloaded on its parameter type. So the
+shared context is keyed by the decision each declaration asks for, never by
+bare name alone, and a declaration never scans the declarations that share
+its name:
+
+| Decision | Looked up by |
+| --- | --- |
+| A Rust trait-impl member's level | trait name → the level its same-named traits agree on, decided once |
+| An earlier C/C++ `static` declaration | the complete function identity (C: name; C++: namespace, parameter types, template signature) → its earliest `static` declaration |
+| The namespace a qualified C++ name resolves to | namespace path → its earliest declaring block |
+| A Scala `private[p]` qualifier | the set of the file's package segments |
+| A member's container kind (`SameFileType`, `SameFileTable`) | name and qualified name, and name and each whole-segment tail of the qualified name → the kind those declarations agree on |
+| A member's container record | an enclosing same-named record, from one span-ordered sweep per name; else name, kind and qualified name → the nearest preceding declaration |
+| An export's target | name and name span |
+| A declared base or Rust impl target (`extends`, `implements`, an impl member's container) | in-file qualified name, from one per-file index of every declaration, per enclosing scope → the one declaration of that name |
+
+`shared_context_steps` counts building and reading all of it, containment
+and export-target lookups included, so a per-declaration rescan shows up as
+quadratic growth: `symbols_shared_context` doubles the declarations of each
+generated shape, repeated names included, and requires the steps no more
+than to double, with at most 16 per record.
 
 ### Binding by name
 

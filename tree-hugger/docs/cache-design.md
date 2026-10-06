@@ -194,7 +194,7 @@ file's records, imports, exports and every analysis pass but diagnostics:
 | Input | Where it comes from | Changes when |
 |---|---|---|
 | schema version | `SchemaVersion::V4_1` | the record shape changes |
-| implementation version | crate version and `EXTRACTOR_REVISION` (`0.1.0+rev.22`) | extraction code changes |
+| implementation version | crate version and `EXTRACTOR_REVISION` (`0.1.0+rev.23`) | extraction code changes |
 | grammar identity | the compiled grammar: name, declared version (if any), ABI, node-kind, field and parse-state counts | a grammar crate is upgraded |
 | grammar ID | the grammar variant (`typescript` or `tsx`, …) | the file's grammar variant differs |
 | query text | the effective `locals`, `imports` and `references` query text, with inherited vendored queries and overlays resolved | a `.scm` file the analysis compiles changes |
@@ -282,7 +282,10 @@ flowchart TD
 
 The passes that work from stored records alone are the docs pass, the
 semantic pass (when references are stored) and containment (when every kind
-is stored, since a member's owner can be of any kind). References,
+is stored, since a member's owner can be of any kind, and the file is not
+Rust: a Rust impl member's owner is its impl's resolved self type, which no
+record retains, see [Declared Type Relations](./type-relations.md#rust-impls)).
+References,
 diagnostics, flags and metrics need the syntax tree (attributes, the
 declaration's parameter list), so they parse the file; the definitions query
 runs again with them, because binding and semantic lint consume its live

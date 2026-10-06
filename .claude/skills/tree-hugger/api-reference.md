@@ -196,8 +196,10 @@ recursion field, so nothing to map).
 two snapshots with `WorkCounters::since`. `shared_context_steps` counts the
 derivation of, and lookups in, context a file's declarations share (file
 namespace index, sibling scopes, inner `cfg(test)`, C++ access sections,
-same-file traits/`static` prototypes/owners); it must grow linearly with
-declarations (`symbols_shared_context`). Tests rely on nextest's process-per-test isolation.
+same-file traits/`static` prototypes/owners, container and export-target
+lookups); it must grow linearly with declarations, repeated names included
+(`symbols_shared_context`: a trait, owner or Lua table repeated per module,
+namespaced and overloaded C++ functions, Scala block packages). Tests rely on nextest's process-per-test isolation.
 
 #### Diagnostics
 
@@ -308,11 +310,15 @@ whitespace trimmed; keeps `pub(...)`, setter-only modifiers, annotations),
 and the written `modifiers` (`Const`, `Unsafe`, `Readonly`, `Mut`,
 `Custom("abstract" | "final" | "override" | "virtual" | "sealed" |
 "mutating")`; see `symbol-schema-design.md#attributes-and-modifiers`) and,
-for members of a Rust `impl Trait for Type`, one `relations.implements` entry
-named after the trait's last path segment (`id` only when exactly one trait of
-that name is declared in the file). A Rust `impl` member's container is the
-implemented type's last path segment without generics; its container kind is
-that type's same-file kind, absent when declared elsewhere. Every other
+`relations.extends`/`relations.implements` (each base the declaration writes,
+as written, `id` and in-file `qualified_name` only when the path names exactly
+one eligible same-file declaration; a Rust trait impl adds its trait as written
+to each member and to the resolved self type; see
+`tree-hugger/docs/type-relations.md`). A Rust `impl` member's
+`identity.container_name` is the implemented type's last path segment without
+generics; its container kind is that type's same-file kind, absent when
+declared elsewhere. Under Containment its `relations.container` is the self
+type resolved by full written path, or the self type as written with no ID. Every other
 container kind is the kind extracted for the container's own declaration.
 
 `source.signature_text` is the display header: a contiguous part of
