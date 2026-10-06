@@ -1,14 +1,21 @@
 //! File-association breakdown rendering and path-list rendering.
+//!
+//! A filtered verbose report (`sniff files --association <cat> -v`) follows
+//! its summary table, any incomplete-scan notice, and this module's file list
+//! (see [`super::file_list`]) with the captured matching paths; language and
+//! framework details come after the list. The list itself renders only when
+//! the caller supplies the link root the captured paths are relative to.
 
 use std::fmt::Write;
 use std::path::{Path, PathBuf};
 
 use biscuit_terminal::components::list::UnorderedList;
-use biscuit_terminal::components::prose::InlineProse;
+use biscuit_terminal::components::prose::{InlineProse, Prose};
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 use sniff::filesystem::{FileAssociationBreakdown, FileAssociationStats};
 
+use super::file_list::render_file_list;
 use super::language::render_framework_summary;
 use super::path_format::{format_basename_filepath, format_styled_filepath};
 use crate::args::FilesFilter;
@@ -49,10 +56,18 @@ pub(crate) fn filter_file_breakdown(
     }
 }
 
+/// Renders the file-association summary table and, for a filtered verbose
+/// report, the captured matching paths.
+///
+/// `link_root` is the root the captured `files` paths are relative to (the
+/// owning package root, else the effective base); the command layer resolves
+/// it before rendering and reports a failure there, so this renderer never
+/// guesses one. `None` renders no list — verbosity changes presentation only.
 pub fn render_files_section(
     files: &FileAssociationBreakdown,
     verbose: u8,
     filter: &FilesFilter,
+    link_root: Option<&Path>,
 ) -> String {
     use biscuit_terminal::components::table::{Table, TableCellContent, TableColumn};
     use biscuit_terminal::utils::layout::{Alignment, Length, TargetValue};
@@ -81,6 +96,28 @@ pub fn render_files_section(
     writeln!(out).unwrap();
     write!(out, "{}", table.display(&term)).unwrap();
     writeln!(out).unwrap();
+
+    if filtered.truncated {
+        writeln!(
+            out,
+            "{}",
+            Prose::new("<b>Incomplete scan:</b> the file classification limit was reached. Counts and percentages describe a partial sample and may vary between runs.")
+                .render(&term)
+        )
+        .unwrap();
+    }
+
+    // The file list comes after the table and any incomplete-scan notice and
+    // before the language/framework details. A missing root is not guessed
+    // here; the caller resolves it or reports why it cannot.
+    if verbose > 0 && filter.association.is_some() && let Some(root) = link_root {
+        let paths: Vec<PathBuf> = filtered
+            .by_association
+            .iter()
+            .flat_map(|stats| stats.files.iter().cloned())
+            .collect();
+        out.push_str(&render_file_list(&paths, root, &term));
+    }
 
     if verbose > 0 && !filtered.by_framework.is_empty() {
         writeln!(
@@ -165,5 +202,277 @@ pub fn render_path_list(
             out.push('\n');
             out
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Strips renderer styling so assertions are independent of the test
+    /// host's detected terminal capabilities (a non-tty harness renders the
+    /// file list without OSC8 links).
+    fn visible(rendered: &str) -> String {
+        biscuit_terminal::prelude::strip_escape_codes(rendered)
+    }
+
+    fn stats_with_files(association: sniff::filesystem::FileAssociation, files: &[&str]) -> FileAssociationStats {
+        FileAssociationStats {
+            association,
+            file_count: files.len(),
+            percentage: 100.0,
+            files: files.iter().map(PathBuf::from).collect(),
+        }
+    }
+
+    #[test]
+    fn truncated_files_report_discloses_partial_sample_even_without_matches() {
+        let files = FileAssociationBreakdown {
+            truncated: true,
+            limit: Some(10_000),
+            ..FileAssociationBreakdown::default()
+        };
+        let filter = FilesFilter {
+            association: Some(sniff::filesystem::FileAssociation::Image),
+        };
+        for verbose in [0, 1] {
+            let rendered = render_files_section(&files, verbose, &filter, Some(Path::new("/work")));
+            assert!(rendered.contains("Incomplete scan"), "{rendered}");
+            assert!(rendered.contains("partial sample"), "{rendered}");
+        }
+    }
+
+    #[test]
+    fn verbose_filtered_report_lists_captured_paths_after_table() {
+        let files = FileAssociationBreakdown {
+            by_association: vec![stats_with_files(sniff::filesystem::FileAssociation::Image, &[
+                "assets/banner.png",
+                "assets/logo.svg",
+            ])],
+            ..FileAssociationBreakdown::default()
+        };
+        let filter = FilesFilter {
+            association: Some(sniff::filesystem::FileAssociation::Image),
+        };
+        let rendered = render_files_section(&files, 1, &filter, Some(Path::new("/work")));
+        let text = visible(&rendered);
+        let table_end = text.find("Image").expect("table row");
+        let heading = text.find("Files:").expect("list heading");
+        assert!(table_end < heading, "{text}");
+        assert!(text.contains("assets/banner.png"), "{text}");
+        assert!(text.contains("assets/logo.svg"), "{text}");
+    }
+
+    #[test]
+    fn file_list_precedes_framework_and_language_details() {
+        use sniff::filesystem::{FileAssociation, FrameworkKind, FrameworkStats, ProgrammingLanguage};
+        // An association filter keeps only its own detail projection, so each
+        // detail heading is reached through the filter that retains it.
+        let files = FileAssociationBreakdown {
+            by_association: vec![
+                stats_with_files(FileAssociation::ProgrammingLanguage, &["src/main.rs"]),
+                stats_with_files(FileAssociation::FrameworkFile, &["web/App.vue"]),
+            ],
+            by_language: vec![sniff::filesystem::ProgrammingLanguageStats {
+                language: ProgrammingLanguage::Rust,
+                language_type: sniff::filesystem::ProgrammingLanguageType::CompiledBinary,
+                direct_file_count: 1,
+                framework_file_count: 0,
+                total_file_count: 1,
+                signal: 1.0,
+                percentage: 100.0,
+                direct_files: vec![PathBuf::from("src/main.rs")],
+                framework_files: vec![],
+            }],
+            by_framework: vec![FrameworkStats {
+                framework: FrameworkKind::Vue,
+                file_count: 1,
+                explicit_file_count: 1,
+                inferred_file_count: 0,
+                related_languages: vec![],
+                files: vec![PathBuf::from("web/App.vue")],
+            }],
+            ..FileAssociationBreakdown::default()
+        };
+        for (association, path, details) in [
+            (FileAssociation::ProgrammingLanguage, "src/main.rs", "Languages: Rust (1)"),
+            (FileAssociation::FrameworkFile, "web/App.vue", "Frameworks: Vue (1)"),
+        ] {
+            let filter = FilesFilter {
+                association: Some(association),
+            };
+            let rendered = render_files_section(&files, 1, &filter, Some(Path::new("/work")));
+            let text = visible(&rendered);
+            let heading = text.find("Files:").expect("list heading");
+            let entry = text.find(path).expect("listed path");
+            let detail = text.find(details).expect("retained details");
+            assert!(heading < entry && entry < detail, "{association:?}: {text}");
+        }
+    }
+
+    #[test]
+    fn every_category_projection_keeps_bracketed_labels_literal() {
+        use sniff::filesystem::FileAssociation;
+        for (association, extension) in [
+            (FileAssociation::Image, "png"),
+            (FileAssociation::ProgrammingLanguage, "rs"),
+            (FileAssociation::FrameworkFile, "vue"),
+            (FileAssociation::Unknown, "zzz"),
+        ] {
+            let names = [
+                format!("dir[x]/ordinary.{extension}"),
+                format!("photo[x].{extension}"),
+            ];
+            let name_refs: Vec<&str> = names.iter().map(String::as_str).collect();
+            let files = FileAssociationBreakdown {
+                by_association: vec![stats_with_files(association, &name_refs)],
+                ..FileAssociationBreakdown::default()
+            };
+            let filter = FilesFilter {
+                association: Some(association),
+            };
+            let rendered = render_files_section(&files, 1, &filter, Some(Path::new("/work")));
+            let text = visible(&rendered);
+            let list = &text[text.find("Files:").expect("list heading")..];
+            let expected = format!("Files:\n- {}\n- {}\n", names[0], names[1]);
+            assert!(list.starts_with(&expected), "{association:?}: {list:?}");
+            assert!(!text.contains("\\]"), "{association:?}: {text:?}");
+        }
+    }
+
+    #[test]
+    fn no_list_without_link_root() {
+        let files = FileAssociationBreakdown {
+            by_association: vec![stats_with_files(sniff::filesystem::FileAssociation::Image, &[
+                "assets/logo.svg",
+            ])],
+            ..FileAssociationBreakdown::default()
+        };
+        let filter = FilesFilter {
+            association: Some(sniff::filesystem::FileAssociation::Image),
+        };
+        let rendered = render_files_section(&files, 1, &filter, None);
+        assert!(!rendered.contains("Files:"), "{rendered}");
+    }
+
+    #[test]
+    fn no_list_when_not_verbose_unfiltered_or_empty() {
+        let image = stats_with_files(sniff::filesystem::FileAssociation::Image, &["a.png"]);
+        let files = FileAssociationBreakdown {
+            by_association: vec![image.clone()],
+            ..FileAssociationBreakdown::default()
+        };
+        let root = Some(Path::new("/work"));
+
+        // Non-verbose filtered: no list.
+        let filter = FilesFilter {
+            association: Some(sniff::filesystem::FileAssociation::Image),
+        };
+        let rendered = render_files_section(&files, 0, &filter, root);
+        assert!(!rendered.contains("Files:"), "{rendered}");
+
+        // Verbose but unfiltered: no list.
+        let unfiltered = FilesFilter { association: None };
+        let rendered = render_files_section(&files, 1, &unfiltered, root);
+        assert!(!rendered.contains("Files:"), "{rendered}");
+
+        // Verbose filtered but the category has no captured files: no list.
+        let empty = FileAssociationBreakdown {
+            by_association: vec![stats_with_files(sniff::filesystem::FileAssociation::Image, &[])],
+            ..FileAssociationBreakdown::default()
+        };
+        let rendered = render_files_section(&empty, 1, &filter, root);
+        assert!(!rendered.contains("Files:"), "{rendered}");
+
+        // The captured paths are untouched by the verbosity change.
+        assert_eq!(image.files, vec![PathBuf::from("a.png")]);
+    }
+
+    #[test]
+    fn unknown_association_lists_paths_and_notice_precedes_list() {
+        let files = FileAssociationBreakdown {
+            by_association: vec![stats_with_files(sniff::filesystem::FileAssociation::Unknown, &[
+                "mystery.bin",
+            ])],
+            truncated: true,
+            limit: Some(100),
+            ..FileAssociationBreakdown::default()
+        };
+        let filter = FilesFilter {
+            association: Some(sniff::filesystem::FileAssociation::Unknown),
+        };
+        let rendered = render_files_section(&files, 1, &filter, Some(Path::new("/work")));
+        let text = visible(&rendered);
+        let notice = text.find("Incomplete scan").expect("notice");
+        let heading = text.find("Files:").expect("list heading");
+        assert!(notice < heading, "{text}");
+        assert!(text.contains("mystery.bin"), "{text}");
+    }
+
+    #[test]
+    fn truncated_breakdown_projects_one_observation_to_text_and_json() {
+        // One constructed, captured breakdown shared by both projections:
+        // the text discloses the partial sample before listing it, and the
+        // JSON projection carries the same captured files and truncation.
+        let files = FileAssociationBreakdown {
+            by_association: vec![stats_with_files(sniff::filesystem::FileAssociation::Image, &[
+                "a.png", "b.png",
+            ])],
+            truncated: true,
+            limit: Some(10),
+            ..FileAssociationBreakdown::default()
+        };
+        let filter = FilesFilter {
+            association: Some(sniff::filesystem::FileAssociation::Image),
+        };
+        let rendered = render_files_section(&files, 1, &filter, Some(Path::new("/work")));
+        let text = visible(&rendered);
+        let notice = text.find("Incomplete scan").expect("notice");
+        let heading = text.find("Files:").expect("list heading");
+        assert!(notice < heading, "{text}");
+        assert!(text.contains("a.png") && text.contains("b.png"), "{text}");
+
+        let projected = filter_file_breakdown(&files, &filter);
+        assert!(projected.truncated);
+        assert_eq!(projected.limit, Some(10));
+        let json = serde_json::to_value(&projected).expect("serializable");
+        assert_eq!(json["truncated"], serde_json::json!(true));
+        assert_eq!(
+            json["by_association"][0]["files"],
+            serde_json::json!(["a.png", "b.png"]),
+            "the captured sample is the list's source: {json}"
+        );
+        assert_eq!(json["by_association"][0]["file_count"], 2);
+    }
+
+    #[test]
+    fn removed_file_remains_listed_and_linked_after_discovery() {
+        // A file deleted after discovery stays listed with its link; no
+        // existence probe decides either. The root must be absolute on every
+        // OS, so anchor on the system temp directory.
+        let root = std::env::temp_dir();
+        let files = FileAssociationBreakdown {
+            by_association: vec![stats_with_files(sniff::filesystem::FileAssociation::Image, &[
+                "vanished/gone.png",
+            ])],
+            ..FileAssociationBreakdown::default()
+        };
+        let filter = FilesFilter {
+            association: Some(sniff::filesystem::FileAssociation::Image),
+        };
+        let rendered = render_files_section(&files, 1, &filter, Some(&root));
+        let text = visible(&rendered);
+        assert!(text.contains("vanished/gone.png"), "{text}");
+        // The section's terminal is host-detected (no OSC8 under a test
+        // harness), so prove the link on an OSC8-capable terminal.
+        let linked = render_file_list(
+            &files.by_association[0].files,
+            &root,
+            &Terminal::new_optimistic(200),
+        );
+        assert!(
+            linked.contains("\x1b]8;;file://"),
+            "the removed file keeps its hyperlink:\n{linked:?}"
+        );
     }
 }

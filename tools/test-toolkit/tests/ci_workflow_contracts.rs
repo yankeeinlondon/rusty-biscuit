@@ -460,6 +460,25 @@ fn every_cargo_workflow_neutralizes_a_stray_rustc_wrapper() {
     }
 }
 
+#[test]
+fn cross_check_unix_builds_neutralize_host_compiler_wrappers() {
+    let source = read("scripts/cross-check.sh");
+    let prelude = source
+        .split_once("unix_prelude() {")
+        .expect("Unix remote prelude")
+        .1
+        .split_once("\nEOF\n}")
+        .expect("end of Unix remote prelude")
+        .0;
+    for variable in ["RUSTC_WRAPPER", "RUSTC_WORKSPACE_WRAPPER"] {
+        assert!(
+            prelude.contains(&format!("export {variable}=\"\"")),
+            "cross-check must clear {variable} before native and archive builds; \
+             unsetting it permits host config or cold-build shims to reactivate caching"
+        );
+    }
+}
+
 // --- D3: bootstrap preflight gates package fan-out ---------------------------
 
 #[test]

@@ -525,6 +525,9 @@ repo="\$base/rusty-biscuit"
 # Never touch the developer's ~/.config (a network mount on the WSL guest).
 export GIT_CONFIG_GLOBAL=/dev/null
 export XDG_CONFIG_HOME="\$base/.xdg-empty"
+# An empty value overrides host Cargo config and cold-build cache shims.
+export RUSTC_WRAPPER=""
+export RUSTC_WORKSPACE_WRAPPER=""
 mkdir -p "\$XDG_CONFIG_HOME"
 # Hosted CI runners use a UTF-8 locale. A host whose shells run \`LANG=C\` (the
 # Linux build host) makes terminal detection choose ASCII glyph fallbacks, so
