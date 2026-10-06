@@ -324,8 +324,10 @@ The focused `sniff files` command requests structure-only membership and Git ide
 with docs and formatting disabled. Its inventory walk starts at the owning package or
 base directory, so unrelated repository files cannot consume its classification budget.
 The association filter retains percentages of all files scanned in that scope; verbosity
-does not change acquisition. A capped text report discloses the partial sample, even if
-the selected association has no matches. See [file association reports](cli/files.md).
+does not change acquisition — a filtered verbose report only renders the matching paths
+the captured observation already holds. A capped text report discloses the partial
+sample, even if the selected association has no matches. See
+[file association reports](cli/files.md).
 
 ### Git Status Layers
 

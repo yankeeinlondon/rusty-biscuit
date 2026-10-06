@@ -87,6 +87,7 @@ sniff repo branches                  # Local branches from known refs
 sniff repo package-dependencies      # Internal workspace dependency graph
 sniff repo dependencies              # External package dependencies
 sniff files --association image      # Image counts within the package/base directory
+sniff files --association image -v   # …and each matching file, hyperlinked to its path
 sniff repo git-status --compact      # Status section only
 sniff repo remote origin             # Inspect remote repository
 sniff blast-radius                   # Docs affected by dirty changes

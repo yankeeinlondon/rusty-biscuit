@@ -107,9 +107,12 @@ sniff docs        # Repository markdown documents
 `sniff files --association image` shows image counts and their percentage of
 all files in the reported scope. It scans the owning package (excluding nested
 packages), or the base directory when that directory has no owning package.
-`-v` adds detail without changing the scan or its percentages. Classification
-is capped at 10,000 files within that scope; text output labels a capped scan
-as incomplete, and JSON includes `truncated: true` and `limit: 10000`.
+Adding `-v` to a filtered report lists every matching file — each entry a
+hyperlink to the actual file, resolved against the owning package root or
+base directory the scan used — without changing the scan, its percentages, or
+JSON output. Classification is capped at 10,000 files within that scope; text
+output labels a capped scan as incomplete, and JSON includes `truncated: true`
+and `limit: 10000`. A capped verbose list covers only the captured sample.
 See [file association reports](../docs/cli/files.md) for examples.
 
 **Blast Radius:**
