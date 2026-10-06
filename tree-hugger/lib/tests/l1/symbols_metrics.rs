@@ -1,13 +1,14 @@
-//! The metrics matrix of `2026-10-03-symbol-filters-and-reports`:
-//! `parameters` and `has_docs` for each fixture function, `None` where a
-//! metric is unsupported, and the language-wide rules behind them.
+//! The metrics matrix: `parameters`, `has_docs` and `lines` for each
+//! fixture function, `None` where a metric is unsupported, and the
+//! language-wide rules behind them; `BODY_LINES_MATRIX` holds the body forms
+//! `lines` is counted from.
 
 use std::path::Path;
 
 use tempfile::TempDir;
 use tree_hugger::{
     Capability, MetricsFacet, ProgrammingLanguage, SourceFile, SymbolKindV2, SymbolQuery,
-    SymbolRecord,
+    SymbolRecord, TextSpan, TreeFile,
 };
 
 use crate::symbols_fixtures::{display_name, in_file_name, primary_fixture};
@@ -22,8 +23,8 @@ pub enum Support {
     Unsupported(&'static str),
 }
 
-/// `(qualified name of a function, parameters, has_docs)`.
-pub type MetricsCase = (&'static str, Option<u32>, Option<bool>);
+/// `(qualified name of a function, parameters, has_docs, lines)`.
+pub type MetricsCase = (&'static str, Option<u32>, Option<bool>, Option<u32>);
 
 pub struct MetricsRow {
     pub language: ProgrammingLanguage,
@@ -41,13 +42,13 @@ pub const METRICS_MATRIX: &[MetricsRow] = &[
         parameters: Support::Measured,
         docs: Support::Measured,
         cases: &[
-            ("documented_pair", Some(2), Some(true)),
-            ("undocumented_none", Some(0), Some(false)),
-            ("deprecated_api", Some(0), Some(false)),
+            ("documented_pair", Some(2), Some(true), Some(1)),
+            ("undocumented_none", Some(0), Some(false), Some(1)),
+            ("deprecated_api", Some(0), Some(false), Some(1)),
             // The `&self` receiver is not counted.
-            ("Receiver::with_receiver", Some(1), Some(false)),
-            ("cfg_test_module::inside_cfg_test", Some(1), Some(false)),
-            ("function_with_nested_items::nested_local_module::nested_module_function", Some(0), Some(false)),
+            ("Receiver::with_receiver", Some(1), Some(false), Some(1)),
+            ("cfg_test_module::inside_cfg_test", Some(1), Some(false), Some(1)),
+            ("function_with_nested_items::nested_local_module::nested_module_function", Some(0), Some(false), Some(1)),
         ],
     },
     MetricsRow {
@@ -55,11 +56,11 @@ pub const METRICS_MATRIX: &[MetricsRow] = &[
         parameters: Support::Measured,
         docs: Support::Measured,
         cases: &[
-            ("documentedPair", Some(2), Some(true)),
-            ("undocumentedNone", Some(0), Some(false)),
-            ("variadic", Some(2), Some(false)),
-            ("Receiver.withReceiver", Some(1), Some(true)),
-            ("boundaryArrow", Some(1), Some(false)),
+            ("documentedPair", Some(2), Some(true), Some(1)),
+            ("undocumentedNone", Some(0), Some(false), Some(1)),
+            ("variadic", Some(2), Some(false), Some(1)),
+            ("Receiver.withReceiver", Some(1), Some(true), Some(1)),
+            ("boundaryArrow", Some(1), Some(false), Some(1)),
         ],
     },
     MetricsRow {
@@ -67,11 +68,11 @@ pub const METRICS_MATRIX: &[MetricsRow] = &[
         parameters: Support::Measured,
         docs: Support::Measured,
         cases: &[
-            ("documentedPair", Some(2), Some(true)),
-            ("undocumentedNone", Some(0), Some(false)),
-            ("variadic", Some(2), Some(false)),
-            ("documentedArrow", Some(1), Some(true)),
-            ("lookAlikeTag", Some(0), Some(true)),
+            ("documentedPair", Some(2), Some(true), Some(1)),
+            ("undocumentedNone", Some(0), Some(false), Some(1)),
+            ("variadic", Some(2), Some(false), Some(1)),
+            ("documentedArrow", Some(1), Some(true), Some(1)),
+            ("lookAlikeTag", Some(0), Some(true), Some(1)),
         ],
     },
     MetricsRow {
@@ -79,12 +80,12 @@ pub const METRICS_MATRIX: &[MetricsRow] = &[
         parameters: Support::Measured,
         docs: Support::Measured,
         cases: &[
-            ("symbols.DocumentedPair", Some(2), Some(true)),
-            ("symbols.UndocumentedNone", Some(0), Some(false)),
-            ("symbols.Variadic", Some(2), Some(false)),
+            ("symbols.DocumentedPair", Some(2), Some(true), Some(1)),
+            ("symbols.UndocumentedNone", Some(0), Some(false), Some(3)),
+            ("symbols.Variadic", Some(2), Some(false), Some(1)),
             // The receiver has its own list and is not counted.
-            ("symbols.ExportedStruct.WithReceiver", Some(1), Some(false)),
-            ("symbols.DeprecatedLater", Some(0), Some(true)),
+            ("symbols.ExportedStruct.WithReceiver", Some(1), Some(false), Some(1)),
+            ("symbols.DeprecatedLater", Some(0), Some(true), Some(1)),
         ],
     },
     MetricsRow {
@@ -92,13 +93,13 @@ pub const METRICS_MATRIX: &[MetricsRow] = &[
         parameters: Support::Measured,
         docs: Support::Measured,
         cases: &[
-            ("documented_pair", Some(2), Some(true)),
-            ("undocumented_none", Some(0), Some(false)),
+            ("documented_pair", Some(2), Some(true), Some(1)),
+            ("undocumented_none", Some(0), Some(false), Some(1)),
             // `*rest` and `**options` count once each.
-            ("variadic", Some(3), Some(false)),
+            ("variadic", Some(3), Some(false), Some(1)),
             // `self` is an ordinary parameter in Python's syntax.
-            ("Receiver.with_receiver", Some(2), Some(false)),
-            ("outer_function.nested_function", Some(0), Some(false)),
+            ("Receiver.with_receiver", Some(2), Some(false), Some(1)),
+            ("outer_function.nested_function", Some(0), Some(false), Some(1)),
         ],
     },
     MetricsRow {
@@ -106,10 +107,10 @@ pub const METRICS_MATRIX: &[MetricsRow] = &[
         parameters: Support::Measured,
         docs: Support::Measured,
         cases: &[
-            ("com.example.symbols.FlagsAndMetrics.documentedPair", Some(2), Some(true)),
-            ("com.example.symbols.FlagsAndMetrics.undocumentedNone", Some(0), Some(false)),
-            ("com.example.symbols.FlagsAndMetrics.deprecatedByTag", Some(0), Some(true)),
-            ("com.example.symbols.FlagsAndMetrics.variadic", Some(2), Some(false)),
+            ("com.example.symbols.FlagsAndMetrics.documentedPair", Some(2), Some(true), Some(1)),
+            ("com.example.symbols.FlagsAndMetrics.undocumentedNone", Some(0), Some(false), Some(1)),
+            ("com.example.symbols.FlagsAndMetrics.deprecatedByTag", Some(0), Some(true), Some(1)),
+            ("com.example.symbols.FlagsAndMetrics.variadic", Some(2), Some(false), Some(1)),
         ],
     },
     MetricsRow {
@@ -117,9 +118,9 @@ pub const METRICS_MATRIX: &[MetricsRow] = &[
         parameters: Support::Measured,
         docs: Support::Measured,
         cases: &[
-            ("Example.Symbols.FlagsAndMetrics.DocumentedPair", Some(2), Some(true)),
-            ("Example.Symbols.FlagsAndMetrics.UndocumentedNone", Some(0), Some(false)),
-            ("Example.Symbols.FlagsAndMetrics.Variadic", Some(2), Some(false)),
+            ("Example.Symbols.FlagsAndMetrics.DocumentedPair", Some(2), Some(true), Some(1)),
+            ("Example.Symbols.FlagsAndMetrics.UndocumentedNone", Some(0), Some(false), Some(1)),
+            ("Example.Symbols.FlagsAndMetrics.Variadic", Some(2), Some(false), Some(1)),
         ],
     },
     MetricsRow {
@@ -127,10 +128,10 @@ pub const METRICS_MATRIX: &[MetricsRow] = &[
         parameters: Support::Measured,
         docs: Support::Measured,
         cases: &[
-            ("documented_pair", Some(2), Some(true)),
+            ("documented_pair", Some(2), Some(true), Some(1)),
             // `(void)` is a known empty list.
-            ("undocumented_none", Some(0), Some(false)),
-            ("variadic", Some(2), Some(false)),
+            ("undocumented_none", Some(0), Some(false), Some(1)),
+            ("variadic", Some(2), Some(false), Some(1)),
         ],
     },
     MetricsRow {
@@ -138,9 +139,9 @@ pub const METRICS_MATRIX: &[MetricsRow] = &[
         parameters: Support::Measured,
         docs: Support::Measured,
         cases: &[
-            ("documented_pair", Some(2), Some(true)),
-            ("undocumented_none", Some(0), Some(false)),
-            ("variadic", Some(2), Some(false)),
+            ("documented_pair", Some(2), Some(true), Some(1)),
+            ("undocumented_none", Some(0), Some(false), Some(1)),
+            ("variadic", Some(2), Some(false), Some(1)),
         ],
     },
     MetricsRow {
@@ -148,9 +149,9 @@ pub const METRICS_MATRIX: &[MetricsRow] = &[
         parameters: Support::Measured,
         docs: Support::Measured,
         cases: &[
-            ("documentedPair", Some(2), Some(true)),
-            ("undocumentedNone", Some(0), Some(false)),
-            ("variadic", Some(2), Some(false)),
+            ("documentedPair", Some(2), Some(true), Some(1)),
+            ("undocumentedNone", Some(0), Some(false), Some(1)),
+            ("variadic", Some(2), Some(false), Some(1)),
         ],
     },
     MetricsRow {
@@ -158,11 +159,11 @@ pub const METRICS_MATRIX: &[MetricsRow] = &[
         parameters: Support::Measured,
         docs: Support::Measured,
         cases: &[
-            ("example.symbols.documentedPair", Some(2), Some(true)),
-            ("example.symbols.undocumentedNone", Some(0), Some(false)),
-            ("example.symbols.variadic", Some(2), Some(false)),
+            ("example.symbols.documentedPair", Some(2), Some(true), Some(1)),
+            ("example.symbols.undocumentedNone", Some(0), Some(false), Some(1)),
+            ("example.symbols.variadic", Some(2), Some(false), Some(1)),
             // `def area: Int` has no parameter list at all.
-            ("example.symbols.FirstShape.area", None, Some(false)),
+            ("example.symbols.FirstShape.area", None, Some(false), Some(1)),
         ],
     },
     MetricsRow {
@@ -170,39 +171,39 @@ pub const METRICS_MATRIX: &[MetricsRow] = &[
         parameters: Support::Measured,
         docs: Support::Measured,
         cases: &[
-            ("Example\\Symbols\\documented_pair", Some(2), Some(true)),
-            ("Example\\Symbols\\undocumented_none", Some(0), Some(false)),
-            ("Example\\Symbols\\variadic", Some(2), Some(false)),
+            ("Example\\Symbols\\documented_pair", Some(2), Some(true), Some(2)),
+            ("Example\\Symbols\\undocumented_none", Some(0), Some(false), Some(2)),
+            ("Example\\Symbols\\variadic", Some(2), Some(false), Some(2)),
         ],
     },
     MetricsRow {
         language: L::Perl,
         parameters: NO_PARAMETERS,
         docs: NO_DOCS,
-        cases: &[("Fixture::Other::test_helper", None, None)],
+        cases: &[("Fixture::Other::test_helper", None, None, Some(1))],
     },
     MetricsRow {
         language: L::Lua,
         parameters: Support::Measured,
         docs: NO_DOCS,
         cases: &[
-            ("documented_pair", Some(2), None),
+            ("documented_pair", Some(2), None, Some(0)),
             // `...` counts once.
-            ("variadic", Some(2), None),
-            ("test_helper", Some(0), None),
+            ("variadic", Some(2), None, Some(0)),
+            ("test_helper", Some(0), None, Some(0)),
         ],
     },
     MetricsRow {
         language: L::Bash,
         parameters: NO_PARAMETERS,
         docs: NO_DOCS,
-        cases: &[("test_helper", None, None)],
+        cases: &[("test_helper", None, None, Some(3))],
     },
     MetricsRow {
         language: L::Zsh,
         parameters: NO_PARAMETERS,
         docs: NO_DOCS,
-        cases: &[("test_helper", None, None)],
+        cases: &[("test_helper", None, None, Some(3))],
     },
 ];
 
@@ -231,7 +232,7 @@ fn metrics_match_each_fixture_function() {
         let label = display_name(&path);
         let records = metrics_records(&path);
         assert!(!row.cases.is_empty(), "{label}: a row lists its functions");
-        for (name, parameters, has_docs) in row.cases {
+        for (name, parameters, has_docs, lines) in row.cases {
             let matching: Vec<&SymbolRecord> = records
                 .iter()
                 .filter(|record| in_file_name(record) == *name && is_function(record.kind))
@@ -239,7 +240,7 @@ fn metrics_match_each_fixture_function() {
             assert_eq!(matching.len(), 1, "{label}: one function `{name}`");
             assert_eq!(
                 matching[0].metrics,
-                Some(MetricsFacet { parameters: *parameters, has_docs: *has_docs, lines: None }),
+                Some(MetricsFacet { parameters: *parameters, has_docs: *has_docs, lines: *lines }),
                 "{label}: `{name}`"
             );
         }
@@ -255,8 +256,23 @@ fn metrics_match_each_fixture_function() {
                 row.docs == Support::Measured,
                 "{label}: `{name}` has_docs"
             );
+            // `lines` is read from the stored body span, so the two never
+            // disagree; other kinds have none even with a body.
+            let expected_lines = is_function(record.kind)
+                .then(|| record.source.body_span.as_ref().map(span_lines))
+                .flatten();
+            assert_eq!(metrics.lines, expected_lines, "{label}: `{name}` ({:?}) lines", record.kind);
         }
     }
+}
+
+/// The spec's count of physical lines a nonempty span touches, with
+/// one-based locations; `0` for an empty span.
+fn span_lines(span: &TextSpan) -> u32 {
+    if span.start_byte == span.end_byte {
+        return 0;
+    }
+    span.end.line - span.start.line + u32::from(span.end.column > 1)
 }
 
 /// `(source, extension, name, parameters, has_docs)`.
@@ -322,11 +338,9 @@ fn metric_forms_outside_the_fixtures() {
             .iter()
             .find(|record| record.identity.name == *name)
             .unwrap_or_else(|| panic!("{source}: no `{name}`"));
-        assert_eq!(
-            record.metrics,
-            Some(MetricsFacet { parameters: *parameters, has_docs: *has_docs, lines: None }),
-            "{source}: `{name}`"
-        );
+        let metrics = record.metrics.unwrap_or_else(|| panic!("{source}: `{name}` has no metrics"));
+        // `lines` is `BODY_LINES_MATRIX`'s.
+        assert_eq!((metrics.parameters, metrics.has_docs), (*parameters, *has_docs), "{source}: `{name}`");
     }
 }
 
@@ -720,5 +734,335 @@ fn structured_doc_summaries_keep_literal_leading_stars() {
             .unwrap_or_else(|| panic!("{source}: no `{name}`"));
         let actual = record.docs.parsed.as_ref().and_then(|parsed| parsed.summary.as_deref());
         assert_eq!(actual, Some(*summary), "{extension}: `{name}`");
+    }
+}
+
+/// What a [`BodyCase`] expects of a record's `source.body_span` and
+/// `metrics.lines`.
+#[derive(Debug, Clone, Copy)]
+pub enum Body {
+    /// A function, method or constructor whose body span holds exactly this
+    /// text (LF line endings), counting `lines`.
+    Text(SymbolKindV2, &'static str, u32),
+    /// A function, method or constructor without an implementation body:
+    /// no span, `lines` is `None`.
+    Absent(SymbolKindV2),
+    /// A declaration that is not callable but has a body span (a type, a
+    /// module): `lines` is still `None`.
+    NotCallable,
+}
+
+/// `(in-file qualified name, expectation)`.
+pub type BodyCase = (&'static str, Body);
+
+pub struct BodyLinesRow {
+    pub language: ProgrammingLanguage,
+    pub extension: &'static str,
+    pub source: &'static str,
+    pub cases: &'static [BodyCase],
+}
+
+use Body::{Absent, NotCallable, Text};
+use SymbolKindV2 as K;
+
+/// The body each language's callables are measured from: block and
+/// expression bodies, nested and returned callables that are not the body,
+/// defaults and types that are not the body, declarations without one, and
+/// non-callable declarations that have a body span. Every source is also
+/// checked with CRLF line endings.
+pub const BODY_LINES_MATRIX: &[BodyLinesRow] = &[
+    BodyLinesRow {
+        language: L::Rust,
+        extension: "rs",
+        source: "fn one() {}\n\nfn multi() {\n    // a comment\n\n    fn nested() {}\n    let x = 1;\n}\n\nfn returns() -> Box<dyn Fn() -> u8> { Box::new(|| 1) }\n\ntrait T {\n    fn required(&self);\n    fn provided(&self) {}\n}\n\nmod m {\n}\n",
+        cases: &[
+            ("one", Text(K::Function, "{}", 1)),
+            ("multi", Text(K::Function, "{\n    // a comment\n\n    fn nested() {}\n    let x = 1;\n}", 6)),
+            ("multi::nested", Text(K::Function, "{}", 1)),
+            ("returns", Text(K::Function, "{ Box::new(|| 1) }", 1)),
+            ("T::required", Absent(K::Method)),
+            ("T::provided", Text(K::Method, "{}", 1)),
+            ("T", NotCallable),
+            ("m", NotCallable),
+        ],
+    },
+    BodyLinesRow {
+        language: L::TypeScript,
+        extension: "ts",
+        source: "export const arrow = (x: number): number => x * 2;\nconst curried = () => () => 1;\nfunction withDefault(cb = () => 3): number {\n  return cb();\n}\nabstract class A {\n  abstract m(): void;\n  n(): { a: number } { return { a: 1 }; }\n}\ninterface I {\n  i(): void;\n}\n",
+        cases: &[
+            ("arrow", Text(K::Function, "x * 2", 1)),
+            // The returned arrow is the expression body itself.
+            ("curried", Text(K::Function, "() => 1", 1)),
+            ("withDefault", Text(K::Function, "{\n  return cb();\n}", 3)),
+            ("A.m", Absent(K::Method)),
+            // An object return type is not the body.
+            ("A.n", Text(K::Method, "{ return { a: 1 }; }", 1)),
+            ("I.i", Absent(K::Method)),
+            ("A", NotCallable),
+        ],
+    },
+    BodyLinesRow {
+        language: L::JavaScript,
+        extension: "js",
+        source: "const arrow = async x => ({ x });\nfunction multi() {\n  return 1;\n}\nclass K {\n  m() {}\n}\n",
+        cases: &[
+            ("arrow", Text(K::Function, "({ x })", 1)),
+            ("multi", Text(K::Function, "{\n  return 1;\n}", 3)),
+            ("K.m", Text(K::Method, "{}", 1)),
+            ("K", NotCallable),
+        ],
+    },
+    BodyLinesRow {
+        language: L::Go,
+        extension: "go",
+        source: "package p\n\nfunc F() {}\n\nfunc G() func() int {\n\treturn func() int { return 1 }\n}\n\ntype S struct {\n\tA int\n}\n\nfunc (s S) M() {\n}\n",
+        cases: &[
+            ("p.F", Text(K::Function, "{}", 1)),
+            // The returned literal's body is inside, not instead of, `G`'s.
+            ("p.G", Text(K::Function, "{\n\treturn func() int { return 1 }\n}", 3)),
+            ("p.S.M", Text(K::Method, "{\n}", 2)),
+        ],
+    },
+    BodyLinesRow {
+        language: L::Python,
+        extension: "py",
+        source: "def with_default(x=lambda: 1):\n    # leading\n    return x\n\ndef one(): pass\n\n@decorator\ndef decorated():\n    pass\n\nclass C:\n    def m(self): ...\n",
+        cases: &[
+            // The default `lambda` is not the body; the comment the grammar
+            // leaves before the body's block is part of it.
+            ("with_default", Text(K::Function, "# leading\n    return x", 2)),
+            ("one", Text(K::Function, "pass", 1)),
+            ("decorated", Text(K::Function, "pass", 1)),
+            ("C.m", Text(K::Method, "...", 1)),
+            ("C", NotCallable),
+        ],
+    },
+    BodyLinesRow {
+        language: L::Java,
+        extension: "java",
+        source: "interface I { void m(); default void n() {} }\nabstract class A {\n  abstract void q();\n  A() {\n  }\n}\n",
+        cases: &[
+            ("I.m", Absent(K::Method)),
+            ("I.n", Text(K::Method, "{}", 1)),
+            ("A.q", Absent(K::Method)),
+            ("A.A", Text(K::Constructor, "{\n  }", 2)),
+            ("A", NotCallable),
+        ],
+    },
+    BodyLinesRow {
+        language: L::CSharp,
+        extension: "cs",
+        source: "abstract class A {\n  int x;\n  int M() => 1;\n  A() => x = 1;\n  abstract void Q();\n  void N()\n  {\n  }\n  static int L() { int Local() => 3; return Local(); }\n}\n",
+        cases: &[
+            // An expression body is its expression, without `=>`.
+            ("A.M", Text(K::Method, "1", 1)),
+            ("A.A", Text(K::Constructor, "x = 1", 1)),
+            ("A.Q", Absent(K::Method)),
+            ("A.N", Text(K::Method, "{\n  }", 2)),
+            ("A.L", Text(K::Method, "{ int Local() => 3; return Local(); }", 1)),
+            ("A.L.Local", Text(K::Function, "3", 1)),
+            ("A", NotCallable),
+        ],
+    },
+    BodyLinesRow {
+        language: L::C,
+        extension: "c",
+        source: "int add(int a, int b)\n{\n  return a + b;\n}\nint proto(int a);\nint (*get(void))(int) { return 0; }\nstruct S {\n  int a;\n};\n",
+        cases: &[
+            ("add", Text(K::Function, "{\n  return a + b;\n}", 3)),
+            ("proto", Absent(K::Function)),
+            // A function returning a function pointer has its own body.
+            ("get", Text(K::Function, "{ return 0; }", 1)),
+            ("S", NotCallable),
+        ],
+    },
+    BodyLinesRow {
+        language: L::Cpp,
+        extension: "cpp",
+        source: "struct C {\n  C() = default;\n  virtual void v() = 0;\n  void m();\n  int f() { return 1; }\n};\nstruct D {\n  D(int) = delete;\n};\nvoid C::m() {\n}\ntemplate <typename T> T id(T x) { return x; }\nint tryf() try { return 1; } catch (...) { return 0; }\n",
+        cases: &[
+            ("C::C", Absent(K::Constructor)),
+            ("D::D", Absent(K::Constructor)),
+            ("C::v", Absent(K::Method)),
+            ("C::m", Absent(K::Method)),
+            ("C::f", Text(K::Method, "{ return 1; }", 1)),
+            // The out-of-class definition (a container-less function).
+            ("m", Text(K::Function, "{\n}", 2)),
+            ("id", Text(K::Function, "{ return x; }", 1)),
+            ("tryf", Text(K::Function, "try { return 1; } catch (...) { return 0; }", 1)),
+            ("C", NotCallable),
+        ],
+    },
+    BodyLinesRow {
+        language: L::Swift,
+        extension: "swift",
+        source: "protocol P { func m() }\nstruct S {\n  init() {}\n  func g(cb: () -> Int = { 1 }) -> Int {\n    cb()\n  }\n}\n",
+        cases: &[
+            ("P.m", Absent(K::Method)),
+            ("S.init", Text(K::Constructor, "{}", 1)),
+            // The default closure is not the body.
+            ("S.g", Text(K::Method, "{\n    cb()\n  }", 3)),
+            ("S", NotCallable),
+        ],
+    },
+    BodyLinesRow {
+        language: L::Scala,
+        extension: "scala",
+        source: "object O {\n  def f = 1\n  def g(x: Int = 2): Int = {\n    x\n  }\n  def h: Int\n}\ntrait T { def a(): Int }\n\ndef braceless(x: Int): Int =\n  val y = x\n  y\n\ndef after = 1\n",
+        cases: &[
+            // An expression body is its expression, without `=`.
+            ("O.f", Text(K::Method, "1", 1)),
+            ("O.g", Text(K::Method, "{\n    x\n  }", 3)),
+            ("O.h", Absent(K::Method)),
+            ("T.a", Absent(K::Method)),
+            // The grammar's indented block runs over the blank line after
+            // it, which is not counted.
+            ("braceless", Text(K::Function, "val y = x\n  y", 2)),
+            ("O", NotCallable),
+        ],
+    },
+    BodyLinesRow {
+        language: L::Php,
+        extension: "php",
+        source: "<?php\ninterface I { function m(); }\nfunction f()\n{\n}\nabstract class A { abstract function q(); }\n",
+        cases: &[
+            ("I::m", Absent(K::Method)),
+            ("f", Text(K::Function, "{\n}", 2)),
+            ("A::q", Absent(K::Method)),
+            ("A", NotCallable),
+        ],
+    },
+    BodyLinesRow {
+        language: L::Perl,
+        extension: "pl",
+        source: "sub f { 1 }\nsub g {\n  my $x = 1;\n\n  return $x;\n}\n",
+        cases: &[
+            ("f", Text(K::Function, "{ 1 }", 1)),
+            ("g", Text(K::Function, "{\n  my $x = 1;\n\n  return $x;\n}", 5)),
+        ],
+    },
+    BodyLinesRow {
+        language: L::Lua,
+        extension: "lua",
+        source: "local function f(a) return a end\nlocal function empty() end\nfunction c()\n  -- only a comment\nend\nfunction d()\n  -- leading\n  return 1\n  -- trailing\nend\n",
+        cases: &[
+            ("f", Text(K::Function, "return a", 1)),
+            // An empty body is an empty span, not a missing one.
+            ("empty", Text(K::Function, "", 0)),
+            // Comments the grammar leaves beside the body's block are in it.
+            ("c", Text(K::Function, "-- only a comment", 1)),
+            ("d", Text(K::Function, "-- leading\n  return 1\n  -- trailing", 3)),
+        ],
+    },
+    BodyLinesRow {
+        language: L::Bash,
+        extension: "sh",
+        source: "f() ( echo sub )\ng() {\n  :\n}\n",
+        cases: &[
+            ("f", Text(K::Function, "( echo sub )", 1)),
+            ("g", Text(K::Function, "{\n  :\n}", 3)),
+        ],
+    },
+    BodyLinesRow {
+        language: L::Zsh,
+        extension: "zsh",
+        source: "outer() {\n  inner() { :; }\n}\n",
+        cases: &[
+            ("outer", Text(K::Function, "{\n  inner() { :; }\n}", 3)),
+            ("outer.inner", Text(K::Function, "{ :; }", 1)),
+        ],
+    },
+];
+
+/// The languages with a body-lines row, for the coverage guard.
+pub fn body_lines_matrix_languages() -> Vec<ProgrammingLanguage> {
+    BODY_LINES_MATRIX.iter().map(|row| row.language).collect()
+}
+
+/// Each case's `source.body_span` and `metrics.lines` agree, on a
+/// metrics-only query and on the complete index, with LF and with CRLF
+/// line endings.
+#[test]
+fn body_lines_are_counted_from_the_callables_own_body() {
+    let dir = TempDir::new().expect("temp dir");
+    for row in BODY_LINES_MATRIX {
+        for (ending, source) in [("LF", row.source.to_string()), ("CRLF", row.source.replace('\n', "\r\n"))] {
+            let path = dir.path().join(format!("body_{:?}_{ending}.{}", row.language, row.extension));
+            std::fs::write(&path, &source).expect("write snippet");
+            let selective = metrics_records(&path);
+            let complete = SourceFile::read(&path)
+                .expect("read source")
+                .query(&SymbolQuery::complete_index())
+                .expect("query")
+                .index
+                .symbols;
+            let errors = TreeFile::new(&path).expect("parse").syntax_diagnostics();
+            assert!(errors.is_empty(), "{:?} {ending}: the snippet parses cleanly: {errors:?}", row.language);
+            for records in [&selective, &complete] {
+                for (name, body) in row.cases {
+                    let label = format!("{:?} {ending} `{name}`", row.language);
+                    let callable = !matches!(body, NotCallable);
+                    let matching: Vec<&SymbolRecord> = records
+                        .iter()
+                        .filter(|record| in_file_name(record) == *name && is_function(record.kind) == callable)
+                        .collect();
+                    assert_eq!(matching.len(), 1, "{label}: one record");
+                    let record = matching[0];
+                    let lines = record.metrics.unwrap_or_else(|| panic!("{label}: no metrics")).lines;
+                    let text = record.source.body_span.as_ref().map(|span| {
+                        source[span.start_byte as usize..span.end_byte as usize].replace("\r\n", "\n")
+                    });
+                    match *body {
+                        Text(kind, expected, count) => {
+                            assert_eq!(record.kind, kind, "{label}: kind");
+                            assert_eq!(text.as_deref(), Some(expected), "{label}: body");
+                            assert_eq!(lines, Some(count), "{label}: lines");
+                        }
+                        Absent(kind) => {
+                            assert_eq!(record.kind, kind, "{label}: kind");
+                            assert_eq!(text, None, "{label}: body");
+                            assert_eq!(lines, None, "{label}: lines");
+                        }
+                        NotCallable => {
+                            assert!(text.is_some(), "{label}: has a body span");
+                            assert_eq!(lines, None, "{label}: lines");
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Inside a present `metrics` facet `lines` is always a key, `null` when
+/// unsupported; without `Capability::Metrics` the whole facet is absent.
+#[test]
+fn lines_key_is_present_null_or_absent_with_its_facet() {
+    let dir = TempDir::new().expect("temp dir");
+    let path = dir.path().join("Shape.java");
+    std::fs::write(&path, "interface Shape {\n  double area();\n  default int sides() {\n    return 0;\n  }\n}\n")
+        .expect("write snippet");
+    let json = |query: &SymbolQuery, name: &str| -> serde_json::Value {
+        let records = SourceFile::read(&path).expect("read source").query(query).expect("query").index.symbols;
+        let record = records.iter().find(|record| record.identity.name == name).expect("record");
+        serde_json::to_value(record).expect("serialize")
+    };
+    let metrics = SymbolQuery::new().capabilities([Capability::Metrics]);
+    assert_eq!(
+        json(&metrics, "area")["metrics"],
+        serde_json::json!({ "parameters": 0, "has_docs": false, "lines": null })
+    );
+    assert_eq!(
+        json(&metrics, "sides")["metrics"],
+        serde_json::json!({ "parameters": 0, "has_docs": false, "lines": 3 })
+    );
+    assert_eq!(
+        json(&metrics, "Shape")["metrics"],
+        serde_json::json!({ "parameters": null, "has_docs": false, "lines": null })
+    );
+    for name in ["area", "sides", "Shape"] {
+        let record = json(&SymbolQuery::new(), name);
+        assert!(record.get("metrics").is_none(), "`{name}`: no facet without Metrics: {record}");
     }
 }

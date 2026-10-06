@@ -2,8 +2,8 @@
 //! `2026-10-03-symbol-filters-and-reports` (`async` is `symbols_async`):
 //! `visibility.is_deprecated` and `visibility.is_test` are set exactly by
 //! each language's markers, attributes and file-name rules, never by an
-//! ordinary comment or a look-alike name, and the attribute facet stays
-//! empty.
+//! ordinary comment or a look-alike name, and the attribute facet is the
+//! same with or without them.
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -216,6 +216,9 @@ fn expected_names(cell: Result<&[&str], &str>) -> BTreeSet<String> {
         .unwrap_or_default()
 }
 
+/// A record's in-file name and its attributes as `(name, value)`.
+type NamedAttributes = (String, Vec<(String, Option<String>)>);
+
 #[test]
 fn flags_are_set_exactly_by_each_languages_markers() {
     for row in FLAGS_MATRIX {
@@ -243,9 +246,28 @@ fn flags_are_set_exactly_by_each_languages_markers() {
                 "{label}: decoy `{decoy}` is flagged"
             );
         }
-        assert!(
-            records.iter().all(|record| record.attributes.is_empty()),
-            "{label}: the attribute facet stays empty"
+        // Flags and the attribute facet share one parse: the facet is the
+        // same whether or not the flags were asked for.
+        let (_, declarations_only) = isolated_primary(row.language, &SymbolQuery::new());
+        let attributes = |records: &[SymbolRecord]| -> Vec<NamedAttributes> {
+            records
+                .iter()
+                .map(|record| {
+                    (
+                        in_file_name(record).to_string(),
+                        record
+                            .attributes
+                            .iter()
+                            .map(|attribute| (attribute.name.clone(), attribute.value.clone()))
+                            .collect(),
+                    )
+                })
+                .collect()
+        };
+        assert_eq!(
+            attributes(&records),
+            attributes(&declarations_only),
+            "{label}: the attribute facet does not depend on the flags"
         );
     }
 }

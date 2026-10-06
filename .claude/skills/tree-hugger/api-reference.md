@@ -282,8 +282,9 @@ The v1 ↔ v2 adapter (`From<SymbolInfo> for SymbolRecord`,
 converts as the bare name). Records also carry `visibility.is_test` and
 `is_deprecated` (`Capability::Flags`; `false` = not computed without it) and
 an optional `metrics` facet (`MetricsFacet { parameters, has_docs, lines }`,
-each `Option` = unsupported, every key required (schema 4.1 added `lines`;
-it is `None` until the body-line metric lands); absent facet = not requested; `Capability::Metrics`).
+each `Option` = unsupported, every key required (schema 4.1 added `lines`:
+a function, method or constructor's body lines, counted from its
+`source.body_span`); absent facet = not requested; `Capability::Metrics`).
 None of them exists on `SymbolInfo`, so the adapter does not carry them. The
 cache refuses a stored facet or a `true` flag whose capability the entry does
 not list, and a record without the facet under `metrics`. Every kind/visibility conversion is a
@@ -303,7 +304,10 @@ whitespace trimmed; keeps `pub(...)`, setter-only modifiers, annotations),
 `type_info.constraints` (the declaration's own written parameter list,
 `extract/generics.rs`; a list whose positions overflow `u16` is
 `TreeHuggerError::TooManyGenericParameters`; see
-`tree-hugger/docs/symbol-schema-design.md#generic-parameters`) and,
+`tree-hugger/docs/symbol-schema-design.md#generic-parameters`), `attributes`
+and the written `modifiers` (`Const`, `Unsafe`, `Readonly`, `Mut`,
+`Custom("abstract" | "final" | "override" | "virtual" | "sealed" |
+"mutating")`; see `symbol-schema-design.md#attributes-and-modifiers`) and,
 for members of a Rust `impl Trait for Type`, one `relations.implements` entry
 named after the trait's last path segment (`id` only when exactly one trait of
 that name is declared in the file). A Rust `impl` member's container is the

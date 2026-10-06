@@ -1054,6 +1054,126 @@ fn entry_from_extractor_revision_eighteen_is_not_served_after_the_repairs() {
     });
 }
 
+const UPGRADE_MODIFIERS_RS: &str =
+    "#[inline]\n#[must_use = \"keep\"]\npub const unsafe fn upgrade_written() -> u8 {\n    0\n}\n\npub fn upgrade_sentinel() {}\n";
+
+/// `upgrade_written`'s modifiers and attributes as `[modifiers, [[name,
+/// value], …]]`, in a `hug --json-full` report.
+fn upgrade_written_facts(output: &Value) -> Value {
+    let record = go_record(output, "upgrade_written");
+    let attributes: Vec<Value> = record["attributes"]
+        .as_array()
+        .map(|attributes| {
+            attributes
+                .iter()
+                .map(|attribute| serde_json::json!([attribute["name"], attribute["value"]]))
+                .collect()
+        })
+        .unwrap_or_default();
+    serde_json::json!([record["modifiers"].as_array().cloned().unwrap_or_default(), attributes])
+}
+
+/// Revision 19 wrote no `attributes` and only `static`/`async` modifiers;
+/// revision 20 records every written attribute and the `const`/`unsafe`
+/// tokens.
+#[test]
+fn entry_from_extractor_revision_nineteen_is_not_served_after_the_repairs() {
+    assert_stale_revision_is_not_served(&StaleRevision {
+        revision: "19",
+        key: OldKey::Computed,
+        file: "written.rs",
+        language: "rust",
+        source: UPGRADE_MODIFIERS_RS.to_string(),
+        sentinel: "upgrade_sentinel",
+        probe: upgrade_written_facts,
+        repaired: serde_json::json!([
+            [{ "type": "Const" }, { "type": "Unsafe" }],
+            [["inline", null], ["must_use", "\"keep\""]]
+        ]),
+        stale: serde_json::json!([[], []]),
+        revert: |snapshot| {
+            let record = record_named(snapshot, "upgrade_written")
+                .as_object_mut()
+                .expect("record object");
+            record.remove("modifiers");
+            record.remove("attributes");
+        },
+    });
+}
+
+const UPGRADE_BLOCK_PACKAGE_SCALA: &str =
+    "package UpgradeLeft { class UpgradeW { def probe(): Unit = () } }\nclass UpgradeSentinel\n";
+
+/// `[qualified_name, is_namespace_rooted]` of `UpgradeW` and its `probe`, in
+/// a `hug --json-full` report.
+fn upgrade_block_package_names(output: &Value) -> Value {
+    let facts: Vec<Value> = ["UpgradeW", "probe"]
+        .into_iter()
+        .map(|name| {
+            let identity = &go_record(output, name)["identity"];
+            serde_json::json!([identity["qualified_name"], identity["is_namespace_rooted"]])
+        })
+        .collect();
+    Value::from(facts)
+}
+
+/// Revision 20 dropped a Scala block package (`package p { … }`) from the
+/// names of the declarations in its body; revision 21 keeps it as their
+/// rooting segment.
+#[test]
+fn entry_from_extractor_revision_twenty_is_not_served_after_the_repairs() {
+    assert_stale_revision_is_not_served(&StaleRevision {
+        revision: "20",
+        key: OldKey::Computed,
+        file: "blocks.scala",
+        language: "scala",
+        source: UPGRADE_BLOCK_PACKAGE_SCALA.to_string(),
+        sentinel: "UpgradeSentinel",
+        probe: upgrade_block_package_names,
+        repaired: serde_json::json!([["UpgradeLeft.UpgradeW", true], ["UpgradeLeft.UpgradeW.probe", true]]),
+        stale: serde_json::json!([["blocks.scala#UpgradeW", false], ["blocks.scala#UpgradeW.probe", false]]),
+        revert: |snapshot| {
+            for (name, in_file) in [("UpgradeW", "UpgradeW"), ("probe", "UpgradeW.probe")] {
+                let identity = &mut record_named(snapshot, name)["identity"];
+                identity["qualified_name"] = Value::from(in_file);
+                identity["is_namespace_rooted"] = Value::from(false);
+            }
+        },
+    });
+}
+
+const UPGRADE_BODY_C: &str = "int upgrade_add(int a)\n{\n  return a;\n}\nint upgrade_sentinel(void) { return 0; }\n";
+
+/// `[body_span.start.line, metrics.lines]` of `upgrade_add`, in a
+/// `hug --json-full` report.
+fn upgrade_body_lines(output: &Value) -> Value {
+    let record = go_record(output, "upgrade_add");
+    serde_json::json!([record["source"]["body_span"]["start"]["line"], record["metrics"]["lines"]])
+}
+
+/// Revision 21 stored no body span for a C/C++ function (whose anchor is its
+/// declarator) and never counted `metrics.lines`; revision 22 reads the
+/// definition's body and counts it.
+#[test]
+fn entry_from_extractor_revision_twenty_one_is_not_served_after_the_repairs() {
+    assert_stale_revision_is_not_served(&StaleRevision {
+        revision: "21",
+        key: OldKey::Computed,
+        file: "body.c",
+        language: "c",
+        source: UPGRADE_BODY_C.to_string(),
+        sentinel: "upgrade_sentinel",
+        probe: upgrade_body_lines,
+        repaired: serde_json::json!([2, 3]),
+        stale: serde_json::json!([null, null]),
+        revert: |snapshot| {
+            let record = record_named(snapshot, "upgrade_add");
+            record["source"].as_object_mut().expect("source object").remove("body_span");
+            record["metrics"]["lines"] = Value::Null;
+        },
+    });
+}
+
 const UPGRADE_PROBE_PY: &str = "\n\nclass UpgradeProbe:\n    def __init__(self, seed):\n        pass\n";
 
 /// The stable key of `UpgradeProbe.__init__` in `deferred.py` when it reports

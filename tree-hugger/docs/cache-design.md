@@ -194,7 +194,7 @@ file's records, imports, exports and every analysis pass but diagnostics:
 | Input | Where it comes from | Changes when |
 |---|---|---|
 | schema version | `SchemaVersion::V4_1` | the record shape changes |
-| implementation version | crate version and `EXTRACTOR_REVISION` (`0.1.0+rev.19`) | extraction code changes |
+| implementation version | crate version and `EXTRACTOR_REVISION` (`0.1.0+rev.22`) | extraction code changes |
 | grammar identity | the compiled grammar: name, declared version (if any), ABI, node-kind, field and parse-state counts | a grammar crate is upgraded |
 | grammar ID | the grammar variant (`typescript` or `tsx`, …) | the file's grammar variant differs |
 | query text | the effective `locals`, `imports` and `references` query text, with inherited vendored queries and overlays resolved | a `.scm` file the analysis compiles changes |
@@ -449,7 +449,8 @@ everything else refuses the entry.
 | Record field | Served when | Public result |
 |---|---|---|
 | `identity.container_kind` | absent or `null` | no container kind |
-| `modifiers` | absent or `[]` | no modifiers (not `static`, not `async`) |
+| `modifiers` | absent or `[]` | no modifiers (not `static`, not `async`, none written) |
+| `attributes` | absent or `[]` | no attributes |
 | `identity.keyword` | absent, `null` or `""` | no keyword, or the empty keyword |
 | `source.declaration_text` | absent, `null` or `""` | no text, or the empty text |
 | `source.signature_text` | absent, `null` or `""` | no header, or the empty header |
@@ -469,7 +470,7 @@ other than exactly 4.1 refuses it too. In an entry that lists `metrics`, the
 of the wrong type refuses it), and so is each of its three keys (absent
 refuses, so a 4.0 facet without `lines` is never read as `null`; only `null`
 is served). `lines` is a `u32`: `"3"`, `3.5`, `-1` and `4294967296` refuse
-the entry. For all twenty-two record fields (twenty-three columns: `modifiers` is checked twice, on a static and on an async
+the entry. For all twenty-three record fields (twenty-four columns: `modifiers` is checked twice, on a static and on an async
 declaration), a
 wrong type (`123`, or `"123"` for a number, or an array holding a wrong
 element), a duplicate key and invalid JSON refuse the entry. For example, an

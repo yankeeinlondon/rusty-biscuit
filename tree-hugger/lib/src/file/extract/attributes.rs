@@ -42,8 +42,10 @@ impl From<&SyntacticAttribute> for Attribute {
 /// Read from Rust outer attributes, C++ `[[…]]` attribute declarations (the
 /// declaration's own, then those after `name` in its declarator, see
 /// [`declarator_id_attributes`]: `int a [[deprecated]], b;` gives `a` one
-/// and `b` none), Java and Scala annotations, C# attribute lists, Python
-/// decorators and Swift attributes; every other language has none.
+/// and `b` none), Java and Scala annotations, C# attribute lists, Python,
+/// TypeScript and JavaScript decorators and Swift attributes; every other
+/// language has none. File-level forms (Rust inner attributes, C#
+/// `[assembly: …]`) are never a declaration's.
 pub(crate) fn declaration_attributes(
     declaration: Node<'_>,
     name: Node<'_>,
@@ -77,12 +79,7 @@ pub(crate) fn declaration_attributes(
             }
         }
         ProgrammingLanguage::Java => {
-            let host = if declaration.kind() == "variable_declarator" {
-                declaration.parent().unwrap_or(declaration)
-            } else {
-                declaration
-            };
-            for modifiers in children_of_kind(host, "modifiers") {
+            for modifiers in children_of_kind(modifier_host(declaration, language), "modifiers") {
                 let mut cursor = modifiers.walk();
                 for annotation in modifiers.named_children(&mut cursor) {
                     if matches!(annotation.kind(), "marker_annotation" | "annotation") {
@@ -97,13 +94,7 @@ pub(crate) fn declaration_attributes(
             }
         }
         ProgrammingLanguage::CSharp => {
-            let mut host = declaration;
-            while matches!(host.kind(), "variable_declarator" | "variable_declaration")
-                && let Some(parent) = host.parent()
-            {
-                host = parent;
-            }
-            for list in children_of_kind(host, "attribute_list") {
+            for list in children_of_kind(modifier_host(declaration, language), "attribute_list") {
                 for attribute in children_of_kind(list, "attribute") {
                     let arguments = find_child_by_kind(attribute, "attribute_argument_list");
                     attributes.push(SyntacticAttribute {
@@ -121,8 +112,15 @@ pub(crate) fn declaration_attributes(
             {
                 for decorator in children_of_kind(decorated, "decorator") {
                     if let Some(expression) = first_named_non_comment(decorator) {
-                        attributes.push(python_decorator(expression, source));
+                        attributes.push(decorator_attribute(expression, language, source));
                     }
+                }
+            }
+        }
+        ProgrammingLanguage::TypeScript | ProgrammingLanguage::JavaScript => {
+            for decorator in ecma_decorators(declaration) {
+                if let Some(expression) = first_named_non_comment(decorator) {
+                    attributes.push(decorator_attribute(expression, language, source));
                 }
             }
         }
@@ -133,9 +131,7 @@ pub(crate) fn declaration_attributes(
                 }
             }
         }
-        ProgrammingLanguage::TypeScript
-        | ProgrammingLanguage::JavaScript
-        | ProgrammingLanguage::Go
+        ProgrammingLanguage::Go
         | ProgrammingLanguage::C
         | ProgrammingLanguage::Php
         | ProgrammingLanguage::Perl
@@ -200,34 +196,112 @@ fn annotation_attribute(annotation: Node<'_>, source: &str) -> SyntacticAttribut
     }
 }
 
-/// A Python decorator expression: a name, a dotted name or a call of one,
-/// read through any parentheses around it (`@(deprecated)`).
-fn python_decorator(expression: Node<'_>, source: &str) -> SyntacticAttribute {
-    match expression.kind() {
-        "parenthesized_expression" => match first_named_non_comment(expression) {
-            Some(inner) => python_decorator(inner, source),
-            None => SyntacticAttribute {
-                name: String::new(),
-                arguments: None,
-                value: None,
-            },
-        },
-        "call" => {
-            let arguments = expression.child_by_field_name("arguments");
-            SyntacticAttribute {
-                name: expression
-                    .child_by_field_name("function")
-                    .map(|function| token_text(function, source))
-                    .unwrap_or_default(),
-                arguments: arguments.map(|arguments| delimited_arguments(arguments, source)),
-                value: arguments.map(|arguments| delimited_text(arguments, source)),
-            }
+/// The modifier and attribute host of a Java or C# declaration: a field's
+/// or local's whole declaration (which holds the modifier list), not the
+/// declarator naming one of its variables; any other declaration itself.
+pub(crate) fn modifier_host(declaration: Node<'_>, language: ProgrammingLanguage) -> Node<'_> {
+    let mut host = declaration;
+    loop {
+        let climbs = match language {
+            ProgrammingLanguage::Java => host.kind() == "variable_declarator",
+            ProgrammingLanguage::CSharp => matches!(host.kind(), "variable_declarator" | "variable_declaration"),
+            _ => false,
+        };
+        match host.parent() {
+            Some(parent) if climbs => host = parent,
+            _ => return host,
         }
-        _ => SyntacticAttribute {
+    }
+}
+
+/// The decorators of a TypeScript or JavaScript declaration, in source
+/// order: an exported class's on its `export` statement (`@d export class`),
+/// a TypeScript method's as the `class_body` children directly before it,
+/// then the declaration's own. A parameter's decorators are the
+/// parameter's, never its function's.
+fn ecma_decorators(declaration: Node<'_>) -> Vec<Node<'_>> {
+    let mut decorators = Vec::new();
+    if let Some(parent) = declaration.parent() {
+        match parent.kind() {
+            "export_statement" => decorators.extend(children_of_kind(parent, "decorator")),
+            "class_body" => {
+                let mut preceding = Vec::new();
+                let mut sibling = declaration.prev_sibling();
+                while let Some(node) = sibling {
+                    match node.kind() {
+                        "decorator" => preceding.push(node),
+                        kind if is_comment_kind(kind) => {}
+                        _ => break,
+                    }
+                    sibling = node.prev_sibling();
+                }
+                decorators.extend(preceding.into_iter().rev());
+            }
+            _ => {}
+        }
+    }
+    decorators.extend(children_of_kind(declaration, "decorator"));
+    decorators
+}
+
+/// A Python, TypeScript or JavaScript decorator expression, read through any
+/// parentheses around it (`@(deprecated)`). A path (`name`, `a.b`) is the
+/// name with no arguments; a call of a path is that path with the call's
+/// arguments. Any other expression is kept whole as the name, as written
+/// and trimmed, with no arguments: `@(lambda f: f)` is `lambda f: f`.
+fn decorator_attribute(expression: Node<'_>, language: ProgrammingLanguage, source: &str) -> SyntacticAttribute {
+    if matches!(expression.kind(), "parenthesized_expression")
+        && let Some(inner) = first_named_non_comment(expression)
+    {
+        return decorator_attribute(inner, language, source);
+    }
+    let call = match language {
+        ProgrammingLanguage::Python => "call",
+        _ => "call_expression",
+    };
+    if is_decorator_path(expression, language) {
+        return SyntacticAttribute {
             name: token_text(expression, source),
             arguments: None,
             value: None,
-        },
+        };
+    }
+    if expression.kind() == call
+        && let Some(function) = expression.child_by_field_name("function")
+        && is_decorator_path(function, language)
+        && let Some(arguments) = expression
+            .child_by_field_name("arguments")
+            .filter(|arguments| matches!(arguments.kind(), "argument_list" | "arguments"))
+    {
+        return SyntacticAttribute {
+            name: token_text(function, source),
+            arguments: Some(delimited_arguments(arguments, source)),
+            value: Some(delimited_text(arguments, source)),
+        };
+    }
+    SyntacticAttribute {
+        name: node_source(expression, source).trim().to_string(),
+        arguments: None,
+        value: None,
+    }
+}
+
+/// An identifier, or a member access of a path by a plain name (`a.b.c`).
+fn is_decorator_path(node: Node<'_>, language: ProgrammingLanguage) -> bool {
+    let (member, property_field) = match language {
+        ProgrammingLanguage::Python => ("attribute", "attribute"),
+        _ => ("member_expression", "property"),
+    };
+    match node.kind() {
+        "identifier" => true,
+        kind if kind == member => {
+            node.child_by_field_name("object")
+                .is_some_and(|object| is_decorator_path(object, language))
+                && node
+                    .child_by_field_name(property_field)
+                    .is_some_and(|property| matches!(property.kind(), "identifier" | "property_identifier"))
+        }
+        _ => false,
     }
 }
 
@@ -265,10 +339,11 @@ fn field_text(node: Node<'_>, field: &str, source: &str) -> String {
 }
 
 fn is_comment(node: Node<'_>) -> bool {
-    matches!(
-        node.kind(),
-        "comment" | "line_comment" | "block_comment" | "multiline_comment"
-    )
+    is_comment_kind(node.kind())
+}
+
+fn is_comment_kind(kind: &str) -> bool {
+    matches!(kind, "comment" | "line_comment" | "block_comment" | "multiline_comment")
 }
 
 fn first_named_non_comment(node: Node<'_>) -> Option<Node<'_>> {

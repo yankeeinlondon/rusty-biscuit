@@ -989,6 +989,91 @@ pub(crate) fn body_node_for_declaration(node: Node<'_>) -> Option<Node<'_>> {
         .or_else(|| find_child_by_kind(node, "object_type"))
 }
 
+/// The body of a function, method or constructor: what `source.body_span`
+/// stores and `metrics.lines` counts. It is the declaration's own `body`
+/// field, never a type-body fallback, so a default value, a return type or a
+/// nested callable is never taken for it; it is read from the declaration
+/// because a C/C++ function's anchor is its `function_declarator`. `None`
+/// without an implementation body (a prototype, an abstract or interface
+/// method, a defaulted or deleted C++ member).
+///
+/// An expression body is its expression: C#'s `arrow_expression_clause`
+/// holds the `=>`, which is left out (JS/TS arrows and Scala `=` already
+/// keep the introducer outside the field). Python and Lua leave comments
+/// before (Lua: also after) the body's `block` as children of the function,
+/// so there the body runs from the first child after the header to the last
+/// one before `end`, a comment on the header's own line excepted; Lua omits
+/// the block of an empty body, which is then the empty span at `end`.
+///
+/// The span ends at its last non-whitespace byte: tree-sitter-scala's
+/// braceless `indented_block` runs over the blank lines up to the dedent and
+/// a Perl `block` over its line break, which are not the body's lines.
+pub(crate) fn callable_body_span(
+    declaration: Node<'_>,
+    language: ProgrammingLanguage,
+    source: &str,
+) -> Option<TextSpan> {
+    callable_body_extent(declaration, language).map(|span| without_trailing_whitespace(span, source))
+}
+
+fn callable_body_extent(declaration: Node<'_>, language: ProgrammingLanguage) -> Option<TextSpan> {
+    let header_end = match language {
+        ProgrammingLanguage::Python => find_child_by_kind(declaration, ":")?,
+        ProgrammingLanguage::Lua => declaration.child_by_field_name("parameters")?,
+        _ => {
+            let body = declaration.child_by_field_name("body")?;
+            let expression = (body.kind() == "arrow_expression_clause")
+                .then(|| {
+                    let mut cursor = body.walk();
+                    body.named_children(&mut cursor).find(|child| child.kind() != "comment")
+                })
+                .flatten();
+            return Some(text_span_for_node(expression.unwrap_or(body)));
+        }
+    };
+    let header_row = header_end.end_position().row;
+    let mut cursor = declaration.walk();
+    let mut inside = declaration
+        .children(&mut cursor)
+        .skip_while(|child| child.id() != header_end.id())
+        .skip(1)
+        .take_while(|child| child.kind() != "end")
+        .filter(|child| child.kind() != "comment" || child.start_position().row > header_row);
+    match inside.next() {
+        Some(first) => {
+            let last = inside.last().unwrap_or(first);
+            let (first, last) = (text_span_for_node(first), text_span_for_node(last));
+            Some(TextSpan { end: last.end, end_byte: last.end_byte, ..first })
+        }
+        None => {
+            let end = text_span_for_node(find_child_by_kind(declaration, "end")?);
+            Some(TextSpan { end: end.start, end_byte: end.start_byte, ..end })
+        }
+    }
+}
+
+/// `span` ending after its last non-whitespace byte, its end location
+/// recomputed (one-based, byte columns as tree-sitter counts them).
+fn without_trailing_whitespace(span: TextSpan, source: &str) -> TextSpan {
+    let start = span.start_byte as usize;
+    let Some(text) = source.get(start..span.end_byte as usize) else {
+        return span;
+    };
+    let kept = text.trim_end_matches(|character: char| character.is_ascii_whitespace());
+    if kept.len() == text.len() {
+        return span;
+    }
+    let end_byte = start + kept.len();
+    let end = match kept.rfind('\n') {
+        Some(newline) => TextPoint {
+            line: span.start.line + kept.matches('\n').count() as u32,
+            column: (kept.len() - newline) as u32,
+        },
+        None => TextPoint { line: span.start.line, column: span.start.column + kept.len() as u32 },
+    };
+    TextSpan { end, end_byte: end_byte as u32, ..span }
+}
+
 /// The right-hand side of a type alias declaration as written (TypeScript,
 /// Rust, Go and Scala `type A = …`, Swift `typealias A = …`), generic
 /// parameters left unresolved. `None` for a declaration with no right-hand

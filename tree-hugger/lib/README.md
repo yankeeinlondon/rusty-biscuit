@@ -206,7 +206,14 @@ metadata and standalone symbols agree.
 `SymbolRecord` (schema 4.1) carries the same facts:
 
 - `visibility.level` holds the level; `modifiers` holds `Static` for member
-  `static` and `StaticStorage` for storage/linkage `static`.
+  `static` and `StaticStorage` for storage/linkage `static`, `Async`, and the
+  modifiers the declaration writes: Rust `const fn` (`Const`), `unsafe`,
+  `mut` bindings and receivers (`Mut`), `readonly` (`Readonly`), and
+  `abstract`, `final`, `override`, `virtual`, C# `sealed` and Swift
+  `mutating` as `Custom` values, in one fixed order.
+- `attributes` holds the declaration's own attributes, annotations and
+  decorators in source order: `#[tokio::test]` is `{name: "tokio::test"}`,
+  `@Deprecated(since = "9")` is `{name: "Deprecated", value: "since = \"9\""}`.
 - `identity.container_kind` holds the container's kind next to
   `identity.container_name` (the container name).
 - `identity.keyword` holds the declaring keyword (`fn`, `struct`, `def`,

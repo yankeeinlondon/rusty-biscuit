@@ -33,8 +33,8 @@ use crate::shared::{
 pub enum Capability {
     /// Declaration records with identity, spans, container name and the
     /// cheap metadata (keyword, signature text, declaration text, signature,
-    /// type metadata, raw doc comment). The file's import and export records
-    /// come with it.
+    /// type metadata, generic parameters, written modifiers, attributes, raw
+    /// doc comment). The file's import and export records come with it.
     Declarations,
     /// `relations.parent`, `relations.container` and `relations.members`.
     Containment,
@@ -53,8 +53,8 @@ pub enum Capability {
     /// package `tests/`) are applied to every result after analysis or cache
     /// lookup.
     Flags,
-    /// The `metrics` facet (`parameters` and `has_docs`), read while the
-    /// declarations are extracted.
+    /// The `metrics` facet (`parameters`, `has_docs` and `lines`), read
+    /// while the declarations are extracted.
     Metrics,
 }
 

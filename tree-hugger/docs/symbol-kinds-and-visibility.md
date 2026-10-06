@@ -45,7 +45,7 @@ The two models are:
 | Model | API | Where kind, visibility and `static` live |
 |---|---|---|
 | `SymbolInfo` (v1) | `TreeFile::symbols()` | `kind`, `scope`, `visibility` (`None` = unknown), `is_static`, `is_static_storage`, `is_async`, `container_name`, `container_kind`, `qualified_name`, `is_namespace_rooted` |
-| `SymbolRecord` (schema 4.1) | `TreeFile::symbol_records()`, `symbol_index_v2()` | `kind`, `scope`, `visibility.level`, `modifiers` (`Static`, `StaticStorage`, `Async`), `identity.container_name`, `identity.container_kind`, `identity.qualified_name`, `identity.is_namespace_rooted`, `identity.keyword`, `source.declaration_text`, `source.signature_text`, `relations.implements` |
+| `SymbolRecord` (schema 4.1) | `TreeFile::symbol_records()`, `symbol_index_v2()` | `kind`, `scope`, `visibility.level`, `modifiers` (`Static`, `StaticStorage`, `Async`, and the written `Const`, `Readonly`, `Unsafe`, `Mut` and `Custom` keywords), `attributes`, `identity.container_name`, `identity.container_kind`, `identity.qualified_name`, `identity.is_namespace_rooted`, `identity.keyword`, `source.declaration_text`, `source.signature_text`, `relations.implements` |
 
 The adapter between them (`From<SymbolInfo> for SymbolRecord` and back)
 preserves kind, scope, visibility, both `static` flags, `async`, container
@@ -548,7 +548,22 @@ PHP `namespace` (file-scoped or block), a named C++ `namespace` and a Perl
 (`com.example.symbols.PublicWidget`). Consecutive file-level Scala package
 clauses nest (`package outer` then `package inner` gives
 `outer.inner.PackageProbe.work`); a later PHP `namespace X;` or Perl
-`package X;` replaces an earlier one. A Rust inline `mod`, a TypeScript
+`package X;` replaces an earlier one. A Scala block package
+(`package p { … }`) is never a record of its own, but it names everything in
+its body: each enclosing block adds its segment after the file-level clauses
+before it, and a block with no file-level clause before it still roots the
+name. The block does not carry over to declarations after it:
+
+```scala
+package example.symbols
+package left { class W { def probe() = () } }      // example.symbols.left.W.probe
+package right { class W { def probe() = () } }     // example.symbols.right.W.probe
+package outer { package inner { class Nested } }   // example.symbols.outer.inner.Nested
+class After                                        // example.symbols.After
+```
+
+Without the first line the names are `left.W.probe`, `outer.inner.Nested`
+and so on, still rooted (no file prefix); `After` is then `file#After`. A Rust inline `mod`, a TypeScript
 `namespace` and a type qualify the name but do not root it: `schema::Record`
 is not complete without its file. A Perl package name is absolute wherever it
 is written.
@@ -864,7 +879,10 @@ an attribute is ignored (`#[deprecated /* why */]`, `[Obsolete /* why */]`
 and `@java.lang. /* why */ Deprecated` count), and the marker word inside a
 string argument or another attribute's arguments never counts
 (`[[nodiscard("deprecated")]]`, `@nowarn("deprecated")`). A Python
-decorator is read through parentheses (`@(deprecated)`).
+decorator is read through parentheses (`@(deprecated)`). The record's
+`attributes` list is this same parsed list; TypeScript and JavaScript
+decorators appear there too but mark no flag (those languages' deprecation
+reads only the doc block).
 
 ```go
 // Deprecated: use NewPoint.      <- doc paragraph: is_deprecated = true
@@ -946,7 +964,7 @@ undocumented (see [Symbol Reports](./symbol-reports.md)).
 |---|---|---|
 | `parameters` | the declared parameters of a function, method or constructor: its own parameter list (every list of a curried Scala `def`), whatever binds each parameter (a name, a destructuring pattern or `_`), without a receiver (a Rust `self`, a Java `Type this` or a TypeScript `this: T`; a Go receiver is a separate list and never counted); a variadic parameter counts once; unnamed C, C++ and Go parameters count; `(void)` and `()` are `0` | the declaration is not a function, it has no parameter list (`def area: Int` in Scala), or the language is Perl, Bash or Zsh, whose parameters are not extracted |
 | `has_docs` | whether the declaration has [documentation](#documentation): a doc comment that is not empty once its delimiters are removed, or a nonempty Python docstring (a string constant; bytes and formatted literals do not count); ordinary comments do not count | the language is Lua, Perl, Bash or Zsh, which have no doc-comment detection |
-| `lines` | **planned:** the physical lines a function, method or constructor's `source.body_span` touches (`{}` on one line is `1`; an empty span is `0`). Today every computed facet carries the key as `null` | **today:** always. **Planned:** the declaration is not a function, method or constructor, or it has no body (an abstract or interface method, a prototype) |
+| `lines` | the physical lines a function, method or constructor's `source.body_span` touches (see [Body lines](#body-lines)): `{}` on one line is `1`, an empty body is `0` | the declaration is not a function, method or constructor (a class or module body is not counted), or it has no body: a prototype, an abstract, interface or protocol method, a defaulted or deleted C++ member |
 
 ```python
 class Receiver:
@@ -965,6 +983,40 @@ pub fn patterned((a, b): (u32, u32), _: String) {} // parameters = 2:
 ```scala
 def patterned(a: Int)(b: String): Int = a // parameters = 2, both lists
 ```
+
+### Body lines
+
+`lines` measures source size, not executable lines: every line the body
+touches counts, braces, blank lines, comments and nested declarations
+included. It is computed from the record's own `source.body_span`, so the two
+always agree:
+
+```rust
+fn multi() {          // body_span: line 1, column 12 → line 5, column 2
+    // a comment
+                      // lines = 5 - 1 + 1 = 5
+    fn nested() {}    // `nested` has its own body: lines = 1
+}
+```
+
+For a body span from line `s` to line `e` (one-based), `lines` is `e - s + 1`,
+or `e - s` when the span ends at column 1 (it stops before that line). CRLF
+and LF files count the same. Which text is the body:
+
+| Body form | The span | Example |
+|---|---|---|
+| a block | the block, braces included | `fn f() {}` → `{}`, 1 |
+| an expression body | the expression only, never the `=>` or `=` that introduces it | TS/JS `(x) => x * 2` → `x * 2`; C# `int M() => 1;` → `1`; Scala `def f = 1` → `1` |
+| Python and Lua | from the first statement or comment after the header (`:` in Python, the parameters in Lua) to the last one before `end`; a comment on the header's own line is not body | `def f():` with `# note` and `return 1` on the next two lines → 2 |
+| an empty Lua body | an empty span at `end` | `local function f() end` → `0` |
+| C and C++ | the definition's body; a C++ function-try-block is the whole `try … catch` | `int f() try { … } catch (...) { … }` |
+
+The span never ends in whitespace: tree-sitter-scala's braceless (Scala 3)
+body and Perl's `sub` block extend over the blank lines or the line break
+after them, and those are left out. A default value (`def f(x=lambda: 1)`,
+Swift `cb: () -> Int = { 1 }`), a return type (`n(): { a: number }`) and a
+nested or returned callable are never taken for the body; a function that
+returns a closure (`() => () => 1`) has that closure as its expression body.
 
 ## Visibility
 
@@ -1321,6 +1373,9 @@ class Shape {
   private[Shape] def secret() = 2           // Unknown; text kept in declaration_text
 }
 ```
+
+A segment of a block package (`package shapes { … }`, nested blocks
+included) is a package segment too.
 
 ### A level is not an export
 

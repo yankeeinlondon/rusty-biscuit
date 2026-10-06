@@ -229,6 +229,132 @@ fn generic_parameters_reach_every_json_format() {
     }
 }
 
+const WRITTEN_FACTS_RS: &str = "#[inline]\n#[must_use = \"keep  it\"]\npub const unsafe fn both() -> u8 {\n    0\n}\n\npub struct Cell;\n\nimpl Cell {\n    pub fn set(&mut self) {}\n}\n";
+const WRITTEN_FACTS_TS: &str = "@sealed\nexport abstract class Shape {\n  @log() override describe(): string { return \"abstract\"; }\n  readonly sides: number = 0;\n}\n";
+
+/// A record's `[modifiers, [[attribute name, value], …]]`.
+fn written_facts(record: &Value) -> Value {
+    let attributes: Vec<Value> = record["attributes"]
+        .as_array()
+        .map(|attributes| {
+            attributes
+                .iter()
+                .map(|attribute| serde_json::json!([attribute["name"], attribute["value"]]))
+                .collect()
+        })
+        .unwrap_or_default();
+    serde_json::json!([record["modifiers"].as_array().cloned().unwrap_or_default(), attributes])
+}
+
+/// Written modifiers and attributes reach `--json`, `--jsonl` and
+/// `--json-full` alike, and a warm run serves the same facts from the
+/// persistent cache without parsing.
+#[test]
+fn written_modifiers_and_attributes_reach_every_json_format() {
+    let scratch = Scratch::new(&[("facts.rs", WRITTEN_FACTS_RS), ("shape.ts", WRITTEN_FACTS_TS)]);
+    let custom = |keyword: &str| serde_json::json!({ "type": "Custom", "value": keyword });
+    let expected = [
+        (
+            "both",
+            serde_json::json!([[{ "type": "Const" }, { "type": "Unsafe" }], [["inline", null], ["must_use", "\"keep  it\""]]]),
+        ),
+        ("set", serde_json::json!([[{ "type": "Mut" }], []])),
+        ("Shape", serde_json::json!([[custom("abstract")], [["sealed", null]]])),
+        ("describe", serde_json::json!([[custom("override")], [["log", ""]]])),
+        ("sides", serde_json::json!([[{ "type": "Readonly" }], []])),
+    ];
+    let find = |records: &[&Value], name: &str| -> Value {
+        let matches: Vec<&&Value> = records.iter().filter(|record| record["identity"]["name"] == name).collect();
+        assert_eq!(matches.len(), 1, "one `{name}` record");
+        written_facts(matches[0])
+    };
+
+    let json = json_of(&scratch.stdout(&["--json", "symbols", "facts.rs", "shape.ts"]));
+    let listed = records(&json);
+    for (name, facts) in &expected {
+        assert_eq!(&find(&listed, name), facts, "--json `{name}`");
+    }
+
+    let lines = scratch.stdout(&["symbols", "--jsonl", "facts.rs", "shape.ts"]);
+    let lines: Vec<Value> = lines.lines().map(json_of).collect();
+    let line_records: Vec<&Value> = lines.iter().map(|line| &line["record"]).collect();
+    for (name, facts) in &expected {
+        assert_eq!(&find(&line_records, name), facts, "--jsonl `{name}`");
+    }
+
+    let full_args = ["--verbose", "--json-full", "symbols", "facts.rs", "shape.ts"];
+    for run in ["cold", "warm"] {
+        let output = scratch.hug(&full_args);
+        assert!(output.status.success(), "{run}: {}", stderr_of(&output));
+        if run == "warm" {
+            let stderr = stderr_of(&output);
+            assert!(stderr.starts_with("cache: 2 hits, 0 partial hits, 0 misses; parsed 0 files"), "{stderr}");
+        }
+        let full = json_of(&String::from_utf8(output.stdout).expect("utf-8"));
+        let indexed: Vec<&Value> = full["indexes"]
+            .as_array()
+            .expect("indexes")
+            .iter()
+            .flat_map(|index| index["symbols"].as_array().expect("symbols"))
+            .collect();
+        for (name, facts) in &expected {
+            assert_eq!(&find(&indexed, name), facts, "--json-full {run} `{name}`");
+        }
+    }
+}
+
+const BODY_LINES_C: &str = "int add(int a, int b)\n{\n  return a + b;\n}\nint proto(int a);\nstruct Pair { int a; int b; };\n";
+const BODY_LINES_LUA: &str = "local function empty() end\nlocal function two()\n  -- note\n  return 2\nend\n";
+
+/// `metrics.lines` reaches `--json-full` through the normal invocation:
+/// counted (C definition, Lua comment and body), `0` (Lua empty body),
+/// `null` (prototype, struct). An entry written by `--json functions`
+/// without metrics is widened (reparsed once), then a warm run is a hit
+/// with the same values; `--json` itself carries no metrics facet.
+#[test]
+fn body_lines_reach_the_full_index_across_cache_widening() {
+    let scratch = Scratch::new(&[("body.c", BODY_LINES_C), ("body.lua", BODY_LINES_LUA)]);
+    let expected = [
+        ("add", Value::from(3)),
+        ("proto", Value::Null),
+        ("Pair", Value::Null),
+        ("empty", Value::from(0)),
+        ("two", Value::from(2)),
+    ];
+
+    let json = json_of(&scratch.stdout(&["--json", "functions", "body.c", "body.lua"]));
+    let listed = records(&json);
+    assert!(!listed.is_empty(), "functions are listed");
+    for record in &listed {
+        assert!(record.get("metrics").is_none(), "--json carries no metrics: {record}");
+    }
+
+    let full_args = ["--verbose", "--json-full", "symbols", "body.c", "body.lua"];
+    for run in ["widened", "warm"] {
+        let output = scratch.hug(&full_args);
+        assert!(output.status.success(), "{run}: {}", stderr_of(&output));
+        let stderr = stderr_of(&output);
+        let cache_line = match run {
+            "widened" => "cache: 0 hits, 2 partial hits, 0 misses; parsed 2 files",
+            _ => "cache: 2 hits, 0 partial hits, 0 misses; parsed 0 files",
+        };
+        assert!(stderr.starts_with(cache_line), "{run}: {stderr}");
+        let full = json_of(&String::from_utf8(output.stdout).expect("utf-8"));
+        let indexed: Vec<&Value> = full["indexes"]
+            .as_array()
+            .expect("indexes")
+            .iter()
+            .flat_map(|index| index["symbols"].as_array().expect("symbols"))
+            .collect();
+        for (name, lines) in &expected {
+            let matching: Vec<&&Value> = indexed.iter().filter(|record| record["identity"]["name"] == *name).collect();
+            assert_eq!(matching.len(), 1, "{run}: one `{name}` record");
+            let metrics = matching[0]["metrics"].as_object().expect("metrics facet");
+            assert_eq!(metrics.get("lines"), Some(lines), "{run}: `{name}` lines");
+        }
+    }
+}
+
 /// A selected declaration with more generic parameters than a `u16`
 /// position can number fails its file with kind
 /// `too_many_generic_parameters` (exit 1); a command that does not select

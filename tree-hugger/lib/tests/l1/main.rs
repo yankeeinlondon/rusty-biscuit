@@ -29,6 +29,8 @@ mod symbols_flags;
 mod symbols_fixtures;
 mod symbols_function_locals;
 mod symbols_generics;
+mod symbols_modifiers;
+mod symbols_namespace_bodies;
 mod symbols_header;
 mod symbols_kind_coverage;
 mod symbols_kinds;

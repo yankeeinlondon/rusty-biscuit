@@ -12,7 +12,7 @@ use crate::file::source_file::SourceFile;
 use crate::queries::{GrammarRef, QueryKind, format_rule_message, query_for, severity_for_rule};
 use crate::rule_registry::{RuleRegistry, diagnostic_metadata_from_rule};
 use crate::shared::{
-    AnalysisPass, CodeBlock, CodeRange, Diagnostic, DiagnosticSeverity, FileSymbolIndex,
+    AnalysisPass, Attribute, CodeBlock, CodeRange, Diagnostic, DiagnosticSeverity, FileSymbolIndex,
     ImportSymbol, LintDiagnostic, ProgrammingLanguage, ReferencedSymbol, SourceContext, SymbolInfo,
     SymbolKind, SymbolKindData, SymbolKindV2, SymbolRecord, SymbolRef, SyntaxDiagnostic,
     normalize_modifiers, stable_symbol_key, symbol_id_from_stable_key,
@@ -1755,20 +1755,32 @@ impl TreeFile {
         } in definitions
         {
             let wanted = selection.wants(symbol.kind);
+            // `metrics.lines` counts this span, so the two never disagree.
+            let body_span = if symbol.kind.is_function() {
+                callable_body_span(declaration, self.language, &self.source)
+            } else {
+                body_span_for_declaration(anchor)
+            };
             let metrics = (wanted && facts.metrics).then(|| {
                 symbol_metrics(
                     symbol.kind,
                     declaration,
                     name,
                     symbol.doc_comment.as_deref(),
+                    body_span.as_ref(),
                     self.language,
                     &self.source,
                 )
             });
+            // Parsed once per selected declaration: the record's
+            // `attributes` and both flag readers take this list rather than
+            // reading the tree again.
+            let attributes = if wanted {
+                declaration_attributes(declaration, name, self.language, &self.source)
+            } else {
+                Vec::new()
+            };
             let flags = (wanted && facts.flags).then(|| {
-                // Parsed once per declaration; every attribute reader takes
-                // this list rather than reading the tree again.
-                let attributes = declaration_attributes(declaration, name, self.language, &self.source);
                 let is_deprecated =
                     is_deprecated(&attributes, symbol.doc_comment.as_deref(), self.language);
                 // The file-wide rules (`is_test_file`) read the path and
@@ -1794,7 +1806,7 @@ impl TreeFile {
 
             record.source.declaration_span = text_span_for_node(anchor);
             record.source.name_span = Some(name_span);
-            record.source.body_span = body_span_for_declaration(anchor);
+            record.source.body_span = body_span;
             record.visibility.is_exported = is_exported;
             if let Some((is_test, is_deprecated)) = flags {
                 record.visibility.is_test = is_test;
@@ -1823,6 +1835,10 @@ impl TreeFile {
                     })?;
                 record.type_info.generic_params = generics.params;
                 record.type_info.constraints = generics.constraints;
+                record.attributes = attributes.iter().map(Attribute::from).collect();
+                record
+                    .modifiers
+                    .extend(declaration_modifiers(declaration, name, self.language));
                 if record.kind == SymbolKindV2::TypeAlias {
                     record.kind_data = SymbolKindData::TypeAlias(TypeAliasData {
                         aliased_type_text: extract_type_alias_target(declaration, self.language, &self.source),

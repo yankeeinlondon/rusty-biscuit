@@ -128,10 +128,11 @@ the `metrics` facet were added on top of 4.0 without a version bump;
 them is served. The `metrics.lines` key changed the record shape and so
 follows the minor-version rule: it is schema 4.1. Filling a declared
 field (`type_info.generic_params` and `type_info.constraints`, see
-[Generic parameters](#generic-parameters)) changes no shape and only moves
-`EXTRACTOR_REVISION`. Two parts of the record are declared but still empty
-on every record: `attributes`, and the type links of `relations`
-(`extends`, `overrides`, and `implements` outside Rust; see
+[Generic parameters](#generic-parameters); `attributes` and the written
+modifiers, see [Attributes and Modifiers](#attributes-and-modifiers))
+changes no shape and only moves `EXTRACTOR_REVISION`. One part of the
+record is declared but still empty on every record: the type links of
+`relations` (`extends`, `overrides`, and `implements` outside Rust; see
 [Relation Facet](#relation-facet)).
 
 | Fact | When computed |
@@ -139,6 +140,7 @@ on every record: `attributes`, and the type links of `relations`
 | `scope`, the `async` modifier, the in-file `qualified_name` | always, for every declaration (also those a kind selection leaves out) |
 | `visibility.is_test`, `visibility.is_deprecated` | with `Capability::Flags`; without it both are `false`, meaning "not computed" (`hug --json`, `--jsonl` and `--json-full` always ask for it) |
 | `type_info.generic_params`, `type_info.constraints` | always, on every selected record (no capability needed); empty on a record a kind selection leaves out |
+| `attributes`, the modifiers other than `static` and `async` | always, on every selected record (no capability needed); empty on a record a kind selection leaves out |
 | `metrics` (`parameters`, `has_docs`, `lines`) | with `Capability::Metrics`, on every selected record; without it the facet is absent (`hug --json-full` and `--stats` ask for it) |
 
 Scope, `async` and the qualified name are lightweight and every record needs
@@ -168,14 +170,16 @@ parameter counting once; it is `null` for a declaration that is not
 a function, one with no parameter list (`def area: Int` in Scala), and in
 Perl, Bash and Zsh. `has_docs` is whether `docs.raw_doc` is present; it is
 `null` in Lua, Perl, Bash and Zsh, which have no doc-comment detection.
-`lines` is **planned**: it will count the physical lines a function, method
-or constructor's `source.body_span` touches (`0` for an empty span); today it
-is `null` on every record. A schema 4.0 facet without the key is malformed,
+`lines` counts the physical lines a function, method or constructor's
+`source.body_span` touches (`0` for an empty Lua body); it is `null` for
+every other kind, even one with a body span, and for a callable without a
+body (see [Body lines](./symbol-kinds-and-visibility.md#body-lines)). A
+schema 4.0 facet without the key is malformed,
 never read as `null`. A predicate never matches a `null` metric, so `undocumented(true)` skips a Lua
 function rather than reporting it as undocumented:
 
 ```json
-"metrics": { "parameters": 2, "has_docs": false, "lines": null }   // Python: measured
+"metrics": { "parameters": 2, "has_docs": false, "lines": 3 }      // Python: measured
 "metrics": { "parameters": null, "has_docs": null, "lines": null } // Bash: unsupported
                                                      // no "metrics" key: not requested
 ```
@@ -283,7 +287,10 @@ separators (`schema::Record::load`, `com.example.Point.area`,
 result adds it after the cache lookup, from the query's scan root or naming
 context (`src/shapes.rs#Point::norm`, `crate::shapes::Point::norm`), which is
 why neither is a cache-key input. `is_namespace_rooted` marks names that
-already start at a declared `package` or `namespace` and so get no prefix.
+already start at a declared `package` or `namespace` and so get no prefix;
+a block-form namespace counts wherever it encloses the declaration (a Scala
+`package left { class W }` gives `left.W`, rooted, although the package
+itself is not a record).
 
 ```rust
 let query = SymbolQuery::new()
@@ -363,6 +370,15 @@ pub struct SourceFacet {
 ```
 
 `source_text` and `body_text` should be feature-gated or size-limited for large-scale indexing.
+
+`body_span` of a function, method or constructor is its own implementation
+body, the span `metrics.lines` counts: a block, or an expression body
+without its `=>`/`=`, never a default value, a return type or a nested
+callable, and never ending in whitespace (the forms are listed under
+[Body lines](./symbol-kinds-and-visibility.md#body-lines)). It is absent for
+a callable without a body (a prototype, an abstract or interface method, a
+defaulted or deleted C++ member). Other declarations keep the body of their
+own node (a class body, an enum body), when the grammar has one.
 
 `declaration_text` is filled for every record: the declaration from its start
 up to, but not including, its body, trailing whitespace trimmed (a bodyless
@@ -569,8 +585,62 @@ so the variant order above is part of the output format:
               { "type": "Custom", "value": "abstract" }, { "type": "Custom", "value": "final" }]
 ```
 
-**Planned:** further modifiers (`Abstract`, `Final`, `Sealed`, `Open`,
-`Virtual`, `Override`, `Extern`, `Generator`).
+Every modifier is a token the declaration itself writes. A keyword in its
+body, a string, its type (TypeScript `size: readonly string[]`) or a
+parameter (`fn f(mut x: u32)` marks the parameter `x`, not `f`) never marks
+it, and none is inferred: Java interface methods are not `abstract`, a
+Python `@abstractmethod` adds no modifier.
+
+| Modifier | Written as |
+|---|---|
+| `Const` | Rust `const fn` only; Java `final` and C++ `const` objects or member functions are not `Const` |
+| `Unsafe` | Rust `unsafe fn`, `unsafe trait` |
+| `Readonly` | TypeScript `readonly` fields, interface properties and constructor parameter properties; C# `readonly` fields, structs and members |
+| `Mut` | Rust bindings (`let mut x`, `static mut S`, `mut x: T`, `mut self`) and a method whose receiver is written with `mut` (`&mut self`, `mut self`, `self: &mut Self`) |
+| `Custom("abstract")` | TypeScript, Java, C#, Scala, PHP |
+| `Custom("final")` | Java, C++ (class and member `final`), Swift, Scala, PHP |
+| `Custom("override")` | TypeScript, C#, C++, Swift, Scala |
+| `Custom("virtual")` | C#, C++ |
+| `Custom("sealed")` | C# only (never renamed `final`) |
+| `Custom("mutating")` | Swift only (never Rust's `Mut`) |
+
+Go, C, JavaScript, Python, Perl, Bash, Zsh and Lua write none of these.
+Other keywords (Scala and Java `sealed`, Swift `open`/`nonmutating`, PHP
+`readonly`, C++ `constexpr`) are not read.
+
+`attributes` lists the declaration's own attributes, annotations and
+decorators in source order, repeats kept. `name` is the path as written
+with whitespace and comments removed, without the marker (`#[…]`, `@`,
+`[…]`); `value` is the raw text between the outer delimiters, trimmed,
+`None` without an argument list and `""` for an explicit `()`:
+
+| Source | `name` | `value` |
+|---|---|---|
+| Rust `#[tokio::test]` | `tokio::test` | `None` |
+| Java `@Deprecated(since = "9")` | `Deprecated` | `since = "9"` |
+| Rust `#[allow()]` | `allow` | `""` |
+| Rust `#[cfg_attr(test, derive(Debug))]` | `cfg_attr` | `test, derive(Debug)` (one attribute, never expanded) |
+| Rust `#[doc = "a  b"]` | `doc` | `"a  b"` |
+| Python `@(lambda f: f)` | `lambda f: f` | `None` |
+
+A decorator that is neither a path nor a call of a path keeps its whole
+expression, as written, as the name. They are read from Rust outer
+attributes, C++ `[[…]]`, Java and Scala annotations, C# attribute lists,
+Swift attributes and Python, TypeScript and JavaScript decorators (an
+exported class's decorator written before `export` is the class's; a
+parameter's decorator is the parameter's). File-level forms (Rust
+`#![…]`, C# `[assembly: …]`) and doc comments are never a declaration's
+attributes. PHP `#[…]` attributes, Perl sub attributes and C
+`__attribute__` are not read. The deprecation and test flags read the same
+parsed list (see [`symbol-kinds-and-visibility.md`](./symbol-kinds-and-visibility.md));
+adding decorators changed no flag.
+
+Grammar limit: tree-sitter-typescript 0.23.2 and tree-sitter-javascript
+0.25.0 accept only a path, a call of a path or a parenthesized one of those
+as a decorator; `@(flag ? one : two) m() {}` is a syntax error, so a
+TypeScript or JavaScript decorator is never the "whole expression" case.
+
+**Planned:** further modifiers (`Open`, `Extern`, `Generator`).
 
 ### Type Facet
 
@@ -1274,7 +1344,8 @@ variant on one side fails to compile until the other side handles it. The
 adapter does not carry `keyword`, `declaration_text`, `signature_text`,
 `relations` or `semantics` (v1 has no field for them, so in particular no
 recursion flag), the `is_test` and `is_deprecated` flags, the `metrics`
-facet, `TypeMetadata::type_parameters`, or a TypeAlias's field metadata.
+facet, `attributes`, any modifier other than `Static`, `StaticStorage` and
+`Async`, `TypeMetadata::type_parameters`, or a TypeAlias's field metadata.
 
 ### Recommended migration phases
 

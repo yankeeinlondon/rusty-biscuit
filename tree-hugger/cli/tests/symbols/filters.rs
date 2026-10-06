@@ -1047,3 +1047,35 @@ fn json_enum_variant_lists_keep_scala_case_payloads() {
         ])
     );
 }
+
+const SCALA_FIXTURE: &str = include_str!("../../../lib/tests/fixtures/symbols/scala.scala");
+
+/// Scala block packages (`package p { … }`) after the fixture's statement
+/// package keep their segment, so qualified selectors tell same-named
+/// classes in sibling packages apart.
+#[test]
+fn qualified_selectors_distinguish_scala_block_packages() {
+    let source = format!(
+        "{SCALA_FIXTURE}\npackage R9Left {{ class R9W {{ def probe(): Unit = () }} }}\n\
+         package R9Right {{ class R9W {{ def probe(): Unit = () }} }}\n\
+         package R9Outer {{\n  package R9Inner {{ class R9Nested {{ def probe(): Unit = () }} }}\n}}\n\
+         class R9After\n"
+    );
+    let scratch = Scratch::new(&[("scala.scala", source.as_str())]);
+    let selectors: [&[&str]; 6] = [
+        &["functions", "--name", "example.symbols.R9Left.R9W.probe"],
+        &["functions", "--in", "example.symbols.R9Left.R9W"],
+        &["classes", "--in", "example.symbols.R9Left.R9W"],
+        &["classes", "--in", "example.symbols.R9Right.R9W"],
+        &["functions", "--in", "example.symbols.R9Outer.R9Inner.R9Nested"],
+        &["types", "--name", "example.symbols.R9After"],
+    ];
+    for selector in selectors {
+        let args: Vec<&str> = selector
+            .iter()
+            .copied()
+            .chain(["--file", "scala.scala", "--exact", "--count", "--no-cache"])
+            .collect();
+        assert_eq!(scratch.stdout(&args).trim(), "1", "hug {}", args.join(" "));
+    }
+}

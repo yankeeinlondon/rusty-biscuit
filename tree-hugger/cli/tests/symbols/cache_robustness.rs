@@ -130,6 +130,16 @@ fn is_static(record: &Value) -> bool {
         .is_some_and(|modifiers| modifiers.iter().any(|modifier| modifier["type"] == "Static"))
 }
 
+/// The names of the record's attributes, in order.
+fn attribute_names(record: &Value) -> Value {
+    Value::from(
+        record["attributes"]
+            .as_array()
+            .map(|attributes| attributes.iter().map(|attribute| attribute["name"].clone()).collect::<Vec<_>>())
+            .unwrap_or_default(),
+    )
+}
+
 fn or_empty_list(value: &Value) -> Value {
     if value.is_null() {
         json!([])
@@ -218,6 +228,26 @@ fn columns() -> Vec<Column> {
                 R,
             ],
         },
+        // Absent and `[]` are the written encoding of "no attributes".
+        Column {
+            name: "attributes",
+            target: Target::Record(STATIC_METHOD),
+            path: &["attributes"],
+            control: None,
+            empty: None,
+            public: |out| attribute_names(record(out, STATIC_METHOD)),
+            outcomes: [
+                S(json!(["staticmethod"])),
+                S(json!([])),
+                R,
+                R,
+                R,
+                R,
+                S(json!([])),
+                R,
+                R,
+            ],
+        },
         Column {
             name: "scope",
             target: Target::Record(METHOD),
@@ -276,7 +306,7 @@ fn columns() -> Vec<Column> {
             empty: None,
             public: |out| record(out, METHOD)["metrics"].clone(),
             outcomes: [
-                S(json!({ "parameters": 1, "has_docs": false, "lines": null })),
+                S(json!({ "parameters": 1, "has_docs": false, "lines": 2 })),
                 R,
                 R,
                 R,
@@ -887,7 +917,7 @@ fn an_absent_metrics_facet_is_not_requested_never_computed_null() {
     assert_eq!(widened, json_of(&scratch.stdout(&UNCACHED_ARGS)), "widened by metrics: an uncached result");
     assert_eq!(
         record(&widened, METHOD)["metrics"],
-        json!({ "parameters": 1, "has_docs": false, "lines": null }),
+        json!({ "parameters": 1, "has_docs": false, "lines": 2 }),
         "the facet is computed with every key"
     );
 }
