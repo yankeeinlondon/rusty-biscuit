@@ -6,6 +6,7 @@ implementation_3: "2026-10-05T14:05:04-07:00"
 implementation_4: "2026-10-05T14:23:46-07:00"
 implementation_5: "2026-10-05T15:41:32-07:00"
 implementation_6: "2026-10-05T16:19:15-07:00"
+implementation_7: "2026-10-05T16:52:58-07:00"
 ---
 
 ## Implementation of Review Findings #1
@@ -288,3 +289,29 @@ The files changed in this cycle are `tree-hugger/lib/src/file/extract/doc_commen
         - defect class: a completion record (checked plan task, `completed_phase` frontmatter) asserts a required verification step is done while the measurements that step must produce are missing from the record
         - discovery: the prerequisite's method (its implementation log, Phase 1 baseline and Phase 6 sample) is a back-to-back `hyperfine -N --warmup 1 --runs 5` of a pre and a post release binary in `tree-hugger/`, `/usr/bin/time -l hug symbols --no-cache` from the repository root for peak RSS, and `hug --json functions --no-cache` bytes on the Phase 1 baseline tree (`git archive 60e3b841 tree-hugger`) and today's tree
         - discovery: the prerequisite's post binary (`b76a33baa`) is still at `/tmp/th-baseline/hug-post`; host load at start is 38 (1 min) / 128 (15 min), so only same-invocation ratios are meaningful
+        - discovery: sibling repairs began editing `tree-hugger/` source at 16:54:47, during the first timing run, so that run was discarded; every `tree-hugger/` measurement was re-taken on a frozen `git archive HEAD tree-hugger` snapshot (`/tmp/th-perf/r7-tree`, 162 files); the measured binary was built from a clean `c111bcef8` before the edits began
+        - discovery: against the prerequisite's post binary, cold `functions` uses 39% more wall time and 41% more CPU; a third binary built at `5c523d96e` (this feature's Phase 7 close) shows the extra CPU arrived with this feature's Phases 1-7, not with the later deferred-kind repairs; `sample` puts about 45% of the declaration pass in `qualified_name::Builder`
+        - discovery: repository-wide `hug symbols --no-cache` peak RSS fell from 1.97 GB to 0.26 GB (0.27 GB with `--all-scopes`), but elapsed time rose from 8.2 s to 14.6 s (17.6 s with `--all-scopes`); `--json functions` on the Phase 1 baseline tree grew 4.3%, to 2,838,752 B
+        - completed: performance sample recorded in `implementation-log.md` under `## Phase 7` / `### Performance sample`
+        - discovery: the 7.8 sample was taken at the Phase 7 close and recorded (`92b267c36`, `### 7.8 Performance sample`: `Builder::prefix` cost, RSS 1.95 GB → 0.27 GB, `--json functions` +4%); the review-cycle-1 planning commit `9266bc82e` deleted the whole Phase 6 and Phase 7 narrative (and the end of Phase 5's Verification) while its message calls it a move, keeping only the 7.9 native-Windows bullet, which it spliced into Phase 5; the text existed nowhere else in the tree
+        - completed: restored Phase 5's Verification tail, `## Phase 6` and `## Phase 7` (7.1–7.8 and the 7.7/7.9 close-out) verbatim from `92b267c36`, with the native-Windows evidence moved back into 7.9; the review-7 re-run follows as `### Performance sample re-run (review cycle 7)`, whose introduction records the deletion and that it agrees with 7.8
+        - completed: the spec's `message_to_agent` ("details in implementation-log.md, Phase 6") and the README's `hug symbols` before/after figures (4,635 of 16,681 lines, from the 7.8 sample) have their source record again
+        - verification: only feature-record Markdown changed in this cycle (`implementation-log.md`, `log.md`, review frontmatter); no source, test or doc page changed, so `just test`/`just lint` were not re-run. The working tree's `tree-hugger/cli` source edits belong to the concurrent symbol-type-relations session and are not part of this cycle
+- class sweep: a completion record asserts a required verification step is done while the record it must produce is missing; sites checked: plan Phase 6 tasks 6.1–6.10 and Phase 7 tasks 7.1–7.9 against `implementation-log.md`, the log's `completed_phase: 7` and per-phase file lists, the spec's `message_to_agent` pointer to "Phase 6", the README release-note figures, `log.md` cycles 1–6 completion sections; fixed here: 7.8 performance sample (restored and re-run), Phase 6 narrative (6.1–6.10 requirement → test record), Phase 7 7.1–7.7 and 7.9 records, Phase 5 Verification tail; clean: `log.md` cycles 1–6 (each completion claim has its entries), README figures (correctly attributed; they now trace to 7.8), Phases 1–4 (unchanged since `92b267c36`)
+- work completed for 'Required post-feature performance sample has no recorded results' at 17:04:48
+
+### Successful Completion
+
+The implementation of review cycle 7 has completed successfully in about 12 minutes (16:52:58 → 17:04:48). During this implementation all 1 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 1 were fixed, 0 were deferred (see reasons below):
+
+- no review findings were deferred; the performance sample was measurable at a 1-minute load of 8–12, with each pre/post comparison taken back-to-back in one hyperfine invocation, so `deferred_perf_measurement` is not set
+- the sample records a regression without a gate, as the spec allows: cold declaration runs use about 40% more CPU and repo-wide `hug symbols` takes 14.6 s against 8.2 s, both from the always-computed qualified-name builder (`Builder::prefix` climbing ancestors with `Node::parent`); peak RSS fell 87% and `--json functions` grew about 4%
+
+The files changed in this cycle are `tree-hugger/features/2026-10-03-symbol-filters-and-reports/implementation-log.md`, `log.md` and `review-7.md` (frontmatter). Measurement artifacts are under `/tmp/th-perf/`; the measured binary is `/tmp/th-baseline/hug-filters-rev17`.
+
+## Implementation of Review Findings #8
+
+> **started at:** 2026-10-05T17:12:11-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in 'tree-hugger/features/2026-10-03-symbol-filters-and-reports/review-8.md'
+- this is iteration 8 of the review-to-implement cycle

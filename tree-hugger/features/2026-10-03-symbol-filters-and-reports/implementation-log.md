@@ -1310,6 +1310,412 @@ default: **planned** marker removed), `docs/cache-design.md`
   new tests are L1 (`symbols` binary, no tier marker).
 - `just cross-check tree-hugger-cli --os linux`: 216 passed (6 L2 skipped);
   `just cross-check tree-hugger --os linux`: 680 passed.
+- Windows: `just cross-check tree-hugger-cli --os windows` failed
+  `_storage_preflight` again (host disk headroom, as in Phase 4); nothing
+  overridden or deleted. OS-sensitive code this phase: `--file` resolution
+  (`FileReference` + `file_identity`) and `is_glob`; the tests use relative
+  `/`-separated values only.
+- Validation checkpoint 5: `hug symbols` over `tree-hugger/` 4,388 lines,
+  `--all-scopes` 15,711 (see Departures for the spec's older numbers).
+- No pre-existing failures; nothing skipped.
+
+
+## Phase 6
+
+Reports: JSON Lines, `--tree`, `--signatures`, `--format plain|table`,
+`--count`, `--stats` (terminal and JSON) and the output-mode rule. CLI only;
+no library change, so `EXTRACTOR_REVISION` stays `"9"`.
+
+### Structure
+
+- **`cli/src/output.rs`** (new): `ReportArgs` (`--jsonl`, `--count`,
+  `--stats`, `--format`, `--signatures`, `--tree`), flattened into the
+  declaration args and `ClassArgs` only, so `imports`/`lint` reject them at
+  parse time (`imports --stats` is a clap "unexpected argument", exit 2).
+  `resolve(GivenOutput) -> Result<OutputMode, String>` is the one place the
+  "exactly one mode" rule lives; `main` turns an `Err` into a clap
+  `ArgumentConflict` before any file is read.
+- **`--sort` became `Option<SortOrder>`** so "given" is detectable (`--stats
+  --sort file` is an error too); `Command::sort().unwrap_or_default()` keeps
+  every other caller unchanged.
+- **`cli/src/stats.rs`** (new): `Stats::add` / `write_json` /
+  `write_terminal`. Map keys are the records' serde spellings (`Function`,
+  `Public`, `Rust`); terminal tables use the display labels.
+- **`declarations.rs`**: `ReportFormat` now carries every mode
+  (`Terminal { render: RenderOptions, view }`, `Json`, `JsonFull`,
+  `JsonLines`, `Count`, `Stats(Option<RenderOptions>)`);
+  `ReportFormat::capabilities` replaces `always_computes_flags` (JSON formats
+  add `Flags`, stats `Metrics`, `--tree` `Containment`). Writers share a
+  `Sink` (out, errors, cache stats, stderr). `selected_records` is the one
+  projection the JSON formats and the table share (sorted, trimmed, classes'
+  displayed members by container position); `--json`'s `members` map is
+  built from it (`members_by_id`), so the two class shapes cannot drift.
+  `write_json_lines`, `write_table`, `write_tree` stream per file in path
+  order and flush at chunk ends; `write_tally` holds only counters.
+- **`render.rs`**: `RenderOptions { styled, show_comments, width,
+  signatures }`; `shown()`/`Shown` decide what a line shows per signature
+  mode; `compact_signature` + `short_list` (`… +N` past four entries, field
+  and enum-variant lists alike); `container_suffix`; `one_line` for
+  multi-line headers; `literal()`/`neutralized()` for source text;
+  `Renderer::table`, `Renderer::outline` with `Outline`/`Root`.
+- **`report.rs`**: `JsonLine` envelope in the spec's field order.
+
+### Requirement → test
+
+| Requirement | Test(s) |
+|---|---|
+| 6.1 envelope fields and order, values repeat the file entry, no blobs, `SymbolRecord` read→write→read round trip, same records/order as `--json` | `reports::json_lines_are_self_describing_envelopes_that_round_trip` |
+| 6.1 class lines carry a `members` list equal to the `--json` map entry | `reports::json_lines_class_lines_carry_their_members_as_a_list` |
+| 6.1 files in path order, `--sort name\|kind` within each file, same as `--json --sort` | `reports::json_lines_keep_files_in_path_order_and_sort_within_each` |
+| 6.1 failure after partial output (stderr, exit 1, good lines kept); empty selection = zero bytes | `reports::json_lines_report_failures_after_partial_output_and_nothing_for_an_empty_selection` |
+| 6.1 never worker order (byte-identical with 1 and 8 threads) | `golden::json_symbols_over_multi_are_identical_with_one_thread` (+ `--jsonl --sort kind`) |
+| 6.1 bounded buffering / broken pipe quiet | `report::a_failing_stdout_stops_every_streamed_layout_within_two_chunks` (+ `--jsonl`, `classes --jsonl`, `--format table`, `--tree`), `report::a_closed_stdout_ends_the_run_quietly` (+ `--jsonl`) |
+| 6.1 / spec DoD: `--json`/`--jsonl` carry computed `is_test`/`is_deprecated` without a filter; `flags` in `completed_capabilities` | `reports::json_and_jsonl_records_carry_computed_flags_without_a_filter` |
+| 6.2 nesting by container ID: two Rust `impl` blocks under one type, Go receiver, Java overloads in source order, type declared elsewhere under a marked heading, headings not counted, empty = `(no symbols)` | `reports::tree_nests_members_under_their_container` |
+| 6.2 combination table (`--sort` containers vs members, heading sort, `--group-by-file` no-op, `--group-by-module` heading, `--format plain` = `--plain`, errors for table/json/json-full/jsonl/count, `classes --tree`) | `reports::tree_combines_with_sort_grouping_and_formats`, `output::tests::tree_is_terminal_list_output_only` |
+| 6.3 `short` default and `… +N` boundary (5 fields → `+1`, 4 stay whole), `full` header, `none` names with container, table column per mode | `reports::signature_modes_show_full_short_or_no_signatures` |
+| 6.4 count = one integer line; equals `--json` records and `--jsonl` lines | `golden::count_symbols_over_multi_is_one_integer_line` |
+| 6.4 every filter applies before counting: `--count`, the three stats maps and `--json` agree for 14 selections; `--undocumented` never counts unknown docs | `reports::count_and_stats_apply_every_filter` |
+| 6.4 `classes` counts containers only (count and stats) | `reports::classes_count_and_stats_count_containers_only` |
+| 6.4 count with a failing file (exit 1, good files counted), zero matches = `0` | `reports::count_is_one_integer_line_even_when_a_file_fails` |
+| 6.4 doc coverage: `unavailable` from Lua/Bash, null ratio on zero matches and on unknown-only docs, synthetic exports apart | `reports::stats_json_envelope_counts_doc_coverage_and_reports_failures_last`, `stats::tests::*` (2) |
+| 6.5 wrapping at injected width with hanging indent (list and tree); `--plain`, `--format plain`, redirected never wrap | `reports::interactive_output_wraps_at_the_injected_width` |
+| 6.5 control sequences (CSI, OSC 8 link, clear screen, BEL) and Prose markup shown literally in list, `full`, tree, table, `--comments`, plain | `reports::control_sequences_and_markup_in_source_are_shown_literally` |
+| 6.5 table columns, Signature cell, per-file tables, `classes` rows, empty | `reports::table_rows_carry_location_kind_visibility_name_and_signature` |
+| 6.6 stats terminal: three tables + coverage line, `--format table` identical, `--format plain` unstyled = styled stripped | `reports::stats_terminal_tables_compose_with_formats` |
+| 6.6 stats JSON envelope order, no `schema_version`, trailing `errors` with a failing file, exit 1 | `reports::stats_json_envelope_counts_doc_coverage_and_reports_failures_last` |
+| 6.7 every mode pair (table-driven), each mode alone, stats exceptions and ordering-flag errors | `output::tests::*` (4) |
+| 6.7 the same rules through the binary (exit 2, stderr names the flag), `imports --stats`, `classes --static-only --instance-only` | `reports::exactly_one_output_mode_with_the_stats_exception` |
+| 6.8 goldens over `multi/`: `--format table`, `--format plain`, `--jsonl`, `--tree`, `--stats`, `--stats --json`, `--signatures full`; `--count` | `golden::{table,tree,full_signature,stats,stats_json,jsonl}_symbols_over_multi_match_the_golden`, `golden::format_plain_symbols_over_multi_match_the_plain_golden`, `golden::count_symbols_over_multi_is_one_integer_line` |
+| 6.10 real terminal: wrapping at the pane width and at `COLUMNS=60` (hanging indent, rows ≤ width, dim location on its wrapped row); table columns, OSC 8 Location link, Signature wrapping inside its cell at `COLUMNS=70` with constant row width | `level2_declarations::check_wrapping`, `check_table` (tmux, WezTerm, Kitty) |
+| stale `EXTRACTOR_REVISION` entry | no revision change this phase; still covered by `cache_upgrade::entry_from_extractor_revision_eight_is_not_served_after_the_repairs` |
+
+Goldens: new `symbols.table`, `symbols.tree`, `symbols.stats`,
+`symbols-stats.json`, `symbols.jsonl` (each line canonicalized like
+`symbols.json`, IDs numbered across lines), `symbols-signatures-full.plain`.
+`--format plain` is asserted against the existing `symbols.plain`, which
+also proves it equals `--plain`. `symbols.plain`/`symbols.json` are
+unchanged: no `multi/` type has more than four fields. All are compared after
+`strip_ansi_codes` + path redaction and are width-independent (piped output
+never wraps; tables take their natural width), with `/` paths.
+
+Input robustness matrix: not applicable. No file format, configuration or
+persisted field is read or changed. The new inputs are command-line flags
+(conflicts covered above) and the `COLUMNS` variable: a non-numeric, zero or
+absent value falls back to the detected width (`wrap_width`).
+
+### Superseded tests
+
+| Test | Change | Why |
+|---|---|---|
+| `wiring::pretty_symbols_use_the_same_labels_as_plain` | adds `COLUMNS=10000` to its `CLICOLOR_FORCE` run | forced color is interactive output, which now wraps at the detected width; the test's point is "same text as plain" |
+| `level2_declarations` (all five scenarios) | run with `COLUMNS=10000` | they check layout and styling; the "long row stays one logical row" check asserted the old never-wrap rule, which now holds only when the width is wide. Wrapping got its own scenarios |
+
+### Departures and decisions
+
+- **`COLUMNS` overrides the detected width** (positive integers only), and
+  wrapping happens only when stdout is a terminal or `CLICOLOR_FORCE` is set.
+  biscuit-terminal has no width override and the spec forbids changing it;
+  `COLUMNS` is the conventional knob and is what the L1 tests inject. A
+  consequence: any test that forces color must pin `COLUMNS`, or its output
+  depends on the developer's terminal (recorded in the skill).
+- **A token longer than the remaining width is hyphenated**
+  (`regional_break-` / `down`): biscuit-terminal's `WrapProse` behavior. A
+  `BespokeProse` policy breaking after `(`/`,` was tried and had no effect on
+  the list items, so it was removed; changing the wrapper is out of scope.
+- **`--format table` is one table per file**, not one per scan: a single
+  table must hold every row to plan its widths, which would be the
+  whole-scan accumulator the streaming rule forbids. Location still carries
+  the file. When the terminal is too narrow for the non-wrapping columns
+  (Location, Kind, Visibility, Name), the table renders at its natural width
+  instead of failing with biscuit-terminal's "could not be rendered" message.
+  Unknown visibility is an empty cell (the listing omits it too).
+- **`--signatures full` replaces visibility and label** with the header as
+  written (which already carries them) and keeps the flat `[in …]` suffix;
+  multi-line headers are joined with single spaces. Without an extracted
+  header it falls back to the short form.
+- **`… +N` applies to enum variant lists as well as field lists**: both use
+  the same `{ … }` form; the spec names field lists.
+- **Control characters print as `\u{..}`** (`char::escape_unicode`), tabs
+  included, before `Prose::escape_text`, which on its own passes ANSI CSI/OSC
+  sequences through verbatim. Table text cells (plain, not Prose) get the
+  same neutralizing.
+- **`--tree` contextual headings** also cover a member whose container is
+  declared in another file (`impl Elsewhere { … }`): containment gives it no
+  `relations.container`, so the outline falls back to
+  `identity.container_name`. Found while writing the focused cases; the
+  first version listed such a method at the top level.
+- **Parameters in `--tree --all-scopes`** nest under whatever container their
+  record names: for Rust, the `impl` type rather than the method (a
+  containment fact from Phase 3, not changed here).
+- **`classes --tree` is an argument error** (`classes` already nests);
+  `classes --format table` lists each container followed by its displayed
+  members.
+- **Stats maps count every selected record**, synthetic exports included, so
+  each map sums to `--count`; `synthetic_exports` reports them apart and
+  doc coverage excludes them.
+- **`--signatures` with `--json`/`--jsonl`/`--count` is accepted and has no
+  effect**, like `--comments`; the spec makes it an error only with
+  `--stats`.
+- **`--json` with `--json-full`** is now an argument error (two modes); it
+  was silently `--json-full` before.
+
+### Verification
+
+- `just test`: 928 run, 928 passed, 0 skipped (897 at the end of Phase 5;
+  +17 `reports`, +8 `golden`, +6 `output`/`stats` unit tests).
+- `just test-l2`: 6 passed (tmux and WezTerm ran the new wrapping and table
+  scenarios, OSC 8 checked in WezTerm; Kitty skip-clean, not available).
+- `just lint`: clean (re-run after touching sources so clippy re-checked
+  both crates). `just check-tier-coverage tree-hugger`: 0 stranded; the new
+  tests are L1 in the `symbols` binary (`reports`, `golden`) or unit tests,
+  plus the existing `level2_declarations` target.
+- `just cross-check tree-hugger-cli --os linux`: 248 passed (6 L2 skipped).
+- Windows: `just cross-check tree-hugger-cli --os windows` built and archived
+  the test binaries for `windows-latest`, then failed `_storage_preflight`
+  on the consume side (15 GiB free on the Cargo target volume, below the
+  50 GiB threshold; the 80 GB sweep freed nothing), as in Phases 4 and 5.
+  Nothing overridden or deleted. OS-sensitive code this phase: `COLUMNS`
+  parsing and terminal-width detection (biscuit-terminal's), and paths in
+  table cells and outline headings, which use the existing portable display
+  path.
+- No pre-existing failures; nothing skipped.
+
+## Phase 7
+
+Docs, release notes, performance sample and close. Implemented by
+claude/opus on 2026-10-05. One CLI fix (table links) found while checking
+docs against the binary; otherwise documentation and comment-only edits.
+`EXTRACTOR_REVISION` stays `"9"`.
+
+### 7.1–7.4 Docs (audited against the code; code wins)
+
+Every doc sample added this phase was produced by the release binary over
+a scratch repository, not written by hand.
+
+- **`docs/symbol-kinds-and-visibility.md`** (7.1): added a Mermaid diagram of
+  how scope is decided, the 13 languages that extract parameters (and why
+  Perl/Bash/Zsh have none), a nested Bash/Zsh function example (`Local`),
+  the `async` rules (declaration keyword only; JS/TS through the bound
+  value; C++ coroutines not marked; Rust `async` block example), the
+  out-of-line `#[cfg(test)] mod tests;` limit with an example and the
+  `#![cfg(test)]` workaround, exact-`cfg(test)`-only, no
+  `unittest.TestCase`/`describe` rule, `../` prefixes for files outside the
+  scan root, `hug`'s lack of a naming-context option (Rust/Python examples),
+  which modes compute `metrics`, absent facet vs `null` metric, Swift
+  `typealias`/`init` and Scala `type` in the limitations. Drift fixed:
+  - Swift `async` listed initializers → no `init` is captured → removed, added
+    to limitations.
+  - flags computed by "`--json` and `--json-full`" → `--jsonl` too.
+  - PHP `::` "after a type" → after anything but a namespace (function
+    included) → reworded with example.
+  - qualified-name segments omitted enum variants → added.
+- **`docs/symbol-reports.md`** (7.2): an example for every selector, a Plain
+  (`--format plain`) section with a sample, a `--count` sample, a Mermaid
+  diagram of the output-mode rule. Drift fixed: the exit-status table was
+  split by a blank line; directory filters (see below) were promised by the
+  intro example (`hug --json symbols src/`) and the `--file` section.
+- **`docs/symbol-schema-design.md`** (7.3): additive fields with exactly
+  which facets stay empty, which `hug` modes request each capability, why
+  scope/`async`/qualified name are always computed, metric absence with a
+  JSON example, the `NamingContext` example, that `finish` applies prefix and
+  predicates to cached and uncached results alike, migration mappings for
+  the new v1 fields. Drift fixed:
+  - ID ordinal said "same kind, container and name" with a scan-relative key
+    → `(kind, qualified_name)` with the absolute file identity → rewritten.
+  - "`relations` inheritance lists stay empty" → Rust `implements` is filled
+    → "`extends`, `overrides`, and `implements` outside Rust".
+  - "Until revision 7" → "Before revision 7".
+  - rule 4.1 (additive fields bump the minor) vs the shipped `V4_0` with
+    some new fields required on read → departure documented.
+  - flag modes lacked `--jsonl`; migration lacked the new v1 fields.
+- **`docs/cache-design.md`** (7.3): why naming context and scan root are not
+  key inputs, a `finish` node in the lookup diagram, a two-scan-root example,
+  test-table rows for flags/metrics consistency and prefix isolation.
+  Verified: `EXTRACTOR_REVISION` `"9"`, the three `validate` rules, every
+  robustness row against `cache_robustness.rs` both ways. Drift fixed: a
+  blank line split the `metrics.*` row from its table; "twenty-two record
+  fields" → 21 fields in 22 columns; `diagnostics_fingerprint` cell completed.
+- **READMEs, help, completions, skill** (7.4): `cli/README.md` gained a
+  Selectors section (every selector, four examples run against the binary);
+  `README.md` gained the selector flags. `--help` already documents every
+  flag; completions are clap's dynamic completions and offer the values of
+  `--format`, `--signatures`, `--scope` and `--kind` (checked through
+  `COMPLETE=bash`). `api-reference.md` already lists every `SymbolQuery`
+  builder method (cross-checked against `query.rs`) and the facets.
+  `SKILL.md` quick reference gained a selectors row and the directory-input
+  limit.
+
+### 7.5 Release notes
+
+`README.md` "Release Notes: precise, filterable symbol reports", above the
+earlier notes: smart-case matching and locals hidden in `hug symbols`, each
+with real before/after output (`hug-post` vs this build on one file), the
+new selectors and outputs, the one-output-mode rule and `--json --json-full`
+now being an error, the new record facts and the ID/cache consequence,
+wrapping under `CLICOLOR_FORCE`, and escaped control characters.
+
+### 7.6 Unscheduled entries
+
+- `symbol-type-relations`: claimed the attribute parsing already covers
+  "TS, JS and Python decorators" → `attributes.rs` reads Rust, C++, Java,
+  Scala, C#, Python and Swift; TS/JS decorators need a reader. Corrected.
+- `stats-package-grouping`: "zero matches leaves its coverage unavailable" →
+  `unavailable` now names the count of declarations without doc detection;
+  an empty group has a `null` ratio. Corrected.
+- `extra-report-formats`, `cyclomatic-complexity`, `changed-files-filter`,
+  `scoped-references`, `deferred-kind-precision`: still accurate.
+- `docs/dependencies.md`: no change. No commit of this feature touched a
+  `Cargo.toml` (the `rayon`, `biscuit-hash` and `file-reference` changes on
+  the branch belong to `2026-10-03-symbol-improvements`).
+
+### Found while checking docs against the binary
+
+- **Fixed: `--format table` links pointed at the wrong file below the scan
+  root.** The Location cell is built from the trimmed (scan-root-relative)
+  `file_path`, and `file_url` resolved it against the working directory, so
+  `hug functions --format table` run from `src/` linked
+  `…/src/src/lib.rs#L1`. `Renderer::table` now takes the scan root and links
+  `scan_root.join(file_path)` (a `../` or absolute fallback path joins
+  correctly). Test: `reports::table_location_links_resolve_against_the_scan_root`
+  (runs from `src/` with forced color; the table's link targets must equal
+  the listing's). Verified red with the old line (`…/src/src/lib.rs#L1`) and
+  green with the fix. Flagged by the 7.7 comment review.
+- **Recorded, not fixed: a directory input selects no files.** `hug functions
+  src/`, `./src` and `--file src` exit 1 with `Error: NoSourceFiles { … }`
+  (Debug-formatted); `'src/**'` works. Inputs become `ignore` override
+  whitelist globs, and a directory pattern whitelists the directory but not
+  its files. Identical in `hug-pre` (before `2026-10-03-symbol-improvements`)
+  and `hug-post`, so it predates this feature. The docs now say so and give
+  the glob form; worth a fix spec (the scanner change is small: expand an
+  existing directory input to `dir/**`), plus a readable `NoSourceFiles`
+  message.
+- **Cosmetic, left:** the table's Location shows the scan-root-relative path
+  while the listing shows the display-root-relative path; they differ only
+  when the two roots differ. The table golden pins the current form.
+
+### 7.8 Performance sample
+
+- **Same host** as both earlier samples (Apple M4 Max, 16 cores, macOS),
+  load average 6–10 during the runs (lower than the earlier 14–24).
+- **Binaries:** `hug-pre` (`60e3b841`, before `2026-10-03-symbol-improvements`)
+  and `hug-post` (that feature's Phase 6 build, `b76a33baa`, 2026-10-04
+  18:41, before its review cycles), both kept in `/tmp/th-baseline/`, and
+  `hug-filters`: `cargo build --release -p tree-hugger-cli` of this tree
+  (`de96f623f` plus the uncommitted Phase 6 work), before the table-link fix
+  and comment edits, neither of which touches the timed commands.
+- **Method:** as before, one hyperfine invocation (`-N -i --warmup 1 --runs
+  5`) in `tree-hugger/` (159 files today), each binary with its own `TMPDIR`
+  cache, warm runs after the warmup run. Every command re-run by hand: all
+  exit 0, all three binaries print the same line counts (`functions` 2,280,
+  `imports` 979, `lint` 8), and `lint`/`imports` output is byte-identical
+  between `hug-post` and `hug-filters`.
+
+| Command (in `tree-hugger/`) | `hug-pre` | `hug-post` | this feature | vs `hug-post` |
+|---|---|---|---|---|
+| `hug functions --no-cache` | 2.383 s ± 0.003 | 0.135 s ± 0.008 | 0.152 s ± 0.004 | +13% |
+| `hug functions` (warm) | 1.397 s ± 0.007 | 0.051 s ± 0.001 | 0.052 s ± 0.001 | +2% (noise) |
+| `hug lint --no-cache` | 2.376 s ± 0.003 | 0.170 s ± 0.011 | 0.200 s ± 0.010 | +18% |
+| `hug imports --no-cache` | 2.369 s ± 0.005 | 0.105 s ± 0.004 | 0.131 s ± 0.003 | +25% |
+
+Single-threaded (`RAYON_NUM_THREADS=1`): `functions --no-cache` 551 → 700 ms
+(+27%), `imports --no-cache` 571 → 735 ms (+29%). Work is identical
+(`--verbose`: `parsed 159 files, 159 definition captures`, 0 or 159
+diagnostics runs in both; warm `159 hits … parsed 0 files` in both), so the
+cost is per declaration, not extra passes.
+
+**Cause (regression recorded, no gate):** a 4 s `sample` profile of a
+single-threaded `hug symbols --no-cache` at the repository root puts 642 of
+2,222 `run_query` samples (29%) in `extract::qualified_name::qualified_names`,
+almost all in `Builder::prefix`, plus 162 in `scope::symbol_scope`; the top
+leaf is `ts_node_child_iterator_next` (933 samples vs 105 in
+`ts_parser_parse`). Both are the always-computed metadata from Phase 2 (B2,
+B5), run for every captured declaration, locals included. The prefix walk
+climbs ancestors with `Node::parent`, which tree-sitter 0.26 implements by
+descending from the root (`ts_node_child_with_descendant`), so each climb
+is O(depth) per step and grows with nesting. A cursor-based walk or one
+ancestor map per file would remove most of it; not attempted here
+(ruling 9: measure, do not widen).
+
+**Peak RSS and elapsed** (repository root, `/usr/bin/time -l hug symbols
+--no-cache > /dev/null`, one run each):
+
+| | `hug-post` | this feature |
+|---|---|---|
+| peak RSS | 1,949,237,248 B (1.95 GB) | 268,058,624 B (0.27 GB) |
+| elapsed / user | 8.24 s / 23.37 s | 14.48 s / 35.26 s |
+| lines printed | 470,453 | 146,615 (locals hidden) |
+
+RSS fell to 14% of `hug-post`; that drop is not this feature alone: it
+includes the streaming renderer from `2026-10-03-symbol-improvements`'s
+review cycles (after `hug-post` was built) and the hidden locals. Elapsed
+rose 76% (user CPU +51%) on the large tree, where deep files make the
+qualified-name walk above dominate.
+
+**JSON size** (`hug --json … --no-cache` in `tree-hugger/`):
+
+| Report | `hug-post` | this feature |
+|---|---|---|
+| `--json functions` | 3,960,658 B | 4,131,455 B (+4%: `scope`, `qualified_name`, `is_namespace_rooted`, computed flags) |
+| `--json symbols` | 19,767,890 B | 7,508,475 B (locals hidden); 22,256,845 B with `--all-scopes` (+13%) |
+
+`hug symbols` in `tree-hugger/`: 4,635 lines by default, 16,681 with
+`--all-scopes` (= `hug-post`'s 16,681): 28% remain. The release notes quote
+these two figures.
+
+### Phase 7 close-out (7.7 and 7.9), 2026-10-05
+
+The Phase 7 run ended before 7.7 and 7.9 finished. Its agent had started the
+7.7 drift review as a background subagent and `just test-l2` in the
+background. It then called `ScheduleWakeup` and ended its turn, expecting to
+be resumed when they reported. In a non-interactive `claudine compose` run,
+ending the turn ends the session, so nothing resumed it. The success stack
+committed the partial work (`a13123339`), and the plan, log and spec were left
+without their completion flags. The implement prompts now carry a rule
+against ending a turn with work pending (`prompts/_finish-before-exit.md`),
+and `implement-plan`'s success stack warns when a final phase exits without
+`implemented: true`.
+
+**7.7 Comment drift pass.** The interrupted run had already fixed some
+comments (the `74fce8453` library drift and the table-link fix it found).
+This close-out reviewed every changed symbol in the feature's 43 source files
+(`git diff 99a9b9324 HEAD`) in three disjoint passes, about 205 symbols in
+all. It found 8 drifts and resolved each one, code winning:
+
+- `lib/src/file/extract/signatures.rs` `declared_parameters`: the doc cited
+  `x => x` as having no parameter list, but the code returns one parameter.
+  The example was removed.
+- `signatures.rs` `extract_csharp_parameter`: the doc omitted the `params`
+  variadic case. Added.
+- `lib/src/file/extract/classify.rs` `ContainerLookup::SameFileTable`: Lua
+  `M.x` was missing beside `M.f`/`M:m`. Added.
+- `lib/src/file/extract/qualified_name.rs` `qualified_names`: the doc omitted
+  enum variants and unextracted named nodes (a TS `namespace`, Java/C#
+  constructors). Added.
+- `lib/src/file/naming.rs` `portable_relative`: the doc said both paths are
+  canonicalized before comparing. The code tries the written path first, and
+  only then resolves `root` and the parent directory of `path`. Rewritten.
+- `lib/src/shared/schema_v2/facets.rs` `IdentityFacet::qualified_name`: the
+  doc said the name never depends on the scan root, but finished query results
+  carry the prefix and only cache entries and IDs do not. Clarified.
+- `cli/src/scanner.rs`: an inline comment still said "symbol glob" after
+  `normalize_symbol_glob` was removed. Now "symbol name".
+- `cli/src/selection.rs` `--name` help (user-visible): it claimed qualified
+  patterns match "from its start", but only `*` patterns are anchored. The
+  wording was corrected.
+
+Two pieces of help text are incomplete but not wrong, and were left as they
+are: `--plain` does not mention that it disables wrapping, and
+`--signatures short` does not mention enum variant lists. Every edit is
+comment-only: `git diff -U0` shows no changed non-comment line.
+
+**7.9 Final validation**, in `tree-hugger/` after the drift edits:
+
+- `just test`: 929 passed, 0 skipped.
+- `just test-l2`: 6 passed.
+- `just lint`: clean.
+- `just cross-check tree-hugger --os linux`: 680 passed.
+- `just cross-check tree-hugger-cli --os linux`: 249 passed, 6 L2 skipped.
 - Windows, first attempt: `just cross-check tree-hugger-cli --os windows`
   failed `_storage_preflight` on `build-win-native`. Cargo's target volume
   `B:` had 15.2 GiB free and the sweep freed 0. That was the same failure as in
@@ -1331,3 +1737,138 @@ default: **planned** marker removed), `docs/cache-design.md`
 
 `cargo fmt` was not run, nothing was committed, and the feature stays out of
 `_completed`. Terminal state: implementation complete, ready for review.
+
+### Performance sample re-run (review cycle 7)
+
+Review cycle 7 (2026-10-05) found no performance sample in this log. The
+7.8 sample above had been recorded at the Phase 7 close (`92b267c36`), but
+the review-cycle-1 planning commit (`9266bc82e`) deleted Phase 6 and Phase 7
+while describing the change as a move, and kept only the 7.9 Windows evidence
+(spliced into Phase 5's Verification). Phases 5–7 were restored here from
+`92b267c36`, with that Windows evidence back in 7.9. The sample was also
+re-run on the current tree; it agrees with 7.8 (the same `Builder::prefix`
+cost, an 86–87% RSS drop, about 4% JSON growth).
+
+- **Tree:** `c111bcef8` (`feat/symbols`). The working tree was clean when the
+  build finished. Sibling review-7 repairs then started editing `tree-hugger/`
+  sources at 16:54:47, during the first timing run, so that run was
+  discarded. Every `tree-hugger/` measurement below uses a frozen snapshot
+  instead: `git archive HEAD tree-hugger` into `/tmp/th-perf/r7-tree`, with
+  `git init` so the scan has a root (162 files). The repository-root RSS runs
+  scan the live checkout, which had those few uncommitted edits.
+- **Build:** `cargo build --release -p tree-hugger-cli` (workspace `release`
+  profile), copied to `/tmp/th-baseline/hug-filters-rev17`.
+- **Baseline binary:** the prerequisite's post binary,
+  `/tmp/th-baseline/hug-post` (`b76a33baa`). For attribution only, a third
+  binary was built at `5c523d96e` (this feature's Phase 7 close, before the
+  repairs and deferred-kind commits) in a temporary worktree, which was then
+  removed: `/tmp/th-perf/hug-filters-phase7`. The range from `b76a33baa` to
+  HEAD also contains the prerequisite's review fixes (`99a9b9324`) and the
+  deferred-kind-precision commits, so "pre to post" is not this feature
+  alone.
+- **Host:** the prerequisite's host (Apple M4 Max, 16 cores, macOS). The
+  1-minute load average was 10.8 → 10.7 during the timing run (5-minute:
+  70 → 68), and 8.2 → 7.6 during the RSS runs.
+- **Method:** the prerequisite's method. Both binaries were timed
+  back-to-back in one `hyperfine -N -i --warmup 1 --runs 5` invocation. Each
+  binary had its own `TMPDIR` cache (`/usr/bin/env TMPDIR=… <binary> …`), and
+  the warm runs follow hyperfine's warmup. Because `-i` was passed, every
+  command was re-run once by hand. All runs exited `0` and both binaries
+  printed the same line counts (`functions` 2,464, `imports` 1,012, `lint` 8).
+  The `lint` and `imports` outputs are byte-identical. `functions` differs
+  on 1,070 lines, all intended: 1,069 lose an implicit ` -> ()` (the Phase 4
+  return-type repair), and `order.rs`'s `compare` now shows its destructured
+  tuple parameters.
+
+| Command (in `tree-hugger/` snapshot) | Pre (`b76a33baa`) | Post (`c111bcef8`) | Ratio | User CPU pre → post |
+|---|---|---|---|---|
+| `hug functions --no-cache` | 0.144 s ± 0.008 | 0.199 s ± 0.007 | 139% | 0.81 s → 1.13 s |
+| `hug functions` (warm) | 0.062 s ± 0.010 | 0.053 s ± 0.001 | 86% | 0.063 s → 0.063 s |
+| `hug lint --no-cache` | 0.258 s ± 0.039 | 0.265 s ± 0.013 | 103% | 1.88 s → 2.02 s |
+| `hug imports --no-cache` | 0.142 s ± 0.009 | 0.168 s ± 0.008 | 118% | 1.03 s → 1.19 s |
+
+This feature has no hard gate. For context only, these figures still meet the
+prerequisite's targets against its `60e3b841` baseline. Post `functions
+--no-cache` is 11% of 1.859 s (target ≤ 40%), warm `functions` is 5% of
+1.078 s (target ≤ 15%), and `lint` is well under 1.883 s. That comparison
+crosses runs and inputs (131 files then, 162 now).
+
+**Attribution run** (a second hyperfine invocation, same snapshot, load 11.8
+→ 11.0):
+
+| Command | Pre | Phase 7 close (`5c523d96e`) | Post | User CPU pre / Phase 7 / post |
+|---|---|---|---|---|
+| `functions --no-cache` | 0.181 s ± 0.070 (one 0.299 s outlier) | 0.164 s ± 0.003 | 0.162 s ± 0.006 | 0.78 / 1.01 / 0.99 s |
+| `imports --no-cache` | 0.109 s ± 0.005 | 0.144 s ± 0.004 | 0.150 s ± 0.015 | 0.84 / 1.04 / 1.04 s |
+
+The extra CPU is already present at the Phase 7 close. It comes from this
+feature's Phases 1–7 (or the prerequisite's review fixes in the same range),
+not from the later repairs.
+
+**Work evidence** (`hug --verbose`, post binary, snapshot):
+
+| Run | Stats line |
+|---|---|
+| `functions --no-cache` | `cache: disabled; parsed 162 files, 162 definition captures, 0 diagnostics runs` |
+| `lint --no-cache` | `cache: disabled; parsed 162 files, 162 definition captures, 162 diagnostics runs` |
+| `functions` (warm) | `cache: 162 hits, 0 partial hits, 0 misses; parsed 0 files, 0 definition captures, 0 diagnostics runs` |
+
+The pre binary reports the same parse counts, so neither binary does extra
+passes. The extra cost is per-file work inside the declaration pass.
+
+**Peak RSS** (repository root, `/usr/bin/time -l <binary> symbols … >
+/dev/null`, one run each, run one after another). This feature changed the
+default scope: `hug symbols` now hides locals, so `--all-scopes` is the
+like-for-like comparison.
+
+| Binary | Command | Elapsed | User | Maximum resident set size | Output lines |
+|---|---|---|---|---|---|
+| Pre | `symbols --no-cache` | 8.24 s | 23.64 s | 1,969,815,552 B (1.97 GB) | 472,644 |
+| Post | `symbols --no-cache` | 14.55 s | 35.47 s | 256,638,976 B (0.26 GB) | 147,046 |
+| Post | `symbols --all-scopes --no-cache` | 17.55 s | 38.41 s | 272,269,312 B (0.27 GB) | 472,283 |
+| Phase 7 close | `symbols --no-cache` | 15.19 s | 35.93 s | 269,893,632 B (0.27 GB) | — |
+| Phase 7 close | `symbols --all-scopes --no-cache` | 18.12 s | 39.00 s | 270,008,320 B (0.27 GB) | — |
+
+The pre figure matches the prerequisite's 1.95 GB. The 361-line gap between
+pre and post `--all-scopes` was not investigated. It covers the live tree's
+uncommitted edits and the kind repairs in the range.
+
+**JSON size** (`hug --json functions --no-cache`):
+
+| Input | Pre | Post | Change |
+|---|---|---|---|
+| Phase 1 baseline tree (`git archive 60e3b841 tree-hugger` in `/tmp/th-perf/base`, `git init`) | 2,722,595 B | 2,838,752 B | +116,157 B (+4.3%) |
+| Today's `tree-hugger/` (snapshot, 162 files) | 4,306,825 B | 4,494,418 B | +187,593 B (+4.4%) |
+
+The pre figure on the baseline tree reproduces the prerequisite's
+2,722,595 B exactly. The Phase 7 close binary gives 2,837,172 B and
+4,491,626 B. On today's snapshot, `hug --json symbols --no-cache` is
+21,996,176 B pre and 8,143,410 B post (24,852,589 B, +13.0%, with
+`--all-scopes`). `hug symbols` prints 18,619 lines pre, and 5,008 lines post
+(18,619 with `--all-scopes`).
+
+#### Regressions and causes
+
+- **Cold declaration runs use more CPU** (`functions --no-cache` +39% wall
+  time and +41% CPU; `imports` +18% and +15%; `lint` +3% and +7%). A macOS
+  `sample` of repository-wide `hug symbols` puts about 2,700 of the roughly
+  6,000 samples in `TreeFile::definitions` inside
+  `qualified_name::Builder::{qualified, prefix}`. That builder is Phase 2.3's
+  qualified name for every record. The pre binary has no comparable frame.
+  `imports` was not profiled separately.
+- **Repository-wide `hug symbols` is slower** (8.2 s → 14.6 s, user time
+  23.6 s → 35.5 s), and slower still with `--all-scopes` (17.6 s). The causes
+  are the same per-record cost plus more idle workers: in the same 5-second
+  window, the post binary's idle condition-variable wait samples were 38,211
+  against 18,071. That idle time is consistent with Phase 6 streaming, which
+  analyzes files in listing order and writes after each batch.
+- **Peak RSS fell 87%** (1.97 GB → 0.26 GB; 0.27 GB with `--all-scopes`).
+  The cause is Phase 6 streaming, which holds one file's listing instead of
+  the whole result. The drop is present at the Phase 7 close.
+- **`--json functions` grew 4.3%** on the baseline tree, about 74 B per
+  record over 1,580 records. The additions are a `qualified_name` on every
+  record with the file prefix, where pre had one only on 438 members
+  (+101.9 KB), plus `is_namespace_rooted` (+45.8 KB), `is_test` (+26.0 KB;
+  `--json` always computes flags) and `scope` (+24.2 KB). Dropping the
+  implicit unit return type removed 80.9 KB (`type_info` −68.5 KB,
+  `kind_data` −12.4 KB). `metrics` is absent, as Phase 3.7 specifies.
