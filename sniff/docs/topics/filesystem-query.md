@@ -15,9 +15,11 @@ if report.outcome != Outcome::Usable {
 **Status.** The library entry point, report contract, platform-neutral
 matching, the [Linux/WSL2 backend](#linux-and-wsl2), the
 [macOS backend](#macos), and the [Windows loaded-module backend](#windows)
-are built. Windows does not inspect other processes' file handles: its
-`open_handles` mechanism reports `unsupported`. **Planned:** the
-[CLI query](../cli/filesystem_query.md).
+are built, as is the [`sniff filesystem query`](../cli/filesystem_query.md)
+command. Windows does not yet report open files: its `open_handles`
+mechanism reports `unsupported`. **Planned:** Windows will report open
+handles by asking which processes hold each path (see
+[Windows](#windows)).
 
 A directory query includes descendants by default;
 `PathUsageOptions::default().target_only()` inspects the target alone. Normal
@@ -123,7 +125,7 @@ Prerequisites never make an outcome `usable` on their own.
 | --- | --- | --- |
 | Linux/WSL2 | Open descriptors, cwd, inotify registrations | Permissions; fanotify and polling are `unsupported` |
 | macOS | Vnode descriptors and cwd, including observable event-only opens | Permissions (another user's processes are denied without root); FSEvents and polling are `unsupported` |
-| Windows | Loaded modules (executables and DLLs) | Permissions and protected processes; open handles, cwd, `ReadDirectoryChangesW` subscriptions, and polling are `unsupported` |
+| Windows | Loaded modules (executables and DLLs); **planned:** open handles on files and directories | Permissions and protected processes; open handles (until built), cwd, `ReadDirectoryChangesW` subscriptions, and polling are `unsupported` |
 
 For example, a Node process with its cwd in a checkout will appear as working
 directory evidence. A Node process watching that checkout through FSEvents may
@@ -302,6 +304,30 @@ flowchart LR
   working directory and a `ReadDirectoryChangesW` subscription are directory
   handles that cannot be told apart from any other, so both are
   `unsupported` too.
+- **Planned: open handles from the path side.** Sniff will not resolve
+  another process's handle. It will open each entry in the queried tree itself,
+  with attribute-only access, and ask Windows which processes hold it
+  (`NtQueryInformationFile` with `FileProcessIdsUsingFileInformation`). That
+  call returns even while the holder is blocked on the file. It needs no
+  elevation and no access to the holding process. Each holder becomes
+  `open_handle` evidence on that path. A working directory or a directory
+  watcher shows up this way as a holder of its directory, but the cwd and
+  subscription mechanisms stay `unsupported`, because the handle kind
+  cannot be told apart.
+
+  For example, a query of `C:\work\app` while a dev server watches
+  `C:\work\app\src` reports:
+
+  ```text
+  open_handle  \\?\C:\work\app\src
+  ```
+
+  Each call costs a few milliseconds, and more on a host with many open
+  handles. Sniff therefore visits directories first, then files, and
+  visits `target`, `node_modules`, and git-ignored entries last. It uses
+  at most 8 threads, and stops scheduling when the query's budget runs
+  out. Entries it did not reach make the mechanism `partial`. A file
+  waiting to be deleted cannot be opened, so its holders cannot be seen.
 
 A loaded module or an open handle shows that a process uses a file. It does
 not establish that deleting or renaming the file will fail. A handle opened

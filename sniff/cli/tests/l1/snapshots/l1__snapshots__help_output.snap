@@ -33,6 +33,8 @@ Commands:
     sniff repo            Show repository name (--json for the scope-complete aggregate; --help for
     all repo commands)
     sniff filesystem      Show full filesystem report
+    sniff filesystem query <path>
+                          Show processes using a file or directory tree
     sniff language        Show language detection
     sniff files           Show file associations
     sniff docs            Show markdown documents

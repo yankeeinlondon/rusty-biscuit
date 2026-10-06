@@ -14,12 +14,13 @@ use tracing::info_span;
 
 use crate::args::{
     BlastRadiusScopeArg, COMPLETIONS_HELP, Cli, Commands, DEFAULT_COMMIT_COUNT, DocsFilter,
-    FilesFilter, ServiceStateArg, SoftwareSubcommand,
+    FilesFilter, FilesystemSubcommand, ServiceStateArg, SoftwareSubcommand,
 };
 use crate::output::{self, OutputFilter, PathListFormat};
 use crate::perf::{CliPerf, handle_no_results};
 use std::fmt::Write as FmtWrite;
 
+mod filesystem_query;
 mod remote;
 mod repo;
 
@@ -54,7 +55,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Pre-scan for --plain to disable clap ANSI styling before parsing
-    let is_plain = std::env::args().any(|a| a == "--plain");
+    let is_plain = std::env::args_os().any(|a| a == "--plain");
     if is_plain {
         // NO_COLOR is a well-established convention for disabling terminal colors
         unsafe { std::env::set_var("NO_COLOR", "1") };
@@ -86,6 +87,20 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     // No subcommand and no --json flag: show help
     if cli.command.is_none() && !cli.json {
         Cli::command().print_help()?;
+        return Ok(());
+    }
+
+    // The focused query runs before any detection plan exists: no inventory,
+    // remote, or network work.
+    if let Some(Commands::Filesystem {
+        subcommand: Some(FilesystemSubcommand::Query(args)),
+        ..
+    }) = &cli.command
+    {
+        let code = filesystem_query::run(args, cli.json, cli.plain, &perf)?;
+        if code != 0 {
+            std::process::exit(code);
+        }
         return Ok(());
     }
 
@@ -1820,7 +1835,10 @@ fn print_completions(shell: Shell) {
 }
 
 fn wants_completions_help() -> bool {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let args: Vec<String> = std::env::args_os()
+        .skip(1)
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect();
     wants_completions_help_with_args(&args)
 }
 
@@ -1848,7 +1866,10 @@ fn exit_with_parse_error(err: clap::Error) -> ! {
     use clap::error::ErrorKind;
 
     let kind = err.kind();
-    let argv: Vec<String> = std::env::args().skip(1).collect();
+    let argv: Vec<String> = std::env::args_os()
+        .skip(1)
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect();
     let under_repo = argv.iter().any(|a| a == "repo");
     let is_unknown_sub = matches!(
         kind,
