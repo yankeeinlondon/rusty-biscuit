@@ -170,10 +170,13 @@ pub fn replace_with_link(path: &Path, saved_name: &str) -> PathBuf {
     std::os::unix::fs::symlink(&saved, path).unwrap();
     #[cfg(windows)]
     {
+        // `path` may be git's spelling (`C:/Users/...`), and `cmd` reads
+        // `/Users` as a switch.
+        let native = |path: &Path| path.to_string_lossy().replace('/', "\\");
         let status = Command::new("cmd")
             .args(["/C", "mklink", "/J"])
-            .arg(path)
-            .arg(&saved)
+            .arg(native(path))
+            .arg(native(&saved))
             .stdout(std::process::Stdio::null())
             .status()
             .expect("cmd runs");

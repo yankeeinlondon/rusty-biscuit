@@ -29,6 +29,16 @@ hold the rest:
   `HANDLE_FLAG_INHERIT` on the current process's stdio before setting the
   detached creation flags (`windows` crate features `Win32_Foundation` and
   `Win32_System_Console`). Unix never sees this; fds are close-on-exec.
+- **A git process costs ~47 ms on Windows, ~5 ms on macOS.** Process start
+  dominates any code that runs many small git commands, and git for Windows
+  also routes a local-path transport through MSYS `sh.exe`. Symptom: a
+  Windows-only timeout where `GIT_TRACE` shows the same metadata command
+  (`remote get-url`, `symbolic-ref`, `config --get`) run repeatedly. Do not
+  raise the budget; read the metadata in-process (`worktree`'s
+  `git_metadata`, `sniff`'s `gix` use) and keep git for transport. Measure
+  with `GIT_TRACE=<file>` on the child, which timestamps every process. Found
+  2026-10-05: `wt list`'s refresh worker started 14 git processes per fetch
+  and missed its 3 s wait on `windows-latest`.
 - **A refused loopback connection is slow.** Connecting to a closed
   `127.0.0.1` port fails in milliseconds on macOS and Linux, but native
   Windows retries the SYN and reports the refusal after about 2 s. A test

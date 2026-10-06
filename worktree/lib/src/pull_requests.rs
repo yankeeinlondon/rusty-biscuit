@@ -164,10 +164,11 @@ impl PrFailure {
 /// without one.
 ///
 /// A stored answer is bound to this exact value; pass the main checkout so
-/// every caller reads the same configuration.
+/// every caller reads the same configuration. Read in-process; `git remote
+/// get-url origin` only when `gix` cannot read the repository.
 pub fn origin_url(repo_root: &Path) -> Option<String> {
-    git_from(repo_root, repo_root, &["remote", "get-url", "origin"])
-        .ok()
+    crate::git_metadata::origin_url(repo_root)
+        .unwrap_or_else(|| git_from(repo_root, repo_root, &["remote", "get-url", "origin"]).ok())
         .filter(|url| !url.is_empty())
 }
 
