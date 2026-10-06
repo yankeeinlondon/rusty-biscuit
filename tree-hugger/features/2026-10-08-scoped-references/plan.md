@@ -6,6 +6,13 @@ created: 2026-10-05
 phase: 1
 agent: claude/sonnet
 yolo: true
+packages:
+  - tree-hugger
+source_files_during_phase_1: []
+docs_updated_during_phase_1: []
+docs_created_during_phase_1:
+  - tree-hugger/docs/references.md
+skills_files_updated_during_phase_1: []
 ---
 
 # Plan: Scope-Aware References and `hug refs`
@@ -52,15 +59,15 @@ The spec leaves these for the author. Each carries a recommended default so work
 
 One spike, run once, before the work it informs (the spec's "scope study"). No re-checks in later phases.
 
-- [ ] **Scope study (Rust and TypeScript).** Build scope trees from the effective `@local.scope` captures (`lib/queries/rust`, `lib/queries/typescript/locals.scm`, inherited queries) and compare against first-match binding on the existing fixture corpus; list targets that change, classified as corrected vs. still uncertain. Record scope and reference-query gaps (e.g. scope captures attached to import/declaration nodes, missing member-call captures). Output: a short "Scope study" section in `implementation-log.md` sizing Phase 2. Throwaway code only; not a benchmark; changed-target counts are not correctness evidence.
+- [x] **Scope study (Rust and TypeScript).** Build scope trees from the effective `@local.scope` captures (`lib/queries/rust`, `lib/queries/typescript/locals.scm`, inherited queries) and compare against first-match binding on the existing fixture corpus; list targets that change, classified as corrected vs. still uncertain. Record scope and reference-query gaps (e.g. scope captures attached to import/declaration nodes, missing member-call captures). Output: a short "Scope study" section in `implementation-log.md` sizing Phase 2. Throwaway code only; not a benchmark; changed-target counts are not correctness evidence.
 
 ### Tasks
 
-- [ ] **Confirm prerequisites.** Verify the three `depends-on` features are in the tree: candidate-name index and selective capabilities (`Capability` enum in `lib/src/file/query.rs`), qualified names, constructor kinds. Note any gap in the log.
-- [ ] **Inventory captures.** For all 16 languages, list effective scope, definition and reference captures (`lib/queries/*`, including `vendor/` and inherited). Wave 1 can fan out by language group.
-- [ ] **Scope study spike.** As above (depends on inventory for Rust/TS).
-- [ ] **Language/form support table.** Write the author-approved table (per language: block vs function scope, parameters/destructuring, loop/catch/pattern bindings, use-before-declaration, hoisting, nested-callable capture, imports/aliases, type vs value names; each row `Resolved` or `Limited` with reason). Draft in `docs/` as **planned**; rows cannot be `Resolved` for non-Rust/TS languages under default ruling 1.
-- [ ] **Record rulings.** Write accepted rulings 1–9 into `implementation-log.md`.
+- [x] **Confirm prerequisites.** Verify the three `depends-on` features are in the tree: candidate-name index and selective capabilities (`Capability` enum in `lib/src/file/query.rs`), qualified names, constructor kinds. Note any gap in the log.
+- [x] **Inventory captures.** For all 16 languages, list effective scope, definition and reference captures (`lib/queries/*`, including `vendor/` and inherited). Wave 1 can fan out by language group.
+- [x] **Scope study spike.** As above (depends on inventory for Rust/TS).
+- [x] **Language/form support table.** Write the author-approved table (per language: block vs function scope, parameters/destructuring, loop/catch/pattern bindings, use-before-declaration, hoisting, nested-callable capture, imports/aliases, type vs value names; each row `Resolved` or `Limited` with reason). Draft in `docs/` as **planned**; rows cannot be `Resolved` for non-Rust/TS languages under default ruling 1.
+- [x] **Record rulings.** Write accepted rulings 1–9 into `implementation-log.md`.
 
 #### Wave 1 (concurrent)
 

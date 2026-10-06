@@ -15,6 +15,17 @@ reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-05
 review_iterations: 0
+human_review: false
+message_to_agent: |-
+  Phase 1 is complete; read the implementation log's "Phase 1" section before starting.
+  - Baseline is schema 4.3 and EXTRACTOR_REVISION "29", not 4.0/"10" as the plan text says. Schema goes to 5.0; the revision goes to the next value at Phase 4 time.
+  - The planned language table is in tree-hugger/docs/references.md (marked planned). Rust, TypeScript AND JavaScript resolve; the other 13 languages are Limited(unsupported_language) with targets never Scoped.
+  - Ruling 2 narrowed: Rust `self.f()` stays NameOnly (dropped from resolved forms); only `Self::f()`/`Type::f()` with one in-file type and exactly one inherent `f` resolves.
+  - Ruling 4: REPORT_SCHEMA_VERSION stays 1; `hug refs` gets its own envelope shape at version 1.
+  - Ruling 6: TS/JS parameter defaults are owned by the function (not the enclosing scope); class field initializers/static blocks are owner-absent Limited(ownership_unknown).
+  - Reason codes gain `unexpanded_macro` (Rust macros).
+  - Scope-study gaps Phase 2 must fix (each will otherwise produce wrong Scoped targets): Rust impl/trait headers and associated items live inside the impl_item scope (bind `fmt::Display` qualifier to `fn fmt`) - exclude members from lexical tables and resolve headers in the enclosing scope; Rust vendored scopes lack source_file, mod_item body and trait_item; TS plain parameters are captured as a bare `@local.definition` (no kind) and must be kept as bindings; TS `import_specifier (identifier)` captures both original and alias - bind only the alias; no references.scm separates call targets, and member-call names (Rust field_identifier, TS property_identifier) are not captured at all.
+  - Docs pages must not name this feature; docs/references.md already follows that rule.
 $schema:
   status: |-
     enum(
