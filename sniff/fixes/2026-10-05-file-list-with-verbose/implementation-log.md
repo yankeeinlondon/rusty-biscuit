@@ -23,6 +23,15 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4: []
+docs_updated_during_phase_4:
+    - sniff/README.md
+    - sniff/cli/README.md
+    - sniff/docs/cli/files.md
+    - sniff/docs/sniff-library-architecture.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/sniff/cli.md
 packages:
     - sniff-cli
 ---
@@ -511,3 +520,157 @@ repository file, so no `include_str!`/`repo_root()` declaration is needed.
   schedules no WSL2-specific evidence for Phase 3.
 - Docs, skills, final lint sweep, and hand-off are Phase 4 by design
   (plan 4.1–4.5); none were updated in this phase.
+
+## Phase 4
+
+Phase 4 is the docs, lint, and hand-off phase: no source code, no tests
+added, no behavior changed. All plan checkboxes 4.1–4.5 are complete; the
+fix's terminal state is **implementation complete, ready for review**.
+
+### Session context discovered at phase start
+
+The worktree no longer carried the Phases 2–3 source changes as uncommitted
+edits — they had been committed between sessions as `e3bff2e57` (scope
+narrowing, pre-existing work), `b04f2df9c` / `1521b0504` (scope docs/skill),
+`df23b3306` (fix(sniff-cli): list captured paths in filtered verbose
+association reports), and `92229d0a4` (Phase 2/3 planning records). The
+implementation-diff scope check (4.4) therefore runs against
+`e3bff2e57^..HEAD` plus the working tree. Nothing was re-done; this phase
+verified the committed state and added the documentation sweep on top.
+
+### Task 4.1 — Docs
+
+- **`sniff/docs/cli/files.md`** (the file-association topic page) extended
+  for a repo-newcomer audience: a new "Listing the matching files" section
+  leads with what `-v` on a filtered report does (with a real invocation and
+  output sample captured from the built CLI), followed by one rule per
+  bullet (ordering, relative labels, hyperlink/plain behavior, literal-text
+  labels, presentation-only verbosity); a new "Link roots" section explains
+  package-root-vs-base selection with a Mermaid flowchart covering both
+  failure branches (stderr error, nonzero exit, nothing on stdout) and the
+  no-probe/no-canonicalize guarantee; "Incomplete scans" now states the
+  verbose list covers only the captured sample, after the notice.
+- **`sniff/cli/README.md`** — the `files` paragraph now states that `-v` on
+  a filtered report lists every matching file hyperlinked against the
+  scan's own root, that the scan/percentages/JSON are unchanged, and the
+  capped-verbose-list caveat.
+- **`sniff/docs/sniff-library-architecture.md`** — the focused-`files`
+  paragraph (it names the verbose behavior) now says verbosity does not
+  change acquisition because a filtered verbose report only renders the
+  matching paths the captured observation already holds.
+- **`sniff/README.md`** — one example line added:
+  `sniff files --association image -v` (each matching file, hyperlinked).
+- **`.claude/skills/sniff/cli.md`** (the Sniff CLI skill reference) — the
+  "File association reports" section gained the full list contract: source
+  of the list (captured `files` field, never a second walk), link-root
+  authority (`package_for_dir`, not the git root), command-layer resolution
+  and its failure semantics, the JSON/unfiltered/non-verbose exclusion, the
+  reversible-label layering, and the silent per-entry no-link fallback.
+  Verified `.opencode/skill/sniff/cli.md` is a hardlink (same inode) to the
+  `.claude` path, so the single edit covers both locations named in the
+  spec's Phase-4 message.
+- No doc links to or names the fix directory (checked by inspection of the
+  edited files).
+
+**Drift check (plan 4.1):** greps for `render_files_section`, "identical
+verbose", and verbose-behavior phrases across source and docs found **no
+stale statements**. The `render_files_section` / `render_text` /
+`resolve_files_link_root` doc comments and the `files.rs` / `file_list.rs`
+module headers were already updated by Phases 2–3 and re-read this phase;
+the only "identical verbose/non-verbose" matches are this fix's own
+spec/plan/log, an unrelated `repo_recent-commits.md` sentence about a
+different subcommand's `-v`/`-c` interaction, and a completed fix in
+another worktree. Nothing to resolve.
+
+### Task 4.2 — Lint and clippy (2026-10-06, all clean)
+
+- `just lint` in `sniff/` — clean.
+- `cargo clippy -p sniff --all-targets -- -D warnings` — clean.
+- `cargo clippy -p sniff-cli --all-targets -- -D warnings` — clean.
+
+### Task 4.3 — Cross-OS evidence
+
+Loaded the `os` skill. Phase 4 changed Markdown docs only; no source under
+test changed since Phase 3's cross-rig runs, so that evidence still
+describes the exact code under verification:
+
+- **macOS (this host): proven.** `just test` in `sniff/` — **3190 run,
+  3190 passed, 32 skipped, 0 failed** (identical counts to Phase 3 close),
+  plus the manual runs below in 4.4.
+- **Windows (build-win-native) and Linux (build-linux):** Phase 3 close ran
+  `just cross-check sniff-cli` with **windows 12/12 `cli::files_` + 6/6
+  `files_link_root`** and **linux 13/13 `cli::files_`** (see Phase 3
+  evidence; linux needed the native path per the documented kache-poisoned
+  `target/release` workaround). Platform-neutral label/URL unit tests run
+  in the L1 suite on every OS; the `#[cfg(windows)]`-gated tests (lone
+  surrogates, drive/verbatim-drive/UNC targets) run in the Windows
+  environment the CI pipeline schedules (push-to-main and the `ci:all-os`
+  label; pull requests prove Linux and macOS).
+- **WSL2:** not exercised locally; the new code paths are shared with Linux
+  (same `#[cfg(unix)]` branch) and nightly CI covers WSL2. The plan
+  schedules no WSL2-specific evidence.
+
+### Task 4.4 — Final verification sweep
+
+- **Acceptance criteria re-run.** Every AC maps to green automated tests
+  (mapping in the Phase 3 section; targeted re-run this phase: 45 lib tests
+  matching `file_list|files_link_root|truncated_breakdown|removed_file|
+  unknown_association|no_list` — 45/45 passed; 13 integration `cli::files_`
+  tests — 13/13 passed; all inside the 3190/3190 suite). AC checklist:
+  1 ✓ paths-vs-JSON parity, 2 ✓ JSON unchanged/no list bytes in
+  `--json --perf -v`, 3 ✓ `-v` position/`-vv`/`--plain`, 4 ✓ names/roots/
+  destinations/capability fallback, 5 ✓ empty+truncated, 6 ✓ counters,
+  7 ✓ label notation units, 8 ✓ fallback + root failure.
+- **Manual stream split** (built CLI, fixture workspace):
+  `--base <pkg> files --association image -v 2> /dev/null` prints the
+  complete report — table, `Files:` heading, both linked entries — on
+  stdout; `> /dev/null` exits 0 with **zero stderr bytes** (the success
+  path emits nothing to stderr). The root-failure stderr path is pinned by
+  `files_verbose_root_failure_errors_on_stderr_without_stdout` (Unix,
+  deleted cwd) and the `files_link_root` unit tests (including the
+  Windows-substitute failure 2(b)).
+- **JSON parity spot check:** filtered JSON with and without `-v` on the
+  same fixture is byte-identical (`cmp` clean).
+- **Diff scope:** `git diff --name-only e3bff2e57^..HEAD` plus working tree
+  touches only `sniff-cli` source/tests, sniff docs/README, the sniff CLI
+  skill, and this fixes directory. **No `biscuit-terminal` file, no
+  `sniff/lib` file, no JSON-serialization file** (`repo_json.rs` et al.
+  absent) is in the diff.
+
+### Task 4.5 — Hand-off
+
+- Plan and log frontmatter updated with the Phase 4 keys, `source_code`,
+  `documentation`, `completed_phase: 4`, `implemented: true`; packages
+  remain `[sniff-cli]` (docs live in the sniff area but belong to the
+  `sniff-cli` behavior they document).
+- Spec frontmatter set to `status: implemented`, `implemented: true`,
+  `human_review: false`, with a completion `message_to_agent`.
+- Not committed (no request to commit); fix directory **not** moved to
+  `_completed`; `just complete` not run. Terminal state: implementation
+  complete, ready for review.
+
+### Requirement-to-test mapping (Phase 4)
+
+Phase 4 changed documentation only; by design it adds no tests. The gates
+run for this phase are the evidence: `just test` 3190/3190, `just lint`,
+both `-D warnings` clippy gates, the 45+13 targeted AC re-runs, and the
+manual stream-split/JSON-parity/fixture runs above.
+
+### Pre-existing findings (not from this change, no action)
+
+- The 32 routine tier/env skips in `just test` (unchanged since baseline).
+- `build-linux` standing clone's `target/release` remains kache-poisoned
+  (documented in the `os` skill; workaround is a feature flag).
+- The worktree carries unrelated dirty files from other work
+  (kache/os skills, `docs/initialization.md`, `docs/kache-strategy.md`,
+  `scripts/cross-check.sh`, `tools/test-kit` CI contract test); none
+  intersect this fix.
+
+### Skipped or out-of-scope work
+
+- Author-only actions deliberately not performed: closing the review
+  cycle, moving the fix to `_completed`, `just complete`, and the optional
+  Phase-1-ruling-10 measurement sample. The Phase 2 ruling-5 notation
+  precision (C1 scalars as `\u{XXXX}` on Unix) remains flagged for the
+  author's review cycle only; it is not a blocker and needs no decision
+  before any next step (there is no next phase).

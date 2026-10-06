@@ -20,9 +20,10 @@ $schema:
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented_by: string -> the agent who implemented the plan
 area: sniff
-status: finalized-spec
+status: implemented
 created: 2026-10-05
-implemented: false
+implemented: true
+implemented_by: opencode/zai-coding-plan/glm-5.3
 packages:
     - sniff-cli
 reviewed: true
@@ -35,35 +36,16 @@ needs_rulings: false
 review_note: the clarification process served as a review
 human_review: false
 message_to_agent: |-
-    Phase 3 (command wiring, root resolution, integration tests) is
-    complete; see
+    All four phases are complete; the fix is in the
+    "implementation complete, ready for review" state. See
     sniff/fixes/2026-10-05-file-list-with-verbose/implementation-log.md
-    under "## Phase 3", including a session-recovery note: the phase began
-    from an interrupted prior pass whose implementation was verified
-    task-by-task, with two stray comment edits reverted. Essentials for
-    Phase 4 (docs, lint, hand-off): (1) The feature works end to end —
-    `sniff files --association <cat> -v` renders the list; root resolution
-    lives in `resolve_files_link_root` in sniff/cli/src/commands/mod.rs and
-    flows through `output::render_text`'s `link_root` parameter into
-    `render_files_section`; no JSON, sniff-library, or biscuit-terminal
-    code changed. (2) Phase 4 owns plan 4.1-4.5: the docs sweep
-    (sniff/cli/README.md, sniff/docs/cli/files.md with a root-selection
-    Mermaid flow for a repo-newcomer audience, sniff/docs/
-    sniff-library-architecture.md only if it names the verbose behavior,
-    .claude/skills/sniff/cli.md — note the skill moved to
-    .opencode/skill/sniff/cli.md in this worktree layout; check both), the
-    drift grep (render_files_section, "identical verbose", files doc
-    comments), final `just lint` + both clippy gates, cross-OS statement
-    per the os skill, and the final verification sweep including the
-    stdout/stderr split check and the git-diff scope check. (3) Gates at
-    Phase 3 close, all green: `just test` 3190/3190 (32 routine skips),
-    `just lint`, clippy -D warnings for sniff and sniff-cli; cross-rig
-    windows 12/12 + 6/6 and linux 13/13 cli::files_ tests (linux needed
-    the native path via `--features test-fixtures` because the standing
-    clone's target/release is kache-poisoned — documented in the os
-    skill). (4) No human-review items were raised in Phases 2 or 3; the
-    Phase 2 ruling-5 notation precision (C1 scalars as \u{XXXX} on Unix)
-    remains flagged for the author's review cycle only.
+    ("## Phase 4" and earlier phases) for the full record. Closing the
+    review cycle, moving the fix to _completed, and just complete remain
+    author-only actions. One non-blocking item is flagged for the review
+    cycle: on Unix, a C1 control code point in a path labels as \u{XXXX}
+    rather than \xNN so it cannot collide with the invalid byte of the
+    same value (Phase 2 design decision 1); override there if a different
+    spelling is wanted.
 ---
 
 # File Lists for Filtered Verbose Association Reports

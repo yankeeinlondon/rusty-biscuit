@@ -1,7 +1,7 @@
 ---
 total_phases: 4
 created: 2026-10-05
-phase: 1
+phase: 4
 agent: claude/sonnet
 yolo: true
 source_files_during_phase_1: []
@@ -24,6 +24,30 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4: []
+docs_updated_during_phase_4:
+    - sniff/README.md
+    - sniff/cli/README.md
+    - sniff/docs/cli/files.md
+    - sniff/docs/sniff-library-architecture.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/sniff/cli.md
+source_code:
+    - sniff/cli/src/output/filesystem/file_list.rs
+    - sniff/cli/src/output/filesystem/files.rs
+    - sniff/cli/src/output/filesystem/mod.rs
+    - sniff/cli/src/output/mod.rs
+    - sniff/cli/src/commands/mod.rs
+    - sniff/cli/tests/l1/cli.rs
+documentation:
+    - sniff/README.md
+    - sniff/cli/README.md
+    - sniff/docs/cli/files.md
+    - sniff/docs/sniff-library-architecture.md
+    - .claude/skills/sniff/cli.md
+completed_phase: 4
+implemented: true
 packages:
     - sniff-cli
 ---
@@ -368,7 +392,7 @@ in `tests/common` only if needed, via `SniffCliFixture`):
 
 ## Phase 4: Docs, Lint, and Hand-Off
 
-- [ ] **4.1 Docs** (parallel with 4.2)
+- [x] **4.1 Docs** (parallel with 4.2)
     - Update `sniff/cli/README.md`, `sniff/docs/cli/files.md` (the
       file-association topic page; audience is a developer new to the repo:
       lead with what the user can do, one example per rule, a small Mermaid
@@ -378,21 +402,21 @@ in `tests/common` only if needed, via `SniffCliFixture`):
     - Run the `drift` check: grep `render_files_section`, "identical verbose",
       and `files` doc comments for stale statements; fix comments in the same
       change; report any drift found and how it was resolved.
-- [ ] **4.2 Lint and clippy**
+- [x] **4.2 Lint and clippy**
     - `just lint`; `cargo clippy -p sniff --all-targets -- -D warnings`;
       `cargo clippy -p sniff-cli --all-targets -- -D warnings`.
-- [ ] **4.3 Cross-OS evidence**
+- [x] **4.3 Cross-OS evidence**
     - Load the `os` skill. Prove macOS locally. Do not claim Windows/WSL2 are
       untestable from this host without consulting the skill; label-notation
       and URL logic must be covered by the platform-neutral unit tests, and
       the Windows-gated tests run on the CI environment the pipeline schedules.
-- [ ] **4.4 Final verification sweep**
+- [x] **4.4 Final verification sweep**
     - Re-run all spec acceptance criteria against the checklist, confirm the
       stdout/stderr split manually (`> /dev/null` shows the stderr-only
       content; `2> /dev/null` still yields the complete report), and confirm
       `git diff` touches no JSON serialization, no `biscuit-terminal`, and no
       sniff library code.
-- [ ] **4.5 Hand-off**
+- [x] **4.5 Hand-off**
     - Set spec/plan status to implemented per the repo's frontmatter convention
       only; do not move to `_completed`. Commit per repo rules (author
       identity, signed, no agent attribution trailers; verify with
