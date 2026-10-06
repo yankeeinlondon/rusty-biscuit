@@ -102,6 +102,76 @@ docs_updated_during_phase_5:
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
   - .claude/skills/tree-hugger/SKILL.md
+source_files_during_phase_6:
+  - tree-hugger/lib/src/cache/symbol_cache.rs
+  - tree-hugger/lib/src/cache/mod.rs
+  - tree-hugger/lib/src/analysis/scope/mod.rs
+  - tree-hugger/lib/src/file/query.rs
+  - tree-hugger/cli/src/render.rs
+docs_updated_during_phase_6:
+  - tree-hugger/docs/references.md
+  - tree-hugger/README.md
+  - tree-hugger/lib/README.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+  - .claude/skills/tree-hugger/SKILL.md
+  - .claude/skills/tree-hugger/api-reference.md
+  - .claude/skills/tree-hugger/query-system.md
+source_code:
+  - tree-hugger/lib/src/shared/schema_v2/occurrences.rs
+  - tree-hugger/lib/src/shared/schema_v2/mod.rs
+  - tree-hugger/lib/src/shared/schema_v2/facets.rs
+  - tree-hugger/lib/src/analysis/mod.rs
+  - tree-hugger/lib/src/analysis/occurrences.rs
+  - tree-hugger/lib/src/analysis/scope/mod.rs
+  - tree-hugger/lib/src/analysis/scope/rust.rs
+  - tree-hugger/lib/src/analysis/scope/ecma.rs
+  - tree-hugger/lib/src/cache/mod.rs
+  - tree-hugger/lib/src/cache/symbol_cache.rs
+  - tree-hugger/lib/src/file/tree_file.rs
+  - tree-hugger/lib/src/file/tree_file/definitions.rs
+  - tree-hugger/lib/queries/rust/references.scm
+  - tree-hugger/lib/queries/typescript/references.scm
+  - tree-hugger/lib/queries/javascript/references.scm
+  - tree-hugger/lib/tests/l1/symbols_occurrences.rs
+  - tree-hugger/lib/tests/l1/main.rs
+  - tree-hugger/lib/tests/l1/cache_tests.rs
+  - tree-hugger/lib/src/file/query.rs
+  - tree-hugger/lib/src/analysis/coverage.rs
+  - tree-hugger/lib/src/analysis/counters.rs
+  - tree-hugger/lib/src/analysis/tests.rs
+  - tree-hugger/lib/tests/l1/symbols_reference_summaries.rs
+  - tree-hugger/lib/tests/l1/symbols_query.rs
+  - tree-hugger/lib/tests/l1/symbols_cache.rs
+  - tree-hugger/cli/tests/symbols/cache_robustness.rs
+  - tree-hugger/lib/src/cache/stored_evidence.rs
+  - tree-hugger/lib/src/shared/schema_v2/types.rs
+  - tree-hugger/lib/src/file/mod.rs
+  - tree-hugger/lib/tests/l1/tree_file.rs
+  - tree-hugger/cli/tests/symbols/cache_upgrade.rs
+  - tree-hugger/cli/tests/symbols/report.rs
+  - tree-hugger/cli/tests/symbols/reports.rs
+  - tree-hugger/cli/tests/symbols/wiring.rs
+  - tree-hugger/cli/tests/fixtures/golden/symbols.json
+  - tree-hugger/cli/tests/fixtures/golden/symbols.jsonl
+  - tree-hugger/cli/src/refs.rs
+  - tree-hugger/cli/src/main.rs
+  - tree-hugger/cli/src/render.rs
+  - tree-hugger/cli/tests/symbols/refs.rs
+  - tree-hugger/cli/tests/symbols/main.rs
+  - tree-hugger/cli/tests/symbols/terminal_scope.rs
+  - tree-hugger/cli/tests/support/terminal_report.rs
+  - tree-hugger/cli/tests/level2_declarations.rs
+documentation:
+  - tree-hugger/docs/references.md
+  - tree-hugger/docs/symbol-schema-design.md
+  - tree-hugger/docs/cache-design.md
+  - tree-hugger/docs/symbol-reports.md
+  - tree-hugger/cli/README.md
+  - tree-hugger/README.md
+  - tree-hugger/lib/README.md
+completed_phase: 6
+implemented: true
 ---
 
 # Implementation Log for 2026-10-08-scoped-references (6 phases)
@@ -969,3 +1039,121 @@ input-robustness matrix applies.
   uncommitted Phase 4 changes, so the input is wider than this phase.
 - Final run on the finished tree (after the last `refs.rs` cleanup):
   `just lint` passes; `just test` 1206 of 1206 passed.
+
+## Phase 6
+
+Phase 6 finished the documentation, the skill, the comment drift pass and
+the cross-OS review. Its only source changes are five doc comments; there is
+no behavior change.
+
+### What was done
+
+- **Docs.** `docs/references.md` gained "Upgrading from schema 4.x": what
+  5.0 changes in meaning (not layout), a before/after table for
+  `references`, `referenced_by` and `is_recursive`, and how the cache
+  recomputes old entries. Every row was checked against `hug symbols
+  --json-full` on the example before it was written. The first draft said
+  4.x reported `is_recursive: Yes` by name and that `run.references` became
+  `[]`. Both were wrong: 4.x always said `Unknown`, and the edge now points at
+  the local `let parse` record. The draft was corrected before it was kept.
+  The area `README.md` lists `refs` and has a new release-notes section,
+  "scope-aware references and `hug refs`". `lib/README.md` shows
+  `reference_evidence()` and has a schema-records bullet for the summaries
+  and `Capability::Occurrences`. Already current and left alone:
+  `cli/README.md`, `docs/symbol-reports.md`, `docs/cache-design.md` and
+  `docs/symbol-schema-design.md` (all updated in Phases 2–5), plus
+  `docs/symbol-kinds-and-visibility.md` (only its schema number is
+  involved, and it already says 5.0). `docs/symbol-schema.md` is a general
+  research note, not a contract, so it was not touched. `references.md`
+  already had the recursion Mermaid diagram, the language table and the
+  boundary section, and it has no **planned** markers. No `docs/` page names
+  this feature.
+- **Concurrent commit.** While this phase ran, another session committed the
+  `references.md` upgrade section as `6e4ad0334` ("docs(tree-hugger): add
+  schema 5.0 upgrade notes to references"). The committed text is this
+  phase's final, corrected version. That file is therefore no longer in the
+  uncommitted tree, but it is listed below as a Phase 6 doc.
+- **Skill.**
+  - `SKILL.md`: removed the duplicated `refs` table row and the duplicated
+    `hug refs` architecture bullet (left over from Phase 5); added a
+    Detailed Documentation link to `docs/references.md`.
+  - `api-reference.md`: added `reference_evidence()` and the
+    `Occurrence`/`ReferenceCoverage`/`ReferenceEvidence` types.
+  - `query-system.md`: fixed drift (see below).
+- **Drift pass** (code is correct; the comments were fixed):
+  1. `cache/symbol_cache.rs` `CacheLookup::WidenedCapabilities` claimed
+     semantics always widens without a parse. It does so only from stored
+     occurrences, and containment never does for Rust or Swift.
+  2. `cache/mod.rs` `CacheUnit::References`: "References are not yet stored
+     in FileSymbolIndex" is now false.
+  3. `analysis/scope/mod.rs` `ScopeTree::table` said "in name position
+     order". Bindings are stored in binding order, and `visible_in` picks
+     the latest `ordered` binding by position.
+  4. `file/query.rs` `SymbolQueryResult::index` did not mention
+     occurrences or coverage.
+  5. `cli/src/render.rs` module doc did not name `refs` as a user.
+  6. Skill `query-system.md` called the bind pass "name-based" and said a
+     `@reference.member` capture "never changes the bind pass". The bind pass
+     now reads occurrences, so it can.
+
+  Checked and accurate: `bind_references`, `semantic_pass`, the
+  `direct_recursion`/`may_call_itself` docs, `Capability` docs and order,
+  `SchemaVersion`, `stored_evidence`, the scope rules, `refs.rs`,
+  `RefsArgs`/`DiscoveryArgs`, and the three `references.scm` headers.
+- **Pre-existing limit found, not fixed.** `semantic_pass` sets
+  `may_panic: Yes` only when `relations.references` names `panic`/`panic!`.
+  That list holds only `Scoped` in-file targets and bound imports, and
+  `panic!` is `Unresolved`, so in practice it is never `Yes`. `main`'s
+  first-match `bind_references` also pushed only in-file targets and
+  imports, so this feature did not cause it. It is out of scope; a follow-up
+  could read the occurrences instead.
+- **OS review.** No new path or prefix code was added in this phase. Phase 5's
+  `refs` reuses `portable_relative`/`display_path`/`file_url`, which were
+  already proven on native Windows (Phase 5: 22/22 `refs::` and
+  `terminal_scope::` on `build-win-native`). Linux had not been run for this
+  feature, so this phase ran it:
+  - `just cross-check tree-hugger --os linux symbols_occurrences
+    symbols_reference_summaries stored_evidence`: 36/36 passed.
+  - `just cross-check tree-hugger-cli --os linux refs::`: 12/12 passed.
+
+  WSL was not run: there is no platform-specific code, and the nightly runs
+  WSL2. No CI environments or gates were added.
+- **Timing note** (one host, macOS dev machine, one sample each, release
+  build): `hug refs run_query 'lib/src/**' --json` over `tree-hugger/lib/src`
+  (103 files, 39,051 lines) took 0.36 s with `--no-cache`, then 0.04 s and
+  0.03 s warm. The debug build took 1.86 s cold. The author should take a
+  wider measurement (several hosts, a monorepo-sized tree) per ruling 9.
+
+### Departures and decisions
+
+- No spec departure in this phase. Spec `status` is set to `implemented`.
+  The feature directory was not moved and `just complete` was not run.
+- Feature-wide departures and rulings are recorded in the Phase 1–5
+  sections above and are not repeated here.
+
+### Requirement → test mapping
+
+This phase changed no behavior: five comments, Markdown docs and skill
+files. No test was added. The docs' worked examples were verified by running
+the real binary (`hug symbols --json-full`, `hug refs`), not by a test. No
+parser, schema or configuration reader changed, so the input-robustness
+matrix does not apply.
+
+### Gates
+
+- Scope calculator (repository root, after every edit including
+  frontmatter): see the final entry below.
+- `just lint`: passes.
+- `just test`: **1229 of 1229 passed**. That is 1206 at Phase 5 plus tests
+  another session committed in this worktree.
+- `just test-l2`: **6 of 6 passed** (tmux, WezTerm; Kitty is not installed,
+  so its entry points skip).
+- Linux cross-check: 36/36 lib and 12/12 CLI, as above.
+- Scope calculator, final (repository root, after every Phase 6 edit,
+  frontmatter included): `git status --porcelain --untracked-files=all |
+  awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py` gave
+  `"packages": ["tree-hugger", "tree-hugger-cli", "test-toolkit"]`,
+  `"change_class": "package"`, so the gates could not be skipped and were
+  run. The input includes the other session's uncommitted
+  `2026-10-06-symbol-type-relations` files; `test-toolkit` is a reverse
+  dependency, as in Phase 5.

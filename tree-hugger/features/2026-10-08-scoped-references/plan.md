@@ -3,7 +3,7 @@ kind: plan
 feature: 2026-10-08-scoped-references
 total_phases: 6
 created: 2026-10-05
-phase: 5
+phase: 6
 agent: claude/sonnet
 yolo: true
 packages:
@@ -105,6 +105,76 @@ docs_updated_during_phase_5:
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
   - .claude/skills/tree-hugger/SKILL.md
+source_files_during_phase_6:
+  - tree-hugger/lib/src/cache/symbol_cache.rs
+  - tree-hugger/lib/src/cache/mod.rs
+  - tree-hugger/lib/src/analysis/scope/mod.rs
+  - tree-hugger/lib/src/file/query.rs
+  - tree-hugger/cli/src/render.rs
+docs_updated_during_phase_6:
+  - tree-hugger/docs/references.md
+  - tree-hugger/README.md
+  - tree-hugger/lib/README.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+  - .claude/skills/tree-hugger/SKILL.md
+  - .claude/skills/tree-hugger/api-reference.md
+  - .claude/skills/tree-hugger/query-system.md
+source_code:
+  - tree-hugger/lib/src/shared/schema_v2/occurrences.rs
+  - tree-hugger/lib/src/shared/schema_v2/mod.rs
+  - tree-hugger/lib/src/shared/schema_v2/facets.rs
+  - tree-hugger/lib/src/analysis/mod.rs
+  - tree-hugger/lib/src/analysis/occurrences.rs
+  - tree-hugger/lib/src/analysis/scope/mod.rs
+  - tree-hugger/lib/src/analysis/scope/rust.rs
+  - tree-hugger/lib/src/analysis/scope/ecma.rs
+  - tree-hugger/lib/src/cache/mod.rs
+  - tree-hugger/lib/src/cache/symbol_cache.rs
+  - tree-hugger/lib/src/file/tree_file.rs
+  - tree-hugger/lib/src/file/tree_file/definitions.rs
+  - tree-hugger/lib/queries/rust/references.scm
+  - tree-hugger/lib/queries/typescript/references.scm
+  - tree-hugger/lib/queries/javascript/references.scm
+  - tree-hugger/lib/tests/l1/symbols_occurrences.rs
+  - tree-hugger/lib/tests/l1/main.rs
+  - tree-hugger/lib/tests/l1/cache_tests.rs
+  - tree-hugger/lib/src/file/query.rs
+  - tree-hugger/lib/src/analysis/coverage.rs
+  - tree-hugger/lib/src/analysis/counters.rs
+  - tree-hugger/lib/src/analysis/tests.rs
+  - tree-hugger/lib/tests/l1/symbols_reference_summaries.rs
+  - tree-hugger/lib/tests/l1/symbols_query.rs
+  - tree-hugger/lib/tests/l1/symbols_cache.rs
+  - tree-hugger/cli/tests/symbols/cache_robustness.rs
+  - tree-hugger/lib/src/cache/stored_evidence.rs
+  - tree-hugger/lib/src/shared/schema_v2/types.rs
+  - tree-hugger/lib/src/file/mod.rs
+  - tree-hugger/lib/tests/l1/tree_file.rs
+  - tree-hugger/cli/tests/symbols/cache_upgrade.rs
+  - tree-hugger/cli/tests/symbols/report.rs
+  - tree-hugger/cli/tests/symbols/reports.rs
+  - tree-hugger/cli/tests/symbols/wiring.rs
+  - tree-hugger/cli/tests/fixtures/golden/symbols.json
+  - tree-hugger/cli/tests/fixtures/golden/symbols.jsonl
+  - tree-hugger/cli/src/refs.rs
+  - tree-hugger/cli/src/main.rs
+  - tree-hugger/cli/src/render.rs
+  - tree-hugger/cli/tests/symbols/refs.rs
+  - tree-hugger/cli/tests/symbols/main.rs
+  - tree-hugger/cli/tests/symbols/terminal_scope.rs
+  - tree-hugger/cli/tests/support/terminal_report.rs
+  - tree-hugger/cli/tests/level2_declarations.rs
+documentation:
+  - tree-hugger/docs/references.md
+  - tree-hugger/docs/symbol-schema-design.md
+  - tree-hugger/docs/cache-design.md
+  - tree-hugger/docs/symbol-reports.md
+  - tree-hugger/cli/README.md
+  - tree-hugger/README.md
+  - tree-hugger/lib/README.md
+completed_phase: 6
+implemented: true
 ---
 
 # Plan: Scope-Aware References and `hug refs`
@@ -120,12 +190,12 @@ new `Capability::Occurrences` through query, coverage projection and cache
 
 Done means all of the following are observable:
 
-- [ ] A shadowed local, a same-named method on another type, and `other.method()` no longer bind to the wrong declaration; each is `Scoped`, `NameOnly` or `Unresolved` as the spec defines.
-- [ ] `semantics.is_recursive` is `Yes` only for a `Scoped` direct `Call` to own ID; `No` only with complete call coverage; otherwise `Unknown`; `None` when no analysis requested.
-- [ ] Cold, warm, capability-widened and kind-narrowed results equal uncached analysis; a real cache hit, malformed-evidence rejection and old-version invalidation are asserted; work counters prove skipped/non-duplicated work.
-- [ ] All 16 languages have an explicit supported or limited state in the language table (no language is silently empty).
-- [ ] `hug refs` works in text and `--json`, states the file-local boundary (also when empty), and never turns a cross-file same-name call into a resolved incoming reference.
-- [ ] `just test`, `just lint` and `just test-l2` pass in `tree-hugger/`; docs, READMEs and `.claude/skills/tree-hugger/` are updated; departures are in the implementation log. Agent's terminal state is "implementation complete, ready for review" (no move to `_completed`, no `just complete`).
+- [x] A shadowed local, a same-named method on another type, and `other.method()` no longer bind to the wrong declaration; each is `Scoped`, `NameOnly` or `Unresolved` as the spec defines.
+- [x] `semantics.is_recursive` is `Yes` only for a `Scoped` direct `Call` to own ID; `No` only with complete call coverage; otherwise `Unknown`; `None` when no analysis requested.
+- [x] Cold, warm, capability-widened and kind-narrowed results equal uncached analysis; a real cache hit, malformed-evidence rejection and old-version invalidation are asserted; work counters prove skipped/non-duplicated work.
+- [x] All 16 languages have an explicit supported or limited state in the language table (no language is silently empty).
+- [x] `hug refs` works in text and `--json`, states the file-local boundary (also when empty), and never turns a cross-file same-name call into a resolved incoming reference.
+- [x] `just test`, `just lint` and `just test-l2` pass in `tree-hugger/`; docs, READMEs and `.claude/skills/tree-hugger/` are updated; departures are in the implementation log. Agent's terminal state is "implementation complete, ready for review" (no move to `_completed`, no `just complete`).
 
 Dependencies (`2026-10-03-symbol-improvements`, `2026-10-03-symbol-filters-and-reports`, `2026-10-05-deferred-kind-precision`) are in the working tree; Phase 1 confirms they are landed before Phase 3 begins.
 
@@ -313,12 +383,12 @@ Goal: the command, in text and JSON.
 
 ### Tasks
 
-- [ ] **Docs.** Update area, `lib`, `cli` READMEs; `docs/symbol-schema*.md`, cache and report docs (`docs/symbol-reports.md`), `docs/symbol-kinds-and-visibility.md` if affected. Explain confidence, language limitations (table from Phase 1, remove **planned** markers for what landed), direct recursion, schema migration (4.0 → 5.0, recompute under exact-version policy) and the file-local boundary, each with a compact example; audience is a developer new to the repo; add a Mermaid diagram of the recursion decision flow. Current docs do not link to or name this dated feature.
-- [ ] **Skill.** Update `.claude/skills/tree-hugger/` (`SKILL.md`, `api-reference.md`, `query-system.md`) for occurrences, `Capability::Occurrences`, `hug refs`.
-- [ ] **Drift pass.** Per CLAUDE.md, sweep doc comments in every changed symbol; fix drift in favor of code and report what drifted.
-- [ ] **OS review.** Load the `os` skill; check new path/prefix code and tests for Windows path spelling and symlinked temp dirs; no new CI environments or gates. Local macOS run only unless the `os` skill indicates a cheap Linux/Windows host is reachable; record what was and was not run.
-- [ ] **Quick timing note (optional).** One host, one quick sample of indexed lookup on a large fixture; record in the log. Wider measurement listed for the author only (ruling 9).
-- [ ] **Implementation log.** Record departures from spec, accepted rulings, scope study outcome and limitations; set spec status to `implemented` per repo convention. Do not move the feature to `_completed` and do not run `just complete`.
+- [x] **Docs.** Update area, `lib`, `cli` READMEs; `docs/symbol-schema*.md`, cache and report docs (`docs/symbol-reports.md`), `docs/symbol-kinds-and-visibility.md` if affected. Explain confidence, language limitations (table from Phase 1, remove **planned** markers for what landed), direct recursion, schema migration (4.0 → 5.0, recompute under exact-version policy) and the file-local boundary, each with a compact example; audience is a developer new to the repo; add a Mermaid diagram of the recursion decision flow. Current docs do not link to or name this dated feature.
+- [x] **Skill.** Update `.claude/skills/tree-hugger/` (`SKILL.md`, `api-reference.md`, `query-system.md`) for occurrences, `Capability::Occurrences`, `hug refs`.
+- [x] **Drift pass.** Per CLAUDE.md, sweep doc comments in every changed symbol; fix drift in favor of code and report what drifted.
+- [x] **OS review.** Load the `os` skill; check new path/prefix code and tests for Windows path spelling and symlinked temp dirs; no new CI environments or gates. Local macOS run only unless the `os` skill indicates a cheap Linux/Windows host is reachable; record what was and was not run.
+- [x] **Quick timing note (optional).** One host, one quick sample of indexed lookup on a large fixture; record in the log. Wider measurement listed for the author only (ruling 9).
+- [x] **Implementation log.** Record departures from spec, accepted rulings, scope study outcome and limitations; set spec status to `implemented` per repo convention. Do not move the feature to `_completed` and do not run `just complete`.
 
 #### Wave 1 (concurrent)
 

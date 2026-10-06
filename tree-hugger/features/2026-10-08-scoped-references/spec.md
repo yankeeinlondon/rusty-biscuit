@@ -2,7 +2,7 @@
 kind: feature
 name: scoped-references
 date: 2026-10-08
-status: draft-spec
+status: implemented
 area: tree-hugger
 packages:
   - tree-hugger
@@ -14,15 +14,15 @@ depends-on:
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-05
-review_iterations: 0
+review_iterations: 1
 human_review: false
 message_to_agent: |-
-  Phases 1-5 are complete; read the implementation log's "Phase 5" section first.
-  - `hug refs` is built (`cli/src/refs.rs`, wired by `main::run_refs`), documented in `docs/references.md#hug-refs` and `cli/README.md` ("Refs Command"), with no **planned** marker left in `docs/references.md`. The skill (`SKILL.md`) has the command row and an architecture bullet; `api-reference.md` and `query-system.md` were not touched in Phase 5.
-  - `--exclude-files`, `--language` and `--no-cache` now live in `DiscoveryArgs` (flattened into `ScanOptions` and `RefsArgs`). The area/lib READMEs do not mention `hug refs` yet; Phase 6 owns those and the remaining docs sweep (`docs/symbol-schema*.md`, the recursion Mermaid diagram and migration notes).
-  - The shared L2 helper `terminal_report::Report::has_logical_row` now measures rows without trailing spaces (WezTerm pads a wrapped line's last piece). Kitty is not installed on this host, so its L2 entry points skip.
-  - `just cross-check ... -E 'test(/.../)'` breaks in the recipe's remote shell quoting; pass plain substring filters instead.
-  - Phase 4's note still applies: another session may be editing this worktree (2026-10-06-symbol-type-relations files); do not treat those files as this feature's work.
+  All 6 phases are complete; read the implementation log's "Phase 6" section for the close-out.
+  - Phase 6 changed only five doc comments (no behavior), README/docs pages and the tree-hugger skill.
+  - The `references.md` "Upgrading from schema 4.x" section was committed by another session as 6e4ad0334 while Phase 6 ran; its content is Phase 6's final text.
+  - A pre-existing limit (not caused by this feature) was logged: `semantics.may_panic` is effectively never `Yes`, because it reads `relations.references`, which never holds an unresolved `panic!`.
+implemented: true
+implemented_by: "claude/opus"
 $schema:
   status: |-
     enum(
