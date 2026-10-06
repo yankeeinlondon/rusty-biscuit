@@ -74,6 +74,19 @@ sample of the requested directory. `--association` preserves percentages of
 all scanned files; `-v` changes only display detail. Capped text reports must
 disclose the partial sample, even when the association filter matches nothing.
 
+A filtered verbose report lists the captured matching paths after the table
+(and any incomplete-scan notice), before language/framework details. The list
+comes from the captured `files` field — never a second walk. Hyperlinks
+resolve against the root the paths are relative to: the owning package root
+via `RepoInfo::package_for_dir` (the scan's own authority; not the git root),
+else the effective base. That root is resolved in the command layer
+(`resolve_files_link_root`) before any stdout; on failure it errors to stderr
+and exits nonzero rather than guessing. JSON, unfiltered, and non-verbose
+reports never resolve a root. Labels are reversible (controls visible,
+backslashes doubled) and are markup-escaped after label construction; entries
+whose target cannot become a faithful `file://` URL fall back to the plain
+label, silently.
+
 ## Common host commands
 
 ```text
