@@ -1,6 +1,6 @@
 ---
 created: 2026-10-06
-phase: 1
+phase: 3
 total_phases: 6
 agent: claude/sonnet
 yolo: true
@@ -8,7 +8,33 @@ source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
-packages: []
+source_files_during_phase_2:
+    - claudine/cli/src/commands/wrap/exec/timeouts.rs
+    - claudine/cli/src/commands/wrap/exec/timeouts/tests.rs
+    - claudine/lib/src/render/final_message.rs
+    - claudine/lib/src/composition/sequence/task/tests.rs
+    - claudine/lib/tests/l1/assistant_stream_width.rs
+    - claudine/lib/tests/l1/main.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+    - claudine/cli/src/commands/wrap/exec/reader_join.rs
+    - claudine/cli/src/commands/wrap/exec/reader_join/tests.rs
+    - claudine/cli/src/commands/wrap/exec/mod.rs
+    - claudine/cli/src/commands/wrap/exec/spawn/captured.rs
+    - claudine/cli/src/commands/wrap/exec/spawn/inherited.rs
+    - claudine/cli/src/commands/wrap/exec/spawn/semantic.rs
+    - claudine/cli/src/commands/wrap/exec/spawn/tests/captured.rs
+    - claudine/cli/src/commands/wrap/exec/spawn/tests/inherited.rs
+    - claudine/cli/src/commands/wrap/exec/wiring/session.rs
+docs_updated_during_phase_3:
+    - claudine/docs/topics/timeouts.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+packages:
+    - claudine
+    - claudine-cli
 ---
 
 # Plan: a slow stream reader is reported as what it was
@@ -75,16 +101,16 @@ These touch disjoint files and can start as soon as Phase 1's baseline is done.
 
 ### Wave 1 (parallel)
 
-- [ ] **Unit suffix (R6).**
+- [x] **Unit suffix (R6).**
     - in `cli/src/commands/wrap/exec/timeouts.rs`, make `format_internal_duration` always emit a unit: seconds below 60, `Nm` (and `NmSs` if remainder is nonzero) from 60 to 3599, `NhMm` from 3600
     - table test for 59, 60, 120, 3599, 3600 asserting exact strings; check callers' messages and any snapshot or doc text that quotes the old bare form
     - drift pass over the function's `///` docs
-- [ ] **Gutter inset in Markdown (R7).**
+- [x] **Gutter inset in Markdown (R7).**
     - in `lib/src/render/final_message.rs`, make `FinalMessage::render` derive the Markdown width from the supplied `Terminal` (`term.width()` honoring `fixed_width`) rather than independently detected defaults, so cached `with_options` options and default options both honor the inset; keep capability fallback and `NO_COLOR` behavior
     - check how `new_assistant_stream_inset` (`cli/src/commands/wrap/exec/mod.rs`) and `AssistantStream` pass options, so the streaming and final paths agree
     - tests: prose and a fenced code block inside an inset-2 terminal, a terminal narrower than the inset, cached options (`with_options`), and plain (non-TTY) output unchanged
     - use biscuit-terminal components; do not hand-roll wrapping
-- [ ] **Reap flake (R8).** Investigate `an_early_wait_error_still_reaps_the_whole_tree` (`lib/src/composition/sequence/task/tests.rs`).
+- [x] **Reap flake (R8).** Investigate `an_early_wait_error_still_reaps_the_whole_tree` (`lib/src/composition/sequence/task/tests.rs`).
     - reproduce: run it under load (`just test` for lib alongside a CPU hog, or nextest with high `--test-threads`), capture the 32 s LEAK-FAIL path
     - decide whether the leak is real (production reap code in the task shell) or the fixture's timing (`BackgroundedDescendant`, `REAP_DEADLINE`, the `sleep 1` marker in the body)
     - fix at the cause; if the fixture is at fault prefer a descendant-ready handshake. Do not weaken `assert_reaped` or the marker assertion, and add no retries
@@ -98,19 +124,19 @@ Depends on Phase 1 rulings F; independent of Phase 2.
 
 ### Wave 2 (sequential; shared helpers first)
 
-- [ ] **Shared outcome reporting.** Add to `reader_join.rs` a reporter that turns a `JoinOutcome` into (a) an error kind (`parse_failure` for panics with the payload string, or an explicit non-string-payload message; `stream_reader_timeout` for timeouts with the observed state) and (b) a stderr diagnostic written without tracing. Confirm `panic_message` covers non-string payloads and say so in its message.
-- [ ] **Retire fallback-only joins.** Remove `join_with_timeout_or`/`join_with_timeout` from `exec/mod.rs`; migrate their callers.
+- [x] **Shared outcome reporting.** Add to `reader_join.rs` a reporter that turns a `JoinOutcome` into (a) an error kind (`parse_failure` for panics with the payload string, or an explicit non-string-payload message; `stream_reader_timeout` for timeouts with the observed state) and (b) a stderr diagnostic written without tracing. Confirm `panic_message` covers non-string payloads and say so in its message.
+- [x] **Retire fallback-only joins.** Remove `join_with_timeout_or`/`join_with_timeout` from `exec/mod.rs`; migrate their callers.
 
 ### Wave 3 (parallel after Wave 2)
 
-- [ ] **Captured path** (`spawn/captured.rs`).
+- [x] **Captured path** (`spawn/captured.rs`).
     - track both readers with `ReaderProgress` and join them with `join_reader` under one `ReaderBudget` and one `since` clock started after process-tree teardown
     - keep bytes already collected: a timed-out reader's partial buffer must be readable (shared buffer rather than the thread's return value) and the result flagged as incomplete capture
-- [ ] **Inherited path** (`spawn/inherited.rs`).
+- [x] **Inherited path** (`spawn/inherited.rs`).
     - same tracked joins and shared clock; a forwarding stall or failure is a warning plus session-record field and never a provider failure (Ruling F)
-- [ ] **Semantic path** (`spawn/semantic.rs`).
+- [x] **Semantic path** (`spawn/semantic.rs`).
     - use the shared reporter for the stderr reader and the `settle_parser` warning so all three paths format identically
-- [ ] **Boundary tests** with injected short `ReaderBudget` and synchronization signals (no real 120 s waits), in `reader_join/tests.rs` and `spawn/tests/{captured,inherited}.rs`:
+- [x] **Boundary tests** with injected short `ReaderBudget` and synchronization signals (no real 120 s waits), in `reader_join/tests.rs` and `spawn/tests/{captured,inherited}.rs`:
     - real panic with a string payload and a non-string payload vs each timeout state (`PipeOpen`, `Processing`)
     - held-open pipe: short cap applies only after a continuous 250 ms read wait and at or after 5 s; a reader between buffered lines does not count
     - shared stdout/stderr deadline: the two joins together wait no longer than one limit; a state change does not reset it

@@ -32,38 +32,26 @@ packages:
     - claudine-cli
 human_review: false
 message_to_agent: |-
-    Phase 1 is complete (rulings, baseline, spike). Key context for the next phases:
+    Phase 3 is complete (reader outcomes on the captured, inherited, and
+    semantic spawn paths). Context for Phase 4 and 5:
 
-    1. Rulings A-G were adopted as the plan's documented defaults because the
-       session was non-interactive and the author could not be consulted. They
-       are recorded verbatim in the plan's "Implementation log" section. Phase
-       4's design depends on ruling A; if the author rejects it at review,
-       Phase 4 must be re-planned.
-    2. Baseline from the worktree's claudine/: `just lint` exit 0, `just test`
-       8373 passed / 9 skipped / 0 failed. No known-red tests.
-    3. HOST HAZARD: this host exports CDPATH containing the main checkout. A
-       relative `cd claudine` from the worktree root jumps to the MAIN
-       checkout, not the worktree. Always `cd` with an absolute path or a
-       `./`-prefixed path, and verify with `pwd`. (Already recorded in the os
-       skill's macos.md.)
-    4. Spike (R5) confirmed the incident shape live: reader blocked in
-       write(2) inside StdoutWriter::write from the OutputTextCallback inside
-       feed_line, holding the parser mid-line; main thread blocked after the
-       120 s join timeout on __psynch_mutexwait acquiring the StreamOutput
-       lock in emit_stderr_line — the wrapper hangs forever (R4 gap confirmed,
-       not just theoretical).
-    5. Spike found a confirmed Claudine-side contributor, and a fix task was
-       appended to Phase 4's "Spike follow-up": per-block Markdown rendering
-       rebuilds Terminal::default() (darkmatter terminal_options_from_terminal_options),
-       and biscuit_terminal::discovery::fonts::font_name is UNCACHED — its
-       fallback_font_name_scan -> query_iterm2_font_name spawns a `defaults
-       read com.googlecode.iterm2` subprocess per Markdown block on the reader
-       thread. 889/2217 reader samples were in this path. Cache/hoist the
-       detection.
-    6. Spike artifacts (sample outputs, fake agent, pane transcripts) are under
-       /tmp/claudine-r5-spike/ if a later phase wants the raw evidence.
-    7. Phase 1 changed no source files, docs, or skills; only the fix's
-       plan.md, implementation-log.md, and spec.md frontmatter.
+    1. Shared reporter lives in cli/.../exec/reader_join.rs: ReaderStream,
+       ReaderFailure, reader_failure, reader_warning_line,
+       eprint_reader_warning. settle_parser uses it. join_with_timeout(_or),
+       join_within, and ReaderStall::Unknown are gone.
+    2. The session-record field for incomplete output on the captured and
+       inherited paths is NOT written. ProcessResult.reader_warnings and
+       CapturedChildOutput.incomplete are populated but carry
+       #[allow(dead_code)]. Phase 4's output-loss record (Rulings A/B) should
+       own plumbing them into session_end (attempt tuple in
+       harness_orch/attempt.rs, policy.rs); remove the allows when it does.
+    3. The stderr-reader panic wording changed to the shared "Stream stderr
+       reader thread panicked: ..." form. docs/topics/timeouts.md has a new
+       captured/inherited paragraph; Phase 6 should still add the diagram.
+    4. The lint guard error_guards rejects error.to_string() on typed
+       errors; carry io::Error and format at the edge.
+    5. Test placement trap from Phase 2 still applies (300-line inline-test
+       budget; autotests=false).
 ---
 
 # A successful agent run is reported as a stream parser panic
