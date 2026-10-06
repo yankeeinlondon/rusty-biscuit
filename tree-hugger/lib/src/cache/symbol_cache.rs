@@ -356,6 +356,7 @@ impl SymbolCache {
                     &missing,
                     coverage.capability_set(),
                     coverage.kind_set(),
+                    index.language,
                 ) {
                     add_record_passes(&mut index, coverage.capability_set(), &missing);
                     let lookup = CacheLookup::WidenedCapabilities { parsed: false };

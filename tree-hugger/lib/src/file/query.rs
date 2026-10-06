@@ -34,9 +34,13 @@ pub enum Capability {
     /// Declaration records with identity, spans, container name and the
     /// cheap metadata (keyword, signature text, declaration text, signature,
     /// type metadata, generic parameters, written modifiers, attributes, raw
-    /// doc comment). The file's import and export records come with it.
+    /// doc comment), plus `relations.extends`/`relations.implements` with
+    /// same-file target IDs, resolved against every declaration of the file
+    /// whether or not its kind is selected. The file's import and export
+    /// records come with it.
     Declarations,
-    /// `relations.parent`, `relations.container` and `relations.members`.
+    /// `relations.parent`, `relations.container` and `relations.members`,
+    /// including Rust impl members linked to their impl's resolved self type.
     Containment,
     /// The bind pass: containment plus reference, dependency and
     /// referenced-by edges and resolved export targets.

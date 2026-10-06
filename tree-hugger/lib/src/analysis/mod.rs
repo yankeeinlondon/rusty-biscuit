@@ -98,6 +98,7 @@ pub(crate) fn run_query(
     let facts = RecordFacts {
         flags: query.requires(Capability::Flags),
         metrics: query.requires(Capability::Metrics),
+        containment: plan.containment,
     };
     let symbols = tree_file.records_from(definitions, &selection, facts)?;
 
@@ -207,22 +208,44 @@ impl NameIndex {
 
 /// Containment: each record's parent and container, and each container's
 /// members.
+///
+/// A record that already has a container (a Rust impl member, linked by
+/// `TreeFile::records_from` from its impl's resolved self type) keeps it
+/// and its parent, and joins its parent's members in record order.
 fn link_containers(symbols: &mut [SymbolRecord], names: &NameIndex) {
-    let mut parent_links: Vec<Option<SymbolRef>> = vec![None; symbols.len()];
-    let mut members_by_parent: HashMap<SymbolId, Vec<SymbolRef>> = HashMap::new();
-
+    let mut parents: Vec<Option<usize>> = vec![None; symbols.len()];
     for (child_idx, parent_idx) in resolve_containers(symbols, names) {
-        let symbol = &symbols[child_idx];
-        parent_links[child_idx] = Some(symbol_ref(&symbols[parent_idx]));
-        members_by_parent
-            .entry(symbols[parent_idx].id.clone())
-            .or_default()
-            .push(symbol_ref(symbol));
+        parents[child_idx] = Some(parent_idx);
+    }
+    if symbols.iter().any(|symbol| symbol.relations.container.is_some()) {
+        let by_id: HashMap<&SymbolId, usize> =
+            symbols.iter().enumerate().map(|(idx, symbol)| (&symbol.id, idx)).collect();
+        for (idx, symbol) in symbols.iter().enumerate() {
+            if let Some(parent) = &symbol.relations.parent
+                && let Some(id) = &parent.id
+            {
+                parents[idx] = by_id.get(id).copied();
+            }
+        }
     }
 
+    let mut members_by_parent: HashMap<SymbolId, Vec<SymbolRef>> = HashMap::new();
+    for (child_idx, parent_idx) in parents.iter().enumerate() {
+        if let Some(parent_idx) = parent_idx {
+            members_by_parent
+                .entry(symbols[*parent_idx].id.clone())
+                .or_default()
+                .push(symbol_ref(&symbols[child_idx]));
+        }
+    }
+    let parent_links: Vec<Option<SymbolRef>> =
+        parents.iter().map(|parent| parent.map(|idx| symbol_ref(&symbols[idx]))).collect();
+
     for (symbol, parent) in symbols.iter_mut().zip(parent_links) {
-        symbol.relations.container = parent.clone();
-        symbol.relations.parent = parent;
+        if symbol.relations.container.is_none() {
+            symbol.relations.container = parent.clone();
+            symbol.relations.parent = parent;
+        }
         symbol.relations.members = members_by_parent.remove(&symbol.id).unwrap_or_default();
     }
 }
@@ -234,6 +257,7 @@ fn resolve_containers(symbols: &[SymbolRecord], names: &NameIndex) -> Vec<(usize
     let children: Vec<ContainerRequest<'_>> = symbols
         .iter()
         .enumerate()
+        .filter(|(_, symbol)| symbol.relations.container.is_none())
         .filter_map(|(child_idx, symbol)| {
             let container_name = symbol.identity.container_name.as_deref()?;
             // A record may itself carry a dotted name (C# `namespace A.B`).
@@ -330,8 +354,9 @@ fn bind_references(index: &mut FileSymbolIndex, names: &NameIndex, references: &
     }
 
     let mut exported_ids = HashSet::new();
+    let export_targets = (!index.exports.is_empty()).then(|| ExportTargets::new(&index.symbols));
     for export in &mut index.exports {
-        if let Some(idx) = find_export_target(&index.symbols, names, export) {
+        if let Some(idx) = export_targets.as_ref().and_then(|targets| targets.find(export)) {
             let symbol = &index.symbols[idx];
             export.symbol.id = Some(symbol.id.clone());
             export.symbol.qualified_name = Some(symbol.identity.qualified_name.clone());
@@ -631,13 +656,17 @@ fn smallest_enclosing(
     enclosing
 }
 
+/// A record's name, kind and one spelling of its owner identity (its in-file
+/// qualified name, or a whole-segment tail of it).
+type OwnerKey<'a> = (&'a str, SymbolKindV2, &'a str);
+
 /// A file's records indexed by the identity a member declared outside its
 /// type names its owner by, built once per file on the first such member.
 struct OwnerIndex<'a> {
     symbols: &'a [SymbolRecord],
     /// Name, kind and in-file qualified name → `(start byte, index)`, in
     /// that order.
-    by_qualified: HashMap<(&'a str, SymbolKindV2, &'a str), Vec<(u32, usize)>>,
+    by_qualified: HashMap<OwnerKey<'a>, Vec<(u32, usize)>>,
     /// Built on the first member no owner qualifies.
     tails: OnceCell<OwnerTails<'a>>,
 }
@@ -647,15 +676,16 @@ struct OwnerTails<'a> {
     by_kind: HashMap<(&'a str, SymbolKindV2), Vec<usize>>,
     /// Name, kind and every whole-segment tail of the qualified name
     /// ([`segment_suffixes`]) → record indexes, in record order.
-    by_suffix: HashMap<(&'a str, SymbolKindV2, &'a str), Vec<usize>>,
+    by_suffix: HashMap<OwnerKey<'a>, Vec<usize>>,
 }
 
 impl<'a> OwnerIndex<'a> {
     fn new(symbols: &'a [SymbolRecord]) -> Self {
-        let mut by_qualified: HashMap<_, Vec<(u32, usize)>> = HashMap::new();
+        let mut by_qualified: HashMap<OwnerKey<'a>, Vec<(u32, usize)>> = HashMap::new();
         for (idx, symbol) in symbols.iter().enumerate() {
+            let identity = &symbol.identity;
             by_qualified
-                .entry((symbol.identity.name.as_str(), symbol.kind, symbol.identity.qualified_name.as_str()))
+                .entry((identity.name.as_str(), symbol.kind, identity.qualified_name.as_str()))
                 .or_default()
                 .push((symbol.source.declaration_span.start_byte, idx));
         }
@@ -836,16 +866,35 @@ fn ends_with_segments(name: &str, tail: &str) -> bool {
         })
 }
 
-fn find_export_target(
-    symbols: &[SymbolRecord],
-    names: &NameIndex,
-    export: &ExportRecord,
-) -> Option<usize> {
-    names.named(&export.name).iter().copied().find(|&idx| {
-        symbols[idx].source.name_span.as_ref().is_some_and(|span| {
-            span.start_byte == export.span.start_byte && span.end_byte == export.span.end_byte
-        })
-    })
+/// Records by name and name span, built once per file with exports, so an
+/// export finds its target without scanning every record of its name.
+struct ExportTargets<'a> {
+    /// The first record, in record order, with this name and name span.
+    by_name_span: HashMap<(&'a str, u32, u32), usize>,
+}
+
+impl<'a> ExportTargets<'a> {
+    fn new(symbols: &'a [SymbolRecord]) -> Self {
+        let mut by_name_span = HashMap::new();
+        for (idx, symbol) in symbols.iter().enumerate() {
+            if let Some(span) = &symbol.source.name_span {
+                by_name_span
+                    .entry((symbol.identity.name.as_str(), span.start_byte, span.end_byte))
+                    .or_insert(idx);
+            }
+        }
+        count_shared_context_steps(symbols.len());
+        Self { by_name_span }
+    }
+
+    /// The record an export names: the first one with the export's name and
+    /// span.
+    fn find(&self, export: &ExportRecord) -> Option<usize> {
+        count_shared_context_steps(1);
+        self.by_name_span
+            .get(&(export.name.as_str(), export.span.start_byte, export.span.end_byte))
+            .copied()
+    }
 }
 
 fn parse_docs_facet(mut docs: DocsFacet) -> DocsFacet {

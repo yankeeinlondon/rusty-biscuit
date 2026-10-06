@@ -467,8 +467,10 @@ pub(crate) enum ContainerLookup<'tree> {
         fallback: SymbolKind,
     },
     /// A Rust `impl` member or a Go receiver method: the implemented type,
-    /// found by name among the file's type declarations.
-    SameFileType,
+    /// found by name among the file's type declarations. `impl_item` is
+    /// the Rust impl the declaration sits in, whose self type decides its
+    /// container under Containment.
+    SameFileType { impl_item: Option<Node<'tree>> },
     /// A Lua `M.f` / `M:m` / `M.x`: the table, found by name among the file's
     /// item-scoped declarations.
     SameFileTable,
@@ -506,7 +508,7 @@ pub(crate) fn find_symbol_container<'tree>(
     if language == ProgrammingLanguage::Go && declaration.kind() == "method_declaration" {
         return go_receiver_type_name(declaration, source).map(|name| ContainerRef {
             name,
-            lookup: ContainerLookup::SameFileType,
+            lookup: ContainerLookup::SameFileType { impl_item: None },
         });
     }
 
@@ -522,7 +524,7 @@ pub(crate) fn find_symbol_container<'tree>(
         if language == ProgrammingLanguage::Rust && parent.kind() == "impl_item" {
             return impl_self_type_name(parent, source).map(|name| ContainerRef {
                 name,
-                lookup: ContainerLookup::SameFileType,
+                lookup: ContainerLookup::SameFileType { impl_item: Some(parent) },
             });
         }
 

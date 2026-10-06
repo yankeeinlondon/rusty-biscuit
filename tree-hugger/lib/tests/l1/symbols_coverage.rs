@@ -18,6 +18,7 @@ use crate::symbols_containment::containment_matrix_languages;
 use crate::symbols_flags::flags_matrix_languages;
 use crate::symbols_generics::generics_matrix_languages;
 use crate::symbols_modifiers::modifiers_matrix_languages;
+use crate::symbols_relations::relations_matrix_languages;
 use crate::symbols_kind_coverage::kind_coverage_matrix_languages;
 use crate::symbols_metrics::{body_lines_matrix_languages, metrics_matrix_languages};
 use crate::symbols_qualified_names::qualified_name_matrix_languages;
@@ -150,7 +151,7 @@ fn every_language_has_matrix_rows() {
 /// closed, and a repeated one would let a later phase fill the wrong row.
 #[test]
 fn every_language_has_one_row_in_each_report_matrix() {
-    let matrices: [(&str, Vec<ProgrammingLanguage>); 11] = [
+    let matrices: [(&str, Vec<ProgrammingLanguage>); 12] = [
         ("SCOPE_MATRIX", scope_matrix_languages()),
         ("QUALIFIED_NAME_MATRIX", qualified_name_matrix_languages()),
         ("CONTAINMENT_MATRIX", containment_matrix_languages()),
@@ -162,6 +163,7 @@ fn every_language_has_one_row_in_each_report_matrix() {
         ("SELECTION_FILTER_MATRIX", selection_filter_matrix_languages()),
         ("GENERICS_MATRIX", generics_matrix_languages()),
         ("MODIFIERS_MATRIX", modifiers_matrix_languages()),
+        ("RELATIONS_MATRIX", relations_matrix_languages()),
     ];
     for (matrix, rows) in &matrices {
         for language in ProgrammingLanguage::all() {

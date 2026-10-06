@@ -71,6 +71,9 @@ pub(crate) struct RecordFacts {
     pub(crate) flags: bool,
     /// `Capability::Metrics`.
     pub(crate) metrics: bool,
+    /// `Capability::Containment`: Rust impl members arrive linked to their
+    /// impl's self type, which only the syntax tree can resolve.
+    pub(crate) containment: bool,
 }
 
 /// A symbol with the nodes it was extracted from.
@@ -85,6 +88,8 @@ pub(crate) struct ExtractedSymbol<'tree> {
     pub(crate) declaration: Node<'tree>,
     /// The captured name node.
     pub(crate) name: Node<'tree>,
+    /// The Rust `impl` whose self type names this symbol's container.
+    pub(crate) container_impl: Option<Node<'tree>>,
 }
 
 /// One definition capture, before any metadata is read from it.
@@ -291,6 +296,10 @@ impl TreeFile {
             .map(|(entry, container_kind)| {
                 let mut extracted = entry.extracted;
                 extracted.symbol.container_kind = container_kind;
+                extracted.container_impl = match entry.container.map(|container| container.lookup) {
+                    Some(ContainerLookup::SameFileType { impl_item }) => impl_item,
+                    _ => None,
+                };
                 extracted
             })
             .collect())
@@ -351,6 +360,8 @@ impl TreeFile {
                 anchor: winner.anchor(),
                 declaration: winner.declaration,
                 name: winner.name,
+                // Read from `container` once every symbol is known.
+                container_impl: None,
             },
             container,
         }
@@ -682,7 +693,7 @@ fn resolve_container_kind<'a>(
             .tables
             .get_or_init(|| KindAgreement::of(symbols, |symbol| symbol.scope == SymbolScope::Item))
             .agreed(&container.name, qualified_name),
-        ContainerLookup::SameFileType => owner_kinds
+        ContainerLookup::SameFileType { .. } => owner_kinds
             .types
             .get_or_init(|| KindAgreement::of(symbols, |symbol| symbol.kind.is_type()))
             .agreed(&container.name, qualified_name),

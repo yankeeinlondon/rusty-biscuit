@@ -640,3 +640,140 @@ fn a_wide_result_narrows_to_exactly_the_uncached_narrow_query() {
     }
     assert!(compared > 100, "too few records compared ({compared})");
 }
+
+/// The declaration facts of one record that the query and capabilities can
+/// change: generic parameters, constraints, modifiers, attributes,
+/// `extends`/`implements`, containment links and the `metrics` facet.
+fn declaration_facts(record: &SymbolRecord) -> Value {
+    serde_json::json!({
+        "generic_params": record.type_info.generic_params,
+        "constraints": record.type_info.constraints,
+        "modifiers": record.modifiers,
+        "attributes": record.attributes,
+        "extends": record.relations.extends,
+        "implements": record.relations.implements,
+        "parent": record.relations.parent,
+        "container": record.relations.container,
+        "members": record.relations.members,
+        "metrics": record.metrics,
+    })
+}
+
+/// [`declaration_facts`] of `record` as the complete index reports it, with
+/// what `query` does not compute removed.
+fn expected_facts(complete: &SymbolRecord, query: &SymbolQuery) -> Value {
+    let mut facts = declaration_facts(complete);
+    if !query.requires(Capability::Containment) {
+        facts["parent"] = Value::Null;
+        facts["container"] = Value::Null;
+        facts["members"] = serde_json::json!([]);
+    }
+    if !query.requires(Capability::Metrics) {
+        facts["metrics"] = Value::Null;
+    }
+    facts
+}
+
+/// Over every source of the generics, modifiers, body-lines and relations
+/// matrices (and the Rust impls), a narrow query reports, for each record it
+/// selects, the same generic parameters, modifiers, attributes, relations
+/// targets (IDs included), Rust impl container links and `metrics` as the
+/// complete index, under each capability set; facts a capability set does
+/// not compute are absent. The selected records are exactly the complete
+/// index's records of the selected kinds.
+#[test]
+fn declaration_facts_of_narrow_queries_equal_the_complete_index() {
+    let kind_sets: [(&str, Option<&[SymbolKindV2]>); 4] = [
+        ("every kind", None),
+        ("functions", Some(&FUNCTION_KINDS)),
+        ("types", Some(&TYPE_KINDS)),
+        ("methods only", Some(&[SymbolKindV2::Method])),
+    ];
+    let capability_sets: [&[Capability]; 6] = [
+        &[Capability::Declarations],
+        &[Capability::Containment],
+        &[Capability::Metrics],
+        &[Capability::Flags],
+        &[Capability::Containment, Capability::Metrics],
+        &Capability::ALL,
+    ];
+    let dir = TempDir::new().expect("temp");
+    let mut compared = 0usize;
+    let mut nonempty = [0usize; 6];
+
+    for (label, path) in crate::symbols_relations::write_declaration_fact_sources(dir.path()) {
+        let source = TreeFile::new(&path).expect("parse");
+        assert!(source.syntax_diagnostics().is_empty(), "{label}: {:?}", source.syntax_diagnostics());
+        let complete = source.query(&SymbolQuery::complete_index()).expect("complete").index;
+        for record in &complete.symbols {
+            nonempty[0] += usize::from(!record.type_info.generic_params.is_empty());
+            nonempty[1] += usize::from(!record.modifiers.is_empty());
+            nonempty[2] += usize::from(!record.attributes.is_empty());
+            nonempty[3] += usize::from(!record.relations.extends.is_empty() || !record.relations.implements.is_empty());
+            nonempty[4] += usize::from(record.relations.container.as_ref().is_some_and(|c| c.id.is_none()));
+            nonempty[5] += usize::from(record.metrics.as_ref().is_some_and(|m| m.lines.is_some()));
+        }
+        for (set_name, kinds) in kind_sets {
+            for capabilities in capability_sets {
+                let mut query = SymbolQuery::new().capabilities(capabilities.iter().copied());
+                if let Some(kinds) = kinds {
+                    query = query.kinds(kinds.iter().copied());
+                }
+                let cell = format!("{label}: {set_name} with {capabilities:?}");
+                let narrow = source.query(&query).expect("narrow query").index;
+                let expected: Vec<&SymbolRecord> = complete
+                    .symbols
+                    .iter()
+                    .filter(|record| kinds.is_none_or(|kinds| kinds.contains(&record.kind)))
+                    .collect();
+                assert_eq!(
+                    narrow.symbols.iter().map(|record| &record.id).collect::<Vec<_>>(),
+                    expected.iter().map(|record| &record.id).collect::<Vec<_>>(),
+                    "{cell}: selected records"
+                );
+                for (record, complete_record) in narrow.symbols.iter().zip(expected) {
+                    assert_eq!(
+                        declaration_facts(record),
+                        expected_facts(complete_record, &query),
+                        "{cell}: `{}`",
+                        record.identity.qualified_name
+                    );
+                    compared += 1;
+                }
+            }
+        }
+    }
+    assert!(compared > 1000, "too few records compared ({compared})");
+    for (fact, count) in
+        ["generic parameters", "modifiers", "attributes", "relations", "textual impl containers", "body lines"]
+            .iter()
+            .zip(nonempty)
+    {
+        assert!(count > 0, "no source exercised {fact}");
+    }
+}
+
+/// A declarations-only query over the same sources runs the parse pass
+/// alone: one parse, one definitions query, one relation link (one
+/// declaration index and, in Rust, one impl walk) per file, and no
+/// diagnostics. The complete index links relations once too.
+#[test]
+fn declaration_facts_need_one_parse_one_capture_and_one_relation_link() {
+    let dir = TempDir::new().expect("temp");
+    for (label, path) in crate::symbols_relations::write_declaration_fact_sources(dir.path()) {
+        for query in [SymbolQuery::new(), SymbolQuery::new().kinds([SymbolKindV2::Method]), SymbolQuery::complete_index()] {
+            let cell = format!("{label}: {query:?}");
+            let (result, work) =
+                counted(|| SourceFile::read(&path).expect("read").query(&query).expect("query"));
+            assert_eq!(work.parser_constructions, 1, "{cell}: parses");
+            assert_eq!(work.definition_captures, 1, "{cell}: definitions queries");
+            assert_eq!(work.relation_links, 1, "{cell}: relation links");
+            if query.requires(Capability::Diagnostics) {
+                assert_eq!(work.diagnostics_runs, 1, "{cell}: diagnostics runs");
+            } else {
+                assert_eq!(work.diagnostics_runs, 0, "{cell}: diagnostics runs");
+                assert_eq!(result.index.completed_passes, [AnalysisPass::Parse], "{cell}: passes");
+            }
+        }
+    }
+}

@@ -3,14 +3,19 @@
 //! need only its records.
 //!
 //! Both rely on how each pass changes a record, as [`run_query`] runs them:
-//! containment sets `relations.parent`/`container`/`members`; binding sets
+//! containment sets `relations.parent`/`container`/`members` (a Rust impl
+//! member's from its impl, while records are built); binding sets
 //! `relations.references`/`dependencies`/`referenced_by`, export targets and
 //! `is_exported` (to the value the declaration already had, since both come
 //! from the same export spans); the semantic pass sets `semantics` on
 //! functions and methods; the docs pass sets `docs.parsed`. Flags and
 //! metrics are read from the syntax tree while records are built, so adding
 //! either needs a parse; without them a record's `is_test` and
-//! `is_deprecated` are `false` and it has no `metrics` facet. The file-wide
+//! `is_deprecated` are `false` and it has no `metrics` facet. Generic
+//! parameters, modifiers, attributes and `extends`/`implements` come with
+//! the declarations and do not depend on the selected kinds (targets resolve
+//! against every declaration of the file), so projection keeps them as they
+//! are. The file-wide
 //! test rules are not part of any stored result: `SymbolQueryResult::finish`
 //! applies them after projection. Each pass also
 //! stamps `provenance.parse_pass`, which [`stamp_parse_pass`] recomputes.
@@ -23,23 +28,26 @@ use std::collections::BTreeSet;
 
 use super::{NameIndex, PassPlan, docs_pass, link_containers, semantic_pass};
 use crate::file::query::{Capability, SymbolQuery, SymbolQueryResult};
-use crate::shared::{AnalysisPass, FileSymbolIndex, SemanticFacet, SymbolKindV2};
+use crate::shared::{AnalysisPass, FileSymbolIndex, ProgrammingLanguage, SemanticFacet, SymbolKindV2};
 
 /// Whether `missing` can be added to a result covering `kinds` (`None` =
 /// every kind) and `completed` from its records alone, without parsing.
 ///
 /// Containment needs every record as a candidate owner, so it needs a result
-/// of every kind; semantics needs the references binding produced; flags and
-/// metrics need the syntax tree.
+/// of every kind, and in Rust the syntax tree: an impl member's container is
+/// its impl's self type as written and resolved, which no record retains;
+/// semantics needs the references binding produced; flags and metrics need
+/// the syntax tree.
 pub(crate) fn record_passes_suffice(
     missing: &BTreeSet<Capability>,
     completed: &BTreeSet<Capability>,
     kinds: Option<&BTreeSet<SymbolKindV2>>,
+    language: ProgrammingLanguage,
 ) -> bool {
     missing.iter().all(|capability| match capability {
         Capability::StructuredDocs => true,
         Capability::Semantics => completed.contains(&Capability::References),
-        Capability::Containment => kinds.is_none(),
+        Capability::Containment => kinds.is_none() && language != ProgrammingLanguage::Rust,
         Capability::Declarations
         | Capability::References
         | Capability::Diagnostics

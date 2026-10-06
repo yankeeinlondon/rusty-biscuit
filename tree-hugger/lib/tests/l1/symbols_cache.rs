@@ -299,6 +299,15 @@ fn widening_capabilities_runs_only_the_missing_passes() {
             parsed: false,
             diagnostics_runs: 0,
         },
+        // A Rust impl member's container is its impl's resolved self type,
+        // which no stored record retains.
+        WideningRow {
+            language: ProgrammingLanguage::Rust,
+            first: SymbolQuery::new(),
+            second: SymbolQuery::new().capabilities([Capability::Containment]),
+            parsed: true,
+            diagnostics_runs: 0,
+        },
         // Containment over a narrow entry needs the owners it does not hold.
         WideningRow {
             language: ProgrammingLanguage::Java,

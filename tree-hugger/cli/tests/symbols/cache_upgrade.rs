@@ -1174,6 +1174,43 @@ fn entry_from_extractor_revision_twenty_one_is_not_served_after_the_repairs() {
     });
 }
 
+const UPGRADE_BASES_PY: &str =
+    "class UpgradeBase:\n    pass\n\nclass UpgradeChild(UpgradeBase, other.Mixin):\n    pass\n";
+
+/// `UpgradeChild`'s `relations.extends` as `[name, has id]` pairs, in a
+/// `hug --json-full` report.
+fn upgrade_extends(output: &Value) -> Value {
+    let record = go_record(output, "UpgradeChild");
+    let extends = record["relations"]["extends"].as_array().cloned().unwrap_or_default();
+    Value::from(
+        extends
+            .iter()
+            .map(|target| serde_json::json!([target["name"], target.get("id").is_some()]))
+            .collect::<Vec<_>>(),
+    )
+}
+
+/// Revision 22 read no declared bases; revision 23 records each written
+/// base, with a same-file ID only where the name resolves.
+#[test]
+fn entry_from_extractor_revision_twenty_two_is_not_served_after_the_relations() {
+    assert_stale_revision_is_not_served(&StaleRevision {
+        revision: "22",
+        key: OldKey::Computed,
+        file: "bases.py",
+        language: "python",
+        source: UPGRADE_BASES_PY.to_string(),
+        sentinel: "UpgradeBase",
+        probe: upgrade_extends,
+        repaired: serde_json::json!([["UpgradeBase", true], ["other.Mixin", false]]),
+        stale: serde_json::json!([]),
+        revert: |snapshot| {
+            let record = record_named(snapshot, "UpgradeChild");
+            record["relations"].as_object_mut().expect("relations object").remove("extends");
+        },
+    });
+}
+
 const UPGRADE_PROBE_PY: &str = "\n\nclass UpgradeProbe:\n    def __init__(self, seed):\n        pass\n";
 
 /// The stable key of `UpgradeProbe.__init__` in `deferred.py` when it reports

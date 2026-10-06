@@ -6,7 +6,7 @@ use tempfile::TempDir;
 use crate::TreeFile;
 use crate::analysis::{
     NameIndex, OwnerSymbolIndex, RefSet, agrees_with_owner_path, analyze_file, ends_with_segments,
-    export_record, find_container_symbol, find_export_target, last_name_segment, owner_path,
+    ExportTargets, export_record, find_container_symbol, last_name_segment, owner_path,
     qualifies, resolve_containers,
 };
 use crate::shared::{
@@ -226,7 +226,8 @@ fn scan_containers(symbols: &[SymbolRecord]) -> Vec<(usize, usize)> {
         .collect()
 }
 
-/// The full scan `find_export_target` did before the name index.
+/// The full scan of every record an export target lookup did before the
+/// name index.
 fn scan_export_target(symbols: &[SymbolRecord], export: &ExportRecord) -> Option<usize> {
     symbols.iter().position(|symbol| {
         symbol.identity.name == export.name
@@ -279,7 +280,7 @@ fn name_index_selects_the_same_targets_as_a_full_scan() {
         for export in tree_file.exported_symbols().expect("exports") {
             let export = export_record(&export);
             assert_eq!(
-                find_export_target(&symbols, &names, &export),
+                ExportTargets::new(&symbols).find(&export),
                 scan_export_target(&symbols, &export),
                 "{label}: export target for `{}`",
                 export.name

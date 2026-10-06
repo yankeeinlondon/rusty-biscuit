@@ -60,19 +60,17 @@ const OWNER_MATRIX: &[OwnerRow] = &[
         ],
     },
     OwnerRow {
-        label: "Rust sole type with an unqualified, rooted or imported impl",
+        // An imported self type (`use a::V; impl V`) needs import
+        // resolution and stays unlinked: `symbols_relations` holds that row.
+        label: "Rust sole type with an unqualified or rooted impl",
         extension: "rs",
         source: "pub struct W;\n\
                  impl W { pub fn direct(&self) {} }\n\
-                 mod inner { impl crate::W { pub fn rooted(&self) {} } }\n\
-                 mod a { pub struct V; }\n\
-                 use a::V;\n\
-                 impl V { pub fn imported(&self) {} }\n",
+                 mod inner { impl crate::W { pub fn rooted(&self) {} } }\n",
         cases: &[
             ("W::direct", "W"),
             ("W::rooted", "W"),
             ("W::rooted::self", "W"),
-            ("V::imported", "a::V"),
         ],
     },
     OwnerRow {
@@ -248,8 +246,10 @@ fn a_sole_same_named_record_never_overrides_an_explicit_owner() {
         for member in row.members {
             let child = named(&records, row.label, member);
             assert!(child.relations.parent.is_none(), "{}: `{member}` parent {:?}", row.label, child.relations.parent);
+            // A Rust impl member keeps a textual container named by the self
+            // type as written, with no ID.
             assert!(
-                child.relations.container.is_none(),
+                child.relations.container.as_ref().is_none_or(|container| container.id.is_none()),
                 "{}: `{member}` container {:?}",
                 row.label,
                 child.relations.container

@@ -14,11 +14,12 @@ use crate::rule_registry::{RuleRegistry, diagnostic_metadata_from_rule};
 use crate::shared::{
     AnalysisPass, Attribute, CodeBlock, CodeRange, Diagnostic, DiagnosticSeverity, FileSymbolIndex,
     ImportSymbol, LintDiagnostic, ProgrammingLanguage, ReferencedSymbol, SourceContext, SymbolInfo,
-    SymbolKind, SymbolKindData, SymbolKindV2, SymbolRecord, SymbolRef, SyntaxDiagnostic,
+    SymbolKind, SymbolKindData, SymbolKindV2, SymbolRecord, SyntaxDiagnostic,
     normalize_modifiers, stable_symbol_key, symbol_id_from_stable_key,
 };
 
 mod definitions;
+mod relations;
 
 pub(crate) use definitions::{ExtractedSymbol, MetadataSelection, RecordFacts};
 
@@ -1743,7 +1744,7 @@ impl TreeFile {
         let root = self.tree.root_node();
         let mut ordinals: HashMap<(SymbolKindV2, String), u32> = HashMap::new();
         let mut records = Vec::new();
-        let mut implemented_traits = Vec::new();
+        let mut relation_inputs = Vec::new();
         // Inner `#![cfg(test)]` state per file root and module body, shared
         // by every declaration below them.
         let mut inner_cfg_test = HashMap::new();
@@ -1752,6 +1753,7 @@ impl TreeFile {
             anchor,
             declaration,
             name,
+            container_impl,
         } in definitions
         {
             let wanted = selection.wants(symbol.kind);
@@ -1851,34 +1853,24 @@ impl TreeFile {
             // The one point where a record's modifiers are put in order.
             normalize_modifiers(&mut record.modifiers);
 
-            implemented_traits.push(
-                (wanted && self.language == ProgrammingLanguage::Rust)
-                    .then(|| impl_of_member(declaration))
-                    .flatten()
-                    .and_then(|impl_item| impl_trait_name(impl_item, &self.source)),
-            );
+            relation_inputs.push(relations::RelationInput {
+                declaration,
+                anchor,
+                name,
+                wanted,
+                container_impl,
+            });
             records.push(record);
         }
 
-        // A member of `impl Trait for Type` records the trait; `id` only when
-        // exactly one trait of that name is declared in this file.
-        for (idx, trait_name) in implemented_traits.into_iter().enumerate() {
-            let Some(trait_name) = trait_name else {
-                continue;
-            };
-            let mut same_file_traits = records.iter().filter(|candidate| {
-                candidate.kind == SymbolKindV2::Trait && candidate.identity.name == trait_name
-            });
-            let id = match (same_file_traits.next(), same_file_traits.next()) {
-                (Some(trait_record), None) => Some(trait_record.id.clone()),
-                _ => None,
-            };
-            records[idx].relations.implements.push(SymbolRef {
-                id,
-                name: trait_name,
-                qualified_name: None,
-            });
-        }
+        relations::link_relations(
+            &mut records,
+            &relation_inputs,
+            root,
+            self.language,
+            &self.source,
+            facts.containment,
+        );
 
         Ok(records)
     }

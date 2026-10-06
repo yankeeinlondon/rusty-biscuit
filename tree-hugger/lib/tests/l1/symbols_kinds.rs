@@ -804,8 +804,8 @@ fn rust_trait_impl_members_record_the_implemented_trait() {
     );
     assert_eq!(
         implements("fmt", "PublicStruct"),
-        vec![("Display".to_string(), None)],
-        "a standard-library trait has a name but no same-file id"
+        vec![("fmt::Display".to_string(), None)],
+        "a standard-library trait keeps its written path but has no same-file id"
     );
     assert_eq!(
         implements("private_trait_method", "String"),
@@ -854,11 +854,12 @@ fn rust_impl_members_are_members_of_the_implemented_type() {
         coord_method.relations.container.as_ref().map(|c| c.name.as_str()),
         Some("Coord")
     );
+    // A type declared elsewhere has no record to link to: the container is
+    // named by the self type as written, with no ID and no parent.
     let foreign = rust.record("private_trait_method", Some("String"));
-    assert!(
-        foreign.relations.container.is_none(),
-        "a type declared elsewhere has no record to link to"
-    );
+    let container = foreign.relations.container.as_ref().expect("textual container");
+    assert_eq!((container.name.as_str(), container.id.as_ref()), ("String", None));
+    assert!(foreign.relations.parent.is_none());
 }
 
 /// Kinds and containers are decided once: both public paths agree on every

@@ -12,6 +12,7 @@ static DIAGNOSTICS_RUNS: AtomicU64 = AtomicU64::new(0);
 static PARSER_CONSTRUCTIONS: AtomicU64 = AtomicU64::new(0);
 static DEFINITION_CAPTURES: AtomicU64 = AtomicU64::new(0);
 static SHARED_CONTEXT_STEPS: AtomicU64 = AtomicU64::new(0);
+static RELATION_LINKS: AtomicU64 = AtomicU64::new(0);
 
 /// A snapshot of the process-wide work counts.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -28,12 +29,17 @@ pub struct WorkCounters {
     /// module's declarations share (the file-level namespace in force, the
     /// preceding sibling-scoped container or access section, inner
     /// `#![cfg(test)]` attributes, same-file traits, `static` prototypes,
-    /// package segments, same-file owners and members, and the records a
-    /// god-file container call-out reads), counting both building that
+    /// package segments, same-file owners and members, the records a
+    /// member's container or an export's target resolves to, and the records
+    /// a god-file container call-out reads), counting both building that
     /// context and each declaration's lookup in it. It grows
     /// linearly with a file's declarations; a per-declaration rescan of the
     /// file or module shows up here as quadratic growth.
     pub shared_context_steps: u64,
+    /// Runs of a file's relation linker, which builds the file's declaration
+    /// index and, in Rust, walks its impls. One analysis runs it once,
+    /// however many records it selects.
+    pub relation_links: u64,
 }
 
 impl WorkCounters {
@@ -44,6 +50,7 @@ impl WorkCounters {
             parser_constructions: self.parser_constructions - earlier.parser_constructions,
             definition_captures: self.definition_captures - earlier.definition_captures,
             shared_context_steps: self.shared_context_steps - earlier.shared_context_steps,
+            relation_links: self.relation_links - earlier.relation_links,
         }
     }
 }
@@ -61,6 +68,7 @@ pub fn work_counters() -> WorkCounters {
         parser_constructions: PARSER_CONSTRUCTIONS.load(Ordering::Relaxed),
         definition_captures: DEFINITION_CAPTURES.load(Ordering::Relaxed),
         shared_context_steps: SHARED_CONTEXT_STEPS.load(Ordering::Relaxed),
+        relation_links: RELATION_LINKS.load(Ordering::Relaxed),
     }
 }
 
@@ -78,4 +86,8 @@ pub(crate) fn count_definition_capture() {
 
 pub(crate) fn count_shared_context_steps(steps: usize) {
     SHARED_CONTEXT_STEPS.fetch_add(steps as u64, Ordering::Relaxed);
+}
+
+pub(crate) fn count_relation_link() {
+    RELATION_LINKS.fetch_add(1, Ordering::Relaxed);
 }
