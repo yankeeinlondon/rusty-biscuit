@@ -65,7 +65,10 @@ pub struct MixedFixture {
     xdg_cache: tempfile::TempDir,
     main: PathBuf,
     worktrees: Vec<PathBuf>,
+    teardown_nudge: TeardownNudge,
 }
+
+type TeardownNudge = Mutex<Option<Box<dyn FnMut() + Send>>>;
 
 impl MixedFixture {
     pub fn new() -> Self {
@@ -81,19 +84,27 @@ impl MixedFixture {
             .into_owned();
 
         run_git(&main, &["init", "-b", "main"]);
-        run_git(&main, &["config", "user.email", "test@example.com"]);
-        run_git(&main, &["config", "user.name", "Test User"]);
-        run_git(&main, &["config", "commit.gpgsign", "false"]);
-        run_git(&main, &["config", "gc.auto", "0"]);
-        run_git(&main, &["config", "core.untrackedCache", "true"]);
+        append_git_config(
+            &main.join(".git").join("config"),
+            &[
+                ("user.email", "test@example.com"),
+                ("user.name", "Test User"),
+                ("commit.gpgsign", "false"),
+                ("gc.auto", "0"),
+                ("core.untrackedCache", "true"),
+            ],
+        );
 
-        commit(&main, "base.txt", "base", "base");
+        // One `git fast-import` writes every commit and branch below, in
+        // place of a checkout, add, and commit process per commit.
+        let mut history = FastImport::default();
+        let base = history.commit("refs/heads/main", None, "base.txt", "base", "base");
 
         // Behind-only branches: forked at base and never advanced.
         let mut branches = Vec::new();
         for i in 0..BEHIND_BRANCHES {
             let name = format!("behind-{i}");
-            run_git(&main, &["branch", &name]);
+            history.branch(&name, &base);
             branches.push(name);
         }
 
@@ -101,24 +112,23 @@ impl MixedFixture {
         // below (behind).
         for i in 0..DIVERGENT_BRANCHES {
             let name = format!("divergent-{i}");
-            run_git(&main, &["checkout", "-b", &name, "main"]);
-            commit(&main, &format!("{name}.txt"), "x", "divergent commit");
-            run_git(&main, &["checkout", "main"]);
+            history.commit(&format!("refs/heads/{name}"), Some(&base), &format!("{name}.txt"), "x", "divergent commit");
             branches.push(name);
         }
 
         // Advance `main`: behind-* are now behind by one; divergent-* diverge.
-        commit(&main, "main-advance.txt", "advance", "advance main");
+        let advanced = history.commit("refs/heads/main", Some(&base), "main-advance.txt", "advance", "advance main");
 
         // Fast-forward branches: forked at the advanced `main` tip with one
         // commit (ahead, not behind). `main` does not move afterward.
         for i in 0..FAST_FORWARD_BRANCHES {
             let name = format!("fast-forward-{i}");
-            run_git(&main, &["checkout", "-b", &name, "main"]);
-            commit(&main, &format!("{name}.txt"), "x", "fast-forward commit");
-            run_git(&main, &["checkout", "main"]);
+            history.commit(&format!("refs/heads/{name}"), Some(&advanced), &format!("{name}.txt"), "x", "fast-forward commit");
             branches.push(name);
         }
+        history.run(&main);
+        // The main checkout, still on `main`, takes its files and index.
+        run_git(&main, &["reset", "-q", "--hard", "main"]);
 
         let mut worktrees = Vec::new();
         for name in &branches {
@@ -133,6 +143,7 @@ impl MixedFixture {
             xdg_cache,
             main,
             worktrees,
+            teardown_nudge: Mutex::new(None),
         }
     }
 
@@ -152,7 +163,10 @@ impl MixedFixture {
         command
             .current_dir(&self.main)
             .env("HOME", self.home.path())
-            .env("XDG_CACHE_HOME", self.xdg_cache.path());
+            .env("XDG_CACHE_HOME", self.xdg_cache.path())
+            // A value exported in the caller's shell would silently shorten
+            // every listing that is meant to wait the real budget.
+            .env_remove(worktree_cli::env::TEST_WAIT_BUDGET_VAR);
         command
     }
 
@@ -425,6 +439,13 @@ impl MixedFixture {
         wait_for_workers(&self.worker_paths(), limit, nudge)
     }
 
+    /// Calls `nudge` before each probe `Drop` makes while it waits for the
+    /// fixture's workers, so a test can hold a worker until teardown is
+    /// waiting for it.
+    pub fn on_teardown_wait(&self, nudge: impl FnMut() + Send + 'static) {
+        *self.teardown_nudge.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Box::new(nudge));
+    }
+
     /// The repository and stores a worker for this fixture uses, computed
     /// without panicking so `Drop` can use it while unwinding.
     fn worker_paths(&self) -> WorkerPaths {
@@ -474,7 +495,12 @@ impl Default for MixedFixture {
 impl Drop for MixedFixture {
     fn drop(&mut self) {
         let paths = self.worker_paths();
-        let finished = reap_workers(&paths, || {});
+        let mut nudge = self.teardown_nudge.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take();
+        let finished = reap_workers(&paths, || {
+            if let Some(nudge) = nudge.as_mut() {
+                nudge();
+            }
+        });
         paths.remove_stores();
         if !std::thread::panicking() {
             assert!(finished, "a refresh worker outlived the test or kept a lock; release its request first");
@@ -773,10 +799,77 @@ pub fn wait_for_refresh_workers(main: &Path, count: usize, limit: Duration) -> V
     }
 }
 
-fn commit(repo: &Path, file: &str, contents: &str, message: &str) {
-    fs::write(repo.join(file), format!("{contents}\n")).expect("write commit file");
-    run_git(repo, &["add", "."]);
-    run_git(repo, &["commit", "-m", message]);
+/// Commits and branches for one `git fast-import` run, each commit adding
+/// one file to its parent's tree, by the fixture identity, dated now.
+#[derive(Default)]
+struct FastImport {
+    stream: String,
+    marks: usize,
+}
+
+impl FastImport {
+    /// Queues a commit on `refname` (after `parent`, a mark from this import,
+    /// or a root commit) that adds `file` holding `contents` and a newline;
+    /// returns its mark.
+    fn commit(&mut self, refname: &str, parent: Option<&str>, file: &str, contents: &str, message: &str) -> String {
+        self.marks += 1;
+        let mark = format!(":{}", self.marks);
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).expect("clock").as_secs();
+        let message = format!("{message}\n");
+        let contents = format!("{contents}\n");
+        self.stream.push_str(&format!(
+            "commit {refname}\nmark {mark}\ncommitter Test User <test@example.com> {now} +0000\ndata {}\n{message}",
+            message.len()
+        ));
+        if let Some(parent) = parent {
+            self.stream.push_str(&format!("from {parent}\n"));
+        }
+        self.stream.push_str(&format!("M 100644 inline {file}\ndata {}\n{contents}\n", contents.len()));
+        mark
+    }
+
+    /// Queues branch `name` at `target`, a mark from this import.
+    fn branch(&mut self, name: &str, target: &str) {
+        self.stream.push_str(&format!("reset refs/heads/{name}\nfrom {target}\n\n"));
+    }
+
+    fn run(self, repo: &Path) {
+        let mut child = Command::new("git")
+            .current_dir(repo)
+            .args(["fast-import", "--quiet"])
+            .stdin(Stdio::piped())
+            .spawn()
+            .expect("git should be installed");
+        child.stdin.take().expect("stdin").write_all(self.stream.as_bytes()).expect("write fast-import stream");
+        let status = child.wait().expect("fast-import ran");
+        assert!(status.success(), "git fast-import failed in {repo:?}:\n{}", self.stream);
+    }
+}
+
+/// Appends `entries` (`section[.subsection].name`, value) to the git config
+/// file `config`, as one `git config <key> <value>` each would set them,
+/// without a `git` process per key.
+pub fn append_git_config(config: &Path, entries: &[(&str, &str)]) {
+    assert!(config.is_file(), "no git config at {config:?}");
+    // Windows paths carry backslashes, which a config file reads as escapes.
+    let quoted = |value: &str| format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""));
+    let mut text = String::new();
+    let mut current_header = String::new();
+    for (key, value) in entries {
+        let (section, rest) = key.split_once('.').unwrap_or_else(|| panic!("config key {key:?} has no section"));
+        let (header, name) = match rest.rsplit_once('.') {
+            Some((subsection, name)) => (format!("[{section} {}]", quoted(subsection)), name),
+            None => (format!("[{section}]"), rest),
+        };
+        if header != current_header {
+            text.push_str(&header);
+            text.push('\n');
+            current_header = header;
+        }
+        text.push_str(&format!("\t{name} = {}\n", quoted(value)));
+    }
+    let mut file = fs::OpenOptions::new().append(true).open(config).expect("open git config");
+    file.write_all(text.as_bytes()).expect("append git config");
 }
 
 fn run_git(repo: &Path, args: &[&str]) {

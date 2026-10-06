@@ -59,19 +59,29 @@ impl Drop for DirGuard {
     }
 }
 
+/// The settings every repository here gets.
+fn configure(repo: &Path) {
+    crate::commands::test_support::configure(
+        repo,
+        &[
+            ("user.email", "test@example.com"),
+            ("user.name", "Test User"),
+            ("commit.gpgsign", "false"),
+            // Suppress background/detached git work so nextest leak detection
+            // sees no lingering child processes after the test returns.
+            ("gc.auto", "0"),
+            ("core.fsmonitor", "false"),
+            ("core.commitGraph", "false"),
+        ],
+    );
+}
+
 fn temp_repo() -> tempfile::TempDir {
     let dir = tempfile::tempdir().expect("create temp dir");
     let path = dir.path();
 
     run_git(path, &["init", "-b", "main"]);
-    run_git(path, &["config", "user.email", "test@example.com"]);
-    run_git(path, &["config", "user.name", "Test User"]);
-    run_git(path, &["config", "commit.gpgsign", "false"]);
-    // Suppress background/detached git work so nextest leak detection
-    // sees no lingering child processes after the test returns.
-    run_git(path, &["config", "gc.auto", "0"]);
-    run_git(path, &["config", "core.fsmonitor", "false"]);
-    run_git(path, &["config", "core.commitGraph", "false"]);
+    configure(path);
 
     fs::write(path.join("file.txt"), "1\n").unwrap();
     run_git(path, &["add", "."]);
@@ -107,12 +117,7 @@ fn temp_repo_named_with_linked_feature() -> (tempfile::TempDir, PathBuf) {
     fs::create_dir(&main).expect("create main repo dir");
 
     run_git(&main, &["init", "-b", "main"]);
-    run_git(&main, &["config", "user.email", "test@example.com"]);
-    run_git(&main, &["config", "user.name", "Test User"]);
-    run_git(&main, &["config", "commit.gpgsign", "false"]);
-    run_git(&main, &["config", "gc.auto", "0"]);
-    run_git(&main, &["config", "core.fsmonitor", "false"]);
-    run_git(&main, &["config", "core.commitGraph", "false"]);
+    configure(&main);
 
     fs::write(main.join("file.txt"), "1\n").unwrap();
     run_git(&main, &["add", "."]);
@@ -486,9 +491,27 @@ mod gather {
 
     impl Fixture {
         fn new() -> Self {
-            LAUNCHES.lock().unwrap_or_else(|e| e.into_inner()).clear();
             let repo = temp_repo();
-            run_git(repo.path(), &["remote", "add", "origin", ORIGIN]);
+            // What `git remote add origin <ORIGIN>` writes.
+            crate::commands::test_support::configure(
+                repo.path(),
+                &[("remote.origin.url", ORIGIN), ("remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")],
+            );
+            Self::around(repo)
+        }
+
+        /// A fixture on its own copy of `template`'s repository: as
+        /// independent as [`Fixture::new`]'s, without the `git` processes
+        /// that build one. The template must have no linked worktree, whose
+        /// administrative files hold absolute paths.
+        fn copied_from(template: &Path) -> Self {
+            let repo = tempfile::tempdir().expect("repo dir");
+            copy_tree(template, repo.path());
+            Self::around(repo)
+        }
+
+        fn around(repo: tempfile::TempDir) -> Self {
+            LAUNCHES.lock().unwrap_or_else(|e| e.into_inner()).clear();
             let cache = tempfile::tempdir().expect("cache dir");
             let store = cache.path().join("prs.json");
             let head_store = cache.path().join("remote-head.json");
@@ -550,6 +573,19 @@ mod gather {
                 .map(|entry| entry.expect("entry").file_name().to_string_lossy().into_owned())
                 .filter(|name| name.contains("receipt"))
                 .collect()
+        }
+    }
+
+    fn copy_tree(from: &Path, to: &Path) {
+        for entry in std::fs::read_dir(from).expect("read template") {
+            let entry = entry.expect("template entry");
+            let target = to.join(entry.file_name());
+            if entry.file_type().expect("file type").is_dir() {
+                std::fs::create_dir(&target).expect("create dir");
+                copy_tree(&entry.path(), &target);
+            } else {
+                std::fs::copy(entry.path(), &target).expect("copy file");
+            }
         }
     }
 
@@ -801,10 +837,12 @@ mod gather {
     #[serial_test::serial]
     fn a_replaced_or_removed_origin_suppresses_every_request_notice() {
         const PROVIDER_ORIGIN: &str = "https://github.com/owner/repo.git";
+        // Every case starts from its own copy of this repository.
+        let template = Fixture::new();
+        run_git(template.main(), &["remote", "set-url", "origin", PROVIDER_ORIGIN]);
         for (projection, shape, shows) in projections() {
             for change in [None, Some(OriginChange::Replaced(ELSEWHERE)), Some(OriginChange::Removed)] {
-                let fixture = Fixture::new();
-                run_git(fixture.main(), &["remote", "set-url", "origin", PROVIDER_ORIGIN]);
+                let fixture = Fixture::copied_from(template.main());
                 fixture.worker(|worker| {
                     worker.origin = PROVIDER_ORIGIN.into();
                     worker.changes_origin = change;

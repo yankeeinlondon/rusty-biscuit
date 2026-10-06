@@ -167,17 +167,21 @@ impl Repo {
         let feature = dir.path().join("feature");
         fs::create_dir(&main).unwrap();
         run_git(&main, &["init", "-q", "-b", "main"]);
-        for (key, value) in [
-            ("user.email", "test@example.com"),
-            ("user.name", "Test User"),
-            ("commit.gpgsign", "false"),
-            ("tag.gpgsign", "false"),
-            ("gc.auto", "0"),
-            ("core.fsmonitor", "false"),
-            ("core.commitGraph", "false"),
-        ] {
-            run_git(&main, &["config", key, value]);
-        }
+        crate::test_support::configure(
+            &main,
+            &[
+                ("user.email", "test@example.com"),
+                ("user.name", "Test User"),
+                ("commit.gpgsign", "false"),
+                ("tag.gpgsign", "false"),
+                ("gc.auto", "0"),
+                ("core.fsmonitor", "false"),
+                ("core.commitGraph", "false"),
+                // What `git remote add origin <ORIGIN>` writes.
+                ("remote.origin.url", ORIGIN),
+                ("remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"),
+            ],
+        );
         let commit = |file: &str| {
             fs::write(main.join(file), format!("{file}\n")).unwrap();
             run_git(&main, &["add", "--", file]);
@@ -191,7 +195,6 @@ impl Repo {
         fs::write(feature.join("a1.txt"), "a1\n").unwrap();
         run_git(&feature, &["add", "a1.txt"]);
         run_git(&feature, &["commit", "-q", "-m", "a1"]);
-        run_git(&main, &["remote", "add", "origin", ORIGIN]);
         run_git(&main, &["update-ref", "refs/remotes/origin/main", &c2]);
 
         let cache = cache_path(&main).expect("cache path");

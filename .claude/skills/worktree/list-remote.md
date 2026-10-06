@@ -295,6 +295,14 @@ the waits in unit tests. Stub launchers write the real stores and a receipt,
 publishing through the real `refresh`. There is still **no live-head seam in
 the foreground**.
 
+The binary's only seam is `WT_TEST_WAIT_BUDGET_MS`
+(`env::TEST_WAIT_BUDGET_VAR`, parsed by `env::test_wait_budget`), which
+`list::production_seams` puts into `ListSeams::wait_budget`. It is compiled
+only under `cfg(debug_assertions)`: the `dev`/`test` profiles local nextest
+and CI's archives use. Release builds never read it, and it never touches
+`forced_budget`. A malformed value panics rather than silently waiting 3 s.
+Usage rules: [testing.md](testing.md#shortening-a-held-listings-wait).
+
 ## Tests and performance gates
 
 See [testing.md](testing.md#wt-list).

@@ -29,6 +29,7 @@ facts and traps, not user docs.
 | `wt list` background worker, PR store, live-head store, receipts, the wait and its budgets | [list-remote.md](list-remote.md) |
 | The `wt list` git graph: gathering, classification, layout, Kitty L2, graph perf | [git-graph.md](git-graph.md) |
 | Any worktree test: stand-ins (`ProxyStub`, `FakeGitea`, `HoldingOrigin`), fixtures, L2 recipes, perf gates | [testing.md](testing.md) |
+| Building a fixture repository: config writes, bulk commits, template copies, counting `git` spawns | [fixtures.md](fixtures.md) |
 
 ## Rules that bite everywhere
 

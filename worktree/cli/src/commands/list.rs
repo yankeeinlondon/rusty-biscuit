@@ -63,6 +63,16 @@ const PRODUCTION_SEAMS: ListSeams = ListSeams {
     forced_budget: FORCED_BUDGET,
 };
 
+/// [`PRODUCTION_SEAMS`], except that a debug build takes a test's shorter
+/// ordinary wait from [`crate::env::test_wait_budget`].
+fn production_seams() -> ListSeams {
+    #[cfg(debug_assertions)]
+    if let Some(wait_budget) = crate::env::test_wait_budget() {
+        return ListSeams { wait_budget, ..PRODUCTION_SEAMS };
+    }
+    PRODUCTION_SEAMS
+}
+
 /// The followed head attempt as the wait left it, and what the caption says
 /// of it; the PR half never changes it.
 fn remote_status(head: &HeadEnd, last: impl Fn() -> LastKnown) -> RemoteStatus {
@@ -278,7 +288,7 @@ pub fn run(
         process_start,
         image_support,
         &terminal,
-        PRODUCTION_SEAMS,
+        production_seams(),
     )?;
     match (perf, timings) {
         (Some(PerfFormat::Human), Some(timings)) => eprint!("{}", perf::human_report(&timings)),

@@ -523,14 +523,19 @@ mod tests {
         let path = dir.path();
 
         run_git(path, &["init", "-b", "main"]);
-        run_git(path, &["config", "user.email", "test@example.com"]);
-        run_git(path, &["config", "user.name", "Test User"]);
-        run_git(path, &["config", "commit.gpgsign", "false"]);
-        // Suppress background/detached git work so nextest leak detection
-        // sees no lingering child processes after the test returns.
-        run_git(path, &["config", "gc.auto", "0"]);
-        run_git(path, &["config", "core.fsmonitor", "false"]);
-        run_git(path, &["config", "core.commitGraph", "false"]);
+        crate::test_support::configure(
+            path,
+            &[
+                ("user.email", "test@example.com"),
+                ("user.name", "Test User"),
+                ("commit.gpgsign", "false"),
+                // Suppress background/detached git work so nextest leak detection
+                // sees no lingering child processes after the test returns.
+                ("gc.auto", "0"),
+                ("core.fsmonitor", "false"),
+                ("core.commitGraph", "false"),
+            ],
+        );
 
         fs::write(path.join("file.txt"), "1\n").unwrap();
         run_git(path, &["add", "."]);

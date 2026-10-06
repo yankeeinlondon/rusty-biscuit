@@ -16,8 +16,9 @@ use std::time::{Duration, Instant};
 use assert_cmd::cargo::cargo_bin;
 use worktree::pull_requests::pr_store_path;
 use worktree::remote_head::remote_head_store_path;
+use worktree_cli::env::TEST_WAIT_BUDGET_VAR;
 
-use crate::perf_support::{WorkerPaths, isolated_cache_file, reap_workers};
+use crate::perf_support::{WorkerPaths, append_git_config, isolated_cache_file, reap_workers};
 
 /// How long a test waits for a detached worker before failing.
 pub const WORKER_WAIT: Duration = Duration::from_secs(20);
@@ -47,8 +48,12 @@ impl Fixture {
 
         fixture.git(fixture.root.path(), &["init", "--bare", "-b", "main", "origin.git"]);
         fixture.git(fixture.root.path(), &["init", "-b", "main", "pusher"]);
-        fixture.git(&fixture.pusher, &["remote", "add", "origin", fixture.bare.to_str().unwrap()]);
-        fixture.commit_and_push("first");
+        // What `git remote add origin <bare>` writes.
+        append_git_config(
+            &fixture.pusher.join(".git").join("config"),
+            &[("remote.origin.url", fixture.bare.to_str().unwrap()), ("remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")],
+        );
+        fixture.push_commit("first");
         fixture.git(fixture.root.path(), &["clone", fixture.bare.to_str().unwrap(), "main"]);
         fixture.git(&fixture.main, &["worktree", "add", "-b", "feature", fixture.linked.to_str().unwrap()]);
         fixture
@@ -78,16 +83,27 @@ impl Fixture {
 
     /// Another clone advances `origin`'s `main` by one commit; returns it.
     pub fn commit_and_push(&self, message: &str) -> String {
+        self.push_commit(message);
+        self.git(&self.pusher, &["rev-parse", "HEAD"])
+    }
+
+    /// [`Fixture::commit_and_push`] without reading back the new commit.
+    fn push_commit(&self, message: &str) {
         fs::write(self.pusher.join("file.txt"), format!("{message}\n")).expect("write");
         self.git(&self.pusher, &["add", "."]);
         self.git(&self.pusher, &["commit", "-m", message]);
         self.git(&self.pusher, &["push", "origin", "main"]);
-        self.git(&self.pusher, &["rev-parse", "HEAD"])
     }
 
     pub fn wt(&self, dir: &Path) -> Command {
         let mut command = self.isolated(Command::new(cargo_bin("wt")));
-        command.current_dir(dir).env("NO_COLOR", "1").env_remove("WT_SHELL_WRAPPER");
+        command
+            .current_dir(dir)
+            .env("NO_COLOR", "1")
+            .env_remove("WT_SHELL_WRAPPER")
+            // A value exported in the caller's shell would silently shorten
+            // every listing that is meant to wait the real budget.
+            .env_remove(TEST_WAIT_BUDGET_VAR);
         command
     }
 
@@ -95,7 +111,17 @@ impl Fixture {
     /// caption word-wraps) and the padding that follows a plain branch badge
     /// dropped before punctuation.
     pub fn list_from(&self, dir: &Path) -> String {
-        let output = self.wt(dir).arg("list").output().expect("wt list runs");
+        Self::collapsed_list(&mut self.wt(dir))
+    }
+
+    /// [`Fixture::list`] with the ordinary wait cut to `budget`
+    /// ([`TEST_WAIT_BUDGET_VAR`]), for a listing whose worker is held past it.
+    pub fn list_within(&self, budget: Duration) -> String {
+        Self::collapsed_list(self.wt(&self.main).env(TEST_WAIT_BUDGET_VAR, budget.as_millis().to_string()))
+    }
+
+    fn collapsed_list(wt: &mut Command) -> String {
+        let output = wt.arg("list").output().expect("wt list runs");
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(output.status.success(), "wt list failed:\n{stderr}");
         assert_no_spinner(&stderr);

@@ -36,17 +36,18 @@ fn git_output(repo: &Path, args: &[&str]) -> String {
 
 fn init_repo(path: &Path) {
     run_git(path, &["init", "-q", "-b", "main"]);
-    for (key, value) in [
-        ("user.email", "test@example.com"),
-        ("user.name", "Test User"),
-        ("commit.gpgsign", "false"),
-        // Suppress optional Git workers so nextest does not report fixture leaks.
-        ("gc.auto", "0"),
-        ("core.fsmonitor", "false"),
-        ("core.commitGraph", "false"),
-    ] {
-        run_git(path, &["config", key, value]);
-    }
+    crate::commands::test_support::configure(
+        path,
+        &[
+            ("user.email", "test@example.com"),
+            ("user.name", "Test User"),
+            ("commit.gpgsign", "false"),
+            // Suppress optional Git workers so nextest does not report fixture leaks.
+            ("gc.auto", "0"),
+            ("core.fsmonitor", "false"),
+            ("core.commitGraph", "false"),
+        ],
+    );
 }
 
 /// Commits `file` and returns the new full SHA.
@@ -490,7 +491,7 @@ fn next_commit_time() -> i64 {
     now + SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
-/// [`commit_on`] and [`chain_on`] for fixtures with hundreds of commits: one
+/// [`commit_on`] for many commits at once: one
 /// `git fast-import` writes them all instead of a `commit-tree` process per
 /// commit. Every commit keeps its first parent's tree and is dated by
 /// [`next_commit_time`]; `get-mark` returns each SHA as it is made. Objects
@@ -558,16 +559,6 @@ impl BulkCommits {
         assert!(self.child.wait().expect("git fast-import").success(), "git fast-import failed in {:?}", self.path);
         run_git(&self.path, &["update-ref", "-d", "refs/fixture/bulk"]);
     }
-}
-
-/// `count` commits after `from`, oldest first.
-fn chain_on(path: &Path, tree: &str, from: &str, prefix: &str, count: usize) -> Vec<String> {
-    let mut chain: Vec<String> = Vec::with_capacity(count);
-    for n in 1..=count {
-        let parent = chain.last().map_or(from, String::as_str).to_string();
-        chain.push(commit_on(path, tree, &[&parent], &format!("{prefix}{n}")));
-    }
-    chain
 }
 
 /// `feat/schema-enhancement`'s own commits in [`observed_sparse_lanes`].
@@ -1131,17 +1122,33 @@ fn repo_with_root() -> (tempfile::TempDir, PathBuf, String, String) {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().to_path_buf();
     init_repo(&path);
-    let r = commit(&path, "r");
-    let tree = git_output(&path, &["rev-parse", "HEAD^{tree}"]);
-    (dir, path, r, tree)
+    fs::write(path.join("r"), "r\n").unwrap();
+    run_git(&path, &["add", "--", "r"]);
+    run_git(&path, &["commit", "-q", "-m", "r"]);
+    let shas = git_output(&path, &["rev-parse", "HEAD", "HEAD^{tree}"]);
+    let (r, tree) = shas.split_once('\n').expect("commit and tree");
+    (dir, path, r.trim().to_string(), tree.trim().to_string())
 }
 
 /// Points each branch at its tip, then moves the `main` checkout with it.
 fn set_branches(path: &Path, tips: &[(&str, &str)]) {
-    for (branch, tip) in tips {
-        run_git(path, &["update-ref", &format!("refs/heads/{branch}"), tip]);
-    }
+    let updates: String = tips.iter().map(|(branch, tip)| format!("update refs/heads/{branch} {tip}\n")).collect();
+    update_refs(path, &updates);
     run_git(path, &["reset", "-q", "--hard", "main"]);
+}
+
+/// Applies `git update-ref --stdin` instructions in one call.
+fn update_refs(path: &Path, instructions: &str) {
+    use std::io::Write;
+    let mut child = Command::new("git")
+        .current_dir(path)
+        .args(["update-ref", "--stdin"])
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .expect("git should be installed");
+    child.stdin.take().expect("stdin").write_all(instructions.as_bytes()).expect("write update-ref input");
+    let status = child.wait().expect("update-ref ran");
+    assert!(status.success(), "update-ref --stdin failed in {path:?}: {instructions}");
 }
 
 /// Where the local `main` is in [`continued_after_merge`]; `origin/main` is
@@ -1205,24 +1212,32 @@ impl ContinuedAfterMerge {
 }
 
 fn continued_after_merge(local_main: LocalMain) -> ContinuedAfterMerge {
-    let (dir, path, r, tree) = repo_with_root();
+    let (dir, path, r, _) = repo_with_root();
+    let mut bulk = BulkCommits::new(&path);
     let mut d = vec![r.clone()];
-    d.extend(chain_on(&path, &tree, &r, "d", 4));
-    let w = chain_on(&path, &tree, &d[1], "w", 3);
-    let p = commit_on(&path, &tree, &[&d[4]], "P");
-    let sync = commit_on(&path, &tree, &[&w[2], &p], "Merge branch 'main' into fix/wt-ux");
-    let x = chain_on(&path, &tree, &sync, "x", CONTINUED_AFTER_SYNC);
+    d.extend(bulk.chain(&r, "d", 4));
+    let w = bulk.chain(&d[1], "w", 3);
+    let p = bulk.commit(&[&d[4]], "P");
+    let sync = bulk.commit(&[&w[2], &p], "Merge branch 'main' into fix/wt-ux");
+    let x = bulk.chain(&sync, "x", CONTINUED_AFTER_SYNC);
     let b = x.last().unwrap().clone();
-    let c = commit_on(&path, &tree, &[&p, &b], "Merge pull request #105 from fix/wt-ux");
-    let n = commit_on(&path, &tree, &[&b], "N");
-    let p_prime = (local_main == LocalMain::Diverged).then(|| commit_on(&path, &tree, &[&p], "P'"));
+    let c = bulk.commit(&[&p, &b], "Merge pull request #105 from fix/wt-ux");
+    let n = bulk.commit(&[&b], "N");
+    let p_prime = (local_main == LocalMain::Diverged).then(|| bulk.commit(&[&p], "P'"));
+    bulk.finish();
     let main = match local_main {
         LocalMain::AtMerge => c.clone(),
         LocalMain::Behind => p.clone(),
         LocalMain::Diverged => p_prime.clone().unwrap(),
     };
-    set_branches(&path, &[("main", &main), ("fix/wt-ux", &n), ("fix/sniff-pr", &b)]);
-    set_origin_main(&path, &c);
+    // `set_branches` plus `origin/main` in its one `update-ref`.
+    update_refs(
+        &path,
+        &format!(
+            "update refs/heads/main {main}\nupdate refs/heads/fix/wt-ux {n}\nupdate refs/heads/fix/sniff-pr {b}\nupdate refs/remotes/origin/main {c}\n"
+        ),
+    );
+    run_git(&path, &["reset", "-q", "--hard", "main"]);
     let mut forks = ForkOriginStore::default();
     forked_at(&mut forks, "fix/sniff-pr", "fix/wt-ux", &b, 30);
     ContinuedAfterMerge { _dir: dir, path, d, w, p, sync, x, c, n, p_prime, local_main, forks }

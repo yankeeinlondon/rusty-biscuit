@@ -967,12 +967,17 @@ branch refs/heads/fix/bug-42
         let path = dir.path();
 
         run_git(path, &["init", "-b", "main"]);
-        run_git(path, &["config", "user.email", "test@example.com"]);
-        run_git(path, &["config", "user.name", "Test User"]);
-        run_git(path, &["config", "commit.gpgsign", "false"]);
-        run_git(path, &["config", "gc.auto", "0"]);
-        run_git(path, &["config", "core.fsmonitor", "false"]);
-        run_git(path, &["config", "core.commitGraph", "false"]);
+        crate::test_support::configure(
+            path,
+            &[
+                ("user.email", "test@example.com"),
+                ("user.name", "Test User"),
+                ("commit.gpgsign", "false"),
+                ("gc.auto", "0"),
+                ("core.fsmonitor", "false"),
+                ("core.commitGraph", "false"),
+            ],
+        );
 
         fs::write(path.join("file.txt"), "base\n").expect("write base file");
         run_git(path, &["add", "."]);

@@ -30,17 +30,18 @@ fn git_output(repo: &Path, args: &[&str]) -> String {
 
 fn init_repo(path: &Path) {
     run_git(path, &["init", "-q", "-b", "main"]);
-    for (key, value) in [
-        ("user.email", "test@example.com"),
-        ("user.name", "Test User"),
-        ("commit.gpgsign", "false"),
-        // Suppress optional Git workers so nextest does not report fixture leaks.
-        ("gc.auto", "0"),
-        ("core.fsmonitor", "false"),
-        ("core.commitGraph", "false"),
-    ] {
-        run_git(path, &["config", key, value]);
-    }
+    crate::test_support::configure(
+        path,
+        &[
+            ("user.email", "test@example.com"),
+            ("user.name", "Test User"),
+            ("commit.gpgsign", "false"),
+            // Suppress optional Git workers so nextest does not report fixture leaks.
+            ("gc.auto", "0"),
+            ("core.fsmonitor", "false"),
+            ("core.commitGraph", "false"),
+        ],
+    );
 }
 
 /// Commits `file` and returns the new full SHA.
@@ -213,14 +214,15 @@ fn advance_origin(repo: &Path, origin: &Path, file: &str) -> String {
 }
 
 fn init_repo_config(path: &Path) {
-    for (key, value) in [
-        ("user.email", "test@example.com"),
-        ("user.name", "Test User"),
-        ("commit.gpgsign", "false"),
-        ("gc.auto", "0"),
-    ] {
-        run_git(path, &["config", key, value]);
-    }
+    crate::test_support::configure(
+        path,
+        &[
+            ("user.email", "test@example.com"),
+            ("user.name", "Test User"),
+            ("commit.gpgsign", "false"),
+            ("gc.auto", "0"),
+        ],
+    );
 }
 
 #[test]
@@ -462,10 +464,6 @@ fn merge_no_ff(path: &Path, branch: &str) -> String {
     git_output(path, &["rev-parse", "HEAD"])
 }
 
-fn set_origin_main(path: &Path, sha: &str) {
-    run_git(path, &["update-ref", "refs/remotes/origin/main", sha]);
-}
-
 fn line<'a>(graph: &'a GraphFacts, branch: &str) -> &'a GraphLine {
     graph
         .lines
@@ -512,14 +510,74 @@ fn next_commit_time() -> i64 {
     now + SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
-/// `count` commits after `from`, oldest first.
-fn chain_on(path: &Path, tree: &str, from: &str, prefix: &str, count: usize) -> Vec<String> {
-    let mut chain: Vec<String> = Vec::with_capacity(count);
-    for n in 1..=count {
-        let parent = chain.last().map_or(from, String::as_str).to_string();
-        chain.push(commit_on(path, tree, &[&parent], &format!("{prefix}{n}")));
+/// [`commit_on`] for many commits at once: one
+/// `git fast-import` writes them all instead of a `commit-tree` process per
+/// commit. Every commit keeps its first parent's tree and is dated by
+/// [`next_commit_time`]; `get-mark` returns each SHA as it is made. Objects
+/// are readable by other Git commands only after [`BulkCommits::finish`].
+struct BulkCommits {
+    path: PathBuf,
+    child: std::process::Child,
+    stdin: std::process::ChildStdin,
+    stdout: std::io::BufReader<std::process::ChildStdout>,
+    marks: std::collections::HashMap<String, usize>,
+}
+
+impl BulkCommits {
+    fn new(path: &Path) -> Self {
+        let mut child = Command::new("git")
+            .current_dir(path)
+            .args(["fast-import", "--quiet", "--done"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .expect("git should be installed");
+        let stdin = child.stdin.take().expect("stdin");
+        let stdout = std::io::BufReader::new(child.stdout.take().expect("stdout"));
+        Self { path: path.to_path_buf(), child, stdin, stdout, marks: Default::default() }
     }
-    chain
+
+    fn commit(&mut self, parents: &[&str], message: &str) -> String {
+        use std::io::{BufRead, Write};
+        let mark = self.marks.len() + 1;
+        // A commit made in this session is named by its mark.
+        let name = |sha: &str| self.marks.get(sha).map_or_else(|| sha.to_string(), |mark| format!(":{mark}"));
+        let mut command = format!(
+            "commit refs/fixture/bulk\nmark :{mark}\ncommitter Test User <test@example.com> {} +0000\ndata {}\n{message}\n",
+            next_commit_time(),
+            message.len()
+        );
+        for (index, parent) in parents.iter().enumerate() {
+            command.push_str(&format!("{} {}\n", if index == 0 { "from" } else { "merge" }, name(parent)));
+        }
+        command.push_str(&format!("\nget-mark :{mark}\n"));
+        self.stdin.write_all(command.as_bytes()).expect("write to git fast-import");
+        self.stdin.flush().expect("flush git fast-import");
+        let mut sha = String::new();
+        self.stdout.read_line(&mut sha).expect("read a mark from git fast-import");
+        let sha = sha.trim().to_string();
+        assert_eq!(sha.len(), 40, "git fast-import gave {sha:?} for {message}");
+        self.marks.insert(sha.clone(), mark);
+        sha
+    }
+
+    fn chain(&mut self, from: &str, prefix: &str, count: usize) -> Vec<String> {
+        let mut chain: Vec<String> = Vec::with_capacity(count);
+        for n in 1..=count {
+            let parent = chain.last().map_or(from, String::as_str).to_string();
+            chain.push(self.commit(&[&parent], &format!("{prefix}{n}")));
+        }
+        chain
+    }
+
+    /// Ends the session, writing its objects, and drops its scratch ref.
+    fn finish(mut self) {
+        use std::io::Write;
+        self.stdin.write_all(b"done\n").expect("finish git fast-import");
+        drop(self.stdin);
+        assert!(self.child.wait().expect("git fast-import").success(), "git fast-import failed in {:?}", self.path);
+        run_git(&self.path, &["update-ref", "-d", "refs/fixture/bulk"]);
+    }
 }
 
 #[test]
@@ -643,17 +701,33 @@ fn repo_with_root() -> (tempfile::TempDir, PathBuf, String, String) {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().to_path_buf();
     init_repo(&path);
-    let r = commit(&path, "r");
-    let tree = git_output(&path, &["rev-parse", "HEAD^{tree}"]);
-    (dir, path, r, tree)
+    fs::write(path.join("r"), "r\n").unwrap();
+    run_git(&path, &["add", "--", "r"]);
+    run_git(&path, &["commit", "-q", "-m", "r"]);
+    let shas = git_output(&path, &["rev-parse", "HEAD", "HEAD^{tree}"]);
+    let (r, tree) = shas.split_once('\n').expect("commit and tree");
+    (dir, path, r.trim().to_string(), tree.trim().to_string())
 }
 
 /// Points each branch at its tip, then moves the `main` checkout with it.
 fn set_branches(path: &Path, tips: &[(&str, &str)]) {
-    for (branch, tip) in tips {
-        run_git(path, &["update-ref", &format!("refs/heads/{branch}"), tip]);
-    }
+    let updates: String = tips.iter().map(|(branch, tip)| format!("update refs/heads/{branch} {tip}\n")).collect();
+    update_refs(path, &updates);
     run_git(path, &["reset", "-q", "--hard", "main"]);
+}
+
+/// Applies `git update-ref --stdin` instructions in one call.
+fn update_refs(path: &Path, instructions: &str) {
+    use std::io::Write;
+    let mut child = Command::new("git")
+        .current_dir(path)
+        .args(["update-ref", "--stdin"])
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .expect("git should be installed");
+    child.stdin.take().expect("stdin").write_all(instructions.as_bytes()).expect("write update-ref input");
+    let status = child.wait().expect("update-ref ran");
+    assert!(status.success(), "update-ref --stdin failed in {path:?}: {instructions}");
 }
 
 /// Where the local `main` is in [`continued_after_merge`]; `origin/main` is
@@ -717,24 +791,32 @@ impl ContinuedAfterMerge {
 }
 
 fn continued_after_merge(local_main: LocalMain) -> ContinuedAfterMerge {
-    let (dir, path, r, tree) = repo_with_root();
+    let (dir, path, r, _) = repo_with_root();
+    let mut bulk = BulkCommits::new(&path);
     let mut d = vec![r.clone()];
-    d.extend(chain_on(&path, &tree, &r, "d", 4));
-    let w = chain_on(&path, &tree, &d[1], "w", 3);
-    let p = commit_on(&path, &tree, &[&d[4]], "P");
-    let sync = commit_on(&path, &tree, &[&w[2], &p], "Merge branch 'main' into fix/wt-ux");
-    let x = chain_on(&path, &tree, &sync, "x", CONTINUED_AFTER_SYNC);
+    d.extend(bulk.chain(&r, "d", 4));
+    let w = bulk.chain(&d[1], "w", 3);
+    let p = bulk.commit(&[&d[4]], "P");
+    let sync = bulk.commit(&[&w[2], &p], "Merge branch 'main' into fix/wt-ux");
+    let x = bulk.chain(&sync, "x", CONTINUED_AFTER_SYNC);
     let b = x.last().unwrap().clone();
-    let c = commit_on(&path, &tree, &[&p, &b], "Merge pull request #105 from fix/wt-ux");
-    let n = commit_on(&path, &tree, &[&b], "N");
-    let p_prime = (local_main == LocalMain::Diverged).then(|| commit_on(&path, &tree, &[&p], "P'"));
+    let c = bulk.commit(&[&p, &b], "Merge pull request #105 from fix/wt-ux");
+    let n = bulk.commit(&[&b], "N");
+    let p_prime = (local_main == LocalMain::Diverged).then(|| bulk.commit(&[&p], "P'"));
+    bulk.finish();
     let main = match local_main {
         LocalMain::AtMerge => c.clone(),
         LocalMain::Behind => p.clone(),
         LocalMain::Diverged => p_prime.clone().unwrap(),
     };
-    set_branches(&path, &[("main", &main), ("fix/wt-ux", &n), ("fix/sniff-pr", &b)]);
-    set_origin_main(&path, &c);
+    // `set_branches` plus `origin/main` in its one `update-ref`.
+    update_refs(
+        &path,
+        &format!(
+            "update refs/heads/main {main}\nupdate refs/heads/fix/wt-ux {n}\nupdate refs/heads/fix/sniff-pr {b}\nupdate refs/remotes/origin/main {c}\n"
+        ),
+    );
+    run_git(&path, &["reset", "-q", "--hard", "main"]);
     let mut forks = ForkOriginStore::default();
     forked_at(&mut forks, "fix/sniff-pr", "fix/wt-ux", &b, 30);
     ContinuedAfterMerge { _dir: dir, path, d, w, p, sync, x, c, n, p_prime, local_main, forks }

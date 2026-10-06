@@ -346,6 +346,19 @@ Never parse the human report. Never add a concurrent region's children together 
 
 - **A performance test** has a `perf_` name, runs serially under `just test-perf`, and may bound a stage's duration or a whole command's wall-clock time.
 - **A functional test** never uses timing as evidence, and passes without `--perf`. A test that a listing stopped at its budget proves it with the wait's scripted clock (`list::wait::tests`) and with what the listing printed, not with a duration. A test that work ran proves it with `Listing` facts (`Listing::regathered`, for example) or the `count-git` recorder, not with stage names.
+- **A functional test whose worker is held past the wait may shorten that wait.** Waiting out the real 3 s proves nothing more when the held request outlasts any wait, so set `WT_TEST_WAIT_BUDGET_MS` (spelled `worktree_cli::env::TEST_WAIT_BUDGET_VAR`) on the `wt` command, and an ordinary listing waits that many milliseconds instead:
+
+  ```rust
+  let output = fixture.wt_command_via_gitea(&gitea)
+      .arg("list")
+      .env(TEST_WAIT_BUDGET_VAR, "300")
+      .output()?;
+  ```
+
+  - Only debug builds read it: the `dev` and `test` Cargo profiles that `cargo nextest run` and CI's test archives build. A release build, such as the one `just install` makes, always waits 3 s. The `-r`/`--ff` wait is never shortened.
+  - A value that is not a positive whole number panics, so a typo cannot pass silently on the 3 s wait.
+  - Keep the wait long enough for whatever must finish inside it. `list_remote_head.rs` uses 300 ms (`HELD_WAIT`) when the worker is held before anything the listing shows could finish, and 1 s (`STEP_WAIT`) when one step must finish first, such as the check before a held fetch.
+  - At least one functional test keeps the real wait (`list_prs.rs`'s `a_held_pr_request_with_nothing_stored_ends_at_the_budget_with_only_the_hint`). Performance tests never set the variable: the held-worker gates assert that the wait lasted at least 3 s, so a leaked override fails them.
 - Tests of the report itself (`perf_flag.rs`, `worktree::timing` unit tests) may read `Timings`; they check its shape and reconciliation, not its speed.
 - The human report's layout is tested in two layers. Unit tests in `cli/src/perf/tests.rs` render synthetic trees at a fixed width and check exact rows: shares, remainders under a millisecond, over-attribution, and worker sections of every status. `cli/tests/level2_list_perf.rs` runs the real `wt list --perf` in a tmux pane at 80, 100, and 120 columns against a local `origin`. It checks the structure only, because durations vary: tree connectors, `[n git]` suffixes, percentages on sequential rows, `—` on concurrent and worker rows (the worker heading included), aligned value and share columns, and no wrapped rows.
 

@@ -10,6 +10,9 @@ the `rust-testing` skill; graph tests are in [git-graph.md](git-graph.md#tests).
 - Test origins use `example.invalid` hosts so a user `insteadOf` rule cannot
   rewrite them.
 - Tests inject the source, so they count requests with a stub.
+- Build fixture repositories with the shared helpers in
+  [fixtures.md](fixtures.md) (config written to the file, `fast-import`,
+  template copies), not one `git` process per setting or commit.
 - `wt` colors stderr even when captured; set `NO_COLOR=1` when asserting text.
 - Every fixture that can spawn a detached worker must release it in a drop guard
   (`list_prs::ReleaseOnDrop`), so a failed assertion still closes the
@@ -145,6 +148,41 @@ connection, then `close_held()` and wait until neither lock is `Contended`
 used by `list_prs::finish_worker`). A free PR lock alone no longer proves the
 worker is gone.
 
+To prove a teardown *waits* (rather than racing a worker that happens to
+exit quickly), hold the reply until teardown is waiting:
+`MixedFixture::on_teardown_wait(nudge)` runs `nudge` before each probe its
+`Drop` makes, and a `FakeGitea::before_reply` that blocks on the flag the
+nudge sets answers only then
+(`list_prs::a_failed_assertion_while_a_pr_request_is_held_still_reaps_the_worker_before_the_fixture_goes`).
+A teardown that skips the wait never releases the reply, so the worker
+outlives the fixture and the test fails. Never use a fixed sleep there.
+
+### Shortening a held listing's wait
+
+A listing whose worker is held past the wait would otherwise sit out the
+real 3 s. Set `WT_TEST_WAIT_BUDGET_MS` (`worktree_cli::env::TEST_WAIT_BUDGET_VAR`)
+on that one command: `list_prs::held(command)`,
+`remote_fixture::Fixture::list_within(budget)`. Seam details:
+[list-remote.md](list-remote.md#seams).
+
+- `HELD_WAIT` (300 ms): the worker is held before anything the listing
+  asserts could finish.
+- `STEP_WAIT` (1 s, `list_remote_head.rs`): one step must end inside the wait
+  while a later one is held. Examples: the check before a held fetch
+  (still pulling), or the second listing's contender exiting so it adopts.
+  At 300 ms these pass alone, but give them margin under suite load.
+- A listing that must see the worker *answer* (the second listing after a
+  release) keeps the real wait.
+- If the store is read after a short wait, synchronize on the held request
+  first (`gate.wait_for_runs(1)`, `origin.wait_for_requests`). With 300 ms
+  the worker may not have recorded its attempt by the time the listing
+  returns.
+- Keep `a_held_pr_request_with_nothing_stored_ends_at_the_budget_with_only_the_hint`
+  on the real 3 s path. Never set the variable in a `perf_` test: the
+  held-worker gates assert a wait of at least 3 s.
+- A release-profile test run ignores the variable. Those tests then pass
+  on the 3 s wait, only more slowly.
+
 ### Real-Git live-head proofs
 
 - `cli/tests/list_remote_head.rs`: local bare `origin`, a `pusher` clone, and
@@ -166,7 +204,7 @@ worker is gone.
   can see zero workers under heavy host load (load average 40+): once 10 s
   pass from the worker's launch, its check deadline kills the held
   transport and the worker exits. A run near 10 s rather than the usual
-  3.4 s is load, not a regression; rerun before investigating.
+  1 s is load, not a regression; rerun before investigating.
 - Binary tests find receipts by prefix beside the store
   (`list_flags::receipts_beside`), since the wait deletes them.
 - Library transport tests reuse `live_remote::tests::Loopback` (the module is
