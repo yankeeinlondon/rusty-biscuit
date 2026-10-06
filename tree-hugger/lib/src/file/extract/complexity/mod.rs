@@ -7,6 +7,7 @@
 //! decorators, attributes and return types never count.
 
 use super::*;
+use crate::analysis::counters::count_complexity_walk;
 
 mod javascript;
 mod rust;
@@ -65,7 +66,9 @@ fn rules_for(language: ProgrammingLanguage) -> Option<&'static Rules> {
 /// language has no reviewed rules, a visited node is an error or missing
 /// node, or the total does not fit in `u32`.
 pub(crate) fn cyclomatic(body: CallableBody<'_>, language: ProgrammingLanguage) -> Option<u32> {
-    count(body, rules_for(language)?)
+    let rules = rules_for(language)?;
+    count_complexity_walk();
+    count(body, rules)
 }
 
 fn count(body: CallableBody<'_>, rules: &Rules) -> Option<u32> {

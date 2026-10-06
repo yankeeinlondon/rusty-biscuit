@@ -798,14 +798,14 @@ fn new_record_fields_read_per_shape() {
 /// records now carry, so `SymbolRecord -> SymbolInfo -> SymbolRecord` is
 /// lossy for them, by design: structured generic parameters and
 /// constraints, `extends`/`implements`, raw attributes, the `metrics` facet
-/// (and so `lines`), and every modifier other than `Static`,
+/// (and so `lines` and `cyclomatic`: never invented), and every modifier other than `Static`,
 /// `StaticStorage` and `Async` come back empty. Pinned over every source of
 /// the generics, modifiers, body-lines and relations matrices; each loss
 /// must actually occur somewhere, so a fixed adapter flips this test.
 #[test]
 fn record_only_declaration_facts_are_lost_through_the_older_model() {
     let dir = tempfile::TempDir::new().expect("temp");
-    let mut lost = [0usize; 6];
+    let mut lost = [0usize; 7];
     for (label, path) in crate::symbols_relations::write_declaration_fact_sources(dir.path()) {
         let index = TreeFile::new(&path).expect("parse").symbol_index_v2().expect("complete index");
         for record in index.symbols {
@@ -832,9 +832,10 @@ fn record_only_declaration_facts_are_lost_through_the_older_model() {
             lost[3] += usize::from(!record.attributes.is_empty());
             lost[4] += usize::from(record.metrics.as_ref().is_some_and(|metrics| metrics.lines.is_some()));
             lost[5] += usize::from(back.modifiers.len() < record.modifiers.len());
+            lost[6] += usize::from(record.metrics.as_ref().is_some_and(|metrics| metrics.cyclomatic.is_some()));
         }
     }
-    for (fact, count) in ["generic parameters", "constraints", "relations", "attributes", "lines", "modifiers"]
+    for (fact, count) in ["generic parameters", "constraints", "relations", "attributes", "lines", "modifiers", "cyclomatic"]
         .iter()
         .zip(lost)
     {

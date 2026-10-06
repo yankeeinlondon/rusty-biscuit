@@ -10,7 +10,7 @@ use std::path::Path;
 use serde_json::Value;
 use tempfile::TempDir;
 use tree_hugger::{
-    AnalysisPass, Capability, MetricsFacet, SourceFile, SymbolKindV2, SymbolQuery, SymbolRecord, TreeFile,
+    AnalysisPass, Capability, MetricsFacet, SourceFile, SymbolId, SymbolKindV2, SymbolQuery, SymbolRecord, TreeFile,
     TreeHuggerError, TriState, VisibilityLevel, WorkCounters, work_counters,
 };
 
@@ -267,6 +267,100 @@ fn flags_and_metrics_run_with_the_declarations_only() {
     assert!(plain.index.symbols.iter().all(|record| record.metrics.is_none()
         && !record.visibility.is_deprecated
         && !record.visibility.is_test));
+}
+
+pub(crate) type ComplexitySource = (&'static str, &'static str, &'static [(&'static str, Option<u32>)]);
+
+/// One source per complexity case: a reviewed language's callables with a
+/// body (`Some`), bodyless ones (`None`), and a language without counting
+/// rules (`None` for every record, the other metrics still measured).
+/// `(file name, source, expected cyclomatic by name)`.
+pub(crate) const COMPLEXITY_SOURCES: [ComplexitySource; 4] = [
+    (
+        "walks.rs",
+        "fn branch(x: bool) -> u8 { if x { 1 } else { 2 } }\nstruct S;\nimpl S { fn both(&self) -> bool { true && false } }\ntrait T { fn bodyless(&self); }\n",
+        &[("branch", Some(2)), ("both", Some(2)), ("bodyless", None), ("S", None), ("T", None)],
+    ),
+    (
+        "walks.js",
+        "function coalesce(a) { return a ?? 1; }\nclass K { plain() { return 1; } }\n",
+        &[("coalesce", Some(2)), ("plain", Some(1)), ("K", None)],
+    ),
+    (
+        "walks.ts",
+        "function sign(a: number): number { return a > 0 ? 1 : 0; }\ninterface I { declared(): void; }\n",
+        &[("sign", Some(2)), ("declared", None), ("I", None)],
+    ),
+    (
+        "walks.go",
+        "package p\n\nfunc branch(a bool) int {\n\tif a {\n\t\treturn 1\n\t}\n\treturn 0\n}\n",
+        &[("branch", None)],
+    ),
+];
+
+/// The complexity walk runs only under `Capability::Metrics`, once per
+/// measured callable of a language with counting rules: no other capability
+/// (alone or all together) walks a body, a language without rules walks
+/// none, and the complete index walks no more than a metrics-only query.
+/// Record IDs and qualified names do not depend on whether it ran.
+#[test]
+fn complexity_is_walked_only_for_metrics_once_per_measured_callable() {
+    let dir = TempDir::new().expect("temp");
+    let without_metrics: Vec<Capability> =
+        Capability::ALL.into_iter().filter(|capability| *capability != Capability::Metrics).collect();
+    for (name, source, expected) in COMPLEXITY_SOURCES {
+        let path = write(&dir, name, source);
+        let mut identities: Option<Vec<(SymbolId, String)>> = None;
+        let queries = [
+            SymbolQuery::new(),
+            SymbolQuery::new().capabilities([Capability::Flags]),
+            SymbolQuery::new().capabilities(without_metrics.iter().copied()),
+            SymbolQuery::new().capabilities([Capability::Metrics]),
+            SymbolQuery::complete_index(),
+        ];
+        for query in queries {
+            let cell = format!("{name}: {query:?}");
+            let (result, work) =
+                counted(|| SourceFile::read(&path).expect("read").query(&query).expect("query"));
+            let records = &result.index.symbols;
+            let identity: Vec<(SymbolId, String)> =
+                records.iter().map(|record| (record.id.clone(), record.identity.qualified_name.clone())).collect();
+            assert_eq!(identities.get_or_insert_with(|| identity.clone()), &identity, "{cell}: IDs and qualified names");
+            if !query.requires(Capability::Metrics) {
+                assert_eq!(work.complexity_walks, 0, "{cell}: walks without metrics");
+                assert!(records.iter().all(|record| record.metrics.is_none()), "{cell}: a metrics facet");
+                continue;
+            }
+            for (symbol, cyclomatic) in expected {
+                let record = records
+                    .iter()
+                    .find(|record| record.identity.name == *symbol)
+                    .unwrap_or_else(|| panic!("{cell}: no `{symbol}` record"));
+                let metrics = record.metrics.as_ref().unwrap_or_else(|| panic!("{cell}: `{symbol}` has no facet"));
+                assert_eq!(metrics.cyclomatic, *cyclomatic, "{cell}: `{symbol}` cyclomatic");
+                assert!(metrics.has_docs.is_some(), "{cell}: `{symbol}` lost has_docs beside complexity");
+            }
+            let measured = records
+                .iter()
+                .filter(|record| record.metrics.as_ref().is_some_and(|metrics| metrics.cyclomatic.is_some()))
+                .count();
+            assert_eq!(work.complexity_walks, measured as u64, "{cell}: one walk per measured callable");
+        }
+    }
+    // The language without rules still measures its function's other metrics.
+    let go = write(&dir, "walks.go", COMPLEXITY_SOURCES[3].1);
+    let metrics = TreeFile::new(&go).expect("parse").query(&SymbolQuery::new().capabilities([Capability::Metrics]))
+        .expect("query")
+        .index
+        .symbols
+        .into_iter()
+        .find(|record| record.identity.name == "branch")
+        .and_then(|record| record.metrics)
+        .expect("Go metrics");
+    assert_eq!(
+        metrics,
+        MetricsFacet { parameters: Some(1), has_docs: Some(false), lines: Some(6), cyclomatic: None }
+    );
 }
 
 #[test]

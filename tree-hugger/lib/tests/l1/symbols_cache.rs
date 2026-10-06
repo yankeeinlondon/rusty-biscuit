@@ -1243,3 +1243,49 @@ fn path_meaning_rows_hold_on_warm_hits() {
     }
     assert!(rows >= 30, "the written-base rows ran ({rows})");
 }
+
+/// Complexity through the cache: a declarations-only entry widened by
+/// Metrics parses once and walks each measured callable once; the entry then
+/// stores every `cyclomatic` value, a `null` included (a language without
+/// counting rules or a bodyless declaration), and a warm Metrics request is
+/// a `Hit` that parses and walks nothing. So an unavailable value is cached
+/// like a number, never recomputed on every run.
+#[test]
+fn complexity_is_stored_once_and_served_on_warm_hits() {
+    let sources = TempDir::new().expect("sources");
+    let declarations = SymbolQuery::new();
+    let metrics = SymbolQuery::new().capabilities([Capability::Metrics]);
+    for (name, source, expected) in crate::symbols_query::COMPLEXITY_SOURCES {
+        let path = sources.path().join(name);
+        std::fs::write(&path, source).expect("write source");
+        let dir = TempDir::new().expect("temp");
+        let cache = cache_in(&dir);
+        let (_, _, work) = cached(&cache, read(&path), &declarations);
+        assert_eq!(work.complexity_walks, 0, "{name}: a declarations-only entry walks nothing");
+
+        let (lookup, widened, work) = cached(&cache, read(&path), &metrics);
+        assert_eq!(lookup, CacheLookup::WidenedCapabilities { parsed: true }, "{name}: widened");
+        assert_eq!(work.parser_constructions, 1, "{name}: one parse");
+        let measured = expected.iter().filter(|(_, cyclomatic)| cyclomatic.is_some()).count();
+        assert_eq!(work.complexity_walks, measured as u64, "{name}: one walk per measured callable");
+        assert_eq!(widened, uncached(&path, &metrics), "{name}: widened result");
+
+        let entry = read_entry(&only_entry(&dir));
+        for (symbol, cyclomatic) in expected {
+            let record = entry["records"]
+                .as_array()
+                .expect("entry records")
+                .iter()
+                .find(|record| record["identity"]["name"] == *symbol)
+                .unwrap_or_else(|| panic!("{name}: the entry has no `{symbol}`"));
+            assert_eq!(record["metrics"]["cyclomatic"], json!(cyclomatic), "{name}: stored `{symbol}`");
+        }
+
+        for query in [&metrics, &declarations] {
+            let (lookup, served, work) = cached(&cache, read(&path), query);
+            assert_eq!(lookup, CacheLookup::Hit, "{name}: then {query:?}");
+            assert_eq!(work, WorkCounters::default(), "{name}: then {query:?}");
+            assert_eq!(served, uncached(&path, query), "{name}: then {query:?}");
+        }
+    }
+}

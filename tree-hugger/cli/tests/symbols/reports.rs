@@ -799,3 +799,82 @@ fn control_sequences_and_markup_in_source_are_shown_literally() {
     let plain = scratch.stdout(&["--plain", "functions"]);
     assert!(!plain.contains('\u{1b}') && plain.contains("\\u{1b}[31m"), "{plain:?}");
 }
+
+/// `metrics.cyclomatic` reaches the reports that already request metrics,
+/// and no other: `--json-full` carries the key on every record, a number
+/// for a measured callable and `null` (never `0`) where it is unavailable,
+/// identical cold, warm and uncached; `--json` and `--jsonl` listings
+/// compute no metrics unless a selector reads them (`--undocumented`,
+/// `--min-params`), and then carry the same values; `--stats` adds no
+/// complexity statistic.
+#[test]
+fn cyclomatic_is_reported_only_where_metrics_already_are() {
+    let scratch = Scratch::new(&[
+        ("walks.rs", "fn branch(x: bool) -> u8 { if x && !x { 1 } else { 2 } }\ntrait T { fn bodyless(&self); }\n"),
+        ("walks.js", "function coalesce(a) { return a ?? (a || 1); }\n"),
+        ("walks.go", "package p\n\nfunc branch(a bool) int {\n\tif a {\n\t\treturn 1\n\t}\n\treturn 0\n}\n"),
+    ]);
+    let uncached = json_of(&scratch.stdout(&["--json-full", "functions", "--no-cache"]));
+    let cold = json_of(&scratch.stdout(&["--json-full", "functions"]));
+    let warm = json_of(&scratch.stdout(&["--json-full", "functions"]));
+    assert_eq!(cold, uncached, "cold run");
+    assert_eq!(warm, uncached, "warm run");
+    let cyclomatic = |file: &str, name: &str| -> Value {
+        let index = uncached["indexes"]
+            .as_array()
+            .expect("indexes")
+            .iter()
+            .find(|index| index["file"] == file)
+            .unwrap_or_else(|| panic!("no index for {file}"));
+        let record = index["symbols"]
+            .as_array()
+            .expect("symbols")
+            .iter()
+            .find(|record| record["identity"]["name"] == name)
+            .unwrap_or_else(|| panic!("no `{name}` in {file}"));
+        record["metrics"]
+            .get("cyclomatic")
+            .unwrap_or_else(|| panic!("`{name}` in {file} has no cyclomatic key"))
+            .clone()
+    };
+    assert_eq!(cyclomatic("walks.rs", "branch"), Value::from(3));
+    assert_eq!(cyclomatic("walks.rs", "bodyless"), Value::Null, "a bodyless declaration");
+    assert_eq!(cyclomatic("walks.js", "coalesce"), Value::from(3));
+    assert_eq!(cyclomatic("walks.go", "branch"), Value::Null, "a language without counting rules");
+
+    let listing = json_of(&scratch.stdout(&["--json", "functions"]));
+    let lines = lines_of(&scratch.stdout(&["functions", "--jsonl"]));
+    assert_eq!(lines.len(), 4, "every function is listed");
+    let capability_lists = listing["files"]
+        .as_array()
+        .expect("files")
+        .iter()
+        .chain(lines.iter())
+        .map(|entry| &entry["completed_capabilities"]);
+    for capabilities in capability_lists {
+        assert!(!capabilities.as_array().expect("capabilities").contains(&Value::from("metrics")), "{capabilities}");
+    }
+    let records = json_records(&listing).into_iter().chain(lines.iter().map(|line| line["record"].clone()));
+    for record in records {
+        assert!(record.get("metrics").is_none(), "a listing record carries metrics: {record}");
+    }
+
+    let selected = json_of(&scratch.stdout(&["--json", "functions", "--undocumented"]));
+    let selected_lines = lines_of(&scratch.stdout(&["functions", "--jsonl", "--min-params", "1"]));
+    let selected_records: Vec<Value> = json_records(&selected)
+        .into_iter()
+        .chain(selected_lines.iter().map(|line| line["record"].clone()))
+        .collect();
+    assert_eq!(selected_records.len(), 4 + 3, "every undocumented function, every one with a parameter");
+    for record in &selected_records {
+        let file = record["source"]["file_path"].as_str().expect("file_path");
+        let name = record["identity"]["name"].as_str().expect("name");
+        let value = record["metrics"].get("cyclomatic").unwrap_or_else(|| panic!("`{name}` in {file}: no key: {record}"));
+        assert_eq!(*value, cyclomatic(file, name), "`{name}` in {file}: {record}");
+    }
+
+    for args in [&["--json", "functions", "--stats"][..], &["functions", "--stats"]] {
+        let stats = scratch.stdout(args);
+        assert!(!stats.contains("cyclomatic") && !stats.contains("complexity"), "{args:?}: {stats}");
+    }
+}

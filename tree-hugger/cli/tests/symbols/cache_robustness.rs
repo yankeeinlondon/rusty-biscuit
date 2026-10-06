@@ -477,6 +477,19 @@ fn columns() -> Vec<Column> {
             public: |out| record(out, METHOD)["metrics"]["lines"].clone(),
             outcomes: [S(json!(3)), R, S(Value::Null), R, R, R, S(json!(0)), R, R],
         },
+        // Python has no counting rules, so a count is set first and the
+        // stored value (not a recomputed `null`) is what reaches the output.
+        // An absent key (an entry from before the key) is rejected, never
+        // read as `null`, and no list or object is a count.
+        Column {
+            name: "metrics.cyclomatic",
+            target: Target::Record(METHOD),
+            path: &["metrics", "cyclomatic"],
+            control: Some(json!(3)),
+            empty: Some(json!([])),
+            public: |out| record(out, METHOD)["metrics"]["cyclomatic"].clone(),
+            outcomes: [S(json!(3)), R, S(Value::Null), R, R, R, R, R, R],
+        },
         Column {
             name: "source.declaration_text",
             target: Target::Record(METHOD),
@@ -969,12 +982,12 @@ fn the_cache_entry_records_the_coverage_it_holds() {
     }
 }
 
-/// `metrics.lines` is a `u32`: a fraction, a negative count and a count past
-/// `u32::MAX` reject the entry (recomputed), while `u32::MAX` itself is
-/// served. These are the wrong-number cells the matrix's one `WrongType`
-/// (a string) does not reach.
+/// `metrics.lines` and `metrics.cyclomatic` are `u32`s: a fraction, a
+/// negative count, a count past `u32::MAX`, a Boolean and an object reject
+/// the entry (recomputed), while `u32::MAX` itself is served. These are the
+/// wrong-type cells the matrix's one `WrongType` (a string) does not reach.
 #[test]
-fn metrics_lines_serves_only_a_u32_count() {
+fn metrics_counts_serve_only_a_u32() {
     let scratch = Scratch::new(&[(FILE, PYTHON_FIXTURE)]);
     let uncached = json_of(&scratch.stdout(&UNCACHED_ARGS));
     json_of(&scratch.stdout(&CACHED_ARGS));
@@ -988,23 +1001,28 @@ fn metrics_lines_serves_only_a_u32_count() {
     let temp = TempDir::new().expect("cell temp");
     let cell_entry = temp.path().join(&relative_entry);
     std::fs::create_dir_all(cell_entry.parent().expect("entry parent")).expect("create shard");
-    for (value, served) in [
-        (json!(3.5), false),
-        (json!(-1), false),
-        (json!(4_294_967_296_u64), false),
-        (json!(4_294_967_295_u32), true),
-    ] {
-        let mut edited = original.clone();
-        rename_record(&mut edited, SENTINEL_FROM, SENTINEL_TO);
-        record_mut(&mut edited, METHOD)["metrics"]["lines"] = value.clone();
-        std::fs::write(&cell_entry, serde_json::to_string(&edited).expect("serialize")).expect("write entry");
-        let output = json_of(&stdout_of(scratch.hug_with_temp(temp.path(), &CACHED_ARGS), &CACHED_ARGS));
-        if served {
-            assert!(has_sentinel(&output), "lines {value}: served");
-            assert_eq!(record(&output, METHOD)["metrics"]["lines"], value, "lines {value}: stored value");
-        } else {
-            assert!(!has_sentinel(&output), "lines {value}: rejected");
-            assert_eq!(output, uncached, "lines {value}: recomputed like an uncached run");
+    for key in ["lines", "cyclomatic"] {
+        for (value, served) in [
+            (json!(3.5), false),
+            (json!(-1), false),
+            (json!(4_294_967_296_u64), false),
+            (json!(true), false),
+            (json!({}), false),
+            (json!(4_294_967_295_u32), true),
+        ] {
+            let cell = format!("{key} {value}");
+            let mut edited = original.clone();
+            rename_record(&mut edited, SENTINEL_FROM, SENTINEL_TO);
+            record_mut(&mut edited, METHOD)["metrics"][key] = value.clone();
+            std::fs::write(&cell_entry, serde_json::to_string(&edited).expect("serialize")).expect("write entry");
+            let output = json_of(&stdout_of(scratch.hug_with_temp(temp.path(), &CACHED_ARGS), &CACHED_ARGS));
+            if served {
+                assert!(has_sentinel(&output), "{cell}: served");
+                assert_eq!(record(&output, METHOD)["metrics"][key], value, "{cell}: stored value");
+            } else {
+                assert!(!has_sentinel(&output), "{cell}: rejected");
+                assert_eq!(output, uncached, "{cell}: recomputed like an uncached run");
+            }
         }
     }
 }

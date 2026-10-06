@@ -13,6 +13,7 @@ static PARSER_CONSTRUCTIONS: AtomicU64 = AtomicU64::new(0);
 static DEFINITION_CAPTURES: AtomicU64 = AtomicU64::new(0);
 static SHARED_CONTEXT_STEPS: AtomicU64 = AtomicU64::new(0);
 static RELATION_LINKS: AtomicU64 = AtomicU64::new(0);
+static COMPLEXITY_WALKS: AtomicU64 = AtomicU64::new(0);
 
 /// A snapshot of the process-wide work counts.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -40,6 +41,10 @@ pub struct WorkCounters {
     /// index and, in Rust, walks its impls. One analysis runs it once,
     /// however many records it selects.
     pub relation_links: u64,
+    /// Callable bodies walked to count `metrics.cyclomatic`: one per
+    /// measured callable of a language with counting rules, and none for a
+    /// query without metrics or a language without rules.
+    pub complexity_walks: u64,
 }
 
 impl WorkCounters {
@@ -51,6 +56,7 @@ impl WorkCounters {
             definition_captures: self.definition_captures - earlier.definition_captures,
             shared_context_steps: self.shared_context_steps - earlier.shared_context_steps,
             relation_links: self.relation_links - earlier.relation_links,
+            complexity_walks: self.complexity_walks - earlier.complexity_walks,
         }
     }
 }
@@ -69,6 +75,7 @@ pub fn work_counters() -> WorkCounters {
         definition_captures: DEFINITION_CAPTURES.load(Ordering::Relaxed),
         shared_context_steps: SHARED_CONTEXT_STEPS.load(Ordering::Relaxed),
         relation_links: RELATION_LINKS.load(Ordering::Relaxed),
+        complexity_walks: COMPLEXITY_WALKS.load(Ordering::Relaxed),
     }
 }
 
@@ -90,4 +97,8 @@ pub(crate) fn count_shared_context_steps(steps: usize) {
 
 pub(crate) fn count_relation_link() {
     RELATION_LINKS.fetch_add(1, Ordering::Relaxed);
+}
+
+pub(crate) fn count_complexity_walk() {
+    COMPLEXITY_WALKS.fetch_add(1, Ordering::Relaxed);
 }
