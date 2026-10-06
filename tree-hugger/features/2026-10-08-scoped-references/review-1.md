@@ -18,6 +18,7 @@ recurrence: false
 created: 2026-10-06T13:06:44-07:00
 spec: 2026-10-08-scoped-references/spec.md
 implemented: true
+next: 2026-10-08-scoped-references/review-2.md
 implemented_by: claude/opus
 log: tree-hugger/features/2026-10-08-scoped-references/log.md
 description: "A **feature** review of `2026-10-08-scoped-references/spec.md`"
