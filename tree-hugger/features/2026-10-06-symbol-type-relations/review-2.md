@@ -32,7 +32,9 @@ reviewed_by: codex/gpt-6.1-sol
 recurrence: true
 created: 2026-10-05T20:25:48-07:00
 spec: 2026-10-06-symbol-type-relations/spec.md
-implemented: false
+implemented: true
+implemented_by: codex/gpt-6.1-sol
+log: 2026-10-06-symbol-type-relations/log.md
 description: "A **feature** review of `2026-10-06-symbol-type-relations/spec.md`"
 feature: 2026-10-06-symbol-type-relations/review-2.md
 previous: 2026-10-06-symbol-type-relations/review-1.md

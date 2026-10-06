@@ -172,3 +172,12 @@ their category. These are documented boundaries of the accepted behavior.
 
 **Implementation complete, ready for review.** The feature remains active;
 the author closes the review cycle and moves it when appropriate.
+
+### Review cycle 2 complete
+
+All three review-2 findings are implemented: the Python scope repair,
+permanent cache robustness coverage, and the C#/Swift/Scala readers under
+the author's accepted Option B. `review-2.md` is marked `implemented: true`.
+The review's original findings and readiness judgment remain the historical
+assessment; a new review will assess the repaired implementation. The feature
+remains active and ready for review iteration 3.
