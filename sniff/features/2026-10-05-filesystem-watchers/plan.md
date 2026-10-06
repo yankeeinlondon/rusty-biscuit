@@ -1,7 +1,7 @@
 ---
 total_phases: 7
 created: 2026-10-05
-phase: 3
+phase: 6
 agent: claude/sonnet
 yolo: true
 source_files_during_phase_1: []
@@ -14,6 +14,7 @@ skills_files_updated_during_phase_1:
   - .claude/skills/os/windows.md
 packages:
   - sniff
+  - sniff-cli
 source_files_during_phase_2:
   - sniff/lib/Cargo.toml
   - sniff/lib/src/performance/counters.rs
@@ -83,6 +84,25 @@ docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
   - .claude/skills/sniff/SKILL.md
   - .claude/skills/os/windows.md
+source_files_during_phase_6:
+  - sniff/cli/src/args/filesystem.rs
+  - sniff/cli/src/args/mod.rs
+  - sniff/cli/src/commands/filesystem_query.rs
+  - sniff/cli/src/commands/mod.rs
+  - sniff/cli/src/output/filesystem/query.rs
+  - sniff/cli/src/output/filesystem/mod.rs
+  - sniff/cli/src/output/mod.rs
+  - sniff/cli/tests/l1/filesystem_query.rs
+  - sniff/cli/tests/l1/main.rs
+  - sniff/cli/tests/l1/snapshots/l1__snapshots__help_output.snap
+docs_updated_during_phase_6:
+  - sniff/docs/cli/filesystem_query.md
+  - sniff/docs/topics/filesystem-query.md
+  - sniff/cli/README.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+  - .claude/skills/sniff/cli.md
+  - .claude/skills/sniff/testing.md
 ---
 
 # Plan: Filesystem process and watcher discovery
@@ -173,6 +193,7 @@ in the implementation log; the spec stays unchanged.
       contract is a separate decision outside this feature.
       Consequence under option 1: `--timeout` and CLI help must say "stops
       scheduling work", never "returns within".
+      **Author confirmed option 1 on 2026-10-06.**
 - [x] **R2 - Hang-prone native operations (gates Phase 5).** Under option 1 the
       spec says such operations must be isolated safely or omitted with an
       explicit capability limitation. Ruling: omit any Windows operation that
@@ -180,6 +201,11 @@ in the implementation log; the spec stays unchanged.
       `NtQueryObject` name queries on synchronous pipe/console handles) and
       report it as a structured limitation; do not add a helper executable in
       this release.
+      **Author ruling 2026-10-06: option D, the file-side query.** Windows
+      handle owners come from opening each tree entry ourselves and asking
+      `NtQueryInformationFile(FileProcessIdsUsingFileInformation)`. That call
+      did not block in any hang scenario (spikes S2d-S2f in the log), so no
+      foreign handle is duplicated or resolved and no helper ships.
 - [x] **R3 - Per-thread Linux enumeration.** Ruling: enumerate `/proc/<pid>` only
       (thread-group leaders), never `/proc/<pid>/task/*`, and read fd tables from
       the process directory.
@@ -455,17 +481,28 @@ Gated `#[cfg(windows)]`. Depends on Wave 3, R2, and S2. Not WSL2.
 
 ### Wave 6 (parallel, with Phases 3 and 4)
 
-- [ ] **Handle owners** - focused backend (binding per S2); do not use
-      `filelocksmith` in-process; enumerate system handles with a size-retry
-      loop for undersized buffers (no silently dropped entries); resolve only
-      handles that can be inspected without risking an indefinite block (R2);
-      compare by file id + volume serial where possible, else Windows-aware path
-      comparison; evidence `open_handle`; protected-process and architecture
-      (WOW64) inspection failures recorded as limitations, never swallowed.
-      **Blocked (Phase 5):** awaits the author's R2 answer (spec
-      `human_review_items`, in-process omission vs a killable helper). Until
-      then `open_handles` reports `unsupported` on Windows with the hang as its
-      reason; no option was chosen.
+- [ ] **Handle owners (R2 option D, file-side query)** - for each entry of the
+      already-walked tree (the walk gives the type; never open anything that is
+      not a file or directory, because opening a pipe path connects to it):
+      `CreateFileW` with `FILE_READ_ATTRIBUTES`, `FILE_SHARE_READ |
+      FILE_SHARE_WRITE | FILE_SHARE_DELETE`, `OPEN_EXISTING`,
+      `FILE_FLAG_BACKUP_SEMANTICS` for directories, `\\?\` spelling; then
+      `NtQueryInformationFile(…, FileProcessIdsUsingFileInformation = 47)`
+      starting with a 4 KiB buffer and growing on `STATUS_INFO_LENGTH_MISMATCH`
+      / `STATUS_BUFFER_OVERFLOW` (each retry repeats the costly call); close.
+      Each returned PID becomes an `open_handle` record for that path, joined
+      to the existing enumeration and identity (creation token) per PID; a PID
+      not in the enumeration is opened for identity as other candidates are.
+      No foreign handle is duplicated, so `PROCESS_DUP_HANDLE` is not needed.
+      Scheduling: directories before files; entries under `target/`,
+      `node_modules/`, and git-ignored paths last; all on a scoped pool of
+      `min(available_parallelism, 8)` threads that is always joined; stop
+      scheduling when the R1 budget expires and report the unreached entries
+      as `partial` coverage. Per-entry open failures are recorded, not
+      swallowed; `STATUS_DELETE_PENDING` is a named limitation (its holders
+      cannot be seen). The calling process is never reported by the call; this
+      is caller exclusion, not a blind spot (S2f).
+      Do not use `filelocksmith` in-process.
 - [x] **Loaded modules** - enumerate modules per candidate process as a distinct
       `loaded_module` mechanism with its own coverage record; handle failures
       (access denied, process exited) recorded.
@@ -485,7 +522,10 @@ Gated `#[cfg(windows)]`. Depends on Wave 3, R2, and S2. Not WSL2.
       **Partly done (Phase 5):** case-sensitive, verbatim, case-variant,
       short-name, and unpaired-surrogate tests exist for module paths, plus a
       live child found by its loaded executable. The open-file and
-      directory-handle child test waits on the Handle owners task (R2).
+      directory-handle child test waits on the Handle owners task. It must
+      also cover a child blocked in `LockFileEx` and one blocked in a
+      synchronous `ReadDirectoryChangesW`, both reported without the query
+      hanging, and budget exhaustion leaving `partial` coverage.
 
 Checkpoint: Windows L1 tests green on the native Windows host; any capability
 omitted under R2 documented as a limitation in report output and tests.
@@ -498,7 +538,7 @@ for the final checkpoint). Load the `cli` and `biscuit-terminal` skills.
 
 ### Wave 7 (parallel)
 
-- [ ] **Args** - `filesystem query <PATH>` as a subcommand of `filesystem` in
+- [x] **Args** - `filesystem query <PATH>` as a subcommand of `filesystem` in
       `cli/src/args/mod.rs`; `PATH` is an `OsString`/`PathBuf` positional (non-
       UTF-8 accepted); `--target-only`; `--timeout <MS>` with a clap value parser
       rejecting zero, negative, malformed, and overflowing values (exit 2);
@@ -506,13 +546,13 @@ for the final checkpoint). Load the `cli` and `biscuit-terminal` skills.
       `--latest-versions` when combined with `query` through clap
       (usage error, exit 2); `--base` does not rebase. Subcommand help text per
       R1 wording; dynamic path/reference completions reused.
-- [ ] **Dispatch** - handle `filesystem query` before ordinary detection-plan
+- [x] **Dispatch** - handle `filesystem query` before ordinary detection-plan
       construction (no repository inventory, remote, or network work); resolve
       textual references through `biscuit-file` `FileReference` (local only; non-
       local rejected before probing; failure is a typed target error, never a
       current-directory fallback); keep the original reference separate from the
       native path; ordinary non-UTF-8 paths bypass string conversion.
-- [ ] **Human rendering** - new module under `cli/src/output/filesystem/` using
+- [x] **Human rendering** - new module under `cli/src/output/filesystem/` using
       `biscuit-terminal` `TerminalRenderable` (`Prose`, lists, `Table`): target,
       processes with PID and available identity, matched paths and evidence,
       then coverage and limitations. Coverage/limitations on stdout, also in
@@ -520,16 +560,16 @@ for the final checkpoint). Load the `cli` and `biscuit-terminal` skills.
       sequences and newlines neutralized in display only; truncation per R5 with
       an omitted-count line; never overstates deletion contention. Rendering
       consumes the captured report (no second query).
-- [ ] **JSON and perf** - `--json` serializes the library report once before
+- [x] **JSON and perf** - `--json` serializes the library report once before
       writing; `--json` beats `--plain`; with `--perf`, use `print_json_value` so
       data and `performance` are one document; rendered performance summary on
       stderr; stdout always valid JSON.
-- [ ] **Exit codes and errors** - `usable` -> 0; `unavailable`/`unsupported` ->
+- [x] **Exit codes and errors** - `usable` -> 0; `unavailable`/`unsupported` ->
       1 with full report on stdout; typed query or resolution error -> 1 with
       stderr diagnostic (and `{"error":{"kind","message"}}` on stdout in JSON
       mode); output-write failure via the CLI error path; match presence never
       changes the exit code; no special-empty-result failure.
-- [ ] **CLI tests** - in `cli/tests/l1` using the existing isolated process
+- [x] **CLI tests** - in `cli/tests/l1` using the existing isolated process
       fixture and runtime-resolved test binary: text/JSON equivalence from an
       injected/retained observation (hidden test seam, not a public flag);
       partial, empty, skipped, unsupported, and total-failure outputs with exit

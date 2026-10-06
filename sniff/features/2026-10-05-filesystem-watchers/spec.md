@@ -27,9 +27,11 @@ reviewed_on: 2026-10-05
 review_iterations: 0
 related:
   - 2026-10-05-graceful-file-contention
-human_review: true
+human_review: false
 human_review_items:
   - |-
+    **Answered 2026-10-06 by the author: Option 1.** `wt` adopting the "stops scheduling work" contract stays a separate decision outside this feature (R8).
+
     **How strict is the `--timeout` / two-second limit? (Phase 2 is built on Option 1; please confirm before Phase 6 writes the CLI help)**
 
     The spec leaves this as an open question for you. Some operating-system calls can hang (for example on a stalled disk or network share), and no safe way exists to interrupt them inside the caller's program. Phase 2 has now built the public types and the budget logic on Option 1 below, as the plan allowed. Choosing Option 2 or 3 now means reworking that code.
@@ -44,8 +46,12 @@ human_review_items:
       - Pros: a hard promise where it is possible.
       - Cons: removes most of the useful evidence, especially on Windows.
 
+    **Update after Phase 6 (2026-10-06):** the `sniff filesystem query` command is built with Option 1 wording: `--timeout` "stops scheduling discovery work" and the help says it "is not a limit on when the command returns". Choosing Option 2 or 3 now also means rewording that help text and `sniff/docs/cli/filesystem_query.md`.
+
     **Recommendation: Option 1** for macOS and Linux, where the spikes found no call that hangs in normal use. Windows is decided separately in the next item. Please also confirm that `wt` will accept "stops scheduling work" wording before it adopts the API (`wt` adoption itself is outside this feature).
   - |-
+    **Answered 2026-10-06 by the author: Option D (added after spikes S2d-S2f), not A, B, or C.** Instead of resolving another process's handle, Sniff opens each tree entry itself (attribute-only, full sharing) and asks Windows which processes have it open (`NtQueryInformationFile`, `FileProcessIdsUsingFileInformation`). This query did not hang in the `LockFileEx`, synchronous `ReadDirectoryChangesW`, or pipe-server scenarios, needs no elevation and no access to other processes, and ships no helper. It costs about 6 ms per entry at 100k system handles, so it runs folders first, then files, on a bounded thread pool within the Option 1 budget, and reports what it did not reach. Details and numbers: Phase 1 addendum in `implementation-log.md`.
+
     **Windows: how to read which file another program has open without risking a hang (needed before Phase 5, the Windows backend)**
 
     **Update after Phase 5 (2026-10-06):** without your answer, Phase 5 built everything on Windows that both options need: Sniff finds programs and libraries (DLLs) loaded from inside a folder, and reliably identifies each process. It does **not** yet find files that other programs hold open on Windows; it says so in every report ("unsupported", with the reason). That is exactly what Option A ships, so choosing A needs no more code. Choosing B means adding the helper on top of what exists. Phase 6 (the command-line tool) does not depend on this choice, but the open-file test on Windows and the Phase 5 "Handle owners" task stay unfinished until you answer.
@@ -66,16 +72,20 @@ human_review_items:
 
     **Recommendation: Option B**, because it keeps the feature useful on Windows without breaking the spec's safety rules. If the packaging cost is not acceptable for this release, choose **Option A** and treat Windows handle discovery as a follow-up feature; do not choose Option C.
 message_to_agent: |-
-  Phases 2-5 are built in `sniff/lib/src/filesystem/query/`: the core, Linux/WSL2 (`linux.rs`), macOS (`macos.rs`), and the Windows loaded-module backend (`win32.rs`, module `win32` so it does not shadow the `windows` crate). Read the Phase 5 section of `implementation-log.md` first.
+  Phases 2-6 are built. Read the Phase 6 section of `implementation-log.md` first; Phase 5's notes on Windows still apply.
 
-  Phase 5 is only partly done. The "Handle owners" task (Windows open-handle evidence) and the open-file/directory-handle child test are BLOCKED on the author's answer to the second `human_review_items` entry (R2). Windows reports `open_handles` as `unsupported`, with the hang as its reason. Do not build handle inspection, and do not choose Option A or B yourself. If the author answers B, the helper is added on top of `ModuleBackend`. If A, nothing more is needed beyond checking the task off with that resolution.
+  Both review items were answered on 2026-10-06 (see `human_review_items` and the "Phase 1 addendum" in `implementation-log.md`):
+  - R1 (deadline contract): Option 1 confirmed. The existing "stops scheduling work" wording in the CLI help and docs stays as it is.
+  - R2 (Windows handle owners): Option D, the file-side query. Before Phase 7, finish the Phase 5 "Handle owners" task as now written in `plan.md`, plus the open-file/directory-handle part of "Windows tests". Read the S2d-S2f findings in the log and the `os` skill (`windows.md`, "Asking which processes have a path open") first. Then run Phase 7.
 
-  For Phase 6 (CLI):
-  - R1 (first review item: "stops scheduling work" vs a hard return deadline) gates the `--timeout` help text. If it is still unanswered, write the option-1 wording ("stops scheduling work after"), never "returns within", and keep the item open.
-  - The CLI renders whatever mechanisms a report carries. On Windows that is `loaded_modules` evidence (`kind: loaded_module`, no `access`/`descriptor`), and four `unsupported` records with `reason` text. Do not special-case per OS in the CLI; render `coverage` generically.
-  - On Windows, `matched_paths` are under the verbatim `\\?\` canonical root (existing core behavior); `observed_path` keeps the OS spelling. Human rendering may want `biscuit_file::canonicalize_simplified`-style display, but JSON must stay the report as captured.
-  - `win32_tests::spellings::a_case_sensitive_directory_...` fails (rather than skips) where `fsutil file setCaseSensitiveInfo` is refused. It passes on build-win-native; hosted `windows-latest` is unverified. If it is red after a push to `main`, see the `os` skill (`windows.md`) before changing it.
-  - `just cross-check` has no lint mode. On build-win-native the SSH shell is PowerShell (`Set-Location B:\coding\<clone>`, not `cd /d`). Windows `clippy --all-targets -D warnings` fails on pre-existing lints in unrelated files (listed in the log); `--lib` is clean.
+  Phase 6 facts that matter for Phase 7:
+  - The CLI is `sniff/cli/src/{args/filesystem.rs,commands/filesystem_query.rs,output/filesystem/query.rs}`; tests are `sniff/cli/tests/l1/filesystem_query.rs` (18) plus unit tests in the CLI lib target.
+  - `sniff/docs/cli/filesystem_query.md` was rewritten to the shipped behavior and the topic page's "Planned: CLI" marker was removed in Phase 6, so Phase 7 reviews those pages rather than writing them. The CLI README gained one line only; the library README was not touched.
+  - Hidden test seam: `SNIFF_FILESYSTEM_QUERY_REPLAY=<report.json>` makes the command render that report instead of querying. It is documented as "not a supported interface". The test fixture scrubs inherited `SNIFF_*` variables.
+  - Only sigil file references (`@ & ^ ~ vault:`) go through biscuit-file; ordinary paths go to the library unchanged. A directory resolves as the first `NonFile` candidate because biscuit-file matches regular files only.
+  - The three pre-parse `std::env::args()` scans in `sniff/cli/src/commands/mod.rs` were switched to `args_os` (non-UTF-8 argv panicked before clap).
+  - Gates: macOS `just test` 3270/3270, `just lint` and strict clippy (`--all-targets -D warnings`, with and without `test-fixtures`) clean; Linux 138/138 and native Windows 134/134 for the `filesystem` filter via `just cross-check sniff-cli`; WSL2 not run (no WSL-specific CLI path).
+  - The Phase 7 acceptance-traceability row for spec item 7 maps to `filesystem_query.rs`; item 1's "no inventory" proof is `a_live_json_perf_query_is_one_object_and_does_no_inventory` (counters limited to `filesystem.query.*`/`filesystem.io.*`).
 ---
 
 # Filesystem process and watcher discovery

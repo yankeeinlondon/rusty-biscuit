@@ -13,6 +13,7 @@ skills_files_updated_during_phase_1:
   - .claude/skills/os/windows.md
 packages:
   - sniff
+  - sniff-cli
 source_files_during_phase_2:
   - sniff/lib/Cargo.toml
   - sniff/lib/src/performance/counters.rs
@@ -82,6 +83,25 @@ docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
   - .claude/skills/sniff/SKILL.md
   - .claude/skills/os/windows.md
+source_files_during_phase_6:
+  - sniff/cli/src/args/filesystem.rs
+  - sniff/cli/src/args/mod.rs
+  - sniff/cli/src/commands/filesystem_query.rs
+  - sniff/cli/src/commands/mod.rs
+  - sniff/cli/src/output/filesystem/query.rs
+  - sniff/cli/src/output/filesystem/mod.rs
+  - sniff/cli/src/output/mod.rs
+  - sniff/cli/tests/l1/filesystem_query.rs
+  - sniff/cli/tests/l1/main.rs
+  - sniff/cli/tests/l1/snapshots/l1__snapshots__help_output.snap
+docs_updated_during_phase_6:
+  - sniff/docs/cli/filesystem_query.md
+  - sniff/docs/topics/filesystem-query.md
+  - sniff/cli/README.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+  - .claude/skills/sniff/cli.md
+  - .claude/skills/sniff/testing.md
 ---
 
 # Implementation Log for 2026-10-05-filesystem-watchers (7 phases)
@@ -1028,3 +1048,221 @@ lifetime test. Both checks were restored, and 18/18 pass.
 - `just check-tier-coverage sniff`: nothing stranded.
 - No pre-existing failures in the tests run; no requirement skipped except
   the R2-blocked handle-owner work.
+
+## Phase 6
+
+Phase 6 builds the `sniff filesystem query <PATH>` command in `sniff-cli`.
+The library is unchanged: the CLI resolves the target, calls
+`query_path_usage` once, and projects the captured report to text or JSON.
+R1 is still unanswered, so `--timeout` help and docs use the option-1
+wording ("stops scheduling work"; "not a limit on when the command
+returns"). The R2 Windows handle-owner question does not affect the CLI,
+which renders whatever coverage a report carries.
+
+### What was built
+
+| File | Contents |
+| --- | --- |
+| `cli/src/args/filesystem.rs` (new) | `FilesystemSubcommand::Query(FilesystemQueryArgs)`: `PATH` as `OsString` with `ValueHint::AnyPath` (clap's dynamic path completion), `--target-only`, `--timeout <MS>` through `parse_timeout`, subcommand after-help on advisory meaning and exit codes |
+| `cli/src/args/mod.rs` | `Filesystem` gains `subcommand` and `args_conflicts_with_subcommands = true`; top-level help lists the command; 8 parser unit tests (`args::tests::filesystem_query`) |
+| `cli/src/commands/filesystem_query.rs` (new) | `run` (exit-code mapping, JSON/text projection, fallible stdout write), `resolve_target`, the replay seam, 4 unit tests |
+| `cli/src/commands/mod.rs` | Dispatch right after the help check, before any detection plan; the three `std::env::args()` pre-parse scans changed to `args_os` |
+| `cli/src/output/filesystem/query.rs` (new) | `render_path_usage` through `Prose`, `InlineProse`, and `UnorderedList`; `literal`/`neutralize`; R5 caps; space-only wrapping; `UNWRAPPED_WIDTH` |
+| `cli/src/output/{mod.rs,filesystem/mod.rs}` | Module registration and re-exports |
+| `cli/tests/l1/filesystem_query.rs` (new), `cli/tests/l1/main.rs` | 18 L1 integration tests |
+| `cli/tests/l1/snapshots/l1__snapshots__help_output.snap` | Two added help lines (metadata header left as it was) |
+
+### Decisions and departures from the plan
+
+- **Replay seam is an environment variable, always compiled.** The plan asks
+  for a hidden test seam that is not a public flag. `SNIFF_FILESYSTEM_QUERY_REPLAY`
+  names a JSON report file; the command strictly deserializes it (the Phase 2
+  reader rejects malformed shapes) and renders it instead of querying. Gating
+  it behind `test-fixtures` would have stranded the tests locally, because
+  local L1 runs without that feature (`local-features = []`). The test
+  fixture already scrubs inherited `SNIFF_*` variables. Documented in
+  `docs/cli/filesystem_query.md` as "not a supported interface".
+- **Only sigil references go through `FileReference`.** Relative, absolute,
+  and non-UTF-8 paths are passed to the library unchanged, so a relative path
+  resolves against the invocation directory (spec) and no string conversion
+  happens. `@ & ^ ~ vault:` resolve with `resolve_detailed`; because
+  `biscuit-file` matches regular files only, the target is the first
+  candidate whose disposition is `Matched` or `NonFile` (directories), in the
+  reference's own order. `&`, `^`, and `@` get the enclosing Git root from
+  `find_git_root`; no package-scope catalog, since that needs repository
+  inventory. URLs are rejected before probing (`nonlocal_reference`).
+  Consequence: an ordinary path containing `{{VAR}}` is not interpolated.
+- **The original reference is shown in text, not added to JSON.** The
+  report's `requested` field is what the library received (the resolved
+  path for a reference). Text shows a `Reference:` line; JSON stays the
+  unmodified library report, per "without CLI-side filtering or inference".
+- **No `print_json_value`.** It prints with `println!` and
+  `unwrap_or_default()`, which would write an empty line on a serialization
+  failure and panic on a closed pipe. The command uses the same
+  `attach_performance` to make one document, serializes to a string first,
+  then writes with `write_all`/`flush` and returns I/O errors through the
+  CLI error path.
+- **Rendered `--perf` summary goes to stderr in every mode**, text included
+  (spec: rendered performance diagnostics belong on stderr).
+- **Typed errors bypass `main`'s `Error:` path.** The command prints its own
+  neutralized `Error: …` on stderr, the JSON error object on stdout in JSON
+  mode, and exits 1, so the diagnostic is not printed twice.
+- **Overflowing `--timeout`.** `parse_timeout` rejects non-integers, zero,
+  values above `u64::MAX`, and durations `Instant::now()` cannot add. `u64::MAX`
+  milliseconds is representable on macOS, so it is accepted there (the
+  library would then run without a practical limit); the first test draft
+  expected exit 2 and was corrected.
+- **Wrapping.** The default `WordWrap` breaks at `-` and `/` and hyphenates
+  long words, which split temp-dir paths across lines at 80 columns. Text now
+  wraps only at spaces, and when stdout is not a terminal it lays out at
+  4096 columns so piped output never splits a path. On a terminal a path
+  longer than the window still wraps.
+- **Neutralization before escaping.** `Prose::escape_text` passes CSI and OSC
+  sequences through, so `literal` first rewrites control characters (C0, DEL,
+  C1) and bidirectional overrides to `\n`, `\u{1b}`, … and then escapes.
+  Stderr diagnostics are neutralized too; JSON keeps the original values.
+- **Non-UTF-8 argv panic fixed.** `run()` scanned `std::env::args()` for
+  `--plain` (and two other helpers did the same), which panics on a
+  non-UTF-8 argument before clap sees it. All three now use `args_os`.
+- **Completions.** Sniff had no path or file-reference completer to reuse;
+  `ValueHint::AnyPath` gives clap's dynamic path completion (verified with
+  `COMPLETE=fish`). Reference-sigil completion (`@…`) is not offered.
+- **Human display of Windows paths** keeps the report's `\\?\` spelling of
+  `matched_paths`; no lexical simplification was added.
+
+### Requirement-to-test mapping
+
+Integration tests are in `sniff/cli/tests/l1/filesystem_query.rs` (the `l1`
+binary, no tier marker, default features); unit tests are in the `sniff-cli`
+lib target.
+
+| Requirement | Tests |
+| --- | --- |
+| Text and JSON are projections of one retained report; JSON is the unfiltered report | `text_and_json_are_projections_of_one_retained_report` |
+| `--json` beats `--plain` | `json_wins_over_plain` |
+| Partial report: usable, exit 0 | `a_partial_report_is_usable_and_exits_zero`, `text_and_json_...` |
+| Empty report: exit 0, says no matches is not proof | `an_empty_usable_report_exits_zero_and_does_not_claim_the_target_is_unused` |
+| Skipped (`not_attempted`, budget), total failure, unsupported: exit 1, full report on stdout, empty stderr | `non_usable_reports_exit_one_with_the_full_report_on_stdout`, `a_skipped_report_says_the_budget_ran_out` |
+| Match presence does not change the exit code | `match_presence_does_not_change_the_exit_code` |
+| R5 truncation in text only, with omitted counts | `long_lists_are_shortened_in_text_only_and_say_how_much_was_left_out` |
+| Hostile names/paths/messages (markup, ANSI CSI, OSC 8, BEL, newline, CR, bidi) shown literally in styled and plain text; JSON exact | `hostile_names_and_paths_are_shown_literally_and_kept_exact_in_json` |
+| `--plain` has no escape codes and keeps coverage/limitations | `plain_text_carries_no_escape_codes`, `text_and_json_...` |
+| Never overstates deletion contention | `text_and_json_...` (no "blocks"; "does not prove … will fail") |
+| `--json --perf` one object; structured performance; rendered summary on stderr; no inventory (only `filesystem.query.*`/`filesystem.io.*` counters, one tree walk, one enumeration) | `a_live_json_perf_query_is_one_object_and_does_no_inventory` |
+| No `performance` without `--perf`; stdout/stderr separation | `without_perf_there_is_no_performance_field` |
+| `--target-only`, `--timeout` reach the library | `target_only_and_timeout_reach_the_library`, `args::tests::filesystem_query::target_only_and_timeout_parse` |
+| Relative path resolves against the invocation dir; `--base` ignored | `a_relative_path_resolves_against_the_invocation_directory_not_base` |
+| Runtime error JSON shape (`missing_target`, `reference_not_found`, `nonlocal_reference`); text mode stdout empty | `runtime_errors_have_the_stated_json_shape`, `commands::filesystem_query::tests::*` |
+| Malformed replay is an error, never an empty report | `a_malformed_replay_is_an_error_not_an_empty_report` |
+| Invalid args exit 2 with no stdout (missing path, bad timeouts, inventory flags on either side of `query`) | `invalid_arguments_exit_two_without_a_report`, `args::tests::filesystem_query::*` |
+| Bare `filesystem` and its flags unchanged | `args::tests::filesystem_query::the_bare_filesystem_report_keeps_its_inventory_flags`, existing `cli::test_filesystem_subcommand_*`, `global_flags::scoped_flags_parse_for_supported_commands` |
+| Non-UTF-8 argument stays native (Unix) | `a_non_utf8_argument_reaches_the_query_as_native_bytes`, `args::tests::filesystem_query::a_non_utf8_path_stays_native`, `commands::filesystem_query::tests::a_non_utf8_path_passes_through_without_conversion` |
+| Non-UTF-8 directory queried and serialized losslessly (Linux; APFS rejects such names) | `a_non_utf8_directory_is_queried_and_serialized_losslessly` |
+
+The Input Robustness Matrix applies only to the replay reader, which is the
+Phase 2 report reader unchanged (its matrix is asserted there); the CLI adds
+`a_malformed_replay_is_an_error_not_an_empty_report` for its own path.
+
+Mutation checks: rendering without `neutralize` fails the hostile-name test;
+mapping every report to exit 0 fails the non-usable and match-presence tests.
+Both were restored and the suite is green.
+
+### Gates run
+
+- macOS (local): `just test` in `sniff/` passed, 3270 run, 3270 passed,
+  33 skipped (after accepting the two-line help snapshot change). `just lint`
+  is clean. `cargo clippy -p sniff-cli --all-targets [--features
+  test-fixtures] -- -D warnings` is clean. The library was not changed.
+- Linux (`just cross-check sniff-cli --os linux filesystem`): 138/138,
+  including the non-UTF-8 directory test.
+- Native Windows (`just cross-check sniff-cli --os windows filesystem`):
+  134/134.
+- WSL2 not run: the CLI has no WSL-specific path, and the Linux leg ran the
+  same code.
+- `just check-tier-coverage sniff`: nothing stranded.
+- Manual checks on macOS: a `tail -f` child in a temp tree is reported by
+  working directory and open handle, the `app-copy` sibling is not; `&sniff`,
+  `^justfile`, `@README.md` resolve; `~` with a 300 ms budget reports
+  `unavailable` (exit 1) because the home-tree walk exhausts the budget.
+- No pre-existing failures; nothing skipped.
+
+## Phase 1 addendum: author rulings and spikes S2d-S2f (2026-10-06)
+
+This section is recorded after Phase 6. It answers both `human_review_items`
+and reopens the Phase 5 "Handle owners" task. No shipped source changed.
+
+### Rulings
+
+- **R1: option 1 confirmed by the author.** Nothing changes: the library,
+  CLI help, and docs already say "stops scheduling work". Whether `wt`
+  accepts that contract is a separate decision outside this feature (R8).
+- **R2: option D, chosen by the author, replaces options A, B, and C.**
+  The question changes from "which file is this foreign handle?" to "which
+  processes have this path open?" Sniff opens each tree entry itself and
+  calls `NtQueryInformationFile(FileProcessIdsUsingFileInformation)`.
+  Restart Manager uses this call internally. No foreign handle is
+  duplicated or resolved, so the S2 hang does not apply. It needs no
+  elevation and no helper executable. The plan's Handle owners task is
+  rewritten to match.
+
+### Spikes
+
+All spikes ran on build-win-native in scratch crates outside the
+repository. The elevated SSH session was used except where noted.
+
+**S2d: hang, coverage, edge cases.** Each scenario ran 5 trials on `B:`
+(ReFS) and 5 on `C:` (NTFS).
+
+| Scenario | Result |
+| --- | --- |
+| Holder blocked in `LockFileEx` on a synchronous handle (the S2 hang) | No hang; the waiter's and lock holder's PIDs returned |
+| Holder blocked in synchronous `ReadDirectoryChangesW` | No hang; the watcher's PID returned; our open and close did not wake the watcher |
+| Synchronous pipe server in `ConnectNamedPipe` | Open fails fast (231). Opening the pipe path connected to the server as a client, so the backend must never open a non-file, non-directory path |
+| Open file, open directory, cwd, loaded DLL, running exe | PID reported, on the exact path only. Nothing rolls up to ancestors, so ancestor matching is Sniff's job |
+| Holder opened with share mode 0 | Still found |
+| Delete pending (classic and POSIX) | Open fails with `STATUS_DELETE_PENDING`; the holder cannot be seen |
+| Path longer than 260 characters | Works with `\\?\`; fails without it |
+| Restart Manager | No directory support (error 5), no long-path support (error 29), slower per path, and a missing path returns success with an empty list. Not used |
+
+**S2e: cost.** The host had 12 logical cores and about 100k system handles.
+
+- Each call scans system-wide state. It costs about 4 ms plus about 25 µs
+  per 1,000 system handles, whether or not the path has holders: 6 ms at
+  100k handles, 29 ms at 1.1M. The file system (ReFS or NTFS) made no
+  difference.
+- Parallel calls scale almost linearly up to the core count: 5,051 entries
+  take 30 s on 1 thread, 4.5 s on 8, and 3.1 s on 12. No kernel lock
+  serializes them.
+- On real checkouts, 12 threads cover about 3,200 entries in 2 s:
+  - a checkout without `target\` (2,345 directories) completed all its
+    directories in 1.4 s;
+  - clones with `target\` (4,300-5,300 directories, 32k-53k entries)
+    completed about 63% of their directories in 2 s;
+  - with `target\` excluded, those clones' directories fit in 2 s.
+  Files alone would need 10-35 s.
+
+**S2f: permissions and caller exclusion.**
+
+- A normal, non-elevated desktop session saw the same holders as the
+  elevated one: 240 PIDs on `ntdll.dll`, including System (PID 4) and
+  other users' processes, against 236 elevated; 177 against 174 on
+  `System32`. The full S2d matrix gave the same results non-elevated.
+- Holders that opened with attribute-only access, `SYNCHRONIZE` only, or no
+  access at all were all reported, for both files and directories. The
+  calling process never appears in its own results. That is caller
+  exclusion, not a blind spot for low-access handles.
+
+### Consequences for Phase 5
+
+- Scheduling follows from the cost: directories first, then files;
+  `target/`, `node_modules/`, and git-ignored entries last; a scoped,
+  always-joined pool of `min(available_parallelism, 8)` threads. Eight
+  threads gave 6.8× in S2e and leave capacity for interactive callers.
+  When the budget expires, unreached entries make the mechanism `partial`.
+- A cwd or `ReadDirectoryChangesW` watcher appears as a holder of its
+  directory. It is reported as `open_handle` evidence on that directory.
+  The separate cwd and subscription mechanisms stay `unsupported`, because
+  Windows cannot tell those handles apart from other directory handles.
+- New limitations to document: delete-pending entries are invisible; cost
+  scales with the system's handle count; opening an entry on a hung network
+  redirector can block, which is the same R1 overrun risk every OS carries.
