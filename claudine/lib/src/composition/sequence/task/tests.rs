@@ -119,16 +119,44 @@ impl BackgroundedDescendant {
     /// — so the test failed at its own deadline rather than on the behavior.
     /// Making publication a precondition of the command completing also
     /// removes the vacuous case where nothing was ever backgrounded. `exit 90`
-    /// bounds the wait at ~10 s so a broken fixture fails loudly instead of
-    /// hanging.
+    /// bounds the wait at ~60 s so a broken fixture fails loudly instead of
+    /// hanging. The budget is deliberately long: every iteration forks
+    /// `/bin/sleep`, so the loop's wall-clock cost and the descendant's
+    /// publication delay stretch together under load — a short attempt budget
+    /// can give up on a descendant that was merely starved, failing the test
+    /// on fixture timing rather than on the behavior under test.
     fn background(&self, body: &str) -> String {
         format!(
             "/bin/sh -c 'echo $$ > \"{pid}\"; {body}' & \
              attempts=0; while [ ! -s \"{pid}\" ]; do \
-             attempts=$((attempts + 1)); [ $attempts -lt 1000 ] || exit 90; \
+             attempts=$((attempts + 1)); [ $attempts -lt 6000 ] || exit 90; \
              sleep 0.01; done;",
             pid = self.pid_path.display(),
         )
+    }
+
+    /// A body that performs `action` only when the descendant outlived the
+    /// command shell — the survivor tell every reap contract asserts never
+    /// fires.
+    ///
+    /// Gated on the parent's death, not on a fuse. The first form was
+    /// `sleep 1; <action>`: the descendant acted one second after it started
+    /// and the test asserted the reap landed first. Under full-suite load the
+    /// kill chain — the command shell noticing the pid file, its first stdout
+    /// byte, the capture thread reading it, the 20 ms wait poll, the group
+    /// SIGKILL — once took ~30 s, so the marker landed ahead of a *working*
+    /// reap and the test reported a leak that never happened. The reap kills
+    /// the descendant and its parent in one broadcast, so a reaped descendant
+    /// never observes the death at any load; a genuine survivor sees the
+    /// parent go (a zombie still answers `kill -0`, so the observation waits
+    /// for the epilogue's `child.wait`) and acts within one poll interval.
+    /// The trailing `sleep 30` keeps a survivor alive past `REAP_DEADLINE` so
+    /// `assert_reaped`'s pid watch reports it by pid — it exits on its own,
+    /// so a failed run leaves nothing behind. `action` must not contain
+    /// single quotes: the body is interpolated into a single-quoted
+    /// `/bin/sh -c '…'` string by [`Self::background`].
+    fn survivor_action(action: &str) -> String {
+        format!("while kill -0 $PPID 2>/dev/null; do sleep 0.1; done; {action}; sleep 30")
     }
 
     /// Block until the recorded process is gone, then drop the pid file.
@@ -1634,7 +1662,10 @@ mod shell_tasks {
             .run(
                 &format!(
                     "{} echo done",
-                    descendant.background(&format!("sleep 1; echo late > \"{}\"", marker.display())),
+                    descendant.background(&BackgroundedDescendant::survivor_action(&format!(
+                        "echo late > \"{}\"",
+                        marker.display()
+                    ))),
                 ),
                 Duration::from_secs(30),
                 None,
@@ -1698,7 +1729,10 @@ mod shell_tasks {
         let result = SystemTaskShell::failing_wait().run(
             &format!(
                 "{} echo started; sleep 300",
-                descendant.background(&format!("sleep 1; echo late > \"{}\"", marker.display())),
+                descendant.background(&BackgroundedDescendant::survivor_action(&format!(
+                    "echo late > \"{}\"",
+                    marker.display()
+                ))),
             ),
             Duration::from_secs(300),
             None,
@@ -1990,7 +2024,7 @@ mod shell_streaming {
             .run(
                 &format!(
                     "{} printf 'now\\n'",
-                    descendant.background("sleep 1; printf 'late\\n'"),
+                    descendant.background(&BackgroundedDescendant::survivor_action("printf late")),
                 ),
                 Duration::from_secs(30),
                 None,
@@ -2045,7 +2079,7 @@ mod shell_streaming {
         let result = SystemTaskShell::failing_wait().run(
             &format!(
                 "{} printf 'buffered\\n'; sleep 300",
-                descendant.background("sleep 1; printf 'late\\n'"),
+                descendant.background(&BackgroundedDescendant::survivor_action("printf late")),
             ),
             Duration::from_secs(300),
             None,
