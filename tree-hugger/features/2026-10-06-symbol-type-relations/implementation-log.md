@@ -75,6 +75,52 @@ docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
   - .claude/skills/tree-hugger/SKILL.md
   - .claude/skills/tree-hugger/api-reference.md
+source_files_during_phase_4:
+  - tree-hugger/lib/src/file/extract/modifiers.rs
+  - tree-hugger/lib/src/file/extract/attributes.rs
+  - tree-hugger/lib/src/file/tree_file.rs
+  - tree-hugger/lib/src/file/mod.rs
+  - tree-hugger/lib/src/file/query.rs
+  - tree-hugger/lib/tests/l1/symbols_modifiers.rs
+  - tree-hugger/lib/tests/l1/main.rs
+  - tree-hugger/lib/tests/l1/symbols_coverage.rs
+  - tree-hugger/lib/tests/l1/symbols_flags.rs
+  - tree-hugger/cli/tests/symbols/report.rs
+  - tree-hugger/cli/tests/symbols/cache_upgrade.rs
+  - tree-hugger/cli/tests/symbols/cache_robustness.rs
+  - tree-hugger/cli/tests/fixtures/golden/symbols.json
+  - tree-hugger/cli/tests/fixtures/golden/symbols.jsonl
+docs_updated_during_phase_4:
+  - tree-hugger/docs/symbol-schema-design.md
+  - tree-hugger/docs/symbol-kinds-and-visibility.md
+  - tree-hugger/docs/cache-design.md
+  - tree-hugger/lib/README.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/tree-hugger/SKILL.md
+  - .claude/skills/tree-hugger/api-reference.md
+source_files_during_phase_5:
+  - tree-hugger/lib/src/file/extract/classify.rs
+  - tree-hugger/lib/src/file/extract/metrics.rs
+  - tree-hugger/lib/src/file/tree_file.rs
+  - tree-hugger/lib/src/file/mod.rs
+  - tree-hugger/lib/src/file/query.rs
+  - tree-hugger/lib/tests/l1/symbols_metrics.rs
+  - tree-hugger/lib/tests/l1/symbols_coverage.rs
+  - tree-hugger/lib/tests/l1/symbols_query.rs
+  - tree-hugger/cli/tests/symbols/report.rs
+  - tree-hugger/cli/tests/symbols/cache_upgrade.rs
+  - tree-hugger/cli/tests/symbols/cache_robustness.rs
+  - tree-hugger/cli/tests/fixtures/golden/symbols.json
+  - tree-hugger/cli/tests/fixtures/golden/symbols.jsonl
+docs_updated_during_phase_5:
+  - tree-hugger/docs/symbol-kinds-and-visibility.md
+  - tree-hugger/docs/symbol-schema-design.md
+  - tree-hugger/docs/cache-design.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .claude/skills/tree-hugger/SKILL.md
+  - .claude/skills/tree-hugger/api-reference.md
 ---
 
 # Implementation Log for 2026-10-06-symbol-type-relations (9 phases)
@@ -622,3 +668,413 @@ the serialization's `skip_serializing_if = "Vec::is_empty"` encoding). Phase
 - `docs/cache-design.md`: `rev.19`.
 - Skill: `SKILL.md` (generics bullet, revision 19, stale-revision list),
   `api-reference.md` (record facets filled by extraction).
+
+## Phase 4
+
+Written modifiers and raw attributes, extractor revision 20. One owner; the
+three language groups were done in one pass because they share one reader
+per concern (`modifiers.rs`, `attributes.rs`) and one matrix file.
+
+### Probe (throwaway, deleted)
+
+An in-crate test (`src/file/probe_tmp.rs`, removed with its `mod` line)
+printed each capture's `declaration` node, its children and its preceding
+siblings for one snippet per language. What it settled:
+
+- TypeScript method decorators are `decorator:`-fielded **`class_body`
+  children before the `method_definition`**; field decorators are inside
+  `public_field_definition`; an exported class's decorator written before
+  `export` is on the `export_statement`; `export @d class` puts it on the
+  `class_declaration`. JavaScript (0.25.0) keeps method and field
+  decorators inside the member node.
+- A TS constructor parameter property is its own `required_parameter`
+  record (its `readonly` and decorator are the parameter's).
+- C++ `override`/`final` are `virtual_specifier` nodes inside the
+  `function_declarator`; a class's `final` is a `virtual_specifier` child of
+  the `class_specifier`; `virtual` is an anonymous token on the member
+  declaration.
+- Rust `let mut x` puts `mutable_specifier` directly on the
+  `let_declaration`; `&mut self` and `mut self` both put it on the
+  `self_parameter` (`&` distinguishes them); `self: &mut Self` is a
+  `parameter` whose `type` is a `reference_type`.
+- C#: each keyword is its own `modifier` node; Java: one `modifiers` node
+  with anonymous keyword tokens; Swift: `modifiers` → `inheritance_modifier`
+  / `member_modifier` / `mutation_modifier`; Scala: `modifiers` with
+  anonymous tokens; PHP: `abstract_modifier` / `final_modifier`.
+
+### 4.1 Modifier reader
+
+- New `extract/modifiers.rs::declaration_modifiers(declaration, name,
+  language)`; `records_from` extends `record.modifiers` with it inside the
+  `if wanted` block, before the one `normalize_modifiers` call. It reads
+  only tokens the declaration node itself owns (direct children, the
+  declaration's own modifier list, or for C++ the function declarator that
+  declares the captured name via `declared_function_named`), so a keyword
+  in a body, a string, a type (`size: readonly string[]`) or a parameter
+  never marks the declaration. No source text is scanned.
+- Per language (the table now lives in `docs/symbol-schema-design.md`):
+  Rust `Const`/`Unsafe` (`function_modifiers`), `unsafe trait`, `Mut` on
+  `let mut`, `static mut`, `mut x: T`, `mut self` and on a method whose
+  receiver is written with `mut`; C++ `virtual`, `override`, `final`
+  (members and classes); TS `abstract`, `override`, `Readonly`; Java
+  `abstract`, `final`; C# `abstract`, `override`, `virtual`, `sealed`,
+  `Readonly`; Swift `final`, `override`, `mutating`; Scala `abstract`,
+  `final`, `override`; PHP `abstract`, `final`.
+- **Decision: a `&mut self` receiver gives the method `Mut`, but the
+  `self` parameter record gets `Mut` only for `mut self`.** The spec's
+  "receiver `mut`" means the method's receiver is written with `mut`
+  (`&mut self`, `mut self`, `self: &mut Self`); the parameter record's own
+  `Mut` is the binding rule, and in `&mut self` the `mut` is the borrow's,
+  not the binding's.
+- **Decision: keywords outside the spec's language table are not read**:
+  Scala/Java `sealed`, Swift `open`/`nonmutating`, PHP `readonly`, C++
+  `constexpr`/`const` member functions. PHP `readonly` arguably meets the
+  generic "explicit declaration readonly" rule, but the table lists only
+  `abstract`/`final` for PHP; adding it is a one-line change if wanted.
+- Java and C# read the modifier list from the whole field/local
+  declaration, never the declarator: the host climb that
+  `declaration_attributes` already did inline is now the shared
+  `attributes::modifier_host`, used by both readers.
+
+### 4.2 Attribute population
+
+- `declaration_attributes` is hoisted out of the Flags closure in
+  `records_from`: it runs once per selected declaration, and both the
+  record's `attributes` (`Attribute::from`) and the flag readers take that
+  one list.
+- New TS/JS decorators (`ecma_decorators`): the `export` statement's, then
+  the TS `class_body` siblings directly before the member, then the
+  declaration's own; a parameter's are the parameter's.
+- Decorator expressions (Python, TS, JS share `decorator_attribute`): a
+  path is the name with no arguments; a call of a path is the path plus
+  the call's arguments; parentheses are read through (unchanged flag
+  behavior for `@(deprecated)`); **anything else keeps its whole
+  expression, as written and trimmed, as the name, with no arguments**
+  (`@(lambda f: f)` → `lambda f: f`, `@registry["  k "]` keeps the literal
+  whitespace). Before, Python token-joined such expressions
+  (`lambdaf:f`), which also compacted whitespace inside literals.
+- No flag changed: TS/JS deprecation reads only the doc block, and every
+  other flag reader matches exact names, which no "whole expression" name
+  can equal. `symbols_flags` is unchanged except for the assertion below.
+- Rust inner attributes (`#![…]`) and C# `[assembly: …]` never attach
+  (outer-only Rust walk; `global_attribute` is not under a declaration);
+  both pinned in the matrix.
+
+### Demonstrated grammar limit
+
+| Grammar | Snippet | Observation |
+|---|---|---|
+| tree-sitter-typescript 0.23.2 | `class A {\n  @(flag ? one : two) m() {}\n}` | syntax error: the decorator is `parenthesized_expression(identifier, ERROR(…))`; the grammar accepts only a path, a call of a path or a parenthesized one of those |
+| tree-sitter-javascript 0.25.0 | same snippet | syntax error (top-level `ERROR`); same restriction |
+
+So the spec's "unusual decorator expression" case exists only in Python.
+`@f()()` and `` @g `x` `` also fail to parse in TS (probe).
+
+### 4.3–4.5 Language groups and 4.6 merge
+
+`lib/tests/l1/symbols_modifiers.rs`, `MODIFIERS_MATRIX`, one row per
+language (16), checked on the complete index **and** a declarations-only
+`SymbolQuery::new().kinds([kind])` that must run only the parse pass;
+`symbols_coverage::every_language_has_one_row_in_each_report_matrix` now
+requires a `MODIFIERS_MATRIX` row per language.
+
+| Language | Status | Positive | Negative |
+|---|---|---|---|
+| Rust | supported | `const unsafe fn` + 5 attributes (repeat `#[allow()]` ×2, `cfg_attr` raw, `doc = "a  b"`), `async unsafe fn` + `tokio::test`, `mut` param/let, `static mut`, `unsafe trait`, `&mut self`/`mut self`/`self: &mut Self` methods, `const fn new` (`Static`, `Const`) | file `#![allow]` not on the first item; `unsafe {}` / string in body; `takes(mut count)` unmarked; `fixed`; `read(&self, other: &mut u8)` |
+| TypeScript | supported | `@sealed` before `export`, `abstract` class/method/property, `override` + two decorators, `readonly` field/interface property/parameter property, parameter decorator, `static async` | `run` (no inherited decorator), constructor (parameter's decorator not its), `size: readonly string[]` |
+| JavaScript | supported (decorators only) | class, method (two), field, `export @tagged class`, `static async` | no TS modifier invented |
+| Go | absent | — | function, struct with a field tag |
+| Python | supported (decorators only) | repeated `app.route` with raw value, `dataclass`, `abstractmethod`, `functools.cache`, lambda and subscript expressions, `staticmethod` method (`Static`), `async` | module-level `@staticmethod` gives no `Static`; no decorator implies a modifier |
+| Java | supported | class annotations (`Deprecated`, array value), repeated `@Override`, `abstract`/`final`, both declarators of one field, `static final`, `final` parameter and local | keyword in a body string |
+| C# | supported | `Serializable`, three attribute lists incl. `[return: NotNull]`, `abstract`/`virtual`/`override sealed`, `readonly` fields and struct, `sealed` class, `static async` | `[assembly: …]` not on `Shape`; keyword in body |
+| C | absent | — | `static` stays `StaticStorage` only; keyword in a string |
+| C++ | supported | `virtual`, `override`, member and class `final`, two `[[…]]` lists, `static` field, attribute through a member `template` | `const` member function not `Const`; `plain` with a keyword string; function-pointer parameter |
+| Swift | supported | `@available`/`@objc`, `final` class/property, `override`, `mutating` (also in a protocol), `static`, `async` | `nonmutating`, keyword in a body string |
+| Scala | supported | annotation with value, `abstract` class, `final override` method + `@inline`, `final val`, object member `Static` | abstract `def` without keyword, `sealed trait` |
+| PHP | supported (modifiers only) | `abstract`/`final` classes and methods, `static` | `#[Attribute]` not read (outside the required set) |
+| Perl, Bash, Zsh, Lua | absent | — | keyword-named function, keyword in a string; Perl `:lvalue` sub attribute not read |
+
+Plus `symbols_modifiers::modifiers_serialize_in_one_order_whatever_the_source_order`
+(C# `override sealed` vs `sealed override`, `static public async` vs
+`async static public` give the same JSON) and
+`modifiers_grammar_limits_hold_for_the_pinned_grammars` (the two rows above).
+
+### Revision, cache, goldens
+
+- `EXTRACTOR_REVISION` `"19"` → `"20"`; revision 19 added as a
+  `StaleRevision` (`OldKey::Computed`):
+  `cache_upgrade::entry_from_extractor_revision_nineteen_is_not_served_after_the_repairs`
+  (a revision-19 entry without `modifiers`/`attributes` is not served; the
+  repaired value is `[[Const, Unsafe], [[inline, null], [must_use,
+  "\"keep\""]]]`, then a warm hit).
+- `cache_robustness` gained an `attributes` column (on `static_method`,
+  whose `@staticmethod` is the control): absent and `[]` served as no
+  attributes (the field's `skip_serializing_if = "Vec::is_empty"`
+  encoding), every other shape rejected. That makes twenty-four columns.
+  Schema stays 4.1: filling existing fields is not a shape change.
+- Goldens regenerated; the diff is `rev.19 → rev.20` plus one `Mut` on
+  `grow(&mut self)` in `multi/rust.rs` (the multi tree has no attributes).
+
+### Changed tests (intended)
+
+- `symbols_flags::flags_are_set_exactly_by_each_languages_markers` asserted
+  "the attribute facet stays empty", the old contract. It now asserts the
+  facet is identical with and without `Capability::Flags` (same parse,
+  flags do not change it); the flag assertions themselves are unchanged.
+
+### Requirement → test
+
+| Requirement | Test |
+|---|---|
+| per-language modifiers and attributes; own tokens only (body, string, type, parameter negatives); wrapper/file attributes not spread; repeats, empty `()`, raw values, `cfg_attr` unexpanded; existing Static/StaticStorage/Async unchanged | `symbols_modifiers::modifiers_matrix_holds_on_complete_and_declarations_only_paths` |
+| declarations-only query carries them and runs only the parse pass | same test (selective path per declaration) |
+| one serialized order whatever the source order | `symbols_modifiers::modifiers_serialize_in_one_order_whatever_the_source_order` |
+| TS/JS decorator grammar limit | `symbols_modifiers::modifiers_grammar_limits_hold_for_the_pinned_grammars` |
+| 16-language row guard | `symbols_coverage::every_language_has_one_row_in_each_report_matrix` |
+| one attribute parse shared with flags; flags unchanged | `symbols_flags::flags_are_set_exactly_by_each_languages_markers` (facet equal with and without Flags; every flag cell unchanged), all other `symbols_flags` tests unchanged |
+| JSON / JSONL / `--json-full`, normal invocation, cache write then warm hit (`parsed 0 files`) | CLI `report::written_modifiers_and_attributes_reach_every_json_format` |
+| revision bump invalidates old entries; warm hit after | CLI `cache_upgrade::entry_from_extractor_revision_nineteen_is_not_served_after_the_repairs` |
+| cache reader shapes for `attributes` | CLI `cache_robustness::persisted_symbol_fields_are_served_or_recomputed_per_shape` (new column) |
+| existing raw-value reader unchanged | `attributes::tests::attributes_keep_their_raw_argument_text` (unchanged) |
+
+Input robustness matrix: no new file-format field. `attributes` and
+`modifiers` were already in the record schema; their cache shapes are now
+pinned by the `attributes` column and the existing two `modifiers` columns
+(absent/`[]` served, `null`, wrong type, one/every wrong element, duplicate
+key and trailing content rejected). Smell grep: their `#[serde(default)]`
+is the format's own encoding (`skip_serializing_if = "Vec::is_empty"`), so
+absent = empty by definition; no `unwrap_or_default`/`.ok()` on the reader.
+
+### Gates
+
+- `just test`: **1041 / 1041 passed** (Phase 3: 1035; +3 lib modifiers
+  tests, +1 CLI report test, +1 cache-upgrade test, +1 other — probably the
+  concurrent session's).
+- `just lint`: green (the Phase 3 note's foreign `type_complexity` /
+  `dead_code` errors are gone).
+- `just check-tier-coverage tree-hugger`: nothing stranded.
+- No rendering change, so `just test-l2` was not run. No OS-specific code
+  (no paths, `cfg`, processes), so no cross-check.
+
+### Docs and skill
+
+- `docs/symbol-schema-design.md`: "still empty" paragraph corrected (only
+  type relations remain empty), "when computed" row for attributes and
+  written modifiers, the Attributes and Modifiers section now states the
+  modifier table, attribute rules and examples, unread forms, the TS/JS
+  grammar limit, and the adapter loss (attributes and every modifier other
+  than Static/StaticStorage/Async).
+- `docs/symbol-kinds-and-visibility.md`: record facts row; decorators fill
+  `attributes` without marking flags.
+- `docs/cache-design.md`: `rev.20`, `attributes` record-field row,
+  twenty-four columns.
+- `lib/README.md`: schema-record bullets for modifiers and attributes.
+- `lib/src/file/query.rs`: `Capability::Declarations` doc lists generics,
+  written modifiers and attributes (drift: it predated Phase 3's generics).
+- Skill: `SKILL.md` (written-modifiers bullet, attribute facet filled,
+  revision 20, stale-revision list, twenty-four columns),
+  `api-reference.md` (record facets filled by extraction).
+
+### Comment drift found and fixed
+
+- `symbols_flags.rs` module doc and assertion said the attribute facet
+  stays empty → now "the same with or without the flags".
+- `attributes.rs::declaration_attributes` doc listed no TS/JS decorators →
+  lists them and the file-level forms that never attach.
+- `modifiers.rs` module doc said it reads only `async` → names
+  `declaration_modifiers`.
+- `query.rs` `Capability::Declarations` (above). The `Capability::Metrics`
+  doc still says "(`parameters` and `has_docs`)"; that is Phase 5's
+  metric and is left for Phase 5 / 9.4.
+
+### Notes
+
+- Files under `features/2026-10-03-symbol-filters-and-reports/` and
+  `fixes/_unscheduled/` changed during this session from another process;
+  not part of this phase, left alone.
+- Skipped: nothing. Pre-existing failures: none.
+
+## Phase 5
+
+Callable body-line metric (`metrics.lines`), extractor revision 22. One
+owner; the language groups share one reader (`callable_body_span`) and one
+matrix, so they were done in one pass.
+
+### Probe (throwaway, deleted)
+
+An in-crate test (`src/file/tree_file/probe_tmp.rs`, removed with its `mod`
+line) and an L1 test (`tests/l1/probe_tmp.rs`, removed) printed every
+callable's anchor, declaration, their children and the stored body span
+for every primary fixture and one snippet per language. What it settled:
+
+- Every grammar puts a callable's body under the `body` field (Rust,
+  TS/JS, Go, Java `constructor_body`, C#, C/C++, Swift `function_body`,
+  Scala, PHP, Perl, Bash/Zsh, Lua, Python). The old reader's type-body
+  fallbacks (`class_body`, `object_type`, …) are never a callable's body.
+- **C/C++ functions had no body span**: their anchor is the
+  `function_declarator`; the body is on the declaration
+  (`function_definition`). Only C/C++ callables have an anchor different
+  from their declaration (31 fixture records). Defaulted/deleted members
+  are `function_definition`s with `default_method_clause` /
+  `delete_method_clause` and no `body`; a function-try-block's `body` is
+  the `try_statement`.
+- **C# expression bodies kept `=>`**: the `body` is an
+  `arrow_expression_clause` (`=>` + expression), also for local functions
+  and constructors.
+- JS/TS arrows and Scala `def f = 1` already keep the introducer outside
+  the field; a returned arrow (`() => () => 1`) is the outer arrow's whole
+  expression body.
+- **Python and Lua**: the `block` starts at the first statement; a comment
+  before it (Lua: also after it) is a child of the function, beside the
+  block. **Lua omits the block of an empty body** (`function f() end` has
+  only `parameters` and `end`), so its body span was absent.
+- **Trailing whitespace inside the node**: tree-sitter-scala's braceless
+  `indented_block` runs over the blank lines up to the dedent
+  (`def b(x: Int): Int =\n  val y = x\n  y\n\ndef after = 1` spans to the
+  `def after` line); a Perl `block` includes its line break.
+- Go `type S struct {…}` and Go func literals, JS/TS function expressions,
+  PHP closures/arrow functions, Python lambdas, Rust closures are not
+  callable records (unchanged).
+
+### 5.1 Body node reader
+
+- New `classify.rs::callable_body_span(declaration, language, source)`,
+  used by `records_from` for Function/Method/Constructor records; other
+  kinds keep `body_span_for_declaration(anchor)` unchanged. It reads only
+  the declaration's `body` field, so a default value, return type or
+  nested/returned callable is never taken; C# `arrow_expression_clause`
+  gives its expression; Python/Lua run from the first child after `:` /
+  `parameters` (a comment on the header's own line excepted) to the last
+  child before `end`; an empty Lua body is the empty span at `end`.
+- **Decision: the stored span ends at its last non-whitespace byte**
+  (`without_trailing_whitespace`, end location recomputed in byte columns
+  as tree-sitter counts them). Otherwise every Scala 3 function followed by
+  a blank line would count one extra line, and the span would hold no body
+  text there. The spec's "exact same body node" is kept as "exact same
+  span": `lines` is computed from the stored `source.body_span`, never
+  separately.
+- **Decision: an empty Lua body is `Some(0)`, not `None`**. The function
+  has an implementation body that happens to be empty; `None` is reserved
+  for callables without one (prototypes, abstract/interface methods).
+  This is the one form that produces the spec's "empty byte span".
+- `body_node_for_declaration` (used for `declaration_text` and
+  `signature_text` cuts) is untouched, so declaration and signature text do
+  not change (all header/signature matrices unchanged).
+
+### 5.2 `lines` computation
+
+- `metrics.rs::body_lines(kind, body_span)`: `None` unless
+  Function/Method/Constructor with a span; `Some(0)` for an empty span;
+  else `end.line - start.line + (end.column > 1)`. `symbol_metrics` takes
+  the record's body span, so the three metrics still arrive together under
+  `Capability::Metrics` and `lines` cannot disagree with the stored span.
+- God-files: `god_files/analysis.rs` does not read `source.body_span` (only
+  a test comment mentions it) and keeps its declaration-span unit; all
+  god-files tests unchanged and green.
+
+### Revision, cache, goldens
+
+- **Concurrent session:** a second session (review 9 of
+  `2026-10-03-symbol-filters-and-reports`) is working in this worktree and
+  had already moved `EXTRACTOR_REVISION` `"20"` → `"21"` with a
+  revision-20 `StaleRevision` before this phase started. This phase moves
+  it `"21"` → `"22"` and adds
+  `cache_upgrade::entry_from_extractor_revision_twenty_one_is_not_served_after_the_repairs`
+  (a revision-21 entry with no `body_span` on a C function and
+  `lines: null` is not served; repaired `[2, 3]`, then a warm hit).
+- Schema stays 4.1: `lines` already existed; filling it changes no shape.
+- `cache_robustness`: the `metrics` column's control and
+  `an_absent_metrics_facet_is_not_requested_never_computed_null` pinned the
+  old always-`null` value; both now expect `lines: 2` for the Python
+  fixture's `instance_method`. The robustness rows themselves are
+  unchanged (still twenty-four record columns; `lines` already had its
+  column from Phase 2).
+- Goldens regenerated (`HUG_UPDATE_GOLDEN=1`); the record-level diff
+  against `HEAD` is the revision, Phase 4's `Mut`, and four new
+  `body_span`s on the multi tree's C/C++ callables (`point_sum`,
+  `reset_origin`, `geometry::Vector::Vector`, `geometry::dot`). No other
+  body span moved (checked by comparing every record's span against HEAD).
+
+### Changed tests (intended)
+
+- `symbols_metrics::metric_forms_outside_the_fixtures` compared the whole
+  facet with `lines: None`; it now compares `parameters`/`has_docs` only
+  (its subject), `lines` being the new matrix's.
+- `symbols_query::flags_and_metrics_run_with_the_declarations_only`:
+  `old`/`helper` now `lines: Some(1)`.
+
+### Requirement → test
+
+| Requirement | Test |
+|---|---|
+| every fixture function's `lines` (with `parameters`/`has_docs` unchanged) | `symbols_metrics::metrics_match_each_fixture_function` (new `lines` column in `METRICS_MATRIX`) |
+| `lines` agrees with the stored span on every record; non-callables `None` even with a body span | same test (per-record check against the span) |
+| per-language body forms: `{}` = 1, multi-line, comments/blank/nested counted, expression bodies without `=>`/`=` (TS/JS arrow, C#, Scala), returned callback / nested callable not the body, defaults not the body (Python lambda, Swift closure, TS arrow), return type not the body (TS object type), abstract/interface/protocol/prototype `None`, C++ defaulted/deleted/pure `None`, C++ try-block, out-of-class C++ member, Python/Lua comments, Lua empty = 0, Scala braceless with trailing blank line, Perl block, class/module/trait `None` | `symbols_metrics::body_lines_are_counted_from_the_callables_own_body` (`BODY_LINES_MATRIX`, one row per language; metrics-only query and complete index) |
+| CRLF and LF count the same | same test (every row also run with CRLF) |
+| formula incl. span ending at column 1 (spec example 3 → 6:1 = 3) | `file::extract::metrics::tests::body_lines_follow_the_spec_formula` (unit; trimmed record spans never end at column 1) |
+| `lines` present inside a facet, `null` where unsupported, facet absent when unrequested | `symbols_metrics::lines_key_is_present_null_or_absent_with_its_facet` |
+| 16-language row guard | `symbols_coverage::every_language_has_one_row_in_each_report_matrix` (`BODY_LINES_MATRIX` added) |
+| normal invocation; `--json` has no facet; widening an entry without metrics reparses once (`0 hits, 2 partial hits … parsed 2 files`); warm hit (`parsed 0 files`) with equal values | CLI `report::body_lines_reach_the_full_index_across_cache_widening` |
+| revision bump invalidates revision-21 entries | CLI `cache_upgrade::entry_from_extractor_revision_twenty_one_is_not_served_after_the_repairs` |
+| cache reader shapes of `lines` | CLI `cache_robustness::*` (Phase 2 column, unchanged rows; control value updated) |
+| god-files unchanged | existing god-files tests, unchanged |
+
+Input robustness matrix: no new file-format field (`metrics.lines` and its
+column exist since Phase 2). Smell grep on the reader is unchanged.
+
+### Gates
+
+- `just test` (tree-hugger): **1052 / 1052 passed**.
+- `just lint`: `tree-hugger-cli` green. `tree-hugger` fails on one
+  `clippy::type_complexity` in `lib/tests/l1/symbols_shared_context.rs:506`,
+  a file the concurrent review-9 session was editing at the time (18:09 →
+  18:10); not touched here. With that one lint allowed
+  (`cargo clippy -p tree-hugger -p tree-hugger-cli --all-targets
+  --all-features -- -D warnings -A clippy::type_complexity`) both crates
+  are clean, and no new code here has a complex type.
+- `just check-tier-coverage tree-hugger`: nothing stranded. New tests are
+  plain L1 names in the existing `l1` and `symbols` binaries.
+- No rendering change, so `just test-l2` was not run. No OS-specific code
+  (byte spans only; CRLF covered by the matrix), so no cross-check.
+
+### Docs and skill
+
+- `docs/symbol-kinds-and-visibility.md`: `lines` row is current (no longer
+  planned); new `### Body lines` section (formula, body forms table,
+  trailing whitespace, defaults/nested callables).
+- `docs/symbol-schema-design.md`: `lines` paragraph current, example value,
+  `body_span` paragraph for callables in the Source Facet section.
+- `docs/cache-design.md`: `rev.22`.
+- `lib/src/file/query.rs`: `Capability::Metrics` doc now names `lines`
+  (the drift Phase 4 left for this phase).
+- Skill: `SKILL.md` (body-span/`lines` bullet, revision 22 and stale list),
+  `api-reference.md` (the "`None` until the metric lands" note removed).
+
+### Comment drift found and fixed
+
+- `metrics.rs::symbol_metrics` doc said `lines` "is not computed yet and is
+  always `None`" → points at `body_lines`.
+- `query.rs` `Capability::Metrics` (above); `api-reference.md` (above).
+- `symbols_metrics.rs` module doc named the old feature and only two
+  metrics → names all three and the new matrix.
+
+### Notes
+
+- Files changed during this phase by the concurrent session (not part of
+  this phase): `lib/src/file/extract/qualified_name.rs`,
+  `visibility/scala.rs`, `lib/tests/l1/symbols_shared_context.rs`, the new
+  `symbols_namespace_bodies.rs` and its `mod` line, the revision-20 stale
+  test, and the 2026-10-03 feature files.
+- Skipped: `just test-l2` (no rendering change). Pre-existing failures:
+  none; the one lint error is the concurrent session's.
+- Re-run at close (after the docs/comment edits): the concurrent session
+  was mid-edit again. The library unit-test target did not compile
+  (`lib/src/analysis/tests.rs`: unresolved `find_container_symbol`, a call
+  with 3 of 4 arguments), so `just test` stopped. The targets that compile
+  were run directly: `tree-hugger --test l1` 578/579 (the one failure is
+  that session's new
+  `symbols_shared_context::repeated_names_keep_shared_context_linear_and_results_intact`;
+  its one skipped test is its `#[ignore]`d step-count printer) and
+  `tree-hugger-cli` 292/292. The earlier full `just test` (1052/1052)
+  included this phase's lib unit test
+  (`metrics::tests::body_lines_follow_the_spec_formula`).

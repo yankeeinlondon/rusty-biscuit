@@ -79,6 +79,52 @@ docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
   - .claude/skills/tree-hugger/SKILL.md
   - .claude/skills/tree-hugger/api-reference.md
+source_files_during_phase_4:
+  - tree-hugger/lib/src/file/extract/modifiers.rs
+  - tree-hugger/lib/src/file/extract/attributes.rs
+  - tree-hugger/lib/src/file/tree_file.rs
+  - tree-hugger/lib/src/file/mod.rs
+  - tree-hugger/lib/src/file/query.rs
+  - tree-hugger/lib/tests/l1/symbols_modifiers.rs
+  - tree-hugger/lib/tests/l1/main.rs
+  - tree-hugger/lib/tests/l1/symbols_coverage.rs
+  - tree-hugger/lib/tests/l1/symbols_flags.rs
+  - tree-hugger/cli/tests/symbols/report.rs
+  - tree-hugger/cli/tests/symbols/cache_upgrade.rs
+  - tree-hugger/cli/tests/symbols/cache_robustness.rs
+  - tree-hugger/cli/tests/fixtures/golden/symbols.json
+  - tree-hugger/cli/tests/fixtures/golden/symbols.jsonl
+docs_updated_during_phase_4:
+  - tree-hugger/docs/symbol-schema-design.md
+  - tree-hugger/docs/symbol-kinds-and-visibility.md
+  - tree-hugger/docs/cache-design.md
+  - tree-hugger/lib/README.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/tree-hugger/SKILL.md
+  - .claude/skills/tree-hugger/api-reference.md
+source_files_during_phase_5:
+  - tree-hugger/lib/src/file/extract/classify.rs
+  - tree-hugger/lib/src/file/extract/metrics.rs
+  - tree-hugger/lib/src/file/tree_file.rs
+  - tree-hugger/lib/src/file/mod.rs
+  - tree-hugger/lib/src/file/query.rs
+  - tree-hugger/lib/tests/l1/symbols_metrics.rs
+  - tree-hugger/lib/tests/l1/symbols_coverage.rs
+  - tree-hugger/lib/tests/l1/symbols_query.rs
+  - tree-hugger/cli/tests/symbols/report.rs
+  - tree-hugger/cli/tests/symbols/cache_upgrade.rs
+  - tree-hugger/cli/tests/symbols/cache_robustness.rs
+  - tree-hugger/cli/tests/fixtures/golden/symbols.json
+  - tree-hugger/cli/tests/fixtures/golden/symbols.jsonl
+docs_updated_during_phase_5:
+  - tree-hugger/docs/symbol-kinds-and-visibility.md
+  - tree-hugger/docs/symbol-schema-design.md
+  - tree-hugger/docs/cache-design.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .claude/skills/tree-hugger/SKILL.md
+  - .claude/skills/tree-hugger/api-reference.md
 ---
 
 # Plan: generics, inheritance, modifiers, attributes and body line counts
@@ -369,7 +415,7 @@ in their existing tests.
 
 ### Wave 1 (single owner)
 
-- [ ] **4.1 Modifier reader**
+- [x] **4.1 Modifier reader**
     - Extend `modifiers.rs` (and the shared declaration/wrapper helpers it
       uses) to read declaration-owned tokens: Const (explicit const-callable
       syntax only: Rust `const fn`), Unsafe, Readonly (explicit declaration
@@ -382,7 +428,7 @@ in their existing tests.
       body or on a nested parameter must not mark the enclosing callable; do
       not scan raw text for keywords.
     - Feed through the normalizer from 2.4.
-- [ ] **4.2 Attribute population**
+- [x] **4.2 Attribute population**
     - Populate `attributes` from the shared parse (2.3): name excludes the
       marker, whitespace compacted only in syntactic paths; value is raw
       argument text without outer delimiters, trimmed (no arguments → `None`,
@@ -395,16 +441,16 @@ in their existing tests.
 
 ### Wave 2 (parallel by language group; disjoint files)
 
-- [ ] **4.3 Group A: Rust, C++, Swift, Scala** — `unsafe`, `const fn`, `mut`
+- [x] **4.3 Group A: Rust, C++, Swift, Scala** — `unsafe`, `const fn`, `mut`
   receivers; `virtual`/`override`/`final`; Swift `final`/`override`/
   `mutating` (not Rust Mut); Scala `abstract`/`final`/`override`.
-- [ ] **4.4 Group B: TypeScript, JavaScript, Java, C#, PHP, Python** —
+- [x] **4.4 Group B: TypeScript, JavaScript, Java, C#, PHP, Python** —
   TS `abstract`/`override`/`readonly`; JS decorators only, no invented TS
   modifiers; Java annotations + `abstract`/`final`; C# attribute lists,
   `abstract`/`override`/`virtual`/`readonly`, `sealed` as `Custom("sealed")`;
   PHP `abstract`/`final`, no PHP attributes; Python decorators with no inferred
   modifier.
-- [ ] **4.5 Group C: Go, C, Perl, Bash, Zsh, Lua** — assert none; classify each
+- [x] **4.5 Group C: Go, C, Perl, Bash, Zsh, Lua** — assert none; classify each
   as an absent construct in the matrix.
 - Each group adds rows to a new modifiers/attributes matrix, including: keyword
   only in a body or string, nested parameter, repeated attributes, empty
@@ -413,7 +459,7 @@ in their existing tests.
 
 ### Wave 3 (sequential)
 
-- [ ] **4.6 Merge and verify** — `just test`; extend coverage guard for the
+- [x] **4.6 Merge and verify** — `just test`; extend coverage guard for the
   modifiers/attributes matrix (16 languages); update the
   comments saying attributes are read "only for flags".
 
@@ -426,7 +472,7 @@ Parallel with Phases 3 and 4 after Phase 2 (touches `classify.rs`,
 
 ### Wave 1 (single owner)
 
-- [ ] **5.1 Body node reader**
+- [x] **5.1 Body node reader**
     - Extend the shared body-node logic in `classify.rs` for grammar-supported
       expression bodies and transparent wrappers; the stored `body_span` and
       the metric must use the *same* node. Do not mistake a default value, type
@@ -434,7 +480,7 @@ Parallel with Phases 3 and 4 after Phase 2 (touches `classify.rs`,
       own body. An expression body spans its expression, excluding `=>`/`=`.
     - Abstract/interface declarations and defaulted/deleted C++ constructors
       stay without a body.
-- [ ] **5.2 `lines` computation**
+- [x] **5.2 `lines` computation**
     - For Function, Method, Constructor only: no body → `None`; empty byte span
       → `Some(0)`; otherwise
       `end.line - start.line + (end.column > 1 ? 1 : 0)` with one-based
@@ -446,7 +492,7 @@ Parallel with Phases 3 and 4 after Phase 2 (touches `classify.rs`,
 
 ### Wave 2 (parallel by language group; test rows only)
 
-- [ ] **5.3 Matrix rows per language** — extend `symbols_metrics.rs`: LF, CRLF,
+- [x] **5.3 Matrix rows per language** — extend `symbols_metrics.rs`: LF, CRLF,
   `{}` on one line (1), span ending at column 1 (spec example 3→6 col 1 = 3),
   comments/blank/nested declarations counted, expression bodies (arrow,
   Rust none, Scala/Kotlin-style `=`, Python lambda excluded as a default),
@@ -456,7 +502,7 @@ Parallel with Phases 3 and 4 after Phase 2 (touches `classify.rs`,
 
 ### Wave 3 (sequential)
 
-- [ ] **5.4 Verify** — `just test`; confirm existing metrics cases for
+- [x] **5.4 Verify** — `just test`; confirm existing metrics cases for
   `parameters` and `has_docs` are unchanged.
 
 **Validation checkpoint:** a strict test that `lines` is present, `null` where

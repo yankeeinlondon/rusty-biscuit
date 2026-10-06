@@ -9,37 +9,32 @@ reviewed_on: 2026-10-05
 review_iterations: 0
 human_review: false
 message_to_agent: |-
-  Phases 1-3 are done; read `## Phase 2` and `## Phase 3` of
-  implementation-log.md. Facts that matter for Phase 4 and later:
+  Phases 1-5 are done; read `## Phase 4` and `## Phase 5` of
+  implementation-log.md. Facts that matter for Phase 6 and later:
 
-  - `EXTRACTOR_REVISION` is now "19" (schema stays 4.1). Each phase that
-    changes extracted records bumps it again (20, ...) and adds the previous
-    revision as a `StaleRevision` (`OldKey::Computed`) in
-    `cli/tests/symbols/cache_upgrade.rs`; see the revision-18 test added in
-    Phase 3 for the smallest example. Regenerate goldens with
-    `HUG_UPDATE_GOLDEN=1` and confirm the diff is only the revision unless
-    the multi tree really changes.
-  - `TreeFile::records_from` now returns `Result<Vec<SymbolRecord>,
-    TreeHuggerError>`. Generics are filled inside its `if wanted` block via
-    `extract/generics.rs::declared_generics`; per-record facts for Phase 4
-    (modifiers, attributes) belong in the same block, before the
-    `normalize_modifiers` call.
-  - `declaration_attributes` is still called inside the Flags closure; Phase
-    4.2 must hoist it out of that closure so flags and the `attributes`
-    facet share one parse (use an `if`, clippy rejects
-    `.then(..).unwrap_or_default()`).
-  - The `declaration` node per capture was probed in Phase 3 (log, 3.1):
-    C++ members/functions sit under a `template_declaration` parent, Go
-    `type` records' declaration is the whole `type_declaration` (use the
-    name's parent spec), a TS variable-declared arrow function's
-    declaration is the `arrow_function`, an exported TS class's
-    declaration is the `class_declaration` whose parent is
-    `export_statement` (its decorator lives on that wrapper).
-  - `just lint` was red at the end of Phase 3 from another process's
-    concurrent, uncommitted edits in this worktree (`type_complexity` at
-    `lib/src/file/extract/visibility/mod.rs:81`, `dead_code` at
-    `qualified_name.rs:132`); nothing in Phase 3's files. If it is still
-    red, check `git diff` for those files before assuming it is yours.
+  - A second session (review cycles of 2026-10-03-symbol-filters-and-reports)
+    works in this same worktree and also bumps `EXTRACTOR_REVISION`. Read
+    the constant (`lib/src/file/mod.rs`) right before you bump it: it was
+    "21" from that session when Phase 5 started and is "22" now. Bump from
+    whatever is current and add that value as the newest `StaleRevision`
+    (`OldKey::Computed`) in `cli/tests/symbols/cache_upgrade.rs` (the
+    revision-21 test added in Phase 5 is the newest example). Do not edit
+    files that session is changing; a lint or compile error in one of its
+    files is its own (Phase 5 hit one in `symbols_shared_context.rs`).
+  - Regenerate goldens with `HUG_UPDATE_GOLDEN=1` and compare record by
+    record against HEAD, not by line count.
+  - `TreeFile::records_from` (`tree_file.rs`) computes the body span first
+    (`callable_body_span` for callables, `body_span_for_declaration` for
+    the rest), then metrics from it; inside `if wanted` it fills generics,
+    `attributes`, then `modifiers`, all before the one
+    `normalize_modifiers` call. Per-record relation facts go in the same
+    block; anything per file (the light-declaration index) is built once
+    before the loop.
+  - Java/C# modifier and attribute hosts go through
+    `attributes::modifier_host`; reuse it.
+  - The `cache_robustness` matrix has twenty-four record columns; a new
+    load-bearing record field adds a column and updates the count in
+    `docs/cache-design.md` and the skill.
   - Carried from Phase 1: ruling 1 (mixed C#/Swift/Scala base lists) is
     still unanswered and gates only tasks 6.5-6.7. Grammar quirks for the
     relation readers are in the Phase 1 probe tables (Scala `with` tokens
