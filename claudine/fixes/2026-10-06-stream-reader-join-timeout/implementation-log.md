@@ -30,9 +30,41 @@ docs_updated_during_phase_3:
     - claudine/docs/topics/timeouts.md
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+    - claudine/cli/src/commands/wrap/output_worker.rs
+    - claudine/cli/src/commands/wrap/output_worker/tests.rs
+    - claudine/cli/src/commands/wrap/run_scope.rs
+    - claudine/cli/src/commands/wrap/run_scope/tests.rs
+    - claudine/cli/src/commands/wrap/stream_io.rs
+    - claudine/cli/src/commands/wrap/stream_io/tests.rs
+    - claudine/cli/src/commands/wrap/mod.rs
+    - claudine/cli/src/commands/wrap/section.rs
+    - claudine/cli/src/commands/wrap/policy.rs
+    - claudine/cli/src/commands/wrap/wrapper_exec.rs
+    - claudine/cli/src/commands/wrap/harness_orch/attempt.rs
+    - claudine/cli/src/commands/wrap/live_semantic_sink/event_sink.rs
+    - claudine/cli/src/commands/wrap/exec/reader_join.rs
+    - claudine/cli/src/commands/wrap/exec/reader_join/tests.rs
+    - claudine/cli/src/commands/wrap/exec/spawn/semantic.rs
+    - claudine/cli/src/output/assistant.rs
+    - claudine/cli/src/shutdown.rs
+    - biscuit-terminal/lib/src/discovery/fonts/mod.rs
+docs_updated_during_phase_4:
+    - claudine/docs/topics/timeouts.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/claudine/SKILL.md
+source_files_during_phase_5:
+    - claudine/cli/src/commands/wrap/exec/reader_join.rs
+    - claudine/cli/src/commands/wrap/exec/reader_join/matrix.rs
+docs_updated_during_phase_5:
+    - claudine/docs/topics/timeouts.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
 packages:
     - claudine
     - claudine-cli
+    - biscuit-terminal
 ---
 
 # Implementation Log
@@ -475,3 +507,183 @@ All L1, in claudine-cli (`just test`), injected millisecond budgets, no real
 `just lint` exit 0; `just test` 8399 passed, 9 skipped, 0 failed. Docs:
 `docs/topics/timeouts.md` gained the captured/inherited paragraph. Not run:
 cross-OS rigs (tests use channels and in-memory sinks, no `cfg(unix)`).
+
+## Phase 4
+
+Terminal delivery is now separated from parsing (R3, R4).
+
+### What changed
+
+- `wrap/output_worker.rs`: `OutputWorker`, one thread per coordinator, a
+  bounded queue of whole frames (4096 frames, 8 MiB) carrying stdout and stderr
+  frames in order (Ruling C). `submit` never blocks. `drain(deadline)` waits
+  for the queue; on expiry it sets the *disabled* flag, discards the queue and
+  abandons the thread. After that `submit` rejects at once, and the worker loop
+  returns before taking another frame, so a late in-progress write may finish
+  but nothing follows it. No code path starts a second writer (the thread is
+  spawned once, lazily). `FrameSink` is the test seam; `OutputLoss` counts
+  dropped, rejected, and stalled.
+- `wrap/stream_io.rs`: every `StreamOutput` emission (`stdout_writer`,
+  `emit_stderr_line`, `emit_stderr_frames`, `emit_stdout_frames`,
+  `emit_stdout_line`, new `emit_stderr_undecorated`) builds a byte frame and
+  queues it. Cursor bookkeeping stays at queue time, under the same lock, so
+  frame order and the injected newline are as before; it moves only when the
+  frame was actually queued. `StreamOutput::shared()` is the one process-wide
+  worker, which is what makes Ruling B hold (a stalled sink stays silent for
+  later iterations; no per-iteration writer). Tests moved to
+  `stream_io/tests.rs` because inline tests passed the 300-line placement cap.
+- `wrap/run_scope.rs`: a thread-local `RunScope` the stdout reader enters.
+  It carries a `closed` flag and a `ResultSnapshot`. `LiveSemanticSink`
+  returns early from `on_semantic_event` when the scope is closed (no render,
+  no lifecycle dispatch, no event log), and publishes a completed turn or
+  terminal error into the snapshot *before* rendering. The output layer checks
+  the same flag, so a reader past its cutoff cannot write into a following
+  iteration (replaces the plan's "generation token"; a thread-local reaches the
+  sink and the writers without changing the parser-builder signature).
+- `spawn/semantic.rs`: the reader enters the scope; after the stdout join the
+  run settles from the snapshot and closes the scope; the main-thread
+  `eprintln!` of captured stderr is now queued; after the warnings the run sets
+  the output deadline `readers_since + drain_limit` and drains against it
+  (Ruling E).
+- `settle_parser` takes the snapshot. With the slot empty and the reader
+  stalled: published terminal error is kept; a published completed turn with
+  exit 0 is kept as success (no assistant text, only the parser had it);
+  anything else stays `stream_reader_timeout`. `FallbackParser` now holds a
+  whole summary. Phase 5 owns the full matrix.
+- `wrapper_exec.rs`, `harness_orch/attempt.rs`: `section_stream.drain_final()`
+  after `emit_stream_summary`, which consumes the run's stored deadline (so a
+  stale clock cannot cut off the next iteration), falling back to 120 s.
+- `shutdown.rs::flush_streams`: drains the worker (10 s fallback) before the
+  exit flush and skips the flush when delivery was disabled, because the
+  abandoned writer may hold the stdout lock and `stdout().flush()` would wait
+  on it forever.
+- `output/assistant.rs`: `emit_final_message` with a section stream writes
+  through the worker instead of `std::io::stdout()`.
+- `policy.rs`: `emit_stream_summary_inner` adds `extra.output_incomplete`
+  (`dropped_frames`, `rejected_frames`, `stalled`) to the `session_end` row
+  when the run lost output; the loss is read from `SectionStream::output_loss`
+  against a mark taken when the stream was built (Ruling A's "recorded in the
+  session record"). The plan said the field crosses the attempt tuple; reading
+  it from the section stream avoided that.
+- Spike follow-up: `biscuit_terminal::discovery::fonts::font_name` is cached in
+  a `OnceLock`. `Terminal::default()` calls it, so this removes the per-block
+  `defaults read com.googlecode.iterm2` subprocess in darkmatter's Markdown
+  render path. The fix is in the lower layer that owns the call, not a hoist in
+  darkmatter, which would have needed a cached `Terminal`.
+- Docs: `docs/topics/timeouts.md` gained "A terminal that stops accepting
+  output" and the corrected "join alone" claim; the claudine skill's Timeouts
+  line names the worker.
+
+### Departures and open items
+
+- A delivered-late frame problem was found and fixed while writing tests: a
+  rejected write used to move the newline cursor, which would have injected a
+  stray `\n` into the next iteration.
+- Not routed through the worker, by choice: the stderr reader's raw
+  passthrough (`std::io::stderr().lock()`; a stall there is bounded by its
+  join and reported as a stderr-reader warning), the captured/inherited paths'
+  own forwarding, the Kimi wire session, and the `eprintln!` fallbacks used
+  only when no section stream exists (tests, legacy). A terminal stall there
+  does not hold the parser, but it also is not covered by the worker's
+  disabled flag. Flagged for review.
+- The output-loss warning is not shown on the terminal, by design: a stalled
+  terminal cannot show it. It is in the session record and `tracing::warn!`.
+- `ProcessResult.reader_warnings` and `CapturedChildOutput.incomplete` remain
+  `#[allow(dead_code)]` (Phase 3 note). The `output_incomplete` field covers the
+  semantic path; the captured and inherited paths do not use the worker.
+- No test drives the real `run_child_stream_semantic` with a blocked sink: the
+  semantic path has no existing process-level test harness and a portable
+  provider fixture does not exist. The blocked-sink behavior is covered by
+  simulating the reader (parser rendering through `StdoutWriter`, `join_reader`,
+  `settle_parser`, `drain`) in `stream_io/tests.rs`. A real-process test is a
+  candidate for Phase 5/6.
+- The font cache has no direct test (subprocess spawns are not observable from
+  a unit test); existing biscuit-terminal tests pass.
+
+### Requirement-to-test mapping
+
+All L1, `just test` in `claudine`:
+
+- blocked sink: run completes, no emission, trailer wait, or exit drain hangs:
+  `stream_io::tests::a_blocked_terminal_stalls_no_caller`,
+  `output_worker::tests::a_permanently_blocked_sink_never_blocks_submit_or_drain_past_its_deadline`
+- no late write after disabling:
+  `output_worker::tests::the_write_in_progress_may_finish_but_nothing_follows_it_after_disabling`
+- late reader cannot write into the next iteration:
+  `stream_io::tests::a_closed_run_cannot_write_into_the_next_iteration`,
+  `run_scope::tests::closing_a_scope_closes_it_for_the_thread_that_entered_it`
+- slow line, unread result:
+  `stream_io::tests::a_reader_behind_a_blocked_terminal_still_parses_the_unread_result`
+- queue bound (frames, bytes, whole frames, provider data untouched):
+  `output_worker::tests::a_full_queue_drops_whole_frames_and_counts_them`,
+  `the_byte_cap_bounds_queued_memory`
+- no writer-thread growth:
+  `output_worker::tests::a_stalled_sink_never_gains_a_second_writer_thread`,
+  `stream_io::tests::iterations_on_a_stalled_terminal_share_one_writer`
+- unblocked output unchanged (order, newline injection):
+  `output_worker::tests::an_unblocked_sink_receives_every_frame_in_order`,
+  `stream_io::tests::queued_frames_keep_cursor_order_for_an_unblocked_sink`,
+  and the pre-existing `stream_io` cursor tests
+- stale deadline cannot cut off the next iteration:
+  `stream_io::tests::the_drain_deadline_is_consumed_by_the_final_drain`
+- snapshot settle: `reader_join::tests::a_stalled_reader_with_a_published_turn_and_exit_zero_keeps_the_result`,
+  `a_stalled_reader_keeps_the_provider_error_it_had_published`,
+  `a_stalled_reader_with_no_published_result_is_an_incomplete_stream`,
+  `a_published_turn_does_not_turn_a_nonzero_exit_into_success`;
+  scope publishing: `run_scope::tests::leaving_the_scope_stops_publishing_into_it`
+
+### Gates
+
+`just test` (claudine): 8419 passed, 9 skipped, 0 failed. `just lint`: exit 0.
+`just test` in biscuit-terminal: 3566 passed. The sink tests use channels,
+condvars, and in-memory sinks and carry no `cfg(unix)`; the cross-OS rigs were
+not run. Not run: `cargo fmt`.
+
+## Phase 5
+
+Success preservation matrix (R3).
+
+### Finding
+
+Phase 4's snapshot-aware `settle_parser` already met every outcome rule, so
+Phase 5 changed no behavior; it proves the rules and documents them.
+
+- exit 0 with a published turn, stalled anywhere: result and exit kept, warning
+- published terminal error: kept as the run's error (also with exit 0)
+- nothing published: `stream_reader_timeout`, never an invented result
+- nonzero exit or interruption: exit code kept
+- provider timeout / rate limit: applied by the caller after settling, so the
+  reader warning cannot replace it
+- real panic: `parse_failure`
+- stderr-reader failure: warning only. The stderr bridges (Codex app-server,
+  Pi RPC, OpenCode) accumulate into shared state, not the reader's return
+  value, so a timed-out stderr reader does not change the bridge outcome.
+
+### Tests
+
+- `reader_join::matrix` (new file): 6 run outcomes x {stall before the parser
+  is handed back (`Processing` and `PipeOpen`), stall in the final render,
+  panic, joined in time}, asserting exit code, `error_kind`, `is_error`, and
+  warning presence. Provider timeout is applied with the real
+  `apply_early_termination_to_summary`.
+- `a_slow_but_progressing_reader_is_joined_with_its_real_parser_and_no_warning`:
+  the Codex 6.5 s case with scaled budgets.
+- Per-path (captured partial bytes and incomplete flag, inherited forward
+  failure is a warning) are the Phase 3 tests in `spawn/tests/`.
+
+### Departures
+
+- the plan asked for "rendering stalled" as a third reader failure; it is the
+  slot-holding timeout column. The `Interrupted` and `ProviderTimeout` rows
+  model the post-settle caller behavior rather than driving a process.
+
+### Docs
+
+`docs/topics/timeouts.md`: outcome table for a stalled reader. `settle_parser`
+docs note the panic and early-termination rules.
+
+### Gates
+
+`just test` (claudine): 8423 passed, 9 skipped, 0 failed (before the final
+matrix test additions; the new matrix tests pass focused). `just lint`: exit 0.
+Not run: `cargo fmt`, cross-OS rigs (tests are portable, no `cfg(unix)`).

@@ -32,26 +32,14 @@ packages:
     - claudine-cli
 human_review: false
 message_to_agent: |-
-    Phase 3 is complete (reader outcomes on the captured, inherited, and
-    semantic spawn paths). Context for Phase 4 and 5:
-
-    1. Shared reporter lives in cli/.../exec/reader_join.rs: ReaderStream,
-       ReaderFailure, reader_failure, reader_warning_line,
-       eprint_reader_warning. settle_parser uses it. join_with_timeout(_or),
-       join_within, and ReaderStall::Unknown are gone.
-    2. The session-record field for incomplete output on the captured and
-       inherited paths is NOT written. ProcessResult.reader_warnings and
-       CapturedChildOutput.incomplete are populated but carry
-       #[allow(dead_code)]. Phase 4's output-loss record (Rulings A/B) should
-       own plumbing them into session_end (attempt tuple in
-       harness_orch/attempt.rs, policy.rs); remove the allows when it does.
-    3. The stderr-reader panic wording changed to the shared "Stream stderr
-       reader thread panicked: ..." form. docs/topics/timeouts.md has a new
-       captured/inherited paragraph; Phase 6 should still add the diagram.
-    4. The lint guard error_guards rejects error.to_string() on typed
-       errors; carry io::Error and format at the edge.
-    5. Test placement trap from Phase 2 still applies (300-line inline-test
-       budget; autotests=false).
+    Phase 5 is complete. The outcome rules were already implemented by Phase 4's
+    snapshot-aware settle_parser; Phase 5 added the matrix test
+    (cli/.../exec/reader_join/matrix.rs), the Codex slow-reader fixture, and the
+    outcome table in docs/topics/timeouts.md. For Phase 6: the Phase 4
+    "not routed through the worker" items (stderr reader passthrough,
+    captured/inherited forwarding, Kimi wire) are still open for the author; the
+    signal-handling, composition, and README doc updates are not done yet. The
+    plan's Phase 6 Wave 8 also asks for a repo grep for join_with_timeout_or.
 ---
 
 # A successful agent run is reported as a stream parser panic

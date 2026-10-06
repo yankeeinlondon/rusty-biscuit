@@ -1,6 +1,6 @@
 ---
 created: 2026-10-06
-phase: 3
+phase: 5
 total_phases: 6
 agent: claude/sonnet
 yolo: true
@@ -32,9 +32,41 @@ docs_updated_during_phase_3:
     - claudine/docs/topics/timeouts.md
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+    - claudine/cli/src/commands/wrap/output_worker.rs
+    - claudine/cli/src/commands/wrap/output_worker/tests.rs
+    - claudine/cli/src/commands/wrap/run_scope.rs
+    - claudine/cli/src/commands/wrap/run_scope/tests.rs
+    - claudine/cli/src/commands/wrap/stream_io.rs
+    - claudine/cli/src/commands/wrap/stream_io/tests.rs
+    - claudine/cli/src/commands/wrap/mod.rs
+    - claudine/cli/src/commands/wrap/section.rs
+    - claudine/cli/src/commands/wrap/policy.rs
+    - claudine/cli/src/commands/wrap/wrapper_exec.rs
+    - claudine/cli/src/commands/wrap/harness_orch/attempt.rs
+    - claudine/cli/src/commands/wrap/live_semantic_sink/event_sink.rs
+    - claudine/cli/src/commands/wrap/exec/reader_join.rs
+    - claudine/cli/src/commands/wrap/exec/reader_join/tests.rs
+    - claudine/cli/src/commands/wrap/exec/spawn/semantic.rs
+    - claudine/cli/src/output/assistant.rs
+    - claudine/cli/src/shutdown.rs
+    - biscuit-terminal/lib/src/discovery/fonts/mod.rs
+docs_updated_during_phase_4:
+    - claudine/docs/topics/timeouts.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/claudine/SKILL.md
+source_files_during_phase_5:
+    - claudine/cli/src/commands/wrap/exec/reader_join.rs
+    - claudine/cli/src/commands/wrap/exec/reader_join/matrix.rs
+docs_updated_during_phase_5:
+    - claudine/docs/topics/timeouts.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
 packages:
     - claudine
     - claudine-cli
+    - biscuit-terminal
 ---
 
 # Plan: a slow stream reader is reported as what it was
@@ -151,29 +183,29 @@ Depends on Phase 1 Rulings A to E and the spike. This is the structural phase; d
 
 ### Wave 4 (design and core type)
 
-- [ ] **Output worker.** Add a CLI-owned `OutputWorker` (own module under `cli/src/commands/wrap/`, next to `stream_io.rs`):
+- [x] **Output worker.** Add a CLI-owned `OutputWorker` (own module under `cli/src/commands/wrap/`, next to `stream_io.rs`):
     - one thread, bounded queue of whole frames (Ruling D), carrying stdout and stderr frames in order (Ruling C)
     - `submit` never blocks and never holds a run-state lock; full queue drops presentation frames and counts them
     - `finish(deadline)` waits on completion up to the shared deadline; on expiry sets a *disabled* flag, abandons the thread (no new writer is ever created for that sink, Ruling B), and records an incomplete-output diagnostic
     - after disabling, `submit` rejects instantly; a late in-progress write may finish but cannot be followed by more
     - portable: no Unix-only calls; synthetic sink behind a trait for tests
-- [ ] **Result snapshot.** Add a lock-free-with-respect-to-terminal-I/O snapshot of parser state (final result, error kind, exit data) that is published *before* a rendered frame is submitted, so `settle_parser` can read it even when the reader holds the parser inside a callback. Provider parsing, result semantics, and Markdown rendering stay in the library; only the coordination lives in the CLI.
+- [x] **Result snapshot.** Add a lock-free-with-respect-to-terminal-I/O snapshot of parser state (final result, error kind, exit data) that is published *before* a rendered frame is submitted, so `settle_parser` can read it even when the reader holds the parser inside a callback. Provider parsing, result semantics, and Markdown rendering stay in the library; only the coordination lives in the CLI.
 
 ### Wave 5 (wiring; sequential)
 
-- [ ] **Reader wiring.** Route `OutputTextCallback`/`ReasoningCallback` and `AssistantStream` writes through the worker (`spawn/semantic.rs`, `StdoutWriter`/`StreamOutput` in `stream_io.rs`). Ordering and content for an unblocked sink must be byte-identical to today; keep the biscuit-terminal component path, capability fallbacks, and `NO_COLOR`.
-- [ ] **Main-thread writes.** Move the ticker shutdown, warnings, trailer, summary rendering, `StreamOutput` lock acquisition, and panic reporting through the worker with the Ruling E deadline (`emit_stream_summary` in `policy.rs`). No main-thread write may reach the terminal directly.
-- [ ] **Frozen summary.** Freeze the summary and publish exactly one `session_end` before lifecycle completion. After cutoff a late reader must not mutate the summary, emit semantic events for the completed run, or write into the next iteration (generation token checked by the sink and the semantic emitter).
-- [ ] **Settle on the snapshot.** Change `settle_parser` to use the snapshot where the slot is empty because the reader stalled mid-line (see Phase 5 for the outcome rules).
-- [ ] **Spike follow-up.** If the spike confirmed a Claudine-side contributor (write size, escape output, queries), fix it here.
+- [x] **Reader wiring.** Route `OutputTextCallback`/`ReasoningCallback` and `AssistantStream` writes through the worker (`spawn/semantic.rs`, `StdoutWriter`/`StreamOutput` in `stream_io.rs`). Ordering and content for an unblocked sink must be byte-identical to today; keep the biscuit-terminal component path, capability fallbacks, and `NO_COLOR`.
+- [x] **Main-thread writes.** Move the ticker shutdown, warnings, trailer, summary rendering, `StreamOutput` lock acquisition, and panic reporting through the worker with the Ruling E deadline (`emit_stream_summary` in `policy.rs`). No main-thread write may reach the terminal directly.
+- [x] **Frozen summary.** Freeze the summary and publish exactly one `session_end` before lifecycle completion. After cutoff a late reader must not mutate the summary, emit semantic events for the completed run, or write into the next iteration (generation token checked by the sink and the semantic emitter).
+- [x] **Settle on the snapshot.** Change `settle_parser` to use the snapshot where the slot is empty because the reader stalled mid-line (see Phase 5 for the outcome rules).
+- [x] **Spike follow-up.** If the spike confirmed a Claudine-side contributor (write size, escape output, queries), fix it here.
     - confirmed contributor from the Phase 1 spike: per-block Markdown rendering rebuilds `Terminal::default()` (darkmatter `terminal_options_from_terminal_options`), and `biscuit_terminal::discovery::fonts::font_name` (and its `fallback_font_name_scan` → `query_iterm2_font_name`) is uncached, spawning a `defaults read com.googlecode.iterm2` subprocess per Markdown block on the reader thread. Cache or hoist the detection so a large final message does not multiply subprocess spawns while the reader holds the parser.
 
 ### Wave 6 (tests)
 
-- [ ] **Blocked sink tests** with a controllable sink: block permanently; assert the run completes, lifecycle events fire, `shutdown::finish` returns, and warnings, tickers, trailer, and summary do not hang. Release the sink at teardown and assert no late event or output reaches a following iteration.
-- [ ] **Slow line, unread result.** Block delivery on a middle line with the final result line still unread; parsing still produces the complete successful result.
-- [ ] **Queue bound.** Overflow drops and counts presentation frames, memory stays bounded, provider bytes and the result are intact; JSON stdout stays valid.
-- [ ] **No detached-writer growth.** Across several simulated iterations on a stalled sink the writer-thread count does not grow.
+- [x] **Blocked sink tests** with a controllable sink: block permanently; assert the run completes, lifecycle events fire, `shutdown::finish` returns, and warnings, tickers, trailer, and summary do not hang. Release the sink at teardown and assert no late event or output reaches a following iteration.
+- [x] **Slow line, unread result.** Block delivery on a middle line with the final result line still unread; parsing still produces the complete successful result.
+- [x] **Queue bound.** Overflow drops and counts presentation frames, memory stays bounded, provider bytes and the result are intact; JSON stdout stays valid.
+- [x] **No detached-writer growth.** Across several simulated iterations on a stalled sink the writer-thread count does not grow.
 
 **Checkpoint:** focused tests green on macOS; sink tests written for portability (no Unix-only gating).
 
@@ -181,14 +213,14 @@ Depends on Phase 1 Rulings A to E and the spike. This is the structural phase; d
 
 Depends on Phase 4's snapshot.
 
-- [ ] **Outcome rules in `settle_parser`/policy.** Implement exactly:
+- [x] **Outcome rules in `settle_parser`/policy.** Implement exactly:
     - parsed successful result plus child exit 0: keep exit code and result, warn that output may be incomplete, at any stall point
     - no complete result at cutoff: `stream_reader_timeout` as an incomplete-stream failure; never invent a result from unread lines
     - preserve an already-established provider failure, nonzero exit, signal interruption, or provider timeout; the reader warning never replaces its primary cause
     - a real panic stays `parse_failure`
     - a stderr-reader failure alone stays a warning unless its provider-specific bridge is needed for the outcome (check Codex app-server, Pi RPC, and OpenCode bridges under `exec/`)
-- [ ] **Matrix test.** One table-driven test across {exit 0 + result, exit 0 no result, result says failure with exit 0, nonzero exit, interrupted, provider timeout} x {reader timeout, panic, rendering stalled}: assert resulting exit code, `error_kind`, and warning presence. None becomes success because rendering timed out.
-- [ ] **Per-path semantics.** Captured: partial bytes remain available and incomplete capture is flagged. Inherited: forwarding failure is distinguished from provider failure. Include Codex's slow-reader case (6.5 s in the logs) as a fixture with injected budgets.
+- [x] **Matrix test.** One table-driven test across {exit 0 + result, exit 0 no result, result says failure with exit 0, nonzero exit, interrupted, provider timeout} x {reader timeout, panic, rendering stalled}: assert resulting exit code, `error_kind`, and warning presence. None becomes success because rendering timed out.
+- [x] **Per-path semantics.** Captured: partial bytes remain available and incomplete capture is flagged. Inherited: forwarding failure is distinguished from provider failure. Include Codex's slow-reader case (6.5 s in the logs) as a fixture with injected budgets.
 
 **Checkpoint:** matrix passes; `just test` for claudine-cli passes.
 
@@ -306,3 +338,21 @@ Spike paragraph for the timeouts doc (usable verbatim):
 > final message is slowed further because each Markdown block rebuilds the
 > detected terminal options, and font detection can spawn a subprocess per
 > block on the reader thread.
+
+### Phase 4 (recorded 2026-10-06)
+
+See `implementation-log.md`, `## Phase 4`. Shipped: `OutputWorker`
+(`wrap/output_worker.rs`), a thread-local `RunScope` carrying a closed flag and
+a `ResultSnapshot` (`wrap/run_scope.rs`), `StreamOutput` queueing every frame,
+snapshot-aware `settle_parser`, the `output_incomplete` session-record field,
+the exit-time drain, and a process-wide `font_name` cache in biscuit-terminal.
+Departures: a thread-local scope replaces the generation token; the stderr
+reader passthrough, captured/inherited forwarding, and Kimi wire writes are not
+routed through the worker; no process-level `run_child_stream_semantic` test
+with a blocked sink (simulated reader instead).
+
+### Phase 5 (recorded 2026-10-06)
+
+See `implementation-log.md`, `## Phase 5`. The Phase 4 snapshot settle already
+implemented the outcome rules; Phase 5 added the matrix test, the Codex
+slow-reader fixture, and the outcome table in the timeouts doc.
