@@ -315,6 +315,38 @@ fn a() { b() } fn b() { a() }         // No, No: mutual recursion is not direct
 
 A proven self-call is `Yes` even when the rest of the body is uncertain.
 
+## Upgrading from schema 4.x
+
+Record schema 5.0 keeps the 4.3 field layout, but `relations.references`,
+`dependencies`, `referenced_by` and `semantics.is_recursive` now mean "proven
+by a `Scoped` occurrence" instead of "the first declaration with this name".
+A consumer that read those fields gets edges to the declaration the name
+really binds, and `is_recursive` is decided instead of always `Unknown`:
+
+```rust
+fn parse() {}
+fn run() { let parse = || 1; parse(); }
+fn countdown(n: u32) -> u32 { if n == 0 { 0 } else { countdown(n - 1) } }
+fn walk(w: &W) { w.walk(); }
+```
+
+| Field | 4.x | 5.0 |
+|---|---|---|
+| `run.references` | the function `parse` | the local `let parse` (its own record ID) |
+| `fn parse`'s `referenced_by` | `[run]` | `[]` |
+| `countdown.semantics.is_recursive` | `Unknown` (never trusted) | `Yes` |
+| `parse.semantics.is_recursive` | `Unknown` | `No` |
+| `walk.semantics.is_recursive` | `Unknown` | `Unknown` (`w.walk()` is a receiver call) |
+
+A file index may also carry `occurrences` and `reference_coverage` (only
+under `Capability::Occurrences`). The `--json` envelopes report
+`schema_version` `{"major":5,"minor":0}`.
+
+Nothing has to be migrated by hand. The persistent cache serves an entry
+only when it and every record in it are exactly 5.0, so an entry written by
+an earlier version is analyzed again on first use and rewritten (see
+[Cache Design](./cache-design.md#schema-versions)).
+
 ## `hug refs`
 
 `hug refs` shows the evidence above for one declaration: where it is
