@@ -62,6 +62,46 @@ docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
   - .claude/skills/tree-hugger/SKILL.md
   - .claude/skills/tree-hugger/api-reference.md
+source_files_during_phase_4:
+  - tree-hugger/lib/src/cache/stored_evidence.rs
+  - tree-hugger/lib/src/cache/mod.rs
+  - tree-hugger/lib/src/cache/symbol_cache.rs
+  - tree-hugger/lib/src/analysis/occurrences.rs
+  - tree-hugger/lib/src/shared/schema_v2/types.rs
+  - tree-hugger/lib/src/file/mod.rs
+  - tree-hugger/lib/tests/l1/symbols_cache.rs
+  - tree-hugger/lib/tests/l1/tree_file.rs
+  - tree-hugger/cli/tests/symbols/cache_robustness.rs
+  - tree-hugger/cli/tests/symbols/cache_upgrade.rs
+  - tree-hugger/cli/tests/symbols/report.rs
+  - tree-hugger/cli/tests/symbols/reports.rs
+  - tree-hugger/cli/tests/symbols/wiring.rs
+  - tree-hugger/cli/tests/fixtures/golden/symbols.json
+  - tree-hugger/cli/tests/fixtures/golden/symbols.jsonl
+docs_updated_during_phase_4:
+  - tree-hugger/docs/cache-design.md
+  - tree-hugger/docs/symbol-schema-design.md
+  - tree-hugger/docs/references.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/tree-hugger/SKILL.md
+  - .claude/skills/tree-hugger/api-reference.md
+source_files_during_phase_5:
+  - tree-hugger/cli/src/refs.rs
+  - tree-hugger/cli/src/main.rs
+  - tree-hugger/cli/src/render.rs
+  - tree-hugger/cli/tests/symbols/refs.rs
+  - tree-hugger/cli/tests/symbols/main.rs
+  - tree-hugger/cli/tests/symbols/terminal_scope.rs
+  - tree-hugger/cli/tests/support/terminal_report.rs
+  - tree-hugger/cli/tests/level2_declarations.rs
+docs_updated_during_phase_5:
+  - tree-hugger/docs/references.md
+  - tree-hugger/docs/symbol-reports.md
+  - tree-hugger/cli/README.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .claude/skills/tree-hugger/SKILL.md
 ---
 
 # Implementation Log for 2026-10-08-scoped-references (6 phases)
@@ -637,3 +677,295 @@ checks described above.
 - Not run: `just test-l2` (no terminal rendering changed) and cross-OS
   checks. No path, filesystem or OS-specific code changed; spans are byte
   offsets.
+
+## Phase 4
+
+Phase 4 moved the record schema to 5.0, bumped the extractor revision, and
+made the cache read the reference evidence strictly: a damaged or
+contradictory entry is now a miss and gets recomputed, never served.
+
+### What was built
+
+- **Versions.** `SchemaVersion::V5_0` is now `CURRENT`, and 4.3 is documented
+  as "no longer emitted". `EXTRACTOR_REVISION` went from 30 to 31 (ruling 3:
+  bumped from the value in the tree, not "10" → "11"). `REPORT_SCHEMA_VERSION`
+  stays 1 (ruling 4). The goldens `symbols.json` and `symbols.jsonl` were
+  regenerated with `HUG_UPDATE_GOLDEN=1`. Their diff is only
+  `schema_version` (4.3 → 5.0, 190 sites) and `extractor_version` (rev.30 →
+  rev.31, 95 sites). Every record ID is unchanged, so declaration IDs stay
+  stable.
+- **Strict evidence form** (new `lib/src/cache/stored_evidence.rs`). The
+  entry writes `occurrences` and `reference_coverage` through
+  `StoredOccurrence`/`StoredCoverage`/`StoredRef`/`StoredSpan`/`StoredPoint`.
+  Every key is written (`null` owner or ID, `[]` candidates or reasons), and
+  the reader types are `deny_unknown_fields` and require every key (a
+  `nullable` deserializer, so an absent key is an error and never `None`).
+  The public `Occurrence`/`ReferenceCoverage` serde defaults are never on
+  the cache path. `symbol_cache.rs` uses these through
+  `serialize_with`/`deserialize_with`, and its `nullable_string` became the
+  generic `stored_evidence::nullable`.
+- **`validate_evidence`** (called from `StoredEntry::validate`, error →
+  `CacheMiss::Inconsistent`). It absorbs Phase 3's two capability checks and
+  adds:
+  - the first region is the whole file with no owner (`whole_file_span`,
+    now `pub(crate)`);
+  - every span is checked against the source: in range, on character
+    boundaries, start ≤ end, and its points equal the one-based line and
+    byte column of its offsets (`LineStarts`). An occurrence span is
+    non-empty and lies inside its owner span;
+  - `target.name` is the source text at the span;
+  - `(owner ID, owner span)` is a coverage region, the occurrence's owner
+    equals that region's owner, and an owner or candidate that names a
+    stored record repeats its name and qualified name;
+  - confidence consistency: `Scoped` has no candidates; `NameOnly` has no
+    target ID and has distinct candidates, each with an ID; `Unresolved`
+    has neither;
+  - occurrences are strictly in canonical order (`occurrence_order`, now
+    `pub(crate)`) with distinct spans. Coverage is in outer-first order.
+    Reasons are ascending and distinct, and empty exactly when the region
+    is `Complete`;
+  - cross-check against the records: every in-file `references` edge (a
+    reference that is not a `dependencies` import) and every
+    `referenced_by` edge has the `Scoped` occurrence that made it, and
+    `is_recursive: Yes` has a `Scoped` self-`Call`.
+- **Projection** needed no change. Phase 3 already did what the plan task
+  asks: `record_passes_suffice` widens `Semantics` without a parse only from
+  stored `Occurrences`, and `project` clears the evidence without the
+  capability. The existing `symbols_cache` projection and widening rows
+  pass.
+
+### Departures and decisions
+
+- **The `[]`-occurrences cell.** The plan's matrix says `[]` is accepted
+  only when the file truly has none. Without a parse, the reader can tell
+  that only through derived facts: an emptied list is refused when any record
+  keeps an edge an occurrence made (or a recursion `Yes`). An occurrence
+  removed while nothing derived from it remains (a call with no in-file
+  target) cannot be detected without parsing. That residual is documented in
+  `docs/cache-design.md#reference-evidence`. The entry key includes the
+  source hash, so an entry is only ever read for its own text.
+- **`target.name` vs records is not checked.** A target's name is the
+  written token, which can differ from the declaration's name (a TS
+  `new Box()` can bind a constructor record). Owners and candidates are
+  copies of `symbol_ref(record)`, so those are checked.
+- **Test helpers keep forged entries consistent.**
+  `cache_upgrade::rename_record` (the sentinel used by every warm-hit test)
+  now renames the evidence owners and candidates that name the record. A
+  new `set_qualified_name` does the same for the revision 6 and 20 rows,
+  which forge a qualified name. Without this, the stricter reader correctly
+  refused their control payloads.
+- `assert_schema_bump_entry_is_not_served` now takes a `SchemaBump` row
+  (what the old shape lacked, and how to recognize the current shape), so
+  the revision-30 row can say "no `occurrences`/`reference_coverage` keys".
+- Hard-coded "future" versions in tests (`5.0` in two incompatible-version
+  lists, and `{5,1}` as the robustness matrix's incompatible minor) were
+  moved: the lists now use 4.3, 5.1 and 6.0.
+- **Concurrent edits in this worktree.** While this phase ran, another
+  session edited the same worktree for the `2026-10-06-symbol-type-relations`
+  review: `lib/src/file/extract/relations.rs`,
+  `lib/src/file/tree_file/relations.rs`, `lib/tests/l1/symbols_relations.rs`,
+  `cli/tests/symbols/outline.rs`, `docs/type-relations.md`,
+  `docs/symbol-kinds-and-visibility.md`, `docs/symbol-reports.md`, that
+  feature's `log.md`, and the area/lib/cli READMEs. It also made some of
+  the same 4.3 → 5.0 text substitutions in `docs/cache-design.md`,
+  `docs/symbol-schema-design.md`, the READMEs and the skill before my doc
+  pass. **Those files are not this phase's work** (except where listed in
+  the frontmatter). Whoever commits this phase must separate them.
+
+### Input Robustness Matrix (cache entry, reference evidence)
+
+One test walks the matrix from a real `hug --json-full` entry for a
+TypeScript fixture. The fixture has a `Scoped` call with an edge, a
+`NameOnly` member call, an `Unresolved` call, a `Limited` region, direct
+recursion and a non-ASCII character. Each cell makes one edit, and the
+outcome is asserted through `hug`'s output (served = the sentinel is
+present; rejected = output equals an uncached run):
+`cache_robustness::reference_evidence_is_served_only_when_consistent`.
+
+| Shape | `occurrences` | `reference_coverage` | `confidence` | `target.id` | `candidates` | `span` | `owner` | coverage `reasons` |
+|---|---|---|---|---|---|---|---|---|
+| control | served | served | served | served | served | served | served | served |
+| absent | miss | miss | miss | miss | miss | miss | miss | miss |
+| `null` | miss | miss | miss | miss (the edge has no occurrence) | miss | miss | miss (no such region) | miss |
+| wrong type | miss | miss | miss | miss | miss | miss | miss | miss |
+| one bad element | miss | miss | miss | miss | miss | miss | miss (qualified name ≠ region owner's) | miss |
+| every element bad | miss | miss | miss | miss | miss | miss | miss | miss |
+| empty | miss (edge without occurrence); **served** for a quiet file | miss | miss | miss | miss (`NameOnly` needs candidates) | miss | miss | miss (`Limited` needs a reason) |
+| duplicate key | miss | miss | miss | miss | miss | miss | miss | miss |
+| trailing content | miss | miss | miss | miss | miss | miss | miss | miss |
+
+Plus 24 consistency edits, each of which must be a miss: zero-length, inverted,
+past-the-end and off-boundary spans; points that disagree with offsets; a
+target name that is not the source text; `Scoped` with candidates;
+`NameOnly` with an ID or a repeated candidate; `Unresolved` with an ID or
+candidates; a repeated occurrence; reordered occurrences; an owner from
+another region; a region owner or candidate whose names differ from the
+record's; a `Complete` region with a reason; repeated reasons; no file
+region; reordered coverage; evidence without the capability; a removed
+edge-making occurrence; a forged `referenced_by`; and a forged
+`is_recursive: Yes`. The capability claim column (`completed_capabilities`)
+is the existing Python-matrix entry column. Code-smell grep on the cache
+read path: no `#[serde(default)]`, `unwrap_or_default`, `.ok()` or parsing
+`filter_map` in `stored_evidence.rs` (its one `filter_map` reads IDs off
+already-parsed relation refs).
+
+The first matrix run found a real gap. An edited owner `qualified_name` was
+served. That led to the owner-equals-region-owner and names-its-record checks.
+
+### Requirement → test mapping
+
+| Requirement | Test |
+|---|---|
+| Schema 5.0 on records, envelopes, entries | `wiring` (TypeScript schema 5.0), `report.rs`/`reports.rs` envelope prefixes, `tree_file::emits_symbol_records_v2`/`emits_symbol_index_v2_with_completed_passes`, goldens |
+| Declaration IDs unchanged | golden diff (version fields only) + `golden::json_symbols_over_multi_match_the_golden` |
+| Old version invalidated (revision 30, schema 4.3, no evidence keys) under both keys; rewritten entry current | `cache_upgrade::entry_from_extractor_revision_thirty_is_not_served_after_the_scoped_references_bump` |
+| 4.3 entry/record versions are misses | `symbols_cache::incompatible_record_schema_versions_are_misses_never_served_or_widened` (4.3 added), `each_key_input_and_stored_identity_decides_a_miss` (entry 4.3 added), `cache_upgrade::warm_entry_from_the_previous_extractor_…` |
+| Malformed or inconsistent evidence is a miss, never an empty result | `cache_robustness::reference_evidence_is_served_only_when_consistent` |
+| Genuinely empty evidence is served | the same test (quiet file) |
+| Persisted round trip (write → read → rewrite → read), every fixture | `symbols_cache::stored_reference_evidence_round_trips_through_rewrites` (new) |
+| Passive corpus: every shipped fixture's evidence passes the strict reader (`Hit`, no work) | `symbols_cache::every_fixture_is_a_complete_warm_hit_equal_to_an_uncached_run` |
+| Cold/warm/widened/narrowed equal uncached; real `Hit`; counters | existing `symbols_cache` projection/widening tests (Phase 3 `Occurrences` rows), `cache_robustness::the_cache_entry_records_the_coverage_it_holds` (now also asserts the written `null` owner) |
+| Span points vs offsets (CRLF, non-ASCII, end of source) | `cache::stored_evidence::tests::points_are_one_based_lines_and_byte_columns` |
+
+### Gates
+
+- Scope calculator (repository root, after all edits): `"packages":
+  ["tree-hugger", "tree-hugger-cli", "test-toolkit"]`, `"change_class":
+  "package"`, so both gates ran. The input list includes the concurrent
+  session's files.
+- `just test` (tree-hugger + tree-hugger-cli): **1193 of 1193 passed**.
+  An earlier full run (under load from the concurrent session's builds) had
+  1192 pass and 1 time out. My output filter did not capture that test's
+  name, and the next full run was all green.
+- `just lint`: passes.
+- Not run: `just test-l2`, because no terminal rendering changed, and
+  cross-OS checks. The new code reads no paths. Spans are validated against
+  the source text with byte arithmetic, `\r` counts as a column exactly as
+  tree-sitter does (unit-tested), and the tests use `tempfile` and `Scratch`.
+
+## Phase 5
+
+Phase 5 added `hug refs`, which reports one declaration's references (or its
+callers or callees) from the reference evidence, in text and `--json`.
+
+### What was built
+
+- **Command** (`cli/src/refs.rs`, new; wired in `cli/src/main.rs` through
+  `run_refs`, handled before the declaration commands' output-mode
+  resolution). `hug refs [<symbol> | --id <id>] [file-globs...]`: the first
+  positional is the name, the rest are file filters; `--id` makes every
+  positional a filter. With neither, a clap usage error (exit 2).
+  `--callers` conflicts with `--callees` (clap). `--json-full` is rejected in
+  `run_refs`; `--jsonl`, `--format`, `--count`, `--stats` and every
+  declaration selector are rejected by clap because `RefsArgs` does not carry
+  `ReportArgs`/`SelectionArgs`.
+- **Shared discovery flags.** `--exclude-files`, `--language` and `--no-cache`
+  moved from `ScanOptions` into a new `DiscoveryArgs`, flattened into
+  `ScanOptions` and into `RefsArgs`, so `refs` reuses them without accepting
+  the listing-only flags (`--exclude-symbols`, `--comments`, `--group-by-*`).
+  The persistent-cache constructor became `main::symbol_cache`, shared by both
+  paths.
+- **Selection.** Every file is analyzed with `SymbolQuery::new()
+  .capabilities([Occurrences]).scan_root(..)`: every kind and every scope, so
+  locals and parameters are selectable. A name is `NamePattern::exact`,
+  matched through the library's `SymbolQuery::matches` (smart case,
+  language separators, `file#` prefixes, trailing `!`), and `--id` compares
+  `record.id` exactly. Matches are collected across the whole scan before
+  anything is written: more than one → stderr listing (location, label,
+  qualified name, ID), exit 1, empty stdout; none → empty report, exit 0.
+- **Report model.** Resolution is file-local, so only the matching file's
+  index is kept. Incoming (default, `--callers` = `Call` only): `Scoped`
+  occurrences whose `target.id` is the declaration's ID, plus a separate
+  `name_only_suggestions` group of `NameOnly` occurrences whose candidates
+  include it. `Unresolved` same-name occurrences are never attached. Callees:
+  every `Call` whose `owner.id` is the declaration's ID, whatever its
+  confidence, each with an `absent_id` explanation when the target has no
+  ID (`import`, `binding_without_record`, `name_only`, `unresolved`).
+  Owner and candidate `qualified_name`s are replaced by the records'
+  displayed (prefixed) names for presentation only; nothing stored changes.
+- **JSON envelope** (`report_schema_version` 1, ruling 4): `schema_version`,
+  `root_dir`, `boundary`, `selector`, `direction`, `declaration` (trimmed like
+  `--json` records, `null` when nothing matched), `files` (the declaration's
+  file: `file`, `language`, `completed_capabilities`, `occurrences`,
+  `name_only_suggestions`, `coverage`, `limited_regions`), then `errors`.
+- **Text** through the declaration renderer (`Renderer::{line, list, link,
+  declaration}` and `render::label` became `pub(crate)`): heading with the
+  declaration and its linked location, the boundary on every report, groups
+  by owning region (owner name, `file-level code [span]` or `code without a
+  declaration owner [span]`), one bullet per call site with a linked dim
+  location, and a note counting `Limited` regions.
+
+### Departures and decisions
+
+- **How `import` is told apart from other `Scoped` calls without an ID.** The
+  occurrence does not store which import bound it, so the CLI reads the
+  owner record's `relations.dependencies`. That list is built from exactly
+  the bound imports (`bind_references`), keyed by the import's local name,
+  which is the written target name. So `import` is decided from the
+  library's own evidence, not guessed; a `Scoped` call with no ID that is
+  not listed there is `binding_without_record` (a TS `for…of`/`catch`
+  binding, for instance). No schema change was needed.
+- **Coverage in JSON** is the regions owning a listed row (plus the
+  declaration's own region for `--callees`), not every region of the file;
+  `limited_regions` counts the file's `Limited` regions for incoming views.
+- **Exit status for ambiguity is 1**, like a failed file; clap usage errors
+  stay 2.
+- **Shared L2 helper fix.** `terminal_report::Report::has_logical_row` joined
+  the padded last piece of a WezTerm soft-wrapped row onto the next row (the
+  capture pads that piece to the pane width), so an 81-column `refs` heading
+  could never match. It now measures rows without trailing spaces, as its doc
+  already implied ("the space the capture trimmed"). The regression test
+  `terminal_scope::a_padded_last_piece_ends_its_logical_row` fails against
+  the old helper.
+- An all-lowercase qualified name is case-insensitive under smart case, so
+  `names.ts#widget` matches both `widget` and `Widget`. That is the existing
+  rule, and the test uses `--id` from the ambiguity listing instead.
+
+### Requirement → test mapping
+
+All L1 tests are in `cli/tests/symbols/refs.rs` (the `symbols` binary, L1):
+
+| Requirement | Test |
+|---|---|
+| Incoming rows: every `Scoped` call/usage bound to the ID, call sites kept, owners prefixed, coverage for each row | `references_list_every_established_call_and_usage_in_the_declarations_file` |
+| `--callers` excludes `Usage`, keeps repeated calls | `callers_exclude_usages_and_keep_repeated_calls` |
+| `--callees`: owned calls only, all confidences, absent IDs explained (TS bindings, Rust import, unresolved), own region in coverage | `callees_list_owned_calls_and_explain_absent_ids` |
+| Uncertain group separate; `--id` cannot upgrade; non-candidate not suggested | `name_only_suggestions_stay_separate_and_an_id_cannot_upgrade_them` |
+| Duplicate names across files: exit 1, no stdout (JSON and text), locations + IDs; file prefix, `--id`, `--exclude-files` select one | `a_name_declared_in_two_files_is_an_error_listing_both` |
+| Exact smart-case names, case-sensitive IDs, local targets | `names_are_exact_smart_case_and_ids_case_sensitive` |
+| Empty reports (unknown name, unknown ID, unreferenced declaration) succeed and state the boundary | `empty_reports_succeed_and_state_the_boundary` |
+| Cross-file same-name call never resolved | `a_cross_file_same_name_call_is_never_a_resolved_reference` |
+| Versioned envelope, key set, `errors` last, trimmed record, failed file → `errors` + exit 1 | `the_json_envelope_is_versioned_and_ends_with_errors` |
+| Text grouping, ownerless labels, suggestion group, callee explanations | `the_text_report_groups_rows_by_owner_and_labels_ownerless_code` |
+| Cache options reused; warm run is a real `Hit` with no parse and identical output | `a_warm_run_hits_the_cache_with_the_same_report` |
+| Missing selector, `--callers`+`--callees`, `--json-full`, `--jsonl`, `--format`, `--count`, `--kind`, `--exclude-symbols` rejected (exit 2, no stdout) | `missing_selectors_conflicts_and_unsupported_formats_are_rejected` |
+| Real-terminal styling, OSC 8 links, boundary on empty report, `hug`'s wrapping at `COLUMNS=60` (L2, tmux/WezTerm/Kitty) | `level2_declarations::check_refs` |
+| Padded WezTerm wrap piece ends its logical row | `terminal_scope::a_padded_last_piece_ends_its_logical_row` |
+
+No parser, schema or configuration reader changed in this phase (the CLI
+reads evidence that Phase 4's strict cache reader already validates), so no
+input-robustness matrix applies.
+
+### Gates
+
+- `just test`: **1206 of 1206 passed** (Phase 4: 1193, plus 12 `refs` tests
+  and 1 `terminal_scope` test).
+- `just test-l2`: **6 of 6 passed**. tmux and WezTerm ran every check,
+  `check_refs` included. Kitty is not installed on this host, so its entry
+  points skipped cleanly (0.01s). The first run failed on the
+  `has_logical_row` defect above.
+- `just lint`: passes.
+- Cross-OS: `just cross-check tree-hugger-cli --os windows refs:: terminal_scope::`
+  on native Windows: 22 of 22 passed. A filterset with parentheses
+  (`-E 'test(/…/)'`) fails in the recipe's remote shell quoting; plain
+  substring filters work. Linux and WSL were not run: the new code reuses
+  the existing portable-path helpers (`portable_relative`, `display_path`,
+  `file_url`) and adds no filesystem or platform code.
+- Scope calculator (repository root, after every Phase 5 edit, frontmatter
+  included): `git status --porcelain --untracked-files=all | awk '{print $NF}'
+  | xargs python3 scripts/ci/affected_scope.py` gave `"packages":
+  ["tree-hugger", "tree-hugger-cli", "test-toolkit"]`, `"change_class":
+  "package"`, so both gates were required. The working tree still holds the
+  uncommitted Phase 4 changes, so the input is wider than this phase.
+- Final run on the finished tree (after the last `refs.rs` cleanup):
+  `just lint` passes; `just test` 1206 of 1206 passed.

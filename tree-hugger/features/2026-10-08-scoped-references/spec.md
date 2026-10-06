@@ -17,14 +17,12 @@ reviewed_on: 2026-10-05
 review_iterations: 0
 human_review: false
 message_to_agent: |-
-  Phases 1-3 are complete; read the implementation log's "Phase 3" section first.
-  - `Capability::Occurrences` exists (Occurrences requires References; Semantics requires Occurrences). `analysis::run_query` is the one path: summaries (`bind_references`) and `semantic_pass` read `index.occurrences`/`reference_coverage`; `TreeFile::reference_evidence()` is an Occurrences query selecting no kinds.
-  - Phase 3 pulled a MINIMAL slice of the Phase 4 cache work forward: `StoredEntry`/`WrittenEntry` (lib/src/cache/symbol_cache.rs) now carry required `occurrences` and `reference_coverage` keys; `validate` only checks "empty without the occurrences capability" and "coverage non-empty with it". Phase 4 still owns: schema 5.0 + EXTRACTOR_REVISION bump (it is "30" in the tree now, not 29 - another session bumped it), the stale-revision/schema-bump cache-upgrade rows, strict per-occurrence validation (spans in range/char boundaries, confidence/ID/candidate consistency) via a present-required deserializer on the cache path (the public `Occurrence.candidates` and `ReferenceCoverage.reasons` have `serde(default)`), and the Input Robustness Matrix columns in `cli/tests/symbols/cache_robustness.rs`.
-  - `coverage::record_passes_suffice`: Semantics widens without a parse only from stored Occurrences; Occurrences needs a parse. `project` clears the evidence without Occurrences. `symbols_cache` projection/widening tests already include Occurrences cells/rows.
-  - `semantic_pass` must stay a function of stored data only (occurrences, coverage, imports, records incl. `relations.parent` for constructors) so cache widening equals a fresh run. The import-alias self-call rule is by name for that reason.
-  - Summaries changed meaning per spec: limited languages have no edges; only callable owners collect references. `--json-full` indexes now include occurrences/coverage (in-file names; REPORT_SCHEMA_VERSION still 1).
-  - Recursion tests: `lib/tests/l1/symbols_reference_summaries.rs` (`RECURSION_MATRIX`).
-  - Docs pages must not name this feature; `docs/references.md` now marks only strict cache storage under the next schema and `hug refs` as planned.
+  Phases 1-5 are complete; read the implementation log's "Phase 5" section first.
+  - `hug refs` is built (`cli/src/refs.rs`, wired by `main::run_refs`), documented in `docs/references.md#hug-refs` and `cli/README.md` ("Refs Command"), with no **planned** marker left in `docs/references.md`. The skill (`SKILL.md`) has the command row and an architecture bullet; `api-reference.md` and `query-system.md` were not touched in Phase 5.
+  - `--exclude-files`, `--language` and `--no-cache` now live in `DiscoveryArgs` (flattened into `ScanOptions` and `RefsArgs`). The area/lib READMEs do not mention `hug refs` yet; Phase 6 owns those and the remaining docs sweep (`docs/symbol-schema*.md`, the recursion Mermaid diagram and migration notes).
+  - The shared L2 helper `terminal_report::Report::has_logical_row` now measures rows without trailing spaces (WezTerm pads a wrapped line's last piece). Kitty is not installed on this host, so its L2 entry points skip.
+  - `just cross-check ... -E 'test(/.../)'` breaks in the recipe's remote shell quoting; pass plain substring filters instead.
+  - Phase 4's note still applies: another session may be editing this worktree (2026-10-06-symbol-type-relations files); do not treat those files as this feature's work.
 $schema:
   status: |-
     enum(

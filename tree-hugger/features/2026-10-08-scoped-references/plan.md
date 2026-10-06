@@ -3,7 +3,7 @@ kind: plan
 feature: 2026-10-08-scoped-references
 total_phases: 6
 created: 2026-10-05
-phase: 3
+phase: 5
 agent: claude/sonnet
 yolo: true
 packages:
@@ -65,6 +65,46 @@ docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
   - .claude/skills/tree-hugger/SKILL.md
   - .claude/skills/tree-hugger/api-reference.md
+source_files_during_phase_4:
+  - tree-hugger/lib/src/cache/stored_evidence.rs
+  - tree-hugger/lib/src/cache/mod.rs
+  - tree-hugger/lib/src/cache/symbol_cache.rs
+  - tree-hugger/lib/src/analysis/occurrences.rs
+  - tree-hugger/lib/src/shared/schema_v2/types.rs
+  - tree-hugger/lib/src/file/mod.rs
+  - tree-hugger/lib/tests/l1/symbols_cache.rs
+  - tree-hugger/lib/tests/l1/tree_file.rs
+  - tree-hugger/cli/tests/symbols/cache_robustness.rs
+  - tree-hugger/cli/tests/symbols/cache_upgrade.rs
+  - tree-hugger/cli/tests/symbols/report.rs
+  - tree-hugger/cli/tests/symbols/reports.rs
+  - tree-hugger/cli/tests/symbols/wiring.rs
+  - tree-hugger/cli/tests/fixtures/golden/symbols.json
+  - tree-hugger/cli/tests/fixtures/golden/symbols.jsonl
+docs_updated_during_phase_4:
+  - tree-hugger/docs/cache-design.md
+  - tree-hugger/docs/symbol-schema-design.md
+  - tree-hugger/docs/references.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/tree-hugger/SKILL.md
+  - .claude/skills/tree-hugger/api-reference.md
+source_files_during_phase_5:
+  - tree-hugger/cli/src/refs.rs
+  - tree-hugger/cli/src/main.rs
+  - tree-hugger/cli/src/render.rs
+  - tree-hugger/cli/tests/symbols/refs.rs
+  - tree-hugger/cli/tests/symbols/main.rs
+  - tree-hugger/cli/tests/symbols/terminal_scope.rs
+  - tree-hugger/cli/tests/support/terminal_report.rs
+  - tree-hugger/cli/tests/level2_declarations.rs
+docs_updated_during_phase_5:
+  - tree-hugger/docs/references.md
+  - tree-hugger/docs/symbol-reports.md
+  - tree-hugger/cli/README.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .claude/skills/tree-hugger/SKILL.md
 ---
 
 # Plan: Scope-Aware References and `hug refs`
@@ -202,10 +242,10 @@ Goal: persist and project the new evidence safely.
 
 ### Tasks
 
-- [ ] **Schema bump.** Move 4.0 → 5.0 (per ruling 3) on records, indexes, envelopes and fingerprints; bump `EXTRACTOR_REVISION` ("10" → "11", `lib/src/file/mod.rs`); update report versions per ruling 4. Declaration IDs unchanged where identity unchanged (assert against golden fixtures; regenerate `cli/tests/fixtures/golden/symbols.json{,l}` only for intended shape changes).
-- [ ] **Coverage projection** (`lib/src/analysis/coverage.rs`). Widening by occurrences requires syntax unless complete occurrence evidence is stored; widening by semantics uses stored occurrences + coverage (summaries alone insufficient); resolve before discarding light records; never rerun definitions query or parse to build a second representation.
-- [ ] **Cache** (`lib/src/cache/symbol_cache.rs`). Store occurrences in-file names only (scan-root-relative prefixes applied only at presentation); keep one-entry-per-file; strict read validation (spans in range and on char boundaries, confidence/target-ID/candidate consistency, capability claims backed by evidence). Missing or malformed required data is a cache miss, never a computed empty result. Public serde defaults for additive lists must not let the strict reader accept an entry that claims `Occurrences` but omits them (use a present-required deserializer for the cache path).
-- [ ] **Docs for schema** (`docs/symbol-schema-design.md`, `docs/symbol-schema.md`, `docs/cache-design.md`): current behavior, with decided-but-unbuilt items marked **planned**.
+- [x] **Schema bump.** Move 4.0 → 5.0 (per ruling 3) on records, indexes, envelopes and fingerprints; bump `EXTRACTOR_REVISION` ("10" → "11", `lib/src/file/mod.rs`); update report versions per ruling 4. Declaration IDs unchanged where identity unchanged (assert against golden fixtures; regenerate `cli/tests/fixtures/golden/symbols.json{,l}` only for intended shape changes).
+- [x] **Coverage projection** (`lib/src/analysis/coverage.rs`). Widening by occurrences requires syntax unless complete occurrence evidence is stored; widening by semantics uses stored occurrences + coverage (summaries alone insufficient); resolve before discarding light records; never rerun definitions query or parse to build a second representation.
+- [x] **Cache** (`lib/src/cache/symbol_cache.rs`). Store occurrences in-file names only (scan-root-relative prefixes applied only at presentation); keep one-entry-per-file; strict read validation (spans in range and on char boundaries, confidence/target-ID/candidate consistency, capability claims backed by evidence). Missing or malformed required data is a cache miss, never a computed empty result. Public serde defaults for additive lists must not let the strict reader accept an entry that claims `Occurrences` but omits them (use a present-required deserializer for the cache path).
+- [x] **Docs for schema** (`docs/symbol-schema-design.md`, `docs/symbol-schema.md`, `docs/cache-design.md`): current behavior, with decided-but-unbuilt items marked **planned**.
 
 ### Input Robustness Matrix (cache entry, occurrence evidence)
 
@@ -245,12 +285,12 @@ Goal: the command, in text and JSON.
 
 ### Tasks
 
-- [ ] **Command wiring** (`cli/src/main.rs`, new `cli/src/refs.rs`). `hug refs [<symbol> | --id <id>] [file-globs...]`; exactly one selector; `--callers`/`--callees` mutually exclusive (clap conflict); `--id` case-sensitive; reuse discovery, ignore rules, language overrides, file-globs and cache options; reject unsupported output formats and selectors with a clear error (only text and `--json`).
-- [ ] **Selection.** Names use existing exact smart-case rules, language separators, file-prefixed qualified names and trailing `!`; ambiguity checked across all selected files, kinds, scopes including locals (do not inherit the hidden-local default); multiple declarations → nonzero error listing locations and IDs with no partial output; unknown name/ID → success with an empty report.
-- [ ] **Report model.** Incoming: established rows matching target ID; separate "name-only suggestions" group only when candidates include the ID; unresolved same-name references never attached. Callers = incoming `Call`; callees = calls owned by selected declaration, including unresolved and import targets with visibly explained absent IDs. Default lists `Call` and `Usage` grouped by owner; each call site kept; file-level and anonymous owners labeled with spans. `--id` cannot upgrade uncertainty. Request `Occurrences` capability; apply scan-root prefixes only for presentation.
-- [ ] **JSON.** Versioned envelope per existing conventions: selected declaration identity, per-file occurrences, coverage, completed capabilities, file-local boundary statement (present on empty reports).
-- [ ] **Text rendering.** Through `biscuit-terminal` components (`Prose`, `UnorderedList`, existing location links/wrapping); boundary note always printed, including when empty.
-- [ ] **Boundary behavior.** A cross-file same-name call is never an incoming resolved reference.
+- [x] **Command wiring** (`cli/src/main.rs`, new `cli/src/refs.rs`). `hug refs [<symbol> | --id <id>] [file-globs...]`; exactly one selector; `--callers`/`--callees` mutually exclusive (clap conflict); `--id` case-sensitive; reuse discovery, ignore rules, language overrides, file-globs and cache options; reject unsupported output formats and selectors with a clear error (only text and `--json`).
+- [x] **Selection.** Names use existing exact smart-case rules, language separators, file-prefixed qualified names and trailing `!`; ambiguity checked across all selected files, kinds, scopes including locals (do not inherit the hidden-local default); multiple declarations → nonzero error listing locations and IDs with no partial output; unknown name/ID → success with an empty report.
+- [x] **Report model.** Incoming: established rows matching target ID; separate "name-only suggestions" group only when candidates include the ID; unresolved same-name references never attached. Callers = incoming `Call`; callees = calls owned by selected declaration, including unresolved and import targets with visibly explained absent IDs. Default lists `Call` and `Usage` grouped by owner; each call site kept; file-level and anonymous owners labeled with spans. `--id` cannot upgrade uncertainty. Request `Occurrences` capability; apply scan-root prefixes only for presentation.
+- [x] **JSON.** Versioned envelope per existing conventions: selected declaration identity, per-file occurrences, coverage, completed capabilities, file-local boundary statement (present on empty reports).
+- [x] **Text rendering.** Through `biscuit-terminal` components (`Prose`, `UnorderedList`, existing location links/wrapping); boundary note always printed, including when empty.
+- [x] **Boundary behavior.** A cross-file same-name call is never an incoming resolved reference.
 
 #### Wave 1 (concurrent)
 
@@ -264,8 +304,8 @@ Goal: the command, in text and JSON.
 
 ### Tests
 
-- [ ] L1 CLI (`cli/tests/symbols/` new `refs.rs`): exact/smart-case, duplicate names across files (ambiguity error, no partial stdout), `--id`, local targets, empty reports, conflicting flags, unsupported format rejection, versioned JSON, callers/callees exclude `Usage`, repeated calls preserved, uncertain groups separate, cross-file same-name not resolved.
-- [ ] L2 (`just test-l2`) terminal report via the shared harness (see `rust-testing` and `biscuit-test-harness` skills), no window focus; use the Test Toolkit.
+- [x] L1 CLI (`cli/tests/symbols/` new `refs.rs`): exact/smart-case, duplicate names across files (ambiguity error, no partial stdout), `--id`, local targets, empty reports, conflicting flags, unsupported format rejection, versioned JSON, callers/callees exclude `Usage`, repeated calls preserved, uncertain groups separate, cross-file same-name not resolved.
+- [x] L2 (`just test-l2`) terminal report via the shared harness (see `rust-testing` and `biscuit-test-harness` skills), no window focus; use the Test Toolkit.
 
 **Checkpoint 5:** `just test`, `just test-l2`, `just lint` green in `tree-hugger/`.
 

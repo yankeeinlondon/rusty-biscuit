@@ -5,8 +5,8 @@ date: 2026-10-06
 status: implemented
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
-reviewed_on: 2026-10-05
-review_iterations: 3
+reviewed_on: 2026-10-06
+review_iterations: 8
 human_review: false
 human_review_items: []
 message_to_agent: |-
@@ -17,6 +17,9 @@ message_to_agent: |-
   uniquely resolved same-file owner; external owners remain a documented gap.
   The accepted decision and follow-up implementation are recorded in log.md.
   Tasks 6.5-6.7 and the review-2 cache robustness matrix are implemented.
+  Review-7 findings are implemented: nested Swift generic contexts, indexed
+  C++ inline lookup, and indexed Rust/C#/Swift bound attachment. Ready for
+  review iteration 8; repair details and verification are recorded in log.md.
   Local verification and remaining limitations are recorded in log.md.
 implemented: true
 implemented_by: "claude/opus"
