@@ -8,6 +8,14 @@ source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2: []
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3: []
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
 packages: []
 ---
 
@@ -249,3 +257,135 @@ ship). No new permanent tests, no docs, no skills, no package sources changed
   in `_completed`), then re-run its Phase 1 verification idea: the removed
   probe (`name[](min(1))` loads, validates, survives `merge_baseline`, and is
   visible in the typed view) is the acceptance shape.
+
+## Phase 2
+
+**Outcome: NOT STARTED — the dependency gate still fails.** The phase-2
+implementation run was requested on 2026-10-05. Per the plan's Dependency Gate
+("This feature cannot start implementation until that prerequisite lands") and
+Phase 1's recorded stop, no Phase 2 task was started, no plan checkbox was
+checked, and no source file was touched. This section records the
+re-verification that justified the stop.
+
+### Gate re-verification (2026-10-05)
+
+- `2026-09-28-recursive-schema-types` spec status is still `draft-spec`; its
+  directory contains only `spec.md` (no plan, no implementation log; last
+  modified Sep 28).
+- `TypeExpr` (`lib/src/markdown/schemas/simplified/types.rs:183-201`) still
+  has only `Primitive`, `InlineObject`, `Imported` — no `Ref` variant.
+- `apply_import_postfix` (`lib/src/markdown/schemas/resolve.rs:1322-1331`)
+  still returns the `SchemaError::Convert` "cannot apply `[]`/constraints to
+  the union-typed named type `{name}@{reference}`" — the exact error the
+  Phase 1 probe observed for `policy[](min(1))@./content-policy.yaml`.
+- No `$defs`/`$ref` lowering exists: a search over `lib/src/markdown/schemas`
+  finds `$defs` only in a reject-list at `resolve.rs:633`.
+- `git log -- darkmatter/lib/src/markdown/schemas/` shows no recursive-types
+  work since Phase 1 (latest commit touching the tree:
+  `b9ce7c893 perf(darkmatter): compile the baseline validator once per
+  context`).
+
+### Why no partial implementation was done
+
+Wave 1 (dependency add, embedded table, virtual path normalizer) is
+technically independent of the prerequisite, but starting it was rejected:
+
+1. The plan's gate is feature-level, not wave-level, and both Phase 1's
+   recorded outcome and the spec's `message_to_agent` say do not start
+   Phases 2–6 until the prerequisite lands.
+2. Phase 2 Wave 2 is specified to "reuse the prerequisite's cycle/definition
+   rules" — those rules do not exist, so the resolver hook cannot be written
+   as specified; a Wave-1-only landing would be dead code (an unused embedded
+   table and an unused `content-policy` dependency) behind `allow(dead_code)`.
+3. Wave 3 (the `content_policy` baseline entry) is proven fatal by the Phase 1
+   probe: it panics at baseline load and would break `darkmatter_base_schema()`
+   for DMLS, compose, and Claudine, turning the area's suite red.
+4. Checking off Wave 1 tasks while Waves 2–3 are blocked would misrepresent
+   plan state and invite Phase 3 (which requires "the embedded baseline must
+   be loadable") to run against a half-landed Phase 2.
+
+### Requirement-to-test mapping (Phase 2)
+
+None — no behavior changed; no test was added, removed, or run (the working
+tree has zero darkmatter source changes this phase, so Phase 1's green
+`just lint` / `just test` evidence stands).
+
+### Unfinished / blocked
+
+All Phase 2 tasks remain unchecked and untouched: dependency add, embedded
+table, virtual path normalizer, resolver hook, resolve + lower once, origin
+and positions, runtime baseline update, and validation checkpoint 2. The
+blocker is unchanged from Phase 1: implement
+`2026-09-28-recursive-schema-types` (or choose another option in the spec's
+`human_review_items`), then re-run Phase 2. Phase 1's survey (accessor/caller
+table, resolver seam map, rulings R1–R8) remains valid for that run.
+
+## Phase 3
+
+**Outcome: NOT STARTED — the dependency gate still fails, and Phase 2 (this
+phase's direct prerequisite) was never started.** The phase-3 implementation
+run was requested on 2026-10-05. Per the plan's Phase 3 heading ("Depends on
+Phase 2 (the embedded baseline must be loadable)"), the Dependency Gate
+(feature-level, not phase-level), and the spec's standing `message_to_agent`
+instruction ("Do NOT start Phases 2-6 until the prerequisite lands"), no
+Phase 3 task was started, no plan checkbox was checked, and no source file
+was touched. This section records the re-verification that justified the
+stop.
+
+### Gate re-verification (2026-10-05)
+
+- `2026-09-28-recursive-schema-types` spec status is still `draft-spec`; its
+  directory still contains only `spec.md` (no plan, no implementation log).
+- `TypeExpr` (`lib/src/markdown/schemas/simplified/types.rs:184-201`) still
+  has only `Primitive`, `InlineObject`, `Imported` — no `Ref` variant.
+- `apply_import_postfix` (`lib/src/markdown/schemas/resolve.rs:1328`) still
+  returns the `SchemaError::Convert` "cannot apply `[]`/constraints to the
+  union-typed named type" rejection that the Phase 1 probe hit for the exact
+  `policy[](min(1))@…` shape this feature needs in its baseline.
+- Phase 2 is verifiably absent from the tree: `darkmatter/lib/Cargo.toml`
+  has no `content-policy` dependency, `darkmatter/docs/schemas/darkmatter.yaml`
+  has no `content_policy` property, and `git status` shows zero modified
+  files under `darkmatter/` or `content-policy/` beyond this feature's own
+  markdown.
+
+### Why no partial implementation was done
+
+Phase 3's substance is the five-step baseline selection order in `load_api`
+(`cli/src/commands/schema/validate.rs`), whose terminal step is "embedded
+baseline via `DarkmatterSchemas::new(ctx).with_baseline(darkmatter_base_schema())`".
+That step, and validation checkpoint 3's triage ("`last_updated: not-a-date`
+fails by default, passes with opt-out"), only change behavior once Phase 2
+has landed the resolved embedded baseline and the `content_policy` baseline
+entry. Landing Phase 3 without Phase 2 was rejected for the same reasons the
+phase-2 run rejected a Wave-1-only landing:
+
+1. The `--no-baseline-schema` flag and selection rewrite would be built
+   against a baseline that does not yet validate `content_policy`; the
+   checkpoint's required default-behavior change cannot be tested, so the
+   phase's own acceptance evidence cannot exist.
+2. Checking off Phase 3 tasks while Phase 2 is blocked would misrepresent
+   plan state and invite Phase 4 (whose corpus tests validate "through the
+   default baseline") to run against a nonexistent baseline.
+3. The plan's gate is feature-level; the spec's `human_review_items` already
+   put the sequencing decision in front of the author, and a third silent
+   partial landing would not change that decision, only muddy the record.
+
+### Requirement-to-test mapping (Phase 3)
+
+None — no behavior changed; no test was added, removed, or run. The working
+tree has zero darkmatter source changes this phase, so Phase 1's green
+`just lint` / `just test` evidence stands (same reasoning as the Phase 2
+run's).
+
+### Unfinished / blocked
+
+All Phase 3 tasks remain unchecked and untouched: the `--no-baseline-schema`
+argument, the five-step selection function, the output/exit-code rules, the
+`--no-trigger-schemas` separation, and validation checkpoint 3. The blocker
+is unchanged from Phases 1–2: implement
+`2026-09-28-recursive-schema-types` (or choose another option in the spec's
+`human_review_items`), then run Phase 2, then Phase 3. Phase 1's survey
+(accessor/caller table, resolver seam map, rulings R1–R8) remains valid;
+ruling R6 (env access via `request.snapshot().env()` plus one shared parse
+of the disable values, shared with compose's
+`env_disables_baseline_schema`) is the Phase 3 design note to carry forward.

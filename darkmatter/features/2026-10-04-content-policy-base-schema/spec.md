@@ -71,6 +71,26 @@ human_review_items:
         I recommend option 1: the Phase 1 survey, rulings, and accessor maps in
         `implementation-log.md` were written so the next run can begin at Phase
         2 immediately after the prerequisite lands.
+
+        **Update (2026-10-05):** a second automated run was dispatched to
+        implement Phase 2 and stopped at the same gate, re-verifying that the
+        prerequisite is still unbuilt (spec still draft; the union-list-item
+        rejection is still in the resolver). Without a decision here, the
+        phase runner will keep stopping at this gate.
+
+        **Update (2026-10-05, later):** a third automated run was dispatched
+        to implement Phase 3 and stopped at the same gate. Phase 3 depends on
+        Phase 2 (the embedded baseline must exist before the CLI's new
+        selection rules can mean anything), and Phase 2 remains blocked by
+        the unbuilt prerequisite. Nothing has been implemented in any run;
+        each stop is recorded in `implementation-log.md`.
+    - |-
+        Secondary decision (only if you pick option 2 above): if the feature
+        is reshaped to avoid union list items, the spec's acceptance criteria
+        that depend on per-entry checking (unknown rule, unknown action,
+        item-level diagnostics with `/content_policy/N` paths) must be
+        rewritten in a new spec/plan cycle. Confirm which criteria you are
+        willing to drop before any reshaped implementation starts.
 depends-on:
     - 2026-09-28-recursive-schema-types
 related:
@@ -78,20 +98,27 @@ related:
 message_to_agent: >-
     Phase 1 completed as a gate check and the gate FAILED:
     2026-09-28-recursive-schema-types is not implemented (draft-spec, no plan;
-    TypeExpr has no Ref variant; lowering emits no $defs; resolve.rs:1326
-    rejects `[]` over a union-typed named type — a live probe of the exact
-    content_policy reference failed with that error). Do NOT start Phases 2-6.
-    Read implementation-log.md first: it holds the baseline accessor/caller
-    table, the import-resolver seam map (R2/R3 injection points:
-    mod.rs:148 baseline entry has no import expansion today;
-    ImportEngine::resolve_namespace at resolve.rs:1141 is the @file-to-disk
-    seam; NamespaceKey::File(canonical_path) is the definition identity;
-    skip dependencies insertion for embedded namespaces), the content-policy
+    TypeExpr has no Ref variant; lowering emits no $defs; resolve.rs rejects
+    `[]` over a union-typed named type — a live probe of the exact
+    content_policy reference failed with that error). A phase-2 run on
+    2026-10-05 re-verified the gate (still draft-spec; the rejection remains
+    at resolve.rs:1322-1331) and correctly started nothing. A phase-3 run on
+    2026-10-05 also re-verified the gate and started nothing: Phase 3 depends
+    on Phase 2 (embedded baseline loadable), and Phase 2 never ran. Do NOT
+    start Phases 2-6 until the prerequisite lands and the probe shape passes
+    (name[](min(1)) loads, validates, survives merge_baseline, visible in the
+    typed view); run the phases in order — Phase 2, then Phase 3. Read
+    implementation-log.md first: it holds the baseline
+    accessor/caller table, the import-resolver seam map (R2/R3 injection
+    points: mod.rs baseline entry has no import expansion today;
+    ImportEngine::resolve_namespace is the @file-to-disk seam;
+    NamespaceKey::File(canonical_path) is the definition identity; skip
+    dependencies insertion for embedded namespaces), the content-policy
     constraint confirmation (add with default-features = false; deps-check
     guards the no-reverse-dependency rule; darkmatter/docs/dependencies.md has
-    no entry yet), and rulings R1-R8. When the prerequisite lands, re-verify
-    with the probe shape (name[](min(1)) loads, validates, survives
-    merge_baseline, visible in the typed view) before Phase 2.
+    no entry yet), and rulings R1-R8 (R6 is the Phase 3 design note: validate
+    reads the env from request.snapshot().env() with one shared parse of the
+    disable values, shared with compose's env_disables_baseline_schema).
 ---
 
 # Compile Content Policy's Schema into the Base Schema
