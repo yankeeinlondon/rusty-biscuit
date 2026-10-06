@@ -243,11 +243,16 @@ jobs:
           # document — calculates scope exactly as before. A manual or nightly
           # run and a branch-creating push carry no comparison base and never
           # consult the note, and a push whose pull request validation is
-          # reused plans a narrower set than any receipt holds.
+          # reused plans a narrower set than any receipt holds. A receipt is
+          # planned for the event's own environments, so a `ci:all-os` pull
+          # request never takes one: the hook publishes a receipt on every
+          # push, and taking it silently dropped the label.
           local_scope=0
           scope_source="CI (no comparison base)"
           if [[ "$EVENT_NAME" == "workflow_dispatch" || "$EVENT_NAME" == "schedule" ]]; then
             scope_source="CI ($EVENT_NAME ignores local scope)"
+          elif [[ "$EVENT_NAME" == "pull_request" && "${ALL_ENVIRONMENTS:-}" == "true" ]]; then
+            scope_source="CI (ci:all-os plans every environment)"
           elif [[ "$EVENT_NAME" == "push" && "${PROVEN_BY_PULL_REQUEST:-}" == "true" ]]; then
             scope_source="CI (reused pull request validation narrows the plan)"
           elif [[ -n "$base" && ! "$base" =~ ^0+$ ]]; then

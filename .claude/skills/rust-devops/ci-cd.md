@@ -44,7 +44,10 @@ local and hosted runs. Its package policy is deliberately narrow:
   `schedule` (`0 8 * * *`, its own concurrency group) plans the full
   workspace for `ubuntu-latest`, `windows-latest`, and `wsl2-ubuntu`;
   `workflow_dispatch` plans everything. The `ci:all-os` label plans every
-  environment for a pull request and takes effect on the next push. A push
+  environment for a pull request and takes effect on the next push; such a
+  run never takes the hook's scope receipt, which is planned for the
+  event's own environments (until 2026-10-06 it did, and the label was
+  silently ignored). A push
   whose pull request validation is reused plans with `--proven-event
   pull_request`: the proven environments land in `proven_environments`, so
   only Windows runs, and an empty plan skips everything as before. The hook
@@ -327,7 +330,8 @@ Keep two claims distinct:
 When changing the current evidence implementation, preserve these agreed
 semantics:
 
-- A matching local scope receipt is authoritative. CI reuses it; a missing,
+- A matching local scope receipt is authoritative, except on a `ci:all-os`
+  pull request. CI reuses it; a missing,
   stale, malformed, or mismatched receipt makes CI calculate scope itself.
   Live as of 2026-09-11: the hook publishes it on `refs/notes/ci-local/scope`
   in every mode, before any gate, from the committed `base..head` path set;
