@@ -6,6 +6,112 @@ use serde_json::Value;
 use crate::common;
 use common::DisposableAmbientContext as _;
 
+#[test]
+fn files_association_is_stable_inside_a_large_monorepo() {
+    let fixture = common::SniffCliFixture::named("sniff-files-association");
+    let root = fixture.cwd();
+    git2::Repository::init(root).unwrap();
+    let area = root.join("area");
+    let package = area.join("lib");
+    std::fs::create_dir_all(package.join("src")).unwrap();
+    std::fs::write(
+        root.join("Cargo.toml"),
+        "[workspace]\nmembers = [\"area/lib\"]\n",
+    )
+    .unwrap();
+    std::fs::write(
+        package.join("Cargo.toml"),
+        "[package]\nname = \"sample\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+    )
+    .unwrap();
+    std::fs::write(package.join("src/lib.rs"), "pub fn sample() {}\n").unwrap();
+    for index in 0..3 {
+        std::fs::write(
+            package.join(format!("image-{index}.png")),
+            b"\x89PNG\r\n\x1a\n",
+        )
+        .unwrap();
+    }
+    for index in 0..7 {
+        std::fs::write(package.join(format!("note-{index}.txt")), "text\n").unwrap();
+    }
+    std::fs::write(area.join("README.md"), "# Area\n").unwrap();
+    std::fs::write(area.join("justfile"), "default:\n    echo sample\n").unwrap();
+    let unrelated = root.join("unrelated");
+    std::fs::create_dir(&unrelated).unwrap();
+    for index in 0..10_050 {
+        std::fs::write(unrelated.join(format!("file-{index}.txt")), "text\n").unwrap();
+    }
+
+    for (base, total) in [(&area, 14), (&package.join("src"), 12)] {
+        let output = fixture
+            .command()
+            .args([
+                "--base", base.to_str().unwrap(), "--perf", "files", "--json",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        let json: Value = serde_json::from_slice(&output).unwrap();
+        let counters = &json["performance"]["counters"];
+        assert_eq!(counters["filesystem.file_inventory.files_accepted"], total, "{json}");
+        for counter in [
+            "git.status_walks",
+            "filesystem.docs.documents_parsed",
+            "filesystem.file_inventory.entries_over_cap",
+        ] {
+            assert_eq!(counters[counter].as_u64().unwrap_or(0), 0, "{json}");
+        }
+        let mut previous = None;
+        for verbose in [false, true, false] {
+            let mut command = fixture.command();
+            command.args([
+                "--base", base.to_str().unwrap(), "files", "--association", "image", "--json",
+            ]);
+            if verbose {
+                command.arg("-v");
+            }
+            let output = command.assert().success().get_output().stdout.clone();
+            let json: Value = serde_json::from_slice(&output).unwrap();
+            assert!(json.get("truncated").is_none(), "{json}");
+            assert_eq!(json["total_files"], 3);
+            assert_eq!(json["by_association"][0]["file_count"], 3);
+            let percentage = json["by_association"][0]["percentage"].as_f64().unwrap();
+            assert!(
+                (percentage - 300.0 / f64::from(total)).abs() < 0.0001,
+                "{json}"
+            );
+            if let Some(previous) = previous.as_ref() {
+                assert_eq!(&json, previous);
+            }
+            previous = Some(json);
+        }
+        let mut previous = None;
+        for verbose in [false, true, false] {
+            let mut command = fixture.command();
+            command.args([
+                "--base", base.to_str().unwrap(), "--plain", "files", "--association", "image",
+            ]);
+            if verbose {
+                command.arg("-v");
+            }
+            let output = command.assert().success().get_output().stdout.clone();
+            let text = String::from_utf8(output).unwrap();
+            assert!(
+                text.contains(&format!("3 ({:.1}%)", 300.0 / f64::from(total))),
+                "{text}"
+            );
+            assert!(!text.contains("Incomplete scan"), "{text}");
+            if let Some(previous) = previous.as_ref() {
+                assert_eq!(&text, previous);
+            }
+            previous = Some(text);
+        }
+    }
+}
+
 fn run_isolated_software(args: &[&str]) -> assert_cmd::assert::Assert {
     // These tests verify the CLI contract, not the host's installed inventory.
     // The fake-only escape proves no host executable can be version-probed.

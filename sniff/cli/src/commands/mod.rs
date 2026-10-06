@@ -1327,7 +1327,13 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             .without_os()
             .without_hardware()
             .without_network()
-            .filesystem(FilesystemRequest::new().git(git_request.clone())),
+            .filesystem(
+                FilesystemRequest::new()
+                    .git(GitRequest::identity())
+                    .repo(RepoRequest::structure())
+                    .without_docs()
+                    .without_formatting(),
+            ),
         OutputFilter::Docs => DetectionPlan::new()
             .without_os()
             .without_hardware()

@@ -4,7 +4,7 @@ use std::fmt::Write;
 use std::path::{Path, PathBuf};
 
 use biscuit_terminal::components::list::UnorderedList;
-use biscuit_terminal::components::prose::InlineProse;
+use biscuit_terminal::components::prose::{InlineProse, Prose};
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 use sniff::filesystem::{FileAssociationBreakdown, FileAssociationStats};
@@ -81,6 +81,16 @@ pub fn render_files_section(
     writeln!(out).unwrap();
     write!(out, "{}", table.display(&term)).unwrap();
     writeln!(out).unwrap();
+
+    if filtered.truncated {
+        writeln!(
+            out,
+            "{}",
+            Prose::new("<b>Incomplete scan:</b> the file classification limit was reached. Counts and percentages describe a partial sample and may vary between runs.")
+                .render(&term)
+        )
+        .unwrap();
+    }
 
     if verbose > 0 && !filtered.by_framework.is_empty() {
         writeln!(
@@ -164,6 +174,28 @@ pub fn render_path_list(
             let mut out = items.join(", ");
             out.push('\n');
             out
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn truncated_files_report_discloses_partial_sample_even_without_matches() {
+        let files = FileAssociationBreakdown {
+            truncated: true,
+            limit: Some(10_000),
+            ..FileAssociationBreakdown::default()
+        };
+        let filter = FilesFilter {
+            association: Some(sniff::filesystem::FileAssociation::Image),
+        };
+        for verbose in [0, 1] {
+            let rendered = render_files_section(&files, verbose, &filter);
+            assert!(rendered.contains("Incomplete scan"), "{rendered}");
+            assert!(rendered.contains("partial sample"), "{rendered}");
         }
     }
 }
