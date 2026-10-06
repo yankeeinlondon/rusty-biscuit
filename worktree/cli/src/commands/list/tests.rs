@@ -1,4 +1,3 @@
-
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -6,40 +5,8 @@ use std::process::Command;
 use biscuit_terminal::discovery::detection::ImageSupport;
 use biscuit_terminal::terminal::Terminal;
 use worktree::git::recorder;
+use worktree::timing::{Scope, Stage, Timings};
 use worktree::worktree::{list_worktrees, parse_worktree_state};
-
-use crate::commands::git_graph;
-use crate::perf::PerfCollector;
-
-mod pipeline;
-
-/// Each top-level `--perf` row with its children's labels.
-fn perf_shape(collector: &PerfCollector) -> Vec<(String, Vec<String>)> {
-    let tree = collector.build_perf_tree();
-    let labels = |row: &crate::perf::PerfNode| row.children.iter().map(|child| child.label.clone()).collect();
-    tree.children.iter().map(|row| (row.label.clone(), labels(row))).collect()
-}
-
-/// The children of the one top-level row labeled `group`.
-fn perf_group(collector: &PerfCollector, group: &str) -> Vec<String> {
-    let shape = perf_shape(collector);
-    let mut rows = shape.iter().filter(|(label, _)| label == group);
-    let (_, children) = rows.next().unwrap_or_else(|| panic!("no `{group}` row: {shape:?}"));
-    assert!(rows.next().is_none(), "one `{group}` row: {shape:?}");
-    children.clone()
-}
-
-/// Top-level rows plus `unattributed` equal the total exactly, and no child
-/// outlasts the group it was measured inside.
-fn assert_perf_reconciles(collector: &PerfCollector) {
-    let tree = collector.build_perf_tree();
-    let top_level: std::time::Duration = tree.children.iter().map(|row| row.total).sum();
-    assert_eq!(top_level, tree.total, "{tree:#?}");
-    assert!(tree.children.iter().all(|row| row.label != crate::perf::OVER_ATTRIBUTED), "{tree:#?}");
-    for row in &tree.children {
-        assert!(row.children.iter().all(|child| child.total <= row.total), "{tree:#?}");
-    }
-}
 
 /// These repositories have no origin, so nothing is launched.
 fn no_launch(main: &Path, _: &super::LaunchArgs) -> std::io::Result<super::WorkerHandle> {
@@ -51,6 +18,19 @@ const NO_PRS: super::ListSeams = super::ListSeams {
     wait_budget: super::ORDINARY_BUDGET,
     forced_budget: super::FORCED_BUDGET,
 };
+
+/// [`super::run_pipeline`] from the current directory with `NO_PRS`.
+fn run_pipeline(verbose: bool, perf: bool, image: ImageSupport, terminal: &Terminal) -> Option<Timings> {
+    super::run_pipeline(None, verbose, perf, super::ListFlags::default(), std::time::Instant::now(), image, terminal, NO_PRS)
+        .expect("run_pipeline should succeed")
+}
+
+/// `git` calls only the graph's history read makes.
+fn graph_calls(calls: &[Vec<String>]) -> usize {
+    recorder::count_matching(calls, |args| {
+        args.iter().any(|arg| arg == "--is-shallow-repository") || args.first().map(String::as_str) == Some("log")
+    })
+}
 
 fn run_git(repo: &Path, args: &[&str]) {
     let status = Command::new("git")
@@ -79,19 +59,29 @@ impl Drop for DirGuard {
     }
 }
 
+/// The settings every repository here gets.
+fn configure(repo: &Path) {
+    crate::commands::test_support::configure(
+        repo,
+        &[
+            ("user.email", "test@example.com"),
+            ("user.name", "Test User"),
+            ("commit.gpgsign", "false"),
+            // Suppress background/detached git work so nextest leak detection
+            // sees no lingering child processes after the test returns.
+            ("gc.auto", "0"),
+            ("core.fsmonitor", "false"),
+            ("core.commitGraph", "false"),
+        ],
+    );
+}
+
 fn temp_repo() -> tempfile::TempDir {
     let dir = tempfile::tempdir().expect("create temp dir");
     let path = dir.path();
 
     run_git(path, &["init", "-b", "main"]);
-    run_git(path, &["config", "user.email", "test@example.com"]);
-    run_git(path, &["config", "user.name", "Test User"]);
-    run_git(path, &["config", "commit.gpgsign", "false"]);
-    // Suppress background/detached git work so nextest leak detection
-    // sees no lingering child processes after the test returns.
-    run_git(path, &["config", "gc.auto", "0"]);
-    run_git(path, &["config", "core.fsmonitor", "false"]);
-    run_git(path, &["config", "core.commitGraph", "false"]);
+    configure(path);
 
     fs::write(path.join("file.txt"), "1\n").unwrap();
     run_git(path, &["add", "."]);
@@ -127,12 +117,7 @@ fn temp_repo_named_with_linked_feature() -> (tempfile::TempDir, PathBuf) {
     fs::create_dir(&main).expect("create main repo dir");
 
     run_git(&main, &["init", "-b", "main"]);
-    run_git(&main, &["config", "user.email", "test@example.com"]);
-    run_git(&main, &["config", "user.name", "Test User"]);
-    run_git(&main, &["config", "commit.gpgsign", "false"]);
-    run_git(&main, &["config", "gc.auto", "0"]);
-    run_git(&main, &["config", "core.fsmonitor", "false"]);
-    run_git(&main, &["config", "core.commitGraph", "false"]);
+    configure(&main);
 
     fs::write(main.join("file.txt"), "1\n").unwrap();
     run_git(&main, &["add", "."]);
@@ -189,7 +174,7 @@ fn run_skips_graph_git_calls_when_image_unavailable() {
     }
 
     recorder::start_recording();
-    let result = super::run(None, false, false, super::ListFlags::default(), std::time::Instant::now());
+    let result = super::run(None, false, None, super::ListFlags::default(), std::time::Instant::now());
     let calls = recorder::finish_recording();
 
     unsafe {
@@ -218,297 +203,53 @@ fn run_skips_graph_git_calls_when_image_unavailable() {
 
 #[test]
 #[serial_test::serial]
-fn run_pipeline_without_perf_produces_no_collector() {
+fn run_pipeline_without_perf_returns_no_timings() {
     let repo = temp_repo();
     let _dir = DirGuard::enter(repo.path());
-    let terminal = Terminal::default();
 
-    let collector = super::run_pipeline(
-        None,
-        false,
-        false,
-        super::ListFlags::default(),
-        std::time::Instant::now(),
-        ImageSupport::None,
-        &terminal,
-        NO_PRS,
-    )
-    .expect("run_pipeline should succeed");
+    let timings = run_pipeline(false, false, ImageSupport::None, &Terminal::default());
 
-    assert!(
-        collector.is_none(),
-        "no collector should be produced when perf is false"
-    );
+    assert!(timings.is_none(), "no timings without --perf: {timings:?}");
 }
 
+/// The command document holds `startup`, then the library's own top-level
+/// spans (not a span for the library's total), then the render stages, and
+/// reconciles: the decoder rejects a document that does not.
 #[test]
 #[serial_test::serial]
-fn run_pipeline_non_image_verbose_includes_verbose_gather_stage() {
+fn a_command_report_holds_the_library_spans_between_startup_and_the_render_stages() {
     let repo = temp_repo_with_feature_branch();
     let repo_path = repo.path();
     let feature_path = repo_path
         .parent()
         .expect("temp dir has a parent")
-        .join(format!(
-            "{}-feature",
-            repo_path.file_name().unwrap().to_string_lossy()
-        ));
+        .join(format!("{}-feature", repo_path.file_name().unwrap().to_string_lossy()));
     run_git(repo_path, &["worktree", "add", feature_path.to_str().unwrap(), "feature-a"]);
     let _guard = DirGuard::enter(&feature_path);
-    let terminal = Terminal::default();
 
-    let collector = super::run_pipeline(
-        None,
-        true,
-        true,
-        super::ListFlags::default(),
-        std::time::Instant::now(),
-        ImageSupport::None,
-        &terminal,
-        NO_PRS,
-    )
-    .expect("run_pipeline should succeed");
+    let timings = run_pipeline(true, true, ImageSupport::None, &Terminal::default()).expect("timings with --perf");
 
-    let stages = collector
-        .as_ref()
-        .expect("collector should be present when perf is true")
-        .recorded_stages();
-    let names: Vec<_> = stages.iter().map(|(name, _)| *name).collect();
-    assert!(
-        names.contains(&"verbose gather"),
-        "verbose gather should be recorded on non-image verbose path, got: {names:?}"
-    );
-    assert!(
-        names.contains(&"verbose render"),
-        "verbose render should be recorded, got: {names:?}"
-    );
-    assert!(
-        !names.contains(&"graph gather"),
-        "graph gather should not be recorded on non-image path, got: {names:?}"
-    );
-    assert!(
-        !names.contains(&"remote wait"),
-        "without an origin there is no remote wait row, got: {names:?}"
-    );
-    let collector = collector.as_ref().expect("collector");
-    assert_eq!(perf_group(collector, "local gather"), ["list gather", "verbose gather"]);
-    assert_perf_reconciles(collector);
-    assert!(
-        !names.contains(&"graph image render (biscuit-terminal)"),
-        "graph image render should not be recorded, got: {names:?}"
-    );
-}
-
-/// Test seam that proves what overlaps what in `gather_listing`.
-///
-/// The pipeline reports each local gather's start (`arrive`) and end
-/// (`finished`), and the end of the remote wait (`remote_finished`). Without
-/// an installed seam these do nothing, so every other test runs the pipeline
-/// unchanged. What `arrive` does depends on the [`Mode`]; every wait is
-/// bounded, so a pipeline that does not overlap fails instead of hanging.
-pub(super) mod overlap {
-    use std::sync::{Arc, Condvar, Mutex, MutexGuard};
-    use std::time::Duration;
-
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub(in crate::commands::list) enum Gather {
-        List,
-        Graph,
-    }
-
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub(in crate::commands::list) enum Mode {
-        /// Each local gather waits for the other to start: both start only
-        /// when neither has to finish first.
-        Rendezvous,
-        /// Only records; a stub worker waits on the events.
-        Observe,
-        /// The list gather starts only once the remote wait has returned, so
-        /// it certainly outlasts the wait.
-        HoldListUntilRemote,
-    }
-
-    #[derive(Default)]
-    struct Events {
-        list: bool,
-        graph: bool,
-        list_saw_graph: bool,
-        graph_saw_list: bool,
-        list_done: bool,
-        graph_done: bool,
-        remote_done: bool,
-        list_saw_remote_done: bool,
-    }
-
-    struct Seam {
-        mode: Mode,
-        events: Mutex<Events>,
-        changed: Condvar,
-    }
-
-    impl Seam {
-        fn lock(&self) -> MutexGuard<'_, Events> {
-            self.events.lock().unwrap_or_else(|e| e.into_inner())
-        }
-
-        /// Records with `record`, then waits (bounded) while `pending` holds.
-        fn update_and_wait(&self, record: impl FnOnce(&mut Events), pending: impl Fn(&Events) -> bool) -> MutexGuard<'_, Events> {
-            let mut events = self.lock();
-            record(&mut events);
-            self.changed.notify_all();
-            self.changed
-                .wait_timeout_while(events, WAIT, |events| pending(events))
-                .unwrap_or_else(|e| e.into_inner())
-                .0
-        }
-    }
-
-    /// Only a failing (non-overlapping) pipeline waits this long; an
-    /// overlapping one is released as soon as the awaited event happens.
-    const WAIT: Duration = Duration::from_secs(10);
-
-    static INSTALLED: Mutex<Option<Arc<Seam>>> = Mutex::new(None);
-
-    fn installed() -> Option<Arc<Seam>> {
-        INSTALLED.lock().unwrap_or_else(|e| e.into_inner()).clone()
-    }
-
-    pub(in crate::commands::list) fn arrive(side: Gather) {
-        let Some(seam) = installed() else {
-            return;
-        };
-        let record = |events: &mut Events| match side {
-            Gather::List => events.list = true,
-            Gather::Graph => events.graph = true,
-        };
-        match (seam.mode, side) {
-            (Mode::Rendezvous, _) => {
-                let mut events = seam.update_and_wait(record, |events| match side {
-                    Gather::List => !events.graph,
-                    Gather::Graph => !events.list,
-                });
-                match side {
-                    Gather::List => events.list_saw_graph = events.graph,
-                    Gather::Graph => events.graph_saw_list = events.list,
-                }
-            }
-            (Mode::HoldListUntilRemote, Gather::List) => {
-                let mut events = seam.update_and_wait(record, |events| !events.remote_done);
-                events.list_saw_remote_done = events.remote_done;
-            }
-            (Mode::Observe | Mode::HoldListUntilRemote, _) => drop(seam.update_and_wait(record, |_| false)),
-        }
-    }
-
-    pub(in crate::commands::list) fn finished(side: Gather) {
-        if let Some(seam) = installed() {
-            let mut events = seam.lock();
-            match side {
-                Gather::List => events.list_done = true,
-                Gather::Graph => events.graph_done = true,
-            }
-            seam.changed.notify_all();
-        }
-    }
-
-    pub(in crate::commands::list) fn remote_finished() {
-        if let Some(seam) = installed() {
-            seam.lock().remote_done = true;
-            seam.changed.notify_all();
-        }
-    }
-
-    /// For a stub worker holding its outcome: waits (bounded) until `done`
-    /// holds; `false` on timeout or without an installed seam.
-    fn await_events(done: impl Fn(&Events) -> bool) -> bool {
-        let Some(seam) = installed() else {
-            return false;
-        };
-        let events = seam.lock();
-        let (events, _) = seam
-            .changed
-            .wait_timeout_while(events, WAIT, |events| !done(events))
-            .unwrap_or_else(|e| e.into_inner());
-        done(&events)
-    }
-
-    /// Both local gathers have started.
-    pub(in crate::commands::list) fn await_both_started() -> bool {
-        await_events(|events| events.list && events.graph)
-    }
-
-    /// Both local gathers have finished (a gather that does not run, such as
-    /// the graph on a non-image path, never finishes).
-    pub(in crate::commands::list) fn await_both_finished() -> bool {
-        await_events(|events| events.list_done && events.graph_done)
-    }
-
-    /// Uninstalls on drop, so a failed assertion cannot leak the seam into a
-    /// later test in the same process.
-    pub(in crate::commands::list) struct Installed(Arc<Seam>);
-
-    impl Installed {
-        pub(in crate::commands::list) fn new() -> Self {
-            Self::with_mode(Mode::Rendezvous)
-        }
-
-        pub(in crate::commands::list) fn with_mode(mode: Mode) -> Self {
-            let seam = Arc::new(Seam { mode, events: Mutex::default(), changed: Condvar::new() });
-            *INSTALLED.lock().unwrap_or_else(|e| e.into_inner()) = Some(Arc::clone(&seam));
-            Installed(seam)
-        }
-
-        /// `(list gather saw the graph start, graph gather saw the list start)`.
-        pub(in crate::commands::list) fn outcome(&self) -> (bool, bool) {
-            let events = self.0.lock();
-            (events.list_saw_graph, events.graph_saw_list)
-        }
-
-        /// `(list gather started, graph gather started)`.
-        pub(in crate::commands::list) fn started(&self) -> (bool, bool) {
-            let events = self.0.lock();
-            (events.list, events.graph)
-        }
-
-        /// The list gather started only after the remote wait returned.
-        pub(in crate::commands::list) fn list_started_after_the_wait(&self) -> bool {
-            self.0.lock().list_saw_remote_done
-        }
-    }
-
-    impl Drop for Installed {
-        fn drop(&mut self) {
-            *INSTALLED.lock().unwrap_or_else(|e| e.into_inner()) = None;
-        }
-    }
-}
-
-#[test]
-#[serial_test::serial]
-fn run_pipeline_gathers_the_graph_while_list_gather_is_unfinished() {
-    let repo = temp_repo_with_feature_branch();
-    let _guard = DirGuard::enter(repo.path());
-    let terminal = Terminal::builder().width(120).build();
-    let rendezvous = overlap::Installed::new();
-
-    let result = super::run_pipeline(
-        None,
-        false,
-        false,
-        super::ListFlags::default(),
-        std::time::Instant::now(),
-        ImageSupport::Kitty,
-        &terminal,
-        NO_PRS,
-    );
-
-    assert!(result.is_ok(), "run_pipeline should succeed: {:?}", result.err());
-    assert_eq!(
-        rendezvous.outcome(),
-        (true, true),
-        "(list gather saw graph start, graph gather saw list start): \
-         each gather must start before the other finishes"
-    );
+    assert_eq!(timings.scope(), Scope::Command);
+    let stages: Vec<Stage> = timings.spans().iter().map(|span| span.stage()).collect();
+    let library = [Stage::ReadWorktrees, Stage::PrepareLocal, Stage::LocalReads, Stage::Commit];
+    let render = [
+        Stage::CaptionStatus,
+        Stage::DisplayFacts,
+        Stage::TableRender,
+        Stage::VerboseRender,
+        Stage::NotesRender,
+        Stage::GraphBudget,
+        Stage::FinalNotesRender,
+        Stage::WriteOutput,
+    ];
+    let without_origin_lookup: Vec<Stage> = stages.iter().copied().filter(|stage| *stage != Stage::OriginLookup).collect();
+    let expected: Vec<Stage> = std::iter::once(Stage::Startup).chain(library).chain(render).collect();
+    assert_eq!(without_origin_lookup, expected, "{stages:?}");
+    assert!(timings.span(&[Stage::LocalReads, Stage::VerboseHistory]).is_some(), "{timings:?}");
+    assert!(timings.span(&[Stage::LocalReads, Stage::GraphHistory]).is_none(), "{timings:?}");
+    assert!(!stages.contains(&Stage::GraphRender), "nothing is drawn without image support: {stages:?}");
+    let decoded = Timings::from_json(&timings.to_json()).expect("the command document reconciles");
+    assert_eq!(decoded.over_attributed(), std::time::Duration::ZERO, "{decoded:?}");
 }
 
 #[test]
@@ -520,35 +261,11 @@ fn run_pipeline_gathers_the_graph_on_a_narrow_image_terminal() {
     let _dir = DirGuard::enter(repo.path());
     let narrow = Terminal::builder().width(40).build();
 
-    let collector = super::run_pipeline(
-        None,
-        false,
-        true,
-        super::ListFlags::default(),
-        std::time::Instant::now(),
-        ImageSupport::Kitty,
-        &narrow,
-        NO_PRS,
-    )
-    .expect("run_pipeline should succeed");
+    recorder::start_recording();
+    run_pipeline(false, false, ImageSupport::Kitty, &narrow);
+    let calls = recorder::finish_recording();
 
-    let names: Vec<_> = collector
-        .as_ref()
-        .expect("collector")
-        .recorded_stages()
-        .iter()
-        .map(|(name, _)| *name)
-        .collect();
-    for stage in ["pre-dispatch", "list gather", "pr gather", "graph gather", "table render"] {
-        assert!(names.contains(&stage), "{stage} should be recorded, got {names:?}");
-    }
-    let collector = collector.as_ref().expect("collector");
-    let top_level: Vec<String> = perf_shape(collector).into_iter().map(|(label, _)| label).collect();
-    assert_eq!(top_level[..3], ["pre-dispatch", "pr gather", "local gather"], "{top_level:?}");
-    assert_eq!(top_level.last().map(String::as_str), Some("unattributed"));
-    assert_eq!(perf_group(collector, "local gather"), ["list gather", "graph gather"]);
-    assert!(!names.contains(&"remote wait"), "a local-only listing has no remote wait row: {names:?}");
-    assert_perf_reconciles(collector);
+    assert!(graph_calls(&calls) > 0, "the graph's history is read: {calls:?}");
 }
 
 #[test]
@@ -559,35 +276,12 @@ fn run_pipeline_without_image_support_or_verbose_gathers_no_graph() {
     let terminal = Terminal::builder().width(120).build();
 
     recorder::start_recording();
-    let collector = super::run_pipeline(
-        None,
-        false,
-        true,
-        super::ListFlags::default(),
-        std::time::Instant::now(),
-        ImageSupport::None,
-        &terminal,
-        NO_PRS,
-    )
-    .expect("run_pipeline should succeed");
+    run_pipeline(false, false, ImageSupport::None, &terminal);
     let calls = recorder::finish_recording();
 
-    let names: Vec<_> = collector
-        .as_ref()
-        .expect("collector")
-        .recorded_stages()
-        .iter()
-        .map(|(name, _)| *name)
-        .collect();
-    assert!(!names.contains(&"graph gather"), "got {names:?}");
-    assert!(!names.contains(&"verbose gather"), "got {names:?}");
-    let collector = collector.as_ref().expect("collector");
-    assert_eq!(perf_group(collector, "local gather"), ["list gather"]);
-    assert_perf_reconciles(collector);
-    let graph_calls = recorder::count_matching(&calls, |args| {
-        matches!(args.first().map(String::as_str), Some("merge-base") | Some("log"))
-    });
-    assert_eq!(graph_calls, 0, "got {calls:?}");
+    assert_eq!(graph_calls(&calls), 0, "got {calls:?}");
+    let merge_bases = recorder::count_matching(&calls, |args| args.first().map(String::as_str) == Some("merge-base"));
+    assert_eq!(merge_bases, 0, "got {calls:?}");
 }
 
 /// Subprocess counts for the `wt list` gather pieces on a linked-worktree
@@ -624,10 +318,10 @@ fn perf_subprocess_counts_meet_sla() {
     // one more `--is-ancestor` and one first-parent chain (`rev-list`) when
     // the boundary is an ordinary fork.
     let parsed = parse_worktree_state().expect("parse");
-    let input = git_graph::GatherInput::from_list(&parsed, parsed.refs());
+    let input = worktree::graph::GatherInput::from_list(&parsed, parsed.refs());
     recorder::start_recording();
     let t0 = Instant::now();
-    let (graph, verbose) = git_graph::gather(&input, true, false);
+    let (graph, verbose) = worktree::graph::gather(&input, true, false);
     let base_elapsed = t0.elapsed();
     let base_calls = recorder::finish_recording();
 
@@ -642,7 +336,7 @@ fn perf_subprocess_counts_meet_sla() {
     eprintln!("base view gather: {base_elapsed:.2?}, {} git calls", base_calls.len());
 }
 
-/// `gather_remote` against a real repository and stores, with a counting stub
+/// The library's remote stage against a real repository and stores, with a counting stub
 /// in place of the worker. The stub "runs" at launch: it writes its attempt,
 /// a PR answer through the real `refresh` when asked, and its receipt, to the
 /// real stores.
@@ -660,11 +354,12 @@ mod gather {
         finish_attempt, receipt_path_beside, set_credentials, write_receipt,
     };
 
+    use worktree::list::wait::{HeadEnd, PrEnd};
+    use worktree::list::{ListOptions, RemoteAnswers, Stores, follow_remote, prepare_remote};
+
     use super::super::list_table::{CredentialCondition, LastKnown, PrOutcome, RemoteStatus};
-    use super::super::wait::{HeadEnd, PrEnd};
     use super::super::{
-        LaunchArgs, ListFlags, ListSeams, RemoteAnswers, RequestNotices, Stores, WorkerHandle, caption_status,
-        gather_remote, observed_pr_failure, request_notices,
+        LaunchArgs, ListFlags, RequestNotices, WorkerHandle, caption_status, observed_pr_failure, request_notices,
     };
     use super::{recorder, run_git, temp_repo};
 
@@ -770,6 +465,7 @@ mod gather {
             finished_at: unix_now(),
             head: HeadStatus::Ok,
             prs: worker.prs,
+            durations: worktree::timing::LaunchReport::Missing,
         };
         write_receipt(&receipt_path_beside(&worker.head_store, &args.attempt).expect("path"), &receipt).expect("receipt");
         Ok(WorkerHandle::new(|| true))
@@ -795,9 +491,27 @@ mod gather {
 
     impl Fixture {
         fn new() -> Self {
-            LAUNCHES.lock().unwrap_or_else(|e| e.into_inner()).clear();
             let repo = temp_repo();
-            run_git(repo.path(), &["remote", "add", "origin", ORIGIN]);
+            // What `git remote add origin <ORIGIN>` writes.
+            crate::commands::test_support::configure(
+                repo.path(),
+                &[("remote.origin.url", ORIGIN), ("remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")],
+            );
+            Self::around(repo)
+        }
+
+        /// A fixture on its own copy of `template`'s repository: as
+        /// independent as [`Fixture::new`]'s, without the `git` processes
+        /// that build one. The template must have no linked worktree, whose
+        /// administrative files hold absolute paths.
+        fn copied_from(template: &Path) -> Self {
+            let repo = tempfile::tempdir().expect("repo dir");
+            copy_tree(template, repo.path());
+            Self::around(repo)
+        }
+
+        fn around(repo: tempfile::TempDir) -> Self {
+            LAUNCHES.lock().unwrap_or_else(|e| e.into_inner()).clear();
             let cache = tempfile::tempdir().expect("cache dir");
             let store = cache.path().join("prs.json");
             let head_store = cache.path().join("remote-head.json");
@@ -831,10 +545,21 @@ mod gather {
             publish(&self.store, self.main(), age, number, CredentialEvidence::Unknown);
         }
 
+        /// The library's remote stage alone: [`prepare_remote`] then
+        /// [`follow_remote`], with nothing in between.
         fn gather_with(&self, launch: super::super::WorkerLaunch, flags: ListFlags) -> RemoteAnswers {
-            let seams = ListSeams { launch, wait_budget: BUDGET, forced_budget: BUDGET };
+            let options = ListOptions {
+                refresh: flags.refresh,
+                ignore_api: flags.ignore_api,
+                fast_forward: flags.fast_forward,
+                worker: Some(launch),
+                wait_budget: BUDGET,
+                forced_budget: BUDGET,
+                ..ListOptions::default()
+            };
             let stores = Stores { prs: &self.store, head: &self.head_store };
-            gather_remote(stores, self.main(), "main", flags, seams).expect("gathered")
+            let plan = prepare_remote(self.main(), &options).expect("gathered");
+            follow_remote(plan, stores, self.main(), "main", &options, &mut |_| {})
         }
 
         fn gather(&self) -> RemoteAnswers {
@@ -848,6 +573,19 @@ mod gather {
                 .map(|entry| entry.expect("entry").file_name().to_string_lossy().into_owned())
                 .filter(|name| name.contains("receipt"))
                 .collect()
+        }
+    }
+
+    fn copy_tree(from: &Path, to: &Path) {
+        for entry in std::fs::read_dir(from).expect("read template") {
+            let entry = entry.expect("template entry");
+            let target = to.join(entry.file_name());
+            if entry.file_type().expect("file type").is_dir() {
+                std::fs::create_dir(&target).expect("create dir");
+                copy_tree(&entry.path(), &target);
+            } else {
+                std::fs::copy(entry.path(), &target).expect("copy file");
+            }
         }
     }
 
@@ -1099,10 +837,12 @@ mod gather {
     #[serial_test::serial]
     fn a_replaced_or_removed_origin_suppresses_every_request_notice() {
         const PROVIDER_ORIGIN: &str = "https://github.com/owner/repo.git";
+        // Every case starts from its own copy of this repository.
+        let template = Fixture::new();
+        run_git(template.main(), &["remote", "set-url", "origin", PROVIDER_ORIGIN]);
         for (projection, shape, shows) in projections() {
             for change in [None, Some(OriginChange::Replaced(ELSEWHERE)), Some(OriginChange::Removed)] {
-                let fixture = Fixture::new();
-                run_git(fixture.main(), &["remote", "set-url", "origin", PROVIDER_ORIGIN]);
+                let fixture = Fixture::copied_from(template.main());
                 fixture.worker(|worker| {
                     worker.origin = PROVIDER_ORIGIN.into();
                     worker.changes_origin = change;
@@ -1191,7 +931,7 @@ mod observations {
     };
 
     use super::super::list_table::{CredentialCondition, LastKnown, RemoteStatus};
-    use super::super::wait::HeadEnd;
+    use worktree::list::wait::HeadEnd;
     use super::super::{credential_line, fallback_notice, remote_status};
 
     const GITHUB: &str = "https://github.com/owner/repo.git";
@@ -1380,7 +1120,7 @@ mod observations {
         };
 
         use super::super::super::list_table::{CredentialCondition, CredentialLine};
-        use super::super::super::wait::{HeadEnd, PrEnd, WaitEnd};
+        use worktree::list::wait::{HeadEnd, PrEnd, WaitEnd};
         use super::super::super::{RemoteAnswers, request_notices};
         use super::{GITHUB, attempt, note};
 
@@ -1397,7 +1137,7 @@ mod observations {
         fn answers(head: HeadEnd, prs: PrEnd, pr_credentials: CredentialEvidence) -> RemoteAnswers {
             RemoteAnswers {
                 origin: Some(GITHUB.into()),
-                waited: Some(WaitEnd { head, prs, pr_credentials, timed_out: false }),
+                waited: Some(WaitEnd { head, prs, pr_credentials, timed_out: false, worker_reports: Vec::new() }),
                 ..RemoteAnswers::default()
             }
         }

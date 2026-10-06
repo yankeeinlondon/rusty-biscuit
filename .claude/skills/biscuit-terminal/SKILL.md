@@ -112,6 +112,18 @@ Use the `renderable` skill for shared IR/layout/style definitions. Use the
 - Internal `terminal-tests` and `browser-tests` features expose only their
   corresponding integration targets and harness dependencies. Ordinary local
   L1 keeps both disabled; tier recipes and CI enable them explicitly.
+- PTY tests that manufacture a query reply must also answer the DA1 sentinel
+  every live query appends: add `ProbeAnswer::every(DA1_QUERY, DA1_REPLY)`
+  after the query's own answer (`lib/tests/common/pty.rs`). Without it the
+  probe still parses the reply but waits out its timeout. The PTY helper sets
+  `BISCUIT_TERMINAL_QUERY_SILENCE_MS=1000` so a busy host's slow manufactured
+  reply is not mistaken for a silent terminal; pass it empty to test the
+  default budget.
+- The PTY tests spawn the `discovery_probe` example. `just test` builds it,
+  but a narrowed `cargo nextest run --test l1 ...` does not, and silently runs
+  a stale probe: run `cargo build -p biscuit-terminal --example
+  discovery_probe` after changing the library (a mutation check passed
+  vacuously this way on 2026-10-05).
 - The library's integration tests build as two binaries (`autotests = false`):
   `lib/tests/l1/` and `lib/tests/level2/` (`terminal-tests`). Each former test
   file is a module, so select one with `--test l1 <module>::`, never

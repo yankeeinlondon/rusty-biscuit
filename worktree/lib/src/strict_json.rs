@@ -35,6 +35,11 @@ impl Members {
         self.0.get(key).filter(|member| member.clean).and_then(|member| T::deserialize(&member.value).ok())
     }
 
+    /// Whether the member `key` is present, whatever its value.
+    pub(crate) fn contains(&self, key: &str) -> bool {
+        self.0.contains_key(key)
+    }
+
     /// Every member as one value, for a format read as a whole; `None` when
     /// any member repeats a key.
     pub(crate) fn into_value(self) -> Option<Value> {

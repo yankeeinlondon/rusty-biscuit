@@ -2,16 +2,15 @@
 
 use std::time::Duration;
 
-#[cfg(unix)]
-use crate::discovery::raw_mode::{RawModeGuard, TERMINAL_QUERY_MUTEX};
-
 use crate::discovery::detection::{TerminalApp, get_terminal_app, is_tty};
 use crate::discovery::os_detection::is_ci;
 
-#[cfg(unix)]
+#[cfg(any(unix, test))]
 use super::parse::parse_osc_color_response;
 use super::parse::{ansi_index_to_rgb, parse_colorfgbg};
-use super::types::{DEFAULT_TIMEOUT, OscQueryError, RgbValue};
+#[cfg(unix)]
+use super::types::DEFAULT_TIMEOUT;
+use super::types::{OscQueryError, RgbValue};
 
 /// Tracing target marking one *actual* tty round-trip attempt for an OSC code.
 ///
@@ -48,15 +47,87 @@ fn osc_color_name(code: u8) -> &'static str {
 ///
 /// The fallback chain ensures we always return a reasonable result
 /// when possible, while preferring actual terminal queries for accuracy.
+///
+/// The live step for OSC 10 and 11 is one batched round trip shared by both
+/// codes and cached per process, so building a `Terminal` (which wants both)
+/// costs the terminal one exchange.
 pub(super) fn query_osc_color(code: u8) -> Option<RgbValue> {
-    query_osc_color_with_timeout(code, DEFAULT_TIMEOUT)
+    resolve_color(code, || live_color_cached(code))
 }
 
-/// Query terminal color with a custom timeout.
+/// Query terminal color with a custom timeout (one uncached live attempt).
 pub(super) fn query_osc_color_with_timeout(code: u8, timeout: Duration) -> Option<RgbValue> {
-    // Silence unused warning on non-Unix platforms; used inside #[cfg(unix)] below.
-    let _ = timeout;
+    resolve_color(code, || {
+        live_colors(&[code], timeout).into_iter().next().flatten()
+    })
+}
 
+/// The live OSC 10/11 answers, queried together once per process.
+#[cfg(unix)]
+static LIVE_FG_BG: std::sync::OnceLock<[Option<RgbValue>; 2]> = std::sync::OnceLock::new();
+
+#[cfg(unix)]
+fn live_color_cached(code: u8) -> Option<RgbValue> {
+    match code {
+        10 | 11 => {
+            let [fg, bg] = *LIVE_FG_BG.get_or_init(|| {
+                let answers = live_colors(&[10, 11], DEFAULT_TIMEOUT);
+                [answers[0], answers[1]]
+            });
+            if code == 10 { fg } else { bg }
+        }
+        _ => live_colors(&[code], DEFAULT_TIMEOUT)
+            .into_iter()
+            .next()
+            .flatten(),
+    }
+}
+
+#[cfg(not(unix))]
+fn live_color_cached(_code: u8) -> Option<RgbValue> {
+    None
+}
+
+/// One round trip asking for every code in `codes`; one answer per code.
+#[cfg(unix)]
+fn live_colors(codes: &[u8], timeout: Duration) -> Vec<Option<RgbValue>> {
+    for &code in codes {
+        tracing::debug!(
+            target: OSC_QUERY_ATTEMPT_TARGET,
+            code,
+            "OSC{} actual query attempted",
+            code
+        );
+    }
+    match query_osc_batch(codes, timeout) {
+        Ok(response) => codes
+            .iter()
+            .map(|&code| {
+                let color = find_osc_color(&response, code);
+                if color.is_none() {
+                    tracing::debug!(code, "OSC{} ({}) not answered", code, osc_color_name(code));
+                }
+                color
+            })
+            .collect(),
+        Err(e) => {
+            tracing::debug!(
+                codes = ?codes,
+                error = %e,
+                "OSC color query failed, falling back to heuristics"
+            );
+            vec![None; codes.len()]
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn live_colors(codes: &[u8], _timeout: Duration) -> Vec<Option<RgbValue>> {
+    vec![None; codes.len()]
+}
+
+/// The gate and fallback chain around a live color lookup.
+fn resolve_color(code: u8, live: impl FnOnce() -> Option<RgbValue>) -> Option<RgbValue> {
     let tty = is_tty();
     let ci = is_ci();
     if !tty {
@@ -67,44 +138,25 @@ pub(super) fn query_osc_color_with_timeout(code: u8, timeout: Duration) -> Optio
     }
 
     // Try actual OSC query first (if terminal supports it)
-    #[cfg(unix)]
-    if tty && !ci {
-        let supports_osc = super::support::answers_color_queries(&get_terminal_app());
-
-        if supports_osc && detect_multiplexer().is_none() {
-            tracing::debug!(
-                target: OSC_QUERY_ATTEMPT_TARGET,
-                code,
-                "OSC{} actual query attempted",
-                code
-            );
-
-            match query_osc_actual(code, timeout) {
-                Ok(color) => {
-                    tracing::debug!(
-                        code,
-                        r = color.r,
-                        g = color.g,
-                        b = color.b,
-                        source = "actual_query",
-                        "OSC{} color detected via actual query",
-                        code
-                    );
-                    return Some(color);
-                }
-                Err(e) => {
-                    tracing::debug!(
-                        code,
-                        query = osc_color_name(code),
-                        error = %e,
-                        "OSC{} ({}) query failed, falling back to heuristics",
-                        code,
-                        osc_color_name(code)
-                    );
-                }
-            }
-        }
+    if tty
+        && !ci
+        && super::support::answers_color_queries(&get_terminal_app())
+        && detect_multiplexer().is_none()
+        && let Some(color) = live()
+    {
+        tracing::debug!(
+            code,
+            r = color.r,
+            g = color.g,
+            b = color.b,
+            source = "actual_query",
+            "OSC{} color detected via actual query",
+            code
+        );
+        return Some(color);
     }
+    #[cfg(not(unix))]
+    let _ = live;
 
     // Fallback 1: Try COLORFGBG environment variable
     if let Ok(colorfgbg) = std::env::var("COLORFGBG")
@@ -203,26 +255,31 @@ pub(crate) fn detect_multiplexer() -> Option<&'static str> {
 
 /// Perform an actual OSC query to the terminal.
 ///
-/// This function sends an OSC query sequence and reads the response.
-/// It requires raw mode and has timeout handling.
+/// Sends the OSC query followed by a DA1 sentinel and reads the reply with a
+/// deadline. A terminal that answers DA1 but not the query fails fast with
+/// [`OscQueryError::Unsupported`]; one that answers nothing fails within the
+/// silence budget, and every later query in the process then fails at once.
 ///
-/// ## Arguments
+/// ## Errors
 ///
-/// * `code` - OSC code to query (10=foreground, 11=background, 12=cursor)
-/// * `timeout` - Maximum time to wait for response
-///
-/// ## Returns
-///
-/// `Ok(RgbValue)` on success, or an `OscQueryError` on failure.
+/// [`OscQueryError::Timeout`] when the terminal answered nothing,
+/// [`OscQueryError::Unsupported`] when it answered DA1 but not the query.
 ///
 /// ## Platform Support
 ///
-/// This function is only available on Unix platforms. On other platforms,
-/// it returns `Err(OscQueryError::Unsupported)`.
+/// Unix only. On other platforms this returns
+/// `Err(OscQueryError::Unsupported)`.
 #[cfg(unix)]
 pub fn query_osc_actual(code: u8, timeout: Duration) -> Result<RgbValue, OscQueryError> {
-    use std::io::{Read, Write};
-    use std::os::unix::io::AsRawFd;
+    let response = query_osc_batch(&[code], timeout)?;
+    find_osc_color(&response, code)
+        .ok_or_else(|| OscQueryError::ParseError("invalid response format".into()))
+}
+
+/// Send one OSC `?` query per code in a single write and return the raw reply.
+#[cfg(unix)]
+fn query_osc_batch(codes: &[u8], timeout: Duration) -> Result<Vec<u8>, OscQueryError> {
+    use crate::discovery::tty_query::{TtyQueryError, round_trip};
 
     // Pre-flight checks
     if !is_tty() {
@@ -235,62 +292,29 @@ pub fn query_osc_actual(code: u8, timeout: Duration) -> Result<RgbValue, OscQuer
         return Err(OscQueryError::Multiplexer(mux.to_string()));
     }
 
-    // Open /dev/tty for the query I/O so the request bytes reach the
-    // controlling terminal even when stdout is redirected to a pipe (as
-    // happens when the binary is invoked under `output="$(...)"`).
-    // Writing to `std::io::stdout()` there would land the query in the
-    // captured stream; the terminal would never receive it; and any
-    // wrapper re-emitting `$output` later would trigger a delayed reply
-    // that arrives as garbage on the next shell prompt.
-    let mut tty = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open("/dev/tty")
-        .map_err(|e| OscQueryError::IoError(format!("open /dev/tty: {e}")))?;
-    let fd = tty.as_raw_fd();
+    let request: Vec<u8> = codes
+        .iter()
+        .flat_map(|code| format!("\x1b]{code};?\x07").into_bytes())
+        .collect();
+    round_trip(&request, timeout).map_err(|e| match e {
+        TtyQueryError::Silent => OscQueryError::Timeout(timeout),
+        TtyQueryError::Unanswered => OscQueryError::Unsupported(codes[0]),
+        TtyQueryError::Io(e) => OscQueryError::IoError(e),
+    })
+}
 
-    let _lock = TERMINAL_QUERY_MUTEX
-        .lock()
-        .map_err(|_| OscQueryError::IoError("terminal query mutex poisoned".into()))?;
-
-    let _guard = RawModeGuard::new(fd).map_err(OscQueryError::IoError)?;
-
-    let query = format!("\x1b]{};?\x07", code);
-    tty.write_all(query.as_bytes())
-        .map_err(|e| OscQueryError::IoError(e.to_string()))?;
-    tty.flush()
-        .map_err(|e| OscQueryError::IoError(e.to_string()))?;
-
-    let mut buffer = [0u8; 64];
-    let mut response = Vec::new();
-    let start = std::time::Instant::now();
-
-    while start.elapsed() < timeout {
-        match tty.read(&mut buffer) {
-            Ok(0) => {
-                std::thread::sleep(Duration::from_millis(10));
-            }
-            Ok(n) => {
-                response.extend_from_slice(&buffer[..n]);
-                if response.contains(&0x07) || response.windows(2).any(|w| w == b"\x1b\\") {
-                    break;
-                }
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                std::thread::sleep(Duration::from_millis(10));
-            }
-            Err(e) => {
-                return Err(OscQueryError::IoError(e.to_string()));
-            }
+/// Find and parse the reply for `code` among the OSC replies in `response`.
+#[cfg(any(unix, test))]
+fn find_osc_color(response: &[u8], code: u8) -> Option<RgbValue> {
+    let mut from = 0;
+    while let Some(rel) = response[from..].windows(2).position(|w| w == b"\x1b]") {
+        let start = from + rel;
+        if let Some(color) = parse_osc_color_response(&response[start..], code) {
+            return Some(color);
         }
+        from = start + 2;
     }
-
-    if response.is_empty() {
-        return Err(OscQueryError::Timeout(timeout));
-    }
-
-    parse_osc_color_response(&response, code)
-        .ok_or_else(|| OscQueryError::ParseError("invalid response format".into()))
+    None
 }
 
 /// Stub for non-Unix platforms.
@@ -344,6 +368,14 @@ mod tests {
         let bg = get_terminal_default_color(&app, 11);
         assert!(bg.is_some());
         assert!(bg.unwrap().is_dark());
+    }
+
+    #[test]
+    fn find_osc_color_picks_each_code_from_a_batched_reply() {
+        let reply = b"\x1b]10;rgb:e5e5/e5e5/e5e5\x07\x1b]11;rgb:1e1e/1e1e/1e1e\x1b\\";
+        assert_eq!(find_osc_color(reply, 10), Some(RgbValue::new(229, 229, 229)));
+        assert_eq!(find_osc_color(reply, 11), Some(RgbValue::new(30, 30, 30)));
+        assert_eq!(find_osc_color(reply, 12), None);
     }
 
     #[test]

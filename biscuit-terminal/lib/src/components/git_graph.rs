@@ -495,7 +495,8 @@ impl GitGraph {
     ///
     /// Lanes are trimmed first (base view only): past half the viewport's rows,
     /// the default lane is kept and other lanes are added most recently active
-    /// first, each with its drawn ancestors, until the next would not fit.
+    /// first, each with its drawn ancestors, until the next would not fit
+    /// (lanes active in the same second are tried in turn before stopping).
     /// A lane's drawn ancestors are the lanes holding its fork commit and each
     /// of its merge destinations, and its parent's lane, so a merge between two
     /// branch lanes is drawn with both or neither. Then, while the graph is
@@ -1071,7 +1072,8 @@ impl GitGraph {
     }
 
     /// Keeps the default lane plus, most recently active first, each lane and
-    /// its drawn ancestors while the graph stays within `max_rows`.
+    /// its drawn ancestors while the graph stays within `max_rows`. A lane that
+    /// does not fit ends the search once its same-second peers are tried.
     fn fit_lanes(&self, full: Draft, max_rows: u32, rows_of: &dyn Fn(&str) -> Option<u32>) -> Draft {
         let mut candidates: Vec<usize> = full.lanes.iter().map(|(index, _)| *index).collect();
         candidates.sort_by_key(|index| {
@@ -1096,7 +1098,14 @@ impl GitGraph {
         };
 
         let positions = drawn_positions(&full);
+        // Lanes whose tips share a second are equally recent, so one that does
+        // not fit gives way to its peers; a less recent lane never jumps ahead.
+        let mut stopped_at: Option<Option<i64>> = None;
         for candidate in candidates {
+            let last_active = self.lines[candidate].last_active;
+            if stopped_at.is_some_and(|stopped| stopped != last_active) {
+                break;
+            }
             if keep.contains(&candidate) {
                 continue;
             }
@@ -1112,7 +1121,8 @@ impl GitGraph {
                 .and_then(|emitted| rows_of(&emitted.text))
                 .is_some_and(|rows| rows <= max_rows);
             if !fits {
-                break;
+                stopped_at = Some(last_active);
+                continue;
             }
             keep = tentative;
         }

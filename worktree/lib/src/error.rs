@@ -152,6 +152,11 @@ pub enum WorktreeError {
 
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
+
+    /// Requested timings could not be stated exactly in the timings
+    /// document.
+    #[error(transparent)]
+    Timings(#[from] crate::timing::TimingsError),
 }
 
 /// One worktree listed in an [`WorktreeError::AmbiguousWorktree`] error.

@@ -1,4 +1,4 @@
-//! Graph-stage timings of `wt list --perf` on the [`GraphFixture`] shapes:
+//! Graph-stage timings of `wt list --perf=json` on the [`GraphFixture`] shapes:
 //! ordinary history, older essential connections, multiple selected
 //! branches, and the observed sparse-lanes history.
 //!
@@ -13,8 +13,7 @@
 //! A pseudo-terminal never answers terminal queries. Ghostty is the
 //! Kitty-protocol emulator whose image path asks no cursor-position question
 //! (the others wait out a 1 s timeout here), which keeps the render stage
-//! under a second, where `--perf` prints tenths of a millisecond instead of
-//! tenths of a second. The one-commit floor row measures what fixed cost
+//! fast enough to compare. The one-commit floor row measures what fixed cost
 //! remains; compare the other rows against it and against their own earlier
 //! medians.
 //!
@@ -31,10 +30,17 @@ use std::time::Duration;
 use serial_test::serial;
 
 use perf_support::graph::GraphFixture;
-use perf_support::stage_from_perf;
+use perf_support::{perf_timings, stage_at};
+use worktree::timing::{Stage, Timings};
 
-const GATHER: &str = "graph gather";
-const RENDER: &str = "graph image render (biscuit-terminal)";
+const GATHER: &str = "graph_history";
+const RENDER: &str = "graph_render";
+
+/// The graph's history read, under whichever region ran.
+fn graph_history(timings: &Timings) -> Option<Duration> {
+    stage_at(timings, &[Stage::RemoteAndLocal, Stage::GraphHistory])
+        .or_else(|| stage_at(timings, &[Stage::LocalReads, Stage::GraphHistory]))
+}
 
 fn samples() -> usize {
     std::env::var("WT_GRAPH_PERF_SAMPLES")
@@ -48,12 +54,12 @@ fn quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', r"'\''"))
 }
 
-/// Runs `wt list --perf` in a `columns`×`rows` pseudo-terminal and returns
+/// Runs `wt list --perf=json` in a `columns`×`rows` pseudo-terminal and returns
 /// everything the terminal received.
 fn list_perf_in_pty(fixture: &GraphFixture, columns: u32, rows: u32) -> String {
     let wt = fixture.wt_command();
     let program = wt.get_program().to_string_lossy().into_owned();
-    let inner = format!("stty cols {columns} rows {rows}; exec {} list --perf", quote(&program));
+    let inner = format!("stty cols {columns} rows {rows}; exec {} list --perf=json", quote(&program));
     let mut command = Command::new("script");
     if cfg!(target_os = "macos") {
         command.args(["-q", "/dev/null", "/bin/sh", "-c", &inner]);
@@ -100,11 +106,10 @@ fn stage_samples(fixture: &GraphFixture, columns: u32, rows: u32, samples: usize
     let mut renders = Vec::new();
     for _ in 0..samples {
         let output = list_perf_in_pty(fixture, columns, rows);
-        let stage = |name: &str| {
-            stage_from_perf(&output, name).unwrap_or_else(|| panic!("no `{name}` stage for {}:\n{output}", fixture.name))
-        };
-        gathers.push(stage(GATHER));
-        renders.push(stage(RENDER));
+        let timings = perf_timings(&output);
+        let missing = |name: &str| -> Duration { panic!("no `{name}` stage for {}:\n{output}", fixture.name) };
+        gathers.push(graph_history(&timings).unwrap_or_else(|| missing(GATHER)));
+        renders.push(stage_at(&timings, &[Stage::GraphRender]).unwrap_or_else(|| missing(RENDER)));
     }
     (gathers, renders)
 }
