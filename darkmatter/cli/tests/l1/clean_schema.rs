@@ -434,19 +434,16 @@ fn test_absent_and_empty_frontmatter_perform_no_schema_work() {
 
     // Positive control: the probe fires when frontmatter is present.
     let with_frontmatter = repo.write("docs/has-fm.md", "---\ntitle: Fine\n---\n\n# Body\n");
-    // Wide enough that the temp path (its length differs by OS) never wraps
-    // inside the file name the assertion looks for.
-    fixture
-        .command_builder()
-        .plain_terminal(400, 50)
-        .build()
+    let output = fixture
+        .command()
         .arg("clean")
         .arg(&with_frontmatter)
         .arg("--baseline-schema")
         .arg(&missing)
         .assert()
-        .failure()
-        .stderr(predicates::str::contains("does-not-exist.yaml"));
+        .failure();
+    let stderr = common::unwrapped(&String::from_utf8_lossy(&output.get_output().stderr));
+    assert!(stderr.contains("does-not-exist.yaml"), "{stderr}");
 
     // Counter proof: no frontmatter, and no empty frontmatter, do no schema
     // work at all — so the unloadable baseline is never reached.
@@ -476,12 +473,8 @@ fn test_absent_frontmatter_never_resolves_the_schema_override() {
     let missing = repo.root.join("nope.yaml");
 
     let with_frontmatter = repo.write("docs/has-fm.md", "---\ntitle: Fine\n---\n\n# Body\n");
-    // Wide enough that the temp path (its length differs by OS) never wraps
-    // inside the file name the assertion looks for.
     fixture
-        .command_builder()
-        .plain_terminal(400, 50)
-        .build()
+        .command()
         .arg("clean")
         .arg(&with_frontmatter)
         .arg("--schema")
