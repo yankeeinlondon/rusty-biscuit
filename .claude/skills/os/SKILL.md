@@ -65,6 +65,7 @@ environment's cell and how to record an execution ban.
 | macOS watcher receives events but its target is absent from `lsof` | FSEvents directory watches do not require an open descriptor naming the target | [macos.md](macos.md#finding-filesystem-watchers) |
 | `ErrorKind::NotFound` check misses on Windows only; message shows `os error -2147024894` | a `windows` crate error converted with `io::Error::from` keeps the HRESULT | [windows.md](windows.md#environment-and-processes) |
 | A per-handle file query hangs only on Windows; `CancelSynchronousIo` returns 1168 | the handle's owner has synchronous I/O pending on that file object | [windows.md](windows.md#inspecting-another-processs-handles) |
+| Need "which processes hold this path" on Windows without the per-handle hang | ask from the file side with `FileProcessIdsUsingFileInformation` | [windows.md](windows.md#asking-which-processes-have-a-path-open) |
 | `/proc` fd scan finds nothing for a process you know holds files | `procfs` skips per-fd `EACCES`, or `sdev` was compared without decoding | [linux.md](linux.md#reading-proc-for-another-processs-descriptors) |
 | Green gates that did not test your worktree | Bash `cd <area>` followed `CDPATH` into the main checkout | [macos.md](macos.md) |
 | macOS host L2 red with a shell prompt in the captured frame | a host shell-startup prompt swallowed the input; not a repo defect | [macos.md](macos.md) |

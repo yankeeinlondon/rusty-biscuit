@@ -276,3 +276,43 @@ Simulate Medium integrity with a filtered token, or use a desktop session.
   hosted `windows-latest` runner allows it is unverified; the
   `filesystem::query` case-sensitivity test fails, rather than skips, where it
   cannot.
+
+## Asking which processes have a path open
+
+Measured 2026-10-06 on `BUILD_WIN`. This is the safe alternative to resolving
+another process's handles (above): open the path yourself and ask the kernel
+which processes hold it.
+
+- **The call:** `CreateFileW(path, FILE_READ_ATTRIBUTES, FILE_SHARE_READ |
+  FILE_SHARE_WRITE | FILE_SHARE_DELETE, OPEN_EXISTING,
+  FILE_FLAG_BACKUP_SEMANTICS for directories)`, then
+  `NtQueryInformationFile(h, …, 47 /* FileProcessIdsUsingFileInformation */)`.
+  The result is a `u32` count, then `usize` PIDs from byte offset 8. Start with
+  a 4 KiB buffer, because every `STATUS_INFO_LENGTH_MISMATCH` retry repeats the
+  whole costly call.
+- **It does not hang** where the handle-side queries do. It returned
+  promptly while the holder was blocked in `LockFileEx` or in a synchronous
+  `ReadDirectoryChangesW` call. Our open and close did not wake the
+  watcher.
+- **Permissions.** No elevation is needed, and no other process is opened. A
+  non-elevated desktop session saw System (PID 4) and other users' processes,
+  the same holders as the elevated SSH session.
+- **What it reports and what it misses:**
+  - It reports open files and directories, cwd, loaded DLLs, a running exe,
+    share-mode-0 holders, and holders with attribute-only or zero access.
+  - Results never roll up to parent directories.
+  - The caller's own PID is never listed.
+  - A delete-pending file cannot be opened (`0xC0000056`), so its holders
+    are invisible.
+  - Long paths need the `\\?\` prefix.
+- **Cost is per call and scales with the system's handle count, not the
+  tree.** About 4 ms plus about 25 µs per 1,000 system handles, whether or
+  not anything holds the path (6 ms at 100k handles). Calls scale nearly
+  linearly across threads up to the core count, so walk large trees in
+  parallel and in priority order.
+- **Never open a pipe path to probe it.** Opening `\\.\pipe\…`, even
+  `GetFileAttributesW` on it, connects to a waiting server as a client.
+  Take the entry type from the directory walk.
+- **Restart Manager (`RmGetList`) is a worse wrapper for the same question.**
+  It has no directory or long-path support, it is slower per path, and a
+  missing path returns success with an empty list.

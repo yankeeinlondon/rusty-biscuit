@@ -43,6 +43,29 @@ URL building, or JSON surgery.
   stdout and `No commits matched.` to stderr.
 - `-v` given before the subcommand plus `-c` after it resolves to compact.
 
+### `filesystem query`
+
+`sniff filesystem query <PATH>` (`commands/filesystem_query.rs`) dispatches
+before any detection plan is built, so it performs no inventory, remote, or
+network work. `filesystem` sets `args_conflicts_with_subcommands`, which makes
+`--refresh-remotes`/`--latest-versions` with `query` a clap usage error.
+
+- Ordinary paths (relative, absolute, non-UTF-8) reach the library unchanged.
+  Only sigil references (`@ & ^ ~ vault:`) go through `biscuit-file`, and
+  `resolve_detailed` matches regular files only, so the first candidate that
+  is `Matched` **or `NonFile`** is the target (that is how a directory
+  resolves). `&`/`^` get the enclosing Git root via `find_git_root`, never a
+  scope catalog (that would need repository inventory).
+- Exit code follows the library `outcome` (usable 0, else 1), never match
+  presence. A failure with no report prints `{"error":{"kind","message"}}`
+  in JSON mode and exits 1 without going through `main`'s `Error:` path.
+- Text lays out at `UNWRAPPED_WIDTH` when stdout is not a terminal: the
+  default wrap policy breaks paths at `-`/`/` and hyphenates long words.
+- `output/filesystem/query.rs::literal` neutralizes control characters
+  before `Prose::escape_text`, because `escape_text` passes CSI/OSC through.
+- `std::env::args()` panics on a non-UTF-8 argument; the pre-parse scans in
+  `commands/mod.rs` use `args_os`. Keep it that way for any new scan.
+
 ## `--perf` output
 
 `--perf` renders a hierarchical timing tree rooted at `Total` and, when the
