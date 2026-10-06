@@ -13,11 +13,11 @@ if report.outcome != Outcome::Usable {
 ```
 
 **Status.** The library entry point, report contract, platform-neutral
-matching, and the [Linux/WSL2 backend](#linux-and-wsl2) are built.
-**Planned:** the macOS and Windows backends and the
-[CLI query](../cli/filesystem_query.md). Until its backend lands, every usage
-mechanism on macOS and Windows reports `unsupported` and the outcome there is
-`unsupported`.
+matching, the [Linux/WSL2 backend](#linux-and-wsl2), the
+[macOS backend](#macos), and the [Windows loaded-module backend](#windows)
+are built. Windows does not inspect other processes' file handles: its
+`open_handles` mechanism reports `unsupported`. **Planned:** the
+[CLI query](../cli/filesystem_query.md).
 
 A directory query includes descendants by default;
 `PathUsageOptions::default().target_only()` inspects the target alone. Normal
@@ -122,8 +122,8 @@ Prerequisites never make an outcome `usable` on their own.
 | Environment | Discovery | Coverage limit |
 | --- | --- | --- |
 | Linux/WSL2 | Open descriptors, cwd, inotify registrations | Permissions; fanotify and polling are `unsupported` |
-| macOS (**planned**) | Vnode descriptors and cwd, including observable event-only opens | FSEvents subscriptions cannot be enumerated systemwide |
-| Windows (**planned**) | File/directory handle and loaded-module owners | Handle ownership does not establish watcher status or deletion blocking; cwd and `ReadDirectoryChangesW` subscriptions are `unsupported` |
+| macOS | Vnode descriptors and cwd, including observable event-only opens | Permissions (another user's processes are denied without root); FSEvents and polling are `unsupported` |
+| Windows | Loaded modules (executables and DLLs) | Permissions and protected processes; open handles, cwd, `ReadDirectoryChangesW` subscriptions, and polling are `unsupported` |
 
 For example, a Node process with its cwd in a checkout will appear as working
 directory evidence. A Node process watching that checkout through FSEvents may
@@ -195,6 +195,135 @@ Problems stay visible instead of reading as "no matches":
 - fanotify marks and polling watchers are `unsupported`. A complete
   descriptor scan is still not complete watcher discovery.
 
+## macOS
+
+The backend calls `libproc` (`proc_listallpids`, `proc_pidinfo`,
+`proc_pidfdinfo`) directly; it reads no other process's memory and runs no
+subprocess.
+
+- **Processes** come from `proc_listallpids`. The creation token is the start
+  time in microseconds since the epoch from `PROC_PIDTBSDINFO`, which also
+  supplies the name. If it changes between enumeration and the end of a
+  process's inspection, the PID was reused and nothing read for it is kept.
+- **Open descriptors** (`open_handles`) are listed with `PROC_PIDLISTFDS`.
+  A listing that fills its buffer may have been cut short, so it is read
+  again with a larger buffer until it is not full. Each vnode descriptor is
+  read with `PROC_PIDFDVNODEPATHINFO`; sockets, pipes, and kqueues carry no
+  path and are counted but not matched. Identity is the vnode's
+  `(dev, ino)`, in the same encoding `std::fs::Metadata::dev` reports; the
+  kernel's path becomes `observed_path` only, and it uses the canonical
+  spelling (`/private/var/...` for a target queried as `/var/...`).
+- **Access and event-only opens.** `access` comes from the descriptor's open
+  flags. A descriptor opened with `O_EVTONLY` (how kqueue-based watchers
+  hold a file) is still `open_handle` evidence, with `event_only: true`;
+  every other macOS descriptor has `event_only: false`. It shows that a
+  process can be notified about the object, not that it is subscribed.
+- **The working directory** (`working_directories`) comes from
+  `PROC_PIDVNODEPATHINFO` and is matched the same way.
+- **FSEvents** subscriptions are `unsupported`: macOS has no supported
+  systemwide inventory of them, so a process watching through FSEvents alone
+  can be absent from matches. Polling watchers are `unsupported` everywhere.
+
+For example, a target `/var/tmp/app` held open read-write by PID 812, with
+PID 812's cwd in `/var/tmp/app/sub`, yields one process record with two
+pieces of evidence:
+
+```text
+open_handle        /private/var/tmp/app/file.txt   fd 3  read+write  event_only: false
+working_directory  /private/var/tmp/app/sub
+```
+
+Problems stay visible instead of reading as "no matches":
+
+- Without root, every per-process call for another user's process (for
+  example `launchd`, PID 1) fails with `EPERM`. That process is
+  `permission_denied` for `open_handles` and `working_directories`, which
+  are then `partial`. Process enumeration itself stays `complete`: the PID
+  list is whole, only the detail is denied.
+- A descriptor that closes between the listing and its read is no longer
+  usage and is not a gap. A descriptor that cannot be read for any other
+  reason is a `permission_denied` or `inspection_failed` limitation naming
+  it, and the rest of the table is still read.
+- A process whose start time cannot be read for a reason other than
+  permission has no creation token: enumeration records an
+  `identity_uncertain` limitation and the record is kept apart.
+
+## Windows
+
+The backend lists processes with `EnumProcesses` and reads each one through
+a process handle; it runs no subprocess and starts no thread. It reports one
+usage mechanism, `loaded_modules`: every executable and DLL a process has
+mapped. A module is observed by path only, so its path is looked up and
+matched by identity (`match_basis: path_lookup`). That settles `\\?\`,
+8.3 short-name, and case spellings, and a case-sensitive directory keeps
+`Module.dll` and `module.dll` apart.
+
+For example, a build tool started from `C:\work\app\bin\tool.exe` that has
+also loaded `C:\work\app\bin\helper.dll` yields, for a query of
+`C:\work\app`:
+
+```text
+loaded_module  \\?\C:\work\app\bin\helper.dll
+loaded_module  \\?\C:\work\app\bin\tool.exe
+```
+
+Matched paths sit under the canonical root, which on Windows is the verbatim
+`\\?\` spelling; `observed_path` keeps the spelling Windows reported.
+
+- **Processes and identity.** Each listed PID is opened once with
+  `PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ`, or with the limited
+  right alone when memory access is denied. The creation token is the
+  process's creation `FILETIME`, which also gives `start_time`; the image path
+  gives `name` and `executable`. While that handle is open the PID cannot be
+  reused.
+- **Handle lifetime.** A process with no in-scope module has its handle
+  closed as soon as it has been inspected. A process holding something in
+  scope keeps its handle until the query returns, so `user` (the account SID
+  from its token) and the creation-time recheck are read through the same
+  handle, never by opening the PID again.
+
+```mermaid
+flowchart LR
+    A[EnumProcesses] --> B[OpenProcess per PID]
+    B -->|denied| D[candidate without a token]
+    B --> C[inspect modules]
+    C -->|nothing in scope| E[close handle]
+    C -->|in scope| F[enrich through the handle]
+    F --> G[close when the query returns]
+```
+
+- **Module lists** come from `EnumProcessModulesEx(LIST_MODULES_ALL)`. A list
+  larger than the buffer is read again at the reported size, so no module is
+  dropped; a list that keeps outgrowing its buffer, or reports more than
+  65,536 modules, fails that process instead.
+- **Unsupported mechanisms.** Reading the identity of another process's
+  handle can block until that process's pending I/O on the file completes,
+  and nothing can cancel the wait, so `open_handles` is `unsupported`. A
+  working directory and a `ReadDirectoryChangesW` subscription are directory
+  handles that cannot be told apart from any other, so both are
+  `unsupported` too.
+
+A loaded module or an open handle shows that a process uses a file. It does
+not establish that deleting or renaming the file will fail. A handle opened
+with `FILE_SHARE_DELETE` permits deletion, and a module's file can often be
+renamed while it is mapped.
+
+Problems stay visible instead of reading as "no matches":
+
+- A process that cannot be opened at all (a protected process, or another
+  user's when not elevated) is `permission_denied` for `loaded_modules`. So
+  is a process opened without memory access; that one still has its creation
+  token, so it is not `identity_uncertain`. The System process's modules are
+  never readable, so `loaded_modules` is `partial` on every host.
+- A module list that cannot be read while the process is running is
+  `inspection_failed`, with the Windows message (for example, a process still
+  starting, or of an architecture this build cannot read). The same failure
+  after the process has exited is `process_disappeared`.
+- A module unloaded between the listing and its path read is no longer usage
+  and is not a gap.
+- An open that fails for a reason other than permission leaves the process
+  without a token: enumeration records an `identity_uncertain` limitation.
+
 ## Serialized form
 
 The report serializes with snake_case keys and `schema_version: 1`.
@@ -217,9 +346,14 @@ Under a performance collector the query records these
 `performance::counters`: `filesystem.query.tree_walks` (one per recursive
 directory query), `tree_identity_reads`, `process_enumerations`,
 `process_inspections`, `descriptor_inspections`, `watch_registration_reads`,
-`identity_enrichments`, and `path_lookups`, all under `filesystem.query.`.
+`module_inspections`, `identity_enrichments`, and `path_lookups`, all under
+`filesystem.query.`.
 On Linux, `descriptor_inspections` counts each `/proc/<pid>/fd/<n>` entry and
 `watch_registration_reads` each `fdinfo` read of an anonymous-inode
-descriptor, failures included.
+descriptor, failures included. On macOS, `descriptor_inspections` counts
+each listed descriptor, vnode or not; `watch_registration_reads` stays zero.
+On Windows, `module_inspections` counts each module path read, failures
+included, and `path_lookups` counts only modules whose path could lie inside
+the target; the descriptor and watch counters stay zero.
 Root resolution also records `filesystem.io.metadata_probes` and
 `filesystem.io.canonicalizations`.
