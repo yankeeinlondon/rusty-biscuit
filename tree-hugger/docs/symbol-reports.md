@@ -919,7 +919,12 @@ means exit status `1`.
 complete index per scanned file, whether or not anything matched, with every
 kind, every pass (`Parse`, `Bind`, `Semantic`, `Docs`, `Diagnostics`),
 every capability (the test and deprecation flags and the `metrics` facet
-included), imports, exports, diagnostics and `declaration_text`.
+included), imports, exports, diagnostics and `declaration_text`. A
+callable's `metrics.lines` and `metrics.cyclomatic` therefore appear on every
+`--json-full` record, but on `--json`/`--jsonl` records only when
+`--undocumented` or `--min-params` asked for metrics (see
+[Cyclomatic Complexity](./cyclomatic-complexity.md)); `--stats` computes
+metrics for doc coverage but reports no complexity statistic.
 
 Because it reports everything, `--json-full` rejects any flag that narrows
 records (exit `2`): a symbol-name filter, `--name`, `--exclude-symbols`,

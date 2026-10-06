@@ -201,7 +201,9 @@ file's records, imports, exports and every analysis pass but diagnostics:
 
 A change to Rust extraction code cannot be seen in query text, so
 `EXTRACTOR_REVISION` must still be bumped with any change to extracted
-records, including a repair on an unreleased branch. After a bump, every
+records, including a repair on an unreleased branch and a change to a
+[cyclomatic counting rule](./cyclomatic-complexity.md), which changes the
+numbers reported for unchanged source. After a bump, every
 entry written by the earlier revision is a miss and is recomputed on first
 use; nothing is migrated.
 
@@ -479,7 +481,7 @@ other than exactly 4.3 refuses it too. In an entry that lists `metrics`, the
 of the wrong type refuses it), and so is each of its four keys (absent
 refuses, so a 4.0 facet without `lines` or a 4.2 facet without `cyclomatic`
 is never read as `null`; only `null` is served). `lines` and `cyclomatic`
-are `u32`s: `"3"`, `3.5`, `-1` and `4294967296` refuse the entry. For every tested record field, a wrong type (`123`, or `"123"` for a number, or an array holding a wrong
+are `u32`s: `"3"`, `3.5`, `-1`, `4294967296`, `true`, `{}` and `[]` refuse the entry, and `4294967295` is served. For every tested record field, a wrong type (`123`, or `"123"` for a number, or an array holding a wrong
 element), a duplicate key and invalid JSON refuse the entry. For example, an
 entry whose method record carries `"modifiers": null` is recomputed, while one
 with no `modifiers` key reports that method as an instance method.
@@ -525,6 +527,7 @@ visited once per run, so they only added copies.
 | A filtered, prefixed query writes in-file names and every record; another scan root is a Hit with the same IDs | `lib/tests/l1/symbols_query_filters.rs` `predicates_and_prefixes_never_reach_the_cache_entry` |
 | Concurrent writers (threads and processes) | `concurrent_writers_leave_a_readable_entry_whose_coverage_matches`, `cli/tests/symbols/cache_lookup.rs`, `lib/tests/l1/cache_tests.rs` |
 | Entry and record field shapes | `cli/tests/symbols/cache_robustness.rs` |
+| Widening an entry by `metrics` parses once and walks each measured callable once; every `cyclomatic` value, `null` included, is stored, and a warm request is a `Hit` that walks nothing | `complexity_is_stored_once_and_served_on_warm_hits` |
 | Old extractor revisions and records of other schema versions are never served | `cli/tests/symbols/cache_upgrade.rs` |
 | A kind-narrowed entry never claims complete coverage; widening to every kind and capability, then a warm `Hit` with zero work counters, equals an uncached run | `deferred_kind_entries_never_claim_complete_coverage_and_warm_hits_do_no_work` |
 | A reclassified record gets the ID of its new kind; unchanged records and namespace members keep theirs | `reclassified_records_get_new_ids_and_unrelated_ids_stay` |

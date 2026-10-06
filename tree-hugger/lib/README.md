@@ -244,9 +244,11 @@ metadata and standalone symbols agree.
   `is_exported: false`.
 - `visibility.is_test` and `visibility.is_deprecated` are computed only with
   `Capability::Flags`, and the `metrics` facet (`parameters`, `has_docs`,
-  `lines`) only with `Capability::Metrics`; `lines` counts the lines a
-  function, method or constructor's body spans and is `null` for any other
-  kind or a declaration without a body:
+  `lines`, `cyclomatic`) only with `Capability::Metrics`; `lines` counts the
+  lines a function, method or constructor's body spans and is `null` for any
+  other kind or a declaration without a body; `cyclomatic` is 1 plus the
+  decisions in that body (Rust, JavaScript and TypeScript; `null` elsewhere,
+  never zero, see [Cyclomatic Complexity](../docs/cyclomatic-complexity.md)):
 
   ```rust
   let query = SymbolQuery::new().capabilities([Capability::Flags, Capability::Metrics]);

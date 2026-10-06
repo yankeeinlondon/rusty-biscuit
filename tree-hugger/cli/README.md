@@ -184,7 +184,9 @@ With `--json`, `functions`, `types`, `symbols` and `classes` print one report:
 - Records carry their declared facts on every JSON format: generic
   parameters and constraints (`type_info`), `modifiers`, `attributes` and the
   written bases (`relations.extends`/`implements`/`unclassified_bases`). The `metrics` facet,
-  including a callable's body size `metrics.lines`, is only in `--json-full`.
+  including a callable's body size `metrics.lines` and cyclomatic complexity
+  `metrics.cyclomatic`, is in `--json-full`, and in `--json`/`--jsonl` only
+  when `--undocumented` or `--min-params` asks for metrics.
 - Records carry the declaration header (`source.signature_text`) but not the
   declaration's source text, attached comments or work the command did not
   ask for (references, semantics); `completed_passes` and

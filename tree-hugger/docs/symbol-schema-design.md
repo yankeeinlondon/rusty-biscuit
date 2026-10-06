@@ -157,6 +157,7 @@ pub struct MetricsFacet {
     pub parameters: Option<u32>,  // `null` = unsupported for this declaration
     pub has_docs: Option<bool>,   // `null` = no doc-comment detection
     pub lines: Option<u32>,       // `null` = not a callable, or no body
+    pub cyclomatic: Option<u32>,  // `null` = unavailable, never zero
 }
 ```
 
@@ -183,7 +184,8 @@ items left out. It is `null` for every other kind, a callable without a
 body, a language without reviewed counting rules (every language but Rust,
 JavaScript and TypeScript today), a syntax error inside the counted body,
 or a total beyond `u32`;
-`null` is never zero. A facet without either key (schema 4.0 without
+`null` is never zero. The full rules, with an example per rule, are in
+[Cyclomatic Complexity](./cyclomatic-complexity.md). A facet without either key (schema 4.0 without
 `lines`, 4.2 without `cyclomatic`) is malformed, never read as `null`. A predicate never matches a `null` metric, so `undocumented(true)` skips a Lua
 function rather than reporting it as undocumented:
 
@@ -1274,7 +1276,9 @@ read only for a field the winner lacks.
 `tree_hugger::work_counters()` counts lint-diagnostics runs, parser
 constructions, definition-query executions, shared-context steps and
 relation-linker runs (one per analysis: the declaration index for
-`extends`/`implements` and, in Rust, the impl walk) process-wide (atomics, so work on any thread is counted); tests compare two
+`extends`/`implements` and, in Rust, the impl walk) and complexity walks
+(one per callable body measured for `metrics.cyclomatic`, so none for a
+query without metrics or a language without counting rules) process-wide (atomics, so work on any thread is counted); tests compare two
 snapshots with `WorkCounters::since`.
 
 Context that many declarations of one file share is derived once per file,

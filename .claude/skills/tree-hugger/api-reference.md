@@ -193,9 +193,12 @@ recursion field, so nothing to map).
 
 `work_counters()` returns process-wide atomic counts (`diagnostics_runs`,
 `parser_constructions`, `definition_captures`, `shared_context_steps`,
-`relation_links`); diff two snapshots with `WorkCounters::since`.
+`relation_links`, `complexity_walks`); diff two snapshots with `WorkCounters::since`.
 `relation_links` counts runs of the per-file relation linker (declaration
-index build plus the Rust impl walk), one per analysis. `shared_context_steps` counts the
+index build plus the Rust impl walk), one per analysis. `complexity_walks`
+counts callable bodies walked for `metrics.cyclomatic`: one per measured
+callable of a language with counting rules, none without `Capability::Metrics`
+or for a language without rules. `shared_context_steps` counts the
 derivation of, and lookups in, context a file's declarations share (file
 namespace index, sibling scopes, inner `cfg(test)`, C++ access sections,
 same-file traits/`static` prototypes/owners, container and export-target

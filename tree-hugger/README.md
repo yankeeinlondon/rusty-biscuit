@@ -163,6 +163,13 @@ syntax tree in the same single parse (no compiler, no extra pass):
   annotations and decorators with their raw arguments.
 - **Body size**: `metrics.lines` counts the lines of a function, method or
   constructor's body (`null` for other kinds and bodiless declarations).
+- **Cyclomatic complexity**: `metrics.cyclomatic` is 1 plus one per decision
+  (`if`, a conditional loop, a ternary, `&&`/`||`, a non-default arm, a
+  guard, a `catch`) in that same body, nested functions and types left out.
+  Rust, JavaScript and TypeScript have counting rules; every other language,
+  a bodyless declaration and a body with a syntax error report `null`, which
+  never means zero. The rules, with an example each, are in
+  [Cyclomatic Complexity](./docs/cyclomatic-complexity.md).
 - **Outline rows show bases**: `hug types --tree` and `hug symbols --tree`
   end a type's row with them.
 
