@@ -11,7 +11,7 @@ use crate::common;
 
 use std::time::Duration;
 
-use common::pty::{ProbeAnswer, drive_probe, spawn_with_env};
+use common::pty::{DA1_QUERY, DA1_REPLY, ProbeAnswer, drive_probe, spawn_with_env};
 use serial_test::serial;
 
 /// The DSR cursor-position query, `CSI 6 n`, as it appears in the master
@@ -42,7 +42,10 @@ const PROBE_DEADLINE: Duration = Duration::from_secs(5);
 /// probe run to completion before the session is dropped.
 fn cursor_probe_output(mode: &str, reply: &'static [u8], marker: &str) -> String {
     let mut session = spawn_with_env(&[("PROBE", mode), ("PROBE_TERM_PROGRAM", "WezTerm")]);
-    let mut answers = [ProbeAnswer::new(DSR_QUERY, reply)];
+    let mut answers = [
+        ProbeAnswer::new(DSR_QUERY, reply),
+        ProbeAnswer::every(DA1_QUERY, DA1_REPLY),
+    ];
     let collected = drive_probe(&mut session, &mut answers, marker, PROBE_DEADLINE);
     String::from_utf8_lossy(&collected).into_owned()
 }

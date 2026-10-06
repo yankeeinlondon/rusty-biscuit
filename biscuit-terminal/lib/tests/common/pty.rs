@@ -19,6 +19,14 @@ pub const OSC10_QUERY: &[u8] = b"\x1b]10;?\x07";
 /// The OSC 11 (background color) query, `ESC ] 11 ; ? BEL`.
 pub const OSC11_QUERY: &[u8] = b"\x1b]11;?\x07";
 
+/// The DA1 sentinel the library appends to every terminal query, `CSI c`.
+pub const DA1_QUERY: &[u8] = b"\x1b[c";
+
+/// A DA1 reply as a VT220-class terminal sends it. Every live query waits for
+/// this (or its timeout), so a test that manufactures a query reply should
+/// answer DA1 too, listed after the query's own answer.
+pub const DA1_REPLY: &[u8] = b"\x1b[?62;22c";
+
 /// Count non-overlapping occurrences of `needle` in `haystack`.
 pub fn count_occurrences(haystack: &[u8], needle: &[u8]) -> usize {
     if needle.is_empty() || haystack.len() < needle.len() {
@@ -53,9 +61,19 @@ fn discovery_probe_path() -> PathBuf {
         .join(format!("discovery_probe{}", std::env::consts::EXE_SUFFIX))
 }
 
+/// Silence budget for probes whose replies this harness manufactures.
+///
+/// The library's local default also has to cover the driver's poll interval
+/// and the probe's startup, which a contended host can stretch; one second
+/// restores the pre-budget per-query allowance. A test of the default itself passes this variable
+/// with an empty value, which the library ignores.
+pub const SILENCE_BUDGET_FOR_TESTS: (&str, &str) = ("BISCUIT_TERMINAL_QUERY_SILENCE_MS", "1000");
+
 /// Base environment variables that prevent hangs and unwanted side-effects
 /// in the spawned probe.
 ///
+/// * `BISCUIT_TERMINAL_QUERY_SILENCE_MS=1000` on non-Windows hosts; see
+///   [`SILENCE_BUDGET_FOR_TESTS`].
 /// * `NO_COLOR=1` on non-Windows hosts disables color output so assertions need not
 ///   cope with unrelated SGR sequences.
 /// * `PROBE_FORCE_TTY=true` on Windows because ConPTY child handles are not
@@ -63,7 +81,7 @@ fn discovery_probe_path() -> PathBuf {
 ///   there because the prose probes exercise non-color SGR capabilities.
 pub fn anti_hang_env() -> Vec<(&'static str, &'static str)> {
     #[cfg(not(windows))]
-    let env = vec![("NO_COLOR", "1")];
+    let env = vec![("NO_COLOR", "1"), SILENCE_BUDGET_FOR_TESTS];
     #[cfg(windows)]
     let env = vec![("PROBE_FORCE_TTY", "true")];
     env
@@ -99,8 +117,14 @@ pub fn spawn_with_env(envs: &[(&str, &str)]) -> OsSession {
     let mut cmd = Command::new(&bin);
 
     // Remove terminal-specific env vars that would override TERM_PROGRAM
-    // detection, so tests can manufacture a terminal identity cleanly.
+    // detection, so tests can manufacture a terminal identity cleanly. The
+    // SSH/Mosh markers go too: a run over SSH (as `just cross-check` does)
+    // would otherwise give every query the remote silence budget.
     for var in [
+        "SSH_CLIENT",
+        "SSH_CONNECTION",
+        "SSH_TTY",
+        "MOSH_CONNECTION",
         "WEZTERM_UNIX_SOCKET",
         "WEZTERM_PANE",
         "KITTY_WINDOW_ID",
@@ -171,13 +195,14 @@ pub fn try_read_available(session: &mut OsSession) -> String {
     buf
 }
 
-/// A one-shot manufactured terminal answer: when `query` first appears in the
-/// master stream, `reply` is written back into the PTY exactly once.
+/// A manufactured terminal answer: when `query` appears in the master stream,
+/// `reply` is written back into the PTY — once for [`ProbeAnswer::new`], or
+/// once per occurrence for [`ProbeAnswer::every`].
 ///
 /// The type is protocol-neutral. `query` is whatever byte sequence the probe
-/// writes to `/dev/tty` — an OSC colour query (`ESC ] 11 ; ? BEL`) or the DSR
-/// cursor-position query (`ESC [ 6 n`) — and `reply` is the response a real
-/// terminal would send.
+/// writes to `/dev/tty` — an OSC colour query (`ESC ] 11 ; ? BEL`), the DSR
+/// cursor-position query (`ESC [ 6 n`), or the DA1 sentinel — and `reply` is
+/// the response a real terminal would send.
 ///
 /// Answering on observation rather than after a fixed delay is what makes a
 /// probe test independent of process-start latency: `Session::spawn` returns
@@ -186,7 +211,8 @@ pub fn try_read_available(session: &mut OsSession) -> String {
 pub struct ProbeAnswer {
     pub query: &'static [u8],
     pub reply: &'static [u8],
-    sent: bool,
+    answered: usize,
+    repeat: bool,
 }
 
 impl ProbeAnswer {
@@ -194,13 +220,22 @@ impl ProbeAnswer {
         Self {
             query,
             reply,
-            sent: false,
+            answered: 0,
+            repeat: false,
+        }
+    }
+
+    /// Answer every occurrence of `query`, as a terminal answers DA1.
+    pub fn every(query: &'static [u8], reply: &'static [u8]) -> Self {
+        Self {
+            repeat: true,
+            ..Self::new(query, reply)
         }
     }
 }
 
 /// Drive a probe session: read the master stream, answer each pending
-/// [`ProbeAnswer`] once when its query first appears, and stop when the ASCII
+/// [`ProbeAnswer`] when its query appears, and stop when the ASCII
 /// `until` marker is seen in the collected bytes or `deadline` elapses.
 ///
 /// `until` should be a marker the probe prints *after* the exchange completes,
@@ -236,10 +271,12 @@ pub fn drive_probe(
         }
 
         for answer in answers.iter_mut() {
-            if !answer.sent && count_occurrences(&collected, answer.query) > 0 {
+            let seen = count_occurrences(&collected, answer.query);
+            let owed = if answer.repeat { seen } else { seen.min(1) };
+            while answer.answered < owed {
                 let _ = session.write_all(answer.reply);
                 let _ = session.flush();
-                answer.sent = true;
+                answer.answered += 1;
             }
         }
 

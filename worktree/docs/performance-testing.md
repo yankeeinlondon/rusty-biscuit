@@ -1,6 +1,6 @@
 ---
-hash: ef46db3751d8e999-612971d5cae12dd4
-last_updated: 2026-09-27
+hash: ef46db3751d8e999-f3360b3d03e17c47
+last_updated: 2026-10-04
 ---
 
 # Performance Testing — Worktree
@@ -15,28 +15,28 @@ The first owned cost center is [`list_worktrees`](../../worktree/lib/src/worktre
 - The caption compares the local default branch with its local tracking ref `origin/<default>` (cached like any other pair) and records the tracking tip it read. Its counts also choose the default-branch target, so a warm run makes no `merge-base` call. The library listing path never touches the network; the CLI reads it after its worker's check and fetch (see [Live Remote Head](#live-remote-head)).
 - Per-worktree `git status --porcelain` and per-branch comparisons (`git rev-list --left-right --count` plus a speculative `git merge-tree --write-tree`, against the target and, for a branch whose fork parent is another branch, against the parent) are dispatched in parallel via `std::thread::scope`.
 - `git status` is passed `-c core.untrackedCache=true`; benchmarks assume a warm untracked-cache so the measurement reflects steady-state behavior rather than the first cold walk.
-- The intended Criterion surface benchmarks `list_worktrees()` end-to-end in the `rusty-biscuit` monorepo, using the Phase 1 `count-git` recorder to assert subprocess counts in addition to wall-clock time.
+- The Criterion bench measures this listing through the library pipeline (see [Bench Recipe](#bench-recipe)); subprocess counts are asserted separately with the `count-git` recorder.
 
 ## Graph Data Collection
 
-The second owned cost center is graph data collection in [`worktree/cli/src/commands/git_graph.rs`](../../worktree/cli/src/commands/git_graph.rs).
+The second owned cost center is graph data collection in the library, [`worktree::graph`](../lib/src/graph.rs). The CLI only converts the gathered facts for biscuit-terminal and renders them ([`git_graph.rs`](../cli/src/commands/git_graph.rs)).
 
-- [`gather`](../../worktree/cli/src/commands/git_graph.rs) reads whether the repository is shallow once, then works in three stages, each stage's branches concurrently: it classifies every drawn branch (one `merge-base --is-ancestor` per candidate lane, plus `rev-list --first-parent --parents` and `rev-list --ancestry-path` for a merged branch) and finds its fork (`merge-base`); it builds every branch lane (`log --first-parent`), classifying the lane's boundary (the first commit below it) the same way, so a branch that kept going after its merge is extended through that merge; then it builds the default lane. Each fork, merge, or label commit outside a lane's window costs one `rev-list --first-parent --count`, and a lane's anchors are verified together in one `log --no-walk`. See [git-graph.md](./git-graph.md).
+- [`gather`](../lib/src/graph.rs) reads whether the repository is shallow once, then works in three stages, each stage's branches concurrently: it classifies every drawn branch (one `merge-base --is-ancestor` per candidate lane, plus `rev-list --first-parent --parents` and `rev-list --ancestry-path` for a merged branch) and finds its fork (`merge-base`); it builds every branch lane (`log --first-parent`), classifying the lane's boundary (the first commit below it) the same way, so a branch that kept going after its merge is extended through that merge; then it builds the default lane. Each fork, merge, or label commit outside a lane's window costs one `rev-list --first-parent --count`, and a lane's anchors are verified together in one `log --no-walk`. See [git-graph.md](./git-graph.md).
 - Graph data is only gathered when the terminal reports inline-image support. On non-image terminals the entire graph-data path is skipped.
-- `GitGraph` measures each trimming candidate with the renderer (`GitGraph::plan`). That cost is in the `graph image render` stage, never in `list gather` or the table.
+- `GitGraph` measures each trimming candidate with the renderer (`GitGraph::plan`). That cost is in the `graph_render` stage, never in `graph_history`, `local_gather`, or the table.
 
 ## PR Request
 
-`wt list` makes no PR request of its own. The detached worker every listing launches (see [Live Remote Head](#live-remote-head)) asks for open PRs on every run, beside its live-head check, and the listing waits for both within one budget ([`pull_requests.rs`](../lib/src/pull_requests.rs), [`list/wait.rs`](../cli/src/commands/list/wait.rs)).
+`wt list` makes no PR request of its own. The detached worker every listing launches (see [Live Remote Head](#live-remote-head)) asks for open PRs on every run, beside its live-head check, and the listing waits for both within one budget ([`pull_requests.rs`](../lib/src/pull_requests.rs), [`list/wait.rs`](../lib/src/list/wait.rs)).
 
 - Every stored answer is bound to a digest of the exact `git remote get-url origin` value, so every run pays that one git call before it may show stored badges.
 - The worker's PR half asks whenever it wins the nonblocking lock beside the store, whatever the stored answer's age, under a 10 s deadline (`REFRESH_DEADLINE`). A contender makes no request, so overlapping listings keep at most one PR request in flight. A failure is never stored, and a repository in `~/.wt.json` makes no request.
 - The two halves run concurrently, so an ordinary listing waits for the slower of the PR request and the head update (check plus any fetch), never their sum, and never more than 3 s. A stalled PR request now costs the whole 3 s even when the head answers at once; that is the accepted price of showing this run's answer.
-- The `--perf` row `pr gather` is the origin lookup before the wait. The origin recheck and the stored-answer read after the wait are the `pr reread` child of the wait's group (see [Runtime `--perf` flag](#runtime---perf-flag)). Neither makes a request, and neither adds to `list gather`. The PR request's time, and the publication-id read before the launch, are inside `remote wait`.
+- In `--perf`, `origin_lookup` is the origin lookup before the wait. The origin recheck and the stored-answer read after the wait are `pr_cache_read`, a child of the region that spans the wait (see [Runtime `--perf` flag](#runtime---perf-flag)). Neither makes a request, and neither adds to `local_gather`. The PR request runs in the worker; the foreground sees its time only inside `refresh_worker`, and the worker's own report shows it as `pr_request`.
 
 ### Before and after: waiting for the PR request
 
-An observation, not a threshold: one quick unauthenticated sample on the macOS development host on 2026-10-02, in the `rusty-biscuit` checkout (`origin` is a public GitHub repository over SSH), with release builds of `wt` from `main` (before) and from this change (after), run back to back with a few seconds between runs. Times are the `--perf` stages.
+An observation, not a threshold: one quick unauthenticated sample on the macOS development host on 2026-10-02, in the `rusty-biscuit` checkout (`origin` is a public GitHub repository over SSH), with release builds of `wt` from `main` (before) and from this change (after), run back to back with a few seconds between runs. Times are the `--perf` rows of that date ([old row names](#rows-in-older-samples)).
 
 | Build | Run | PR request | `pr gather` | `remote wait` |
 | --- | --- | --- | ---: | ---: |
@@ -50,13 +50,13 @@ An observation, not a threshold: one quick unauthenticated sample on the macOS d
 
 ## Live Remote Head
 
-Every listing with an `origin` checks the remote and, when it differs, fetches the one tracking ref, through the same detached worker that makes the PR request, and waits for both halves up to 3 s ([`remote_update.rs`](../lib/src/remote_update.rs), [`list/wait.rs`](../cli/src/commands/list/wait.rs)).
+Every listing with an `origin` checks the remote and, when it differs, fetches the one tracking ref, through the same detached worker that makes the PR request, and waits for both halves up to 3 s ([`remote_update.rs`](../lib/src/remote_update.rs), [`list/wait.rs`](../lib/src/list/wait.rs)).
 
 - `wt list` launches (or adopts) one `wt internal-refresh <main checkout> --attempt <id>` and polls `<repo hash>.remote-head.json`'s `attempt` record and the attempt's completion receipt every 25 ms until the head attempt has an outcome **and** the PR half is resolved (a new PR publication id, or the receipt), or 3 s pass. Work still running at 3 s continues in the background, and the caption says so ("still checking" or "still pulling").
-- The local gathers (dirtiness, comparisons, graph, and `-v` history) run on scoped threads *during* the wait, from the branch tips read before it, so an ordinary listing costs the slower of the wait and the local work. After the wait (and after `--ff`, which runs once the local work is joined) the tips are read again; when they differ, or either read failed, the comparisons, graph, and history are gathered once more from the second read, so the output still describes the post-fetch state. A changed-tip run therefore pays for one extra ref-dependent gather (the `regather` stage); dirtiness is measured again only in a checkout `--ff` moved (the `checkout status refresh` stage). The wait's budget limits only the wait: a local gather that takes longer is still finished before rendering. See [the listing docs](./cli/list.md#local-work-during-the-wait).
+- The local gathers (dirtiness, comparisons, graph, and `-v` history) run on scoped threads *during* the wait, from the branch tips read before it, so an ordinary listing costs the slower of the wait and the local work. After the wait (and after `--ff`, which runs once the local work is joined) the tips are read again; when they differ, or either read failed, the comparisons, graph, and history are gathered once more from the second read, so the output still describes the post-fetch state. A changed-tip run therefore pays for one extra ref-dependent gather (the `regather` stage); dirtiness is measured again only in a checkout `--ff` moved (the `checkout_refresh` stage). The wait's budget limits only the wait: a local gather that takes longer is still finished before rendering. See [the listing docs](./cli/list.md#local-work-during-the-wait).
 - The worker's check asks the provider API, then `git ls-remote`, within one 10 s budget (`REMOTE_HEAD_REFRESH_DEADLINE`), and its fetch of `refs/remotes/origin/<default>` has its own 60 s deadline (`FETCH_DEADLINE`). Both kill the whole process tree at the deadline ([`live_remote.rs`](../lib/src/live_remote.rs)), so no worker holds `remote-head.lock` forever.
 - `-r`/`--refresh` and `--ff` wait the same way, bounded by `ATTEMPT_MAX_AGE` (75 s) instead of 3 s; in practice by the worker's own deadlines. Every attempt, ordinary or forced, writes its own receipt file (`<repo hash>.refresh-receipt.<attempt id>.json`), so overlapping runs each read their own; the run tries once to delete it as its wait ends, and every worker deletes this repository's receipts older than 75 s before writing its own. A receipt written after its wait ended (the wait timed out, or finished early on a new publication and a finished head) is left for that sweep.
-- In `--perf`, the wait and the local gathers are one group, `remote wait ‖ local gather`, whose children are `remote wait` (launch through outcome or budget), `pr reread`, `list gather`, and `graph gather` or `verbose gather`. After it come `fast-forward` (`--ff` only), a `regather` group (only when the tips changed or a read failed), and `checkout status refresh` (only when `--ff` moved a checked-out branch), each a top-level row of its own. See [Runtime `--perf` flag](#runtime---perf-flag).
+- In `--perf`, the wait and the local gathers are one concurrent region, `remote_and_local`, whose children are `refresh_worker` (launch through outcome or budget), `pr_cache_read`, `local_gather`, and `graph_history` or `verbose_history`. After it come `fast_forward` (`--ff` only), `ref_reread`, `regather` (only when the tips changed or a read failed), `commit`, and `checkout_refresh` (only when `--ff` moved a checked-out branch), each a top-level span of its own. See [Runtime `--perf` flag](#runtime---perf-flag).
 
 ### The full-command contract
 
@@ -75,7 +75,7 @@ The 1 s bound is no longer the whole command's: spec decision 1 of `2026-09-27-l
 
 ### Quick sample: the wait and the local gathers overlap
 
-An observation, not a threshold: one quick sample on the macOS development host (Mac16,5, 16 cores, load average about 10 at the time) on 2026-10-03, in the `rusty-biscuit` checkout with 10 worktrees (`origin` is a public GitHub repository over SSH), with a release build of `wt` from the working tree on top of commit `2147b2aa2`, where the gathers first overlapped the wait. No `GITHUB_TOKEN` or `GH_TOKEN` was set, so the API requests were unauthenticated. Stderr was not a terminal, so no graph was gathered. Runs were a few seconds apart; times are the `--perf` rows.
+An observation, not a threshold: one quick sample on the macOS development host (Mac16,5, 16 cores, load average about 10 at the time) on 2026-10-03, in the `rusty-biscuit` checkout with 10 worktrees (`origin` is a public GitHub repository over SSH), with a release build of `wt` from the working tree on top of commit `2147b2aa2`, where the gathers first overlapped the wait. No `GITHUB_TOKEN` or `GH_TOKEN` was set, so the API requests were unauthenticated. Stderr was not a terminal, so no graph was gathered. Runs were a few seconds apart; times are the `--perf` rows of that date ([old row names](#rows-in-older-samples)).
 
 | Run | Total | `remote wait ‖ local gather` | `remote wait` | `list gather` | `verbose gather` | `pr gather` / `pr reread` | `unattributed` |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -113,7 +113,7 @@ The third owned cost center is the verbose commit block rendered by `wt list -v`
 
 ## Bench Recipe
 
-The library-owned gather surface is benchmarked with Criterion in [`worktree/lib/benches/list_status.rs`](../../worktree/lib/benches/list_status.rs). The bench runs end-to-end against `list_worktrees()` in the ambient `rusty-biscuit` checkout, using `iter_batched_ref` with a throughput of one element per iteration so the report shows calls/sec.
+The library-owned gather surface is benchmarked with Criterion in [`worktree/lib/benches/list_status.rs`](../lib/benches/list_status.rs). The bench calls the library's listing pipeline, [`worktree::list::gather`](../lib/src/list.rs), against the ambient `rusty-biscuit` checkout with `ListOptions::default()`: no refresh worker, no graph, no `-v` details, no `--ff`, and timings off. It measures the shared local half of `wt list` (parsing, dirtiness, comparisons, the cache save, and a read of the stored remote answers), not the full command: it launches no worker, waits for nothing, and renders nothing. It uses `iter_batched_ref` with a throughput of one element per iteration so the report shows calls/sec.
 
 Run the benches from the package area with:
 
@@ -134,48 +134,249 @@ The shared `_bench_preflight` recipe checks battery, memory, and load before run
 
 ## Measurement Methodology
 
-Criterion benches, the `--perf` runtime diagnostic, and the `perf_*` tests together provide complementary measurement surfaces. The benches cover the library-owned gather stage, `--perf` covers the full CLI pipeline end-to-end, and the `perf_*` tests assert reproducible subprocess-count and wall-clock bounds.
+Criterion benches, the `--perf` runtime diagnostic, and the `perf_*` tests together provide complementary measurement surfaces. The benches cover the library's local listing, `--perf` covers the full CLI pipeline end-to-end, and the `perf_*` tests assert reproducible subprocess-count and wall-clock bounds.
 
 ### Runtime `--perf` flag
 
-`wt list --perf` emits a per-stage timing report to stderr after the command completes. The report is rendered with `biscuit-terminal`'s `MetricsTree` inside a `BlockQuote` and shows only the stages that actually ran. On a non-image terminal the graph-gather and graph-image-render stages are omitted, matching the package's exclusion of rasterization from worktree-owned benchmarks. Use this as a runtime diagnostic complement to the dev-time Criterion benches.
+`wt list --perf` prints a timing report to stderr after the listing. It answers "where did the time of this run go?" by naming each step that ran, how long it took, and how many `git` processes it started.
 
-Work that runs at the same time is reported as a **group**: one top-level row whose duration is measured from the start of the concurrent region until its last task has finished. It is never the sum or the maximum of its children. The children are the concurrent tasks, each with its own duration and no share (the share column shows `—`), because they overlap and adding them would count the same time twice:
+| Flag | Output after the listing |
+| --- | --- |
+| `--perf`, `--perf=human` | A tree for people, drawn with biscuit-terminal's `MetricsTree` |
+| `--perf=json` | One line, `WT_PERF_JSON {…}`, for programs and tests |
 
-```text
-▌ Performance                    404.6ms  100%
-▌ ├─ pre-dispatch                936.0µs   <1%
-▌ ├─ pr gather                     7.5ms    2%
-▌ ├─ remote wait ‖ local gather  351.9ms   87%
-▌ │  ├─ remote wait              345.8ms     —
-▌ │  ├─ pr reread                  6.1ms     —
-▌ │  ├─ list gather              188.5ms     —
-▌ │  └─ verbose gather           174.8ms     —
-▌ ├─ table render                450.0µs   <1%
-▌ ├─ verbose render              308.0µs   <1%
-▌ └─ unattributed                 43.4ms   11%
-```
+The value needs `=`, so `wt --perf json` reads `json` as a subcommand name rather than as the report format (and fails, since there is no such subcommand). An unknown value such as `--perf=xml` is a usage error (exit code 2). A listing that fails prints no report. Stdout stays empty either way, because the shell wrapper reads it.
+
+#### Who measures what
+
+The measuring belongs to the `worktree` library, not to the CLI. The library's listing pipeline, `worktree::list::gather`, measures itself when `ListOptions::timings` is `true` and returns the result in `Listing::timings`. `wt list --perf` sets that option, adds its own stages (startup and rendering) around the library's, and renders the finished document. The library never prints the report and has no terminal dependency.
 
 ```mermaid
 flowchart LR
-    pre[pre-dispatch] --> prg[pr gather]
-    prg --> group
-    subgraph group [remote wait ‖ local gather]
-        direction TB
-        wait[remote wait] --> reread[pr reread]
-        list[list gather]
-        hist[graph gather or verbose gather]
-    end
-    group --> ff["fast-forward (--ff)"]
-    ff --> regather["regather group (tips moved)"]
-    regather --> refresh["checkout status refresh (--ff moved a checkout)"]
-    refresh --> render[table, graph, and verbose render]
+    flag["wt list --perf"] --> opts["ListOptions { timings: true }"]
+    opts --> lib["worktree::list::gather"]
+    lib --> doc["Listing.timings (scope: library)"]
+    doc --> cli["CLI adds startup and render stages"]
+    cli --> cmd["Timings (scope: command)"]
+    cmd --> human["--perf: MetricsTree on stderr"]
+    cmd --> json["--perf=json: WT_PERF_JSON line on stderr"]
+    doc --> unit["in-process tests read stages by path"]
+    json --> proc["process tests decode the line"]
 ```
 
-- **Top-level rows reconcile exactly.** They are sequential, so they and `unattributed` (time no row covers: parsing the worktree list, the ref reread, process exit) add up to the total. If the top-level rows ever exceed the total, the report shows the excess as `over-attributed (overlapping top-level rows)` instead of `unattributed`; that means overlapping work was recorded outside a group, and is a bug.
-- **Without remote work** (no `origin`) the group is `local gather`, with no `remote wait` child.
-- **`regather`** appears only when the second ref read differs from the first or either read failed. It is a group too, with children `list regather` and `graph regather` or `verbose regather`.
-- **Reading a stage in a test.** `perf_support::stage_from_perf` matches a row's whole label at any depth, so `remote wait` is the child and never the `remote wait ‖ local gather` group; `perf_support::perf_rows` returns every row with its depth.
+With `timings: false` (the default) the pipeline builds no timing tree, takes no per-step clock reads, counts no `git` calls, and does not ask the refresh worker to time itself. Turning timings on never adds a `git` call, a network request, or a longer wait.
+
+#### Stages
+
+Each step is a `worktree::timing::Stage`. A stage has a stable snake_case **id**, which JSON and tests use, and a **label**, which only the human report shows. Labels may change at any time; ids may not. Only the steps that ran appear.
+
+The listing's stages, in report order (*CLI* marks a stage only the command adds; a library document never contains it):
+
+| Id | Label | Measures |
+| --- | --- | --- |
+| `startup` | startup | *CLI.* Process start to the listing: argument parsing and terminal detection |
+| `read_worktrees` | read worktrees and refs | `git worktree list`, the default branch, the refs, and the fork-origin records |
+| `origin_lookup` | origin and API preferences | The origin URL, the `--ignore-api` record, and the API preference |
+| `prepare_local` | prepare local inputs | The comparison-cache load and the graph's inputs |
+| `remote_and_local` | refresh worker ‖ local reads | Concurrent. The refresh worker and the local reads beside it; only when a wait ran |
+| `local_reads` | local reads | Concurrent. The same local reads when no wait ran (no `origin`, or no worker) |
+| `refresh_worker` | launch and wait for refresh | Under `remote_and_local`. Launching the worker and following it until both halves end or the budget runs out |
+| `worker_launch` | launch worker | Under `refresh_worker`. Spawning the worker, by the listing's own clock |
+| `worker_wait` | follow results | Under `refresh_worker`. Polling for the worker's results |
+| `pr_cache_read` | PR cache read | Under `remote_and_local`. The origin recheck and the PR store read |
+| `local_gather` | local listing facts | Concurrent. Worktree status and branch comparisons |
+| `worktree_status` | worktree status | Under `local_gather`. One `git status` per worktree |
+| `branch_comparisons` | branch comparisons | Ahead/behind and merge results, including the caption's and the fork tree's |
+| `graph_history` | graph history | The commit-history reads the graph is drawn from (image terminals only) |
+| `verbose_history` | verbose history | The history reads when only `-v` needs them |
+| `shallow_check` | shallow check | Under `graph_history`. Whether the repository is shallow |
+| `default_tips` | default-branch tips | Under a history stage. The default branch's local and `origin` tips |
+| `focused_merge_base` | focused merge base | Under a history stage. The current branch's merge base |
+| `verbose_details` | verbose commit details | Under a history stage. Commit details for `-v` |
+| `lane_assembly` | assemble lanes and fork holders | Under `graph_history`. The whole lane-assembly loop, including a repeat after another fork holder is found |
+| `fast_forward` | fast-forward | `--ff` only |
+| `ref_reread` | ref reread | Reading the refs again after the wait |
+| `regather` | regather | Ref-dependent facts gathered again, only when the refs changed or a read failed |
+| `commit` | save caches and records | The comparison-cache save and record pruning |
+| `checkout_refresh` | checkout status refresh | Another `git status` for a checkout `--ff` moved |
+| `caption_status` | caption status | *CLI.* The caption's status, including any reflog read |
+| `display_facts` | prepare display facts | *CLI.* The conversion to table facts |
+| `table_render` | table render | *CLI.* |
+| `verbose_render` | verbose render | *CLI.* `-v` only |
+| `notes_render` | status and preliminary notes | *CLI.* |
+| `graph_budget` | graph row budget | *CLI.* Sizing the graph's rows |
+| `graph_render` | graph image render (biscuit-terminal) | *CLI.* Laying out and drawing the graph image |
+| `final_notes_render` | final notes render | *CLI.* Notes the graph added |
+| `write_output` | assemble and write output | *CLI.* Writing the listing to stderr |
+
+Under `regather`, the steps are `prepare_local`, then a `local_reads` region holding `branch_comparisons` beside `graph_history` or `verbose_history`. Dirtiness is not read again there. When both the graph and `-v` need history it is read once, as `graph_history` with a `verbose_details` child; `verbose_history` has no `shallow_check`.
+
+The refresh worker's stages appear only in its own reports (see [Worker reports](#worker-reports)):
+
+| Id | Label | Measures |
+| --- | --- | --- |
+| `worker_setup` | worker setup | Worker entry until its halves start: checkout, origin, preferences, and receipt target |
+| `worker_halves` | PR refresh ‖ head refresh | Concurrent. The two halves |
+| `pr_refresh` | PR refresh | The PR lock, the provider request, and the publication |
+| `head_refresh` | default-branch refresh | The default-branch check and the optional fetch, with their store work |
+| `pr_request` | PR request | Under `pr_refresh`. The provider request, when one was made |
+| `head_check` | head check | Under `head_refresh`. The check, by provider API or `git ls-remote`; when the API fails and Git is tried, its time covers both |
+| `head_fetch` | head fetch | Under `head_refresh`. The `git fetch`, when the remote differed |
+
+The report on this repository (debug build, 10 worktrees, no image terminal) looks like this:
+
+```text
+▌ Performance                                 527.4ms  100%
+▌ ├─ startup                                    2.1ms   <1%
+▌ ├─ read worktrees and refs  [3 git]          20.0ms    4%
+▌ ├─ origin and API preferences  [1 git]        5.4ms    1%
+▌ ├─ prepare local inputs  [0 git]              1.5ms   <1%
+▌ ├─ refresh worker ‖ local reads  [11 git]   476.2ms   90%
+▌ │  ├─ launch and wait for refresh           470.1ms     —
+▌ │  │  ├─ launch worker                      500.0µs   <1%
+▌ │  │  └─ follow results                     469.6ms   99%
+▌ │  ├─ PR cache read  [1 git]                  6.1ms     —
+▌ │  └─ local listing facts  [10 git]         296.8ms     —
+▌ │     ├─ worktree status  [10 git]          295.4ms     —
+▌ │     └─ branch comparisons  [0 git]        270.0µs     —
+▌ ├─ ref reread  [1 git]                        7.1ms    1%
+▌ ├─ save caches and records  [0 git]          13.3ms    3%
+▌ ├─ table render                               1.4ms   <1%
+▌ └─ …
+▌ Refresh worker (diagnostic, measured in the worker): complete      —    —
+▌ └─ launch 0 (complete)                                         436.4ms  —
+▌    ├─ worker setup                                             286.6ms  —
+▌    └─ PR refresh ‖ head refresh                                149.8ms  —
+▌       ├─ PR refresh                                            149.7ms  —
+▌       │  ├─ PR request                                          89.4ms  —
+▌       │  └─ unattributed                                        60.3ms  —
+▌       └─ default-branch refresh                                142.3ms  —
+▌          ├─ head check                                          60.6ms  —
+▌          └─ unattributed                                        81.7ms  —
+```
+
+#### Two kinds of children
+
+A span's children are one of two kinds, and the kind decides how they add up.
+
+- **Sequential** children are consecutive parts of their parent. Each shows its share of the parent, and they reconcile to it exactly: `refresh_worker` is `worker_launch` plus `worker_wait` plus a remainder.
+- **Concurrent** children ran at the same time inside their parent. They show `—` instead of a share and are never added up, because adding overlapping work counts the same time twice. `remote_and_local` (476 ms) is not the sum of its children (470 + 6 + 297 ms); it is the time from the start of the region until its last task finished.
+
+**Reconciliation.** The top level, and every parent with sequential children, reconciles exactly in integer microseconds:
+
+```text
+sum(children) + unattributed − over_attributed = elapsed
+```
+
+At most one remainder is nonzero. When the children cover less than the parent, the gap is `unattributed`. The human report hides an `unattributed` row under 1 ms; JSON always carries it. When the children add up to more than the parent, the excess is `over_attributed` and is always shown, because it means overlapping work was recorded as sequential, which is a bug. A parent with concurrent children, or with none, carries zero remainders.
+
+**`git` counts.** `[3 git]` is the number of `git` processes the step started, its children's included, each counted once. A failed spawn is not counted; a `git` that ran and exited with an error is. A count of `0` means "measured, none started"; a step with no count is one whose count is not known (for example `refresh_worker`, whose `git` runs in the worker process).
+
+#### Worker reports
+
+The refresh worker is a separate `wt` process, so its time is not part of the listing's total. With `--perf`, the listing asks the worker to time itself (`wt internal-refresh … --timings`); the worker writes its report into the receipt it already writes, and the listing copies it before deleting the receipt. Reports appear beneath the foreground tree as a labeled diagnostic section, one entry per launch the listing owns. Nothing in the section, its heading included, shows a percentage (`—` instead), because none of it is a share of the listing's total. Otherwise it follows the same rules as the foreground: a launch and each of its parents with sequential children reconcile through an `unattributed` row (hidden under 1 ms) or an always-shown `over-attributed` row, and concurrent children such as the two halves get neither. A forced retry is a second entry and is never added to the first. Waiting for a report never extends the wait: a listing that ends before the worker writes its receipt (an early finish or a timeout) shows that launch as `missing`.
+
+| Status | Meaning |
+| --- | --- |
+| `complete` | Every owned launch reported both halves |
+| `partial` | Some measurements are usable and others are not (for example one half panicked, or one of two launches has no report) |
+| `missing` | No report reached the listing |
+| `invalid` | The receipt's report did not decode; the receipt's outcome still counts |
+| `adopted` | The listing followed another run's attempt and has no report of its own |
+| `origin_changed` | `origin` changed during the wait, so every report was suppressed |
+
+The JSON form writes `origin_changed`; the human heading writes `origin changed`.
+
+#### `--perf=json`
+
+`--perf=json` keeps the listing on stderr, then writes an empty line and one compact line:
+
+```text
+WT_PERF_JSON {"format_version":1,"scope":"command","total_us":359609,"spans":[…],"unattributed_us":75,"over_attributed_us":0,"worker_reports":[…],"worker_report_status":"complete"}
+```
+
+**Framing.** A reader takes the **final nonempty line** of stderr, splitting on LF and dropping a trailing CR (a pseudo-terminal capture ends lines with CRLF), checks that it starts with `WT_PERF_JSON `, and decodes the rest. It never searches earlier text: the listing can show commit subjects, and a subject that happens to read `WT_PERF_JSON {…}` must not be taken for the report. No ANSI codes, carriage returns, or image bytes appear inside the JSON.
+
+**Schema (version 1).** All durations are unsigned integer microseconds of elapsed time, never dates.
+
+| Field | Where | Meaning |
+| --- | --- | --- |
+| `format_version` | document, worker report | Always `1` |
+| `scope` | document | `command` from `wt list`; `library` from `worktree::list::gather` |
+| `total_us` | document, worker report | The measured interval |
+| `spans` | document, worker report, span `children` | Spans in order |
+| `stage` | span | The stage id |
+| `elapsed_us` | span | The span's elapsed time |
+| `git_calls` | span | Optional; absent means unknown |
+| `children_kind` | span | `sequential` or `concurrent`; written even when `children` is empty |
+| `unattributed_us`, `over_attributed_us` | document, worker report, span | The remainders; always written, `0` included |
+| `worker_reports` | document | One entry per owned launch: `launch_index` (0-based), `attempt_id`, `status`, and an optional `report` holding the worker's own document |
+| `worker_report_status` | document | The summary status; absent when no worker was followed |
+
+Every number fits an unsigned 64-bit integer, and the reconciliation holds exactly in that range, never against a clamped value. Two sequential children of `u64::MAX` µs under a 10 µs parent leave an excess no field can hold, so no pair of remainders makes that document valid; one child of `u64::MAX` µs under a 0 µs parent is valid, with `over_attributed_us` of `u64::MAX`. Concurrent children are never summed, so any durations under a concurrent parent are valid.
+
+The writer cannot produce such a document either: `Timings::new` and `WorkerTimings::new` return `TimingsError::Unrepresentable`, naming the span's path, when a duration or an exact remainder exceeds `u64::MAX` µs, so every `Timings` value serializes exactly. `wt list --perf` reports that error instead of a report. A worker that cannot represent its own timings writes its receipt without them, so its outcome still counts and the listing reports that launch's timings as `missing`.
+
+`worktree::timing::Timings::from_json` is the reader, and it rejects: a version other than 1, an unknown stage id, two ordinary siblings with the same id, remainders that do not reconcile (including an excess no field can hold), remainders on a concurrent parent, a `null` in an optional field, and trailing content. Unknown fields are ignored. The worker's report travels in the receipt's optional `durations` member, which leaves the receipt at version 1 (see [the listing docs](./cli/list.md#how-the-wait-knows-both-halves-are-done)).
+
+#### Reading a stage in a test
+
+A span is found by its **path** of stage ids from the top, never by its label. The same stage can appear under two parents (`branch_comparisons` under `local_gather` and under `regather`), and a path tells them apart.
+
+In process, ask the library for timings:
+
+```rust
+let options = ListOptions { timings: true, ..ListOptions::default() };
+let listing = worktree::list::gather(&repo, &options, &mut |_| {})?;
+let timings = listing.timings.expect("timings were requested");
+let status = timings.span(&[Stage::LocalReads, Stage::LocalGather, Stage::WorktreeStatus]);
+```
+
+Out of process, run `wt list --perf=json` and decode its final line with the helpers in `cli/tests/perf_support/mod.rs`:
+
+```rust
+let timings = perf_support::perf_timings(&stderr); // panics on a missing or malformed record
+let wait = perf_support::stage_at(&timings, &[Stage::RemoteAndLocal, Stage::RefreshWorker]);
+let local = perf_support::local_gather(&timings); // under whichever region ran
+```
+
+Never parse the human report. Never add a concurrent region's children together to stand in for one elapsed time.
+
+#### Performance tests and functional tests
+
+- **A performance test** has a `perf_` name, runs serially under `just test-perf`, and may bound a stage's duration or a whole command's wall-clock time.
+- **A functional test** never uses timing as evidence, and passes without `--perf`. A test that a listing stopped at its budget proves it with the wait's scripted clock (`list::wait::tests`) and with what the listing printed, not with a duration. A test that work ran proves it with `Listing` facts (`Listing::regathered`, for example) or the `count-git` recorder, not with stage names.
+- **A functional test whose worker is held past the wait may shorten that wait.** Waiting out the real 3 s proves nothing more when the held request outlasts any wait, so set `WT_TEST_WAIT_BUDGET_MS` (spelled `worktree_cli::env::TEST_WAIT_BUDGET_VAR`) on the `wt` command, and an ordinary listing waits that many milliseconds instead:
+
+  ```rust
+  let output = fixture.wt_command_via_gitea(&gitea)
+      .arg("list")
+      .env(TEST_WAIT_BUDGET_VAR, "300")
+      .output()?;
+  ```
+
+  - Only debug builds read it: the `dev` and `test` Cargo profiles that `cargo nextest run` and CI's test archives build. A release build, such as the one `just install` makes, always waits 3 s. The `-r`/`--ff` wait is never shortened.
+  - A value that is not a positive whole number panics, so a typo cannot pass silently on the 3 s wait.
+  - Keep the wait long enough for whatever must finish inside it. `list_remote_head.rs` uses 300 ms (`HELD_WAIT`) when the worker is held before anything the listing shows could finish, and 1 s (`STEP_WAIT`) when one step must finish first, such as the check before a held fetch.
+  - At least one functional test keeps the real wait (`list_prs.rs`'s `a_held_pr_request_with_nothing_stored_ends_at_the_budget_with_only_the_hint`). Performance tests never set the variable: the held-worker gates assert that the wait lasted at least 3 s, so a leaked override fails them.
+- Tests of the report itself (`perf_flag.rs`, `worktree::timing` unit tests) may read `Timings`; they check its shape and reconciliation, not its speed.
+- The human report's layout is tested in two layers. Unit tests in `cli/src/perf/tests.rs` render synthetic trees at a fixed width and check exact rows: shares, remainders under a millisecond, over-attribution, and worker sections of every status. `cli/tests/level2_list_perf.rs` runs the real `wt list --perf` in a tmux pane at 80, 100, and 120 columns against a local `origin`. It checks the structure only, because durations vary: tree connectors, `[n git]` suffixes, percentages on sequential rows, `—` on concurrent and worker rows (the worker heading included), aligned value and share columns, and no wrapped rows.
+
+#### Rows in older samples
+
+The dated samples on this page use the report's row names of their date. Their current stages:
+
+| Older row | Current stage path |
+| --- | --- |
+| `pre-dispatch` | `startup`, `read_worktrees` |
+| `pr gather` | `origin_lookup` |
+| `remote wait ‖ local gather` / `local gather` (group) | `remote_and_local` / `local_reads` |
+| `remote wait` | `remote_and_local` › `refresh_worker` |
+| `pr reread` | `remote_and_local` › `pr_cache_read` |
+| `list gather` | `remote_and_local` › `local_gather` (or `local_reads` › `local_gather`) |
+| `graph gather`, `verbose gather` | `graph_history`, `verbose_history` under the same region |
+| `graph image render` | `graph_render` |
+| `checkout status refresh` | `checkout_refresh` |
 
 Run the perf tests with:
 
@@ -185,14 +386,14 @@ cargo nextest run -p worktree-cli -E 'test(/perf_/)' --nocapture
 
 For contention-free wall-clock measurement of the SLA, run perf tests serially via `just test-perf`.
 
-### `perf_subprocess_counts_meet_sla` (unit test, `list.rs`)
+### `perf_subprocess_counts_meet_sla` (unit test, `cli/src/commands/list/tests.rs`)
 
-Asserts the subprocess-count bounds the optimization guarantees. Runs in the ambient `rusty-biscuit` checkout so the counts reflect real worktree scale:
+Asserts the subprocess-count bounds the optimization guarantees, on a fixture repository with one linked feature worktree:
 
 - `list_worktrees()` resolves the default branch exactly once (one `symbolic-ref` call) and reads tips with one `for-each-ref`. Wall-clock is printed for observability; the full-command SLA that subsumes this piece is asserted by the integration test below.
 - The base-view `gather` on that fixture, where every branch has only the default lane as a candidate, issues one `rev-parse` (the shallow check); per branch, two `merge-base --is-ancestor` (its tip and its lane's boundary), one fork `merge-base`, and one `rev-list` (the boundary's first-parent chain); and one `git log` per branch plus one for the default lane.
 
-### `graph_and_verbose_share_one_merge_base` (unit test, `git_graph/tests.rs`)
+### `graph_and_verbose_share_one_merge_base` (unit test, `lib/src/graph/tests.rs`)
 
 Subprocess-count guard for the image-terminal `wt list -v` data-gather path (graph facts + verbose details) on a controlled feature-branch fixture: exactly one merge base, shared by the graph's fork and the verbose details, two `merge-base --is-ancestor` (the branch's tip and its lane's boundary), and zero `rev-parse --short`. Rasterization is excluded (this test never renders).
 
@@ -216,7 +417,7 @@ In environments where the local `just` wrapper requires explicit paths, the equi
 just --justfile worktree/justfile --working-directory worktree test-perf
 ```
 
-The warm and cold cache gates measure the **`list gather` stage** parsed from `wt list --perf`, not full-command wall-clock. `list gather` is the stage the cache targets (it dominates a cold `wt list`); a full-command bound could pass while `list gather` itself regresses. Both gates run on a shared *mixed* fixture (`tests/perf_support/mod.rs`): one `main` checkout plus several divergent branches and several fast-forward and behind-only branches. The mix is deliberate — the divergent branches show the warm-cache collapse, while the fast-forward and behind-only branches bound the cold-path tradeoff of the speculative `merge-tree` now issued for every non-main branch (the cache cannot help a cache miss).
+The warm and cold cache gates measure the **`local_gather` stage**, read from `wt list --perf=json` (see [Reading a stage in a test](#reading-a-stage-in-a-test)), not full-command wall-clock. `local_gather` is the stage the cache targets (it dominates a cold `wt list`); a full-command bound could pass while `local_gather` itself regresses. The dated tables below call it `list gather`, its name before 2026-10-04. Both gates run on a shared *mixed* fixture (`tests/perf_support/mod.rs`): one `main` checkout plus several divergent branches and several fast-forward and behind-only branches. The mix is deliberate — the divergent branches show the warm-cache collapse, while the fast-forward and behind-only branches bound the cold-path tradeoff of the speculative `merge-tree` now issued for every non-main branch (the cache cannot help a cache miss).
 
 The dated tables below are **historical records**: each shows what was measured on its date, against the gates that existed then, and is never rewritten. Several name gates that have since been removed (`perf_list_meets_sla_when_the_pr_request_hits_its_deadline`, which timed a foreground PR request that no longer exists, and `perf_list_meets_sla_with_a_stale_answer_and_a_blocked_refresh`), and their notes describe the listing's behavior on that date. The last table is the current one.
 
@@ -296,7 +497,7 @@ Re-measured on 2026-10-02 after the worker began asking for PRs on every run and
 
 ## Graph Stages
 
-`graph gather` and `graph image render (biscuit-terminal)` appear in `wt list --perf` only when stderr is a terminal and `TERM_PROGRAM` names an image-capable emulator, so `tests/perf_graph_stages.rs` runs `wt list --perf` under `script` in a 120×40 pseudo-terminal, emulating Ghostty (other Kitty-protocol emulators wait out a 1 s cursor-position query there). The fixtures are `GraphFixture` in `tests/perf_support/graph.rs`, built through `git fast-import`. A second test, `perf_graph_stages_for_the_observed_sparse_lanes_at_200x60`, runs one more shape at 200×60 and prints each stage's median with its min–max spread. That shape (`GraphFixture::observed_sparse_lanes`) has three long branch lanes with recorded parents, and one of those branches is merged directly into `main` after its parent merged `main` back. The tests assert only that both stages are reported: the graph has no numeric budget, and the full command's 1 s bound (`perf_full_command_non_image_meets_sla`) still applies. Record medians with:
+`graph_history` (the graph's history reads; `graph gather` in the tables below) and `graph_render` (`graph image render`) appear in `wt list --perf` only when stderr is a terminal and `TERM_PROGRAM` names an image-capable emulator, so `tests/perf_graph_stages.rs` runs `wt list --perf=json` under `script` in a 120×40 pseudo-terminal, emulating Ghostty (other Kitty-protocol emulators wait out a 1 s cursor-position query there). The fixtures are `GraphFixture` in `tests/perf_support/graph.rs`, built through `git fast-import`. A second test, `perf_graph_stages_for_the_observed_sparse_lanes_at_200x60`, runs one more shape at 200×60 and prints each stage's median with its min–max spread. That shape (`GraphFixture::observed_sparse_lanes`) has three long branch lanes with recorded parents, and one of those branches is merged directly into `main` after its parent merged `main` back. The tests assert only that both stages are reported: the graph has no numeric budget, and the full command's 1 s bound (`perf_full_command_non_image_meets_sla`) still applies. Record medians with:
 
 ```sh
 WT_GRAPH_PERF_SAMPLES=10 just test-perf perf_graph --cargo-profile release
@@ -359,7 +560,7 @@ A later change (2026-09-28) draws a branch that kept going after its merge as on
 - Only a file-system watcher avoids checking every file. Git's own (`core.fsmonitor`) runs a daemon per worktree and exists only on macOS and Windows; on Linux it needs Watchman plus a hook.
 - Ruled 2026-09-25: no watcher and no daemon. The wall time is already small, and the status flags are unchanged.
 
-The warm gate also asserts that warm `list gather` is below a cold reference measured in the same run, proving the cache collapses the divergent-branch recompute rather than the host merely being fast. Bounds are looser than the ratified measurements so ordinary host variance does not fail CI, yet tight enough to catch regressions that reintroduce serial branch comparison, skip the cache, or let the cold-path speculative `merge-tree` blow the budget. Deterministic subprocess-count assertions for cache hit/miss behavior live in the recorder-backed unit tests.
+The warm gate also asserts that warm `local_gather` is below a cold reference measured in the same run, proving the cache collapses the divergent-branch recompute rather than the host merely being fast. Bounds are looser than the ratified measurements so ordinary host variance does not fail CI, yet tight enough to catch regressions that reintroduce serial branch comparison, skip the cache, or let the cold-path speculative `merge-tree` blow the budget. Deterministic subprocess-count assertions for cache hit/miss behavior live in the recorder-backed unit tests.
 
 ## Track 2 — Aspect Ratio (Parked)
 

@@ -97,6 +97,10 @@ fn main() {
 - `utils::text` - Content length calculation (escape-aware)
 - `utils::multiplex` - Multiplexing detection
 
+Live terminal queries (colors, window pixels, cursor position) cost a terminal
+that never answers one short wait per process; see
+[`docs/discovery/terminal-queries.md`](../docs/discovery/terminal-queries.md).
+
 ## Terminal Images (TerminalImage)
 
 `TerminalImage` renders inline images using the Kitty graphics protocol with automatic iTerm2 handling and a graceful text fallback.

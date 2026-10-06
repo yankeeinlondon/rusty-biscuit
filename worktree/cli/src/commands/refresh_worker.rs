@@ -12,22 +12,36 @@
 //! The PR half asks whenever it wins the PR lock, and once both halves are
 //! done the worker writes the completion receipt the foreground waits for, on
 //! every attempt.
+//!
+//! With `--timings` (from `wt list --perf`) the worker also measures itself,
+//! from its entry until both halves are done, into the receipt's
+//! `durations`: setup, then both halves as concurrent children, each with the
+//! library operations that ran inside it. A half that panicked leaves no
+//! span, which the reader takes as unknown, not zero.
 
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::time::Instant;
+use std::rc::Rc;
+use std::time::{Duration, Instant};
 
+use sniff::remote::blocking::PrUnavailable;
 use worktree::api_preference;
 use worktree::git::git_from;
+use worktree::live_remote::GitFailure;
 use worktree::pull_requests::{
-    OpenPrSource, REFRESH_DEADLINE, RefreshOutcome, SniffOpenPrSource, origin_digest, origin_url, pr_store_path,
-    refresh, unix_now,
+    FetchedPrs, OpenPrSource, PrRequestError, REFRESH_DEADLINE, RefreshOutcome, SniffOpenPrSource, origin_digest,
+    origin_url, pr_store_path, refresh, unix_now,
 };
 use worktree::remote_head::{
     HeadStatus, PrFailure, PrStatus, Receipt, new_attempt_id, refresh_receipt_path, remote_head_store_path,
     remove_stale_receipts, write_receipt,
 };
-use worktree::remote_update::{AttemptRequest, GitTransport, Seams, SniffBranchHeads, run_attempt};
+use worktree::remote_update::{
+    ApiHead, AttemptEnd, AttemptRequest, BranchHeadSource, GitRemote, GitTransport, Seams, SniffBranchHeads,
+    run_attempt,
+};
+use worktree::timing::{LaunchReport, Span, SpanList, Stage, TimingsError, WorkerTimings};
 use worktree::worktree::default_branch_in;
 
 use super::list::{LaunchArgs, WorkerHandle};
@@ -48,12 +62,17 @@ pub fn launch(main: &Path, args: &LaunchArgs) -> std::io::Result<WorkerHandle> {
 }
 
 fn spawn_worker(exe: &Path, main: &Path, args: &LaunchArgs) -> std::io::Result<Child> {
+    worker_command(exe, main, args).spawn()
+}
+
+fn worker_command(exe: &Path, main: &Path, args: &LaunchArgs) -> Command {
     let mut command = Command::new(exe);
     command
         .arg(SUBCOMMAND)
         .arg(main)
         .arg("--attempt")
         .arg(&args.attempt)
+        .args(args.timings.then_some("--timings"))
         .current_dir(main)
         .env_remove("WT_SHELL_WRAPPER")
         .env_remove("COMPLETE")
@@ -61,13 +80,15 @@ fn spawn_worker(exe: &Path, main: &Path, args: &LaunchArgs) -> std::io::Result<C
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     sniff::process::configure_detached_child(&mut command);
-    command.spawn()
+    command
 }
 
 /// The worker: runs attempt `attempt` (a new id when `None`) for `repo` when
 /// it is a main checkout, and does nothing otherwise. It prints nothing and
-/// never fails, since nobody reads its output or exit status.
-pub fn run(repo: &Path, attempt: Option<&str>) {
+/// never fails, since nobody reads its output or exit status. With `timings`
+/// its receipt carries the worker's own durations.
+pub fn run(repo: &Path, attempt: Option<&str>, timings: bool) {
+    let entry = timings.then(Instant::now);
     let Some(main) = main_checkout(repo) else {
         return;
     };
@@ -79,12 +100,78 @@ pub fn run(repo: &Path, attempt: Option<&str>) {
         api_preference::preference_path().is_some_and(|path| api_preference::load(&path).ignores_origin(origin))
     });
     let receipt = receipt_target(&main, &id, origin.as_deref());
+    let clock = entry.map(|entry| WorkerClock { entry, setup: entry.elapsed() });
     run_and_record(
         &main,
         receipt.as_ref(),
-        |main| pr_half(main, ignore_api),
-        |main| head_half(main, &id, ignore_api),
+        clock,
+        |main, steps| pr_half(main, ignore_api, steps),
+        |main, steps| head_half(main, &id, ignore_api, steps),
     );
+}
+
+/// When a timed worker started and how long its setup took.
+#[derive(Debug, Clone, Copy)]
+struct WorkerClock {
+    entry: Instant,
+    /// From entry until the halves start: the checkout, origin, preference,
+    /// and receipt-target reads.
+    setup: Duration,
+}
+
+/// The steps one half records, shared with the seams that time the library
+/// operations inside it. Each half's thread makes its own.
+#[derive(Clone)]
+struct Steps(Rc<RefCell<SpanList>>);
+
+impl Steps {
+    fn new() -> Self {
+        Self(Rc::new(RefCell::new(SpanList::sequential())))
+    }
+
+    /// Runs `work` and adds its elapsed time to `stage`. A stage run twice
+    /// (a check's API request and its Git fallback, or a recheck) is summed;
+    /// the runs never overlap.
+    fn time<T>(&self, stage: Stage, work: impl FnOnce() -> T) -> T {
+        let started = Instant::now();
+        let output = work();
+        self.0.borrow_mut().push(Span::new(stage, started.elapsed()));
+        output
+    }
+
+    fn spans(&self) -> SpanList {
+        self.0.borrow().clone()
+    }
+}
+
+/// Runs one half, as the span `stage` around it when `timed`.
+fn timed_half<T>(timed: bool, stage: Stage, half: impl FnOnce(Option<&Steps>) -> T) -> (T, Option<Span>) {
+    if !timed {
+        return (half(None), None);
+    }
+    let steps = Steps::new();
+    let started = Instant::now();
+    let output = half(Some(&steps));
+    (output, Some(Span::new(stage, started.elapsed()).with_children(steps.spans())))
+}
+
+/// The worker's report: setup, then the halves group over `halves` with
+/// each half that returned a span; `total` runs from entry to the halves'
+/// end. An error when the measurements cannot be stated exactly.
+fn worker_timings(
+    clock: WorkerClock,
+    halves: Duration,
+    total: Duration,
+    spans: [Option<Span>; 2],
+) -> Result<WorkerTimings, TimingsError> {
+    let mut children = SpanList::concurrent();
+    for span in spans.into_iter().flatten() {
+        children.push(span);
+    }
+    let mut top = SpanList::sequential();
+    top.push(Span::new(Stage::WorkerSetup, clock.setup));
+    top.push(Span::new(Stage::WorkerHalves, halves).with_children(children));
+    WorkerTimings::new(total, top)
 }
 
 /// Where an attempt's completion receipt goes, and what it binds to.
@@ -110,13 +197,31 @@ fn receipt_target(main: &Path, id: &str, origin: Option<&str>) -> Option<Receipt
 /// write is best effort: the foreground's wait is bounded without it, and a
 /// successful PR publication is proven by the store's publication id, not by
 /// the receipt.
+///
+/// With `clock` the receipt carries the worker's durations, measured until
+/// both halves are done, so the receipt's own sweep and write are outside
+/// them. Each half gets the steps to record into, or `None` untimed; an
+/// untimed attempt reads no clock.
 fn run_and_record(
     main: &Path,
     receipt: Option<&ReceiptTarget>,
-    pr: impl FnOnce(&Path) -> PrStatus + Send,
-    head: impl FnOnce(&Path) -> HeadStatus + Send,
+    clock: Option<WorkerClock>,
+    pr: impl FnOnce(&Path, Option<&Steps>) -> PrStatus + Send,
+    head: impl FnOnce(&Path, Option<&Steps>) -> HeadStatus + Send,
 ) {
-    let (prs, head) = run_halves(main, pr, head);
+    let timed = clock.is_some();
+    let halves_started = timed.then(Instant::now);
+    let (prs, head) = run_halves(
+        main,
+        |main| timed_half(timed, Stage::PrRefresh, |steps| pr(main, steps)),
+        |main| timed_half(timed, Stage::HeadRefresh, |steps| head(main, steps)),
+    );
+    let durations = clock.zip(halves_started).map(|(clock, halves_started)| {
+        let (halves, total) = (halves_started.elapsed(), clock.entry.elapsed());
+        let spans = [prs.as_ref().and_then(|(_, span)| span.clone()), head.as_ref().and_then(|(_, span)| span.clone())];
+        worker_timings(clock, halves, total, spans).map_or(LaunchReport::Invalid, LaunchReport::from_worker)
+    });
+    let (prs, head) = (prs.map(|(status, _)| status), head.map(|(status, _)| status));
     if let Some(target) = receipt {
         let receipt = Receipt {
             attempt_id: target.attempt_id.clone(),
@@ -125,6 +230,7 @@ fn run_and_record(
             finished_at: unix_now(),
             head: head.unwrap_or(HeadStatus::Failed),
             prs: prs.unwrap_or(PrStatus::Failed { failure: PrFailure::Other }),
+            durations: durations.unwrap_or_default(),
         };
         remove_stale_receipts(&target.path, std::time::SystemTime::now());
         let _ = write_receipt(&target.path, &receipt);
@@ -148,24 +254,34 @@ fn run_halves<P: Send, H: Send>(
     })
 }
 
-fn pr_half(main: &Path, ignore_api: bool) -> PrStatus {
+fn pr_half(main: &Path, ignore_api: bool, steps: Option<&Steps>) -> PrStatus {
     match pr_store_path(main) {
-        Ok(store) => pr_status(&store, main, ignore_api, worker_source),
+        Ok(store) => pr_status(&store, main, ignore_api, worker_source, steps),
         Err(_) => PrStatus::Failed { failure: PrFailure::Other },
     }
 }
 
 /// The PR half: no request at all for an ignored repository, so it shows no
-/// badges, otherwise [`refresh`] as the receipt reports it.
+/// badges, otherwise [`refresh`] as the receipt reports it. With `steps` the
+/// provider request is recorded as [`Stage::PrRequest`] when it is made.
 fn pr_status(
     store: &Path,
     main: &Path,
     ignore_api: bool,
     connect: impl FnOnce(&str) -> Box<dyn OpenPrSource>,
+    steps: Option<&Steps>,
 ) -> PrStatus {
     if ignore_api {
         return PrStatus::Ignored;
     }
+    let steps = steps.cloned();
+    let connect = move |origin: &str| -> Box<dyn OpenPrSource> {
+        let source = connect(origin);
+        match steps {
+            Some(steps) => Box::new(TimedPrSource { source, steps }),
+            None => source,
+        }
+    };
     match refresh(store, main, unix_now, connect) {
         RefreshOutcome::Refreshed => PrStatus::Ok,
         RefreshOutcome::Unsupported => PrStatus::Unsupported,
@@ -178,14 +294,68 @@ fn pr_status(
     }
 }
 
-fn head_half(main: &Path, id: &str, ignore_api: bool) -> HeadStatus {
+fn head_half(main: &Path, id: &str, ignore_api: bool, steps: Option<&Steps>) -> HeadStatus {
     let Ok(store) = remote_head_store_path(main) else {
         return HeadStatus::Failed;
     };
     let started = Instant::now();
     let monotonic = || started.elapsed();
     let seams = Seams { api: &SniffBranchHeads, git: &GitTransport { main }, now: &unix_now, monotonic: &monotonic };
-    run_attempt(AttemptRequest { store: &store, main, id, ignore_api }, &seams).head_status()
+    head_attempt(AttemptRequest { store: &store, main, id, ignore_api }, &seams, steps).head_status()
+}
+
+/// [`run_attempt`], recording with `steps` each check (the provider API
+/// request and any `ls-remote` fallback, summed) as [`Stage::HeadCheck`] and
+/// a fetch as [`Stage::HeadFetch`], only when they run.
+fn head_attempt(request: AttemptRequest<'_>, seams: &Seams<'_>, steps: Option<&Steps>) -> AttemptEnd {
+    let Some(steps) = steps else {
+        return run_attempt(request, seams);
+    };
+    let api = TimedBranchHeads { source: seams.api, steps };
+    let git = TimedGit { remote: seams.git, steps };
+    run_attempt(request, &Seams { api: &api, git: &git, now: seams.now, monotonic: seams.monotonic })
+}
+
+/// A PR source whose request is recorded as [`Stage::PrRequest`].
+struct TimedPrSource {
+    source: Box<dyn OpenPrSource>,
+    steps: Steps,
+}
+
+impl OpenPrSource for TimedPrSource {
+    fn source_repo(&self) -> Option<String> {
+        self.source.source_repo()
+    }
+
+    fn fetch(&self) -> Result<FetchedPrs, PrRequestError> {
+        self.steps.time(Stage::PrRequest, || self.source.fetch())
+    }
+}
+
+struct TimedBranchHeads<'a> {
+    source: &'a dyn BranchHeadSource,
+    steps: &'a Steps,
+}
+
+impl BranchHeadSource for TimedBranchHeads<'_> {
+    fn branch_head(&self, origin: &str, branch: &str, deadline: Duration) -> Result<ApiHead, PrUnavailable> {
+        self.steps.time(Stage::HeadCheck, || self.source.branch_head(origin, branch, deadline))
+    }
+}
+
+struct TimedGit<'a> {
+    remote: &'a dyn GitRemote,
+    steps: &'a Steps,
+}
+
+impl GitRemote for TimedGit<'_> {
+    fn live_head(&self, branch: &str, deadline: Duration) -> Result<Option<String>, GitFailure> {
+        self.steps.time(Stage::HeadCheck, || self.remote.live_head(branch, deadline))
+    }
+
+    fn fetch(&self, branch: &str, deadline: Duration) -> Result<(), GitFailure> {
+        self.steps.time(Stage::HeadFetch, || self.remote.fetch(branch, deadline))
+    }
 }
 
 fn worker_source(origin: &str) -> Box<dyn OpenPrSource> {
@@ -219,11 +389,9 @@ mod tests {
     use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
     use std::time::Duration;
 
-    use sniff::remote::blocking::PrUnavailable;
-    use worktree::live_remote::GitFailure;
-    use worktree::pull_requests::{CachedPrs, FetchedPrs, PrRequestError, select_cached};
+    use worktree::pull_requests::{CachedPrs, select_cached};
     use worktree::remote_head::{Attempt, CredentialEvidence, load_receipt, read_store};
-    use worktree::remote_update::{ApiHead, AttemptEnd, BranchHeadSource, GitRemote};
+    use worktree::timing::ChildrenKind;
 
     use super::*;
 
@@ -260,7 +428,7 @@ mod tests {
         let root = tempfile::tempdir().expect("temp dir");
         let missing = root.path().join("no-such-wt");
 
-        let args = LaunchArgs { attempt: ID.into() };
+        let args = LaunchArgs { attempt: ID.into(), timings: false };
         let started = spawn_worker(&missing, root.path(), &args);
 
         assert!(started.is_err(), "{started:?}");
@@ -319,17 +487,34 @@ mod tests {
 
         /// The PR half against this fixture's store, with `source`.
         fn refresh_prs(&self, main: &Path, source: impl OpenPrSource + 'static) -> PrStatus {
-            pr_status(&self.pr_store(), main, false, move |_| Box::new(source) as Box<dyn OpenPrSource>)
+            self.refresh_prs_timed(main, source, None)
+        }
+
+        /// [`Fixture::refresh_prs`], recording into `steps`.
+        fn refresh_prs_timed(&self, main: &Path, source: impl OpenPrSource + 'static, steps: Option<&Steps>) -> PrStatus {
+            pr_status(&self.pr_store(), main, false, move |_| Box::new(source) as Box<dyn OpenPrSource>, steps)
         }
 
         /// The real update attempt against this fixture's store, with the
         /// provider scripted and Git unable to fetch.
         fn refresh_head(&self, main: &Path, head: &Head) -> AttemptEnd {
+            self.refresh_head_timed(main, head, &NoGit, None)
+        }
+
+        /// [`Fixture::refresh_head`] with `git`, recording into `steps`.
+        fn refresh_head_timed(
+            &self,
+            main: &Path,
+            head: &dyn BranchHeadSource,
+            git: &dyn GitRemote,
+            steps: Option<&Steps>,
+        ) -> AttemptEnd {
             let now = unix_now;
             let monotonic = || Duration::ZERO;
-            run_attempt(
+            head_attempt(
                 AttemptRequest { store: &self.head_store(), main, id: ID, ignore_api: false },
-                &Seams { api: head, git: &NoGit, now: &now, monotonic: &monotonic },
+                &Seams { api: head, git, now: &now, monotonic: &monotonic },
+                steps,
             )
         }
     }
@@ -500,8 +685,9 @@ mod tests {
             run_and_record(
                 &main,
                 Some(&fixture.receipt_target()),
-                |main| fixture.refresh_prs(main, Pr::Answer),
-                |main| fixture.refresh_head(main, &present()).head_status(),
+                None,
+                |main, _| fixture.refresh_prs(main, Pr::Answer),
+                |main, _| fixture.refresh_head(main, &present()).head_status(),
             );
             assert_eq!(fixture.receipt().map(|receipt| receipt.prs), Some(PrStatus::Contended), "the receipt says so");
             assert!(!fixture.pr_published(), "a contender makes no request");
@@ -565,13 +751,14 @@ mod tests {
         run_and_record(
             &fixture.main(),
             Some(&target),
-            move |_| {
+            None,
+            move |_, _| {
                 // Still no receipt once the head half is done: this half is not.
                 assert!(wait_for(&head_finished), "the head half finished");
                 assert!(!path.exists(), "no receipt while the PR half runs");
                 PrStatus::Failed { failure: PrFailure::RateLimited { authenticated: false, key: None } }
             },
-            move |_| {
+            move |_, _| {
                 assert!(!path.exists(), "no receipt while the head half runs");
                 signal(&head_done);
                 HeadStatus::Ok
@@ -590,8 +777,9 @@ mod tests {
         run_and_record(
             &fixture.main(),
             Some(&fixture.receipt_target()),
-            |_| -> PrStatus { panic!("the PR half panicked") },
-            |_| HeadStatus::AdoptedElsewhere,
+            None,
+            |_, _| -> PrStatus { panic!("the PR half panicked") },
+            |_, _| HeadStatus::AdoptedElsewhere,
         );
         let receipt = fixture.receipt().expect("a receipt");
         assert_eq!(
@@ -603,8 +791,9 @@ mod tests {
         run_and_record(
             &fixture.main(),
             Some(&fixture.receipt_target()),
-            |_| PrStatus::Ok,
-            |_| -> HeadStatus { panic!("the head half panicked") },
+            None,
+            |_, _| PrStatus::Ok,
+            |_, _| -> HeadStatus { panic!("the head half panicked") },
         );
         let receipt = fixture.receipt().expect("a receipt");
         assert_eq!((receipt.head, receipt.prs), (HeadStatus::Failed, PrStatus::Ok));
@@ -639,14 +828,14 @@ mod tests {
                 Box::new(|fixture, main| {
                     pr_status(&fixture.pr_store(), main, true, |_| -> Box<dyn OpenPrSource> {
                         panic!("an ignored repository makes no PR request")
-                    })
+                    }, None)
                 }),
                 PrStatus::Ignored,
             ),
         ];
         for (label, pr, expected) in cases {
             let fixture = Fixture::new();
-            run_and_record(&fixture.main(), Some(&fixture.receipt_target()), |main| pr(&fixture, main), |_| HeadStatus::Ok);
+            run_and_record(&fixture.main(), Some(&fixture.receipt_target()), None, |main, _| pr(&fixture, main), |_, _| HeadStatus::Ok);
             let receipt = fixture.receipt().unwrap_or_else(|| panic!("{label}: a receipt"));
             assert_eq!((receipt.head, receipt.prs), (HeadStatus::Ok, expected), "{label}");
         }
@@ -673,7 +862,7 @@ mod tests {
         age_file(&other_repo, worktree::remote_head::ATTEMPT_MAX_AGE + Duration::from_secs(5));
         age_file(&active, worktree::remote_head::ATTEMPT_MAX_AGE - Duration::from_secs(5));
 
-        run_and_record(&fixture.main(), Some(&target), |_| PrStatus::Ok, |_| HeadStatus::Ok);
+        run_and_record(&fixture.main(), Some(&target), None, |_, _| PrStatus::Ok, |_, _| HeadStatus::Ok);
 
         assert!(!old.exists(), "an old receipt is swept");
         assert!(active.exists(), "another attempt's young receipt is kept");
@@ -689,7 +878,7 @@ mod tests {
         std::fs::write(&blocked, "").unwrap();
         let target = ReceiptTarget { path: blocked.join(format!("refresh-receipt.{ID}.json")), ..fixture.receipt_target() };
 
-        run_and_record(&fixture.main(), Some(&target), |main| fixture.refresh_prs(main, Pr::Answer), |_| HeadStatus::Ok);
+        run_and_record(&fixture.main(), Some(&target), None, |main, _| fixture.refresh_prs(main, Pr::Answer), |_, _| HeadStatus::Ok);
 
         assert!(!target.path.exists());
         assert!(fixture.pr_published(), "the store, not the receipt, holds the answer");
@@ -717,7 +906,7 @@ mod tests {
         let calls = Arc::new(AtomicUsize::new(0));
         let status = || {
             let calls = calls.clone();
-            pr_status(&fixture.pr_store(), &main, false, move |_| Box::new(Counting(calls)) as Box<dyn OpenPrSource>)
+            pr_status(&fixture.pr_store(), &main, false, move |_| Box::new(Counting(calls)) as Box<dyn OpenPrSource>, None)
         };
 
         assert_eq!(status(), PrStatus::Ok);
@@ -730,8 +919,162 @@ mod tests {
         let fixture = Fixture::new();
         let status = pr_status(&fixture.pr_store(), &fixture.main(), true, |_| -> Box<dyn OpenPrSource> {
             panic!("an ignored repository makes no PR request")
-        });
+        }, None);
         assert_eq!(status, PrStatus::Ignored);
         assert!(!fixture.pr_store().exists());
+    }
+
+    /// A worker clock whose setup has just ended.
+    fn clock() -> WorkerClock {
+        let entry = Instant::now();
+        std::thread::sleep(Duration::from_millis(1));
+        WorkerClock { entry, setup: entry.elapsed() }
+    }
+
+    fn stages(spans: &[Span]) -> Vec<Stage> {
+        spans.iter().map(Span::stage).collect()
+    }
+
+    #[test]
+    fn the_launch_asks_for_timings_only_when_the_listing_does() {
+        let args = |timings| {
+            let command = worker_command(Path::new("wt"), Path::new("main"), &LaunchArgs { attempt: ID.into(), timings });
+            command.get_args().map(|arg| arg.to_string_lossy().into_owned()).collect::<Vec<_>>()
+        };
+        assert_eq!(args(false), [SUBCOMMAND, "main", "--attempt", ID]);
+        assert_eq!(args(true), [SUBCOMMAND, "main", "--attempt", ID, "--timings"]);
+    }
+
+    /// A timed attempt through the real halves: the receipt carries setup,
+    /// then both halves as concurrent children with the library operations
+    /// that ran inside each, and its outcome is the untimed attempt's. The
+    /// untimed attempt hands neither half a step list to record into.
+    #[test]
+    fn a_timed_attempt_measures_itself_into_its_receipt() {
+        let run = |clock: Option<WorkerClock>| {
+            let fixture = Fixture::new();
+            let given_steps = std::sync::Mutex::new(Vec::new());
+            run_and_record(
+                &fixture.main(),
+                Some(&fixture.receipt_target()),
+                clock,
+                |main, steps| {
+                    given_steps.lock().unwrap().push(steps.is_some());
+                    fixture.refresh_prs_timed(main, Pr::Answer, steps)
+                },
+                |main, steps| {
+                    given_steps.lock().unwrap().push(steps.is_some());
+                    fixture.refresh_head_timed(main, &present(), &NoGit, steps).head_status()
+                },
+            );
+            let raw = std::fs::read_to_string(&fixture.receipt_target().path).expect("a receipt");
+            (fixture.receipt().expect("a valid receipt"), raw, given_steps.into_inner().unwrap())
+        };
+        let (untimed, untimed_raw, untimed_steps) = run(None);
+        let (timed, raw, timed_steps) = run(Some(clock()));
+
+        assert_eq!((untimed_steps, timed_steps), (vec![false, false], vec![true, true]));
+        assert_eq!(untimed.durations, LaunchReport::Missing);
+        assert!(!untimed_raw.contains("durations"), "an untimed attempt writes no member: {untimed_raw}");
+        assert_eq!((timed.head, &timed.prs), (untimed.head, &untimed.prs), "timing changes no outcome");
+
+        let LaunchReport::Complete(worker) = &timed.durations else {
+            panic!("a complete report: {:?}", timed.durations);
+        };
+        assert_eq!(stages(worker.spans()), [Stage::WorkerSetup, Stage::WorkerHalves]);
+        let halves = worker.span(&[Stage::WorkerHalves]).expect("halves");
+        assert_eq!(halves.children_kind(), ChildrenKind::Concurrent);
+        assert_eq!(stages(halves.children()), [Stage::PrRefresh, Stage::HeadRefresh]);
+        assert_eq!(stages(halves.find(&[Stage::PrRefresh]).unwrap().children()), [Stage::PrRequest]);
+        // No tracking ref, so the checked head is fetched (and fails).
+        assert_eq!(stages(halves.find(&[Stage::HeadRefresh]).unwrap().children()), [Stage::HeadCheck, Stage::HeadFetch]);
+        assert!(worker.span(&[Stage::WorkerSetup]).unwrap().elapsed() >= Duration::from_millis(1));
+        assert_eq!(worker.over_attributed(), Duration::ZERO, "setup and the halves are consecutive parts of the total");
+
+        let durations = raw.split("\"durations\"").nth(1).expect("the member");
+        for secret in [ORIGIN, "example.invalid", "GITHUB_TOKEN", "owner/repo"] {
+            assert!(!durations.contains(secret), "{secret:?} in the timings: {durations}");
+        }
+    }
+
+    #[test]
+    fn a_pr_request_is_recorded_only_when_it_is_made() {
+        let fixture = Fixture::new();
+        let main = fixture.main();
+
+        let steps = Steps::new();
+        assert_eq!(fixture.refresh_prs_timed(&main, Pr::Fail, Some(&steps)), PrStatus::Failed {
+            failure: PrFailure::CredentialsRejected { key: Some("GITHUB_TOKEN".into()) }
+        });
+        assert_eq!(stages(steps.spans().spans()), [Stage::PrRequest], "a failed request was still made");
+
+        let steps = Steps::new();
+        let ignored = pr_status(&fixture.pr_store(), &main, true, |_| -> Box<dyn OpenPrSource> {
+            panic!("an ignored repository makes no PR request")
+        }, Some(&steps));
+        assert_eq!(ignored, PrStatus::Ignored);
+        assert!(steps.spans().spans().is_empty(), "no request, no step");
+    }
+
+    /// Answers after a pause, so each part of a check takes measurable time.
+    struct Slow<T>(T);
+
+    const PAUSE: Duration = Duration::from_millis(20);
+
+    impl BranchHeadSource for Slow<Head> {
+        fn branch_head(&self, origin: &str, branch: &str, deadline: Duration) -> Result<ApiHead, PrUnavailable> {
+            std::thread::sleep(PAUSE);
+            self.0.branch_head(origin, branch, deadline)
+        }
+    }
+
+    impl GitRemote for Slow<NoGit> {
+        fn live_head(&self, branch: &str, deadline: Duration) -> Result<Option<String>, GitFailure> {
+            std::thread::sleep(PAUSE);
+            self.0.live_head(branch, deadline)
+        }
+        fn fetch(&self, branch: &str, deadline: Duration) -> Result<(), GitFailure> {
+            self.0.fetch(branch, deadline)
+        }
+    }
+
+    /// The provider fails, so `ls-remote` checks instead: one check step
+    /// covering both, and no fetch after a failed check.
+    #[test]
+    fn a_check_that_falls_back_to_git_is_one_check_covering_both() {
+        let fixture = Fixture::new();
+        let steps = Steps::new();
+        let api = Slow(Head(Err(PrUnavailable::Network { message: "unreachable".into() })));
+
+        let end = fixture.refresh_head_timed(&fixture.main(), &api, &Slow(NoGit), Some(&steps));
+
+        assert_eq!(end.head_status(), HeadStatus::Failed);
+        let spans = steps.spans();
+        assert_eq!(stages(spans.spans()), [Stage::HeadCheck]);
+        assert!(spans.spans()[0].elapsed() >= 2 * PAUSE, "the API request and the fallback: {:?}", spans.spans()[0].elapsed());
+    }
+
+    /// A panicked half leaves no span, so the report is partial, and the
+    /// other half's outcome and measurements stand.
+    #[test]
+    fn a_panicking_half_leaves_a_partial_report_and_the_other_half_measured() {
+        let fixture = Fixture::new();
+        run_and_record(
+            &fixture.main(),
+            Some(&fixture.receipt_target()),
+            Some(clock()),
+            |_, _| -> PrStatus { panic!("the PR half panicked") },
+            |main, steps| fixture.refresh_head_timed(main, &present(), &NoGit, steps).head_status(),
+        );
+
+        let receipt = fixture.receipt().expect("a receipt");
+        assert_eq!(receipt.prs, PrStatus::Failed { failure: PrFailure::Other }, "recorded as failed, as before");
+        assert!(fixture.head_published(), "the head half published");
+        let LaunchReport::Partial(worker) = &receipt.durations else {
+            panic!("a partial report: {:?}", receipt.durations);
+        };
+        let halves = worker.span(&[Stage::WorkerHalves]).expect("halves");
+        assert_eq!(stages(halves.children()), [Stage::HeadRefresh], "the panicked half is unknown, not zero");
+        assert_eq!(stages(halves.find(&[Stage::HeadRefresh]).unwrap().children()), [Stage::HeadCheck, Stage::HeadFetch]);
     }
 }

@@ -30,7 +30,7 @@ use biscuit_terminal::utils::wrap_policy::WordWrap;
 use worktree::default_target::DefaultTarget;
 
 pub use biscuit_terminal::components::git_graph::GraphOmission;
-pub use crate::commands::git_graph::{ForkedOffLine, MergedElsewhere};
+pub use worktree::graph::{ForkedOffLine, MergedElsewhere};
 use worktree::listing::{
     BranchComparisons, Caption, CaptionState, Comparison, MergeState, ParentComparison, TreeNode,
     TreeRow,
@@ -82,7 +82,7 @@ pub struct TableFacts<'a> {
 
 /// What a drawn graph left out or drew without a merge, from its
 /// [`GitGraphPlan`](biscuit_terminal::components::git_graph::GitGraphPlan)
-/// and [`GraphFacts`](crate::commands::git_graph::GraphFacts).
+/// and [`GraphFacts`](worktree::graph::GraphFacts).
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct GraphOmissions {
     /// Worktree lanes the height cap left out.
