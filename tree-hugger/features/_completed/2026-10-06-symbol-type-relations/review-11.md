@@ -12,10 +12,13 @@ reviewed_by: codex/gpt-6.1-sol
 recurrence: true
 created: 2026-10-06T15:01:02-07:00
 spec: 2026-10-06-symbol-type-relations/spec.md
-implemented: false
+implemented: true
+implemented_by: claude/opus
+log: tree-hugger/features/2026-10-06-symbol-type-relations/log.md
 description: "A **feature** review of `2026-10-06-symbol-type-relations/spec.md`"
 feature: 2026-10-06-symbol-type-relations/review-11.md
 previous: 2026-10-06-symbol-type-relations/review-10.md
+next: 2026-10-06-symbol-type-relations/review-12.md
 ---
 
 # Review of Symbol Type Relations — Iteration 11

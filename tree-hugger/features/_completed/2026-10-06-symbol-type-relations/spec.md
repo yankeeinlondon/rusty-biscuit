@@ -6,7 +6,7 @@ status: implemented
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-06
-review_iterations: 11
+review_iterations: 12
 human_review: false
 human_review_items: []
 message_to_agent: |-
@@ -50,6 +50,7 @@ packages:
 depends-on:
   - 2026-10-03-symbol-filters-and-reports
   - 2026-10-05-deferred-kind-precision
+completed: true
 ---
 
 # Generics, Inheritance, Modifiers, Attributes and Body Line Counts
