@@ -53,13 +53,23 @@ wrapped and unwrapped builds in one `target/`.
 
 ## Git Interaction
 
-For repository scripts and hooks, prefer the installed Git CLI when exact Git
-semantics, credentials, signing, hooks, or user configuration are part of the
-contract. Embed a library only when the product needs Git operations without a
-Git subprocess.
+Programmatic Git goes through a library, in-process. Shelling out to `git`
+from Rust is the exception, not the default: every process costs ~5 ms on
+macOS and ~47 ms on Windows (measured 2026-10-05), its output is text to
+parse, and its behavior moves with the installed Git version.
 
-- Choose `git2` when mature libgit2 coverage outweighs the C build and native
-  dependency surface.
-- Choose `gix` when a pure-Rust implementation, Git-compatible trust model, or
-  fine-grained plumbing crates materially improve the product.
-- Do not replace a working Git CLI boundary solely to avoid spawning a process.
+- **Default to `gix`** for anything a program reads or writes: refs, config,
+  remotes, objects, status, diffs. It is pure Rust, honors Git's trust model
+  and `GIT_CONFIG_*` environment, and is already in the build through
+  `sniff` and `worktree`.
+- **Use `git2`** only where `gix` has no API yet (`sniff` keeps it for fixture
+  writes such as checkout and worktree creation).
+- **Use the CLI only for non-programmatic interactions**: an operation done on
+  the user's behalf exactly as they would do it, where their Git setup is the
+  contract (a signed commit with their hooks, credential helpers and
+  prompts, a fetch or push over their SSH or HTTPS configuration). Keep each
+  such call behind one boundary and say why it is there.
+- Shell scripts and Git hooks have no library; the CLI is simply their
+  interface, and this rule does not apply to them.
+- A library read that replaces a CLI read gets a parity test against that
+  command (`worktree`'s `git_metadata` tests are the model).
