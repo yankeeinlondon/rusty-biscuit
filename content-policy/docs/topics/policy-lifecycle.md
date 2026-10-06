@@ -3,8 +3,8 @@
 **Status: in progress.** Every rule is built end to end: the time and
 constant rules (`Evergreen`, `TimeSensitive`, `ValidFor`, and `ValidUntil`)
 and `FileChanged`, through the library's frontmatter reader, evaluation,
-renewal, the `policy` CLI, and the editor schema. The reference to the editor
-schema from Darkmatter's base document schema is **planned**; its section
+renewal, the `policy` CLI, and the editor schema. Darkmatter incorporating the
+editor schema into its base document schema is **planned**; its section
 describes the agreed design.
 
 Use content policies to tell an application when a Markdown document needs a
@@ -953,9 +953,15 @@ second: {rule: "ValidUntil(2027-01-01)", action: archive}
 Setting a document's `$schema` to the file itself validates nothing, because
 the file declares types and no properties.
 
-Darkmatter's base document schema is **planned** to type `content_policy` as a
-list of `policy` entries, so that every Markdown document gets these checks
-with no `$schema` of its own.
+A caller that wants these checks in its own schema does not need the file on
+disk: the library exports its text as `content_policy::EDITOR_SCHEMA`, with no
+optional feature, so the caller compiles in the version that matches the
+parser it links.
+
+Darkmatter is **planned** to compile it into its base document schema and type
+`content_policy` as a list of `policy` entries, so that every Markdown document
+gets these checks with no `$schema` of its own, in the editor and from
+`md schema validate`.
 
 ## Library Ownership
 

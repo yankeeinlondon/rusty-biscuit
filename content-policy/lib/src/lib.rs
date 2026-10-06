@@ -57,3 +57,11 @@ pub use renew::{
     RenewalContext, RenewalError, RenewalPlan, TextEdit, apply_renewal, plan_fingerprint,
     plan_renewal,
 };
+
+/// The editor schema, `content-policy/schemas/content-policy.yaml`, compiled
+/// in so a caller can incorporate it into its own SimplifiedSchema.
+///
+/// It is a `kind: schema` file declaring the types `short_form` (one compact
+/// rule), `long_form` (a `{rule, action}` entry), and `policy` (either form).
+/// The schema checks a subset of the grammar; evaluation is the authority.
+pub const EDITOR_SCHEMA: &str = include_str!("../../schemas/content-policy.yaml");

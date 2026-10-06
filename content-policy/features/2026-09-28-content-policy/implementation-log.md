@@ -1526,3 +1526,44 @@ hashed content left `last_updated` stale (reproduced by the review).
   passed, and `backend-proof` reported `tmux run=4`; `just test` 173 passed;
   `just lint` clean. Not run: `just check-tier-coverage` and a CI plan review
   (`just ci-local --plan`).
+
+## Ruling 34: exported editor schema (2026-10-04)
+
+Finding 1 of `review-1` is resolved by ruling 34 rather than by Darkmatter
+work: content-policy offers its editor schema to callers, and Darkmatter's
+adoption of it (base-schema typing, the embedded-file table from spike S1, the
+`md schema validate` fallback to the base schema, DMLS tests, and a
+parser/schema parity test) moved to `2026-10-04-content-policy-base-schema`,
+which depends on `2026-09-28-recursive-schema-types`. This feature no longer
+depends on it.
+
+- `content_policy::EDITOR_SCHEMA` is the compiled-in text of
+  `content-policy/schemas/content-policy.yaml`, available with no feature.
+  `tests/editor_schema.rs` checks it is the file and declares `short_form`,
+  `long_form`, and `policy`.
+- README, `policy-lifecycle.md`, and the `content-policy` skill name the
+  constant; the remaining **planned** marker is Darkmatter's adoption.
+
+### Repairs after merging `main`
+
+The L1 suite did not compile or pass on this branch after `main` was merged;
+neither failure came from this feature's code.
+
+- `75adeb7f9` deleted `claudine/docs/research/acp/{gemini-cli,json-rpc,kimi-code-cli}.md`,
+  three of the migrated documents that `tests/common` embeds with
+  `include_bytes!`. They are removed from `MIGRATED_DOCUMENTS` (23 → 20), with
+  the `acp/json-rpc` special case in `evaluation.rs`. Ruling 31's migration of
+  `json-rpc.md` has no document left to check.
+- `4d12c6c4c` (Biscuit File tree-root boundary) made relative references
+  resolve inside a tree root that defaults to the context's `cwd`, added
+  `RelativeTreeEscape`, and reports a dangling symlink as `Io(NotFound)`.
+  `FileAdapter` now sets the tree root to its boundary root
+  (`with_base_dir`), and one `resolution_failure` mapping turns
+  `RepositoryEscape`/`RelativeTreeEscape` into `OutsideBoundary` and
+  `Io(NotFound)` into `Missing` at both resolution call sites. Four
+  `file_adapter` tests had failed; behavior is unchanged from Phase 5.
+
+Verified on macOS: `just test` 175 passed (4 skipped); `just lint` clean,
+including `deps-check`; `BISCUIT_TEST_REQUIRED_BACKENDS=tmux just test-l2`
+4 passed, `tmux run=4`. Not run: Windows, Linux, or WSL2 for the adapter
+change.

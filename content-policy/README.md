@@ -98,8 +98,10 @@ files. `policy renew` computes and writes the fingerprint.
 Content Policy ships a schema for `content_policy` entries,
 [`schemas/content-policy.yaml`](schemas/content-policy.yaml), so editors running
 DMLS (Darkmatter's language server) can suggest rule forms and flag a mistyped
-rule or action as you write. Applying it to every document through Darkmatter's
-base schema is planned.
+rule or action as you write. The library exports the same text as
+`content_policy::EDITOR_SCHEMA`, so a caller can compile it into its own schema.
+Darkmatter incorporating it into its base schema, so every document gets these
+checks, is planned.
 
 ## Evaluation and Renewal
 
