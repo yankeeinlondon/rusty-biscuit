@@ -471,6 +471,16 @@ terminal that never accepts output cannot hang the wrapper forever.
 A stderr reader that panics or times out shows a warning and contributes no
 captured stderr. It does not change the summary.
 
+The captured and inherited spawn paths use the same two bounds, the same
+shared clock, and the same wording, and print their warning straight to
+stderr, so it shows with tracing off. Their readers are tracked the same way:
+
+- **Captured:** the capture buffer is shared with the reader thread, so a
+  reader that panicked or was abandoned still yields what it had collected.
+  The result is marked incomplete.
+- **Inherited:** a stalled or failed forward to the terminal is a warning,
+  never a provider failure. The child's exit code and termination stand.
+
 For example, if the agent exits 0 while the terminal takes 30 s to accept
 its last screen of Markdown, the reader is handling output rather than
 waiting on its pipe, so the 120 s bound applies. The run finishes with the agent's own result and exit code.
