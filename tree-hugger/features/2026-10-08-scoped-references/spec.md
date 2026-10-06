@@ -17,15 +17,14 @@ reviewed_on: 2026-10-05
 review_iterations: 0
 human_review: false
 message_to_agent: |-
-  Phase 1 is complete; read the implementation log's "Phase 1" section before starting.
-  - Baseline is schema 4.3 and EXTRACTOR_REVISION "29", not 4.0/"10" as the plan text says. Schema goes to 5.0; the revision goes to the next value at Phase 4 time.
-  - The planned language table is in tree-hugger/docs/references.md (marked planned). Rust, TypeScript AND JavaScript resolve; the other 13 languages are Limited(unsupported_language) with targets never Scoped.
-  - Ruling 2 narrowed: Rust `self.f()` stays NameOnly (dropped from resolved forms); only `Self::f()`/`Type::f()` with one in-file type and exactly one inherent `f` resolves.
-  - Ruling 4: REPORT_SCHEMA_VERSION stays 1; `hug refs` gets its own envelope shape at version 1.
-  - Ruling 6: TS/JS parameter defaults are owned by the function (not the enclosing scope); class field initializers/static blocks are owner-absent Limited(ownership_unknown).
-  - Reason codes gain `unexpanded_macro` (Rust macros).
-  - Scope-study gaps Phase 2 must fix (each will otherwise produce wrong Scoped targets): Rust impl/trait headers and associated items live inside the impl_item scope (bind `fmt::Display` qualifier to `fn fmt`) - exclude members from lexical tables and resolve headers in the enclosing scope; Rust vendored scopes lack source_file, mod_item body and trait_item; TS plain parameters are captured as a bare `@local.definition` (no kind) and must be kept as bindings; TS `import_specifier (identifier)` captures both original and alias - bind only the alias; no references.scm separates call targets, and member-call names (Rust field_identifier, TS property_identifier) are not captured at all.
-  - Docs pages must not name this feature; docs/references.md already follows that rule.
+  Phases 1-3 are complete; read the implementation log's "Phase 3" section first.
+  - `Capability::Occurrences` exists (Occurrences requires References; Semantics requires Occurrences). `analysis::run_query` is the one path: summaries (`bind_references`) and `semantic_pass` read `index.occurrences`/`reference_coverage`; `TreeFile::reference_evidence()` is an Occurrences query selecting no kinds.
+  - Phase 3 pulled a MINIMAL slice of the Phase 4 cache work forward: `StoredEntry`/`WrittenEntry` (lib/src/cache/symbol_cache.rs) now carry required `occurrences` and `reference_coverage` keys; `validate` only checks "empty without the occurrences capability" and "coverage non-empty with it". Phase 4 still owns: schema 5.0 + EXTRACTOR_REVISION bump (it is "30" in the tree now, not 29 - another session bumped it), the stale-revision/schema-bump cache-upgrade rows, strict per-occurrence validation (spans in range/char boundaries, confidence/ID/candidate consistency) via a present-required deserializer on the cache path (the public `Occurrence.candidates` and `ReferenceCoverage.reasons` have `serde(default)`), and the Input Robustness Matrix columns in `cli/tests/symbols/cache_robustness.rs`.
+  - `coverage::record_passes_suffice`: Semantics widens without a parse only from stored Occurrences; Occurrences needs a parse. `project` clears the evidence without Occurrences. `symbols_cache` projection/widening tests already include Occurrences cells/rows.
+  - `semantic_pass` must stay a function of stored data only (occurrences, coverage, imports, records incl. `relations.parent` for constructors) so cache widening equals a fresh run. The import-alias self-call rule is by name for that reason.
+  - Summaries changed meaning per spec: limited languages have no edges; only callable owners collect references. `--json-full` indexes now include occurrences/coverage (in-file names; REPORT_SCHEMA_VERSION still 1).
+  - Recursion tests: `lib/tests/l1/symbols_reference_summaries.rs` (`RECURSION_MATRIX`).
+  - Docs pages must not name this feature; `docs/references.md` now marks only strict cache storage under the next schema and `hug refs` as planned.
 $schema:
   status: |-
     enum(

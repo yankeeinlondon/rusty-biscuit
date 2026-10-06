@@ -3,16 +3,68 @@ kind: plan
 feature: 2026-10-08-scoped-references
 total_phases: 6
 created: 2026-10-05
-phase: 1
+phase: 3
 agent: claude/sonnet
 yolo: true
 packages:
   - tree-hugger
+  - tree-hugger-cli
 source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1:
   - tree-hugger/docs/references.md
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - tree-hugger/lib/src/shared/schema_v2/occurrences.rs
+  - tree-hugger/lib/src/shared/schema_v2/mod.rs
+  - tree-hugger/lib/src/shared/schema_v2/facets.rs
+  - tree-hugger/lib/src/analysis/mod.rs
+  - tree-hugger/lib/src/analysis/occurrences.rs
+  - tree-hugger/lib/src/analysis/scope/mod.rs
+  - tree-hugger/lib/src/analysis/scope/rust.rs
+  - tree-hugger/lib/src/analysis/scope/ecma.rs
+  - tree-hugger/lib/src/cache/mod.rs
+  - tree-hugger/lib/src/cache/symbol_cache.rs
+  - tree-hugger/lib/src/file/tree_file.rs
+  - tree-hugger/lib/src/file/tree_file/definitions.rs
+  - tree-hugger/lib/queries/rust/references.scm
+  - tree-hugger/lib/queries/typescript/references.scm
+  - tree-hugger/lib/queries/javascript/references.scm
+  - tree-hugger/lib/tests/l1/symbols_occurrences.rs
+  - tree-hugger/lib/tests/l1/main.rs
+  - tree-hugger/lib/tests/l1/cache_tests.rs
+docs_updated_during_phase_2:
+  - tree-hugger/docs/references.md
+  - tree-hugger/docs/symbol-schema-design.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+  - .claude/skills/tree-hugger/SKILL.md
+  - .claude/skills/tree-hugger/query-system.md
+source_files_during_phase_3:
+  - tree-hugger/lib/src/file/query.rs
+  - tree-hugger/lib/src/file/tree_file.rs
+  - tree-hugger/lib/src/analysis/mod.rs
+  - tree-hugger/lib/src/analysis/occurrences.rs
+  - tree-hugger/lib/src/analysis/coverage.rs
+  - tree-hugger/lib/src/analysis/counters.rs
+  - tree-hugger/lib/src/analysis/tests.rs
+  - tree-hugger/lib/src/cache/symbol_cache.rs
+  - tree-hugger/lib/src/shared/schema_v2/mod.rs
+  - tree-hugger/lib/src/shared/schema_v2/facets.rs
+  - tree-hugger/lib/tests/l1/symbols_reference_summaries.rs
+  - tree-hugger/lib/tests/l1/main.rs
+  - tree-hugger/lib/tests/l1/symbols_query.rs
+  - tree-hugger/lib/tests/l1/symbols_cache.rs
+  - tree-hugger/cli/tests/symbols/cache_robustness.rs
+docs_updated_during_phase_3:
+  - tree-hugger/docs/references.md
+  - tree-hugger/docs/symbol-schema-design.md
+  - tree-hugger/docs/cache-design.md
+  - tree-hugger/docs/symbol-reports.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+  - .claude/skills/tree-hugger/SKILL.md
+  - .claude/skills/tree-hugger/api-reference.md
 ---
 
 # Plan: Scope-Aware References and `hug refs`
@@ -86,15 +138,15 @@ Goal: the shared model, scope tree and lookup, proven on Rust and TypeScript, wi
 
 ### Tasks
 
-- [ ] **Occurrence types.** Add `Occurrence`, `OccurrenceKind` (`Call`/`Usage`), `Confidence` (`Scoped`/`NameOnly`/`Unresolved`), `ReferenceCoverage`, coverage state and reason-code enum to `lib/src/shared/schema_v2/`; add `occurrences` and `reference_coverage` to `FileSymbolIndex` (`schema_v2/mod.rs`). Spans reuse `TextSpan` (one-based line/column, half-open byte offsets). Serde defaults must be additive for public output.
-- [ ] **Capture collection.** During the existing definitions-query traversal (`lib/src/file/tree_file*`), collect scope captures and keep binding facts for **all** declarations including kinds omitted from results (so uncaptured shadowing bindings block outer matches). Syntax needed only for resolution stays optional when references are not requested.
-- [ ] **Scope tree.** New module (e.g. `lib/src/analysis/scope.rs`): file-root scope, parent links, per-scope declaration tables keyed by language name category (Rust type/value; TS type/value), indexed lookup (no per-occurrence scan of all declarations). Declarations assigned to the scope where the name is visible (function name in enclosing scope, parameters in body scope).
-- [ ] **Reference extraction queries.** Extend `references.scm` for Rust and TypeScript (and JS via ECMA) to capture invocation targets, member names in `object.run()` (`object` Usage, `run` Call), `consume(run)` (`consume` Call, `run` Usage), constructors, macro invocations (Usage of macro; unknown expansion limits coverage). Exclude definition names, import binding names, comments, strings. Update query provenance notes alongside every vendored query edit.
-- [ ] **Lookup rules (Rust, TS).** Implement ruled order/hoisting/shadowing (the three spec counter-examples), type/value categories, import aliases (local import binding, absent external ID, source and original name kept in import record), qualified targets resolved only when full path/receiver is established and unique, qualifier preserved on unresolved targets, overloads/wildcards/dynamic access never unique.
-- [ ] **Confidence assignment.** `Scoped` only for one established binding; `NameOnly` with distinct sorted candidates (no target ID); `Unresolved` otherwise; method targets stay candidates unless one declaration is established.
-- [ ] **Ownership and coverage.** Owner = nearest enclosing callable record; anonymous callable boundaries retained (owner absent, `owner_span` set); file-level code and initializers kept; defaults/decorators per ruling 6. Emit `reference_coverage` per region (named bodies even with zero occurrences; anonymous boundaries); empty reference queries and parse errors → `Limited`.
-- [ ] **Non-supported languages.** Conservative identifier/call occurrences where an existing `references.scm` allows, all regions `Limited(unsupported_language)`, targets never `Scoped`. Explicit state for all 16 languages.
-- [ ] **Determinism.** Dedupe overlapping captures of the same occurrence (not distinct uses); sort by start byte, end byte, owner span, kind, written target, confidence; candidates by declaration position then ID. No hash-map iteration order dependence.
+- [x] **Occurrence types.** Add `Occurrence`, `OccurrenceKind` (`Call`/`Usage`), `Confidence` (`Scoped`/`NameOnly`/`Unresolved`), `ReferenceCoverage`, coverage state and reason-code enum to `lib/src/shared/schema_v2/`; add `occurrences` and `reference_coverage` to `FileSymbolIndex` (`schema_v2/mod.rs`). Spans reuse `TextSpan` (one-based line/column, half-open byte offsets). Serde defaults must be additive for public output.
+- [x] **Capture collection.** During the existing definitions-query traversal (`lib/src/file/tree_file*`), collect scope captures and keep binding facts for **all** declarations including kinds omitted from results (so uncaptured shadowing bindings block outer matches). Syntax needed only for resolution stays optional when references are not requested.
+- [x] **Scope tree.** New module (e.g. `lib/src/analysis/scope.rs`): file-root scope, parent links, per-scope declaration tables keyed by language name category (Rust type/value; TS type/value), indexed lookup (no per-occurrence scan of all declarations). Declarations assigned to the scope where the name is visible (function name in enclosing scope, parameters in body scope).
+- [x] **Reference extraction queries.** Extend `references.scm` for Rust and TypeScript (and JS via ECMA) to capture invocation targets, member names in `object.run()` (`object` Usage, `run` Call), `consume(run)` (`consume` Call, `run` Usage), constructors, macro invocations (Usage of macro; unknown expansion limits coverage). Exclude definition names, import binding names, comments, strings. Update query provenance notes alongside every vendored query edit.
+- [x] **Lookup rules (Rust, TS).** Implement ruled order/hoisting/shadowing (the three spec counter-examples), type/value categories, import aliases (local import binding, absent external ID, source and original name kept in import record), qualified targets resolved only when full path/receiver is established and unique, qualifier preserved on unresolved targets, overloads/wildcards/dynamic access never unique.
+- [x] **Confidence assignment.** `Scoped` only for one established binding; `NameOnly` with distinct sorted candidates (no target ID); `Unresolved` otherwise; method targets stay candidates unless one declaration is established.
+- [x] **Ownership and coverage.** Owner = nearest enclosing callable record; anonymous callable boundaries retained (owner absent, `owner_span` set); file-level code and initializers kept; defaults/decorators per ruling 6. Emit `reference_coverage` per region (named bodies even with zero occurrences; anonymous boundaries); empty reference queries and parse errors → `Limited`.
+- [x] **Non-supported languages.** Conservative identifier/call occurrences where an existing `references.scm` allows, all regions `Limited(unsupported_language)`, targets never `Scoped`. Explicit state for all 16 languages.
+- [x] **Determinism.** Dedupe overlapping captures of the same occurrence (not distinct uses); sort by start byte, end byte, owner span, kind, written target, confidence; candidates by declaration position then ID. No hash-map iteration order dependence.
 
 #### Wave 1 (concurrent, disjoint files)
 
@@ -113,12 +165,12 @@ Goal: the shared model, scope tree and lookup, proven on Rust and TypeScript, wi
 
 ### Tests (L1, `lib/tests/l1/`, new `symbols_occurrences.rs`)
 
-- [ ] Shadowing: Rust `let f = f();`, TS block `let f` before init, Python local-by-assignment (Python asserts `Limited`, not a wrong binding, under default ruling 1).
-- [ ] Two types with same-named methods stay `NameOnly`; `other.method()` never binds to caller; unrelated/dynamic receivers uncertain; overload ambiguity has no target ID.
-- [ ] Spans/qualifiers incl. non-ASCII source; repeated call sites on one line stay two records; overlapping captures dedupe; constructors; file-level initializers; anonymous callables with distinct `owner_span`; nested named functions; declaration names and comment/string text excluded.
-- [ ] Alias import: `Scoped`, absent target ID, import record keeps source and original name.
-- [ ] Per-language state test over all 16 languages (supported or limited with reason; never empty-and-passing).
-- [ ] Determinism: shuffled capture order yields identical output.
+- [x] Shadowing: Rust `let f = f();`, TS block `let f` before init, Python local-by-assignment (Python asserts `Limited`, not a wrong binding, under default ruling 1).
+- [x] Two types with same-named methods stay `NameOnly`; `other.method()` never binds to caller; unrelated/dynamic receivers uncertain; overload ambiguity has no target ID.
+- [x] Spans/qualifiers incl. non-ASCII source; repeated call sites on one line stay two records; overlapping captures dedupe; constructors; file-level initializers; anonymous callables with distinct `owner_span`; nested named functions; declaration names and comment/string text excluded.
+- [x] Alias import: `Scoped`, absent target ID, import record keeps source and original name.
+- [x] Per-language state test over all 16 languages (supported or limited with reason; never empty-and-passing).
+- [x] Determinism: shuffled capture order yields identical output.
 
 **Checkpoint 2:** `just test` in `tree-hugger/` green; occurrences and coverage computed for Rust/TS; old summary behavior untouched.
 
@@ -128,11 +180,11 @@ Goal: single extraction/resolution path feeding summaries, recursion and capabil
 
 ### Tasks
 
-- [ ] **Replace `bind_references`.** Derive `references` (established local targets and bound imports), `dependencies` (bound imports), `referenced_by` (declaration owners of established local targets) in first-occurrence order; keep dedupe by resolved ID else name+qualifier; uncertain occurrences excluded; ownerless occurrences make no reverse edges; containment and export binding unchanged. Diagnostic severity/confidence/default enablement must not change (assert with existing lint tests).
-- [ ] **Honest recursion.** Rewrite `semantic_pass` (`analysis/mod.rs`): `Yes` only for `Call` + own ID + `Scoped`; `Yes` wins over other uncertainty; else `Unknown` on limited coverage or potentially recursive unresolved/indirect call; `No` requires complete call coverage and none of that uncertainty; bodyless declarations `Unknown`; self-value reference and mutual recursion are not direct recursion; nested callable owners isolated; `None` when no semantics requested. Legacy adapter (`file/tree_file.rs` `is_recursive: false`) keeps mapping `Unknown`/`None` → `false` and gains no occurrence fields.
-- [ ] **`Capability::Occurrences`.** Add to `lib/src/file/query.rs`; `Occurrences` requires `References`; `Semantics` requires `Occurrences`; `References` alone builds summaries then discards occurrence output; complete indexes and `--json-full` request it; declaration/containment reports still skip reference work. `for_query`/`passes` in `analysis/mod.rs` updated.
-- [ ] **Whole-file occurrence semantics.** Occurrences and coverage describe the whole file independent of selected kinds/predicates; may name unselected declarations; dropping the capability clears occurrences and coverage.
-- [ ] **Work counters.** Extend `analysis/counters.rs` so skipped and non-duplicated work (no second definitions query or parse) is observable.
+- [x] **Replace `bind_references`.** Derive `references` (established local targets and bound imports), `dependencies` (bound imports), `referenced_by` (declaration owners of established local targets) in first-occurrence order; keep dedupe by resolved ID else name+qualifier; uncertain occurrences excluded; ownerless occurrences make no reverse edges; containment and export binding unchanged. Diagnostic severity/confidence/default enablement must not change (assert with existing lint tests).
+- [x] **Honest recursion.** Rewrite `semantic_pass` (`analysis/mod.rs`): `Yes` only for `Call` + own ID + `Scoped`; `Yes` wins over other uncertainty; else `Unknown` on limited coverage or potentially recursive unresolved/indirect call; `No` requires complete call coverage and none of that uncertainty; bodyless declarations `Unknown`; self-value reference and mutual recursion are not direct recursion; nested callable owners isolated; `None` when no semantics requested. Legacy adapter (`file/tree_file.rs` `is_recursive: false`) keeps mapping `Unknown`/`None` → `false` and gains no occurrence fields.
+- [x] **`Capability::Occurrences`.** Add to `lib/src/file/query.rs`; `Occurrences` requires `References`; `Semantics` requires `Occurrences`; `References` alone builds summaries then discards occurrence output; complete indexes and `--json-full` request it; declaration/containment reports still skip reference work. `for_query`/`passes` in `analysis/mod.rs` updated.
+- [x] **Whole-file occurrence semantics.** Occurrences and coverage describe the whole file independent of selected kinds/predicates; may name unselected declarations; dropping the capability clears occurrences and coverage.
+- [x] **Work counters.** Extend `analysis/counters.rs` so skipped and non-duplicated work (no second definitions query or parse) is observable.
 
 #### Wave 1
 
