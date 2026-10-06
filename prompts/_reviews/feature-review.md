@@ -87,12 +87,30 @@ failure:
 You are performing a review of the functionality defined by the `{{spec_name}}` spec:
 
 ::block when="previous_review"
-- This is the #{{iteration}} iteration of the review/fix cycle for this specification
-- The first thing you will need to check is whether the _findings_ in the review's `## Unblocked Findings` section were all implemented
-    - this is the most obvious thing that the last implementation was supposed to have addressed
-- The second thing you will need to check is whether:
-    - any of the _
-    - any of the _findings_ in the review's `## Blocked Findings` were _unblocked_ prior to the last implementation's
+This is iteration #{{iteration}} of the review/fix cycle. Read @{{previous_review}}
+and its implementation log before reviewing new work. Completion flags and log
+summaries are claims to verify against the implementation.
+
+Write a `## Previous Finding Verification` table with these columns:
+finding ID/title, required instances and consumers, outcome, verification evidence,
+and remaining work or blocker. Include every finding from the previous review
+and any unresolved finding from earlier reviews, including legacy reviews that
+use one `## Findings` section. Reconcile the body, frontmatter findings, instance
+tables, required repairs, and implementation ledger; do not rely on titles alone.
+
+- Use outcomes **verified fixed**, **partially fixed**, **regressed**, **still
+  blocked**, **newly unblocked**, or **unresolved**. A finding is verified fixed
+  only when all its required instances and consumers are checked.
+- Check whether each blocker was removed before or after the repair. Cite the
+  accepted decision or changed prerequisite; do not reopen accepted decisions.
+  Newly unblocked work that is already repaired can be verified fixed, with the
+  unblocking recorded in the evidence column.
+- Carry every remaining defect into `## Unblocked Findings` or `## Blocked
+  Findings`, retaining its ID and stating what remains. An unresolved required
+  repair keeps `ready: false`; a human review alone does not.
+- Distinguish an unchanged failing reproduction, a regression introduced by a
+  repair, and a newly discovered sibling outside the earlier enumerated cases.
+  Passing the earlier cases does not prove the entire defect class is closed.
 ::end-block
 
 
@@ -103,18 +121,7 @@ You are performing a review of the functionality defined by the `{{spec_name}}` 
 - **Technical Design:** "@{{design}}"
 ::end-block
 
-::block when="And(spec, design)"
-Read both the specification and design documents and then perform a review on the implementation:
-
-::end-block
-::block when="spec"
-Read both the specification document and then perform a review on the implementation:
-
-::end-block
-::block when="design"
-Read both the specification document and then perform a review on the implementation:
-
-::end-block
+Read the specification and any supplied design document, then review the implementation:
 
 - look for gaps in functionality that were designed but not implemented
 - features who's implementation is broken or incomplete
@@ -132,13 +139,36 @@ parser for that class would have replaced all five.
 
 For every finding:
 
+- assign a stable ID such as `R{{iteration}}-F1`; retain the original ID for
+  carried findings and give newly discovered siblings their own IDs with a
+  reference to the earlier finding. For legacy findings, use the review filename
+  plus title as the identifier without rewriting historical reviews
+- include the finding ID in its body heading and frontmatter title; retain child
+  IDs when carrying an instance forward so the repair ledger can be reconciled
 - classify it in one sentence that names the defect class, not the file
 - enumerate every sibling site: each parser, reader, detector, or projection
   that handles the same kind of input or makes the same kind of decision
 - check each one, using the same reproduction you used for the first (copy a
   real fixture, change one field, run the shipped CLI or public API)
 - report the class as **one finding** with an instance table: site, shape
-  tested, observed result, expected result; include the sites that were clean
+  tested, observed result, expected result, verification evidence; give each
+  required instance/consumer a child ID and include sites that were clean
+
+When a finding changes identity, scope, category, arity, or another decision
+input, trace that evidence from collection through filtering, summaries,
+candidate selection, lookup stopping conditions, and downstream consumers.
+Enumerate each decision that can accept, reject, or classify the result; checking
+the reader or grouping step alone is insufficient.
+
+A **clean** site needs a reproduction with independently stated expected results,
+or a precise contract/invariant explanation tied to the relevant code. Check both
+incorrect extra results and missing required results. A conservative fallback
+that loses a provable result is still a defect. Agreement between cached and
+uncached output alone does not establish correctness.
+
+Put every blocking issue in the titled findings and frontmatter `findings` list,
+including issues discovered in robustness or verification sections. Keep
+nonblocking recommendations explicitly separate so the repair inventory is complete.
 
 Do not stop at the first high finding. Finish the sweep, then write.
 
@@ -149,7 +179,8 @@ Compare each finding in this review with the findings of every earlier review
 in this directory. If a finding belongs to the same class as an earlier one:
 
 - say so under a `## Recurrence` heading, naming the earlier review and finding
-- state which sibling sites that fix should have swept and did not
+- state whether this is an unchanged instance, a repair regression, or a newly
+  discovered sibling; identify the missed decisions and consumers
 - sweep them all now, so this review carries the complete list
 - set the frontmatter property `recurrence` to `true`; the review loop does not
   stop on it, so the next repair cycle implements exactly the list this review
@@ -211,7 +242,8 @@ test is at the wrong level under "Findings" with severity at least "high".
 ::block when="iteration >  1"
 - Now set the frontmatter properties of the _previous review_ located at @{{previous_review}}:
     - set the `next` property on the _previous review_ to "{{parent_dir(review)}}/{{basename(review)}}"
-    - set the `implemented` property to `true`
+    - preserve `implemented` and `implemented_by`: these record the implementer's
+      claim; this review's verification table records your independent assessment
 ::end-block
 
 ### Spec Frontmatter
@@ -224,10 +256,13 @@ The spec file which underpins the requirements for this feature review needs to 
 
 ### Summarize
 
-- Summarize to the caller what was found and be sure to mention whether the review deemed the {{feature_or_fix}} to be **production ready** or not.
+- Summarize readiness, previous-finding verification outcomes, and new findings.
+  Account for every previous finding; distinguish partial repairs from newly
+  discovered siblings instead of reporting only the latest defect.
 
 ::block when="iteration != 1"
-> **Note:** this is _not_ the first review we've done on this functionality but the prior review's suggestions have now all been implemented (or at least the developer has claimed that they are).
+> Verify the prior repair's actual coverage; another review iteration does not
+> imply that all previous findings were implemented.
 ::end-block
 
 **IMPORTANT:**
