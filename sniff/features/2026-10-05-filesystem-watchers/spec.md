@@ -30,9 +30,9 @@ related:
 human_review: true
 human_review_items:
   - |-
-    **How strict is the `--timeout` / two-second limit? (needed before Phase 2 fixes the public API)**
+    **How strict is the `--timeout` / two-second limit? (Phase 2 is built on Option 1; please confirm before Phase 6 writes the CLI help)**
 
-    The spec leaves this as an open question for you. Some operating-system calls can hang (for example on a stalled disk or network share), and no safe way exists to interrupt them inside the caller's program. Phase 2 builds the public types and the budget logic around whichever answer you choose, so changing it later means rework.
+    The spec leaves this as an open question for you. Some operating-system calls can hang (for example on a stalled disk or network share), and no safe way exists to interrupt them inside the caller's program. Phase 2 has now built the public types and the budget logic on Option 1 below, as the plan allowed. Choosing Option 2 or 3 now means reworking that code.
 
     - **Option 1 - "stop starting new work after the limit" (the spec's recommendation; this is what the plan assumes).** Sniff keeps what it found so far, reports that the time budget ran out, and returns. A single slow system call that is already running can make the query take longer than the limit.
       - Pros: simple, no extra programs to ship, honest about what was checked.
@@ -64,16 +64,16 @@ human_review_items:
 
     **Recommendation: Option B**, because it keeps the feature useful on Windows without breaking the spec's safety rules. If the packaging cost is not acceptable for this release, choose **Option A** and treat Windows handle discovery as a follow-up feature; do not choose Option C.
 message_to_agent: |-
-  Phase 1 is rulings and spikes only; no source changed. Read `implementation-log.md` (Phase 1) before starting: it holds the R1-R11 rulings, spike evidence, and crate decisions.
+  Phases 2 and 3 are built: the platform-neutral core and the Linux/WSL2 backend in `sniff/lib/src/filesystem/query/`. Read the Phase 3 section of `implementation-log.md` first; it lists every departure and the requirement-to-test table.
 
-  Key decisions for Phase 2 onward:
-  - No `procfs` and no `libproc`. Linux uses a hand-rolled `/proc` reader (std + libc); procfs silently drops per-fd EACCES. macOS uses direct `libc` FFI (`proc_pidinfo` LISTFDS / `proc_pidfdinfo` VNODEPATHINFO / PROC_PIDVNODEPATHINFO for cwd) plus ~4 local `#[repr(C)]` items; libproc's path query is non-recursive, its flags are ignored, and its cwd is unimplemented on macOS. Windows uses the existing `windows` 0.62 dependency with extra features (listed in the log). `inotify` is a Linux-gated dev-dependency only.
-  - Linux inotify `sdev` is the kernel's `major<<20|minor`; decode and rebuild with `libc::makedev` before comparing to `st_dev`. build-linux's mounts all have major 0, so a missing decode passes there. Test the decode with a nonzero major (a pure parser test), and on WSL2 ext4 for live evidence.
-  - R6 outcome rule: process enumeration and tree identity are prerequisites and never make an outcome `usable` on their own. Fixed-`unsupported` records (FSEvents, fanotify, Windows cwd/subscriptions) do not count toward usable vs unavailable.
-  - R7: snake_case keys, `schema_version: 1`, 64-bit ids as decimal strings, unavailable identity fields as explicit `null`.
-  - R1 (deadline semantics) and the Windows per-handle hang (R2) are awaiting the author (`human_review_items`). Phase 2 may proceed on R1 option 1 ("stops scheduling work"; no thread may outlive the call), but keep the backend trait able to report a per-evidence "identity unavailable" outcome so a Windows helper or omission fits later. Do not start Phase 5 until R2 is answered.
-  - On Windows, a process's cwd shows up only as an ordinary directory handle in the handle table; record it as `open_handle`, and keep the Windows cwd mechanism `unsupported`.
-  - The build-win-native SSH session is elevated; permission counts taken over SSH overstate what a normal user sees.
+  For Phase 4 (macOS backend):
+  - Follow the Linux pattern. `linux.rs` implements `UsageBackend`, and `backend::platform()` is now `#[cfg]`-split. Add a `#[cfg(target_os = "macos")]` arm returning your backend, and narrow the `PlatformBackend`/`platform_mechanisms`/`NOT_IMPLEMENTED` cfgs to exclude macOS (they are currently `not(target_os = "linux")`). Keep FSEvents and polling `unsupported`; `POLLING_UNSUPPORTED` is a shared constant in `backend.rs`.
+  - Gate `the_shipped_backend_reports_unsupported_until_a_native_backend_exists` (`tests.rs`) to Windows only once macOS has a backend.
+  - Reusable pieces: `Tally` in `linux.rs` (per-mechanism successes/denials/failures -> `InspectionResult`), the post-inspection start-token re-check (PID reuse -> `Vanished`, nothing kept), and the self-inspection rule (collect the descriptor list and release it before reading entries).
+  - Coverage: a limitation of kind `AncestorWatch` is a scope note, not a gap (`Limitations::has_gaps`). Every other limitation on a mechanism makes it `partial`.
+  - Test seam: `linux_tests.rs` runs the backend against a synthetic `/proc` on any Unix host, and live controlled children re-exec the test binary (`#[ignore]` fixture `usage_child`, readiness line on stdout, kill+wait guard). The macOS backend calls `proc_pidinfo` directly, so it cannot use a synthetic tree. Inject failures through a small trait or closure, or test the classification helpers through the report.
+  - `just cross-check` has no lint mode. For Linux clippy, run `ssh -o BatchMode=yes build-linux` in the clone that `cross-check` just synced (path printed as `clone:`).
+  - R1 (deadline semantics) and the Windows per-handle hang (R2) still await the author. Phase 4 is not blocked; Phase 5 must not start until R2 is answered.
 ---
 
 # Filesystem process and watcher discovery

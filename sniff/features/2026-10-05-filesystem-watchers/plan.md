@@ -1,7 +1,7 @@
 ---
 total_phases: 7
 created: 2026-10-05
-phase: 1
+phase: 3
 agent: claude/sonnet
 yolo: true
 source_files_during_phase_1: []
@@ -12,7 +12,46 @@ skills_files_updated_during_phase_1:
   - .claude/skills/os/linux.md
   - .claude/skills/os/macos.md
   - .claude/skills/os/windows.md
-packages: []
+packages:
+  - sniff
+source_files_during_phase_2:
+  - sniff/lib/Cargo.toml
+  - sniff/lib/src/performance/counters.rs
+  - sniff/lib/src/filesystem/mod.rs
+  - sniff/lib/src/filesystem/query/mod.rs
+  - sniff/lib/src/filesystem/query/backend.rs
+  - sniff/lib/src/filesystem/query/budget.rs
+  - sniff/lib/src/filesystem/query/identity.rs
+  - sniff/lib/src/filesystem/query/matching.rs
+  - sniff/lib/src/filesystem/query/native.rs
+  - sniff/lib/src/filesystem/query/options.rs
+  - sniff/lib/src/filesystem/query/process.rs
+  - sniff/lib/src/filesystem/query/report.rs
+  - sniff/lib/src/filesystem/query/root.rs
+  - sniff/lib/src/filesystem/query/tree.rs
+  - sniff/lib/src/filesystem/query/tests.rs
+docs_updated_during_phase_2:
+  - sniff/docs/topics/filesystem-query.md
+  - sniff/docs/dependencies.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+  - .claude/skills/sniff/SKILL.md
+  - .claude/skills/os/SKILL.md
+  - .claude/skills/os/windows.md
+source_files_during_phase_3:
+  - sniff/lib/src/filesystem/query/linux.rs
+  - sniff/lib/src/filesystem/query/linux_tests.rs
+  - sniff/lib/src/filesystem/query/fixtures/inotify-fdinfo.txt
+  - sniff/lib/src/filesystem/query/backend.rs
+  - sniff/lib/src/filesystem/query/mod.rs
+  - sniff/lib/src/filesystem/query/report.rs
+  - sniff/lib/src/filesystem/query/tree.rs
+  - sniff/lib/src/filesystem/query/tests.rs
+docs_updated_during_phase_3:
+  - sniff/docs/topics/filesystem-query.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+  - .claude/skills/sniff/SKILL.md
 ---
 
 # Plan: Filesystem process and watcher discovery
@@ -192,27 +231,27 @@ backend code yet.
 
 ### Wave 2 (parallel)
 
-- [ ] **Options and errors** - `PathUsageOptions` (default recursive, builder for
+- [x] **Options and errors** - `PathUsageOptions` (default recursive, builder for
       target-only, deadline default 2 s); `PathUsageError` typed variants:
       invalid option (zero/unrepresentable duration), missing target, unsupported
       target kind (socket/device/FIFO, rejected from `symlink_metadata` before any
       open), root-validation timeout, root identity failure. Each has a stable
       `kind` string for the CLI JSON error.
-- [ ] **Report types** - `PathUsageReport`, `ProcessRecord`, `Evidence`,
+- [x] **Report types** - `PathUsageReport`, `ProcessRecord`, `Evidence`,
       `EvidenceKind`, `Coverage`, `CoverageStatus` (`complete`, `partial`,
       `unsupported`, `failed`, `not_attempted`), `Limitation`, `Outcome`
       (`usable`, `unavailable`, `unsupported`), `WatchInfo` (mask, recursion
       known, descriptor, watch id), `NativeIdentity`. Unavailable fields are
       explicit (`Option` serialized as an explicit state, not omitted silently).
-- [ ] **Lossless path object** - `{display, native?}` serializer/deserializer for
+- [x] **Lossless path object** - `{display, native?}` serializer/deserializer for
       `OsStr`/`Path`: Unix bytes, Windows UTF-16 units (including unpaired
       surrogates); `native` emitted only when `display` is not round-trippable.
       64-bit native ids and creation tokens serialize as strings.
-- [ ] **Shared budget** - one monotonic `Budget` created on entry; `remaining()`,
+- [x] **Shared budget** - one monotonic `Budget` created on entry; `remaining()`,
       `expired()`; used by every phase; wall-clock start/end timestamps for
       presentation, `Instant` for elapsed. A `not_attempted` coverage record with
       a reason is the only way a skipped phase is represented.
-- [ ] **Counters** - add named counters in `performance::counters` for process
+- [x] **Counters** - add named counters in `performance::counters` for process
       enumeration, descriptor inspection, tree identity reads, and watch-
       registration reads; count attempts once including failures; no timing or
       formatting cost when collection is off.
@@ -222,13 +261,13 @@ target where available); serde round-trip tests for the path object pass.
 
 ### Wave 3 (parallel)
 
-- [ ] **Root resolution and identity** - `symlink_metadata`, resolve root alias
+- [x] **Root resolution and identity** - `symlink_metadata`, resolve root alias
       once and keep both spellings; capture native root identity (dev/ino or
       Windows file id + volume serial); budget exhaustion here is the typed
       root-validation timeout; recheck identity before completing when budget
       allows, else record limitation and mark coverage partial; root replacement
       keeps prior evidence and adds a root-change limitation.
-- [ ] **Tree identity collection** - single streaming walk (`walkdir`, no
+- [x] **Tree identity collection** - single streaming walk (`walkdir`, no
       following of descendant symlinks/junctions/reparse points, no file body
       reads, no per-entry handle retention) building identity -> in-scope paths
       (an identity may map to several paths: hard links; none preferred). Include
@@ -236,20 +275,20 @@ target where available); serde round-trip tests for the path object pass.
       become aggregated limitations with counts and representative examples.
       Budget checked between entries; exhaustion yields partial tree coverage that
       propagates to every dependent mechanism.
-- [ ] **Containment and matching** - identity-first matching, native component-
+- [x] **Containment and matching** - identity-first matching, native component-
       aware path comparison fallback (never string prefix; `/work/app-copy`
       outside `/work/app`); Windows drive/UNC/verbatim spellings, short-name
       aliases, and per-directory case sensitivity (no blanket lowercasing);
       deleted object never matched by former path alone; observed alias kept
       separately from in-scope paths.
-- [ ] **Process lifetime identity** - `ProcessKey` built from PID plus native
+- [x] **Process lifetime identity** - `ProcessKey` built from PID plus native
       creation token (or retained handle); merging rule: conflicting known start
       times never merge; missing start time keeps records separate with
       identity-association-uncertain flag; enrichment (name, exe, user) only after
       verifying the same lifetime; evidence is preserved when enrichment fails or
       the process vanishes. Identity enrichment through `sysinfo` on candidate
       PIDs only, no full refresh, no cmdline/environ.
-- [ ] **Orchestrator and outcome** - `query_path_usage` runs: validate options,
+- [x] **Orchestrator and outcome** - `query_path_usage` runs: validate options,
       resolve root, collect tree identity, enumerate processes, run each
       applicable backend mechanism, enrich, recheck root, assemble report,
       compute `Outcome` per R6, sort by PID then evidence path key, then kind,
@@ -265,13 +304,32 @@ hard-link alias, sibling-prefix rejection, descendant symlink not expanded,
 non-UTF-8 and (Windows-gated) unpaired-surrogate path round trip, hidden files
 in scope. Counter test proves one tree walk regardless of process count.
 
+#### Report-reader robustness matrix (Phase 2 ruling)
+
+The report and its path object are read back (retained observations, Phase 6
+test seam). Each load-bearing field has this outcome; `reject` means
+deserialization fails. Asserted by
+`the_report_reader_rejects_every_malformed_shape_of_its_load_bearing_fields`
+and `the_native_string_reader_rejects_every_malformed_shape`.
+
+| Shape | `outcome` / `coverage[].status` | `target.resolved.display` | `processes`, `matched_paths` | `creation_token` | `name` | `native.units` |
+| --- | --- | --- | --- | --- | --- | --- |
+| absent | reject | reject | reject | reject | reject | reject |
+| explicit null | reject | reject | reject | unavailable (`None`) | unavailable (`None`) | reject |
+| wrong type, whole field | reject | reject | reject | reject | reject | reject |
+| wrong type, one element | n/a | n/a | reject | n/a | n/a | reject |
+| wrong type, every element | n/a | n/a | reject | n/a | n/a | reject |
+| empty | reject (`""`) | accepted: the empty value | accepted: present, empty | reject (`""`) | reject (`""`) | accepted: empty value |
+| duplicate key | reject | reject | reject | reject | reject | reject |
+| trailing content / unknown key | reject | reject | reject | reject | reject | reject |
+
 ## Phase 3: Linux and WSL2 backend
 
 Gated `#[cfg(target_os = "linux")]`. Depends on Wave 3 and S3.
 
 ### Wave 4 (parallel, with Phases 4 and 5)
 
-- [ ] **Process and descriptor scan** - enumerate `/proc/<pid>` leaders (R3);
+- [x] **Process and descriptor scan** - enumerate `/proc/<pid>` leaders (R3);
       read `/proc/<pid>/stat` start time as the creation token; for each fd,
       `fstat`-equivalent identity via `/proc/<pid>/fd/<n>` metadata (not link text,
       which is descriptive for unlinked files); read cwd the same way; classify
@@ -280,23 +338,23 @@ Gated `#[cfg(target_os = "linux")]`. Depends on Wave 3 and S3.
       (`partial`), never converted to no matches. Descriptor replacement during
       inspection recorded as a limitation. Mount/PID namespace limitation recorded
       when device identities cannot be compared reliably.
-- [ ] **inotify fdinfo parser** - parse `inotify wd:<dec> ino:<hex> sdev:<hex>
+- [x] **inotify fdinfo parser** - parse `inotify wd:<dec> ino:<hex> sdev:<hex>
       mask:<hex>` lines; normalize the kernel `sdev` encoding to match
       `st_dev` (major/minor decode); ignore unknown extra fields; malformed
       required fields reported without discarding valid sibling lines; preserve
       multiple registrations per inotify descriptor (fd number + wd). Identify
       inotify fds by `fdinfo` presence of inotify lines, not by link text alone.
       Never read from the inotify fd itself (no event queue consumption).
-- [ ] **Watch matching** - a registration matches only when its inode is the
+- [x] **Watch matching** - a registration matches only when its inode is the
       target or an included descendant; ancestor watches are excluded and
       reported as a limitation; non-recursive target watch kept under
       `--target-only`; unmatched registrations never gain an invented path; mask
       and `recursive_known=false` (inotify has no native recursion) recorded.
-- [ ] **Coverage records** - separate records for process enumeration, descriptors,
+- [x] **Coverage records** - separate records for process enumeration, descriptors,
       cwd, inotify; a fanotify record fixed at `unsupported`; "complete
       descriptor scan is not complete watcher discovery" stated in the
       limitation text.
-- [ ] **Linux tests** - controlled child (readiness handshake over a pipe,
+- [x] **Linux tests** - controlled child (readiness handshake over a pipe,
       guaranteed cleanup via guard on success/failure/timeout, no sleeps) with an
       open file, cwd in the tree, and a live inotify watch (using the `inotify`
       crate as a **dev-dependency only** to create it). Assert correct dev/inode,

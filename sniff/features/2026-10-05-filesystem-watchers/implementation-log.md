@@ -11,7 +11,46 @@ skills_files_updated_during_phase_1:
   - .claude/skills/os/linux.md
   - .claude/skills/os/macos.md
   - .claude/skills/os/windows.md
-packages: []
+packages:
+  - sniff
+source_files_during_phase_2:
+  - sniff/lib/Cargo.toml
+  - sniff/lib/src/performance/counters.rs
+  - sniff/lib/src/filesystem/mod.rs
+  - sniff/lib/src/filesystem/query/mod.rs
+  - sniff/lib/src/filesystem/query/backend.rs
+  - sniff/lib/src/filesystem/query/budget.rs
+  - sniff/lib/src/filesystem/query/identity.rs
+  - sniff/lib/src/filesystem/query/matching.rs
+  - sniff/lib/src/filesystem/query/native.rs
+  - sniff/lib/src/filesystem/query/options.rs
+  - sniff/lib/src/filesystem/query/process.rs
+  - sniff/lib/src/filesystem/query/report.rs
+  - sniff/lib/src/filesystem/query/root.rs
+  - sniff/lib/src/filesystem/query/tree.rs
+  - sniff/lib/src/filesystem/query/tests.rs
+docs_updated_during_phase_2:
+  - sniff/docs/topics/filesystem-query.md
+  - sniff/docs/dependencies.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+  - .claude/skills/sniff/SKILL.md
+  - .claude/skills/os/SKILL.md
+  - .claude/skills/os/windows.md
+source_files_during_phase_3:
+  - sniff/lib/src/filesystem/query/linux.rs
+  - sniff/lib/src/filesystem/query/linux_tests.rs
+  - sniff/lib/src/filesystem/query/fixtures/inotify-fdinfo.txt
+  - sniff/lib/src/filesystem/query/backend.rs
+  - sniff/lib/src/filesystem/query/mod.rs
+  - sniff/lib/src/filesystem/query/report.rs
+  - sniff/lib/src/filesystem/query/tree.rs
+  - sniff/lib/src/filesystem/query/tests.rs
+docs_updated_during_phase_3:
+  - sniff/docs/topics/filesystem-query.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+  - .claude/skills/sniff/SKILL.md
 ---
 
 # Implementation Log for 2026-10-05-filesystem-watchers (7 phases)
@@ -322,3 +361,336 @@ and Phase 5 adds features to an existing dependency.
 - **Human review:** the spec sets `human_review: true` for R1 (deadline
   semantics) and the Windows per-handle hang (R2 option A vs B). Phase 2 can
   proceed on R1 option 1; Phase 5 must wait for the Windows answer.
+
+## Phase 2
+
+Phase 2 builds the platform-neutral library core in
+`sniff/lib/src/filesystem/query/`, re-exported from `sniff::filesystem`
+(`query_path_usage`, `PathUsageOptions`, `PathUsageReport`, `PathUsageError`).
+It proceeds on R1 option 1 (shared scan budget), as Phase 1 directed; the
+author has not yet answered R1, so the spec keeps `human_review: true`.
+
+### What was built
+
+| File | Contents |
+| --- | --- |
+| `options.rs` | `PathUsageOptions` (recursive by default, `target_only()`, `with_deadline()`, 2 s default); `PathUsageError` with stable `kind()` strings |
+| `native.rs` | `NativeString` lossless path/name object (hand-written strict visitor); `decimal` adapters for 64/128-bit ids; `nullable` (absent is an error, `null` is unavailable) |
+| `budget.rs` | One monotonic `Budget` per query; sticky `exhausted`; test-only check-count expiry and `expire()` |
+| `identity.rs` | `FileIdentity` (`unix` dev/ino; `windows` volume serial + 128-bit `FileIdInfo`) and per-OS reads |
+| `root.rs` | Root resolution from `symlink_metadata` (FIFO/socket/device rejected before any open), one canonicalization, identity capture, recheck |
+| `tree.rs` | One streaming `walkdir` walk, identity -> every in-scope path (hard links), aggregated unreadable-entry limitations, budget check per entry |
+| `matching.rs` | Identity-first matching; path-only evidence gets a component-aware pre-filter then an identity lookup (`match_basis: path_lookup`); deleted objects never matched by former path |
+| `process.rs` | Merge only on equal PID **and** creation token; token-less records stay separate and `identity_uncertain`; enrichment re-reads the token after reading details and refuses on change |
+| `report.rs` | Report types (R7 names), `Limitations` aggregator (kind + message, three examples), R6 `outcome` |
+| `backend.rs` | Crate-private `UsageBackend` trait (enumerate once, inspect per process, `creation_token`, `details` defaulting to per-PID `sysinfo`), interim `PlatformBackend` |
+| `mod.rs` | `query_path_usage` and the orchestrator: coverage per mechanism, prerequisite-gap propagation, R4 caps, sorting |
+| `tests.rs` | Unit tests through a fake backend over real temp trees: 55 run on macOS, 56 on Linux, 52 on Windows (OS-gated cases differ) |
+
+New counters (`performance::counters`): `filesystem.query.tree_walks`,
+`tree_identity_reads`, `process_enumerations`, `process_inspections`,
+`descriptor_inspections`, `watch_registration_reads`, `identity_enrichments`,
+`path_lookups`. The descriptor and watch counters are for Phase 3-5 backends.
+
+`sniff/lib/Cargo.toml` gains the `windows` feature `Win32_Storage_FileSystem`
+(`CreateFileW`, `GetFileInformationByHandleEx(FileIdInfo)`). No new crates.
+
+### Decisions and departures from the plan
+
+- **Root recheck runs before enrichment.** The plan orders "enrich, recheck
+  root". The recheck decides whether coverage can stay complete; enrichment is
+  optional. Running the recheck first means a budget that runs out during
+  enrichment cannot also leave the root unverified.
+- **Path fallback is a lookup, not text comparison.** The plan asks for
+  component-aware comparison that also handles Windows drive/UNC/verbatim
+  spellings, short names, and per-directory case sensitivity. Text cannot
+  decide short names or case-sensitive directories without querying the
+  filesystem. So a path-only observation passes a component-aware pre-filter
+  (never a string prefix; over-inclusive on Windows: case-folded, prefixes
+  folded, `~` components let through) and is then looked up by identity. The
+  match carries `match_basis: path_lookup` so a consumer knows the lookup
+  could name a replacement. Evidence with a backend identity is matched on
+  identity alone.
+- **Windows tree identities use one attribute-only handle per entry.**
+  `CreateFileW(FILE_READ_ATTRIBUTES, FILE_FLAG_OPEN_REPARSE_POINT)` plus
+  `FileIdInfo`, closed immediately. This is not the S2 hang: the handle is the
+  query's own, not another process's. If Windows trees exhaust the budget in
+  Phase 5, the bulk alternative is `GetFileInformationByHandleEx
+  (FileIdExtdDirectoryInfo)` once per directory. The Windows walker also
+  refuses to descend into non-link reparse directories (cloud placeholders),
+  which std reports as ordinary directories.
+- **`elapsed_us: u64`, not `elapsed_ms: f64`.** The first Linux run failed the
+  report round trip: serde_json (without `float_roundtrip`) read `0.399236`
+  back as `0.39923600000000004`. An integer reads back exactly.
+- **Mechanism names.** `open_handles` covers Unix descriptors and Windows
+  handles; the rest are `working_directories`, `inotify`, `fanotify`,
+  `fsevents`, `loaded_modules`, `directory_change_subscriptions`, `polling`;
+  prerequisites are `process_enumeration` and `tree_identity`. Coverage
+  `scope` is `visible_processes`, `target`, or `target_tree`.
+- **Where limitations live.** Mechanism-specific limitations sit on that
+  mechanism's coverage record. Report-wide ones (root changed or unverified,
+  identity enrichment) are in the top-level `limitations`. An unsupported
+  mechanism is reported once, as `status: unsupported` with a `reason`, not
+  also as a limitation.
+- **`attempted`/`succeeded` units.** Process inspections for usage
+  mechanisms, tree entries for `tree_identity`, processes listed for
+  `process_enumeration`. A mechanism with attempts and zero successes is
+  `failed` (its denials remain listed); a mechanism never started because the
+  budget ran out or enumeration failed is `not_attempted` with a `reason`.
+- **Creation token is a plain `u64`** (Linux `starttime` ticks, macOS start
+  microseconds, Windows creation FILETIME), serialized as a decimal string.
+- **Interim backend.** `backend::platform()` declares each OS's mechanisms
+  but implements none, so a real query today returns `outcome: unsupported`
+  with every reason filled in. The fixed-unsupported reasons (FSEvents,
+  fanotify, polling, Windows cwd and `ReadDirectoryChangesW`) are final.
+- **Not built in Phase 2 (belongs to Phase 3):** the "watch on an ancestor is
+  outside this query" limitation. It needs inotify data, so Phase 3 adds a
+  `LimitationKind` and the ancestor identities.
+- **`Budget::remaining()` was not added**; no caller needs it yet.
+- **Windows trap found and fixed:** `io::Error::from(windows::core::Error)`
+  keeps the HRESULT as the raw OS error, so `ErrorKind::NotFound` never
+  matched; a deleted root was reported as unverified instead of changed.
+  `identity.rs` now unwraps `FACILITY_WIN32` HRESULTs. Recorded in the `os`
+  skill (`windows.md` plus a symptom-router row).
+
+### Report-reader robustness matrix
+
+The outcome table is in the plan under Phase 2 ("Report-reader robustness
+matrix"). Structs use `deny_unknown_fields`; every `Option` field uses
+`nullable` (or `decimal::option`), so an absent key is an error and `null` is
+"unavailable"; `Vec` fields have no `serde(default)`. The control row (the
+unedited serialized report reads back equal) passes on every host. Grep for
+smells: no `#[serde(default)]`, `unwrap_or_default()`, or `.ok()` on a
+load-bearing parse in `query/`. The one `.ok()` is in `matching.rs`, where a
+failed lookup correctly means "no match".
+
+### Requirement-to-test mapping
+
+All tests are L1 unit tests in `sniff/lib/src/filesystem/query/tests.rs`
+(lib target, no tier marker, default features).
+
+| Requirement | Tests |
+| --- | --- |
+| Options, typed errors, stable kinds | `default_options_are_recursive_with_a_two_second_budget`, `zero_and_unrepresentable_deadlines_are_invalid_options`, `a_missing_target_is_a_typed_error_not_an_empty_report`, `a_dangling_root_symlink_is_a_missing_target` (Unix), `a_fifo_target_is_rejected_before_it_is_opened` (Unix), `every_error_kind_is_stable` |
+| Root alias resolved once, both spellings | `a_root_symlink_queries_its_target_and_reports_both_spellings` (Unix), `a_relative_target_keeps_its_requested_spelling` |
+| All five coverage statuses | `a_clean_inspection_is_complete_and_usable_with_no_matches`, `a_denied_process_makes_coverage_partial_and_stays_visible`, `every_inspection_failing_is_failed_and_unavailable`, `a_failed_enumeration_leaves_usage_mechanisms_not_attempted`, `a_process_that_exits_before_inspection_is_a_visible_gap` |
+| Outcome rule (R6) | `the_outcome_rule_ignores_prerequisites_and_fixed_unsupported_records`, `a_partial_mechanism_with_retained_evidence_is_usable`, `an_empty_visible_process_set_is_complete`, `a_partial_enumeration_with_nothing_inspected_is_unavailable`, `the_shipped_backend_reports_unsupported_until_a_native_backend_exists` |
+| Prerequisite propagation | `a_partial_enumeration_propagates_into_every_dependent_mechanism`, `an_unreadable_descendant_makes_dependent_coverage_partial` (Unix, non-root) |
+| Budget before/during each phase | `a_budget_expired_on_entry_is_a_root_validation_timeout`, `a_budget_expiring_during_root_validation_is_a_root_validation_timeout`, `a_budget_expiring_during_the_tree_walk_keeps_a_report_with_a_partial_tree`, `a_budget_expiring_before_enumeration_leaves_mechanisms_not_attempted`, `a_budget_expiring_during_enumeration_inspects_nothing`, `a_budget_expiring_before_any_inspection_is_not_attempted`, `a_budget_expiring_during_inspection_keeps_collected_evidence` (also covers recheck and enrichment skipped) |
+| Root replacement and removal | `a_root_replaced_during_the_query_keeps_evidence_and_reports_the_change`, `a_root_removed_during_the_query_is_a_root_change` |
+| PID reuse, missing start time, enrichment | `the_same_pid_with_different_start_tokens_stays_two_processes`, `enrichment_after_pid_reuse_never_mislabels_prior_evidence`, `enrichment_after_the_process_exits_keeps_its_evidence`, `verified_enrichment_fills_identity_without_overriding_backend_fields`, `missing_start_tokens_never_merge_and_are_not_enriched`, `a_retained_handle_without_a_token_allows_enrichment` |
+| Hard-link alias | `hard_links_report_every_in_scope_path_and_the_observed_alias` |
+| Sibling-prefix rejection, path spellings | `a_similarly_prefixed_sibling_is_outside_the_tree`, `windows_spellings_are_compared_by_component_not_by_string` (Windows), `a_case_variant_path_lookup_matches_only_the_object_it_names` (Windows) |
+| Path-only and identity matching rules | `a_path_only_observation_inside_the_tree_matches_by_lookup`, `a_deleted_object_is_never_matched_by_its_former_path`, `an_object_with_a_known_identity_is_never_matched_by_path_text` |
+| Descendant symlink not expanded | `descendant_symlinks_are_indexed_as_links_and_never_expanded` (Unix) |
+| Hidden/ignored in scope; target-only | `hidden_and_git_ignored_entries_are_in_scope`, `target_only_matches_the_directory_itself_and_not_descendants` |
+| Malformed records, truncation (R4), sorting | `malformed_records_keep_valid_siblings_and_make_coverage_partial`, `evidence_beyond_the_per_process_cap_is_counted_as_omitted`, `processes_and_evidence_are_sorted_for_presentation` |
+| One tree walk; no inventory | `one_tree_walk_serves_every_process_and_no_inventory_runs` (50 processes: 1 walk, 1 enumeration, only `filesystem.query.*`, metadata, and canonicalize counters) |
+| Lossless paths, ids, explicit nulls | `a_unicode_native_string_serializes_as_display_only`, `a_non_utf8_unix_path_round_trips_losslessly` (Unix), `an_unpaired_windows_surrogate_round_trips_losslessly` (Windows), `foreign_native_encodings_decode_only_when_representable`, `a_non_utf8_file_in_the_tree_matches_and_its_report_round_trips` (Linux: APFS refuses non-UTF-8 names), `identifiers_serialize_as_decimal_strings`, `unavailable_fields_serialize_as_explicit_nulls`, `decimal_identifiers_reject_non_canonical_strings` |
+| Input-robustness matrix | `the_report_reader_rejects_every_malformed_shape_of_its_load_bearing_fields`, `the_native_string_reader_rejects_every_malformed_shape` |
+
+Mutation check: disabling the token re-read in `process::enrich` fails
+`enrichment_after_pid_reuse_never_mislabels_prior_evidence`; replacing
+`Path::starts_with` with a string prefix fails
+`a_similarly_prefixed_sibling_is_outside_the_tree`. Both were restored.
+
+### Gates run
+
+- macOS (local): `just test` in `sniff/` 3188 run, 3188 passed, 32 skipped;
+  `just lint` clean; `cargo clippy -p sniff --all-targets [--features remote]
+  -- -D warnings` and the same for `sniff-cli` clean.
+- Linux (`just cross-check sniff --os linux filesystem::query::`): 56/56.
+  The first run failed the non-UTF-8 round trip (the `f64` finding above).
+- Native Windows (`just cross-check sniff --os windows filesystem::query::`):
+  52/52 (Unix-only tests excluded, Windows-only tests included). The first run
+  failed `a_root_removed_during_the_query_is_a_root_change` (the HRESULT
+  finding above).
+- WSL2 not run: it compiles and runs the same Linux path build-linux
+  exercised, and Phase 2 adds no backend. The nightly WSL2 leg covers it.
+- `just cross-check` re-parses `-E 'test(...)'` through a shell and fails on
+  the parentheses; pass a plain substring filter instead.
+- No pre-existing failures; no skipped requirement.
+
+## Phase 3
+
+Phase 3 builds the Linux/WSL2 backend, `ProcBackend` in
+`sniff/lib/src/filesystem/query/linux.rs`, and returns it from
+`backend::platform()` on Linux. macOS and Windows keep the interim
+`PlatformBackend` (now `#[cfg(not(target_os = "linux"))]`). Shipped code is
+plain `std`: no new runtime or dev dependency.
+
+### What was built
+
+| File | Contents |
+| --- | --- |
+| `linux.rs` | `ProcBackend` over a configurable proc root (`/proc` in production): leader-only enumeration with `starttime` tokens and `comm` names; per-process descriptor, cwd, and inotify inspection; post-inspection start-time check; the hand-written `fdinfo` parser and `sdev` decode |
+| `linux_tests.rs` | 16 synthetic-`/proc` tests (every Unix host) plus 4 live tests in `linux_tests::live` (Linux and WSL2) and the `#[ignore]` child fixture `usage_child` |
+| `fixtures/inotify-fdinfo.txt` | The real `fdinfo` captured in S3, byte for byte (tabs kept), read with `include_str!` |
+| `backend.rs` | `FANOTIFY_UNSUPPORTED`/`POLLING_UNSUPPORTED` shared with the Linux backend; `platform()` per OS; Linux branch of the interim mechanism list removed |
+| `report.rs` | `LimitationKind::{AncestorWatch, DescriptorReplaced, DeviceIdentityUnreliable}`; `Limitations::has_gaps` |
+| `mod.rs` | Module declarations; coverage uses `has_gaps` (an ancestor watch is not a gap) |
+| `tree.rs` | `TreeIndex::identities()` for the device-mismatch check |
+| `tests.rs` | `the_shipped_backend_reports_unsupported_until_a_native_backend_exists` gated to non-Linux |
+
+Per process the backend does this:
+
+1. List `/proc/<pid>/fd` and close the listing before reading any entry, so
+   the query's own listing handle is gone when it inspects itself.
+2. For each descriptor: `stat` through the magic link gives the identity. An
+   in-scope match reads its link text (observed path, `(deleted)`) and its
+   `fdinfo` (access from `flags`, replacement check against `ino:`).
+   Otherwise, link text `anon_inode:*` means the `fdinfo` is read and parsed
+   for `inotify` lines.
+3. `stat` `/proc/<pid>/cwd` the same way.
+4. Re-read `starttime`. If it changed or the process is gone, every mechanism
+   reports `Vanished` and nothing read is kept.
+
+### Decisions and departures from the plan
+
+- **No `inotify` dev-dependency.** The plan names the `inotify` crate for test
+  watches. The child fixture calls `libc::inotify_init1` and
+  `inotify_add_watch` instead; `libc` is already a dependency, so no crate
+  is added. The R9 table's "Phase 3 adds one dev-dependency" no longer holds.
+- **The `/proc` reader also compiles in Unix test builds**
+  (`#[cfg(any(target_os = "linux", all(test, unix)))]`). Shipped code stays
+  Linux-only. Tests point the backend at a synthetic `/proc` whose `fd/<n>`
+  and `cwd` entries are symlinks; `stat` and `readlink` treat those like the
+  kernel's magic links. That way the `fdinfo` matrix and the permission/race
+  tests run on macOS too, through the public report.
+- **Matrix rows "every line bad" and "zero-length record".** The plan says
+  "`partial` with zero successes". The Phase 2 core makes a mechanism with
+  attempts and no successes `failed`, so a process whose only inotify record
+  is unusable reports `inotify` `failed` (attempted 1, succeeded 0, limitation
+  kept). With other processes inspected successfully the mechanism is
+  `partial`. In neither case is it `complete` or empty, which is the row's
+  intent. Successes count classified descriptors and valid registrations.
+- **Matrix row "duplicate registration".** The plan says both copies are kept.
+  The kernel never repeats a `wd` within one inotify instance, and the core
+  already collapses evidence that is identical in every field. So an
+  identical repeated line yields one record. The same `wd` with a different
+  mask (or any other differing field) yields two records, and the test
+  asserts both cases.
+- **Ancestor watches are a scope note, not a gap.** They produce an
+  `ancestor_watch` limitation on `inotify` (pid and `fd/wd` example) without
+  making coverage `partial`; `Limitations::has_gaps` excludes that kind.
+  Otherwise, an editor watching a checkout's parent would make every query
+  inside it `partial`.
+- **Mount namespaces become a device check.** `stat` through
+  `/proc/<pid>/fd` returns kernel-global `(st_dev, st_ino)`, so descriptor and
+  cwd identities compare reliably across mount namespaces. The unreliable
+  case is inotify `sdev` on btrfs subvolumes and overlayfs, where `st_dev`
+  differs from the superblock device. A registration whose inode is in the
+  tree but whose decoded device is not adds a `device_identity_unreliable`
+  limitation (coverage `partial`) and is never matched on inode alone.
+- **Descriptor replacement** is detected when `fdinfo` prints `ino:` and it
+  differs from the inode `stat` saw: the descriptor is dropped with a
+  `descriptor_replaced` limitation. Kernels without the `ino:` line cannot
+  show replacement this way.
+- **Closed descriptors and zombies.** A descriptor that disappears between
+  the listing and its `stat` (`ENOENT`/`ESRCH`) is no longer usage and is not
+  a gap. A missing cwd counts as inspected with no evidence; the start-time
+  re-read tells an exit apart.
+- **Access is optional detail.** An unreadable `fdinfo` or malformed `flags`
+  line on a matched descriptor leaves `access: null` with no limitation; the
+  identity match stands.
+- **Unreadable `stat` during enumeration.** The process is still a candidate,
+  with no token (so `identity_uncertain`). An `identity_uncertain` limitation
+  makes enumeration `partial`.
+- **Counters.** `descriptor_inspections` counts each `/proc/<pid>/fd/<n>`
+  entry; `watch_registration_reads` counts each anonymous-inode `fdinfo` read.
+  A matched descriptor's access-flag read is part of its descriptor
+  inspection.
+- **`retained_handle` stays false.** The backend keeps no `/proc/<pid>`
+  handle between enumeration and enrichment; enrichment relies on the
+  `starttime` token.
+- **`backend.rs`'s `#![cfg_attr(not(test), allow(dead_code))]` stays.**
+  macOS and Windows non-test builds still construct no inspection results.
+
+### `fdinfo` input-robustness matrix
+
+Asserted by `the_fdinfo_reader_gives_every_malformed_shape_a_defined_outcome`,
+which works from the captured fixture. One base edit aims `wd:3` at
+`app/file.txt` and `wd:2` at the root directory; `wd:1` keeps its captured,
+out-of-scope identity. Each cell then makes one further edit, applied to the
+`wd:3` line unless noted. Every cell is asserted through `PathUsageReport`:
+`wd:3`/`wd:2` evidence counts, `inotify` status, and the `malformed_record`
+count. Every cell also asserts that `open_handles` stays `complete` and the
+outcome `usable`.
+
+| Cell | `wd` | `ino` | `sdev` | `mask` | Outcome |
+| --- | --- | --- | --- | --- | --- |
+| control | valid | valid | valid | valid | `wd:3` + `wd:2` evidence, `complete` |
+| absent | removed | removed | removed | removed | line malformed, `wd:2` kept, `partial` |
+| empty value | `wd:` | `ino:` | `sdev:` | `mask:` | malformed (never 0), `partial` |
+| wrong type | `x`, `+3` | `zz` | `zz` | `zz` | malformed, `partial` |
+| wrong type, every line | - | `zz` on all three | - | - | no evidence, 3 malformed, `failed` |
+| out of range | - | 17 hex digits | `100000000` (> 32-bit `dev_t`) | - | malformed (never truncated) |
+| duplicate key | `wd:3` twice | `ino:1` before / after the real one | - | - | malformed (never first/last-wins) |
+| empty record | file has no `inotify` lines | | | | not inotify, no limitation, `complete` |
+| zero-length record | `""` | | | | 1 malformed, `failed` |
+| duplicate registration | identical line repeated | | | | one record (see departures) |
+| same `wd`, different mask | | | | | two records |
+| garbage line | `zzz` appended | | | | 1 malformed, all three valid lines kept |
+| trailing token | ` garbage` on the line | | | | that line malformed |
+| unknown field | ` foo:1` appended | | | | accepted, `complete` |
+
+Mutation check: removing the duplicate-key rejection fails the matrix at
+"duplicate ino, first" (first-wins). The check was restored. Smell grep: no
+`serde(default)` or `unwrap_or_default()` in `linux.rs`. Every `.ok()` and
+`filter_map` is one of three cases:
+
+- inside a digit-checked parse helper whose `None` the caller turns into a
+  malformed record;
+- an unreadable `starttime`, which conservatively means "vanished";
+- the ancestor-identity set, which only decides a scope note.
+
+### Requirement-to-test mapping
+
+All tests are L1 unit tests in the `sniff` lib target, with no tier marker
+and default features. `linux_tests` runs on every Unix host;
+`linux_tests::live` runs on Linux and WSL2.
+
+| Requirement | Tests |
+| --- | --- |
+| Leaders only; threads are not processes | `only_numeric_proc_entries_are_processes_and_comm_may_hold_parentheses`, `live::the_querying_process_is_listed_once_and_its_threads_are_not_processes` |
+| `starttime` token, `comm` with parentheses, unreadable stat | `only_numeric_proc_entries_are_processes_and_comm_may_hold_parentheses` |
+| Controlled child: open file, cwd, live inotify watches with correct dev/inode | `live::a_controlled_child_is_found_by_its_descriptors_cwd_and_watches` |
+| Multiple registrations on one descriptor preserved | same live test (3 distinct `wd`s, one descriptor), `a_watch_preserves_its_mask_descriptor_and_identity` |
+| Sibling-prefix rejection | live test (`app-copy` open and watched), `open_descriptors_and_the_cwd_are_matched_by_identity_with_access_flags` |
+| Ancestor watch excluded and reported | live test, `a_watch_on_an_ancestor_is_reported_as_outside_the_query` |
+| Hard-link alias; unlinked `(deleted)` text descriptive only | live test, `a_hard_link_outside_the_tree_reports_the_in_scope_path_and_the_alias` |
+| Target-only keeps the target watch only | `live::target_only_reports_the_target_watch_and_not_descendant_usage`, `target_only_keeps_a_watch_of_the_target_and_ignores_descendants` |
+| `sdev` normalization (nonzero major) | `kernel_device_numbers_are_normalized_to_stat_encoding` (cross-checked against `libc::makedev` on Linux); live WSL2 run on ext4 (major 8) |
+| Device mismatch never matched on inode alone | `a_watch_on_an_in_scope_inode_of_another_device_is_a_visible_limitation` |
+| Access flags (`O_RDONLY`/`O_WRONLY`/`O_RDWR`/`O_PATH`) | `open_descriptors_and_the_cwd_are_matched_by_identity_with_access_flags` |
+| Non-inotify anon descriptors; counters | `other_anonymous_descriptors_are_read_but_carry_no_registrations` |
+| Permission denial: whole table, and listed-but-denied entries | `a_denied_descriptor_table_is_a_visible_gap_not_an_empty_result`, `denied_descriptors_inside_a_listed_table_are_counted` (non-root) |
+| Descriptor replacement | `a_descriptor_replaced_during_inspection_is_dropped_and_reported` |
+| Process exit and PID reuse during inspection | `a_process_that_exits_before_inspection_has_vanished`, `a_reused_pid_discards_everything_read_during_inspection` |
+| Budget expiring between descriptors | `a_budget_expiring_between_descriptors_keeps_what_was_read` |
+| Genuine caller usage kept; detector handles excluded | `live::the_querying_process_is_listed_once_and_its_threads_are_not_processes` |
+| Shipped Linux mechanisms; fanotify/polling `unsupported` | `live::the_shipped_linux_backend_inventories_descriptors_cwd_and_inotify`, `open_descriptors_and_the_cwd_are_matched_by_identity_with_access_flags` |
+| `fdinfo` matrix | `the_fdinfo_reader_gives_every_malformed_shape_a_defined_outcome` |
+
+### Gates run
+
+- macOS (local): `just test` in `sniff/` passed twice, 3204 run, 3204 passed,
+  32 skipped. One earlier invocation exited 101 without printing any test
+  result or summary (it stopped before nextest ran tests); its output was not
+  captured and it did not reproduce. `just lint` clean. `cargo clippy -p
+  sniff --all-targets [--features remote] -- -D warnings` and `cargo clippy
+  -p sniff-cli --all-targets -- -D warnings` clean.
+- Linux (`just cross-check sniff --os linux filesystem::query::`): 75/75,
+  including the 4 live tests (all passed on the first run).
+- WSL2 (`just cross-check sniff --os wsl filesystem::query::`, nextest
+  archive path): 75/75, including the live tests on ext4 (major 8). This
+  confirms the `sdev` decode against a real nonzero major.
+- Native Windows (`just cross-check sniff --os windows filesystem::query::`):
+  52/52. The Linux module is not compiled there. The build's warnings
+  (`KEY_ALL_ACCESS`, `stage_raw_path`, unused `index`) are in unrelated files
+  and predate this phase.
+- Linux clippy: `cross-check` has no lint mode, so `cargo clippy -p sniff
+  --all-targets -- -D warnings` and `--lib` ran over `ssh -o BatchMode=yes
+  build-linux` in the clone that `cross-check` had just synced. Both are
+  clean. This matters because `linux.rs` non-test code compiles only there.
+- No pre-existing failures; no skipped requirement.
