@@ -337,8 +337,14 @@ with the member's owner path (the member's qualified name without its last
 segment); with several and none qualifying, the member has no parent. A
 lone same-named record never overrides a qualification that names another
 owner: beside a local `W`, the method of `impl other::W` is
-`other::W::probe` with no parent, and `container_kind` is likewise read
-only from same-named records that agree with that owner path.
+`other::W::probe` with no parent. A Rust `impl` member's `container_kind`
+is the kind of the declaration its self type resolves to by the rules in
+[Declared Type Relations](./type-relations.md#when-a-target-gets-an-id), and
+is omitted when the self type does not resolve: `impl ::ext::B` beside a
+local `mod ext { struct B; }`, or `impl Base for T` inside `fn outer<T>()`
+beside a file-level `struct T`. Other members found by name read
+`container_kind` only from same-named records that agree with their owner
+path.
 
 `keyword` is the grammar token that introduces the declaration, such as `fn`,
 `struct`, `def`, `func`, `const`, `let`, `var`, `class`, `protocol`, `sub`,
@@ -716,6 +722,23 @@ The rules, each visible in the example:
   and `Bag` does not receive the `impl` block's `T`. A Rust `impl` block has
   no record of its own. A C++ member template reads only the `template`
   directly around it.
+- **A requirement the declaration writes is its own, with or without a
+  parameter list.** A member that constrains itself on its enclosing type's
+  parameter keeps that requirement and still owns no parameters; a
+  requirement written on the enclosing template stays with the template:
+
+  ```cpp
+  template <class T> requires Small<T> struct Bound { void plain(); };
+  template <class T> struct Gate {
+      void check() requires Small<T>;   // constraints ["Small<T>"], generic_params []
+      Gate() requires Small<T> {}       // constraints ["Small<T>"], generic_params []
+  };
+  ```
+
+  `Bound` has `T` and `["Small<T>"]`; `plain` has neither. The same holds for
+  a Rust or Swift method's `where` on its type's `T`, and for a C# `where`
+  clause on a declaration with no list (which the compiler rejects but the
+  grammar accepts).
 - **Bounds attach to their parameter, in source order.** An inline bound
   (`T: Clone`) comes first, then bounds written in a `where` clause on the
   same bare name (`where U: Copy`). A requirement on anything else (`T` of
@@ -731,13 +754,16 @@ The rules, each visible in the example:
   (`'a`); Rust `const N: usize` and C++ non-type parameters are `Const`, and
   their declared type is not a constraint (it stays in
   `source.declaration_text`); everything else is `Type`, including packs
-  (C++ `class... Ts`, Python `*Ts` and `**P`, named without the stars) and
-  higher-kinded parameters (Scala `F[_]`, C++ `template <class> class TT`).
+  (C++ `class... Ts`, Python `*Ts` and `**P`, named without the stars, Swift
+  `each T`, named without `each`) and higher-kinded parameters (Scala
+  `F[_]`, C++ `template <class> class TT`, whose default in
+  `template <class> class TT = Box` is `Box`).
 - **Variance** is recorded as written: C# `in`/`out`, Scala `+`/`-`;
   otherwise absent.
 - **Positions** are zero-based indexes in the written list and are `u16`.
   An unnamed C++ parameter (`template <typename, int N>`) has no entry but
-  keeps its slot, so `N` is position 1. A selected declaration with more
+  keeps its slot, so `N` is position 1. A Rust attribute on a parameter is
+  not a parameter: in `<#[cfg(feature = "x")] T, U>`, `T` is position 0. A selected declaration with more
   than 65 536 parameters fails its file with
   `TreeHuggerError::TooManyGenericParameters` (`hug` reports
   `too_many_generic_parameters`); positions are never truncated.
@@ -750,8 +776,8 @@ The rules, each visible in the example:
 | Python | `class C[T]`, `def f[T]` | `T: int`, `T: (int, str)` | — | — | — |
 | Java | classes, interfaces, records, methods, constructors | `extends A & B` | — | — | — |
 | C# | classes, structs, interfaces, records, methods | `where T : class, new()` | — | `in`, `out` | a `where` clause naming no declared parameter |
-| C++ | the `template` directly around the declaration | — | `= int`, `= 3` | — | `requires` clauses (after the parameters or the function) |
-| Swift | types, functions, aliases | `T: P`, `where T: P` | — | — | `where` requirements on anything else (`U == Int`) |
+| C++ | the `template` directly around the declaration | — | `= int`, `= 3`, `template <class> class TT = Box` | — | `requires` after that template's parameters; a function's own trailing `requires`, wrapped or not |
+| Swift | types, functions, aliases | `T: P`, `where T: P` (after the list, or inside it: `<T where T: P>`) | — | — | `where` requirements on anything else (`U == Int`) |
 | Scala | classes, traits, enums, functions, type aliases | `>: L`, `<: U`, `: Ctx`, operator kept | — | `+`, `-` | — |
 | JavaScript, C, PHP, Perl, Bash, Zsh, Lua | — (no declared generic parameters; JSDoc and PHPDoc `@template` are not read) | | | | |
 
@@ -1261,7 +1287,7 @@ its name:
 | An earlier C/C++ `static` declaration | the complete function identity (C: name; C++: namespace, parameter types, template signature) → its earliest `static` declaration |
 | The namespace a qualified C++ name resolves to | namespace path → its earliest declaring block |
 | A Scala `private[p]` qualifier | the set of the file's package segments |
-| A member's container kind (`SameFileType`, `SameFileTable`) | name and qualified name, and name and each whole-segment tail of the qualified name → the kind those declarations agree on |
+| A member's container kind (`SameFileType`, `SameFileTable`) | a Rust impl member: the impl's resolved self type (the declared-base index below); otherwise name and qualified name, and name and each whole-segment tail of the qualified name → the kind those declarations agree on |
 | A member's container record | an enclosing same-named record, from one span-ordered sweep per name; else name, kind and qualified name → the nearest preceding declaration |
 | An export's target | name and name span |
 | A declared base or Rust impl target (`extends`, `implements`, an impl member's container) | in-file qualified name, from one per-file index of every declaration, per enclosing scope → the one declaration of that name |

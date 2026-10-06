@@ -323,8 +323,11 @@ to each member and to the resolved self type; see
 `tree-hugger/docs/type-relations.md`; C#/Swift/Scala lists are not read yet,
 **planned**). A Rust `impl` member's
 `identity.container_name` is the implemented type's last path segment without
-generics; its container kind is that type's same-file kind, absent when
-declared elsewhere. Under Containment its `relations.container` is the self
+generics; its container kind is the kind of the declaration the self type
+resolves to by the relation resolver (`relations::impl_self_types`, called
+from `definitions.rs::resolve_container_kind`, so `symbols()` agrees),
+absent when it does not resolve (`impl ::ext::B`, an enclosing generic `T`,
+a type declared elsewhere). Under Containment its `relations.container` is the self
 type resolved by full written path, or the self type as written with no ID. Every other
 container kind is the kind extracted for the container's own declaration.
 
