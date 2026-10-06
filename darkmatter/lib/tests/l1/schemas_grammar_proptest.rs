@@ -54,9 +54,16 @@ fn bare_word() -> impl Strategy<Value = String> {
 }
 
 /// Glob-like pattern that includes `[`, `]`, `*`, `!`, etc. but no
-/// whitespace, commas, semicolons, parens, or quotes.
+/// whitespace, commas, semicolons, parens, or quotes. `match()` rejects a
+/// pattern that is not a glob reference at definition time, so only valid
+/// ones (a `!` exclusion included) are generated.
 fn glob_pattern() -> impl Strategy<Value = String> {
-    "[a-zA-Z0-9_/.*!^$+\\-\\[\\]]{1,12}".prop_filter("non-empty", |s| !s.is_empty())
+    "[a-zA-Z0-9_/.*!^$+\\-\\[\\]]{1,12}".prop_filter("a valid glob reference", |s| {
+        matches!(
+            biscuit_file::GlobReference::new([s]),
+            Ok(_) | Err(biscuit_file::GlobReferenceError::NoPositivePattern)
+        )
+    })
 }
 
 fn item_constraints_for(ty: SimplifiedType) -> impl Strategy<Value = Vec<Constraint>> {
@@ -116,6 +123,9 @@ fn item_constraints_for(ty: SimplifiedType) -> impl Strategy<Value = Vec<Constra
             })
             .boxed(),
         SimplifiedType::File => proptest::collection::vec(glob_pattern(), 1..4)
+            .prop_filter("at least one positive pattern", |globs| {
+                globs.iter().any(|glob| !glob.starts_with('!'))
+            })
             .prop_map(|globs| vec![Constraint::Match(globs)])
             .boxed(),
         SimplifiedType::Enum => proptest::collection::vec(bare_word(), 1..5)

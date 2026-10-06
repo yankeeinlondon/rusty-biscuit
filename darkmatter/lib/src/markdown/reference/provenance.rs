@@ -307,7 +307,7 @@ impl ReferenceGraphProvenance {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::markdown::compose::ComposeOptions;
+    use crate::markdown::compose::{ComposeOptions, ComposeRequest, test_request};
     use std::path::PathBuf;
 
     fn url(raw: &str) -> ComposeSource {
@@ -389,7 +389,7 @@ mod tests {
         document: ReferenceDocumentIdentity,
         source: Option<ComposeSource>,
         mode: ReferenceGraphMode,
-        options: &ComposeOptions,
+        options: &ComposeRequest,
     ) -> ReferenceGraphProvenance {
         ReferenceGraphProvenance::new(
             document,
@@ -402,7 +402,7 @@ mod tests {
 
     #[test]
     fn check_accepts_matching_dimensions() {
-        let opts = ComposeOptions::new();
+        let opts = test_request(ComposeOptions::new());
         let doc = identity_of("---\ntitle: A\n---\nBody\n");
         let src = Some(url("https://example.com/root.md"));
         let prov = provenance(doc.clone(), src.clone(), ReferenceGraphMode::Full, &opts);
@@ -416,7 +416,7 @@ mod tests {
 
     #[test]
     fn check_reports_document_first() {
-        let opts = ComposeOptions::new();
+        let opts = test_request(ComposeOptions::new());
         let doc = identity_of("---\ntitle: A\n---\nBody\n");
         let other = identity_of("---\ntitle: A\n---\nDifferent\n");
         let src = Some(url("https://example.com/root.md"));
@@ -437,7 +437,7 @@ mod tests {
 
     #[test]
     fn check_reports_source_before_mode() {
-        let opts = ComposeOptions::new();
+        let opts = test_request(ComposeOptions::new());
         let doc = identity_of("---\ntitle: A\n---\nBody\n");
         let prov = provenance(
             doc.clone(),
@@ -460,13 +460,13 @@ mod tests {
 
     #[test]
     fn check_reports_mode_before_options() {
-        let opts = ComposeOptions::new();
+        let opts = test_request(ComposeOptions::new());
         let doc = identity_of("---\ntitle: A\n---\nBody\n");
         let src = Some(url("https://example.com/root.md"));
         let prov = provenance(doc.clone(), src.clone(), ReferenceGraphMode::TransclusionOnly, &opts);
 
         // Different options AND different mode; mode is checked first.
-        let other_opts = ComposeOptions::new().with_max_transclusion_depth(3);
+        let other_opts = test_request(ComposeOptions::new().with_max_transclusion_depth(3));
         let request_opts = ReferenceGraphOptionsIdentity::capture(&other_opts);
         let err = prov
             .check(&doc, &src, ReferenceGraphMode::Full, &request_opts)
@@ -482,12 +482,12 @@ mod tests {
 
     #[test]
     fn check_reports_options_mismatch() {
-        let opts = ComposeOptions::new();
+        let opts = test_request(ComposeOptions::new());
         let doc = identity_of("---\ntitle: A\n---\nBody\n");
         let src = Some(url("https://example.com/root.md"));
         let prov = provenance(doc.clone(), src.clone(), ReferenceGraphMode::Full, &opts);
 
-        let other_opts = ComposeOptions::new().with_max_transclusion_depth(3);
+        let other_opts = test_request(ComposeOptions::new().with_max_transclusion_depth(3));
         let request_opts = ReferenceGraphOptionsIdentity::capture(&other_opts);
         let err = prov
             .check(&doc, &src, ReferenceGraphMode::Full, &request_opts)
@@ -504,12 +504,12 @@ mod tests {
         // resolve to distinct link targets. `timestamp` is dropped by the
         // compose-cache `context_hash`, so this reuse was previously
         // (wrongly) accepted.
-        let built = ComposeOptions::new_with_context(
+        let built = test_request(ComposeOptions::new_with_context(
             ComposeContext::fixed_for_testing_with([("timestamp", serde_json::json!("1000"))]),
-        );
-        let requested = ComposeOptions::new_with_context(
+        ));
+        let requested = test_request(ComposeOptions::new_with_context(
             ComposeContext::fixed_for_testing_with([("timestamp", serde_json::json!("2000"))]),
-        );
+        ));
         let doc = identity_of("---\ntitle: A\n---\n[link](./x-{{ ctx.timestamp }}.md)\n");
         let src = Some(url("https://example.com/root.md"));
         let prov = provenance(doc.clone(), src.clone(), ReferenceGraphMode::Full, &built);
@@ -529,12 +529,12 @@ mod tests {
         // values such as `memory_used` (also dropped by `context_hash`).
         // Different values flip the condition, so a prebuilt graph must not be
         // reused across them.
-        let built = ComposeOptions::new_with_context(
+        let built = test_request(ComposeOptions::new_with_context(
             ComposeContext::fixed_for_testing_with([("memory_used", serde_json::json!(1024))]),
-        );
-        let requested = ComposeOptions::new_with_context(
+        ));
+        let requested = test_request(ComposeOptions::new_with_context(
             ComposeContext::fixed_for_testing_with([("memory_used", serde_json::json!(2048))]),
-        );
+        ));
         let doc = identity_of("---\ntitle: A\n---\nBody\n");
         let src = Some(url("https://example.com/root.md"));
         let prov = provenance(doc.clone(), src.clone(), ReferenceGraphMode::Full, &built);
@@ -548,7 +548,7 @@ mod tests {
 
     #[test]
     fn provenance_accessors_expose_mode_and_dependencies() {
-        let opts = ComposeOptions::new();
+        let opts = test_request(ComposeOptions::new());
         let doc = identity_of("body");
         let prov = provenance(doc, None, ReferenceGraphMode::Full, &opts);
         assert_eq!(prov.mode(), ReferenceGraphMode::Full);

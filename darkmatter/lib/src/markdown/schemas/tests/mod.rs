@@ -20,7 +20,7 @@ fn md_with_schema(yaml_body: &str) -> Markdown {
 #[test]
 fn validates_inline_schema_success() {
     let md = md_with_schema("$schema:\n  title: 'string(required)'\ntitle: Hello\n");
-    let api = DarkmatterSchemas::new();
+    let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(std::env::temp_dir()));
     let report = api.validate(&md).unwrap();
     assert!(report.valid, "expected valid: {:?}", report.problems);
 }
@@ -28,7 +28,7 @@ fn validates_inline_schema_success() {
 #[test]
 fn validates_inline_schema_missing_required() {
     let md = md_with_schema("$schema:\n  title: 'string(required)'\nother: stuff\n");
-    let api = DarkmatterSchemas::new();
+    let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(std::env::temp_dir()));
     let report = api.validate(&md).unwrap();
     assert!(!report.valid);
     assert!(!report.problems.is_empty());
@@ -37,7 +37,7 @@ fn validates_inline_schema_missing_required() {
 #[test]
 fn no_schema_no_baseline_is_vacuously_valid() {
     let md = md_with_schema("name: alice\n");
-    let api = DarkmatterSchemas::new();
+    let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(std::env::temp_dir()));
     let report = api.validate(&md).unwrap();
     assert!(report.valid);
     assert!(report.problems.is_empty());
@@ -54,7 +54,7 @@ fn bare_sidecar_advisory_reaches_every_validation_entry_point() {
     )
     .expect("write schema");
     let md = prompt_with_source(dir.path(), "$schema: ./schema.yaml\n");
-    let api = DarkmatterSchemas::new();
+    let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(dir.path()));
     let effective = api.effective_for(&md).unwrap().unwrap();
     let input = serde_json::json!({});
     let options = ValidationOptions::default();
@@ -110,7 +110,7 @@ fn bare_sidecar_advisory_survives_baseline_and_reference_assembly() {
         ..Default::default()
     });
 
-    let report = DarkmatterSchemas::new()
+    let report = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(dir.path()))
         .with_baseline(baseline)
         .unwrap()
         .validate(&md)
@@ -145,7 +145,7 @@ fn excluded_bare_sidecar_shapes_remain_advisory_free_through_validation() {
             &format!("$schema: ./schema-{index}.yaml\ntitle: hello\ncount: 2\n"),
         );
 
-        let report = DarkmatterSchemas::new().validate(&md).unwrap();
+        let report = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(dir.path())).validate(&md).unwrap();
         assert!(
             report.advisories.is_empty(),
             "{label} unexpectedly produced {:?}",
@@ -174,7 +174,7 @@ fn baseline_applies_when_document_has_no_schema() {
         },
         ..Default::default()
     });
-    let api = DarkmatterSchemas::new().with_baseline(baseline).unwrap();
+    let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(std::env::temp_dir())).with_baseline(baseline).unwrap();
     let report = api.validate(&md).unwrap();
     assert!(!report.valid);
     assert!(
@@ -205,7 +205,7 @@ fn baseline_merges_with_document_schema() {
         },
         ..Default::default()
     });
-    let api = DarkmatterSchemas::new().with_baseline(baseline).unwrap();
+    let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(std::env::temp_dir())).with_baseline(baseline).unwrap();
     let report = api.validate(&md).unwrap();
     assert!(!report.valid);
     assert!(
@@ -218,7 +218,7 @@ fn baseline_merges_with_document_schema() {
 
 #[test]
 fn validator_cache_reuses_across_documents() {
-    let api = DarkmatterSchemas::new();
+    let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(std::env::temp_dir()));
     let md1 = md_with_schema("$schema:\n  x: number\nx: 1\n");
     let md2 = md_with_schema("$schema:\n  x: number\nx: 2\n");
     api.validate(&md1).unwrap();
@@ -234,7 +234,7 @@ fn validator_cache_reuses_across_documents() {
 #[test]
 fn coerces_boolish_string_against_inline_schema() {
     let md = md_with_schema("$schema:\n  flag: boolean\nflag: \"true\"\n");
-    let api = DarkmatterSchemas::new();
+    let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(std::env::temp_dir()));
     let report = api.validate(&md).unwrap();
     assert!(report.valid, "expected valid: {:?}", report.problems);
 }
@@ -242,7 +242,7 @@ fn coerces_boolish_string_against_inline_schema() {
 #[test]
 fn coerces_numeric_string_against_inline_schema() {
     let md = md_with_schema("$schema:\n  n: number\nn: \"42\"\n");
-    let api = DarkmatterSchemas::new();
+    let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(std::env::temp_dir()));
     let report = api.validate(&md).unwrap();
     assert!(report.valid, "expected valid: {:?}", report.problems);
 }
@@ -250,7 +250,7 @@ fn coerces_numeric_string_against_inline_schema() {
 #[test]
 fn ambiguous_string_still_reports_type_problem() {
     let md = md_with_schema("$schema:\n  flag: boolean(required)\nflag: \"yes\"\n");
-    let api = DarkmatterSchemas::new();
+    let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(std::env::temp_dir()));
     let report = api.validate(&md).unwrap();
     assert!(!report.valid);
     assert!(
@@ -286,7 +286,7 @@ fn coerces_baseline_merged_field_without_document_schema() {
         },
         ..Default::default()
     });
-    let api = DarkmatterSchemas::new().with_baseline(baseline).unwrap();
+    let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(std::env::temp_dir())).with_baseline(baseline).unwrap();
     let report = api.validate(&md).unwrap();
     assert!(report.valid, "expected valid: {:?}", report.problems);
 }
@@ -301,7 +301,7 @@ fn coerces_raw_json_schema_baseline_with_no_simplified_ast() {
         "type": "object",
         "properties": { "flag": {"type": "boolean"} }
     });
-    let api = DarkmatterSchemas::new()
+    let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(std::env::temp_dir()))
         .with_baseline_json_schema(raw)
         .unwrap();
     let effective = api.effective_for(&md).unwrap().unwrap();
@@ -320,7 +320,7 @@ fn enriches_problem_with_property_description() {
     let md = md_with_schema(
         "$schema:\n  title: 'string(required) -> The headline shown in listings'\nother: x\n",
     );
-    let api = DarkmatterSchemas::new();
+    let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(std::env::temp_dir()));
     let report = api.validate(&md).unwrap();
     assert!(!report.valid);
     assert!(
@@ -346,7 +346,7 @@ fn description_equal_to_message_is_suppressed() {
         },
         "required": ["title"]
     });
-    let api = DarkmatterSchemas::new()
+    let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(std::env::temp_dir()))
         .with_baseline_json_schema(raw)
         .unwrap();
     let report = api.validate(&md).unwrap();
@@ -372,7 +372,7 @@ fn whitespace_only_description_is_suppressed() {
             "title": { "type": "string", "description": "   " }
         }
     });
-    let api = DarkmatterSchemas::new()
+    let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(std::env::temp_dir()))
         .with_baseline_json_schema(raw)
         .unwrap();
     let report = api.validate(&md).unwrap();
@@ -389,43 +389,18 @@ fn whitespace_only_description_is_suppressed() {
 
 // ── file_ref_fallback_dir threading (Phase 2 Track B) ───────────────
 
-/// RAII guard that restores the process CWD on drop, even on panic.
-/// Tests that mutate CWD are annotated with
-/// `#[serial_test::serial("darkmatter-file-cwd")]` to prevent races with
-/// the ambient-CWD tests in `format::tests` and `validate::tests`.
-struct CwdGuard {
-    prior: std::path::PathBuf,
-}
-
-impl CwdGuard {
-    fn enter(dir: &std::path::Path) -> Self {
-        let prior = std::env::current_dir().expect("read CWD");
-        std::env::set_current_dir(dir).expect("set CWD");
-        Self { prior }
-    }
-}
-
-impl Drop for CwdGuard {
-    fn drop(&mut self) {
-        let _ = std::env::set_current_dir(&self.prior);
-    }
-}
-
 /// A `file`-typed schema property value is not resolved via the captured
 /// launch-area fallback. The launch area is diagnostic context, not a
 /// resolution input for a reference authored inside the document.
 #[test]
-#[serial_test::serial(darkmatter_file_cwd)]
 fn file_format_does_not_resolve_via_launch_area_fallback() {
     let launch_dir = tempfile::tempdir().expect("tempdir");
     std::fs::write(launch_dir.path().join("spec.md"), "# Spec\n").expect("write spec");
     let unrelated_dir = tempfile::tempdir().expect("tempdir");
 
     let md = md_with_schema("$schema:\n  spec: 'file(eager; required)'\nspec: spec.md\n");
-    let api = DarkmatterSchemas::new()
+    let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(unrelated_dir.path()))
         .with_file_ref_fallback_dir(launch_dir.path().to_path_buf());
-
-    let _cwd = CwdGuard::enter(unrelated_dir.path());
     let report = api.validate(&md).expect("validate");
 
     assert!(
@@ -435,25 +410,23 @@ fn file_format_does_not_resolve_via_launch_area_fallback() {
     );
 }
 
-/// A `file`-typed schema property value that exists under the ambient CWD
-/// but NOT under the prompt directory or the fallback dir fails validation
-/// — proving the document-first / fallback anchors (not the ambient CWD)
-/// drive resolution when configured. The prompt has a real file source in
-/// a third directory so its `base_dir` is distinct from the CWD.
+/// A `file`-typed schema property value that exists under the context's
+/// `cwd` but NOT under the prompt directory or the fallback dir fails
+/// validation — proving the document-first / fallback anchors (not the
+/// context's `cwd`) drive resolution when configured. The prompt has a real
+/// file source in a third directory so its `base_dir` is distinct from the
+/// `cwd`.
 #[test]
-#[serial_test::serial(darkmatter_file_cwd)]
 fn file_format_fallback_rejects_when_not_under_fallback() {
     let prompt_dir = tempfile::tempdir().expect("tempdir");
     let fallback_dir = tempfile::tempdir().expect("tempdir");
     let cwd_dir = tempfile::tempdir().expect("tempdir");
-    // File exists under CWD but NOT under the prompt dir or the fallback dir.
+    // File exists under the context cwd but NOT under the prompt dir or the fallback dir.
     std::fs::write(cwd_dir.path().join("ambient.md"), "# Ambient\n").expect("write");
 
     let md = prompt_with_source(prompt_dir.path(), "$schema:\n  spec: 'file(eager; required)'\nspec: ambient.md\n");
-    let api = DarkmatterSchemas::new()
+    let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(cwd_dir.path()))
         .with_file_ref_fallback_dir(fallback_dir.path().to_path_buf());
-
-    let _cwd = CwdGuard::enter(cwd_dir.path());
     let report = api.validate(&md).expect("validate");
 
     assert!(
@@ -487,7 +460,7 @@ fn schema_reference_stays_document_relative_with_fallback() {
     let md = Markdown::try_from(doc_path.as_path()).expect("read doc");
     // Fallback points at a dir WITHOUT schema.yaml — if the $schema
     // reference were resolved via the fallback, this would fail.
-    let api = DarkmatterSchemas::new()
+    let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(doc_dir.path()))
         .with_file_ref_fallback_dir(fallback_dir.path().to_path_buf());
     let report = api.validate(&md).expect("validate");
     assert!(
@@ -517,7 +490,7 @@ fn root_union_schema_string_arm_stays_document_relative_with_fallback() {
     .expect("write doc");
 
     let md = Markdown::try_from(doc_path.as_path()).expect("read doc");
-    let api = DarkmatterSchemas::new()
+    let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(doc_dir.path()))
         .with_file_ref_fallback_dir(fallback_dir.path().to_path_buf());
     let report = api.validate(&md).expect("validate");
     assert!(
@@ -534,7 +507,7 @@ fn root_union_schema_string_arm_stays_document_relative_with_fallback() {
 // expression path's `file_exists`/`frontmatter` order. These L1 tests
 // write a real prompt file so `base_dir` is the prompt directory, point
 // the fallback at a separate directory, and assert each rung of the
-// resolution order independently of the ambient process CWD.
+// resolution order independently of the context's `cwd`.
 
 /// Writes `---\n{frontmatter}---\nbody\n` to `dir/prompt.md` and reads it
 /// back as a `Markdown` whose source is that file (so `base_dir_for`
@@ -553,9 +526,8 @@ fn prompt_with_source(dir: &std::path::Path, frontmatter: &str) -> Markdown {
 /// precedence is covered structurally by the resolver unit test
 /// `resolve_ctx::document_relative_hit_wins_over_fallback_conflict`.
 /// Here we additionally guard that resolution does not depend on the
-/// ambient CWD by switching it to an unrelated directory.
+/// context's `cwd` by anchoring it at an unrelated directory.
 #[test]
-#[serial_test::serial(darkmatter_file_cwd)]
 fn file_property_present_in_both_resolves_prompt_dir() {
     let prompt_dir = tempfile::tempdir().expect("tempdir");
     let fallback_dir = tempfile::tempdir().expect("tempdir");
@@ -564,10 +536,8 @@ fn file_property_present_in_both_resolves_prompt_dir() {
     std::fs::write(fallback_dir.path().join("spec.md"), "# fallback copy\n").expect("write fallback spec");
 
     let md = prompt_with_source(prompt_dir.path(), "$schema:\n  spec: 'file(eager; required)'\nspec: spec.md\n");
-    let api = DarkmatterSchemas::new()
+    let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(unrelated.path()))
         .with_file_ref_fallback_dir(fallback_dir.path().to_path_buf());
-
-    let _cwd = CwdGuard::enter(unrelated.path());
     let report = api.validate(&md).expect("validate");
     assert!(
         report.valid,
@@ -578,9 +548,8 @@ fn file_property_present_in_both_resolves_prompt_dir() {
 
 /// A `file` value that exists ONLY in the prompt directory still validates
 /// when a fallback is configured (document-first hit). Independent of the
-/// ambient CWD.
+/// context's `cwd`.
 #[test]
-#[serial_test::serial(darkmatter_file_cwd)]
 fn file_property_present_only_in_prompt_dir_validates() {
     let prompt_dir = tempfile::tempdir().expect("tempdir");
     let fallback_dir = tempfile::tempdir().expect("tempdir");
@@ -588,10 +557,8 @@ fn file_property_present_only_in_prompt_dir_validates() {
     std::fs::write(prompt_dir.path().join("local.md"), "# local\n").expect("write local");
 
     let md = prompt_with_source(prompt_dir.path(), "$schema:\n  spec: 'file(eager; required)'\nspec: ./local.md\n");
-    let api = DarkmatterSchemas::new()
+    let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(unrelated.path()))
         .with_file_ref_fallback_dir(fallback_dir.path().to_path_buf());
-
-    let _cwd = CwdGuard::enter(unrelated.path());
     let report = api.validate(&md).expect("validate");
     assert!(
         report.valid,
@@ -601,9 +568,9 @@ fn file_property_present_only_in_prompt_dir_validates() {
 }
 
 /// A `file` value that exists only under the launch-area fallback does not
-/// validate. Resolution remains document-local and independent of ambient CWD.
+/// validate. Resolution remains document-local and independent of the
+/// context's `cwd`.
 #[test]
-#[serial_test::serial(darkmatter_file_cwd)]
 fn file_property_present_only_in_fallback_does_not_validate() {
     let prompt_dir = tempfile::tempdir().expect("tempdir");
     let fallback_dir = tempfile::tempdir().expect("tempdir");
@@ -611,10 +578,8 @@ fn file_property_present_only_in_fallback_does_not_validate() {
     std::fs::write(fallback_dir.path().join("caller.md"), "# caller\n").expect("write caller");
 
     let md = prompt_with_source(prompt_dir.path(), "$schema:\n  spec: 'file(eager; required)'\nspec: caller.md\n");
-    let api = DarkmatterSchemas::new()
+    let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(unrelated.path()))
         .with_file_ref_fallback_dir(fallback_dir.path().to_path_buf());
-
-    let _cwd = CwdGuard::enter(unrelated.path());
     let report = api.validate(&md).expect("validate");
     assert!(
         !report.valid,
@@ -624,11 +589,10 @@ fn file_property_present_only_in_fallback_does_not_validate() {
 }
 
 /// Guard: with both a prompt-dir anchor and a fallback configured, a value
-/// that exists ONLY under the process CWD (neither the prompt dir nor the
-/// fallback) must NOT validate — there is no ambient-CWD rung on the
-/// production path.
+/// that exists ONLY under the context's `cwd` (neither the prompt dir nor
+/// the fallback) must NOT validate — a sourced document never falls back to
+/// the `cwd`.
 #[test]
-#[serial_test::serial(darkmatter_file_cwd)]
 fn file_property_present_only_in_cwd_does_not_validate() {
     let prompt_dir = tempfile::tempdir().expect("tempdir");
     let fallback_dir = tempfile::tempdir().expect("tempdir");
@@ -636,14 +600,12 @@ fn file_property_present_only_in_cwd_does_not_validate() {
     std::fs::write(cwd_dir.path().join("ambient.md"), "# ambient\n").expect("write ambient");
 
     let md = prompt_with_source(prompt_dir.path(), "$schema:\n  spec: 'file(eager; required)'\nspec: ambient.md\n");
-    let api = DarkmatterSchemas::new()
+    let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(cwd_dir.path()))
         .with_file_ref_fallback_dir(fallback_dir.path().to_path_buf());
-
-    let _cwd = CwdGuard::enter(cwd_dir.path());
     let report = api.validate(&md).expect("validate");
     assert!(
         !report.valid,
-        "a file value found only under the ambient CWD must NOT validate: {:?}",
+        "a file value found only under the context cwd must NOT validate: {:?}",
         report.problems,
     );
 }
@@ -660,7 +622,7 @@ fn effective_for_prompt(
     let path = dir.join("prompt.md");
     std::fs::write(&path, format!("---\n{frontmatter}---\nbody\n")).expect("write prompt");
     let md = Markdown::try_from(path.as_path()).expect("read prompt");
-    DarkmatterSchemas::new()
+    DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(dir))
         .effective_for(&md)
         .expect("effective_for")
         .expect("schema present")
@@ -792,7 +754,7 @@ fn darkmatter_schemas_validate_does_not_mutate_eager_file_frontmatter() {
     .expect("write prompt");
 
     let md = Markdown::try_from(prompt_path.as_path()).expect("read prompt");
-    let api = DarkmatterSchemas::new();
+    let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(dir.path()));
     let report = api.validate(&md).expect("validate");
     assert!(report.valid, "expected valid: {:?}", report.problems);
     // The stored frontmatter still carries the raw reference — the
@@ -845,7 +807,7 @@ fn baseline_generated_ctx_validates_when_authored_doc_omits_ctx() {
     let baseline = baseline_from_yaml(
         "ctx:\n  today: \"date(generated; required) -> today's date, host-supplied\"",
     );
-    let api = DarkmatterSchemas::new()
+    let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(std::env::temp_dir()))
         .with_baseline(baseline)
         .expect("baseline converts");
 
@@ -864,7 +826,7 @@ fn baseline_generated_ctx_type_checks_wrongly_typed_value() {
     let baseline = baseline_from_yaml(
         "ctx:\n  today: \"date(generated; required) -> today's date, host-supplied\"",
     );
-    let api = DarkmatterSchemas::new()
+    let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(std::env::temp_dir()))
         .with_baseline(baseline)
         .expect("baseline converts");
 
@@ -895,7 +857,7 @@ fn baseline_generated_ctx_accepts_correctly_typed_value() {
     let baseline = baseline_from_yaml(
         "ctx:\n  today: \"date(generated; required) -> today's date, host-supplied\"",
     );
-    let api = DarkmatterSchemas::new()
+    let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(std::env::temp_dir()))
         .with_baseline(baseline)
         .expect("baseline converts");
 
@@ -975,10 +937,10 @@ fn darkmatter_base_json_schema_is_cached() {
 
 #[test]
 fn darkmatter_baseline_builder_shares_cached_json_schema() {
-    let first = DarkmatterSchemas::new()
+    let first = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(std::env::temp_dir()))
         .with_darkmatter_baseline_json_schema()
         .expect("built-in baseline must be valid");
-    let second = DarkmatterSchemas::new()
+    let second = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(std::env::temp_dir()))
         .with_darkmatter_baseline_json_schema()
         .expect("built-in baseline must be valid");
     let first = &first.baseline.expect("baseline must be configured").json_schema;
@@ -1013,7 +975,7 @@ fn darkmatter_base_json_schema_allows_unknown_keys() {
 /// conflict (Non-Goal 5; spec testing requirement 6).
 #[test]
 fn document_schema_overrides_baseline_title() {
-    let api = DarkmatterSchemas::new()
+    let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(std::env::temp_dir()))
         .with_baseline(super::darkmatter_base_schema())
         .expect("baseline converts");
 
@@ -1033,7 +995,7 @@ fn document_schema_overrides_baseline_title() {
 
 fn effective_number_field() -> EffectiveSchema {
     let md = md_with_schema("$schema:\n  n: number\n");
-    DarkmatterSchemas::new()
+    DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(std::env::temp_dir()))
         .effective_for(&md)
         .expect("effective_for")
         .expect("schema present")
@@ -1086,7 +1048,7 @@ fn validate_with_options_judges_a_literal_token_by_its_text() {
         assert!(report.pending.is_empty(), "{text:?}: {:?}", report.pending);
     }
 
-    let text_schema = DarkmatterSchemas::new()
+    let text_schema = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(std::env::temp_dir()))
         .effective_for(&md_with_schema("$schema:\n  s: enum(abc, xyz)\n"))
         .expect("effective_for")
         .expect("schema present");
@@ -1161,7 +1123,7 @@ fn plain_validate_report_has_empty_pending() {
 fn origins_attribute_document_and_baseline_properties() {
     let md = md_with_schema("$schema:\n  title: 'string(required)'\ntitle: hi\n");
     let baseline = baseline_from_yaml("owner: 'string(required)'");
-    let api = DarkmatterSchemas::new().with_baseline(baseline).unwrap();
+    let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(std::env::temp_dir())).with_baseline(baseline).unwrap();
     let effective = api.effective_for(&md).unwrap().unwrap();
     assert_eq!(
         effective.origins.get("title").map(|o| o.kind),
@@ -1188,7 +1150,7 @@ fn origins_referenced_file_carries_uri() {
     )
     .unwrap();
     let md = Markdown::try_from(doc_path.as_path()).unwrap();
-    let effective = DarkmatterSchemas::new()
+    let effective = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(dir.path()))
         .effective_for(&md)
         .unwrap()
         .unwrap();
@@ -1218,7 +1180,7 @@ fn dependencies_surface_import_and_example_edges() {
         dir.path(),
         "$schema:\n  value: type@./types.yaml\n  today: \"date(example(./today-example.yaml))\"\nvalue: a\n",
     );
-    let effective = DarkmatterSchemas::new()
+    let effective = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(dir.path()))
         .effective_for(&md)
         .unwrap()
         .unwrap();
@@ -1250,7 +1212,7 @@ fn dependencies_surface_referenced_schema_file() {
     )
     .expect("write schema");
     let md = prompt_with_source(dir.path(), "$schema: ./schema.yaml\ntitle: hi\n");
-    let effective = DarkmatterSchemas::new()
+    let effective = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(dir.path()))
         .effective_for(&md)
         .unwrap()
         .unwrap();
@@ -1265,7 +1227,7 @@ fn dependencies_surface_referenced_schema_file() {
 fn dependencies_empty_without_imports_or_examples() {
     // The no-dependency fast path: a plain inline `$schema` records no edges.
     let md = md_with_schema("$schema:\n  title: 'string(required)'\ntitle: hi\n");
-    let effective = DarkmatterSchemas::new()
+    let effective = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(std::env::temp_dir()))
         .effective_for(&md)
         .unwrap()
         .unwrap();

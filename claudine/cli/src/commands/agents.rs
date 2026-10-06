@@ -4,7 +4,7 @@ use clap::Args;
 use color_eyre::eyre::Result;
 
 use biscuit_terminal::components::list::UnorderedList;
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::{LineBreaks, Prose};
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::WordWrap;
@@ -150,7 +150,9 @@ fn render_detail(term: &Terminal, agent: &AgentInfo) {
             log::data("");
             let preview_lines: Vec<&str> = body.lines().take(20).collect();
             let preview = preview_lines.join("\n");
+            // A preview of the file's lines, shown as lines.
             let preview_prose = Prose::new(format!("<dim>{preview}</dim>"))
+                .with_line_breaks(LineBreaks::Hard)
                 .with_word_wrap(WordWrap::BespokeProse(None, vec![' '], None));
             log::data(&preview_prose.render(term));
             let total_lines = body.lines().count();

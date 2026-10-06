@@ -80,7 +80,7 @@ fn compose_single_shell_block() {
         .with_shell_approval_handler(Arc::new(AllowAllHandler));
 
     let md = Markdown::try_from(dir.path().join("doc.md").as_path()).unwrap();
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::request_support::request(options)).unwrap();
     let output = composed.content();
 
     assert!(
@@ -112,7 +112,7 @@ fn compose_multiple_shell_blocks() {
         .with_shell_approval_handler(Arc::new(AllowAllHandler));
 
     let md = Markdown::try_from(dir.path().join("doc.md").as_path()).unwrap();
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::request_support::request(options)).unwrap();
     let output = composed.content();
 
     assert!(
@@ -142,7 +142,7 @@ fn compose_shell_block_with_multiple_commands() {
         .disable(ComposeOperation::Cleanup);
 
     let md = Markdown::try_from(dir.path().join("doc.md").as_path()).unwrap();
-    let (composed, _) = md.compose_with(options).unwrap();
+    let (composed, _) = md.compose_with(&crate::request_support::request(options)).unwrap();
     let output = composed.content();
 
     // Command outputs are concatenated verbatim; the line break between them is
@@ -171,7 +171,7 @@ fn compose_shell_block_with_empty_output_commands() {
         .with_shell_approval_handler(Arc::new(AllowAllHandler));
 
     let md = Markdown::try_from(dir.path().join("doc.md").as_path()).unwrap();
-    let (composed, _) = md.compose_with(options).unwrap();
+    let (composed, _) = md.compose_with(&crate::request_support::request(options)).unwrap();
     let output = composed.content();
 
     assert_eq!(
@@ -203,7 +203,7 @@ fn shell_block_inside_true_page_block_executes() {
         .with_shell_approval_handler(Arc::new(AllowAllHandler));
 
     let md = Markdown::try_from(dir.path().join("doc.md").as_path()).unwrap();
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::request_support::request(options)).unwrap();
     let output = composed.content();
 
     assert!(
@@ -231,7 +231,7 @@ fn shell_block_inside_false_page_block_is_removed() {
         .with_shell_approval_handler(Arc::new(AllowAllHandler));
 
     let md = Markdown::try_from(dir.path().join("doc.md").as_path()).unwrap();
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::request_support::request(options)).unwrap();
     let output = composed.content();
 
     assert!(
@@ -267,7 +267,7 @@ fn shell_block_in_transcluded_document_executes() {
         .with_shell_approval_handler(Arc::new(AllowAllHandler));
 
     let md = Markdown::try_from(dir.path().join("parent.md").as_path()).unwrap();
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::request_support::request(options)).unwrap();
     let output = composed.content();
 
     assert!(
@@ -298,7 +298,7 @@ fn shell_block_with_conditional_transclusion() {
         .with_shell_approval_handler(Arc::new(AllowAllHandler));
 
     let md = Markdown::try_from(dir.path().join("parent.md").as_path()).unwrap();
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::request_support::request(options)).unwrap();
     let output = composed.content();
 
     assert!(
@@ -329,7 +329,7 @@ fn shell_block_skipped_when_transclusion_condition_false() {
         .with_shell_approval_handler(Arc::new(AllowAllHandler));
 
     let md = Markdown::try_from(dir.path().join("parent.md").as_path()).unwrap();
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::request_support::request(options)).unwrap();
     let output = composed.content();
 
     assert!(
@@ -361,7 +361,7 @@ fn compose_fails_when_shell_block_command_denied() {
         .with_shell_approval_handler(Arc::new(DenyAllHandler));
 
     let md = Markdown::try_from(dir.path().join("doc.md").as_path()).unwrap();
-    let result = md.compose_with(options);
+    let result = md.compose_with(&crate::request_support::request(options));
 
     assert!(
         result.is_err(),
@@ -377,7 +377,7 @@ fn compose_fails_on_unterminated_shell_block() {
     let options = context_free_options().with_source_file(dir.path().join("doc.md"));
 
     let md = Markdown::try_from(dir.path().join("doc.md").as_path()).unwrap();
-    let result = md.compose_with(options);
+    let result = md.compose_with(&crate::request_support::request(options));
 
     assert!(
         result.is_err(),
@@ -412,7 +412,7 @@ fn shell_block_after_interpolation() {
         .with_shell_approval_handler(Arc::new(AllowAllHandler));
 
     let md = Markdown::try_from(dir.path().join("doc.md").as_path()).unwrap();
-    let (composed, _) = md.compose_with(options).unwrap();
+    let (composed, _) = md.compose_with(&crate::request_support::request(options)).unwrap();
     let output = composed.content();
 
     assert!(
@@ -443,7 +443,7 @@ fn compose_shell_blocks(block_count: usize) -> (String, usize) {
         .with_shell_approval_handler(Arc::new(AllowAllHandler));
 
     let md = Markdown::try_from(dir.path().join("doc.md").as_path()).unwrap();
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::request_support::request(options)).unwrap();
 
     (composed.content().to_string(), report.shell_blocks_applied)
 }
@@ -495,7 +495,7 @@ fn compose_shell_block_with_when_error() {
         .with_shell_approval_handler(Arc::new(AllowAllHandler));
 
     let md = Markdown::try_from(dir.path().join("doc.md").as_path()).unwrap();
-    let (composed, _) = md.compose_with(options).unwrap();
+    let (composed, _) = md.compose_with(&crate::request_support::request(options)).unwrap();
     let output = composed.content();
 
     assert!(
@@ -523,7 +523,7 @@ fn compose_shell_block_with_timeout() {
         .with_shell_approval_handler(Arc::new(AllowAllHandler));
 
     let md = Markdown::try_from(dir.path().join("doc.md").as_path()).unwrap();
-    let result = md.compose_with(options);
+    let result = md.compose_with(&crate::request_support::request(options));
 
     assert!(result.is_err(), "Expected timeout error");
     let err = result.unwrap_err().to_string();
@@ -555,7 +555,7 @@ fn compose_mixed_shell_directive_and_shell_block() {
         .with_shell_approval_handler(Arc::new(AllowAllHandler));
 
     let md = Markdown::try_from(dir.path().join("doc.md").as_path()).unwrap();
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::request_support::request(options)).unwrap();
     let output = composed.content();
 
     assert!(

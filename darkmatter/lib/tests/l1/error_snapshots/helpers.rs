@@ -52,3 +52,18 @@ pub fn assert_contains_all(out: &str, must_contain: &[&str]) {
         );
     }
 }
+
+/// Asserts each label in `labels` starts its own body line of a rendered
+/// status block, so rows a hard-break `Prose` separates are not joined by
+/// soft breaks or wrapped onto a neighbor's line.
+#[track_caller]
+pub fn assert_rows_on_own_lines(out: &str, labels: &[&str]) {
+    let rows: Vec<&str> = out
+        .lines()
+        .map(|line| line.trim_start_matches('┃').trim_start())
+        .collect();
+    for label in labels {
+        let starts = rows.iter().filter(|row| row.starts_with(label)).count();
+        assert_eq!(starts, 1, "expected `{label}` to start exactly one line; got:\n{out}");
+    }
+}

@@ -13,15 +13,12 @@
 //!
 //! ## Resolved divergences
 //!
-//! - **Prose inline styling on terminal**: items that are `Prose` components
-//!   previously lost their `<b>` / `<i>` / `<red>` styling because
-//!   `Prose::render_tree_node()` returns `None` and the generic
-//!   `RenderableTerminalContent::to_tree_nodes` fallback strips ANSI to plain
-//!   text. `project_list_items` now downcasts `Prose` and projects through
-//!   `Prose::to_render_nodes`, mirroring the `BlockQuote` / `Compose` /
-//!   `OrderedList` pattern. Inline styling now survives on the Terminal
-//!   target; the Markdown target still degrades to plain text because the
-//!   cross-target tree projection has no `<b>` peer in CommonMark.
+//! - **Prose inline styling**: `Prose` items once lost their `<b>` / `<i>` /
+//!   `<red>` styling because `Prose::render_tree_node()` returns `None` and
+//!   the generic fallback strips ANSI to plain text. A `Prose` item is block
+//!   content: the shared projection embeds its `Paragraph` and `Code` blocks
+//!   in the `ListItem`, so inline styling survives on the Terminal target and
+//!   semantic emphasis (`**bold**`) survives in Markdown.
 
 #[allow(clippy::duplicate_mod)]
 #[path = "parity_helpers.rs"]
@@ -785,7 +782,7 @@ fn html_nested_ordered_list_emits_ol() {
 }
 
 // ---------------------------------------------------------------------------
-// Cross-target: Prose styling survives terminal, degrades for Markdown
+// Cross-target: Prose styling survives terminal and Markdown
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -802,9 +799,8 @@ fn prose_item_content_survives_terminal_render() {
 
 #[test]
 fn prose_inline_styling_survives_terminal_render() {
-    // Pin: after the `project_list_items` Prose-downcast fix (mirroring
-    // BlockQuote / Compose / OrderedList), inline `<b>` / `<i>` / `<red>`
-    // styling must survive on the Terminal target. We assert on the bold
+    // Pin: a Prose item projects its own blocks, so inline `<b>` / `<i>` /
+    // `<red>` styling must survive on the Terminal target. We assert on the bold
     // SGR open sequence; the exact close/reset bytes depend on the
     // renderer's pairing strategy.
     let mut list = UnorderedList::empty();
@@ -813,7 +809,7 @@ fn prose_inline_styling_survives_terminal_render() {
     let rendered = list.render(&term);
     assert!(
         rendered.contains("\x1b[1m"),
-        "bold SGR must be present (regression for Prose-downcast fix): {rendered:?}"
+        "bold SGR must be present (Prose item projects structurally): {rendered:?}"
     );
     assert!(
         strip_ansi(&rendered).contains("foo"),
@@ -822,12 +818,12 @@ fn prose_inline_styling_survives_terminal_render() {
 }
 
 #[test]
-fn prose_inline_styling_degrades_in_markdown() {
+fn prose_item_keeps_semantic_emphasis_in_markdown() {
     let mut list = UnorderedList::empty();
     list.add(Prose::new("<b>Bold</b> item"));
     let md = list.render_markdown();
-    assert!(md.contains("Bold"), "content present: {md:?}");
-    assert!(!md.contains("<b>"), "raw style tokens stripped: {md:?}");
+    assert!(md.contains("- **Bold** item"), "semantic emphasis kept: {md:?}");
+    assert!(!md.contains("<b>"), "raw style tokens never leak: {md:?}");
 }
 
 // ---------------------------------------------------------------------------

@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Context, Result};
 use biscuit_terminal::prelude::{
-    OrderedList, Prose, TerminalRenderable, RenderableTerminalContent, Table, TableColumn, Terminal, UnorderedList,
+    InlineProse, OrderedList, Prose, TerminalRenderable, RenderableTerminalContent, Table, TableColumn, Terminal, UnorderedList,
 };
 use cargo_metadata::{Metadata, MetadataCommand, PackageId};
 use serde_json::Value;
@@ -220,7 +220,7 @@ impl Ui {
     }
 
     fn prose(&self, text: &str) -> String {
-        Prose::new(text).render(&self.term)
+        InlineProse::new(text).render(&self.term)
     }
 
     fn print_line(&self, text: &str) {
@@ -250,7 +250,7 @@ fn format_duration(duration: Duration) -> String {
 }
 
 fn render_prefix(term: &Terminal, markup: &str) -> String {
-    Prose::new(markup).render(term)
+    InlineProse::new(markup).render(term)
 }
 
 fn ensure_not_cancelled(cancellation: &Cancellation) -> Result<()> {
@@ -2365,6 +2365,21 @@ mod tests {
         let text = "0123456789";
         assert_eq!(tail_excerpt(text, 4), "6789");
         assert_eq!(tail_excerpt(text, 20), "0123456789");
+    }
+
+    /// The prefix and the status labels are fragments spliced into one output
+    /// line, so each must render without a line break of its own.
+    #[test]
+    fn inline_fragments_render_on_one_line() {
+        let term = Terminal::new();
+        let prefix = render_prefix(&term, DRIFT_PREFIX_MARKUP);
+        let ui = Ui::new(3);
+        let stage = ui.prose("<cyan>[1/3]</cyan>");
+        let label = ui.prose("<dim>status:</dim>");
+
+        assert!(prefix.contains('▌') && !prefix.contains('\n'), "{prefix:?}");
+        assert!(stage.contains("[1/3]") && !stage.contains('\n'), "{stage:?}");
+        assert!(label.contains("status:") && !label.contains('\n'), "{label:?}");
     }
 
     #[test]

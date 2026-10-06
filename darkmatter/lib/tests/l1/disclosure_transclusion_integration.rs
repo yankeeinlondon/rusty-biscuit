@@ -28,7 +28,7 @@ fn file_transclusion_with_disclosure_summary_emits_dsl() {
         .only(&[ComposeOperation::BlockTransclusion, ComposeOperation::Cleanup]);
 
     let md = Markdown::try_from(root.as_path()).unwrap();
-    let (composed, _report) = md.compose_with(options).unwrap();
+    let (composed, _report) = md.compose_with(&crate::request_support::request(options)).unwrap();
     let text = composed.content();
 
     assert!(
@@ -75,7 +75,7 @@ fn file_transclusion_with_disclosure_true_uses_default_summary() {
         .only(&[ComposeOperation::BlockTransclusion, ComposeOperation::Cleanup]);
 
     let md = Markdown::try_from(root.as_path()).unwrap();
-    let (composed, _report) = md.compose_with(options).unwrap();
+    let (composed, _report) = md.compose_with(&crate::request_support::request(options)).unwrap();
     let text = composed.content();
 
     assert!(
@@ -113,7 +113,7 @@ fn code_transclusion_with_disclosure_summary_emits_dsl() {
         .only(&[ComposeOperation::CodeTransclusion, ComposeOperation::Cleanup]);
 
     let md = Markdown::try_from(root.as_path()).unwrap();
-    let (composed, _report) = md.compose_with(options).unwrap();
+    let (composed, _report) = md.compose_with(&crate::request_support::request(options)).unwrap();
     let text = composed.content();
 
     assert!(
@@ -166,7 +166,7 @@ fn code_transclusion_with_disclosure_true_uses_default_summary() {
         .only(&[ComposeOperation::CodeTransclusion, ComposeOperation::Cleanup]);
 
     let md = Markdown::try_from(root.as_path()).unwrap();
-    let (composed, _report) = md.compose_with(options).unwrap();
+    let (composed, _report) = md.compose_with(&crate::request_support::request(options)).unwrap();
     let text = composed.content();
 
     assert!(

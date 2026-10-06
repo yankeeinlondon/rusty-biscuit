@@ -5,7 +5,7 @@
 
 use std::path::Path;
 
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::{LineBreaks, Prose};
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::prelude::WordWrap;
 use biscuit_terminal::terminal::Terminal;
@@ -47,6 +47,7 @@ pub(crate) fn handle_recent_commits_command(
         print!("{}", report.to_plain(&options));
     } else {
         let rendered = Prose::new(report.to_prose(&options))
+            .with_line_breaks(LineBreaks::Hard)
             .with_word_wrap(WordWrap::WrapProse(None, None))
             .render(&Terminal::default());
         println!("{}", rendered.trim_end_matches('\n'));

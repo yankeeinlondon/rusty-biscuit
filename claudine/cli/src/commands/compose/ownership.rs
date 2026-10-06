@@ -63,7 +63,7 @@ pub(crate) fn own_caller_arguments(
     }
 
     let schema = if tokens.iter().any(|token| setter_key(token).is_some()) {
-        authored_schema_parameters(source, launch_fallback, Some(file_resolution_context))?
+        authored_schema_parameters(source, launch_fallback, file_resolution_context)?
     } else {
         SchemaParameters::NoSchema
     };

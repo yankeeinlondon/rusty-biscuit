@@ -2,6 +2,11 @@
 
 ## Recent Dependency Notes
 
+- `renderable` adds `pulldown-cmark` 0.13 as a **dev-dependency** with
+  `default-features = false` (2026-10-03). It was already in the graph through
+  `darkmatter`, so the lockfile gains one edge and no package. Its tests parse
+  the output of `renderable::markdown::code_span` with a real CommonMark
+  parser to prove every value round-trips as one code span.
 - `content-policy` (library) and `content-policy-cli` join the workspace
   (2026-09-29). No crate is new to the graph. The
   library takes `biscuit-file` with `default-features = false` and only `yaml`,
@@ -203,7 +208,10 @@
   carries those four crates; the library's send-only builds are unchanged. Its
   `tests/research_cli.rs` uses the workspace `biscuit-test-harness` as a
   development dependency for `bin_exe!`, so the binary resolves on the WSL2
-  nextest-archive leg. No new external crate was added.
+  nextest-archive leg. No new external crate was added. It also names
+  `biscuit-file` (only `file-reference`) directly, already in the tree through
+  that feature, so `messenger research validate` resolves its document
+  arguments with `FileReference`.
 - `worktree/lib` uses `biscuit-hash` for the SHA-pair cache file name. The cache
   stores deterministic ahead/behind and clean-merge results under the user cache
   directory, keyed by canonical repo-root xxHash plus the compared pair of tip

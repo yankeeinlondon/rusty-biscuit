@@ -27,8 +27,8 @@ use worktree::remote_update::FETCH_DEADLINE;
 const WARM_LIST_GATHER_BOUND: Duration = Duration::from_millis(120);
 const COLD_LIST_GATHER_BOUND: Duration = Duration::from_millis(300);
 const FULL_COMMAND_BOUND: Duration = Duration::from_millis(1000);
-/// What a stage may take beyond the work it waits for: `pr gather` (the PR
-/// store reads around the wait, no request) and `remote wait` past its 3 s.
+/// What a stage may take beyond the work it waits for: the foreground PR
+/// reads (`pr gather` before the wait plus `pr reread` after it, no request) and `remote wait` past its 3 s.
 const STAGE_SLACK: Duration = Duration::from_millis(300);
 /// Ordinary listing's wait for a stalled worker (spec §3).
 const REMOTE_WAIT: Duration = Duration::from_secs(3);
@@ -119,9 +119,10 @@ fn best_full_command_with_store(fixture: &MixedFixture, proxy: &ProxyStub, age: 
         .expect("at least one timed run")
 }
 
-/// `pr gather` from one `wt list --perf` with the store reseeded `age` old,
+/// The foreground PR reads (`pr gather` plus the `pr reread` child of the
+/// wait's group) from one `wt list --perf` with the store reseeded `age` old,
 /// and its rendered output.
-fn pr_gather_with_store(fixture: &MixedFixture, proxy: &ProxyStub, age: Duration) -> (Duration, String) {
+fn pr_reads_with_store(fixture: &MixedFixture, proxy: &ProxyStub, age: Duration) -> (Duration, String) {
     fixture.seed_pr_store(age, 99, "divergent-0");
     let output = fixture
         .wt_command_via(proxy)
@@ -131,13 +132,15 @@ fn pr_gather_with_store(fixture: &MixedFixture, proxy: &ProxyStub, age: Duration
         .expect("wt list --perf should run");
     assert!(output.status.success(), "wt list --perf failed");
     let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-    (stage_from_perf(&stderr, "pr gather").expect("pr gather stage"), stderr)
+    let reads = stage_from_perf(&stderr, "pr gather").expect("pr gather stage")
+        + stage_from_perf(&stderr, "pr reread").expect("pr reread child");
+    (reads, stderr)
 }
 
 /// Every listing's worker asks for open PRs, fresh answer or stale; when that
 /// request fails at once, the listing still meets the 1 s bound and shows the
-/// stale answer as one it couldn't refresh. `pr gather` (the store reads
-/// around the wait) must stay under [`STAGE_SLACK`] too, since the 1 s bound
+/// stale answer as one it couldn't refresh. The foreground PR reads (the store
+/// reads around the wait) must stay under [`STAGE_SLACK`] too, since the 1 s bound
 /// alone would hide a reintroduced foreground request.
 #[test]
 #[serial]
@@ -152,16 +155,16 @@ fn perf_list_meets_sla_with_a_stale_answer_and_a_failing_refresh() {
 
     // Warm the comparison cache with a fresh answer. Its workers ask for
     // open PRs as well as for the live head: one request per half.
-    let _ = pr_gather_with_store(&fixture, &proxy, Duration::ZERO);
+    let _ = pr_reads_with_store(&fixture, &proxy, Duration::ZERO);
     let fresh_full = best_full_command_with_store(&fixture, &proxy, Duration::ZERO);
-    let fresh_pr = (0..5).map(|_| pr_gather_with_store(&fixture, &proxy, Duration::ZERO).0).min().unwrap();
+    let fresh_pr = (0..5).map(|_| pr_reads_with_store(&fixture, &proxy, Duration::ZERO).0).min().unwrap();
     assert!(fixture.wait_until_unlocked(Duration::from_secs(20), || ()), "the fresh runs' workers exited");
     assert_eq!(proxy.connections(), 2 * 11, "a fresh answer is asked for again, beside the live-head check");
 
     let stale_full = best_full_command_with_store(&fixture, &proxy, STALE);
     let mut stale_pr = Vec::new();
     for _ in 0..5 {
-        let (pr, stderr) = pr_gather_with_store(&fixture, &proxy, STALE);
+        let (pr, stderr) = pr_reads_with_store(&fixture, &proxy, STALE);
         assert!(stderr.contains("PR #99"), "the stale badge is shown:\n{stderr}");
         assert!(stderr.contains("PRs as of 12 min ago (couldn't refresh)"), "with its age:\n{stderr}");
         assert!(!stderr.contains("running this command again"), "the failure ended the wait:\n{stderr}");
@@ -176,8 +179,8 @@ fn perf_list_meets_sla_with_a_stale_answer_and_a_failing_refresh() {
     assert_eq!(proxy.connections(), 2 * (11 + 10), "the stale runs' workers made one request per half");
 
     eprintln!(
-        "fresh answer: full {fresh_full:.2?}, pr gather {fresh_pr:.2?}; \
-         stale answer, failing refresh: full {stale_full:.2?}, pr gather {stale_pr:.2?}"
+        "fresh answer: full {fresh_full:.2?}, pr reads {fresh_pr:.2?}; \
+         stale answer, failing refresh: full {stale_full:.2?}, pr reads {stale_pr:.2?}"
     );
     for pr in &stale_pr {
         assert!(*pr < STAGE_SLACK, "no PR request in the foreground, got {pr:?}");

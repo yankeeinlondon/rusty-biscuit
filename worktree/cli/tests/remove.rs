@@ -2550,3 +2550,745 @@ fn an_unambiguous_relative_endpoint_is_observed_and_deleted_from() {
     assert_eq!(refs_of(&remotes.other), other_before, "other is never modified");
     assert!(!remotes.wt.exists());
 }
+
+// --- Worktrees Git can no longer read -----------------------------------------
+
+fn porcelain(fixture: &Fixture) -> String {
+    git(&fixture.repo(), &["worktree", "list", "--porcelain"])
+}
+
+/// The porcelain block for the worktree at `path`, if Git still lists it.
+fn listed_block(fixture: &Fixture, path: &Path) -> Option<String> {
+    let wanted = canonical(path.parent().unwrap()).join(path.file_name().unwrap());
+    porcelain(fixture).split("\n\n").find(|block| {
+        block.lines().next().and_then(|line| line.strip_prefix("worktree ")).is_some_and(|listed| {
+            let listed = Path::new(listed);
+            canonical(listed.parent().unwrap()).join(listed.file_name().unwrap()) == wanted
+        })
+    }).map(str::to_string)
+}
+
+fn stderr_of(output: &std::process::Output) -> String {
+    String::from_utf8_lossy(&output.stderr).into_owned()
+}
+
+const ALL_FORCE_FLAGS: [&str; 3] = ["--force-worktree", "--force-branch", "--force-remote"];
+
+/// A worktree inside the base checkout. Only there can a caller standing in
+/// it with its `.git` gone still reach the repository: Git discovers the
+/// enclosing base checkout.
+fn add_nested_worktree(fixture: &Fixture, branch: &str, dir_name: &str) -> PathBuf {
+    let path = fixture.repo().join(".nested").join(dir_name);
+    git(&fixture.repo(), &["worktree", "add", "-q", "-b", branch, path.to_str().unwrap(), "main"]);
+    path
+}
+
+#[test]
+fn a_missing_directory_has_only_its_record_removed_and_its_safe_branch_deleted() {
+    let fixture = Fixture::new();
+    let gone = fixture.add_worktree("feat/gone", "feat-gone");
+    let other = fixture.add_worktree("feat/other", "feat-other");
+    fs::remove_dir_all(&gone).unwrap();
+    assert!(listed_block(&fixture, &gone).unwrap().contains("prunable"));
+
+    let output = fixture.wt(&fixture.repo()).args(["remove", "feat-gone"]).output().unwrap();
+    let stderr = stderr_of(&output);
+    assert_eq!(output.status.code(), Some(0), "{stderr}");
+    assert!(stderr.contains("Its directory is already gone"), "{stderr}");
+    assert!(stderr.contains("Removed the record of worktree feat-gone"), "{stderr}");
+    assert!(stderr.contains("Deleted branch feat/gone"), "{stderr}");
+    // Nothing claims files were checked: there were none.
+    assert!(!stderr.contains("No uncommitted or ignored files"), "{stderr}");
+    assert!(listed_block(&fixture, &gone).is_none(), "{}", porcelain(&fixture));
+    assert!(!fixture.branch_exists("feat/gone"));
+    assert!(!gone.exists(), "nothing is recreated");
+    assert!(listed_block(&fixture, &other).is_some() && other.join("README.md").exists());
+    assert!(fixture.branch_exists("feat/other"));
+}
+
+#[test]
+fn staged_work_left_in_a_missing_directory_record_needs_consent() {
+    let fixture = Fixture::new();
+    let gone = fixture.add_worktree("feat/gone", "feat-gone");
+    fs::write(gone.join("staged.txt"), "staged\n").unwrap();
+    git(&gone, &["add", "staged.txt"]);
+    fs::remove_dir_all(&gone).unwrap();
+
+    let output = fixture.wt(&fixture.repo()).args(["remove", "feat-gone"]).output().unwrap();
+    let stderr = stderr_of(&output);
+    assert_eq!(output.status.code(), Some(3), "{stderr}");
+    assert!(stderr.contains("holds staged changes"), "{stderr}");
+    assert!(stderr.contains("staged.txt"), "{stderr}");
+    assert!(stderr.contains("--force-worktree"), "{stderr}");
+    assert!(listed_block(&fixture, &gone).is_some(), "the record stays");
+    assert!(fixture.branch_exists("feat/gone"));
+
+    fixture.wt(&fixture.repo()).args(["remove", "feat-gone", "--force-worktree"]).assert().code(0);
+    assert!(listed_block(&fixture, &gone).is_none());
+}
+
+#[test]
+fn a_missing_detached_directory_has_its_record_removed() {
+    let fixture = Fixture::new();
+    let gone = fixture.root.path().join("wts").join("detached-gone");
+    git(&fixture.repo(), &["worktree", "add", "-q", "--detach", gone.to_str().unwrap(), "main"]);
+    fs::remove_dir_all(&gone).unwrap();
+
+    fixture
+        .wt(&fixture.repo())
+        .args(["remove", "detached-gone"])
+        .assert()
+        .code(0)
+        .stderr(predicate::str::contains("Detached HEAD"))
+        .stderr(predicate::str::contains("Removed the record of worktree detached-gone"));
+    assert!(listed_block(&fixture, &gone).is_none());
+}
+
+#[test]
+fn a_missing_directory_keeps_an_unsafe_branch_without_a_terminal() {
+    let fixture = Fixture::new();
+    let gone = fixture.add_worktree("feat/gone", "feat-gone");
+    fixture.commit(&gone, "unique.txt");
+    fs::remove_dir_all(&gone).unwrap();
+
+    fixture
+        .wt(&fixture.repo())
+        .args(["remove", "feat-gone"])
+        .assert()
+        .code(0)
+        .stderr(predicate::str::contains("Removed the record"))
+        .stderr(predicate::str::contains("kept branch"));
+    assert!(listed_block(&fixture, &gone).is_none());
+    assert!(fixture.branch_exists("feat/gone"), "its commits exist nowhere else");
+}
+
+#[test]
+fn a_missing_directory_whose_index_is_gone_refuses_even_with_every_force_flag() {
+    let fixture = Fixture::new();
+    let gone = fixture.add_worktree("feat/gone", "feat-gone");
+    let admin = PathBuf::from(git(&gone, &["rev-parse", "--path-format=absolute", "--git-dir"]));
+    fs::remove_dir_all(&gone).unwrap();
+    fs::remove_file(admin.join("index")).unwrap();
+
+    let output = fixture.wt(&fixture.repo()).args(["remove", "feat-gone"]).args(ALL_FORCE_FLAGS).output().unwrap();
+    let stderr = stderr_of(&output);
+    assert_eq!(output.status.code(), Some(3), "{stderr}");
+    assert!(stderr.contains("Can't remove feat-gone"), "{stderr}");
+    assert!(stderr.contains("staged work can't be ruled out"), "{stderr}");
+    assert!(stderr.contains("No working files, branches, or worktree records were removed"), "{stderr}");
+    assert!(!stderr.contains("prune"), "{stderr}");
+    assert!(listed_block(&fixture, &gone).is_some());
+    assert!(fixture.branch_exists("feat/gone"));
+}
+
+/// The defect's original case, shaped like the observed one: detached, its
+/// `.git` file gone, a working file kept.
+#[test]
+fn an_unlinked_worktree_is_repaired_then_its_files_are_protected() {
+    let fixture = Fixture::new();
+    let wt = fixture.root.path().join("wts").join("lhg-before");
+    git(&fixture.repo(), &["worktree", "add", "-q", "--detach", wt.to_str().unwrap(), "main"]);
+    fs::write(wt.join("README.md"), "edited, never committed\n").unwrap();
+    fs::remove_file(wt.join(".git")).unwrap();
+
+    let output = fixture.wt(&fixture.repo()).args(["remove", "lhg-before"]).output().unwrap();
+    let stderr = stderr_of(&output);
+    assert_eq!(output.status.code(), Some(3), "{stderr}");
+    assert!(stderr.contains("Its .git file was missing"), "{stderr}");
+    assert!(stderr.contains("Uncommitted files (1)"), "{stderr}");
+    assert!(stderr.contains("Nothing was removed"), "{stderr}");
+    assert!(stderr.contains("The .git link restored for lhg-before was left in place"), "{stderr}");
+    assert!(!stderr.contains("not a git repository"), "{stderr}");
+    assert_eq!(fs::read_to_string(wt.join("README.md")).unwrap(), "edited, never committed\n");
+    assert!(wt.join(".git").is_file(), "the repaired link is not rolled back");
+    let block = listed_block(&fixture, &wt).expect("still registered");
+    assert!(!block.contains("prunable"), "{block}");
+
+    fixture.wt(&fixture.repo()).args(["remove", "lhg-before", "--force-worktree"]).assert().code(0);
+    assert!(!wt.exists());
+    assert!(listed_block(&fixture, &wt).is_none());
+}
+
+#[test]
+fn a_clean_unlinked_worktree_is_repaired_and_removed_with_its_safe_branch() {
+    let fixture = Fixture::new();
+    let wt = fixture.add_worktree("feat/x", "feat-x");
+    fs::remove_file(wt.join(".git")).unwrap();
+
+    fixture
+        .wt(&fixture.repo())
+        .args(["remove", "feat-x"])
+        .assert()
+        .code(0)
+        .stderr(predicate::str::contains("Its .git file was missing"))
+        .stderr(predicate::str::contains("No uncommitted or ignored files"))
+        .stderr(predicate::str::contains("Removed worktree feat-x"))
+        .stderr(predicate::str::contains("Deleted branch feat/x"));
+    assert!(!wt.exists());
+    assert!(!fixture.branch_exists("feat/x"));
+}
+
+/// A directory Git can't write into: `git worktree repair` cannot recreate
+/// `.git`, so no postcondition holds.
+#[cfg(unix)]
+#[test]
+fn a_repair_that_is_not_verified_refuses_even_with_every_force_flag() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let fixture = Fixture::new();
+    let wt = fixture.add_worktree("feat/x", "feat-x");
+    fs::write(wt.join("notes.txt"), "keep me\n").unwrap();
+    fs::remove_file(wt.join(".git")).unwrap();
+    fs::set_permissions(&wt, fs::Permissions::from_mode(0o555)).unwrap();
+    struct Writable<'a>(&'a Path);
+    impl Drop for Writable<'_> {
+        fn drop(&mut self) {
+            let _ = fs::set_permissions(self.0, fs::Permissions::from_mode(0o755));
+        }
+    }
+    let _restore = Writable(&wt);
+    if fs::write(wt.join("probe"), "").is_ok() {
+        eprintln!("skipped: this user can write into a read-only directory");
+        return;
+    }
+
+    let output = fixture.wt(&fixture.repo()).args(["remove", "feat-x"]).args(ALL_FORCE_FLAGS).output().unwrap();
+    let stderr = stderr_of(&output);
+    assert_eq!(output.status.code(), Some(3), "{stderr}");
+    assert!(
+        stderr.contains("Can't remove feat-x: its .git file was missing and Git couldn't restore a verified link."),
+        "{stderr}"
+    );
+    assert!(stderr.contains("No working files, branches, or worktree records were removed."), "{stderr}");
+    assert!(stderr.contains("The repair attempt may have changed Git metadata"), "{stderr}");
+    assert!(stderr.contains("git worktree list --porcelain"), "{stderr}");
+    // Git's spelling of the path, which `canonical` matches on macOS too.
+    assert!(stderr.contains(&format!("git worktree repair {}", canonical(&wt).display())), "{stderr}");
+    assert!(stderr.contains("retry wt remove feat-x"), "{stderr}");
+    assert_eq!(stderr.matches("Not verified: Git couldn't resolve").count(), 1, "said once: {stderr}");
+    assert!(stderr.contains("Repair output:"), "{stderr}");
+    assert!(!stderr.contains("wt restored it to check"), "never claimed: {stderr}");
+    assert!(!stderr.contains("prune"), "{stderr}");
+    assert!(!stderr.contains("Nothing was changed"), "{stderr}");
+    assert_eq!(fs::read_to_string(wt.join("notes.txt")).unwrap(), "keep me\n");
+    assert!(listed_block(&fixture, &wt).is_some(), "the record stays");
+    assert!(fixture.branch_exists("feat/x"));
+}
+
+#[test]
+fn a_worktree_replaced_by_a_file_refuses_even_with_every_force_flag() {
+    let fixture = Fixture::new();
+    let wt = fixture.add_worktree("feat/x", "feat-x");
+    fs::remove_dir_all(&wt).unwrap();
+    fs::write(&wt, "not a checkout\n").unwrap();
+
+    let output = fixture.wt(&fixture.repo()).args(["remove", "feat-x"]).args(ALL_FORCE_FLAGS).output().unwrap();
+    let stderr = stderr_of(&output);
+    assert_eq!(output.status.code(), Some(3), "{stderr}");
+    assert!(stderr.contains("Can't remove feat-x: Git can't read this worktree"), "{stderr}");
+    assert!(stderr.contains("is not a directory"), "{stderr}");
+    assert!(stderr.contains("No working files, branches, or worktree records were removed"), "{stderr}");
+    assert_eq!(fs::read_to_string(&wt).unwrap(), "not a checkout\n");
+    assert!(listed_block(&fixture, &wt).is_some());
+    assert!(fixture.branch_exists("feat/x"));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_worktree_replaced_by_a_link_is_never_followed() {
+    let fixture = Fixture::new();
+    let wt = fixture.add_worktree("feat/x", "feat-x");
+    let elsewhere = fixture.root.path().join("elsewhere");
+    fs::create_dir(&elsewhere).unwrap();
+    fs::write(elsewhere.join("precious.txt"), "precious\n").unwrap();
+    fs::remove_dir_all(&wt).unwrap();
+    std::os::unix::fs::symlink(&elsewhere, &wt).unwrap();
+
+    let output = fixture.wt(&fixture.repo()).args(["remove", "feat-x"]).args(ALL_FORCE_FLAGS).output().unwrap();
+    let stderr = stderr_of(&output);
+    assert_eq!(output.status.code(), Some(3), "{stderr}");
+    assert!(stderr.contains("is a link"), "{stderr}");
+    assert!(fs::symlink_metadata(&wt).unwrap().file_type().is_symlink());
+    assert_eq!(fs::read_to_string(elsewhere.join("precious.txt")).unwrap(), "precious\n");
+    assert!(!elsewhere.join(".git").exists(), "nothing was repaired through the link");
+    assert!(fixture.branch_exists("feat/x"));
+}
+
+/// Not prunable, so nothing is prepared, but `git status` fails: the error
+/// names the target and the operation, and keeps its exit code.
+#[test]
+fn a_status_failure_names_the_target_and_operation_and_removes_nothing() {
+    let fixture = Fixture::new();
+    let wt = fixture.add_worktree("feat/x", "feat-x");
+    fs::write(wt.join(".git"), "garbage\n").unwrap();
+    assert!(!listed_block(&fixture, &wt).unwrap().contains("prunable"));
+
+    let output = fixture.wt(&fixture.repo()).args(["remove", "feat-x"]).args(ALL_FORCE_FLAGS).output().unwrap();
+    let stderr = stderr_of(&output);
+    assert_eq!(output.status.code(), Some(1), "{stderr}");
+    assert!(stderr.contains("could not check the files of worktree feat-x at "), "{stderr}");
+    assert!(stderr.contains("fatal:"), "Git's own reason is kept: {stderr}");
+    assert!(!stderr.contains("Removed"), "{stderr}");
+    assert!(!stderr.contains("left in place"), "nothing was repaired: {stderr}");
+    assert_eq!(fs::read_to_string(wt.join(".git")).unwrap(), "garbage\n");
+    assert!(wt.join("README.md").exists());
+    assert!(fixture.branch_exists("feat/x"));
+}
+
+/// Git never marks a locked record `prunable`, so a locked worktree whose
+/// directory is gone takes the ordinary path, where the status check fails.
+#[test]
+fn a_locked_worktree_whose_directory_is_gone_fails_with_context_and_keeps_everything() {
+    let fixture = Fixture::new();
+    let wt = fixture.add_worktree("feat/x", "feat-x");
+    git(&fixture.repo(), &["worktree", "lock", wt.to_str().unwrap()]);
+    fs::remove_dir_all(&wt).unwrap();
+
+    let output = fixture.wt(&fixture.repo()).args(["remove", "feat-x"]).args(ALL_FORCE_FLAGS).output().unwrap();
+    let stderr = stderr_of(&output);
+    assert_eq!(output.status.code(), Some(1), "{stderr}");
+    assert!(stderr.contains("could not check the files of worktree feat-x"), "{stderr}");
+    assert!(listed_block(&fixture, &wt).unwrap().contains("locked"));
+    assert!(fixture.branch_exists("feat/x"));
+}
+
+#[test]
+fn a_repaired_worktree_hands_off_and_finishes_with_the_ordinary_checks() {
+    let fixture = Fixture::new();
+    let wt = add_nested_worktree(&fixture, "feat/x", "feat-x");
+    fs::remove_file(wt.join(".git")).unwrap();
+
+    let first = fixture
+        .wt(&wt)
+        .env("WT_SHELL_WRAPPER", "1")
+        .args(["remove", "feat-x"])
+        .assert()
+        .code(0)
+        .stderr(predicate::str::contains("Its .git file was missing"))
+        .get_output()
+        .stdout
+        .clone();
+    let (landing, token) = protocol(&first);
+    assert!(wt.join(".git").is_file());
+
+    fixture
+        .wt(&landing)
+        .args(["remove", "--handoff", &token])
+        .assert()
+        .code(0)
+        .stderr(predicate::str::contains("Removed worktree"));
+    assert!(!wt.exists());
+    assert!(!fixture.branch_exists("feat/x"));
+}
+
+#[test]
+fn a_link_broken_between_the_runs_refuses_without_another_repair() {
+    let fixture = Fixture::new();
+    let wt = add_nested_worktree(&fixture, "feat/x", "feat-x");
+    fs::remove_file(wt.join(".git")).unwrap();
+    let (landing, token) = first_run(&fixture, &wt, &[]);
+
+    fs::remove_file(wt.join(".git")).unwrap();
+    let output = fixture.wt(&landing).args(["remove", "--handoff", &token]).output().unwrap();
+    let stderr = stderr_of(&output);
+    assert_eq!(output.status.code(), Some(3), "{stderr}");
+    assert!(stderr.contains("broke since you confirmed"), "{stderr}");
+    assert!(stderr.contains("Nothing was removed"), "{stderr}");
+    assert!(!wt.join(".git").exists(), "the second run never repairs");
+    assert!(wt.join("README.md").exists());
+    assert!(fixture.branch_exists("feat/x"));
+}
+
+#[test]
+fn a_link_redirected_between_the_runs_refuses_with_nothing_removed() {
+    for repaired_first in [true, false] {
+        let fixture = Fixture::new();
+        let wt = add_nested_worktree(&fixture, "feat/x", "feat-x");
+        let other = fixture.add_worktree("feat/y", "feat-y");
+        if repaired_first {
+            fs::remove_file(wt.join(".git")).unwrap();
+        }
+        let (landing, token) = first_run(&fixture, &wt, &[]);
+
+        let other_record = git(&other, &["rev-parse", "--path-format=absolute", "--git-dir"]);
+        fs::write(wt.join(".git"), format!("gitdir: {other_record}\n")).unwrap();
+        let output = fixture.wt(&landing).args(["remove", "--handoff", &token]).output().unwrap();
+        let stderr = stderr_of(&output);
+        assert_eq!(output.status.code(), Some(3), "repaired first: {repaired_first}: {stderr}");
+        assert!(stderr.contains("worktree link"), "{stderr}");
+        assert!(wt.join("README.md").exists());
+        assert!(other.join("README.md").exists());
+        assert!(fixture.branch_exists("feat/x") && fixture.branch_exists("feat/y"));
+    }
+}
+
+// --- A checkout replaced by a readable link ----------------------------------
+//
+// Git reads the checkout through such a link and does not mark it `prunable`,
+// yet `git worktree remove` would delete the files it leads to and then fail
+// on the link.
+
+/// Moves the directory at `path` to its sibling `saved` and puts a directory
+/// link to it at `path`: a symbolic link, or on Windows a junction, which
+/// needs no privilege. Returns the moved directory.
+fn replace_with_link(path: &Path) -> PathBuf {
+    let saved = path.with_file_name("saved");
+    fs::rename(path, &saved).unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&saved, path).unwrap();
+    #[cfg(windows)]
+    {
+        let status = Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(path)
+            .arg(&saved)
+            .stdout(std::process::Stdio::null())
+            .status()
+            .expect("cmd runs");
+        assert!(status.success(), "mklink /J needs no privilege");
+    }
+    saved
+}
+
+fn is_link(path: &Path) -> bool {
+    let Ok(metadata) = fs::symlink_metadata(path) else {
+        return false;
+    };
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        if metadata.file_attributes() & 0x400 != 0 {
+            return true;
+        }
+    }
+    metadata.file_type().is_symlink()
+}
+
+/// The files, the link, the record, and the branch all survive.
+fn assert_link_refusal_kept_everything(fixture: &Fixture, wt: &Path, saved: &Path, output: &std::process::Output) {
+    let stderr = stderr_of(output);
+    assert_eq!(output.status.code(), Some(3), "{stderr}");
+    assert!(!stderr.contains("Removed"), "{stderr}");
+    assert_eq!(fs::read_to_string(saved.join("a")).unwrap(), "a\n", "committed file kept: {stderr}");
+    assert!(is_link(wt), "the link is left alone");
+    assert!(listed_block(fixture, wt).is_some(), "the record stays:\n{}", porcelain(fixture));
+    assert!(fixture.branch_exists("feat/x"));
+}
+
+/// `feat-x` on `feat/x` with a committed `a`, then moved to `saved` and
+/// replaced by a link to it. Returns the worktree path and `saved`.
+fn replaced_by_a_readable_link(fixture: &Fixture, worktree: impl Fn(&Fixture) -> PathBuf) -> (PathBuf, PathBuf) {
+    let wt = worktree(fixture);
+    fixture.commit(&wt, "a");
+    let saved = replace_with_link(&wt);
+    let block = listed_block(fixture, &wt).expect("still registered");
+    assert!(!block.contains("prunable"), "Git reads through the link:\n{block}");
+    (wt, saved)
+}
+
+#[test]
+fn a_checkout_replaced_by_a_readable_link_refuses_with_and_without_force_flags() {
+    for flags in [&["--force-worktree", "--force-branch"][..], &[]] {
+        let fixture = Fixture::new();
+        let (wt, saved) = replaced_by_a_readable_link(&fixture, |fixture| fixture.add_worktree("feat/x", "feat-x"));
+
+        let output = fixture.wt(&fixture.repo()).args(["remove", "feat-x"]).args(flags).output().unwrap();
+
+        let stderr = stderr_of(&output);
+        assert!(stderr.contains("Can't remove feat-x: "), "{flags:?}: {stderr}");
+        assert!(stderr.contains("is a link, which may have replaced the original checkout"), "{stderr}");
+        assert!(!stderr.contains("Git can't read"), "Git can read it; never claimed: {stderr}");
+        assert!(!stderr.contains("Uncommitted files") && !stderr.contains("No uncommitted"), "refused before inventory: {stderr}");
+        assert_link_refusal_kept_everything(&fixture, &wt, &saved, &output);
+    }
+}
+
+#[test]
+fn a_readable_link_refuses_the_first_handoff_run_before_any_token() {
+    let fixture = Fixture::new();
+    let (wt, saved) = replaced_by_a_readable_link(&fixture, |fixture| add_nested_worktree(fixture, "feat/x", "feat-x"));
+
+    let output =
+        fixture.wt(&wt).env("WT_SHELL_WRAPPER", "1").args(["remove", "feat-x", "--force-worktree"]).output().unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains("remove-handoff:") && !stdout.contains("cd:"), "no token issued: {stdout}");
+    assert_link_refusal_kept_everything(&fixture, &wt, &saved, &output);
+}
+
+#[test]
+fn a_checkout_replaced_by_a_link_between_the_runs_refuses_the_approval() {
+    let fixture = Fixture::new();
+    let wt = add_nested_worktree(&fixture, "feat/x", "feat-x");
+    fixture.commit(&wt, "a");
+    let (landing, token) = first_run(&fixture, &wt, &["--force-worktree", "--force-branch"]);
+
+    let saved = replace_with_link(&wt);
+    let output = fixture.wt(&landing).args(["remove", "--handoff", &token]).output().unwrap();
+
+    let stderr = stderr_of(&output);
+    assert!(stderr.contains("now a link"), "{stderr}");
+    assert!(stderr.contains("start over"), "{stderr}");
+    assert_link_refusal_kept_everything(&fixture, &wt, &saved, &output);
+}
+
+/// A `git` on `PATH` that delegates every call, then, after a successful-or-
+/// not `worktree repair`, moves the repaired checkout to `saved` and puts a
+/// link to it in its place: every Git-side check reads through the link.
+#[cfg(unix)]
+#[test]
+fn a_checkout_replaced_by_a_link_after_repair_refuses() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let fixture = Fixture::new();
+    let wt = fixture.add_worktree("feat/x", "feat-x");
+    fixture.commit(&wt, "a");
+    fs::remove_file(wt.join(".git")).unwrap();
+    let saved = wt.with_file_name("saved");
+    let real_git = String::from_utf8(Command::new("sh").args(["-c", "command -v git"]).output().unwrap().stdout).unwrap();
+    let bin = fixture.root.path().join("bin");
+    fs::create_dir(&bin).unwrap();
+    let shim = bin.join("git");
+    fs::write(
+        &shim,
+        format!(
+            "#!/bin/sh\n'{}' \"$@\"\nstatus=$?\ncase \"$*\" in *'worktree repair'*) mv '{wt}' '{saved}' && ln -s '{saved}' '{wt}' ;; esac\nexit $status\n",
+            real_git.trim(),
+            wt = wt.display(),
+            saved = saved.display()
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&shim, fs::Permissions::from_mode(0o755)).unwrap();
+    let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default());
+
+    let output = fixture
+        .wt(&fixture.repo())
+        .env("PATH", path)
+        .args(["remove", "feat-x", "--force-worktree", "--force-branch"])
+        .output()
+        .unwrap();
+
+    let stderr = stderr_of(&output);
+    assert!(stderr.contains("Git couldn't restore a verified link"), "{stderr}");
+    assert!(stderr.contains("is now a link"), "{stderr}");
+    assert!(!stderr.contains("wt restored it to check"), "never claimed: {stderr}");
+    assert_link_refusal_kept_everything(&fixture, &wt, &saved, &output);
+}
+
+/// The guard inspects only the target itself: a worktree reached through a
+/// linked ancestor directory is removed as usual.
+#[cfg(unix)]
+#[test]
+fn a_worktree_under_a_linked_ancestor_still_removes() {
+    let fixture = Fixture::new();
+    let real_parent = fixture.root.path().join("real-wts");
+    fs::create_dir(&real_parent).unwrap();
+    let alias = fixture.root.path().join("alias-wts");
+    std::os::unix::fs::symlink(&real_parent, &alias).unwrap();
+    let wt = alias.join("feat-x");
+    git(&fixture.repo(), &["worktree", "add", "-q", "-b", "feat/x", wt.to_str().unwrap(), "main"]);
+
+    fixture.wt(&fixture.repo()).args(["remove", "feat-x"]).assert().code(0).stderr(predicate::str::contains("Removed worktree feat-x"));
+    assert!(!real_parent.join("feat-x").exists());
+    assert!(!fixture.branch_exists("feat/x"));
+}
+
+/// A `git` first on `PATH` that delegates every call to the real Git, then
+/// runs `after` (a shell snippet, which can call the real Git as `"$real"`)
+/// once, after the first call whose arguments contain `trigger`. Delegated
+/// output (buffered in a file, so `-z` NULs survive) and exit status pass
+/// through.
+#[cfg(unix)]
+fn one_shot_git_shim(fixture: &Fixture, trigger: &str, after: &str) -> String {
+    use std::os::unix::fs::PermissionsExt;
+
+    let real_git = String::from_utf8(Command::new("sh").args(["-c", "command -v git"]).output().unwrap().stdout).unwrap();
+    let bin = fixture.root.path().join("bin");
+    fs::create_dir(&bin).unwrap();
+    let fired = bin.join("fired");
+    let shim = bin.join("git");
+    fs::write(
+        &shim,
+        format!(
+            "#!/bin/sh\nreal='{git}'\nout=$(mktemp)\n\"$real\" \"$@\" > \"$out\"\nstatus=$?\n\
+            case \"$*\" in *'{trigger}'*) if [ ! -e '{fired}' ]; then : > '{fired}'; {after}; fi ;; esac\n\
+            cat \"$out\"\nrm -f \"$out\"\nexit $status\n",
+            git = real_git.trim(),
+            fired = fired.display(),
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&shim, fs::Permissions::from_mode(0o755)).unwrap();
+    format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default())
+}
+
+/// The review's reproduction: the surviving index is inspected clean, then
+/// gains a staged version before removal. That version was never reported,
+/// so removal refuses even though the report said the index matched HEAD.
+#[cfg(unix)]
+#[test]
+fn staged_work_written_to_a_missing_directory_record_after_its_check_refuses() {
+    let fixture = Fixture::new();
+    let gone = fixture.add_worktree("feat/gone", "feat-gone");
+    let admin = PathBuf::from(git(&gone, &["rev-parse", "--path-format=absolute", "--git-dir"]));
+    let index = admin.join("index");
+    let clean = fs::read(&index).unwrap();
+    fs::write(gone.join("a"), "staged later\n").unwrap();
+    git(&gone, &["add", "a"]);
+    let staged = fixture.root.path().join("staged-index");
+    fs::copy(&index, &staged).unwrap();
+    fs::write(&index, &clean).unwrap();
+    fs::remove_dir_all(&gone).unwrap();
+    let path = one_shot_git_shim(&fixture, "diff-index", &format!("cp '{}' '{}'", staged.display(), index.display()));
+
+    let output = fixture.wt(&fixture.repo()).env("PATH", path).args(["remove", "feat-gone"]).output().unwrap();
+
+    let stderr = stderr_of(&output);
+    assert_eq!(output.status.code(), Some(3), "{stderr}");
+    assert!(stderr.contains("changed after it was checked"), "{stderr}");
+    assert!(stderr.contains("start over"), "{stderr}");
+    assert!(!stderr.contains("Removed the record"), "{stderr}");
+    assert!(listed_block(&fixture, &gone).is_some(), "the record stays");
+    assert_eq!(fs::read(&index).unwrap(), fs::read(&staged).unwrap(), "the new staged version survives");
+    assert!(fixture.branch_exists("feat/gone"));
+
+    // A fresh run reports the staged work and asks for consent again.
+    let output = fixture.wt(&fixture.repo()).args(["remove", "feat-gone"]).output().unwrap();
+    let stderr = stderr_of(&output);
+    assert_eq!(output.status.code(), Some(3), "{stderr}");
+    assert!(stderr.contains("holds staged changes"), "{stderr}");
+}
+
+/// A worktree on `branch` whose index Git keeps split, optionally with
+/// `staged.txt` staged first, with its directory deleted; returns its
+/// administrative `index` and the `sharedindex.*` file that index references.
+fn missing_with_a_split_index(fixture: &Fixture, branch: &str, dir_name: &str, stage: bool) -> (PathBuf, PathBuf, PathBuf) {
+    let gone = fixture.add_worktree(branch, dir_name);
+    if stage {
+        fs::write(gone.join("staged.txt"), "staged\n").unwrap();
+        git(&gone, &["add", "staged.txt"]);
+    }
+    git(&gone, &["update-index", "--split-index"]);
+    let admin = PathBuf::from(git(&gone, &["rev-parse", "--path-format=absolute", "--git-dir"]));
+    let shared: Vec<PathBuf> = fs::read_dir(&admin)
+        .unwrap()
+        .map(|dirent| dirent.unwrap().path())
+        .filter(|path| path.file_name().unwrap().to_string_lossy().starts_with("sharedindex."))
+        .collect();
+    let [shared] = shared.as_slice() else { panic!("one shared index: {shared:?}") };
+    fs::remove_dir_all(&gone).unwrap();
+    (gone, admin.join("index"), shared.clone())
+}
+
+/// The controls for the split-index refusals below: an unchanged split index
+/// is removed, and its reported staged work is discarded with consent.
+#[test]
+fn a_missing_directory_with_an_unchanged_split_index_is_removed() {
+    let fixture = Fixture::new();
+    let (gone, _, _) = missing_with_a_split_index(&fixture, "feat/clean", "clean", false);
+    let output = fixture.wt(&fixture.repo()).args(["remove", "clean"]).output().unwrap();
+    let stderr = stderr_of(&output);
+    assert_eq!(output.status.code(), Some(0), "{stderr}");
+    assert!(listed_block(&fixture, &gone).is_none());
+    assert!(!fixture.branch_exists("feat/clean"));
+
+    let (gone, _, _) = missing_with_a_split_index(&fixture, "feat/staged", "staged", true);
+    let output = fixture.wt(&fixture.repo()).args(["remove", "staged"]).output().unwrap();
+    let stderr = stderr_of(&output);
+    assert_eq!(output.status.code(), Some(3), "{stderr}");
+    assert!(stderr.contains("holds staged changes") && stderr.contains("staged.txt"), "{stderr}");
+    let output = fixture.wt(&fixture.repo()).args(["remove", "staged", "--force-worktree"]).output().unwrap();
+    let stderr = stderr_of(&output);
+    assert_eq!(output.status.code(), Some(0), "{stderr}");
+    assert!(listed_block(&fixture, &gone).is_none());
+}
+
+/// The review's split-index reproduction: the shared file a split index's
+/// entries live in changes after `diff-index` checked it, leaving `index`
+/// itself byte-identical. Removal refuses (exit 3) and keeps the record, both
+/// index files, and the branch: unforced over a clean index, and with every
+/// force flag over reported staged work. Every shape of the change is the
+/// library's `a_split_index_whose_shared_file_changes_after_inspection_refuses`;
+/// this test only proves the refusal reaches the command, so it takes one shape
+/// per flag set.
+#[cfg(unix)]
+#[test]
+fn a_split_index_whose_shared_file_changes_after_its_check_refuses_even_with_every_force_flag() {
+    let cases = [
+        (false, &[][..], "corrupted", "printf corrupt > \"$shared\""),
+        (true, &ALL_FORCE_FLAGS[..], "removed", "rm \"$shared\""),
+    ];
+    for (stage, flags, shape, edit) in cases {
+        let fixture = Fixture::new();
+        let (gone, index, shared) = missing_with_a_split_index(&fixture, "feat/split", "split", stage);
+        let primary = fs::read(&index).unwrap();
+        let path = one_shot_git_shim(&fixture, "diff-index", &format!("shared='{}'; {edit}", shared.display()));
+
+        let output = fixture.wt(&fixture.repo()).env("PATH", path).args(["remove", "split"]).args(flags).output().unwrap();
+
+        let stderr = stderr_of(&output);
+        let case = format!("{shape}, staged: {stage}, flags: {flags:?}");
+        assert_eq!(output.status.code(), Some(3), "{case}: {stderr}");
+        assert!(stderr.contains("can't be inspected") && stderr.contains("start over"), "{case}: {stderr}");
+        assert!(!stderr.contains("Removed the record") && !stderr.contains("Deleted branch"), "{case}: {stderr}");
+        assert!(listed_block(&fixture, &gone).is_some(), "{case}: the record stays");
+        assert_eq!(fs::read(&index).unwrap(), primary, "{case}: only the shared file changed");
+        assert!(fs::symlink_metadata(&shared).is_ok() || shape == "removed", "{case}");
+        assert!(fixture.branch_exists("feat/split"), "{case}");
+    }
+}
+
+/// The branch was judged safe at the tip the report showed; a commit that
+/// lands on it before deletion was never assessed, so the branch is kept.
+#[cfg(unix)]
+#[test]
+fn a_branch_that_moves_after_its_worktree_is_removed_is_kept() {
+    let fixture = Fixture::new();
+    let wt = fixture.add_worktree("feat/x", "feat-x");
+    let other = fixture.add_worktree("feat/other", "feat-other");
+    let moved = fixture.commit(&other, "unassessed.txt");
+    let path = one_shot_git_shim(
+        &fixture,
+        "worktree remove",
+        &format!("\"$real\" -C '{}' update-ref refs/heads/feat/x {moved}", fixture.repo().display()),
+    );
+
+    let output = fixture.wt(&fixture.repo()).env("PATH", path).args(["remove", "feat-x"]).output().unwrap();
+
+    let stderr = stderr_of(&output);
+    assert_eq!(output.status.code(), Some(1), "{stderr}");
+    assert!(stderr.contains("Removed worktree feat-x"), "{stderr}");
+    assert!(stderr.contains("moved") && stderr.contains("so it was kept"), "{stderr}");
+    assert!(!stderr.contains("Deleted branch"), "{stderr}");
+    assert!(!wt.exists());
+    assert_eq!(git(&fixture.repo(), &["rev-parse", "refs/heads/feat/x"]), moved);
+}
+
+/// `--force-worktree` approves discarding the files the report listed. A
+/// version staged after the report (here, as soon as the files were
+/// fingerprinted) was never shown, and `git worktree remove --force` would
+/// discard it, so removal refuses.
+#[cfg(unix)]
+#[test]
+fn a_change_staged_after_the_report_is_not_covered_by_force_worktree() {
+    let fixture = Fixture::new();
+    let wt = fixture.add_worktree("feat/x", "feat-x");
+    fs::write(wt.join("notes.txt"), "reported\n").unwrap();
+    fs::write(wt.join("README.md"), "staged after the report\n").unwrap();
+    let path = one_shot_git_shim(&fixture, "ls-files --stage", &format!("\"$real\" -C '{}' add README.md", wt.display()));
+
+    let output = fixture.wt(&fixture.repo()).env("PATH", path).args(["remove", "feat-x", "--force-worktree"]).output().unwrap();
+
+    let stderr = stderr_of(&output);
+    assert_eq!(output.status.code(), Some(3), "{stderr}");
+    assert!(stderr.contains("changed after they were checked"), "{stderr}");
+    assert!(!stderr.contains("Removed worktree"), "{stderr}");
+    assert_eq!(git(&wt, &["diff", "--cached", "--name-only"]), "README.md", "the staged change survives");
+    assert!(wt.join("notes.txt").exists());
+    assert!(fixture.branch_exists("feat/x"));
+
+    // Unchanged since its report, the same removal goes ahead.
+    fixture.wt(&fixture.repo()).args(["remove", "feat-x", "--force-worktree"]).assert().code(0);
+    assert!(!wt.exists());
+}

@@ -24,8 +24,10 @@ contract, see [the topic doc](../../../../biscuit-file/docs/topics/file-referenc
 `FileReference::payload()` returns the authored text after `%`, the sigil,
 and its optional `/` (`%@/@x.md` → `@x.md`); diagnostics use it instead of
 trimming prefixes.
-Recursive `%` is a modifier, not another kind. It traverses the same ordered
-roots, does not follow directory symlinks, sorts all matches lexically, and
+Recursive `%` is a modifier, not another kind. It is `GlobReference`'s
+`take_first` on `**/<escaped payload>` under the same ordered roots (an
+absolute payload searches below its own directory), so it returns the most
+local match, not a lexical winner. It does not follow directory symlinks and
 records roots as `ProbeDisposition::SearchRoot`.
 
 Magic consumes exactly the authored `@` or `@/` sigil form. Its remaining
@@ -44,8 +46,10 @@ tier — containment in the local root decides, never containment in `$HOME`.
 `add_magic_path_with_tier(path, position, MagicPathTier::User)` forces the
 user tier, which a caller needs for home conventions when the local root *is*
 `$HOME`. `PathPosition` orders a root only within its tier (`Start` before
-that tier's intrinsic roots, `End` after). Roots are deduplicated after
-ordering, keeping first-seen provenance. A relative configured root joins onto
+that tier's intrinsic roots, `End` after). Roots (and candidate plans) are
+deduplicated after ordering by `PathIdentity` (`first_seen_by_identity` in
+`portable/path_identity.rs`), keeping first-seen provenance and spelling; an
+unreducible verbatim path is a duplicate of its legacy spelling. A relative configured root joins onto
 the captured request directory — for ambient `resolve_from(cwd)`, onto
 `cwd` rather than the process CWD.
 
@@ -80,11 +84,13 @@ let target = FileReference::new("prompts/next.md")?
 ```
 
 `FileResolutionContext::new(cwd)` snapshots the process environment and
-cross-platform home once. Supply a validated repository scope catalog,
+home once. Supply a validated repository scope catalog,
 and override the snapshot with `with_env()`, `with_home_dir()`, or
 `without_home_dir()` when the caller has authoritative values. `with_env()`
 replaces the whole environment (it does not merge); non-Unicode variables are
-never captured. Context-owned
+never captured. `capture_env()` and `home_dir()` are the exact readers `new()`
+uses, so a caller building through `from_snapshot` (Darkmatter's
+`RequestSnapshot::from_process()`) sees the same values. Context-owned
 `add_magic_path()` and `add_vault()` configure the roots used by explicit APIs.
 
 Every context directory and tree anchor (request and authoring `cwd`,
@@ -94,8 +100,11 @@ be absolute. Builders and derivations never fail; `validate()` (run first by eve
 resolver entry point and `PortablePath`) returns
 `RelativeContextDirectory { anchor: ContextAnchor, path }`, trusted
 derivations included. Relative env values, magic roots, and vault roots keep
-their own rules and stay supported. `home_dir()` reports a relative `$HOME` as
-`None`.
+their own rules and stay supported. `home_dir()` is `std::env::home_dir()` (`HOME` on POSIX,
+`USERPROFILE` on native Windows, platform fallback when unset) and reports a
+relative home as `None` with no second lookup; it never canonicalizes or
+checks existence. It is the workspace's one home reader: Claudine and
+Darkmatter call it rather than `dirs::home_dir`/`std::env::home_dir`.
 
 Use `for_source(source)` for each in-repository nested file-backed document. It
 sets the source and changes the authoring `cwd` to `source.parent()`, while
@@ -182,6 +191,15 @@ failures are `Err`.
 failure vocabulary is `InvalidReference`, `MissingContext`, `NoMatch`, `Io`,
 and `UnsupportedRemote`. `NoMatch` has no underlying error; other failed
 outcomes retain a `FileReferenceError`.
+`FileReferenceError::resolution_failure()` returns that same class for any
+error (never `NoMatch`); do not re-derive it.
+
+A consumer that reports a single-file miss appends
+`ResolutionFailure::glob_hint(reference)` (or `DetailedResolution::glob_hint()`):
+the literal-glob hint, `Some` only for `NoMatch` on text containing `*`, `?`,
+or `[`. Never test for wildcards in a consumer; Darkmatter's
+`errors::with_glob_hint(message, failure, reference)` appends it as a `hint:`
+line.
 
 `candidate_plan()` returns the complete ordered, unprobed plan. By contrast,
 `DetailedResolution::candidates()` contains only attempts made before the first
@@ -230,6 +248,46 @@ repository-scoped candidates receive lexical and canonical containment checks,
 including the deepest existing ancestor for a missing lazy target. This is a
 TOCTOU-aware resolver boundary, not a filesystem sandbox. Quote `&` in shell
 arguments, such as `spec='&docs/plan.md'`.
+
+### Glob references (`GlobReference`)
+
+`GlobReference::new(patterns)` takes `[!][prefix]glob` patterns; the prefix
+selects the same roots as a `FileReference` with that prefix. `new` rejects
+`%` and URL prefixes (`RejectedPrefix`), grammar errors (`MalformedPrefix`),
+bad glob syntax (`InvalidGlob`), and all-exclusion lists
+(`NoPositivePattern`); root failures surface at `list_files` / `take_first`.
+
+- **Native order:** merged roots in precedence order, then fewest components
+  below the root, then component-wise. A file is owned and judged by the first
+  root containing it, so a later root never re-includes an excluded file.
+- `list_files` → `GlobListing { matches, skipped }`; `take_first` → shallowest
+  match under the first root with any, later roots unwalked (this is `%`).
+- **Unreadable directories fail, never shorten.** A directory the walk must
+  enter but cannot read is `GlobReferenceError::Io { path }` (`%` maps it to
+  `FileReferenceError::Io`); a missing search directory is still `Ok` empty.
+  Exempt: a directory deeper than a `**`-free pattern can reach, a vanished
+  entry or dangling link, and (for `take_first`) one whose files would all be
+  deeper than the found match. Never reintroduce `filter_map(Result::ok)` on
+  a walk.
+- `matches` (lexical, never fails), `lists_file` (also drops out-of-tree file
+  symlinks), `roots`, `matches_without_context` (bare/absolute patterns only),
+  `with_file_name_view`, `escape`, `patterns`.
+- Bare/`./`/`../` patterns keep the relative boundary: a search directory
+  outside the tree is `RelativeTreeEscape` unless `allow_external_relative()`;
+  an out-of-tree file symlink is a `SkippedEntry { link, target }`, not a
+  match. Directory symlinks are never followed.
+- Brackets: `FileReference "pages/[id].md"` is literal; glob `[id]` is a
+  character class; `%pages/[id].md` finds the literal file.
+- `*`/`?` do not cross `/`, matching is case-sensitive everywhere (an absolute
+  pattern's authored directory names too: `prepare` drops the root unless each
+  name the filesystem resolves is an exact entry of its parent; never compare
+  by lowercasing, since `ς`/`Σ` and `ß`/`SS` alias on case-insensitive APFS; tests probe the fixture volume, never the OS. An unlistable
+  parent falls back to the canonical name on macOS/Windows, or a proof that the
+  other-case spelling is a different entry; unconfirmed spellings are rejected.
+  Windows 8.3 short names are accepted; `{{VAR}}` and `%` directories are
+  exempt), `\` never
+  escapes (literal on Unix, a separator on Windows), `{{VAR}}` values are
+  literal; no hidden/ignore/underscore filter.
 
 ### Completion/execution parity
 
@@ -282,5 +340,7 @@ public containment check for *any* reference kind against a caller-chosen
 directory (lexical, then through symlinks from the deepest ancestor whose
 target exists, so a broken symlink reads as missing, not as `Io`). Resolution
 itself checks containment only for `&` and `^`. `RemoteNotLocal`
-means a URL reached a local path API; use the `url`-gated `resolve_target()`
-when the caller accepts `Resolved::Remote`.
+means a URL reached a local path API; use the `url`-gated
+`resolve_target_in_context(&ctx)` (or the ambient `resolve_target()`) when the
+caller accepts `Resolved::Remote`. Only the context form fills a URL's
+`{{VAR}}` from the context's environment.

@@ -10,7 +10,7 @@ fn ordinary_memory_file_is_rejected_before_body_composition() {
 
     assert!(!wrapper_harness_frontmatter_enabled(&path).unwrap());
 
-    let invocation = claudine::invocation_context::InvocationContext::capture_at(directory.path());
+    let invocation = claudine::invocation_context::InvocationContext::capture_at(crate::request::snapshot(), directory.path()).unwrap();
     let profile = super::super::profile::profile_for_provider(Provider::Claude).unwrap();
     let result = detect_wrapper_harness(
         Provider::Claude,
@@ -38,7 +38,7 @@ fn no_prompt_skips_memory_lookup_and_harness_work() {
         "---\nloop: {}\n---\nbody\n",
     )
     .unwrap();
-    let invocation = claudine::invocation_context::InvocationContext::capture_at(directory.path());
+    let invocation = claudine::invocation_context::InvocationContext::capture_at(crate::request::snapshot(), directory.path()).unwrap();
     let profile = super::super::profile::profile_for_provider(Provider::Claude).unwrap();
 
     let result = detect_wrapper_harness(
@@ -62,7 +62,7 @@ fn no_prompt_skips_memory_lookup_and_harness_work() {
 #[test]
 fn prompt_without_memory_candidate_skips_all_harness_work() {
     let directory = tempfile::tempdir().unwrap();
-    let invocation = claudine::invocation_context::InvocationContext::capture_at(directory.path());
+    let invocation = claudine::invocation_context::InvocationContext::capture_at(crate::request::snapshot(), directory.path()).unwrap();
     let profile = super::super::profile::profile_for_provider(Provider::Claude).unwrap();
 
     let result = detect_wrapper_harness(
@@ -92,7 +92,7 @@ fn enabled_memory_harness_uses_one_materialization_and_request_owned_compose() {
         "---\ntimeout: 1m\n---\nMemory body.\n",
     )
     .unwrap();
-    let invocation = claudine::invocation_context::InvocationContext::capture_at(directory.path());
+    let invocation = claudine::invocation_context::InvocationContext::capture_at(crate::request::snapshot(), directory.path()).unwrap();
     let profile = super::super::profile::profile_for_provider(Provider::Claude).unwrap();
 
     let result = detect_wrapper_harness(
@@ -138,7 +138,7 @@ fn enabled_memory_harness_composes_requested_runtime_facets_from_invocation_evid
         "---\ntimeout: 1m\nresolved_os: \"{{ ctx.os }}\"\n---\nMemory body.\n",
     )
     .unwrap();
-    let invocation = claudine::invocation_context::InvocationContext::capture_at(directory.path());
+    let invocation = claudine::invocation_context::InvocationContext::capture_at(crate::request::snapshot(), directory.path()).unwrap();
     let profile = super::super::profile::profile_for_provider(Provider::Claude).unwrap();
 
     let result = detect_wrapper_harness(
@@ -190,7 +190,7 @@ fn malformed_memory_frontmatter_fails_the_full_harness_detection_path() {
         "---\ntimeout: [\n---\nbody\n",
     )
     .unwrap();
-    let invocation = claudine::invocation_context::InvocationContext::capture_at(directory.path());
+    let invocation = claudine::invocation_context::InvocationContext::capture_at(crate::request::snapshot(), directory.path()).unwrap();
     let profile = super::super::profile::profile_for_provider(Provider::Claude).unwrap();
 
     let error = match detect_wrapper_harness(

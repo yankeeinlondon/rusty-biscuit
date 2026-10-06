@@ -178,6 +178,23 @@ on Unix a literal `\` in a filename renders as `/`.
 Never use rendered text as a path-identity key — use `PathIdentity` (below).
 A short root can simplify while its long descendant cannot.
 
+### Canonicalization and home
+
+```rust
+// Unfeatured. `dunce::canonicalize`: std's result, minus a reducible `\\?\`.
+let real: std::io::Result<PathBuf> = biscuit_file::canonicalize_simplified(path);
+// Feature `file-reference`. HOME (POSIX) / USERPROFILE (Windows), relative → None.
+let home: Option<PathBuf> = biscuit_file::home_dir();
+```
+
+- `canonicalize_simplified` is std's `canonicalize` on macOS/Linux; it differs
+  only on Windows. Use it for any canonical path that is returned, stored,
+  rendered, hashed into a shared key, or reparsed. Raw calls are for private
+  comparisons only, listed in the package's `path_lookup_guard.rs`.
+- `home_dir()` is `std::env::home_dir().filter(is_absolute)`: never
+  canonicalized, no existence check, `HOME` ignored on native Windows. It
+  replaced `dirs::home_dir` (known-folder lookup) on 2026-10-03.
+
 ## Path Identity
 Source: `biscuit-file/lib/src/file_reference/portable/path_identity.rs` (feature `file-reference`)
 

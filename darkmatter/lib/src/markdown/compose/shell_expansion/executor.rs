@@ -20,6 +20,7 @@ use super::types::{
     StderrTarget, StdoutTarget,
 };
 use crate::markdown::compose::ComposeSource;
+use biscuit_file::FileResolutionContext;
 
 /// Detailed output from a successful shell command execution.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -61,25 +62,27 @@ impl CommandExecution {
 /// 1. `options.shell.working_directory` if set
 /// 2. Source file's parent directory if `ComposeSource::File`
 /// 3. `options.shell.policy_root` if set
-/// 4. `std::env::current_dir()`
+/// 4. the request directory (`context.cwd()`), never the process's
 ///
 /// ## Examples
 ///
 /// ```
+/// use biscuit_file::FileResolutionContext;
 /// use darkmatter::markdown::compose::shell_expansion::executor::resolve_working_directory;
 /// use darkmatter::markdown::compose::shell_expansion::types::ShellExpansionOptions;
 /// use darkmatter::markdown::compose::ComposeSource;
-/// use std::path::PathBuf;
 ///
+/// let request_dir = std::env::temp_dir();
+/// let context = FileResolutionContext::new(&request_dir);
 /// let options = ShellExpansionOptions::default();
-/// let source = ComposeSource::Unknown;
-/// let working_dir = resolve_working_directory(&options, &source);
-/// // Returns current directory
+/// let working_dir = resolve_working_directory(&options, &ComposeSource::Unknown, &context);
+/// assert_eq!(working_dir, request_dir);
 /// ```
 #[instrument(skip_all)]
 pub fn resolve_working_directory(
     shell_opts: &ShellExpansionOptions,
     source: &ComposeSource,
+    context: &FileResolutionContext,
 ) -> PathBuf {
     if let Some(ref wd) = shell_opts.working_directory {
         return wd.clone();
@@ -93,7 +96,7 @@ pub fn resolve_working_directory(
     if let Some(ref root) = shell_opts.policy_root {
         return root.clone();
     }
-    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+    context.cwd().to_path_buf()
 }
 
 /// Executes a shell directive command with timeout and output capture.
@@ -133,7 +136,8 @@ pub fn resolve_working_directory(
 /// };
 /// let options = ShellExpansionOptions::default();
 /// let source = ComposeSource::Unknown;
-/// let output = execute_command(&directive, &options, &source).unwrap();
+/// let context = biscuit_file::FileResolutionContext::new(std::env::temp_dir());
+/// let output = execute_command(&directive, &options, &source, &context).unwrap();
 /// assert!(output.contains("hello"));
 /// ```
 #[instrument(skip_all, fields(
@@ -145,8 +149,9 @@ pub fn execute_command(
     directive: &ShellDirective,
     shell_opts: &ShellExpansionOptions,
     source: &ComposeSource,
+    context: &FileResolutionContext,
 ) -> Result<String, ShellExpansionError> {
-    Ok(execute_command_detailed(directive, shell_opts, source)?.combined_output())
+    Ok(execute_command_detailed(directive, shell_opts, source, context)?.combined_output())
 }
 
 /// How a command ended, or, for a chain, how the last command that ran ended.
@@ -207,9 +212,10 @@ pub(crate) fn execute_command_detailed(
     directive: &ShellDirective,
     shell_opts: &ShellExpansionOptions,
     source: &ComposeSource,
+    context: &FileResolutionContext,
 ) -> Result<CommandExecution, ShellExpansionError> {
     let first = directive_actions(directive).into_iter().take(1).collect();
-    let outcome = run_actions(directive, first, shell_opts, source)?;
+    let outcome = run_actions(directive, first, shell_opts, source, context)?;
     outcome_to_execution(directive, outcome, shell_opts.timeout_behavior)
 }
 
@@ -220,8 +226,9 @@ pub(crate) fn execute_directive_impl(
     directive: &ShellDirective,
     shell_opts: &ShellExpansionOptions,
     source: &ComposeSource,
+    context: &FileResolutionContext,
 ) -> Result<CommandExecution, ShellExpansionError> {
-    let outcome = execute_directive_outcome(directive, shell_opts, source)?;
+    let outcome = execute_directive_outcome(directive, shell_opts, source, context)?;
     outcome_to_execution(directive, outcome, shell_opts.timeout_behavior)
 }
 
@@ -241,8 +248,9 @@ pub(crate) fn execute_directive_outcome(
     directive: &ShellDirective,
     shell_opts: &ShellExpansionOptions,
     source: &ComposeSource,
+    context: &FileResolutionContext,
 ) -> Result<ShellOutcome, ShellExpansionError> {
-    run_actions(directive, directive_actions(directive), shell_opts, source)
+    run_actions(directive, directive_actions(directive), shell_opts, source, context)
 }
 
 /// The directive's commands with their chain operators. A directive without a
@@ -266,8 +274,9 @@ fn run_actions(
     actions: Vec<PipelineAction>,
     shell_opts: &ShellExpansionOptions,
     source: &ComposeSource,
+    context: &FileResolutionContext,
 ) -> Result<ShellOutcome, ShellExpansionError> {
-    let working_dir = resolve_working_directory(shell_opts, source);
+    let working_dir = resolve_working_directory(shell_opts, source, context);
     let timeout = directive.timeout_override.unwrap_or(shell_opts.timeout);
     debug!(working_dir = %working_dir.display(), "shell: executing command");
 
@@ -739,6 +748,12 @@ mod tests {
     };
     use tempfile::TempDir;
 
+    /// A request anchored at the temporary directory, standing in for the
+    /// compose request a directive runs under.
+    fn request_context() -> FileResolutionContext {
+        FileResolutionContext::new(std::env::temp_dir())
+    }
+
     fn test_ctx() -> biscuit_terminal::errors::SourceContext {
         biscuit_terminal::errors::SourceContext::new(
             std::path::PathBuf::from("/test"),
@@ -788,7 +803,7 @@ mod tests {
         let options = ShellExpansionOptions::default();
         let source = ComposeSource::Unknown;
 
-        let output = execute_command(&directive, &options, &source).unwrap();
+        let output = execute_command(&directive, &options, &source, &request_context()).unwrap();
         assert_eq!(output.trim(), "hello");
     }
 
@@ -799,7 +814,7 @@ mod tests {
         let options = ShellExpansionOptions::default();
         let source = ComposeSource::Unknown;
 
-        let output = execute_command(&d, &options, &source).unwrap();
+        let output = execute_command(&d, &options, &source, &request_context()).unwrap();
         assert_eq!(output, "");
     }
 
@@ -810,7 +825,7 @@ mod tests {
         let options = ShellExpansionOptions::default();
         let source = ComposeSource::Unknown;
 
-        let result = execute_command(&d, &options, &source);
+        let result = execute_command(&d, &options, &source, &request_context());
         assert!(result.is_err());
         match result.unwrap_err() {
             ShellExpansionError::ExecutionFailed { code, .. } => {
@@ -826,7 +841,7 @@ mod tests {
         let options = ShellExpansionOptions::default();
         let source = ComposeSource::Unknown;
 
-        let result = execute_command(&d, &options, &source);
+        let result = execute_command(&d, &options, &source, &request_context());
         assert!(result.is_err());
         match result.unwrap_err() {
             ShellExpansionError::CommandNotFound {
@@ -849,7 +864,7 @@ mod tests {
         };
         let source = ComposeSource::Unknown;
 
-        let result = execute_command(&d, &options, &source);
+        let result = execute_command(&d, &options, &source, &request_context());
         assert!(result.is_err());
         match result.unwrap_err() {
             ShellExpansionError::Timeout { timeout, .. } => {
@@ -869,13 +884,13 @@ mod tests {
             ..Default::default()
         };
         let source = ComposeSource::File(PathBuf::from("/yet/another/path/file.md"));
-        let wd = resolve_working_directory(&options, &source);
+        let wd = resolve_working_directory(&options, &source, &request_context());
         assert_eq!(wd, temp_dir.path());
 
         // Test 2: File source parent when working_directory is None
         let options = ShellExpansionOptions::default();
         let source = ComposeSource::File(PathBuf::from("/path/to/file.md"));
-        let wd = resolve_working_directory(&options, &source);
+        let wd = resolve_working_directory(&options, &source, &request_context());
         assert_eq!(wd, PathBuf::from("/path/to"));
 
         // Test 3: policy_root when no file source
@@ -884,14 +899,14 @@ mod tests {
             ..Default::default()
         };
         let source = ComposeSource::Unknown;
-        let wd = resolve_working_directory(&options, &source);
+        let wd = resolve_working_directory(&options, &source, &request_context());
         assert_eq!(wd, PathBuf::from("/policy/root"));
 
-        // Test 4: current_dir as fallback
+        // Test 4: the request directory as fallback, never the process's
         let options = ShellExpansionOptions::default();
         let source = ComposeSource::Unknown;
-        let wd = resolve_working_directory(&options, &source);
-        assert!(!wd.as_os_str().is_empty());
+        let wd = resolve_working_directory(&options, &source, &FileResolutionContext::new(temp_dir.path()));
+        assert_eq!(wd, temp_dir.path());
     }
 
     #[cfg(unix)]
@@ -904,7 +919,7 @@ mod tests {
         };
         let source = ComposeSource::Unknown;
 
-        let result = execute_command(&d, &options, &source);
+        let result = execute_command(&d, &options, &source, &request_context());
         match result {
             Ok(output) => assert_eq!(output, ""),
             Err(ShellExpansionError::Timeout { .. }) => {
@@ -920,7 +935,7 @@ mod tests {
         let options = ShellExpansionOptions::default();
         let source = ComposeSource::Unknown;
 
-        let output = execute_command_detailed(&d, &options, &source).unwrap();
+        let output = execute_command_detailed(&d, &options, &source, &request_context()).unwrap();
         assert_eq!(framed_payload(&output.stdout), "out");
         assert_eq!(framed_payload(&output.stderr), "err");
         // Only stdout carries libtest's preamble, so the tail of the combined
@@ -950,14 +965,11 @@ mod tests {
     }
 
     #[test]
-    fn bare_filename_source_falls_through_to_cwd() {
+    fn bare_filename_source_falls_through_to_the_request_directory() {
         let options = ShellExpansionOptions::default();
         let source = ComposeSource::File(PathBuf::from("file.md"));
-        let wd = resolve_working_directory(&options, &source);
-        assert!(
-            !wd.as_os_str().is_empty(),
-            "Working directory must not be empty for bare filenames"
-        );
+        let wd = resolve_working_directory(&options, &source, &request_context());
+        assert_eq!(wd, std::env::temp_dir(), "a bare filename has no parent, so the request directory applies");
     }
 
     #[cfg(unix)]
@@ -967,7 +979,7 @@ mod tests {
         let options = ShellExpansionOptions::default();
         let source = ComposeSource::File(PathBuf::from("test.md"));
 
-        let output = execute_command(&d, &options, &source).unwrap();
+        let output = execute_command(&d, &options, &source, &request_context()).unwrap();
         assert_eq!(output.trim(), "works");
     }
 
@@ -990,7 +1002,7 @@ mod tests {
         let options = ShellExpansionOptions::default();
         let source = ComposeSource::Unknown;
 
-        let output = execute_command(&d, &options, &source).unwrap();
+        let output = execute_command(&d, &options, &source, &request_context()).unwrap();
         assert_eq!(output.trim(), "hello world");
     }
 
@@ -1000,7 +1012,7 @@ mod tests {
         let options = ShellExpansionOptions::default();
         let source = ComposeSource::Unknown;
 
-        match execute_command(&d, &options, &source) {
+        match execute_command(&d, &options, &source, &request_context()) {
             Err(ShellExpansionError::ExecutionFailed {
                 code,
                 stdout,
@@ -1034,7 +1046,7 @@ mod tests {
         let options = ShellExpansionOptions::default(); // strip_ansi: true by default
         let source = ComposeSource::Unknown;
 
-        let output = execute_command(&d, &options, &source).unwrap();
+        let output = execute_command(&d, &options, &source, &request_context()).unwrap();
         assert_eq!(output.trim(), "hello");
     }
 
@@ -1060,7 +1072,7 @@ mod tests {
         };
         let source = ComposeSource::Unknown;
 
-        let output = execute_command(&d, &options, &source).unwrap();
+        let output = execute_command(&d, &options, &source, &request_context()).unwrap();
         assert_eq!(output.trim(), "\x1b[31mhello\x1b[0m");
     }
 
@@ -1083,7 +1095,7 @@ mod tests {
         let options = ShellExpansionOptions::default(); // strip_ansi: true by default
         let source = ComposeSource::Unknown;
 
-        let output = execute_command(&d, &options, &source).unwrap();
+        let output = execute_command(&d, &options, &source, &request_context()).unwrap();
         assert!(output.contains("NO_COLOR=1"));
     }
 
@@ -1109,7 +1121,7 @@ mod tests {
         };
         let source = ComposeSource::Unknown;
 
-        let result = execute_command(&d, &options, &source);
+        let result = execute_command(&d, &options, &source, &request_context());
         assert!(result.is_err());
         match result.unwrap_err() {
             ShellExpansionError::Timeout { timeout, .. } => {
@@ -1360,7 +1372,7 @@ mod tests {
             ..Default::default()
         };
 
-        let output = execute_command_detailed(&d, &options, &ComposeSource::Unknown).unwrap();
+        let output = execute_command_detailed(&d, &options, &ComposeSource::Unknown, &request_context()).unwrap();
         let stdout = payload_after_preamble(&output.stdout, SATURATE_STDOUT_BYTE);
         let stderr = payload_after_preamble(&output.stderr, SATURATE_STDERR_BYTE);
         assert_eq!(stdout.len(), SATURATION_BYTES);
@@ -1401,7 +1413,7 @@ mod tests {
             ..Default::default()
         };
 
-        let output = execute_directive_impl(&d, &options, &ComposeSource::Unknown).unwrap();
+        let output = execute_directive_impl(&d, &options, &ComposeSource::Unknown, &request_context()).unwrap();
         // Counted, not framed: the pipeline concatenates both actions' captures,
         // so each stream carries two libtest preambles rather than one leading
         // one. The payload bytes cannot occur in either.
@@ -1438,7 +1450,7 @@ mod tests {
             ..Default::default()
         };
 
-        let output = execute_command_detailed(&d, &options, &ComposeSource::Unknown).unwrap();
+        let output = execute_command_detailed(&d, &options, &ComposeSource::Unknown, &request_context()).unwrap();
         // Both streams land in stdout; stderr stays empty for a `2>&1` merge.
         // Counted per payload byte rather than framed: a merged pipe interleaves
         // the two streams at chunk granularity, so only the totals are defined.
@@ -1475,7 +1487,7 @@ mod tests {
         let options = ShellExpansionOptions::default();
 
         wait_probe::take();
-        execute_command(&d, &options, &ComposeSource::Unknown).unwrap();
+        execute_command(&d, &options, &ComposeSource::Unknown, &request_context()).unwrap();
 
         assert_eq!(wait_probe::take(), vec![NO_POLL_BUDGET]);
     }
@@ -1503,7 +1515,7 @@ mod tests {
         let options = ShellExpansionOptions::default();
 
         wait_probe::take();
-        execute_command_detailed(&d, &options, &ComposeSource::Unknown).unwrap();
+        execute_command_detailed(&d, &options, &ComposeSource::Unknown, &request_context()).unwrap();
 
         assert_eq!(wait_probe::take(), vec![NO_POLL_BUDGET]);
     }
@@ -1531,7 +1543,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = execute_command_detailed(&d, &options, &ComposeSource::Unknown).unwrap();
+        let result = execute_command_detailed(&d, &options, &ComposeSource::Unknown, &request_context()).unwrap();
         assert_eq!(result.timeout_fallback, Some(Duration::from_millis(500)));
 
         // Without this, a helper that never started would satisfy the
@@ -1574,7 +1586,7 @@ mod tests {
         });
         let options = ShellExpansionOptions::default();
 
-        let err = execute_command_detailed(&d, &options, &ComposeSource::Unknown).unwrap_err();
+        let err = execute_command_detailed(&d, &options, &ComposeSource::Unknown, &request_context()).unwrap_err();
         match err {
             ShellExpansionError::Timeout { timeout, .. } => {
                 assert_eq!(timeout, Duration::from_millis(100));
@@ -1606,7 +1618,7 @@ mod tests {
         };
         let source = ComposeSource::Unknown;
 
-        let result = execute_command_detailed(&d, &options, &source);
+        let result = execute_command_detailed(&d, &options, &source, &request_context());
         assert!(result.is_ok());
         let result = result.unwrap();
         assert_eq!(result.stdout, "");

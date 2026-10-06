@@ -1,10 +1,7 @@
-#[cfg(unix)]
 use std::collections::HashMap;
 use std::fs;
-#[cfg(unix)]
 use std::path::Path;
 
-#[cfg(unix)]
 use claudine::mcp::types::{
     McpCatalog, McpDefaults, McpOrigin, McpProviderState, McpServer, McpServerMetadata,
     McpTransport, ProviderScopeEntries, ProviderStateEntry, RepoProviderState,
@@ -12,10 +9,10 @@ use claudine::mcp::types::{
 use predicates::str::contains;
 use crate::common;
 use common::{CliProcessFixture, init_git_repo};
+use common::{write, write_json};
 #[cfg(unix)]
-use common::{write, write_executable, write_json};
+use common::write_executable;
 
-#[cfg(unix)]
 fn make_server(id: &str) -> McpServer {
     McpServer {
         id: id.into(),
@@ -41,7 +38,6 @@ fn make_server(id: &str) -> McpServer {
     }
 }
 
-#[cfg(unix)]
 fn seed_catalog(home: &Path, servers: &[McpServer]) {
     let catalog = McpCatalog {
         version: 1,
@@ -54,7 +50,6 @@ fn seed_catalog(home: &Path, servers: &[McpServer]) {
     write_json(&home.join(".claudine/mcp/catalog.json"), &catalog);
 }
 
-#[cfg(unix)]
 fn seed_defaults(home: &Path, ids: &[&str]) {
     write_json(
         &home.join(".claudine/mcp/defaults.json"),
@@ -65,7 +60,6 @@ fn seed_defaults(home: &Path, ids: &[&str]) {
     );
 }
 
-#[cfg(unix)]
 fn seed_provider_state(
     home: &Path,
     repo_root: Option<&Path>,
@@ -115,8 +109,6 @@ fn seed_provider_state(
     write_json(&home.join(".claudine/mcp/provider-state.json"), &state);
 }
 
-// This subprocess fixture requires Unix HOME isolation for user-global MCP state.
-#[cfg(unix)]
 #[test]
 fn mcp_show_json_includes_provenance() {
     let fixture = CliProcessFixture::named("mcp-show-json");
@@ -146,8 +138,6 @@ fn mcp_show_json_includes_provenance() {
     assert_eq!(value["provenance"][0]["native_name"], "calendar-native");
 }
 
-// This subprocess fixture requires Unix HOME isolation for user-global MCP state.
-#[cfg(unix)]
 #[test]
 fn mcp_config_json_uses_new_command_name() {
     let fixture = CliProcessFixture::named("mcp-config-json");
@@ -168,8 +158,6 @@ fn mcp_config_json_uses_new_command_name() {
     assert_eq!(value["server"]["aliases"][0], "gcal");
 }
 
-// This subprocess fixture requires Unix HOME isolation for user-global MCP state.
-#[cfg(unix)]
 #[test]
 fn mcp_check_json_reports_invalid_servers() {
     let fixture = CliProcessFixture::named("mcp-check-json");
@@ -221,8 +209,6 @@ fn mcp_default_repo_uses_repo_root_from_nested_directory() {
     assert!(!nested.join(".claudine/mcp.json").exists());
 }
 
-// This subprocess fixture requires Unix HOME isolation for user-global MCP state.
-#[cfg(unix)]
 #[test]
 fn mcp_export_reports_unresolved_defaults_and_uses_native_name() {
     let fixture = CliProcessFixture::named("mcp-export-unresolved");
@@ -257,7 +243,7 @@ args = ["-y", "@test/google-calendar"]
     );
     seed_provider_state(
         &home,
-        Some(&repo_root.canonicalize().unwrap_or(repo_root.clone())),
+        Some(&biscuit_file::canonicalize_simplified(&repo_root).unwrap_or(repo_root.clone())),
         "codex",
         "google-calendar",
         "calendar",
@@ -395,8 +381,6 @@ fn claude_wrapper_mcp_reports_sync_guidance() {
 // Recommendation #1: repo-root detection returns None outside a repo
 // ---------------------------------------------------------------------------
 
-// This subprocess fixture requires Unix HOME isolation for user-global MCP state.
-#[cfg(unix)]
 #[test]
 fn mcp_list_outside_repo_returns_no_repo_defaults() {
     let fixture = CliProcessFixture::named("mcp-list-outside-repo");
@@ -434,8 +418,6 @@ fn mcp_default_repo_fails_outside_repo() {
 // Recommendation #2: mcp remove cascades to defaults
 // ---------------------------------------------------------------------------
 
-// This subprocess fixture requires Unix HOME isolation for user-global MCP state.
-#[cfg(unix)]
 #[test]
 fn mcp_remove_cascades_to_user_defaults() {
     let fixture = CliProcessFixture::named("mcp-remove-user-defaults");
@@ -470,8 +452,6 @@ fn mcp_remove_cascades_to_user_defaults() {
     assert!(defaults.defaults.contains(&"slack".to_string()));
 }
 
-// This subprocess fixture requires Unix HOME isolation for user-global MCP state.
-#[cfg(unix)]
 #[test]
 fn mcp_remove_cascades_to_repo_defaults() {
     let fixture = CliProcessFixture::named("mcp-remove-repo-defaults");
@@ -538,8 +518,6 @@ fn mcp_sync_rejects_positional_provider() {
 // Recommendation #7: repo defaults replace user defaults
 // ---------------------------------------------------------------------------
 
-// This subprocess fixture requires Unix HOME isolation for user-global MCP state.
-#[cfg(unix)]
 #[test]
 fn effective_defaults_repo_replaces_user() {
     let fixture = CliProcessFixture::named("mcp-repo-replaces-user");
@@ -647,8 +625,6 @@ fn strict_mode_errors_on_ambiguous_tag() {
 // Recommendation #8: mcp remove alias reports owner and remaining aliases
 // ---------------------------------------------------------------------------
 
-// This subprocess fixture requires Unix HOME isolation for user-global MCP state.
-#[cfg(unix)]
 #[test]
 fn mcp_remove_alias_reports_owner_and_remaining() {
     let fixture = CliProcessFixture::named("mcp-remove-alias");

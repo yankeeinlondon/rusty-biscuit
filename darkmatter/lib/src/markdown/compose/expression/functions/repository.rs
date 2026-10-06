@@ -129,10 +129,10 @@ mod tests {
         let topology = topology(&repo);
         let snapshot = biscuit_file::FileResolutionContext::new(&cwd)
             .with_repository_scope_catalog(repository_scope_catalog(&topology, &repo).unwrap());
-        let mut context = ResolutionContext::new(cwd)
+        let mut context = ResolutionContext::at(cwd)
             .with_repository_root(&repo)
             .with_observations(CapturedObservations::for_test_packages(&repo, &topology));
-        context.file_resolution_context = Some(snapshot);
+        context.file_resolution_context = snapshot;
         Fixture { _temp: temp, repo, context }
     }
 

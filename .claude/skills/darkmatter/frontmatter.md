@@ -85,8 +85,9 @@ stored hash (`Markdown::stored_hash`), plans the save, applies the `Change`
 policy, and stamps the UTC date of `now`. `Change::Detect` bumps `last_updated`
 only when the hash moved (`md hash --save`); `Change::Known` bumps it because
 the caller just edited the content (effects auto-rehash, Claudine's inline
-closure). Do not call `plan_hash_save` plus `apply_hash_save_text` directly in
-a new writer.
+closure). Advancing `last_updated` renews every content policy whose baseline
+is `@last_updated`; see the `content-policy` skill. Do not call
+`plan_hash_save` plus `apply_hash_save_text` directly in a new writer.
 
 ## Text-Preserving Property Restoration
 

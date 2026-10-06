@@ -1,0 +1,26 @@
+---
+source: worktree/cli/tests/list_table.rs
+expression: "labeled(vec![(\"plain\".into(),\nunlinked(\"/code/wts/plain\", Some(\"feat/plain\"))),\n(\"spaces in the path\".into(), unlinked(\"/code/wts/my work\", None)),\n(\"a single quote in the path\".into(), unlinked(\"/code/wts/it's\", None)),\n(\"a PowerShell quote in the path\".into(),\nunlinked(\"/code/wts/it\\u{2019}s\", None)),\n(\"shell metacharacters\".into(), unlinked(\"/code/wts/$(rm -rf ~);x\", None)),\n(\"a leading dash\".into(), unlinked(\"/code/wts/-n\", None)),])"
+---
+## plain
+ - plain: its .git file is missing;  wt remove feat/plain  removes it.
+
+
+## spaces in the path
+ - my work: its .git file is missing;  wt remove 'my work'  removes it.
+
+
+## a single quote in the path
+ - it's: its .git file is missing; wt remove removes it. No name selects it for wt remove: it's can't be typed the same way in every shell.
+
+
+## a PowerShell quote in the path
+ - it’s: its .git file is missing; wt remove removes it. No name selects it for wt remove: it’s can't be typed the same way in every shell.
+
+
+## shell metacharacters
+ - $(rm -rf ~);x: its .git file is missing;  wt remove '$(rm -rf ~);x'  removes it.
+
+
+## a leading dash
+ - -n: its .git file is missing; wt remove removes it. No name selects it for wt remove: -n can't be typed the same way in every shell.

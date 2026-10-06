@@ -211,6 +211,21 @@ pub enum ReferenceError {
     Url(#[from] url::ParseError),
 }
 
+impl ReferenceError {
+    /// The file-reference failure class, when a file reference raised this
+    /// error (directly or through a wrapped transclusion error).
+    pub fn resolution_failure(&self) -> Option<biscuit_file::ResolutionFailure> {
+        match self {
+            Self::FileReference(source) => Some(source.resolution_failure()),
+            Self::Compose(inner) => match inner.as_ref() {
+                crate::markdown::MarkdownError::Transclusion(inner) => inner.resolution_failure(),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+}
+
 impl From<crate::markdown::MarkdownError> for ReferenceError {
     fn from(err: crate::markdown::MarkdownError) -> Self {
         Self::Compose(Box::new(err))
@@ -222,7 +237,7 @@ impl biscuit_terminal::errors::BlockError for ReferenceError {
         &self,
         term: &biscuit_terminal::terminal::Terminal,
     ) -> biscuit_terminal::components::status_block::StatusBlock {
-        use biscuit_terminal::components::prose::Prose;
+        use biscuit_terminal::components::prose::{LineBreaks, Prose};
         use biscuit_terminal::components::status::StatusState;
         use biscuit_terminal::components::status_block::StatusBlock;
         use biscuit_terminal::errors::{ErrorHeader, StatusBlockExt};
@@ -255,9 +270,11 @@ impl biscuit_terminal::errors::BlockError for ReferenceError {
                 StatusBlock::new(StatusState::Error)
                     .error_header(ErrorHeader::new("ReferenceError", "directive parse failed"))
                     .body(body)
+                    // The hint is Prose markup: `\` before the newline keeps
+                    // the two lines apart (a bare newline is a soft break).
                     .hint(format!(
-                        "Error: {}\nCheck syntax: <cyan>::file path=\"...\"</cyan>",
-                        Prose::escape_text(message)
+                        "Error: {}\\\nCheck syntax: <cyan>::file path=\"...\"</cyan>",
+                        Prose::escape_text_outside_code_spans(message)
                     ))
             }
 
@@ -278,13 +295,13 @@ impl biscuit_terminal::errors::BlockError for ReferenceError {
 
             ReferenceError::Validation(message) => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("ReferenceError", "validation failed"))
-                .body(Prose::escape_text(message))
+                .body(Prose::escape_text_outside_code_spans(message))
                 .hint("Review the reference graph and fix any reported cycles or dangling edges."),
 
             ReferenceError::ReferenceGraphMismatch(err) => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("ReferenceError", "graph out of date"))
                 .body(vec![
-                    Prose::new(Prose::escape_text(&err.headline())),
+                    Prose::new(Prose::escape_text_outside_code_spans(&err.headline())),
                     Prose::new(
                         "<dim>Note:</dim> the prebuilt graph no longer matches this document, its \
                          source, mode, options, or a transcluded child.",
@@ -299,12 +316,16 @@ impl biscuit_terminal::errors::BlockError for ReferenceError {
 
             ReferenceError::FileReference(source) => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("ReferenceError", "file reference failure"))
-                .body(source.to_string())
+                .body(vec![
+                    Prose::new(source.to_string()).with_line_breaks(LineBreaks::Hard),
+                    crate::markdown::errors::resolution_failure_row(source.resolution_failure()),
+                ])
                 .hint("Check sigil usage: `@` magic, `&` repository root, `^` repository-scoped."),
 
             ReferenceError::Io(source) => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("ReferenceError", "I/O failure"))
-                .body(source.to_string())
+                // A not-found message carries its own `hint:` row.
+                .body(Prose::new(source.to_string()).with_line_breaks(LineBreaks::Hard))
                 .hint("Check file existence and permissions."),
 
             ReferenceError::Url(source) => StatusBlock::new(StatusState::Error)

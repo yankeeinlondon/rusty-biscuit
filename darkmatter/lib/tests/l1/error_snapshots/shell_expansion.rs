@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use darkmatter::markdown::compose::{ShellCommandOrigin, ShellExpansionError};
 
-use super::helpers::{assert_contains_all, render, test_ctx};
+use super::helpers::{assert_contains_all, assert_rows_on_own_lines, render, test_ctx};
 
 fn body_origin() -> ShellCommandOrigin {
     ShellCommandOrigin::Body { line: 17 }
@@ -185,4 +185,128 @@ fn policy_io_includes_path_and_kind() {
             "PermissionDenied",
         ],
     );
+}
+
+/// Every labeled body row keeps its own terminal line: the rows are joined by
+/// single newlines, which the body renders as hard breaks.
+#[test]
+fn labeled_rows_render_on_their_own_lines() {
+    use darkmatter::markdown::compose::expression::ExpressionError;
+
+    let ctx = || Box::new(test_ctx("", "doc.md"));
+    let cases: Vec<(ShellExpansionError, &[&str])> = vec![
+        (
+            ShellExpansionError::ParseDirective {
+                ctx: ctx(),
+                origin: body_origin(),
+                message: "unterminated quote".into(),
+            },
+            &["Origin:", "Message:"],
+        ),
+        (
+            ShellExpansionError::ExpressionEvaluation {
+                ctx: ctx(),
+                origin: frontmatter_origin(),
+                message: "bad ternary".into(),
+                cause: Box::new(ExpressionError::UnknownFunction { name: "nope".into() }),
+            },
+            &["Origin:", "Message:"],
+        ),
+        (
+            ShellExpansionError::CommandNotFound { ctx: ctx(), command: "nx".into(), origin: body_origin() },
+            &["Command:", "Origin:"],
+        ),
+        (
+            ShellExpansionError::Blacklisted {
+                ctx: ctx(),
+                command: "rm -rf /".into(),
+                reason: "destructive".into(),
+                origin: body_origin(),
+            },
+            &["Command:", "Origin:", "Reason:"],
+        ),
+        (
+            ShellExpansionError::ApprovalRequired {
+                ctx: ctx(),
+                command: "gh repo list".into(),
+                whitelist_path: Box::new(PathBuf::from("/tmp/wl")),
+                blacklist_path: Box::new(PathBuf::from("/tmp/bl")),
+                origin: body_origin(),
+            },
+            &["Command:", "Origin:", "Whitelist:", "Blacklist:"],
+        ),
+        (
+            ShellExpansionError::Denied { ctx: ctx(), command: "git push".into(), origin: frontmatter_origin() },
+            &["Command:", "Origin:"],
+        ),
+        (
+            ShellExpansionError::NotPreApproved {
+                ctx: ctx(),
+                command: "pnpm run build".into(),
+                origin: body_origin(),
+                source_desc: " (from whitelist)".into(),
+            },
+            &["Command:", "Origin:", "Source:"],
+        ),
+        (
+            ShellExpansionError::DynamicCommandShape {
+                ctx: ctx(),
+                command: "echo {{ today }}".into(),
+                key: "today".into(),
+                origin: body_origin(),
+            },
+            &["Command:", "Origin:", "Depends on:"],
+        ),
+        (
+            ShellExpansionError::UnevaluatedDependencyShape {
+                ctx: ctx(),
+                command: "echo hi".into(),
+                dependency: "a condition".into(),
+                origin: body_origin(),
+            },
+            &["Command:", "Origin:", "Depends on:"],
+        ),
+        (
+            ShellExpansionError::Timeout {
+                ctx: ctx(),
+                command: "sleep 30".into(),
+                timeout: Duration::from_secs(5),
+                origin: body_origin(),
+            },
+            &["Command:", "Origin:", "Timeout:"],
+        ),
+        (
+            ShellExpansionError::ExecutionFailed {
+                ctx: ctx(),
+                command: "ls --bogus".into(),
+                code: 2,
+                stdout: String::new(),
+                stderr: "ls: unrecognized option\nusage: ls".into(),
+                origin: body_origin(),
+            },
+            &["Command:", "Origin:", "Exit code:", "stderr:", "ls: unrecognized option", "usage: ls"],
+        ),
+        (
+            ShellExpansionError::ExecutionFailed {
+                ctx: ctx(),
+                command: "true".into(),
+                code: 1,
+                stdout: String::new(),
+                stderr: String::new(),
+                origin: body_origin(),
+            },
+            &["Command:", "Origin:", "Exit code:"],
+        ),
+        (
+            ShellExpansionError::PolicyIo {
+                path: PathBuf::from("/etc/shell.policy"),
+                source: std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied"),
+            },
+            &["Path:", "Kind:", "denied"],
+        ),
+    ];
+
+    for (err, labels) in cases {
+        assert_rows_on_own_lines(&render(&err), labels);
+    }
 }

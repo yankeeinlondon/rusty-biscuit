@@ -198,7 +198,7 @@ fn classify_file(path: &Path) -> ClassifiedFile {
 /// format validator defers it; its interpolations and ternaries are audited
 /// by the other surfaces.
 fn schema_expressions(path: &Path, document: &Markdown, push: &mut impl FnMut(Surface, &str)) -> bool {
-    let mut schemas = DarkmatterSchemas::new()
+    let mut schemas = DarkmatterSchemas::new(crate::request_support::cwd_context())
         .with_darkmatter_baseline_json_schema()
         .expect("the Darkmatter baseline schema loads");
     if let Some(dir) = path.parent() {

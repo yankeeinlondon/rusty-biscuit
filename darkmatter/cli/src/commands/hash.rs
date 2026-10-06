@@ -1,15 +1,17 @@
 //! `md hash` subcommand implementation.
 
-use crate::io::{load_markdown, load_markdown_text};
+use crate::io::{DocumentArgumentError, load_markdown, parse_argument, read_markdown_text};
+use crate::request::MdRequest;
 use biscuit_hash::xx_hash;
 use color_eyre::eyre::{Context, Result, eyre};
 use darkmatter::markdown::hash::{
     Change, ComputedHash, DEFAULT_HASH_PROPERTY, LAST_UPDATED_KEY, MdHashKind, MdHashOptions, StoredHash,
     select_kind,
 };
-use darkmatter::markdown::{Markdown, fs::collect_markdown_files};
+use darkmatter::markdown::Markdown;
+use darkmatter::markdown::fs::{ReferenceEntry, collect_markdown_files, resolve_entry_in_context};
 use rayon::prelude::*;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tracing::instrument;
 
 /// Hash a markdown document's frontmatter and/or body.
@@ -25,6 +27,7 @@ use tracing::instrument;
 /// bare-hash only: `--save`, `--diff`, and the `structured`/`detailed` kinds are
 /// rejected with a usage error.
 #[instrument(skip_all)]
+#[allow(clippy::too_many_arguments)]
 pub fn run_hash(
     input: Option<&PathBuf>,
     kind: Option<MdHashKind>,
@@ -33,20 +36,26 @@ pub fn run_hash(
     save: bool,
     diff: bool,
     strict: bool,
+    request: &MdRequest,
 ) -> Result<()> {
     let options = resolve_hash_options(kind, body, frontmatter, strict);
 
-    // Directory mode: aggregate hash over all markdown files.
-    if let Some(path) = input
-        && path.is_dir()
-    {
-        return run_hash_directory(path, &options, save, diff);
-    }
+    // A file argument opens once, here, so single-document mode, `--diff`, and
+    // `--save` all act on the entry that decided the mode.
+    let opened = match input {
+        Some(path) if path.to_str() != Some("-") => match open_hash_argument(path, request)? {
+            ReferenceEntry::Directory(directory) => {
+                return run_hash_directory(&directory, &options, save, diff);
+            }
+            ReferenceEntry::File(file) => Some(file),
+        },
+        _ => None,
+    };
 
     if save {
-        let input_path = input
+        let resolved = opened
             .ok_or_else(|| eyre!("--save requires an input file path (stdin is not supported)"))?;
-        let (resolved, source, md) = load_markdown_text(input_path)?;
+        let (source, md) = read_markdown_text(&resolved)?;
         let stored = md.stored_hash(&options)?;
         return run_hash_save(
             &md,
@@ -58,7 +67,11 @@ pub fn run_hash(
         );
     }
 
-    let md = load_markdown(input)?;
+    let md = match &opened {
+        Some(file) => Markdown::try_from(file.as_path())
+            .wrap_err_with(|| format!("Failed to read file: {:?}", file))?,
+        None => load_markdown(input, request)?,
+    };
     let stored = md.stored_hash(&options)?;
 
     if diff {
@@ -201,6 +214,32 @@ fn run_hash_save(
     Ok(())
 }
 
+/// Opens a hash argument as the file or directory it names, through the same
+/// reference grammar and candidate precedence as every file argument.
+///
+/// The first planned candidate that exists decides: a file there is hashed
+/// as one document even when a later candidate is a directory, and a
+/// directory there is hashed as a tree even when a later candidate is a file
+/// (so `&docs` is the repository's `docs/`). A candidate that cannot be probed
+/// stops the search with the `io` failure class rather than letting a later
+/// candidate answer. A recursive (`%`) reference names files only.
+///
+/// ## Errors
+///
+/// A [`DocumentArgumentError`] when the argument is not valid reference
+/// syntax (a relative path leaving the launch repository is
+/// `InvalidReference`), a candidate cannot be probed, or nothing exists;
+/// checked before any directory is read.
+fn open_hash_argument(argument: &Path, request: &MdRequest) -> Result<ReferenceEntry> {
+    let reference = parse_argument(argument)?;
+    let raw = || argument.to_string_lossy().into_owned();
+    match resolve_entry_in_context(&reference, request.launch_context()?) {
+        Ok(Some(entry)) => Ok(entry),
+        Ok(None) => Err(DocumentArgumentError::no_match(raw()).into()),
+        Err(source) => Err(DocumentArgumentError::new(raw(), source).into()),
+    }
+}
+
 /// Directory-aggregate hashing. Bare-hash only: `--save`, `--diff`, and the
 /// `structured`/`detailed` kinds are rejected with a usage error.
 fn run_hash_directory(
@@ -300,11 +339,11 @@ mod tests {
             "---\ntitle: T\nhash: 1111111111111111-2222222222222222\nlast_updated: 2020-01-01\n---\n# H\n\nBody.\n",
         )
         .unwrap();
-        let (resolved, source, md) = load_markdown_text(&file).unwrap();
+        let (source, md) = read_markdown_text(&file).unwrap();
         let options = MdHashOptions::default();
         let stored = md.stored_hash(&options).unwrap();
 
-        run_hash_save(&md, &source, &resolved, stored.as_ref(), &options, instant).unwrap();
+        run_hash_save(&md, &source, &file, stored.as_ref(), &options, instant).unwrap();
 
         let written = std::fs::read_to_string(&file).unwrap();
         assert!(

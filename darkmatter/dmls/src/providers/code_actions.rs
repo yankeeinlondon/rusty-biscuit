@@ -33,7 +33,8 @@ use super::edits::EditBuilder;
 use crate::config::DmlsConfig;
 use crate::diagnostics::codes::{code, source};
 use crate::diagnostics::nested_span::NestedSpanRewrite;
-use crate::graph::{DocumentId, LinkTarget, NodeId, WorkspaceGraph, normalize_join};
+use crate::context::ReferenceTarget;
+use crate::graph::{DocumentId, LinkTarget, NodeId, WorkspaceGraph};
 use crate::overlay::FrontmatterAst;
 use crate::overlay::expressions;
 use crate::workspace::file_path_to_uri;
@@ -131,11 +132,12 @@ fn create_missing_markdown_file(ctx: &DocumentContext, diag: &Diagnostic) -> Opt
     let LinkTarget::RelativePath { path, .. } = target else {
         return None;
     };
-    let base_dir = ctx.path.parent()?;
-    let resolved = normalize_join(base_dir, path);
-    if resolved.exists() {
+    // The file goes where the reference would find it first, as `md
+    // compose` absolutizes a link to a file not yet created.
+    let ReferenceTarget::Missing { candidate: Some(resolved), .. } = ctx.resolve_reference(path)?
+    else {
         return None;
-    }
+    };
     if !is_creatable_filename(&resolved) {
         return None;
     }
@@ -630,7 +632,7 @@ mod tests {
         let path = Path::new("/t.md");
         let source_map =
             SourceMap::new(uri.clone(), 1, PositionEncoding::Utf16, Arc::from(text));
-        let graph = WorkspaceGraph::build_with_roots(&BTreeMap::new(), 0, &[]);
+        let graph = WorkspaceGraph::build_with_roots(&BTreeMap::new(), 0, &[], &crate::graph::NoContexts);
         let config = DmlsConfig::default();
         let profile = ClientProfile {
             client_name: None,
@@ -667,6 +669,7 @@ mod tests {
             config: &config,
             profile: &profile,
             overlay: None,
+            resolution: &crate::context::test_support::resolution_for(path),
         };
 
         let diagnostics = crate::providers::dsl::diagnostics(&ctx);

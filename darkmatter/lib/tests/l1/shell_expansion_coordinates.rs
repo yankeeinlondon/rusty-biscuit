@@ -55,7 +55,7 @@ fn body_shell_origin_is_file_relative_with_frontmatter() {
 
     let md = Markdown::try_from(dir.path().join("doc.md").as_path()).unwrap();
     let err = md
-        .compose_with(compose_options(&dir))
+        .compose_with(&crate::request_support::request(compose_options(&dir)))
         .expect_err("failing ::shell should error");
 
     let msg = err.to_string();
@@ -83,7 +83,7 @@ fn shell_block_origin_is_file_relative_with_frontmatter() {
 
     let md = Markdown::try_from(dir.path().join("doc.md").as_path()).unwrap();
     let err = md
-        .compose_with(compose_options(&dir))
+        .compose_with(&crate::request_support::request(compose_options(&dir)))
         .expect_err("failing ::shell-block should error");
 
     // Wrapper's `command_line` field surfaces in its `Display` ("Shell block
@@ -122,7 +122,7 @@ fn shell_block_origin_counts_lines_not_bytes_with_crlf() {
 
     let md = Markdown::try_from(dir.path().join("doc.md").as_path()).unwrap();
     let err = md
-        .compose_with(compose_options(&dir))
+        .compose_with(&crate::request_support::request(compose_options(&dir)))
         .expect_err("failing ::shell-block should error");
 
     let msg = err.to_string();
@@ -158,7 +158,7 @@ fn shell_block_execution_failed_renders_inner_diagnostic() {
 
     let md = Markdown::try_from(dir.path().join("doc.md").as_path()).unwrap();
     let err = md
-        .compose_with(compose_options(&dir))
+        .compose_with(&crate::request_support::request(compose_options(&dir)))
         .expect_err("failing ::shell-block should error");
 
     let term = Terminal::builder().width(80).build();
@@ -205,7 +205,7 @@ fn frontmatter_shell_origin_is_file_relative() {
 
     let md = Markdown::try_from(dir.path().join("doc.md").as_path()).unwrap();
     let err = md
-        .compose_with(compose_options(&dir))
+        .compose_with(&crate::request_support::request(compose_options(&dir)))
         .expect_err("failing frontmatter shell should error");
 
     let msg = err.to_string();
@@ -244,7 +244,7 @@ fn body_shell_origin_counts_lines_not_bytes_with_crlf() {
 
     let md = Markdown::try_from(dir.path().join("doc.md").as_path()).unwrap();
     let err = md
-        .compose_with(compose_options(&dir))
+        .compose_with(&crate::request_support::request(compose_options(&dir)))
         .expect_err("failing ::shell should error");
 
     let term = Terminal::builder().width(80).build();

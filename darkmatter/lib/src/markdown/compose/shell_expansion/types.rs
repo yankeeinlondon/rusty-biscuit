@@ -425,7 +425,6 @@ pub struct ShellExpansionOptions {
     pub policy_root: Option<PathBuf>,
     pub working_directory: Option<PathBuf>,
     pub approval_handler: Option<Arc<dyn ShellApprovalHandler>>,
-    pub file_resolution_context: Option<biscuit_file::FileResolutionContext>,
     /// Whether to strip ANSI escape codes and set `NO_COLOR=1`.
     pub strip_ansi: bool,
 }
@@ -438,7 +437,6 @@ impl Clone for ShellExpansionOptions {
             policy_root: self.policy_root.clone(),
             working_directory: self.working_directory.clone(),
             approval_handler: self.approval_handler.clone(),
-            file_resolution_context: self.file_resolution_context.clone(),
             strip_ansi: self.strip_ansi,
         }
     }
@@ -459,7 +457,6 @@ impl fmt::Debug for ShellExpansionOptions {
                     &"None"
                 },
             )
-            .field("file_resolution_context", &self.file_resolution_context)
             .field("strip_ansi", &self.strip_ansi)
             .finish()
     }
@@ -473,7 +470,6 @@ impl Default for ShellExpansionOptions {
             policy_root: None,
             working_directory: None,
             approval_handler: None,
-            file_resolution_context: None,
             strip_ansi: true,
         }
     }
@@ -699,7 +695,7 @@ impl biscuit_terminal::errors::BlockError for ShellExpansionError {
         &self,
         _term: &biscuit_terminal::terminal::Terminal,
     ) -> biscuit_terminal::components::status_block::StatusBlock {
-        use biscuit_terminal::components::prose::Prose;
+        use biscuit_terminal::components::prose::{LineBreaks, Prose};
         use biscuit_terminal::components::status::StatusState;
         use biscuit_terminal::components::status_block::StatusBlock;
         use biscuit_terminal::errors::{ErrorHeader, StatusBlockExt};
@@ -715,7 +711,7 @@ impl biscuit_terminal::errors::BlockError for ShellExpansionError {
                     "directive parse failed",
                 ))
                 .body(vec![
-                    Prose::new(format!("<dim>Origin:</dim> {origin}\n<dim>Message:</dim> {message}")),
+                    Prose::new(format!("<dim>Origin:</dim> {origin}\n<dim>Message:</dim> {message}")).with_line_breaks(LineBreaks::Hard),
                     ctx.excerpt_prose(origin.line_number(), 1, "md"),
                 ])
                 .hint("Body syntax: <cyan>::shell \"command\"</cyan>. Frontmatter syntax: <cyan>key: $(command)</cyan>."),
@@ -731,7 +727,7 @@ impl biscuit_terminal::errors::BlockError for ShellExpansionError {
                     "expression evaluation failed",
                 ))
                 .body(vec![
-                    Prose::new(format!("<dim>Origin:</dim> {origin}\n<dim>Message:</dim> {message}")),
+                    Prose::new(format!("<dim>Origin:</dim> {origin}\n<dim>Message:</dim> {message}")).with_line_breaks(LineBreaks::Hard),
                     ctx.excerpt_prose(origin.line_number(), 1, "md"),
                 ])
                 .hint("Frontmatter ternary syntax: <cyan>key: $(condition ? command : command)</cyan>."),
@@ -745,7 +741,7 @@ impl biscuit_terminal::errors::BlockError for ShellExpansionError {
                 .body(vec![
                     Prose::new(format!(
                         "<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Origin:</dim> {origin}"
-                    )),
+                    )).with_line_breaks(LineBreaks::Hard),
                     ctx.excerpt_prose(origin.line_number(), 1, "md"),
                 ])
                 .hint("Install the binary or update <cyan>$PATH</cyan> so it is discoverable."),
@@ -760,7 +756,7 @@ impl biscuit_terminal::errors::BlockError for ShellExpansionError {
                 .body(vec![
                     Prose::new(format!(
                         "<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Origin:</dim> {origin}\n<dim>Reason:</dim> {reason}"
-                    )),
+                    )).with_line_breaks(LineBreaks::Hard),
                     ctx.excerpt_prose(origin.line_number(), 1, "md"),
                 ])
                 .hint("Remove the entry from your blacklist file if you trust this command."),
@@ -778,7 +774,7 @@ impl biscuit_terminal::errors::BlockError for ShellExpansionError {
                         "<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Origin:</dim> {origin}\n<dim>Whitelist:</dim> {}\n<dim>Blacklist:</dim> {}",
                         whitelist_path.display(),
                         blacklist_path.display()
-                    )),
+                    )).with_line_breaks(LineBreaks::Hard),
                     ctx.excerpt_prose(origin.line_number(), 1, "md"),
                 ])
                 .hint("Re-run with <cyan>--approve-shell</cyan> or add the command to your whitelist."),
@@ -792,7 +788,7 @@ impl biscuit_terminal::errors::BlockError for ShellExpansionError {
                 .body(vec![
                     Prose::new(format!(
                         "<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Origin:</dim> {origin}"
-                    )),
+                    )).with_line_breaks(LineBreaks::Hard),
                     ctx.excerpt_prose(origin.line_number(), 1, "md"),
                 ])
                 .hint("The user declined to approve this shell expansion."),
@@ -810,7 +806,7 @@ impl biscuit_terminal::errors::BlockError for ShellExpansionError {
                 .body(vec![
                     Prose::new(format!(
                         "<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Origin:</dim> {origin}\n<dim>Source:</dim> {source_desc}"
-                    )),
+                    )).with_line_breaks(LineBreaks::Hard),
                     ctx.excerpt_prose(origin.line_number(), 1, "md"),
                 ])
                 .hint("This is a bug in the pre-flight scanner — please report it."),
@@ -828,7 +824,7 @@ impl biscuit_terminal::errors::BlockError for ShellExpansionError {
                 .body(vec![
                     Prose::new(format!(
                         "<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Origin:</dim> {origin}\n<dim>Depends on:</dim> frontmatter.{key}"
-                    )),
+                    )).with_line_breaks(LineBreaks::Hard),
                     ctx.excerpt_prose(origin.line_number(), 1, "md"),
                 ])
                 .hint(
@@ -849,7 +845,7 @@ impl biscuit_terminal::errors::BlockError for ShellExpansionError {
                 .body(vec![
                     Prose::new(format!(
                         "<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Origin:</dim> {origin}\n<dim>Depends on:</dim> {dependency}"
-                    )),
+                    )).with_line_breaks(LineBreaks::Hard),
                     ctx.excerpt_prose(origin.line_number(), 1, "md"),
                 ])
                 .hint(
@@ -867,7 +863,7 @@ impl biscuit_terminal::errors::BlockError for ShellExpansionError {
                 .body(vec![
                     Prose::new(format!(
                         "<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Origin:</dim> {origin}\n<dim>Timeout:</dim> {timeout:?}"
-                    )),
+                    )).with_line_breaks(LineBreaks::Hard),
                     ctx.excerpt_prose(origin.line_number(), 1, "md"),
                 ])
                 .hint("Raise the timeout, or pass <cyan>--allow-shell-timeout</cyan> to warn instead of fail."),
@@ -924,11 +920,11 @@ impl biscuit_terminal::errors::BlockError for ShellExpansionError {
                 if !stderr_section.is_empty() || !stdout_section.is_empty() {
                     body.push(Prose::new(format!(
                         "<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Origin:</dim> {origin}\n<dim>Exit code:</dim> {code}{stderr_section}{stdout_section}"
-                    )));
+                    )).with_line_breaks(LineBreaks::Hard));
                 } else {
                     body.push(Prose::new(format!(
                         "<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Origin:</dim> {origin}\n<dim>Exit code:</dim> {code}"
-                    )));
+                    )).with_line_breaks(LineBreaks::Hard));
                 }
 
                 StatusBlock::new(StatusState::Error)
@@ -939,11 +935,11 @@ impl biscuit_terminal::errors::BlockError for ShellExpansionError {
 
             ShellExpansionError::PolicyIo { path, source } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("ShellExpansionError", "policy I/O error"))
-                .body(format!(
+                .body(Prose::new(format!(
                     "<dim>Path:</dim> {}\n<dim>Kind:</dim> {:?}\n{source}",
                     path.display(),
                     source.kind()
-                ))
+                )).with_line_breaks(LineBreaks::Hard))
                 .hint("Verify the policy file exists and the process can read it."),
 
             // Delegate to the wrapped rich error so its styled block (excerpt,

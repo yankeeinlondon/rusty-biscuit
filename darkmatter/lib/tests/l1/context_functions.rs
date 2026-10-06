@@ -91,7 +91,7 @@ fn compose_ambient(
 ) -> String {
     let context = ComposeContext::capture_for_document(path.parent().unwrap(), document);
     let options = configure(fixture_options(context, path));
-    let (composed, report) = document.clone().compose_with(options).expect("compose must succeed");
+    let (composed, report) = document.clone().compose_with(&crate::request_support::request(options)).expect("compose must succeed");
     assert!(report.warnings.is_empty(), "unexpected warnings: {:?}", report.warnings);
     composed.content().to_string()
 }
@@ -349,7 +349,7 @@ fn recent_commits_rejects_a_zero_count_during_compose() {
     let (path, document) = fixture.document("prompt.md", "---\nlatest: '{{ recent_commits(0) }}'\n---\nbody\n");
     let context = ComposeContext::capture_for_document(path.parent().unwrap(), &document);
     let error = document
-        .compose_with(fixture_options(context, &path))
+        .compose_with(&crate::request_support::request(fixture_options(context, &path)))
         .expect_err("a zero count is a compose error");
     assert!(error.to_string().contains("count must be at least 1"), "{error}");
 }
@@ -364,7 +364,7 @@ fn recent_commits_rejects_invalid_counts_in_the_body() {
             fixture.document("prompt.md", &format!("latest=[{{{{ recent_commits({count}) }}}}]\n"));
         let context = ComposeContext::capture_for_document(path.parent().unwrap(), &document);
         let error = document
-            .compose_with(fixture_options(context, &path).with_fail_fast(false))
+            .compose_with(&crate::request_support::request(fixture_options(context, &path).with_fail_fast(false)))
             .expect_err("an invalid count is a compose error in the body");
         assert!(error.to_string().contains("recent_commits"), "{count}: {error}");
     }
@@ -374,7 +374,7 @@ fn recent_commits_rejects_invalid_counts_in_the_body() {
     let (path, document) = fixture.document("prompt.md", "latest=[{{ recent_commits(\"3\") }}]\n");
     let context = ComposeContext::capture_for_document(path.parent().unwrap(), &document);
     let error = document
-        .compose_with(fixture_options(context, &path).with_fail_fast(false))
+        .compose_with(&crate::request_support::request(fixture_options(context, &path).with_fail_fast(false)))
         .expect_err("a type error is a compose error in the body");
     assert!(error.to_string().contains("recent_commits"), "{error}");
 }
@@ -388,7 +388,7 @@ fn package_rejects_a_remote_reference_in_the_body() {
         fixture.document("prompt.md", "p=[{{ package(\"https://example.com/zeta/lib\") }}]\n");
     let context = ComposeContext::capture_for_document(path.parent().unwrap(), &document);
     let error = document
-        .compose_with(fixture_options(context, &path).with_fail_fast(false))
+        .compose_with(&crate::request_support::request(fixture_options(context, &path).with_fail_fast(false)))
         .expect_err("a remote reference is a compose error in the body");
     assert!(error.to_string().contains("does not accept HTTP(S) URLs"), "{error}");
 }
@@ -436,7 +436,7 @@ fn address_filters_compose_from_supplied_interface_evidence() {
     assert!(context.capture_requirements().contains(ContextGroup::Network));
 
     let (composed, report) = document
-        .compose_with(fixture_options(context, &path))
+        .compose_with(&crate::request_support::request(fixture_options(context, &path)))
         .expect("compose must succeed");
     assert!(report.warnings.is_empty(), "unexpected warnings: {:?}", report.warnings);
     let values = fields(composed.content());

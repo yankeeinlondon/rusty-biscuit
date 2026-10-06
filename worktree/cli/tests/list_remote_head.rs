@@ -387,6 +387,8 @@ fn seed_fresh_answers(fixture: &Fixture, head: &str) {
         "publication": worktree::remote_head::new_attempt_id().expect("a publication id"),
         "source_repo": null,
         "pull_requests": [],
+        // A seeded answer: nothing is known of how it was asked.
+        "credentials": { "state": "unknown" },
     });
     fs::write(&pr_store, serde_json::to_vec(&prs).expect("json")).expect("write PR store");
     let head_store = fixture.head_store();
@@ -437,7 +439,7 @@ fn a_shallow_clone_lists_with_the_incomplete_history_notice_and_asks_origin_noth
     assert!(success, "wt list failed:\n{transcript}");
     assert!(transcript.contains("feature"), "the table lists the worktree:\n{transcript}");
     assert!(transcript.contains("\x1b_G"), "the graph was drawn:\n{transcript}");
-    assert!(transcript.contains("Some history is not shown"), "the notice is shown:\n{transcript}");
+    assert!(transcript.contains("This clone is shallow"), "the notice is shown:\n{transcript}");
     assert_eq!(gate.runs() - without_graph, without_graph, "drawing the graph adds no ls-remote or fetch");
 }
 

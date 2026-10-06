@@ -21,6 +21,7 @@ impl biscuit_terminal::errors::BlockError for CtxMergeError {
         &self,
         _term: &biscuit_terminal::terminal::Terminal,
     ) -> biscuit_terminal::components::status_block::StatusBlock {
+        use biscuit_terminal::components::prose::{LineBreaks, Prose};
         use biscuit_terminal::components::status::StatusState;
         use biscuit_terminal::components::status_block::StatusBlock;
         use biscuit_terminal::errors::{ErrorHeader, StatusBlockExt};
@@ -28,9 +29,9 @@ impl biscuit_terminal::errors::BlockError for CtxMergeError {
         match self {
             CtxMergeError::InvalidUserCtx { kind } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("CtxMergeError", "invalid user ctx"))
-                .body(format!(
+                .body(Prose::new(format!(
                     "<dim>Found:</dim> {kind}\n<dim>Expected:</dim> JSON object"
-                ))
+                )).with_line_breaks(LineBreaks::Hard))
                 .hint(
                     "Frontmatter <cyan>ctx:</cyan> must be a mapping, or pass <cyan>--allow-override</cyan> to ignore it.",
                 ),

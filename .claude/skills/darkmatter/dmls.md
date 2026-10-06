@@ -7,6 +7,7 @@ workspace, completion, hover, and diagnostic work.
 
 - [Architecture](#architecture)
 - [Passive-analysis contract](#passive-analysis-contract)
+- [File-resolution contexts](#file-resolution-contexts)
 - [Features](#features)
 - [Undeclared properties and unknown functions](#undeclared-properties-and-unknown-functions)
 - [Rollout chronology](#rollout-chronology)
@@ -36,6 +37,67 @@ Editor analysis must be safe for every keystroke:
 
 Use source text plus captured document/workspace context. Keep incomplete syntax
 recoverable where possible and publish typed diagnostics with stable ranges.
+
+## File-resolution contexts
+
+User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs`.
+
+- `RunOptions::new(snapshot)`: `main.rs` calls `RequestSnapshot::from_process()`
+  once and hands it to the server (and to `--bench-index`). Nothing else in
+  DMLS reads process `HOME`, environment, or CWD for resolution.
+- `RepositoryContexts` (shared `Arc`, on `ServerState.contexts`) caches one
+  `build_resolution_context` result per repository root (key from
+  `biscuit_file::find_git_root`; a document in no repository keys its folder),
+  failures included. `for_document(path)` derives with `for_source`;
+  `for_untitled(roots)` needs exactly one repository across the folders.
+- Every provider resolves through `DocumentContext.resolution`
+  (`ctx.file_context()` is `Result<&FileResolutionContext, &ContextFailure>`,
+  `ctx.resolve_reference(raw)`; no context is ever an `Option`, which the
+  context guard enforces). A failed resolution
+  means **no** resolution: never reintroduce a lexical join (the old
+  `normalize_join` is deleted). `providers/diagnostics.rs` publishes the one
+  `dm.context.build_failure` diagnostic. With a failed context the overlay
+  assembles no schema at all (`SchemaOutcome::Ready(None)`): `$schema` and
+  trigger payloads cannot resolve without one, and `DarkmatterSchemas::new`
+  requires a context.
+- The graph takes `&dyn DocumentContexts` (`WorkspaceIndex::new(contexts)`):
+  `arena::locate` takes the first planned candidate when it is indexed (no
+  probe), else asks `context::resolve_reference`, else, only on a clean
+  `NoMatch`, a later indexed candidate (an unsaved buffer); an `Io` probe
+  failure stays a broken path. An existing unindexed file is
+  `EdgeTarget::File`, never a broken link; the index decides headings, never
+  existence, and anchors on unindexed files are not checked. Tests use `context::test_support`
+  (`abs`, `workspace_contexts`, `resolution_for`) because a context rejects a
+  rootless `/w` path on Windows; integration tests use `FixedContext` or a
+  real `RepositoryContexts`; empty graphs use `NoContexts`
+  (`ContextFailure::NotProvided`).
+- Invalidation: every watched path calls `invalidate_contexts`, which drops
+  ancestor-keyed entries (plus folder keys inside the repository for a
+  `.git/` path), then `relink`s the graph. Package manifests and `.git/config`
+  are watched (`watch::context_input_globs`, from sniff's
+  `PACKAGE_MANIFEST_FILE_NAMES`) but never indexed (`is_context_input`).
+  Rescan mode diffs `scan_manifests` fingerprints; config reload clears all.
+- The overlay schema cache key includes
+  `darkmatter::markdown::compose::file_resolution_context_identity(context)`
+  (the same exhaustive encoding the compose graph identity uses: source,
+  `cwd`, repository/package/area roots, home, launch `@` scope, sorted
+  environment, magic and vault roots, tree root and origin) plus the
+  resolution's `generation()`, so the same text under another context (a
+  different `^` root or `SCHEMAS_DIR`) re-assembles and a rebuilt context
+  re-validates file values. Never hand-roll a context hash in DMLS. A test
+  that needs a cache miss must vary the context with no trigger registry in
+  play (the registry's `Debug` also enters the key and masks the context
+  term), as `overlay::tests::schema_cache_keys_on_the_package_root` does.
+- `dmls/tests/l1/schema_roots_parity.rs` is the `md` vs DMLS parity gate for
+  schema roots, applied triggers, bare-name `$schema`, and `$path`
+  definition errors; DMLS shows missing required properties only with
+  `[schema] strict = true`.
+- `context_build_count()` is a process-wide work counter; L1 tests assert
+  deltas (nextest runs one test per process).
+- Fixture traps: sniff recognizes a package only under a workspace manifest,
+  and counts a declared member whose directory exists even without its own
+  manifest. Inline `$schema` `file` is lazy (syntax only); use `file(eager)`
+  to exercise resolution in validation.
 
 ## Features
 
@@ -166,6 +228,11 @@ Darkmatter library, so editor tests are not the only proof of grammar behavior.
 
 - `just test` runs the cross-platform L1 extension manifest and crate-shape
   contract alongside the DMLS protocol suite.
+- `tests/l1/repository_contexts.rs` holds the per-repository context
+  acceptance tests (one build, every feature, invalidation, failure
+  diagnostic, untitled buffers). `LspFixture::start_with_snapshot` supplies
+  a test's own `HOME`/environment/`@` roots; the default fixture snapshot uses
+  a `HOME` inside the workspace.
 - `just check-zed` compiles `zed-dmls` for Zed's `wasm32-wasip2` target and
   requires that target to have been provisioned explicitly.
 - `just zed-verify` adds Zed's pinned official packager and artifact contract;

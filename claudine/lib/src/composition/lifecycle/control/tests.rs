@@ -3,6 +3,20 @@ use crate::composition::ActionLocation;
 use crate::composition::lifecycle::LifecycleSignal;
 use indexmap::IndexMap;
 
+/// [`super::resolve_proxy_target`] in the context a request naming only
+/// `repo_root` gives the source document.
+fn resolve_proxy_target(
+    target: &str,
+    source_path: &std::path::Path,
+    repo_root: Option<&std::path::Path>,
+) -> Result<std::path::PathBuf, crate::harness::HarnessError> {
+    super::resolve_proxy_target(
+        target,
+        source_path,
+        &crate::test_support::document_context(source_path, repo_root),
+    )
+}
+
 fn retry(max: u32, backoff: RetryBackoff, delay: &str) -> StackControl {
     StackControl::Retry {
         max_attempts: max,
@@ -297,8 +311,8 @@ fn request_scoped_proxy_resolution_rejects_lexical_a_b_a_cycle() {
     let context = biscuit_file::FileResolutionContext::new(&prompts)
         .with_source_path(&a)
         .with_repository_root(dir.path());
-    let resolved_b = resolve_proxy_target_in_context("./b.md", &a, &context).unwrap();
-    let resolved_a = resolve_proxy_target_in_context("././a.md", &b, &context).unwrap();
+    let resolved_b = super::resolve_proxy_target("./b.md", &a, &context).unwrap();
+    let resolved_a = super::resolve_proxy_target("././a.md", &b, &context).unwrap();
     let authored_a_identity = prompts.join("nested/../a.md");
     let chain = vec![authored_a_identity, resolved_b];
 
@@ -458,7 +472,7 @@ fn lifecycle_proxy_reuses_request_snapshot_after_environment_mutation() {
 
     // SAFETY: this test is serialized while mutating process-global state.
     unsafe { std::env::set_var("LIFECYCLE_SNAPSHOT_ROOT", ambient.path()) };
-    let resolved = resolve_proxy_target_in_context(
+    let resolved = super::resolve_proxy_target(
         "{{LIFECYCLE_SNAPSHOT_ROOT}}/target.md",
         &source,
         &snapshot,

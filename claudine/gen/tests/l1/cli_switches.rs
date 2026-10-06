@@ -513,7 +513,8 @@ fn every_compiled_provider_has_switches_or_a_gap() {
         .parent()
         .expect("gen crate lives under the claudine package area")
         .to_path_buf();
-    for generation in claudine_gen::generate_all(&area).unwrap() {
+    let snapshot = darkmatter::markdown::compose::RequestSnapshot::new(&area);
+    for generation in claudine_gen::generate_all(&area, &snapshot).unwrap() {
         let catalog = cli_switches(&generation);
         let researched = catalog["researched"].as_array().is_some_and(|records| !records.is_empty());
         let gap = catalog["unknown"]["gap"].as_str().is_some_and(|gap| !gap.trim().is_empty());

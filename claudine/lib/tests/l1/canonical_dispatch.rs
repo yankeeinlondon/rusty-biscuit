@@ -26,7 +26,8 @@ fn make_config_with_action(event: AgenticEvent, action: HookAction) -> Canonical
     config.default_sounds = DefaultSounds::default();
     config.actions = actions;
 
-    compile_canonical_runtime(config, None).unwrap()
+    let snapshot = darkmatter::markdown::compose::RequestSnapshot::new(std::env::temp_dir());
+    compile_canonical_runtime(config, None, &snapshot).unwrap()
 }
 
 /// Dispatching a `SoundEffect` action completes without error and returns
@@ -87,7 +88,7 @@ async fn dispatch_no_binding_returns_default() {
     config.default_sounds = DefaultSounds::default();
     config.actions = actions;
 
-    let runtime = compile_canonical_runtime(config, None).unwrap();
+    let runtime = compile_canonical_runtime(config, None, &darkmatter::markdown::compose::RequestSnapshot::new(std::env::temp_dir())).unwrap();
 
     // Dispatch a different event — SessionStart has no binding.
     let meta = EventMeta::new(Provider::Claude, AgenticEvent::SessionStart);
@@ -115,7 +116,7 @@ async fn dispatch_empty_actions_returns_non_blocking_ack() {
     config.default_sounds = DefaultSounds::default();
     config.actions.insert(AgenticEvent::TurnComplete, vec![]);
 
-    let runtime = compile_canonical_runtime(config, None).unwrap();
+    let runtime = compile_canonical_runtime(config, None, &darkmatter::markdown::compose::RequestSnapshot::new(std::env::temp_dir())).unwrap();
     let meta = EventMeta::new(Provider::Claude, AgenticEvent::TurnComplete);
 
     let outcome = dispatch_canonical_with_runtime(
@@ -141,7 +142,7 @@ async fn dispatch_with_default_config_returns_no_protect_decisions() {
         logging: false,
         ..Default::default()
     };
-    let runtime = compile_canonical_runtime(config, None).unwrap();
+    let runtime = compile_canonical_runtime(config, None, &darkmatter::markdown::compose::RequestSnapshot::new(std::env::temp_dir())).unwrap();
 
     for event in [
         AgenticEvent::SessionStart,
@@ -179,7 +180,7 @@ async fn dispatch_protect_post_evaluates_without_binding() {
     config.logging = false;
     // No actions configured — protect should still evaluate for AfterTool.
 
-    let runtime = compile_canonical_runtime(config, None).unwrap();
+    let runtime = compile_canonical_runtime(config, None, &darkmatter::markdown::compose::RequestSnapshot::new(std::env::temp_dir())).unwrap();
 
     // Use an MCP tool name with a prompt-injection response payload so that
     // the protect service has something to evaluate for AfterTool.

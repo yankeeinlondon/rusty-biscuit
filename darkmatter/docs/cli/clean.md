@@ -222,7 +222,7 @@ The cleanup process applies these transformations:
 5. **Table Alignment**: Pads table cells for aligned columns
 6. **Emphasis Preservation**:
     - Preserves original emphasis markers (`*` vs `_`)
-    - `PREFER_ITALICS` can influence emphasis marker style
+    - `PREFER_ITALICS` (`*`, or `_`/`__`) restyles italics to that marker, except where the marker could not open and close there: `_` never works inside a word, and a marker beside the same character would join it. Such italics keep their original marker, so `PREFER_ITALICS=_` turns `a *b* c` into `a _b_ c` but leaves `a*b*c` as is
     - Strong/bold markers are preserved
 7. **Fenced Code Blocks**: Adds `text` language when fence language is missing
 8. **Blockquote Formatting**:

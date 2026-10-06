@@ -7,7 +7,7 @@
 use std::rc::Rc;
 
 use biscuit_terminal::components::list::UnorderedList;
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::{InlineProse, Prose};
 use biscuit_terminal::components::renderable::{RenderableTerminalContent, TerminalRenderable};
 use biscuit_terminal::terminal::Terminal;
 use sniff::filesystem::repo::{
@@ -67,7 +67,7 @@ fn append_observation(
         explanation(observation),
     );
     items.push(RenderableTerminalContent::String(
-        Prose::new(headline).render(term),
+        InlineProse::new(headline).render(term),
     ));
 
     let details: Vec<String> = observation
@@ -86,7 +86,7 @@ fn append_observation(
                 Prose::escape_text(member)
             )
         }))
-        .map(|detail| Prose::new(detail).render(term))
+        .map(|detail| InlineProse::new(detail).render(term))
         .collect();
     if !details.is_empty() {
         items.push(RenderableTerminalContent::Component(Rc::new(

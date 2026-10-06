@@ -1548,17 +1548,9 @@ fn resolve_arg(
             Some(e),
         )
     })?;
-    // Magic (`@`) roots and the pass's cached repository root live on the
-    // context; per D2 there is no launch-area fallback for a nested-document
+    // Per D2 there is no launch-area fallback for a nested-document
     // reference — only repository and authoring-document candidates participate.
-    resolve_document_file_ref(
-        &file_ref,
-        &ctx.cwd,
-        ctx.repository_root.as_deref(),
-        ctx.package_area.as_deref(),
-        &ctx.magic_paths,
-        ctx.file_resolution_context.as_ref(),
-    )
+    resolve_document_file_ref(&file_ref, &ctx.cwd, &ctx.file_resolution_context)
     .map_err(|e| {
         file_reference_error(
             function,
@@ -1683,7 +1675,7 @@ pub fn relative_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, Exp
     Ok(Value::String(make_portable_relative_in_context(
         &abs,
         &ctx.cwd,
-        ctx.file_resolution_context.as_ref(),
+        &ctx.file_resolution_context,
     )))
 }
 
@@ -1727,18 +1719,10 @@ fn resolve_path_shape(
     let file_ref = biscuit_file::FileReference::new(&normalized).map_err(|e| {
         file_reference_error(name, raw, ctx, FileRefFailure::classify(&e), Some(e))
     })?;
-    // Magic (`@`) roots and the pass's cached repository root live on the
-    // context; the shared shaper builds the same candidate plan execution
-    // probes (document-first for implicit references), so a missing target's
-    // shape is the first shared candidate rather than a source-first join.
-    resolve_document_file_ref_shape(
-        &file_ref,
-        &ctx.cwd,
-        ctx.repository_root.as_deref(),
-        ctx.package_area.as_deref(),
-        &ctx.magic_paths,
-        ctx.file_resolution_context.as_ref(),
-    )
+    // The shared shaper builds the same candidate plan execution probes
+    // (document-first for implicit references), so a missing target's shape
+    // is the first shared candidate rather than a source-first join.
+    resolve_document_file_ref_shape(&file_ref, &ctx.cwd, &ctx.file_resolution_context)
     .map_err(|e| file_reference_error(name, raw, ctx, FileRefFailure::classify(&e), Some(e)))
 }
 
@@ -1775,7 +1759,7 @@ fn format_indexed_stem(base: &str, index: u64, width: usize) -> String {
 fn path_display_components(
     path: &Path,
     base_dir: &Path,
-    request_context: Option<&biscuit_file::FileResolutionContext>,
+    request_context: &biscuit_file::FileResolutionContext,
 ) -> (Vec<String>, String) {
     let rel = make_portable_relative_in_context(path, base_dir, request_context);
     let trimmed = rel.strip_prefix('/').unwrap_or(&rel).to_string();
@@ -1801,7 +1785,7 @@ pub fn is_indexed_file_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Val
         return Ok(Value::Null);
     }
     let path = resolve_path_arg("is_indexed_file", &args[0], ctx)?;
-    let (_, base) = path_display_components(&path, &ctx.cwd, ctx.file_resolution_context.as_ref());
+    let (_, base) = path_display_components(&path, &ctx.cwd, &ctx.file_resolution_context);
     let stem = file_stem(&base);
     Ok(Value::Bool(parse_indexed_stem(&stem).is_some()))
 }
@@ -1813,7 +1797,7 @@ pub fn file_index_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, E
         return Ok(Value::Null);
     }
     let path = resolve_path_arg("file_index", &args[0], ctx)?;
-    let (_, base) = path_display_components(&path, &ctx.cwd, ctx.file_resolution_context.as_ref());
+    let (_, base) = path_display_components(&path, &ctx.cwd, &ctx.file_resolution_context);
     let stem = file_stem(&base);
     let index = parse_indexed_stem(&stem)
         .map(|i| i.index as i64)
@@ -1829,7 +1813,7 @@ pub fn increment_file_index_fn(args: &[Value], ctx: &ResolutionContext) -> Resul
         return Ok(Value::Null);
     }
     let path = resolve_path_arg("increment_file_index", &args[0], ctx)?;
-    let (_, base) = path_display_components(&path, &ctx.cwd, ctx.file_resolution_context.as_ref());
+    let (_, base) = path_display_components(&path, &ctx.cwd, &ctx.file_resolution_context);
     let ext = file_extension(&base);
     let stem = file_stem(&base);
     let new_stem = if let Some((base_name, index, width)) = indexed_stem_info(&stem) {
@@ -1850,7 +1834,7 @@ pub fn increment_file_index_fn(args: &[Value], ctx: &ResolutionContext) -> Resul
     Ok(Value::String(make_portable_relative_in_context(
         &out,
         &ctx.cwd,
-        ctx.file_resolution_context.as_ref(),
+        &ctx.file_resolution_context,
     )))
 }
 
@@ -1862,7 +1846,7 @@ pub fn decrement_file_index_fn(args: &[Value], ctx: &ResolutionContext) -> Resul
         return Ok(Value::Null);
     }
     let path = resolve_path_arg("decrement_file_index", &args[0], ctx)?;
-    let (_, base) = path_display_components(&path, &ctx.cwd, ctx.file_resolution_context.as_ref());
+    let (_, base) = path_display_components(&path, &ctx.cwd, &ctx.file_resolution_context);
     let ext = file_extension(&base);
     let stem = file_stem(&base);
     let new_stem = if let Some((base_name, index, width)) = indexed_stem_info(&stem) {
@@ -1883,7 +1867,7 @@ pub fn decrement_file_index_fn(args: &[Value], ctx: &ResolutionContext) -> Resul
     Ok(Value::String(make_portable_relative_in_context(
         &out,
         &ctx.cwd,
-        ctx.file_resolution_context.as_ref(),
+        &ctx.file_resolution_context,
     )))
 }
 
@@ -1908,7 +1892,7 @@ fn find_index_endpoint(
         return Ok(Value::String(make_portable_relative_in_context(
             &input,
             &ctx.cwd,
-            ctx.file_resolution_context.as_ref(),
+            &ctx.file_resolution_context,
         )));
     };
     let filename = input
@@ -1927,7 +1911,7 @@ fn find_index_endpoint(
             return Ok(Value::String(make_portable_relative_in_context(
                 &input,
                 &ctx.cwd,
-                ctx.file_resolution_context.as_ref(),
+                &ctx.file_resolution_context,
             )));
         }
         Err(error) => {
@@ -1970,7 +1954,7 @@ fn find_index_endpoint(
     Ok(Value::String(make_portable_relative_in_context(
         &chosen,
         &ctx.cwd,
-        ctx.file_resolution_context.as_ref(),
+        &ctx.file_resolution_context,
     )))
 }
 
@@ -1997,7 +1981,7 @@ pub fn basename_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, Exp
         return Ok(Value::Null);
     }
     let path = resolve_path_arg("basename", &args[0], ctx)?;
-    let (_, base) = path_display_components(&path, &ctx.cwd, ctx.file_resolution_context.as_ref());
+    let (_, base) = path_display_components(&path, &ctx.cwd, &ctx.file_resolution_context);
     Ok(Value::String(base))
 }
 
@@ -2009,7 +1993,7 @@ pub fn basename_without_index_fn(args: &[Value], ctx: &ResolutionContext) -> Res
         return Ok(Value::Null);
     }
     let path = resolve_path_arg("basename_without_index", &args[0], ctx)?;
-    let (_, base) = path_display_components(&path, &ctx.cwd, ctx.file_resolution_context.as_ref());
+    let (_, base) = path_display_components(&path, &ctx.cwd, &ctx.file_resolution_context);
     let stem = file_stem(&base);
     let ext = file_extension(&base);
     let unindexed = match indexed_stem_info(&stem) {
@@ -2040,7 +2024,7 @@ pub fn dirname_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, Expr
     let projected = make_portable_relative_in_context(
         &path,
         &ctx.cwd,
-        ctx.file_resolution_context.as_ref(),
+        &ctx.file_resolution_context,
     );
     if Path::new(&projected).is_absolute() {
         return Ok(Value::String(
@@ -2049,7 +2033,7 @@ pub fn dirname_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, Expr
                 .unwrap_or_default(),
         ));
     }
-    let (dirs, _) = path_display_components(&path, &ctx.cwd, ctx.file_resolution_context.as_ref());
+    let (dirs, _) = path_display_components(&path, &ctx.cwd, &ctx.file_resolution_context);
     Ok(Value::String(if dirs.is_empty() {
         String::new()
     } else {
@@ -2065,7 +2049,7 @@ pub fn ext_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, Expressi
         return Ok(Value::Null);
     }
     let path = resolve_path_arg("ext", &args[0], ctx)?;
-    let (_, base) = path_display_components(&path, &ctx.cwd, ctx.file_resolution_context.as_ref());
+    let (_, base) = path_display_components(&path, &ctx.cwd, &ctx.file_resolution_context);
     Ok(Value::String(file_extension(&base)))
 }
 
@@ -2077,7 +2061,7 @@ pub fn parent_dir_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, E
         return Ok(Value::Null);
     }
     let path = resolve_path_arg("parent_dir", &args[0], ctx)?;
-    let (dirs, _) = path_display_components(&path, &ctx.cwd, ctx.file_resolution_context.as_ref());
+    let (dirs, _) = path_display_components(&path, &ctx.cwd, &ctx.file_resolution_context);
     Ok(Value::String(dirs.last().cloned().unwrap_or_default()))
 }
 
@@ -2089,7 +2073,7 @@ pub fn file_trailing_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value
         return Ok(Value::Null);
     }
     let path = resolve_path_arg("file_trailing", &args[0], ctx)?;
-    let (dirs, base) = path_display_components(&path, &ctx.cwd, ctx.file_resolution_context.as_ref());
+    let (dirs, base) = path_display_components(&path, &ctx.cwd, &ctx.file_resolution_context);
     Ok(Value::String(match dirs.last() {
         Some(d) => format!("{d}/{base}"),
         None => base,
@@ -2104,7 +2088,7 @@ pub fn dir_leading_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, 
         return Ok(Value::Null);
     }
     let path = resolve_path_arg("dir_leading", &args[0], ctx)?;
-    let (dirs, _) = path_display_components(&path, &ctx.cwd, ctx.file_resolution_context.as_ref());
+    let (dirs, _) = path_display_components(&path, &ctx.cwd, &ctx.file_resolution_context);
     Ok(Value::String(if dirs.len() <= 1 {
         String::new()
     } else {
@@ -2137,7 +2121,7 @@ pub fn join_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, Express
         make_portable_relative_in_context(
             &validated,
             &ctx.cwd,
-            ctx.file_resolution_context.as_ref(),
+            &ctx.file_resolution_context,
         ),
     ))
 }
@@ -2181,17 +2165,35 @@ fn destination_needs_wrapping(dest: &str) -> bool {
 /// Formats a Markdown inline link `[text](destination)` with text and
 /// destination escaping.
 fn format_markdown_link(text: &str, destination: &str) -> String {
-    let escaped_text = escape_link_text(text);
-    let safe_dest = if destination_needs_wrapping(destination) {
+    format!("[{}]({})", escape_link_text(text), markdown_destination(destination))
+}
+
+/// Formats a Markdown inline link whose text is one code span.
+///
+/// The label is fenced by [`renderable::markdown::code_span`] and is otherwise
+/// literal: `[`, `]`, and `\` are not escaped, because a code span binds
+/// tighter than link brackets and gives backslashes no meaning. An empty label
+/// yields `[](destination)`, the same as `link(target, "")`.
+fn format_markdown_code_link(text: &str, destination: &str) -> String {
+    format!(
+        "[{}]({})",
+        renderable::markdown::code_span(text),
+        markdown_destination(destination)
+    )
+}
+
+/// Spells a link destination, wrapping it in angle brackets when CommonMark
+/// would otherwise end or split it.
+fn markdown_destination(destination: &str) -> String {
+    if destination_needs_wrapping(destination) {
         let inner = destination.replace('<', "\\<").replace('>', "\\>");
         format!("<{inner}>")
     } else {
         destination.to_string()
-    };
-    format!("[{escaped_text}]({safe_dest})")
+    }
 }
 
-/// Renders a resolved local path as a `link()` destination.
+/// Renders a resolved local path as a `link()`-family destination.
 ///
 /// ## Errors
 ///
@@ -2201,16 +2203,82 @@ fn format_markdown_link(text: &str, destination: &str) -> String {
 /// an option: it may be a magic (`@`), repository (`&`/`^`), or source-relative
 /// reference that
 /// names a different file once the composed document moves.
-fn portable_destination(path: &Path) -> Result<String, ExpressionError> {
+fn portable_destination(function: &'static str, path: &Path) -> Result<String, ExpressionError> {
     biscuit_file::try_portable_string(path).ok_or_else(|| {
         expression_other(
-            "link",
+            function,
             format!(
-                "link() cannot render {} as a Markdown destination: no faithful portable spelling exists, and CommonMark would consume the backslash escapes in its native form.",
+                "{function}() cannot render {} as a Markdown destination: no faithful portable spelling exists, and CommonMark would consume the backslash escapes in its native form.",
                 path.display()
             ),
         )
     })
+}
+
+/// The raw label and destination shared by `link()` and `code_link()`, before
+/// either spells the label as Markdown.
+struct LinkParts {
+    label: String,
+    destination: String,
+}
+
+/// Resolves the `link(file)` / `link(target, desc)` argument shapes for
+/// `function`, which names the caller in every error.
+///
+/// Returns `Ok(None)` when a null argument propagates to a null result.
+fn resolve_link_parts(
+    function: &'static str,
+    args: &[Value],
+    ctx: &ResolutionContext,
+) -> Result<Option<LinkParts>, ExpressionError> {
+    match args.len() {
+        1 => {
+            if args[0].is_null() {
+                return Ok(None);
+            }
+            let raw = require_string_expr(function, &args[0])?;
+            if is_remote_url(raw) {
+                return Err(expression_other(
+                    function,
+                    format!(
+                        "{function}() one-argument form does not accept HTTP(S) URLs; use {function}(target, desc)"
+                    ),
+                ));
+            }
+            let path = resolve_path_arg(function, &args[0], ctx)?;
+            let label = make_portable_relative_in_context(
+                &path,
+                &ctx.cwd,
+                &ctx.file_resolution_context,
+            );
+            let destination = portable_destination(function, &path)?;
+            Ok(Some(LinkParts { label, destination }))
+        }
+        2 => {
+            if any_null(args) {
+                return Ok(None);
+            }
+            let target_raw = require_string_expr(function, &args[0])?;
+            let label = require_string_expr(function, &args[1])?.to_string();
+            let destination = if is_remote_url(target_raw) {
+                url::Url::parse(target_raw).map_err(|e| {
+                    expression_other(
+                        function,
+                        format!("{function}() invalid URL {target_raw:?}: {e}"),
+                    )
+                })?;
+                target_raw.to_string()
+            } else {
+                let path = resolve_path_arg(function, &args[0], ctx)?;
+                portable_destination(function, &path)?
+            };
+            Ok(Some(LinkParts { label, destination }))
+        }
+        _ => Err(expression_other(
+            function,
+            format!("{function}() requires 1 or 2 arguments"),
+        )),
+    }
 }
 
 /// `link(file)` / `link(target, desc)` — emits a Markdown inline link.
@@ -2221,50 +2289,20 @@ fn portable_destination(path: &Path) -> Result<String, ExpressionError> {
 /// - Two arguments: `target` may be a local file reference or an HTTP(S) URL;
 ///   `desc` must be a string and is used as the link text.
 pub fn link_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
-    match args.len() {
-        1 => {
-            if args[0].is_null() {
-                return Ok(Value::Null);
-            }
-            let raw = require_string_expr("link", &args[0])?;
-            if is_remote_url(raw) {
-                return Err(expression_other(
-                    "link",
-                    "link() one-argument form does not accept HTTP(S) URLs; use link(target, desc)"
-                        .to_string(),
-                ));
-            }
-            let path = resolve_path_arg("link", &args[0], ctx)?;
-            let desc = make_portable_relative_in_context(
-                &path,
-                &ctx.cwd,
-                ctx.file_resolution_context.as_ref(),
-            );
-            let dest = portable_destination(&path)?;
-            Ok(Value::String(format_markdown_link(&desc, &dest)))
-        }
-        2 => {
-            if any_null(args) {
-                return Ok(Value::Null);
-            }
-            let target_raw = require_string_expr("link", &args[0])?;
-            let desc = require_string_expr("link", &args[1])?;
-            let dest = if is_remote_url(target_raw) {
-                url::Url::parse(target_raw).map_err(|e| {
-                    expression_other("link", format!("link() invalid URL {target_raw:?}: {e}"))
-                })?;
-                target_raw.to_string()
-            } else {
-                let path = resolve_path_arg("link", &args[0], ctx)?;
-                portable_destination(&path)?
-            };
-            Ok(Value::String(format_markdown_link(desc, &dest)))
-        }
-        _ => Err(expression_other(
-            "link",
-            "link() requires 1 or 2 arguments".to_string(),
-        )),
-    }
+    Ok(resolve_link_parts("link", args, ctx)?.map_or(Value::Null, |parts| {
+        Value::String(format_markdown_link(&parts.label, &parts.destination))
+    }))
+}
+
+/// `code_link(file)` / `code_link(target, desc)` — emits a Markdown inline link
+/// whose text is inline code, such as `` [`plans/foo.md`](/abs/plans/foo.md) ``.
+///
+/// Arguments, null handling, destinations, and errors are `link()`'s; only the
+/// label differs (see [`format_markdown_code_link`]).
+pub fn code_link_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
+    Ok(resolve_link_parts("code_link", args, ctx)?.map_or(Value::Null, |parts| {
+        Value::String(format_markdown_code_link(&parts.label, &parts.destination))
+    }))
 }
 
 /// Validates that a skill name is a single basename component.
@@ -2300,13 +2338,11 @@ pub fn has_skill_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, Ex
     }
     let agent = ctx.agent();
     let home_dir = ctx.home_dir().unwrap_or_else(|| PathBuf::from("."));
-    let local_root = match &ctx.file_resolution_context {
-        Some(snapshot) => snapshot
-            .repository_root()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| ctx.cwd.clone()),
-        None => ctx.cwd.clone(),
-    };
+    let local_root = ctx
+        .file_resolution_context
+        .repository_root()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| ctx.cwd.clone());
     let roots = SkillRoots::new(home_dir, local_root).roots_for_agent(&agent);
     Ok(Value::Bool(skill_exists_in_roots(&roots, name)))
 }
@@ -2331,13 +2367,11 @@ pub fn has_local_skill_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Val
         ));
     }
     let agent = ctx.agent();
-    let local_root = match &ctx.file_resolution_context {
-        Some(snapshot) => snapshot
-            .repository_root()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| ctx.cwd.clone()),
-        None => ctx.cwd.clone(),
-    };
+    let local_root = ctx
+        .file_resolution_context
+        .repository_root()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| ctx.cwd.clone());
     let roots = SkillRoots::new(PathBuf::from("."), local_root).local_roots_for_agent(&agent);
     Ok(Value::Bool(skill_exists_in_roots(&roots, name)))
 }
@@ -2449,124 +2483,46 @@ pub fn try_frontmatter_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Val
     Ok(Value::Object(outcome))
 }
 
-/// `find_files(pattern) -> file[] | Error` — every regular file a glob
-/// reference matches, as sorted absolute portable paths.
+/// `find_files(pattern) -> file[] | Error` — every file a glob reference
+/// matches, as absolute portable paths in native order.
 ///
-/// The path before the first segment holding `*`, `?`, or `[` is an ordinary
-/// file reference naming the directory to search (`&claudine/fixes`), and the
-/// rest is a glob matched against paths below it, where `*` stays within one
-/// segment and `**` crosses segments. A pattern without a wildcard names one
-/// file. A missing directory, like a missing file, matches nothing; so does a
-/// `null` pattern. Directory symlinks are not followed.
+/// The pattern is a [`GlobReference`](biscuit_file::GlobReference) authored
+/// in this document: its prefix (`&`, `^`, `@`, `~`, `./`, bare, …) picks the
+/// roots single-file resolution uses for that sigil, and the result merges
+/// every root's matches, most local root first, then shallowest, then
+/// component-wise. A bare pattern searches the document's folder, then the
+/// repository root. `*` stays within one segment and `**` crosses segments;
+/// a pattern without a wildcard names one path under each root. No hidden,
+/// ignored, or underscore filter applies, so a `&**/…` walk from the
+/// repository root also visits build output.
+///
+/// Directory symlinks are not followed. A file symlink a bare, `./`, or `../`
+/// pattern matches whose target leaves the file tree is left out and reported
+/// as a [`GLOB_SKIPPED_SYMLINK_CODE`](crate::markdown::compose::ComposeWarning::GLOB_SKIPPED_SYMLINK_CODE)
+/// warning. A `null` pattern lists nothing; a pattern that cannot be parsed or
+/// rooted is an [`ExpressionError::GlobReference`].
 pub fn find_files_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
     require_args_expr("find_files", args, 1)?;
     if any_null(args) {
         return Ok(Value::Array(Vec::new()));
     }
     let raw = require_string_expr("find_files", &args[0])?;
-    if is_remote_url(raw) {
-        return Err(expression_other(
-            "find_files",
-            format!("find_files() searches local directories and cannot search {raw:?}"),
-        ));
-    }
-    if raw.starts_with('%') {
-        return Err(expression_other(
-            "find_files",
-            format!("find_files() takes a glob, not a `%` recursive reference: {raw:?}"),
-        ));
-    }
-    let normalized = normalize_path_arg(raw);
-    let Some(wildcard) = normalized.find(['*', '?', '[']) else {
-        let found = resolve_arg("find_files", raw, ctx)?.filter(|path| path.is_file());
-        return Ok(Value::Array(
-            found
-                .map(|path| Value::String(biscuit_file::to_portable_string(&path)))
-                .into_iter()
-                .collect(),
-        ));
+    let glob_error = |source| ExpressionError::GlobReference {
+        function: "find_files",
+        source: Arc::new(source),
     };
-    // A leading root sigil belongs to the directory even when a wildcard
-    // follows it directly (`&**/spec.md`).
-    let sigil_len = match normalized.as_bytes() {
-        [b'&' | b'^' | b'@', b'/', ..] => 2,
-        [b'&' | b'^' | b'@', ..] => 1,
-        _ => 0,
-    };
-    let (prefix, glob) = match normalized[sigil_len..wildcard].rfind('/') {
-        Some(slash) => {
-            let slash = sigil_len + slash;
-            (&normalized[..slash], &normalized[slash + 1..])
-        }
-        None => (&normalized[..sigil_len.min(1)], &normalized[sigil_len..]),
-    };
-    let matcher = globset::GlobBuilder::new(glob)
-        .literal_separator(true)
-        .build()
-        .map_err(|error| {
-            expression_other("find_files", format!("find_files() has an invalid glob {glob:?}: {error}"))
-        })?
-        .compile_matcher();
-    // A bare sigil names its root, which a reference spells with a `.` payload.
-    let directory_ref = match prefix {
-        "" | "&" | "^" | "@" => format!("{prefix}."),
-        other => other.to_string(),
-    };
-    let file_ref = biscuit_file::FileReference::new(&directory_ref).map_err(|error| {
-        file_reference_error("find_files", raw, ctx, FileRefFailure::classify(&error), Some(error))
-    })?;
-    let directory = super::resolve_ctx::resolve_document_directory(
-        &file_ref,
-        &ctx.cwd,
-        &ctx.magic_paths,
-        ctx.file_resolution_context.as_ref(),
-    )
-    .map_err(|error| {
-        file_reference_error("find_files", raw, ctx, FileRefFailure::classify(&error), Some(error))
-    })?;
-    let mut matches = Vec::new();
-    if let Some(directory) = directory {
-        collect_glob_matches(&directory, &directory, &matcher, &mut matches).map_err(|error| {
-            expression_other("find_files", format!("find_files() could not search {raw:?}: {error}"))
-        })?;
-    }
-    matches.sort();
+    // A URL keeps its `//`, so the glob reference rejects it as remote.
+    let pattern = if is_remote_url(raw) { raw.to_string() } else { normalize_path_arg(raw) };
+    let globs = biscuit_file::GlobReference::new([pattern]).map_err(glob_error)?;
+    let listing = globs.list_files(&ctx.file_context()).map_err(glob_error)?;
+    ctx.glob_warnings.record("interpolation", &listing);
     Ok(Value::Array(
-        matches
+        listing
+            .matches
             .iter()
             .map(|path| Value::String(biscuit_file::to_portable_string(path)))
             .collect(),
     ))
-}
-
-/// Walks `directory` without following directory symlinks, collecting the
-/// regular files whose `/`-separated path below `root` matches `matcher`.
-fn collect_glob_matches(
-    root: &Path,
-    directory: &Path,
-    matcher: &globset::GlobMatcher,
-    matches: &mut Vec<PathBuf>,
-) -> std::io::Result<()> {
-    for entry in std::fs::read_dir(directory)? {
-        let entry = entry?;
-        let path = entry.path();
-        let file_type = entry.file_type()?;
-        if file_type.is_dir() {
-            collect_glob_matches(root, &path, matcher, matches)?;
-            continue;
-        }
-        // A symlink counts when it points at a regular file.
-        if !(file_type.is_file() || (file_type.is_symlink() && path.is_file())) {
-            continue;
-        }
-        let Ok(relative) = path.strip_prefix(root) else {
-            continue;
-        };
-        if matcher.is_match(biscuit_file::to_portable_string(relative)) {
-            matches.push(path);
-        }
-    }
-    Ok(())
 }
 
 /// A value read from another document's frontmatter, with stored literal
@@ -2641,7 +2597,7 @@ pub fn validate_schema_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Val
     if !md.frontmatter().as_map().contains_key("$schema") {
         return Ok(Value::Bool(true));
     }
-    let schemas = DarkmatterSchemas::new();
+    let schemas = DarkmatterSchemas::new(ctx.file_context());
     let report = schemas
         .validate(&md)
         .map_err(|e| expression_other(
@@ -3830,7 +3786,7 @@ mod tests {
 
         #[test]
         fn dispatch_fs_returns_none_for_non_fs_names() {
-            let ctx = ResolutionContext::new(std::path::PathBuf::from("."));
+            let ctx = ResolutionContext::at(std::path::PathBuf::from("."));
             assert!(dispatch_fs("lower", &[json!("x")], &ctx).is_none());
         }
 
@@ -3838,7 +3794,7 @@ mod tests {
         fn dirname_renamed_without_dir_alias() {
             // A relative context directory fails resolution validation.
             let dir = tempfile::TempDir::new().unwrap();
-            let ctx = ResolutionContext::new(dir.path().to_path_buf());
+            let ctx = ResolutionContext::at(dir.path().to_path_buf());
             assert_eq!(
                 dispatch_fs("dirname", &[json!("sub/note.md")], &ctx)
                     .unwrap()
@@ -3852,7 +3808,7 @@ mod tests {
         fn absolute_and_file_exists_resolve_relative_to_base_dir() {
             let dir = tempfile::TempDir::new().unwrap();
             std::fs::write(dir.path().join("a.md"), "# A\n").unwrap();
-            let ctx = ResolutionContext::new(dir.path().to_path_buf());
+            let ctx = ResolutionContext::at(dir.path().to_path_buf());
 
             let abs = absolute_fn(&[json!("a.md")], &ctx).unwrap();
             assert_eq!(
@@ -3889,10 +3845,10 @@ mod tests {
             .unwrap();
             let snapshot = biscuit_file::FileResolutionContext::new(&base_dir)
                 .with_repository_scope_catalog(catalog);
-            let mut ctx = ResolutionContext::new(base_dir)
+            let mut ctx = ResolutionContext::at(base_dir)
                 .with_repository_root(repo.path())
                 .with_package_area(&package_area);
-            ctx.file_resolution_context = Some(snapshot);
+            ctx.file_resolution_context = snapshot;
 
             assert_eq!(
                 absolute_fn(&[json!("^shared.md")], &ctx).unwrap(),
@@ -3914,7 +3870,7 @@ mod tests {
             // An unrelated directory the process is chdir'd into: plan.md is NOT
             // here either.
             let unrelated_dir = tempfile::TempDir::new().unwrap();
-            let ctx = ResolutionContext::new(base_dir.path().to_path_buf())
+            let ctx = ResolutionContext::at(base_dir.path().to_path_buf())
                 .with_file_ref_fallback_dir(launch_dir.path().to_path_buf());
 
             let original = std::env::current_dir().unwrap();
@@ -3934,7 +3890,7 @@ mod tests {
             let cwd_dir = tempfile::TempDir::new().unwrap();
             std::fs::write(cwd_dir.path().join("ambient.md"), "# Ambient\n").unwrap();
             let base_dir = tempfile::TempDir::new().unwrap();
-            let ctx = ResolutionContext::new(base_dir.path().to_path_buf());
+            let ctx = ResolutionContext::at(base_dir.path().to_path_buf());
 
             let original = std::env::current_dir().unwrap();
             std::env::set_current_dir(cwd_dir.path()).unwrap();
@@ -3949,7 +3905,7 @@ mod tests {
             let dir = tempfile::TempDir::new().unwrap();
             std::fs::create_dir_all(dir.path().join("sub")).unwrap();
             std::fs::write(dir.path().join("sub/a.md"), "# A\n").unwrap();
-            let ctx = ResolutionContext::new(dir.path().to_path_buf());
+            let ctx = ResolutionContext::at(dir.path().to_path_buf());
             let rel = relative_fn(&[json!("sub/a.md")], &ctx).unwrap();
             assert_eq!(rel, json!("sub/a.md"));
         }
@@ -3962,7 +3918,7 @@ mod tests {
                 "---\ntitle: Hi\nstatus: draft\n---\nBody\n",
             )
             .unwrap();
-            let ctx = ResolutionContext::new(dir.path().to_path_buf());
+            let ctx = ResolutionContext::at(dir.path().to_path_buf());
 
             let whole = frontmatter_fn(&[json!("d.md")], &ctx).unwrap();
             assert_eq!(whole["title"], json!("Hi"));
@@ -3995,7 +3951,7 @@ mod tests {
             if std::fs::read_to_string(&path).is_ok() {
                 return;
             }
-            let ctx = ResolutionContext::new(dir.path().to_path_buf());
+            let ctx = ResolutionContext::at(dir.path().to_path_buf());
 
             match frontmatter_fn(&[json!("locked.md")], &ctx).unwrap_err() {
                 ExpressionError::FileReference(diagnostic) => {
@@ -4015,7 +3971,7 @@ mod tests {
             std::fs::write(dir.path().join("empty.md"), "---\ntitle: T\n---\n\n   \n").unwrap();
             std::fs::write(dir.path().join("full.md"), "---\n---\n# Heading\n\nWords\n").unwrap();
             std::fs::write(dir.path().join("fm_title.md"), "---\ntitle: FM\n---\n# H1\n").unwrap();
-            let ctx = ResolutionContext::new(dir.path().to_path_buf());
+            let ctx = ResolutionContext::at(dir.path().to_path_buf());
 
             assert_eq!(
                 markdown_body_empty_fn(&[json!("empty.md")], &ctx).unwrap(),
@@ -4041,7 +3997,7 @@ mod tests {
         fn validate_schema_true_when_no_schema_property() {
             let dir = tempfile::TempDir::new().unwrap();
             std::fs::write(dir.path().join("plain.md"), "---\ntitle: T\n---\nBody\n").unwrap();
-            let ctx = ResolutionContext::new(dir.path().to_path_buf());
+            let ctx = ResolutionContext::at(dir.path().to_path_buf());
             assert_eq!(
                 validate_schema_fn(&[json!("plain.md")], &ctx).unwrap(),
                 json!(true)
@@ -4057,7 +4013,7 @@ mod tests {
 
         #[test]
         fn has_command_found_on_path_returns_true() {
-            let ctx = ResolutionContext::new(std::env::temp_dir());
+            let ctx = ResolutionContext::at(std::env::temp_dir());
             // Guard behind an independent probe so a minimal CI image lacking
             // the binary skips the positive assertion instead of failing.
             if which::which(PROBE_BINARY).is_ok() {
@@ -4070,7 +4026,7 @@ mod tests {
 
         #[test]
         fn has_command_missing_returns_false() {
-            let ctx = ResolutionContext::new(std::env::temp_dir());
+            let ctx = ResolutionContext::at(std::env::temp_dir());
             assert_eq!(
                 has_command_fn(&[json!("definitely-not-a-real-bin-zzz")], &ctx).unwrap(),
                 json!(false)
@@ -4079,7 +4035,7 @@ mod tests {
 
         #[test]
         fn has_command_non_string_and_empty_read_as_false() {
-            let ctx = ResolutionContext::new(std::env::temp_dir());
+            let ctx = ResolutionContext::at(std::env::temp_dir());
             for arg in [
                 json!(null),
                 json!(42),
@@ -4098,7 +4054,7 @@ mod tests {
 
         #[test]
         fn has_command_absolute_path_to_missing_returns_false() {
-            let ctx = ResolutionContext::new(std::env::temp_dir());
+            let ctx = ResolutionContext::at(std::env::temp_dir());
             let missing = std::env::temp_dir().join("definitely-not-a-real-zzz-bin");
             assert_eq!(
                 has_command_fn(&[json!(missing.to_string_lossy().to_string())], &ctx).unwrap(),
@@ -4114,7 +4070,7 @@ mod tests {
             let path = dir.path().join("tool");
             std::fs::write(&path, "#!/bin/sh\n").unwrap();
             std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-            let ctx = ResolutionContext::new(dir.path().to_path_buf());
+            let ctx = ResolutionContext::at(dir.path().to_path_buf());
             assert_eq!(
                 has_command_fn(&[json!(path.to_string_lossy().to_string())], &ctx).unwrap(),
                 json!(true)
@@ -4129,7 +4085,7 @@ mod tests {
             let path = dir.path().join("data.txt");
             std::fs::write(&path, "not executable\n").unwrap();
             std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
-            let ctx = ResolutionContext::new(dir.path().to_path_buf());
+            let ctx = ResolutionContext::at(dir.path().to_path_buf());
             assert_eq!(
                 has_command_fn(&[json!(path.to_string_lossy().to_string())], &ctx).unwrap(),
                 json!(false)
@@ -4139,7 +4095,7 @@ mod tests {
         #[test]
         fn has_command_directory_returns_false() {
             let dir = tempfile::TempDir::new().unwrap();
-            let ctx = ResolutionContext::new(dir.path().to_path_buf());
+            let ctx = ResolutionContext::at(dir.path().to_path_buf());
             assert_eq!(
                 has_command_fn(&[json!(dir.path().to_string_lossy().to_string())], &ctx).unwrap(),
                 json!(false)
@@ -4148,7 +4104,7 @@ mod tests {
 
         #[test]
         fn has_command_tilde_is_not_expanded() {
-            let ctx = ResolutionContext::new(std::env::temp_dir());
+            let ctx = ResolutionContext::at(std::env::temp_dir());
             assert_eq!(
                 has_command_fn(&[json!("~/bin/x")], &ctx).unwrap(),
                 json!(false)
@@ -4157,7 +4113,7 @@ mod tests {
 
         #[test]
         fn has_command_relative_path_is_not_resolved() {
-            let ctx = ResolutionContext::new(std::env::temp_dir());
+            let ctx = ResolutionContext::at(std::env::temp_dir());
             assert_eq!(
                 has_command_fn(&[json!("./mytool")], &ctx).unwrap(),
                 json!(false)
@@ -4195,7 +4151,7 @@ mod tests {
                     .unwrap();
                 }
             }
-            let ctx = ResolutionContext::new(dir.path().to_path_buf());
+            let ctx = ResolutionContext::at(dir.path().to_path_buf());
 
             let original = std::env::current_dir().unwrap();
             std::env::set_current_dir(dir.path()).unwrap();
@@ -4209,14 +4165,14 @@ mod tests {
 
         #[test]
         fn has_command_requires_exactly_one_arg() {
-            let ctx = ResolutionContext::new(std::env::temp_dir());
+            let ctx = ResolutionContext::at(std::env::temp_dir());
             assert!(has_command_fn(&[], &ctx).is_err());
             assert!(has_command_fn(&[json!("sh"), json!("extra")], &ctx).is_err());
         }
 
         #[test]
         fn has_command_dispatches_by_canonical_and_alias() {
-            let ctx = ResolutionContext::new(std::env::temp_dir());
+            let ctx = ResolutionContext::at(std::env::temp_dir());
             assert_eq!(
                 dispatch_fs("has_command", &[json!("definitely-not-a-real-bin-zzz")], &ctx)
                     .unwrap()
@@ -4623,7 +4579,7 @@ mod tests {
 
         fn ctx_with_temp_dir() -> (tempfile::TempDir, ResolutionContext) {
             let dir = tempfile::TempDir::new().unwrap();
-            let ctx = ResolutionContext::new(dir.path().to_path_buf());
+            let ctx = ResolutionContext::at(dir.path().to_path_buf());
             (dir, ctx)
         }
 
@@ -4696,7 +4652,7 @@ mod tests {
 
         #[test]
         fn indexed_functions_null_propagate_and_reject_remote() {
-            let ctx = ResolutionContext::new(std::env::temp_dir());
+            let ctx = ResolutionContext::at(std::env::temp_dir());
 
             assert_eq!(is_indexed_file_fn(&[json!(null)], &ctx).unwrap(), json!(null));
             assert_eq!(file_index_fn(&[json!(null)], &ctx).unwrap(), json!(null));
@@ -4712,7 +4668,7 @@ mod tests {
 
         #[test]
         fn indexed_functions_require_arity() {
-            let ctx = ResolutionContext::new(std::env::temp_dir());
+            let ctx = ResolutionContext::at(std::env::temp_dir());
             assert!(is_indexed_file_fn(&[], &ctx).is_err());
             assert!(is_indexed_file_fn(&[json!("a"), json!("b")], &ctx).is_err());
             assert!(file_index_fn(&[], &ctx).is_err());
@@ -4783,7 +4739,7 @@ mod tests {
 
         #[test]
         fn join_rejects_http_and_null_propagates() {
-            let ctx = ResolutionContext::new(std::env::temp_dir());
+            let ctx = ResolutionContext::at(std::env::temp_dir());
 
             assert_eq!(join_fn(&[json!(null), json!("b")], &ctx).unwrap(), json!(null));
             let err = join_fn(&[json!("https://example.com"), json!("b")], &ctx).unwrap_err();
@@ -4794,7 +4750,7 @@ mod tests {
 
         #[test]
         fn join_requires_strings_and_correct_arity() {
-            let ctx = ResolutionContext::new(std::env::temp_dir());
+            let ctx = ResolutionContext::at(std::env::temp_dir());
             assert!(join_fn(&[], &ctx).is_err());
             assert!(join_fn(&[json!("a")], &ctx).is_err());
             assert!(join_fn(&[json!(123), json!("b")], &ctx).is_err());
@@ -4809,7 +4765,7 @@ mod tests {
             std::fs::create_dir_all(repo.path().join(".git")).unwrap();
             let base = repo.path().join("prompts");
             std::fs::create_dir_all(&base).unwrap();
-            let ctx = ResolutionContext::new(base.clone())
+            let ctx = ResolutionContext::at(base.clone())
                 .with_repository_root(repo.path().to_path_buf());
 
             // Implicit bare miss → document-CWD candidate.
@@ -4823,7 +4779,7 @@ mod tests {
 
         #[test]
         fn path_functions_do_not_require_existence() {
-            let ctx = ResolutionContext::new(std::env::temp_dir());
+            let ctx = ResolutionContext::at(std::env::temp_dir());
 
             assert_eq!(basename_fn(&[json!("foo/bar/missing.md")], &ctx).unwrap(), json!("missing.md"));
             assert_eq!(dirname_fn(&[json!("foo/bar/missing.md")], &ctx).unwrap(), json!("foo/bar"));
@@ -4835,7 +4791,7 @@ mod tests {
 
         #[test]
         fn path_functions_dispatch_by_name() {
-            let ctx = ResolutionContext::new(std::env::temp_dir());
+            let ctx = ResolutionContext::at(std::env::temp_dir());
             assert_eq!(
                 dispatch_fs("is_indexed_file", &[json!("foo-1.md")], &ctx)
                     .unwrap()
@@ -4868,7 +4824,7 @@ mod tests {
 
         fn ctx_with_temp_dir() -> (tempfile::TempDir, ResolutionContext) {
             let dir = tempfile::TempDir::new().unwrap();
-            let ctx = ResolutionContext::new(dir.path().to_path_buf());
+            let ctx = ResolutionContext::at(dir.path().to_path_buf());
             (dir, ctx)
         }
 
@@ -4908,7 +4864,7 @@ mod tests {
 
         #[test]
         fn link_two_arg_https_emits_url_destination() {
-            let ctx = ResolutionContext::new(std::env::temp_dir());
+            let ctx = ResolutionContext::at(std::env::temp_dir());
             let result = link_fn(
                 &[
                     json!("https://example.com/page"),
@@ -4922,7 +4878,7 @@ mod tests {
 
         #[test]
         fn link_escapes_brackets_in_text() {
-            let ctx = ResolutionContext::new(std::env::temp_dir());
+            let ctx = ResolutionContext::at(std::env::temp_dir());
             let result = link_fn(
                 &[
                     json!("https://example.com"),
@@ -5007,7 +4963,7 @@ mod tests {
             // A literal `.` component under a verbatim prefix is a real
             // directory name, so `dunce` refuses to reduce the prefix and the
             // path has no portable spelling.
-            let ctx = ResolutionContext::new(std::path::PathBuf::from(r"\\?\C:\repo\.\docs"));
+            let ctx = ResolutionContext::at(std::path::PathBuf::from(r"\\?\C:\repo\.\docs"));
 
             let one_arg = link_fn(&[json!("sibling.md")], &ctx).unwrap_err();
             assert!(
@@ -5024,7 +4980,7 @@ mod tests {
 
         #[test]
         fn link_one_arg_rejects_remote_url() {
-            let ctx = ResolutionContext::new(std::env::temp_dir());
+            let ctx = ResolutionContext::at(std::env::temp_dir());
             let err = link_fn(
                 &[json!("https://example.com/doc.md")],
                 &ctx,
@@ -5035,7 +4991,7 @@ mod tests {
 
         #[test]
         fn basename_rejects_uppercase_scheme_urls() {
-            let ctx = ResolutionContext::new(std::env::temp_dir());
+            let ctx = ResolutionContext::at(std::env::temp_dir());
 
             let err = basename_fn(&[json!("HTTPS://example.com/doc.md")], &ctx)
                 .unwrap_err();
@@ -5047,7 +5003,7 @@ mod tests {
 
         #[test]
         fn join_rejects_uppercase_scheme_urls() {
-            let ctx = ResolutionContext::new(std::env::temp_dir());
+            let ctx = ResolutionContext::at(std::env::temp_dir());
 
             let err = join_fn(&[json!("HTTPS://example.com"), json!("b")], &ctx)
                 .unwrap_err();
@@ -5059,14 +5015,14 @@ mod tests {
 
         #[test]
         fn link_one_arg_rejects_uppercase_scheme_urls() {
-            let ctx = ResolutionContext::new(std::env::temp_dir());
+            let ctx = ResolutionContext::at(std::env::temp_dir());
             let err = link_fn(&[json!("HTTPS://example.com/doc.md")], &ctx).unwrap_err();
             assert!(err.contains("HTTP(S)"), "got: {err}");
         }
 
         #[test]
         fn link_two_arg_accepts_uppercase_scheme_urls() {
-            let ctx = ResolutionContext::new(std::env::temp_dir());
+            let ctx = ResolutionContext::at(std::env::temp_dir());
 
             let result = link_fn(
                 &[json!("HTTPS://example.com/page"), json!("Example")],
@@ -5084,7 +5040,7 @@ mod tests {
 
         #[test]
         fn link_null_propagates_and_arity_errors() {
-            let ctx = ResolutionContext::new(std::env::temp_dir());
+            let ctx = ResolutionContext::at(std::env::temp_dir());
             assert_eq!(
                 link_fn(&[json!(null), json!("desc")], &ctx).unwrap(),
                 json!(null)
@@ -5099,16 +5055,215 @@ mod tests {
 
         #[test]
         fn link_type_mismatch_errors() {
-            let ctx = ResolutionContext::new(std::env::temp_dir());
+            let ctx = ResolutionContext::at(std::env::temp_dir());
             assert!(link_fn(&[json!(123)], &ctx).is_err());
             assert!(link_fn(&[json!("a"), json!(123)], &ctx).is_err());
+        }
+
+        /// Returns the visible text, code spans included, of the single link
+        /// in `markdown`, and whether that text came from exactly one code span.
+        fn link_code_label(markdown: &str) -> (String, bool) {
+            use pulldown_cmark::{Event, Parser, Tag, TagEnd};
+
+            let mut label = String::new();
+            let mut code_spans = 0;
+            let mut other_text = false;
+            let mut inside = false;
+            for event in Parser::new(markdown) {
+                match event {
+                    Event::Start(Tag::Link { .. }) => inside = true,
+                    Event::End(TagEnd::Link) => inside = false,
+                    Event::Code(code) if inside => {
+                        code_spans += 1;
+                        label.push_str(&code);
+                    }
+                    Event::Text(text) if inside => {
+                        other_text = true;
+                        label.push_str(&text);
+                    }
+                    _ => {}
+                }
+            }
+            (label, code_spans == 1 && !other_text)
+        }
+
+        fn code_link(args: &[Value], ctx: &ResolutionContext) -> String {
+            code_link_fn(args, ctx).unwrap().as_str().unwrap().to_string()
+        }
+
+        /// Splits `[label](destination)` at the `](` that ends the label.
+        fn split_link(markdown: &str) -> (&str, &str) {
+            let index = markdown.rfind("](").expect("a Markdown link");
+            (&markdown[1..index], &markdown[index + 2..markdown.len() - 1])
+        }
+
+        #[test]
+        fn code_link_one_arg_matches_link_destination_with_a_code_label() {
+            let (dir, ctx) = ctx_with_temp_dir();
+            std::fs::create_dir_all(dir.path().join("plans")).unwrap();
+            std::fs::write(dir.path().join("plans/foo.md"), "x").unwrap();
+            std::fs::write(dir.path().join("my doc (v1).md"), "x").unwrap();
+
+            for file in ["plans/foo.md", "my doc (v1).md"] {
+                let plain = link_fn(&[json!(file)], &ctx).unwrap();
+                let plain = plain.as_str().unwrap();
+                let code = code_link(&[json!(file)], &ctx);
+
+                let (plain_label, plain_dest) = split_link(plain);
+                let (code_label, code_dest) = split_link(&code);
+                assert_eq!(code_dest, plain_dest, "same destination spelling and quoting");
+                assert_eq!(code_label, format!("`{plain_label}`"));
+                assert_eq!(link_code_label(&code), (file.to_string(), true), "{code}");
+            }
+            assert_eq!(
+                code_link(&[json!("plans/foo.md")], &ctx),
+                format!(
+                    "[`plans/foo.md`]({})",
+                    biscuit_file::to_portable_string(&dir.path().join("plans/foo.md"))
+                )
+            );
+        }
+
+        #[test]
+        fn code_link_two_arg_file_and_url_destinations_match_link() {
+            let (dir, ctx) = ctx_with_temp_dir();
+            std::fs::write(dir.path().join("doc.md"), "x").unwrap();
+
+            for target in ["doc.md", "https://example.com/page", "HTTPS://example.com/page"] {
+                let plain = link_fn(&[json!(target), json!("md hash")], &ctx).unwrap();
+                let code = code_link(&[json!(target), json!("md hash")], &ctx);
+                assert_eq!(split_link(&code).1, split_link(plain.as_str().unwrap()).1);
+                assert_eq!(split_link(&code).0, "`md hash`");
+            }
+        }
+
+        #[test]
+        fn code_link_keeps_brackets_unescaped_inside_the_code_span() {
+            let ctx = ResolutionContext::at(std::env::temp_dir());
+            let url = json!("https://example.com");
+
+            let rendered = code_link(&[url.clone(), json!("a]b")], &ctx);
+            assert_eq!(rendered, "[`a]b`](https://example.com)");
+            assert_eq!(link_code_label(&rendered), ("a]b".to_string(), true));
+
+            let rendered = code_link(&[url, json!("click [here]")], &ctx);
+            assert_eq!(rendered, "[`click [here]`](https://example.com)");
+            assert_eq!(link_code_label(&rendered), ("click [here]".to_string(), true));
+        }
+
+        #[test]
+        fn code_link_emits_backslashes_as_is() {
+            let ctx = ResolutionContext::at(std::env::temp_dir());
+            let rendered = code_link(&[json!("https://example.com"), json!(r"a\_b")], &ctx);
+            assert_eq!(rendered, r"[`a\_b`](https://example.com)");
+            assert_eq!(link_code_label(&rendered), (r"a\_b".to_string(), true));
+        }
+
+        #[test]
+        fn code_link_fences_backticks_and_pads_edges() {
+            let ctx = ResolutionContext::at(std::env::temp_dir());
+            let url = json!("https://example.com");
+            for (label, expected) in [
+                ("a`b", "[``a`b``](https://example.com)"),
+                ("``x``", "[``` ``x`` ```](https://example.com)"),
+                ("`a`", "[`` `a` ``](https://example.com)"),
+                (" a ", "[`  a  `](https://example.com)"),
+            ] {
+                let rendered = code_link(&[url.clone(), json!(label)], &ctx);
+                assert_eq!(rendered, expected, "{label:?}");
+                assert_eq!(link_code_label(&rendered), (label.to_string(), true), "{label:?}");
+            }
+        }
+
+        #[test]
+        fn code_link_turns_line_endings_into_spaces() {
+            let ctx = ResolutionContext::at(std::env::temp_dir());
+            for label in ["one\ntwo", "one\r\ntwo", "one\rtwo"] {
+                let rendered = code_link(&[json!("https://example.com"), json!(label)], &ctx);
+                assert_eq!(rendered, "[`one two`](https://example.com)", "{label:?}");
+            }
+        }
+
+        #[test]
+        fn code_link_empty_label_is_an_ordinary_empty_link() {
+            let ctx = ResolutionContext::at(std::env::temp_dir());
+            let rendered = code_link(&[json!("https://example.com"), json!("")], &ctx);
+            assert_eq!(rendered, "[](https://example.com)");
+            assert_eq!(
+                link_fn(&[json!("https://example.com"), json!("")], &ctx).unwrap(),
+                json!(rendered)
+            );
+        }
+
+        #[test]
+        fn code_link_null_propagates_like_link() {
+            let ctx = ResolutionContext::at(std::env::temp_dir());
+            for args in [
+                vec![json!(null)],
+                vec![json!(null), json!("desc")],
+                vec![json!("https://example.com"), json!(null)],
+            ] {
+                assert_eq!(code_link_fn(&args, &ctx).unwrap(), json!(null), "{args:?}");
+                assert_eq!(link_fn(&args, &ctx).unwrap(), json!(null), "{args:?}");
+            }
+        }
+
+        /// Each failure carries `link()`'s cause under the name the caller
+        /// invoked, and `link()`'s own error text is unchanged.
+        #[test]
+        fn code_link_errors_name_code_link_with_the_link_cause() {
+            let ctx = ResolutionContext::at(std::env::temp_dir());
+            let cases: [(Vec<Value>, &str); 6] = [
+                (vec![json!("https://example.com/doc.md")], "one-argument form does not accept HTTP(S) URLs"),
+                (vec![], "requires 1 or 2 arguments"),
+                (vec![json!("a"), json!("b"), json!("c")], "requires 1 or 2 arguments"),
+                // Neither parses as a URL, so both fail as file paths.
+                (vec![json!("http://[::1"), json!("x")], "invalid file path"),
+                (vec![json!("https://exa mple.com"), json!("x")], ""),
+                (vec![json!(123)], ""),
+            ];
+            for (args, cause) in cases {
+                let link_err = link_fn(&args, &ctx).unwrap_err();
+                let code_err = code_link_fn(&args, &ctx).unwrap_err();
+                let function = match &code_err {
+                    ExpressionError::Other { function, .. } => Some(function.as_str()),
+                    ExpressionError::FileReference(diagnostic) => Some(diagnostic.function),
+                    _ => None,
+                };
+                assert!(matches!(function, None | Some("code_link")), "{code_err:?}");
+                assert!(code_err.to_string().contains(cause), "{code_err}");
+                assert!(link_err.to_string().contains(cause), "{link_err}");
+                assert_eq!(
+                    code_err.to_string(),
+                    link_err.to_string().replace("link(", "code_link("),
+                    "{args:?}"
+                );
+            }
+            assert_eq!(
+                link_fn(&[json!("https://example.com/doc.md")], &ctx).unwrap_err().to_string(),
+                "link(): link() one-argument form does not accept HTTP(S) URLs; use link(target, desc)"
+            );
+            assert!(code_link_fn(&[json!("a"), json!(123)], &ctx).is_err());
+        }
+
+        #[test]
+        fn code_link_is_dispatched_by_name_and_alias() {
+            let ctx = ResolutionContext::at(std::env::temp_dir());
+            let args = [json!("https://example.com"), json!("md hash")];
+            for name in ["code_link", "codelink"] {
+                assert_eq!(
+                    dispatch_fs(name, &args, &ctx).unwrap().unwrap(),
+                    json!("[`md hash`](https://example.com)"),
+                    "{name}"
+                );
+            }
         }
 
         #[test]
         fn has_skill_finds_user_and_local_roots() {
             let home = tempfile::TempDir::new().unwrap();
             let local = tempfile::TempDir::new().unwrap();
-            let ctx = ResolutionContext::new(local.path().to_path_buf())
+            let ctx = ResolutionContext::at(local.path().to_path_buf())
                 .with_home_dir(home.path().to_path_buf())
                 .with_ctx_value("agent", json!("claude"));
 
@@ -5134,9 +5289,9 @@ mod tests {
             let snapshot = biscuit_file::FileResolutionContext::new(request_repo.path())
                 .with_repository_root(request_repo.path())
                 .without_home_dir();
-            let mut ctx = ResolutionContext::new(nested_repo.path().to_path_buf())
+            let mut ctx = ResolutionContext::at(nested_repo.path().to_path_buf())
                 .with_ctx_value("agent", json!("claude"));
-            ctx.file_resolution_context = Some(snapshot);
+            ctx.file_resolution_context = snapshot;
 
             assert_eq!(ctx.home_dir(), None);
             assert_eq!(
@@ -5156,7 +5311,7 @@ mod tests {
             std::fs::create_dir_all(local.path().join(".opencode/skill/cross-skill")).unwrap();
             std::fs::create_dir_all(local.path().join(".claude/skills/cross-skill")).unwrap();
 
-            let claude_ctx = ResolutionContext::new(local.path().to_path_buf())
+            let claude_ctx = ResolutionContext::at(local.path().to_path_buf())
                 .with_home_dir(home.path().to_path_buf())
                 .with_ctx_value("agent", json!("claude"));
             assert_eq!(
@@ -5168,7 +5323,7 @@ mod tests {
                 json!(true)
             );
 
-            let opencode_ctx = ResolutionContext::new(local.path().to_path_buf())
+            let opencode_ctx = ResolutionContext::at(local.path().to_path_buf())
                 .with_home_dir(home.path().to_path_buf())
                 .with_ctx_value("agent", json!("opencode"));
             assert_eq!(
@@ -5185,7 +5340,7 @@ mod tests {
         fn has_local_skill_excludes_user_roots() {
             let home = tempfile::TempDir::new().unwrap();
             let local = tempfile::TempDir::new().unwrap();
-            let ctx = ResolutionContext::new(local.path().to_path_buf())
+            let ctx = ResolutionContext::at(local.path().to_path_buf())
                 .with_home_dir(home.path().to_path_buf())
                 .with_ctx_value("agent", json!("claude"));
 
@@ -5205,7 +5360,7 @@ mod tests {
         #[test]
         fn has_skill_uses_env_agent_when_ctx_not_set() {
             let local = tempfile::TempDir::new().unwrap();
-            let ctx = ResolutionContext::new(local.path().to_path_buf())
+            let ctx = ResolutionContext::at(local.path().to_path_buf())
                 .with_home_dir(local.path().to_path_buf());
 
             // Unknown agent: only .agents/skills and .codex/skills are searched.
@@ -5219,7 +5374,7 @@ mod tests {
 
         #[test]
         fn has_skill_rejects_path_separators_and_dotdot() {
-            let ctx = ResolutionContext::new(std::env::temp_dir());
+            let ctx = ResolutionContext::at(std::env::temp_dir());
             assert!(has_skill_fn(&[json!("foo/bar")], &ctx).is_err());
             assert!(has_skill_fn(&[json!("..")], &ctx).is_err());
             assert!(has_skill_fn(&[json!(".")], &ctx).is_err());
@@ -5227,7 +5382,7 @@ mod tests {
 
         #[test]
         fn has_skill_empty_name_returns_false() {
-            let ctx = ResolutionContext::new(std::env::temp_dir());
+            let ctx = ResolutionContext::at(std::env::temp_dir());
             assert_eq!(has_skill_fn(&[json!("")], &ctx).unwrap(), json!(false));
             assert_eq!(
                 has_local_skill_fn(&[json!("")], &ctx).unwrap(),
@@ -5238,7 +5393,7 @@ mod tests {
         #[test]
         fn has_skill_nested_directory_does_not_count() {
             let local = tempfile::TempDir::new().unwrap();
-            let ctx = ResolutionContext::new(local.path().to_path_buf())
+            let ctx = ResolutionContext::at(local.path().to_path_buf())
                 .with_home_dir(local.path().to_path_buf())
                 .with_ctx_value("agent", json!("claude"));
 
@@ -5257,7 +5412,7 @@ mod tests {
         #[test]
         fn has_skill_missing_root_returns_false() {
             let local = tempfile::TempDir::new().unwrap();
-            let ctx = ResolutionContext::new(local.path().to_path_buf())
+            let ctx = ResolutionContext::at(local.path().to_path_buf())
                 .with_home_dir(local.path().to_path_buf())
                 .with_ctx_value("agent", json!("claude"));
 
@@ -5269,7 +5424,7 @@ mod tests {
 
         #[test]
         fn has_skill_null_propagates_and_arity_errors() {
-            let ctx = ResolutionContext::new(std::env::temp_dir());
+            let ctx = ResolutionContext::at(std::env::temp_dir());
             assert_eq!(
                 has_skill_fn(&[json!(null)], &ctx).unwrap(),
                 json!(null)
@@ -5284,7 +5439,7 @@ mod tests {
 
         #[test]
         fn phase5_functions_dispatch_by_name() {
-            let ctx = ResolutionContext::new(std::env::temp_dir());
+            let ctx = ResolutionContext::at(std::env::temp_dir());
             assert_eq!(
                 dispatch_fs("link", &[json!("https://example.com"), json!("x")], &ctx)
                     .unwrap()
@@ -5330,7 +5485,7 @@ mod fn_remote_tests {
         tokio::time::sleep(Duration::from_millis(200)).await;
         ResolutionContext {
             remote_fetch: Some(rt),
-            ..ResolutionContext::new(std::path::PathBuf::from("."))
+            ..ResolutionContext::at(std::path::PathBuf::from("."))
         }
     }
 
@@ -5377,7 +5532,7 @@ mod fn_remote_tests {
         // Frontmatter's resolution context carries no remote runtime, so a
         // remote URL argument is unreadable and must error rather than
         // silently reporting the URL as absent (Decision B).
-        let ctx = ResolutionContext::new(std::path::PathBuf::from("."));
+        let ctx = ResolutionContext::at(std::path::PathBuf::from("."));
         let err = file_exists_fn(&[json!("https://example.com/doc.md")], &ctx)
             .expect_err("local-only remote URL must fail loudly");
         assert!(err.contains("local-only"), "unexpected message: {err}");
@@ -5386,7 +5541,7 @@ mod fn_remote_tests {
     #[test]
     fn load_markdown_remote_url_fails_loudly_in_local_only_context() {
         // The document-reading functions share the same local-only contract.
-        let ctx = ResolutionContext::new(std::path::PathBuf::from("."));
+        let ctx = ResolutionContext::at(std::path::PathBuf::from("."));
         let err = markdown_title_fn(&[json!("https://example.com/doc.md")], &ctx)
             .expect_err("local-only remote URL must fail loudly");
         assert!(
@@ -5656,7 +5811,7 @@ mod arity_gating_tests {
         // The default context's empty `cwd` is relative, which resolution
         // validation rejects.
         let dir = tempfile::TempDir::new().unwrap();
-        let ctx = ResolutionContext::new(dir.path().to_path_buf());
+        let ctx = ResolutionContext::at(dir.path().to_path_buf());
         assert_eq!(
             dispatch_fs("basename", &[json!("foo/bar.md")], &ctx)
                 .unwrap()

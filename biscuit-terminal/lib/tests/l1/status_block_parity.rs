@@ -695,19 +695,30 @@ fn hint_only_remains_outside_block_quote() {
 #[test]
 fn multiple_body_items_keep_blank_line_separation_in_block_quote() {
     let block = StatusBlock::new(StatusState::Info)
-        .body(vec![Prose::new("first item"), Prose::new("second item")]);
+        .body(vec![Prose::new("first item"), Prose::new("<b>second</b> item")]);
     let bq = body_block_quote_children(&block);
-    assert_eq!(bq.len(), 2, "expected leading blank + single body paragraph");
-    let body_text = match &bq[1].kind {
-        NodeKind::Paragraph { children } => match &children.first().unwrap().kind {
-            NodeKind::Text { value } => value.clone(),
-            other => panic!("expected Text node, got {other:?}"),
-        },
-        other => panic!("expected Paragraph, got {other:?}"),
+    assert_eq!(bq.len(), 3, "expected leading blank + one paragraph per body item");
+    let NodeKind::Paragraph { children } = &bq[1].kind else {
+        panic!("expected Paragraph, got {:?}", bq[1].kind);
     };
     assert!(
-        body_text.contains("first item\n\nsecond item"),
-        "body items must be separated by blank line: {body_text:?}"
+        matches!(&children[..], [RenderNode { kind: NodeKind::Text { value }, .. }] if value == "first item"),
+        "first body item is its own paragraph: {children:?}"
+    );
+    let NodeKind::Paragraph { children } = &bq[2].kind else {
+        panic!("expected Paragraph, got {:?}", bq[2].kind);
+    };
+    assert!(
+        matches!(children[0].kind, NodeKind::Strong { .. }),
+        "body item styling survives as structure: {children:?}"
+    );
+
+    let md = block.render_markdown();
+    assert!(md.contains("> first item\n>\n> **second** item"), "{md:?}");
+    let html = block.render_html_fragment().render();
+    assert!(
+        html.contains("<p>first item</p><p><strong>second</strong> item</p>"),
+        "{html}"
     );
 }
 

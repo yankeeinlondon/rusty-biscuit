@@ -49,7 +49,7 @@ fn bench_system_prompt_resolution_cold_and_warm() {
     }
     let ctx = launch_context_for_root(&root);
     let args = SystemPromptArgs::default();
-    let invocation = claudine::invocation_context::InvocationContext::capture_at(&root);
+    let invocation = claudine::invocation_context::InvocationContext::capture_at(&darkmatter::markdown::compose::RequestSnapshot::from_process().unwrap(), &root).unwrap();
 
     // First call: cold — pays for any one-time lazy initialisations
     // (Darkmatter parsers, syntect grammar tables, regex compiles, …).
@@ -99,11 +99,11 @@ fn bench_resolve_and_prepare_step_by_step() {
     let root = worktree_root();
     let ctx = launch_context_for_root(&root);
     let args = SystemPromptArgs::default();
-    let invocation = claudine::invocation_context::InvocationContext::capture_at(&root);
+    let invocation = claudine::invocation_context::InvocationContext::capture_at(&darkmatter::markdown::compose::RequestSnapshot::from_process().unwrap(), &root).unwrap();
 
     for run in 1..=3 {
         let t0 = Instant::now();
-        let resolved = resolve::resolve_system_prompt_source(&args, &ctx).unwrap();
+        let resolved = resolve::resolve_system_prompt_source(&args, &ctx, &invocation).unwrap();
         let t_resolve = t0.elapsed();
         let (source, raw_text) = resolved.expect("system-prompt.md should be discovered");
         eprintln!(
@@ -126,14 +126,20 @@ fn bench_resolve_and_prepare_step_by_step() {
         } {
             opts = opts.with_source_file(p);
         }
-        let (composed, _report) = md.compose_with(opts).unwrap();
+        let (composed, _report) = md.compose_with(
+            &darkmatter::markdown::compose::ComposeRequest::with_context(
+                opts,
+                invocation.launch_file_resolution_context().clone(),
+            )
+            .unwrap(),
+        ).unwrap();
         let _ = composed.content();
         let t_compose_sp = t1.elapsed();
         eprintln!("run #{run} compose system-prompt.md: {:?}", t_compose_sp);
 
         // Non-interactive candidates resolution (file probing).
         let t2 = Instant::now();
-        let candidates = resolve::resolve_non_interactive_candidates(&ctx).unwrap();
+        let candidates = resolve::resolve_non_interactive_candidates(&ctx, &invocation).unwrap();
         let t_candidates = t2.elapsed();
         eprintln!(
             "run #{run} resolve_non_interactive_candidates: {:?} ({} candidates)",
@@ -152,7 +158,13 @@ fn bench_resolve_and_prepare_step_by_step() {
         {
             opts = opts.with_source_file(path);
         }
-        let (composed, _report) = md.compose_with(opts).unwrap();
+        let (composed, _report) = md.compose_with(
+            &darkmatter::markdown::compose::ComposeRequest::with_context(
+                opts,
+                invocation.launch_file_resolution_context().clone(),
+            )
+            .unwrap(),
+        ).unwrap();
         let _ = composed.content();
         let t_compose_ni = t3.elapsed();
         eprintln!("run #{run} compose non-interactive.md: {:?}", t_compose_ni);
@@ -198,7 +210,7 @@ fn bench_request_topology_probe_and_reuse() {
     std::fs::write(&launch_prompt, "launch {{ ctx.repo.root }}").unwrap();
     std::fs::write(&sibling_prompt, "sibling {{ ctx.repo.root }}").unwrap();
 
-    let invocation = claudine::invocation_context::InvocationContext::capture_at(&launch);
+    let invocation = claudine::invocation_context::InvocationContext::capture_at(&darkmatter::markdown::compose::RequestSnapshot::from_process().unwrap(), &launch).unwrap();
     let ctx = launch_context_for_root(&launch);
     let prepare = |path: &std::path::Path| {
         let args = SystemPromptArgs {
@@ -256,13 +268,24 @@ fn bench_raw_darkmatter_compose_passes() {
 
     eprintln!("system-prompt.md: {} bytes", sp_text.len());
     eprintln!("non-interactive.md: {} bytes", ni_text.len());
+    let invocation = claudine::invocation_context::InvocationContext::capture_at(
+        &darkmatter::markdown::compose::RequestSnapshot::from_process().unwrap(),
+        &root,
+    )
+    .unwrap();
 
     // 1) System prompt compose pass.
     for run in 1..=3 {
         let md: Markdown = sp_text.as_str().into();
         let opts = ComposeOptions::new().with_source_file(&sp_path);
         let t = Instant::now();
-        let (_composed, _report) = md.compose_with(opts).unwrap();
+        let (_composed, _report) = md.compose_with(
+            &darkmatter::markdown::compose::ComposeRequest::with_context(
+                opts,
+                invocation.launch_file_resolution_context().clone(),
+            )
+            .unwrap(),
+        ).unwrap();
         eprintln!("system-prompt.md compose run #{run}: {:?}", t.elapsed());
     }
 
@@ -271,7 +294,13 @@ fn bench_raw_darkmatter_compose_passes() {
         let md: Markdown = ni_text.as_str().into();
         let opts = ComposeOptions::new().with_source_file(&ni_path);
         let t = Instant::now();
-        let (_composed, _report) = md.compose_with(opts).unwrap();
+        let (_composed, _report) = md.compose_with(
+            &darkmatter::markdown::compose::ComposeRequest::with_context(
+                opts,
+                invocation.launch_file_resolution_context().clone(),
+            )
+            .unwrap(),
+        ).unwrap();
         eprintln!("non-interactive.md compose run #{run}: {:?}", t.elapsed());
     }
 
@@ -288,7 +317,13 @@ fn bench_raw_darkmatter_compose_passes() {
         let md: Markdown = sp_text.as_str().into();
         let opts = ComposeOptions::new();
         let t = Instant::now();
-        let (_composed, _report) = md.compose_with(opts).unwrap();
+        let (_composed, _report) = md.compose_with(
+            &darkmatter::markdown::compose::ComposeRequest::with_context(
+                opts,
+                invocation.launch_file_resolution_context().clone(),
+            )
+            .unwrap(),
+        ).unwrap();
         eprintln!(
             "system-prompt.md compose-without-source run #{run}: {:?}",
             t.elapsed()

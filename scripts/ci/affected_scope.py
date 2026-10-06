@@ -25,6 +25,7 @@ import os
 import re
 import subprocess
 import sys
+from dataclasses import replace
 from datetime import date
 from pathlib import Path, PurePosixPath
 from collections.abc import Callable, Sequence
@@ -4424,6 +4425,11 @@ def test_input_references(
     general rule would attach their tests to most source edits. The
     declaration names the cross-package couplings that are worth a narrowed
     cell — a contract suite that executes another package's script.
+
+    A Markdown document that transcludes a changed path (`::file`, directly or
+    through other documents) is searched too, and a test reading it is
+    reported against the changed path. Only test references carry over: a
+    shipped embed holds the document's text, not the files it transcludes.
     """
     source_inputs = source_inputs or {}
     candidates = [
@@ -4433,13 +4439,49 @@ def test_input_references(
     ]
     if not candidates:
         return []
+    reached = test_inputs.transcluding_documents(
+        candidates, markdown_documents(root, candidates), reader
+    )
     targets = test_inputs.targets_from_metadata(packages.values(), root.resolve().as_posix())
+    references: list[test_inputs.Reference] = []
+    for reference in test_inputs.scan(
+        targets, reader, [*candidates, *sorted(reached)], include_slow
+    ):
+        named = reference.path
+        if any(path == named or path.startswith(named + "/") for path in candidates):
+            references.append(reference)
+        if reference.product:
+            continue
+        transcluded = {
+            path
+            for document, paths in reached.items()
+            if document == named or document.startswith(named + "/")
+            for path in paths
+        }
+        references.extend(replace(reference, path=path) for path in sorted(transcluded))
     return [
         reference
-        for reference in test_inputs.scan(targets, reader, candidates, include_slow)
+        for reference in dict.fromkeys(references)
         if not is_package_source_path(PurePosixPath(reference.path))
         or reference.package in source_inputs.get(reference.path, ())
     ]
+
+
+def markdown_documents(root: Path, paths: Sequence[str]) -> list[str]:
+    """The Markdown files that could transclude one of `paths`.
+
+    The search covers each path's top-level directory, where its transcluders
+    live (`prompts/_os.md` is pulled in from `prompts/`); a path at the
+    repository root has none. Build output and dependency trees are skipped.
+    """
+    skipped = {".git", "target", "node_modules"}
+    documents: list[str] = []
+    for top in sorted({path.split("/", 1)[0] for path in paths if "/" in path}):
+        for directory, children, files in os.walk(root / top):
+            children[:] = sorted(child for child in children if child not in skipped)
+            relative = Path(directory).relative_to(root).as_posix()
+            documents.extend(f"{relative}/{name}" for name in sorted(files) if name.endswith(".md"))
+    return documents
 
 
 def select_test_inputs(

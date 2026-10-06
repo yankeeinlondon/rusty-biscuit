@@ -214,7 +214,7 @@ pub fn inline_scenarios() -> Vec<InlineScenario> {
 
 use biscuit_terminal::components::inline_content::InlineContent;
 use biscuit_terminal::components::pad::{PadLeft, PadRight};
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::{InlineProse, Prose};
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::status::{Status, StatusState};
 use biscuit_terminal::terminal::Terminal;
@@ -242,8 +242,9 @@ pub struct InlineComponentCase {
 /// Each component is built so that style scenarios produce the relevant style
 /// through the component's own content:
 ///
-/// - `InlineContent` / `PadLeft` / `PadRight`: wrap a `Prose` span so color,
-///   emphasis, and inline background lower to SGR.
+/// - `InlineContent`: wraps an `InlineProse` span, and `PadLeft` /
+///   `PadRight` wrap a `Prose`, so color, emphasis, and inline background
+///   lower to SGR.
 /// - `Status`: color comes from `StatusState`; emphasis comes from the
 ///   `from_prose` constructor.
 pub fn inline_component_cases() -> Vec<InlineComponentCase> {
@@ -261,12 +262,14 @@ pub fn inline_component_cases() -> Vec<InlineComponentCase> {
                         *c.layout_mut() = s.layout.clone();
                         c
                     }
-                    "color_red" => InlineContent::from("plain ").with(Prose::new("<red>red</red>")),
+                    "color_red" => {
+                        InlineContent::from("plain ").with(InlineProse::new("<red>red</red>"))
+                    }
                     "emphasis_bold" => {
-                        InlineContent::from("plain ").with(Prose::new("<b>bold</b>"))
+                        InlineContent::from("plain ").with(InlineProse::new("<b>bold</b>"))
                     }
                     "background_inline" => InlineContent::from("plain ")
-                        .with(Prose::new("<bg-coral>bg</bg-coral>")),
+                        .with(InlineProse::new("<bg-coral>bg</bg-coral>")),
                     other => panic!("unknown inline scenario: {other}"),
                 };
                 render_inline(&component, s.width)

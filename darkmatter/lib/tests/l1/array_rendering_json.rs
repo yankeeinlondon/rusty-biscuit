@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 fn compose(source: &str) -> darkmatter::markdown::Markdown {
     let markdown: Markdown = source.to_string().into();
     let (composed, _report) = markdown
-        .compose_with(ComposeOptions::new())
+        .compose_with(&crate::request_support::request(ComposeOptions::new()))
         .expect("compose pipeline should succeed");
     composed
 }

@@ -720,18 +720,17 @@ pub fn render_lines(lines: &[ReportLine], plain: bool) -> String {
                 ReportLevel::Info => "INFO",
             };
             let text = format!("{prefix}: {}", line.text);
-            let markup = if plain {
-                Prose::escape_text(&text)
-            } else {
-                let tag = match line.level {
-                    ReportLevel::Success => "green",
-                    ReportLevel::Warning => "yellow",
-                    ReportLevel::Failure => "red",
-                    ReportLevel::Info => "dim",
-                };
-                format!("<{tag}>{}</{tag}>", Prose::escape_text(&text))
+            // Plain output is the text as written, whatever the terminal can style.
+            if plain {
+                return text;
+            }
+            let tag = match line.level {
+                ReportLevel::Success => "green",
+                ReportLevel::Warning => "yellow",
+                ReportLevel::Failure => "red",
+                ReportLevel::Info => "dim",
             };
-            Prose::new(markup).render(&terminal)
+            Prose::new(format!("<{tag}>{}</{tag}>", Prose::escape_text_outside_code_spans(&text))).render(&terminal)
         })
         .collect::<Vec<_>>()
         .join("\n")

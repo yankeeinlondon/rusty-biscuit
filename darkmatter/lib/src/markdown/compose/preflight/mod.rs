@@ -6,7 +6,9 @@
 //! - [`collect`] performs a condition-**blind** walk of the document graph
 //!   (frontmatter `$(...)`, body `::shell`/`::shell-block`, and transcluded
 //!   children) and returns every command that *could* execute under *any*
-//!   document state.
+//!   document state. It also resolves `::code` and `::toc-linking` targets
+//!   passively (see [`PreflightTargetEdge`]) so a broken reference fails here
+//!   as it does for `::file`.
 //! - [`approval`] turns that collection into the deduped *approval set* the
 //!   orchestrator boundary hands back as the execution membership source.
 //!
@@ -30,7 +32,7 @@ pub use lifecycle::{ComposePreflightApprovals, PreflightApprovalStats};
 use crate::markdown::Markdown;
 use crate::markdown::compose::transclusion;
 use crate::markdown::compose::icmp::PlannedIcmpProbe;
-use crate::markdown::compose::{ComposeOptions, ComposeWarning, DeferredCapabilities};
+use crate::markdown::compose::{ComposeWarning, DeferredCapabilities};
 use crate::markdown::compose::shell_expansion::types::{ShellCommandEntry, ShellExpansionError};
 use crate::markdown::types::MarkdownResult;
 use std::path::{Path, PathBuf};
@@ -75,6 +77,33 @@ pub enum PreflightResolvedTarget {
     Url(url::Url),
 }
 
+/// The directive family of a [`PreflightTargetEdge`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreflightTargetKind {
+    /// `::code`
+    Code,
+    /// `::toc-linking`
+    TocLinking,
+}
+
+/// A directive target pre-flight resolved without walking it.
+///
+/// `::code` and `::toc-linking` insert text that is never composed as
+/// Markdown, so their targets hold no shell commands to approve. Pre-flight
+/// still resolves each one so a broken reference fails here exactly as a
+/// `::file` target does; it does not read or fetch the target. These are not
+/// [`PreflightGraphEdge`]s and never feed the transclusion resolution cache.
+#[derive(Debug, Clone)]
+pub struct PreflightTargetEdge {
+    pub kind: PreflightTargetKind,
+    /// 1-based line of the directive in its file.
+    pub line: usize,
+    /// The target as authored; for a `::toc-linking` chain, the alternative
+    /// the chain selected.
+    pub raw_target: String,
+    pub resolved_target: PreflightResolvedTarget,
+}
+
 /// Reusable graph metadata for one document visited during pre-flight
 /// collection.
 ///
@@ -115,6 +144,9 @@ pub struct PreflightGraphNode {
     /// bumps, not a subtree deep-clone — Finding 16), followed by frontmatter
     /// prologue/epilogue children, which have no directive edge.
     pub children: Vec<Arc<PreflightGraphNode>>,
+    /// `::code` and `::toc-linking` targets of this document, in directive
+    /// order. A suppressed `::toc-linking` chain (`| false`) has none.
+    pub targets: Vec<PreflightTargetEdge>,
 }
 
 /// Best-effort canonical form of a path for source-equality comparison.
@@ -122,13 +154,13 @@ pub struct PreflightGraphNode {
 /// Falls back to the path as-given when it does not exist on disk (e.g. a
 /// remote source recorded as its URL string), so comparison still works.
 fn canonical_key(path: &Path) -> PathBuf {
-    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+    biscuit_file::canonicalize_simplified(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 impl PreflightGraphNode {
-    /// Returns `true` when this node has no entries and no edges.
+    /// Returns `true` when this node has no entries, edges, or targets.
     pub fn is_empty(&self) -> bool {
-        self.entries.is_empty() && self.edges.is_empty()
+        self.entries.is_empty() && self.edges.is_empty() && self.targets.is_empty()
     }
 
     /// Returns the child node this document transcluded from `path`, if any.
@@ -262,7 +294,7 @@ impl ComposePreflightReport {
 /// projection exists to leave unread.
 pub(crate) fn validate_pre_approved(
     markdown: &Markdown,
-    options: &ComposeOptions,
+    options: &crate::markdown::compose::ComposeRequest,
 ) -> MarkdownResult<()> {
     let Some(ref approved) = options.pre_approved_commands else {
         return Ok(());
@@ -270,9 +302,9 @@ pub(crate) fn validate_pre_approved(
 
     let ctx = markdown.source_context_for_errors();
     let entries = if options.is_frontmatter_surface_only() {
-        collect::collect_frontmatter_shell_commands(markdown, options)?
+        collect::frontmatter_shell_commands(markdown, options)?
     } else {
-        collect::collect_shell_commands(markdown, options)?
+        collect::collect_effects(markdown, options)?.0
     };
     for entry in &entries {
         if !approved.contains(&entry.normalized) {
@@ -300,10 +332,12 @@ impl Markdown {
     ///
     /// ```
     /// use darkmatter::markdown::Markdown;
-    /// use darkmatter::markdown::compose::ComposeOptions;
+    /// use darkmatter::markdown::compose::{ComposeOptions, ComposeRequest, RequestSnapshot};
     ///
     /// let md: Markdown = "::shell echo hello\n".into();
-    /// let report = md.compose_preflight(&ComposeOptions::new()).unwrap();
+    /// let request =
+    ///     ComposeRequest::prepare(ComposeOptions::new(), &RequestSnapshot::new(std::env::temp_dir())).unwrap();
+    /// let report = md.compose_preflight(&request).unwrap();
     /// assert_eq!(report.approval_set(), vec!["echo hello".to_string()]);
     /// ```
     ///
@@ -313,10 +347,10 @@ impl Markdown {
     /// `::shell` parse errors, and `DynamicCommandShape`).
     pub fn compose_preflight(
         &self,
-        options: &ComposeOptions,
+        request: &crate::markdown::compose::ComposeRequest,
     ) -> MarkdownResult<ComposePreflightReport> {
         let (entries, icmp_probes, deferred_context, preflight_graph) =
-            collect::collect_effects(self, options)?;
+            collect::collect_effects(self, request)?;
         Ok(ComposePreflightReport {
             entries,
             warnings: Vec::new(),
@@ -344,7 +378,7 @@ mod acceptance_tests {
     use tempfile::TempDir;
 
     fn approval_set(md: &Markdown) -> HashSet<String> {
-        md.compose_preflight(&ComposeOptions::new())
+        md.compose_preflight(&crate::markdown::compose::test_request(ComposeOptions::new()))
             .unwrap()
             .approval_set()
             .into_iter()
@@ -391,7 +425,7 @@ cleanup: false
 
         let temp = TempDir::new().unwrap();
         let (composed, _report) = md
-            .compose_with(execute_options(approval, temp.path()))
+            .compose_with(&crate::markdown::compose::test_request(execute_options(approval, temp.path())))
             .unwrap();
 
         assert!(composed.content().contains("ALWAYS"));
@@ -429,7 +463,7 @@ flag: a
             let options =
                 execute_options(approval.clone(), temp.path()).with_set_overrides(json!({ "flag": flag }));
             let (composed, _) = md
-                .compose_with(options)
+                .compose_with(&crate::markdown::compose::test_request(options))
                 .unwrap_or_else(|e| panic!("flag={flag} should not miss approval: {e}"));
             if flag == "a" {
                 assert!(composed.content().contains("branch-a"));
@@ -464,7 +498,7 @@ flag: a
         for flag in ["a", "b", "a"] {
             let options =
                 execute_options(approval.clone(), temp.path()).with_set_overrides(json!({ "flag": flag }));
-            let (_, report) = md.compose_with(options).unwrap();
+            let (_, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
             // The pre-approved membership fast-path never prompts.
             assert_eq!(
                 report.shell_approvals_used, 0,
@@ -501,7 +535,7 @@ flag: a
             .with_shell_policy_root(temp.path())
             .with_pre_approved_commands(approved);
 
-        let result = md.compose_with(options);
+        let result = md.compose_with(&crate::markdown::compose::test_request(options));
         assert!(
             result.is_err(),
             "compose should fail because the body command is unapproved"
@@ -545,7 +579,7 @@ flag: a
             .with_shell_policy_root(temp.path())
             .with_pre_approved_commands(approved);
 
-        let (composed, report) = md.compose_with(options).unwrap();
+        let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         assert!(sentinel.exists(), "frontmatter command should have executed");
         assert!(composed.content().contains("body-cmd"));
         assert_eq!(report.shell_approvals_used, 0);
@@ -584,7 +618,7 @@ flag: a
             .with_shell_policy_root(temp.path())
             .with_pre_approved_commands(approved);
 
-        let result = md.compose_with(options);
+        let result = md.compose_with(&crate::markdown::compose::test_request(options));
         assert!(
             result.is_err(),
             "compose should fail because the second shell block's command is unapproved"
@@ -634,7 +668,7 @@ flag: a
             .with_source_file(&root_path)
             .with_pre_approved_commands(approved);
 
-        let result = md.compose_with(options);
+        let result = md.compose_with(&crate::markdown::compose::test_request(options));
         assert!(
             result.is_err(),
             "compose should fail because the child shell block's command is unapproved"
@@ -702,7 +736,7 @@ flag: a
             let options = execute_options(approval.clone(), temp.path())
                 .with_set_overrides(serde_json::Value::Object(overrides.clone()));
             let (composed, _) = md
-                .compose_with(options)
+                .compose_with(&crate::markdown::compose::test_request(options))
                 .unwrap_or_else(|e| panic!("compose failed for {overrides:?}: {e}"));
 
             // For every branch whose `flag_i == 1`, the branch's command must
@@ -759,7 +793,7 @@ flag: a
         // pre-approved channel is unused.
         let preflight = md
             .compose_preflight(
-                &ComposeOptions::new().with_source_file(&root_path),
+                &crate::markdown::compose::test_request(ComposeOptions::new().with_source_file(&root_path)),
             )
             .unwrap();
         assert_eq!(
@@ -785,7 +819,7 @@ flag: a
         let baseline_options = ComposeOptions::new()
             .only(&[ComposeOperation::BlockTransclusion])
             .with_source_file(&root_path);
-        let (baseline, _) = md.compose_with(baseline_options.clone()).unwrap();
+        let (baseline, _) = md.compose_with(&crate::markdown::compose::test_request(baseline_options.clone())).unwrap();
         let baseline_text = baseline.content().to_string();
         assert!(
             baseline_text.contains("Child body content"),
@@ -795,7 +829,7 @@ flag: a
         // Compose WITH the preflight graph — must produce equivalent output.
         let with_graph_options = baseline_options
             .with_preflight_graph(preflight.preflight_graph.clone());
-        let (with_graph, _) = md.compose_with(with_graph_options).unwrap();
+        let (with_graph, _) = md.compose_with(&crate::markdown::compose::test_request(with_graph_options)).unwrap();
         let with_graph_text = with_graph.content().to_string();
         assert!(
             with_graph_text.contains("Child body content"),
@@ -837,7 +871,7 @@ flag: a
         // graph contains the edge. The condition-aware check happens later.
         let preflight = md
             .compose_preflight(
-                &ComposeOptions::new().with_source_file(&root_path),
+                &crate::markdown::compose::test_request(ComposeOptions::new().with_source_file(&root_path)),
             )
             .unwrap();
         assert_eq!(preflight.preflight_graph.edges.len(), 1);
@@ -848,7 +882,7 @@ flag: a
             .only(&[ComposeOperation::BlockTransclusion])
             .with_source_file(&root_path)
             .with_set_overrides(json!({ "include_child": false }));
-        let (baseline, _) = md.compose_with(baseline_options.clone()).unwrap();
+        let (baseline, _) = md.compose_with(&crate::markdown::compose::test_request(baseline_options.clone())).unwrap();
         assert!(
             !baseline.content().contains("Child body content"),
             "baseline compose unexpectedly transcluded the gated child: {}",
@@ -858,7 +892,7 @@ flag: a
         // Compose WITH the preflight graph, same override — same result.
         let with_graph_options = baseline_options
             .with_preflight_graph(preflight.preflight_graph.clone());
-        let (with_graph, _) = md.compose_with(with_graph_options).unwrap();
+        let (with_graph, _) = md.compose_with(&crate::markdown::compose::test_request(with_graph_options)).unwrap();
         assert!(
             !with_graph.content().contains("Child body content"),
             "preflight-graph compose unexpectedly transcluded the gated child: {}",
@@ -902,7 +936,7 @@ flag: a
         // The preflight graph captures the `::file` edge with its pre-pruning
         // span (page blocks are not evaluated during the condition-blind walk).
         let preflight = md
-            .compose_preflight(&ComposeOptions::new().with_source_file(&root_path))
+            .compose_preflight(&crate::markdown::compose::test_request(ComposeOptions::new().with_source_file(&root_path)))
             .unwrap();
         assert_eq!(preflight.preflight_graph.edges.len(), 1);
 
@@ -912,7 +946,7 @@ flag: a
                 ComposeOperation::BlockTransclusion,
             ])
             .with_source_file(&root_path);
-        let (baseline, _) = md.compose_with(baseline_options.clone()).unwrap();
+        let (baseline, _) = md.compose_with(&crate::markdown::compose::test_request(baseline_options.clone())).unwrap();
         assert!(
             baseline.content().contains("CHILD-CONTENT-MARKER"),
             "baseline did not transclude child: {}",
@@ -922,7 +956,7 @@ flag: a
 
         let with_graph_options =
             baseline_options.with_preflight_graph(preflight.preflight_graph.clone());
-        let (with_graph, _) = md.compose_with(with_graph_options).unwrap();
+        let (with_graph, _) = md.compose_with(&crate::markdown::compose::test_request(with_graph_options)).unwrap();
 
         assert_eq!(
             with_graph.content(),
@@ -961,7 +995,7 @@ flag: a
         let md: Markdown = root_content.into();
 
         let preflight = md
-            .compose_preflight(&ComposeOptions::new().with_source_file(&root_path))
+            .compose_preflight(&crate::markdown::compose::test_request(ComposeOptions::new().with_source_file(&root_path)))
             .unwrap();
 
         // The walked graph is recursive: the root's single edge points at the
@@ -991,7 +1025,7 @@ flag: a
         let baseline_options = ComposeOptions::new()
             .only(&[ComposeOperation::BlockTransclusion])
             .with_source_file(&root_path);
-        let (baseline, _) = md.compose_with(baseline_options.clone()).unwrap();
+        let (baseline, _) = md.compose_with(&crate::markdown::compose::test_request(baseline_options.clone())).unwrap();
         assert!(
             baseline.content().contains("GRANDCHILD-CONTENT-MARKER"),
             "baseline did not transclude grandchild: {}",
@@ -1000,7 +1034,7 @@ flag: a
 
         let with_graph_options =
             baseline_options.with_preflight_graph(preflight.preflight_graph.clone());
-        let (with_graph, _) = md.compose_with(with_graph_options).unwrap();
+        let (with_graph, _) = md.compose_with(&crate::markdown::compose::test_request(with_graph_options)).unwrap();
         assert!(
             with_graph.content().contains("GRANDCHILD-CONTENT-MARKER"),
             "graph-seeded compose did not transclude grandchild: {}",
@@ -1035,7 +1069,7 @@ flag: a
         let md: Markdown = root_content.into();
 
         let preflight = md
-            .compose_preflight(&ComposeOptions::new().with_source_file(&root_path))
+            .compose_preflight(&crate::markdown::compose::test_request(ComposeOptions::new().with_source_file(&root_path)))
             .unwrap();
         let graph = &preflight.preflight_graph;
 

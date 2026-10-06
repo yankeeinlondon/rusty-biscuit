@@ -9,6 +9,7 @@
 mod agent_errors_fleet;
 mod boundary_lint;
 mod canonical_dispatch;
+mod context_construction_guard;
 mod deprecated_compatibility;
 mod diagnostic_detail_conformance;
 mod kimi_wire;
@@ -17,6 +18,7 @@ mod messaging_delivery;
 mod messaging_spawn_guard;
 mod model_catalog_integration;
 mod opencode_stderr_lifecycle;
+mod path_lookup_guard;
 mod protocol_fixture_replay;
 mod semantic_fidelity;
 mod single_loop_engine;

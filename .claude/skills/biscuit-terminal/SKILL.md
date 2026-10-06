@@ -15,6 +15,17 @@ library, and renders `renderable::tree` nodes to terminal output.
 - Detect capabilities with `Terminal::new()` or `Terminal::new_optimistic`.
 - Prefer components from `biscuit_terminal::prelude` for rich terminal output.
 - Use `Prose` for styled rich text instead of hand-written escape codes.
+  `Prose` is **block** content (paragraphs split on blank lines, fenced code,
+  `Layout`, `ProseTag` per paragraph); `InlineProse` is the **inline**
+  counterpart (table cells, labels, values inside a line). Both share one
+  grammar: a single `\n` is a soft break unless `.with_line_breaks(LineBreaks::Hard)`,
+  `\` before a newline is a hard break, and code spans are `InlineCode`
+  (literal contents; never `Prose::escape_text` inside backticks).
+- Pick the shape the container takes: table cells, header labels, and
+  `InlineContent` take `InlineProse`; lists, `BlockQuote`, `TwoColumn`
+  columns, and `StatusBlock::body` embed `Prose` as its own blocks, with its
+  layout moved onto those blocks (see `components.md`, "Embedding `Prose` in
+  a container").
 - For multi-target components, project through `renderable::tree` and share a
   helper between `TreeRenderable::render_tree` and
   `TerminalRenderable::render_tree_node`.

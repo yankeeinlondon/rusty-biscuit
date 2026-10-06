@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use biscuit_file::FetchPolicy;
@@ -68,7 +69,21 @@ pub struct FocusedProviderClient {
     /// Instant by which every remaining request must finish; replaces
     /// [`REQUEST_TIMEOUT`] when set.
     deadline: Option<Instant>,
+    /// When set, every request sent appends the credential it was sent with.
+    sent: Option<SentLog>,
 }
+
+/// The credential selection one request was sent with: a variable *name*,
+/// never its value.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum SentWith {
+    Anonymous,
+    Key(String),
+}
+
+/// Shared by a client and the caller that installed it with
+/// [`FocusedProviderClient::with_sent_log`].
+pub(crate) type SentLog = Arc<Mutex<Vec<SentWith>>>;
 
 /// How [`FocusedProviderClient::fetch_json`] reports a 404.
 ///
@@ -222,6 +237,7 @@ impl FocusedProviderClient {
             credential_scope: CredentialScope::Provider,
             original_reference: None,
             deadline: None,
+            sent: None,
         })
     }
 
@@ -805,6 +821,17 @@ impl FocusedProviderClient {
         }
     }
 
+    /// A copy that records, in `log`, the credential selection of every
+    /// request it sends, in order. The selection is the one made for the
+    /// request itself, so it is evidence of what was sent rather than a
+    /// second lookup that the environment could have changed since.
+    pub(crate) fn with_sent_log(&self, log: SentLog) -> Self {
+        Self {
+            sent: Some(log),
+            ..self.clone()
+        }
+    }
+
     async fn get_json(
         &self,
         path: &str,
@@ -864,6 +891,16 @@ impl FocusedProviderClient {
             .build()
             .map_err(|error| transport(&endpoint, error))?;
         let (credential, variable) = self.credential();
+        if let Some(log) = &self.sent {
+            let sent = match &credential {
+                Some((name, _)) => SentWith::Key(name.clone()),
+                None => SentWith::Anonymous,
+            };
+            // A poisoned log only loses evidence, which then reads as unknown.
+            if let Ok(mut log) = log.lock() {
+                log.push(sent);
+            }
+        }
         let token = credential.map(|(_, token)| token);
         let mut request = client
             .get(endpoint.clone())
@@ -966,7 +1003,8 @@ impl FocusedProviderClient {
     }
 
     /// The token this client sends as `(variable name, value)`, and the
-    /// variable to name when none is set.
+    /// variable to name when none is set. A variable set to the empty string
+    /// counts as unset.
     ///
     /// Read from the environment on every call, as each request does.
     fn credential(&self) -> (Option<(String, String)>, String) {
@@ -986,12 +1024,6 @@ impl FocusedProviderClient {
                 (token.map(|token| (variable.clone(), token)), variable)
             }
         }
-    }
-
-    /// Name of the environment variable whose token this client would send
-    /// now, never its value; `None` when no candidate is set.
-    pub(crate) fn credential_key(&self) -> Option<String> {
-        self.credential().0.map(|(name, _)| name)
     }
 
     fn pr_exact_path(&self, id: &str) -> Result<String, SniffError> {

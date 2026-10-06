@@ -26,15 +26,16 @@ The **worktree** package area, like many in this monorepo, is composed of both a
     Lists the worktrees (along with the base repo checkout) which currently exist. See [`docs/cli/list.md`](./docs/cli/list.md) for the full output.
 
     - first, two questions for `origin`, asked side by side by a background process: the default branch's current commit (through the provider API, falling back to `git ls-remote`; when it differs from `origin/<default>`, that one tracking ref is fetched), and the open pull requests. An ordinary listing waits up to 3 s for both, with a spinner on terminals; anything still running carries on in the background and the listing says so. `-r` and `--ff` wait for both to finish, up to 75 s. The local default branch is never moved unless you ask with `--ff`
+    - meanwhile the local work runs: `git status` in every worktree Git can read, the branch comparisons, and the graph. Afterwards the branch tips are read again; if a fetch or `--ff` moved any of them, the comparisons and graph are worked out again from the new tips, so everything shown describes one state. Uncommitted-file status is not measured again, except in a checkout whose files `--ff` just moved
     - a one-sentence caption comparing the local default branch with `origin/<default>` (in sync, ahead, behind, or diverged), followed in dim italics by what this run learned (`updated from origin just now`, `still checking in the background`, `couldn't check origin`, …; nothing when a fresh check found the tracking ref current). Without an `origin` there is no caption
     - a table with one row per worktree; the current row is highlighted
-        - **Worktree**: a dot for uncommitted files (none, other files, or source files) and the directory name (`base repo` for the main checkout)
+        - **Worktree**: a dot for uncommitted files (none, other files, or source files), `✕` when Git can't read the worktree or its path is a link that may have replaced it (a closing note says why and how to recover), or `?` when `git status` failed, and the directory name (`base repo` for the main checkout). `wt list` never repairs or removes a worktree
         - **Branch**: a tree of which branch was forked from which (recorded by `wt create`); deleted parents are struck through
         - **`-> {default}`**: `clean` or `conflicts` against the default branch (local or `origin/<default>`, whichever contains the other); from 100 columns, followed by `+ahead` and `-behind` commit counts
         - **`-> parent`**: the same against the branch's fork parent (its local branch)
         - open PRs from this repository as badges, placed by the PR's target. Every listing asks again and shows the answer that arrives within its wait; otherwise it shows the last stored answer for the current `origin`, with a dim item saying how old it is (`PRs as of N min ago`) or that this run `couldn't refresh` it (`couldn't get open PRs` when nothing is stored)
     - a legend, then, on image-capable terminals, a branch graph (see [`docs/git-graph.md`](./docs/git-graph.md))
-    - notes when they apply: a credentials warning under the caption when a missing or rejected API key (or a rate limit) stopped the check or the PR request, a hint to run again when the wait ran out, and closing notes suggesting `wt --ff` when the default branch is behind or explaining the `ls-remote` fallback
+    - notes when they apply: one credentials line, either a warning when a missing or rejected API key (or a rate limit) stopped the check or the PR request, or, failing that, a notice that the provider answered without an API key (with the variables to set), a hint to run again when the wait ran out, and closing notes suggesting `wt --ff` when the default branch is behind or explaining the `ls-remote` fallback
     - flags (listing only): `-r`/`--refresh` waits for a full update from `origin`; `--ignore-api` makes this repository use `git ls-remote` only, recorded in `~/.wt.json`; `--ff`/`--fast-forward` fast-forwards the local default branch to `origin/<default>`
 
     > The **list** command is the default command so it will be run if a user types only `wt`
@@ -101,7 +102,7 @@ The **worktree** package area, like many in this monorepo, is composed of both a
 
 - `wt remove <name> [--force-worktree] [--force-branch] [--force-remote]`
 
-    Removes a worktree by branch or directory name and, when its commits are safe elsewhere, its local branch. It starts from one question: would removing this lose work?
+    Removes a worktree by branch or directory name and, when its commits are safe elsewhere, its local branch. It starts from one question: would removing this lose work? See [`docs/cli/remove.md`](./docs/cli/remove.md) for the full rules and examples.
 
     - **report first**: before asking or removing anything it prints uncommitted files, included ignored files needing consent (marked new, changed, or unknown), a summary of other ignored entries, the branch's safety tier and supporting ref, ahead/behind against the default branch, its copy on origin (as of your last fetch), and its PR; each question then starts after one blank line
     - **the worktree**: new, changed, or unknown included files and uncommitted files need consent. An interactive run asks (default No); a non-interactive run needs `--force-worktree` or exits 3 without removing anything. Unchanged included copies and other ignored files do not need consent.
@@ -115,6 +116,13 @@ The **worktree** package area, like many in this monorepo, is composed of both a
         - the second step asks the network only for what the approved actions still need: keeping the branch or deleting it by explicit choice needs no PR lookup or live check, and a branch deleted because it was safe needs none when a local default branch, another local branch, or a tag still holds its commits. A branch proved safe only by a PR or an `origin/*` copy is checked live again, and nothing is removed if that proof is gone or cannot be checked. With `--force-remote`, the branch on origin is checked again before anything is removed, and a change, deletion, or unreachable origin stops the removal. Every dirty file is still read in full
     - on Windows, a worktree folder another program holds (a cmd window or terminal tab opened in it, an open file) is detected before anything is deleted and refused with exit 4
     - the main checkout cannot be removed (use plain `git` for that), whether it is named `base` or by its branch
+    - **a worktree Git can't read** (`✕` in `wt list`) is prepared before the report, never by deleting anything:
+        - *directory gone*: the index Git kept for it is compared with its last commit; staged changes need the usual consent (`--force-worktree` in a script), an index that can't be read, or that changed after it was checked (including the `sharedindex.*` file a split index depends on), refuses (exit 3), and only that worktree's record is removed (`git worktree remove <path>`, never `prune`), then its branch is handled as usual
+        - *directory present, `.git` file gone*: `wt` runs `git worktree repair <path>` from the base checkout **before asking anything**, verifies the restored link itself (never trusting Git's exit status), says in the report that its `.git` file was missing, and continues as for any worktree. If you decline or a later check refuses, the restored link is left in place and the message says so. Git's repair can also restore other worktrees' broken links
+        - *a link that can't be verified, or anything else* (a file or link at the path, an unreadable path, a `.git` Git can't use): refused with exit 3 and the condition found. No working files, branches, or records are removed, but a repair attempt may have changed Git metadata, and the message says so
+        - **no `--force-*` flag allows deleting a directory whose files could not be checked**
+    - **a worktree whose path is itself a link** (a symbolic link, or on Windows any reparse point such as a junction, standing where the checkout was) is refused with exit 3 whatever the flags, even though Git reads the checkout through it and does not mark it `prunable`: removing it would delete the files the link leads to. The path is checked before anything else, after a repair, in both runs of a handoff, and immediately before deletion. A link among the parent directories (macOS `/tmp`) is fine
+        - run it from outside a worktree whose `.git` is gone: from inside, `wt` can't find the repository
     - an interactive run needs stdin and stderr to be terminals and `CI` to be unset or empty
 
 - `wt help`
@@ -172,8 +180,8 @@ cmd.exe has no wrapper.
 | 0 | Done, including a prompt the caller cancelled |
 | 1 | Something failed |
 | 2 | Invalid arguments (clap) |
-| 3 | Refused to avoid losing work; nothing was changed |
-| 4 | Blocked by the environment (for example, no shell wrapper); nothing was changed |
+| 3 | Refused to avoid losing work; nothing was removed, though `wt remove` may have repaired a worktree's `.git` link first (the message says so) |
+| 4 | Blocked by the environment (for example, no shell wrapper); nothing was removed |
 
 > Important: always try to use `biscuit-terminal` renderable components to produce a nice looking output. `Prose` is the most commonly used component but `UnorderedList`, `BlockQuote`, or `Table` can also be very helpful.
 
@@ -189,7 +197,7 @@ cmd.exe has no wrapper.
 
 ### Runtime diagnostic
 
-Run `wt list --perf` to emit a per-stage timing report to stderr after the command completes. The report is rendered as a reconciling tree: recorded stages plus an `unattributed` node sum to the total wall-clock time. Only stages that actually ran are shown, so on a non-image terminal the graph-related stages are omitted.
+Run `wt list --perf` to emit a per-stage timing report to stderr after the command completes. The report is rendered as a reconciling tree: the top-level rows plus an `unattributed` row sum to the total wall-clock time. Work that runs at the same time is one measured group (`remote wait ‖ local gather`, or `local gather` without an `origin`; `regather` when the tips moved), whose children show their own durations with no share and are not added to the total. Only stages that actually ran are shown, so on a non-image terminal the graph-related stages are omitted.
 
 ### Dev-time benchmarks
 

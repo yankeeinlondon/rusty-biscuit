@@ -14,6 +14,10 @@
 //! - A successful check is published before the fetch starts, so a failed
 //!   fetch keeps the newly checked answer, and a failed check keeps the
 //!   previous one.
+//! - A successful API check records the credentials its request was sent with
+//!   on the attempt before anything else is written, so every later state of
+//!   the attempt keeps them; they come from sniff's client, never from a
+//!   second look at the environment.
 //! - `origin` and the default branch are read again after each network step;
 //!   a change ends the attempt as unavailable and publishes nothing more.
 //! - Every store write is best effort: a failed write ends the attempt, and
@@ -29,24 +33,30 @@ use crate::git::git_from;
 use crate::live_remote::{GitFailure, LsRemote, fetch_tracking_ref, is_valid_branch_name};
 use crate::pull_requests::{origin_digest, origin_url};
 use crate::remote_head::{
-    Answer, AnswerSource, ApiCondition, ApiNote, Attempt, CheckFailure, FallbackReason, FetchFailure,
-    HeadStatus, Outcome, Phase, REMOTE_HEAD_REFRESH_DEADLINE, UnavailableReason, begin_attempt,
-    finish_attempt, publish_answer, remote_head_lock_path, set_phase,
+    Answer, AnswerSource, ApiCondition, ApiNote, Attempt, CheckFailure, CredentialEvidence, FallbackReason,
+    FetchFailure, HeadStatus, Outcome, Phase, REMOTE_HEAD_REFRESH_DEADLINE, UnavailableReason, begin_attempt,
+    finish_attempt, publish_answer, remote_head_lock_path, set_credentials, set_phase,
 };
 use crate::worktree::default_branch_in;
 
 /// How long the fetch of the tracking ref may take.
 pub const FETCH_DEADLINE: Duration = Duration::from_secs(60);
 
+/// A provider's branch-head answer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApiHead {
+    /// The object ID of `refs/heads/<branch>`.
+    pub sha: String,
+    /// What the request was sent with, as the sending client selected it.
+    pub credentials: CredentialEvidence,
+}
+
 /// A provider's branch-head API.
 pub trait BranchHeadSource {
-    /// The object ID of `refs/heads/<branch>` in the repository at `origin`.
-    fn branch_head(&self, origin: &str, branch: &str, deadline: Duration) -> Result<String, PrUnavailable>;
-
-    /// The name of the token variable a request for `origin` sends, or
-    /// `None` for an anonymous request. It tells a 404 with a key from one
-    /// without, which the error itself cannot.
-    fn key_in_use(&self, origin: &str) -> Option<String>;
+    /// The head of `refs/heads/<branch>` in the repository at `origin`. A
+    /// failure names the variable its request sent, where the error has a
+    /// `key`, so no second credential lookup is needed.
+    fn branch_head(&self, origin: &str, branch: &str, deadline: Duration) -> Result<ApiHead, PrUnavailable>;
 }
 
 /// [`BranchHeadSource`] through sniff's blocking provider client.
@@ -54,18 +64,9 @@ pub trait BranchHeadSource {
 pub struct SniffBranchHeads;
 
 impl BranchHeadSource for SniffBranchHeads {
-    fn branch_head(&self, origin: &str, branch: &str, deadline: Duration) -> Result<String, PrUnavailable> {
-        sniff::remote::blocking::branch_head(origin, branch, deadline).map(|head| head.sha)
-    }
-
-    /// The first of the provider's variables that is set and not empty.
-    /// sniff's host-bound `SNIFF_*_TOKEN` override is not seen here, so a 404
-    /// sent with only that token reads as sent without one.
-    fn key_in_use(&self, origin: &str) -> Option<String> {
-        sniff::remote::blocking::credential_env(origin)?
-            .variables
-            .into_iter()
-            .find(|name| std::env::var_os(name).is_some_and(|value| !value.is_empty()))
+    fn branch_head(&self, origin: &str, branch: &str, deadline: Duration) -> Result<ApiHead, PrUnavailable> {
+        sniff::remote::blocking::branch_head(origin, branch, deadline)
+            .map(|head| ApiHead { credentials: CredentialEvidence::from_sniff(&head.credentials), sha: head.sha })
     }
 }
 
@@ -170,6 +171,10 @@ struct Recorder<'a> {
 impl Recorder<'_> {
     fn phase(&self, phase: Phase, api: Option<ApiNote>) -> Result<(), WriteFailed> {
         set_phase(self.store, self.id, phase, api).map_err(|_| WriteFailed)
+    }
+
+    fn credentials(&self, credentials: CredentialEvidence) -> Result<(), WriteFailed> {
+        set_credentials(self.store, self.id, credentials).map_err(|_| WriteFailed)
     }
 
     fn publish(&self, answer: &Answer) -> Result<(), WriteFailed> {
@@ -345,9 +350,15 @@ fn check(
         return Ok(git_check(None));
     }
     let error = match seams.api.branch_head(origin, branch, REMOTE_HEAD_REFRESH_DEADLINE) {
-        Ok(sha) => {
+        Ok(head) => {
+            // Recorded before anything else is written, so every later state
+            // of the attempt (fetching, a failed or timed-out fetch, a
+            // `source: fetch` answer) keeps it.
+            if let Some(recorder) = recorder {
+                recorder.credentials(head.credentials)?;
+            }
             return Ok(CheckReport {
-                result: Ok(Checked { sha: Some(sha), source: AnswerSource::Api, checked_at }),
+                result: Ok(Checked { sha: Some(head.sha), source: AnswerSource::Api, checked_at }),
                 api: None,
             });
         }
@@ -356,7 +367,7 @@ fn check(
         Err(PrUnavailable::Unsupported { .. }) => return Ok(git_check(None)),
         Err(error) => error,
     };
-    let (reason, note) = fallback(&error, || seams.api.key_in_use(origin));
+    let (reason, note) = fallback(&error);
     if let Some(recorder) = recorder {
         recorder.phase(Phase::CheckingFallback { reason }, note.clone())?;
     }
@@ -364,7 +375,7 @@ fn check(
 }
 
 /// Why the API gave way to `ls-remote`, and the §5 condition it observed.
-fn fallback(error: &PrUnavailable, key_in_use: impl FnOnce() -> Option<String>) -> (FallbackReason, Option<ApiNote>) {
+fn fallback(error: &PrUnavailable) -> (FallbackReason, Option<ApiNote>) {
     let note = |condition, key| Some(ApiNote { condition, key, fallback_answered: false });
     match error {
         PrUnavailable::CredentialsRequired { .. } => {
@@ -380,8 +391,8 @@ fn fallback(error: &PrUnavailable, key_in_use: impl FnOnce() -> Option<String>) 
             FallbackReason::RateLimited,
             note(ApiCondition::RateLimited { authenticated: *authenticated }, key.clone()),
         ),
-        PrUnavailable::NotFoundOrNotPermitted { .. } => {
-            let key = key_in_use();
+        PrUnavailable::NotFoundOrNotPermitted { key, .. } => {
+            let key = key.clone();
             // Without a key the repository may simply be private.
             let reason = if key.is_none() { FallbackReason::NotVisible } else { FallbackReason::Other };
             (reason, note(ApiCondition::NotFoundOrNotPermitted, key))

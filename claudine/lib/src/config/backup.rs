@@ -86,7 +86,7 @@ fn cleanup_old_backups(backup_dir: &Path) -> Result<usize> {
 
 /// Returns the base backup directory (`~/.claudine/backups`).
 fn backup_base_dir() -> Result<PathBuf> {
-    let home = dirs::home_dir().ok_or_else(|| {
+    let home = biscuit_file::home_dir().ok_or_else(|| {
         std::io::Error::new(std::io::ErrorKind::NotFound, "home directory not found")
     })?;
     Ok(home.join(".claudine").join("backups"))

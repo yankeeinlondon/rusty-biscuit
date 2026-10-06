@@ -1,7 +1,7 @@
 use renderable::style::Style;
 
 use crate::{
-    components::prose::Prose,
+    components::prose::InlineProse,
     utils::{layout::Alignment, wrap_policy::WordWrap},
 };
 
@@ -120,12 +120,12 @@ enum DropBehavior {
 pub struct TableColumn {
     /// Header text for the column
     pub header: String,
-    /// Optional styled header using Prose.
+    /// Optional styled header label using [`InlineProse`].
     ///
     /// Compatibility shim: [`new_with_bold`](Self::new_with_bold) still
     /// populates this so existing callers keep working. The canonical typed
     /// home of header appearance is [`header_style`](Self::header_style).
-    pub header_prose: Option<Prose>,
+    pub header_prose: Option<InlineProse>,
     /// Typed appearance slot for this column's header cell (Spec B D5).
     ///
     /// This per-column override is merged on top of the table-wide
@@ -192,7 +192,7 @@ impl TableColumn {
     /// compatibility shim.
     pub fn new_with_bold<T: Into<String>>(header: T) -> Self {
         let text = header.into();
-        let prose = Prose::new(format!("<bold>{text}</bold>"));
+        let prose = InlineProse::new(format!("<bold>{text}</bold>"));
         let header_style = Style {
             emphasis: renderable::style::TextEmphasis {
                 bold: true,

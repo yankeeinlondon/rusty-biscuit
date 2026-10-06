@@ -240,6 +240,16 @@ appended; it is never counted as a content change.
 
 **Directory input**
 
+- The directory is named with the same reference forms as a file
+  (`md hash '&docs'` is the repository's `docs/`); a relative directory may not
+  leave the repository (`failure: invalid-reference`).
+- The first place the reference looks that holds a file or a directory decides
+  the mode, in the same order a file argument is searched. Run from `docs/`,
+  `md hash notes.md` hashes `docs/notes.md` as one document even when the
+  repository root has a `notes.md/` directory, and `--diff` and `--save` act on
+  that document; with no `docs/notes.md`, it hashes the directory. A place that
+  cannot be checked (permission denied, a symlink loop) stops the command with
+  `failure: io` instead of moving on to the next place.
 - Recursively collects `.md` and `.dm` files.
 - Skips hidden (dot-prefixed) directories. All other directories — including
   `node_modules`, `target`, and `vendor` — are traversed, so their Markdown

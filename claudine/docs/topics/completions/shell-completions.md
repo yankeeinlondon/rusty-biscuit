@@ -145,7 +145,9 @@ Default iteration order (`ScopeSet::iter_scopes`):
 6. **Extras** — mode-specific (see below).
 
 Magic convention roots come from Claudine's shared `with_prompt_magic_roots`
-registration and are expanded by `FileReference::complete_partial_in_context`.
+registration, which adds them to the request snapshot before Darkmatter's
+builder makes the completion context (the same builder call composition
+uses), and are expanded by `FileReference::complete_partial_in_context`.
 Claudine registers its prompt conventions around biscuit-file's intrinsic
 roots, and biscuit-file orders every `@` root into two tiers: the **local**
 tree is exhausted before anything home-based. `<local>` is the repository
@@ -237,7 +239,9 @@ file.
 ### Magic `@` resolution
 
 A partial beginning with `@` is a magic path — a **filename search**. The
-engine constructs one explicit `FileResolutionContext`, asks
+engine builds one `FileResolutionContext` from the request snapshot the
+`claudine` binary took at startup (its launch directory, HOME, and
+environment), asks
 `FileReference::complete_partial_in_context` for the ordered roots and rendered
 prefix, and emits that prefix plus each matching basename. A bare partial emits
 `@<basename>`; a path-shaped partial retains its scope. The `@` stays because it
@@ -316,6 +320,12 @@ A partial ending in `/` (or preceded by any path segment) is a committed
 directory — the user has narrowed to a specific subtree. The walker
 stays inside that subtree and enumerates everything the mode contract
 accepts.
+
+The subtree is looked up where composition looks for the committed
+token: under the launch directory first, then under the repository
+root. From a nested package, `prompts/<TAB>` therefore offers the
+package's own `prompts/` files ahead of the repository's, and a name both
+hold is offered once, for the file composition would open.
 
 ```text
 claudine compose prompts/<TAB>
@@ -535,6 +545,42 @@ prompt's `$schema` declaration via Darkmatter before falling back to the
 shell default. Implementation lives in
 [`completion/schema_completion/mod.rs`](../../../cli/src/completion/schema_completion/mod.rs).
 
+### Which prompt supplies the schema
+
+The committed prompt argument is located exactly as `claudine compose`
+locates it: through the shared file-reference grammar and the same
+request context (launch directory, repository, package area, package,
+home, and Claudine's prompt roots). Every form composition accepts works,
+including the token the positional completer just emitted:
+
+```text
+claudine compose @pro<TAB>                 → @prompt.md
+claudine compose @prompt.md zebra=<TAB>    → zebra='red'  zebra='blue'
+claudine compose &prompt.md z<TAB>         → zebra=
+claudine compose ~/prompt.md zebra=<TAB>   → zebra='red'  zebra='blue'
+```
+
+Bare, `./`, absolute, `&`, `^`, `@`, and `~/` arguments all follow their
+composition meaning. In particular `./prompt.md` names only the file in
+the launch directory: from a nested package with no `prompt.md` of its
+own, it offers nothing, even when the repository root has one. A prompt
+argument that composition would reject yields no schema candidates.
+
+A `$schema: <file>` reference inside the prompt is read the same way, in
+the prompt document's context, so the authored property order (below)
+survives `$schema: '&schemas/order.yaml'` as well as
+`$schema: ./order.yaml`.
+
+A prompt in another repository gets the context composition gives it. Its
+own repository anchors `&`, `^`, and a bare path's root lookup, while `@`
+keeps searching the tree you launched from. Launched from `~/work/app`:
+
+```text
+claudine compose ~/work/lib/prompts/p.md zebra=<TAB>
+  $schema: '&schemas/order.yaml'   → ~/work/lib/schemas/order.yaml
+  $schema: '@order.yaml'           → ~/work/app/order.yaml (launch tree first)
+```
+
 ### Property names (before `=`)
 
 Required properties are emitted first in declaration order, then
@@ -563,20 +609,44 @@ property and dispatches by `CompletionKind`:
 - **`enum` → enum members** as `property='value'`. Prefix-insensitive
   match when a value partial is typed; all members surface when the
   partial is empty.
-- **`file(match='*.png', …)` → filesystem paths** rooted at the
-  invoking `cwd` (the launch area; see the "Why anchored on the `cwd`"
-  note under *Setter values*), filtered by the
-  property's glob patterns. The walk shares the scope walker's
-  exclusion rules — `.gitignore` plus the `_`-prefix and curated
-  skip-list (`target`, `node_modules`, …) elision — so archived
-  `_completed/` artefacts never surface. The typed value partial is
-  applied as a case-insensitive substring (`*partial*`) over the
-  repo-relative path, not just the basename: because `match(...)`
-  candidates routinely share a basename (every `**/*spec*.md` hit is
-  `spec.md`), a directory fragment like `spec=features/real` is the
-  only way to narrow them. An empty `match(...)` list falls back to the
-  default markdown glob (see the ENTER-path note below); the legacy
-  zero-candidate behavior was dropped.
+- **`file(match(…))` → the files the globs admit.** Each pattern is a
+  glob reference, so its prefix picks where it searches, exactly as a
+  single file reference does:
+
+  | Pattern | Searched, in order |
+  |---------|--------------------|
+  | `**/*spec*.md` (bare) | the launch directory, then the repository root |
+  | `./**/*spec*.md` | the launch directory only |
+  | `&**/*spec*.md` | the repository root |
+  | `^**/*spec*.md` | the package, the package area, then the repository root |
+  | `~/notes/*.md`, `@prompts/*.md`, `/abs/*.md` | home, the `@` roots, the path as written |
+
+  A file is offered once, from the first of those folders that contains
+  it, and only when `match()` validation would accept it there, so a
+  `!fixes/**` exclusion judged from the package is not undone by the
+  repository-root pass. The walk shares the scope walker's exclusion
+  rules — hidden files and directories, `.gitignore`, plus the
+  `_`-prefix and curated skip-list (`target`, `node_modules`, …) — so
+  archived `_completed/` artefacts never surface. These rules only
+  shape the suggestions: validation still accepts a hidden, ignored, or
+  `_`-prefixed file you type. A file symlink that a bare, `./`, or `../`
+  pattern matches and whose target leaves the file tree is left out
+  silently; completion reports no warning for it.
+
+  Candidates keep the search order (nearest folder first, then
+  shallowest, then by path component); they are not re-sorted
+  alphabetically. Each is spelled so that it resolves back to the same
+  file from where you are: a file under the launch directory keeps its
+  plain relative path (`fixes/…/spec.md`, never `./fixes/…/spec.md`),
+  and any other file takes the first of `../x.md` or `../sibling/x.md`,
+  `&path`, `~/path`, or the absolute path that does. A `{{VAR}}`
+  spelling is never offered, because a placeholder reads oddly in a
+  shell argument. The typed value partial is a
+  case-insensitive substring (`*partial*`) over that spelling, so a
+  directory fragment like `spec=features/real` narrows candidates that
+  share a basename. An empty `match(...)` list falls back to the
+  default markdown glob under the launch directory (see the ENTER-path
+  note below).
 - **`url`, `email`, `date`, `datetime`, `time` (hint-only)** emit no
   candidates. The `__complete` stdout protocol does not carry a
   description channel today, so the hint string from
@@ -592,6 +662,11 @@ claudine compose @plan.md tier=<TAB>
 claudine compose @plan.md cover=<TAB>          # schema: file(match('*.png'))
 → cover='assets/cover.png'
 → cover='assets/dark/cover.png'
+
+# launched from packages/web, schema: file(match(^**/*spec*.md))
+claudine compose @plan.md spec=<TAB>
+→ spec='fixes/login/spec.md'                 # under the launch directory
+→ spec='&fixes/2026-09-29-ts-review/spec.md' # the repository root's, two levels up
 ```
 
 ### Root-level unions
@@ -730,6 +805,9 @@ Runtime operation-file recovery distinguishes three outcomes for
    operation-file recovery runs.
 2. **Unresolved bare discovery name** — a single-component implicit name
    such as `access` or `access.md` is eligible for the interactive picker.
+   A name containing `*`, `?`, or `[` (such as `*.md`) is not: it is
+   reported as an explicit miss, because a file reference reads those
+   characters literally.
 3. **Unresolved explicit reference** — a typed path or reference such as
    `./docs/access.md`, `~/access.md`, or `@access.md` reports the existing
    `composition.invalid_file_reference` typed no-match diagnostic without
@@ -739,6 +817,22 @@ Runtime operation-file recovery distinguishes three outcomes for
    errors consume that budget but are skipped, so later matches and matches
    already found within the bound remain available. An unusable repository root
    still produces no suggestions.
+
+Each of these errors ends with the `failure: <class>` row Darkmatter renders for
+a failed file reference, so a script can tell why the argument did not resolve
+without parsing the message. An explicit miss is `failure: no-match`, and a
+reference that cannot be used as written (a `../` that leaves the repository)
+is `failure: invalid-reference`. A bare name whose picker cannot open, finds
+nothing, finds too much, or is cancelled is also `failure: no-match`, because
+the picker runs only after the name matched no file. The classes are listed in
+[File Reference Failures](../../../../darkmatter/docs/errors/file-reference-failures.md).
+
+An explicit miss whose reference contains `*`, `?`, or `[`
+(`claudine compose --dry-run 'docs/*.md'`) also explains that a file
+reference reads those characters literally and that a set of files needs a
+form that accepts a glob reference, such as `::file-links`. A plain missing
+name (`docs/missing.md`) and a failure other than `no-match` carry no such
+hint.
 
 Interactive file collection also applies to **missing `$schema`
 properties**: when a frontmatter schema declares
@@ -757,14 +851,17 @@ Claudine prints the non-interactive remediation block instead.
 - A property typed `file[]` uses a multi-select `ChooseMany` chooser:
   press `Space` to toggle items, then `Enter` to submit the set.
 
-Candidates come from the schema's `match(...)` globs when present;
+Candidates come from the schema's `match(...)` globs when present,
+searched and ordered exactly as TAB completion's are (see *Property
+values* above), and listed in that order;
 otherwise the bare `file`/`file[]` fallback walks the invoking `cwd`
 (the launch area — the runtime missing-property chooser runs *before*
 the wrapper's `switch_process_cwd`, so its `cwd` is still the launch
 area) for markdown files, excluding prompt directories so composition
 prompts do not leak into generic file values. Both walks share the scope walker's exclusion rules —
 `.gitignore`, the `_`-prefix elision, and the curated skip-list
-(`target`, `node_modules`, …).
+(`target`, `node_modules`, …) — and the `match(...)` walk also skips
+hidden files and directories.
 
 ### Layout
 

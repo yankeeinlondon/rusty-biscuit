@@ -19,8 +19,9 @@
 //! empty `Vec`, signalling to the caller that the shell's native fallback
 //! should take over.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
+use biscuit_file::{FileReference, FileResolutionContext};
 use darkmatter::markdown::compose::ComposeSource;
 use darkmatter::markdown::schemas::{DarkmatterSchemas, EffectiveSchema};
 use darkmatter::markdown::Markdown;
@@ -30,6 +31,8 @@ use super::scopes::{self, ScopeContext};
 mod candidates;
 mod keys;
 #[cfg(test)]
+mod parity_tests;
+#[cfg(test)]
 mod tests;
 
 pub(crate) use candidates::{file_candidate_paths, property_value};
@@ -38,7 +41,7 @@ pub(crate) use keys::{declared_property_order, property_names};
 /// Resolve `file_arg` to a loaded [`EffectiveSchema`].
 ///
 /// Returns `None` when:
-/// - the file cannot be located on disk,
+/// - the committed prompt reference does not resolve to a file,
 /// - the file is not valid Markdown,
 /// - the document has no `$schema`,
 /// - the schema cannot be parsed or compiled.
@@ -46,44 +49,80 @@ pub(crate) use keys::{declared_property_order, property_names};
 /// All failure modes are silent: completion is best-effort and falls back to
 /// shell-native behavior on any error.
 pub(crate) fn load_effective_schema(file_arg: &str, ctx: &ScopeContext) -> Option<EffectiveSchema> {
-    let path = resolve_prompt_path(file_arg, ctx)?;
-    let text = std::fs::read_to_string(&path).ok()?;
-    let markdown: Markdown = Markdown::from(text).with_source(ComposeSource::infer_from_path(&path));
-    // Completions lack a launch-area context, so file-typed values fall back
-    // to ambient CWD here (consistent with pre-`chdir` timing).
-    DarkmatterSchemas::new().effective_for(&markdown).ok()?
+    let prompt = CommittedPrompt::resolve(file_arg, ctx)?;
+    let text = std::fs::read_to_string(&prompt.path).ok()?;
+    let markdown: Markdown =
+        Markdown::from(text).with_source(ComposeSource::infer_from_path(&prompt.path));
+    DarkmatterSchemas::new(prompt.context).effective_for(&markdown).ok()?
 }
 
-/// Resolve a setter-token file_arg to an absolute path on disk.
-///
-/// Tries the following interpretations in order:
-/// 1. As-is when absolute.
-/// 2. Relative to cwd.
-/// 3. Relative to the effective repo root (when one is detected).
-///
-/// `@`-prefixed magic paths are not expanded — the file_arg here is the
-/// value the user has already committed in argv, which the shell completion
-/// engine would have rewritten to a concrete path on selection.
-pub(super) fn resolve_prompt_path(file_arg: &str, ctx: &ScopeContext) -> Option<PathBuf> {
-    if file_arg.is_empty() {
-        return None;
-    }
-    let trimmed = file_arg.trim_matches(['"', '\'']);
-    let raw = Path::new(trimmed);
-    if raw.is_absolute() && raw.is_file() {
-        return Some(raw.to_path_buf());
-    }
-    let from_cwd = ctx.cwd.join(raw);
-    if from_cwd.is_file() {
-        return Some(from_cwd);
-    }
-    if let Some(root) = scopes::effective_repo_root(ctx) {
-        let from_repo = root.join(raw);
-        if from_repo.is_file() {
-            return Some(from_repo);
+/// The prompt-file argument already committed in argv, resolved the way
+/// composition resolves it.
+pub(super) struct CommittedPrompt {
+    pub(super) path: PathBuf,
+    /// The completion context derived for the prompt document, so the
+    /// document's own references (`$schema` files, `file` values) resolve as
+    /// they will when the prompt is composed.
+    pub(super) context: FileResolutionContext,
+}
+
+impl CommittedPrompt {
+    /// Resolve `file_arg` through the shared file-reference grammar and the
+    /// completion request's context.
+    ///
+    /// The argument keeps whatever form the user committed, including the
+    /// `@`/`&`/`^`/`~/` tokens the positional completer emits, so a prefixed
+    /// prompt and an explicit `./` keep their composition semantics: `./`
+    /// never falls back to the repository root.
+    pub(super) fn resolve(file_arg: &str, ctx: &ScopeContext) -> Option<Self> {
+        let trimmed = file_arg.trim_matches(['"', '\'']);
+        if trimmed.is_empty() {
+            return None;
         }
+        let reference = FileReference::new(trimmed).ok()?;
+        let request = scopes::file_resolution_context(ctx).ok()?;
+        let path = reference.resolve_in_context(&request).ok()??;
+        if !path.is_file() {
+            return None;
+        }
+        let path = in_repository_spelling(&request, path);
+        let ordinary = request.for_source_reference(&reference, &path);
+        if ordinary.validate().is_ok() && request.repository_root().is_some() {
+            return Some(Self { path, context: ordinary });
+        }
+        // Outside the launch repository (or launched from none) the prompt
+        // gets composition's source derivation: its own repository anchors
+        // `&`, `^`, and bare references, while `@` keeps the launch scope.
+        let context = claudine::composition::derive_request_context_for_source(&request, &path)
+            .ok()?
+            .for_source_reference(&reference, &path);
+        Some(Self { path, context })
     }
-    None
+}
+
+/// `path` spelled under the request's repository root when it names a file
+/// inside that repository through another spelling (`/var` against
+/// `/private/var`, a symlinked checkout).
+///
+/// Composition re-derives a source's repository by canonical directory; a
+/// derived context only keeps its repository for a lexically contained source,
+/// so without this an absolute prompt spelled differently would lose its
+/// repository-relative `$schema` references.
+fn in_repository_spelling(request: &FileResolutionContext, path: PathBuf) -> PathBuf {
+    let Some(root) = request.repository_root() else {
+        return path;
+    };
+    if path.starts_with(root) {
+        return path;
+    }
+    let (Ok(canonical_root), Ok(canonical_path)) = (root.canonicalize(), path.canonicalize())
+    else {
+        return path;
+    };
+    match canonical_path.strip_prefix(&canonical_root) {
+        Ok(relative) => root.join(relative),
+        Err(_) => path,
+    }
 }
 
 #[cfg(test)]

@@ -30,7 +30,7 @@ test-fixtures = []
 claudine-catalog-types = { path = "../catalog-types" }
 sniff = { path = "../../sniff/lib" }
 biscuit-hash = { path = "../../biscuit-hash/lib", features = ["xx_hash", "blake3"] }
-biscuit-file = { path = "../../biscuit-file/lib", features = ["yaml", "json5"] }
+biscuit-file = { path = "../../biscuit-file/lib", features = ["yaml", "json5", "file-reference"] }
 darkmatter = { path = "../../darkmatter/lib" }
 playa = { path = "../../playa/lib", features = ["sound-effects", "async", "native-playback"] }
 biscuit-speaks = { path = "../../biscuit-speaks/lib", features = ["playa"] }
@@ -60,9 +60,6 @@ uuid = { version = "1", features = ["v4"] }
 
 # Regex for matcher engine
 regex = "1.11"
-
-# Home directory
-dirs = "6"
 
 # URL validation
 url = { version = "2.5", features = ["serde"] }
@@ -144,3 +141,12 @@ ubuntu-latest = ["libasound2-dev"]
 # Off by default so test targets may construct commands freely; the crate root
 # denies it for production builds (see `clippy.toml` for the method list).
 disallowed_methods = "allow"
+
+[package.metadata.ci.tests]
+# The context construction and path lookup guards include darkmatter-cli's
+# shared engines by `#[path]` and spell those files in their tests.
+source-inputs = [
+  "darkmatter/cli/tests/common/context_guard.rs",
+  "darkmatter/cli/tests/common/path_lookup_guard.rs",
+  "darkmatter/cli/tests/common/source_scan.rs",
+]

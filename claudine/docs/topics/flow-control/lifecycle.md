@@ -154,6 +154,13 @@ Each lifecycle property is an object containing any of these fields:
 | `success` | string | Status line rendered with a success style. |
 | `stack` | list | Ordered list of conditional actions (see [Stacks](#stacks)). |
 
+The `stdout`, `stderr`, `info`, `warn`, and `success` channels keep the lines of their text: each newline, whether written in the YAML (a `|` block) or carried by an interpolated value such as a captured output, starts a new line. For example, `info: 'captured=[{{ last(outputs) }}]'` after a step printed `line one` and `  line two` shows:
+
+```text
+ℹ captured=[line one
+  line two]
+```
+
 Most lifecycle output is written to stderr, messaging routes, or desktop notifications. The `stdout` channel is the lone exception: it writes to stdout, which is otherwise reserved for pipeable command output, so reach for it only when you specifically want lifecycle text on stdout.
 
 A `message` or `notify` sent from a terminal event (`success`, `failure`, `finalize`) finishes, or is reported as unfinished, before the process exits normally. Claudine waits at most 10 seconds for it. A send still running at that limit is reported with a warning, and whether it arrived is unknown. The exit code does not change. See [Messaging → The CLI drains before every ordinary exit](../messaging.md#the-cli-drains-before-every-ordinary-exit).

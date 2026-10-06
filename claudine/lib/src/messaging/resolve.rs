@@ -144,7 +144,7 @@ pub fn parse_signal_recipient(recipient: &str) -> SignalRecipient {
 ///
 /// Resolution order:
 /// 1. Already absolute — returned as-is.
-/// 2. Starts with `~/` — home directory expanded via `dirs::home_dir()`.
+/// 2. Starts with `~/` — home directory expanded via [`biscuit_file::home_dir`].
 /// 3. Relative with a `cwd` — joined to `cwd`.
 /// 4. Relative with a `repo_root` — joined to `repo_root`.
 /// 5. Final fallback — joined to the process working directory.
@@ -158,7 +158,7 @@ pub fn resolve_image_path(raw: &str, cwd: Option<&str>, repo_root: Option<&str>)
 
     // Tilde expansion
     if let Some(stripped) = raw.strip_prefix("~/") {
-        if let Some(home) = dirs::home_dir() {
+        if let Some(home) = biscuit_file::home_dir() {
             return home.join(stripped);
         }
         warn!("Could not determine home directory for tilde expansion");
@@ -384,7 +384,7 @@ mod tests {
     fn tilde_path_expands() {
         let result = resolve_image_path("~/images/shot.png", None, None);
         // Should start with the home directory
-        let home = dirs::home_dir().expect("home dir must exist for this test");
+        let home = biscuit_file::home_dir().expect("home dir must exist for this test");
         assert_eq!(result, home.join("images/shot.png"));
     }
 

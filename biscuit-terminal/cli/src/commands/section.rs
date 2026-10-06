@@ -1,12 +1,12 @@
 use crate::args::LayoutArgs;
 use crate::commands::shared::{
     apply_renderable_layout, emit_vertical_margins, print_example_command,
-    render_markdown_with_layout_frontmatter, terminal_for_render,
+    render_html_with_alignment, render_markdown_with_layout_frontmatter, terminal_for_render,
 };
 use crate::commands::{CliContext, Run};
+use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::{BrowserRenderable, TerminalRenderable};
 use biscuit_terminal::components::section::{HeadingLevel, Section};
-use biscuit_terminal::utils::layout::Alignment;
 use clap::Args as ClapArgs;
 use renderable::markdown::MarkdownRenderable;
 
@@ -34,7 +34,8 @@ pub struct SectionArgs {
     #[arg(long, short = 'l', default_value_t = 2)]
     pub level: u8,
 
-    /// Body content items. Repeat for multiple items.
+    /// Body content items, each rendered as its own `Prose` block (inline
+    /// styling tags and Markdown emphasis apply). Repeat for multiple items.
     #[arg(long, short = 'c')]
     pub content: Vec<String>,
 
@@ -88,7 +89,7 @@ impl Run for SectionArgs {
 
         let mut section = Section::new(level, &title);
         for item in &content {
-            section.push(item.as_str());
+            section.push(Prose::new(crate::types::unescape_shell_escapes(item)));
         }
 
         apply_renderable_layout(&mut section, &self.layout);
@@ -96,7 +97,7 @@ impl Run for SectionArgs {
         if self.html {
             println!(
                 "{}",
-                render_html_with_layout(&section.render_html_fragment().render(), &self.layout)
+                render_html_with_alignment(&section.render_html_fragment().render(), &self.layout)
             );
             if self.example {
                 print_example_command(SECTION_EXAMPLE_CMD);
@@ -155,34 +156,4 @@ fn heading_level_from_u8(level: u8) -> color_eyre::Result<HeadingLevel> {
             "Heading level must be 1-6, got {other}"
         )),
     }
-}
-
-/// Wraps the rendered HTML fragment in a `<div>` only when the CLI was given
-/// layout properties the tree-path CSS lowering cannot express on the
-/// component's own root element.
-///
-/// The tree renderer lowers `Layout` to CSS on the `<section>` itself. Margins
-/// (all four sides) and `max_width`-driven alignment are emitted there
-/// directly. The only `LayoutArgs` property without a `<section>`-level peer
-/// is `--alignment` without a `max_width`, which needs a `text-align`
-/// declaration on a surrounding block.
-fn render_html_with_layout(fragment: &str, layout: &LayoutArgs) -> String {
-    let Some(style) = wrapper_only_css(layout) else {
-        return fragment.to_string();
-    };
-    format!("<div style=\"{style}\">{fragment}</div>")
-}
-
-/// Returns the CSS declarations that the tree-path layout lowering cannot
-/// express on the component's own element. Today that is `text-align` from
-/// `--alignment`. Margins are always expressible by the tree path and
-/// therefore deliberately omitted here to avoid double-application.
-fn wrapper_only_css(layout: &LayoutArgs) -> Option<String> {
-    let alignment = layout.alignment?;
-    let text_align = match alignment {
-        Alignment::Left => "left",
-        Alignment::Center => "center",
-        Alignment::Right => "right",
-    };
-    Some(format!("text-align: {text_align}"))
 }

@@ -21,7 +21,7 @@ fn opencode_config_dir() -> Option<PathBuf> {
     std::env::var_os("XDG_CONFIG_HOME")
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
-        .or_else(|| dirs::home_dir().map(|home| home.join(".config")))
+        .or_else(|| biscuit_file::home_dir().map(|home| home.join(".config")))
         .map(|config| config.join("opencode"))
 }
 

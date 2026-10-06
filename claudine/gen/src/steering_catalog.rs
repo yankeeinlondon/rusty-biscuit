@@ -26,6 +26,8 @@ use claudine_catalog_types::steering::{
     DiscoveryMethod, ExecutionInterfaceKind, ExecutionState, GuaranteeLevel, HostOs, LaunchMode, LaunchOrigin,
     OperationIntent, ReceiptTiming, SteeringTransport, VerificationOutcome,
 };
+use biscuit_file::FileResolutionContext;
+use darkmatter::markdown::compose::RequestSnapshot;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -394,13 +396,21 @@ pub fn project_research(slug: &str, steering: &Value, execution: &Value) -> Resu
     })
 }
 
-/// Loads and projects one provider's research from `area`.
-pub fn load_research(area: &Path, slug: &str) -> Result<ResearchSteering, GenError> {
+/// Loads and projects one provider's research from `area`, resolving each
+/// document's `$schema` through `context` (the area's context from
+/// [`inputs::area_resolution_context`]).
+pub fn load_research(
+    area: &Path,
+    slug: &str,
+    context: &FileResolutionContext,
+) -> Result<ResearchSteering, GenError> {
     let steering = inputs::load_validated_frontmatter(
         &area.join(format!("docs/research/{RESEARCH_TOPIC}/{slug}.md")),
+        context,
     )?;
     let execution = inputs::load_validated_frontmatter(
         &area.join(format!("docs/research/{EXECUTION_TOPIC}/{slug}.md")),
+        context,
     )?;
     project_research(slug, &steering, &execution)
 }
@@ -652,15 +662,17 @@ pub fn orphan_policy_errors(active: &[String], policy: &ActivationPolicy) -> Vec
 // Generation: → lib/src/steering/generated.rs
 // ---------------------------------------------------------------------------
 
-/// Builds the generated steering catalog for every wired provider. Fails
-/// when any policy entry does not pass activation applicability.
-pub fn build_steering_catalog(area: &Path) -> Result<String, GenError> {
+/// Builds the generated steering catalog for every wired provider, reading
+/// research through one context built from `snapshot` rebased at the area.
+/// Fails when any policy entry does not pass activation applicability.
+pub fn build_steering_catalog(area: &Path, snapshot: &RequestSnapshot) -> Result<String, GenError> {
+    let context = inputs::area_resolution_context(area, snapshot)?;
     let policy = load_activation_policy(area)?;
     let active = inputs::roster_active_slugs(area)?;
     let mut errors = orphan_policy_errors(&active, &policy);
     let mut providers = Vec::new();
     for slug in provider_slugs() {
-        let research = load_research(area, slug)?;
+        let research = load_research(area, slug, &context)?;
         errors.extend(activation_errors(slug, &research, &policy).into_iter().map(|e| format!("{slug}: {e}")));
         providers.push((slug, research));
     }
@@ -671,9 +683,12 @@ pub fn build_steering_catalog(area: &Path) -> Result<String, GenError> {
 }
 
 /// Byte-compares [`build_steering_catalog`] with the committed file.
-pub fn check_steering_catalog(area: &Path) -> Result<CheckOutcome, GenError> {
+pub fn check_steering_catalog(
+    area: &Path,
+    snapshot: &RequestSnapshot,
+) -> Result<CheckOutcome, GenError> {
     let path = steering_catalog_path(area);
-    let generated = build_steering_catalog(area)?;
+    let generated = build_steering_catalog(area, snapshot)?;
     if !path.is_file() {
         return Ok(CheckOutcome::MissingCommitted { path });
     }

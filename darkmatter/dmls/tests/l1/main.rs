@@ -9,12 +9,16 @@
 #[path = "../common/mod.rs"]
 mod common;
 
+mod context_construction_guard;
+mod entry_point_parity;
 mod level1_graph_index;
 mod level1_wiki;
 mod lsp_session;
 mod mapping_only_corpus;
 mod no_side_effects;
 mod packaging_contract;
+mod repository_contexts;
+mod schema_roots_parity;
 mod shell_suffixes;
 mod stdio_subprocess;
 mod strict_mode_recovery_spike;

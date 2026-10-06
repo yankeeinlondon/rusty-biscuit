@@ -181,7 +181,8 @@ fn emit(markup: &str) {
     crate::log::message(&Prose::new(markup.to_string()).render(&crate::log::terminal()));
 }
 
-/// Keep ledger-supplied text from being read as Prose markup.
+/// Keep ledger-supplied text from being read as Prose markup, leaving the
+/// code spans it marks with backticks literal.
 pub(crate) fn escape(text: &str) -> String {
-    Prose::escape_text(text)
+    Prose::escape_text_outside_code_spans(text)
 }

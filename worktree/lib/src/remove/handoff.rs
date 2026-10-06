@@ -19,9 +19,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::cache::{atomic_write, repo_cache_file};
 use crate::error::WorktreeError;
+use crate::git::git_from;
 use super::included::{BaselineBinding, RulesBinding};
 
-pub const HANDOFF_FORMAT_VERSION: u32 = 3;
+pub const HANDOFF_FORMAT_VERSION: u32 = 4;
 
 /// How long a record stays valid.
 pub const HANDOFF_TTL: Duration = Duration::from_secs(60);
@@ -35,6 +36,10 @@ pub struct HandoffState {
     pub target: PathBuf,
     pub head: String,
     pub branch: Option<String>,
+    /// The Git directory the checkout's `.git` leads to (its worktree record),
+    /// from [`checkout_git_dir`]. A link restored before the first run's
+    /// checks, then broken or redirected, cannot match it.
+    pub git_dir: PathBuf,
     /// [`crate::remove::Inventory::fingerprint`] of the worktree.
     pub fingerprint: String,
     pub rules: RulesBinding,
@@ -189,6 +194,9 @@ pub fn verify(record: &HandoffRecord, fresh: &HandoffState, cwd: &Path) -> Resul
     if stored.branch != fresh.branch {
         changed.push("branch");
     }
+    if !same_path(&stored.git_dir, &fresh.git_dir) {
+        changed.push("worktree link");
+    }
     if stored.fingerprint != fresh.fingerprint {
         changed.push("uncommitted or included files");
     }
@@ -206,6 +214,16 @@ pub fn verify(record: &HandoffRecord, fresh: &HandoffState, cwd: &Path) -> Resul
     } else {
         Err(HandoffRefusal::Changed(changed))
     }
+}
+
+/// The Git directory that the checkout at `target` resolves to, canonical.
+/// Git runs from `base`, so nothing holds the target open.
+///
+/// In a directory whose `.git` is gone, Git discovers any enclosing
+/// repository instead, so the answer is the base's Git directory there, which
+/// never equals a linked worktree's record.
+pub fn checkout_git_dir(base: &Path, target: &Path) -> Result<PathBuf, WorktreeError> {
+    git_from(base, target, &["rev-parse", "--path-format=absolute", "--git-dir"]).map(|dir| canonical(Path::new(&dir)))
 }
 
 /// `path` canonical, without Windows' verbatim prefix; unchanged when it
@@ -238,6 +256,7 @@ mod tests {
             target,
             head: "1111111111111111111111111111111111111111".into(),
             branch: Some("feat/x".into()),
+            git_dir: dir.join("base/.git/worktrees/wt"),
             fingerprint: "f".repeat(64),
             rules: super::super::included::IncludedAssessment::default().rules,
             baseline: BaselineBinding::None,
@@ -320,7 +339,7 @@ mod tests {
         assert_eq!(consume(&path, 0), Err(HandoffError::Missing));
 
         let mut record = HandoffRecord::new(state(dir.path()), approvals(), 0);
-        record.format_version = 2;
+        record.format_version = 3;
         write_record(&path, &record).unwrap();
         assert_eq!(consume(&path, 0), Err(HandoffError::Missing));
     }
@@ -343,6 +362,7 @@ mod tests {
             ("checked-out commit", Box::new(|s| s.head = "3".repeat(40))),
             ("branch", Box::new(|s| s.branch = Some("feat/y".into()))),
             ("branch", Box::new(|s| s.branch = None)),
+            ("worktree link", Box::new(|s| s.git_dir = elsewhere.clone())),
             ("uncommitted or included files", Box::new(|s| s.fingerprint = "0".repeat(64))),
             ("include rules", Box::new(|s| s.rules.presence = "changed".into())),
             ("copy baseline", Box::new(|s| s.baseline = BaselineBinding::Record {
@@ -359,6 +379,32 @@ mod tests {
                 "{field}"
             );
         }
+    }
+
+    #[test]
+    fn the_checkout_git_dir_follows_the_link_not_the_record() {
+        let repo = super::super::test_support::TestRepo::new();
+        let base = repo.path();
+        let first = repo.add_worktree("feat/a", "a", "main");
+        let second = repo.add_worktree("feat/b", "b", "main");
+        let record_of = |checkout: &Path| {
+            super::super::admin_entry::admin_entry_for(&base, checkout).unwrap().dir
+        };
+        let (first_record, second_record) = (record_of(&first), record_of(&second));
+
+        assert_eq!(checkout_git_dir(&base, &first).unwrap(), canonical(&first_record));
+
+        // `.git` redirected to the other record: the records' back-references
+        // are unchanged, so only the forward link shows it.
+        let redirect = format!("gitdir: {}\n", second_record.display());
+        fs::write(first.join(".git"), redirect).unwrap();
+        assert_eq!(checkout_git_dir(&base, &first).unwrap(), canonical(&second_record));
+        assert_eq!(record_of(&first), first_record);
+
+        // Broken: nothing to resolve outside any repository.
+        fs::remove_file(first.join(".git")).unwrap();
+        let broken = checkout_git_dir(&base, &first);
+        assert!(broken.is_err(), "{broken:?}");
     }
 
     #[test]

@@ -61,6 +61,8 @@ All file references in the CLI use the `FileReference` struct from the `biscuit-
 
 **"Base directory"** means the directory a reference was authored from: for an argument you type at the shell that is the directory you ran `md` in; for a reference written inside a document it is the directory of the document being composed.
 
+A relative reference may not climb out of the repository that holds its base directory, whether you type it as an argument or a document contains it: inside `/work/repo`, `md compose ../../elsewhere.md` fails with `failure: invalid-reference` when it would leave `/work/repo`. An absolute path may name any file. See [Relative references stay in their tree](../topics/file-referencing.md#relative-references-stay-in-their-tree).
+
 Two modifiers compose with every kind above:
 
 - a leading `%` (`%@README.md`) switches from exact-path probing to a recursive search of the same roots
@@ -71,7 +73,35 @@ A few things worth knowing before typing one of these at a shell prompt:
 - `&` is a shell control operator, so repository-root references have to be quoted: `md render '&docs/plan.md'`
 - `&` and `^` are repository-contained — using either outside a repository, or writing a payload that escapes it (`&../outside.md`), is a typed error rather than a silent miss
 - `@` is the one multi-homed introducer that can leave the repository, because `$HOME` is in its search list; reach for `^` when repository containment is the point
-- the `!` sigil has been removed from the grammar; a reference beginning with `!` is now a parse error that suggests `^`
+- the `!` sigil has been removed from the grammar; a reference beginning with `!` is now a parse error (`failure: invalid-reference`) that suggests `^`
+
+### Every file argument uses this grammar
+
+Every command that reads a file you name opens it through the table above, from the directory you ran `md` in: the document argument of `md <file>`, `render`, `compose`, `clean`, `toc`, `get`, `set`, `rm`, `edit`, `hash`, both inputs of `delta`, `graph`, `validate refs`, `schema validate`, `schema detect`, `schema triggers`, and `code-block` (see below). So `md schema validate '@notes.md'`, `md validate refs '&docs/plan.md'`, and `md get '^README.md' title` work like `md compose` does. Output destinations, cache directories, and `--magic-root` directories are settings, not files to read, and are plain paths.
+
+An argument is parsed before anything is read, so text that is not valid reference syntax fails with `failure: invalid-reference` even when a file with that literal name exists:
+
+```text
+$ ls
+@   doc.md
+$ md get @ title            # a bare `@` is an introducer with no path
+⤫ FileReferenceError: file argument not resolved
+┃ failure: invalid-reference
+$ md get ./@ title          # `./` names the literal file
+"Literal"
+```
+
+The same holds for a bare `&` or `^`, and for the removed `!` sigil (`md get '!old.md' title`). Spell a file whose name starts with one of these characters with `./` in front.
+
+A few commands add a rule of their own:
+
+- **`md code-block <input>`** renders `--content` input as typed and requires `--file` input to resolve to a file. With neither flag, the input is read as a file only when it is one line of reference syntax naming an existing file (`md code-block '&src/main.rs'`); anything else, including a reference that matches nothing, a malformed one such as `@`, and a relative path leaving the repository, is rendered as literal code and no file is read.
+- **`md hash <directory>`** names its directory with the same grammar (`md hash '&docs'`); a relative directory may not leave the repository. The first place the reference looks that holds a file or a directory decides between hashing one document and a tree, so `md hash notes.md` hashes a nearer `notes.md` file before a repository-root `notes.md/` directory, and a place that cannot be checked fails with `failure: io`.
+- **`md edit <file>`** creates the file when the reference matches nothing, at the first place the reference would look: beside you for `./new.md` or `new.md`, at the repository root for `&new.md`. A malformed reference or a path leaving the repository is refused before any file is created or editor opened.
+- **`md schema triggers <file>`** inspects a document inside a repository and prints the file it opened on its `Document:` line; a document outside every repository fails with `failure: missing-context`, and a schema root it cannot inspect (such as one below a folder without search permission) fails with an I/O error naming that root instead of listing the roots.
+- **`md schema validate`** reports an argument that does not open on that file's line (`could not be opened`, with its `failure:` row) and exits `3`, as for a file whose frontmatter cannot be parsed.
+
+To search more directories for `@` references, pass `--magic-root <DIR>` before the subcommand (`md --magic-root shared compose '@notes.md'`); it is repeatable and applies to every route. See [Magic Paths](../topics/magic-paths.md#from-the-md-command-line).
 
 The canonical reference for the full grammar — including the error vocabulary and the `resolve_detailed()` diagnostics — is [File References in `biscuit-file`](../../../biscuit-file/docs/topics/file-references.md). For how darkmatter injects its own `@` search roots, see [Magic Paths](../topics/magic-paths.md).
 

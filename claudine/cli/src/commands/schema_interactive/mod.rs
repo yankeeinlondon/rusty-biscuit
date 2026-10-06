@@ -97,16 +97,24 @@ pub fn resolve_interactive_options(silent: bool) -> InteractiveSchemaOptions {
 /// collection). User cancellation of the prompt bubbles back as the
 /// original `MissingProperties` error so the CLI shows the non-TTY
 /// remediation block.
+#[allow(clippy::too_many_arguments)]
 pub fn pre_validate_with_interactive_collection(
     source: &ResolvedCompositionSource,
     set_overrides: Option<&serde_json::Value>,
     interactive: InteractiveSchemaOptions,
     term: &Terminal,
     file_ref_fallback_dir: Option<&std::path::Path>,
+    file_resolution_context: &biscuit_file::FileResolutionContext,
     defer_schema_verdict: bool,
     mode: CompositionMode,
 ) -> Result<PreValidatedSchema, CompositionError> {
-    let first = pre_validate_schema_for_mode(source, set_overrides, file_ref_fallback_dir, mode);
+    let first = pre_validate_schema_for_mode(
+        source,
+        set_overrides,
+        file_ref_fallback_dir,
+        file_resolution_context,
+        mode,
+    );
     let Err(err) = first else {
         return first;
     };
@@ -135,6 +143,7 @@ pub fn pre_validate_with_interactive_collection(
             interactive,
             err,
             file_ref_fallback_dir,
+            file_resolution_context,
         );
     }
 
@@ -162,9 +171,13 @@ pub fn pre_validate_with_interactive_collection(
         });
     }
 
-    if let Ok(Some(report)) =
-        build_schema_status_report_for_mode(source, set_overrides, file_ref_fallback_dir, mode)
-    {
+    if let Ok(Some(report)) = build_schema_status_report_for_mode(
+        source,
+        set_overrides,
+        file_ref_fallback_dir,
+        file_resolution_context,
+        mode,
+    ) {
         render_status_report(&report, term);
     }
 
@@ -181,6 +194,7 @@ pub fn pre_validate_with_interactive_collection(
         source,
         Some(&serde_json::Value::Object(merged)),
         file_ref_fallback_dir,
+        file_resolution_context,
         mode,
     )
 }
@@ -206,6 +220,7 @@ fn resolve_unresolved_file_reference(
     interactive: InteractiveSchemaOptions,
     err: CompositionError,
     file_ref_fallback_dir: Option<&std::path::Path>,
+    file_resolution_context: &biscuit_file::FileResolutionContext,
 ) -> Result<PreValidatedSchema, CompositionError> {
     let CompositionError::UnresolvedFileReference {
         ref property,
@@ -239,6 +254,7 @@ fn resolve_unresolved_file_reference(
         source,
         Some(&serde_json::Value::Object(merged)),
         file_ref_fallback_dir,
+        file_resolution_context,
     )
 }
 
@@ -264,6 +280,9 @@ fn downgrade_to_schema_validation(err: CompositionError) -> CompositionError {
                 source_path,
                 message: format!("{pointer}: {reason}"),
                 problems: vec![pointer],
+                // Only a reference no file matched becomes an unresolved
+                // partial.
+                failures: vec![biscuit_file::ResolutionFailure::NoMatch],
             }
         }
         other => other,
@@ -285,7 +304,7 @@ fn resolve_provided_file_reference(
     let Some(path) = choose_provided_file_reference(property, provided, patterns, &ctx)? else {
         return Ok(None);
     };
-    let value = resolve_file_value(&path)?;
+    let value = resolve_file_value(&path, &ctx)?;
     if is_array {
         Ok(Some(serde_json::Value::Array(vec![value])))
     } else {
@@ -339,10 +358,9 @@ fn choose_provided_file_reference(
 
 /// Glob candidates filtered by the provided partial substring.
 ///
-/// The testable core of [`resolve_provided_file_reference`]: walks the
-/// `match(...)` patterns from the launch area
-/// ([`scopes::property_value_root`]) and retains candidates whose path contains
-/// `provided` (case-insensitive), sorted for stable ordering.
+/// The testable core of [`resolve_provided_file_reference`]: the
+/// `match(...)` candidates ([`file_candidate_paths`], in native order) whose
+/// path contains `provided` (case-insensitive).
 fn provided_partial_candidates(
     patterns: &[String],
     provided: &str,
@@ -351,7 +369,6 @@ fn provided_partial_candidates(
     let mut candidates = file_candidate_paths(patterns, ctx);
     let needle = provided.to_ascii_lowercase();
     candidates.retain(|path| scopes::path_matches_query(path, &needle));
-    candidates.sort();
     candidates
 }
 
@@ -637,7 +654,7 @@ fn collect_file(
     patterns: &[String],
 ) -> io::Result<serde_json::Value> {
     let ctx = ScopeContext::discover();
-    let mut paths = file_candidate_paths(patterns, &ctx);
+    let paths = file_candidate_paths(patterns, &ctx);
 
     if paths.is_empty() {
         return Err(io::Error::new(
@@ -646,7 +663,6 @@ fn collect_file(
         ));
     }
 
-    paths.sort();
     let options: Vec<ChoiceOption<FileDetail>> = paths
         .into_iter()
         .map(|path| {
@@ -684,13 +700,13 @@ fn collect_file(
         }
         selected
             .into_iter()
-            .map(|d| resolve_file_value(&d.path))
+            .map(|d| resolve_file_value(&d.path, &ctx))
             .collect::<io::Result<Vec<_>>>()?
     } else {
         let selected = choose_one_file(options)?.ok_or_else(|| {
             io::Error::new(io::ErrorKind::InvalidData, "no file selected")
         })?;
-        vec![resolve_file_value(&selected.path)?]
+        vec![resolve_file_value(&selected.path, &ctx)?]
     };
 
     if is_array {
@@ -738,11 +754,15 @@ fn path_label(path: &Path, ctx: &ScopeContext) -> String {
     to_portable_string(path)
 }
 
-fn resolve_file_value(path: &Path) -> io::Result<serde_json::Value> {
+/// The chosen candidate as a resolved absolute path, resolved through the
+/// completion directory's context so it means what the run will read.
+fn resolve_file_value(path: &Path, ctx: &ScopeContext) -> io::Result<serde_json::Value> {
+    let context = crate::completion::scopes::file_resolution_context(ctx)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
     let reference = FileReference::new(path.to_str().unwrap_or(""))
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
     let resolved = reference
-        .resolve()
+        .resolve_in_context(&context)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?
         .ok_or_else(|| {
             io::Error::new(

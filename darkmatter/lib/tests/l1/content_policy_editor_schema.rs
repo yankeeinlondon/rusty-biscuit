@@ -35,7 +35,7 @@ fn validate_entries(schema: &str, entries: &[&str]) -> ValidationReport {
     std::fs::write(&doc_path, &source).expect("write doc");
 
     let markdown: Markdown = source.as_str().into();
-    DarkmatterSchemas::new()
+    DarkmatterSchemas::new(crate::request_support::context_at(dir.path()))
         .validate(&markdown.with_source(ComposeSource::File(doc_path)))
         .expect("the content-policy schema loads and validates")
 }

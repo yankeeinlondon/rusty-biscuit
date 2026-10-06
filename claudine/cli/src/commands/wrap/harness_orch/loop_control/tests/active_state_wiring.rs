@@ -35,7 +35,7 @@ fn materialized_with_prompt(prompt: &str) -> MaterializedHarnessPrompt {
         selection_hints: claudine::composition::EffectiveSelectionHints::default(),
         inline_closure_plan: None,
         launch_schema: None,
-        file_resolution_context: None,
+        file_resolution_context: crate::request::test_context(),
         compose_context: None,
         document_epoch: None,
         lifecycle: None,

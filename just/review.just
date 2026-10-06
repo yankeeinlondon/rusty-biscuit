@@ -61,7 +61,10 @@ fix +args:
         spec="$(printf '%s\n' "${matches}" | fzf --select-1 --height=15 --border --border-label 'Choose the spec to fix')"
     fi
 
-    implemented="$(md get --raw "${spec}" implemented 2>/dev/null || true)"
+    if ! implemented="$(md get --raw "${spec}" implemented)"; then
+        echo -e "{{ red }}ERROR:{{ reset }} could not read the frontmatter of $(just _link "${spec}"); fix the error above before running the review/fix cycle." >&2
+        exit 1
+    fi
     if [[ "${implemented}" != "true" ]]; then
         echo -e "{{ yellow }}$(just _link "${spec}"){{ reset }} is not marked {{ italic }}implemented{{ reset }} (implemented: '${implemented}'); implement it before running the review/fix cycle." >&2
         exit 1
@@ -73,14 +76,18 @@ fix +args:
     # review's `ready`, and a ready review also sets the spec's `completed`.
     latest_review() {
         local iterations
-        iterations="$(md get --raw "${spec}" review_iterations 2>/dev/null || true)"
+        iterations="$(md get --raw "${spec}" review_iterations)" || return 1
         [[ "${iterations}" =~ ^[0-9]+$ ]] && (( iterations > 0 )) && echo "${dir}/review-${iterations}.md"
         return 0
     }
 
     review="$(latest_review)"
-    if [[ -n "${review}" && "$(md get --raw "${review}" ready 2>/dev/null || true)" == "true" ]] \
-        || [[ "$(md get --raw "${spec}" completed 2>/dev/null || true)" == "true" ]]; then
+    review_ready=""
+    if [[ -n "${review}" && -f "${review}" ]]; then
+        review_ready="$(md get --raw "${review}" ready)"
+    fi
+    completed="$(md get --raw "${spec}" completed)"
+    if [[ "${review_ready}" == "true" || "${completed}" == "true" ]]; then
         echo -e "$(just _link "${spec}") is already {{ green }}production ready{{ reset }}; nothing to do."
         exit 0
     fi
@@ -110,14 +117,17 @@ fix +args:
     echo
 
     cycle=0
-    recurring=()
     while (( cycle < max_cycles )); do
         (( ++cycle ))
         review="$(latest_review)"
 
         # Without an unimplemented review there are no findings to implement,
         # so the cycle starts with its review.
-        if [[ -n "${review}" && -f "${review}" && "$(md get --raw "${review}" implemented 2>/dev/null || true)" != "true" ]]; then
+        review_implemented="true"
+        if [[ -n "${review}" && -f "${review}" ]]; then
+            review_implemented="$(md get --raw "${review}" implemented)"
+        fi
+        if [[ "${review_implemented}" != "true" ]]; then
             echo -e "🛠  cycle ${cycle}/${max_cycles}: implementing the findings of $(just _link "${review}")"
             claudine compose "@prompts/_implement/implement-suggestions.md" -y --${implement_agent} --model "${implement_model}" spec="${spec}"
         fi
@@ -126,7 +136,7 @@ fix +args:
         claudine compose "@prompts/_reviews/feature-review.md" -y --${review_agent} --model "${review_model}" spec="${spec}"
 
         review="$(latest_review)"
-        ready="$(md get --raw "${review}" ready 2>/dev/null || true)"
+        ready="$(md get --raw "${review}" ready)"
         if [[ "${ready}" == "true" ]]; then
             echo -e "👍 $(just _link "${review}") marked the spec {{ green }}production ready{{ reset }} after ${cycle} cycle(s)"
             exit 0
@@ -135,19 +145,9 @@ fix +args:
             echo -e "{{ red }}ERROR:{{ reset }} ${review} did not set a boolean 'ready' frontmatter property" >&2
             exit 1
         fi
-        # A recurring finding class does not stop the loop: the review already
-        # swept every sibling site, so the next cycle implements the full list.
-        if [[ "$(md get --raw "${review}" recurrence 2>/dev/null || true)" == "true" ]]; then
-            recurring+=("${review}")
-            echo -e "{{ yellow }}NOTE:{{ reset }} $(just _link "${review}") repeats a finding class an earlier review raised; its sweep list is implemented next."
-        fi
     done
 
     echo -e "{{ red }}ERROR:{{ reset }} ${max_cycles} cycles ran without a production-ready review; latest is $(just _link "$(latest_review)")" >&2
-    if (( ${#recurring[@]} > 0 )); then
-        echo -e "    reviews reporting a recurring finding class (read their {{ italic }}Recurrence{{ reset }} section first):" >&2
-        for r in "${recurring[@]}"; do echo -e "    - $(just _link "${r}")" >&2; done
-    fi
     exit 1
 
 # No-op recipe: reference color vars so linters won't report them as unused.

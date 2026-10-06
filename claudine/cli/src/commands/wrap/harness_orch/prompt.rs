@@ -219,14 +219,14 @@ fn harness_prepare_options(
         // retry, resume, or in-place adoption composes it exactly as the first
         // preparation did.
         proxy_overlay: state.overlay.clone(),
-        ..claudine::composition::PrepareOptions::default()
+        ..claudine::composition::PrepareOptions::new(input_layers.file_resolution_context.clone())
     });
     if let Some((context, file_resolution)) = propagated {
         options.prepared_context = Some(context);
         options.document_epoch = state.document_epoch.clone();
-        options.file_resolution_context = Some(file_resolution);
+        options.file_resolution_context = file_resolution;
     } else if let Some(source_context) = source_context {
-        options.file_resolution_context = Some(source_context.file_resolution_context().clone());
+        options.file_resolution_context = source_context.file_resolution_context().clone();
     }
     options
 }

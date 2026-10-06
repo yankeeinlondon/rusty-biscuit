@@ -148,3 +148,25 @@ impl TestRepo {
         sha
     }
 }
+
+/// Moves the directory at `path` to its sibling `saved_name` and puts a
+/// directory link to it at `path`: a symbolic link, or on Windows a junction,
+/// which needs no privilege. Returns the moved directory.
+pub fn replace_with_link(path: &Path, saved_name: &str) -> PathBuf {
+    let saved = path.with_file_name(saved_name);
+    fs::rename(path, &saved).unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&saved, path).unwrap();
+    #[cfg(windows)]
+    {
+        let status = Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(path)
+            .arg(&saved)
+            .stdout(std::process::Stdio::null())
+            .status()
+            .expect("cmd runs");
+        assert!(status.success(), "mklink /J needs no privilege");
+    }
+    saved
+}

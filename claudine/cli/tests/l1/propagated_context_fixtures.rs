@@ -35,15 +35,6 @@ fn isolated_fixture_can_opt_in_to_repo_prompt_and_appendix_discovery() {
 /// `$HOME` is the isolation facility this fixture requires: it seeds the
 /// user-global prompt under the fixture home and asserts the child process
 /// discovers it.
-///
-/// Unix-only for the reason recorded in the Phase 4 home/config discovery
-/// note — `dirs` 6 reads the Windows profile through the Known Folder API, so
-/// the fixture's `HOME`/`USERPROFILE` overrides are inert there and the child
-/// would read the real user profile. That inertness is the specified native
-/// behavior and must not be replaced with HOME-first production discovery.
-/// The user-home leg of standard discovery is covered on every platform by
-/// `system_prompt::resolve::tests::standard_discovery_user_home_is_injectable`.
-#[cfg(unix)]
 #[test]
 fn isolated_fixture_can_opt_in_to_user_prompt_discovery() {
     let fixture = CliProcessFixture::named("context-user-prompt");

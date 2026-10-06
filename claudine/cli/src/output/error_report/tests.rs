@@ -367,3 +367,68 @@ fn semantic_error_kind_maps_to_agent_error_category() {
         assert_eq!(AgentErrorCategory::from(kind), category);
     }
 }
+
+// ── Display rows ──
+
+fn report_rows(report: &AgentErrorReport) -> Vec<String> {
+    let term = Terminal::builder()
+        .width(300)
+        .color_depth(biscuit_terminal::discovery::detection::ColorDepth::None)
+        .build();
+    biscuit_terminal::utils::escape_codes::strip_escape_codes(report.status_block(&term).render(&term))
+        .lines()
+        .map(|line| line.trim_start().trim_start_matches('┃').trim().to_string())
+        .filter(|row| !row.is_empty())
+        .collect()
+}
+
+#[test]
+fn every_report_part_starts_on_a_row_of_its_own() {
+    let report = AgentErrorReport {
+        provider: Provider::OpenCode,
+        exit_code: 1,
+        category: AgentErrorCategory::AgentNative,
+        summary: "summary one\nsummary two".into(),
+        body_list: Some(vec!["item one".into(), "item two".into()]),
+        footer: Some("footer".into()),
+        detail: Some("detail".into()),
+        hint: Some("hint".into()),
+        suggestions: None,
+        suggestion_style: SuggestionStyle::BareList,
+        location: None,
+    };
+    let rows = report_rows(&report);
+    let start = rows
+        .iter()
+        .position(|row| row.starts_with("Agent Error (OpenCode, exit 1)"))
+        .unwrap_or_else(|| panic!("heading row: {rows:#?}"));
+    let expected = [
+        "summary one",
+        "summary two",
+        "- item one",
+        "- item two",
+        "footer",
+        "detail",
+        "hint",
+    ];
+    assert_eq!(rows[start + 1..start + 1 + expected.len()], expected, "{rows:#?}");
+}
+
+#[test]
+fn the_no_model_report_keeps_its_authored_rows() {
+    let report = AgentErrorReport::no_model_provided(Provider::OpenCode);
+    let rows = report_rows(&report);
+    for authored in report.summary.lines().chain(report.footer.as_deref().unwrap().lines()) {
+        let plain = authored
+            .replace("<yellow>", "")
+            .replace("</yellow>", "")
+            .replace("<blue>", "")
+            .replace("</blue>", "")
+            .replace("<dim>", "")
+            .replace("</dim>", "");
+        assert!(
+            rows.iter().any(|row| row == plain.trim()),
+            "authored row `{plain}` missing: {rows:#?}"
+        );
+    }
+}

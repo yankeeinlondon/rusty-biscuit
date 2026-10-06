@@ -1,7 +1,11 @@
 //! File discovery for the `::file-links` directive.
 //!
-//! Resolves glob and directory targets relative to the containing document,
-//! enforces a repository/CWD security boundary, and computes the rendering
+//! A glob target is a [`GlobReference`] listed in the containing document's
+//! context, so it takes every reference prefix and the merged, most-local-first
+//! roots of `find_files()`. A `--dir` target is a directory relative to the
+//! document. A `--dir` scan and a bare, `./`, or `../` glob are held to the
+//! context's tree root (`base_dir()`), never to the process's current
+//! directory. The result carries the rendering
 //! metadata consumed by the
 //! [`FileSystem`](biscuit_terminal::components::filesystem::FileSystem)
 //! component.
@@ -9,22 +13,23 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use globset::GlobBuilder;
+use biscuit_file::{FileResolutionContext, GlobReference};
 
 use super::types::{
     ALLOWED_EXTENSIONS, FileLinksDirective, FileLinksError, FileLinksMode, FileLinksRender,
     FileLinksResult,
 };
 use crate::markdown::compose::ComposeSource;
-use crate::markdown::compose::find_git_root_from;
 
-/// Discovers file-link targets for a single directive.
+/// Discovers file-link targets for a single directive authored in `source`,
+/// whose resolution context is `document_context`.
 ///
 /// Returns a [`FileLinksResult`] whose `render` field is `None` when no files
 /// matched (the caller decides how to surface the empty result).
 pub fn discover(
     directive: &FileLinksDirective,
     source: &ComposeSource,
+    document_context: &FileResolutionContext,
 ) -> Result<FileLinksResult, FileLinksError> {
     let source_path = require_source_file(source, directive.line)?;
     let source_dir = source_path
@@ -32,26 +37,31 @@ pub fn discover(
         .map(Path::to_path_buf)
         .unwrap_or_else(|| PathBuf::from("."));
     let source_canonical = canonicalize(&source_path);
-    let (boundary, is_repo) = resolve_boundary(&source_path)?;
+    let boundary = canonicalize(document_context.base_dir());
+    let is_repo = document_context.repository_root().is_some();
 
-    let (candidates, component_root) = match &directive.mode {
+    let (candidates, component_root, skipped) = match &directive.mode {
         FileLinksMode::Glob(glob) => {
-            discover_glob(glob, &source_dir, &boundary, &source_canonical, directive.line)?
+            discover_glob(glob, document_context, &source_canonical, directive.line)?
         }
-        FileLinksMode::Dir { path, depth } => discover_dir(
-            path,
-            *depth,
-            &source_dir,
-            &boundary,
-            &source_canonical,
-            directive.line,
-        )?,
+        FileLinksMode::Dir { path, depth } => {
+            let (candidates, root) = discover_dir(
+                path,
+                *depth,
+                &source_dir,
+                &boundary,
+                &source_canonical,
+                directive.line,
+            )?;
+            (candidates, root, Vec::new())
+        }
     };
 
     if candidates.is_empty() {
         return Ok(FileLinksResult {
             directive: directive.clone(),
             render: None,
+            skipped,
         });
     }
 
@@ -59,6 +69,7 @@ pub fn discover(
     Ok(FileLinksResult {
         directive: directive.clone(),
         render: Some(render),
+        skipped,
     })
 }
 
@@ -70,102 +81,43 @@ fn require_source_file(source: &ComposeSource, line: usize) -> Result<PathBuf, F
     }
 }
 
-/// Resolves the security boundary: repo root when inside a repo, CWD otherwise.
-///
-/// Returns `(canonical_boundary, is_repo)`.
-fn resolve_boundary(source_path: &Path) -> Result<(PathBuf, bool), FileLinksError> {
-    let (boundary, is_repo) = match find_git_root_from(source_path) {
-        Some(root) => (root, true),
-        None => (std::env::current_dir()?, false),
-    };
-    let canonical = canonicalize(&boundary);
-    Ok((canonical, is_repo))
-}
-
 /// Canonicalize a path, falling back to the original on failure.
 fn canonicalize(path: &Path) -> PathBuf {
-    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+    biscuit_file::canonicalize_simplified(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 // ── Glob discovery ──────────────────────────────────────────────────────────
 
-/// Discovers files matching a glob pattern.
+/// Discovers the files a glob reference lists, keeping only allowed
+/// extensions and leaving out the containing document.
 ///
-/// The glob is resolved relative to `source_dir`. The walk is scoped to the
-/// literal directory prefix extracted from the glob so sibling subtrees are
-/// not traversed. Returns the sorted, deduplicated canonical candidate paths
-/// and the derived component root (common ancestor of all matches).
+/// Returns the candidates (display paths, deduplicated on their canonical
+/// target), the component root (their common ancestor), and the file
+/// symlinks the listing skipped because their target leaves the file tree.
 fn discover_glob(
     glob: &str,
-    source_dir: &Path,
-    boundary: &Path,
+    document_context: &FileResolutionContext,
     source_canonical: &Path,
     line: usize,
-) -> Result<(Vec<PathBuf>, PathBuf), FileLinksError> {
-    let matcher = GlobBuilder::new(glob)
-        .literal_separator(true)
-        .build()
-        .map_err(|e| FileLinksError::InvalidGlob {
-            pattern: glob.to_string(),
-            line,
-            message: e.to_string(),
-        })?
-        .compile_matcher();
-
-    let (literal_prefix, walk_base) = split_glob_prefix(glob, source_dir);
+) -> Result<(Vec<PathBuf>, PathBuf, Vec<biscuit_file::SkippedEntry>), FileLinksError> {
+    let glob_error = |source| FileLinksError::GlobReference { line, source };
+    let listing = GlobReference::new([glob])
+        .and_then(|globs| globs.list_files(document_context))
+        .map_err(glob_error)?;
 
     let mut candidates = BTreeMap::new();
-    if walk_base.is_dir() {
-        walk_recursive(
-            &walk_base,
-            &walk_base,
-            0,
-            None,
-            boundary,
-            source_canonical,
-            &mut candidates,
-            &|relative, _canonical| {
-                let rel_str = path_to_forward_slashes(relative);
-                let full_rel = if literal_prefix.is_empty() {
-                    rel_str
-                } else {
-                    format!("{literal_prefix}/{rel_str}")
-                };
-                matcher.is_match(&full_rel)
-            },
-        );
+    for path in &listing.matches {
+        let canonical = canonicalize(path);
+        if canonical == *source_canonical || !has_allowed_extension(path) {
+            continue;
+        }
+        insert_candidate(&mut candidates, canonical, display_path(path));
     }
 
-    let candidates_vec: Vec<PathBuf> = candidates.into_values().collect();
-    let component_root = match common_ancestor(&candidates_vec) {
-        Some(root) => root,
-        None => return Ok((Vec::new(), walk_base)),
-    };
-    Ok((candidates_vec, component_root))
-}
-
-/// Splits a glob into its literal directory prefix and the resolved walk base.
-///
-/// Returns `(literal_prefix, walk_base)` where `literal_prefix` is the path
-/// component before the first wildcard (e.g. `"docs"` for `docs/**/*.md`,
-/// empty for `*.md`), and `walk_base` is that prefix resolved relative to
-/// `source_dir`.
-fn split_glob_prefix(glob: &str, source_dir: &Path) -> (String, PathBuf) {
-    let wildcard_pos = glob.chars().position(|c| matches!(c, '*' | '?' | '['));
-    let literal_part = match wildcard_pos {
-        Some(pos) => &glob[..pos],
-        None => glob,
-    };
-    let prefix = match literal_part.rfind('/') {
-        Some(slash_pos) => literal_part[..slash_pos].to_string(),
-        None => String::new(),
-    };
-    let walk_base = if prefix.is_empty() {
-        source_dir.to_path_buf()
-    } else {
-        source_dir.join(&prefix)
-    };
-    (prefix, walk_base)
+    let candidates: Vec<PathBuf> = candidates.into_values().collect();
+    let component_root = common_ancestor(&candidates)
+        .unwrap_or_else(|| canonicalize(document_context.cwd()));
+    Ok((candidates, component_root, listing.skipped))
 }
 
 // ── Directory discovery ─────────────────────────────────────────────────────
@@ -201,29 +153,16 @@ fn discover_dir(
     let component_root = canonicalize(&target);
 
     let mut candidates = BTreeMap::new();
-    collect_files(
-        &target,
-        Some(depth),
-        boundary,
-        source_canonical,
-        &mut candidates,
-        |_relative, _canonical| true,
-    );
+    walk_recursive(&target, 0, depth, boundary, source_canonical, &mut candidates)
+        .map_err(|(path, source)| FileLinksError::Unreadable { path, line, source })?;
 
     Ok((candidates.into_values().collect(), component_root))
 }
 
-// ── Shared walking / filtering ─────────────────────────────────────────────
+// ── Directory walking / filtering ──────────────────────────────────────────
 
-/// Walks `root` and collects matching files keyed by their canonical target.
-///
-/// The map value is each file's *display path* — the canonicalized parent
-/// directory joined with the entry's own (lexical) name. For ordinary files
-/// this equals the canonical path; for an in-bound symlinked file it preserves
-/// the alias name under its real directory, so the rendered tree and hyperlink
-/// represent the matched file rather than its canonical target. The map key is
-/// the true canonical target, used for the boundary check, self-exclusion, and
-/// deduplication.
+/// Walks `dir` for `--dir` mode, collecting files keyed by their canonical
+/// target (see [`insert_candidate`]).
 ///
 /// ## Filtering
 ///
@@ -231,62 +170,31 @@ fn discover_dir(
 /// - Extension must be in [`ALLOWED_EXTENSIONS`] (case-insensitive).
 /// - Canonical target must be within `boundary`.
 /// - The source document itself is excluded.
-/// - Symlinked directories that resolve outside the boundary are not descended
-///   into; symlinked files that escape are dropped.
-///
-/// `extra_filter` receives the path relative to `root` and the canonical path,
-/// and must return `true` for files to include (e.g. glob matching).
-fn collect_files(
-    root: &Path,
-    max_depth: Option<u32>,
-    boundary: &Path,
-    source_canonical: &Path,
-    out: &mut BTreeMap<PathBuf, PathBuf>,
-    extra_filter: impl Fn(&Path, &Path) -> bool,
-) {
-    walk_recursive(
-        root,
-        root,
-        0,
-        max_depth,
-        boundary,
-        source_canonical,
-        out,
-        &extra_filter,
-    );
-}
-
-/// Recursive walker. `base` is the original walk root used to compute relative
-/// paths for `extra_filter`.
-#[allow(clippy::too_many_arguments)]
+/// - Symlinked directories are not descended into; symlinked files whose
+///   target escapes `boundary` are dropped.
+/// - A dangling symlink, or an entry that vanished during the scan, is
+///   skipped. Any other failure to read a directory or an entry is returned
+///   with the path that failed, so an unreadable directory is never a
+///   silently shorter tree.
 fn walk_recursive(
     dir: &Path,
-    base: &Path,
     current_depth: u32,
-    max_depth: Option<u32>,
+    max_depth: u32,
     boundary: &Path,
     source_canonical: &Path,
     out: &mut BTreeMap<PathBuf, PathBuf>,
-    extra_filter: &impl Fn(&Path, &Path) -> bool,
-) {
-    let entries = match std::fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(_) => return,
-    };
+) -> Result<(), (PathBuf, std::io::Error)> {
+    let entries = std::fs::read_dir(dir).map_err(|error| (dir.to_path_buf(), error))?;
 
-    // The directory is always a real directory (symlinked directories are not
-    // descended into), so its canonical form is the stable parent for each
-    // entry's display path.
-    let dir_canonical = canonicalize(dir);
-
-    for entry in entries.flatten() {
+    for entry in entries {
+        let entry = entry.map_err(|error| (dir.to_path_buf(), error))?;
         let entry_path = entry.path();
 
         // Skip symlinked directories to avoid loops; include symlinked files.
         let is_symlink = entry
             .file_type()
-            .map(|ft| ft.is_symlink())
-            .unwrap_or(false);
+            .map_err(|error| (entry_path.clone(), error))?
+            .is_symlink();
 
         let canonical = canonicalize(&entry_path);
 
@@ -303,50 +211,61 @@ fn walk_recursive(
         // Determine real file type (follows symlinks).
         let metadata = match std::fs::metadata(&entry_path) {
             Ok(m) => m,
-            Err(_) => continue,
+            Err(error) if vanished(&error) => continue,
+            Err(error) => return Err((entry_path, error)),
         };
 
         if metadata.is_file() {
-            if !has_allowed_extension(&entry_path) {
-                continue;
-            }
-            let relative = entry_path.strip_prefix(base).unwrap_or(&entry_path);
-            if extra_filter(relative, &canonical) {
-                // Display path keeps the entry's lexical name under its real
-                // directory; deduplicate on the canonical target, preferring
-                // the lexically smallest alias for determinism.
-                let display = dir_canonical.join(entry.file_name());
-                out.entry(canonical)
-                    .and_modify(|existing| {
-                        if display < *existing {
-                            *existing = display.clone();
-                        }
-                    })
-                    .or_insert(display);
+            if has_allowed_extension(&entry_path) {
+                insert_candidate(out, canonical, display_path(&entry_path));
             }
         } else if metadata.is_dir() {
-            // Don't follow symlinked directories.
-            if is_symlink {
-                continue;
-            }
-            // Respect max_depth (None = unlimited for glob mode).
-            if let Some(max) = max_depth
-                && current_depth >= max
-            {
+            if is_symlink || current_depth >= max_depth {
                 continue;
             }
             walk_recursive(
                 &entry_path,
-                base,
                 current_depth + 1,
                 max_depth,
                 boundary,
                 source_canonical,
                 out,
-                extra_filter,
-            );
+            )?;
         }
     }
+    Ok(())
+}
+
+/// A dangling symlink, or an entry removed (or replaced by a file) after its
+/// directory was listed.
+fn vanished(error: &std::io::Error) -> bool {
+    matches!(
+        error.kind(),
+        std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+    )
+}
+
+/// A matched file's display path: its canonical parent directory joined with
+/// its own (lexical) name. For an ordinary file this is the canonical path;
+/// for a symlinked file it keeps the alias name, so the rendered tree and
+/// hyperlink show the matched file rather than its target.
+fn display_path(path: &Path) -> PathBuf {
+    match (path.parent(), path.file_name()) {
+        (Some(parent), Some(name)) => canonicalize(parent).join(name),
+        _ => canonicalize(path),
+    }
+}
+
+/// Records a candidate keyed by its canonical target, so two aliases of one
+/// file are listed once, under the lexically smallest display path.
+fn insert_candidate(out: &mut BTreeMap<PathBuf, PathBuf>, canonical: PathBuf, display: PathBuf) {
+    out.entry(canonical)
+        .and_modify(|existing| {
+            if display < *existing {
+                *existing = display.clone();
+            }
+        })
+        .or_insert(display);
 }
 
 /// Returns `true` when `path` is `path` itself or a descendant of `boundary`.
@@ -363,14 +282,6 @@ fn has_allowed_extension(path: &Path) -> bool {
             ALLOWED_EXTENSIONS.iter().any(|allowed| *allowed == lower)
         })
         .unwrap_or(false)
-}
-
-/// Converts a path to a forward-slash string for glob matching.
-fn path_to_forward_slashes(path: &Path) -> String {
-    path.components()
-        .filter_map(|c| c.as_os_str().to_str())
-        .collect::<Vec<_>>()
-        .join("/")
 }
 
 // ── Render metadata ─────────────────────────────────────────────────────────
@@ -483,13 +394,27 @@ mod tests {
         fs::create_dir(dir.path().join(".git")).unwrap();
     }
 
+    /// The context a request prepares for `source_path`: rooted at the
+    /// enclosing fake repository when there is one.
+    fn document_context(source_path: &Path) -> FileResolutionContext {
+        let context = FileResolutionContext::new(source_path.parent().unwrap());
+        match crate::markdown::compose::find_git_root_from(source_path) {
+            Some(root) => context.with_repository_root(root),
+            None => context,
+        }
+    }
+
     fn discover_content(
         content: &str,
         source_path: &Path,
     ) -> Result<FileLinksResult, FileLinksError> {
         let directives = parse_file_links_directives(content)?;
         assert_eq!(directives.len(), 1, "expected exactly one directive");
-        discover(&directives[0], &ComposeSource::File(source_path.to_path_buf()))
+        discover(
+            &directives[0],
+            &ComposeSource::File(source_path.to_path_buf()),
+            &document_context(source_path),
+        )
     }
 
     // ── Glob mode ────────────────────────────────────────────────────────────
@@ -583,7 +508,13 @@ mod tests {
         let source = write_file(dir.path(), "index.md", "");
 
         let err = discover_content("::file-links [invalid\n", &source).unwrap_err();
-        assert!(matches!(err, FileLinksError::InvalidGlob { .. }));
+        assert!(matches!(
+            err,
+            FileLinksError::GlobReference {
+                source: biscuit_file::GlobReferenceError::InvalidGlob { .. },
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -724,17 +655,18 @@ mod tests {
     // ── Boundary / security ──────────────────────────────────────────────────
 
     #[test]
-    fn glob_excludes_outside_cwd_boundary() {
-        // No .git in tempdir → boundary is CWD (the worktree). Files in the
-        // tempdir are outside that boundary, so the glob matches nothing.
+    fn without_a_repository_the_context_tree_root_bounds_the_glob() {
+        // No `.git`: the tree root is the context's, never the process's
+        // current directory, so the document's own folder is searchable.
         let dir = TempDir::new().unwrap();
         let docs = dir.path().join("docs");
         write_file(&docs, "a.md", "");
         let source = write_file(dir.path(), "index.md", "");
 
         let result = discover_content("::file-links docs/*.md\n", &source).unwrap();
-        // The tempdir is outside the repo/CWD boundary → no matches.
-        assert!(result.render.is_none());
+        let render = result.render.expect("expected matches");
+        assert_eq!(render.included_paths, vec![PathBuf::from("a.md")]);
+        assert!(!render.uses_repo_icon);
     }
 
     #[test]
@@ -753,22 +685,43 @@ mod tests {
     }
 
     #[test]
-    fn parent_escape_glob_is_filtered_by_boundary() {
+    fn a_relative_glob_cannot_leave_the_repository() {
+        let workspace = TempDir::new().unwrap();
+        let repo = workspace.path().join("repo");
+        fs::create_dir_all(repo.join(".git")).unwrap();
+        write_file(&workspace.path().join("outside"), "outside.md", "");
+        let source = write_file(&repo, "index.md", "");
+
+        let err = discover_content("::file-links ../outside/*.md\n", &source).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                FileLinksError::GlobReference {
+                    source: biscuit_file::GlobReferenceError::RelativeTreeEscape { .. },
+                    ..
+                }
+            ),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn an_absolute_glob_may_name_a_directory_outside_the_repository() {
         let dir = TempDir::new().unwrap();
         make_repo(&dir);
-        write_file(dir.path(), "inside.md", "");
         let outside = TempDir::new().unwrap();
         write_file(outside.path(), "outside.md", "");
-
         let source = write_file(dir.path(), "index.md", "");
 
-        // Try to escape via ..
-        let parent_glob = format!(
+        let glob = format!(
             "::file-links \"{}/*.md\"\n",
-            outside.path().display()
+            biscuit_file::to_portable_string(outside.path())
         );
-        let result = discover_content(&parent_glob, &source).unwrap();
-        assert!(result.render.is_none());
+        let render = discover_content(&glob, &source)
+            .unwrap()
+            .render
+            .expect("an absolute root is not relative, so it is allowed");
+        assert_eq!(render.included_paths, vec![PathBuf::from("outside.md")]);
     }
 
     // ── Symlinks (in-bound vs escaping) ──────────────────────────────────────
@@ -809,6 +762,8 @@ mod tests {
 
         let result = discover_content("::file-links docs/*.pdf\n", &source).unwrap();
         assert!(result.render.is_none(), "escaping symlink must be excluded");
+        let skipped: Vec<_> = result.skipped.iter().map(|entry| entry.link.file_name().unwrap()).collect();
+        assert_eq!(skipped, ["escape.pdf"], "the omission is reported");
     }
 
     // ── Source context ───────────────────────────────────────────────────────
@@ -817,7 +772,8 @@ mod tests {
     fn inline_content_without_source_errors() {
         let directives =
             parse_file_links_directives("::file-links *.md\n").unwrap();
-        let err = discover(&directives[0], &ComposeSource::Unknown).unwrap_err();
+        let context = FileResolutionContext::new(std::env::temp_dir());
+        let err = discover(&directives[0], &ComposeSource::Unknown, &context).unwrap_err();
         assert!(matches!(err, FileLinksError::MissingSourceContext { .. }));
     }
 
@@ -888,27 +844,6 @@ mod tests {
     }
 
     // ── Unit tests for helpers ───────────────────────────────────────────────
-
-    #[test]
-    fn split_glob_prefix_nested_path() {
-        let (prefix, base) = split_glob_prefix("docs/**/*.md", Path::new("/src"));
-        assert_eq!(prefix, "docs");
-        assert_eq!(base, PathBuf::from("/src/docs"));
-    }
-
-    #[test]
-    fn split_glob_prefix_no_prefix() {
-        let (prefix, base) = split_glob_prefix("*.md", Path::new("/src"));
-        assert!(prefix.is_empty());
-        assert_eq!(base, PathBuf::from("/src"));
-    }
-
-    #[test]
-    fn split_glob_prefix_parent_prefix() {
-        let (prefix, base) = split_glob_prefix("../sibling/*.md", Path::new("/src/a"));
-        assert_eq!(prefix, "../sibling");
-        assert_eq!(base, PathBuf::from("/src/a/../sibling"));
-    }
 
     #[test]
     fn common_ancestor_single_file() {

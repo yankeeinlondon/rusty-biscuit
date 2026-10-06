@@ -35,7 +35,7 @@ use super::validate::{self, ValidatorCache, error_top_level_key};
 /// arm schemas repeatedly (once per root-union commit, once per property-union
 /// property, across every re-validation pass). These validators are pure
 /// structural type checks built with no file-reference anchors — exactly the
-/// `build_validator(_, None, None)` shape — so a cache keyed on the arm schema
+/// `build_structural_validator(_)` shape — so a cache keyed on the arm schema
 /// JSON alone (via [`ValidatorCache`], whose default fallback is `None`) returns
 /// a byte-identical validator on a hit. It is deliberately separate from the
 /// effective-schema validator cache so the many small arm schemas do not churn
@@ -44,9 +44,9 @@ static COERCION_VALIDATOR_CACHE: LazyLock<ValidatorCache> = LazyLock::new(Valida
 
 /// Returns a cached validator for `schema`, compiled with no file-reference
 /// anchors (the coercion probe shape). Equivalent to
-/// `build_validator(schema, None, None)` on a cache miss.
+/// `build_structural_validator(schema)` on a cache miss.
 fn coercion_validator(schema: &Value) -> Option<Arc<Validator>> {
-    COERCION_VALIDATOR_CACHE.validator_for(schema, None).ok()
+    COERCION_VALIDATOR_CACHE.structural_validator_for(schema).ok()
 }
 
 /// The conversion a recognized property schema asks for.

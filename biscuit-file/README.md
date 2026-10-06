@@ -10,6 +10,7 @@ A Rust library and CLI for working with files and file formats.
 - [**Analyze and repair YAML source**](./lib/README.md#yaml-source-analysis-and-repair) -- produce span-aware diagnostics, inspect certainty, and safely apply deterministic edits
 - **Detect file types** -- Automatically identify files using extensions and magic bytes
 - [**File Resolution**](./docs/topics/file-references.md) -- resolves the file path of a passed in file using a set of smart and consistent path based logic
+- [**Glob references**](./docs/topics/file-references.md#glob-references-globreference) -- match a set of files with a file-reference prefix plus a glob, most local first (`GlobReference::new(["^**/*spec*.md", "!&**/_completed/**"])`)
 - [**Portable references**](#portable-references) -- write the link to a file that keeps working when the document, repository, or host moves (`./x.md`, `&docs/x.md`, `~/x.md`, `{{VAR}}/x.md`)
 - [**Portable path text**](#portable-path-text) -- render a `Path` as forward-slash text without breaking Windows verbatim, UNC, or device paths
 
@@ -126,6 +127,30 @@ use biscuit_file::PathIdentity;
 let root = PathIdentity::new(Path::new("/opt/config"));
 assert!(!PathIdentity::new(Path::new("/opt/config-old/a.toml")).starts_with(&root));
 ```
+
+## Canonical Paths and the Home Directory
+
+`canonicalize_simplified` (unfeatured) follows symlinks like
+`std::fs::canonicalize` but, on native Windows, returns `C:\work\repo` instead
+of the verbatim `\\?\C:\work\repo` whenever both name the same file. Use it
+whenever a canonical path is returned, stored, shown, or parsed again; a raw
+`canonicalize` belongs only inside a comparison where both sides are
+canonicalized the same way.
+
+`home_dir()` (feature `file-reference`) is the one home reader: `HOME` on macOS
+and Linux, `USERPROFILE` on native Windows (setting only `HOME` there changes
+nothing), the platform profile lookup when the variable is unset, and `None`
+for a relative value. The result is used as spelled, never canonicalized.
+
+```rust
+let home = biscuit_file::home_dir();                       // Option<PathBuf>
+let here = biscuit_file::canonicalize_simplified(std::path::Path::new("."))?;
+# let _ = (home, here);
+# Ok::<(), std::io::Error>(())
+```
+
+See [Home](./docs/topics/file-references.md#home-) and
+[Canonicalizing Paths](./docs/topics/file-references.md#canonicalizing-paths).
 
 ## Supported Formats
 

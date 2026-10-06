@@ -344,7 +344,7 @@ fn evaluator_handles_unary_not_on_git_is_dirty() {
 #[test]
 fn condition_lookup_resolves_top_level_event_fields() {
     let meta = sample_meta();
-    let lookup = EventMetaConditionLookup::new(&meta, Path::new("."));
+    let lookup = EventMetaConditionLookup::new(&meta, Path::new("."), crate::test_support::process_snapshot());
 
     assert_eq!(lookup.get("provider"), Some(json!("claude")));
     assert_eq!(lookup.get("event"), Some(json!("before_tool")));
@@ -358,7 +358,7 @@ fn condition_lookup_resolves_top_level_event_fields() {
 #[test]
 fn condition_lookup_resolves_grouped_environment_paths() {
     let meta = sample_meta();
-    let lookup = EventMetaConditionLookup::new(&meta, Path::new("."));
+    let lookup = EventMetaConditionLookup::new(&meta, Path::new("."), crate::test_support::process_snapshot());
 
     assert_eq!(lookup.get("os.type"), Some(json!("macos")));
     assert_eq!(lookup.get("hardware.cores"), Some(json!(16)));
@@ -384,7 +384,7 @@ fn condition_lookup_resolves_grouped_environment_paths() {
 #[test]
 fn condition_lookup_missing_keys_return_none() {
     let meta = sample_meta();
-    let lookup = EventMetaConditionLookup::new(&meta, Path::new("."));
+    let lookup = EventMetaConditionLookup::new(&meta, Path::new("."), crate::test_support::process_snapshot());
 
     assert_eq!(lookup.get("missing"), None);
     assert_eq!(lookup.get("git.unknown"), None);
@@ -394,7 +394,7 @@ fn condition_lookup_missing_keys_return_none() {
 #[test]
 fn condition_lookup_extra_paths_resolve_with_typed_values() {
     let meta = sample_meta();
-    let lookup = EventMetaConditionLookup::new(&meta, Path::new("."));
+    let lookup = EventMetaConditionLookup::new(&meta, Path::new("."), crate::test_support::process_snapshot());
 
     assert_eq!(lookup.get("extra.status"), Some(json!("success")));
     assert_eq!(lookup.get("extra.attempt"), Some(json!(3)));
@@ -413,7 +413,7 @@ fn condition_lookup_extra_paths_resolve_with_typed_values() {
 #[test]
 fn condition_lookup_tool_input_paths_resolve_nested_json() {
     let meta = sample_meta();
-    let lookup = EventMetaConditionLookup::new(&meta, Path::new("."));
+    let lookup = EventMetaConditionLookup::new(&meta, Path::new("."), crate::test_support::process_snapshot());
 
     assert_eq!(lookup.get("tool_input.command"), Some(json!("npm test")));
     assert_eq!(
@@ -434,7 +434,7 @@ fn condition_lookup_env_namespace_resolves_via_std_env() {
         std::env::set_var(key, "value-here");
     }
     let meta = sample_meta();
-    let lookup = EventMetaConditionLookup::new(&meta, Path::new("."));
+    let lookup = EventMetaConditionLookup::new(&meta, Path::new("."), crate::test_support::process_snapshot());
     let resolved = lookup.get(&format!("env.{key}"));
     unsafe {
         std::env::remove_var(key);
@@ -445,7 +445,7 @@ fn condition_lookup_env_namespace_resolves_via_std_env() {
 #[test]
 fn condition_lookup_ctx_today_resolves() {
     let meta = sample_meta();
-    let lookup = EventMetaConditionLookup::new(&meta, Path::new("."));
+    let lookup = EventMetaConditionLookup::new(&meta, Path::new("."), crate::test_support::process_snapshot());
 
     let value = lookup.get("ctx.today");
     assert!(
@@ -462,7 +462,7 @@ fn condition_lookup_ctx_today_resolves() {
 #[test]
 fn condition_lookup_ctx_year_resolves() {
     let meta = sample_meta();
-    let lookup = EventMetaConditionLookup::new(&meta, Path::new("."));
+    let lookup = EventMetaConditionLookup::new(&meta, Path::new("."), crate::test_support::process_snapshot());
 
     let value = lookup.get("ctx.year");
     assert!(
@@ -480,7 +480,7 @@ fn condition_lookup_ctx_year_resolves() {
 fn condition_lookup_falls_through_to_inner() {
     let meta = sample_meta();
     let inner = EventMetaExpressionLookup::new(&meta);
-    let composite = EventMetaConditionLookup::new(&meta, Path::new("."));
+    let composite = EventMetaConditionLookup::new(&meta, Path::new("."), crate::test_support::process_snapshot());
 
     // Every non-ctx path should be identical between inner and composite.
     let paths = [
@@ -524,7 +524,7 @@ fn condition_lookup_ctx_short_circuit() {
     // because CtxLookup does not recognise them, and never reaches the
     // inner adapter.
     let meta = sample_meta();
-    let lookup = EventMetaConditionLookup::new(&meta, Path::new("."));
+    let lookup = EventMetaConditionLookup::new(&meta, Path::new("."), crate::test_support::process_snapshot());
 
     assert_eq!(lookup.get("ctx.unknown_key"), None);
     assert_eq!(lookup.get("ctx"), None);
@@ -533,7 +533,7 @@ fn condition_lookup_ctx_short_circuit() {
 #[test]
 fn condition_lookup_evaluator_handles_string_equality_in_condition_mode() {
     let meta = sample_meta();
-    let lookup = EventMetaConditionLookup::new(&meta, Path::new("."));
+    let lookup = EventMetaConditionLookup::new(&meta, Path::new("."), crate::test_support::process_snapshot());
 
     let value = parse_and_evaluate(
         "tool_name == 'Bash' && git.branch == 'main'",
@@ -547,7 +547,7 @@ fn condition_lookup_evaluator_handles_string_equality_in_condition_mode() {
 #[test]
 fn condition_lookup_evaluator_handles_numeric_comparison_on_hardware_cores() {
     let meta = sample_meta();
-    let lookup = EventMetaConditionLookup::new(&meta, Path::new("."));
+    let lookup = EventMetaConditionLookup::new(&meta, Path::new("."), crate::test_support::process_snapshot());
 
     let value = parse_and_evaluate(
         "hardware.cores > 8 ? \"fast\" : \"slow\"",
@@ -617,7 +617,7 @@ fn doc_env_does_not_resolve_even_when_env_does() {
 #[test]
 fn condition_lookup_doc_namespace_resolves() {
     let meta = sample_meta();
-    let lookup = EventMetaConditionLookup::new(&meta, Path::new("."));
+    let lookup = EventMetaConditionLookup::new(&meta, Path::new("."), crate::test_support::process_snapshot());
 
     assert_eq!(lookup.get("doc.tool_name"), Some(json!("Bash")));
     assert!(lookup.get("doc").is_some_and(|value| value.is_object()));
@@ -628,7 +628,7 @@ fn condition_lookup_read_side_function_resolves_against_base_dir() {
     let dir = tempfile::TempDir::new().unwrap();
     std::fs::write(dir.path().join("artifact"), "ready").unwrap();
     let meta = sample_meta();
-    let lookup = EventMetaConditionLookup::new(&meta, dir.path());
+    let lookup = EventMetaConditionLookup::new(&meta, dir.path(), crate::test_support::process_snapshot());
 
     assert!(lookup.resolution_context().is_some());
     assert_eq!(
@@ -644,7 +644,7 @@ fn condition_lookup_read_side_function_resolves_against_base_dir() {
 #[test]
 fn condition_lookup_evaluator_supports_length_helper_on_extra_array() {
     let meta = sample_meta();
-    let lookup = EventMetaConditionLookup::new(&meta, Path::new("."));
+    let lookup = EventMetaConditionLookup::new(&meta, Path::new("."), crate::test_support::process_snapshot());
 
     let value = parse_and_evaluate(
         "length(extra.tags) > 2 ? \"many\" : \"few\"",

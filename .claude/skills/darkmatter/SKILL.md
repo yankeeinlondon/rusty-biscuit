@@ -18,6 +18,11 @@ extension.
   CWD or repository state in a downstream resolver.
 - Resolve file-like values through `biscuit_file::FileReference`. Preserve its
   source context, explicit-vs-implicit syntax, and typed errors.
+- Read the home only through `biscuit_file::home_dir()` (`RequestSnapshot::from_process`
+  is the one production site; tests build expectations with it too). A canonical
+  path that leaves a private comparison (link targets, cache and preflight keys,
+  `referenced_files`, diagnostics) comes from `biscuit_file::canonicalize_simplified`;
+  `path_lookup_guard.rs` in lib and cli rejects any unlisted raw `canonicalize`.
 - Treat composition as effectful and validation as passive. Schema parsing,
   trigger matching, completion, hover, and validation must not perform I/O,
   execute expressions, fetch remotes, or mutate documents.
@@ -30,19 +35,20 @@ extension.
 
 ## Choose the owning surface
 
-Documentation under `docs/` becomes the authority when implementation lands.
-Write author-facing guidance for humans in the surrounding document's style;
-put necessary implementation details in supporting documents under `docs/` and
-link to those. Never link a document in `docs/` to a specification or a
-feature/fix design document. Keep temporary implementation-status notes explicit
-without making readers consult planning artifacts. Preserve documented file
-locations; an unimplemented grammar is not a reason to move schema definitions
-away from their references or replace their content with placeholders.
+Documentation under `docs/` becomes the authority when implementation lands;
+it never links to a specification or feature/fix design. Preserve documented
+file locations; an unimplemented grammar is not a reason to move schema
+definitions away from their references or replace them with placeholders.
 
 | Work | Start with |
 |---|---|
 | Compose APIs, stages, expressions, file resolution, cache | [compose.md](compose.md) |
 | SimplifiedSchema, triggers, validation, meta-types | [schema.md](schema.md) |
+| Composition requests, contexts, glob consumers | [requests.md](requests.md) |
+| Remote reads and the transport cache | [remote-cache.md](remote-cache.md) |
+| `md` file arguments and CLI conventions | [cli.md](cli.md) |
+| Expression grammar, inserted text, warnings | [expressions.md](expressions.md) |
+| Test fixtures, source guards, parity matrix | [testing.md](testing.md) |
 | Public modules and extracted library surfaces | [library-surfaces.md](library-surfaces.md) |
 | DMLS architecture, protocol behavior, and rollout history | [dmls.md](dmls.md) |
 | Render tree, style lowering, disclosure blocks, code blocks | [rendering.md](rendering.md) |
@@ -61,29 +67,34 @@ also load the `renderable` skill; for terminal components, load
 
 ## Composition authority
 
-`ComposeOptions` is the request authority. It carries the captured resolution
-context plus remote configuration, cache root and policy, compose identity,
-baseline/meta-schema controls, and rendering options. A source-derived file
-reference must resolve against that captured context.
+`ComposeRequest` is the request authority: `ComposeOptions` (remote
+configuration, cache root and policy, compose identity, baseline/meta-schema
+controls, rendering options) plus the one required `FileResolutionContext`
+built from a `RequestSnapshot`. A source-derived file reference must resolve
+against a context derived from that one. User-facing docs:
+`darkmatter/docs/topics/compose-requests.md` (API, builder, Mermaid),
+`topics/file-referencing.md` (forms and tree rule), and
+`errors/file-reference-failures.md` (the `failure:` row).
 
-The root compose pipeline is ordered:
+The root compose pipeline is ordered: frontmatter interpolation pass 1;
+schema validation and coercion; frontmatter shell expansion; frontmatter
+interpolation pass 2; literal replacement; conditional page blocks; body
+interpolation; shell directives and blocks; link resolution; concurrent
+transclusion; inline cleanup and optional reflow; root-only link
+normalization. Keep this order stable. Whole-value `{{ ... }}` and `$(...)`
+values are executable state: they must resolve or fail, never leak as literal
+syntax. Demand-driven context capture must observe only referenced `ctx.*`
+groups.
 
-1. Frontmatter interpolation pass 1.
-2. Schema validation and coercion.
-3. Frontmatter shell expansion.
-4. Frontmatter interpolation pass 2.
-5. Literal replacement.
-6. Conditional page blocks.
-7. Body interpolation.
-8. Shell directives and shell blocks.
-9. Link resolution.
-10. Concurrent transclusion.
-11. Inline cleanup and optional fixed-width reflow.
-12. Root-only link normalization.
-
-Keep this order stable. Whole-value `{{ ... }}` and `$(...)` values are
-executable state: they must resolve or fail, never leak as literal syntax.
-Demand-driven context capture must observe only referenced `ctx.*` groups.
+Every entry point that resolves file references takes a `ComposeRequest`
+(`ComposeRequest::prepare(options, &RequestSnapshot)` or
+`ComposeRequest::with_context`). The context is required, never `Option`;
+only binaries call `RequestSnapshot::from_process()`, and magic roots enter
+only through `RequestSnapshot::with_magic_root*`. `match()`, `find_files()`,
+and `::file-links <glob>` are `GlobReference`s judged or listed in the
+document's (or the caller's origin) context, never the process directory.
+Read [requests.md](requests.md) before touching a request, a context view,
+a validator's context, or a glob consumer.
 
 Read [compose.md](compose.md) before changing a stage, expression function,
 context property, cache key, transclusion directive, or file-resolution path.
@@ -100,6 +111,8 @@ Important contracts:
 - Optional schema properties accept missing or `null` values.
 - Validation keeps source positions, origin information, typed problem codes,
   pending values, and file-reference diagnostics.
+  `FileReferenceDiagnostic::resolution_failure()` gives the biscuit-file
+  class; the diagnostic is re-derived in the validator's own request context.
 - Eager `file(eager)` values may normalize only on successful composition;
   validation-only APIs remain read-only.
 - `literal(value)` preserves YAML scalar typing and lowers to JSON Schema
@@ -110,75 +123,28 @@ Important contracts:
   parsers used by authoring and DMLS.
 - Trigger matching is schema-based and passive. A schema-trigger document is a
   kinded document and must retain its root `kind` declaration.
+- Triggers and bare-name `$schema` lookup use the five schema roots of the
+  **document's** context (`schemas::roots::SchemaRoots::for_document`):
+  package, package area, `base_dir()`, `SCHEMAS_DIR` (the folder itself, from
+  `ctx.env()`), `~/schemas`. Never walk ancestors or read the process
+  environment for them. `$path` patterns are `GlobReference`s; see
+  [schema.md](schema.md#schema-roots-and-path-triggers).
 
 Read [schema.md](schema.md) for imports, unions, pattern dictionaries,
 suggestions, triggers, and DMLS schema behavior.
 
-The authored replacement schema entry point is `darkmatter/schemas/darkmatter.yaml`.
-It declares all globals, including `doc`, and imports types from `partials/`.
-Runtime migration is pending: do not confuse the existing embedded document
-baseline with this global catalog. The planned document baseline is its resolved
-`doc` definition; `ctx` and `current` share a context type, and there is no
-`current_env`. Register the global catalog explicitly rather than auto-applying
-its root as frontmatter properties.
-
+The authored global catalog `darkmatter/schemas/darkmatter.yaml` is not the
+embedded document baseline; see [schema.md](schema.md#authored-global-catalog).
 
 ## Remote and cache safety
 
-HTTP(S) composition is supported for `::file`, `::code`, and read-side
-expression arguments only where a remote runtime is present. Ordinary rendered
-links are never fetched. Frontmatter interpolation and `$()` branching are
-local-only; a remote URL there fails loudly.
-
-- CLI callers opt in with `md compose --allow-host <host>`.
-- Use the two-category vocabulary everywhere (help, docs, comments):
-  **semantic-result artifacts** (composed documents, `::file` children,
-  `::code`/`::toc-linking` results, snapshots) are memory-only until a
-  `ContentPolicy` exists (R18); **transport artifacts** (raw HTTP bodies) are
-  the one class `--cache-root` / `ComposeOptions::with_cache_root(...)` may
-  persist (R36, the fix's Q1). Local transclusion stays run-local even after
-  `ContentPolicy`. `docs/topics/caching.md` is the user-facing contract, and
-  `cli/tests/l1/help.rs::test_compose_help_states_the_transport_cache_boundary`
-  pins the `md compose --help` wording. The semantic-result persistence path was deleted, not kept
-  dormant: `RunLocalCache` is memory-only, `CacheAccessMode` governs run-local
-  reuse only, and `CacheStats` has no persistent counters (transport activity
-  is `RemoteFetchStats`). `lib/tests/l1/semantic_results_never_persist.rs` pins
-  this: `RunLocalCache` may not name `FileStore`/`RemoteFetchRuntime`,
-  `FileStore` is allowlisted (exact counts) to the remote transport cache, and
-  the deleted symbols may not reappear. Update its allowlist deliberately when
-  a transport-cache file legitimately changes its `FileStore` uses.
-- Configuring a cache root mutates nothing. `FileStore::at` only records the
-  path and creates directories inside the write that needs them. A missing root
-  stays missing and an existing one stays byte-identical unless an artifact is
-  written. Never add eager `create_dir_all` or a platform-cache fallback.
-- Freshness is controlled by `RemoteReadConfig` and the CLI remote freshness,
-  refresh, and TTL flags. Response `Cache-Control` outranks all of them:
-  `no-store` is never written (an on-disk `no-store` entry is purged), and
-  `no-cache` is revalidated before every reuse, even under `Optimistic`, with
-  no stale serve under `Fallback`. The write path accepts only
-  `StorableDirectives`, so a TTL override structurally cannot store a
-  `no-store` response; keep it that way.
-- Transport-cache I/O failures (write or purge) are non-fatal. They flow
-  through `RemoteFetchStats::cache_warnings` into `ComposeReport.warnings`
-  (stage `remote_cache`, code `dm.remote_cache.io_failure`); never swallow
-  them with `let _ =`.
-- Remote manifests persist `redacted_url` (`redact_url`: no userinfo or
-  fragment, query shown as `?<redacted>`), never the raw URL; the entry key
-  stays `xx_hash` of the full URL. Warnings may name the redacted form only.
-  Manifest `CACHE_VERSION` (now `2`) is separate from the `v{N}` directory's
-  `STORE_LAYOUT_VERSION` (`1`), so old entries stay at the same path: another
-  version is a miss left on disk, but a `no-store` one is still purged via the
-  version-stable `RemoteUrlManifestHeader`. Bump the layout version only when
-  the path scheme changes.
-- Host policy must be checked before the transport cache is read.
-  `fetch_with_cache` reads the store before its policy-enforcing client runs,
-  so the early `check_allowed` in `RemoteFetchRuntime::register_and_fetch` is
-  the only thing keeping a denied host's cached bytes out of output. A cache
-  root never authorizes a host. `denied_host_never_reads_a_fresh_cached_entry`
-  and the CLI `test_compose_denied_host_never_reads_a_seeded_cache_entry` pin
-  this ordering.
-- `absolute` and `relative` are local path transforms, never remote fetches.
-- `EffectEngine::http_post` uses the same host policy as remote reads.
+HTTP(S) composition covers `::file`, `::code`, and read-side expression
+arguments where a remote runtime is present; rendered links are never fetched,
+and frontmatter interpolation and `$()` fail loudly on a URL. Reads are
+deny-all until `--allow-host`; only transport artifacts (raw HTTP bodies) may
+persist under a cache root; `Cache-Control` outranks every freshness flag;
+host policy is checked before the cache is read. Read
+[remote-cache.md](remote-cache.md) before changing any of this.
 
 ## Rendering authority
 
@@ -187,51 +153,30 @@ one context-aware `renderable::Document`, then performs one target fold.
 Component policy is lowered during construction; do not add a post-fold HTML or
 terminal decoration pass.
 
-`DarkmatterPage` is only a viewport/page-frame assembler. It may own page
-margin, padding, background, max-width centering, and browser wrapper metadata,
-but it must not inspect component node kinds or mutate component content.
-
-The browser contract is strict:
-
-- Browser tests are headless and cannot activate windows or inject host input.
-- Assert DOM state, computed style, accessibility state, or used geometry.
-- Browser HTML and CSS must be derived from the same lowered layout/style
-  values; never repair output with string replacement.
-- Remote links and images retain safe structured attributes and policies.
+`DarkmatterPage` is only a viewport/page-frame assembler and never inspects or
+mutates component content. Browser tests are headless (no window activation or
+host input) and assert DOM, computed style, accessibility state, or geometry;
+browser HTML and CSS come from the same lowered values, never string repair.
 
 Read [rendering.md](rendering.md) before changing style claims, code-block
 themes, disclosure blocks, browser safety, or the render-tree fold.
 
 ## CLI orientation
 
-The binary is `md`. Major command families include:
+The binary is `md`: `compose`, `clean`, `read`, `toc`, `delta`, `schema
+validate|detect|about|triggers`, `hash`, `frontmatter get|set|rm`,
+`code-block`, `graph`, and reference commands.
 
-- `md compose`, `clean`, `read`, `toc`, and `delta` for document processing.
-- `md schema validate|detect|about` for schema workflows.
-- `md hash` for Markdown-aware frontmatter/body hashes. `md hash --save`
-  bumps `last_updated` to the current **UTC** date when the content hash
-  changes (`hash::last_updated_stamp`), which renews every content policy
-  whose baseline is `@last_updated`; see the `content-policy` skill.
-- `md frontmatter get|set|rm` for structured frontmatter changes.
-- `md code-block` for direct terminal, HTML, or Markdown code rendering.
-- `md graph` and reference commands for document/reference inspection.
-
-Rendering flags are presentation policy. `CliStyleClaims` captures explicitly
-supplied global CLI style claims so command handlers can merge them with
-frontmatter without mistaking defaults for user intent. Keep parsing in
-`cli/src/args`, command execution in `cli/src/commands`, and output in shared
-renderable components.
+Every source-file argument opens through `cli/src/io::open_argument`:
+`FileReference` grammar first, resolved in the launch context, with the
+document context derived from the opening reference. Read [cli.md](cli.md)
+before adding a route that reads a file argument or changing CLI style
+claims.
 
 ## Testing and verification
 
-Use the Darkmatter package-area recipes:
-
-```sh
-cd darkmatter
-just build
-just test
-just lint
-```
+Use the package-area recipes in `darkmatter/`: `just build`, `just test`,
+`just lint`.
 
 Use `just test-l2` only for real-terminal behavior and `just test-browser` for
 headless browser behavior. Parser, schema, prompt, template, or configuration
@@ -239,140 +184,15 @@ changes require both a passive shipped-artifact corpus test and an end-to-end
 test through the normal invocation path. Persisted values require a repeated
 read/write/read round trip.
 
-The expression-grammar corpus gate is
-`lib/tests/l1/dasherized_identifier_corpus.rs`. It walks root `prompts/`,
-`.claude/commands/`, `darkmatter/prompts/`, and `claudine/prompts/` through
-the library's own extractors: `ExpressionFinder`,
-`scan_darkmatter_directives`, `parse_frontmatter_shell_value_spanned`, and
-`frontmatter_expression_values`, which finds Expression-typed properties of
-any name under each document's passively resolved effective schema, the
-classification DMLS uses. Claudine's `when`/`while`/`until` keys stay as a
-separate check because Claudine's schema types them as `string` but
-evaluates them as lifecycle conditions. The gate requires every extracted
-expression to parse. Run it after any lexer or parser
-change. A red result names a shipped prompt, and that prompt usually already
-fails to compose. Check with `md compose` before blaming the grammar.
-
-Identifiers may contain `-`: `read_variable` joins a `-` only mid-identifier
-and only when the next character continues an identifier, so `spec-name` is
-one name while `a - b`, `a -b`, `4-2`, and `foo--bar` stay subtraction. The
-rule lives in the lexer, never in `is_identifier_char`. Any cursor-side scan
-(DMLS completion partials) must call `expression::identifier_prefix_start`
-rather than add `-` to a character class, which would merge `foo--bar`.
-
-A `{{ … }}` that cannot be parsed or evaluated fails full-document
-composition regardless of `fail_fast`.
-
-**Inserted text is data.** Every authored span is scanned once. Produced text
-is never scanned again. This covers expression results, file reads, shell
-output, `{{{ }}}` results, data overrides, decoded tokens, and values a parent
-passes to a child. There is intentionally no fixed point:
-`note: "fixed {{{ area }}}"` renders `{{ note }}` as `fixed {{ area }}`. A
-template that relied on a rescan is rewritten at the source. Rules to keep:
-
-- Origin travels beside values. Frontmatter uses `compose/value_origin.rs`,
-  and the body uses `DataRanges`. A directive scanner reads
-  `parse_utils::structural_view`.
-- Frontmatter `$( … )` runs only when its *authored source* is a whole value.
-- Guards judge authored syntax, never flattened text.
-- `--set` (`with_set_overrides`) stays an authored template, and its failures
-  name the override (`SourceRef::Supplied`). Callers pass produced values
-  with `with_data_overrides` or `with_override_layers`.
-- A stored `"{{!data:v1:<base64url>}}"` (`markdown::literal_token`) is a data
-  string. Loaders keep it encoded, and readers call `decode_literal_tokens`.
-- A malformed token is a located, authoring-fatal `MalformedLiteralToken`.
-- Data is never schema-pending (`holds_pending_syntax`).
-- `hash::locate_frontmatter_leaves` finds a leaf's bytes for an in-place
-  write.
-
-Details are in [compose.md](compose.md#inserted-text-is-data) and
-[frontmatter.md](frontmatter.md#literal-tokens).
-
-`interpolate_text`/`interpolate_value` take an explicit
-`ExpressionFailurePolicy`. Pass `Strict` from document stages. Use `Lenient`
-only for preflight discovery (see
-[compose.md](compose.md#error-handling)). The error carries the authored
-span (`SourceRef::OnDiskSpan`) whenever it is provable, including after an
-earlier stage rewrote the body and inside block (`|`, `>`), multi-line,
-tagged, anchored, or aliased frontmatter scalars. `interpolation_block` renders the file and
-authored line and column for every cause, and
-`interpolation/fatality_characterization.rs` is the drift guard.
-
-A well-formed identifier that resolves to nothing is an absent document
-property (`null`); a bare name never falls back to `ctx`. Compose reports it as
-the advisory `dm.expression.undeclared_property` (once per root per document)
-unless the author handled its absence (`x || d`, `x ? …`, `is_null(x)`) or the
-root is declared by the final state, a caller input, or the effective schema.
-Read
-[compose.md](compose.md#undeclared-properties-dmexpressionundeclared_property)
-before changing a runtime evaluation surface: new surfaces must observe
-through the shared `AbsenceScope`, not a new walk. DMLS reports the same
-`dm.expression.undeclared_property` at `WARNING` through the static twin,
-`expression::static_variable_reads`, classified by `BindingView::baseline()`,
-and an unknown function as the `ERROR` `dm.expression.unknown_function` through
-`expression::validate_expression` (see
-[dmls.md](dmls.md#undeclared-properties-and-unknown-functions)).
-
-Hosts add globals (Claudine's `err`, `timing`, `group`) through the binding
-model in `expression/binding.rs`, never through a lookup override. A root
-resolves as reserved namespace → registered global (available, possibly
-`null`, or unavailable with a namespaced reason) → document property. Declare
-globals in an immutable `BindingView`, pair them with runtime entries through
-`EvaluationSession::associate` (rejects reserved names, omissions, and
-contradictions before any provider runs), check authored text passively with
-`prepare_value` + `validate_prepared` (every branch, no provider), and evaluate
-with `evaluate_prepared` or `SubtreeCompose::with_binding_view`. There is no
-strict mode and no root-membership hook. See
-[Host Bindings](../../../darkmatter/docs/topics/darkmatter-expressions.md#host-bindings).
-
-Each issue is reported once. A coded `ComposeWarning` family declares its
-identity in its constructor (`from_schema_advisory`,
-`unknown_context_variable`, `expression_failure`). `add_warning` and
-`merge` collapse warnings whose `(source, code, subject)` match, and never
-compare messages. Schema advisories key on the referenced path. Root and
-expression subjects are per source document:
-`run_compose_pipeline_node` calls `attribute_to_document` before a child
-report merges upward. Push new warnings through `add_warning`/`add_warnings`,
-not `report.warnings.push`. Membership is O(1) through a private
-`WarningIndex` cache: it indexes direct pushes lazily and rebuilds when the
-vector shrinks, but an element replaced in place is not seen.
-`interpolate_text` scans once, so a failed span
-is reported once. A new coded family, such as
-`dm.expression.undeclared_property`, adds a `WarningSubject` constructor
-rather than a message-based check.
-
-Deterministic `md` integration tests must launch through
-`cli/tests/common/fixture.rs`'s `CliProcessFixture`. Its builder pins
-fixture-owned CWD/home/config/cache/temp, scrubs Git/application/rendering
-inputs, and supplies a portable minimal PATH. Use its named `host_path`,
-`fake_only_path`, `ambient_context`, or `inherit_no_env` policy before
-`build()` when the tested behavior requires an escape.
-
-A test whose subject *is* a pinned rendering or darkmatter application input
-declares that claim on the builder too — `rendering_input`,
-`rendering_input_removed`, `application_input`, `application_input_removed`,
-or `plain_terminal(columns, lines)` for the whole fixed-size no-color frame.
-The home/config/cache/temp anchors and the Git plumbing are containment and
-have no declared override at all: handing one back re-contaminates the child.
-`cli/tests/common/protected_env.rs` is the shared classification both the
-builder and the guard read.
-
-Do not hand-build an `md` command or undo isolation afterward;
-`cli/tests/l1/spawn_site_guard.rs` rejects raw spawns, post-build CWD/PATH/
-environment-clear escapes, a post-build `.env`/`.env_remove` naming any
-protected key, and stale exemptions.
-
-Tests that build an HTTP client (`remote_fetch` `persistent_cache_tests` /
-`integration_tests`, `provider_network`, preflight remote, `effects`) hit
-nextest's 30 s timeout when host load far exceeds core count, and do so as a
-cluster. Check `uptime` and re-run exactly those tests at `--test-threads 2`
-before treating a timeout as a regression; never run `just lint` concurrently
-with `just test`.
-
-The ordinary local L1 recipe excludes `slow_` tests and leaves the internal
-`terminal-tests` / `browser-tests` build features disabled. Tier recipes enable
-their required targets; CI enables both features when constructing all-tier
-coverage.
+Expression grammar, inserted-text, failure-policy, undeclared-property, host-binding, and
+warning-identity rules are in [expressions.md](expressions.md); read it
+before changing the lexer, an evaluation surface, or a warning family.
+Fixture rules (`CliProcessFixture`, `git init` for repositories), the
+source-scan guards (context construction, glob implementation, spawn sites,
+semantic results), and the entry-point parity matrix (including the glob
+rows) are in [testing.md](testing.md); read it before writing an `md`
+integration test, adding a file-resolving entry point, or touching a guard's
+allowlist.
 
 Do not run workspace-wide Cargo gates for a Darkmatter-only change. Use Sniff
 and GitNexus first to include actual downstream consumers such as Claudine when

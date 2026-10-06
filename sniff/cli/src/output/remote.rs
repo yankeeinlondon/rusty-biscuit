@@ -88,7 +88,7 @@ pub fn render_remote_text(report: &RemoteReport, readme_content: Option<&str>) -
     if !detail_items.is_empty() {
         let rendered: Vec<String> = detail_items
             .iter()
-            .map(|item| Prose::new(item).render(&term))
+            .map(|item| InlineProse::new(item).render(&term))
             .collect();
         let list = UnorderedList::new(rendered).with_bullet("  ");
         write!(out, "{}", list.display(&term)).unwrap();
@@ -158,16 +158,16 @@ fn render_documents(docs: &[DocumentRef], term: &Terminal) -> String {
     let mut items = Vec::new();
 
     for doc in &readmes {
-        items.push(Prose::new(format!("<b>{}</b>", doc.path)).render(term));
+        items.push(InlineProse::new(format!("<b>{}</b>", doc.path)).render(term));
     }
     if !doc_folder.is_empty() {
         items.push(
-            Prose::new(format!("<dim>docs/</dim> ({} files)", doc_folder.len())).render(term),
+            InlineProse::new(format!("<dim>docs/</dim> ({} files)", doc_folder.len())).render(term),
         );
     }
     for doc in &other_docs {
         if !doc.path.contains('/') {
-            items.push(Prose::new(format!("<dim>{}</dim>", doc.path)).render(term));
+            items.push(InlineProse::new(format!("<dim>{}</dim>", doc.path)).render(term));
         }
     }
 
@@ -223,9 +223,8 @@ pub fn render_cicd(cicd: &[CiCdInfo], term: &Terminal) -> String {
         let now = Utc::now();
 
         for ci in run_shaped.iter().take(10) {
-            // Table cells are not markup-aware (they only strip ANSI for width),
-            // so the status markup must be rendered to ANSI before it goes in.
-            let status = Prose::new(cicd_status_cell(ci)).render(term);
+            // Pre-rendered to ANSI; the table strips escapes only to measure width.
+            let status = InlineProse::new(cicd_status_cell(ci)).render(term);
             let time_str = ci
                 .started_at
                 .as_deref()
@@ -253,7 +252,7 @@ pub fn render_cicd(cicd: &[CiCdInfo], term: &Terminal) -> String {
                     .as_ref()
                     .map(|p| format!(" <dim>({})</dim>", p))
                     .unwrap_or_default();
-                Prose::new(format!("<b>{}</b>{}", ci.provider, path_info)).render(term)
+                InlineProse::new(format!("<b>{}</b>{}", ci.provider, path_info)).render(term)
             })
             .collect();
 
@@ -385,7 +384,7 @@ fn render_tags(tags: &[sniff::remote::TagInfo], term: &Terminal) -> String {
             } else {
                 ""
             };
-            Prose::new(format!("<b>{}</b>{}", tag.name, annotated)).render(term)
+            InlineProse::new(format!("<b>{}</b>{}", tag.name, annotated)).render(term)
         })
         .collect();
 
@@ -399,7 +398,7 @@ fn render_key_urls(report: &RemoteReport, term: &Terminal) -> String {
     let mut items = Vec::new();
 
     items.push(
-        Prose::new(format!(
+        InlineProse::new(format!(
             "<b>Repository:</b> <a href=\"{}\">{}</a>",
             urls.repo, urls.repo
         ))
@@ -408,7 +407,7 @@ fn render_key_urls(report: &RemoteReport, term: &Terminal) -> String {
 
     if let Some(ref homepage) = urls.homepage {
         items.push(
-            Prose::new(format!(
+            InlineProse::new(format!(
                 "<b>Homepage:</b> <a href=\"{homepage}\">{homepage}</a>"
             ))
             .render(term),
@@ -416,24 +415,24 @@ fn render_key_urls(report: &RemoteReport, term: &Terminal) -> String {
     }
     if let Some(ref issues) = urls.issues {
         items.push(
-            Prose::new(format!("<b>Issues:</b> <a href=\"{issues}\">{issues}</a>")).render(term),
+            InlineProse::new(format!("<b>Issues:</b> <a href=\"{issues}\">{issues}</a>")).render(term),
         );
     }
     if let Some(ref prs) = urls.pull_requests {
         items.push(
-            Prose::new(format!("<b>Pull Requests:</b> <a href=\"{prs}\">{prs}</a>")).render(term),
+            InlineProse::new(format!("<b>Pull Requests:</b> <a href=\"{prs}\">{prs}</a>")).render(term),
         );
     }
     if let Some(ref releases) = urls.releases {
         items.push(
-            Prose::new(format!(
+            InlineProse::new(format!(
                 "<b>Releases:</b> <a href=\"{releases}\">{releases}</a>"
             ))
             .render(term),
         );
     }
     if let Some(ref wiki) = urls.wiki {
-        items.push(Prose::new(format!("<b>Wiki:</b> <a href=\"{wiki}\">{wiki}</a>")).render(term));
+        items.push(InlineProse::new(format!("<b>Wiki:</b> <a href=\"{wiki}\">{wiki}</a>")).render(term));
     }
 
     if !items.is_empty() {
@@ -1136,7 +1135,7 @@ mod tests {
         // capture coverage for its color primitives.
         let term = Terminal::new_optimistic(80);
         let ci = make_test_cicd("CI", "completed", Some("success"), None, None, None);
-        let rendered = Prose::new(cicd_status_cell(&ci)).render(&term);
+        let rendered = InlineProse::new(cicd_status_cell(&ci)).render(&term);
         assert!(
             rendered.contains("\x1b[32m") || rendered.contains("32m"),
             "success cell should emit a green SGR sequence, got: {rendered:?}"
@@ -1148,7 +1147,7 @@ mod tests {
     fn test_cicd_status_cell_renders_red_ansi_on_color_terminal() {
         let term = Terminal::new_optimistic(80);
         let ci = make_test_cicd("CI", "completed", Some("failure"), None, None, None);
-        let rendered = Prose::new(cicd_status_cell(&ci)).render(&term);
+        let rendered = InlineProse::new(cicd_status_cell(&ci)).render(&term);
         assert!(
             rendered.contains("\x1b[31m") || rendered.contains("31m"),
             "failure cell should emit a red SGR sequence, got: {rendered:?}"

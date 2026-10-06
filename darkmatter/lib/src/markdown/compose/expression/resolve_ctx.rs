@@ -2,7 +2,7 @@
 //!
 //! Read-only: these helpers resolve and read paths; they never mutate.
 
-use biscuit_file::{FetchPolicy, FileReference, FileReferenceError, PathPosition};
+use biscuit_file::{FetchPolicy, FileReference, FileReferenceError};
 use serde_json::{Map, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -31,24 +31,15 @@ type ProviderQuerySlot = Arc<OnceLock<ProviderQueryResult>>;
 /// (`frontmatter`, `markdown_title`, `markdown_body_empty`, `file_exists`)
 /// also accept HTTP(S) URL arguments and read their content from the run's
 /// remote-fetch cache rather than the filesystem.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct ResolutionContext {
     /// Directory the current document lives in; relative/`@` refs resolve here.
     pub cwd: PathBuf,
-    /// Magic (`@`) search paths, mirroring the compose link-resolution config.
-    pub magic_paths: Vec<(PathBuf, PathPosition)>,
-    /// Repository (worktree) root for the resolution pass, discovered once from
-    /// the document directory. Implicit references anchor at the document
-    /// directory first, then the repository root. Threaded through
-    /// [`document_resolution_context`] so per-reference resolution reuses this
-    /// root rather than rediscovering it. `None` when `cwd` is not inside a
-    /// worktree, in which case resolution falls back to a per-call discovery
-    /// from `cwd`.
+    /// Repository (worktree) root read by the repository-scoped functions
+    /// (`git_*`, `package()`). Starts as the request context's root.
     ///
     /// The repository root is not necessarily the tree root; see
     /// [`base_dir`](Self::base_dir).
-    ///
-    /// [`document_resolution_context`]: crate::markdown::compose::util::document_resolution_context
     pub repository_root: Option<PathBuf>,
     /// Package-area root captured for `@` and `^` references.
     pub package_area: Option<PathBuf>,
@@ -88,32 +79,40 @@ pub struct ResolutionContext {
     /// authority grants nothing, so a surface that was not given one cannot
     /// send a packet.
     pub(crate) icmp: crate::markdown::compose::icmp::IcmpAuthority,
+    /// Where `find_files()` records the file symlinks it skipped; the request's
+    /// sink, so the root report receives them. The default sink is drained by
+    /// no one.
+    pub(crate) glob_warnings: crate::markdown::compose::glob_listing::GlobWarningSink,
     /// Refresh authority for the lazy `current` root, carrying the invocation's
     /// capability to observe one mutable fact now. The default holds no
     /// provider, so a surface that was not given one fails closed instead of
     /// probing the host.
     pub(crate) current: crate::markdown::compose::context::CurrentAuthority,
-    /// Injectable home directory for skill-root discovery. When `None`,
-    /// skill lookups fall back to `dirs::home_dir()`.
-    pub(crate) home_dir: Option<PathBuf>,
-    /// Host-captured request snapshot. When present, all local references
-    /// derive from it and never rediscover ambient process state.
-    pub(crate) file_resolution_context: Option<biscuit_file::FileResolutionContext>,
+    /// The request's context. Every local reference derives from it, so no
+    /// expression reads the process's directory, home, or environment.
+    pub(crate) file_resolution_context: biscuit_file::FileResolutionContext,
     /// Projected property/array occurrences mapped back to their immutable caller records.
     pub(crate) caller_file_provenance: HashMap<String, CallerFileProvenance>,
     /// Caller record selected from the source expression for the active filesystem call.
     pub(crate) active_caller_file_provenance: Option<CallerFileProvenance>,
 }
 
+/// Unit tests that never resolve a file use an empty `cwd`.
+#[cfg(test)]
+impl Default for ResolutionContext {
+    fn default() -> Self {
+        Self::at(PathBuf::new())
+    }
+}
+
 impl ResolutionContext {
-    /// Creates a context for a document in `cwd` with no magic search paths
-    /// and no remote-fetch support.
-    pub fn new(cwd: PathBuf) -> Self {
+    /// Creates a context for a document in `context`'s `cwd`, with no
+    /// remote-fetch support.
+    pub fn new(context: biscuit_file::FileResolutionContext) -> Self {
         Self {
-            cwd,
-            magic_paths: Vec::new(),
-            repository_root: None,
-            package_area: None,
+            cwd: context.cwd().to_path_buf(),
+            repository_root: context.repository_root().map(Path::to_path_buf),
+            package_area: context.package_area().map(Path::to_path_buf),
             file_ref_fallback_dir: None,
             remote_fetch: None,
             provider_queries: Arc::new(Mutex::new(HashMap::new())),
@@ -122,12 +121,19 @@ impl ResolutionContext {
             shell_probe: Default::default(),
             nested_compose: Default::default(),
             icmp: Default::default(),
+            glob_warnings: Default::default(),
             current: Default::default(),
-            home_dir: None,
-            file_resolution_context: None,
+            file_resolution_context: context,
             caller_file_provenance: HashMap::new(),
             active_caller_file_provenance: None,
         }
+    }
+
+    /// A context at `cwd` built the way the pre-request API did: the
+    /// process's home and environment, no repository.
+    #[cfg(test)]
+    pub(crate) fn at(cwd: impl Into<PathBuf>) -> Self {
+        Self::new(biscuit_file::FileResolutionContext::new(cwd.into()))
     }
 
     /// Sets the repository (worktree) root for the resolution pass.
@@ -156,10 +162,9 @@ impl ResolutionContext {
     }
 
     /// The document's [`FileResolutionContext`](biscuit_file::FileResolutionContext):
-    /// the request snapshot derived to [`cwd`](Self::cwd), or, without one, a
-    /// context built from `cwd` and the magic search roots.
+    /// the request context derived to [`cwd`](Self::cwd).
     pub(crate) fn file_context(&self) -> biscuit_file::FileResolutionContext {
-        document_file_context(&self.cwd, &self.magic_paths, self.file_resolution_context.as_ref())
+        document_file_context(&self.cwd, &self.file_resolution_context)
     }
 
     /// The tree root: the directory relative references may not leave.
@@ -208,7 +213,7 @@ impl ResolutionContext {
     #[must_use]
     #[cfg(test)]
     pub fn with_home_dir(mut self, home_dir: PathBuf) -> Self {
-        self.home_dir = Some(home_dir);
+        self.file_resolution_context = self.file_resolution_context.with_home_dir(home_dir);
         self
     }
 
@@ -255,25 +260,23 @@ impl ResolutionContext {
     /// Returns the executing agent name.
     ///
     /// Uses the captured `ctx.agent` value when available; otherwise reads
-    /// `AGENT` from the environment with the same trim-and-default rules.
+    /// `AGENT` from the request context's environment with the same
+    /// trim-and-default rules.
     pub(crate) fn agent(&self) -> String {
         if let Some(Value::String(s)) = self.ctx_value("agent") {
             return s.clone();
         }
-        std::env::var("AGENT")
-            .ok()
+        self.file_resolution_context
+            .env()
+            .get("AGENT")
             .map(|s| s.trim_ascii().to_string())
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| "unknown".to_string())
     }
 
-    /// Returns the home directory to use for skill-root discovery.
+    /// Returns the request's home directory, for skill-root discovery.
     pub(crate) fn home_dir(&self) -> Option<PathBuf> {
-        if self.file_resolution_context.is_some() {
-            self.home_dir.clone()
-        } else {
-            self.home_dir.clone().or_else(dirs::home_dir)
-        }
+        self.file_resolution_context.home_dir().map(Path::to_path_buf)
     }
 
     /// Fetches the text body for an HTTP(S) URL argument.
@@ -349,9 +352,10 @@ pub fn normalize_path_arg(raw: &str) -> String {
 /// Canonical document-backed file-reference resolver shared by the expression
 /// path and the schema validator.
 ///
-/// Resolution runs through an explicit [`FileResolutionContext`] built by
-/// [`document_resolution_context`], so it reads no ambient process state (CWD,
-/// `$HOME`, environment, or git root) after the context is captured. For a
+/// Resolution runs through the request's
+/// [`FileResolutionContext`](biscuit_file::FileResolutionContext) derived to
+/// `cwd`, so it reads no ambient process state (CWD, `$HOME`, environment, or
+/// git root). For a
 /// local filesystem reference the candidate order is (D2/D3):
 ///
 /// - **explicit** `./`/`../` → the document directory (`cwd`) only, no fallback;
@@ -362,10 +366,9 @@ pub fn normalize_path_arg(raw: &str) -> String {
 ///
 /// The launch-area fallback the previous two-step resolver consulted is
 /// **removed for nested documents** (D2): only repository and authoring-document
-/// candidates participate. The caller supplies the magic search roots and the
-/// pass's cached `repository_root`; both surfaces — read-side expression
-/// functions and the `darkmatter-file` schema format validator — share this
-/// single order.
+/// candidates participate. Magic roots and the repository root live on the
+/// context; both surfaces — read-side expression functions and the
+/// `darkmatter-file` schema format validator — share this single order.
 ///
 /// Relative references may not leave the tree root
 /// ([`ResolutionContext::base_dir`]) unless it is only a fallback to `cwd`.
@@ -378,32 +381,49 @@ pub fn normalize_path_arg(raw: &str) -> String {
 ///   root, or a required anchor cannot be established (missing home, missing
 ///   interpolation variable, unconfigured vault, or a candidate probe I/O
 ///   failure).
-///
-/// [`document_resolution_context`]: crate::markdown::compose::util::document_resolution_context
 pub(crate) fn resolve_document_file_ref(
     file_ref: &FileReference,
     cwd: &Path,
-    _repository_root: Option<&Path>,
-    _package_area: Option<&Path>,
-    magic_paths: &[(PathBuf, PathPosition)],
-    request_context: Option<&biscuit_file::FileResolutionContext>,
+    request_context: &biscuit_file::FileResolutionContext,
 ) -> Result<Option<PathBuf>, FileReferenceError> {
-    file_ref.resolve_in_context(&document_file_context(cwd, magic_paths, request_context))
+    file_ref.resolve_in_context(&document_file_context(cwd, request_context))
 }
 
 /// The context a document in `cwd` resolves through.
 ///
 /// A snapshot already derived for `cwd` is used as is: re-deriving it would
-/// drop its source path and a trusted-external derivation.
-fn document_file_context(
+/// drop its source path, its opening anchor (a `~` tree root), and a
+/// trusted-external derivation. It is recognized by the directory it names,
+/// not its spelling: a source keeps the spelling of the tree it was opened in
+/// (macOS `/var`) while its canonical path does not (`/private/var`).
+///
+/// A `cwd` outside the request's tree is the caller's own document, so it is
+/// derived the way compose admits such a source: trusted-external when only
+/// that derivation is valid.
+pub(crate) fn document_file_context(
     cwd: &Path,
-    magic_paths: &[(PathBuf, PathPosition)],
-    request_context: Option<&biscuit_file::FileResolutionContext>,
+    request_context: &biscuit_file::FileResolutionContext,
 ) -> biscuit_file::FileResolutionContext {
-    match request_context {
-        Some(snapshot) if snapshot.cwd() == cwd => snapshot.clone(),
-        Some(snapshot) => snapshot.for_cwd(cwd),
-        None => crate::markdown::compose::util::document_resolution_context(cwd, None, magic_paths, None),
+    if request_context.cwd() == cwd || same_directory(request_context.cwd(), cwd) {
+        return request_context.clone();
+    }
+    let ordinary = request_context.for_cwd(cwd);
+    if ordinary.validate().is_err() {
+        let external = request_context.for_trusted_external_cwd(cwd);
+        if external.validate().is_ok() {
+            return external;
+        }
+    }
+    ordinary
+}
+
+fn same_directory(left: &Path, right: &Path) -> bool {
+    match (
+        biscuit_file::canonicalize_simplified(left),
+        biscuit_file::canonicalize_simplified(right),
+    ) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => false,
     }
 }
 
@@ -432,12 +452,9 @@ fn document_file_context(
 pub(crate) fn resolve_document_file_ref_shape(
     file_ref: &FileReference,
     cwd: &Path,
-    _repository_root: Option<&Path>,
-    _package_area: Option<&Path>,
-    magic_paths: &[(PathBuf, PathPosition)],
-    request_context: Option<&biscuit_file::FileResolutionContext>,
+    request_context: &biscuit_file::FileResolutionContext,
 ) -> Result<PathBuf, FileReferenceError> {
-    let ctx = document_file_context(cwd, magic_paths, request_context);
+    let ctx = document_file_context(cwd, request_context);
     if let Some(path) = file_ref.resolve_in_context(&ctx)? {
         return Ok(path);
     }
@@ -456,31 +473,6 @@ pub(crate) fn resolve_document_file_ref_shape(
                 file_ref.raw()
             ))
         })
-}
-
-/// Resolves a document-backed reference to the first existing **directory**
-/// in its candidate plan, or `None` when no candidate is a directory.
-///
-/// File resolution takes only regular files, so a directory reference is
-/// read from the same candidate order instead: `&dir` is the repository
-/// root's `dir`, `^dir` the package, package-area, then repository `dir`.
-///
-/// ## Errors
-///
-/// Propagates the typed [`FileReferenceError`] when the plan cannot be built
-/// (an invalid context or a missing home, vault, or repository anchor).
-pub(crate) fn resolve_document_directory(
-    file_ref: &FileReference,
-    cwd: &Path,
-    magic_paths: &[(PathBuf, PathPosition)],
-    request_context: Option<&biscuit_file::FileResolutionContext>,
-) -> Result<Option<PathBuf>, FileReferenceError> {
-    let ctx = document_file_context(cwd, magic_paths, request_context);
-    Ok(file_ref
-        .candidate_plan(&ctx)?
-        .into_iter()
-        .map(|candidate| candidate.path().to_path_buf())
-        .find(|path| path.is_dir()))
 }
 
 #[cfg(test)]
@@ -512,10 +504,9 @@ mod tests {
     }
 
     #[test]
-    fn resolution_context_default_is_cwd_no_magic() {
-        let ctx = ResolutionContext::new(PathBuf::from("/tmp/docdir"));
+    fn resolution_context_takes_cwd_from_its_context() {
+        let ctx = ResolutionContext::at("/tmp/docdir");
         assert_eq!(ctx.cwd, PathBuf::from("/tmp/docdir"));
-        assert!(ctx.magic_paths.is_empty());
         assert!(ctx.repository_root.is_none());
         // The launch-area anchor is diagnostic-only and unset by default.
         assert!(ctx.file_ref_fallback_dir.is_none());
@@ -526,15 +517,16 @@ mod tests {
     /// tree, so it falls back to `cwd` and is not a boundary.
     #[test]
     fn base_dir_is_the_tree_root_of_the_document_context() {
-        let ctx = ResolutionContext::new(PathBuf::from("/tmp/docdir"));
+        let ctx = ResolutionContext::at(PathBuf::from("/tmp/docdir"));
         assert_eq!(ctx.base_dir(), PathBuf::from("/tmp/docdir"));
         assert_eq!(ctx.base_dir_origin(), biscuit_file::BaseDirOrigin::Fallback);
 
         let repo = repo_fixture();
         let cwd = repo.path().join("docs");
-        let mut ctx = ResolutionContext::new(cwd.clone());
-        ctx.file_resolution_context = Some(
-            biscuit_file::FileResolutionContext::new(repo.path()).with_repository_root(repo.path()),
+        let ctx = ResolutionContext::new(
+            biscuit_file::FileResolutionContext::new(repo.path())
+                .with_repository_root(repo.path())
+                .for_cwd(&cwd),
         );
         assert_eq!(ctx.cwd, cwd);
         assert_eq!(ctx.base_dir(), repo.path());
@@ -550,15 +542,14 @@ mod tests {
             HashMap::new(),
         );
         let document = request.for_source_reference(&FileReference::new("~/Downloads/a.md").unwrap(), &source);
-        let mut ctx = ResolutionContext::new(home.path().join("Downloads"));
-        ctx.file_resolution_context = Some(document);
+        let ctx = ResolutionContext::new(document);
         assert_eq!(ctx.base_dir(), home.path());
         assert_eq!(ctx.base_dir_origin(), biscuit_file::BaseDirOrigin::Home);
     }
 
     #[test]
     fn with_file_ref_fallback_dir_sets_the_field() {
-        let ctx = ResolutionContext::new(PathBuf::from("/tmp/docdir"))
+        let ctx = ResolutionContext::at(PathBuf::from("/tmp/docdir"))
             .with_file_ref_fallback_dir("/tmp/launch");
         assert_eq!(ctx.file_ref_fallback_dir.as_deref(), Some(std::path::Path::new("/tmp/launch")));
     }
@@ -582,7 +573,7 @@ mod tests {
         std::fs::write(cwd.join("shared.md"), "# Source\n").unwrap();
 
         let file_ref = FileReference::new("shared.md").unwrap();
-        let resolved = resolve_document_file_ref(&file_ref, &cwd, None, None, &[], None)
+        let resolved = resolve_document_file_ref(&file_ref, &cwd, &biscuit_file::FileResolutionContext::new(&cwd))
             .unwrap()
             .expect("should resolve");
 
@@ -601,7 +592,7 @@ mod tests {
         std::fs::write(cwd.join("shared.md"), "# Source\n").unwrap();
 
         let file_ref = FileReference::new("./shared.md").unwrap();
-        let resolved = resolve_document_file_ref(&file_ref, &cwd, None, None, &[], None)
+        let resolved = resolve_document_file_ref(&file_ref, &cwd, &biscuit_file::FileResolutionContext::new(&cwd))
             .unwrap()
             .expect("should resolve from base");
 
@@ -627,15 +618,7 @@ mod tests {
         let snapshot = biscuit_file::FileResolutionContext::new(&cwd)
             .with_repository_scope_catalog(catalog);
         let file_ref = FileReference::new("^shared.md").unwrap();
-        let resolved = resolve_document_file_ref(
-            &file_ref,
-            &cwd,
-            Some(repo.path()),
-            Some(&package_area),
-            &[],
-            Some(&snapshot),
-        )
-        .unwrap();
+        let resolved = resolve_document_file_ref(&file_ref, &cwd, &snapshot).unwrap();
 
         assert_eq!(resolved, Some(package_area.join("shared.md")));
     }
@@ -650,7 +633,7 @@ mod tests {
 
         let file_ref = FileReference::new("absent.md").unwrap();
         let resolved =
-            resolve_document_file_ref(&file_ref, &cwd, None, None, &[], None).unwrap();
+            resolve_document_file_ref(&file_ref, &cwd, &biscuit_file::FileResolutionContext::new(&cwd)).unwrap();
 
         assert!(resolved.is_none());
     }
@@ -677,25 +660,7 @@ mod tests {
         let rt = RemoteFetchRuntime::with_policy(policy);
         let url = format!("{}/dynamic.md", server.uri());
 
-        let ctx = ResolutionContext {
-            cwd: PathBuf::from("/tmp"),
-            magic_paths: Vec::new(),
-            repository_root: None,
-            package_area: None,
-            file_ref_fallback_dir: None,
-            remote_fetch: Some(rt),
-            provider_queries: Default::default(),
-            ctx_values: Map::new(),
-            observations: Default::default(),
-            shell_probe: Default::default(),
-            nested_compose: Default::default(),
-            icmp: Default::default(),
-            current: Default::default(),
-            home_dir: None,
-            file_resolution_context: None,
-            caller_file_provenance: HashMap::new(),
-            active_caller_file_provenance: None,
-        };
+        let ctx = ResolutionContext { remote_fetch: Some(rt), ..ResolutionContext::at("/tmp") };
 
         // The URL was never registered by discovery; the read-side function
         // must register-and-fetch it now and return the body.
@@ -715,25 +680,7 @@ mod tests {
 
         // Deny-all policy: even a well-formed URL must be denied at registration.
         let rt = RemoteFetchRuntime::with_policy(FetchPolicy::deny_all());
-        let ctx = ResolutionContext {
-            cwd: PathBuf::from("/tmp"),
-            magic_paths: Vec::new(),
-            repository_root: None,
-            package_area: None,
-            file_ref_fallback_dir: None,
-            remote_fetch: Some(rt),
-            provider_queries: Default::default(),
-            ctx_values: Map::new(),
-            observations: Default::default(),
-            shell_probe: Default::default(),
-            nested_compose: Default::default(),
-            icmp: Default::default(),
-            current: Default::default(),
-            home_dir: None,
-            file_resolution_context: None,
-            caller_file_provenance: HashMap::new(),
-            active_caller_file_provenance: None,
-        };
+        let ctx = ResolutionContext { remote_fetch: Some(rt), ..ResolutionContext::at("/tmp") };
 
         let result = tokio::task::spawn_blocking(move || {
             ctx.fetch_remote_text("https://blocked.example/doc.md")
@@ -747,7 +694,7 @@ mod tests {
     fn provider_queries_are_run_local_single_flight_and_memoized() {
         use std::sync::atomic::{AtomicUsize, Ordering};
 
-        let context = ResolutionContext::new(PathBuf::from("/tmp"));
+        let context = ResolutionContext::at(PathBuf::from("/tmp"));
         let executions = Arc::new(AtomicUsize::new(0));
         let mut workers = Vec::new();
         for _ in 0..2 {
@@ -769,7 +716,7 @@ mod tests {
         }
         assert_eq!(executions.load(Ordering::SeqCst), 1);
 
-        let second_context = ResolutionContext::new(PathBuf::from("/tmp"));
+        let second_context = ResolutionContext::at(PathBuf::from("/tmp"));
         second_context
             .cached_provider_query("pr", "pr:123".to_string(), || {
                 executions.fetch_add(1, Ordering::SeqCst);
