@@ -67,6 +67,86 @@ docs_updated_during_phase_3:
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
   - .claude/skills/tree-hugger/SKILL.md
+source_files_during_phase_4:
+  - tree-hugger/lib/src/analysis/counters.rs
+  - tree-hugger/lib/src/file/extract/complexity/mod.rs
+  - tree-hugger/lib/tests/l1/symbols_query.rs
+  - tree-hugger/lib/tests/l1/symbols_cache.rs
+  - tree-hugger/lib/tests/l1/symbols_adapter.rs
+  - tree-hugger/cli/tests/symbols/cache_robustness.rs
+  - tree-hugger/cli/tests/symbols/reports.rs
+docs_updated_during_phase_4:
+  - tree-hugger/docs/cache-design.md
+  - tree-hugger/docs/symbol-schema-design.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/tree-hugger/SKILL.md
+  - .claude/skills/tree-hugger/api-reference.md
+source_files_during_phase_5:
+  - tree-hugger/cli/tests/symbols/reports.rs
+docs_updated_during_phase_5:
+  - tree-hugger/docs/symbol-schema-design.md
+  - tree-hugger/docs/symbol-kinds-and-visibility.md
+  - tree-hugger/docs/symbol-reports.md
+  - tree-hugger/docs/cache-design.md
+  - tree-hugger/README.md
+  - tree-hugger/lib/README.md
+  - tree-hugger/cli/README.md
+docs_created_during_phase_5:
+  - tree-hugger/docs/cyclomatic-complexity.md
+skills_files_updated_during_phase_5:
+  - .claude/skills/tree-hugger/SKILL.md
+source_code:
+  - tree-hugger/lib/src/file/extract/complexity/mod.rs
+  - tree-hugger/lib/src/file/extract/complexity/rust.rs
+  - tree-hugger/lib/src/file/extract/complexity/javascript.rs
+  - tree-hugger/lib/src/file/extract/complexity/typescript.rs
+  - tree-hugger/lib/src/file/extract/complexity/tests.rs
+  - tree-hugger/lib/src/file/extract/classify.rs
+  - tree-hugger/lib/src/file/extract/metrics.rs
+  - tree-hugger/lib/src/file/extract/mod.rs
+  - tree-hugger/lib/src/file/tree_file.rs
+  - tree-hugger/lib/src/file/mod.rs
+  - tree-hugger/lib/src/file/query.rs
+  - tree-hugger/lib/src/shared/schema_v2/facets.rs
+  - tree-hugger/lib/src/shared/schema_v2/types.rs
+  - tree-hugger/lib/src/shared/schema_v2/mod.rs
+  - tree-hugger/lib/src/analysis/mod.rs
+  - tree-hugger/lib/src/analysis/tests.rs
+  - tree-hugger/lib/src/analysis/counters.rs
+  - tree-hugger/lib/src/cache/mod.rs
+  - tree-hugger/lib/src/cache/symbol_cache.rs
+  - tree-hugger/lib/src/god_files/analysis.rs
+  - tree-hugger/cli/src/declarations.rs
+  - tree-hugger/cli/src/main.rs
+  - tree-hugger/cli/src/report.rs
+  - tree-hugger/cli/src/stats.rs
+  - tree-hugger/lib/tests/l1/symbols_metrics.rs
+  - tree-hugger/lib/tests/l1/symbols_query.rs
+  - tree-hugger/lib/tests/l1/symbols_adapter.rs
+  - tree-hugger/lib/tests/l1/symbols_cache.rs
+  - tree-hugger/lib/tests/l1/cache_tests.rs
+  - tree-hugger/cli/tests/symbols/cache_upgrade.rs
+  - tree-hugger/cli/tests/symbols/cache_robustness.rs
+  - tree-hugger/cli/tests/symbols/wiring.rs
+  - tree-hugger/cli/tests/symbols/reports.rs
+  - tree-hugger/cli/tests/symbols/report.rs
+  - tree-hugger/cli/tests/fixtures/golden/symbols.json
+  - tree-hugger/cli/tests/fixtures/golden/symbols.jsonl
+  - tree-hugger/cli/tests/fixtures/golden/symbols.tree
+documentation:
+  - tree-hugger/docs/cyclomatic-complexity.md
+  - tree-hugger/docs/symbol-schema-design.md
+  - tree-hugger/docs/cache-design.md
+  - tree-hugger/docs/symbol-kinds-and-visibility.md
+  - tree-hugger/docs/symbol-reports.md
+  - tree-hugger/README.md
+  - tree-hugger/lib/README.md
+  - tree-hugger/cli/README.md
+  - .claude/skills/tree-hugger/SKILL.md
+  - .claude/skills/tree-hugger/api-reference.md
+completed_phase: 5
+implemented: true
 ---
 
 # Implementation Log for 2026-10-07-cyclomatic-complexity (5 phases)
@@ -610,3 +690,189 @@ because those reports do not request Metrics.
   covered explicitly). No path, I/O or platform API is new. CI covers Linux
   and macOS on the pull request and Windows on `main`.
 
+
+## Phase 4
+
+Phase 4 adds query, cache, adapter and CLI validation for `cyclomatic`, plus
+one focused work counter. It changes no counting rule, schema or output, so
+schema stays 4.3 and `EXTRACTOR_REVISION` stays "28" (no bump). The author
+has still not accepted the convention or R1–R6 (spec `human_review`).
+
+### Starting state (2026-10-05)
+
+The worktree was clean. Phases 2 and 3 and the relations-review work are now
+committed (`83bf8089d`, `3a67217b6`), so this phase's diff is only its own
+work.
+
+### What changed
+
+- **`WorkCounters::complexity_walks`** (`analysis/counters.rs`), incremented
+  in `complexity::cyclomatic` after `rules_for` succeeds. The plan allows a
+  focused counter "only if the existing counters cannot observe it". They
+  cannot: under Metrics, a body walk adds no parse, capture or link. It
+  counts one walk per callable body of a language with rules. So it is 0
+  without Metrics and 0 for a language without rules.
+- **No production behavior change otherwise.** The CLI requests Metrics only
+  for `--json-full` (complete index) and `--stats`, as before. `god_files`
+  does not read metrics (grep: no `metrics`/`cyclomatic` in
+  `lib/src/god_files`), so its scores and exit codes cannot change.
+
+### Requirement → test mapping
+
+| Requirement | Test |
+|---|---|
+| Narrow = complete query; LF = CRLF; outer total with inner callables omitted; malformed bodies | Already covered in Phases 2–3 (`assert_cyclomatic_rows`, `an_outer_total_does_not_depend_on_selecting_its_nested_callables`, `cyclomatic_is_unavailable_only_for_a_malformed_counted_body`); not duplicated |
+| Metrics absent when unrequested; no complexity walk for declarations-only, Flags, or every capability but Metrics; one walk per measured callable under Metrics and the complete index; none for Go (no rules); bodyless declarations `None`; other metrics intact when `cyclomatic` is `None` (Go: `parameters`/`has_docs`/`lines` exact) | **new** `symbols_query::complexity_is_walked_only_for_metrics_once_per_measured_callable` (Rust, JS, TS, Go via `COMPLEXITY_SOURCES`) |
+| Symbol IDs and qualified names are unchanged by whether complexity ran | same test (identical `(id, qualified_name)` lists across all five queries) |
+| Widening a declarations-only entry to Metrics parses once and walks each measured callable once; the entry stores each value, `null` included; a warm Metrics request (and the narrower declarations-only one) is a `CacheLookup::Hit` with zero work; a language without rules caches `null` (no perpetual recompute) | **new** `symbols_cache::complexity_is_stored_once_and_served_on_warm_hits` |
+| Generic widening/projection/warm-hit by Metrics across every fixture | existing `widening_capabilities_runs_only_the_missing_passes` (Go row = unavailable language), `projected_results_*`, `every_fixture_is_a_complete_warm_hit_*` (their `WorkCounters::default()` checks now also cover `complexity_walks`) |
+| Cache robustness matrix for `metrics.cyclomatic` (control, absent, null, `"123"`, one/every wrong element, empty `[]`, duplicate key, trailing content) | **new column** `metrics.cyclomatic` in `cache_robustness::persisted_symbol_fields_are_served_or_recomputed_per_shape` |
+| Wrong numbers and types beyond the matrix: `3.5`, `-1`, `4294967296`, `true`, `{}` rejected; `4294967295` served (for both `lines` and `cyclomatic`) | `cache_robustness::metrics_counts_serve_only_a_u32` (renamed from `metrics_lines_serves_only_a_u32_count` and extended) |
+| Record-reader matrix (library) | existing `symbols_adapter::new_record_fields_read_per_shape` (Phase 2) |
+| Previous schema (4.2) and revision (26, 27) entries recomputed, never migrated | existing `cache_upgrade` tests (Phases 2–3); no new revision this phase |
+| The older-model adapter stays lossy and never invents complexity | `symbols_adapter::record_only_declaration_facts_are_lost_through_the_older_model` now also requires that some source *had* a `cyclomatic` value that the round trip dropped |
+| CLI: `--json-full` carries the key (number / `null`, never `0`) cold = warm = uncached; `--json` and `--jsonl` listings compute no metrics; `--stats` (terminal and JSON) adds no complexity statistic | **new** `reports::cyclomatic_is_reported_only_where_metrics_already_are` |
+| Goldens limited to key and schema | Not regenerated: `golden::*` pass unchanged. No schema or revision change this phase, and `--json`/`--jsonl` do not request Metrics, so no key appears |
+
+**Mutation check.** Moving `count_complexity_walk()` before `rules_for(..)?`
+(which counts a walk for a language without rules) failed both new library
+tests on their Go cells. The change was reverted.
+
+### Docs and skill
+
+- `docs/cache-design.md`: the `u32` sentence now lists `true`, `{}`, `[]`
+  and the served `4294967295`, and the Tests table has a row for the new
+  cache test.
+- `docs/symbol-schema-design.md`: the work-counter paragraph names
+  complexity walks.
+- Skill: `api-reference.md` (Work Counters) and SKILL.md (new tests, the
+  counter and CLI exposure).
+- The old test name appears only in the closed
+  `2026-10-06-symbol-type-relations` log. That is a snapshot, so it was left
+  as is.
+
+### Placement
+
+All new tests are L1, and none carries a tier marker in its path.
+`symbols_query`, `symbols_cache` and `symbols_adapter` are in the declared
+`lib/tests/l1` binary. `reports` and `cache_robustness` are in the CLI
+`symbols` binary. No feature gate is involved.
+
+### Gates run (2026-10-05)
+
+- `just test` (tree-hugger): 1099 tests, 1099 passed.
+- `just test-l2` (tree-hugger): 6 passed (tmux, WezTerm and Kitty for
+  declarations and god-files).
+- `just lint` (tree-hugger): passes after the test's tuple type was given an
+  alias (`ComplexitySource`) for `clippy::type_complexity`.
+- OS: no cross-check was run. The new counter is an atomic, and the new tests
+  use temp files and the existing `Scratch` harness. Nothing touches paths or
+  platform APIs. CI covers Linux and macOS on the pull request and Windows on
+  `main`.
+
+## Phase 5
+
+Phase 5 publishes the counting rules and brings the docs, READMEs and skill
+up to current behavior. It changes no counting rule, schema or production
+code. Schema stays 4.3 and `EXTRACTOR_REVISION` stays "28".
+
+### Starting state (2026-10-05)
+
+Phase 4's work was still uncommitted in the worktree (the `M` files in
+`git status`). Phase 5 edits were made on top of it.
+
+### What changed
+
+- **New page `tree-hugger/docs/cyclomatic-complexity.md`**: written for a
+  developer new to the repository. It covers how to get the value (`hug
+  --json-full` with a `jq` line, and `Capability::Metrics`), how to read a
+  number, `null` or an absent facet, and a Mermaid flow of the walk. It has
+  the shared rules table, then one table per language (Rust, JavaScript,
+  TypeScript). Each row shows its contribution and a source → total
+  example. All examples come from the `*_CYCLOMATIC` rows in
+  `symbols_metrics.rs`, plus one end-to-end `hug` run on a TS sample
+  (`classify` → 4). The page also covers nested callables and types, a
+  `null` table, and the syntax-only limits: no macro expansion, no
+  conditional compilation, no reachability, no callees, embedded languages
+  treated as text, and nested type initializers counted in no function. It
+  does not name or link this feature.
+- `docs/symbol-schema-design.md`, `docs/symbol-kinds-and-visibility.md`
+  (Metrics table: a `cyclomatic` row), `docs/symbol-reports.md`
+  (`--json-full` section), `docs/cache-design.md` (a counting-rule change
+  bumps the revision): all now link the new page.
+- `README.md` (release notes bullet), `lib/README.md` (metrics facet),
+  `cli/README.md` (where metrics appear).
+- Skill `SKILL.md`: the CLI-exposure sentence was corrected (see drift
+  below), the new page was added to "Detailed Documentation", and the
+  metrics bullet now names it as the user contract.
+  `api-reference.md` was already current.
+
+### Comment and doc drift found and fixed
+
+- `docs/symbol-schema-design.md`: the `MetricsFacet` code block listed only
+  `parameters`, `has_docs` and `lines`. `cyclomatic` was added.
+- **CLI exposure was misdescribed.** `cli/README.md` said the `metrics`
+  facet "is only in `--json-full`". The skill and the Phase 4
+  `message_to_agent` said `--json`/`--jsonl` "carry no complexity". Running
+  `hug --json functions --undocumented` and `hug functions --jsonl
+  --min-params 1` showed otherwise. These selectors already request
+  Metrics, so their records carry the facet, `cyclomatic` included. This
+  matches the spec ("wherever they already request Metrics"), so the code
+  is right and the prose was wrong. The docs, README and skill now say so.
+  The `reports` test now pins this (see below).
+- Code comments on the changed symbols were reviewed: `MetricsFacet`,
+  `symbol_metrics`, `body_lines`, `callable_body`, `complexity/*`,
+  `WorkCounters::complexity_walks`, `SchemaVersion::V4_3`/`CURRENT`,
+  `EXTRACTOR_REVISION` and `Capability::Metrics`. No drift was found. No
+  comment states a metric count that is now wrong.
+
+### Requirement → test mapping
+
+| Requirement | Test |
+|---|---|
+| JSON/JSONL expose the key wherever Metrics is already requested, with the same values as the full index | **extended** `reports::cyclomatic_is_reported_only_where_metrics_already_are`: `--json functions --undocumented` and `functions --jsonl --min-params 1` give 7 records, each carrying the `cyclomatic` key (presence asserted, so an absent key cannot pass as `null`) equal to the `--json-full` value (3, 3, `null` for Go, `null` for the bodyless trait method) |
+| Doc claims (every example total) | each example is a row in `RUST_CYCLOMATIC`/`JAVASCRIPT_CYCLOMATIC`/`TYPESCRIPT_CYCLOMATIC`, `MALFORMED_BODIES`, or `complexity::tests` (macro token-tree error → `None`) |
+
+The new assertion fails if a selector-driven listing drops or changes the
+key. The doc pages are not read by any compiled code, so they need no
+corpus test.
+
+### Accepted open-question choices and departures (close-out)
+
+- Convention, language set (Rust, JavaScript, TypeScript) and R1–R6 are
+  built as drafted in Phase 1. **Author acceptance is still pending.** The
+  session is non-interactive, so the spec keeps `human_review: true` with
+  its existing item, and the published doc describes the rules as built.
+- Departures recorded earlier are unchanged:
+  - the body comes from `callable_body` (the reader `lines` uses), not from
+    `body_node_for_declaration` (Phase 1);
+  - the schema is 4.3 and the revision 27 → 28, not 4.2/26 (Phase 2/3);
+  - a focused `complexity_walks` counter was added (Phase 4).
+- No closed prerequisite spec was edited.
+
+### Final verification
+
+- Every rule has an executable expectation (`*_CYCLOMATIC` rows), and all
+  16 `METRICS_MATRIX` rows have an explicit `cyclomatic` cell (13 are
+  `NO_CYCLOMATIC`).
+- Narrow, complete, cached and uncached results agree (Phase 4 tests, still
+  green).
+- The docs explain how to read a number versus `null`
+  (`docs/cyclomatic-complexity.md` "Reading the value" and "When the value
+  is `null`").
+- The feature is left active. Status: implementation complete, ready for
+  review once the author accepts the rulings.
+
+### Gates run (2026-10-05)
+
+- Scope: `git status --porcelain --untracked-files=all | awk '{print $NF}' |
+  xargs python3 scripts/ci/affected_scope.py` → `packages: [tree-hugger,
+  tree-hugger-cli, test-toolkit]`, `change_class: package`. The gates were
+  therefore required and run.
+- `just test` (tree-hugger): 1099 tests, 1099 passed.
+- `just lint` (tree-hugger): passes (exit 0).
+- `just test-l2` was not re-run. No renderer or terminal output changed,
+  and Phase 4 ran it green.
+- OS: no cross-check. The only code change is an L1 CLI test assertion
+  that uses the existing `Scratch` harness. CI covers Linux and macOS on the
+  pull request and Windows on `main`.

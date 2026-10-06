@@ -3,7 +3,7 @@ kind: plan
 name: cyclomatic-complexity
 feature: 2026-10-07-cyclomatic-complexity
 created: 2026-10-05
-phase: 3
+phase: 4
 total_phases: 5
 agent: claude/sonnet
 yolo: true
@@ -71,6 +71,86 @@ docs_updated_during_phase_3:
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
   - .claude/skills/tree-hugger/SKILL.md
+source_files_during_phase_4:
+  - tree-hugger/lib/src/analysis/counters.rs
+  - tree-hugger/lib/src/file/extract/complexity/mod.rs
+  - tree-hugger/lib/tests/l1/symbols_query.rs
+  - tree-hugger/lib/tests/l1/symbols_cache.rs
+  - tree-hugger/lib/tests/l1/symbols_adapter.rs
+  - tree-hugger/cli/tests/symbols/cache_robustness.rs
+  - tree-hugger/cli/tests/symbols/reports.rs
+docs_updated_during_phase_4:
+  - tree-hugger/docs/cache-design.md
+  - tree-hugger/docs/symbol-schema-design.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/tree-hugger/SKILL.md
+  - .claude/skills/tree-hugger/api-reference.md
+source_files_during_phase_5:
+  - tree-hugger/cli/tests/symbols/reports.rs
+docs_updated_during_phase_5:
+  - tree-hugger/docs/symbol-schema-design.md
+  - tree-hugger/docs/symbol-kinds-and-visibility.md
+  - tree-hugger/docs/symbol-reports.md
+  - tree-hugger/docs/cache-design.md
+  - tree-hugger/README.md
+  - tree-hugger/lib/README.md
+  - tree-hugger/cli/README.md
+docs_created_during_phase_5:
+  - tree-hugger/docs/cyclomatic-complexity.md
+skills_files_updated_during_phase_5:
+  - .claude/skills/tree-hugger/SKILL.md
+source_code:
+  - tree-hugger/lib/src/file/extract/complexity/mod.rs
+  - tree-hugger/lib/src/file/extract/complexity/rust.rs
+  - tree-hugger/lib/src/file/extract/complexity/javascript.rs
+  - tree-hugger/lib/src/file/extract/complexity/typescript.rs
+  - tree-hugger/lib/src/file/extract/complexity/tests.rs
+  - tree-hugger/lib/src/file/extract/classify.rs
+  - tree-hugger/lib/src/file/extract/metrics.rs
+  - tree-hugger/lib/src/file/extract/mod.rs
+  - tree-hugger/lib/src/file/tree_file.rs
+  - tree-hugger/lib/src/file/mod.rs
+  - tree-hugger/lib/src/file/query.rs
+  - tree-hugger/lib/src/shared/schema_v2/facets.rs
+  - tree-hugger/lib/src/shared/schema_v2/types.rs
+  - tree-hugger/lib/src/shared/schema_v2/mod.rs
+  - tree-hugger/lib/src/analysis/mod.rs
+  - tree-hugger/lib/src/analysis/tests.rs
+  - tree-hugger/lib/src/analysis/counters.rs
+  - tree-hugger/lib/src/cache/mod.rs
+  - tree-hugger/lib/src/cache/symbol_cache.rs
+  - tree-hugger/lib/src/god_files/analysis.rs
+  - tree-hugger/cli/src/declarations.rs
+  - tree-hugger/cli/src/main.rs
+  - tree-hugger/cli/src/report.rs
+  - tree-hugger/cli/src/stats.rs
+  - tree-hugger/lib/tests/l1/symbols_metrics.rs
+  - tree-hugger/lib/tests/l1/symbols_query.rs
+  - tree-hugger/lib/tests/l1/symbols_adapter.rs
+  - tree-hugger/lib/tests/l1/symbols_cache.rs
+  - tree-hugger/lib/tests/l1/cache_tests.rs
+  - tree-hugger/cli/tests/symbols/cache_upgrade.rs
+  - tree-hugger/cli/tests/symbols/cache_robustness.rs
+  - tree-hugger/cli/tests/symbols/wiring.rs
+  - tree-hugger/cli/tests/symbols/reports.rs
+  - tree-hugger/cli/tests/symbols/report.rs
+  - tree-hugger/cli/tests/fixtures/golden/symbols.json
+  - tree-hugger/cli/tests/fixtures/golden/symbols.jsonl
+  - tree-hugger/cli/tests/fixtures/golden/symbols.tree
+documentation:
+  - tree-hugger/docs/cyclomatic-complexity.md
+  - tree-hugger/docs/symbol-schema-design.md
+  - tree-hugger/docs/cache-design.md
+  - tree-hugger/docs/symbol-kinds-and-visibility.md
+  - tree-hugger/docs/symbol-reports.md
+  - tree-hugger/README.md
+  - tree-hugger/lib/README.md
+  - tree-hugger/cli/README.md
+  - .claude/skills/tree-hugger/SKILL.md
+  - .claude/skills/tree-hugger/api-reference.md
+completed_phase: 5
+implemented: true
 ---
 
 # Plan: Per-Symbol Cyclomatic Complexity
@@ -294,31 +374,31 @@ as a parallel wave once Phase 3 is green.
 
 ### Wave 1 (parallel)
 
-- [ ] **Query equivalence**: narrow query equals complete query; a query returning
+- [x] **Query equivalence**: narrow query equals complete query; a query returning
   only an outer function still gives the pruned total; LF and CRLF source give
   equal values; metrics absent when unrequested; other metrics intact when
   complexity is `None`.
-- [ ] **Work counters**: declarations-only query does no optional passes or
+- [x] **Work counters**: declarations-only query does no optional passes or
   complexity traversal (add a focused complexity counter only if the existing
   counters cannot observe it); widening a cache entry to Metrics parses once;
   a warm entry covering Metrics is an actual `CacheLookup::Hit` with no parse;
   a language with unavailable complexity still completes Metrics and caches
   (no perpetual recompute).
-- [ ] **Cache and schema**: previous schema version and previous extractor
+- [x] **Cache and schema**: previous schema version and previous extractor
   revision entries are recomputed, never migrated; run the robustness matrix
   from Phase 1 once per format; update `cache_upgrade.rs` and version-sensitive
   tests using the revision current at implementation time.
-- [ ] **Adapters**: older-model adapters that cannot represent metrics stay
+- [x] **Adapters**: older-model adapters that cannot represent metrics stay
   explicitly lossy and do not invent complexity.
-- [ ] **CLI**: JSON, JSONL and full-index outputs expose the key wherever Metrics
+- [x] **CLI**: JSON, JSONL and full-index outputs expose the key wherever Metrics
   is already requested; no command newly requests Metrics; no new filter, sort,
   column, threshold or statistic.
-- [ ] **Unchanged behaviors**: symbol IDs and qualified names, god-files scores
+- [x] **Unchanged behaviors**: symbol IDs and qualified names, god-files scores
   and exit codes are unchanged; missing complexity is never treated as zero.
 
 ### Wave 2 (after Wave 1)
 
-- [ ] **Golden updates**: regenerate `tests/fixtures/golden/symbols.json` and
+- [x] **Golden updates**: regenerate `tests/fixtures/golden/symbols.json` and
   `symbols.jsonl` only for the new key and schema version; review the diff is
   limited to those.
 
@@ -333,30 +413,30 @@ Goal: docs describe current behavior; implementation is ready for review.
 
 ### Wave 1 (parallel, disjoint files)
 
-- [ ] **Counting rules doc**: publish the accepted convention in the `docs/`
+- [x] **Counting rules doc**: publish the accepted convention in the `docs/`
   tree, with small source examples per language, the unavailable-form limits,
   and the syntax-only caveats (no macro expansion, no reachability, called
   functions not added, opaque macro token trees and embedded languages, nested
   type field initializers excluded). Written for a developer with no
   repository experience; include a compact example per rule. The doc does not
   name or link this feature.
-- [ ] **Schema, cache and symbol-report docs**: update
+- [x] **Schema, cache and symbol-report docs**: update
   `docs/symbol-schema-design.md`, `docs/cache-design.md`,
   `docs/symbol-kinds-and-visibility.md` for the new key, version and
   revision, and how to read a number versus `null`.
-- [ ] **README / API docs and skill**: update tree-hugger README, public API docs,
+- [x] **README / API docs and skill**: update tree-hugger README, public API docs,
   and `.claude/skills/tree-hugger/SKILL.md`.
-- [ ] **Comment drift pass**: review `///` and `//` comments on every changed
+- [x] **Comment drift pass**: review `///` and `//` comments on every changed
   symbol, including any that state how many metrics exist; fix drift on the
   assumption the code is right and report what drifted.
 
 ### Wave 2 (after Wave 1)
 
-- [ ] **Implementation log**: record the accepted open-question choices and any
+- [x] **Implementation log**: record the accepted open-question choices and any
   departures from the spec; do not edit closed prerequisite specs.
-- [ ] **Final verification**: `just test` and `just lint` in `tree-hugger/`;
+- [x] **Final verification**: `just test` and `just lint` in `tree-hugger/`;
   confirm every matrix row, rule expectation, query/cache agreement and the docs
   checklist in the spec's completion paragraph.
-- [ ] **Hand off**: leave the feature active, with status "implementation
+- [x] **Hand off**: leave the feature active, with status "implementation
   complete, ready for review". Do not run `just complete` and do not commit
   unless told to.

@@ -34,20 +34,23 @@ reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-05
 review_iterations: 0
+implemented: true
+implemented_by: "claude/opus"
 human_review: true
 human_review_items:
   - |-
-    **Accept (or change) how complexity is counted, before the remaining
-    phases build on it.**
+    **Accept (or change) how complexity is counted, so the feature can
+    go to review.**
 
-    *Why now:* the counting rules for Rust, JavaScript and TypeScript are now
-    built and tested (Phases 2 and 3), using the convention the spec
-    recommends and the drafted answers below, because nobody could approve
-    them in this unattended run. The spec makes your acceptance a condition
-    of completion. Phase 4 adds checks and Phase 5 publishes the counting
-    rules as user documentation. Changing a rule today costs a few test
-    numbers. After Phase 5 it also means rewriting published docs, and every
-    change needs another cache invalidation.
+    *Why now:* all five phases are built. The counting rules for Rust,
+    JavaScript and TypeScript are implemented, tested and now published in
+    `tree-hugger/docs/cyclomatic-complexity.md`. They follow the convention
+    the spec recommends and the drafted answers below, because nobody could
+    approve them in this unattended run. The spec makes your acceptance a
+    condition of completion, so the feature is "ready for review" only once
+    you accept. Changing a rule now means new expected numbers in the tests,
+    an edit to that one doc page, and a cache invalidation (an extractor
+    revision bump).
 
     The basic convention: a function starts at 1. It adds 1 for each
     `if`/else-if, loop with a condition, ternary, `&&`/`||`/`??`,
@@ -77,7 +80,7 @@ human_review_items:
 
     Options:
 
-    - **Accept as built (recommended).** Phases 4 and 5 proceed unchanged.
+    - **Accept as built (recommended).** Nothing more to change.
       Pros: no delay, and this follows the spec's recommendation. Cons: any
       later change means revised numbers, a cache invalidation and a docs
       update.
@@ -92,45 +95,25 @@ human_review_items:
     `if`/`else`. The other choices leave out only code that does not run as
     part of the call.
 message_to_agent: |-
-  Phase 3 findings for the Phase 4 implementer:
+  All five phases are implemented (schema 4.3, EXTRACTOR_REVISION "28").
+  Notes for the reviewer:
 
-  1. Versions: schema stays 4.3 (`SchemaVersion::CURRENT`) and
-     EXTRACTOR_REVISION is now "28". Phase 3 bumped it for the JS/TS rules,
-     because the spec says any change to supported rules bumps it. Revision
-     27 has a stale-entry test:
-     `cache_upgrade::entry_from_extractor_revision_twenty_seven_is_not_served_after_the_ecmascript_rules`.
-     Phase 4 changes no rules, so it needs no bump.
-  2. Reviewed languages: Rust, JavaScript and TypeScript (`rules_for` in
-     lib/src/file/extract/complexity/mod.rs). `METRICS_MATRIX` now has a
-     `cyclomatic: Support` column. The other 13 languages use
-     `NO_CYCLOMATIC`, and the sweep asserts that a value is measured exactly
-     when a reviewed language has a callable with a body.
-  3. Already covered, so do not duplicate it in Phase 4:
-     - a query that omits an inner callable gives the same outer total
-       (`symbols_metrics::an_outer_total_does_not_depend_on_selecting_its_nested_callables`);
-     - LF/CRLF parity and metrics-only = complete index, for every rule row
-       (`assert_cyclomatic_rows`);
-     - malformed bodies in all three languages
-       (`cyclomatic_is_unavailable_only_for_a_malformed_counted_body`,
-       renamed from the Rust-only test).
-  4. Still open for Phase 4, per the plan:
-     - work counters;
-     - a warm `CacheLookup::Hit` that covers Metrics;
-     - widening an entry to Metrics;
-     - a language whose complexity is unavailable still caches;
-     - the `cache_robustness` record column for `metrics.cyclomatic`. Its
-       probe fixture is Python, which has no rules, so a numeric control
-       value needs a Rust, JS or TS target;
-     - the CLI `--json-full` exposure.
-  5. Extractor limits: JS generator declarations (`function*`), function
-     expressions bound to a `const`, and TS `declare function` produce no
-     Function record. They cannot be test rows, and they are not counting
-     bugs.
-  6. Phase 2 and the concurrent relations-review edits are still
-     uncommitted in this worktree. Check `git status` before regenerating
-     goldens.
-  7. Author acceptance of the convention and R1–R6 is still pending (spec
-     `human_review`).
+  1. Author acceptance of the counting convention and R1-R6 is still
+     pending (`human_review_items`). If any rule is flipped, update the rule
+     table in `lib/src/file/extract/complexity/<language>.rs`, the matching
+     `*_CYCLOMATIC` rows in `lib/tests/l1/symbols_metrics.rs`, the tables in
+     `tree-hugger/docs/cyclomatic-complexity.md`, and bump
+     EXTRACTOR_REVISION (adding the stale revision to `cache_upgrade.rs`).
+  2. Correction to the Phase 4 note: `--json`/`--jsonl` records DO carry
+     `metrics.cyclomatic` when a selector already requests Metrics
+     (`--undocumented`, `--min-params`). This was always the behavior and
+     matches the spec. Only the prose was wrong. Phase 5 fixed the CLI
+     README and the skill, and extended
+     `reports::cyclomatic_is_reported_only_where_metrics_already_are` to
+     pin it.
+  3. The user-facing contract is `tree-hugger/docs/cyclomatic-complexity.md`.
+     Every example total in it is an executable row in `symbols_metrics.rs`
+     or `complexity::tests`.
 ---
 
 # Spec: Per-Symbol Cyclomatic Complexity
