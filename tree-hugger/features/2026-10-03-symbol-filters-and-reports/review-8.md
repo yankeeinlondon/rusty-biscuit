@@ -13,10 +13,13 @@ reviewed_by: codex/gpt-6.1-sol
 recurrence: false
 created: "2026-10-05T17:05:08-07:00"
 spec: 2026-10-03-symbol-filters-and-reports/spec.md
-implemented: false
+implemented: true
+implemented_by: claude/opus
+log: tree-hugger/features/2026-10-03-symbol-filters-and-reports/log.md
 description: "A **feature** review of `2026-10-03-symbol-filters-and-reports/spec.md`"
 feature: 2026-10-03-symbol-filters-and-reports/review-8.md
 previous: 2026-10-03-symbol-filters-and-reports/review-7.md
+next: 2026-10-03-symbol-filters-and-reports/review-9.md
 ---
 
 The feature is **not production ready**. The previous review's missing performance record is repaired. The resulting investigation establishes an avoidable performance defect: declarations repeatedly rediscover shared namespace and test context. A separate high-priority finding records a pre-existing Zsh grammar crash, outside this feature's implementation. No human design decision is required.
