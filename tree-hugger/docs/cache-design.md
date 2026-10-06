@@ -194,7 +194,7 @@ file's records, imports, exports and every analysis pass but diagnostics:
 | Input | Where it comes from | Changes when |
 |---|---|---|
 | schema version | `SchemaVersion::CURRENT` (5.0) | the record shape or meaning changes |
-| implementation version | crate version and `EXTRACTOR_REVISION` (`0.1.0+rev.36`) | extraction code changes |
+| implementation version | crate version and `EXTRACTOR_REVISION` (`0.1.0+rev.39`) | extraction code changes |
 | grammar identity | the compiled grammar: name, declared version (if any), ABI, node-kind, field and parse-state counts | a grammar crate is upgraded |
 | grammar ID | the grammar variant (`typescript` or `tsx`, …) | the file's grammar variant differs |
 | query text | the effective `locals`, `imports` and `references` query text, with inherited vendored queries and overlays resolved | a `.scm` file the analysis compiles changes |
@@ -442,7 +442,7 @@ No entry-level field has a default:
 | `schema_version`, `fingerprint`, `source_hash` | miss | miss | miss | miss | miss | miss | miss | miss |
 | `file`, `language` | miss | miss | miss | miss | miss | miss (`""` is another file or no language) | miss | miss |
 | `diagnostics_fingerprint` | miss | miss (contradicts `diagnostics`) | miss | miss | miss | diagnostics recomputed (one parse; output as uncached) | miss | miss |
-| `records` | miss | miss | miss | miss | miss | **served**: no records of the covered kinds | miss | miss |
+| `records` | miss | miss | miss | miss | miss | **served** when no stored evidence names a record (a file with no records of the covered kinds); miss when name-only evidence of an every-kind entry names records the list no longer holds | miss | miss |
 | `imports`, `exports`, `diagnostics` | miss | miss | miss | miss | miss | **served**: the file has none | miss | miss |
 
 For a version object, "one bad element" and "every element bad" mean one or
@@ -490,10 +490,15 @@ Each field's shapes, in an entry that lists `occurrences`:
 | `reference_coverage` | miss | miss | miss | miss | miss | miss (the file region is required) | miss | miss |
 | occurrence `confidence` | miss | miss | miss | miss | miss | miss | miss | miss |
 | occurrence `target.id` | miss | miss when the occurrence made an edge | miss | miss | miss | miss | miss | miss |
+| ownerless occurrence `target.id` | miss | miss when no import or other binding of the name is written | miss | miss | miss | miss | miss | miss |
 | occurrence `candidates` | miss | miss | miss | miss | miss | miss for `NameOnly` | miss | miss |
 | occurrence `span` | miss | miss | miss | miss | miss | miss | miss | miss |
 | occurrence `owner` | miss | miss for a named owner | miss | miss | miss | miss | miss | miss |
+| occurrence `owner_span` | miss | miss | miss | miss | miss | miss | miss | miss |
+| coverage `owner` | miss | miss for a region owning occurrences | miss | miss | miss | miss | miss | miss |
+| coverage `state` | miss | miss | miss | miss | miss | miss | miss | miss |
 | coverage `reasons` | miss | miss | miss | miss | miss | miss for a `Limited` region | miss | miss |
+| coverage `span` | miss | miss | miss | miss | miss | miss | miss | miss |
 
 Well-formed evidence is then checked against the source, itself, the
 capability claim and the records (`CacheMiss::Inconsistent`). Each of these
@@ -508,23 +513,65 @@ refuses the entry:
   occurrence outside its owner's region;
 - an occurrence whose `target.name` is not the source text at its span;
 - an occurrence whose owner and owner span are not one of the coverage
-  regions, or an owner or candidate whose name and qualified name are not
-  its stored record's;
+  regions, or not the innermost region around it (regions are syntax
+  nodes, so they nest, and a reference belongs to the nearest one);
+- an owner, candidate or reference-summary entry whose name and qualified
+  name are not its stored record's;
+- an ID anywhere in the evidence or a record that is not a generated
+  declaration ID (64 lowercase hex digits), so `"bogus"` is refused even
+  where it names no stored record;
+- a `Scoped` target ID or a candidate ID naming a stored record whose name
+  is not the written name (`f` written, `g`'s ID stored);
 - `Scoped` with candidates; `NameOnly` with a target ID, no candidates, a
-  candidate without an ID or a repeated one; `Unresolved` with either;
+  candidate without an ID, a repeated one or one named other than the
+  written name; `Unresolved` with either;
+- in a language without binding rules (every language but Rust, TypeScript
+  and JavaScript): any `Scoped` occurrence, a region not limited by
+  `unsupported_language` (or, in Rust/TS/JS, a region that is), a
+  `NameOnly` occurrence missing a stored record of its name, an
+  `Unresolved` one while a stored record has its name, and, in an
+  every-kind entry, a candidate that is not a record of its name;
+- a `Scoped` occurrence with no target ID whose name is written nowhere
+  else in the source: such an occurrence is bound to an import or to a
+  binding no record reports (a `for` or `catch` variable, a pattern, a
+  named function expression's own name), and each of those writes the name
+  at a place that is neither a record's name nor an occurrence;
+- a repeated coverage region (same owner and span, or one owner twice);
+  a region owned by a stored record that is not a function, method or
+  constructor; a stored callable with a body and no region of its own,
+  even when it has no occurrences (except Python and Lua, whose body is not
+  always a `body` node, so a region is not provable from the record);
 - occurrences out of their canonical order or repeated; coverage out of
   order; reasons that are not ascending and distinct, or present on a
   `Complete` region or missing from a `Limited` one;
 - a record's in-file `references` or `referenced_by` edge with no `Scoped`
-  occurrence that made it, or `is_recursive: Yes` with no `Scoped` call of
-  the record itself.
+  occurrence that made it; a `Scoped` occurrence between two stored records
+  whose `references`/`referenced_by` edge is missing; a `dependencies`
+  entry with an ID, missing from `references`, or with no `Scoped`
+  occurrence of its name and no ID owned by the record; a `references`
+  entry without an ID that is not a dependency;
+- a `semantics` facet that the stored occurrences, coverage, imports and
+  references do not produce (the reader recomputes it the way the semantic
+  pass does, so `is_recursive: No` on a `Limited` region or beside a
+  `Scoped` self-call, or `Unknown` on a complete region with no candidate
+  call, is refused), or any `semantics` value in an entry that does not
+  list `semantics`.
+
+A kind-narrowed entry keeps evidence that names declarations it omits (a
+functions-only entry stores `new C()` with `C`'s ID). An ID is therefore
+checked against a record only when that record is stored, and is always
+checked for its generated form.
 
 For example, an entry whose `helper` call lost its target ID is recomputed:
 `module_function`'s record still references `helper`, and no occurrence
-says so. What these checks cannot see without parsing is an occurrence
-removed while nothing derived from it remains (a call with no in-file
-target). The entry's key includes the source hash, so an entry is only ever
-read for the text it was written from.
+says so. An ownerless `f();` whose ID is replaced by `g`'s is recomputed
+because `g` is not the written name, and one whose ID becomes `null` is
+recomputed because no import or other binding writes `f`. What these checks
+cannot see without parsing is an occurrence or an anonymous region removed
+while nothing derived from it remains (a call with no in-file target), or a
+`Scoped` occurrence without an ID whose name is written elsewhere for an
+unrelated reason. The entry's key includes the source hash, so an entry is
+only ever read for the text it was written from.
 
 ### Record fields
 
@@ -631,7 +678,8 @@ visited once per run, so they only added copies.
 | Concurrent writers (threads and processes) | `concurrent_writers_leave_a_readable_entry_whose_coverage_matches`, `cli/tests/symbols/cache_lookup.rs`, `lib/tests/l1/cache_tests.rs` |
 | Entry and record field shapes | `cli/tests/symbols/cache_robustness.rs` |
 | Attribute `name`/`value` and modifier `type`/`Custom` `value` shapes, from real Java extraction | `cache_robustness::attribute_and_modifier_members_are_served_or_recomputed_per_shape` |
-| Reference evidence: every shape of every evidence field, each inconsistent edit, and a file with no occurrences served | `cache_robustness::reference_evidence_is_served_only_when_consistent` |
+| Reference evidence: every shape of every evidence field, each inconsistent edit (wrong, malformed and lost target IDs with and without an owner, repeated and missing regions, owners past the innermost region, missing edges and dependencies, recomputed semantics), legitimate no-ID import and unreported-binding targets and a file with no occurrences served | `cache_robustness::reference_evidence_is_served_only_when_consistent` |
+| A kind-narrowed entry referencing omitted declarations is a `Hit`; its retained records are still checked; a language without binding rules must hold exactly its name lookup | `lib/tests/l1/symbols_cache.rs` `stored_evidence_is_checked_against_what_the_entry_retains` |
 | An entry from before schema 5.0 (revision 30, no evidence keys) is recomputed under both keys | `cache_upgrade::entry_from_extractor_revision_thirty_is_not_served_after_the_scoped_references_bump` |
 | Widening an entry by `metrics` parses once and walks each measured callable once; every `cyclomatic` value, `null` included, is stored, and a warm request is a `Hit` that walks nothing | `complexity_is_stored_once_and_served_on_warm_hits` |
 | Old extractor revisions and records of other schema versions are never served | `cli/tests/symbols/cache_upgrade.rs` |

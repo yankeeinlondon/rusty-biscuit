@@ -66,6 +66,7 @@ classified as:
 - `symbols` - list all discovered symbols
 - `imports` - list imported symbols
 - `classes` - list classes, structs, interfaces and traits with their members, split into static and instance methods and fields (a Java interface constant is a static field; a Rust `impl` block's methods are listed under the type it implements)
+- `refs` - list the references to one declaration within its file, or its callers or callees (see [Scope-Aware References](./docs/references.md#hug-refs))
 - `lint` - run lint and syntax diagnostics
 - `god-files` - identify oversized source files that are strong candidates for refactoring
 
@@ -142,6 +143,41 @@ and tie-breakers, `--json-full` and `--verbose`.
 `extends`/`implements` lists on each type record: what each language
 records, when a base gets a same-file ID, and how Rust impls attach to their
 self type.
+
+## Release Notes: scope-aware references and `hug refs`
+
+References are now resolved through each file's lexical scopes instead of
+being bound to the first declaration with the same name:
+
+- **Occurrences with a confidence.** Every reference is an occurrence with
+  its owner, kind (`Call`/`Usage`) and confidence: `Scoped` (one proven
+  binding), `NameOnly` (same-named candidates, none proven) or `Unresolved`.
+  Rust, TypeScript and JavaScript resolve; every other language reports
+  occurrences with `Limited` coverage and never claims a binding.
+- **Honest summaries.** `relations.references`, `dependencies`,
+  `referenced_by` and `semantics.is_recursive` come only from `Scoped`
+  occurrences, so a shadowed local or `other.parse()` no longer links to
+  `fn parse`, and a direct self-call makes `is_recursive` `Yes`:
+
+  ```rust
+  fn parse() {}
+  fn run() { let parse = || 1; parse(); } // before: run -> fn parse; now: run -> the local
+  ```
+
+- **`hug refs`** lists one declaration's references, callers or callees,
+  grouped by owner, with name-only suggestions kept apart:
+
+  ```sh
+  hug refs parse 'src/**'
+  hug refs --id <ID> --callees 'src/**' --json
+  ```
+
+  Resolution never leaves a file, and every report says so.
+
+Records move to schema **5.0** (a change of meaning, not of layout). Cache
+entries written by earlier versions are re-analyzed once. The rules, the
+language table and the recursion decision are in
+[Scope-Aware References](./docs/references.md).
 
 ## Release Notes: generics, base types, modifiers, attributes and body lines
 

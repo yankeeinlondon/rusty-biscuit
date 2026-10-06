@@ -22,6 +22,7 @@ let imports = file.imported_symbols()?;  // Import statements
 let exports = file.exported_symbols()?;  // Exported symbols
 let locals = file.local_symbols()?;      // Local definitions
 let refs = file.referenced_symbols()?;   // All identifier usages
+let evidence = file.reference_evidence()?; // Scoped/NameOnly/Unresolved occurrences + coverage
 let reexports = file.reexported_symbols()?; // Imports that are re-exported
 
 // Selective analysis: only the kinds and work a caller needs
@@ -258,6 +259,22 @@ metadata and standalone symbols agree.
 
   The rules are in
   [Symbol Kinds, Visibility and `static`](../docs/symbol-kinds-and-visibility.md#deprecation-and-test-flags).
+
+- `relations.references`, `dependencies`, `referenced_by` and
+  `semantics.is_recursive` are read from the file's scoped reference
+  occurrences: only a `Scoped` occurrence makes an edge, and `is_recursive`
+  is `Yes` only for a `Scoped` call of the callable's own ID. The occurrences
+  and per-region coverage themselves are kept in the index under
+  `Capability::Occurrences` (or `TreeFile::reference_evidence()`):
+
+  ```rust
+  let query = SymbolQuery::new().capabilities([Capability::Occurrences]);
+  let index = SourceFile::read("src/lib.rs")?.query(&query)?.index;
+  // index.occurrences / index.reference_coverage describe the whole file
+  ```
+
+  Rust, TypeScript and JavaScript resolve; other languages report occurrences
+  with `Limited` coverage. See [Scope-Aware References](../docs/references.md).
 
 The `From<SymbolInfo>` / `From<SymbolRecord>` adapters preserve kind,
 visibility, both `static` flags, container kind and signature presence.

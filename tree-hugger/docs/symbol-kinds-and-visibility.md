@@ -1304,7 +1304,8 @@ A file is a **module** when any of these holds:
 - its extension is `.mjs`, `.cjs`, `.mts` or `.cts`
 - it has an `import` or `export` statement
 - anywhere in the file, even inside a function or an `if`, it calls
-  `require(...)` or assigns to `module.exports` or `exports.…`
+  `require(...)` (also written `(require)(...)`) or assigns to
+  `module.exports` or `exports.…`
 
 In a module, an unexported top-level declaration is ModulePrivate. In any
 other file (a classic script, or a TypeScript global script) it is Unknown,

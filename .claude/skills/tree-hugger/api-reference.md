@@ -43,7 +43,36 @@ fn referenced_symbols(&self) -> Result<Vec<ReferencedSymbol>, TreeHuggerError>
 
 // Re-exported imports
 fn reexported_symbols(&self) -> Result<Vec<ImportSymbol>, TreeHuggerError>
+
+// Whole-file reference evidence: an `Occurrences` query selecting no kinds
+fn reference_evidence(&self) -> Result<ReferenceEvidence, TreeHuggerError>
 ```
+
+`referenced_symbols()` is the older name-only usage list (diagnostics read
+the same captures); it carries no owner, kind or confidence.
+
+#### Reference Evidence (`shared/schema_v2/occurrences.rs`)
+
+```rust
+pub struct ReferenceEvidence { pub occurrences: Vec<Occurrence>, pub reference_coverage: Vec<ReferenceCoverage> }
+pub struct Occurrence {
+    pub owner: Option<SymbolRef>,  // nearest callable record; None = file-level/anonymous/initializer
+    pub owner_span: TextSpan,      // tells ownerless regions apart
+    pub target: SymbolRef,         // name as written; `id` only for Scoped -> in-file record
+    pub candidates: Vec<SymbolRef>,// NameOnly only
+    pub span: TextSpan,
+    pub kind: OccurrenceKind,      // Call | Usage
+    pub confidence: Confidence,    // Scoped | NameOnly | Unresolved
+}
+pub struct ReferenceCoverage { pub owner: Option<SymbolRef>, pub span: TextSpan, pub state: CoverageState, pub reasons: Vec<LimitReason> }
+// CoverageState: Complete | Limited
+// LimitReason: UnsupportedLanguage, UnsupportedBindingForm, MissingCallCapture,
+//              IndirectDispatch, UnexpandedMacro, OwnershipUnknown, ParseError, EmptyReferenceQuery
+```
+
+The same lists sit on `FileSymbolIndex::{occurrences, reference_coverage}`
+under `Capability::Occurrences` (empty = not computed). Contract and
+language table: `tree-hugger/docs/references.md`.
 
 #### Staged Analysis (schema v2 records)
 
@@ -338,7 +367,13 @@ one eligible same-file declaration; a Rust trait impl adds its trait as written
 to each member and to the resolved self type; see
 `tree-hugger/docs/type-relations.md`; C#/Swift/Scala retain unknown categories
 in `relations.unclassified_bases`, and Swift local-owner extensions add
-conformance with `SymbolRef::source_span` evidence). A Rust `impl` member's
+conformance with `SymbolRef::source_span` evidence). A lookup made inside one
+of several same-named owners (two Rust modules, Scala objects, C# types that
+are not fragments of one type) reads only that owner's members, imports,
+wildcard/unrecorded bindings, bases and Swift raw-type shadowing; reopened
+namespaces and the C# `partial` fragments of one type (same category, generic
+arity and enclosing owner) share one lookup, and a qualified C# path reads the
+type whose generic arity it writes. A Rust `impl` member's
 `identity.container_name` is the implemented type's last path segment without
 generics; its container kind is the kind of the declaration the self type
 resolves to by the relation resolver (`relations::impl_self_types`, called

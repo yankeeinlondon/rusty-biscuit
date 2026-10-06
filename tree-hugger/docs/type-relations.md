@@ -144,6 +144,7 @@ The rules, with an example of each:
 | A class body is never a lexical scope in JS/TS | TypeScript `class Outer { Base = 1; m() { class C extends Base {} } }` | the module-level `Base` |
 | A Python class body is a lexical scope only for code written directly in it: a nested class, method or function skips every enclosing class body, with its classes, variables and imports, and continues to the enclosing functions and the module | Python `class Outer: class Base` … `class Middle: class C(Base)`, or `def m(self): class C(Base)` | the module-level `Base`; text only when the module has none |
 | A dynamic expression | JavaScript `class D extends mix(Base)` | text only |
+| A JS/TS `with` body, or a function holding a direct `eval(…)`, may bind any name it does not declare itself | JavaScript `function w(o) { with (o) { class C extends Base {} } }` or `function e() { eval(s); class C extends Base {} }`, next to a module-level `Base` | text only |
 | Rust names are looked up only as far as the nearest module | `mod b { trait T: Base {} }` with `Base` at the crate root | text only (`super::Base` resolves) |
 | Rust `crate::`, `self::` and `super::` anchor the path | `trait U: crate::Base` | the crate-root `Base` |
 | A Rust leading `::` names an external crate | `trait U: ::a::Dup` next to a local `mod a { trait Dup {} }` | text only |
@@ -304,7 +305,9 @@ see a declaration of a block or callable.
 A path continues through a namespace, module or type only when its name
 means **one owner**. Repeated definitions are one owner only where the
 language reopens them: a C++, TypeScript, C# or PHP `namespace`, including
-the same canonical C++ inline namespace defined twice. Everywhere else two
+the same canonical C++ inline namespace defined twice, and the fragments of
+one C# `partial` type (see [C# `partial` fragments](#c-partial-fragments)).
+Everywhere else two
 same-named owners compete: two Rust `mod H` (also under opposite `cfg`
 attributes, which extraction does not evaluate), two Scala `object H`, two
 file-level types, and a C++ spelling that reaches two distinct namespaces
@@ -323,7 +326,12 @@ struct D : ReviewNs::a::Shared::Base {};   // ReviewNs::a::Shared::Base, by its 
 
 A lookup made **inside** one of the competing owners knows which one it is
 in, from its place in the source: a bare name, `self::` or an inner
-module's `super::` reads that owner's own members, never the other's.
+module's `super::` reads that owner's own members, never the other's. The
+same holds for everything else the owner's scope decides: its imports,
+wildcard imports and bindings no record reports, whether it is a type with
+bases (which hides the names outside it), and whether a standard raw-type
+spelling is shadowed there. Another same-named owner's import, wildcard,
+bases or member types change nothing.
 
 ```rust
 mod holder {
@@ -331,8 +339,33 @@ mod holder {
     pub trait C: Base {}          // this module's Base, by its id
     pub trait D: self::Base {}    // the same Base
 }
-mod holder { pub trait Base {} }
+mod holder {
+    pub trait Base {}
+    use external::*;              // binds nothing in the first holder
+}
 trait E: holder::Base {}          // text only: two holder modules
+```
+
+```swift
+class Base {}
+struct Holder {
+    class Child: Base {}          // extends the file-level Base, by its id
+    enum Kind: Int { case a }     // no base: Int is the standard raw type here
+}
+struct Holder: External {         // its bases hide names only inside it
+    class Int {}
+}
+```
+
+An import or a base written in the owner the lookup is made in still
+leaves the name unproved, exactly as with a single owner:
+
+```java
+class Base {}
+class Holder extends External {   // External may declare a member Base
+    static class Child extends Base {}  // text only
+}
+class Holder {}
 ```
 
 | Path | Example | Result |
@@ -343,7 +376,56 @@ trait E: holder::Base {}          // text only: two holder modules
 | through two Rust modules or two Scala objects of one name | the `E` above; Scala `object H { class B }`, `object H`, then `class C extends H.B` | text only (Scala: in `unclassified_bases`) |
 | inside one of them | the `C` and `D` above; Scala `object H { class B; class C extends B }` beside a second `object H { class B }` | that owner's `B` |
 | a Scala companion class and object | `class H`, `object H { class B }`, then `class C extends H.B` | `H.B`: a qualifier names the object, a term |
-| two C# declarations of one type name | `partial class H { class B {} }` and `partial class H {}` | looked up by name: `partial` declarations are one type |
+| two fragments of one C# type | `partial class H { class B {} }` and `partial class H {}`, then `class C : H.B` | `H.B`: the fragments are one type, sharing members, bases and paths through it |
+| two C# `partial` declarations that are different types | `partial class H { class C : B {} }` beside `partial class H<T> { class B {} }` (or `partial struct H`, or a `namespace H`) | text only, in `unclassified_bases` |
+| two C# types of one name that are not `partial` | `class H { class B {} class C : B {} }` beside `class H { class B {} }` | inside the first: that `H`'s `B`; outside, `H.B` is text only |
+| a lookup inside one owner while another same-named owner imports the name, has a wildcard import or has bases | Rust `use external::B;`, Python `from lib import B`, Scala `import lib._`, Java `class H extends External`, C++ a same-named `namespace H { using namespace lib; }` beside `struct H` | the first owner's own `B`, or the outer one when it has none |
+| the same import, wildcard or bases in the owner the lookup is made in | `mod h { pub trait B {} use external::B; pub trait C: B {} }` | text only |
+
+#### C# `partial` fragments
+
+`partial` alone does not make two declarations one type. Two C#
+declarations of one name are fragments of the same type only when **all**
+of these hold:
+
+- both are written `partial`;
+- they declare the same category: `class`, `struct`, `interface`, `record`
+  (also written `record class`) or `record struct`;
+- they have the same generic arity: `H`, `H<T>` and `H<T, U>` are three
+  different types;
+- they are declared in the same owner: the same namespace, or the same
+  type (itself one identity by these rules). `partial class H` inside
+  `Outer` and inside `Outer<T>` are different types.
+
+A namespace and a type never merge. Fragments of one type share members,
+bindings and bases; declarations that fail any condition are competing
+owners, and a lookup inside one of them reads only that type's own
+fragments.
+
+```csharp
+class Base {}
+partial class Holder {
+    class Child : Base {}       // the file-level Base, by its id
+    class Other : Inner {}      // the Inner of the third declaration, by its id
+}
+partial class Holder<T> : External {   // a different type: its base list
+    class Inner {}                     // and members change nothing above
+}
+partial class Holder {                 // the same type as the first
+    class Inner {}
+}
+class FromOutside : Holder.Inner {}       // the non-generic Holder's Inner
+class FromGeneric : Holder<int>.Inner {}  // Holder<T>'s Inner
+```
+
+A qualified path names the type whose arity it writes: `Holder.Inner`
+reads only the non-generic `Holder`, `Holder<int>.Inner` only `Holder<T>`.
+When no type of that arity is declared, or several competing declarations
+share it (a `partial class H` beside a `partial struct H`, two non-`partial`
+`H`), the base keeps its written text with no ID. A base must also have
+the arity it writes: `class C : Base<int>` never takes the ID of a
+non-generic `Base`. A target declared in several fragments of one type has
+no single declaration, so it keeps its text with no ID.
 
 ### Paths through local owners
 
@@ -646,7 +728,7 @@ proved: a local `class` is a superclass, although Swift classes, structs,
 actors and enums all report the `Type` kind. Later entries are protocols. Protocol inheritance stays in `extends`.
 Enum raw-value types established by raw-value cases or standard raw-type
 names are excluded; a same-file protocol can classify an enum's first entry.
-A standard raw-type name is excluded only while nothing in the file
+A standard raw-type name is excluded only while nothing in view
 redeclares it; see [Built-in spellings](#built-in-spellings).
 
 ### Built-in spellings
@@ -671,6 +753,7 @@ path's first segment (`int`, `Int`, `Unicode`, `Swift`) another meaning:
 | a same-file type declaration in view, in the declaring scope or any enclosing one (a Go function body included; a finished or sibling block is not in view) | kept, with the declaration's `id` when the lookup proves it |
 | a same-file alias, a Swift type import of that name (`import protocol M.Int`), an import whose names cannot be read, a type parameter, or several declarations | kept as written, no `id` (Swift: in `unclassified_bases`) |
 | a Swift value import (`import func M.Int`, `import let`, `import var`) | dropped: a value never names the raw type |
+| a declaration only inside another owner of the same name (`struct Holder { class Int {} }` beside the `struct Holder` the enum is in) | dropped: that owner's members are not in view |
 
 ```go
 type int interface{ M() }

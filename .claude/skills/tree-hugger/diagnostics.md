@@ -172,6 +172,9 @@ Tree Hugger detects unreachable code after terminal statements.
 | **Python** | `raise`, `sys.exit()`, `os._exit()` |
 | **Java** | `throw`, `System.exit()` |
 
+A call's function may be parenthesized (`(exit)(1)`; Swift `(fatalError)()`);
+a sequence such as `(g, exit)(1)` is not a terminal call.
+
 ### Example
 
 ```rust
