@@ -16,6 +16,14 @@ source_files_during_phase_3: []
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4: []
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+source_files_during_phase_5: []
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
 packages: []
 ---
 
@@ -389,3 +397,211 @@ is unchanged from Phases 1–2: implement
 ruling R6 (env access via `request.snapshot().env()` plus one shared parse
 of the disable values, shared with compose's
 `env_disables_baseline_schema`) is the Phase 3 design note to carry forward.
+
+## Phase 4
+
+**Outcome: NOT STARTED — the dependency gate still fails, and Phases 2–3
+(this phase's prerequisites) were never started.** The phase-4 implementation
+run was requested on 2026-10-05. Phase 4 is the test phase: every Wave 1 and
+Wave 2 task asserts behavior that Phase 2 (embedded baseline with the
+`content_policy` entry) and Phase 3 (CLI selection rules) are specified to
+introduce, and its validation checkpoint requires `just test` green in
+`darkmatter/`. Per the plan's Dependency Gate (feature-level), Phase 4's own
+heading ("Use the repository Test Toolkit … no L2/L3 tier" against the
+default baseline), and the spec's standing `message_to_agent` ("Do NOT start
+Phases 2-6 until the prerequisite lands"), no Phase 4 task was started, no
+plan checkbox was checked, and no source or test file was touched. This
+section records the re-verification that justified the stop.
+
+### Gate re-verification (2026-10-05)
+
+- `2026-09-28-recursive-schema-types` spec status is still `draft-spec`; its
+  directory still contains only `spec.md` (no plan, no implementation log).
+- `TypeExpr` (`lib/src/markdown/schemas/simplified/types.rs:184-201`) still
+  has only `Primitive`, `InlineObject`, `Imported` — no `Ref` variant; the
+  doc comment above it still describes only those three arms.
+- `apply_import_postfix` (`lib/src/markdown/schemas/resolve.rs:1325-1331`)
+  still returns the `SchemaError::Convert` "cannot apply `[]`/constraints to
+  the union-typed named type `{name}@{reference}`" rejection that the Phase 1
+  probe observed for the exact `policy[](min(1))@…` baseline shape.
+- Phase 2 is verifiably absent from the tree: `darkmatter/lib/Cargo.toml`
+  has no `content-policy` dependency, `darkmatter/docs/schemas/darkmatter.yaml`
+  has no `content_policy` property, and
+  `darkmatter/lib/src/markdown/schemas/embedded.rs` does not exist.
+- Phase 3 is verifiably absent from the tree:
+  `cli/src/commands/schema/validate.rs` contains zero occurrences of
+  `no-baseline-schema` / `no_baseline_schema`.
+- `git log -- darkmatter/lib/src/markdown/schemas/` is unchanged since
+  Phase 1 (latest commit still `b9ce7c893 perf(darkmatter): compile the
+  baseline validator once per context`); no recursive-types work has landed.
+- The file Phase 4 Wave 1 would extend (`lib/tests/l1/content_policy_editor_schema.rs`)
+  exists and currently pins the R1 workaround state (per-rule
+  `policy@./content-policy.yaml` properties), i.e. the corpus extension task
+  presumes a baseline that does not exist yet.
+
+### Why no partial implementation was done
+
+Phase 4 has no implementation content of its own — it is tests all the way
+down, and each test targets gated behavior:
+
+1. **Declaration agreement corpus** validates declarations "through the
+   default baseline" — the baseline only gains `content_policy` in Phase 2
+   Wave 3, and only reaches `md schema validate`'s default path via Phase 3's
+   selection rewrite. Today the default path attaches no baseline at all
+   (`load_api` leaves `DarkmatterSchemas::new` unconfigured), so every
+   both-reject row would fail and every item-level `/content_policy/N`
+   diagnostic assertion would fail.
+2. **Robustness matrix test** asserts compiled-schema outcomes per edit cell
+   (reject at `/content_policy`, `/content_policy/1`, min-1, exit 3 vs 1) —
+   none of those problems can be produced without the Phase 2+3 pipeline.
+3. **Embedded resolution tests** exercise the embedded table, virtual path
+   normalizer, resolver hook, and cache reuse — all Phase 2 deliverables
+   (`embedded.rs` does not exist).
+4. **CLI precedence tests** drive `--no-baseline-schema`, the flag/`--schema`
+   conflict, truthy env opt-out, and exit-2 custom-baseline behavior — all
+   Phase 3 deliverables (the flag does not exist).
+5. **Wave 2 subprocess tests** run built `md`/`dmls` binaries outside the
+   repo and assert validation, compose pending-value behavior, and DMLS
+   completion of rule forms/actions — the binaries do not contain the
+   behavior until Phases 2–3 land.
+6. Adding these tests now would produce a large red suite, directly
+   violating the phase's own completion requirement ("all tests are passing
+   using `just test`") and the plan-level rule that a known-failing test
+   cannot ship (the same reason the Phase 1 probe was removed). The test
+   design requirement "fails for the reported behavior and succeeds only
+   after the fix" presumes the fix lands in the same plan sequence — here
+   the fixing phases are gated off and out of this run's scope.
+7. Authoring test *files* against the current workaround state (per-property
+   `policy@./content-policy.yaml`) would be discarded wholesale when Phases
+   2–3 land, and checking off any Phase 4 task would misrepresent plan state
+   and invite Phase 5 (existing-test triage) to run against a nonexistent
+   corpus.
+
+### Requirement-to-test mapping (Phase 4)
+
+None — no behavior changed and no test was added, removed, or run. The
+working tree has zero darkmatter source changes this phase, so Phase 1's
+green `just lint` / `just test` evidence stands (same reasoning as the
+Phase 2 and Phase 3 runs; the two `hash_kind_save_diff` date-boundary flakes
+noted there remain unrelated pre-existing failures).
+
+### Unfinished / blocked
+
+All Phase 4 tasks remain unchecked and untouched: the declaration agreement
+corpus, the robustness matrix test, the embedded resolution tests, the CLI
+precedence tests, the installed-binary subprocess tests, the passivity
+assertions, the compose/DMLS entry-point tests, and validation checkpoint 4.
+The blocker is unchanged from Phases 1–3: implement
+`2026-09-28-recursive-schema-types` (or choose another option in the spec's
+`human_review_items`), then run Phase 2, then Phase 3, then Phase 4. The
+Phase 4 brief's own guidance (Test Toolkit, `CliProcessFixture`,
+`application_input`/`application_input_removed`, tier naming, declared
+test targets under `autotests = false`, and `include_str!`/manifest-dir
+repository-read spelling) remains the authoring checklist for that run.
+
+## Phase 5
+
+**Outcome: NOT STARTED — the dependency gate still fails, and Phases 2–4
+(the behavior Phase 5 triages tests and updates docs for) were never
+started.** The phase-5 implementation run was requested on 2026-10-05.
+Phase 5 is "Existing-Test Triage and Documentation Drift": every Wave 1
+task updates tests, docs, READMEs, catalogs, skills, or code comments to
+match behavior that Phases 2 (embedded baseline with the `content_policy`
+entry) and 3 (CLI selection rules) are specified to introduce — and the
+tree verifiably contains none of it. Per the plan's Dependency Gate
+(feature-level, not phase-level) and the spec's standing `message_to_agent`
+instruction ("Do NOT start Phases 2-6 until the prerequisite lands"), no
+Phase 5 task was started, no plan checkbox was checked, and no source, test,
+doc, README, catalog, or skill file was touched. This section records the
+re-verification that justified the stop.
+
+### Gate re-verification (2026-10-05, fifth check)
+
+- `2026-09-28-recursive-schema-types` spec status is still `draft-spec`; its
+  directory still contains only `spec.md` (no plan, no implementation log).
+- `TypeExpr` (`lib/src/markdown/schemas/simplified/types.rs:183-201`) still
+  has only `Primitive`, `InlineObject`, `Imported` — no `Ref` variant.
+- `apply_import_postfix` (`lib/src/markdown/schemas/resolve.rs:1322-1331`)
+  still returns the `SchemaError::Convert` "cannot apply `[]`/constraints to
+  the union-typed named type `{name}@{reference}`" rejection that the Phase 1
+  probe observed for the exact `policy[](min(1))@…` baseline shape.
+- Phase 2 is verifiably absent: `lib/src/markdown/schemas/embedded.rs` does
+  not exist, `darkmatter/lib/Cargo.toml` has no `content-policy` dependency,
+  and `darkmatter/docs/schemas/darkmatter.yaml` has no `content_policy`
+  property.
+- Phase 3 is verifiably absent: `cli/src/commands/schema/validate.rs`
+  contains zero occurrences of `no-baseline-schema`/`no_baseline_schema`.
+- Phase 4 is verifiably absent: `lib/tests/l1/content_policy_editor_schema.rs`
+  still pins the R1 workaround state (each policy entry typed as its own
+  `policy@./content-policy.yaml` property, header comment at line 7), and no
+  robustness-matrix, embedded-resolution, CLI-precedence, or subprocess test
+  files from Phase 4's waves exist.
+- `git log -- darkmatter/lib/src/markdown/schemas/` is unchanged since
+  Phase 1 (latest commit still `b9ce7c893 perf(darkmatter): compile the
+  baseline validator once per context`); `git status` shows zero modified
+  files beyond this feature's own plan/spec/log markdown.
+
+### Why no partial implementation was done
+
+Each Phase 5 Wave 1 task, assessed against the current tree:
+
+1. **Baseline corpus tests** — the task updates
+   `base_schema_end_to_end.rs`, `meta_schema_phase1/5`,
+   `effective_schema_ownership`, and the DMLS frontmatter test that
+   "parse/convert the authored baseline without import expansion". That
+   triage is only meaningful once Phase 2's "resolve + lower once" changes
+   how the baseline loads. Today those tests correctly describe the current
+   baseline-loading behavior (bare `parse_yaml_schema`, no import
+   expansion, per the Phase 1 accessor table); "updating" them would either
+   be a no-op or would rewrite them against a pipeline that does not exist,
+   breaking the green suite the checkpoint requires.
+2. **Docs** — the task writes the baseline contract page, CLI docs for the
+   `--no-baseline-schema` flag, env precedence, opt-out, the Mermaid
+   selection-order diagram, and per-rule examples. Every one of those
+   describes Phase 2+3 behavior that does not exist. Per the repo's drift
+   rules, `docs/` is the current record of how a package behaves — a page
+   describing non-existent behavior is a defect of the change that writes
+   it. (Marking pages **planned** is the mechanism for decided-but-unbuilt
+   behavior, but Phases 2–3 never ran, so even the design details those
+   pages would mark planned are unsettled; and writing them now would
+   preempt the phase that owns those decisions.)
+3. **READMEs and catalogs** — the dependency-catalog entries document a
+   `darkmatter → content-policy` dependency that has not been added, and
+   README sections would describe the embedded baseline and validate flag
+   that do not exist.
+4. **Skills** — `.claude/skills/darkmatter/` (schema.md, cli.md) and
+   `.claude/skills/content-policy/` updates, plus removing Content Policy's
+   "planned" base-schema wording, all describe Phase 2+3 behavior; removing
+   "planned" wording now would be actively wrong (the base-schema support
+   is still not built).
+5. **Comment drift** — the `///` docs on
+   `darkmatter_base_schema`/`darkmatter_base_json_schema` ("Loads … via
+   include_str!", "Panics …") still describe exactly what the code does
+   today; there is no drift because the code never changed. Same for
+   `catalog.rs` module docs and the `rule` note in
+   `content-policy/schemas/content-policy.yaml` (R1 stays deferred).
+
+Validation checkpoint 5 (`just test`/`just lint` green in `darkmatter/` and
+`content-policy/` plus GitNexus/Sniff downstream checks) presumes the
+implementation landed; running the suites now would only re-measure the
+Phase 1 state.
+
+### Requirement-to-test mapping (Phase 5)
+
+None — no behavior changed and no test was added, removed, or run. The
+working tree has zero darkmatter or content-policy source changes this
+phase, so Phase 1's green `just lint` / `just test` evidence stands (same
+reasoning as the Phase 2, 3, and 4 runs; the two `hash_kind_save_diff`
+date-boundary flakes noted there remain unrelated pre-existing failures).
+
+### Unfinished / blocked
+
+All Phase 5 tasks remain unchecked and untouched: baseline corpus test
+triage, docs, READMEs and catalogs, skills, comment drift, and validation
+checkpoint 5. The blocker is unchanged from Phases 1–4: implement
+`2026-09-28-recursive-schema-types` (or choose another option in the spec's
+`human_review_items`), then run Phase 2, then Phase 3, then Phase 4, then
+Phase 5. Phase 5's own brief (which tests to keep as the passive
+shipped-artifact test, which doc pages to touch, the
+never-reference-this-feature-directory rule for `docs/`, and the Mermaid
+selection-order diagram) remains the checklist for that run.

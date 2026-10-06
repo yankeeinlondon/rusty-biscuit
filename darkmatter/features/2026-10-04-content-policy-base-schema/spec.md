@@ -84,6 +84,16 @@ human_review_items:
         selection rules can mean anything), and Phase 2 remains blocked by
         the unbuilt prerequisite. Nothing has been implemented in any run;
         each stop is recorded in `implementation-log.md`.
+
+        **Update (2026-10-05, fourth run):** a fourth automated run was
+        dispatched to implement Phase 4 (the test phase) and stopped at the
+        same gate. Phase 4 is tests for behavior Phases 2–3 are specified to
+        introduce (the baseline `content_policy` entry, the embedded schema
+        table, and the CLI's `--no-baseline-schema` selection rules); none of
+        it exists, so the tests would all fail and the phase's own
+        "all tests passing" completion requirement cannot be met. Four
+        consecutive runs have now stopped at this gate with zero
+        implementation — the decision above is the only way forward.
     - |-
         Secondary decision (only if you pick option 2 above): if the feature
         is reshaped to avoid union list items, the spec's acceptance criteria
@@ -104,10 +114,21 @@ message_to_agent: >-
     2026-10-05 re-verified the gate (still draft-spec; the rejection remains
     at resolve.rs:1322-1331) and correctly started nothing. A phase-3 run on
     2026-10-05 also re-verified the gate and started nothing: Phase 3 depends
-    on Phase 2 (embedded baseline loadable), and Phase 2 never ran. Do NOT
-    start Phases 2-6 until the prerequisite lands and the probe shape passes
-    (name[](min(1)) loads, validates, survives merge_baseline, visible in the
-    typed view); run the phases in order — Phase 2, then Phase 3. Read
+    on Phase 2 (embedded baseline loadable), and Phase 2 never ran. A phase-4
+    run on 2026-10-05 re-verified the gate a fourth time and started nothing:
+    Phase 4 is entirely tests for Phase 2+3 behavior (the content_policy
+    baseline entry, the embedded schema table, the CLI selection rules), none
+    of which exists, so its tests would all fail and its green-suite
+    completion requirement cannot be met. A phase-5 run on 2026-10-05
+    re-verified the gate a fifth time (still draft-spec; embedded.rs absent;
+    no content-policy dependency; no content_policy baseline entry; no
+    no-baseline-schema flag) and started nothing: Phase 5 is test triage and
+    documentation drift for that same Phase 2+3 behavior, and writing its
+    docs/README/catalog/skill updates now would make the docs tree describe
+    behavior that does not exist. Do NOT start Phases 2-6 until the
+    prerequisite lands and the probe shape passes (name[](min(1)) loads,
+    validates, survives merge_baseline, visible in the typed view); run the
+    phases in order — Phase 2, then Phase 3, then Phase 4, then Phase 5. Read
     implementation-log.md first: it holds the baseline
     accessor/caller table, the import-resolver seam map (R2/R3 injection
     points: mod.rs baseline entry has no import expansion today;
