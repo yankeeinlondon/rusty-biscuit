@@ -7,6 +7,7 @@
 //! transmitted, and a screenshot of the window. The sizing rule itself is
 //! covered at L1 in biscuit-terminal's `git_graph` tests.
 
+use std::cell::Cell;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -102,6 +103,8 @@ struct Fixture {
     worktrees: Vec<String>,
     /// Set by [`Fixture::sparse_lanes`].
     sparse: Option<SparseLanes>,
+    /// The next [`Fixture::commit`]'s commit time, in Unix seconds.
+    clock: Cell<i64>,
 }
 
 impl Fixture {
@@ -127,6 +130,7 @@ impl Fixture {
             main,
             worktrees: Vec::new(),
             sparse: None,
+            clock: Cell::new(1_700_000_000),
         };
         fixture.commit(&fixture.main, "main.txt", "main 1");
         fixture.commit(&fixture.main, "main.txt", "main 2");
@@ -291,7 +295,18 @@ impl Fixture {
     fn commit(&self, dir: &Path, file: &str, message: &str) {
         fs::write(dir.join(file), message).unwrap();
         run_git(dir, &["add", "."]);
-        run_git(dir, &["commit", "-m", message]);
+        // A minute apart: the graph ranks lanes by their tips' commit times in
+        // whole seconds, so wall-clock commits made within one second would
+        // leave which lane is newest to the machine's speed.
+        let date = format!("@{} +0000", self.clock.replace(self.clock.get() + 60));
+        let status = Command::new("git")
+            .current_dir(dir)
+            .args(["commit", "-m", message])
+            .env("GIT_AUTHOR_DATE", &date)
+            .env("GIT_COMMITTER_DATE", &date)
+            .status()
+            .expect("git should be installed");
+        assert!(status.success(), "git commit failed in {dir:?}");
     }
 
     fn path(&self, name: &str) -> PathBuf {
