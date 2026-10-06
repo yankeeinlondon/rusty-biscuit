@@ -6,7 +6,11 @@
 //! means Unknown: no access applies, or it cannot be established from the
 //! file.
 
+use std::cell::{OnceCell, RefCell};
+use std::collections::HashMap;
+
 use super::*;
+use crate::analysis::counters::count_shared_context_steps;
 
 mod c;
 mod cpp;
@@ -33,7 +37,7 @@ pub(crate) use swift::extract_swift_visibility;
 /// access do not apply inside a function body.
 pub(crate) fn extract_visibility(
     declaration: Node<'_>,
-    ctx: &DeclarationContext<'_>,
+    ctx: &DeclarationContext<'_, '_>,
 ) -> Option<Visibility> {
     if ctx.is_local() || ctx.kind == SymbolKind::Parameter {
         return None;
@@ -59,5 +63,34 @@ pub(crate) fn extract_visibility(
         | ProgrammingLanguage::Perl
         | ProgrammingLanguage::Bash
         | ProgrammingLanguage::Zsh => None,
+    }
+}
+
+/// Facts about one file that several declarations' visibility depends on,
+/// each derived at most once per file (or per class body) on first use
+/// rather than re-read from the tree for every declaration. Create one per
+/// file and hand it to every [`DeclarationContext`] of that file.
+#[derive(Default)]
+pub(crate) struct VisibilityMemo<'tree> {
+    /// C/C++: the file's namespaces and its earlier `static` function
+    /// declarations ([`c::LinkageIndex`]).
+    c_linkage: OnceCell<c::LinkageIndex<'tree>>,
+    /// C++: class body (or nested level) node id → its children's access
+    /// sections.
+    cpp_sections: RefCell<HashMap<usize, SectionsInForce>>,
+    /// Scala: every identifier segment of the file's `package` clauses.
+    scala_package_segments: OnceCell<Vec<&'tree str>>,
+    /// Rust: the levels of the file's traits, by name.
+    rust_trait_levels: OnceCell<HashMap<&'tree str, Vec<Visibility>>>,
+}
+
+/// Child node id → the C++ access section in force before that child
+/// (`None`: no section precedes it; `Some(None)`: the nearest section's text
+/// names no level).
+type SectionsInForce = HashMap<usize, Option<Option<Visibility>>>;
+
+impl std::fmt::Debug for VisibilityMemo<'_> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.debug_struct("VisibilityMemo").finish_non_exhaustive()
     }
 }

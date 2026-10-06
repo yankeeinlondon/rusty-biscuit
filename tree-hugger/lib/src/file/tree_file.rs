@@ -5,6 +5,7 @@ use tree_sitter::{Node, QueryCursor, StreamingIterator};
 
 use crate::analysis::counters::count_diagnostics_run;
 use crate::error::TreeHuggerError;
+use crate::file::extract::attributes::declaration_attributes;
 use crate::file::extract::*;
 use crate::file::query::{SymbolQuery, SymbolQueryResult};
 use crate::file::source_file::SourceFile;
@@ -14,7 +15,7 @@ use crate::shared::{
     AnalysisPass, CodeBlock, CodeRange, Diagnostic, DiagnosticSeverity, FileSymbolIndex,
     ImportSymbol, LintDiagnostic, ProgrammingLanguage, ReferencedSymbol, SourceContext, SymbolInfo,
     SymbolKind, SymbolKindData, SymbolKindV2, SymbolRecord, SymbolRef, SyntaxDiagnostic,
-    stable_symbol_key, symbol_id_from_stable_key,
+    normalize_modifiers, stable_symbol_key, symbol_id_from_stable_key,
 };
 
 mod definitions;
@@ -1719,25 +1720,33 @@ impl TreeFile {
     /// Returns an error if symbol extraction or query compilation fails.
     pub fn symbol_records(&self) -> Result<Vec<SymbolRecord>, TreeHuggerError> {
         let selection = MetadataSelection::ALL;
-        Ok(self.records_from(self.definitions(&selection)?, &selection, RecordFacts::default()))
+        self.records_from(self.definitions(&selection)?, &selection, RecordFacts::default())
     }
 
     /// Converts definitions to parse-pass records, in the same order.
     ///
     /// Every definition yields a record with its identity, ID, spans and
-    /// container; the header texts, keyword, type-alias target, implemented
-    /// trait and the `facts` asked for are filled only for kinds `selection`
-    /// wants.
+    /// container; the header texts, keyword, type-alias target, generic
+    /// parameters, implemented trait and the `facts` asked for are filled
+    /// only for kinds `selection` wants.
+    ///
+    /// ## Errors
+    ///
+    /// [`TreeHuggerError::TooManyGenericParameters`] when a selected
+    /// declaration's generic parameter positions do not fit in `u16`.
     pub(crate) fn records_from(
         &self,
         definitions: Vec<ExtractedSymbol<'_>>,
         selection: &MetadataSelection,
         facts: RecordFacts,
-    ) -> Vec<SymbolRecord> {
+    ) -> Result<Vec<SymbolRecord>, TreeHuggerError> {
         let root = self.tree.root_node();
         let mut ordinals: HashMap<(SymbolKindV2, String), u32> = HashMap::new();
         let mut records = Vec::new();
         let mut implemented_traits = Vec::new();
+        // Inner `#![cfg(test)]` state per file root and module body, shared
+        // by every declaration below them.
+        let mut inner_cfg_test = HashMap::new();
         for ExtractedSymbol {
             symbol,
             anchor,
@@ -1757,20 +1766,18 @@ impl TreeFile {
                 )
             });
             let flags = (wanted && facts.flags).then(|| {
-                let is_deprecated = is_deprecated(
-                    declaration,
-                    name,
-                    symbol.doc_comment.as_deref(),
-                    self.language,
-                    &self.source,
-                );
+                // Parsed once per declaration; every attribute reader takes
+                // this list rather than reading the tree again.
+                let attributes = declaration_attributes(declaration, name, self.language, &self.source);
+                let is_deprecated =
+                    is_deprecated(&attributes, symbol.doc_comment.as_deref(), self.language);
                 // The file-wide rules (`is_test_file`) read the path and
                 // the package layout around it, which the cache does not
                 // key on; `SymbolQueryResult::finish` applies them after
                 // lookup.
-                let is_test = has_test_attribute(declaration, name, self.language, &self.source)
+                let is_test = has_test_attribute(&attributes, self.language)
                     || (self.language == ProgrammingLanguage::Rust
-                        && is_in_rust_cfg_test(declaration, &self.source));
+                        && is_in_rust_cfg_test(declaration, &self.source, &mut inner_cfg_test));
                 (is_test, is_deprecated)
             });
             let name_span = text_span_from_code_range(&symbol.range);
@@ -1808,6 +1815,14 @@ impl TreeFile {
                 record.source.signature_text =
                     signature_text(declaration, name_bytes, self.language, &self.source);
                 record.identity.keyword = declaration_keyword(declaration, self.language);
+                let generics = declared_generics(declaration, name, self.language, &self.source)
+                    .map_err(|overflow| TreeHuggerError::TooManyGenericParameters {
+                        path: self.file.clone(),
+                        symbol: record.identity.name.clone(),
+                        count: overflow.count,
+                    })?;
+                record.type_info.generic_params = generics.params;
+                record.type_info.constraints = generics.constraints;
                 if record.kind == SymbolKindV2::TypeAlias {
                     record.kind_data = SymbolKindData::TypeAlias(TypeAliasData {
                         aliased_type_text: extract_type_alias_target(declaration, self.language, &self.source),
@@ -1816,6 +1831,9 @@ impl TreeFile {
                     });
                 }
             }
+
+            // The one point where a record's modifiers are put in order.
+            normalize_modifiers(&mut record.modifiers);
 
             implemented_traits.push(
                 (wanted && self.language == ProgrammingLanguage::Rust)
@@ -1846,7 +1864,7 @@ impl TreeFile {
             });
         }
 
-        records
+        Ok(records)
     }
 
     /// Runs the full v2 analysis pipeline and returns a per-file symbol index.

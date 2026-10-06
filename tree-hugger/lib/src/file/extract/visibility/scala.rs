@@ -8,7 +8,7 @@ use super::*;
 /// `package` clause itself has no access level.
 pub(super) fn extract_scala_visibility(
     declaration: Node<'_>,
-    ctx: &DeclarationContext<'_>,
+    ctx: &DeclarationContext<'_, '_>,
 ) -> Option<Visibility> {
     if declaration.kind() == "package_clause" {
         return None;
@@ -38,24 +38,35 @@ pub(super) fn extract_scala_visibility(
         .trim();
     if scope == "this" {
         Some(unqualified)
-    } else if package_segments(ctx.root, source).any(|segment| segment == scope) {
+    } else if ctx
+        .memo
+        .scala_package_segments
+        .get_or_init(|| package_segments(ctx.root, source))
+        .iter()
+        .inspect(|_| count_shared_context_steps(1))
+        .any(|segment| *segment == scope)
+    {
         Some(Visibility::Package)
     } else {
         None
     }
 }
 
-/// Every identifier segment of the file's `package` clauses.
-fn package_segments<'src>(root: Node<'_>, source: &'src str) -> impl Iterator<Item = &'src str> {
+/// Every identifier segment of the file's `package` clauses, read once per
+/// file into [`VisibilityMemo`].
+fn package_segments<'src>(root: Node<'_>, source: &'src str) -> Vec<&'src str> {
     let mut segments = Vec::new();
     let mut cursor = root.walk();
+    let mut steps = 0;
     for clause in root
         .children(&mut cursor)
+        .inspect(|_| steps += 1)
         .filter(|child| child.kind() == "package_clause")
     {
         collect_identifiers(clause, source, &mut segments);
     }
-    segments.into_iter()
+    count_shared_context_steps(steps);
+    segments
 }
 
 fn collect_identifiers<'src>(node: Node<'_>, source: &'src str, segments: &mut Vec<&'src str>) {

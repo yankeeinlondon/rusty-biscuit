@@ -2,48 +2,47 @@
 //! file-name heuristics, documented in `docs/symbol-kinds-and-visibility.md`
 //! ("Deprecation and test flags").
 
+use std::collections::HashMap;
 use std::path::Path;
 
-use super::attributes::{SyntacticAttribute, declaration_attributes, rust_attribute};
+use super::attributes::{SyntacticAttribute, rust_attribute};
 use super::*;
+use crate::analysis::counters::count_shared_context_steps;
 
-/// Whether `declaration` carries its language's deprecation marker: an
-/// attribute, annotation or decorator, a `@deprecated` tag in its attached
-/// doc block (`doc`, from [`extract_doc_comment`]) or, in Go, a doc paragraph
-/// starting `Deprecated:`. Ordinary comments are never read. `name` is the
-/// captured name, whose own C++ declarator attributes count.
+/// Whether a declaration carries its language's deprecation marker: one of
+/// its `attributes` (from [`declaration_attributes`](super::attributes::declaration_attributes),
+/// so a C++ name's own declarator attributes count), a `@deprecated` tag in
+/// its attached doc block (`doc`, from [`extract_doc_comment`]) or, in Go, a
+/// doc paragraph starting `Deprecated:`. Ordinary comments are never read.
 pub(crate) fn is_deprecated(
-    declaration: Node<'_>,
-    name: Node<'_>,
+    attributes: &[SyntacticAttribute],
     doc: Option<&str>,
     language: ProgrammingLanguage,
-    source: &str,
 ) -> bool {
-    let attributes = || declaration_attributes(declaration, name, language, source);
     match language {
         ProgrammingLanguage::Rust | ProgrammingLanguage::Cpp => {
-            attributes().iter().any(|attribute| attribute.name == "deprecated")
+            attributes.iter().any(|attribute| attribute.name == "deprecated")
         }
         ProgrammingLanguage::Java => {
-            attributes()
+            attributes
                 .iter()
                 .any(|attribute| matches!(attribute.name.as_str(), "Deprecated" | "java.lang.Deprecated"))
                 || doc.is_some_and(has_deprecated_tag)
         }
-        ProgrammingLanguage::CSharp => attributes()
+        ProgrammingLanguage::CSharp => attributes
             .iter()
             .any(|attribute| csharp_attribute_is(attribute, &["Obsolete"])),
         ProgrammingLanguage::JavaScript | ProgrammingLanguage::TypeScript | ProgrammingLanguage::Php => {
             doc.is_some_and(has_deprecated_tag)
         }
         ProgrammingLanguage::Go => doc.is_some_and(has_deprecated_paragraph),
-        ProgrammingLanguage::Swift => attributes()
+        ProgrammingLanguage::Swift => attributes
             .iter()
             .any(is_swift_unconditional_deprecation),
-        ProgrammingLanguage::Scala => attributes()
+        ProgrammingLanguage::Scala => attributes
             .iter()
             .any(|attribute| matches!(attribute.name.as_str(), "deprecated" | "scala.deprecated")),
-        ProgrammingLanguage::Python => attributes().iter().any(|attribute| {
+        ProgrammingLanguage::Python => attributes.iter().any(|attribute| {
             matches!(
                 attribute.name.as_str(),
                 "deprecated" | "typing_extensions.deprecated" | "warnings.deprecated"
@@ -57,24 +56,18 @@ pub(crate) fn is_deprecated(
     }
 }
 
-/// Whether `declaration` carries a test attribute: Rust `#[test]` or
-/// `#[<path>::test]`, Java `@Test` (qualified or not), C# `[Test]`,
-/// `[Fact]` or `[TestMethod]`.
-pub(crate) fn has_test_attribute(
-    declaration: Node<'_>,
-    name: Node<'_>,
-    language: ProgrammingLanguage,
-    source: &str,
-) -> bool {
-    let attributes = || declaration_attributes(declaration, name, language, source);
+/// Whether a declaration's `attributes` hold a test attribute: Rust
+/// `#[test]` or `#[<path>::test]`, Java `@Test` (qualified or not), C#
+/// `[Test]`, `[Fact]` or `[TestMethod]`.
+pub(crate) fn has_test_attribute(attributes: &[SyntacticAttribute], language: ProgrammingLanguage) -> bool {
     match language {
-        ProgrammingLanguage::Rust => attributes()
+        ProgrammingLanguage::Rust => attributes
             .iter()
             .any(|attribute| attribute.name == "test" || attribute.name.ends_with("::test")),
-        ProgrammingLanguage::Java => attributes()
+        ProgrammingLanguage::Java => attributes
             .iter()
             .any(|attribute| attribute.name == "Test" || attribute.name.ends_with(".Test")),
-        ProgrammingLanguage::CSharp => attributes()
+        ProgrammingLanguage::CSharp => attributes
             .iter()
             .any(|attribute| csharp_attribute_is(attribute, &["Test", "Fact", "TestMethod"])),
         _ => false,
@@ -85,7 +78,15 @@ pub(crate) fn has_test_attribute(
 /// `#[cfg(test)]`, or a module or file whose inner attributes say
 /// `#![cfg(test)]`. `cfg(any(test, …))` and other compound predicates do not
 /// count.
-pub(crate) fn is_in_rust_cfg_test(declaration: Node<'_>, source: &str) -> bool {
+///
+/// `inner_cfg_test` remembers each file root's and module body's inner
+/// attribute answer by node id; pass one map for every declaration of a
+/// file, so each root or module body has its children read at most once.
+pub(crate) fn is_in_rust_cfg_test(
+    declaration: Node<'_>,
+    source: &str,
+    inner_cfg_test: &mut HashMap<usize, bool>,
+) -> bool {
     let mut current = Some(declaration);
     while let Some(node) = current {
         let mut outer = Vec::new();
@@ -99,8 +100,14 @@ pub(crate) fn is_in_rust_cfg_test(declaration: Node<'_>, source: &str) -> bool {
             "mod_item" => node.child_by_field_name("body"),
             _ => None,
         };
-        if inner_host.is_some_and(|host| has_inner_cfg_test(host, source)) {
-            return true;
+        if let Some(host) = inner_host {
+            count_shared_context_steps(1);
+            let has_inner = *inner_cfg_test
+                .entry(host.id())
+                .or_insert_with(|| has_inner_cfg_test(host, source));
+            if has_inner {
+                return true;
+            }
         }
         current = node.parent();
     }
@@ -109,10 +116,15 @@ pub(crate) fn is_in_rust_cfg_test(declaration: Node<'_>, source: &str) -> bool {
 
 fn has_inner_cfg_test(host: Node<'_>, source: &str) -> bool {
     let mut cursor = host.walk();
-    host.children(&mut cursor)
+    let mut steps = 0;
+    let found = host
+        .children(&mut cursor)
+        .inspect(|_| steps += 1)
         .filter(|child| child.kind() == "inner_attribute_item")
         .filter_map(|item| find_child_by_kind(item, "attribute"))
-        .any(|attribute| is_cfg_test(&rust_attribute(attribute, source)))
+        .any(|attribute| is_cfg_test(&rust_attribute(attribute, source)));
+    count_shared_context_steps(steps);
+    found
 }
 
 /// `cfg(test)`: the one argument is the bare `test` predicate (comments

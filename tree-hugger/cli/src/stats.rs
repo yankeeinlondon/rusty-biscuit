@@ -247,6 +247,7 @@ mod tests {
         record.metrics = Some(MetricsFacet {
             parameters: None,
             has_docs,
+            lines: None,
         });
         record
     }

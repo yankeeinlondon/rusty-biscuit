@@ -242,7 +242,7 @@ fn flags_and_metrics_run_with_the_declarations_only() {
     assert!(!old.visibility.is_test, "a scratch file outside any package `tests/`");
     assert_eq!(
         old.metrics,
-        Some(MetricsFacet { parameters: Some(1), has_docs: Some(true) })
+        Some(MetricsFacet { parameters: Some(1), has_docs: Some(true), lines: None })
     );
     assert!(old.relations.references.is_empty(), "references were not bound");
     assert!(old.relations.parent.is_none(), "containment was not requested");
@@ -250,7 +250,7 @@ fn flags_and_metrics_run_with_the_declarations_only() {
     assert!(old.docs.parsed.is_none(), "structured docs were not requested");
     assert_eq!(
         named("helper").metrics,
-        Some(MetricsFacet { parameters: Some(0), has_docs: Some(false) })
+        Some(MetricsFacet { parameters: Some(0), has_docs: Some(false), lines: None })
     );
 
     let plain = tree_file.query(&SymbolQuery::new().kinds([SymbolKindV2::Function])).expect("query");

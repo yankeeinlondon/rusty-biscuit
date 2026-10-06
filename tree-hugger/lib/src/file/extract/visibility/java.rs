@@ -21,7 +21,7 @@ pub(crate) fn extract_java_visibility(node: Node<'_>, source: &str) -> Option<Vi
 /// `package` clause itself has no access level.
 pub(super) fn extract_java_declaration_visibility(
     declaration: Node<'_>,
-    ctx: &DeclarationContext<'_>,
+    ctx: &DeclarationContext<'_, '_>,
 ) -> Option<Visibility> {
     match declaration.kind() {
         "package_declaration" => return None,

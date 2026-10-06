@@ -148,7 +148,7 @@ With `--json`, `functions`, `types`, `symbols` and `classes` print one report:
 ```json
 {
   "report_schema_version": 1,
-  "schema_version": { "major": 4, "minor": 0 },
+  "schema_version": { "major": 4, "minor": 1 },
   "root_dir": "/path/to/project",
   "files": [
     {
@@ -174,7 +174,7 @@ With `--json`, `functions`, `types`, `symbols` and `classes` print one report:
 
 (Records are shown abridged.)
 
-- `symbols` holds only the command's records, as schema 4.0 `SymbolRecord`s,
+- `symbols` holds only the command's records, as schema 4.1 `SymbolRecord`s,
   ordered by `--sort` within each file. File entries are always in portable
   path order, and a file with no match has no entry; an empty selection is
   `files: []`.

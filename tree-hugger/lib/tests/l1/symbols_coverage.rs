@@ -2,7 +2,7 @@
 //! rows in the kind, visibility, keyword and signature-text matrices (and the
 //! static matrix, where it has static members), and in each report matrix
 //! of the symbol filters and reports (scope, qualified names, containment,
-//! async, flags, metrics, kind coverage, selection filters), and every
+//! async, flags, metrics, kind coverage, selection filters, generics), and every
 //! symbol fixture is valid input.
 
 use tree_hugger::{ProgrammingLanguage, SymbolKind, TreeFile};
@@ -16,6 +16,7 @@ use crate::symbols_kinds::KIND_MATRIX;
 use crate::symbols_async::async_matrix_languages;
 use crate::symbols_containment::containment_matrix_languages;
 use crate::symbols_flags::flags_matrix_languages;
+use crate::symbols_generics::generics_matrix_languages;
 use crate::symbols_kind_coverage::kind_coverage_matrix_languages;
 use crate::symbols_metrics::metrics_matrix_languages;
 use crate::symbols_qualified_names::qualified_name_matrix_languages;
@@ -148,7 +149,7 @@ fn every_language_has_matrix_rows() {
 /// closed, and a repeated one would let a later phase fill the wrong row.
 #[test]
 fn every_language_has_one_row_in_each_report_matrix() {
-    let matrices: [(&str, Vec<ProgrammingLanguage>); 8] = [
+    let matrices: [(&str, Vec<ProgrammingLanguage>); 9] = [
         ("SCOPE_MATRIX", scope_matrix_languages()),
         ("QUALIFIED_NAME_MATRIX", qualified_name_matrix_languages()),
         ("CONTAINMENT_MATRIX", containment_matrix_languages()),
@@ -157,6 +158,7 @@ fn every_language_has_one_row_in_each_report_matrix() {
         ("METRICS_MATRIX", metrics_matrix_languages()),
         ("KIND_COVERAGE_MATRIX", kind_coverage_matrix_languages()),
         ("SELECTION_FILTER_MATRIX", selection_filter_matrix_languages()),
+        ("GENERICS_MATRIX", generics_matrix_languages()),
     ];
     for (matrix, rows) in &matrices {
         for language in ProgrammingLanguage::all() {

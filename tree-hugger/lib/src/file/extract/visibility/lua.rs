@@ -5,7 +5,7 @@ use super::*;
 /// (`M.f`, `M:m`, `M.x = …`) have no enforced access and are Unknown.
 pub(super) fn extract_lua_visibility(
     declaration: Node<'_>,
-    ctx: &DeclarationContext<'_>,
+    ctx: &DeclarationContext<'_, '_>,
 ) -> Option<Visibility> {
     if ctx.name.parent().is_some_and(|parent| {
         matches!(

@@ -476,6 +476,7 @@ fn each_key_input_and_stored_identity_decides_a_miss() {
     let original = read_entry(&entry_path);
     for (field, value, reason) in [
         ("schema_version", json!({ "major": 3, "minor": 0 }), "schema version"),
+        ("schema_version", json!({ "major": 4, "minor": 0 }), "schema version"),
         ("fingerprint", json!("0000"), "fingerprint"),
         ("source_hash", json!("0000"), "source hash"),
         ("file", json!("elsewhere.rs"), "file"),
@@ -503,11 +504,12 @@ fn incompatible_record_schema_versions_are_misses_never_served_or_widened() {
     let path = fixture(ProgrammingLanguage::Python);
     let narrow = SymbolQuery::new().kinds(FUNCTION_KINDS);
     let complete = SymbolQuery::complete_index();
-    let current = json!({ "major": 4, "minor": 0 });
+    let current = json!({ "major": 4, "minor": 1 });
     for version in [
         json!({ "major": 2, "minor": 0 }),
         json!({ "major": 3, "minor": 0 }),
-        json!({ "major": 4, "minor": 1 }),
+        json!({ "major": 4, "minor": 0 }),
+        json!({ "major": 4, "minor": 2 }),
         json!({ "major": 5, "minor": 0 }),
     ] {
         for (position, request) in [("first", &narrow), ("last", &narrow), ("first", &complete)] {
@@ -675,7 +677,7 @@ fn covered_kind_lists_are_served_only_in_canonical_form() {
         (
             "metrics facet",
             "/records/0/metrics",
-            json!({ "parameters": 1, "has_docs": false }),
+            json!({ "parameters": 1, "has_docs": false, "lines": null }),
             "metrics stored without the metrics capability",
         ),
         ("is_test", "/records/0/visibility/is_test", json!(true), "a flag set without the flags capability"),

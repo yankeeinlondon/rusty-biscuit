@@ -7,7 +7,7 @@ use std::collections::{BTreeSet, HashMap};
 use tree_sitter::{QueryCursor, StreamingIterator};
 
 use super::TreeFile;
-use crate::analysis::counters::count_definition_capture;
+use crate::analysis::counters::{count_definition_capture, count_shared_context_steps};
 use crate::analysis::agrees_with_owner_path;
 use crate::error::TreeHuggerError;
 use crate::file::extract::*;
@@ -108,6 +108,17 @@ impl<'tree> Candidate<'tree> {
 struct CaptureGroup<'tree> {
     winner: Candidate<'tree>,
     later: Vec<Candidate<'tree>>,
+}
+
+/// Facts about the file that its declarations share, each derived once per
+/// file (lazily, where only some declarations need it) instead of re-read
+/// from the tree for every declaration.
+struct FileFacts<'tree> {
+    root: Node<'tree>,
+    /// JavaScript/TypeScript: the file is a module ([`is_ecma_module_file`]).
+    is_ecma_module: bool,
+    scopes: SiblingScopes<'tree>,
+    visibility: VisibilityMemo<'tree>,
 }
 
 struct PendingSymbol<'tree> {
@@ -221,11 +232,15 @@ impl TreeFile {
             groups.into_iter().collect();
         groups.sort_by_key(|((start, end, _), _)| (*start, *end));
 
+        let facts = FileFacts {
+            root,
+            is_ecma_module,
+            scopes: SiblingScopes::default(),
+            visibility: VisibilityMemo::default(),
+        };
         let mut pending: Vec<PendingSymbol<'_>> = groups
             .into_iter()
-            .map(|((_, _, name), group)| {
-                self.materialize(name, group, selection, root, is_ecma_module)
-            })
+            .map(|((_, _, name), group)| self.materialize(name, group, selection, &facts))
             .collect();
 
         align_field_metadata(&mut pending, selection);
@@ -255,6 +270,11 @@ impl TreeFile {
                     .or_insert(entry.extracted.symbol.kind);
             }
         }
+        // Every symbol of a name, in order, for the containers found by name.
+        let mut by_name: HashMap<&str, Vec<usize>> = HashMap::new();
+        for (index, entry) in pending.iter().enumerate() {
+            by_name.entry(&entry.extracted.symbol.name).or_default().push(index);
+        }
         let container_kinds: Vec<Option<SymbolKind>> = pending
             .iter()
             .map(|entry| {
@@ -263,6 +283,7 @@ impl TreeFile {
                     &entry.extracted.symbol.qualified_name,
                     &kinds_by_node,
                     &pending,
+                    &by_name,
                 )
             })
             .collect();
@@ -285,8 +306,7 @@ impl TreeFile {
         name: String,
         group: CaptureGroup<'tree>,
         selection: &MetadataSelection,
-        root: Node<'tree>,
-        is_ecma_module: bool,
+        facts: &FileFacts<'tree>,
     ) -> PendingSymbol<'tree> {
         let winner = &group.winner;
         let container = match lua_table_of_name(winner.name) {
@@ -296,7 +316,12 @@ impl TreeFile {
                     lookup: ContainerLookup::SameFileTable,
                 })
             }
-            _ => find_symbol_container(winner.declaration, self.language, &self.source),
+            _ => find_symbol_container(
+                winner.declaration,
+                self.language,
+                &self.source,
+                &facts.scopes,
+            ),
         };
         let mut symbol = SymbolInfo {
             name,
@@ -320,7 +345,7 @@ impl TreeFile {
             type_metadata: None,
         };
         if selection.wants(winner.kind) {
-            self.fill_metadata(&mut symbol, &group, root, is_ecma_module);
+            self.fill_metadata(&mut symbol, &group, facts);
         }
 
         PendingSymbol {
@@ -338,22 +363,22 @@ impl TreeFile {
     /// read only for what is still missing. While no signature is known, a
     /// later capture's signature, visibility and `static` flags replace the
     /// current ones together.
-    fn fill_metadata(
-        &self,
+    fn fill_metadata<'tree>(
+        &'tree self,
         symbol: &mut SymbolInfo,
-        group: &CaptureGroup<'_>,
-        root: Node<'_>,
-        is_ecma_module: bool,
+        group: &CaptureGroup<'tree>,
+        facts: &FileFacts<'tree>,
     ) {
-        let flags = |candidate: &Candidate<'_>| {
+        let flags = |candidate: &Candidate<'tree>| {
             let context = DeclarationContext {
                 language: self.language,
                 source: &self.source,
                 name: candidate.name,
-                root,
-                is_ecma_module,
+                root: facts.root,
+                is_ecma_module: facts.is_ecma_module,
                 kind: candidate.kind,
                 scope: symbol_scope(candidate.declaration, candidate.name, candidate.kind, self.language),
+                memo: &facts.visibility,
             };
             (
                 extract_visibility(candidate.declaration, &context),
@@ -479,19 +504,33 @@ fn align_field_metadata(pending: &mut [PendingSymbol<'_>], selection: &MetadataS
         })
         .collect();
 
+    // Each owner's members, in source order, so an owner never scans the
+    // members of every other type.
+    let mut by_owner: HashMap<usize, Vec<usize>> = HashMap::new();
+    for (index, member) in members.iter().enumerate() {
+        by_owner.entry(member.owner).or_default().push(index);
+    }
+
     for entry in pending.iter_mut() {
         let symbol = &mut entry.extracted.symbol;
         if !completes_field_list(symbol.kind) || !selection.wants(symbol.kind) {
             continue;
         }
         let owners = [entry.extracted.declaration.id(), entry.extracted.anchor.id()];
-        let own: Vec<&Member> = members
-            .iter()
-            .filter(|member| owners.contains(&member.owner))
+        let mut indices: Vec<usize> = owners
+            .into_iter()
+            .collect::<BTreeSet<usize>>()
+            .into_iter()
+            .filter_map(|owner| by_owner.get(&owner))
+            .flatten()
+            .copied()
             .collect();
-        if own.is_empty() {
+        count_shared_context_steps(indices.len());
+        if indices.is_empty() {
             continue;
         }
+        indices.sort_unstable();
+        let own: Vec<&Member> = indices.into_iter().map(|index| &members[index]).collect();
         let metadata = symbol.type_metadata.get_or_insert_with(TypeMetadata::new);
 
         let mut paired = vec![false; own.len()];
@@ -632,10 +671,16 @@ fn resolve_container_kind(
     qualified_name: &str,
     kinds_by_node: &HashMap<usize, SymbolKind>,
     symbols: &[PendingSymbol<'_>],
+    by_name: &HashMap<&str, Vec<usize>>,
 ) -> Option<SymbolKind> {
     let container = container?;
     let agrees =
         |candidate: &SymbolInfo| agrees_with_owner_path(&candidate.qualified_name, qualified_name);
+    let named = || {
+        let indices = by_name.get(container.name.as_str()).map_or(&[][..], Vec::as_slice);
+        count_shared_context_steps(indices.len());
+        indices.iter().map(|&index| &symbols[index].extracted.symbol)
+    };
     match container.lookup {
         ContainerLookup::Node { node, fallback } => {
             Some(kinds_by_node.get(&node.id()).copied().unwrap_or(fallback))
@@ -643,14 +688,8 @@ fn resolve_container_kind(
         // The table's kind when the file's item-scoped declarations of
         // that name agree on one.
         ContainerLookup::SameFileTable => {
-            let mut kinds = symbols
-                .iter()
-                .map(|entry| &entry.extracted.symbol)
-                .filter(|symbol| {
-                    symbol.scope == SymbolScope::Item
-                        && symbol.name == container.name
-                        && agrees(symbol)
-                })
+            let mut kinds = named()
+                .filter(|symbol| symbol.scope == SymbolScope::Item && agrees(symbol))
                 .map(|symbol| symbol.kind);
             let first = kinds.next()?;
             kinds.all(|kind| kind == first).then_some(first)
@@ -658,12 +697,7 @@ fn resolve_container_kind(
         // Absent when the type is declared elsewhere, or when same-named
         // declarations in this file disagree on kind.
         ContainerLookup::SameFileType => {
-            let mut kinds = symbols
-                .iter()
-                .map(|entry| &entry.extracted.symbol)
-                .filter(|symbol| {
-                    symbol.kind.is_type() && symbol.name == container.name && agrees(symbol)
-                })
+            let mut kinds = named().filter(|symbol| symbol.kind.is_type() && agrees(symbol))
                 .map(|symbol| symbol.kind);
             let first = kinds.next()?;
             kinds.all(|kind| kind == first).then_some(first)

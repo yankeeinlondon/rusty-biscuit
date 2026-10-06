@@ -740,18 +740,18 @@ fn is_static(record: &Value) -> bool {
 }
 
 #[test]
-fn json_symbols_carry_visibility_and_schema_4_0() {
+fn json_symbols_carry_visibility_and_current_schema() {
     let scratch = Scratch::new(&[("typescript.ts", TYPESCRIPT_FIXTURE)]);
     // `--all-scopes`: the local `localValue` is asserted below.
     let json = json_of(&scratch.stdout(&["--json", "symbols", "--all-scopes", "typescript.ts"]));
 
-    let schema = serde_json::json!({ "major": 4, "minor": 0 });
+    let schema = serde_json::json!({ "major": 4, "minor": 1 });
     assert_eq!(json["report_schema_version"], 1, "TypeScript: report_schema_version");
     assert_eq!(json["schema_version"], schema, "TypeScript: envelope schema_version");
     let records = report_records(&json);
     assert!(
         records.iter().all(|record| record["schema_version"] == schema),
-        "TypeScript: every record is schema 4.0"
+        "TypeScript: every record is schema 4.1"
     );
 
     let make = named(&records, "privateStaticMethod", "TypeScript");
@@ -770,7 +770,7 @@ fn json_symbols_carry_visibility_and_schema_4_0() {
     );
 }
 
-/// Schema 4.0 records carry the declaring keyword, the display header and
+/// Schema 4.x records carry the declaring keyword, the display header and
 /// `identity.container_name`, and no wall-clock timestamps or `module_path`.
 /// `declaration_text` is evidence, not display: only `--json-full` carries it.
 #[test]
@@ -805,8 +805,8 @@ fn json_records_carry_keyword_signature_text_and_container_name() {
     );
 
     for removed in ["\"module_path\"", "created_at_epoch_ms", "updated_at_epoch_ms"] {
-        assert!(!stdout.contains(removed), "schema 4.0 JSON must not contain {removed}");
-        assert!(!full_stdout.contains(removed), "schema 4.0 --json-full must not contain {removed}");
+        assert!(!stdout.contains(removed), "schema 4.x JSON must not contain {removed}");
+        assert!(!full_stdout.contains(removed), "schema 4.x --json-full must not contain {removed}");
     }
 }
 

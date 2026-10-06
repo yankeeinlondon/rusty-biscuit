@@ -48,7 +48,7 @@ fn the_json_envelope_holds_only_selected_records_and_ends_with_errors() {
     let scratch = Scratch::new(MULTI_FIXTURES);
     let stdout = scratch.stdout(&["--json", "functions"]);
     assert!(
-        stdout.starts_with(r#"{"report_schema_version":1,"schema_version":{"major":4,"minor":0},"root_dir":"#),
+        stdout.starts_with(r#"{"report_schema_version":1,"schema_version":{"major":4,"minor":1},"root_dir":"#),
         "envelope head: {}",
         &stdout[..120.min(stdout.len())]
     );
@@ -165,6 +165,93 @@ fn a_failed_file_is_reported_last_on_stderr_and_in_the_exit_status() {
     assert!(stderr_of(&output).contains("bad.rs"));
     let stdout = String::from_utf8(output.stdout).expect("utf-8");
     assert!(stdout.contains("listed()") && stdout.contains("kept()"), "{stdout}");
+}
+
+const GENERIC_BAG_RS: &str = "pub struct Bag<T: Clone = String> {\n    value: T,\n}\n\
+impl<T: Clone> Bag<T> {\n    pub fn get<U>(&self, value: U) -> U where U: Copy, T: Default { value }\n}\n";
+
+/// The `[name, kind, constraints, default, position]` of each generic
+/// parameter of `record`.
+fn generic_params(record: &Value) -> Value {
+    Value::from(
+        record["type_info"]["generic_params"]
+            .as_array()
+            .map(|params| {
+                params
+                    .iter()
+                    .map(|param| {
+                        serde_json::json!([param["name"], param["kind"], param["constraints"], param["default"], param["position"]])
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default(),
+    )
+}
+
+/// Written generic parameters and declaration-level requirements reach
+/// `--json`, `--jsonl` and `--json-full` alike; a method lists only its own
+/// parameters, never its `impl` block's.
+#[test]
+fn generic_parameters_reach_every_json_format() {
+    let scratch = Scratch::new(&[("bag.rs", GENERIC_BAG_RS)]);
+    let bag = serde_json::json!([["T", "Type", ["Clone"], "String", 0]]);
+    let get = serde_json::json!([["U", "Type", ["Copy"], null, 0]]);
+
+    let types = json_of(&scratch.stdout(&["--json", "types", "bag.rs"]));
+    let bag_record = records(&types).into_iter().find(|record| record["identity"]["name"] == "Bag").expect("Bag");
+    assert_eq!(generic_params(bag_record), bag, "--json types");
+    assert!(bag_record["type_info"].get("constraints").is_none(), "Bag has no declaration-level requirement");
+
+    let functions = json_of(&scratch.stdout(&["--json", "functions", "bag.rs"]));
+    let get_record = records(&functions).into_iter().find(|record| record["identity"]["name"] == "get").expect("get");
+    assert_eq!(generic_params(get_record), get, "--json functions");
+    // `T` is the impl's parameter, so its requirement is the method's own.
+    assert_eq!(get_record["type_info"]["constraints"], serde_json::json!(["T: Default"]));
+
+    let lines = scratch.stdout(&["functions", "--jsonl", "bag.rs"]);
+    let line = lines
+        .lines()
+        .map(json_of)
+        .find(|line| line["record"]["identity"]["name"] == "get")
+        .expect("a `get` line");
+    assert_eq!(generic_params(&line["record"]), get, "--jsonl functions");
+
+    let full = json_of(&scratch.stdout(&["--json-full", "symbols", "bag.rs"]));
+    let indexed: Vec<&Value> = full["indexes"]
+        .as_array()
+        .expect("indexes")
+        .iter()
+        .flat_map(|index| index["symbols"].as_array().expect("symbols"))
+        .collect();
+    for (name, expected) in [("Bag", &bag), ("get", &get)] {
+        let record = indexed.iter().find(|record| record["identity"]["name"] == name).expect("record");
+        assert_eq!(&generic_params(record), expected, "--json-full `{name}`");
+    }
+}
+
+/// A selected declaration with more generic parameters than a `u16`
+/// position can number fails its file with kind
+/// `too_many_generic_parameters` (exit 1); a command that does not select
+/// it lists the file normally.
+#[test]
+fn an_unrepresentable_generic_list_fails_only_a_command_that_selects_it() {
+    let params: Vec<String> = (0..=usize::from(u16::MAX) + 1).map(|index| format!("T{index}")).collect();
+    let wide = format!("fn wide<{}>() {{}}\npub struct Narrow;\n", params.join(", "));
+    let scratch = Scratch::new(&[("wide.rs", wide.as_str())]);
+
+    let output = scratch.hug(&["--json", "functions", "wide.rs"]);
+    assert_eq!(output.status.code(), Some(1), "functions exits 1");
+    assert!(stderr_of(&output).contains("wide"), "stderr names the declaration");
+    let json = json_of(&String::from_utf8(output.stdout).expect("utf-8"));
+    let errors = json["errors"].as_array().expect("errors");
+    assert_eq!(errors.len(), 1, "{errors:?}");
+    assert_eq!((&errors[0]["file"], &errors[0]["kind"]), (&Value::from("wide.rs"), &Value::from("too_many_generic_parameters")));
+
+    let output = scratch.hug(&["--json", "types", "wide.rs"]);
+    assert_eq!(output.status.code(), Some(0), "types does not read `wide`: {}", stderr_of(&output));
+    let json = json_of(&String::from_utf8(output.stdout).expect("utf-8"));
+    let names: Vec<&Value> = records(&json).into_iter().map(|record| &record["identity"]["name"]).collect();
+    assert_eq!(names, [&Value::from("Narrow")]);
 }
 
 /// Failures are reported in file order, on stderr and in `errors`, whatever

@@ -44,7 +44,7 @@ pub(crate) fn extract_csharp_visibility(node: Node<'_>, source: &str) -> Option<
 /// it.
 pub(super) fn extract_csharp_declaration_visibility(
     declaration: Node<'_>,
-    ctx: &DeclarationContext<'_>,
+    ctx: &DeclarationContext<'_, '_>,
 ) -> Option<Visibility> {
     match declaration.kind() {
         "namespace_declaration" | "file_scoped_namespace_declaration" => return None,

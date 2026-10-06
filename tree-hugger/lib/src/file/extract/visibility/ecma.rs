@@ -24,7 +24,7 @@ pub(crate) fn extract_ts_visibility(node: Node<'_>, source: &str) -> Option<Visi
 /// - anything else (declarations inside a namespace body, for example): Unknown.
 pub(super) fn extract_ecma_visibility(
     declaration: Node<'_>,
-    ctx: &DeclarationContext<'_>,
+    ctx: &DeclarationContext<'_, '_>,
 ) -> Option<Visibility> {
     let parent = declaration.parent()?;
     match parent.kind() {

@@ -7,7 +7,7 @@ use super::*;
 /// macros have no access modifier and report Unknown.
 pub(super) fn extract_c_visibility(
     declaration: Node<'_>,
-    ctx: &DeclarationContext<'_>,
+    ctx: &DeclarationContext<'_, '_>,
 ) -> Option<Visibility> {
     (has_linkage(ctx.kind) && is_namespace_scope(declaration))
         .then(|| linkage_visibility(declaration, ctx, false))
@@ -58,7 +58,7 @@ pub(super) fn is_namespace_scope(declaration: Node<'_>) -> bool {
 /// declaration made `static`; Public otherwise.
 pub(super) fn linkage_visibility(
     declaration: Node<'_>,
-    ctx: &DeclarationContext<'_>,
+    ctx: &DeclarationContext<'_, '_>,
     cpp: bool,
 ) -> Visibility {
     let source = ctx.source;
@@ -154,42 +154,81 @@ fn child_on_path<'tree>(ancestor: Node<'tree>, descendant: Node<'tree>) -> Optio
 /// this file) makes it miss a `static`, never attach one to another function.
 fn has_earlier_static_declaration(
     declaration: Node<'_>,
-    ctx: &DeclarationContext<'_>,
+    ctx: &DeclarationContext<'_, '_>,
     cpp: bool,
 ) -> bool {
     let source = ctx.source;
     let Some(own_function) = declared_function_named(declaration, ctx.name) else {
         return false;
     };
-    let namespaces = if cpp { declared_namespaces(ctx.root, source) } else { Vec::new() };
-    let Some(own) = FunctionIdentity::of(declaration, &own_function, source, &namespaces) else {
+    let index = ctx
+        .memo
+        .c_linkage
+        .get_or_init(|| LinkageIndex::of(ctx.root, source, cpp));
+    let Some(own) =
+        FunctionIdentity::of(declaration, &own_function, source, &index.namespaces)
+    else {
         return false;
     };
-
-    let mut earlier = Vec::new();
-    collect_scope_declarations(ctx.root, declaration.start_byte(), &mut earlier);
-    earlier.into_iter().any(|candidate| {
-        has_specifier(candidate, "storage_class_specifier", "static", source)
-            && declared_functions(candidate).iter().any(|function| {
-                FunctionIdentity::of(candidate, function, source, &namespaces)
-                    .is_some_and(|earlier| own.redeclares(&earlier, cpp))
-            })
+    let before = declaration.start_byte();
+    index.static_functions.get(own.name).is_some_and(|earlier| {
+        earlier
+            .iter()
+            .take_while(|(start, _)| *start < before)
+            .inspect(|_| count_shared_context_steps(1))
+            .any(|(_, earlier)| own.redeclares(earlier, cpp))
     })
 }
 
-/// Namespace-scope declarations and definitions that end before `before`,
-/// including those under a template header.
-fn collect_scope_declarations<'tree>(node: Node<'tree>, before: usize, found: &mut Vec<Node<'tree>>) {
+/// What the earlier-`static` rule reads from the whole file, collected once
+/// per file into [`VisibilityMemo`]: the namespaces it declares (C++ only)
+/// and the identity of every function a namespace-scope `static`
+/// declaration declares. An earlier declaration's identity depends only on
+/// what precedes it, never on the declaration it is compared with.
+pub(super) struct LinkageIndex<'src> {
+    namespaces: Vec<(usize, Vec<&'src str>)>,
+    /// By function name: the declaring `static` declaration's start byte
+    /// and the function's identity, in source order.
+    static_functions: HashMap<&'src str, Vec<(usize, FunctionIdentity<'src>)>>,
+}
+
+impl<'src> LinkageIndex<'src> {
+    fn of(root: Node<'_>, source: &'src str, cpp: bool) -> Self {
+        let namespaces = if cpp { declared_namespaces(root, source) } else { Vec::new() };
+        let mut declarations = Vec::new();
+        collect_scope_declarations(root, &mut declarations);
+        count_shared_context_steps(declarations.len() + namespaces.len());
+        let mut static_functions: HashMap<&'src str, Vec<(usize, FunctionIdentity<'src>)>> =
+            HashMap::new();
+        for candidate in declarations {
+            if !has_specifier(candidate, "storage_class_specifier", "static", source) {
+                continue;
+            }
+            for function in declared_functions(candidate) {
+                if let Some(identity) =
+                    FunctionIdentity::of(candidate, &function, source, &namespaces)
+                {
+                    static_functions
+                        .entry(identity.name)
+                        .or_default()
+                        .push((candidate.start_byte(), identity));
+                }
+            }
+        }
+        Self { namespaces, static_functions }
+    }
+}
+
+/// Namespace-scope declarations and definitions, in source order, including
+/// those under a template header.
+fn collect_scope_declarations<'tree>(node: Node<'tree>, found: &mut Vec<Node<'tree>>) {
     let mut cursor = node.walk();
     for child in node.named_children(&mut cursor) {
-        if child.start_byte() >= before {
-            break;
-        }
         match child.kind() {
             "declaration" | "function_definition" => found.push(child),
             "namespace_definition" | "linkage_specification" | "declaration_list"
             | "template_declaration" | "preproc_if" | "preproc_ifdef" | "preproc_else"
-            | "preproc_elif" | "preproc_elifdef" => collect_scope_declarations(child, before, found),
+            | "preproc_elif" | "preproc_elifdef" => collect_scope_declarations(child, found),
             _ => {}
         }
     }

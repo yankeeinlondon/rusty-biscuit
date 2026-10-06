@@ -4,7 +4,7 @@
 
 Draft design for a major refactor, partly implemented. `SymbolRecord` and
 `FileSymbolIndex` ship in `lib/src/shared/schema_v2/` and serialize as schema
-**4.0** (the Rust module and type names keep their historical `v2`). Sections
+**4.1** (the Rust module and type names keep their historical `v2`). Sections
 below describe the implemented shape unless marked **planned**. Per-language
 extraction rules for kinds, visibility and `static` are in
 [Symbol Kinds, Visibility and `static`](./symbol-kinds-and-visibility.md).
@@ -124,17 +124,22 @@ pub struct SymbolRecord {
 present), `identity.is_namespace_rooted`, the `Async` entry of `modifiers`,
 `visibility.is_test`, values for the existing `visibility.is_deprecated` and
 the `metrics` facet were added on top of 4.0 without a version bump;
-`EXTRACTOR_REVISION` moved on instead (it is 9 now), so no cache entry written
-without them is served. Three parts of the record are declared but still empty on every
-record: `attributes`, `type_info.generic_params`, and the type links of
-`relations` (`extends`, `overrides`, and `implements` outside Rust; see
+`EXTRACTOR_REVISION` moved on instead, so no cache entry written without
+them is served. The `metrics.lines` key changed the record shape and so
+follows the minor-version rule: it is schema 4.1. Filling a declared
+field (`type_info.generic_params` and `type_info.constraints`, see
+[Generic parameters](#generic-parameters)) changes no shape and only moves
+`EXTRACTOR_REVISION`. Two parts of the record are declared but still empty
+on every record: `attributes`, and the type links of `relations`
+(`extends`, `overrides`, and `implements` outside Rust; see
 [Relation Facet](#relation-facet)).
 
 | Fact | When computed |
 |---|---|
 | `scope`, the `async` modifier, the in-file `qualified_name` | always, for every declaration (also those a kind selection leaves out) |
 | `visibility.is_test`, `visibility.is_deprecated` | with `Capability::Flags`; without it both are `false`, meaning "not computed" (`hug --json`, `--jsonl` and `--json-full` always ask for it) |
-| `metrics` (`parameters`, `has_docs`) | with `Capability::Metrics`, on every selected record; without it the facet is absent (`hug --json-full` and `--stats` ask for it) |
+| `type_info.generic_params`, `type_info.constraints` | always, on every selected record (no capability needed); empty on a record a kind selection leaves out |
+| `metrics` (`parameters`, `has_docs`, `lines`) | with `Capability::Metrics`, on every selected record; without it the facet is absent (`hug --json-full` and `--stats` ask for it) |
 
 Scope, `async` and the qualified name are lightweight and every record needs
 them (the qualified name feeds the ID, and scope decides the default
@@ -149,10 +154,11 @@ pub enum SymbolScope { Item, Member, Local }
 pub struct MetricsFacet {
     pub parameters: Option<u32>,  // `null` = unsupported for this declaration
     pub has_docs: Option<bool>,   // `null` = no doc-comment detection
+    pub lines: Option<u32>,       // `null` = not a callable, or no body
 }
 ```
 
-Inside a present `metrics` facet both keys are required: `null` means the
+Inside a present `metrics` facet every key is required: `null` means the
 metric is unsupported, and an absent key is malformed. An absent facet means
 "not requested". `parameters` is the length of the declaration's own
 parameter list (every list of a curried Scala `def`), counting a parameter
@@ -161,13 +167,16 @@ without a Rust `self` (a Go receiver has its own list), one variadic
 parameter counting once; it is `null` for a declaration that is not
 a function, one with no parameter list (`def area: Int` in Scala), and in
 Perl, Bash and Zsh. `has_docs` is whether `docs.raw_doc` is present; it is
-`null` in Lua, Perl, Bash and Zsh, which have no doc-comment detection. A
-predicate never matches a `null` metric, so `undocumented(true)` skips a Lua
+`null` in Lua, Perl, Bash and Zsh, which have no doc-comment detection.
+`lines` is **planned**: it will count the physical lines a function, method
+or constructor's `source.body_span` touches (`0` for an empty span); today it
+is `null` on every record. A schema 4.0 facet without the key is malformed,
+never read as `null`. A predicate never matches a `null` metric, so `undocumented(true)` skips a Lua
 function rather than reporting it as undocumented:
 
 ```json
-"metrics": { "parameters": 2, "has_docs": false }   // Python: measured
-"metrics": { "parameters": null, "has_docs": null } // Bash: both unsupported
+"metrics": { "parameters": 2, "has_docs": false, "lines": null }   // Python: measured
+"metrics": { "parameters": null, "has_docs": null, "lines": null } // Bash: unsupported
                                                      // no "metrics" key: not requested
 ```
 
@@ -529,7 +538,7 @@ pub struct Attribute {
     pub value: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(tag = "type", content = "value")]
 pub enum Modifier {
     Static,        // member usable without an instance
@@ -549,6 +558,16 @@ pub enum Modifier {
 constant). `StaticStorage` marks Rust `static` items and C/C++ file-scope,
 namespace-scope and function-local `static`. The v1 model carries them as
 `SymbolInfo::is_static` and `SymbolInfo::is_static_storage`.
+
+A record lists each modifier once, in one fixed order: `Static`,
+`StaticStorage`, `Async`, `Const`, `Readonly`, `Unsafe`, `Mut`, then
+distinct `Custom` values in lexical order. The order is the derived `Ord`,
+so the variant order above is part of the output format:
+
+```json
+"modifiers": [{ "type": "Static" }, { "type": "Async" },
+              { "type": "Custom", "value": "abstract" }, { "type": "Custom", "value": "final" }]
+```
 
 **Planned:** further modifiers (`Abstract`, `Final`, `Sealed`, `Open`,
 `Virtual`, `Override`, `Extern`, `Generator`).
@@ -600,6 +619,94 @@ pub struct TypeFacet {
 ```
 
 `ast` can begin as lightweight JSON from Tree-sitter nodes and evolve later to a strongly typed internal AST.
+
+### Generic parameters
+
+`type_info.generic_params` lists the parameters a declaration writes in its
+own parameter list, in source order; `type_info.constraints` holds the
+requirements whose subject is not one of those parameters. Both are read
+from syntax alone, on every selected record.
+
+```rust
+pub struct Bag<T: Clone = String> { value: T }
+impl<T: Clone> Bag<T> {
+    pub fn get<U>(&self, value: U) -> U where U: Copy, T: Default { value }
+}
+```
+
+```json
+"Bag": { "generic_params": [{ "name": "T", "kind": "Type", "constraints": ["Clone"], "default": "String", "position": 0 }] }
+"get": { "generic_params": [{ "name": "U", "kind": "Type", "constraints": ["Copy"], "position": 0 }],
+         "constraints": ["T: Default"] }
+```
+
+The rules, each visible in the example:
+
+- **Only the declaration's own list.** `get` does not receive `Bag`'s `T`,
+  and `Bag` does not receive the `impl` block's `T`. A Rust `impl` block has
+  no record of its own. A C++ member template reads only the `template`
+  directly around it.
+- **Bounds attach to their parameter, in source order.** An inline bound
+  (`T: Clone`) comes first, then bounds written in a `where` clause on the
+  same bare name (`where U: Copy`). A requirement on anything else (`T` of
+  the enclosing `impl`, `T::Item: Copy`, `Vec<T>: Send`, `for<'b> &'b T: …`,
+  Swift `U == Int`, a C++ `requires` clause) goes to `type_info.constraints`
+  as written, once. Nothing is inferred from how a parameter is used.
+- **Texts are as written.** Bounds and defaults keep their source text
+  (generic arguments, qualification and inner whitespace included) with
+  outer whitespace trimmed. A bound list is split at its grammar entries
+  (Rust `+`, Java `&`, C# `,`), never inside a nested type; comments
+  between entries are dropped. A default omits its `=`.
+- **Kinds.** Rust lifetimes are `Lifetime` and keep their apostrophe
+  (`'a`); Rust `const N: usize` and C++ non-type parameters are `Const`, and
+  their declared type is not a constraint (it stays in
+  `source.declaration_text`); everything else is `Type`, including packs
+  (C++ `class... Ts`, Python `*Ts` and `**P`, named without the stars) and
+  higher-kinded parameters (Scala `F[_]`, C++ `template <class> class TT`).
+- **Variance** is recorded as written: C# `in`/`out`, Scala `+`/`-`;
+  otherwise absent.
+- **Positions** are zero-based indexes in the written list and are `u16`.
+  An unnamed C++ parameter (`template <typename, int N>`) has no entry but
+  keeps its slot, so `N` is position 1. A selected declaration with more
+  than 65 536 parameters fails its file with
+  `TreeHuggerError::TooManyGenericParameters` (`hug` reports
+  `too_many_generic_parameters`); positions are never truncated.
+
+| Language | Parameters read from | Bounds | Defaults | Variance | `constraints` |
+|---|---|---|---|---|---|
+| Rust | items, functions, methods, traits, aliases | `T: A + B`, `where T: …` | `T = X`, `const N: u8 = 3` | — | other `where` predicates |
+| TypeScript | classes, interfaces, aliases, functions, methods, arrow functions | `extends X` (one entry) | `= X` | — | — |
+| Go | types (each spec of a `type` group), functions | the whole constraint (`~int \| ~float64`), shared by `K, V any` | — | — | — |
+| Python | `class C[T]`, `def f[T]` | `T: int`, `T: (int, str)` | — | — | — |
+| Java | classes, interfaces, records, methods, constructors | `extends A & B` | — | — | — |
+| C# | classes, structs, interfaces, records, methods | `where T : class, new()` | — | `in`, `out` | a `where` clause naming no declared parameter |
+| C++ | the `template` directly around the declaration | — | `= int`, `= 3` | — | `requires` clauses (after the parameters or the function) |
+| Swift | types, functions, aliases | `T: P`, `where T: P` | — | — | `where` requirements on anything else (`U == Int`) |
+| Scala | classes, traits, enums, functions, type aliases | `>: L`, `<: U`, `: Ctx`, operator kept | — | `+`, `-` | — |
+| JavaScript, C, PHP, Perl, Bash, Zsh, Lua | — (no declared generic parameters; JSDoc and PHPDoc `@template` are not read) | | | | |
+
+Scala keeps each bound's operator because one list mixes lower, upper and
+context bounds; the other languages list only upper bounds and drop their
+keyword (`extends`, `:`).
+
+**Limits of the pinned grammars and the extractor.** These are pinned by
+`symbols_generics::GENERICS_MATRIX`:
+
+- tree-sitter-python 0.25.0 rejects a type-parameter default
+  (`class C[T = str]`, PEP 696), and the `type A[T] = …` statement produces
+  no record, so neither carries generics.
+- tree-sitter-typescript 0.23.2 rejects variance annotations
+  (`interface K<in T>`).
+- tree-sitter-cpp 0.23.4 parses a concept-constrained type parameter
+  (`template <std::integral T>`) exactly like a non-type parameter of a
+  named type (`template <MyEnum E>`), so it is read as `Const` with no
+  constraint. A `typename`/`class` parameter with a `requires` clause is
+  read exactly.
+- C# delegates produce no record, so their parameters are not reported.
+
+The older model's `TypeMetadata::type_parameters` (names only, types only)
+is a separate reader with its own coverage, and the v1↔v2 adapter does not
+carry `generic_params` across.
 
 ### Relation Facet
 
@@ -1054,9 +1161,21 @@ equal priority) supplies each field, and a later equal-priority capture is
 read only for a field the winner lacks.
 
 `tree_hugger::work_counters()` counts lint-diagnostics runs, parser
-constructions and definition-query executions process-wide (atomics, so work
-on any thread is counted); tests compare two snapshots with
-`WorkCounters::since`.
+constructions, definition-query executions and shared-context steps
+process-wide (atomics, so work on any thread is counted); tests compare two
+snapshots with `WorkCounters::since`.
+
+Context that many declarations of one file share is derived once per file,
+or once per module or class body, and looked up per declaration: the
+file-level `package`/`namespace` in force at each top-level node (no index
+at all for a language without such a statement), the C#/Perl sibling-scoped
+container before each node, a Rust root's or module's inner
+`#![cfg(test)]`, a C++ class body's access sections, the file's Rust traits,
+its C/C++ `static` function declarations and C++ namespaces, its Scala
+package segments, and the same-file owners and members that complete
+containers and field lists. `shared_context_steps` counts that work, so a
+per-declaration rescan shows up as quadratic growth
+(`symbols_shared_context` holds the regression).
 
 ### Binding by name
 
@@ -1097,10 +1216,11 @@ Version history:
 |---|---|
 | 2.0 | first emitted record shape; no longer emitted |
 | 3.0 | kinds decided at extraction (Constructor, Property, TypeAlias, EnumVariant no longer collapse to Unknown); visibility for every kind with the C# compound levels; `Modifier::StaticStorage`; `identity.container_kind`; `declaration_text`; Rust `relations.implements`; `is_exported` no longer derived from a Public level. Emitted on records, file indexes, CLI envelopes and analyzer fingerprints |
-| 4.0 (current) | `identity.module_path` renamed `container_name`; `identity.keyword` added; `source.signature_text` filled; `provenance.created_at_epoch_ms` and `updated_at_epoch_ms` removed. Emitted on records, file indexes, CLI envelopes and analyzer fingerprints. Later extended, still as 4.0, with the [additive 4.x fields](#top-level-symbol-record) |
+| 4.0 | `identity.module_path` renamed `container_name`; `identity.keyword` added; `source.signature_text` filled; `provenance.created_at_epoch_ms` and `updated_at_epoch_ms` removed. Later extended, still as 4.0, with the [additive 4.x fields](#top-level-symbol-record); no longer emitted |
+| 4.1 (current) | the required `metrics.lines` key inside a present `metrics` facet. Emitted on records, file indexes, CLI envelopes and analyzer fingerprints |
 
-The additive 4.x fields did not follow the minor-bump rule (4.1 above):
-records still say 4.0. A consumer of 4.0 output only sees new keys, but
+The additive 4.x fields did not follow the minor-bump rule: records still
+said 4.0. `metrics.lines` does follow it, so 4.1 marks it. A consumer of 4.0 output only sees new keys, but
 `scope`, `identity.qualified_name`, `identity.is_namespace_rooted` and
 `visibility.is_test` are required when a record is read back, so a record
 written before them does not deserialize. Within this crate, persisted
@@ -1126,8 +1246,8 @@ A record before and after 4.0 (other fields unchanged):
                 "parse_pass": "docs" }
 ```
 
-Cache entries written under 3.0 are not migrated; their key no longer matches,
-so they are recomputed.
+Cache entries written under 3.0 or 4.0 are not migrated; their key no longer
+matches, so they are recomputed.
 
 The cache fingerprint also contains `EXTRACTOR_REVISION`, so a change to
 extraction rules invalidates cached records without a schema bump (see

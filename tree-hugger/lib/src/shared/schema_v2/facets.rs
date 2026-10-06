@@ -196,7 +196,11 @@ pub struct Attribute {
 }
 
 /// Modifier information kept language-agnostic.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// The derived `Ord` is the serialized order of a record's `modifiers`
+/// (variant declaration order, then `Custom` values lexically); reordering
+/// the variants changes output. See [`normalize_modifiers`].
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(tag = "type", content = "value")]
 pub enum Modifier {
     /// Member usable without an instance.
@@ -212,6 +216,13 @@ pub enum Modifier {
     Custom(String),
 }
 
+/// Puts a declaration's modifiers in their one serialized order and drops
+/// repeats, so extractors may push them in any order and more than once.
+pub(crate) fn normalize_modifiers(modifiers: &mut Vec<Modifier>) {
+    modifiers.sort();
+    modifiers.dedup();
+}
+
 /// Per-symbol measurements, present on a record only when requested. Inside
 /// the facet each metric is required: `None` (serialized `null`) means the
 /// metric is unsupported for this declaration, never "not computed".
@@ -225,6 +236,11 @@ pub struct MetricsFacet {
     /// Non-empty attached documentation.
     #[serde(deserialize_with = "nullable")]
     pub has_docs: Option<bool>,
+    /// Physical lines intersecting a Function, Method or Constructor's
+    /// `source.body_span`; `Some(0)` for an empty span, `None` for other kinds
+    /// and for a callable without a body.
+    #[serde(deserialize_with = "nullable")]
+    pub lines: Option<u32>,
 }
 
 /// A required value that may be `null`; unlike a plain `Option` field, an

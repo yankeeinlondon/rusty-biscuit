@@ -333,7 +333,7 @@ fn serialized_record_round_trips_the_new_fields() {
     input.is_namespace_rooted = true;
     input.is_async = true;
     let record = SymbolRecord::from(input);
-    assert_eq!(record.schema_version, SchemaVersion::V4_0);
+    assert_eq!(record.schema_version, SchemaVersion::V4_1);
 
     let first = serde_json::to_string(&record).expect("serialize");
     let parsed: SymbolRecord = serde_json::from_str(&first).expect("deserialize");
@@ -342,7 +342,7 @@ fn serialized_record_round_trips_the_new_fields() {
     let reparsed: SymbolRecord = serde_json::from_str(&second).expect("re-deserialize");
 
     for record in [&parsed, &reparsed] {
-        assert_eq!(record.schema_version, SchemaVersion::V4_0);
+        assert_eq!(record.schema_version, SchemaVersion::V4_1);
         assert_eq!(record.kind, SymbolKindV2::Constructor);
         assert_eq!(record.identity.container_kind, Some(SymbolKindV2::Class));
         assert_eq!(record.visibility.level, VisibilityLevel::ProtectedInternal);
@@ -707,23 +707,36 @@ fn new_record_fields_read_per_shape() {
     assert_eq!(unedited.identity.qualified_name, "PlainWidget.instance_method");
 
     // `metrics`: present values, and `null` metrics inside a present facet.
-    let both = read(&|value| value["metrics"] = serde_json::json!({ "parameters": 0, "has_docs": false }))
+    let both = read(&|value| value["metrics"] = serde_json::json!({ "parameters": 0, "has_docs": false, "lines": 3 }))
         .expect("measured facet");
     let metrics = both.metrics.expect("facet");
-    assert_eq!((metrics.parameters, metrics.has_docs), (Some(0), Some(false)));
-    let unsupported = read(&|value| value["metrics"] = serde_json::json!({ "parameters": null, "has_docs": null }))
-        .expect("unsupported metrics")
+    assert_eq!((metrics.parameters, metrics.has_docs, metrics.lines), (Some(0), Some(false), Some(3)));
+    let unsupported =
+        read(&|value| value["metrics"] = serde_json::json!({ "parameters": null, "has_docs": null, "lines": null }))
+            .expect("unsupported metrics")
+            .metrics
+            .expect("facet");
+    assert_eq!((unsupported.parameters, unsupported.has_docs, unsupported.lines), (None, None, None));
+    // An empty body span is zero lines, distinct from `null`.
+    let empty_body = read(&|value| value["metrics"] = serde_json::json!({ "parameters": 0, "has_docs": false, "lines": 0 }))
+        .expect("empty body")
         .metrics
         .expect("facet");
-    assert_eq!((unsupported.parameters, unsupported.has_docs), (None, None));
+    assert_eq!(empty_body.lines, Some(0));
 
-    let rejected: [(&str, Box<Edit>); 13] = [
+    let rejected: [(&str, Box<Edit>); 18] = [
         ("metrics null", Box::new(|value| value["metrics"] = serde_json::Value::Null)),
         ("metrics wrong type", Box::new(|value| value["metrics"] = serde_json::json!(123))),
         ("metrics empty", Box::new(|value| value["metrics"] = serde_json::json!({}))),
-        ("metric absent", Box::new(|value| value["metrics"] = serde_json::json!({ "parameters": 1 }))),
-        ("metric wrong type", Box::new(|value| value["metrics"] = serde_json::json!({ "parameters": "one", "has_docs": true }))),
-        ("metric unknown", Box::new(|value| value["metrics"] = serde_json::json!({ "parameters": 1, "has_docs": true, "lines": 3 }))),
+        ("metric absent", Box::new(|value| value["metrics"] = serde_json::json!({ "parameters": 1, "lines": 1 }))),
+        ("metric wrong type", Box::new(|value| value["metrics"] = serde_json::json!({ "parameters": "one", "has_docs": true, "lines": 1 }))),
+        ("metric unknown", Box::new(|value| value["metrics"] = serde_json::json!({ "parameters": 1, "has_docs": true, "lines": 3, "bogus": 3 }))),
+        // A schema 4.0 facet (no `lines`) is never read as a computed `null`.
+        ("lines absent", Box::new(|value| value["metrics"] = serde_json::json!({ "parameters": 1, "has_docs": true }))),
+        ("lines wrong type", Box::new(|value| value["metrics"] = serde_json::json!({ "parameters": 1, "has_docs": true, "lines": "3" }))),
+        ("lines fraction", Box::new(|value| value["metrics"] = serde_json::json!({ "parameters": 1, "has_docs": true, "lines": 3.5 }))),
+        ("lines negative", Box::new(|value| value["metrics"] = serde_json::json!({ "parameters": 1, "has_docs": true, "lines": -1 }))),
+        ("lines one wrong element", Box::new(|value| value["metrics"] = serde_json::json!({ "parameters": 1, "has_docs": true, "lines": [3, "x"] }))),
         ("scope absent", Box::new(|value| { value.as_object_mut().expect("record").remove("scope"); })),
         ("scope null", Box::new(|value| value["scope"] = serde_json::Value::Null)),
         ("scope unknown", Box::new(|value| value["scope"] = serde_json::json!(""))),
@@ -738,6 +751,14 @@ fn new_record_fields_read_per_shape() {
 
     // A repeated metric key is rejected, not last-wins.
     let text = serde_json::to_string(&control).expect("serialize");
-    let duplicated = text.replacen("{", "{\"metrics\":{\"parameters\":1,\"parameters\":2,\"has_docs\":true},", 1);
+    let duplicated =
+        text.replacen("{", "{\"metrics\":{\"parameters\":1,\"parameters\":2,\"has_docs\":true,\"lines\":1},", 1);
     assert!(serde_json::from_str::<SymbolRecord>(&duplicated).is_err(), "duplicate metric");
+    let duplicated_lines =
+        text.replacen("{", "{\"metrics\":{\"parameters\":1,\"has_docs\":true,\"lines\":1,\"lines\":2},", 1);
+    assert!(serde_json::from_str::<SymbolRecord>(&duplicated_lines).is_err(), "duplicate lines");
+    // Trailing content after a valid record is rejected.
+    let measured = text.replacen("{", "{\"metrics\":{\"parameters\":1,\"has_docs\":true,\"lines\":1},", 1);
+    assert!(serde_json::from_str::<SymbolRecord>(&measured).is_ok(), "control for the trailing cell");
+    assert!(serde_json::from_str::<SymbolRecord>(&format!("{measured} trailing")).is_err(), "trailing content");
 }

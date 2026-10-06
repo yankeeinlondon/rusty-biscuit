@@ -96,10 +96,10 @@ pub(crate) fn run_query(
         flags: query.requires(Capability::Flags),
         metrics: query.requires(Capability::Metrics),
     };
-    let symbols = tree_file.records_from(definitions, &selection, facts);
+    let symbols = tree_file.records_from(definitions, &selection, facts)?;
 
     let mut index = FileSymbolIndex {
-        schema_version: crate::shared::SchemaVersion::V4_0,
+        schema_version: crate::shared::SchemaVersion::V4_1,
         file: tree_file.file.clone(),
         language: tree_file.language,
         file_hash: tree_file.hash.clone(),

@@ -121,7 +121,7 @@ hug lint "src/**/*.rs" --lint-only
 ## JSON Output
 
 `functions`, `types`, `symbols` and `classes` print a versioned report:
-`report_schema_version` (`1`), `schema_version` (`4.0`, the records' schema),
+`report_schema_version` (`1`), `schema_version` (`4.1`, the records' schema),
 `root_dir`, `files` (one entry per file with a match: `file`, `language`,
 `completed_passes`, `completed_capabilities` and the selected `symbols`
 records; `classes` adds `members` keyed by container ID) and a trailing

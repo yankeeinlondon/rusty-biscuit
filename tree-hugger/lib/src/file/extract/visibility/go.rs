@@ -5,7 +5,7 @@ use super::*;
 /// Package. The package clause has no access level.
 pub(super) fn extract_go_visibility(
     declaration: Node<'_>,
-    ctx: &DeclarationContext<'_>,
+    ctx: &DeclarationContext<'_, '_>,
 ) -> Option<Visibility> {
     if declaration.kind() == "package_clause" {
         return None;

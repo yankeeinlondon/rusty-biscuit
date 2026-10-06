@@ -12,7 +12,7 @@ use super::*;
 ///   and are Unknown when the trait is declared elsewhere.
 pub(super) fn extract_rust_visibility(
     declaration: Node<'_>,
-    ctx: &DeclarationContext<'_>,
+    ctx: &DeclarationContext<'_, '_>,
 ) -> Option<Visibility> {
     let source = ctx.source;
     if let Some(level) = modifier_level(declaration, source) {
@@ -31,7 +31,7 @@ pub(super) fn extract_rust_visibility(
 
     if let Some(impl_item) = impl_of_member(declaration) {
         return match impl_trait_name(impl_item, source) {
-            Some(trait_name) => same_file_trait_level(ctx.root, &trait_name, source),
+            Some(trait_name) => same_file_trait_level(ctx, &trait_name),
             None => Some(Visibility::Private),
         };
     }
@@ -95,22 +95,32 @@ fn trait_of_member(declaration: Node<'_>) -> Option<Node<'_>> {
 }
 
 /// The level of the trait named `name` declared anywhere in this file; Unknown
-/// when there is none, or when same-named traits disagree.
-fn same_file_trait_level(root: Node<'_>, name: &str, source: &str) -> Option<Visibility> {
-    let mut levels = Vec::new();
-    collect_trait_levels(root, name, source, &mut levels);
+/// when there is none, or when same-named traits disagree. The file's traits
+/// are collected once per file into [`VisibilityMemo`].
+fn same_file_trait_level(ctx: &DeclarationContext<'_, '_>, name: &str) -> Option<Visibility> {
+    let traits = ctx.memo.rust_trait_levels.get_or_init(|| {
+        let mut traits = HashMap::new();
+        collect_trait_levels(ctx.root, ctx.source, &mut traits);
+        traits
+    });
+    let levels = traits.get(name)?;
+    count_shared_context_steps(levels.len());
     let first = *levels.first()?;
     levels.iter().all(|level| *level == first).then_some(first)
 }
 
-fn collect_trait_levels(node: Node<'_>, name: &str, source: &str, levels: &mut Vec<Visibility>) {
+fn collect_trait_levels<'src>(
+    node: Node<'_>,
+    source: &'src str,
+    traits: &mut HashMap<&'src str, Vec<Visibility>>,
+) {
+    count_shared_context_steps(1);
     if node.kind() == "trait_item"
-        && node
+        && let Some(name) = node
             .child_by_field_name("name")
             .and_then(|name_node| name_node.utf8_text(source.as_bytes()).ok())
-            == Some(name)
     {
-        levels.push(item_level(node, source));
+        traits.entry(name).or_default().push(item_level(node, source));
     }
     let mut cursor = node.walk();
     for child in node.named_children(&mut cursor) {
@@ -119,7 +129,7 @@ fn collect_trait_levels(node: Node<'_>, name: &str, source: &str, levels: &mut V
             child.kind(),
             "trait_item" | "mod_item" | "declaration_list" | "function_item" | "block"
         ) {
-            collect_trait_levels(child, name, source, levels);
+            collect_trait_levels(child, source, traits);
         }
     }
 }

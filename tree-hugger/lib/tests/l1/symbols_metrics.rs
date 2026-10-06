@@ -239,7 +239,7 @@ fn metrics_match_each_fixture_function() {
             assert_eq!(matching.len(), 1, "{label}: one function `{name}`");
             assert_eq!(
                 matching[0].metrics,
-                Some(MetricsFacet { parameters: *parameters, has_docs: *has_docs }),
+                Some(MetricsFacet { parameters: *parameters, has_docs: *has_docs, lines: None }),
                 "{label}: `{name}`"
             );
         }
@@ -324,7 +324,7 @@ fn metric_forms_outside_the_fixtures() {
             .unwrap_or_else(|| panic!("{source}: no `{name}`"));
         assert_eq!(
             record.metrics,
-            Some(MetricsFacet { parameters: *parameters, has_docs: *has_docs }),
+            Some(MetricsFacet { parameters: *parameters, has_docs: *has_docs, lines: None }),
             "{source}: `{name}`"
         );
     }

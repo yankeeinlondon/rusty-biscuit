@@ -203,7 +203,7 @@ metadata and standalone symbols agree.
 
 ### Schema records
 
-`SymbolRecord` (schema 4.0) carries the same facts:
+`SymbolRecord` (schema 4.1) carries the same facts:
 
 - `visibility.level` holds the level; `modifiers` holds `Static` for member
   `static` and `StaticStorage` for storage/linkage `static`.
@@ -223,8 +223,8 @@ metadata and standalone symbols agree.
   never from a Public level; converting a `SymbolInfo` always yields
   `is_exported: false`.
 - `visibility.is_test` and `visibility.is_deprecated` are computed only with
-  `Capability::Flags`, and the `metrics` facet (`parameters`, `has_docs`) only
-  with `Capability::Metrics`:
+  `Capability::Flags`, and the `metrics` facet (`parameters`, `has_docs`,
+  `lines`) only with `Capability::Metrics`:
 
   ```rust
   let query = SymbolQuery::new().capabilities([Capability::Flags, Capability::Metrics]);
@@ -243,7 +243,7 @@ visibility, both `static` flags, container kind and signature presence.
 The library provides `FileSummary` and `PackageSummary` structs for JSON output. These types are
 used by the CLI but are also available to library consumers.
 
-Schema output (version 4.0) is exposed via `SymbolRecord` and `FileSymbolIndex`, including `schema_version`
+Schema output (version 4.1) is exposed via `SymbolRecord` and `FileSymbolIndex`, including `schema_version`
 and `completed_passes` metadata for staged analysis. A `SymbolQuery` result adds
 `completed_capabilities`, `selected_kinds` and `name_prefix()`, and `narrowed` answers a
 narrower query from it without parsing again (it re-decides the file-wide test

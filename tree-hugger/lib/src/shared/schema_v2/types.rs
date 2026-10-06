@@ -22,10 +22,13 @@ impl SchemaVersion {
     /// Shape with record timestamps and the container named
     /// `identity.module_path`; no longer emitted.
     pub const V3_0: Self = Self { major: 3, minor: 0 };
-    /// Current shape, emitted on records, file indexes, CLI envelopes and
-    /// analyzer fingerprints: no timestamps, `identity.container_name`,
-    /// `identity.keyword` and a filled `source.signature_text`.
+    /// Shape with no timestamps, `identity.container_name`,
+    /// `identity.keyword` and a filled `source.signature_text`, before
+    /// `metrics.lines`; no longer emitted.
     pub const V4_0: Self = Self { major: 4, minor: 0 };
+    /// Current shape, emitted on records, file indexes, CLI envelopes and
+    /// analyzer fingerprints: 4.0 plus the required `metrics.lines` key.
+    pub const V4_1: Self = Self { major: 4, minor: 1 };
 }
 
 /// 1-based text location.

@@ -193,8 +193,8 @@ file's records, imports, exports and every analysis pass but diagnostics:
 
 | Input | Where it comes from | Changes when |
 |---|---|---|
-| schema version | `SchemaVersion::V4_0` | the record shape changes |
-| implementation version | crate version and `EXTRACTOR_REVISION` (`0.1.0+rev.17`) | extraction code changes |
+| schema version | `SchemaVersion::V4_1` | the record shape changes |
+| implementation version | crate version and `EXTRACTOR_REVISION` (`0.1.0+rev.19`) | extraction code changes |
 | grammar identity | the compiled grammar: name, declared version (if any), ABI, node-kind, field and parse-state counts | a grammar crate is upgraded |
 | grammar ID | the grammar variant (`typescript` or `tsx`, …) | the file's grammar variant differs |
 | query text | the effective `locals`, `imports` and `references` query text, with inherited vendored queries and overlays resolved | a `.scm` file the analysis compiles changes |
@@ -230,7 +230,7 @@ rebuilding the crate.
 
 ```json
 {
-  "schema_version": { "major": 4, "minor": 0 },
+  "schema_version": { "major": 4, "minor": 1 },
   "fingerprint": "<records fingerprint digest>",
   "file": "src/lib.rs",
   "language": "Rust",
@@ -395,7 +395,7 @@ decoder's message, which names the field and tells an absent field
 
 An entry is served only when its own `schema_version` **and the
 `schema_version` of every record in it** are exactly the current version
-(4.0). The records are returned as stored, inside an index that claims the
+(4.1). The records are returned as stored, inside an index that claims the
 current version, and the cache never translates between versions, so a
 different minor version is a miss just like a different major one: an older
 minor lacks fields the current version adds, and a newer one carries fields
@@ -403,9 +403,11 @@ this reader would drop. One record of another version is enough to make the
 whole entry a `CacheMiss::Mismatched("record schema version")`; the file is
 analyzed again and the entry rewritten, and the stale entry is never widened.
 
-For example, an entry written as 4.0 whose `instance_method` record was edited
-to `"schema_version": {"major": 3, "minor": 0}` (or `{"major": 4, "minor": 1}`)
-is recomputed; the output equals an uncached run.
+For example, an entry written as 4.1 whose `instance_method` record was edited
+to `"schema_version": {"major": 3, "minor": 0}` (or the previous
+`{"major": 4, "minor": 0}`) is recomputed; the output equals an uncached run.
+An entry written before 4.1 also lacks `metrics.lines`, which refuses it on
+its own (see [Record fields](#record-fields)).
 
 ### Entry fields
 
@@ -423,7 +425,7 @@ No entry-level field has a default:
 
 For a version object, "one bad element" and "every element bad" mean one or
 both of `major` and `minor` hold a non-number. A well-formed version other
-than 4.0 is a miss, as described above.
+than 4.1 is a miss, as described above.
 
 A kind list must also be in ascending order with no repeats, and a
 capability list closed under prerequisites. The records must agree with that
@@ -454,18 +456,20 @@ everything else refuses the entry.
 | `relations.implements` | absent or `[]` | empty list |
 | `kind_data.data.fields` (type data) | absent or `[]` | empty field list |
 | field data `visibility` | absent or `null` | Unknown access |
-| `metrics.parameters`, `metrics.has_docs` | `null` | the metric is unsupported for that declaration |
+| `metrics.parameters`, `metrics.has_docs`, `metrics.lines` | `null` | the metric is unsupported for that declaration |
+| `metrics.lines` | `0` | an empty body span (distinct from `null`) |
 
 `schema_version`, `kind`, `scope`, `identity.qualified_name`,
 `identity.is_namespace_rooted`, `visibility.level`, `visibility.is_test`,
 `visibility.is_deprecated`, `kind_data.kind_data_type` and field data
 `is_static` are required: absent, `null`, `""` (an unknown scope, an empty
 qualified name) or `{}` refuses the entry, and a record `schema_version`
-other than exactly 4.0 refuses it too. In an entry that lists `metrics`, the
+other than exactly 4.1 refuses it too. In an entry that lists `metrics`, the
 `metrics` facet is required in the same way (absent, `null`, `{}` or a member
-of the wrong type refuses it), and so is each of its two keys (absent
-refuses; only `null` is served). For all twenty-one record fields (twenty-two
-columns: `modifiers` is checked twice, on a static and on an async
+of the wrong type refuses it), and so is each of its three keys (absent
+refuses, so a 4.0 facet without `lines` is never read as `null`; only `null`
+is served). `lines` is a `u32`: `"3"`, `3.5`, `-1` and `4294967296` refuse
+the entry. For all twenty-two record fields (twenty-three columns: `modifiers` is checked twice, on a static and on an async
 declaration), a
 wrong type (`123`, or `"123"` for a number, or an array holding a wrong
 element), a duplicate key and invalid JSON refuse the entry. For example, an
@@ -477,7 +481,7 @@ A stored diagnostic's metadata omits `is_enabled_by_default` and
 as `false`.
 
 The CLI test `cache_robustness` in `cli/tests/symbols/` pins both tables, and
-the incompatible 3.0 and 4.1 versions on the entry and on a record, by editing
+the incompatible 3.0 and 4.0 versions on the entry and on a record, by editing
 an entry `hug --json-full symbols` wrote, one cell at a time.
 
 ## What is not cached

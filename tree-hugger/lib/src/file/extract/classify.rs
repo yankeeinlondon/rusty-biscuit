@@ -1,7 +1,11 @@
 //! Symbol-kind classification, container detection, node spans, and export
 //! detection helpers carved out of `tree_file.rs`.
 
+use std::cell::RefCell;
+use std::collections::HashMap;
+
 use super::*;
+use crate::analysis::counters::count_shared_context_steps;
 
 pub(crate) fn is_block_like_dead_code_container(kind: &str) -> bool {
     kind.contains("block")
@@ -482,11 +486,13 @@ pub(crate) struct ContainerRef<'tree> {
 ///
 /// Sibling-scoped containers (a C# file-scoped namespace, a Perl
 /// `package Foo;` statement) are found among the preceding siblings at each
-/// level, before that level's parent.
+/// level, before that level's parent, through `scopes` (pass one
+/// [`SiblingScopes`] for every declaration of a file).
 pub(crate) fn find_symbol_container<'tree>(
     declaration: Node<'tree>,
     language: ProgrammingLanguage,
     source: &str,
+    scopes: &SiblingScopes<'tree>,
 ) -> Option<ContainerRef<'tree>> {
     // A Perl package name is absolute: `package B` inside or after
     // `package A` is `B`, not a member of `A`.
@@ -507,7 +513,8 @@ pub(crate) fn find_symbol_container<'tree>(
     let mut child = declaration;
     while let Some(parent) = child.parent() {
         if !is_sibling_scoped_container(child, language)
-            && let Some(container) = preceding_sibling_container(child, language, source)
+            && let Some(container) =
+                preceding_sibling_container(child, parent, language, source, scopes)
         {
             return Some(container);
         }
@@ -720,30 +727,64 @@ fn is_sibling_scoped_container(node: Node<'_>, language: ProgrammingLanguage) ->
     }
 }
 
+/// The sibling-scoped container in force at each child of a parent, by
+/// node id, so the preceding siblings of a level are read once per file
+/// rather than once per declaration below that level.
+#[derive(Default)]
+pub(crate) struct SiblingScopes<'tree> {
+    /// Parent node id → child node id → the nearest sibling-scoped
+    /// container before that child.
+    by_parent: RefCell<HashMap<usize, HashMap<usize, Option<Node<'tree>>>>>,
+}
+
+impl<'tree> SiblingScopes<'tree> {
+    /// The nearest sibling-scoped container before `child` among the
+    /// children of `parent`.
+    fn before(
+        &self,
+        child: Node<'tree>,
+        parent: Node<'tree>,
+        language: ProgrammingLanguage,
+    ) -> Option<Node<'tree>> {
+        count_shared_context_steps(1);
+        let mut by_parent = self.by_parent.borrow_mut();
+        let in_force = by_parent.entry(parent.id()).or_insert_with(|| {
+            let mut in_force = HashMap::new();
+            let mut nearest = None;
+            let mut cursor = parent.walk();
+            for sibling in parent.children(&mut cursor) {
+                in_force.insert(sibling.id(), nearest);
+                if is_sibling_scoped_container(sibling, language) {
+                    nearest = Some(sibling);
+                }
+            }
+            count_shared_context_steps(in_force.len());
+            in_force
+        });
+        in_force.get(&child.id()).copied().flatten()
+    }
+}
+
 fn preceding_sibling_container<'tree>(
     node: Node<'tree>,
+    parent: Node<'tree>,
     language: ProgrammingLanguage,
     source: &str,
+    scopes: &SiblingScopes<'tree>,
 ) -> Option<ContainerRef<'tree>> {
     if !matches!(language, ProgrammingLanguage::CSharp | ProgrammingLanguage::Perl) {
         return None;
     }
 
-    let mut sibling = node.prev_sibling();
-    while let Some(candidate) = sibling {
-        if is_sibling_scoped_container(candidate, language) {
-            return match language {
-                ProgrammingLanguage::Perl => perl_package_container(candidate, source),
-                _ => named_container_ref(
-                    candidate,
-                    source,
-                    &[("file_scoped_namespace_declaration", SymbolKind::Namespace)],
-                ),
-            };
-        }
-        sibling = candidate.prev_sibling();
+    let candidate = scopes.before(node, parent, language)?;
+    match language {
+        ProgrammingLanguage::Perl => perl_package_container(candidate, source),
+        _ => named_container_ref(
+            candidate,
+            source,
+            &[("file_scoped_namespace_declaration", SymbolKind::Namespace)],
+        ),
     }
-    None
 }
 
 fn perl_package_container<'tree>(node: Node<'tree>, source: &str) -> Option<ContainerRef<'tree>> {
@@ -1116,7 +1157,7 @@ mod tests {
     }
 
     fn container_name(declaration: Node<'_>, language: ProgrammingLanguage, source: &str) -> Option<String> {
-        find_symbol_container(declaration, language, source).map(|container| container.name)
+        find_symbol_container(declaration, language, source, &SiblingScopes::default()).map(|container| container.name)
     }
 
     /// The Perl rules ahead of the Perl query: a `package Foo;` statement
@@ -1156,7 +1197,7 @@ mod tests {
         }
 
         let block_sub = node("function_definition", "sub block_package_sub");
-        let container = find_symbol_container(block_sub, perl, source).expect("container");
+        let container = find_symbol_container(block_sub, perl, source, &SiblingScopes::default()).expect("container");
         assert!(matches!(
             container.lookup,
             ContainerLookup::Node { fallback: SymbolKind::Module, .. }
@@ -1301,7 +1342,7 @@ mod tests {
                 .unwrap_or_else(|| panic!("no field {prefix:?}"))
         };
         let container = |declaration: Node<'_>| {
-            find_symbol_container(declaration, ProgrammingLanguage::Go, source).map(|container| {
+            find_symbol_container(declaration, ProgrammingLanguage::Go, source, &SiblingScopes::default()).map(|container| {
                 let ContainerLookup::Node { node, fallback } = container.lookup else {
                     panic!("Go type containers are nodes");
                 };
@@ -1348,7 +1389,7 @@ mod tests {
         let root = tree.root_node();
         let container = |kind: &str, prefix: &str| {
             let node = find_node(root, kind, prefix, source).unwrap_or_else(|| panic!("no {prefix:?}"));
-            find_symbol_container(node, ProgrammingLanguage::TypeScript, source).map(|container| {
+            find_symbol_container(node, ProgrammingLanguage::TypeScript, source, &SiblingScopes::default()).map(|container| {
                 let ContainerLookup::Node { fallback, .. } = container.lookup else {
                     panic!("namespace containers are nodes");
                 };

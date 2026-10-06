@@ -45,7 +45,7 @@ The two models are:
 | Model | API | Where kind, visibility and `static` live |
 |---|---|---|
 | `SymbolInfo` (v1) | `TreeFile::symbols()` | `kind`, `scope`, `visibility` (`None` = unknown), `is_static`, `is_static_storage`, `is_async`, `container_name`, `container_kind`, `qualified_name`, `is_namespace_rooted` |
-| `SymbolRecord` (schema 4.0) | `TreeFile::symbol_records()`, `symbol_index_v2()` | `kind`, `scope`, `visibility.level`, `modifiers` (`Static`, `StaticStorage`, `Async`), `identity.container_name`, `identity.container_kind`, `identity.qualified_name`, `identity.is_namespace_rooted`, `identity.keyword`, `source.declaration_text`, `source.signature_text`, `relations.implements` |
+| `SymbolRecord` (schema 4.1) | `TreeFile::symbol_records()`, `symbol_index_v2()` | `kind`, `scope`, `visibility.level`, `modifiers` (`Static`, `StaticStorage`, `Async`), `identity.container_name`, `identity.container_kind`, `identity.qualified_name`, `identity.is_namespace_rooted`, `identity.keyword`, `source.declaration_text`, `source.signature_text`, `relations.implements` |
 
 The adapter between them (`From<SymbolInfo> for SymbolRecord` and back)
 preserves kind, scope, visibility, both `static` flags, `async`, container
@@ -946,6 +946,7 @@ undocumented (see [Symbol Reports](./symbol-reports.md)).
 |---|---|---|
 | `parameters` | the declared parameters of a function, method or constructor: its own parameter list (every list of a curried Scala `def`), whatever binds each parameter (a name, a destructuring pattern or `_`), without a receiver (a Rust `self`, a Java `Type this` or a TypeScript `this: T`; a Go receiver is a separate list and never counted); a variadic parameter counts once; unnamed C, C++ and Go parameters count; `(void)` and `()` are `0` | the declaration is not a function, it has no parameter list (`def area: Int` in Scala), or the language is Perl, Bash or Zsh, whose parameters are not extracted |
 | `has_docs` | whether the declaration has [documentation](#documentation): a doc comment that is not empty once its delimiters are removed, or a nonempty Python docstring (a string constant; bytes and formatted literals do not count); ordinary comments do not count | the language is Lua, Perl, Bash or Zsh, which have no doc-comment detection |
+| `lines` | **planned:** the physical lines a function, method or constructor's `source.body_span` touches (`{}` on one line is `1`; an empty span is `0`). Today every computed facet carries the key as `null` | **today:** always. **Planned:** the declaration is not a function, method or constructor, or it has no body (an abstract or interface method, a prototype) |
 
 ```python
 class Receiver:

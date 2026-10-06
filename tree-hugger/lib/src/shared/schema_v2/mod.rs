@@ -419,7 +419,7 @@ impl From<SymbolInfo> for SymbolRecord {
         let modifiers = modifiers_from_symbol(&value);
 
         Self {
-            schema_version: SchemaVersion::V4_0,
+            schema_version: SchemaVersion::V4_1,
             id: symbol_id_from_stable_key(&stable_key),
             language: value.language,
             kind,
@@ -613,6 +613,74 @@ impl TryFrom<SymbolRecord> for SymbolInfo {
 mod tests {
     use super::*;
 
+    /// Any push order and repeats normalize to Static, StaticStorage, Async,
+    /// Const, Readonly, Unsafe, Mut, then distinct Custom values lexically,
+    /// and serialize in that order.
+    #[test]
+    fn modifiers_normalize_to_one_order_without_repeats() {
+        let custom = |value: &str| Modifier::Custom(value.to_string());
+        let mut modifiers = vec![
+            custom("virtual"),
+            Modifier::Mut,
+            custom("abstract"),
+            Modifier::Unsafe,
+            Modifier::Async,
+            custom("virtual"),
+            Modifier::Readonly,
+            Modifier::Static,
+            Modifier::Const,
+            Modifier::StaticStorage,
+            custom("final"),
+            Modifier::Async,
+            custom("override"),
+        ];
+        normalize_modifiers(&mut modifiers);
+        let expected = vec![
+            Modifier::Static,
+            Modifier::StaticStorage,
+            Modifier::Async,
+            Modifier::Const,
+            Modifier::Readonly,
+            Modifier::Unsafe,
+            Modifier::Mut,
+            custom("abstract"),
+            custom("final"),
+            custom("override"),
+            custom("virtual"),
+        ];
+        assert_eq!(modifiers, expected);
+        assert_eq!(
+            serde_json::to_string(&modifiers).expect("serialize"),
+            concat!(
+                r#"[{"type":"Static"},{"type":"StaticStorage"},{"type":"Async"},{"type":"Const"},"#,
+                r#"{"type":"Readonly"},{"type":"Unsafe"},{"type":"Mut"},"#,
+                r#"{"type":"Custom","value":"abstract"},{"type":"Custom","value":"final"},"#,
+                r#"{"type":"Custom","value":"override"},{"type":"Custom","value":"virtual"}]"#
+            )
+        );
+
+        let mut empty = Vec::new();
+        normalize_modifiers(&mut empty);
+        assert!(empty.is_empty());
+    }
+
+    /// Symbol IDs digest only the stable key (language, file, kind, qualified
+    /// name, ordinal), never the schema version or extractor revision, so a
+    /// version bump keeps every ID. Pinned literally across the 4.0 → 4.1 and
+    /// revision 17 → 18 bumps.
+    #[test]
+    fn symbol_ids_survive_schema_and_revision_bumps() {
+        let key = stable_symbol_key(
+            ProgrammingLanguage::Rust,
+            Path::new("src/lib.rs"),
+            SymbolKindV2::Function,
+            "hello",
+            0,
+        );
+        assert_eq!(key, "rust::src/lib.rs::Function::hello::0");
+        assert_eq!(symbol_id_from_stable_key(&key).0, "7d883dc4d6d958aff41b8871016c3cdea132b3b661b1a5da1a1923b30c86a7a4");
+    }
+
     #[test]
     fn stable_key_and_id_are_deterministic() {
         let key = stable_symbol_key(
@@ -696,7 +764,7 @@ mod tests {
         let record: SymbolRecord = symbol.into();
         let json = serde_json::to_string(&record).expect("serialize");
         let parsed: SymbolRecord = serde_json::from_str(&json).expect("deserialize");
-        assert_eq!(parsed.schema_version, SchemaVersion::V4_0);
+        assert_eq!(parsed.schema_version, SchemaVersion::V4_1);
         assert_eq!(parsed.identity.name, "hello");
     }
 }

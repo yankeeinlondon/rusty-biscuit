@@ -19,7 +19,7 @@ fn create_temp_file(dir: &TempDir, name: &str, content: &str) -> PathBuf {
 #[test]
 fn test_pass_fingerprint_digest_is_stable() {
     let fp = PassFingerprint {
-        schema_version: SchemaVersion::V4_0,
+        schema_version: SchemaVersion::V4_1,
         tree_hugger_version: "0.1.0".to_string(),
         grammar_version: "0.24.0".to_string(),
         grammar_id: "rust".to_string(),
@@ -35,7 +35,7 @@ fn test_pass_fingerprint_digest_is_stable() {
 #[test]
 fn test_pass_fingerprint_changes_with_source() {
     let mut fp = PassFingerprint {
-        schema_version: SchemaVersion::V4_0,
+        schema_version: SchemaVersion::V4_1,
         tree_hugger_version: "0.1.0".to_string(),
         grammar_version: "0.24.0".to_string(),
         grammar_id: "rust".to_string(),
@@ -53,7 +53,7 @@ fn test_pass_fingerprint_changes_with_source() {
 #[test]
 fn test_pass_fingerprint_changes_with_tool_version() {
     let mut fp = PassFingerprint {
-        schema_version: SchemaVersion::V4_0,
+        schema_version: SchemaVersion::V4_1,
         tree_hugger_version: "0.1.0".to_string(),
         grammar_version: "0.24.0".to_string(),
         grammar_id: "rust".to_string(),
@@ -103,7 +103,7 @@ fn test_in_process_cache_symbol_index_hit_miss() {
     cache.put_symbol_index(
         key.to_string(),
         FileSymbolIndex {
-            schema_version: SchemaVersion::V4_0,
+            schema_version: SchemaVersion::V4_1,
             file: PathBuf::from("test.rs"),
             language: ProgrammingLanguage::Rust,
             file_hash: "abc".to_string(),
@@ -245,7 +245,7 @@ fn test_persistent_cache_roundtrip() {
             language: ProgrammingLanguage::Rust,
             file_hash: "abc".to_string(),
             analyzer_fingerprint: AnalyzerFingerprint {
-                schema_version: SchemaVersion::V4_0,
+                schema_version: SchemaVersion::V4_1,
                 tree_hugger_version: "0.1.0".to_string(),
                 grammar_fingerprint: "g1".to_string(),
                 query_fingerprint: "q1".to_string(),
@@ -277,7 +277,7 @@ fn test_persistent_cache_invalidates_entry() {
             language: ProgrammingLanguage::Rust,
             file_hash: "abc".to_string(),
             analyzer_fingerprint: AnalyzerFingerprint {
-                schema_version: SchemaVersion::V4_0,
+                schema_version: SchemaVersion::V4_1,
                 tree_hugger_version: "0.1.0".to_string(),
                 grammar_fingerprint: "g1".to_string(),
                 query_fingerprint: "q1".to_string(),
@@ -307,7 +307,7 @@ fn test_persistent_cache_invalidate_all() {
             language: ProgrammingLanguage::Rust,
             file_hash: "abc".to_string(),
             analyzer_fingerprint: AnalyzerFingerprint {
-                schema_version: SchemaVersion::V4_0,
+                schema_version: SchemaVersion::V4_1,
                 tree_hugger_version: "0.1.0".to_string(),
                 grammar_fingerprint: "g1".to_string(),
                 query_fingerprint: "q1".to_string(),
@@ -513,7 +513,7 @@ fn test_cache_invalidates_on_source_edit() {
 #[test]
 fn test_cache_unit_enum_variants() {
     let fp = PassFingerprint {
-        schema_version: SchemaVersion::V4_0,
+        schema_version: SchemaVersion::V4_1,
         tree_hugger_version: "0.1.0".to_string(),
         grammar_version: "0.24.0".to_string(),
         grammar_id: "rust".to_string(),

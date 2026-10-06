@@ -31,7 +31,7 @@ pub(crate) fn extract_swift_visibility(node: Node<'_>, source: &str) -> Option<V
 /// - everything else is Internal.
 pub(super) fn extract_swift_declaration_visibility(
     declaration: Node<'_>,
-    ctx: &DeclarationContext<'_>,
+    ctx: &DeclarationContext<'_, '_>,
 ) -> Option<Visibility> {
     if let Some(level) = extract_swift_visibility(declaration, ctx.source) {
         return Some(level);

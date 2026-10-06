@@ -17,7 +17,7 @@ pub(crate) fn extract_php_visibility(node: Node<'_>, source: &str) -> Option<Vis
 /// global). Namespaces have no access level.
 pub(super) fn extract_php_declaration_visibility(
     declaration: Node<'_>,
-    ctx: &DeclarationContext<'_>,
+    ctx: &DeclarationContext<'_, '_>,
 ) -> Option<Visibility> {
     if matches!(
         declaration.kind(),

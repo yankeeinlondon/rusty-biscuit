@@ -13,7 +13,8 @@ use crate::shared::MetricsFacet;
 /// ([`declared_parameter_count`]). `None` for kinds that are not functions
 /// or where no list is found ([`declared_parameters`]). `has_docs` is whether `doc` (from
 /// [`extract_doc_comment`]) is present; `None` in Lua, Perl, Bash and Zsh,
-/// which have no doc-comment detection.
+/// which have no doc-comment detection. `lines` is not computed yet and is
+/// always `None`.
 pub(crate) fn symbol_metrics(
     kind: SymbolKind,
     declaration: Node<'_>,
@@ -44,5 +45,5 @@ pub(crate) fn symbol_metrics(
         | ProgrammingLanguage::Zsh => None,
         _ => Some(doc.is_some()),
     };
-    MetricsFacet { parameters, has_docs }
+    MetricsFacet { parameters, has_docs, lines: None }
 }

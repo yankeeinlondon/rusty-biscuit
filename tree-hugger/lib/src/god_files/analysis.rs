@@ -9,6 +9,7 @@ use biscuit_file::FileReference;
 use rayon::prelude::*;
 use tree_sitter::Node;
 
+use crate::analysis::counters::count_shared_context_steps;
 use crate::file::source_file::file_identity;
 use crate::file::tree_file::TreeFile;
 use crate::scanner::collect_files;
@@ -562,14 +563,16 @@ fn compute_symbol_blocks(
         })
         .collect();
 
-    // Attach container call-outs to block entries that are structural containers.
-    attach_many_members(source, records, &coverage, &mut blocks);
-
     // Rank descending by SLOC.
     blocks.sort_by(|a, b| b.sloc.cmp(&a.sloc).then_with(|| a.name.cmp(&b.name)));
 
     let truncated = blocks.len().saturating_sub(MAX_BLOCKS);
     blocks.truncate(MAX_BLOCKS);
+
+    // Attach container call-outs to the retained blocks that are structural
+    // containers. A call-out never changes the ranking, and each block reads
+    // every record, so a dropped block is not worth that read.
+    attach_many_members(source, records, &coverage, &mut blocks);
 
     BlocksResult { blocks, truncated }
 }
@@ -649,6 +652,18 @@ fn attach_many_members(
         };
 
         let (container_start, container_end, _, _) = container_span;
+        // The containers strictly inside this one: the only ones that can
+        // own a member before it does.
+        let nested: Vec<(usize, usize)> = container_spans
+            .iter()
+            .map(|(_, (c_start, c_end, _, _))| (*c_start, *c_end))
+            .filter(|&(c_start, c_end)| {
+                c_start >= container_start
+                    && c_end <= container_end
+                    && (c_start > container_start || c_end < container_end)
+            })
+            .collect();
+        count_shared_context_steps(records.len() + container_spans.len());
 
         let members: Vec<&SymbolRecord> = records
             .iter()
@@ -665,13 +680,9 @@ fn attach_many_members(
                 // Direct ownership only: reject members enclosed by a tighter
                 // container nested within this one (e.g. methods of a nested
                 // class), so an outer container is not inflated by descendants.
-                !container_spans.iter().any(|(_, (c_start, c_end, _, _))| {
-                    let (c_start, c_end) = (*c_start, *c_end);
-                    let strictly_inside = c_start >= container_start
-                        && c_end <= container_end
-                        && (c_start > container_start || c_end < container_end);
-                    strictly_inside && m_start > c_start && m_end <= c_end
-                })
+                !nested
+                    .iter()
+                    .any(|&(c_start, c_end)| m_start > c_start && m_end <= c_end)
             })
             .collect();
 
@@ -1585,6 +1596,44 @@ class BigClass:
         assert_eq!(structural_members[0].identity.name, "method_a");
     }
 
+    /// Container call-outs are computed for the retained blocks only, so the
+    /// records read grow with the file, not with the file times its
+    /// containers; the call-outs of the retained blocks are unchanged.
+    #[test]
+    fn many_member_callouts_read_records_for_retained_blocks_only() {
+        fn class_source(classes: usize) -> String {
+            let mut source = String::new();
+            for class in 0..classes {
+                source.push_str(&format!("class Big{class}:\n"));
+                for method in 0..12 {
+                    source.push_str(&format!("    def m{method}(self):\n        return {method}\n"));
+                }
+            }
+            source
+        }
+        let steps_for = |classes: usize| {
+            let dir = TempDir::new().unwrap();
+            let path = temp_file(&dir, "many.py", &class_source(classes));
+            let tree_file = TreeFile::new(&path).unwrap();
+            let records = tree_file.symbol_records().unwrap();
+            let comment_ranges = tree_file.comment_ranges().unwrap_or_default();
+            let before = crate::work_counters();
+            let result = compute_symbol_blocks(tree_file.source(), &records, &comment_ranges);
+            let steps = crate::work_counters().since(before).shared_context_steps;
+            assert_eq!(result.blocks.len(), MAX_BLOCKS);
+            assert!(
+                result.blocks.iter().all(|block| block.many_members.as_ref().map(|c| c.member_count) == Some(12)),
+                "every retained class keeps its call-out"
+            );
+            steps
+        };
+
+        let small = steps_for(20);
+        let large = steps_for(40);
+        assert!(small > 0, "the call-outs read the records");
+        assert!(large <= 2 * small + 16, "{small} steps for 20 classes, {large} for 40");
+    }
+
     /// Find the callout attached to the first block matching `name`.
     fn callout_for<'a>(blocks: &'a [SymbolBlock], name: &str) -> Option<&'a ContainerCallout> {
         blocks
@@ -2274,7 +2323,7 @@ x = 1
             SourceFacet, SymbolId, SymbolKindData, TextPoint, TextSpan, TypeFacet, VisibilityFacet,
         };
         SymbolRecord {
-            schema_version: SchemaVersion::V4_0,
+            schema_version: SchemaVersion::V4_1,
             id: SymbolId(String::new()),
             language: ProgrammingLanguage::Rust,
             kind: SymbolKindV2::Function,

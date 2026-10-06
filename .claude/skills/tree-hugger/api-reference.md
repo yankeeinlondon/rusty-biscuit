@@ -192,8 +192,12 @@ recursion field, so nothing to map).
 ### Work Counters
 
 `work_counters()` returns process-wide atomic counts (`diagnostics_runs`,
-`parser_constructions`, `definition_captures`); diff two snapshots with
-`WorkCounters::since`. Tests rely on nextest's process-per-test isolation.
+`parser_constructions`, `definition_captures`, `shared_context_steps`); diff
+two snapshots with `WorkCounters::since`. `shared_context_steps` counts the
+derivation of, and lookups in, context a file's declarations share (file
+namespace index, sibling scopes, inner `cfg(test)`, C++ access sections,
+same-file traits/`static` prototypes/owners); it must grow linearly with
+declarations (`symbols_shared_context`). Tests rely on nextest's process-per-test isolation.
 
 #### Diagnostics
 
@@ -277,8 +281,9 @@ The v1 ↔ v2 adapter (`From<SymbolInfo> for SymbolRecord`,
 `qualified_name` and `is_namespace_rooted` (an empty v1 `qualified_name`
 converts as the bare name). Records also carry `visibility.is_test` and
 `is_deprecated` (`Capability::Flags`; `false` = not computed without it) and
-an optional `metrics` facet (`MetricsFacet { parameters, has_docs }`, each
-`Option` = unsupported; absent facet = not requested; `Capability::Metrics`).
+an optional `metrics` facet (`MetricsFacet { parameters, has_docs, lines }`,
+each `Option` = unsupported, every key required (schema 4.1 added `lines`;
+it is `None` until the body-line metric lands); absent facet = not requested; `Capability::Metrics`).
 None of them exists on `SymbolInfo`, so the adapter does not carry them. The
 cache refuses a stored facet or a `true` flag whose capability the entry does
 not list, and a record without the facet under `metrics`. Every kind/visibility conversion is a
@@ -286,7 +291,7 @@ wildcard-free `match`: adding a variant on one side is a compile error until
 the other side handles it. A converted record is never `is_exported` (export
 comes from declaration syntax, set by `symbol_records()` and the bind pass),
 and a function-like kind always converts back with `Some(signature)`.
-Records, file indexes and analyzer fingerprints carry `SchemaVersion::V4_0`:
+Records, file indexes and analyzer fingerprints carry `SchemaVersion::V4_1`:
 no timestamps in `provenance`, the container in `identity.container_name`
 (formerly `module_path`).
 
@@ -294,7 +299,11 @@ Extraction fills the record-only facets in `symbol_records()`:
 `source.declaration_text` (declaration start up to its body, trailing
 whitespace trimmed; keeps `pub(...)`, setter-only modifiers, annotations),
 `source.signature_text` and `identity.keyword` (both from
-`file/extract/header/`, see below) and,
+`file/extract/header/`, see below), `type_info.generic_params` and
+`type_info.constraints` (the declaration's own written parameter list,
+`extract/generics.rs`; a list whose positions overflow `u16` is
+`TreeHuggerError::TooManyGenericParameters`; see
+`tree-hugger/docs/symbol-schema-design.md#generic-parameters`) and,
 for members of a Rust `impl Trait for Type`, one `relations.implements` entry
 named after the trait's last path segment (`id` only when exactly one trait of
 that name is declared in the file). A Rust `impl` member's container is the
@@ -561,7 +570,7 @@ pub enum TreeHuggerError {
 
 The declaration commands (`functions`, `types`, `symbols`, `classes`) do not
 use these types: their `--json` report is a CLI-local envelope
-(`cli/src/report.rs`) of schema 4.0 `SymbolRecord`s, described in
+(`cli/src/report.rs`) of schema 4.1 `SymbolRecord`s, described in
 `tree-hugger/docs/symbol-reports.md`. `PackageSummary` remains the shape of
 `hug imports --json` and `hug lint --json` and of library callers:
 

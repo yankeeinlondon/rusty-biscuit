@@ -710,7 +710,7 @@ orders the containers, and each container's method sections (and its JSON
 ```json
 {
   "report_schema_version": 1,
-  "schema_version": { "major": 4, "minor": 0 },
+  "schema_version": { "major": 4, "minor": 1 },
   "root_dir": "/private/tmp/sample",
   "files": [
     {
@@ -720,7 +720,7 @@ orders the containers, and each container's method sections (and its JSON
       "completed_capabilities": ["declarations", "flags"],
       "symbols": [
         {
-          "schema_version": { "major": 4, "minor": 0 },
+          "schema_version": { "major": 4, "minor": 1 },
           "id": "65e1e0ed…",
           "language": "Rust",
           "kind": "Method",
@@ -761,7 +761,7 @@ cache entry stay the same.)
 | Field | Meaning |
 |---|---|
 | `report_schema_version` | version of this envelope (`1`) |
-| `schema_version` | version of the records inside (`4.0`); the record format is described in [Symbol Schema Design](./symbol-schema-design.md) |
+| `schema_version` | version of the records inside (`4.1`); the record format is described in [Symbol Schema Design](./symbol-schema-design.md) |
 | `root_dir` | the scan root; every path in the report is relative to it |
 | `files` | one entry per file with at least one listed record, in path order |
 | `files[].completed_passes`, `completed_capabilities` | the analysis that was actually done for this file |
@@ -832,7 +832,7 @@ One line per selected declaration, each a complete envelope, so a saved or
 piped line is usable without the rest of the output:
 
 ```json
-{"report_schema_version":1,"schema_version":{"major":4,"minor":0},"file":"src/shapes.rs","language":"Rust","completed_passes":["Parse"],"completed_capabilities":["declarations","flags"],"record":{…}}
+{"report_schema_version":1,"schema_version":{"major":4,"minor":1},"file":"src/shapes.rs","language":"Rust","completed_passes":["Parse"],"completed_capabilities":["declarations","flags"],"record":{…}}
 ```
 
 - `report_schema_version` and `schema_version` mean what they mean in the
@@ -898,7 +898,9 @@ reported three ways:
 1. on stderr, as `error: <message>`, in the order files are analyzed (see
    [Streaming](#streaming));
 2. as one entry in `errors`, with a portable `file`, the error `kind` (`io`,
-   `parse_failed`, `unsupported_language`, …) and the `message`;
+   `parse_failed`, `unsupported_language`, `too_many_generic_parameters`
+   for a selected declaration whose generic parameter positions do not fit
+   in `u16`, …) and the `message`;
 3. through the exit status, which becomes `1`.
 
 ```json

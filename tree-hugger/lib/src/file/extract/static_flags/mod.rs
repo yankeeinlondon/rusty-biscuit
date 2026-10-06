@@ -30,7 +30,7 @@ pub(crate) use swift::extract_swift_is_static;
 ///
 /// Only member kinds (functions, methods, constructors, fields, properties,
 /// constants and variables) can be static; parameters and locals never are.
-pub(crate) fn extract_is_static(declaration: Node<'_>, ctx: &DeclarationContext<'_>) -> bool {
+pub(crate) fn extract_is_static(declaration: Node<'_>, ctx: &DeclarationContext<'_, '_>) -> bool {
     if ctx.is_local()
         || !matches!(
             ctx.kind,
@@ -78,7 +78,7 @@ pub(crate) fn extract_is_static(declaration: Node<'_>, ctx: &DeclarationContext<
 /// Whether `declaration` uses `static` for storage duration or linkage.
 pub(crate) fn extract_is_static_storage(
     declaration: Node<'_>,
-    ctx: &DeclarationContext<'_>,
+    ctx: &DeclarationContext<'_, '_>,
 ) -> bool {
     if ctx.kind == SymbolKind::Parameter {
         return false;

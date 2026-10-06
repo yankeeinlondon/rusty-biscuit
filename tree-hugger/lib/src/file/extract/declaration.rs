@@ -7,7 +7,7 @@ use crate::shared::SymbolScope;
 
 /// What visibility and static readers know about a declaration besides its node.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct DeclarationContext<'tree> {
+pub(crate) struct DeclarationContext<'ctx, 'tree> {
     pub language: ProgrammingLanguage,
     pub source: &'tree str,
     /// The captured name. One declaration can introduce several names
@@ -26,9 +26,12 @@ pub(crate) struct DeclarationContext<'tree> {
     /// The declaration's [`symbol_scope`]: `Local` (a parameter, or inside a
     /// function body) is where member and module access do not apply.
     pub scope: SymbolScope,
+    /// File facts shared by every declaration of the file, so a reader never
+    /// re-scans the file per declaration.
+    pub memo: &'ctx VisibilityMemo<'tree>,
 }
 
-impl DeclarationContext<'_> {
+impl DeclarationContext<'_, '_> {
     pub(crate) fn is_local(&self) -> bool {
         self.scope == SymbolScope::Local
     }

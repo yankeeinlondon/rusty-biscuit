@@ -165,7 +165,8 @@ fn warm_entry_from_the_previous_extractor_is_not_served_after_the_upgrade() {
     for version in [
         serde_json::json!({ "major": 2, "minor": 0 }),
         serde_json::json!({ "major": 3, "minor": 0 }),
-        serde_json::json!({ "major": 4, "minor": 1 }),
+        serde_json::json!({ "major": 4, "minor": 0 }),
+        serde_json::json!({ "major": 5, "minor": 0 }),
     ] {
         let mut incompatible = stale.clone();
         for record in incompatible["records"].as_array_mut().expect("entry records") {
@@ -1011,6 +1012,48 @@ fn entry_from_extractor_revision_sixteen_is_not_served_after_the_repairs() {
     });
 }
 
+const UPGRADE_GENERICS_RS: &str = "pub struct UpgradeBag<T: Clone = String> {\n    value: T,\n}\n";
+
+/// `UpgradeBag`'s generic parameters as `[name, constraints, default,
+/// position]`, in a `hug --json-full` report.
+fn upgrade_generic_params(output: &Value) -> Value {
+    let params = go_record(output, "UpgradeBag")["type_info"]["generic_params"].clone();
+    Value::from(
+        params
+            .as_array()
+            .map(|params| {
+                params
+                    .iter()
+                    .map(|param| serde_json::json!([param["name"], param["constraints"], param["default"], param["position"]]))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default(),
+    )
+}
+
+/// Revision 18 left `type_info.generic_params` empty; revision 19 lists each
+/// written parameter with its bounds, default and position.
+#[test]
+fn entry_from_extractor_revision_eighteen_is_not_served_after_the_repairs() {
+    assert_stale_revision_is_not_served(&StaleRevision {
+        revision: "18",
+        key: OldKey::Computed,
+        file: "bag.rs",
+        language: "rust",
+        source: UPGRADE_GENERICS_RS.to_string(),
+        sentinel: "value",
+        probe: upgrade_generic_params,
+        repaired: serde_json::json!([["T", ["Clone"], "String", 0]]),
+        stale: serde_json::json!([]),
+        revert: |snapshot| {
+            record_named(snapshot, "UpgradeBag")["type_info"]
+                .as_object_mut()
+                .expect("type_info object")
+                .remove("generic_params");
+        },
+    });
+}
+
 const UPGRADE_PROBE_PY: &str = "\n\nclass UpgradeProbe:\n    def __init__(self, seed):\n        pass\n";
 
 /// The stable key of `UpgradeProbe.__init__` in `deferred.py` when it reports
@@ -1064,4 +1107,79 @@ fn entry_from_extractor_revision_thirteen_is_not_served_after_the_repairs() {
             *snapshot = serde_json::from_str(&text).expect("snapshot JSON");
         },
     });
+}
+
+/// Revision 17 wrote schema 4.0 records whose `metrics` had no `lines` key;
+/// revision 18 writes schema 4.1 with the key. Unlike the repairs above, the
+/// old payload is not readable even under the current key (its versions and
+/// metrics shape are rejected), so it is recomputed both there and under its
+/// own key, and the rewritten entry holds 4.1 records with `lines`.
+#[test]
+fn entry_from_extractor_revision_seventeen_is_not_served_after_the_schema_bump() {
+    const PROBE: &str = "python.py";
+    let args = ["--json-full", "symbols", PROBE];
+    let scratch = Scratch::new(&[(PROBE, PYTHON_FIXTURE)]);
+
+    let discovery = TempDir::new().expect("discovery temp");
+    let fresh = json_of(&stdout_of(scratch.hug_with_temp(discovery.path(), &args), &args));
+    let discovered_entry = only_entry(discovery.path());
+    let current = read_json(&discovered_entry);
+    let file_path = current["file"].as_str().expect("entry file").to_string();
+    let relative_project = discovered_entry
+        .parent()
+        .and_then(Path::parent)
+        .and_then(|dir| dir.strip_prefix(discovery.path()).ok())
+        .expect("entry under <temp>/tree-hugger/cache/<project_id>/<shard>/")
+        .to_path_buf();
+    let current_key = discovered_entry
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .expect("entry key")
+        .to_string();
+    assert_eq!(computed_revision_key(EXTRACTOR_REVISION, &file_path), current_key, "computed key formula");
+    let old_key = computed_revision_key("17", &file_path);
+    assert_ne!(old_key, current_key, "revision 17 has its own key");
+
+    let schema_4_0 = serde_json::json!({ "major": 4, "minor": 0 });
+    let mut stale = current.clone();
+    stale["schema_version"] = schema_4_0.clone();
+    for record in stale["records"].as_array_mut().expect("entry records") {
+        record["schema_version"] = schema_4_0.clone();
+        record["metrics"]
+            .as_object_mut()
+            .expect("a complete index stores metrics on every record")
+            .remove("lines");
+    }
+    rename_record(&mut stale, "module_function", STALE_NAME);
+
+    // Under the current key: rejected, recomputed.
+    let control = TempDir::new().expect("control temp");
+    write_json(&entry_path(&control.path().join(&relative_project), &current_key), &stale);
+    let recomputed = json_of(&stdout_of(scratch.hug_with_temp(control.path(), &args), &args));
+    assert_eq!(recomputed, fresh, "a revision 17 payload under the current key is recomputed");
+
+    // Under its own key: never read; run 1 writes the current entry.
+    let project_dir = scratch.temp.path().join(&relative_project);
+    write_json(&entry_path(&project_dir, &old_key), &stale);
+    let run1 = json_of(&scratch.stdout(&args));
+    assert!(!names(&run1).iter().any(|name| name == STALE_NAME), "run 1 served the revision 17 entry");
+    assert_eq!(run1, fresh, "run 1 matches an uncached run");
+    let new_entry = entry_path(&project_dir, &current_key);
+    let written = read_json(&new_entry);
+    let schema_4_1 = serde_json::json!({ "major": 4, "minor": 1 });
+    assert_eq!(written["schema_version"], schema_4_1, "the rewritten entry is schema 4.1");
+    assert!(
+        written["records"].as_array().expect("records").iter().all(|record| {
+            record["schema_version"] == schema_4_1
+                && record["metrics"].as_object().is_some_and(|metrics| metrics.contains_key("lines"))
+        }),
+        "every rewritten record is schema 4.1 with a `lines` key"
+    );
+
+    // Run 2 hits the rewritten entry.
+    let mut renamed = written.clone();
+    rename_record(&mut renamed, "module_function", RENAMED_NAME);
+    write_json(&new_entry, &renamed);
+    let run2 = json_of(&scratch.stdout(&args));
+    assert!(names(&run2).iter().any(|name| name == RENAMED_NAME), "run 2 reads the rewritten entry");
 }

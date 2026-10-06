@@ -7,7 +7,7 @@
 //! success.
 //!
 //! ```json
-//! {"report_schema_version":1,"schema_version":{"major":4,"minor":0},
+//! {"report_schema_version":1,"schema_version":{"major":4,"minor":1},
 //!  "root_dir":"/repo","files":[{"file":"src/lib.rs", ...}],"errors":[]}
 //! ```
 
@@ -116,6 +116,7 @@ pub(crate) fn error_kind(error: &TreeHuggerError) -> &'static str {
         TreeHuggerError::QueryCachePoisoned => "query_cache_poisoned",
         TreeHuggerError::GitRootNotFound { .. } => "git_root_not_found",
         TreeHuggerError::NoSourceFiles { .. } => "no_source_files",
+        TreeHuggerError::TooManyGenericParameters { .. } => "too_many_generic_parameters",
         TreeHuggerError::Ignore(_) => "ignore",
     }
 }
@@ -177,7 +178,7 @@ impl<W: Write> JsonReport<W> {
     /// Writes the envelope up to the opening of the entries array.
     pub(crate) fn begin(mut out: W, root_dir: &str, entries: Entries) -> io::Result<Self> {
         write!(out, "{{\"report_schema_version\":{REPORT_SCHEMA_VERSION},\"schema_version\":")?;
-        serde_json::to_writer(&mut out, &SchemaVersion::V4_0)?;
+        serde_json::to_writer(&mut out, &SchemaVersion::V4_1)?;
         out.write_all(b",\"root_dir\":")?;
         serde_json::to_writer(&mut out, root_dir)?;
         write!(out, ",\"{}\":[", entries.key())?;

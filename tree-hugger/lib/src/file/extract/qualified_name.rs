@@ -3,9 +3,12 @@
 //! alone. A file or naming-context prefix is a query input applied later and
 //! never part of the name stored here (or of the ID derived from it).
 
+use std::cell::OnceCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use super::*;
+use crate::analysis::counters::count_shared_context_steps;
 
 /// One extracted symbol, as the name builder sees it.
 pub(crate) struct NamingInput<'tree> {
@@ -58,6 +61,7 @@ pub(crate) fn qualified_names(
         owners,
         language,
         source,
+        file_namespaces: OnceCell::new(),
     };
     let mut memo: Vec<Option<QualifiedName>> = vec![None; symbols.len()];
     (0..symbols.len())
@@ -123,6 +127,9 @@ struct Builder<'a, 'tree> {
     owners: HashMap<usize, usize>,
     language: ProgrammingLanguage,
     source: &'a str,
+    /// The file-level namespace in force at each child of the root, by node
+    /// id; built on first use (see [`file_namespace_index`]).
+    file_namespaces: OnceCell<HashMap<usize, Option<Rc<str>>>>,
 }
 
 impl<'tree> Builder<'_, 'tree> {
@@ -221,7 +228,25 @@ impl<'tree> Builder<'_, 'tree> {
             }
             child = node;
         }
-        Prefix::Root(file_namespace_before(child, self.language, self.source))
+        Prefix::Root(self.file_namespace_at(child))
+    }
+
+    /// The namespace or package a file-level statement at or before `top`
+    /// (the root, or a child of it) puts it in, read from the per-file
+    /// index rather than by walking back over `top`'s preceding siblings.
+    fn file_namespace_at(&self, top: Node<'tree>) -> Option<String> {
+        if !has_file_level_namespaces(self.language) {
+            return None;
+        }
+        let Some(root) = top.parent() else {
+            // The root has no siblings: only its own statement could apply.
+            return file_level_namespace(top, self.language, self.source);
+        };
+        let index = self
+            .file_namespaces
+            .get_or_init(|| file_namespace_index(root, self.language, self.source));
+        count_shared_context_steps(1);
+        index.get(&top.id()).cloned().flatten().map(|name| name.to_string())
     }
 
     /// The name of a declaration that encloses others but is not extracted
@@ -321,26 +346,49 @@ fn separator(language: ProgrammingLanguage, after_namespace: bool, is_lua_method
     }
 }
 
-/// The namespace or package a file-level statement before `top` puts it in:
-/// the nearest preceding Java `package`, Go package clause, C# file-scoped
-/// namespace, PHP `namespace X;` or Perl `package X;` (a later one replaces an
-/// earlier one), or every preceding Scala package clause, outermost first
-/// (`package outer` then `package inner` is `outer.inner`: Scala clauses
-/// nest).
-fn file_namespace_before(top: Node<'_>, language: ProgrammingLanguage, source: &str) -> Option<String> {
-    let mut clauses = Vec::new();
-    let mut sibling = Some(top);
-    while let Some(candidate) = sibling {
-        if let Some(name) = file_level_namespace(candidate, language, source) {
-            if language != ProgrammingLanguage::Scala {
-                return Some(name);
-            }
-            clauses.push(name);
+/// Whether `language` has a file-level `package`/`namespace` statement
+/// form ([`file_level_namespace`]); a file in any other language needs no
+/// namespace index.
+fn has_file_level_namespaces(language: ProgrammingLanguage) -> bool {
+    matches!(
+        language,
+        ProgrammingLanguage::Java
+            | ProgrammingLanguage::Go
+            | ProgrammingLanguage::CSharp
+            | ProgrammingLanguage::Scala
+            | ProgrammingLanguage::Php
+            | ProgrammingLanguage::Perl
+    )
+}
+
+/// The namespace or package in force at each child of `root`, by node id,
+/// from one pass over the children: the nearest Java `package`, Go package
+/// clause, C# file-scoped namespace, PHP `namespace X;` or Perl `package X;`
+/// at or before the child (a later one replaces an earlier one), or every
+/// Scala package clause at or before it, outermost first (`package outer`
+/// then `package inner` is `outer.inner`: Scala clauses nest).
+fn file_namespace_index(
+    root: Node<'_>,
+    language: ProgrammingLanguage,
+    source: &str,
+) -> HashMap<usize, Option<Rc<str>>> {
+    let mut index = HashMap::new();
+    let mut in_force: Option<Rc<str>> = None;
+    let mut scala_clauses: Vec<String> = Vec::new();
+    let mut cursor = root.walk();
+    for child in root.children(&mut cursor) {
+        if let Some(name) = file_level_namespace(child, language, source) {
+            in_force = Some(if language == ProgrammingLanguage::Scala {
+                scala_clauses.push(name);
+                scala_clauses.join(".").into()
+            } else {
+                name.into()
+            });
         }
-        sibling = candidate.prev_sibling();
+        index.insert(child.id(), in_force.clone());
     }
-    clauses.reverse();
-    (!clauses.is_empty()).then(|| clauses.join("."))
+    count_shared_context_steps(index.len());
+    index
 }
 
 fn file_level_namespace(node: Node<'_>, language: ProgrammingLanguage, source: &str) -> Option<String> {

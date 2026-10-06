@@ -11,6 +11,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 static DIAGNOSTICS_RUNS: AtomicU64 = AtomicU64::new(0);
 static PARSER_CONSTRUCTIONS: AtomicU64 = AtomicU64::new(0);
 static DEFINITION_CAPTURES: AtomicU64 = AtomicU64::new(0);
+static SHARED_CONTEXT_STEPS: AtomicU64 = AtomicU64::new(0);
 
 /// A snapshot of the process-wide work counts.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -23,6 +24,16 @@ pub struct WorkCounters {
     pub parser_constructions: u64,
     /// Executions of a file's definition (locals) query.
     pub definition_captures: u64,
+    /// Nodes and entries visited while deriving context that a file's or a
+    /// module's declarations share (the file-level namespace in force, the
+    /// preceding sibling-scoped container or access section, inner
+    /// `#![cfg(test)]` attributes, same-file traits, `static` prototypes,
+    /// package segments, same-file owners and members, and the records a
+    /// god-file container call-out reads), counting both building that
+    /// context and each declaration's lookup in it. It grows
+    /// linearly with a file's declarations; a per-declaration rescan of the
+    /// file or module shows up here as quadratic growth.
+    pub shared_context_steps: u64,
 }
 
 impl WorkCounters {
@@ -32,6 +43,7 @@ impl WorkCounters {
             diagnostics_runs: self.diagnostics_runs - earlier.diagnostics_runs,
             parser_constructions: self.parser_constructions - earlier.parser_constructions,
             definition_captures: self.definition_captures - earlier.definition_captures,
+            shared_context_steps: self.shared_context_steps - earlier.shared_context_steps,
         }
     }
 }
@@ -48,6 +60,7 @@ pub fn work_counters() -> WorkCounters {
         diagnostics_runs: DIAGNOSTICS_RUNS.load(Ordering::Relaxed),
         parser_constructions: PARSER_CONSTRUCTIONS.load(Ordering::Relaxed),
         definition_captures: DEFINITION_CAPTURES.load(Ordering::Relaxed),
+        shared_context_steps: SHARED_CONTEXT_STEPS.load(Ordering::Relaxed),
     }
 }
 
@@ -61,4 +74,8 @@ pub(crate) fn count_parser_construction() {
 
 pub(crate) fn count_definition_capture() {
     DEFINITION_CAPTURES.fetch_add(1, Ordering::Relaxed);
+}
+
+pub(crate) fn count_shared_context_steps(steps: usize) {
+    SHARED_CONTEXT_STEPS.fetch_add(steps as u64, Ordering::Relaxed);
 }

@@ -267,7 +267,7 @@ fn columns() -> Vec<Column> {
             outcomes: [S(json!(true)), R, R, R, R, R, R, R, R],
         },
         // The entry claims the metrics capability: every record must carry
-        // the facet, and inside it both metrics are required.
+        // the facet, and inside it every metric is required.
         Column {
             name: "metrics",
             target: Target::Record(METHOD),
@@ -275,7 +275,17 @@ fn columns() -> Vec<Column> {
             control: None,
             empty: None,
             public: |out| record(out, METHOD)["metrics"].clone(),
-            outcomes: [S(json!({ "parameters": 1, "has_docs": false })), R, R, R, R, R, R, R, R],
+            outcomes: [
+                S(json!({ "parameters": 1, "has_docs": false, "lines": null })),
+                R,
+                R,
+                R,
+                R,
+                R,
+                R,
+                R,
+                R,
+            ],
         },
         // `null` is a metric the language does not support, never "not
         // computed".
@@ -296,6 +306,19 @@ fn columns() -> Vec<Column> {
             empty: None,
             public: |out| record(out, METHOD)["metrics"]["has_docs"].clone(),
             outcomes: [S(json!(false)), R, S(Value::Null), R, R, R, R, R, R],
+        },
+        // Set to a count first, so the wrong type is a string and the stored
+        // value (not a recomputed one) is what reaches the output. An absent
+        // key (an entry written before the key existed) is rejected, never
+        // read as `null`; `0` is an empty body span.
+        Column {
+            name: "metrics.lines",
+            target: Target::Record(METHOD),
+            path: &["metrics", "lines"],
+            control: Some(json!(3)),
+            empty: Some(json!(0)),
+            public: |out| record(out, METHOD)["metrics"]["lines"].clone(),
+            outcomes: [S(json!(3)), R, S(Value::Null), R, R, R, S(json!(0)), R, R],
         },
         Column {
             name: "source.declaration_text",
@@ -450,7 +473,7 @@ fn columns() -> Vec<Column> {
             control: None,
             empty: None,
             public: |out| record(out, METHOD)["schema_version"].clone(),
-            outcomes: [S(json!({ "major": 4, "minor": 0 })), R, R, R, R, R, R, R, R],
+            outcomes: [S(json!({ "major": 4, "minor": 1 })), R, R, R, R, R, R, R, R],
         },
         // Entry-level fields: none has a default; only an empty record
         // list under valid coverage is a servable shape (a file with no
@@ -580,7 +603,7 @@ fn edited_entry(base: &Value, column: &Column, shape: Shape, value: &Value) -> S
             _ => parent[key] = Value::Array(vec![json!(123); elements.len().max(1)]),
         },
         Shape::IncompatibleMajor => parent[key] = json!({ "major": 3, "minor": 0 }),
-        Shape::IncompatibleMinor => parent[key] = json!({ "major": 4, "minor": 1 }),
+        Shape::IncompatibleMinor => parent[key] = json!({ "major": 4, "minor": 0 }),
         Shape::Empty => {
             parent[key] = match (&column.empty, value) {
                 (Some(empty), _) => empty.clone(),
@@ -776,4 +799,95 @@ fn the_cache_entry_records_the_coverage_it_holds() {
             .collect();
         assert_eq!(rules, ["unused-import"], "{label}");
     }
+}
+
+/// `metrics.lines` is a `u32`: a fraction, a negative count and a count past
+/// `u32::MAX` reject the entry (recomputed), while `u32::MAX` itself is
+/// served. These are the wrong-number cells the matrix's one `WrongType`
+/// (a string) does not reach.
+#[test]
+fn metrics_lines_serves_only_a_u32_count() {
+    let scratch = Scratch::new(&[(FILE, PYTHON_FIXTURE)]);
+    let uncached = json_of(&scratch.stdout(&UNCACHED_ARGS));
+    json_of(&scratch.stdout(&CACHED_ARGS));
+    let entry = only_entry(scratch.temp.path());
+    let relative_entry = entry
+        .strip_prefix(scratch.temp.path())
+        .expect("entry under the scratch temp directory")
+        .to_path_buf();
+    let original = read_json(&entry);
+
+    let temp = TempDir::new().expect("cell temp");
+    let cell_entry = temp.path().join(&relative_entry);
+    std::fs::create_dir_all(cell_entry.parent().expect("entry parent")).expect("create shard");
+    for (value, served) in [
+        (json!(3.5), false),
+        (json!(-1), false),
+        (json!(4_294_967_296_u64), false),
+        (json!(4_294_967_295_u32), true),
+    ] {
+        let mut edited = original.clone();
+        rename_record(&mut edited, SENTINEL_FROM, SENTINEL_TO);
+        record_mut(&mut edited, METHOD)["metrics"]["lines"] = value.clone();
+        std::fs::write(&cell_entry, serde_json::to_string(&edited).expect("serialize")).expect("write entry");
+        let output = json_of(&stdout_of(scratch.hug_with_temp(temp.path(), &CACHED_ARGS), &CACHED_ARGS));
+        if served {
+            assert!(has_sentinel(&output), "lines {value}: served");
+            assert_eq!(record(&output, METHOD)["metrics"]["lines"], value, "lines {value}: stored value");
+        } else {
+            assert!(!has_sentinel(&output), "lines {value}: rejected");
+            assert_eq!(output, uncached, "lines {value}: recomputed like an uncached run");
+        }
+    }
+}
+
+/// An entry written without the metrics capability holds no `metrics` facet
+/// at all. It is served for a request that does not ask for metrics, and a
+/// request that does recomputes the facet (every key, `lines` included)
+/// instead of reading the missing facet as computed `null`s.
+#[test]
+fn an_absent_metrics_facet_is_not_requested_never_computed_null() {
+    let scratch = Scratch::new(&[(FILE, PYTHON_FIXTURE)]);
+    let listing = ["--json", "functions", FILE];
+    json_of(&scratch.stdout(&listing));
+    let entry = only_entry(scratch.temp.path());
+    let written = read_json(&entry);
+    assert!(
+        !written["completed_capabilities"]
+            .as_array()
+            .expect("completed_capabilities")
+            .contains(&json!("metrics")),
+        "a listing does not compute metrics"
+    );
+    assert!(
+        written["records"]
+            .as_array()
+            .expect("entry records")
+            .iter()
+            .all(|record| record.get("metrics").is_none()),
+        "no record carries a metrics facet"
+    );
+
+    let mut renamed = written.clone();
+    rename_record(&mut renamed, SENTINEL_FROM, SENTINEL_TO);
+    std::fs::write(&entry, serde_json::to_string(&renamed).expect("serialize")).expect("write entry");
+    let served = json_of(&scratch.stdout(&listing));
+    let names: Vec<&Value> = served["files"][0]["symbols"]
+        .as_array()
+        .or_else(|| served["symbols"].as_array())
+        .map(|records| records.iter().map(|record| &record["identity"]["name"]).collect())
+        .unwrap_or_default();
+    assert!(
+        names.contains(&&json!(SENTINEL_TO)),
+        "the entry is served to a request without metrics (names: {names:?})"
+    );
+
+    std::fs::write(&entry, serde_json::to_string(&written).expect("serialize")).expect("restore entry");
+    let widened = json_of(&scratch.stdout(&CACHED_ARGS));
+    assert_eq!(widened, json_of(&scratch.stdout(&UNCACHED_ARGS)), "widened by metrics: an uncached result");
+    assert_eq!(
+        record(&widened, METHOD)["metrics"],
+        json!({ "parameters": 1, "has_docs": false, "lines": null }),
+        "the facet is computed with every key"
+    );
 }

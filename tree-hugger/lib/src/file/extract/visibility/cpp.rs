@@ -12,7 +12,7 @@ use super::*;
 /// access modifier and reports Unknown.
 pub(super) fn extract_cpp_visibility(
     declaration: Node<'_>,
-    ctx: &DeclarationContext<'_>,
+    ctx: &DeclarationContext<'_, '_>,
 ) -> Option<Visibility> {
     if let Some(member) = class_member(declaration) {
         // A member of an anonymous union or struct is a member of the
@@ -24,10 +24,44 @@ pub(super) fn extract_cpp_visibility(
         {
             return extract_cpp_visibility(anonymous, ctx);
         }
-        return member_access(declaration, member, ctx.source);
+        return member_access(declaration, member, ctx);
     }
     (has_linkage(ctx.kind) && is_namespace_scope(declaration))
         .then(|| linkage_visibility(declaration, ctx, true))
+}
+
+/// The access section in force before `level` among the children of
+/// `parent`: `None` when no `access_specifier` precedes it, `Some(level)`
+/// for the nearest one (`Some(None)` when its text names no level). Each
+/// parent's children are read once per file into [`VisibilityMemo`].
+fn section_before(
+    level: Node<'_>,
+    parent: Node<'_>,
+    ctx: &DeclarationContext<'_, '_>,
+) -> Option<Option<Visibility>> {
+    count_shared_context_steps(1);
+    let mut sections = ctx.memo.cpp_sections.borrow_mut();
+    let in_force = sections.entry(parent.id()).or_insert_with(|| {
+        let mut in_force = HashMap::new();
+        let mut nearest = None;
+        let mut cursor = parent.walk();
+        for sibling in parent.children(&mut cursor) {
+            in_force.insert(sibling.id(), nearest);
+            if sibling.kind() == "access_specifier" {
+                nearest = Some(sibling.utf8_text(ctx.source.as_bytes()).ok().and_then(|text| {
+                    match text.trim_end_matches(':').trim() {
+                        "public" => Some(Visibility::Public),
+                        "protected" => Some(Visibility::Protected),
+                        "private" => Some(Visibility::Private),
+                        _ => None,
+                    }
+                }));
+            }
+        }
+        count_shared_context_steps(in_force.len());
+        in_force
+    });
+    in_force.get(&level.id()).copied().flatten()
 }
 
 /// The node that sits directly in a class body for `declaration`: the
@@ -49,31 +83,26 @@ fn class_member(declaration: Node<'_>) -> Option<Node<'_>> {
 
 /// The nearest access section before `declaration`, searched at every level
 /// from the declaration out to `member`, so a section inside a preprocessor
-/// conditional governs the members after it in that branch.
-fn member_access(declaration: Node<'_>, member: Node<'_>, source: &str) -> Option<Visibility> {
+/// conditional governs the members after it in that branch. Each level's
+/// sections are indexed once per file ([`section_before`]).
+fn member_access(
+    declaration: Node<'_>,
+    member: Node<'_>,
+    ctx: &DeclarationContext<'_, '_>,
+) -> Option<Visibility> {
     let mut level = declaration;
     loop {
         // The siblings before an `#else`/`#elif` branch are the branch it
         // replaces, so their sections never apply to it.
-        let mut previous = if matches!(
+        let replaces_siblings = matches!(
             level.kind(),
             "preproc_else" | "preproc_elif" | "preproc_elifdef"
-        ) {
-            None
-        } else {
-            level.prev_sibling()
-        };
-        while let Some(sibling) = previous {
-            if sibling.kind() == "access_specifier" {
-                let text = sibling.utf8_text(source.as_bytes()).ok()?;
-                return match text.trim_end_matches(':').trim() {
-                    "public" => Some(Visibility::Public),
-                    "protected" => Some(Visibility::Protected),
-                    "private" => Some(Visibility::Private),
-                    _ => None,
-                };
-            }
-            previous = sibling.prev_sibling();
+        );
+        if !replaces_siblings
+            && let Some(parent) = level.parent()
+            && let Some(section) = section_before(level, parent, ctx)
+        {
+            return section;
         }
         if level == member {
             break;
