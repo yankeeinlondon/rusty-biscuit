@@ -3,15 +3,74 @@ kind: plan
 name: cyclomatic-complexity
 feature: 2026-10-07-cyclomatic-complexity
 created: 2026-10-05
-phase: 1
+phase: 3
 total_phases: 5
 agent: claude/sonnet
 yolo: true
-packages: []
+packages:
+  - tree-hugger
+  - tree-hugger-cli
 source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - tree-hugger/lib/src/file/extract/complexity/mod.rs
+  - tree-hugger/lib/src/file/extract/complexity/rust.rs
+  - tree-hugger/lib/src/file/extract/complexity/tests.rs
+  - tree-hugger/lib/src/file/extract/classify.rs
+  - tree-hugger/lib/src/file/extract/metrics.rs
+  - tree-hugger/lib/src/file/extract/mod.rs
+  - tree-hugger/lib/src/file/tree_file.rs
+  - tree-hugger/lib/src/file/mod.rs
+  - tree-hugger/lib/src/file/query.rs
+  - tree-hugger/lib/src/shared/schema_v2/facets.rs
+  - tree-hugger/lib/src/shared/schema_v2/types.rs
+  - tree-hugger/lib/src/shared/schema_v2/mod.rs
+  - tree-hugger/lib/src/analysis/mod.rs
+  - tree-hugger/lib/src/analysis/tests.rs
+  - tree-hugger/lib/src/cache/mod.rs
+  - tree-hugger/lib/src/cache/symbol_cache.rs
+  - tree-hugger/lib/src/god_files/analysis.rs
+  - tree-hugger/cli/src/declarations.rs
+  - tree-hugger/cli/src/main.rs
+  - tree-hugger/cli/src/report.rs
+  - tree-hugger/cli/src/stats.rs
+  - tree-hugger/lib/tests/l1/symbols_metrics.rs
+  - tree-hugger/lib/tests/l1/symbols_query.rs
+  - tree-hugger/lib/tests/l1/symbols_adapter.rs
+  - tree-hugger/lib/tests/l1/symbols_cache.rs
+  - tree-hugger/lib/tests/l1/cache_tests.rs
+  - tree-hugger/cli/tests/symbols/cache_upgrade.rs
+  - tree-hugger/cli/tests/symbols/cache_robustness.rs
+  - tree-hugger/cli/tests/symbols/wiring.rs
+  - tree-hugger/cli/tests/symbols/reports.rs
+  - tree-hugger/cli/tests/symbols/report.rs
+  - tree-hugger/cli/tests/fixtures/golden/symbols.json
+  - tree-hugger/cli/tests/fixtures/golden/symbols.jsonl
+  - tree-hugger/cli/tests/fixtures/golden/symbols.tree
+docs_updated_during_phase_2:
+  - tree-hugger/docs/symbol-schema-design.md
+  - tree-hugger/docs/cache-design.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+  - .claude/skills/tree-hugger/SKILL.md
+  - .claude/skills/tree-hugger/api-reference.md
+source_files_during_phase_3:
+  - tree-hugger/lib/src/file/extract/complexity/mod.rs
+  - tree-hugger/lib/src/file/extract/complexity/javascript.rs
+  - tree-hugger/lib/src/file/extract/complexity/typescript.rs
+  - tree-hugger/lib/src/file/mod.rs
+  - tree-hugger/lib/tests/l1/symbols_metrics.rs
+  - tree-hugger/cli/tests/symbols/cache_upgrade.rs
+  - tree-hugger/cli/tests/fixtures/golden/symbols.json
+  - tree-hugger/cli/tests/fixtures/golden/symbols.jsonl
+docs_updated_during_phase_3:
+  - tree-hugger/docs/symbol-schema-design.md
+  - tree-hugger/docs/cache-design.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+  - .claude/skills/tree-hugger/SKILL.md
 ---
 
 # Plan: Per-Symbol Cyclomatic Complexity
@@ -154,11 +213,11 @@ Depends on Phase 1 ruling 1 and the prerequisite (see Phase 1 rule 5).
 
 ### Wave 1 (parallel)
 
-- [ ] **Facet field**: add `cyclomatic` with `#[serde(deserialize_with = "nullable")]`
+- [x] **Facet field**: add `cyclomatic` with `#[serde(deserialize_with = "nullable")]`
   to `MetricsFacet` with a doc comment stating that `None` means unavailable
   for this declaration; update the doc that says how many metrics exist.
   - Update every `MetricsFacet { .. }` construction site (compiler finds them).
-- [ ] **Traversal engine**: new module next to `metrics.rs` implementing an
+- [x] **Traversal engine**: new module next to `metrics.rs` implementing an
   iterative cursor traversal over the selected body node.
   - Takes a per-language rule table (node kind to contribution, nested-boundary
     kinds, operator-token matches).
@@ -170,23 +229,23 @@ Depends on Phase 1 ruling 1 and the prerequisite (see Phase 1 rule 5).
     deep-nesting test that would overflow a recursive version).
   - Excludes parameter defaults, decorators, attributes, return/type syntax
     because only the body node is traversed.
-- [ ] **Schema bump**: advance `SchemaVersion` to the next minor above the
+- [x] **Schema bump**: advance `SchemaVersion` to the next minor above the
   prerequisite's, and update records, indexes, CLI envelopes and fingerprints
   consistently; update `docs/symbol-schema-design.md` version history.
-- [ ] **Extractor revision**: bump `EXTRACTOR_REVISION` in `lib/src/file/mod.rs`.
+- [x] **Extractor revision**: bump `EXTRACTOR_REVISION` in `lib/src/file/mod.rs`.
 
 ### Wave 2 (after Wave 1)
 
-- [ ] **Wire up**: call the engine from `symbol_metrics` only for
+- [x] **Wire up**: call the engine from `symbol_metrics` only for
   Function/Method/Constructor with a body from the shared body reader;
   every other kind, bodyless declaration or unsupported language yields `None`
   while `parameters`, `has_docs` and `lines` stay intact.
   - `symbol_metrics` is only reached when Metrics is requested, so a
     declarations-only query never traverses; confirm and keep it that way.
   - Do not add a second body discovery path.
-- [ ] **Cache projection check**: confirm `analysis/coverage.rs` still strips the
+- [x] **Cache projection check**: confirm `analysis/coverage.rs` still strips the
   whole facet when Metrics is unrequested; no new capability.
-- [ ] **Rust rule table** (first language, exercises nested items, match arms,
+- [x] **Rust rule table** (first language, exercises nested items, match arms,
   guards): implement per the reviewed Phase 1 table.
 
 Validation checkpoint: `just test` and `just lint` in `tree-hugger/` pass;
@@ -199,28 +258,28 @@ Gate: author-accepted language set (Phase 1 rule 2).
 
 ### Wave 1 (parallel, one subagent per language; files are disjoint)
 
-- [ ] **JavaScript rules** and fixtures.
-- [ ] **TypeScript rules** and fixtures (shares most JS shapes; includes type
+- [x] **JavaScript rules** and fixtures.
+- [x] **TypeScript rules** and fixtures (shares most JS shapes; includes type
   declarations as nested-type boundaries).
-- [ ] **Further reviewed languages**, one task each, only if their complete
-  inventory was accepted in Phase 1.
+- [x] **Further reviewed languages**, one task each, only if their complete
+  inventory was accepted in Phase 1. (None: the drafted set is Rust, JS, TS.)
 
 Each language task delivers:
 
-- [ ] The rule table in code, matching the reviewed inventory exactly.
-- [ ] Fixtures with exact totals for every included rule and zero-contribution
+- [x] The rule table in code, matching the reviewed inventory exactly.
+- [x] Fixtures with exact totals for every included rule and zero-contribution
   look-alikes (decisions inside comments, strings and parameter defaults).
-- [ ] Empty, block and expression bodies; bodyless declarations; nested named
+- [x] Empty, block and expression bodies; bodyless declarations; nested named
   and anonymous callables; nested types; an inner callable omitted by the query.
-- [ ] A malformed counted body (`None`) and a malformed excluded nested body
+- [x] A malformed counted body (`None`) and a malformed excluded nested body
   (outer still measured, valid sibling retains its value).
 
 ### Wave 2 (after Wave 1)
 
-- [ ] **Remaining languages explicit `None`**: every language not selected
+- [x] **Remaining languages explicit `None`**: every language not selected
   returns `None` through the engine's default "no reviewed rules" path, with no
   approximate fallback.
-- [ ] **Metrics matrix**: add the `cyclomatic` support column and expected values
+- [x] **Metrics matrix**: add the `cyclomatic` support column and expected values
   to `lib/tests/l1/symbols_metrics.rs`; all 16 languages keep a row, either
   reviewed values or `None` with a stated reason. Complexity support is not
   inferred from parameter or doc support.

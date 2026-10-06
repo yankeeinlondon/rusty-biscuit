@@ -37,89 +37,100 @@ review_iterations: 0
 human_review: true
 human_review_items:
   - |-
-    **Accept (or change) how complexity is counted, and the rules for Rust,
-    JavaScript and TypeScript.**
+    **Accept (or change) how complexity is counted, before the remaining
+    phases build on it.**
 
-    *Why now:* the next phase writes the counting code and its tests with
-    exact expected numbers. If a counting rule changes later, those numbers
-    and the published docs have to be redone, and cached results need
-    another invalidation. The spec makes your acceptance a condition of
-    completion, and this session could not ask you.
+    *Why now:* the counting rules for Rust, JavaScript and TypeScript are now
+    built and tested (Phases 2 and 3), using the convention the spec
+    recommends and the drafted answers below, because nobody could approve
+    them in this unattended run. The spec makes your acceptance a condition
+    of completion. Phase 4 adds checks and Phase 5 publishes the counting
+    rules as user documentation. Changing a rule today costs a few test
+    numbers. After Phase 5 it also means rewriting published docs, and every
+    change needs another cache invalidation.
 
-    The full rule tables, with worked examples, are in this feature's
-    `implementation-log.md` under "Phase 1". The basic convention is the one
-    the spec recommends: start at 1, and add 1 for each `if`/else-if, loop
-    with a condition, ternary, `&&`/`||`/`??`, `match`/`switch` arm, guard
-    and `catch`. Plain `else`, `finally`, `loop`/`for(;;)` and Rust `?` add 0.
+    The basic convention: a function starts at 1. It adds 1 for each
+    `if`/else-if, loop with a condition, ternary, `&&`/`||`/`??`,
+    `&&=`/`||=`/`??=`, `match`/`switch` arm, guard and `catch`. Plain
+    `else`, `default`, `finally`, `loop`/`for(;;)`, optional chaining `?.`
+    and Rust `?` add 0. The full tables with worked examples are in this
+    feature's `implementation-log.md` under "Phase 1". The numbers the code
+    now produces are in `lib/tests/l1/symbols_metrics.rs`
+    (`RUST_CYCLOMATIC`, `JAVASCRIPT_CYCLOMATIC`, `TYPESCRIPT_CYCLOMATIC`).
 
-    Looking at the real parse trees raised six smaller questions the spec does
-    not answer. Recommended answers:
+    Six smaller questions the spec left open, with the answers now built:
 
-    - **R1. Rust `match`:** count every arm except the last (a Rust `match`
-      must cover every case, so its last arm acts as the default). This
-      makes a two-arm `match` score the same as `if`/`else`. The alternative
-      counts every arm except a literal `_`, which scores an exhaustive
-      `match` one higher than the equivalent `if` chain.
-    - **R2. Rust `let Some(x) = y else { return }`:** +1. It tests a pattern
-      and exits early, like `if let`. The alternative is 0.
-    - **R3. Rust `async { }`, labeled or `unsafe` blocks inside a function:**
-      count them as part of the function. The alternative treats `async`
-      blocks as separate, like closures.
-    - **R4. A Rust `const`/`static` item declared inside a function:** not
-      counted. It is compile-time code, not code that runs on each call.
-    - **R5. JS/TS object literals `{ p: a ? 1 : 2 }`:** count the values,
-      because they run right there. Methods inside the literal are separate
-      functions. The alternative skips the whole literal.
+    - **R1. Rust `match`:** count every arm except the last, because a
+      `match` must cover every case and its last arm acts as the default.
+      A two-arm `match` then scores the same as `if`/`else`. The
+      alternative counts every arm except a literal `_`.
+    - **R2. Rust `let Some(x) = y else { return }`:** +1, like `if let`.
+      The alternative is 0.
+    - **R3. Rust `async { }`, labeled or `unsafe` blocks inside a
+      function:** counted as part of the function. The alternative treats
+      `async` blocks as separate, like closures.
+    - **R4. A Rust `const`/`static` item inside a function:** not counted,
+      because it is compile-time code.
+    - **R5. JS/TS object literal values `{ p: a ? 1 : 2 }`:** counted (they
+      run right there); methods inside the literal are separate.
     - **R6. TS `namespace N { }` inside a function:** not counted.
 
     Options:
 
-    - **Accept as drafted (recommended).** Phase 2 proceeds unchanged. Pros:
-      no delay; every choice is one table entry, so it is easy to change
-      later. Cons: any later flip means revised expected numbers, a cache
-      invalidation and a docs update.
+    - **Accept as built (recommended).** Phases 4 and 5 proceed unchanged.
+      Pros: no delay, and this follows the spec's recommendation. Cons: any
+      later change means revised numbers, a cache invalidation and a docs
+      update.
     - **Accept, flipping some of R1–R6.** Name the ones to flip. Pros: the
-      numbers match your preferred reading from the start. Cons: none beyond
-      a short reply.
-    - **Choose a different basic convention** (for example, count only
-      branch statements and not `&&`/`||`). Pros: simpler numbers. Cons: the
-      tables need rework before Phase 2, and complex conditions are hidden.
+      numbers match your preferred reading before the docs are written.
+      Cons: a short reply, and a few expected values change in the tests.
+    - **Choose a different basic convention** (for example, do not count
+      `&&`/`||`). Pros: simpler numbers. Cons: all three rule tables and
+      their tests are redone, and complex conditions are hidden.
 
-    I recommend accepting as drafted. It follows the spec's recommendation;
-    R1 keeps Rust `match` in line with `if`/`else`, and the rest exclude only
-    code that does not run as part of the call.
+    I recommend accepting as built. R1 keeps Rust `match` in line with
+    `if`/`else`. The other choices leave out only code that does not run as
+    part of the call.
 message_to_agent: |-
-  Phase 1 findings for the Phase 2 implementer:
+  Phase 3 findings for the Phase 4 implementer:
 
-  1. The prerequisite (2026-10-06-symbol-type-relations) has landed: emitted
-     schema is V4_1, EXTRACTOR_REVISION is "25", and MetricsFacet has `lines`.
-     Its review fixes are still uncommitted in this worktree. Read both values
-     from the tree when you start; this feature uses the next minor (V4_2)
-     and the current revision + 1.
-  2. The plan names the wrong body reader. `source.body_span` and
-     `metrics.lines` come from `classify.rs::callable_body_span` ->
-     `callable_body_extent`, not `body_node_for_declaration` (that one falls
-     back to type bodies and is for declaration-text cuts). The spec requires
-     the same body as `lines`. `callable_body_extent` returns a span: for
-     Rust/JS/TS the body is one node (the `body` field, or the C#
-     arrow-clause expression), but for Python and Lua it is a run of sibling
-     children. Refactor it to return the body nodes and derive the span from
-     them, so traversal and `lines` share one reader. Do not add a second
-     discovery path.
-  3. The rule tables (Rust, JS, TS), with node kinds, fields, tokens and
-     worked examples with expected totals, are in implementation-log.md under
-     Phase 1. The Rust `&&` inside `let_chain` is an unfielded anonymous
-     child, not a `binary_expression` operator, so match it separately.
-     Macro `token_tree`s must be pruned (they contain `if`/`&&` tokens).
-  4. Author acceptance of the convention and of residual choices R1-R6 is
-     pending (spec human_review). Implement per the drafted tables; if the
-     author flips a choice, only that rule entry and its expectations change.
-  5. At the end of Phase 1, `just test` had 2 failures that predate it:
-     golden::json_symbols_over_multi_match_the_golden and
-     golden::jsonl_symbols_over_multi_match_the_golden. They come from the
-     prerequisite's uncommitted review edits to the goldens and extractor.
-     Confirm they are green, or owned by that review, before you regenerate
-     goldens for `cyclomatic`.
+  1. Versions: schema stays 4.3 (`SchemaVersion::CURRENT`) and
+     EXTRACTOR_REVISION is now "28". Phase 3 bumped it for the JS/TS rules,
+     because the spec says any change to supported rules bumps it. Revision
+     27 has a stale-entry test:
+     `cache_upgrade::entry_from_extractor_revision_twenty_seven_is_not_served_after_the_ecmascript_rules`.
+     Phase 4 changes no rules, so it needs no bump.
+  2. Reviewed languages: Rust, JavaScript and TypeScript (`rules_for` in
+     lib/src/file/extract/complexity/mod.rs). `METRICS_MATRIX` now has a
+     `cyclomatic: Support` column. The other 13 languages use
+     `NO_CYCLOMATIC`, and the sweep asserts that a value is measured exactly
+     when a reviewed language has a callable with a body.
+  3. Already covered, so do not duplicate it in Phase 4:
+     - a query that omits an inner callable gives the same outer total
+       (`symbols_metrics::an_outer_total_does_not_depend_on_selecting_its_nested_callables`);
+     - LF/CRLF parity and metrics-only = complete index, for every rule row
+       (`assert_cyclomatic_rows`);
+     - malformed bodies in all three languages
+       (`cyclomatic_is_unavailable_only_for_a_malformed_counted_body`,
+       renamed from the Rust-only test).
+  4. Still open for Phase 4, per the plan:
+     - work counters;
+     - a warm `CacheLookup::Hit` that covers Metrics;
+     - widening an entry to Metrics;
+     - a language whose complexity is unavailable still caches;
+     - the `cache_robustness` record column for `metrics.cyclomatic`. Its
+       probe fixture is Python, which has no rules, so a numeric control
+       value needs a Rust, JS or TS target;
+     - the CLI `--json-full` exposure.
+  5. Extractor limits: JS generator declarations (`function*`), function
+     expressions bound to a `const`, and TS `declare function` produce no
+     Function record. They cannot be test rows, and they are not counting
+     bugs.
+  6. Phase 2 and the concurrent relations-review edits are still
+     uncommitted in this worktree. Check `git status` before regenerating
+     goldens.
+  7. Author acceptance of the convention and R1–R6 is still pending (spec
+     `human_review`).
 ---
 
 # Spec: Per-Symbol Cyclomatic Complexity

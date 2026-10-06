@@ -3,11 +3,70 @@ spec: /Volumes/coding/wt/rusty-biscuit/feat-symbols/tree-hugger/features/2026-10
 plan: tree-hugger/features/2026-10-07-cyclomatic-complexity/plan.md
 implemented_by: claude/opus
 started_phase: 1
-packages: []
+packages:
+  - tree-hugger
+  - tree-hugger-cli
 source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - tree-hugger/lib/src/file/extract/complexity/mod.rs
+  - tree-hugger/lib/src/file/extract/complexity/rust.rs
+  - tree-hugger/lib/src/file/extract/complexity/tests.rs
+  - tree-hugger/lib/src/file/extract/classify.rs
+  - tree-hugger/lib/src/file/extract/metrics.rs
+  - tree-hugger/lib/src/file/extract/mod.rs
+  - tree-hugger/lib/src/file/tree_file.rs
+  - tree-hugger/lib/src/file/mod.rs
+  - tree-hugger/lib/src/file/query.rs
+  - tree-hugger/lib/src/shared/schema_v2/facets.rs
+  - tree-hugger/lib/src/shared/schema_v2/types.rs
+  - tree-hugger/lib/src/shared/schema_v2/mod.rs
+  - tree-hugger/lib/src/analysis/mod.rs
+  - tree-hugger/lib/src/analysis/tests.rs
+  - tree-hugger/lib/src/cache/mod.rs
+  - tree-hugger/lib/src/cache/symbol_cache.rs
+  - tree-hugger/lib/src/god_files/analysis.rs
+  - tree-hugger/cli/src/declarations.rs
+  - tree-hugger/cli/src/main.rs
+  - tree-hugger/cli/src/report.rs
+  - tree-hugger/cli/src/stats.rs
+  - tree-hugger/lib/tests/l1/symbols_metrics.rs
+  - tree-hugger/lib/tests/l1/symbols_query.rs
+  - tree-hugger/lib/tests/l1/symbols_adapter.rs
+  - tree-hugger/lib/tests/l1/symbols_cache.rs
+  - tree-hugger/lib/tests/l1/cache_tests.rs
+  - tree-hugger/cli/tests/symbols/cache_upgrade.rs
+  - tree-hugger/cli/tests/symbols/cache_robustness.rs
+  - tree-hugger/cli/tests/symbols/wiring.rs
+  - tree-hugger/cli/tests/symbols/reports.rs
+  - tree-hugger/cli/tests/symbols/report.rs
+  - tree-hugger/cli/tests/fixtures/golden/symbols.json
+  - tree-hugger/cli/tests/fixtures/golden/symbols.jsonl
+  - tree-hugger/cli/tests/fixtures/golden/symbols.tree
+docs_updated_during_phase_2:
+  - tree-hugger/docs/symbol-schema-design.md
+  - tree-hugger/docs/cache-design.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+  - .claude/skills/tree-hugger/SKILL.md
+  - .claude/skills/tree-hugger/api-reference.md
+source_files_during_phase_3:
+  - tree-hugger/lib/src/file/extract/complexity/mod.rs
+  - tree-hugger/lib/src/file/extract/complexity/javascript.rs
+  - tree-hugger/lib/src/file/extract/complexity/typescript.rs
+  - tree-hugger/lib/src/file/mod.rs
+  - tree-hugger/lib/tests/l1/symbols_metrics.rs
+  - tree-hugger/cli/tests/symbols/cache_upgrade.rs
+  - tree-hugger/cli/tests/fixtures/golden/symbols.json
+  - tree-hugger/cli/tests/fixtures/golden/symbols.jsonl
+docs_updated_during_phase_3:
+  - tree-hugger/docs/symbol-schema-design.md
+  - tree-hugger/docs/cache-design.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+  - .claude/skills/tree-hugger/SKILL.md
 ---
 
 # Implementation Log for 2026-10-07-cyclomatic-complexity (5 phases)
@@ -274,3 +333,280 @@ expectations for the tables above are written in Phase 2 (Rust) and Phase 3
   depend on the OS, so no cross-check was run.
 - Skill: no change needed. No behavior changed, and the rule tables are not
   current behavior until Phase 2/3 implement them.
+
+## Phase 2
+
+Phase 2 adds the counting engine, the Rust rule table, the `cyclomatic` key,
+schema 4.3 and extractor revision 27. The drafted Phase 1 rulings (rules 1–4,
+R1–R4) are implemented as written; the author's acceptance is still pending
+(spec `human_review`), and each ruling is one entry in
+`complexity/rust.rs`.
+
+### Starting state (2026-10-05)
+
+- The prerequisite moved again after Phase 1: HEAD emitted **V4_2** with
+  `EXTRACTOR_REVISION` **26**. This feature therefore uses **V4_3** and
+  **27** (not V4_2/26 as Phase 1 projected).
+- **Another session was editing this worktree concurrently** (review fixes for
+  `2026-10-06-symbol-type-relations`: `relations.rs`, `tree_file/relations.rs`,
+  `render.rs`, `symbols_relations.rs`, `cache_robustness.rs`,
+  `cache_upgrade.rs`, the skill). Its half-written `symbols_relations.rs` kept
+  the L1 binary from compiling for part of this phase. I made only surgical,
+  in-place edits to the files we both touched and did not change its code.
+
+### What changed
+
+- **Body reader, one path** (`classify.rs`). `callable_body_extent` →
+  `callable_body`, which returns `CallableBody` (`Node`, a Python/Lua
+  sibling `Run { first, last }`, or Lua's `EmptyAt(end)`).
+  `CallableBody::span` derives the stored span (same trimming as before), and
+  `callable_body_span` was removed. `records_from` reads the body once and
+  hands the same value to `symbol_metrics`, so `source.body_span`, `lines`
+  and `cyclomatic` cannot read different bodies. This follows the Phase 1
+  departure note (the plan named `body_node_for_declaration`, but that
+  reader is for declaration-text cuts).
+- **Engine** (`extract/complexity/mod.rs`). A `Rules` table has
+  `boundaries` (pruned, never error-checked), `opaque` (pruned but
+  error-checked with `has_error`: an error in a macro's token tree is still
+  in the counted body) and `decisions` by node kind with `Counts::{Always,
+  WithField, Operator, Tokens, UnlessLast}`. The walk uses one `TreeCursor`
+  and a depth counter, with no recursion. The tally uses `checked_add`, so an
+  overflow gives `None`. An `is_error()`/`is_missing()` node in the visited
+  region also gives `None`. A language with no table gives `None`
+  (`rules_for`), with no fallback. A `Run` body walks each sibling from
+  `first` to `last`.
+- **Rust table** (`extract/complexity/rust.rs`) matches the Phase 1 table.
+  It counts `if_expression`, `while_expression`, `for_expression`,
+  `binary_expression` `&&`/`||`, `let_chain` `&&` tokens,
+  `let_declaration` with `alternative` (R2), `match_arm` unless last (R1)
+  and `match_pattern` with `condition`. Boundaries are closures, nested
+  items, and `const`/`static` items (R4). `token_tree` is opaque. `async`,
+  `unsafe`, labeled and `const` blocks are traversed (R3).
+- **Facet** (`facets.rs`): `cyclomatic: Option<u32>` with
+  `deserialize_with = "nullable"` (required, nullable). Its doc says `None`
+  means unavailable and is never zero.
+- **Wire-up** (`metrics.rs`): `symbol_metrics` takes the
+  `Option<CallableBody>` and computes `lines` from its span and
+  `cyclomatic` from its nodes, only for Function/Method/Constructor.
+  `symbol_metrics` runs only under `Capability::Metrics`, so a
+  declarations-only query never traverses. `analysis/coverage.rs` still
+  drops the whole facet when Metrics is not requested (checked; unchanged).
+- **Schema 4.3** (`types.rs`): added `V4_3` and **`SchemaVersion::CURRENT`**
+  (= `V4_3`). Every emitter and validator that hard-coded `V4_2` (cache
+  entry/record checks, analysis, god-files, CLI envelopes, JSONL, adapters)
+  now uses `CURRENT`, so the next bump changes one line. This is a small
+  scope addition beyond the plan, made to avoid repeating the ~25-site edit
+  on every bump. Tests that pin the wire value keep JSON literals
+  (`{"major":4,"minor":3}`).
+- **`EXTRACTOR_REVISION` = "27"** (`file/mod.rs`).
+
+### Comment and doc drift found and fixed
+
+- `docs/symbol-schema-design.md` still named 4.1 as current, and its version
+  history had no 4.2 row (drift left by the prerequisite's 4.2 bump). Fixed:
+  added 4.2 and 4.3 rows, the status line, the facet key list, the `null`
+  meaning and the JSON examples.
+- `docs/cache-design.md` said `V4_1`, `rev.24` and "exactly 4.1", and listed
+  three metric keys. Changed to `CURRENT` (4.3), `rev.27` and four keys, with
+  the `cyclomatic` u32 shapes.
+- `cli/tests/symbols/reports.rs` and `report.rs` pinned `"minor":1`; they
+  were already failing at HEAD after the 4.2 bump. Updated to 4.3.
+- `lib/tests/l1/symbols_cache.rs` listed `{4,2}` as both current and
+  incompatible (left half-updated). Current is now `{4,3}`, and the
+  incompatible list is 2.0, 3.0, 4.0, 4.1, 4.2, 4.4, 5.0.
+- `Capability::Metrics` doc (`query.rs`) and the `extract/mod.rs` module
+  doc (re-exports) were updated for the new key and module.
+- Skill: `callable_body_span` no longer exists. Updated SKILL.md (the body
+  reader, the engine, the test tables, the revision list) and
+  `api-reference.md` (`MetricsFacet`, schema 4.3).
+
+### Goldens
+
+`symbols.json`, `symbols.jsonl` and `symbols.tree` were regenerated
+(`HUG_UPDATE_GOLDEN=1`). Review of the diff:
+
+- `schema_version` minor 1 → 3 (286 lines) and `extractor_version`
+  `rev.24` → `rev.27` (190 lines). The goldens were already stale at HEAD
+  (the two golden failures recorded in Phase 1).
+- **Not from this phase:** one record gains
+  `"relations": {"implements": [{"name": "Named", …}]}`, and the tree golden
+  shows `public class Tag { name: String } implements Named`. Both come from
+  the concurrent session's uncommitted mixed-base-list relation work. Whoever
+  commits should keep those golden lines with that work.
+- No `cyclomatic` line appears, which is expected: `--json symbols` and
+  `--jsonl` do not request Metrics. The full-index (`--json-full`) checks are
+  Phase 4.
+
+### Requirement → test mapping
+
+| Requirement | Test |
+|---|---|
+| Rust rule table, exact totals per rule (if/else-if, `&&`/`\|\|`, bitwise 0, arms − 1, two-arm `match` = `if`/`else`, guard, guard + `&&`, `let … else`, let chain, `loop` 0, `while`/`for`/`while let`, `?` 0) | `symbols_metrics::rust_cyclomatic_follows_the_counting_rules` (`RUST_CYCLOMATIC`) |
+| Zero-contribution look-alikes: macro tokens, comments, strings, attribute args, return-type const expr, items (`struct`/`const`/`static`) in the body | same test, rows `look_alikes`, `return_type`, `items` |
+| Nested callable/closure pruned; nested fn has its own total | same test, row `outer`/`inner` |
+| `async`/`unsafe`/labeled blocks traversed (R3) | same test, row `blocks` |
+| Methods and constructors measured; bodyless trait method `None`; non-callables `None` | same test, last row plus the per-row non-callable sweep |
+| Narrow (metrics-only) and complete index agree; LF = CRLF; fixtures parse cleanly | same test (both query paths × both endings, `syntax_diagnostics` empty) |
+| Malformed counted body → `None`; malformed nested body leaves outer and sibling measured; other metrics intact | `symbols_metrics::rust_cyclomatic_is_unavailable_only_for_a_malformed_counted_body`; engine level `complexity::tests::only_errors_in_the_counted_body_make_the_total_unavailable` (adds opaque macro error → `None`, closure error ignored) |
+| Key present (number / `null`) inside the facet, absent without Metrics | `symbols_metrics::cyclomatic_key_is_present_null_or_absent_with_its_facet`; `lines_key_is_present_null_or_absent_with_its_facet` (Java: `null`) |
+| Unsupported languages `None` for every record, non-callables `None` in all 16 languages | `symbols_metrics::metrics_match_each_fixture_function` (`CYCLOMATIC_LANGUAGES`); `complexity::tests::languages_without_reviewed_rules_have_no_value` |
+| No recursion per syntax node | `complexity::tests::deep_nesting_is_counted_without_recursion` (20 000 nested `if`s on a 256 KiB stack → 20 001) |
+| Checked arithmetic, no wrap | `complexity::tests::a_total_beyond_u32_is_unavailable_not_wrapped` |
+| Python/Lua sibling-run body walked first → last only | `complexity::tests::a_sibling_run_body_is_walked_from_first_to_last` (test-only Python rules) |
+| Declarations-only query does no metrics work; metrics query has value | `symbols_query::flags_and_metrics_run_with_the_declarations_only` (now asserts `cyclomatic: Some(1)`) |
+| Record reader robustness matrix for `metrics.cyclomatic` (control, absent, null, `"3"`, `[3]`, `true`, `-1`, `1.5`, `4294967296`, `{}`, `[]`, duplicate key, trailing content, `u32::MAX` reads) | `symbols_adapter::new_record_fields_read_per_shape` |
+| Older schema entries (4.2 without the key) never served, recomputed under both keys | `cache_upgrade::entry_from_extractor_revision_twenty_six_is_not_served_after_the_schema_bump` (shares `assert_schema_bump_entry_is_not_served` with the revision-17 case) |
+| Cache refuses other schema minors (4.1, 4.2, 4.4) | `symbols_cache::incompatible_record_schema_versions_are_misses_never_served_or_widened` |
+| Envelopes carry 4.3 | `wiring::json_symbols_carry_visibility_and_current_schema`, `report::the_json_envelope_…`, `reports::json_lines_…`, `cache_robustness` record `schema_version` column |
+
+A mutation check confirmed the Rust table test bites: switching `match_arm`
+to `Always` failed `rust_cyclomatic_follows_the_counting_rules` (`arms`:
+5 ≠ 4). The rule was then restored.
+
+All new tests are L1. Their names carry no tier marker. The unit tests are
+in the lib target, and `symbols_metrics` is in the declared `tests/l1`
+binary. No feature gate is involved.
+
+Left for later phases, as planned: the cache-level `cyclomatic` column in
+`cache_robustness` (Phase 4; its fixture is Python, which has no rules, so
+it needs a Rust target), the 16-row `cyclomatic` matrix column (Phase 3),
+work-counter tests and `--json-full` CLI checks (Phase 4), and the
+counting-rules doc (Phase 5).
+
+### Gates run (2026-10-05)
+
+- `cargo nextest run -p tree-hugger -p tree-hugger-cli --no-fail-fast`:
+  1092/1092 passed.
+- `just test` (tree-hugger): 1092 tests, 1092 passed.
+- `just lint` (tree-hugger): passes.
+- An intermediate run had 2 failures in the concurrent session's new
+  `cache_upgrade` revision-24/25 tests: the sentinel was the probed record.
+  That session fixed them before the final runs. They were not caused by
+  this phase.
+- OS: no cross-check run. The engine reads only the parse tree. It has no
+  paths, I/O or platform APIs. Grammar shape does not depend on the OS. The
+  only platform-sensitive item is the deep-nesting test's explicit 256 KiB
+  thread stack, which `std::thread::Builder` supports on every target. CI
+  covers Linux and macOS on the pull request, plus Windows on `main`.
+
+## Phase 3
+
+Phase 3 adds the JavaScript and TypeScript rule tables, the 16-row
+`cyclomatic` matrix column and extractor revision 28. The author has still
+not accepted the convention or R1–R6 (spec `human_review`). This phase
+implements the drafted Phase 1 tables exactly as written, the option the
+review item recommends. Each choice is one table entry, so it can still
+be flipped.
+
+### Starting state (2026-10-05)
+
+- Phase 2 is **not committed**: HEAD is still the Phase 1 close, and the
+  Phase 2 changes plus the concurrent relations-review edits are in the
+  working tree. Phase 3 edits sit on top of them.
+- At the start the tree emitted schema 4.3 and revision 27, as Phase 2
+  left it.
+
+### What changed
+
+- **Engine** (`complexity/mod.rs`): two new `Counts` variants, as the Phase 2
+  handoff asked, rather than special cases in `visit`:
+  - `UnlessFieldKind { field, kind }`: +1 unless the field holds that kind.
+    JS/TS `for (;;)` and `for (init;; step)` both have
+    `condition: empty_statement`.
+  - `Arm(field)`: +1 for an arm with that field, or for one that no
+    non-comment named sibling follows. Grouped `case 1: case 2:` is one arm,
+    `case 1: default:` is 0, and a bodyless last `case 2: }` is one arm.
+  - `rules_for` gains JavaScript and TypeScript.
+- **JavaScript** (`complexity/javascript.rs`) matches the Phase 1 table:
+  - Counted: `if_statement`, `for_statement` (unless `for (;;)`),
+    `for_in_statement` (for…in and for…of), `while`/`do`, ternary,
+    `&&`/`||`/`??`, `&&=`/`||=`/`??=`, `switch_case` arms and `catch_clause`.
+  - Boundaries: function declarations and expressions, generators, arrows,
+    `method_definition` (so object literal methods are pruned while object
+    literal values are counted, R5), and `class_declaration`/`class` (which
+    excludes field initializers).
+  - JSX `{a && <b/>}` counts through the ordinary `binary_expression` rule.
+- **TypeScript** (`complexity/typescript.rs`) reuses
+  `javascript::DECISIONS`. Its boundary list adds `function_signature`,
+  `method_signature`, `abstract_method_signature`,
+  `abstract_class_declaration`, `interface_declaration`,
+  `type_alias_declaration`, `enum_declaration`, `internal_module` and
+  `module` (R6). `conditional_type`, `as`, `satisfies` and `!` match no
+  rule, so they contribute 0. This is one file per language, with the
+  decision list shared rather than duplicated.
+- **`EXTRACTOR_REVISION` = "28".** **Departure from plan rule 7** ("not per
+  language in this plan's own commits"): the spec (line 315) says any later
+  change to supported rules bumps the revision. The repo rule (`file/mod.rs`
+  doc, skill) says repairs on an unreleased branch bump too. A local cache
+  written at revision 27 would otherwise keep serving `cyclomatic: null` for
+  JS/TS functions, and the new cache-upgrade test proves that payload is
+  servable under the current key. The Phase 2 handoff asked for the same
+  bump.
+
+### Requirement → test mapping
+
+| Requirement | Test |
+|---|---|
+| JS rule table, exact totals per rule: if/else-if, `&&`/`\|\|`/`??`, `&&=`/`\|\|=`/`??=`, other compound and bitwise ops 0, `?.` 0, switch arms (grouped, with `default`, bodyless last, comment between labels), `catch` with and without a binding, `finally` 0, `for(;;)` and `for(init;;step)` 0, counted `for`, for-in/of, `while`, `do`, labeled loop + `continue` | `symbols_metrics::javascript_cyclomatic_follows_the_counting_rules` (`JAVASCRIPT_CYCLOMATIC`) |
+| Empty, block and expression bodies; `async` arrow; arrow returning arrow (outer 1) | same, rows `ternary`/`constant`/`block`/`curried`, `empty` |
+| Nested named and anonymous callables, nested class with a field initializer, object-literal values counted and methods pruned (R5), constructors/getters/static methods measured | same, rows `outer`, `literal`, `K` |
+| Zero-contribution look-alikes: comments, strings, template text, parameter defaults; a template substitution counts | same, rows `lookAlikes`, `templated` |
+| JSX `&&` | same, row `view` |
+| TS: everything JS has plus `conditional_type` (in the body and the return type), `as`/`satisfies`/`!` 0; interface/alias/enum/abstract class/namespace boundaries (R6); parameter-property constructor; bodyless abstract method `None` | `symbols_metrics::typescript_cyclomatic_follows_the_counting_rules` (`TYPESCRIPT_CYCLOMATIC`) |
+| Each row parses cleanly; LF = CRLF; metrics-only = complete index; non-callables `None` | `assert_cyclomatic_rows` (shared by the three language tests) |
+| Malformed counted body → `None` with the other metrics intact; malformed nested body leaves outer and sibling measured | `symbols_metrics::cyclomatic_is_unavailable_only_for_a_malformed_counted_body` (`MALFORMED_BODIES`: Rust, JS, TS; renamed from the Rust-only test) |
+| Inner callable left out by the query: the outer total is unchanged | `symbols_metrics::an_outer_total_does_not_depend_on_selecting_its_nested_callables` (Rust, JS, TS; `scopes([Item])` against the complete index) |
+| 16-row matrix: `cyclomatic` column, Measured for Rust/JS/TS with fixture values, `NO_CYCLOMATIC` ("no reviewed cyclomatic counting rules") for the other 13; measured ⇔ callable with a body in a reviewed language | `symbols_metrics::metrics_match_each_fixture_function` (`METRICS_MATRIX`), `symbols_coverage::every_language_has_one_row_in_each_report_matrix` |
+| Unsupported languages go through the no-rules path, with no fallback | `complexity::tests::languages_without_reviewed_rules_have_no_value` (Go), plus the matrix sweep |
+| Revision-27 entry (JS/TS `cyclomatic: null`) is not served after the bump; the same payload under the current key is servable (control) | `cache_upgrade::entry_from_extractor_revision_twenty_seven_is_not_served_after_the_ecmascript_rules` (JS and TS) |
+
+**Mutation checks** (each was reverted afterwards). Every one failed the
+expected test:
+
+- `Arm` → `Always`: JS and TS fail.
+- `for_statement` → `Always`: JS and TS fail.
+- `??` dropped: JS and TS fail.
+- `catch_clause` dropped: JS and TS fail.
+- `class_declaration` dropped from the JS boundaries: JS fails.
+- `method_definition` dropped from the JS boundaries: JS fails.
+- `internal_module`, `enum_declaration` or `arrow_function` dropped from the
+  TS boundaries: TS fails.
+
+**Extractor limits found while writing rows.** These are not counting
+issues, and the rows were removed. JS generator declarations
+(`function* g`), function expressions bound to a `const`, and TS
+`declare function` produce no Function record, so they cannot be rows.
+That is recorded in the skill.
+
+All new tests are L1, in the declared `tests/l1` binary (`symbols_metrics`)
+and the CLI `symbols` binary (`cache_upgrade`). No name carries a tier
+marker, and no feature gate is involved.
+
+### Goldens
+
+`symbols.json` and `symbols.jsonl` were regenerated (`HUG_UPDATE_GOLDEN=1`).
+I compared them with `sed 's/rev\.27/rev.28/g'` of the previous files: the
+only differences are the revision strings. No `cyclomatic` key appears,
+because those reports do not request Metrics.
+
+### Docs and comment drift
+
+- `docs/symbol-schema-design.md`: said "every language but Rust today" and
+  listed only Rust decisions. It now lists the JS/TS decisions and names all
+  three languages. The full counting-rules doc is Phase 5.
+- `docs/cache-design.md`: `rev.27` → `rev.28`.
+- `symbols_metrics.rs` module doc: it named only `RUST_CYCLOMATIC` and three
+  metrics. Updated.
+- Skill: the table list, the `Counts` variants, the "only Rust has one"
+  statement, the test names and the revision list (27 is now stale, 28 is
+  current).
+
+### Gates run (2026-10-05)
+
+- `just test` (tree-hugger): 1096 tests, 1096 passed.
+- `just lint` (tree-hugger): passes.
+- OS: no cross-check was run. Phase 3 adds only rule tables over the parse
+  tree and tests that write temp files through existing helpers (CRLF is
+  covered explicitly). No path, I/O or platform API is new. CI covers Linux
+  and macOS on the pull request and Windows on `main`.
+
