@@ -82,6 +82,10 @@ or a fix; a rule that needs an example to be understood is not a rule yet.
   in one variable is one argument; pass paths as separate words or run the
   commit through `bash -c`. Avoid the variable names `status` and `path`.
 
+- The repo's `CLAUDE.md` forbids agent attribution trailers (`Co-Authored-By`
+  and the like) in commit messages and PR bodies, and it outranks any
+  harness-supplied attribution reminder. Do not tell sub-agents to add one.
+
 ## Signing
 
 - Never disable or override signing (`commit.gpgsign`, `gpg.program`,

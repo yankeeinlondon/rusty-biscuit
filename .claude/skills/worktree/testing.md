@@ -10,6 +10,9 @@ the `rust-testing` skill; graph tests are in [git-graph.md](git-graph.md#tests).
 - Test origins use `example.invalid` hosts so a user `insteadOf` rule cannot
   rewrite them.
 - Tests inject the source, so they count requests with a stub.
+- Build fixture repositories with the shared helpers in
+  [fixtures.md](fixtures.md) (config written to the file, `fast-import`,
+  template copies), not one `git` process per setting or commit.
 - `wt` colors stderr even when captured; set `NO_COLOR=1` when asserting text.
 - Every fixture that can spawn a detached worker must release it in a drop guard
   (`list_prs::ReleaseOnDrop`), so a failed assertion still closes the
@@ -97,16 +100,16 @@ The variable turns a missing-backend skip into a failure.
 - `seed_empty_pr_store(age)` isolates the live-head path from PR requests;
   `isolated_cache_file(home, xdg, real)` resolves a store path the way `wt` will.
 
-### The pipeline overlap seam (`list/tests.rs`, `list/tests/pipeline.rs`)
+### The pipeline overlap seam (`lib/src/list/tests.rs`, `lib/src/list/tests/pipeline.rs`)
 
-- `tests::overlap` is a `#[cfg(test)]` seam inside `gather_listing`: each
+- `tests::overlap` is a `#[cfg(test)]` seam inside `worktree::list::gather`: each
   local gather reports `arrive`/`finished`, the calling thread
   `remote_finished`. Without `overlap::Installed` it does nothing. Modes:
   `Rendezvous` (list and graph each wait for the other to start), `Observe`
   (record only), `HoldListUntilRemote` (the list gather starts after the
   wait). Every wait is bounded (10 s), so a non-overlapping pipeline fails
   instead of hanging; no sleeps or elapsed-time asserts.
-- `pipeline.rs` drives `gather_listing` with a **scripted launch**: it runs on
+- `pipeline.rs` drives `gather` with a **scripted launch**: it runs on
   the calling thread inside the wait, so blocking in it (on
   `overlap::await_both_started` / `await_both_finished`) holds the worker's
   outcome. Released, it runs its ref `moves` (as a fetch would), then records
@@ -114,16 +117,25 @@ The variable turns a missing-backend skip into a failure.
   (`finishes: false`) for timeout cases. `Repo` removes every
   `<repo hash>.*` cache file on drop.
 - Assert through the returned `Listing` and counters: `git status` walks,
-  `for-each-ref` reads, `merge-tree` calls (via `recorder`), and the
-  `regather` / `checkout status refresh` perf stage names. Report shape is
-  asserted with `tests::perf_shape` / `perf_group` and
-  `tests::assert_perf_reconciles` (exact sum, no child longer than its
-  group) over `PerfCollector::build_perf_tree`.
+  `for-each-ref` reads, `merge-tree` calls (via `recorder`), and
+  `Listing::regathered`; never a timing. The timing shape per path, the
+  `git_calls` coverage, and timings on/off doing the same work live in
+  `pipeline/timings.rs` (stage paths, decoded through `Timings::from_json`).
   `assert_describes_the_final_state` compares caption, target, tree, counts,
   dirtiness, graph, and verbose labels with a from-scratch gather after the
   run.
 - Fail the Nth ref read with `recorder::fail_matching` plus an `AtomicUsize`
   (`for-each-ref` is the only call it matches in a listing).
+- `recorder` and `git::calls` are different counts. The recorder logs every
+  **requested** call into one process-global log, *before* spawning, so an
+  injected failure or a failed spawn is still logged; it needs `count-git`
+  (or `cfg(test)`) and `#[serial_test::serial]`. `calls::CallScope` counts
+  only **started** processes, per thread, is always compiled, and needs no
+  serialization. With no injection and every spawn succeeding, the two agree:
+  `listing::repo_tests::a_counting_scope_sees_every_call_of_a_threaded_local_gather`
+  asserts exactly that, which is how a missing `TaskHandle` at a spawn site
+  shows up. `live_remote::run_transport` is the exception: its own Git
+  process is never recorded, so it counts one more than the recorder.
 - `run_pipeline_gathers_the_graph_while_list_gather_is_unfinished` has no
   `origin`: it proves list-versus-graph overlap only. Overlap with the wait is
   `pipeline::the_local_gathers_start_while_the_worker_outcome_is_held`.
@@ -135,6 +147,41 @@ connection, then `close_held()` and wait until neither lock is `Contended`
 **and** no `internal-refresh` process runs (`MixedFixture::wait_until_unlocked`,
 used by `list_prs::finish_worker`). A free PR lock alone no longer proves the
 worker is gone.
+
+To prove a teardown *waits* (rather than racing a worker that happens to
+exit quickly), hold the reply until teardown is waiting:
+`MixedFixture::on_teardown_wait(nudge)` runs `nudge` before each probe its
+`Drop` makes, and a `FakeGitea::before_reply` that blocks on the flag the
+nudge sets answers only then
+(`list_prs::a_failed_assertion_while_a_pr_request_is_held_still_reaps_the_worker_before_the_fixture_goes`).
+A teardown that skips the wait never releases the reply, so the worker
+outlives the fixture and the test fails. Never use a fixed sleep there.
+
+### Shortening a held listing's wait
+
+A listing whose worker is held past the wait would otherwise sit out the
+real 3 s. Set `WT_TEST_WAIT_BUDGET_MS` (`worktree_cli::env::TEST_WAIT_BUDGET_VAR`)
+on that one command: `list_prs::held(command)`,
+`remote_fixture::Fixture::list_within(budget)`. Seam details:
+[list-remote.md](list-remote.md#seams).
+
+- `HELD_WAIT` (300 ms): the worker is held before anything the listing
+  asserts could finish.
+- `STEP_WAIT` (1 s, `list_remote_head.rs`): one step must end inside the wait
+  while a later one is held. Examples: the check before a held fetch
+  (still pulling), or the second listing's contender exiting so it adopts.
+  At 300 ms these pass alone, but give them margin under suite load.
+- A listing that must see the worker *answer* (the second listing after a
+  release) keeps the real wait.
+- If the store is read after a short wait, synchronize on the held request
+  first (`gate.wait_for_runs(1)`, `origin.wait_for_requests`). With 300 ms
+  the worker may not have recorded its attempt by the time the listing
+  returns.
+- Keep `a_held_pr_request_with_nothing_stored_ends_at_the_budget_with_only_the_hint`
+  on the real 3 s path. Never set the variable in a `perf_` test: the
+  held-worker gates assert a wait of at least 3 s.
+- A release-profile test run ignores the variable. Those tests then pass
+  on the 3 s wait, only more slowly.
 
 ### Real-Git live-head proofs
 
@@ -157,7 +204,7 @@ worker is gone.
   can see zero workers under heavy host load (load average 40+): once 10 s
   pass from the worker's launch, its check deadline kills the held
   transport and the worker exits. A run near 10 s rather than the usual
-  3.4 s is load, not a regression; rerun before investigating.
+  1 s is load, not a regression; rerun before investigating.
 - Binary tests find receipts by prefix beside the store
   (`list_flags::receipts_beside`), since the wait deletes them.
 - Library transport tests reuse `live_remote::tests::Loopback` (the module is
@@ -168,24 +215,34 @@ worker is gone.
 
 Measurements: `worktree/docs/performance-testing.md`.
 
-- Read `--perf` rows with `perf_support::stage_from_perf` (whole-label match
-  at any depth; panics on a duplicate label) or `perf_rows` (label, depth,
-  duration). Never substring-match a row: the group
-  `remote wait ‖ local gather` contains its child's name. Give a new row a
-  label no other row shares.
-- An L1 test that bounds how long a held worker keeps `wt list` waiting reads
-  the `remote wait` row, not the whole command's elapsed time. The local
-  gather overlaps the wait and may outlast it, so a whole-command bound fails
-  under suite load without a wait regression (`list_prs.rs` held-request
-  tests). Whether the command returned while the worker is still held, that is,
-  never joined it, is proven by `.output()` returning, not by a duration.
-- `perf_support`'s own unit tests sit under a `perf_`-prefixed module, so they
-  run only in `just test-perf`; the L1 parser and report-shape tests are in
-  `cli/tests/perf_flag.rs`.
+- Run `wt list --perf=json` and read it with `perf_support::perf_timings`
+  (the final nonempty stderr line, LF or CRLF, prefix `WT_PERF_JSON `; never
+  earlier text), then `stage_at(&timings, &[Stage::…])` or `local_gather`.
+  Never read the human report: labels are display only.
+- **Functional tests never pass `--perf` or read a stage.** `list_prs.rs`'s
+  `list_with` runs plain `wt list`. A held worker's budget is proven twice
+  elsewhere: with a scripted clock in `lib/src/list/wait/tests.rs`
+  (`the_budget_ends_the_wait_…`), and by the real `[RemoteAndLocal,
+  RefreshWorker]` bound in `perf_pr_request.rs`. Do not add a whole-command
+  bound: the local gather overlaps the wait and outlasts it under suite load.
+  That the command returned without joining a held worker is proven by
+  `.output()` returning, not by a duration.
+- The reader's own tests (final line only, LF/CRLF, decoy records, a commit
+  subject that resembles the prefix, a pty capture) are L1 in
+  `cli/tests/perf_flag.rs`. Never put a `#[cfg(test)]` module in
+  `perf_support`: it compiles into every test binary that declares the
+  module, and its `perf_` path segment strands it in `just test-perf`.
+- The human report's layout is proven at L2 by `cli/tests/level2_list_perf.rs`
+  (`remote_fixture::Fixture`, local bare `origin`, so the worker's head check
+  is real and offline). It asserts structure only: connectors, `[n git]`,
+  `%` on sequential rows, `—` on concurrent and worker rows, the worker heading
+  without `%`, per-section aligned columns, and no wrapping at 80 and 120 (100 with
+  `TERM_PROGRAM=ghostty` for `graph history`). Exact rows, sub-ms remainders,
+  and over-attribution stay L1 (`perf::tests`, `human_report_at`).
 
 - `perf_pr_request::perf_list_meets_sla_with_a_stale_answer_and_a_failing_refresh`
   is the stale timing gate: reseeds a stale store per sample and asserts every
-  sample's foreground PR reads (`pr gather` + `pr reread`) < 300 ms (the 1 s full-command bound alone would hide a
+  sample's foreground PR reads (`origin_lookup` + `pr_cache_read`) < 300 ms (the 1 s full-command bound alone would hide a
   reintroduced wait).
 - `perf_a_held_live_head_check_costs_the_listing_only_its_wait`,
   `perf_a_held_fetch_costs_the_listing_only_its_wait`, and

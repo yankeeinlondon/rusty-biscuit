@@ -35,17 +35,24 @@
 //! supersedes it; a replacement that cannot start, stops, times out, or exits
 //! without a receipt leaves it standing.
 //!
+//! With [`WaitRequest::timings`] each launch asks its worker to measure
+//! itself, and the report in that launch's receipt is kept in
+//! [`WaitEnd::worker_reports`]. It is taken from the receipt reads the wait
+//! makes anyway, so before the receipt is deleted; a report the wait has not
+//! seen by the time it ends is missing, never waited for.
+//!
 //! The core ([`wait`]) is pure over [`WaitEnv`], so tests script the stores,
-//! the receipt, the locks, and the clock.
+//! the receipt, the locks, and the clock. It draws nothing: a caller shows
+//! progress through the `on_phase` callback.
 
 use std::path::{Path, PathBuf};
 use std::process::Child;
 use std::time::{Duration, Instant};
 
-use biscuit_terminal::components::spinner::{Spinner, SpinnerHandle};
-use worktree::pull_requests::{StoredPublication, pr_lock_held, stored_publication, unix_now};
-use worktree::remote_head::{
-    ATTEMPT_MAX_AGE, Attempt, CredentialEvidence, FallbackReason, HeadStatus, Phase, PrFailure, PrStatus, Receipt, StoreState,
+use crate::pull_requests::{StoredPublication, pr_lock_held, stored_publication, unix_now};
+use crate::timing::{LaunchReport, WorkerReport};
+use crate::remote_head::{
+    ATTEMPT_MAX_AGE, Attempt, CredentialEvidence, HeadStatus, Phase, PrFailure, PrStatus, Receipt, StoreState,
     load_receipt, new_attempt_id, read_store, receipt_path_beside, refresh_lock_held,
 };
 
@@ -55,13 +62,13 @@ pub const ORDINARY_BUDGET: Duration = Duration::from_secs(3);
 /// fetch, and publication allowance.
 pub const FORCED_BUDGET: Duration = ATTEMPT_MAX_AGE;
 const POLL_INTERVAL: Duration = Duration::from_millis(25);
-/// The spinner stays hidden this long, so a quick answer never flashes it.
-const SPINNER_DELAY: Duration = Duration::from_millis(150);
 
 /// What the launched worker is asked to do.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LaunchArgs {
     pub attempt: String,
+    /// Measure the attempt into its receipt's `durations`.
+    pub timings: bool,
 }
 
 /// A launched worker, polled for exit and never joined or killed.
@@ -100,6 +107,8 @@ pub struct WaitRequest<'a> {
     /// nothing, and a head attempt held for another origin or branch.
     pub force: bool,
     pub budget: Duration,
+    /// Ask each launched worker for its timings ([`WaitEnd::worker_reports`]).
+    pub timings: bool,
 }
 
 /// Everything the wait reads, and how its time passes.
@@ -138,6 +147,10 @@ pub struct WaitEnd {
     pub pr_credentials: CredentialEvidence,
     /// The budget ran out before both halves had a result.
     pub timed_out: bool,
+    /// One report per launch, in launch order, with
+    /// [`WaitRequest::timings`]; otherwise empty. A launch whose receipt was
+    /// not read before the wait ended is [`LaunchReport::Missing`].
+    pub worker_reports: Vec<WorkerReport>,
 }
 
 /// What the wait learned of the followed head attempt.
@@ -186,9 +199,17 @@ pub enum PrEnd {
 /// a result retained from a replaced launch, plus a finished head can end the
 /// wait before the last worker writes its receipt. An adopted attempt's
 /// receipt belongs to its own run.
-pub fn wait(request: WaitRequest<'_>, env: &dyn WaitEnv, launch: WorkerLaunch, on_phase: &mut dyn FnMut(Phase)) -> WaitEnd {
+///
+/// `launch` is a [`WorkerLaunch`], or a closure around one (a caller timing
+/// each launch).
+pub fn wait(
+    request: WaitRequest<'_>,
+    env: &dyn WaitEnv,
+    mut launch: impl FnMut(&Path, &LaunchArgs) -> std::io::Result<WorkerHandle>,
+    on_phase: &mut dyn FnMut(Phase),
+) -> WaitEnd {
     let mut launched = Vec::new();
-    let end = launch_and_follow(request, env, launch, on_phase, &mut launched);
+    let end = launch_and_follow(request, env, &mut launch, on_phase, &mut launched);
     for attempt_id in &launched {
         env.discard_receipt(attempt_id);
     }
@@ -199,7 +220,7 @@ pub fn wait(request: WaitRequest<'_>, env: &dyn WaitEnv, launch: WorkerLaunch, o
 fn launch_and_follow(
     request: WaitRequest<'_>,
     env: &dyn WaitEnv,
-    launch: WorkerLaunch,
+    launch: &mut dyn FnMut(&Path, &LaunchArgs) -> std::io::Result<WorkerHandle>,
     on_phase: &mut dyn FnMut(Phase),
     launched: &mut Vec<String>,
 ) -> WaitEnd {
@@ -218,23 +239,30 @@ fn launch_and_follow(
         pr_only: false,
         head_retained: None,
         pr_retained: None,
+        reports: Vec::new(),
     };
-    loop {
+    let end = loop {
         let Some(token) = env.new_attempt_id() else {
-            return follow.unavailable();
+            break follow.unavailable();
         };
         let launched_at = env.unix_now();
-        let mut worker = match launch(request.main, &LaunchArgs { attempt: token.clone() }) {
+        let args = LaunchArgs { attempt: token.clone(), timings: request.timings };
+        let mut worker = match launch(request.main, &args) {
             Ok(handle) => {
                 launched.push(token.clone());
+                if request.timings {
+                    let launch_index = u32::try_from(follow.reports.len()).unwrap_or(u32::MAX);
+                    follow.reports.push(WorkerReport { launch_index, attempt_id: token.clone(), report: LaunchReport::Missing });
+                }
                 handle
             }
-            Err(_) => return follow.unavailable(),
+            Err(_) => break follow.unavailable(),
         };
         if let Some(end) = follow.run(&mut worker, &token, launched_at) {
-            return end;
+            break end;
         }
-    }
+    };
+    WaitEnd { worker_reports: follow.reports, ..end }
 }
 
 struct Follow<'r, 'e> {
@@ -261,6 +289,8 @@ struct Follow<'r, 'e> {
     /// The PR result an earlier launch's receipt reported, kept while a head
     /// retry runs the PR half again.
     pr_retained: Option<PrEnd>,
+    /// [`WaitEnd::worker_reports`]: the last entry is the current launch's.
+    reports: Vec<WorkerReport>,
 }
 
 /// The PR half's state at one poll.
@@ -293,6 +323,7 @@ impl Follow<'_, '_> {
             }
             // Always our own launched id, even while following another's.
             let receipt = self.env.receipt(&ours);
+            self.keep_report(receipt.as_ref());
 
             let seen = self.last.as_ref().filter(|attempt| attempt.id == followed);
             let mut head = seen.filter(|attempt| attempt.outcome.is_some()).cloned().map(HeadEnd::Finished);
@@ -341,7 +372,13 @@ impl Follow<'_, '_> {
 
             match (head, prs) {
                 (Some(head), Some(prs)) => {
-                    return Some(WaitEnd { head, prs, pr_credentials: self.pr_credentials.clone(), timed_out: false });
+                    return Some(WaitEnd {
+                        head,
+                        prs,
+                        pr_credentials: self.pr_credentials.clone(),
+                        timed_out: false,
+                        worker_reports: Vec::new(),
+                    });
                 }
                 (head, prs) => {
                     if head.is_some() && !self.pr_only {
@@ -363,11 +400,22 @@ impl Follow<'_, '_> {
                             prs: prs.unwrap_or(unresolved),
                             pr_credentials: self.pr_credentials.clone(),
                             timed_out: true,
+                            worker_reports: Vec::new(),
                         });
                     }
                 }
             }
             self.env.sleep(POLL_INTERVAL);
+        }
+    }
+
+    /// Keeps the current launch's report from `receipt`, the first time one
+    /// is there: a receipt is written once, so a later read says the same.
+    fn keep_report(&mut self, receipt: Option<&Receipt>) {
+        if let (Some(entry), Some(receipt)) = (self.reports.last_mut(), receipt)
+            && entry.report == LaunchReport::Missing
+        {
+            entry.report = receipt.durations.clone();
         }
     }
 
@@ -381,6 +429,7 @@ impl Follow<'_, '_> {
             prs,
             pr_credentials: self.pr_credentials.clone(),
             timed_out: false,
+            worker_reports: Vec::new(),
         }
     }
 
@@ -519,46 +568,6 @@ fn reported(status: &PrStatus) -> Option<PrEnd> {
         PrStatus::Ignored => Some(PrEnd::Ignored),
         PrStatus::Unsupported => Some(PrEnd::Unsupported),
         PrStatus::Contended => None,
-    }
-}
-
-/// The spinner's text for `phase`.
-pub fn phase_text(phase: Phase) -> &'static str {
-    match phase {
-        Phase::CheckingFallback { reason: FallbackReason::NoKey | FallbackReason::NotVisible } => {
-            "no API key, using fallback method"
-        }
-        Phase::CheckingFallback { reason: FallbackReason::RateLimited } => "rate limited, using fallback method",
-        Phase::Fetching => "pulling remote updates",
-        Phase::Checking | Phase::CheckingFallback { .. } => "updating",
-    }
-}
-
-/// The spinner shown while waiting; it draws only when its output is a
-/// terminal, after [`SPINNER_DELAY`].
-pub struct Progress {
-    spinner: SpinnerHandle,
-}
-
-impl Progress {
-    pub fn on_stderr() -> Self {
-        Self { spinner: Spinner::new(phase_text(Phase::Checking)).with_delay(SPINNER_DELAY).start_on_stderr() }
-    }
-
-    #[cfg(test)]
-    pub fn on(writer: impl std::io::Write + Send + 'static, is_terminal: bool) -> Self {
-        Self {
-            spinner: Spinner::new(phase_text(Phase::Checking)).with_delay(SPINNER_DELAY).start_on(writer, is_terminal),
-        }
-    }
-
-    pub fn show(&self, phase: Phase) {
-        self.spinner.set_text(phase_text(phase));
-    }
-
-    /// Clears the spinner's line, if it drew one.
-    pub fn finish(self) {
-        self.spinner.finish();
     }
 }
 

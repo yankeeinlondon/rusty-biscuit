@@ -7,7 +7,9 @@
 //! `wt internal-refresh <main>` as a direct child first, to know the store
 //! before a listing reads it. An [`UploadPackGate`] holds one `upload-pack`
 //! (the check's `ls-remote`, or the fetch) to prove the rows rendered while
-//! the worker is still working.
+//! the worker is still working. A listing whose worker is held past its
+//! wait cuts that wait to [`HELD_WAIT`] or [`STEP_WAIT`]: the rows it
+//! proves are the same at any budget the held step outlasts.
 
 mod perf_support;
 mod remote_fixture;
@@ -22,6 +24,17 @@ use perf_support::{
 use remote_fixture::{Fixture, UploadPackGate, WORKER_WAIT, assert_checked_now};
 use serial_test::serial;
 use worktree::remote_head::{refresh_receipt_path, remote_head_lock_path};
+use worktree_cli::env::TEST_WAIT_BUDGET_VAR;
+
+/// The wait for a listing whose worker is held before anything the listing
+/// asserts could finish.
+const HELD_WAIT: Duration = Duration::from_millis(300);
+
+/// The wait for a listing whose worker must finish one step (a check, or a
+/// contender's exit) before the deadline while a later step is held: three
+/// times the shortest wait these listings pass with in isolation, as margin
+/// for suite load.
+const STEP_WAIT: Duration = Duration::from_secs(1);
 
 #[test]
 #[serial]
@@ -188,8 +201,11 @@ fn a_check_still_running_at_the_deadline_is_still_checking_and_the_next_run_show
     let gate = UploadPackGate::install(&fixture, 0);
 
     let started = Instant::now();
-    let caption = fixture.list();
+    let caption = fixture.list_within(HELD_WAIT);
     let elapsed = started.elapsed();
+    // The attempt is recorded before its request, so once the held
+    // `upload-pack` runs the store shows it, however short the wait was.
+    gate.wait_for_runs(1);
 
     assert!(
         caption.contains(
@@ -198,7 +214,7 @@ fn a_check_still_running_at_the_deadline_is_still_checking_and_the_next_run_show
         "the previous answer stays usable and dated: {caption}"
     );
     assert!(caption.contains("running this command again will provide updated metrics"), "the hint: {caption}");
-    assert!(elapsed < Duration::from_secs(5), "bounded by the 3 s wait: {elapsed:?}");
+    assert!(elapsed < Duration::from_secs(5), "bounded by its wait, not the held check: {elapsed:?}");
     assert_eq!(fixture.stored_document()["attempt"]["phase"]["kind"], "checking");
     assert!(fixture.stored_document()["attempt"]["outcome"].is_null(), "still running");
 
@@ -218,7 +234,8 @@ fn a_fetch_still_running_at_the_deadline_is_still_pulling_and_publishes_after_th
     let pushed = fixture.commit_and_push("second");
     let gate = UploadPackGate::install(&fixture, 1);
 
-    let caption = fixture.list();
+    // The check must finish inside the wait for the row to say "pulling".
+    let caption = fixture.list_within(STEP_WAIT);
 
     // One coherent local snapshot: the tracking ref as it was, compared as
     // such.
@@ -285,11 +302,12 @@ fn a_second_listing_adopts_the_running_attempt_and_asks_origin_nothing() {
 
     let mut first = KillOnDrop::spawn({
         let mut command = fixture.wt(&fixture.main);
-        command.arg("list");
+        command.arg("list").env(TEST_WAIT_BUDGET_VAR, HELD_WAIT.as_millis().to_string());
         command
     });
     gate.wait_for_runs(1);
-    let caption = fixture.list();
+    // Adoption needs this listing's own contender to exit inside the wait.
+    let caption = fixture.list_within(STEP_WAIT);
 
     assert!(caption.contains("still checking in the background"), "adopted, not failed: {caption}");
     assert!(!caption.contains("couldn't check origin"), "the contender is no finished check: {caption}");
@@ -455,7 +473,7 @@ fn a_failed_assertion_while_upload_pack_is_held_still_reaps_the_worker_before_th
     let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let fixture = Fixture::new();
         let gate = UploadPackGate::install(&fixture, 0);
-        let caption = fixture.list();
+        let caption = fixture.list_within(HELD_WAIT);
         assert!(caption.contains("still checking in the background"), "{caption}");
         gate.wait_for_runs(1);
         workers = refresh_workers(&fixture.main).iter().map(|worker| worker.pid).collect();

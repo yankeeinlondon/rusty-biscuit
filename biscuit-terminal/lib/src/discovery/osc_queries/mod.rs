@@ -7,8 +7,9 @@
 //!
 //! Color detection uses a cascading fallback chain:
 //!
-//! 1. **Actual OSC query** (Unix only, supported terminals) - Most accurate,
-//!    sends escape sequence and parses response with timeout handling
+//! 1. **Actual OSC query** (Unix only, supported terminals) - Most accurate.
+//!    The query is followed by a DA1 sentinel and bounded by a silence budget;
+//!    see `docs/discovery/terminal-queries.md` for the cost contract
 //! 2. **`COLORFGBG` environment variable** - Set by some terminals with
 //!    foreground/background color indices
 //! 3. **Terminal application defaults** - Known default colors for detected
@@ -96,10 +97,10 @@ pub fn bg_color() -> Option<RgbValue> {
 
 /// Query foreground/text color via OSC 10 heuristics.
 ///
-/// Like [`bg_color`], the result is cached per-process: the OSC 10 query
-/// opens `/dev/tty`, toggles raw mode, and polls with a timeout, so repeated
-/// `Terminal` constructions would otherwise each pay a full tty round-trip.
-/// The explicit [`text_color_with_timeout`] path stays uncached.
+/// Like [`bg_color`], the result is cached per-process, and the live OSC 10
+/// query shares one round trip with OSC 11, so repeated `Terminal`
+/// constructions cost the terminal a single exchange. The explicit
+/// [`text_color_with_timeout`] path stays uncached.
 pub fn text_color() -> Option<RgbValue> {
     *TEXT_COLOR_CACHE.get_or_init(|| query::query_osc_color(10))
 }
