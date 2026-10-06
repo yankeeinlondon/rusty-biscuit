@@ -201,8 +201,11 @@ past the branch point is reviewed for constraints but records no receipt —
 the receipt requires an ancestor base — and CI calculates scope itself. A
 target branch the same push also updates is reviewed in both states it can
 be in (its current tip and the incoming revision), and the receipt binds the
-current tip; a target the push deletes blocks that update. CI's
-scope job runs `local_evidence.py scope-verify`
+current tip; a target the push deletes blocks that update. A pull request
+labeled `ci:all-os` never consults the receipt: it is planned for the
+event's own environments, so it cannot stand in for every environment, and
+the summary's `scope source` reads `CI (ci:all-os plans every environment)`.
+Otherwise CI's scope job runs `local_evidence.py scope-verify`
 first; on an exact match it emits the carried documents as the plan and the
 policy artifact **without running the planner**, and on any miss —
 `scope-missing`, `scope-schema`, `scope-head-mismatch`, `scope-tree-mismatch`,
