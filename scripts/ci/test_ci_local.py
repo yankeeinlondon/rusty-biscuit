@@ -1801,6 +1801,7 @@ class WorkflowScopeStepTests(unittest.TestCase):
         expect_failure: bool = False,
         verifier_failure: str | None = None,
         overlay_failure: bool = False,
+        all_environments: bool = False,
         seed=None,
     ) -> StepRun:
         """The job's run steps through the scope step, for one event, over a
@@ -1823,7 +1824,9 @@ class WorkflowScopeStepTests(unittest.TestCase):
         `overlay_failure` breaks only the planner's `--apply-to` form: it
         clobbers the `--plan-out` target and exits 7, so a step that let the
         overlay write straight into `resolved-plan.json` would hand the
-        fan-out a corrupt plan.
+        fan-out a corrupt plan. `all_environments` is the `ci:all-os` label on
+        the pull request (`ALL_ENVIRONMENTS`, `true` or `false` as GitHub
+        renders it).
         """
         with tempfile.TemporaryDirectory(prefix="ci-scope-step-") as temporary:
             root = Path(temporary).resolve()
@@ -1913,6 +1916,7 @@ class WorkflowScopeStepTests(unittest.TestCase):
                     "PUSH_HEAD": head,
                     "PR_BASE": base if event == "pull_request" else "",
                     "PR_HEAD": head if event == "pull_request" else "",
+                    "ALL_ENVIRONMENTS": "true" if all_environments else "false",
                 }
             )
             if push_base == "FIRST":
@@ -2179,6 +2183,16 @@ class WorkflowScopeStepTests(unittest.TestCase):
         # projecting the carried plan yields, so a hit with no evidence and a
         # hit with evidence read the same shape.
         self.assertEqual(receipt["scope"], legacy_scope_document(receipt["plan"]))
+
+    def test_the_all_os_label_plans_every_environment_despite_a_matching_receipt(self) -> None:
+        # A receipt is planned for the event's own environments, so it can
+        # never stand in for `ci:all-os`; on PR #112 one did, and Windows and
+        # WSL2 were deferred although the label was set.
+        run = self.run_step("pull_request", scope_receipt=self.local_scope_receipt, all_environments=True)
+        self.assertEqual("CI (ci:all-os plans every environment)", run.scope_source())
+        self.assertEqual(1, len(run.planner_calls), run.planner_calls)
+        self.assertIn("--all-environments", run.planner_calls[0])
+        self.assertEqual([], run.plan.get("deferred_environments", []), "nothing deferred")
 
     def test_a_receipt_for_another_base_falls_back_with_its_code(self) -> None:
         run = self.run_step("push", push_base="FIRST", scope_receipt=self.local_scope_receipt)

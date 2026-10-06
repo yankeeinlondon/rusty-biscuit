@@ -79,8 +79,9 @@ environment lookup: an adopted worker may have inherited another environment.
 ## PR store (`pull_requests`, format 6)
 
 - File: `<repo hash>.prs.json`, bound to `origin_digest`
-  (`biscuit_hash::blake3_hash` of the exact `origin_url(main)` value, i.e.
-  `git remote get-url origin` run against the main checkout). The raw URL is
+  (`biscuit_hash::blake3_hash` of the exact `origin_url(main)` value: what
+  `git remote get-url origin` prints for the main checkout, read in-process by
+  `git_metadata::origin_url`, with that command as the fallback). The raw URL is
   never stored.
 - Every successful write stamps a new random `publication` id (`new_attempt_id`,
   32 lowercase hex) beside `fetched_at` (whole seconds, can repeat), and the

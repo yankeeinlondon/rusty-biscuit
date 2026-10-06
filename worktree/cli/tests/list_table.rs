@@ -65,7 +65,9 @@ struct Example {
 fn status(dir: &str, branch: Option<&str>, is_main: bool, is_current: bool, dirty: DirtyStatus) -> WorktreeStatus {
     WorktreeStatus {
         entry: WorktreeEntry {
-            path: PathBuf::from("/code/wts").join(dir),
+            // Spelled as `git worktree list` reports it on every OS; `join`
+            // would put a `\` before `dir` on Windows.
+            path: PathBuf::from(format!("/code/wts/{dir}")),
             branch: branch.map(str::to_string),
             head_sha: Some("a1b2c3d4e5f60718293a4b5c6d7e8f9012345678".to_string()),
             is_main,

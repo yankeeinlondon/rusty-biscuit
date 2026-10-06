@@ -59,6 +59,13 @@ facts and traps, not user docs.
   Without it the thread's Git calls silently drop out of a `git_calls` count
   (scopes are per thread). Any new helper that starts Git calls
   `calls::started()` once, after a successful spawn, or uses `calls::output`.
+- **Read repository metadata through `git_metadata`, not a git process.**
+  Origin URL, default branch, branch-name validity, `core.sshCommand`, and ref
+  targets are read in-process with `gix`, falling back to git only when `gix`
+  cannot read the repository. A git process costs ~47 ms on Windows, and a
+  dozen redundant ones once pushed the refresh worker past `wt list`'s 3 s
+  wait there. A new read gets a parity test against the git command it
+  replaces ([performance-testing](../../../worktree/docs/performance-testing.md#git-processes)).
 - **Tests never reach the network.** Use the stand-ins in
   [testing.md](testing.md) and `example.invalid` origins.
 - **The graph never substitutes what it cannot draw.** It marks the plan

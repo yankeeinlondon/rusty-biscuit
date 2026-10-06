@@ -338,6 +338,15 @@ fn a_missing_entry_named_with_delimiter_like_text_gets_its_exact_remove_command(
 
     assert!(output.status.success(), "wt list should succeed: {output:?}");
     let stderr = String::from_utf8_lossy(&output.stderr);
+    // Windows refuses `<` and `>` in a path (os error 123). That is not
+    // evidence of absence, so the entry is uninspectable rather than gone,
+    // and the markup must still read literally.
+    if cfg!(windows) {
+        let words = stderr.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(words.contains(&format!("{name}: Git can't read this worktree:")), "{stderr}");
+        assert!(words.contains("couldn't be inspected"), "{stderr}");
+        return;
+    }
     assert!(stderr.contains(&format!("{name}: its directory is gone;")), "{stderr}");
     assert!(stderr.contains(&format!("wt remove '{name}'")), "{stderr}");
 }

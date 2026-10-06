@@ -79,7 +79,7 @@ pub enum FfResult {
 /// fast-forward, including a needed move whose holder Git marks `prunable`. An invalid branch name is [`FfRefusal::Other`] with no git
 /// mutation.
 pub fn fast_forward_default(main: &Path, default: &str) -> FfResult {
-    if !is_valid_branch_name(main, default) {
+    if !is_valid_branch_name(default) {
         return FfResult::Refused(FfRefusal::Other);
     }
     // An unavailable holder refuses only a needed move, so a branch already

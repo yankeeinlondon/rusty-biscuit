@@ -590,7 +590,7 @@ mod tests {
 
     #[test]
     #[serial_test::serial]
-    fn recorder_captures_default_branch_call() {
+    fn default_branch_starts_no_git_process() {
         let repo = temp_repo();
         let _guard = DirGuard::enter(repo.path());
 
@@ -599,14 +599,7 @@ mod tests {
         let calls = recorder::finish_recording();
 
         assert!(result.is_ok(), "default_branch should succeed: {result:?}");
-
-        let symbolic_ref_count = recorder::count_matching(&calls, |args| {
-            args.first().map(String::as_str) == Some("symbolic-ref")
-        });
-        assert_eq!(
-            symbolic_ref_count, 1,
-            "expected exactly one symbolic-ref call, got {calls:?}"
-        );
+        assert!(calls.is_empty(), "read in-process, got {calls:?}");
     }
 
     #[test]
