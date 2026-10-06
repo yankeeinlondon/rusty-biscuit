@@ -171,6 +171,99 @@ docs_created_during_phase_7: []
 skills_files_updated_during_phase_7:
   - .claude/skills/tree-hugger/SKILL.md
   - .claude/skills/tree-hugger/api-reference.md
+source_files_during_phase_8:
+  - tree-hugger/cli/src/render.rs
+  - tree-hugger/cli/tests/symbols/outline.rs
+  - tree-hugger/cli/tests/symbols/main.rs
+  - tree-hugger/cli/tests/level2_declarations.rs
+  - tree-hugger/cli/tests/fixtures/golden/symbols.tree
+docs_updated_during_phase_8:
+  - tree-hugger/docs/symbol-reports.md
+  - tree-hugger/docs/type-relations.md
+  - tree-hugger/cli/README.md
+docs_created_during_phase_8: []
+skills_files_updated_during_phase_8:
+  - .claude/skills/tree-hugger/SKILL.md
+source_files_during_phase_9:
+  - tree-hugger/lib/src/file/tree_file.rs
+docs_updated_during_phase_9:
+  - tree-hugger/docs/symbol-kinds-and-visibility.md
+  - tree-hugger/docs/type-relations.md
+  - tree-hugger/docs/symbol-schema-design.md
+  - tree-hugger/README.md
+  - tree-hugger/lib/README.md
+  - tree-hugger/cli/README.md
+docs_created_during_phase_9: []
+skills_files_updated_during_phase_9:
+  - .claude/skills/tree-hugger/SKILL.md
+  - .claude/skills/tree-hugger/api-reference.md
+source_code:
+  - tree-hugger/lib/src/shared/schema_v2/types.rs
+  - tree-hugger/lib/src/shared/schema_v2/facets.rs
+  - tree-hugger/lib/src/shared/schema_v2/mod.rs
+  - tree-hugger/lib/src/file/mod.rs
+  - tree-hugger/lib/src/file/tree_file.rs
+  - tree-hugger/lib/src/file/extract/attributes.rs
+  - tree-hugger/lib/src/file/extract/flags.rs
+  - tree-hugger/lib/src/file/extract/metrics.rs
+  - tree-hugger/lib/src/cache/symbol_cache.rs
+  - tree-hugger/lib/src/cache/mod.rs
+  - tree-hugger/lib/src/analysis/mod.rs
+  - tree-hugger/lib/src/analysis/tests.rs
+  - tree-hugger/lib/src/god_files/analysis.rs
+  - tree-hugger/lib/tests/l1/cache_tests.rs
+  - tree-hugger/lib/tests/l1/symbols_adapter.rs
+  - tree-hugger/lib/tests/l1/symbols_cache.rs
+  - tree-hugger/lib/tests/l1/symbols_metrics.rs
+  - tree-hugger/lib/tests/l1/symbols_query.rs
+  - tree-hugger/cli/src/declarations.rs
+  - tree-hugger/cli/src/main.rs
+  - tree-hugger/cli/src/report.rs
+  - tree-hugger/cli/src/stats.rs
+  - tree-hugger/cli/tests/symbols/cache_robustness.rs
+  - tree-hugger/cli/tests/symbols/cache_upgrade.rs
+  - tree-hugger/cli/tests/symbols/report.rs
+  - tree-hugger/cli/tests/symbols/reports.rs
+  - tree-hugger/cli/tests/symbols/wiring.rs
+  - tree-hugger/cli/tests/fixtures/golden/symbols.json
+  - tree-hugger/cli/tests/fixtures/golden/symbols.jsonl
+  - tree-hugger/lib/src/file/extract/generics.rs
+  - tree-hugger/lib/src/file/extract/mod.rs
+  - tree-hugger/lib/src/error.rs
+  - tree-hugger/lib/tests/l1/symbols_generics.rs
+  - tree-hugger/lib/tests/l1/main.rs
+  - tree-hugger/lib/tests/l1/symbols_coverage.rs
+  - tree-hugger/lib/src/file/extract/modifiers.rs
+  - tree-hugger/lib/src/file/query.rs
+  - tree-hugger/lib/tests/l1/symbols_modifiers.rs
+  - tree-hugger/lib/tests/l1/symbols_flags.rs
+  - tree-hugger/lib/src/file/extract/classify.rs
+  - tree-hugger/lib/src/file/extract/relations.rs
+  - tree-hugger/lib/src/file/extract/rust_impl.rs
+  - tree-hugger/lib/src/file/tree_file/relations.rs
+  - tree-hugger/lib/src/file/tree_file/definitions.rs
+  - tree-hugger/lib/src/analysis/coverage.rs
+  - tree-hugger/lib/tests/l1/symbols_relations.rs
+  - tree-hugger/lib/tests/l1/symbols_kinds.rs
+  - tree-hugger/lib/tests/l1/symbols_owner_identity.rs
+  - tree-hugger/lib/tests/l1/symbols_shared_context.rs
+  - tree-hugger/lib/src/analysis/counters.rs
+  - tree-hugger/cli/src/render.rs
+  - tree-hugger/cli/tests/symbols/outline.rs
+  - tree-hugger/cli/tests/symbols/main.rs
+  - tree-hugger/cli/tests/level2_declarations.rs
+  - tree-hugger/cli/tests/fixtures/golden/symbols.tree
+documentation:
+  - tree-hugger/README.md
+  - tree-hugger/lib/README.md
+  - tree-hugger/cli/README.md
+  - tree-hugger/docs/cache-design.md
+  - tree-hugger/docs/symbol-kinds-and-visibility.md
+  - tree-hugger/docs/symbol-reports.md
+  - tree-hugger/docs/symbol-schema-design.md
+  - tree-hugger/docs/type-relations.md
+completed_phase: 9
+implemented: true
 ---
 
 # Implementation Log for 2026-10-06-symbol-type-relations (9 phases)
@@ -1474,3 +1567,234 @@ configuration changed; the record and cache readers are untouched.
   `symbols_relations.rs`, `symbols_shared_context.rs`, docs, skill, plan,
   log, spec). The frontmatter lists every file this phase touched,
   committed or not.
+
+## Phase 8
+
+### 8.1 Container-row inheritance (`cli/src/render.rs`)
+
+- `Renderer::outline_node` appends `Renderer::declared_bases(record)` after
+  the declaration and before the location: ` extends A, B; implements C`,
+  each entry's `SymbolRef::name` (written text) through `render::literal`,
+  in record order (= source order), empty lists omitted, lists joined by
+  `; `. Only `SymbolKind::is_type()` rows get it, so a Rust method's retained
+  trait relation and the `[in …]` context headings never show bases, and
+  `functions --tree` (no type rows) is unchanged. No row is ever added, so
+  selectors are not widened. It goes through the same `hanging_line` Prose,
+  so wrapping, plain output and OSC 8 links are unchanged; `classes`, the
+  flat listing, the table, `--count` and `--stats` are untouched.
+- **`--signatures full` deduplication is a per-source rule, not text
+  matching** (`header_writes(language, list)`). Probe over TS, Python, C++,
+  Go, Rust, Java, PHP and JS: every full header (`signature_text`) already
+  writes its declaration's base list, except two lists the extractor reads
+  elsewhere: a Rust type's `implements` (from `impl` blocks) and Go
+  interface `extends` (embeds in the body). A substring test was rejected:
+  `pub struct W<T: std::fmt::Display>` with `impl Display for W` would hide
+  `implements std::fmt::Display` because the bound repeats the text. When
+  C#/Swift/Scala (6.5–6.7) land, their lists come from the header, which is
+  the rule's default, so no change is needed unless a ruling reads them
+  elsewhere (Swift `extension X: P` conformances would be one: such entries
+  come from an extension, not `X`'s header, and `header_writes` must then
+  return `false` for Swift `implements` or split the rule by origin).
+- Short mode output: `class Square extends Base<number>; implements Shape,
+  Comparable<Square> [3:1]`; full: `class Square extends Base<number>
+  implements Shape, Comparable<Square> [3:1]` (header only); Rust full:
+  `pub struct W<T: std::fmt::Display> implements std::fmt::Display, Base`.
+
+### 8.2 Tests (`cli/tests/symbols/outline.rs`, new module of the `symbols` L1 binary)
+
+Requirement → test:
+
+| Requirement | Test |
+|---|---|
+| bases on `types --tree` and `symbols --tree` rows, source order, including a type with no displayed children; impl on `&Local` adds nothing | `type_rows_show_their_declared_bases_in_source_order` |
+| a Rust method's trait relation is not a heading; `[in &Local]` heading for an unresolved impl (the case Phase 7 flagged as uncovered) | same test (exact rows, and exactly four rows carry bases) |
+| `functions --tree` gains no type row; a `--name` selector adds no container or target | `functions_tree_adds_no_type_row_and_selectors_add_no_container_or_target` |
+| `full` does not repeat header lists but keeps Rust impl / Go body lists (including the bound-overlap case); `none` keeps bases | `signature_modes_keep_bases_without_repeating_the_header` |
+| sorting, `--plain` = `--format plain`, styled wrapping at `COLUMNS=40`, `<…>` stays text | `bases_follow_sorting_plain_output_and_wrapping` |
+| counts and stats gain no category | `counts_and_stats_gain_no_relation_category` |
+| `--json`/`--jsonl`/`--json-full` carry the same relations as the row; `metrics.lines` in the complete index (3, 1, null for a type); listings carry no metrics facet | `json_formats_carry_the_outline_relations_and_body_lines` |
+
+With `declared_bases` disabled, five of the six fail; the counts test is a
+guard and passes either way by design.
+
+### 8.3 Goldens
+
+Only `symbols.tree` changed, one row: `public class Panel { size: Size }
+implements Sized [9:8]` (multi `typescript.ts`). Reviewed: intended. JSON,
+JSONL, table, stats, plain and full-signature goldens are unchanged (no
+record changed in this phase; `EXTRACTOR_REVISION` stays 23, schema 4.1).
+Full-signature golden is a flat listing, so unaffected.
+
+### 8.4 L2
+
+`level2_declarations::check_outline`: `Shape` row now ends with
+`implements Sized`; added style checks (the clause is neither bold nor dim,
+the location after it stays dim) and a `COLUMNS=36` case where the bases
+wrap under the row's hanging indent. `just test-l2` (tmux, WezTerm; Kitty
+not installed here, its entry points return early): 6 passed. The harness
+spawns its panes in the background through the Test Toolkit; nothing here
+requested focus.
+
+### Verification
+
+- `just test` (tree-hugger): 1074 passed, 0 skipped.
+- `just test-l2`: 6 passed.
+- `just lint`: clean (one clippy `match_like_matches_macro` fixed).
+- `just check-tier-coverage tree-hugger`: nothing stranded; `outline` is an
+  L1 module name with no tier marker.
+- OS: pure string formatting, no paths or OS calls added; no cross-check run.
+
+### Docs and skill
+
+- `docs/symbol-reports.md`: new "Declared bases on type rows" subsection
+  under Outline (what shows, selectors, signature modes, wrapping, counts,
+  JSON). `docs/type-relations.md` points at it. `cli/README.md` `--tree`
+  bullet. Area/lib READMEs left to 9.2.
+- Skill: `SKILL.md` output-modes bullet (`declared_bases`, `header_writes`,
+  `outline.rs`).
+
+## Phase 9
+
+Docs, READMEs, skill, comment drift and close. One library change, which is a
+doc comment only (`records_from`); no behavior, record, schema (4.1) or
+`EXTRACTOR_REVISION` (23) change, so no test was added or changed.
+
+**Ruling 1 is still unanswered** (non-interactive session; no answer in the
+spec). Tasks 6.5–6.7 (C#, Swift, Scala base lists) stay open. The docs
+describe these languages as **planned** with examples of the forms involved
+and say plainly that their records have empty `extends`/`implements` today.
+The first item of the definition-of-success checklist therefore holds with
+this one open exception; `human_review` stays `true` on the spec.
+
+### 9.1 Current docs
+
+- `docs/symbol-kinds-and-visibility.md`
+    - "Grammar limits" listed only the Scala `private enum` form. It now has
+      one row per demonstrated limit of this work, each with snippet, pinned
+      grammar, observed node shape and what is reported: Python PEP 696
+      default (tree-sitter-python 0.25.0), TS `in`/`out` variance
+      (tree-sitter-typescript 0.23.2), C++ concept-constrained parameter
+      read as `Const` (tree-sitter-cpp 0.23.4), TS/JS non-path decorator
+      expression (tree-sitter-typescript 0.23.2, tree-sitter-javascript
+      0.25.0). Each row names the test family that pins it.
+    - "Current limitations": new bullets for the planned C#/Swift/Scala
+      relations and for declarations with no record (Python `type A[T]`, C#
+      `delegate`) carrying no generics. The intro now points at the limits
+      in the plural.
+- `docs/type-relations.md`: new "C#, Swift and Scala" section (C#
+  `class Child : Base, IDisposable`, Swift `struct Point: Codable` and
+  `extension Point: Equatable`, Scala `extends Base with Logging`), why
+  the lists are not read, and what records hold today. The table row and the
+  limitation bullet link to it.
+- `docs/symbol-schema-design.md`: Relation Facet "planned" sentence links
+  to that section.
+- Checked current, unchanged: `cache-design.md` (`0.1.0+rev.23`, 4.1,
+  `metrics.lines` rows), `symbol-reports.md` (outline bases, schema 4.1,
+  `too_many_generic_parameters`), `symbol-schema-design.md` (version table,
+  generics table and limits, attributes/modifiers, adapter list). Mermaid
+  flows for resolution and body lines were already in place.
+- No doc names or links this feature (grep for `2026-10-06` and
+  `symbol-type-relations` under `tree-hugger/docs`, READMEs and the skill:
+  no hits).
+
+### 9.2 READMEs
+
+- `README.md` (area): new release-notes section "generics, base types,
+  modifiers, attributes and body lines" (what each new fact is, the outline
+  row example, schema 4.1, one-time re-analysis, adapter loss). The older
+  release note that says "schema 4.0" describes its own release and was left.
+- `lib/README.md`: `type_info.generic_params`/`constraints` bullet with the
+  `Bag<T: Clone = String>` example; `lines` meaning; C#/Swift/Scala
+  planned; the record → `SymbolInfo` adapter losses.
+- `cli/README.md`: which JSON formats carry the declared facts, and that
+  `metrics.lines` appears only in `--json-full`
+  (`ReportFormat::capabilities`: `--json`/`--jsonl` ask Flags only).
+
+### 9.3 Skill
+
+- `SKILL.md` "Known Limitations": C#/Swift/Scala relations planned (ruling
+  pending, doc anchor); the declaration-fact grammar limits with their test
+  family and doc table.
+- `api-reference.md`: adapter paragraph now lists the declaration facts the
+  older model drops (with the pinning test); relations paragraph says
+  C#/Swift/Scala are planned.
+- The rest of the skill (relations, generics, modifiers, body lines, outline
+  bullets, revision 23, schema 4.1) was already current from Phases 2–8.
+
+### 9.4 Comment drift
+
+Reviewed the module and item docs of every reader this feature changed:
+`extract/{attributes,flags,metrics,modifiers,generics,relations,rust_impl,classify}.rs`,
+`tree_file.rs::records_from`, `tree_file/relations.rs`,
+`shared/schema_v2/facets.rs` (`Attribute`, `Modifier`, `MetricsFacet`,
+`GenericParam`), `file/query.rs` (`Capability`), and the CLI renderer's
+`declared_bases`/`header_writes`.
+
+| Drift | Resolution (code is correct) |
+|---|---|
+| `TreeFile::records_from` doc: "generic parameters, implemented trait and the `facts` asked for" — the trait-only link was replaced by declared bases in Phase 6, and attributes and written modifiers were missing | Rewritten: "generic parameters, attributes, written modifiers, declared bases and the `facts` asked for are filled only for kinds `selection` wants. Base targets resolve against every record, wanted or not." |
+
+The two phrases the plan named ("attributes are read only for flags",
+"metrics have two members") no longer appear anywhere in `lib/src` or
+`cli/src`; earlier phases had already corrected them (Phase 2 attributes,
+Phase 2/5 `MetricsFacet` and `Capability::Metrics`).
+
+### 9.5 Rulings, probe, departures and unsupported forms (consolidated)
+
+**Rulings** (Phase 1 table, final state):
+
+| # | Ruling | Final |
+|---|---|---|
+| 1 | Mixed C#/Swift/Scala base lists | **Open.** Not answered; 6.5–6.7 not implemented; documented as planned |
+| 2 | Schema version | Accepted default: `V4_1` |
+| 3 | Prerequisite state | Accepted default: proceed; read syntax where kinds are broad |
+| 4 | Full written Rust trait text | Accepted default (`fmt::Display`, not `Display`) |
+| 5 | Modifier order | Accepted default: one normalizer (`normalize_modifiers`) |
+| 6 | Unresolved impl self type | Accepted default: textual container, no ID, no parent |
+| 7 | `u16` overflow | Accepted default: `TooManyGenericParameters` |
+| 8 | Wider performance measurement | Not planned |
+| 9 | Spike scope | Done once in Phase 1 |
+
+**Grammar probe:** the Phase 1 tables (section 1.2) remain correct; Phase 6
+re-probed the base-list nodes and they held.
+
+**Departures from the spec/plan** (all already in the docs):
+
+- The older `TypeMetadata::type_parameters` readers stay separate readers,
+  not a projection of the new structured reader (Phase 3; plan strand 2 said
+  "kept as a projection").
+- Rust impl self-type resolution is not persisted; widening a cached Rust
+  entry by Containment parses once (the spec's fallback, Phases 6/7).
+- `--signatures full` drops a base list the header already writes by an
+  exact per-source rule (`header_writes`), not by text matching (Phase 8).
+- C#, Swift, Scala relations not implemented (ruling 1 open).
+
+**Unsupported forms:**
+
+| Form | Kind of limit | Where documented |
+|---|---|---|
+| Python type-parameter default `class C[T = str]` | grammar (python 0.25.0) | `symbol-kinds-and-visibility.md#grammar-limits`, `symbol-schema-design.md` |
+| TS variance `interface K<in T>` | grammar (typescript 0.23.2) | same |
+| C++ `template <std::integral T>` read as `Const` | grammar (cpp 0.23.4) | same |
+| TS/JS decorator that is not a path or call | grammar (typescript 0.23.2, javascript 0.25.0) | same, plus `symbol-schema-design.md` attributes |
+| Python `type A[T] = …`, C# `delegate`: no record, so no generics | extractor (no record by design; spec forbids adding records to fill a cell) | `symbol-kinds-and-visibility.md` current limitations |
+| C#/Swift/Scala `extends`/`implements` | open ruling | `type-relations.md#c-swift-and-scala` |
+| Go: a named type embedded in a constraint vs an embedded interface | syntax cannot tell; predeclared non-interfaces excluded | `type-relations.md` limitations |
+| PHP `#[…]`, Perl sub attributes, C `__attribute__` not read as attributes | outside the spec's required set | `symbol-schema-design.md` attributes |
+
+### 9.6 Final verification
+
+- `just test` (tree-hugger): **1074 / 1074 passed**, 0 skipped.
+- `just lint`: green (both packages).
+- `just test-l2`: **6 / 6 passed** (tmux and WezTerm; the Kitty entry points
+  return early because Kitty is not installed here). Panes are spawned in
+  the background by the harness; no window took focus.
+- `just check-tier-coverage`: not re-run; this phase added and renamed no
+  test (Phase 8's run covers the current test set).
+- Cross-OS: not run. This phase changed documentation and one doc comment.
+- Pre-existing failures: none.
+
+Definition-of-success checklist (plan): every item holds except the first
+item's C#/Swift/Scala relation cells, which wait on ruling 1 (logged above,
+not accepted as an exception by the author yet). The feature directory stays
+active; implementation complete, ready for review once ruling 1 is settled.

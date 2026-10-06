@@ -175,6 +175,99 @@ docs_created_during_phase_7: []
 skills_files_updated_during_phase_7:
   - .claude/skills/tree-hugger/SKILL.md
   - .claude/skills/tree-hugger/api-reference.md
+source_files_during_phase_8:
+  - tree-hugger/cli/src/render.rs
+  - tree-hugger/cli/tests/symbols/outline.rs
+  - tree-hugger/cli/tests/symbols/main.rs
+  - tree-hugger/cli/tests/level2_declarations.rs
+  - tree-hugger/cli/tests/fixtures/golden/symbols.tree
+docs_updated_during_phase_8:
+  - tree-hugger/docs/symbol-reports.md
+  - tree-hugger/docs/type-relations.md
+  - tree-hugger/cli/README.md
+docs_created_during_phase_8: []
+skills_files_updated_during_phase_8:
+  - .claude/skills/tree-hugger/SKILL.md
+source_files_during_phase_9:
+  - tree-hugger/lib/src/file/tree_file.rs
+docs_updated_during_phase_9:
+  - tree-hugger/docs/symbol-kinds-and-visibility.md
+  - tree-hugger/docs/type-relations.md
+  - tree-hugger/docs/symbol-schema-design.md
+  - tree-hugger/README.md
+  - tree-hugger/lib/README.md
+  - tree-hugger/cli/README.md
+docs_created_during_phase_9: []
+skills_files_updated_during_phase_9:
+  - .claude/skills/tree-hugger/SKILL.md
+  - .claude/skills/tree-hugger/api-reference.md
+source_code:
+  - tree-hugger/lib/src/shared/schema_v2/types.rs
+  - tree-hugger/lib/src/shared/schema_v2/facets.rs
+  - tree-hugger/lib/src/shared/schema_v2/mod.rs
+  - tree-hugger/lib/src/file/mod.rs
+  - tree-hugger/lib/src/file/tree_file.rs
+  - tree-hugger/lib/src/file/extract/attributes.rs
+  - tree-hugger/lib/src/file/extract/flags.rs
+  - tree-hugger/lib/src/file/extract/metrics.rs
+  - tree-hugger/lib/src/cache/symbol_cache.rs
+  - tree-hugger/lib/src/cache/mod.rs
+  - tree-hugger/lib/src/analysis/mod.rs
+  - tree-hugger/lib/src/analysis/tests.rs
+  - tree-hugger/lib/src/god_files/analysis.rs
+  - tree-hugger/lib/tests/l1/cache_tests.rs
+  - tree-hugger/lib/tests/l1/symbols_adapter.rs
+  - tree-hugger/lib/tests/l1/symbols_cache.rs
+  - tree-hugger/lib/tests/l1/symbols_metrics.rs
+  - tree-hugger/lib/tests/l1/symbols_query.rs
+  - tree-hugger/cli/src/declarations.rs
+  - tree-hugger/cli/src/main.rs
+  - tree-hugger/cli/src/report.rs
+  - tree-hugger/cli/src/stats.rs
+  - tree-hugger/cli/tests/symbols/cache_robustness.rs
+  - tree-hugger/cli/tests/symbols/cache_upgrade.rs
+  - tree-hugger/cli/tests/symbols/report.rs
+  - tree-hugger/cli/tests/symbols/reports.rs
+  - tree-hugger/cli/tests/symbols/wiring.rs
+  - tree-hugger/cli/tests/fixtures/golden/symbols.json
+  - tree-hugger/cli/tests/fixtures/golden/symbols.jsonl
+  - tree-hugger/lib/src/file/extract/generics.rs
+  - tree-hugger/lib/src/file/extract/mod.rs
+  - tree-hugger/lib/src/error.rs
+  - tree-hugger/lib/tests/l1/symbols_generics.rs
+  - tree-hugger/lib/tests/l1/main.rs
+  - tree-hugger/lib/tests/l1/symbols_coverage.rs
+  - tree-hugger/lib/src/file/extract/modifiers.rs
+  - tree-hugger/lib/src/file/query.rs
+  - tree-hugger/lib/tests/l1/symbols_modifiers.rs
+  - tree-hugger/lib/tests/l1/symbols_flags.rs
+  - tree-hugger/lib/src/file/extract/classify.rs
+  - tree-hugger/lib/src/file/extract/relations.rs
+  - tree-hugger/lib/src/file/extract/rust_impl.rs
+  - tree-hugger/lib/src/file/tree_file/relations.rs
+  - tree-hugger/lib/src/file/tree_file/definitions.rs
+  - tree-hugger/lib/src/analysis/coverage.rs
+  - tree-hugger/lib/tests/l1/symbols_relations.rs
+  - tree-hugger/lib/tests/l1/symbols_kinds.rs
+  - tree-hugger/lib/tests/l1/symbols_owner_identity.rs
+  - tree-hugger/lib/tests/l1/symbols_shared_context.rs
+  - tree-hugger/lib/src/analysis/counters.rs
+  - tree-hugger/cli/src/render.rs
+  - tree-hugger/cli/tests/symbols/outline.rs
+  - tree-hugger/cli/tests/symbols/main.rs
+  - tree-hugger/cli/tests/level2_declarations.rs
+  - tree-hugger/cli/tests/fixtures/golden/symbols.tree
+documentation:
+  - tree-hugger/README.md
+  - tree-hugger/lib/README.md
+  - tree-hugger/cli/README.md
+  - tree-hugger/docs/cache-design.md
+  - tree-hugger/docs/symbol-kinds-and-visibility.md
+  - tree-hugger/docs/symbol-reports.md
+  - tree-hugger/docs/symbol-schema-design.md
+  - tree-hugger/docs/type-relations.md
+completed_phase: 9
+implemented: true
 ---
 
 # Plan: generics, inheritance, modifiers, attributes and body line counts
@@ -221,21 +314,23 @@ Implementation complete, ready for review (the agent never closes the feature):
       carries a *demonstrated* grammar limit (snippet, pinned grammar identity
       and node observation) in the implementation log and current docs. An
       unfinished extractor is not a grammar limit.
-- [ ] `metrics.lines` exists, is required inside a present facet, serializes
+    - **Open:** every cell holds except C#, Swift and Scala relations
+      (6.5–6.7), which wait on ruling 1; see the implementation log, Phase 9.
+- [x] `metrics.lines` exists, is required inside a present facet, serializes
       `None` as `null`, and the whole facet stays absent when unrequested.
-- [ ] Schema is 4.1 (or the next minor if 4.0 is no longer current) on records,
+- [x] Schema is 4.1 (or the next minor if 4.0 is no longer current) on records,
       file indexes, CLI envelopes and fingerprints; `EXTRACTOR_REVISION`
       bumped; symbol IDs unchanged.
-- [ ] For every capability set, a narrow query equals the matching slice of the
+- [x] For every capability set, a narrow query equals the matching slice of the
       complete index, including after a real `CacheLookup::Hit`, narrowing and
       widening. Declarations-only skips every optional pass; work counters show
       no repeated query or per-symbol whole-file scan.
-- [ ] `hug types --tree` and `hug symbols --tree` show inheritance on container
+- [x] `hug types --tree` and `hug symbols --tree` show inheritance on container
       rows; JSON/JSONL/full-index carry the same facts; goldens changed only
       for intended reasons.
-- [ ] `just test` and `just lint` green in `tree-hugger/`; `just test-l2` green
+- [x] `just test` and `just lint` green in `tree-hugger/`; `just test-l2` green
       for the rendering change, with no window gaining focus.
-- [ ] Docs, READMEs, skill, comments on changed readers and the implementation
+- [x] Docs, READMEs, skill, comments on changed readers and the implementation
       log are current; no doc names this feature.
 
 ## Phase 1: Gate, rulings and grammar probe
@@ -677,7 +772,7 @@ ruling 1 is unanswered, and then listed as an open item, not skipped silently).
 
 ### Wave 1 (single owner; CLI renderer)
 
-- [ ] **8.1 Container-row inheritance**
+- [x] **8.1 Container-row inheritance**
     - In the CLI renderer (`cli/src/render.rs`, `classes.rs` as applicable)
       append `extends A; implements B` using recorded written targets in
       source order to a visible type container row, including containers with
@@ -692,13 +787,13 @@ ruling 1 is unanswered, and then listed as an open item, not skipped silently).
 
 ### Wave 2 (parallel; disjoint test files)
 
-- [ ] **8.2 CLI assertions** — outline tests under `cli/tests/symbols/*.rs`
+- [x] **8.2 CLI assertions** — outline tests under `cli/tests/symbols/*.rs`
   for the cases above, plus JSON/JSONL/full-index carrying the same facts and
   `metrics.lines`.
-- [ ] **8.3 Golden files** — regenerate `symbols.json`/`symbols.jsonl` and any
+- [x] **8.3 Golden files** — regenerate `symbols.json`/`symbols.jsonl` and any
   outline goldens; review every diff; only intended changes (schema version,
   new fields) are accepted.
-- [ ] **8.4 L2 rendering** — run `just test-l2` through the Test Toolkit;
+- [x] **8.4 L2 rendering** — run `just test-l2` through the Test Toolkit;
   confirm no terminal/browser window gains focus.
 
 **Validation checkpoint:** `just test` and `just test-l2` green in
@@ -708,25 +803,25 @@ ruling 1 is unanswered, and then listed as an open item, not skipped silently).
 
 ### Wave 1 (parallel documentation tasks; disjoint files)
 
-- [ ] **9.1 Current docs** — update `docs/` schema, cache (including
+- [x] **9.1 Current docs** — update `docs/` schema, cache (including
   `cache-design.md` version and revision), symbol-kinds, report and API pages;
   document unsupported forms (with snippet, grammar identity, node limit), the
   mixed-list meaning per the accepted ruling, and the adapter losses. Use
   Mermaid where a flow is clearer, written for a reader with no repo
   experience. Docs never name or link this feature.
-- [ ] **9.2 READMEs** — area, `lib/` and `cli/` READMEs for the new facts and
+- [x] **9.2 READMEs** — area, `lib/` and `cli/` READMEs for the new facts and
   outline output.
-- [ ] **9.3 Skill** — update `.claude/skills/tree-hugger/SKILL.md` for the new
+- [x] **9.3 Skill** — update `.claude/skills/tree-hugger/SKILL.md` for the new
   fields, the 4.1 schema and the capability behavior.
-- [ ] **9.4 Comment drift pass** — review comments on every changed reader,
+- [x] **9.4 Comment drift pass** — review comments on every changed reader,
   especially "attributes are read only for flags" and "metrics have two
   members"; fix per the code-is-correct rule and report each drift found.
 
 ### Wave 2 (sequential)
 
-- [ ] **9.5 Implementation log** — record accepted rulings, the grammar probe
+- [x] **9.5 Implementation log** — record accepted rulings, the grammar probe
   table, every departure from the spec, and the unsupported-form list.
-- [ ] **9.6 Final verification** — `just test`, `just lint`, `just test-l2` in
+- [x] **9.6 Final verification** — `just test`, `just lint`, `just test-l2` in
   `tree-hugger/`; confirm the Definition-of-success checklist above. Leave the
   feature directory active (the author closes it); the agent's terminal state
   is "implementation complete, ready for review". No commit unless asked.

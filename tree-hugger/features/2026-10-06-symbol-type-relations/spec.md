@@ -18,9 +18,17 @@ human_review_items:
     When a listed type is declared in another file, the source alone does not
     say which is which. Every other language's relations are now recorded;
     these three are still empty, and tasks 6.5-6.7 are waiting on this answer.
-    It should be settled before Phase 8, which prints these lists in
-    `hug types --tree`. (Phase 7 is done; options A and C fit the cache as
-    it stands, while option B would add a cache column and a schema bump.)
+    All nine phases are now done except these three languages, and this is
+    the one thing standing between the feature and review: the docs say
+    "planned" for them, and the review cannot sign off on the per-language
+    table while three cells have no decision. Once you choose, a short
+    follow-up implements tasks 6.5-6.7 and replaces "planned" in the docs
+    with the chosen meaning. (`hug types --tree` already prints whatever
+    lists exist, so options A and C need no output change, while option B
+    would add a cache column, a schema bump and a third label on outline
+    rows.) If you would rather review the rest now, you can also accept the
+    three languages as a documented gap for this feature and schedule them
+    separately.
 
     - **Option A: put every listed type in `extends`, except entries proved to be conformance.**
       An entry goes to `implements` only when this file declares it as an
@@ -48,30 +56,33 @@ human_review_items:
     type declared in another file may be dropped (documented as a
     limitation) rather than attached to a same-named local type.
 message_to_agent: |-
-  Phase 7 is done (read `## Phase 7` of implementation-log.md). Tasks
-  6.5-6.7 (C#, Swift, Scala base lists) still wait on ruling 1 (see
-  human_review_items); Phase 8 renders whatever relations exist, so it does
-  not depend on the ruling, but its outline tests should not assume those
-  three languages report bases yet.
+  Phases 1-9 are done (read `## Phase 9` of implementation-log.md). The
+  only open work is tasks 6.5-6.7 (C#, Swift, Scala base lists), blocked on
+  ruling 1 (see human_review_items). `implemented: true` reflects that all
+  phases ran; the plan's first success item and 6.5-6.7 stay unchecked with
+  an "Open" note.
 
-  Facts that matter for Phase 8 and later:
-
-  - No record changed in Phase 7: EXTRACTOR_REVISION is still "23" and the
-    schema 4.1, so the JSON/JSONL goldens need no regeneration for Phase 7.
-  - Ruling for 7.1, now final: widening a cached Rust entry by Containment
-    parses once (`WidenedCapabilities { parsed: true }`); no record carries
-    the impl self-type evidence. Do not add a field for it.
-  - New `WorkCounters::relation_links` (one per analysis). New shared corpus
-    `symbols_relations::declaration_fact_sources()` (every generics,
-    modifiers, body-lines and relations matrix source plus the Rust impls).
-    If 6.5-6.7 land, their rows join it automatically through
-    RELATIONS_MATRIX; flip their `Support::Pending` rows to `Supported`.
-  - An unresolved Rust impl member still has `relations.container` =
-    `{ name: <self type as written>, id: None }`, so `render::Outline`
-    heads it `[in &Local]` / `[in other::W]`. No golden covers that yet;
-    8.2/8.3 should.
-  - `symbols_shared_context.rs` (the concurrent session's file) now exposes
-    `SMALL`, `LARGE` and `grows_linearly` as `pub`; keep edits there minimal.
+  If the author accepts Option A and asks for 6.5-6.7:
+  - readers go in `lib/src/file/extract/relations.rs::declared_bases`
+    (one function per language, like the others); resolution reuses
+    `tree_file/relations.rs::Declarations::resolve` (an entry goes to
+    `implements` only when it resolves to a same-file
+    Interface/Trait/protocol and the owner is concrete).
+  - Swift `extension X: P` entries attach to a uniquely resolved local `X`
+    only; they are not in `X`'s header, so update
+    `cli/src/render.rs::header_writes` and add a row to
+    `cli/tests/symbols/outline.rs`.
+  - replace the Pending rows in `symbols_relations::RELATIONS_MATRIX`,
+    bump `EXTRACTOR_REVISION` (now "23") with a `StaleRevision`
+    (`OldKey::Computed`) in `cli/tests/symbols/cache_upgrade.rs`, and
+    regenerate goldens only if the multi fixtures change.
+  - docs: replace the "C#, Swift and Scala" section of
+    `docs/type-relations.md` (and the "planned" mentions in
+    `symbol-schema-design.md`, `symbol-kinds-and-visibility.md`,
+    `lib/README.md`, the area README release note, and the skill's Known
+    Limitations / api-reference) with the accepted meaning.
+implemented: true
+implemented_by: "claude/opus"
 $schema:
   status: |-
     enum(
