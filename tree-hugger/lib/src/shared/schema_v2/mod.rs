@@ -419,7 +419,7 @@ impl From<SymbolInfo> for SymbolRecord {
         let modifiers = modifiers_from_symbol(&value);
 
         Self {
-            schema_version: SchemaVersion::V4_1,
+            schema_version: SchemaVersion::V4_2,
             id: symbol_id_from_stable_key(&stable_key),
             language: value.language,
             kind,
@@ -764,7 +764,7 @@ mod tests {
         let record: SymbolRecord = symbol.into();
         let json = serde_json::to_string(&record).expect("serialize");
         let parsed: SymbolRecord = serde_json::from_str(&json).expect("deserialize");
-        assert_eq!(parsed.schema_version, SchemaVersion::V4_1);
+        assert_eq!(parsed.schema_version, SchemaVersion::V4_2);
         assert_eq!(parsed.identity.name, "hello");
     }
 }

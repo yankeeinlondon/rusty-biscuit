@@ -337,6 +337,10 @@ pub struct SymbolRef {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub qualified_name: Option<String>,
+    /// Written relation location, when needed to distinguish a declaration's
+    /// header from conformance added by a Swift extension in the same file.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_span: Option<TextSpan>,
 }
 
 /// Cross-symbol relation facet.
@@ -352,6 +356,9 @@ pub struct RelationFacet {
     pub extends: Vec<SymbolRef>,
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub implements: Vec<SymbolRef>,
+    /// Written bases whose inheritance or conformance category is unknown.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub unclassified_bases: Vec<SymbolRef>,
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub overrides: Vec<SymbolRef>,
     #[serde(skip_serializing_if = "Vec::is_empty", default)]

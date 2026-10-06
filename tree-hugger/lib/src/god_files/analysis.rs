@@ -2323,7 +2323,7 @@ x = 1
             SourceFacet, SymbolId, SymbolKindData, TextPoint, TextSpan, TypeFacet, VisibilityFacet,
         };
         SymbolRecord {
-            schema_version: SchemaVersion::V4_1,
+            schema_version: SchemaVersion::V4_2,
             id: SymbolId(String::new()),
             language: ProgrammingLanguage::Rust,
             kind: SymbolKindV2::Function,

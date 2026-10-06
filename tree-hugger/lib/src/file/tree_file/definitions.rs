@@ -5,7 +5,7 @@
 use std::cell::OnceCell;
 use std::collections::{BTreeSet, HashMap};
 
-use tree_sitter::{QueryCursor, StreamingIterator};
+use tree_sitter::{Node, QueryCursor, StreamingIterator};
 
 use super::TreeFile;
 use crate::analysis::counters::{count_definition_capture, count_shared_context_steps};
@@ -277,6 +277,7 @@ impl TreeFile {
             }
         }
         let owner_kinds = OwnerKinds::default();
+        let impl_owners = rust_impl_owners(&pending, root, &self.source);
         let container_kinds: Vec<Option<SymbolKind>> = pending
             .iter()
             .map(|entry| {
@@ -286,6 +287,7 @@ impl TreeFile {
                     &kinds_by_node,
                     &pending,
                     &owner_kinds,
+                    &impl_owners,
                 )
             })
             .collect();
@@ -667,22 +669,56 @@ fn reconcile_variants(listed: Vec<VariantInfo>, mut standalone: Vec<(usize, Vari
     positioned.into_iter().map(|(_, variant)| variant).collect()
 }
 
+/// For each Rust `impl` of the file (by node id), the index in `pending` of
+/// the declaration its self type resolves to, by the relation resolver's
+/// decision (`relations::impl_self_types`); empty when no symbol sits in an
+/// impl.
+fn rust_impl_owners(pending: &[PendingSymbol<'_>], root: Node<'_>, source: &str) -> HashMap<usize, Option<usize>> {
+    let in_impl = |entry: &PendingSymbol<'_>| {
+        entry.container.as_ref().is_some_and(|container| {
+            matches!(container.lookup, ContainerLookup::SameFileType { impl_item: Some(_) })
+        })
+    };
+    if !pending.iter().any(in_impl) {
+        return HashMap::new();
+    }
+    let entries = pending
+        .iter()
+        .map(|entry| super::relations::Declared {
+            qualified_name: entry.extracted.symbol.qualified_name.as_str(),
+            kind: SymbolKindV2::from(entry.extracted.symbol.kind),
+            declaration: entry.extracted.declaration,
+            anchor: entry.extracted.anchor,
+            name: entry.extracted.name,
+        })
+        .collect();
+    super::relations::impl_self_types(entries, root, source)
+}
+
 /// The container's kind is the kind extracted for the container's own
 /// declaration, so a container and its standalone symbol never disagree.
 ///
-/// A container found by name (`SameFileType`, `SameFileTable`) takes its
-/// kind only from same-named declarations whose qualified name agrees with
-/// the member's explicit qualification (`agrees_with_owner_path`): the
-/// members of `impl other::W` take no kind from an unrelated local `W`.
-/// Absent when no such declaration exists or when they disagree on kind.
+/// A Rust impl member's container is the declaration the impl's self type
+/// resolves to (`impl_owners`, the relation resolver's decision); it has no
+/// kind when the self type does not resolve (`impl ::ext::B`, an enclosing
+/// generic `T`), however a same-named local declaration is called. Another
+/// container found by name (`SameFileType`, `SameFileTable`) takes its kind
+/// only from same-named declarations whose qualified name agrees with the
+/// member's explicit qualification (`agrees_with_owner_path`). Absent when
+/// no such declaration exists or when they disagree on kind.
 fn resolve_container_kind<'a>(
     container: Option<&ContainerRef<'_>>,
     qualified_name: &str,
     kinds_by_node: &HashMap<usize, SymbolKind>,
     symbols: &'a [PendingSymbol<'_>],
     owner_kinds: &OwnerKinds<'a>,
+    impl_owners: &HashMap<usize, Option<usize>>,
 ) -> Option<SymbolKind> {
     let container = container?;
+    if let ContainerLookup::SameFileType { impl_item: Some(impl_item) } = container.lookup {
+        let owner = (*impl_owners.get(&impl_item.id())?)?;
+        return Some(symbols[owner].extracted.symbol.kind);
+    }
     match container.lookup {
         ContainerLookup::Node { node, fallback } => {
             Some(kinds_by_node.get(&node.id()).copied().unwrap_or(fallback))

@@ -333,7 +333,7 @@ fn serialized_record_round_trips_the_new_fields() {
     input.is_namespace_rooted = true;
     input.is_async = true;
     let record = SymbolRecord::from(input);
-    assert_eq!(record.schema_version, SchemaVersion::V4_1);
+    assert_eq!(record.schema_version, SchemaVersion::V4_2);
 
     let first = serde_json::to_string(&record).expect("serialize");
     let parsed: SymbolRecord = serde_json::from_str(&first).expect("deserialize");
@@ -342,7 +342,7 @@ fn serialized_record_round_trips_the_new_fields() {
     let reparsed: SymbolRecord = serde_json::from_str(&second).expect("re-deserialize");
 
     for record in [&parsed, &reparsed] {
-        assert_eq!(record.schema_version, SchemaVersion::V4_1);
+        assert_eq!(record.schema_version, SchemaVersion::V4_2);
         assert_eq!(record.kind, SymbolKindV2::Constructor);
         assert_eq!(record.identity.container_kind, Some(SymbolKindV2::Class));
         assert_eq!(record.visibility.level, VisibilityLevel::ProtectedInternal);

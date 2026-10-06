@@ -26,9 +26,10 @@ impl SchemaVersion {
     /// `identity.keyword` and a filled `source.signature_text`, before
     /// `metrics.lines`; no longer emitted.
     pub const V4_0: Self = Self { major: 4, minor: 0 };
-    /// Current shape, emitted on records, file indexes, CLI envelopes and
-    /// analyzer fingerprints: 4.0 plus the required `metrics.lines` key.
+    /// Shape with the required `metrics.lines` key; no longer emitted.
     pub const V4_1: Self = Self { major: 4, minor: 1 };
+    /// Current shape: unclassified bases and optional relation source spans.
+    pub const V4_2: Self = Self { major: 4, minor: 2 };
 }
 
 /// 1-based text location.

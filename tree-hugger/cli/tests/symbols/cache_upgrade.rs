@@ -1211,6 +1211,37 @@ fn entry_from_extractor_revision_twenty_two_is_not_served_after_the_relations() 
     });
 }
 
+const UPGRADE_SHADOWED_BASE_PY: &str = "class Outer:\n    class Base:\n        pass\n\n\
+     def shadow(Outer):\n    class UpgradeChild(Outer.Base):\n        pass\n\n\
+     class UpgradeSentinel:\n    pass\n";
+
+/// Revision 23 resolved a written base by matching its whole qualified name
+/// in any enclosing scope, so `Outer.Base` under a parameter `Outer` named
+/// the file's class; revision 24 lets the parameter decide `Outer` and
+/// leaves the base unresolved.
+#[test]
+fn entry_from_extractor_revision_twenty_three_is_not_served_after_path_meaning() {
+    assert_stale_revision_is_not_served(&StaleRevision {
+        revision: "23",
+        key: OldKey::Computed,
+        file: "shadowed.py",
+        language: "python",
+        source: UPGRADE_SHADOWED_BASE_PY.to_string(),
+        sentinel: "UpgradeSentinel",
+        probe: upgrade_extends,
+        repaired: serde_json::json!([["Outer.Base", false]]),
+        stale: serde_json::json!([["Outer.Base", true]]),
+        revert: |snapshot| {
+            let base = record_named(snapshot, "Base");
+            let (id, qualified_name) = (base["id"].clone(), base["identity"]["qualified_name"].clone());
+            let child = record_named(snapshot, "UpgradeChild");
+            let target = &mut child["relations"]["extends"][0];
+            target["id"] = id;
+            target["qualified_name"] = qualified_name;
+        },
+    });
+}
+
 const UPGRADE_PROBE_PY: &str = "\n\nclass UpgradeProbe:\n    def __init__(self, seed):\n        pass\n";
 
 /// The stable key of `UpgradeProbe.__init__` in `deferred.py` when it reports

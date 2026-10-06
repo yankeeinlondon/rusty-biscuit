@@ -10,15 +10,16 @@
 //! resolution decides both the type-level `implements` summary and, under
 //! Containment, which record the impl's members belong to.
 
-use std::collections::HashMap;
+use std::cell::OnceCell;
+use std::collections::{HashMap, HashSet};
 
 use tree_sitter::Node;
 
 use crate::analysis::counters::{count_relation_link, count_shared_context_steps};
 use crate::analysis::qualifying_prefixes;
 use crate::file::extract::{
-    BasePath, ImplHeader, PathAnchor, WrittenBase, declared_bases, declared_generics, impl_header,
-    impl_of_member,
+    BasePath, ImplHeader, ImportBinding, PathAnchor, WrittenBase, declared_bases,
+    declared_generics, impl_header, impl_of_member, impl_type_parameters, import_binding,
 };
 use crate::shared::{ProgrammingLanguage, SymbolKindV2, SymbolRecord, SymbolRef};
 
@@ -83,33 +84,143 @@ fn path_separator(language: ProgrammingLanguage) -> &'static str {
     }
 }
 
-/// Every declaration of the file by in-file qualified name, and the
-/// records that name a scope by their nodes. Built once per file from all
-/// records, selected or not.
-struct Declarations<'a> {
-    records: &'a [SymbolRecord],
-    by_qualified: HashMap<&'a str, Vec<usize>>,
-    scopes_by_node: HashMap<usize, usize>,
-    language: ProgrammingLanguage,
+/// Kinds a path may pass through to a member: a callable, variable,
+/// parameter or field is a runtime or lexical owner, not a namespace its
+/// declarations are reachable through.
+fn is_path_owner_kind(kind: SymbolKindV2) -> bool {
+    matches!(
+        kind,
+        SymbolKindV2::Module
+            | SymbolKindV2::Namespace
+            | SymbolKindV2::Class
+            | SymbolKindV2::Interface
+            | SymbolKindV2::Type
+            | SymbolKindV2::Enum
+            | SymbolKindV2::Trait
+    )
 }
 
-impl<'a> Declarations<'a> {
-    fn new(records: &'a [SymbolRecord], inputs: &[RelationInput<'_>], language: ProgrammingLanguage) -> Self {
+fn is_type_like_kind(kind: SymbolKindV2) -> bool {
+    matches!(
+        kind,
+        SymbolKindV2::Class | SymbolKindV2::Interface | SymbolKindV2::Type | SymbolKindV2::Enum | SymbolKindV2::Trait
+    )
+}
+
+/// Whether a class scope provides lexical names to a lookup made inside
+/// it: never in JS/TS (members are properties); in Python only to code run
+/// directly in that class body (`innermost`: the header being resolved sits
+/// in it), never to a nested class, method or function, so an enclosing
+/// class's classes, variables and imports are all skipped.
+fn class_scope_is_lexical(language: ProgrammingLanguage, innermost: bool) -> bool {
+    match language {
+        ProgrammingLanguage::TypeScript | ProgrammingLanguage::JavaScript => false,
+        ProgrammingLanguage::Python => innermost,
+        _ => true,
+    }
+}
+
+/// Whether a type's inherited members are found by unqualified lookup from
+/// inside it, so a type with bases hides what lies outside it.
+fn inherits_member_names(language: ProgrammingLanguage) -> bool {
+    matches!(language, ProgrammingLanguage::Java | ProgrammingLanguage::Cpp)
+}
+
+/// Languages with an [`import_binding`] reader (Rust also needs the walk
+/// for its impls).
+fn reads_imports(language: ProgrammingLanguage) -> bool {
+    matches!(
+        language,
+        ProgrammingLanguage::Rust
+            | ProgrammingLanguage::Cpp
+            | ProgrammingLanguage::Php
+            | ProgrammingLanguage::Python
+            | ProgrammingLanguage::TypeScript
+            | ProgrammingLanguage::JavaScript
+    )
+}
+
+/// The import bindings and (Rust) impl blocks of one file, from one walk of
+/// its tree, made on the first lookup that needs it.
+#[derive(Default)]
+struct FileWalk<'a, 'tree> {
+    /// `(scope, name)`: an import in the scope with this in-file qualified
+    /// name (`""` for the root) binds `name`.
+    imports: HashSet<(&'a str, &'a str)>,
+    /// Scopes holding a wildcard import or C++ using-directive.
+    opaque: HashSet<&'a str>,
+    /// Rust `impl` blocks in source order.
+    impls: Vec<Node<'tree>>,
+}
+
+/// What the resolver reads of one declaration: its record or, before
+/// records exist, its definition.
+pub(super) struct Declared<'a, 'tree> {
+    pub(super) qualified_name: &'a str,
+    pub(super) kind: SymbolKindV2,
+    pub(super) declaration: Node<'tree>,
+    pub(super) anchor: Node<'tree>,
+    pub(super) name: Node<'tree>,
+}
+
+/// Every declaration of the file by in-file qualified name, the
+/// declarations that name a scope by their nodes, and the scopes that exist
+/// only as a qualifier of a declared name (a Java package, a C++ namespace
+/// written `a::b`). Built once per file from all declarations, selected or
+/// not, in record order.
+struct Declarations<'a, 'tree> {
+    entries: Vec<Declared<'a, 'tree>>,
+    by_qualified: HashMap<&'a str, Vec<usize>>,
+    /// Built on the first lookup that needs it.
+    implied: OnceCell<HashSet<&'a str>>,
+    scopes_by_node: HashMap<usize, usize>,
+    language: ProgrammingLanguage,
+    root: Node<'tree>,
+    source: &'a str,
+    walk: OnceCell<FileWalk<'a, 'tree>>,
+}
+
+impl<'a, 'tree> Declarations<'a, 'tree> {
+    fn new(
+        entries: Vec<Declared<'a, 'tree>>,
+        root: Node<'tree>,
+        language: ProgrammingLanguage,
+        source: &'a str,
+    ) -> Self {
         let mut by_qualified: HashMap<&str, Vec<usize>> = HashMap::new();
         let mut scopes_by_node = HashMap::new();
-        for (idx, (record, input)) in records.iter().zip(inputs).enumerate() {
-            by_qualified
-                .entry(record.identity.qualified_name.as_str())
-                .or_default()
-                .push(idx);
-            if is_scope_kind(record.kind) {
-                for node in [input.declaration, input.anchor] {
+        for (idx, entry) in entries.iter().enumerate() {
+            by_qualified.entry(entry.qualified_name).or_default().push(idx);
+            if is_scope_kind(entry.kind) {
+                for node in [entry.declaration, entry.anchor] {
                     scopes_by_node.entry(node.id()).or_insert(idx);
                 }
             }
         }
-        count_shared_context_steps(records.len());
-        Self { records, by_qualified, scopes_by_node, language }
+        count_shared_context_steps(entries.len());
+        Self {
+            entries,
+            by_qualified,
+            implied: OnceCell::new(),
+            scopes_by_node,
+            language,
+            root,
+            source,
+            walk: OnceCell::new(),
+        }
+    }
+
+    /// Every proper qualifying prefix of a record's in-file qualified name.
+    fn implied(&self) -> &HashSet<&'a str> {
+        self.implied.get_or_init(|| {
+            // One pass over each name, like hashing it: no step beyond the
+            // record's own.
+            self.entries.iter().flat_map(|entry| qualifying_prefixes(entry.qualified_name)).collect()
+        })
+    }
+
+    fn qualified_name(&self, idx: usize) -> &'a str {
+        self.entries[idx].qualified_name
     }
 
     /// The record whose declaration is the nearest scope around `node`.
@@ -133,27 +244,149 @@ impl<'a> Declarations<'a> {
             if current.kind() == "mod_item"
                 && let Some(&idx) = self.scopes_by_node.get(&current.id())
             {
-                modules.push(self.records[idx].identity.qualified_name.as_str());
+                modules.push(self.qualified_name(idx));
             }
             ancestor = current.parent();
         }
         modules
     }
 
+    /// The file's import bindings and Rust impls, walked once. An import
+    /// binds in its nearest enclosing scope; a PHP `namespace N;` statement
+    /// puts the statements after it in `N`.
+    fn walk(&self) -> &FileWalk<'a, 'tree> {
+        self.walk.get_or_init(|| {
+            let mut walk = FileWalk::default();
+            if !reads_imports(self.language) {
+                return walk;
+            }
+            let mut statement_namespace = "";
+            let mut stack = vec![self.root];
+            while let Some(node) = stack.pop() {
+                if self.language == ProgrammingLanguage::Rust && node.kind() == "impl_item" {
+                    walk.impls.push(node);
+                }
+                if self.language == ProgrammingLanguage::Php
+                    && node.kind() == "namespace_definition"
+                    && node.child_by_field_name("body").is_none()
+                {
+                    // A namespace record's in-file qualified name is its
+                    // name as written.
+                    statement_namespace = node
+                        .child_by_field_name("name")
+                        .and_then(|name| name.utf8_text(self.source.as_bytes()).ok())
+                        .map_or("", str::trim);
+                }
+                if let Some(binding) = import_binding(node, self.language, self.source) {
+                    let scope = self.enclosing_scope(node).map_or(statement_namespace, |idx| self.qualified_name(idx));
+                    match binding {
+                        ImportBinding::Names(names) => walk.imports.extend(names.into_iter().map(|name| (scope, name))),
+                        ImportBinding::Opaque => {
+                            walk.opaque.insert(scope);
+                        }
+                    }
+                    continue;
+                }
+                // Children in reverse so nodes are met in source order.
+                let mut cursor = node.walk();
+                let children: Vec<Node<'tree>> = node.named_children(&mut cursor).collect();
+                stack.extend(children.into_iter().rev());
+            }
+            walk
+        })
+    }
+
+    /// `prefix` joined with `segment` by the language's path separator.
+    fn join(&self, prefix: &str, segment: &str) -> String {
+        if prefix.is_empty() {
+            segment.to_string()
+        } else {
+            format!("{prefix}{}{segment}", path_separator(self.language))
+        }
+    }
+
+    /// Whether `name` is declared or qualifies a declared name.
+    fn is_bound(&self, name: &str) -> bool {
+        self.by_qualified.contains_key(name) || self.implied().contains(name)
+    }
+
+    /// Whether a path may continue through the scope called `name`: every
+    /// declaration of that name is a namespace-like owner (and only
+    /// namespaces may repeat), or it exists only as a qualifier.
+    fn is_traversable(&self, name: &str) -> bool {
+        match self.by_qualified.get(name) {
+            None => self.implied().contains(name),
+            Some(found) => {
+                let kinds = || found.iter().map(|&idx| self.entries[idx].kind);
+                kinds().all(is_path_owner_kind)
+                    && (found.len() == 1
+                        || kinds().all(|kind| matches!(kind, SymbolKindV2::Module | SymbolKindV2::Namespace)))
+            }
+        }
+    }
+
+    /// The scope prefix at which a relative path's first segment is bound,
+    /// walking `scopes` innermost first, or `None` when no binding can be
+    /// proved to be a declaration of this file.
+    ///
+    /// The first scope that binds the segment decides; outer scopes are
+    /// never tried after it. A binding is a declaration (of any kind, so a
+    /// parameter, variable or alias shadows), a qualifier of one, or an
+    /// import, which never resolves. A scope holding a wildcard import or
+    /// using-directive, a Java/C++ type with bases (whose inherited member
+    /// types are found first), and in Rust a module (an item does not see
+    /// its parent module's names) end the search unresolved. Class scopes
+    /// are skipped where they are not lexical: always in JS/TS, and in
+    /// Python every class scope but the innermost (`scopes[0]`, the body the
+    /// header is written in).
+    fn binding_scope<'s>(&self, first: &str, scopes: &[&'s str]) -> Option<&'s str> {
+        let walk = self.walk();
+        for (position, &prefix) in scopes.iter().enumerate() {
+            count_shared_context_steps(1);
+            let owners = self.by_qualified.get(prefix).map_or(&[][..], Vec::as_slice);
+            let is_class = owners.iter().any(|&idx| is_type_like_kind(self.entries[idx].kind));
+            if is_class && !class_scope_is_lexical(self.language, position == 0) {
+                continue;
+            }
+            if walk.opaque.contains(prefix) || walk.imports.contains(&(prefix, first)) {
+                return None;
+            }
+            if self.is_bound(&self.join(prefix, first)) {
+                return Some(prefix);
+            }
+            if inherits_member_names(self.language)
+                && owners.iter().any(|&idx| {
+                    is_type_like_kind(self.entries[idx].kind) && {
+                        let bases = declared_bases(self.entries[idx].name, self.language, self.source);
+                        !(bases.extends.is_empty() && bases.implements.is_empty())
+                    }
+                })
+            {
+                return None;
+            }
+            if self.language == ProgrammingLanguage::Rust
+                && owners.iter().any(|&idx| self.entries[idx].kind == SymbolKindV2::Module)
+            {
+                return None;
+            }
+        }
+        None
+    }
+
     /// The record a written path names, if exactly one eligible declaration
     /// of this file is that name.
     ///
-    /// The path is joined onto each scope prefix `scopes` lists, innermost
-    /// first, for a relative path, onto the root for `crate::` or a PHP
-    /// `\Name`, and onto the module `modules` gives for Rust `self::` and
-    /// `super::`. The first prefix at which *any* declaration has the
-    /// joined name decides: it resolves only if that declaration is the
-    /// only one and `eligible` accepts its kind, so a nearer type alias,
-    /// variable or duplicate shadows an outer type rather than falling
-    /// through to it. A relative path whose first segment is a visible type
-    /// parameter never resolves. In Rust a relative path is looked up only
-    /// up to the nearest module, since an item does not see its parent
-    /// module's names.
+    /// The first segment is decided first: a relative path's by
+    /// [`Self::binding_scope`] over `scopes` (never when it is a visible
+    /// type parameter, `type_params`), a rooted one at the file root
+    /// (`crate::`, PHP `\Name`, C++ `::Name`), Rust `self::`/`super::` at
+    /// the module `modules` gives; a Rust `::name` path is external and
+    /// never resolves. Each following segment is looked up only inside the
+    /// previous one, which must be a namespace-like declaration
+    /// ([`Self::is_traversable`]), so a function's local class is not
+    /// reachable through the function's name. The complete name resolves
+    /// only if it is the only declaration of that name and `eligible`
+    /// accepts its kind.
     fn resolve(
         &self,
         path: &BasePath,
@@ -162,47 +395,43 @@ impl<'a> Declarations<'a> {
         type_params: &[String],
         eligible: fn(SymbolKindV2) -> bool,
     ) -> Option<usize> {
-        let separator = path_separator(self.language);
-        let joined = path.segments.join(separator);
+        let (first, rest) = path.segments.split_first()?;
         let module_at = |out: usize| match out.cmp(&modules.len()) {
             std::cmp::Ordering::Less => Some(modules[out]),
             std::cmp::Ordering::Equal => Some(""),
             std::cmp::Ordering::Greater => None,
         };
-        let prefixes: Vec<&str> = match path.anchor {
+        let base = match path.anchor {
             PathAnchor::Relative => {
-                if path.segments.first().is_some_and(|first| type_params.contains(first)) {
+                if type_params.contains(first) {
                     return None;
                 }
-                scopes.to_vec()
+                self.binding_scope(first, scopes)?
             }
-            PathAnchor::Root => vec![""],
-            PathAnchor::SelfModule => vec![module_at(0)?],
-            PathAnchor::Super(out) => vec![module_at(out)?],
+            PathAnchor::Root => "",
+            PathAnchor::Extern => return None,
+            PathAnchor::SelfModule => module_at(0)?,
+            PathAnchor::Super(out) => module_at(out)?,
         };
-        for prefix in prefixes {
+        let mut current = self.join(base, first);
+        for segment in rest {
             count_shared_context_steps(1);
-            let key = if prefix.is_empty() { joined.clone() } else { format!("{prefix}{separator}{joined}") };
-            if let Some(found) = self.by_qualified.get(key.as_str()) {
-                return match found.as_slice() {
-                    [only] if eligible(self.records[*only].kind) => Some(*only),
-                    _ => None,
-                };
-            }
-            if self.language == ProgrammingLanguage::Rust
-                && self.by_qualified.get(prefix).is_some_and(|scope| {
-                    scope.iter().any(|&idx| self.records[idx].kind == SymbolKindV2::Module)
-                })
-            {
+            if !self.is_traversable(&current) {
                 return None;
             }
+            current = self.join(&current, segment);
         }
-        None
+        match self.by_qualified.get(current.as_str())?.as_slice() {
+            [only] if eligible(self.entries[*only].kind) => Some(*only),
+            _ => None,
+        }
     }
 
-    /// The relation target for `base`.
+    /// The relation target for `base`; `records` are the declarations'
+    /// records.
     fn target(
         &self,
+        records: &[SymbolRecord],
         base: &WrittenBase,
         scopes: &[&str],
         modules: &[&str],
@@ -213,19 +442,49 @@ impl<'a> Declarations<'a> {
             .path
             .as_ref()
             .and_then(|path| self.resolve(path, scopes, modules, type_params, eligible))
-            .map(|idx| &self.records[idx]);
+            .map(|idx| &records[idx]);
         SymbolRef {
             id: resolved.map(|record| record.id.clone()),
             name: base.text.clone(),
             qualified_name: resolved.map(|record| record.identity.qualified_name.clone()),
         }
     }
+
+    /// The type parameter names visible at `node`: `own`, then those of
+    /// every declaration around it (a C++ member class of a template, a
+    /// Java inner class of a generic class, a Rust item inside a generic
+    /// function) and, in Rust, of every enclosing `impl`. `skip` is the
+    /// record `node` declares, whose own list `own` already holds.
+    fn type_parameters_around(&self, node: Node<'_>, skip: Option<usize>, mut own: Vec<String>) -> Vec<String> {
+        let mut previous = skip;
+        let mut ancestor = node.parent();
+        while let Some(current) = ancestor {
+            if let Some(&owner) = self.scopes_by_node.get(&current.id())
+                && Some(owner) != previous
+            {
+                let entry = &self.entries[owner];
+                if let Ok(generics) = declared_generics(entry.declaration, entry.name, self.language, self.source) {
+                    own.extend(generics.params.into_iter().map(|param| param.name));
+                }
+                previous = Some(owner);
+            } else if self.language == ProgrammingLanguage::Rust && current.kind() == "impl_item" {
+                own.extend(impl_type_parameters(current, self.source));
+            }
+            ancestor = current.parent();
+        }
+        own
+    }
 }
 
 /// The scope prefixes a relative path is looked up under from inside the
 /// scope named `scope` (an in-file qualified name, `""` for the root),
-/// innermost first, ending at the root.
-fn scope_chain(scope: &str) -> Vec<&str> {
+/// innermost first, ending at the root. A PHP class name is relative to its
+/// namespace alone: PHP never falls back to an outer or global namespace
+/// for a class.
+fn scope_chain(scope: &str, language: ProgrammingLanguage) -> Vec<&str> {
+    if language == ProgrammingLanguage::Php {
+        return vec![scope];
+    }
     let mut chain = Vec::new();
     if !scope.is_empty() {
         chain.push(scope);
@@ -264,11 +523,22 @@ pub(super) fn link_relations(
 ) {
     count_relation_link();
     let changes = {
-        let declarations = Declarations::new(records, inputs, language);
+        let entries = records
+            .iter()
+            .zip(inputs)
+            .map(|(record, input)| Declared {
+                qualified_name: record.identity.qualified_name.as_str(),
+                kind: record.kind,
+                declaration: input.declaration,
+                anchor: input.anchor,
+                name: input.name,
+            })
+            .collect();
+        let declarations = Declarations::new(entries, root, language, source);
         let mut changes = Vec::new();
-        written_bases(&declarations, inputs, source, &mut changes);
+        written_bases(&declarations, records, inputs, &mut changes);
         if language == ProgrammingLanguage::Rust {
-            impl_relations(&declarations, inputs, root, source, containment, &mut changes);
+            impl_relations(&declarations, records, inputs, containment, &mut changes);
         }
         changes
     };
@@ -295,92 +565,52 @@ fn push_unique(list: &mut Vec<SymbolRef>, target: SymbolRef) {
 
 /// The bases each selected type-like record writes in its own header.
 fn written_bases(
-    declarations: &Declarations<'_>,
+    declarations: &Declarations<'_, '_>,
+    records: &[SymbolRecord],
     inputs: &[RelationInput<'_>],
-    source: &str,
     changes: &mut Vec<Change>,
 ) {
     let language = declarations.language;
-    for (idx, (record, input)) in declarations.records.iter().zip(inputs).enumerate() {
+    for (idx, (record, input)) in records.iter().zip(inputs).enumerate() {
         if !input.wanted || !declares_bases(record.kind) {
             continue;
         }
-        let bases = declared_bases(input.name, language, source);
+        let bases = declared_bases(input.name, language, declarations.source);
         if bases.extends.is_empty() && bases.implements.is_empty() {
             continue;
         }
-        let type_params = visible_type_parameters(declarations, inputs, idx, source);
-        let scopes = match crate::analysis::owner_path(&record.identity.qualified_name) {
-            Some(owner) => scope_chain(owner),
-            None => vec![""],
-        };
+        let own = record.type_info.generic_params.iter().map(|param| param.name.clone()).collect();
+        let type_params = declarations.type_parameters_around(input.declaration, Some(idx), own);
+        let scopes = scope_chain(crate::analysis::owner_path(&record.identity.qualified_name).unwrap_or(""), language);
         let modules = declarations.enclosing_modules(input.declaration);
         for base in &bases.extends {
-            let target = declarations.target(base, &scopes, &modules, &type_params, is_base_kind);
+            let target = declarations.target(records, base, &scopes, &modules, &type_params, is_base_kind);
             changes.push(Change::Extends(idx, target));
         }
         for base in &bases.implements {
-            let target = declarations.target(base, &scopes, &modules, &type_params, is_base_kind);
+            let target = declarations.target(records, base, &scopes, &modules, &type_params, is_base_kind);
             changes.push(Change::Implements(idx, target));
         }
     }
 }
 
-/// The type parameters a base written by record `idx` can name: its own,
-/// then those of every declaration around it (a C++ member class of a
-/// template, a Java inner class of a generic class).
-fn visible_type_parameters(
-    declarations: &Declarations<'_>,
-    inputs: &[RelationInput<'_>],
-    idx: usize,
-    source: &str,
-) -> Vec<String> {
-    let language = declarations.language;
-    let mut names: Vec<String> = declarations.records[idx]
-        .type_info
-        .generic_params
-        .iter()
-        .map(|param| param.name.clone())
-        .collect();
-    let mut previous = idx;
-    let mut ancestor = inputs[idx].declaration.parent();
-    while let Some(current) = ancestor {
-        if let Some(&owner) = declarations.scopes_by_node.get(&current.id())
-            && owner != idx
-            && owner != previous
-        {
-            let input = &inputs[owner];
-            if let Ok(generics) = declared_generics(input.declaration, input.name, language, source) {
-                names.extend(generics.params.into_iter().map(|param| param.name));
-            }
-            previous = owner;
-        }
-        ancestor = current.parent();
-    }
-    names
-}
-
-/// Rust impls, traversed once: each positive trait impl's trait goes to the
-/// `implements` of its selected members and of its uniquely resolved self
-/// type, in file order; inherent and negative impls add no relation. Under
-/// Containment every record whose container is an impl's self type (its
-/// members, and what the container search places there from inside them) is
-/// linked to the resolved self type, or, when it does not resolve, gets a
-/// container named by the self type as written and no parent.
+/// Rust impls, each resolved once: each positive trait impl's trait goes to
+/// the `implements` of its selected members and of its uniquely resolved
+/// self type, in file order; inherent and negative impls add no relation.
+/// Under Containment every record whose container is an impl's self type
+/// (its members, and what the container search places there from inside
+/// them) is linked to the resolved self type, or, when it does not resolve,
+/// gets a container named by the self type as written and no parent.
 fn impl_relations(
-    declarations: &Declarations<'_>,
+    declarations: &Declarations<'_, '_>,
+    records: &[SymbolRecord],
     inputs: &[RelationInput<'_>],
-    root: Node<'_>,
-    source: &str,
     containment: bool,
     changes: &mut Vec<Change>,
 ) {
     let mut impls: HashMap<usize, ResolvedImpl> = HashMap::new();
-    let mut stack = vec![root];
-    while let Some(node) = stack.pop() {
-        if node.kind() == "impl_item"
-            && let Some(resolved) = resolve_impl(declarations, node, source)
-        {
+    for &node in &declarations.walk().impls {
+        if let Some(resolved) = resolve_impl(declarations, records, node) {
             if let (Some(self_type), Some(target)) = (resolved.self_type, &resolved.implements)
                 && inputs[self_type].wanted
             {
@@ -388,10 +618,6 @@ fn impl_relations(
             }
             impls.insert(node.id(), resolved);
         }
-        // Children in reverse so impls are met in source order.
-        let mut cursor = node.walk();
-        let children: Vec<Node<'_>> = node.named_children(&mut cursor).collect();
-        stack.extend(children.into_iter().rev());
     }
     if impls.is_empty() {
         return;
@@ -413,7 +639,7 @@ fn impl_relations(
         if containment {
             let container = match resolved.self_type {
                 Some(owner) => {
-                    let owner = &declarations.records[owner];
+                    let owner = &records[owner];
                     SymbolRef {
                         id: Some(owner.id.clone()),
                         name: owner.identity.name.clone(),
@@ -427,20 +653,61 @@ fn impl_relations(
     }
 }
 
-fn resolve_impl(declarations: &Declarations<'_>, impl_item: Node<'_>, source: &str) -> Option<ResolvedImpl> {
-    let header = impl_header(impl_item, source)?;
-    let scope = declarations
-        .enclosing_scope(impl_item)
-        .map_or("", |idx| declarations.records[idx].identity.qualified_name.as_str());
-    let scopes = scope_chain(scope);
-    let modules = declarations.enclosing_modules(impl_item);
-    let self_type = header.self_path.as_ref().and_then(|path| {
-        declarations.resolve(path, &scopes, &modules, &header.type_params, is_self_type_kind)
+/// The impl's self type and trait, resolved by [`Declarations::resolve`]
+/// from the impl's scope with every generic parameter visible there (the
+/// impl's own and those of the functions, impls and traits around it), so a
+/// self type naming an enclosing generic attaches to no declaration.
+fn resolve_impl(
+    declarations: &Declarations<'_, '_>,
+    records: &[SymbolRecord],
+    impl_item: Node<'_>,
+) -> Option<ResolvedImpl> {
+    let lookup = resolve_self_type(declarations, impl_item)?;
+    let implements = lookup.header.trait_base.as_ref().filter(|_| !lookup.header.is_negative).map(|base| {
+        declarations.target(records, base, &lookup.scopes, &lookup.modules, &lookup.type_params, is_trait_kind)
     });
-    let implements = header
-        .trait_base
+    Some(ResolvedImpl { header: lookup.header, self_type: lookup.self_type, implements })
+}
+
+/// One impl's header, the lookup context its paths resolve in, and the
+/// declaration its self type names.
+struct ImplLookup<'s> {
+    header: ImplHeader,
+    self_type: Option<usize>,
+    scopes: Vec<&'s str>,
+    modules: Vec<&'s str>,
+    type_params: Vec<String>,
+}
+
+/// The impl's header and the declaration its self type names, if one.
+fn resolve_self_type<'a>(declarations: &Declarations<'a, '_>, impl_item: Node<'_>) -> Option<ImplLookup<'a>> {
+    let header = impl_header(impl_item, declarations.source)?;
+    let scope = declarations.enclosing_scope(impl_item).map_or("", |idx| declarations.qualified_name(idx));
+    let scopes = scope_chain(scope, declarations.language);
+    let modules = declarations.enclosing_modules(impl_item);
+    let type_params = declarations.type_parameters_around(impl_item, None, header.type_params.clone());
+    let self_type = header
+        .self_path
         .as_ref()
-        .filter(|_| !header.is_negative)
-        .map(|base| declarations.target(base, &scopes, &modules, &header.type_params, is_trait_kind));
-    Some(ResolvedImpl { header, self_type, implements })
+        .and_then(|path| declarations.resolve(path, &scopes, &modules, &type_params, is_self_type_kind));
+    Some(ImplLookup { header, self_type, scopes, modules, type_params })
+}
+
+/// For each Rust `impl` of the file (by node id), the index in `entries` of
+/// the declaration its self type resolves to, by the same decision
+/// [`link_relations`] makes; `None` when it does not resolve. The
+/// definitions pass reads it for an impl member's container kind, before
+/// records exist.
+pub(super) fn impl_self_types(
+    entries: Vec<Declared<'_, '_>>,
+    root: Node<'_>,
+    source: &str,
+) -> HashMap<usize, Option<usize>> {
+    let declarations = Declarations::new(entries, root, ProgrammingLanguage::Rust, source);
+    declarations
+        .walk()
+        .impls
+        .iter()
+        .filter_map(|&node| Some((node.id(), resolve_self_type(&declarations, node)?.self_type)))
+        .collect()
 }

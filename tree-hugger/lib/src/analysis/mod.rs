@@ -103,7 +103,7 @@ pub(crate) fn run_query(
     let symbols = tree_file.records_from(definitions, &selection, facts)?;
 
     let mut index = FileSymbolIndex {
-        schema_version: crate::shared::SchemaVersion::V4_1,
+        schema_version: crate::shared::SchemaVersion::V4_2,
         file: tree_file.file.clone(),
         language: tree_file.language,
         file_hash: tree_file.hash.clone(),
@@ -163,6 +163,7 @@ fn import_record(import: ImportSymbol) -> ImportRecord {
         span: text_span(&import.range),
         statement_span: import.statement_range.as_ref().map(text_span),
         symbol: SymbolRef {
+            source_span: None,
             id: None,
             name: import.name,
             qualified_name: import.original_name,
@@ -175,6 +176,7 @@ fn export_record(export: &crate::shared::SymbolInfo) -> ExportRecord {
         name: export.name.clone(),
         span: text_span(&export.range),
         symbol: SymbolRef {
+            source_span: None,
             id: None,
             name: export.name.clone(),
             qualified_name: None,
@@ -314,6 +316,7 @@ fn bind_references(index: &mut FileSymbolIndex, names: &NameIndex, references: &
             (
                 import.name.clone(),
                 SymbolRef {
+                    source_span: None,
                     id: import.symbol.id.clone(),
                     name: import.name.clone(),
                     qualified_name: import.symbol.qualified_name.clone(),
@@ -423,6 +426,7 @@ fn docs_pass(index: &mut FileSymbolIndex) {
 
 fn symbol_ref(symbol: &SymbolRecord) -> SymbolRef {
     SymbolRef {
+        source_span: None,
         id: Some(symbol.id.clone()),
         name: symbol.identity.name.clone(),
         qualified_name: Some(symbol.identity.qualified_name.clone()),

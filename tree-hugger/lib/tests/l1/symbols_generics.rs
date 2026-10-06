@@ -1,15 +1,17 @@
 //! The generics matrix: `type_info.generic_params` and
 //! `type_info.constraints` hold exactly the parameters a declaration writes
 //! itself (never an enclosing type's or `impl`'s), with bounds, defaults and
-//! variance as written, on the complete index and on a declarations-only
-//! query. Each language has one row: supported forms with positive and
+//! variance as written, on the complete index, on a declarations-only
+//! query and through the persistent cache (a warm hit and its projections).
+//! Each language has one row: supported forms with positive and
 //! negative declarations, an absent construct, and its demonstrated grammar
 //! limits.
 
 use std::io::Write;
 
+use tree_hugger::cache::{CacheLookup, PersistentCache, SymbolCache};
 use tree_hugger::{
-    FileSymbolIndex, GenericParamKind, ProgrammingLanguage, SymbolKindV2, SymbolQuery, SymbolRecord,
+    FileSymbolIndex, SourceFile, GenericParamKind, ProgrammingLanguage, SymbolKindV2, SymbolQuery, SymbolRecord,
     TreeFile, TreeHuggerError,
 };
 
@@ -90,6 +92,24 @@ const fn bounded(name: &'static str, constraints: &'static [&'static str], posit
     (name, Type, constraints, None, None, position)
 }
 
+/// A C++ member that writes `requires Small<T>` on its enclosing class's
+/// parameter and declares no parameters of its own.
+const fn owns_requirement_only(name: &'static str, kind: SymbolKindV2) -> Declared {
+    Declared {
+        name,
+        kind,
+        params: &[],
+        constraints: &["Small<T>"],
+    }
+}
+
+/// `template <template <class> class TT = Box, class T = int, int N = 3>`.
+const DEFAULTED_TEMPLATE_TEMPLATE: &[Param] = &[
+    ("TT", Type, &[], Some("Box"), None, 0),
+    ("T", Type, &[], Some("int"), None, 1),
+    ("N", Const, &[], Some("3"), None, 2),
+];
+
 pub const GENERICS_MATRIX: &[GenericsRow] = &[
     GenericsRow {
         language: L::Rust,
@@ -100,6 +120,7 @@ pub const GENERICS_MATRIX: &[GenericsRow] = &[
                  pub trait Store<'a, K: 'a + Ord, const N: usize = 4>: Sized\nwhere\n    K: Clone,\n    Vec<K>: Send,\n    for<'b> &'b K: Into<u8>,\n{\n    fn put<V: Into<K> /* bound */ + Copy>(&self, value: V);\n}\n\
                  pub type Pair<A, B = A> = (A, B);\n\
                  pub fn uses<T>(items: T) where T: IntoIterator, T::Item: Copy {}\n\
+                 pub struct Tagged<#[cfg(all())] T, U>(T, U);\n\
                  pub fn infer(items: Vec<u8>) -> usize { items.len() }\n",
         declarations: &[
             declared("Bag", K::Type, &[("T", Type, &["Clone"], Some("String"), None, 0)]),
@@ -130,6 +151,8 @@ pub const GENERICS_MATRIX: &[GenericsRow] = &[
                 params: &[bounded("T", &["IntoIterator"], 0)],
                 constraints: &["T::Item: Copy"],
             },
+            // An attribute in the list takes no position.
+            declared("Tagged", K::Type, &[param("T", 0), param("U", 1)]),
             plain("infer", K::Function),
         ],
         limits: &[],
@@ -258,7 +281,8 @@ pub const GENERICS_MATRIX: &[GenericsRow] = &[
         source: "interface IVariant<in T, out U> where T : class {}\n\
                  class Box<T> where T : class, IComparable<T>, new() {\n    public V Map<V>(V value) where V : notnull { return value; }\n    public int Size() { return 0; }\n}\n\
                  struct Cell<T> {}\n\
-                 record Pair<A, B>(A First, B Second);\n",
+                 record Pair<A, B>(A First, B Second);\n\
+                 class Loose where T : class {\n    public void Tight() where U : struct {}\n}\n",
         declarations: &[
             declared(
                 "IVariant",
@@ -270,6 +294,20 @@ pub const GENERICS_MATRIX: &[GenericsRow] = &[
             plain("Size", K::Method),
             declared("Cell", K::Type, &[param("T", 0)]),
             declared("Pair", K::Type, &[param("A", 0), param("B", 1)]),
+            // The grammar accepts `where` on a declaration with no list
+            // (the compiler rejects it); it names no declared parameter.
+            Declared {
+                name: "Loose",
+                kind: K::Class,
+                params: &[],
+                constraints: &["T : class"],
+            },
+            Declared {
+                name: "Tight",
+                kind: K::Method,
+                params: &[],
+                constraints: &["U : struct"],
+            },
         ],
         limits: &[],
     },
@@ -290,6 +328,13 @@ pub const GENERICS_MATRIX: &[GenericsRow] = &[
                  template <class T> void trailing(T value) requires Small<T> {}\n\
                  template <class T> using Alias = Box<T>;\n\
                  template <template <class> class TT, typename, int... Ns> struct Holder {};\n\
+                 template <template <class> class TT = Box, class T = int, int N = 3> struct Child {};\n\
+                 template <template <class> class TT = Box, class T = int, int N = 3> void build() {}\n\
+                 template <template <class> class TT = Box, class T = int, int N = 3> using Wrapped = TT<int>;\n\
+                 struct Host {\n    template <template <class> class TT = Box, class T = int, int N = 3> void probe() {}\n    template <template <class> class TT = Box, class T = int, int N = 3> Host(TT<int> value) {}\n};\n\
+                 template <class T> struct Gate {\n    void declared() requires Small<T>;\n    void defined() requires Small<T> {}\n    Gate() requires Small<T> {}\n    friend void pal(Gate) requires Small<T> {}\n};\n\
+                 template <class T> void Gate<T>::declared() requires Small<T> {}\n\
+                 template <class T> requires Small<T> struct Bound {\n    void unconstrained();\n};\n\
                  int infer(int value) { return value; }\n",
         declarations: &[
             declared(
@@ -318,6 +363,37 @@ pub const GENERICS_MATRIX: &[GenericsRow] = &[
             declared("Alias", K::TypeAlias, &[param("T", 0)]),
             // The unnamed `typename` keeps its slot.
             declared("Holder", K::Type, &[param("TT", 0), ("Ns", Const, &[], None, None, 2)]),
+            // A template-template parameter's default sits on its nested
+            // `class TT = Box`; the ordinary and non-type defaults beside it
+            // are the controls.
+            declared("Child", K::Type, DEFAULTED_TEMPLATE_TEMPLATE),
+            declared("build", K::Function, DEFAULTED_TEMPLATE_TEMPLATE),
+            declared("Wrapped", K::TypeAlias, DEFAULTED_TEMPLATE_TEMPLATE),
+            declared("probe", K::Method, DEFAULTED_TEMPLATE_TEMPLATE),
+            declared("Host", K::Constructor, DEFAULTED_TEMPLATE_TEMPLATE),
+            // A member of a class template constrains itself on the class's
+            // parameter with no template of its own: the requirement is the
+            // member's, the parameter list stays the class's.
+            declared("Gate", K::Type, &[param("T", 0)]),
+            owns_requirement_only("declared", K::Method),
+            owns_requirement_only("defined", K::Method),
+            owns_requirement_only("Gate", K::Constructor),
+            owns_requirement_only("pal", K::Function),
+            // Out of class, the definition repeats the class's header.
+            Declared {
+                name: "declared",
+                kind: K::Function,
+                params: &[param("T", 0)],
+                constraints: &["Small<T>"],
+            },
+            // A template-level `requires` is the template's alone.
+            Declared {
+                name: "Bound",
+                kind: K::Type,
+                params: &[param("T", 0)],
+                constraints: &["Small<T>"],
+            },
+            plain("unconstrained", K::Method),
             plain("infer", K::Function),
         ],
         limits: &[Limit {
@@ -341,6 +417,9 @@ pub const GENERICS_MATRIX: &[GenericsRow] = &[
                  struct Pair<A, B: Comparable & Hashable> {}\n\
                  func first<T>(items: [T]) -> T {\n    return items[0]\n}\n\
                  typealias List<T> = [T]\n\
+                 func zip<each T: Equatable, U>(values: repeat each T, other: U) {}\n\
+                 struct Packed<each T> {}\n\
+                 func older<T: Sequence where T: Hashable, T.Element == Int>(value: T) {}\n\
                  func infer(value: Int) -> Int {\n    return value\n}\n",
         declarations: &[
             declared("Box", K::Type, &[bounded("T", &["Equatable"], 0), bounded("U", &["Hashable"], 1)]),
@@ -356,6 +435,17 @@ pub const GENERICS_MATRIX: &[GenericsRow] = &[
             declared("Pair", K::Type, &[param("A", 0), bounded("B", &["Comparable & Hashable"], 1)]),
             declared("first", K::Function, &[param("T", 0)]),
             declared("List", K::TypeAlias, &[param("T", 0)]),
+            // A pack's name is nested in `type_parameter_pack`.
+            declared("zip", K::Function, &[bounded("T", &["Equatable"], 0), param("U", 1)]),
+            declared("Packed", K::Type, &[param("T", 0)]),
+            // A `where` clause inside the angle brackets is nested in the
+            // parameter list.
+            Declared {
+                name: "older",
+                kind: K::Function,
+                params: &[bounded("T", &["Sequence", "Hashable"], 0)],
+                constraints: &["T.Element == Int"],
+            },
             plain("infer", K::Function),
         ],
         limits: &[],
@@ -527,6 +617,38 @@ fn generics_matrix_holds_on_complete_and_declarations_only_paths() {
                     .all(|record| record.type_info.generic_params.is_empty() && record.type_info.constraints.is_empty()),
                 "{label}: {reason}"
             );
+        }
+    }
+}
+
+/// The same expectations hold through the persistent cache: a complete entry
+/// is served warm as a real `Hit`, and projected to each declarations-only
+/// query, with every parameter's default, bounds, variance and position
+/// intact (an equal-to-uncached comparison alone would pass if both lost one).
+#[test]
+fn generics_matrix_holds_on_warm_cache_hits_and_projections() {
+    let sources = tempfile::TempDir::new().expect("sources");
+    for (row_index, row) in GENERICS_MATRIX.iter().enumerate() {
+        let label = row.language.name();
+        let path = sources.path().join(format!("row_{row_index}.{}", row.extension));
+        std::fs::write(&path, row.source).expect("write row source");
+        let dir = tempfile::TempDir::new().expect("cache dir");
+        let cache = SymbolCache::new(PersistentCache::open(dir.path().join("cache"), true));
+        let read = || SourceFile::read(&path).expect("read row source");
+        let query = |query: &SymbolQuery| {
+            let outcome = cache.query(read(), query).expect("cached query");
+            assert!(outcome.write_error.is_none(), "{label}: write failed: {:?}", outcome.write_error);
+            outcome
+        };
+        let complete = SymbolQuery::complete_index();
+        assert!(!matches!(query(&complete).lookup, CacheLookup::Hit), "{label}: cold");
+        let warm = query(&complete);
+        assert_eq!(warm.lookup, CacheLookup::Hit, "{label}: warm");
+        for expected in row.declarations {
+            assert_declared(&warm.result.index, &format!("{label} warm"), expected);
+            let narrowed = query(&SymbolQuery::new().kinds([expected.kind]));
+            assert_eq!(narrowed.lookup, CacheLookup::Hit, "{label}: `{}` projection", expected.name);
+            assert_declared(&narrowed.result.index, &format!("{label} projected"), expected);
         }
     }
 }

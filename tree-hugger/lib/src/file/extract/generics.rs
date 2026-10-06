@@ -1,6 +1,6 @@
 //! Structured generic parameters (`type_info.generic_params`) and
 //! declaration-level requirements (`type_info.constraints`), read from the
-//! parameter list a declaration writes itself.
+//! parameter list and requirement clauses a declaration writes itself.
 //!
 //! Only the declaration's own list is read: a method never receives its
 //! type's parameters and an implemented type never receives its `impl`
@@ -154,12 +154,16 @@ fn attach(params: &mut [Param], subject: &str, bounds: Vec<String>) -> bool {
 fn rust_generics(declaration: Node<'_>, source: &str, constraints: &mut Vec<String>) -> Vec<Param> {
     let mut params = Vec::new();
     if let Some(list) = declaration.child_by_field_name("type_parameters") {
-        for (index, entry) in named_children(list).into_iter().enumerate() {
+        // An attribute on a parameter (`<#[cfg(x)] T>`) is a sibling entry
+        // of the list, not a parameter, so it takes no position.
+        let declared = named_children(list).into_iter().filter(|entry| {
+            matches!(entry.kind(), "lifetime_parameter" | "type_parameter" | "const_parameter")
+        });
+        for (index, entry) in declared.enumerate() {
             let kind = match entry.kind() {
                 "lifetime_parameter" => GenericParamKind::Lifetime,
                 "type_parameter" => GenericParamKind::Type,
-                "const_parameter" => GenericParamKind::Const,
-                _ => continue,
+                _ => GenericParamKind::Const,
             };
             let Some(name) = field_text(entry, "name", source) else {
                 continue;
@@ -326,14 +330,11 @@ fn java_generics(declaration: Node<'_>, source: &str) -> Vec<Param> {
 
 fn csharp_generics(declaration: Node<'_>, source: &str, constraints: &mut Vec<String>) -> Vec<Param> {
     // The list is fielded on interfaces and methods, unfielded on classes.
-    let Some(list) = declaration
+    let list = declaration
         .child_by_field_name("type_parameters")
-        .or_else(|| find_child_by_kind(declaration, "type_parameter_list"))
-    else {
-        return Vec::new();
-    };
+        .or_else(|| find_child_by_kind(declaration, "type_parameter_list"));
     let mut params = Vec::new();
-    for (index, entry) in named_children(list).into_iter().enumerate() {
+    for (index, entry) in list.map(named_children).unwrap_or_default().into_iter().enumerate() {
         let Some(name) = field_text(entry, "name", source) else {
             continue;
         };
@@ -345,6 +346,8 @@ fn csharp_generics(declaration: Node<'_>, source: &str, constraints: &mut Vec<St
             .map(|token| token.kind().to_string());
         params.push(param);
     }
+    // Read with or without a list: the grammar accepts `where` on a
+    // declaration that declares no parameters, and it names none of them.
     let mut cursor = declaration.walk();
     let clauses: Vec<Node<'_>> = declaration
         .children(&mut cursor)
@@ -378,28 +381,29 @@ fn cpp_generics(
     source: &str,
     constraints: &mut Vec<String>,
 ) -> Vec<Param> {
+    let mut params = Vec::new();
     // Only the template that directly wraps the declaration: an enclosing
-    // class template's list belongs to the class, and in
+    // class template's list (and its `requires`) belongs to the class, and in
     // `template <class T> template <class U> void A<T>::f(U)` the inner one
     // is the member's.
-    let Some(template) = declaration
+    if let Some(template) = declaration
         .parent()
         .filter(|parent| parent.kind() == "template_declaration")
-    else {
-        return Vec::new();
-    };
-    let mut params = Vec::new();
-    if let Some(list) = template.child_by_field_name("parameters") {
-        for (index, entry) in named_children(list).into_iter().enumerate() {
-            if let Some(param) = cpp_param(entry, index, source) {
-                params.push(param);
+    {
+        if let Some(list) = template.child_by_field_name("parameters") {
+            for (index, entry) in named_children(list).into_iter().enumerate() {
+                if let Some(param) = cpp_param(entry, index, source) {
+                    params.push(param);
+                }
             }
         }
+        if let Some(clause) = find_child_by_kind(template, "requires_clause") {
+            constraints.extend(field_text(clause, "constraint", source));
+        }
     }
-    if let Some(clause) = find_child_by_kind(template, "requires_clause") {
-        constraints.extend(field_text(clause, "constraint", source));
-    }
-    // A trailing `requires` after a function's parameters.
+    // A trailing `requires` after a function's parameters is the function's
+    // own, with or without a wrapper: a member of a class template may
+    // constrain itself on the class's parameter (`void f() requires C<T>;`).
     if let Some(function) = declared_function_named(declaration, name)
         && let Some(clause) = find_child_by_kind(function.function, "requires_clause")
     {
@@ -420,26 +424,31 @@ fn cpp_param(entry: Node<'_>, index: usize, source: &str) -> Option<Param> {
         node.child_by_field_name("name")
             .or_else(|| find_child_by_kind(node, "type_identifier"))
     }
-    let (name, kind) = match entry.kind() {
+    // `declared` is the node holding the name and the default: the entry
+    // itself, except for a template-template parameter.
+    let (declared, name, kind) = match entry.kind() {
         "type_parameter_declaration"
         | "optional_type_parameter_declaration"
-        | "variadic_type_parameter_declaration" => (type_name(entry)?, GenericParamKind::Type),
-        // `template <class> class TT`: the name sits on the trailing
-        // `class TT`, after the parameter's own parameter list.
+        | "variadic_type_parameter_declaration" => (entry, type_name(entry)?, GenericParamKind::Type),
+        // `template <class> class TT = Box`: the name and default sit on the
+        // trailing `class TT = Box`, a nested type parameter declaration
+        // after the parameter's own parameter list.
         "template_template_parameter_declaration" => {
             let declared = named_children(entry)
                 .into_iter()
                 .rfind(|child| child.kind().ends_with("type_parameter_declaration"))?;
-            (type_name(declared)?, GenericParamKind::Type)
+            (declared, type_name(declared)?, GenericParamKind::Type)
         }
-        "parameter_declaration" | "optional_parameter_declaration" | "variadic_parameter_declaration" => {
-            (declarator_name(entry.child_by_field_name("declarator")?)?, GenericParamKind::Const)
-        }
+        "parameter_declaration" | "optional_parameter_declaration" | "variadic_parameter_declaration" => (
+            entry,
+            declarator_name(entry.child_by_field_name("declarator")?)?,
+            GenericParamKind::Const,
+        ),
         _ => return None,
     };
     let mut param = Param::new(&text(name, source), kind, index);
-    param.default = field_text(entry, "default_type", source)
-        .or_else(|| field_text(entry, "default_value", source));
+    param.default = field_text(declared, "default_type", source)
+        .or_else(|| field_text(declared, "default_value", source));
     Some(param)
 }
 
@@ -449,9 +458,15 @@ fn cpp_param(entry: Node<'_>, index: usize, source: &str) -> Option<Param> {
 
 fn swift_generics(declaration: Node<'_>, source: &str, constraints: &mut Vec<String>) -> Vec<Param> {
     let mut params = Vec::new();
-    if let Some(list) = find_child_by_kind(declaration, "type_parameters") {
+    let list = find_child_by_kind(declaration, "type_parameters");
+    if let Some(list) = list {
         for (index, entry) in named_children(list).into_iter().enumerate() {
-            let Some(name) = find_child_by_kind(entry, "type_identifier") else {
+            // A pack (`each T`) nests its name in `type_parameter_pack`.
+            let name = find_child_by_kind(entry, "type_identifier").or_else(|| {
+                let pack = find_child_by_kind(entry, "type_parameter_pack")?;
+                find_child_by_kind(find_child_by_kind(pack, "user_type")?, "type_identifier")
+            });
+            let Some(name) = name else {
                 continue;
             };
             let mut param = Param::new(&text(name, source), GenericParamKind::Type, index);
@@ -460,7 +475,14 @@ fn swift_generics(declaration: Node<'_>, source: &str, constraints: &mut Vec<Str
             params.push(param);
         }
     }
-    if let Some(clause) = find_child_by_kind(declaration, "type_constraints") {
+    // The pinned grammar also accepts a `where` clause inside the angle
+    // brackets (`<T where T: P>`, pre-Swift 4), nested in the list; it comes
+    // first in source order.
+    let clauses = list
+        .and_then(|list| find_child_by_kind(list, "type_constraints"))
+        .into_iter()
+        .chain(find_child_by_kind(declaration, "type_constraints"));
+    for clause in clauses {
         for constraint in named_children(clause) {
             if constraint.kind() != "type_constraint" {
                 continue;

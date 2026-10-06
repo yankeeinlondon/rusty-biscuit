@@ -102,17 +102,7 @@ pub(crate) fn impl_header(impl_item: Node<'_>, source: &str) -> Option<ImplHeade
     let self_text = self_type.utf8_text(source.as_bytes()).ok()?.trim().to_string();
     let mut cursor = impl_item.walk();
     let is_negative = impl_item.children(&mut cursor).any(|child| child.kind() == "!");
-    let type_params = impl_item
-        .child_by_field_name("type_parameters")
-        .map(|list| {
-            let mut cursor = list.walk();
-            list.named_children(&mut cursor)
-                .filter_map(|param| param.child_by_field_name("name"))
-                .filter_map(|name| name.utf8_text(source.as_bytes()).ok())
-                .map(str::to_string)
-                .collect()
-        })
-        .unwrap_or_default();
+    let type_params = impl_type_parameters(impl_item, source);
     Some(ImplHeader {
         trait_base: impl_item
             .child_by_field_name("trait")
@@ -122,4 +112,20 @@ pub(crate) fn impl_header(impl_item: Node<'_>, source: &str) -> Option<ImplHeade
         self_text,
         type_params,
     })
+}
+
+/// The names of `impl_item`'s own type parameters (`impl<T, 'a>` → `T`,
+/// `'a`).
+pub(crate) fn impl_type_parameters(impl_item: Node<'_>, source: &str) -> Vec<String> {
+    impl_item
+        .child_by_field_name("type_parameters")
+        .map(|list| {
+            let mut cursor = list.walk();
+            list.named_children(&mut cursor)
+                .filter_map(|param| param.child_by_field_name("name"))
+                .filter_map(|name| name.utf8_text(source.as_bytes()).ok())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
 }

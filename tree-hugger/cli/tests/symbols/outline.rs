@@ -74,7 +74,7 @@ fn type_rows_show_their_declared_bases_in_source_order() {
         &symbols,
         &[
             "    method fmt(self, f: &mut std::fmt::Formatter) -> std::fmt::Result [5:5]",
-            "  [in type &Local]",
+            "  [in &Local]",
             "    public method by_ref(self) [12:5]",
             "    public method area(): number [4:5]",
         ],
@@ -94,7 +94,9 @@ fn functions_tree_adds_no_type_row_and_selectors_add_no_container_or_target() {
             "lib.rs",
             "  [in type W]",
             "    method fmt(self, f: &mut std::fmt::Formatter) -> std::fmt::Result [5:5]",
-            "  [in type &Local]",
+            // A reference self type names no local type, so its heading
+            // carries no kind.
+            "  [in &Local]",
             "    public method by_ref(self) [12:5]",
             "",
             "shapes.ts",

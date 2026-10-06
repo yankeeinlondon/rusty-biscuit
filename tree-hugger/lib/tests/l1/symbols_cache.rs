@@ -1170,3 +1170,74 @@ fn a_declaration_fact_entry_of_an_older_record_schema_is_a_miss() {
     assert_eq!(lookup, CacheLookup::Miss(CacheMiss::Mismatched("record schema version")), "{label}");
     assert_eq!(served, uncached(&path, &query), "{label}");
 }
+
+/// The Rust impl rows of the path-meaning matrix, cached declarations-only
+/// and then asked for Containment: the widened result parses once and
+/// reports exactly the uncached facts (a self type through an external `::`
+/// path, an enclosing generic parameter or a block import stays a textual
+/// container with no parent and no membership, and the same-named
+/// file-level type gains nothing); the next Containment request is a real
+/// `Hit` with no work and the same facts.
+#[test]
+fn path_meaning_impl_rows_widen_to_containment_with_the_same_facts() {
+    use crate::symbols_relations::{PATH_MEANING_MATRIX, check_impl_facts};
+
+    let sources = TempDir::new().expect("sources");
+    let declarations = SymbolQuery::new();
+    let containment = SymbolQuery::new().capabilities([Capability::Containment]);
+    let mut rows = 0;
+    for (idx, row) in PATH_MEANING_MATRIX.iter().filter(|row| !row.impl_members.is_empty()).enumerate() {
+        rows += 1;
+        let path = sources.path().join(format!("impl_row_{idx}.{}", row.extension));
+        std::fs::write(&path, row.source).expect("write row source");
+        let complete = read(&path).query(&SymbolQuery::complete_index()).expect("complete").index;
+        let dir = TempDir::new().expect("temp");
+        let cache = cache_in(&dir);
+        cached(&cache, read(&path), &declarations);
+
+        let (widened, work) = counted(|| cache.query(read(&path), &containment).expect("widen"));
+        let label = format!("{}: widened", row.label);
+        assert_eq!(widened.lookup, CacheLookup::WidenedCapabilities { parsed: true }, "{label}");
+        assert_eq!(work.parser_constructions, 1, "{label}: one parse");
+        assert_eq!(as_value(&widened.result), uncached(&path, &containment), "{label}: equals uncached");
+        check_impl_facts(&label, row, &complete, &widened.result.index, true);
+
+        let (warm, work) = counted(|| cache.query(read(&path), &containment).expect("warm"));
+        let label = format!("{}: warm", row.label);
+        assert_eq!(warm.lookup, CacheLookup::Hit, "{label}");
+        assert_eq!(work, WorkCounters::default(), "{label}: no work");
+        check_impl_facts(&label, row, &complete, &warm.result.index, true);
+    }
+    assert!(rows >= 5, "the impl rows ran ({rows})");
+}
+
+/// Every [`PATH_MEANING_MATRIX`](crate::symbols_relations::PATH_MEANING_MATRIX)
+/// row with written bases, stored complete, is served warm as a real `Hit`
+/// on the complete index and on a type-only query, and each owner keeps
+/// exactly its uncached targets and target IDs.
+#[test]
+fn path_meaning_rows_hold_on_warm_hits() {
+    use crate::symbols_relations::{PATH_MEANING_MATRIX, check_owner_targets};
+
+    let sources = TempDir::new().expect("sources");
+    let complete_query = SymbolQuery::complete_index();
+    let types_only = SymbolQuery::new().kinds(TYPE_KINDS);
+    let mut rows = 0;
+    for (idx, row) in PATH_MEANING_MATRIX.iter().filter(|row| !row.owners.is_empty()).enumerate() {
+        rows += 1;
+        let path = sources.path().join(format!("row_{idx}.{}", row.extension));
+        std::fs::write(&path, row.source).expect("write row source");
+        let complete = read(&path).query(&complete_query).expect("complete").index;
+        let dir = TempDir::new().expect("temp");
+        let cache = cache_in(&dir);
+        cached(&cache, read(&path), &complete_query);
+        for (path_label, query) in [("complete", &complete_query), ("type-only", &types_only)] {
+            let label = format!("{}: {}: warm {path_label}", row.language.name(), row.label);
+            let (warm, work) = counted(|| cache.query(read(&path), query).expect("warm"));
+            assert_eq!(warm.lookup, CacheLookup::Hit, "{label}");
+            assert_eq!(work, WorkCounters::default(), "{label}: no work");
+            check_owner_targets(&label, &complete, &warm.result.index, row.owners);
+        }
+    }
+    assert!(rows >= 30, "the written-base rows ran ({rows})");
+}

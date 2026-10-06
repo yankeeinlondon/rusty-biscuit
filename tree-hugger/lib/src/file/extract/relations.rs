@@ -40,8 +40,11 @@ pub(crate) enum PathAnchor {
     /// visibility rule).
     Relative,
     /// From the file root only: Rust `crate::`, a PHP fully qualified
-    /// `\NS\Base`.
+    /// `\NS\Base`, a C++ `::Base`.
     Root,
+    /// Rust `::name`: a path through an external crate, which no
+    /// declaration of this file can be.
+    Extern,
     /// Rust `self::`: the enclosing module only.
     SelfModule,
     /// Rust `super::` written this many times: that many modules out.
@@ -98,6 +101,8 @@ pub(crate) fn base_path(node: Node<'_>, language: ProgrammingLanguage, source: &
     collect_segments(node, source, &mut segments)?;
     let mut anchor = PathAnchor::Relative;
     match language {
+        ProgrammingLanguage::Rust if starts_at_global_scope(node) => anchor = PathAnchor::Extern,
+        ProgrammingLanguage::Cpp if starts_at_global_scope(node) => anchor = PathAnchor::Root,
         ProgrammingLanguage::Rust => {
             let skip = match segments.first().map(String::as_str) {
                 Some("crate") => {
@@ -127,6 +132,30 @@ pub(crate) fn base_path(node: Node<'_>, language: ProgrammingLanguage, source: &
         _ => {}
     }
     (!segments.is_empty()).then_some(BasePath { anchor, segments })
+}
+
+/// Whether a Rust or C++ path is written with a leading `::`: its leftmost
+/// qualified part has no qualifier of its own and starts with that token.
+fn starts_at_global_scope(node: Node<'_>) -> bool {
+    let mut current = node;
+    loop {
+        match current.kind() {
+            "generic_type" | "template_type" => {
+                let Some(named) = current.child_by_field_name("type").or_else(|| current.child_by_field_name("name"))
+                else {
+                    return false;
+                };
+                current = named;
+            }
+            "scoped_type_identifier" | "scoped_identifier" | "qualified_identifier" => {
+                match current.child_by_field_name("path").or_else(|| current.child_by_field_name("scope")) {
+                    Some(qualifier) => current = qualifier,
+                    None => return current.child(0).is_some_and(|first| first.kind() == "::"),
+                }
+            }
+            _ => return false,
+        }
+    }
 }
 
 fn collect_segments(node: Node<'_>, source: &str, segments: &mut Vec<String>) -> Option<()> {
@@ -376,4 +405,170 @@ fn rust_supertraits(owner: Node<'_>, language: ProgrammingLanguage, source: &str
         }
         push_unique(&mut bases.extends, written_base(entry, language, source));
     }
+}
+
+/// What one import statement binds in the scope that holds it, for the
+/// relation resolver: a binding of a path's first segment decides that
+/// segment's lookup there, and an imported name never resolves.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum ImportBinding<'source> {
+    /// The names bound, as written (alias, else the last imported
+    /// segment; a Python `import a.b` binds `a`).
+    Names(Vec<&'source str>),
+    /// A wildcard import or C++ using-directive: any name may be bound, so
+    /// no lookup through this scope can be proved.
+    Opaque,
+}
+
+/// The binding `node` makes when it is an import statement of `language`
+/// whose bound names can coexist with a same-file declaration of a farther
+/// scope (Rust `use`, C++ `using` and namespace aliases, PHP `use`, Python
+/// imports, JS/TS imports and TS `import x =`). Java and Go imports bind
+/// only file-level names a same-file declaration would conflict with, so
+/// they are not read.
+pub(crate) fn import_binding<'source>(
+    node: Node<'_>,
+    language: ProgrammingLanguage,
+    source: &'source str,
+) -> Option<ImportBinding<'source>> {
+    let text = |node: Node<'_>| node.utf8_text(source.as_bytes()).ok().map(str::trim).filter(|text| !text.is_empty());
+    let mut names = Vec::new();
+    match (language, node.kind()) {
+        (ProgrammingLanguage::Rust, "use_declaration") => {
+            if !rust_use_names(node.child_by_field_name("argument")?, None, source, &mut names) {
+                return Some(ImportBinding::Opaque);
+            }
+        }
+        (ProgrammingLanguage::Cpp, "using_declaration") => {
+            let mut cursor = node.walk();
+            if node.children(&mut cursor).any(|child| child.kind() == "namespace") {
+                return Some(ImportBinding::Opaque);
+            }
+            let mut cursor = node.walk();
+            let target = node.named_children(&mut cursor).find(|child| child.kind() != "comment")?;
+            names.extend(last_segment(target).and_then(text));
+        }
+        (ProgrammingLanguage::Cpp, "namespace_alias_definition") => {
+            names.extend(node.child_by_field_name("name").and_then(text));
+        }
+        (ProgrammingLanguage::Php, "namespace_use_declaration") => {
+            let mut cursor = node.walk();
+            // `use function …` / `use const …` bind no class name.
+            if node.children(&mut cursor).any(|child| matches!(child.kind(), "function" | "const")) {
+                return None;
+            }
+            let mut clauses = named_entries(node);
+            if let Some(group) = node.child_by_field_name("body") {
+                clauses.extend(named_entries(group));
+            }
+            for clause in clauses.into_iter().filter(|clause| clause.kind() == "namespace_use_clause") {
+                if clause.child_by_field_name("type").is_some() {
+                    continue;
+                }
+                let bound = clause.child_by_field_name("alias").or_else(|| {
+                    let mut cursor = clause.walk();
+                    let named = clause.named_children(&mut cursor).find(|child| child.kind() != "comment")?;
+                    // A qualified name's last segment is its last `name`.
+                    if named.kind() == "qualified_name" {
+                        named_entries(named).into_iter().rev().find(|part| part.kind() == "name")
+                    } else {
+                        Some(named)
+                    }
+                });
+                names.extend(bound.and_then(text));
+            }
+        }
+        (ProgrammingLanguage::Python, "import_statement" | "import_from_statement") => {
+            let mut cursor = node.walk();
+            for (index, child) in node.children(&mut cursor).enumerate() {
+                if child.kind() == "wildcard_import" {
+                    return Some(ImportBinding::Opaque);
+                }
+                if node.field_name_for_child(index as u32) != Some("name") {
+                    continue;
+                }
+                let bound = match child.kind() {
+                    "aliased_import" => child.child_by_field_name("alias"),
+                    // `import a.b` binds `a`; `from m import b` binds `b`.
+                    _ => child.named_child(0),
+                };
+                names.extend(bound.and_then(text));
+            }
+        }
+        (ProgrammingLanguage::TypeScript | ProgrammingLanguage::JavaScript, "import_statement") => {
+            let mut cursor = node.walk();
+            let clause = node.named_children(&mut cursor).find(|child| child.kind() == "import_clause")?;
+            for entry in named_entries(clause) {
+                match entry.kind() {
+                    "identifier" => names.extend(text(entry)),
+                    "namespace_import" => {
+                        let mut cursor = entry.walk();
+                        let bound = entry.named_children(&mut cursor).find(|child| child.kind() == "identifier");
+                        names.extend(bound.and_then(text));
+                    }
+                    "named_imports" => {
+                        for specifier in named_entries(entry) {
+                            let bound = specifier
+                                .child_by_field_name("alias")
+                                .or_else(|| specifier.child_by_field_name("name"));
+                            names.extend(bound.and_then(text));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        (ProgrammingLanguage::TypeScript, "import_alias") => {
+            let mut cursor = node.walk();
+            let bound = node.named_children(&mut cursor).find(|child| child.kind() == "identifier");
+            names.extend(bound.and_then(text));
+        }
+        _ => return None,
+    }
+    Some(ImportBinding::Names(names))
+}
+
+/// The last name of a C++ (possibly qualified) name.
+fn last_segment(node: Node<'_>) -> Option<Node<'_>> {
+    match node.kind() {
+        "qualified_identifier" => last_segment(node.child_by_field_name("name")?),
+        _ => Some(node),
+    }
+}
+
+/// Collects the names a Rust use tree binds; `false` when it holds a glob.
+/// `parent` is the last segment of the enclosing list's path, which a
+/// `self` entry binds.
+fn rust_use_names<'source>(
+    tree: Node<'_>,
+    parent: Option<&'source str>,
+    source: &'source str,
+    names: &mut Vec<&'source str>,
+) -> bool {
+    let text = |node: Node<'_>| node.utf8_text(source.as_bytes()).ok().map(str::trim).filter(|text| !text.is_empty());
+    match tree.kind() {
+        "use_wildcard" => return false,
+        "use_as_clause" => names.extend(tree.child_by_field_name("alias").and_then(text)),
+        "self" => names.extend(parent),
+        "identifier" | "crate" | "super" => names.extend(text(tree)),
+        "scoped_identifier" => names.extend(tree.child_by_field_name("name").and_then(text)),
+        "scoped_use_list" => {
+            let last = tree.child_by_field_name("path").and_then(|path| match path.kind() {
+                "scoped_identifier" => path.child_by_field_name("name").and_then(text),
+                _ => text(path),
+            });
+            if let Some(list) = tree.child_by_field_name("list") {
+                return rust_use_names(list, last, source, names);
+            }
+        }
+        "use_list" => {
+            let mut complete = true;
+            for entry in named_entries(tree) {
+                complete &= rust_use_names(entry, parent, source, names);
+            }
+            return complete;
+        }
+        _ => {}
+    }
+    true
 }

@@ -691,7 +691,7 @@ mod tests {
 
     fn sample_fingerprint() -> AnalyzerFingerprint {
         AnalyzerFingerprint {
-            schema_version: SchemaVersion::V4_1,
+            schema_version: SchemaVersion::V4_2,
             tree_hugger_version: "0.1.0".to_string(),
             grammar_fingerprint: "g1".to_string(),
             query_fingerprint: "q1".to_string(),
@@ -750,7 +750,7 @@ mod tests {
     #[test]
     fn pass_fingerprint_digest_is_deterministic() {
         let fp = PassFingerprint {
-            schema_version: SchemaVersion::V4_1,
+            schema_version: SchemaVersion::V4_2,
             tree_hugger_version: "0.1.0".to_string(),
             grammar_version: "0.24.0".to_string(),
             grammar_id: "rust".to_string(),
@@ -768,7 +768,7 @@ mod tests {
     #[test]
     fn pass_fingerprint_changes_with_tool_version() {
         let base = PassFingerprint {
-            schema_version: SchemaVersion::V4_1,
+            schema_version: SchemaVersion::V4_2,
             tree_hugger_version: "0.1.0".to_string(),
             grammar_version: "0.24.0".to_string(),
             grammar_id: "rust".to_string(),
