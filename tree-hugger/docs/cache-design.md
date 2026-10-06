@@ -193,8 +193,8 @@ file's records, imports, exports and every analysis pass but diagnostics:
 
 | Input | Where it comes from | Changes when |
 |---|---|---|
-| schema version | `SchemaVersion::V4_1` | the record shape changes |
-| implementation version | crate version and `EXTRACTOR_REVISION` (`0.1.0+rev.24`) | extraction code changes |
+| schema version | `SchemaVersion::CURRENT` (4.3) | the record shape changes |
+| implementation version | crate version and `EXTRACTOR_REVISION` (`0.1.0+rev.28`) | extraction code changes |
 | grammar identity | the compiled grammar: name, declared version (if any), ABI, node-kind, field and parse-state counts | a grammar crate is upgraded |
 | grammar ID | the grammar variant (`typescript` or `tsx`, …) | the file's grammar variant differs |
 | query text | the effective `locals`, `imports` and `references` query text, with inherited vendored queries and overlays resolved | a `.scm` file the analysis compiles changes |
@@ -398,7 +398,7 @@ decoder's message, which names the field and tells an absent field
 
 An entry is served only when its own `schema_version` **and the
 `schema_version` of every record in it** are exactly the current version
-(4.1). The records are returned as stored, inside an index that claims the
+(4.3). The records are returned as stored, inside an index that claims the
 current version, and the cache never translates between versions, so a
 different minor version is a miss just like a different major one: an older
 minor lacks fields the current version adds, and a newer one carries fields
@@ -406,11 +406,12 @@ this reader would drop. One record of another version is enough to make the
 whole entry a `CacheMiss::Mismatched("record schema version")`; the file is
 analyzed again and the entry rewritten, and the stale entry is never widened.
 
-For example, an entry written as 4.1 whose `instance_method` record was edited
+For example, an entry written as 4.3 whose `instance_method` record was edited
 to `"schema_version": {"major": 3, "minor": 0}` (or the previous
-`{"major": 4, "minor": 0}`) is recomputed; the output equals an uncached run.
-An entry written before 4.1 also lacks `metrics.lines`, which refuses it on
-its own (see [Record fields](#record-fields)).
+`{"major": 4, "minor": 2}`) is recomputed; the output equals an uncached run.
+An entry written before 4.1 also lacks `metrics.lines`, and one written
+before 4.3 lacks `metrics.cyclomatic`, either of which refuses it on its own
+(see [Record fields](#record-fields)).
 
 ### Entry fields
 
@@ -428,7 +429,7 @@ No entry-level field has a default:
 
 For a version object, "one bad element" and "every element bad" mean one or
 both of `major` and `minor` hold a non-number. A well-formed version other
-than 4.1 is a miss, as described above.
+than 4.3 is a miss, as described above.
 
 A kind list must also be in ascending order with no repeats, and a
 capability list closed under prerequisites. The records must agree with that
@@ -457,10 +458,15 @@ everything else refuses the entry.
 | `identity.keyword` | absent, `null` or `""` | no keyword, or the empty keyword |
 | `source.declaration_text` | absent, `null` or `""` | no text, or the empty text |
 | `source.signature_text` | absent, `null` or `""` | no header, or the empty header |
-| `relations.implements` | absent or `[]` | empty list |
+| `type_info.generic_params`, `type_info.constraints`, `relations.extends`, `relations.implements`, `relations.unclassified_bases` | absent or `[]` | empty list |
+| generic parameter `constraints` | absent or `[]` | empty list |
+| generic parameter `default`, `variance` | absent or `null` | no value |
+| relation target `id`, `qualified_name`, `source_span` | absent or `null` | no value |
+| generic parameter `name`, relation target `name` | `""` | empty string |
+| generic parameter `position` | `0` | first position |
 | `kind_data.data.fields` (type data) | absent or `[]` | empty field list |
 | field data `visibility` | absent or `null` | Unknown access |
-| `metrics.parameters`, `metrics.has_docs`, `metrics.lines` | `null` | the metric is unsupported for that declaration |
+| `metrics.parameters`, `metrics.has_docs`, `metrics.lines`, `metrics.cyclomatic` | `null` | the metric is unsupported (`cyclomatic`: unavailable) for that declaration |
 | `metrics.lines` | `0` | an empty body span (distinct from `null`) |
 
 `schema_version`, `kind`, `scope`, `identity.qualified_name`,
@@ -468,17 +474,22 @@ everything else refuses the entry.
 `visibility.is_deprecated`, `kind_data.kind_data_type` and field data
 `is_static` are required: absent, `null`, `""` (an unknown scope, an empty
 qualified name) or `{}` refuses the entry, and a record `schema_version`
-other than exactly 4.1 refuses it too. In an entry that lists `metrics`, the
+other than exactly 4.3 refuses it too. In an entry that lists `metrics`, the
 `metrics` facet is required in the same way (absent, `null`, `{}` or a member
-of the wrong type refuses it), and so is each of its three keys (absent
-refuses, so a 4.0 facet without `lines` is never read as `null`; only `null`
-is served). `lines` is a `u32`: `"3"`, `3.5`, `-1` and `4294967296` refuse
-the entry. For all twenty-three record fields (twenty-four columns: `modifiers` is checked twice, on a static and on an async
-declaration), a
-wrong type (`123`, or `"123"` for a number, or an array holding a wrong
+of the wrong type refuses it), and so is each of its four keys (absent
+refuses, so a 4.0 facet without `lines` or a 4.2 facet without `cyclomatic`
+is never read as `null`; only `null` is served). `lines` and `cyclomatic`
+are `u32`s: `"3"`, `3.5`, `-1` and `4294967296` refuse the entry. For every tested record field, a wrong type (`123`, or `"123"` for a number, or an array holding a wrong
 element), a duplicate key and invalid JSON refuse the entry. For example, an
 entry whose method record carries `"modifiers": null` is recomputed, while one
 with no `modifiers` key reports that method as an instance method.
+
+Generic parameter `name`, `kind` and `position` and relation target `name`
+are required. Their absence or `null` refuses an entry. A null collection,
+a wrongly typed element, a duplicate key or trailing invalid JSON also
+refuses the entry. Empty optional strings are served literally; an empty
+parameter kind is rejected. The permanent CLI matrix includes every nested
+generic field and relation-target field, plus the three relation lists.
 
 A stored diagnostic's metadata omits `is_enabled_by_default` and
 `requires_experimental_semantics` when they are `false`; an absent key reads
@@ -508,7 +519,7 @@ visited once per run, so they only added copies.
 | A wide entry narrowed to any request equals the uncached request | `projected_results_equal_uncached_queries`, `projected_results_over_multi_equal_uncached_queries` |
 | Widening by capabilities and by kinds; the third narrow run is a hit | `widening_capabilities_runs_only_the_missing_passes`, `widening_kinds_reextracts_once_for_the_union` |
 | Query text, extractor revision, forced language, schema, rules and settings each miss | `each_key_input_and_stored_identity_decides_a_miss` |
-| A record of another schema version (2.0, 3.0, 4.1, 5.0) misses for the same and a wider request, never widened | `incompatible_record_schema_versions_are_misses_never_served_or_widened` |
+| A record of another schema version (2.0, 3.0, 4.0, 4.1, 4.2, 4.4, 5.0) misses for the same and a wider request, never widened | `incompatible_record_schema_versions_are_misses_never_served_or_widened` |
 | Corrupt entries, absent vs `null` reasons, kind-list shapes | `a_corrupt_entry_is_a_miss_and_is_replaced`, `absent_and_null_entry_fields_report_different_reasons`, `covered_kind_lists_are_served_only_in_canonical_form` |
 | A metrics facet or a set flag without its capability, or a record without metrics under `metrics`, is `Inconsistent`; a flags-and-metrics entry serves a flags-only request | `covered_kind_lists_are_served_only_in_canonical_form`, `flags_and_metrics_are_served_only_under_their_capabilities` |
 | A filtered, prefixed query writes in-file names and every record; another scan root is a Hit with the same IDs | `lib/tests/l1/symbols_query_filters.rs` `predicates_and_prefixes_never_reach_the_cache_entry` |

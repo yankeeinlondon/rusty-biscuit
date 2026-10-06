@@ -45,7 +45,7 @@ The two models are:
 | Model | API | Where kind, visibility and `static` live |
 |---|---|---|
 | `SymbolInfo` (v1) | `TreeFile::symbols()` | `kind`, `scope`, `visibility` (`None` = unknown), `is_static`, `is_static_storage`, `is_async`, `container_name`, `container_kind`, `qualified_name`, `is_namespace_rooted` |
-| `SymbolRecord` (schema 4.1) | `TreeFile::symbol_records()`, `symbol_index_v2()` | `kind`, `scope`, `visibility.level`, `modifiers` (`Static`, `StaticStorage`, `Async`, and the written `Const`, `Readonly`, `Unsafe`, `Mut` and `Custom` keywords), `attributes`, `identity.container_name`, `identity.container_kind`, `identity.qualified_name`, `identity.is_namespace_rooted`, `identity.keyword`, `source.declaration_text`, `source.signature_text`, `relations.extends`, `relations.implements` |
+| `SymbolRecord` (schema 4.3) | `TreeFile::symbol_records()`, `symbol_index_v2()` | `kind`, `scope`, `visibility.level`, `modifiers` (`Static`, `StaticStorage`, `Async`, and the written `Const`, `Readonly`, `Unsafe`, `Mut` and `Custom` keywords), `attributes`, `identity.container_name`, `identity.container_kind`, `identity.qualified_name`, `identity.is_namespace_rooted`, `identity.keyword`, `source.declaration_text`, `source.signature_text`, `relations.extends`, `relations.implements`, `relations.unclassified_bases` |
 
 The adapter between them (`From<SymbolInfo> for SymbolRecord` and back)
 preserves kind, scope, visibility, both `static` flags, `async`, container
@@ -1868,8 +1868,9 @@ These are limits of the extractor today, not of the grammars, except the
   `#[\Deprecated]` attribute is not read (only the doc tag is).
 - **Python `self`** counts as a parameter, since nothing in the syntax sets
   it apart.
-- **C#, Swift and Scala base lists** are not read yet (**planned**): their
-  records have empty `relations.extends` and `relations.implements`. See
+- **C#, Swift and Scala base lists** retain inheritance in `extends`,
+  conformance in `implements`, and uncertain entries in `unclassified_bases`.
+  Swift extensions of external or ambiguous owners cannot attach to a local record. See
   [Declared Type Relations](./type-relations.md#c-swift-and-scala).
 - **Declarations with no record carry no generics**: a Python
   `type A[T] = …` statement and a C# `delegate` produce no record, so their

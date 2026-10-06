@@ -26,6 +26,7 @@ const CACHED_ARGS: [&str; 3] = ["--json-full", "symbols", FILE];
 const UNCACHED_ARGS: [&str; 4] = ["--json-full", "symbols", "--no-cache", FILE];
 const SENTINEL_FROM: &str = "module_function";
 const SENTINEL_TO: &str = "matrix_sentinel_function";
+const GENERIC: &str = "MatrixGeneric";
 const METHOD: &str = "instance_method";
 const STATIC_METHOD: &str = "static_method";
 const CLASS: &str = "PlainWidget";
@@ -151,6 +152,132 @@ fn or_empty_list(value: &Value) -> Value {
 fn columns() -> Vec<Column> {
     let unknown = Value::Null;
     vec![
+        Column {
+            name: "type_info.generic_params",
+            target: Target::Record(GENERIC),
+            path: &["type_info", "generic_params"],
+            control: None,
+            empty: None,
+            public: |out| or_empty_list(&record(out, GENERIC)["type_info"]["generic_params"]),
+            outcomes: [S(json!([{ "name": "T", "kind": "Type", "constraints": ["MatrixBase"], "default": "MatrixBase", "variance": "out", "position": 0 }])), S(json!([])), R, R, R, R, S(json!([])), R, R],
+        },
+        Column {
+            name: "type_info.constraints",
+            target: Target::Record(GENERIC),
+            path: &["type_info", "constraints"],
+            control: Some(json!(["T.Item: Copy"])),
+            empty: None,
+            public: |out| or_empty_list(&record(out, GENERIC)["type_info"]["constraints"]),
+            outcomes: [S(json!(["T.Item: Copy"])), S(json!([])), R, R, R, R, S(json!([])), R, R],
+        },
+        Column {
+            name: "relations.extends",
+            target: Target::Record(GENERIC),
+            path: &["relations", "extends"],
+            control: Some(json!([{ "name": "MatrixBase", "id": "matrix-id", "qualified_name": "MatrixBase" }])),
+            empty: None,
+            public: |out| or_empty_list(&record(out, GENERIC)["relations"]["extends"]),
+            outcomes: [S(json!([{ "name": "MatrixBase", "id": "matrix-id", "qualified_name": "MatrixBase" }])), S(json!([])), R, R, R, R, S(json!([])), R, R],
+        },
+        Column {
+            name: "relations.unclassified_bases",
+            target: Target::Record(GENERIC),
+            path: &["relations", "unclassified_bases"],
+            control: Some(json!([{ "name": "External" }])),
+            empty: None,
+            public: |out| or_empty_list(&record(out, GENERIC)["relations"]["unclassified_bases"]),
+            outcomes: [S(json!([{ "name": "External" }])), S(json!([])), R, R, R, R, S(json!([])), R, R],
+        },
+        Column {
+            name: "generic name",
+            target: Target::Record(GENERIC),
+            path: &["type_info", "generic_params", "0", "name"],
+            control: None,
+            empty: Some(json!("")),
+            public: |out| record(out, GENERIC)["type_info"]["generic_params"][0]["name"].clone(),
+            outcomes: [S(json!("T")), R, R, R, R, R, S(json!("")), R, R],
+        },
+        Column {
+            name: "generic kind",
+            target: Target::Record(GENERIC),
+            path: &["type_info", "generic_params", "0", "kind"],
+            control: None,
+            empty: None,
+            public: |out| record(out, GENERIC)["type_info"]["generic_params"][0]["kind"].clone(),
+            outcomes: [S(json!("Type")), R, R, R, R, R, R, R, R],
+        },
+        Column {
+            name: "generic constraints",
+            target: Target::Record(GENERIC),
+            path: &["type_info", "generic_params", "0", "constraints"],
+            control: None,
+            empty: Some(json!([])),
+            public: |out| or_empty_list(&record(out, GENERIC)["type_info"]["generic_params"][0]["constraints"]),
+            outcomes: [S(json!(["MatrixBase"])), S(json!([])), R, R, R, R, S(json!([])), R, R],
+        },
+        Column {
+            name: "generic default",
+            target: Target::Record(GENERIC),
+            path: &["type_info", "generic_params", "0", "default"],
+            control: None,
+            empty: Some(json!("")),
+            public: |out| record(out, GENERIC)["type_info"]["generic_params"][0]["default"].clone(),
+            outcomes: [S(json!("MatrixBase")), S(Value::Null), S(Value::Null), R, R, R, S(json!("")), R, R],
+        },
+        Column {
+            name: "generic variance",
+            target: Target::Record(GENERIC),
+            path: &["type_info", "generic_params", "0", "variance"],
+            control: None,
+            empty: Some(json!("")),
+            public: |out| record(out, GENERIC)["type_info"]["generic_params"][0]["variance"].clone(),
+            outcomes: [S(json!("out")), S(Value::Null), S(Value::Null), R, R, R, S(json!("")), R, R],
+        },
+        Column {
+            name: "generic position",
+            target: Target::Record(GENERIC),
+            path: &["type_info", "generic_params", "0", "position"],
+            control: None,
+            empty: Some(json!(0)),
+            public: |out| record(out, GENERIC)["type_info"]["generic_params"][0]["position"].clone(),
+            outcomes: [S(json!(0)), R, R, R, R, R, S(json!(0)), R, R],
+        },
+        Column {
+            name: "target name",
+            target: Target::Record(GENERIC),
+            path: &["relations", "extends", "0", "name"],
+            control: Some(json!("MatrixBase")),
+            empty: Some(json!("")),
+            public: |out| record(out, GENERIC)["relations"]["extends"][0]["name"].clone(),
+            outcomes: [S(json!("MatrixBase")), R, R, R, R, R, S(json!("")), R, R],
+        },
+        Column {
+            name: "target id",
+            target: Target::Record(GENERIC),
+            path: &["relations", "extends", "0", "id"],
+            control: Some(json!("matrix-id")),
+            empty: Some(json!("")),
+            public: |out| record(out, GENERIC)["relations"]["extends"][0]["id"].clone(),
+            outcomes: [S(json!("matrix-id")), S(Value::Null), S(Value::Null), R, R, R, S(json!("")), R, R],
+        },
+        Column {
+            name: "target qualified_name",
+            target: Target::Record(GENERIC),
+            path: &["relations", "extends", "0", "qualified_name"],
+            control: Some(json!("MatrixBase")),
+            empty: Some(json!("")),
+            public: |out| record(out, GENERIC)["relations"]["extends"][0]["qualified_name"].clone(),
+            outcomes: [S(json!("MatrixBase")), S(Value::Null), S(Value::Null), R, R, R, S(json!("")), R, R],
+        },
+        Column {
+            name: "target source_span",
+            target: Target::Record(GENERIC),
+            path: &["relations", "extends", "0", "source_span"],
+            control: Some(json!({ "start": { "line": 1, "column": 1 }, "end": { "line": 1, "column": 2 }, "start_byte": 0, "end_byte": 1 })),
+            empty: None,
+            public: |out| record(out, GENERIC)["relations"]["extends"][0]["source_span"].clone(),
+            outcomes: [S(json!({ "start": { "line": 1, "column": 1 }, "end": { "line": 1, "column": 2 }, "start_byte": 0, "end_byte": 1 })), S(Value::Null), S(Value::Null), R, R, R, R, R, R],
+        },
         Column {
             name: "kind",
             target: Target::Record(METHOD),
@@ -306,7 +433,7 @@ fn columns() -> Vec<Column> {
             empty: None,
             public: |out| record(out, METHOD)["metrics"].clone(),
             outcomes: [
-                S(json!({ "parameters": 1, "has_docs": false, "lines": 2 })),
+                S(json!({ "parameters": 1, "has_docs": false, "lines": 2, "cyclomatic": null })),
                 R,
                 R,
                 R,
@@ -503,7 +630,7 @@ fn columns() -> Vec<Column> {
             control: None,
             empty: None,
             public: |out| record(out, METHOD)["schema_version"].clone(),
-            outcomes: [S(json!({ "major": 4, "minor": 1 })), R, R, R, R, R, R, R, R],
+            outcomes: [S(json!({ "major": 4, "minor": 3 })), R, R, R, R, R, R, R, R],
         },
         // Entry-level fields: none has a default; only an empty record
         // list under valid coverage is a servable shape (a file with no
@@ -571,7 +698,11 @@ fn parent_mut<'a>(snapshot: &'a mut Value, column: &Column) -> (&'a mut Value, &
         Target::Entry => snapshot,
     };
     for segment in parents {
-        parent = &mut parent[*segment];
+        parent = if let Ok(index) = segment.parse::<usize>() {
+            &mut parent[index]
+        } else {
+            &mut parent[*segment]
+        };
     }
     (parent, key)
 }
@@ -581,6 +712,12 @@ fn parent_mut<'a>(snapshot: &'a mut Value, column: &Column) -> (&'a mut Value, &
 fn column_base(original: &Value, column: &Column) -> (Value, Value) {
     let mut base = original.clone();
     rename_record(&mut base, SENTINEL_FROM, SENTINEL_TO);
+    let parameter = &mut record_mut(&mut base, GENERIC)["type_info"]["generic_params"][0];
+    parameter["default"] = json!("MatrixBase");
+    parameter["variance"] = json!("out");
+    let target = &mut record_mut(&mut base, GENERIC)["relations"]["extends"][0];
+    target["id"] = json!("matrix-id");
+    target["qualified_name"] = json!("MatrixBase");
     let (parent, key) = parent_mut(&mut base, column);
     if let Some(control) = &column.control {
         parent[key] = control.clone();
@@ -633,7 +770,7 @@ fn edited_entry(base: &Value, column: &Column, shape: Shape, value: &Value) -> S
             _ => parent[key] = Value::Array(vec![json!(123); elements.len().max(1)]),
         },
         Shape::IncompatibleMajor => parent[key] = json!({ "major": 3, "minor": 0 }),
-        Shape::IncompatibleMinor => parent[key] = json!({ "major": 4, "minor": 0 }),
+        Shape::IncompatibleMinor => parent[key] = json!({ "major": 4, "minor": 1 }),
         Shape::Empty => {
             parent[key] = match (&column.empty, value) {
                 (Some(empty), _) => empty.clone(),
@@ -674,7 +811,8 @@ fn has_sentinel(output: &Value) -> bool {
 
 #[test]
 fn persisted_symbol_fields_are_served_or_recomputed_per_shape() {
-    let scratch = Scratch::new(&[(FILE, PYTHON_FIXTURE)]);
+    let source = format!("{PYTHON_FIXTURE}\nclass MatrixBase: pass\nclass MatrixGeneric[T: MatrixBase](MatrixBase): pass\n");
+    let scratch = Scratch::new(&[(FILE, &source)]);
     let uncached = json_of(&scratch.stdout(&UNCACHED_ARGS));
     assert_eq!(
         json_of(&scratch.stdout(&CACHED_ARGS)),
@@ -917,7 +1055,7 @@ fn an_absent_metrics_facet_is_not_requested_never_computed_null() {
     assert_eq!(widened, json_of(&scratch.stdout(&UNCACHED_ARGS)), "widened by metrics: an uncached result");
     assert_eq!(
         record(&widened, METHOD)["metrics"],
-        json!({ "parameters": 1, "has_docs": false, "lines": 2 }),
+        json!({ "parameters": 1, "has_docs": false, "lines": 2, "cyclomatic": null }),
         "the facet is computed with every key"
     );
 }

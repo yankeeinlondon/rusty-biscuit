@@ -78,7 +78,7 @@ impl FingerprintInputs {
     /// definition, import and reference queries.
     pub fn records_fingerprint(&self) -> PassFingerprint {
         PassFingerprint {
-            schema_version: SchemaVersion::V4_2,
+            schema_version: SchemaVersion::CURRENT,
             tree_hugger_version: implementation_version(),
             grammar_version: self.grammar_identity.clone(),
             grammar_id: self.grammar_id.to_string(),
@@ -459,7 +459,7 @@ impl SymbolCache {
         self.store.put(
             key,
             &WrittenEntry {
-                schema_version: SchemaVersion::V4_2,
+                schema_version: SchemaVersion::CURRENT,
                 fingerprint,
                 file,
                 language: index.language,
@@ -551,7 +551,7 @@ struct StoredEntry {
 
 impl StoredEntry {
     fn validate(&self, source: &SourceFile, fingerprint: &str) -> Result<(), CacheMiss> {
-        if self.schema_version != SchemaVersion::V4_2 {
+        if self.schema_version != SchemaVersion::CURRENT {
             return Err(CacheMiss::Mismatched("schema version"));
         }
         // Records are served as they are stored, inside a current-version
@@ -560,7 +560,7 @@ impl StoredEntry {
         if self
             .records
             .iter()
-            .any(|record| record.schema_version != SchemaVersion::V4_2)
+            .any(|record| record.schema_version != SchemaVersion::CURRENT)
         {
             return Err(CacheMiss::Mismatched("record schema version"));
         }
@@ -624,7 +624,7 @@ impl StoredEntry {
             coverage = coverage.kinds(kinds);
         }
         let index = FileSymbolIndex {
-            schema_version: SchemaVersion::V4_2,
+            schema_version: SchemaVersion::CURRENT,
             file: source.path().to_path_buf(),
             language: source.language(),
             file_hash: source.hash().to_string(),

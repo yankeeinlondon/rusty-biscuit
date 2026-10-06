@@ -121,7 +121,7 @@ fn json_lines_are_self_describing_envelopes_that_round_trip() {
     let mut from_lines = Vec::new();
     for line in stdout.lines() {
         assert!(
-            line.starts_with(r#"{"report_schema_version":1,"schema_version":{"major":4,"minor":1},"file":""#),
+            line.starts_with(r#"{"report_schema_version":1,"schema_version":{"major":4,"minor":3},"file":""#),
             "{line}"
         );
         let order = ["\"file\":", "\"language\":", "\"completed_passes\":", "\"completed_capabilities\":", "\"record\":"];

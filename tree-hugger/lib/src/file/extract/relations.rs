@@ -1,18 +1,19 @@
 //! Declared type relations: the base types a declaration writes in its own
-//! header (`relations.extends` / `relations.implements`), as written.
+//! header (`extends`, `implements`, `unclassified_bases`), as written.
 //!
 //! A base keeps its complete written expression, outer whitespace trimmed
 //! (`pkg.Base<T>`, `mix(Base)`, `for<'a> Fn(&'a u8)`). Alongside the text the
 //! reader records the base's path ([`BasePath`]) when the expression is a
 //! plain, possibly qualified and possibly instantiated name, so the per-file
-//! resolver can look it up; any other expression (a call, a reference type,
-//! a higher-ranked bound) has no path and stays unresolved. Access and
+//! resolver can look it up. C# and Scala base-constructor arguments are
+//! excluded from that path but kept in the text. A dynamic call, reference
+//! type or higher-ranked bound has no path and stays unresolved. Access and
 //! `virtual` keywords on a C++ base specifier are not part of its text.
 //!
 //! Composition and inferred relations are never read: Go struct embeds,
-//! PHP trait `use`, Perl `@ISA`/`use parent` and Lua metatables. C#, Swift
-//! and Scala base lists mix inheritance and conformance and are not read
-//! until their classification is decided.
+//! PHP trait `use`, Perl `@ISA`/`use parent` and Lua metatables. Mixed lists
+//! retain uncertain entries separately when syntax and local declarations
+//! cannot establish their category.
 
 use super::*;
 
@@ -23,6 +24,10 @@ pub(crate) struct WrittenBase {
     pub(crate) text: String,
     /// Its path, when the expression is a name.
     pub(crate) path: Option<BasePath>,
+    /// Swift evidence distinguishing header bases from extension additions.
+    pub(crate) source_span: Option<TextSpan>,
+    /// Restores written order when independently classified lists are merged.
+    pub(crate) start_byte: usize,
 }
 
 /// A written name path, without generic arguments: `pkg.Base<T>` is
@@ -40,7 +45,7 @@ pub(crate) enum PathAnchor {
     /// visibility rule).
     Relative,
     /// From the file root only: Rust `crate::`, a PHP fully qualified
-    /// `\NS\Base`, a C++ `::Base`.
+    /// `\NS\Base`, a C++ `::Base`, or C# `global::Base`.
     Root,
     /// Rust `::name`: a path through an external crate, which no
     /// declaration of this file can be.
@@ -56,6 +61,7 @@ pub(crate) enum PathAnchor {
 pub(crate) struct DeclaredBases {
     pub(crate) extends: Vec<WrittenBase>,
     pub(crate) implements: Vec<WrittenBase>,
+    pub(crate) unclassified: Vec<WrittenBase>,
 }
 
 /// The bases written by the declaration whose captured name is `name`. The
@@ -77,8 +83,9 @@ pub(crate) fn declared_bases(name: Node<'_>, language: ProgrammingLanguage, sour
         ProgrammingLanguage::Go => go_bases(owner, language, source, &mut bases),
         ProgrammingLanguage::Cpp => cpp_bases(owner, language, source, &mut bases),
         ProgrammingLanguage::Rust => rust_supertraits(owner, language, source, &mut bases),
-        // C#, Swift and Scala: mixed lists, classification undecided. The
-        // other languages declare no bases in this feature's scope.
+        ProgrammingLanguage::CSharp => csharp_bases(owner, source, &mut bases),
+        ProgrammingLanguage::Swift => swift_bases(owner, source, &mut bases),
+        ProgrammingLanguage::Scala => scala_bases(owner, source, &mut bases),
         _ => {}
     }
     bases
@@ -90,6 +97,8 @@ pub(crate) fn written_base(node: Node<'_>, language: ProgrammingLanguage, source
     (!text.is_empty()).then(|| WrittenBase {
         text: text.to_string(),
         path: base_path(node, language, source),
+        source_span: (language == ProgrammingLanguage::Swift).then(|| text_span_for_node(node)),
+        start_byte: node.start_byte(),
     })
 }
 
@@ -103,6 +112,18 @@ pub(crate) fn base_path(node: Node<'_>, language: ProgrammingLanguage, source: &
     match language {
         ProgrammingLanguage::Rust if starts_at_global_scope(node) => anchor = PathAnchor::Extern,
         ProgrammingLanguage::Cpp if starts_at_global_scope(node) => anchor = PathAnchor::Root,
+        ProgrammingLanguage::CSharp => {
+            let mut first = node;
+            while first.kind() == "qualified_name" {
+                first = first.child_by_field_name("qualifier")?;
+            }
+            if first.kind() == "alias_qualified_name" {
+                let alias = first.child_by_field_name("alias")?.utf8_text(source.as_bytes()).ok()?;
+                if alias != "global" { return None; }
+                anchor = PathAnchor::Root;
+                segments.remove(0);
+            }
+        }
         ProgrammingLanguage::Rust => {
             let skip = match segments.first().map(String::as_str) {
                 Some("crate") => {
@@ -161,13 +182,13 @@ fn starts_at_global_scope(node: Node<'_>) -> bool {
 fn collect_segments(node: Node<'_>, source: &str, segments: &mut Vec<String>) -> Option<()> {
     match node.kind() {
         // A leaf name.
-        "identifier" | "type_identifier" | "name" | "property_identifier" | "namespace_identifier"
+        "identifier" | "simple_identifier" | "type_identifier" | "name" | "property_identifier" | "namespace_identifier"
         | "package_identifier" | "crate" | "self" | "super" => {
             let text = node.utf8_text(source.as_bytes()).ok()?.trim();
             (!text.is_empty()).then(|| segments.push(text.to_string()))
         }
         // An instantiation: the path of the instantiated name.
-        "generic_type" | "template_type" | "subscript" => {
+        "generic_type" | "generic_name" | "template_type" | "subscript" => {
             let named = node
                 .child_by_field_name("type")
                 .or_else(|| node.child_by_field_name("name"))
@@ -178,11 +199,12 @@ fn collect_segments(node: Node<'_>, source: &str, segments: &mut Vec<String>) ->
         // A qualified name: every named part in order, generic arguments
         // excluded.
         "scoped_type_identifier" | "scoped_identifier" | "member_expression" | "nested_type_identifier"
-        | "qualified_name" | "namespace_name" | "qualified_identifier" | "attribute" | "qualified_type" => {
+        | "qualified_name" | "alias_qualified_name" | "namespace_name" | "qualified_identifier" | "attribute"
+        | "qualified_type" | "user_type" | "stable_type_identifier" => {
             let mut cursor = node.walk();
             let mut any = false;
             for child in node.named_children(&mut cursor) {
-                if matches!(child.kind(), "type_arguments" | "template_argument_list" | "comment") {
+                if matches!(child.kind(), "type_arguments" | "type_argument_list" | "template_argument_list" | "comment") {
                     continue;
                 }
                 collect_segments(child, source, segments)?;
@@ -207,6 +229,87 @@ fn named_entries<'tree>(node: Node<'tree>) -> Vec<Node<'tree>> {
     node.named_children(&mut cursor)
         .filter(|child| child.kind() != "comment")
         .collect()
+}
+
+fn csharp_bases(owner: Node<'_>, source: &str, bases: &mut DeclaredBases) {
+    let Some(list) = find_child_by_kind(owner, "base_list") else { return };
+    if owner.kind() == "enum_declaration" { return; }
+    let is_interface = owner.kind() == "interface_declaration";
+    let is_struct = owner.kind() == "struct_declaration"
+        || declaration_keyword(owner, ProgrammingLanguage::CSharp).as_deref() == Some("struct")
+        || {
+            let mut cursor = owner.walk();
+            owner.children(&mut cursor).any(|child| child.kind() == "struct")
+        };
+    let entries = named_entries(list);
+    let mut position = 0;
+    let mut index = 0;
+    while index < entries.len() {
+        let entry = entries[index];
+        index += 1;
+        let invocation = entries.get(index).filter(|node| node.kind() == "argument_list");
+        let base = if let Some(arguments) = invocation {
+            index += 1;
+            base_spanning(entry, arguments.end_byte(), ProgrammingLanguage::CSharp, source)
+        } else {
+            written_base(entry, ProgrammingLanguage::CSharp, source)
+        };
+        let list = if is_interface { &mut bases.extends }
+            else if is_struct || position > 0 { &mut bases.implements }
+            else if invocation.is_some() { &mut bases.extends }
+            else { &mut bases.unclassified };
+        push_unique(list, base);
+        position += 1;
+    }
+}
+
+/// Swift uses the same node for classes, structs, enums and extensions.
+/// Enum raw-value types are storage declarations, not inheritance.
+fn swift_bases(owner: Node<'_>, source: &str, bases: &mut DeclaredBases) {
+    let kind = declaration_keyword(owner, ProgrammingLanguage::Swift);
+    let mut cursor = owner.walk();
+    let entries = owner.named_children(&mut cursor).filter(|child| child.kind() == "inheritance_specifier");
+    for (position, entry) in entries.enumerate() {
+        let Some(target) = entry.named_child(0) else { continue };
+        if kind.as_deref() == Some("enum") && position == 0 {
+            // An explicit raw value establishes a raw-value enum even when
+            // its raw type is a user-defined literal-convertible type.
+            if owner.child_by_field_name("body").is_some_and(|body| {
+                named_entries(body).iter().any(|case| case.kind() == "enum_entry" && {
+                    let mut cursor = case.walk();
+                    case.children(&mut cursor).any(|child| child.kind() == "=")
+                })
+            }) { continue; }
+        }
+        let list = match kind.as_deref() {
+            Some("protocol") => &mut bases.extends,
+            Some("struct" | "actor" | "extension") => &mut bases.implements,
+            Some("class" | "enum") if position > 0 => &mut bases.implements,
+            _ => &mut bases.unclassified,
+        };
+        push_unique(list, written_base(target, ProgrammingLanguage::Swift, source));
+    }
+}
+
+fn scala_bases(owner: Node<'_>, source: &str, bases: &mut DeclaredBases) {
+    let Some(clause) = find_child_by_kind(owner, "extends_clause") else { return };
+    let entries = named_entries(clause);
+    let mut position = 0;
+    let mut index = 0;
+    while index < entries.len() {
+        let target = entries[index];
+        index += 1;
+        let mut end = target.end_byte();
+        while index < entries.len() && entries[index].kind() == "arguments" {
+            end = entries[index].end_byte();
+            index += 1;
+        }
+        let list = if owner.kind() == "trait_definition" { &mut bases.extends }
+            else if position > 0 { &mut bases.implements }
+            else { &mut bases.unclassified };
+        push_unique(list, base_spanning(target, end, ProgrammingLanguage::Scala, source));
+        position += 1;
+    }
 }
 
 /// TS/JS `class_heritage` (`extends_clause` with `value:` and its
@@ -280,6 +383,8 @@ fn base_spanning(value: Node<'_>, end: usize, language: ProgrammingLanguage, sou
     (!text.is_empty()).then(|| WrittenBase {
         text: text.to_string(),
         path: base_path(value, language, source),
+        source_span: None,
+        start_byte: value.start_byte(),
     })
 }
 
@@ -434,6 +539,47 @@ pub(crate) fn import_binding<'source>(
     let text = |node: Node<'_>| node.utf8_text(source.as_bytes()).ok().map(str::trim).filter(|text| !text.is_empty());
     let mut names = Vec::new();
     match (language, node.kind()) {
+        (ProgrammingLanguage::CSharp, "using_directive") => {
+            if let Some(alias) = node.child_by_field_name("name") {
+                names.extend(text(alias));
+            } else {
+                return Some(ImportBinding::Opaque);
+            }
+        }
+        (ProgrammingLanguage::Swift, "import_declaration") => {
+            let mut cursor = node.walk();
+            let selective = node.children(&mut cursor).any(|child| {
+                matches!(child.kind(), "typealias" | "struct" | "class" | "enum" | "protocol" | "let" | "var" | "func")
+            });
+            if !selective { return Some(ImportBinding::Opaque); }
+            let identifier = find_child_by_kind(node, "identifier")?;
+            names.extend(named_entries(identifier).last().copied().and_then(text));
+        }
+        (ProgrammingLanguage::Scala, "import_declaration") => {
+            let entries = named_entries(node);
+            if let Some(selectors) = entries.iter().find(|entry| entry.kind() == "namespace_selectors") {
+                for selector in named_entries(*selectors) {
+                    match selector.kind() {
+                        "arrow_renamed_identifier" => {
+                            let renamed = selector.named_child(1)?;
+                            if text(renamed) != Some("_") { names.extend(text(renamed)); }
+                        }
+                        "identifier" => names.extend(text(selector)),
+                        _ => return Some(ImportBinding::Opaque),
+                    }
+                }
+                let mut cursor = selectors.walk();
+                if selectors.children(&mut cursor).any(|child| matches!(child.kind(), "_" | "*")) {
+                    return Some(ImportBinding::Opaque);
+                }
+            } else {
+                let mut cursor = node.walk();
+                if node.children(&mut cursor).any(|child| matches!(child.kind(), "_" | "*" | "namespace_wildcard")) {
+                    return Some(ImportBinding::Opaque);
+                }
+                names.extend(entries.last().copied().and_then(text));
+            }
+        }
         (ProgrammingLanguage::Rust, "use_declaration") => {
             if !rust_use_names(node.child_by_field_name("argument")?, None, source, &mut names) {
                 return Some(ImportBinding::Opaque);

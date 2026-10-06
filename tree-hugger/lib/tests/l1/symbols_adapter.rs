@@ -333,7 +333,7 @@ fn serialized_record_round_trips_the_new_fields() {
     input.is_namespace_rooted = true;
     input.is_async = true;
     let record = SymbolRecord::from(input);
-    assert_eq!(record.schema_version, SchemaVersion::V4_2);
+    assert_eq!(record.schema_version, SchemaVersion::CURRENT);
 
     let first = serde_json::to_string(&record).expect("serialize");
     let parsed: SymbolRecord = serde_json::from_str(&first).expect("deserialize");
@@ -342,7 +342,7 @@ fn serialized_record_round_trips_the_new_fields() {
     let reparsed: SymbolRecord = serde_json::from_str(&second).expect("re-deserialize");
 
     for record in [&parsed, &reparsed] {
-        assert_eq!(record.schema_version, SchemaVersion::V4_2);
+        assert_eq!(record.schema_version, SchemaVersion::CURRENT);
         assert_eq!(record.kind, SymbolKindV2::Constructor);
         assert_eq!(record.identity.container_kind, Some(SymbolKindV2::Class));
         assert_eq!(record.visibility.level, VisibilityLevel::ProtectedInternal);
@@ -707,36 +707,61 @@ fn new_record_fields_read_per_shape() {
     assert_eq!(unedited.identity.qualified_name, "PlainWidget.instance_method");
 
     // `metrics`: present values, and `null` metrics inside a present facet.
-    let both = read(&|value| value["metrics"] = serde_json::json!({ "parameters": 0, "has_docs": false, "lines": 3 }))
+    let both = read(&|value| value["metrics"] = serde_json::json!({ "parameters": 0, "has_docs": false, "lines": 3, "cyclomatic": 1 }))
         .expect("measured facet");
     let metrics = both.metrics.expect("facet");
-    assert_eq!((metrics.parameters, metrics.has_docs, metrics.lines), (Some(0), Some(false), Some(3)));
+    assert_eq!(
+        (metrics.parameters, metrics.has_docs, metrics.lines, metrics.cyclomatic),
+        (Some(0), Some(false), Some(3), Some(1))
+    );
     let unsupported =
-        read(&|value| value["metrics"] = serde_json::json!({ "parameters": null, "has_docs": null, "lines": null }))
+        read(&|value| value["metrics"] = serde_json::json!({ "parameters": null, "has_docs": null, "lines": null, "cyclomatic": null }))
             .expect("unsupported metrics")
             .metrics
             .expect("facet");
-    assert_eq!((unsupported.parameters, unsupported.has_docs, unsupported.lines), (None, None, None));
+    assert_eq!(
+        (unsupported.parameters, unsupported.has_docs, unsupported.lines, unsupported.cyclomatic),
+        (None, None, None, None)
+    );
     // An empty body span is zero lines, distinct from `null`.
-    let empty_body = read(&|value| value["metrics"] = serde_json::json!({ "parameters": 0, "has_docs": false, "lines": 0 }))
+    let empty_body = read(&|value| value["metrics"] = serde_json::json!({ "parameters": 0, "has_docs": false, "lines": 0, "cyclomatic": 1 }))
         .expect("empty body")
         .metrics
         .expect("facet");
     assert_eq!(empty_body.lines, Some(0));
 
-    let rejected: [(&str, Box<Edit>); 18] = [
+    // `cyclomatic`: the largest `u32` reads; it is never capped or wrapped.
+    let largest = read(&|value| {
+        value["metrics"] = serde_json::json!({ "parameters": 0, "has_docs": false, "lines": 3, "cyclomatic": 4_294_967_295_u64 })
+    })
+    .expect("largest cyclomatic")
+    .metrics
+    .expect("facet");
+    assert_eq!(largest.cyclomatic, Some(u32::MAX));
+
+    let rejected: [(&str, Box<Edit>); 27] = [
         ("metrics null", Box::new(|value| value["metrics"] = serde_json::Value::Null)),
         ("metrics wrong type", Box::new(|value| value["metrics"] = serde_json::json!(123))),
         ("metrics empty", Box::new(|value| value["metrics"] = serde_json::json!({}))),
-        ("metric absent", Box::new(|value| value["metrics"] = serde_json::json!({ "parameters": 1, "lines": 1 }))),
-        ("metric wrong type", Box::new(|value| value["metrics"] = serde_json::json!({ "parameters": "one", "has_docs": true, "lines": 1 }))),
-        ("metric unknown", Box::new(|value| value["metrics"] = serde_json::json!({ "parameters": 1, "has_docs": true, "lines": 3, "bogus": 3 }))),
+        ("metric absent", Box::new(|value| value["metrics"] = serde_json::json!({ "parameters": 1, "lines": 1, "cyclomatic": 1 }))),
+        ("metric wrong type", Box::new(|value| value["metrics"] = serde_json::json!({ "parameters": "one", "has_docs": true, "lines": 1, "cyclomatic": 1 }))),
+        ("metric unknown", Box::new(|value| value["metrics"] = serde_json::json!({ "parameters": 1, "has_docs": true, "lines": 3, "bogus": 3, "cyclomatic": 1 }))),
         // A schema 4.0 facet (no `lines`) is never read as a computed `null`.
-        ("lines absent", Box::new(|value| value["metrics"] = serde_json::json!({ "parameters": 1, "has_docs": true }))),
-        ("lines wrong type", Box::new(|value| value["metrics"] = serde_json::json!({ "parameters": 1, "has_docs": true, "lines": "3" }))),
-        ("lines fraction", Box::new(|value| value["metrics"] = serde_json::json!({ "parameters": 1, "has_docs": true, "lines": 3.5 }))),
-        ("lines negative", Box::new(|value| value["metrics"] = serde_json::json!({ "parameters": 1, "has_docs": true, "lines": -1 }))),
-        ("lines one wrong element", Box::new(|value| value["metrics"] = serde_json::json!({ "parameters": 1, "has_docs": true, "lines": [3, "x"] }))),
+        ("lines absent", Box::new(|value| value["metrics"] = serde_json::json!({ "parameters": 1, "has_docs": true, "cyclomatic": 1 }))),
+        ("lines wrong type", Box::new(|value| value["metrics"] = serde_json::json!({ "parameters": 1, "has_docs": true, "lines": "3", "cyclomatic": 1 }))),
+        ("lines fraction", Box::new(|value| value["metrics"] = serde_json::json!({ "parameters": 1, "has_docs": true, "lines": 3.5, "cyclomatic": 1 }))),
+        ("lines negative", Box::new(|value| value["metrics"] = serde_json::json!({ "parameters": 1, "has_docs": true, "lines": -1, "cyclomatic": 1 }))),
+        ("lines one wrong element", Box::new(|value| value["metrics"] = serde_json::json!({ "parameters": 1, "has_docs": true, "lines": [3, "x"], "cyclomatic": 1 }))),
+        // A schema 4.2 facet (no `cyclomatic`) is never read as a computed `null`.
+        ("cyclomatic absent", Box::new(|value| value["metrics"] = serde_json::json!({ "parameters": 1, "has_docs": true, "lines": 1 }))),
+        ("cyclomatic string", Box::new(|value| value["metrics"] = serde_json::json!({ "parameters": 1, "has_docs": true, "lines": 1, "cyclomatic": "3" }))),
+        ("cyclomatic list", Box::new(|value| value["metrics"] = serde_json::json!({ "parameters": 1, "has_docs": true, "lines": 1, "cyclomatic": [3] }))),
+        ("cyclomatic bool", Box::new(|value| value["metrics"] = serde_json::json!({ "parameters": 1, "has_docs": true, "lines": 1, "cyclomatic": true }))),
+        ("cyclomatic negative", Box::new(|value| value["metrics"] = serde_json::json!({ "parameters": 1, "has_docs": true, "lines": 1, "cyclomatic": -1 }))),
+        ("cyclomatic fraction", Box::new(|value| value["metrics"] = serde_json::json!({ "parameters": 1, "has_docs": true, "lines": 1, "cyclomatic": 1.5 }))),
+        ("cyclomatic beyond u32", Box::new(|value| value["metrics"] = serde_json::json!({ "parameters": 1, "has_docs": true, "lines": 1, "cyclomatic": 4_294_967_296_u64 }))),
+        ("cyclomatic empty object", Box::new(|value| value["metrics"] = serde_json::json!({ "parameters": 1, "has_docs": true, "lines": 1, "cyclomatic": {} }))),
+        ("cyclomatic empty list", Box::new(|value| value["metrics"] = serde_json::json!({ "parameters": 1, "has_docs": true, "lines": 1, "cyclomatic": [] }))),
         ("scope absent", Box::new(|value| { value.as_object_mut().expect("record").remove("scope"); })),
         ("scope null", Box::new(|value| value["scope"] = serde_json::Value::Null)),
         ("scope unknown", Box::new(|value| value["scope"] = serde_json::json!(""))),
@@ -752,13 +777,19 @@ fn new_record_fields_read_per_shape() {
     // A repeated metric key is rejected, not last-wins.
     let text = serde_json::to_string(&control).expect("serialize");
     let duplicated =
-        text.replacen("{", "{\"metrics\":{\"parameters\":1,\"parameters\":2,\"has_docs\":true,\"lines\":1},", 1);
+        text.replacen("{", "{\"metrics\":{\"parameters\":1,\"parameters\":2,\"has_docs\":true,\"lines\":1,\"cyclomatic\":1},", 1);
     assert!(serde_json::from_str::<SymbolRecord>(&duplicated).is_err(), "duplicate metric");
     let duplicated_lines =
-        text.replacen("{", "{\"metrics\":{\"parameters\":1,\"has_docs\":true,\"lines\":1,\"lines\":2},", 1);
+        text.replacen("{", "{\"metrics\":{\"parameters\":1,\"has_docs\":true,\"lines\":1,\"lines\":2,\"cyclomatic\":1},", 1);
     assert!(serde_json::from_str::<SymbolRecord>(&duplicated_lines).is_err(), "duplicate lines");
+    let duplicated_cyclomatic = text.replacen(
+        "{",
+        "{\"metrics\":{\"parameters\":1,\"has_docs\":true,\"lines\":1,\"cyclomatic\":1,\"cyclomatic\":2},",
+        1,
+    );
+    assert!(serde_json::from_str::<SymbolRecord>(&duplicated_cyclomatic).is_err(), "duplicate cyclomatic");
     // Trailing content after a valid record is rejected.
-    let measured = text.replacen("{", "{\"metrics\":{\"parameters\":1,\"has_docs\":true,\"lines\":1},", 1);
+    let measured = text.replacen("{", "{\"metrics\":{\"parameters\":1,\"has_docs\":true,\"lines\":1,\"cyclomatic\":1},", 1);
     assert!(serde_json::from_str::<SymbolRecord>(&measured).is_ok(), "control for the trailing cell");
     assert!(serde_json::from_str::<SymbolRecord>(&format!("{measured} trailing")).is_err(), "trailing content");
 }
@@ -791,6 +822,7 @@ fn record_only_declaration_facts_are_lost_through_the_older_model() {
             assert!(back.type_info.constraints.is_empty(), "{cell}: constraints");
             assert!(back.relations.extends.is_empty(), "{cell}: extends");
             assert!(back.relations.implements.is_empty(), "{cell}: implements");
+            assert!(back.relations.unclassified_bases.is_empty(), "{cell}: unclassified bases");
             assert!(back.attributes.is_empty(), "{cell}: attributes");
             assert!(back.metrics.is_none(), "{cell}: metrics");
 

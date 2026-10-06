@@ -991,10 +991,40 @@ pub(crate) fn body_node_for_declaration(node: Node<'_>) -> Option<Node<'_>> {
         .or_else(|| find_child_by_kind(node, "object_type"))
 }
 
+/// A callable's body as syntax nodes ([`callable_body`]).
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum CallableBody<'tree> {
+    /// One node: the `body` field, or an expression body's expression.
+    Node(Node<'tree>),
+    /// A run of sibling children of the declaration, `first` to `last`
+    /// inclusive (Python and Lua).
+    Run { first: Node<'tree>, last: Node<'tree> },
+    /// An empty Lua body: the empty span at this `end` token.
+    EmptyAt(Node<'tree>),
+}
+
+impl CallableBody<'_> {
+    /// The stored `source.body_span`, trailing whitespace removed.
+    pub(crate) fn span(&self, source: &str) -> TextSpan {
+        let extent = match *self {
+            Self::Node(node) => text_span_for_node(node),
+            Self::Run { first, last } => {
+                let (first, last) = (text_span_for_node(first), text_span_for_node(last));
+                TextSpan { end: last.end, end_byte: last.end_byte, ..first }
+            }
+            Self::EmptyAt(end) => {
+                let end = text_span_for_node(end);
+                TextSpan { end: end.start, end_byte: end.start_byte, ..end }
+            }
+        };
+        without_trailing_whitespace(extent, source)
+    }
+}
+
 /// The body of a function, method or constructor: what `source.body_span`
-/// stores and `metrics.lines` counts. It is the declaration's own `body`
-/// field, never a type-body fallback, so a default value, a return type or a
-/// nested callable is never taken for it; it is read from the declaration
+/// stores and `metrics.lines` and `metrics.cyclomatic` measure. It is the
+/// declaration's own `body` field, never a type-body fallback, so a default
+/// value, a return type or a nested callable is never taken for it; it is read from the declaration
 /// because a C/C++ function's anchor is its `function_declarator`. `None`
 /// without an implementation body (a prototype, an abstract or interface
 /// method, a defaulted or deleted C++ member).
@@ -1007,18 +1037,14 @@ pub(crate) fn body_node_for_declaration(node: Node<'_>) -> Option<Node<'_>> {
 /// one before `end`, a comment on the header's own line excepted; Lua omits
 /// the block of an empty body, which is then the empty span at `end`.
 ///
-/// The span ends at its last non-whitespace byte: tree-sitter-scala's
-/// braceless `indented_block` runs over the blank lines up to the dedent and
-/// a Perl `block` over its line break, which are not the body's lines.
-pub(crate) fn callable_body_span(
+/// Its span ([`CallableBody::span`]) ends at its last non-whitespace byte:
+/// tree-sitter-scala's braceless `indented_block` runs over the blank lines
+/// up to the dedent and a Perl `block` over its line break, which are not
+/// the body's lines.
+pub(crate) fn callable_body(
     declaration: Node<'_>,
     language: ProgrammingLanguage,
-    source: &str,
-) -> Option<TextSpan> {
-    callable_body_extent(declaration, language).map(|span| without_trailing_whitespace(span, source))
-}
-
-fn callable_body_extent(declaration: Node<'_>, language: ProgrammingLanguage) -> Option<TextSpan> {
+) -> Option<CallableBody<'_>> {
     let header_end = match language {
         ProgrammingLanguage::Python => find_child_by_kind(declaration, ":")?,
         ProgrammingLanguage::Lua => declaration.child_by_field_name("parameters")?,
@@ -1030,7 +1056,7 @@ fn callable_body_extent(declaration: Node<'_>, language: ProgrammingLanguage) ->
                     body.named_children(&mut cursor).find(|child| child.kind() != "comment")
                 })
                 .flatten();
-            return Some(text_span_for_node(expression.unwrap_or(body)));
+            return Some(CallableBody::Node(expression.unwrap_or(body)));
         }
     };
     let header_row = header_end.end_position().row;
@@ -1042,15 +1068,8 @@ fn callable_body_extent(declaration: Node<'_>, language: ProgrammingLanguage) ->
         .take_while(|child| child.kind() != "end")
         .filter(|child| child.kind() != "comment" || child.start_position().row > header_row);
     match inside.next() {
-        Some(first) => {
-            let last = inside.last().unwrap_or(first);
-            let (first, last) = (text_span_for_node(first), text_span_for_node(last));
-            Some(TextSpan { end: last.end, end_byte: last.end_byte, ..first })
-        }
-        None => {
-            let end = text_span_for_node(find_child_by_kind(declaration, "end")?);
-            Some(TextSpan { end: end.start, end_byte: end.start_byte, ..end })
-        }
+        Some(first) => Some(CallableBody::Run { first, last: inside.last().unwrap_or(first) }),
+        None => find_child_by_kind(declaration, "end").map(CallableBody::EmptyAt),
     }
 }
 

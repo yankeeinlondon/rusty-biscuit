@@ -612,6 +612,17 @@ fn check_outline<H: TerminalHarness>(harness: &mut H, pane: &Pane<H>) {
         report.plain(),
     );
     assert_style(&report, "implements Sized [10:8]", "[10:8]", &["2"], &["1"], "a dim location after wrapped bases");
+    std::fs::write(fixture.repo.path().join("mixed.swift"),
+        "protocol P {}\nprotocol Q {}\nstruct Box: P {}\nextension Box: Q {}\nclass Unknown: External {}\n"
+    ).expect("mixed relation source");
+    let report = run_hug(harness, pane, &fixture, UNWRAPPED, "types --tree --signatures none mixed.swift");
+    assert!(report.plain().contains("Box implements P, Q"), "{}", report.plain());
+    assert!(report.plain().contains("Unknown unclassified bases External"), "{}", report.plain());
+    assert_style(&report, "internal struct Box implements P, Q [3:1]", "implements P, Q", &[], &["1"], "relation text outside the bold declaration");
+    let report = run_hug(harness, pane, &fixture, UNWRAPPED, "types --tree --signatures full mixed.swift");
+    assert!(report.plain().contains("Box: P implements Q"), "{}", report.plain());
+    assert!(!report.plain().contains("implements P"), "{}", report.plain());
+
 }
 
 /// `--stats`: three bordered count tables (kind, visibility, language) and

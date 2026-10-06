@@ -40,13 +40,11 @@ pub struct Owner {
     pub qualified_name: &'static str,
     pub extends: &'static [Target],
     pub implements: &'static [Target],
+    pub unclassified: &'static [Target],
 }
 
 pub enum Support {
     Supported,
-    /// The base list mixes inheritance and conformance; nothing is read
-    /// until the author decides how to classify it.
-    Pending(&'static str),
     /// The language declares no bases in this feature's scope; the row's
     /// source holds the forms that must not be inferred.
     Absent(&'static str),
@@ -72,19 +70,19 @@ pub const RELATIONS_MATRIX: &[RelationsRow] = &[
                  mod a { pub trait Dup {} pub trait UsesDup: Dup + super::Base + crate::Base {} }\n\
                  mod b { pub trait UsesOuter: Base {} }\n",
         owners: &[
-            Owner {
+            Owner { unclassified: &[],
                 qualified_name: "Child",
                 extends: &[to("Base", "Base"), text("other::Base"), text("Clone"), text("for<'x> Fn(&'x u8)")],
                 implements: &[],
             },
-            Owner { qualified_name: "Sub", extends: &[to("Child", "Child"), text("Amb")], implements: &[] },
-            Owner {
+            Owner { unclassified: &[], qualified_name: "Sub", extends: &[to("Child", "Child"), text("Amb")], implements: &[] },
+            Owner { unclassified: &[],
                 qualified_name: "a::UsesDup",
                 extends: &[to("Dup", "a::Dup"), to("super::Base", "Base"), to("crate::Base", "Base")],
                 implements: &[],
             },
             // A Rust item does not see its parent module's names.
-            Owner { qualified_name: "b::UsesOuter", extends: &[text("Base")], implements: &[] },
+            Owner { unclassified: &[], qualified_name: "b::UsesOuter", extends: &[text("Base")], implements: &[] },
         ],
     },
     RelationsRow {
@@ -100,20 +98,20 @@ pub const RELATIONS_MATRIX: &[RelationsRow] = &[
                  class Gen<T> extends T<string> {}\n\
                  interface Sub extends Base, ns.Dup, lib.Base {}\n",
         owners: &[
-            Owner {
+            Owner { unclassified: &[],
                 qualified_name: "Child",
                 extends: &[to("Root", "Root")],
                 implements: &[to("Base", "Base"), to("Mixin<string>", "Mixin"), to("Mixin<number>", "Mixin")],
             },
-            Owner {
+            Owner { unclassified: &[],
                 qualified_name: "Q",
                 extends: &[to("ns.Inner", "ns.Inner")],
                 implements: &[to("ns.Dup", "ns.Dup"), to("Dup", "Dup")],
             },
-            Owner { qualified_name: "Ext", extends: &[text("other.Root")], implements: &[text("Alias")] },
-            Owner { qualified_name: "Dyn", extends: &[text("mix(Root)")], implements: &[] },
-            Owner { qualified_name: "Gen", extends: &[text("T<string>")], implements: &[] },
-            Owner {
+            Owner { unclassified: &[], qualified_name: "Ext", extends: &[text("other.Root")], implements: &[text("Alias")] },
+            Owner { unclassified: &[], qualified_name: "Dyn", extends: &[text("mix(Root)")], implements: &[] },
+            Owner { unclassified: &[], qualified_name: "Gen", extends: &[text("T<string>")], implements: &[] },
+            Owner { unclassified: &[],
                 qualified_name: "Sub",
                 extends: &[to("Base", "Base"), to("ns.Dup", "ns.Dup"), text("lib.Base")],
                 implements: &[],
@@ -127,9 +125,9 @@ pub const RELATIONS_MATRIX: &[RelationsRow] = &[
         source: "class Root {}\nclass Child extends Root {}\nclass Dyn extends mix(Root) {}\n\
                  class Ext extends lib.Root {}\n",
         owners: &[
-            Owner { qualified_name: "Child", extends: &[to("Root", "Root")], implements: &[] },
-            Owner { qualified_name: "Dyn", extends: &[text("mix(Root)")], implements: &[] },
-            Owner { qualified_name: "Ext", extends: &[text("lib.Root")], implements: &[] },
+            Owner { unclassified: &[], qualified_name: "Child", extends: &[to("Root", "Root")], implements: &[] },
+            Owner { unclassified: &[], qualified_name: "Dyn", extends: &[text("mix(Root)")], implements: &[] },
+            Owner { unclassified: &[], qualified_name: "Ext", extends: &[text("lib.Root")], implements: &[] },
         ],
     },
     RelationsRow {
@@ -143,7 +141,7 @@ pub const RELATIONS_MATRIX: &[RelationsRow] = &[
                  type Iface interface {\n\tBase\n\tfmt.Stringer\n\tNum\n\tint\n\t~string\n\tG[int]\n\terror\n}\n\n\
                  type S struct {\n\tBase\n\tx int\n}\n",
         owners: &[
-            Owner {
+            Owner { unclassified: &[],
                 qualified_name: "shapes.Iface",
                 extends: &[
                     to("Base", "shapes.Base"),
@@ -155,7 +153,7 @@ pub const RELATIONS_MATRIX: &[RelationsRow] = &[
                 implements: &[],
             },
             // An embedded struct field is composition.
-            Owner { qualified_name: "shapes.S", extends: &[], implements: &[] },
+            Owner { unclassified: &[], qualified_name: "shapes.S", extends: &[], implements: &[] },
         ],
     },
     RelationsRow {
@@ -169,15 +167,15 @@ pub const RELATIONS_MATRIX: &[RelationsRow] = &[
                  class Dyn(make()):\n    pass\n\n\
                  class Twice(Base, Base):\n    pass\n",
         owners: &[
-            Owner { qualified_name: "Meta", extends: &[text("type")], implements: &[] },
-            Owner {
+            Owner { unclassified: &[], qualified_name: "Meta", extends: &[text("type")], implements: &[] },
+            Owner { unclassified: &[],
                 qualified_name: "Child",
                 extends: &[to("Base", "Base"), text("mod.Base"), text("Generic[T]"), text("*rest")],
                 implements: &[],
             },
-            Owner { qualified_name: "Outer.Inner", extends: &[to("Base", "Outer.Base")], implements: &[] },
-            Owner { qualified_name: "Dyn", extends: &[text("make()")], implements: &[] },
-            Owner { qualified_name: "Twice", extends: &[to("Base", "Base")], implements: &[] },
+            Owner { unclassified: &[], qualified_name: "Outer.Inner", extends: &[to("Base", "Outer.Base")], implements: &[] },
+            Owner { unclassified: &[], qualified_name: "Dyn", extends: &[text("make()")], implements: &[] },
+            Owner { unclassified: &[], qualified_name: "Twice", extends: &[to("Base", "Base")], implements: &[] },
         ],
     },
     RelationsRow {
@@ -194,29 +192,41 @@ pub const RELATIONS_MATRIX: &[RelationsRow] = &[
                  class Outer { interface Base {} class In implements Base {} }\n\
                  class Param<Root> extends Root {}\n",
         owners: &[
-            Owner {
+            Owner { unclassified: &[],
                 qualified_name: "p.Child",
                 extends: &[to("Root", "p.Root")],
                 implements: &[to("Base", "p.Base"), to("Gen<String>", "p.Gen"), to("Gen<Integer>", "p.Gen")],
             },
-            Owner { qualified_name: "p.Ext", extends: &[text("other.Root")], implements: &[to("p.Base", "p.Base")] },
-            Owner {
+            Owner { unclassified: &[], qualified_name: "p.Ext", extends: &[text("other.Root")], implements: &[to("p.Base", "p.Base")] },
+            Owner { unclassified: &[],
                 qualified_name: "p.Sub",
                 extends: &[to("Base", "p.Base"), text("java.io.Serializable")],
                 implements: &[],
             },
-            Owner { qualified_name: "p.E", extends: &[], implements: &[to("Base", "p.Base")] },
-            Owner { qualified_name: "p.R", extends: &[], implements: &[to("Base", "p.Base")] },
-            Owner { qualified_name: "p.Outer.In", extends: &[], implements: &[to("Base", "p.Outer.Base")] },
-            Owner { qualified_name: "p.Param", extends: &[text("Root")], implements: &[] },
+            Owner { unclassified: &[], qualified_name: "p.E", extends: &[], implements: &[to("Base", "p.Base")] },
+            Owner { unclassified: &[], qualified_name: "p.R", extends: &[], implements: &[to("Base", "p.Base")] },
+            Owner { unclassified: &[], qualified_name: "p.Outer.In", extends: &[], implements: &[to("Base", "p.Outer.Base")] },
+            Owner { unclassified: &[], qualified_name: "p.Param", extends: &[text("Root")], implements: &[] },
         ],
     },
     RelationsRow {
         language: L::CSharp,
-        support: Support::Pending("C# base lists mix a base class with interfaces (ruling 1)"),
+        support: Support::Supported,
         extension: "cs",
-        source: "interface IBase {}\nclass Root {}\nclass Child : Root, IBase {}\n",
-        owners: &[],
+        source: "interface I<T> {}\ninterface J : I<int>, External {}\nclass Root<T> {}\n\
+                 class Child : Root<int>, I<int>, External {}\nclass Unknown : Foreign {}\n\
+                 struct Value : External {}\nrecord struct Rec : External;\nenum E : int { A }\n\
+                 class T {}\nclass Generic<T> : T {}\nclass Duplicate {}\nclass Duplicate {}\nclass Amb : Duplicate {}\n",
+        owners: &[
+            Owner { qualified_name: "J", extends: &[to("I<int>", "I"), text("External")], implements: &[], unclassified: &[] },
+            Owner { qualified_name: "Child", extends: &[to("Root<int>", "Root")], implements: &[to("I<int>", "I"), text("External")], unclassified: &[] },
+            Owner { qualified_name: "Unknown", extends: &[], implements: &[], unclassified: &[text("Foreign")] },
+            Owner { qualified_name: "Value", extends: &[], implements: &[text("External")], unclassified: &[] },
+            Owner { qualified_name: "Rec", extends: &[], implements: &[text("External")], unclassified: &[] },
+            Owner { qualified_name: "E", extends: &[], implements: &[], unclassified: &[] },
+            Owner { qualified_name: "Generic", extends: &[], implements: &[], unclassified: &[text("T")] },
+            Owner { qualified_name: "Amb", extends: &[], implements: &[], unclassified: &[text("Duplicate")] },
+        ],
     },
     RelationsRow {
         language: L::C,
@@ -236,7 +246,7 @@ pub const RELATIONS_MATRIX: &[RelationsRow] = &[
                  namespace ns { struct N : B {}; }\n\
                  class E final : other::B {};\n",
         owners: &[
-            Owner {
+            Owner { unclassified: &[],
                 qualified_name: "D",
                 extends: &[
                     to("ns::B", "ns::B"),
@@ -248,24 +258,44 @@ pub const RELATIONS_MATRIX: &[RelationsRow] = &[
                 ],
                 implements: &[],
             },
-            Owner { qualified_name: "P", extends: &[text("T"), to("B", "B")], implements: &[] },
-            Owner { qualified_name: "ns::N", extends: &[to("B", "ns::B")], implements: &[] },
-            Owner { qualified_name: "E", extends: &[text("other::B")], implements: &[] },
+            Owner { unclassified: &[], qualified_name: "P", extends: &[text("T"), to("B", "B")], implements: &[] },
+            Owner { unclassified: &[], qualified_name: "ns::N", extends: &[to("B", "ns::B")], implements: &[] },
+            Owner { unclassified: &[], qualified_name: "E", extends: &[text("other::B")], implements: &[] },
         ],
     },
     RelationsRow {
         language: L::Swift,
-        support: Support::Pending("Swift inheritance and conformance lists, extensions included (ruling 1)"),
+        support: Support::Supported,
         extension: "swift",
-        source: "protocol P {}\nclass Root {}\nclass Child: Root, P {}\nstruct S: P {}\nextension Root: P {}\n",
-        owners: &[],
+        source: "protocol P {}\nprotocol Q: P, External {}\nclass Root {}\nclass Child: Root, P, External {}\n\
+                 struct S: P, Codable {}\nclass Unknown: Foreign {}\nenum E: Int, P { case a = 1 }\n\
+                 enum F: P { case a }\nstruct G<T> {}\nextension Root: P {}\nextension G: Equatable where T: Equatable {}\n\
+                 extension other.Root: Q {}\nextension Root: P, Codable {}\n",
+        owners: &[
+            Owner { qualified_name: "Q", extends: &[to("P", "P"), text("External")], implements: &[], unclassified: &[] },
+            Owner { qualified_name: "Child", extends: &[to("Root", "Root")], implements: &[to("P", "P"), text("External")], unclassified: &[] },
+            Owner { qualified_name: "S", extends: &[], implements: &[to("P", "P"), text("Codable")], unclassified: &[] },
+            Owner { qualified_name: "Unknown", extends: &[], implements: &[], unclassified: &[text("Foreign")] },
+            Owner { qualified_name: "E", extends: &[], implements: &[to("P", "P")], unclassified: &[] },
+            Owner { qualified_name: "F", extends: &[], implements: &[to("P", "P")], unclassified: &[] },
+            Owner { qualified_name: "Root", extends: &[], implements: &[to("P", "P"), text("Codable")], unclassified: &[] },
+            Owner { qualified_name: "G", extends: &[], implements: &[text("Equatable")], unclassified: &[] },
+        ],
     },
     RelationsRow {
         language: L::Scala,
-        support: Support::Pending("Scala `extends`/`with` lists mix classes and traits (ruling 1)"),
+        support: Support::Supported,
         extension: "scala",
-        source: "trait T\nclass Root\nclass Child extends Root with T\n",
-        owners: &[],
+        source: "package sample\ntrait T\nclass Root[A]\nclass Child extends Root[Int] with T with External\n\
+                 class Unknown extends Foreign with T\ntrait Sub extends T with External\nclass Mix extends T\n\
+                 object Singleton extends Root[Int] with T\n",
+        owners: &[
+            Owner { qualified_name: "sample.Child", extends: &[to("Root[Int]", "sample.Root")], implements: &[to("T", "sample.T"), text("External")], unclassified: &[] },
+            Owner { qualified_name: "sample.Unknown", extends: &[], implements: &[to("T", "sample.T")], unclassified: &[text("Foreign")] },
+            Owner { qualified_name: "sample.Sub", extends: &[to("T", "sample.T"), text("External")], implements: &[], unclassified: &[] },
+            Owner { qualified_name: "sample.Mix", extends: &[], implements: &[to("T", "sample.T")], unclassified: &[] },
+            Owner { qualified_name: "sample.Singleton", extends: &[to("Root[Int]", "sample.Root")], implements: &[to("T", "sample.T")], unclassified: &[] },
+        ],
     },
     RelationsRow {
         language: L::Php,
@@ -277,17 +307,17 @@ pub const RELATIONS_MATRIX: &[RelationsRow] = &[
                  interface Sub extends Base, Other {}\n\
                  enum E: string implements Base { case A = 'a'; }\n",
         owners: &[
-            Owner {
+            Owner { unclassified: &[],
                 qualified_name: "App\\Child",
                 extends: &[to("Root", "App\\Root")],
                 implements: &[to("Base", "App\\Base"), to("\\App\\Other", "App\\Other"), text("\\Lib\\Base")],
             },
-            Owner {
+            Owner { unclassified: &[],
                 qualified_name: "App\\Sub",
                 extends: &[to("Base", "App\\Base"), to("Other", "App\\Other")],
                 implements: &[],
             },
-            Owner { qualified_name: "App\\E", extends: &[], implements: &[to("Base", "App\\Base")] },
+            Owner { unclassified: &[], qualified_name: "App\\E", extends: &[], implements: &[to("Base", "App\\Base")] },
         ],
     },
     RelationsRow {
@@ -408,7 +438,8 @@ fn type_record<'a>(index: &'a FileSymbolIndex, label: &str, qualified_name: &str
     let found: Vec<&SymbolRecord> = index
         .symbols
         .iter()
-        .filter(|record| in_file_name(record) == qualified_name && is_type_like(record.kind))
+        .filter(|record| in_file_name(record) == qualified_name && (is_type_like(record.kind)
+            || (record.language == L::Scala && record.kind == SymbolKindV2::Module)))
         .collect();
     assert_eq!(
         found.len(),
@@ -478,12 +509,13 @@ pub fn check_owner_targets(label: &str, complete: &FileSymbolIndex, index: &File
         let label = format!("{label} `{}`", owner.qualified_name);
         assert_targets(complete, &label, "extends", &record.relations.extends, owner.extends);
         assert_targets(complete, &label, "implements", &record.relations.implements, owner.implements);
+        assert_targets(complete, &label, "unclassified", &record.relations.unclassified_bases, owner.unclassified);
         for (target, expected) in record
             .relations
             .extends
             .iter()
-            .chain(&record.relations.implements)
-            .zip(owner.extends.iter().chain(owner.implements))
+            .chain(&record.relations.implements).chain(&record.relations.unclassified_bases)
+            .zip(owner.extends.iter().chain(owner.implements).chain(owner.unclassified))
         {
             let expected_id =
                 expected.resolves_to.map(|qualified_name| type_record(complete, &label, qualified_name).id.clone());
@@ -494,17 +526,17 @@ pub fn check_owner_targets(label: &str, complete: &FileSymbolIndex, index: &File
 
 /// Each row's owners report exactly their written bases on the complete
 /// index and on a declarations-only query of the owner's kind; a resolved
-/// target's ID is the named declaration's. Pending and absent rows report
+/// target's ID is the named declaration's. Absent rows report
 /// no declared base on any record.
 #[test]
 fn relations_matrix_holds_on_complete_and_declarations_only_paths() {
     for row in RELATIONS_MATRIX {
         let label = row.language.name();
         let complete = check_owners(label, row.extension, row.source, row.owners);
-        if let Support::Pending(reason) | Support::Absent(reason) = row.support {
+        if let Support::Absent(reason) = row.support {
             for record in &complete.symbols {
                 assert!(
-                    record.relations.extends.is_empty() && record.relations.implements.is_empty(),
+                    record.relations.extends.is_empty() && record.relations.implements.is_empty() && record.relations.unclassified_bases.is_empty(),
                     "{label}: {reason}: `{}` has {:?} {:?}",
                     record.identity.qualified_name,
                     record.relations.extends,
@@ -551,7 +583,7 @@ const fn unresolved_probe(implements: Target) -> ImplMember {
 }
 
 const fn bases(qualified_name: &'static str, extends: &'static [Target]) -> Owner {
-    Owner { qualified_name, extends, implements: &[] }
+    Owner { unclassified: &[], qualified_name, extends, implements: &[] }
 }
 
 /// A row of written bases alone.
@@ -573,6 +605,50 @@ const fn row(
 /// through the function's name, and an enclosing generic parameter is never
 /// a file-level type.
 pub const PATH_MEANING_MATRIX: &[PathMeaningRow] = &[
+    row("C# primary constructor base invocation", L::CSharp, "cs",
+        "interface I {}\nclass Base(int x) {}\nclass Child(int x) : Base(x), I {}\nclass Unknown(int x) : External(x) {}\n",
+        &[Owner { qualified_name: "Child", extends: &[to("Base(x)", "Base")], implements: &[to("I", "I")], unclassified: &[] },
+          Owner { qualified_name: "Unknown", extends: &[text("External(x)")], implements: &[], unclassified: &[] }]),
+    row("C# rooted base", L::CSharp, "cs",
+        "class Base {}\nnamespace N { class Base {} class Child : global::Base {} }\n",
+        &[Owner { qualified_name: "N.Child", extends: &[to("global::Base", "Base")], implements: &[], unclassified: &[] }]),
+    row("C# alias in a file-scoped namespace", L::CSharp, "cs",
+        "namespace N;\nusing Alias = Lib.Base;\nclass Alias {}\nclass Child : Alias {}\n",
+        &[Owner { qualified_name: "N.Child", extends: &[], implements: &[], unclassified: &[text("Alias")] }]),
+    row("C# inherited member type", L::CSharp, "cs",
+        "class Base {}\nclass Super {}\nclass Outer : Super { class Child : Base {} }\n",
+        &[Owner { qualified_name: "Outer.Child", extends: &[], implements: &[], unclassified: &[text("Base")] }]),
+    row("Swift local protocol shadows a standard raw-type name", L::Swift, "swift",
+        "protocol Int {}\nenum E: Int { case a }\n",
+        &[Owner { qualified_name: "E", extends: &[], implements: &[to("Int", "Int")], unclassified: &[] }]),
+    row("Swift implicit raw-value enum", L::Swift, "swift",
+        "enum E: Int { case a }\n",
+        &[Owner { qualified_name: "E", extends: &[], implements: &[], unclassified: &[] }]),
+    row("Swift explicit external extension owner", L::Swift, "swift",
+        "protocol P {}\nstruct Root {}\nextension other.Root: P {}\n",
+        &[Owner { qualified_name: "Root", extends: &[], implements: &[], unclassified: &[] }]),
+    row("Swift aliased extension owner", L::Swift, "swift",
+        "protocol P {}\nstruct Root {}\ntypealias Alias = Root\nextension Alias: P {}\n",
+        &[Owner { qualified_name: "Root", extends: &[], implements: &[], unclassified: &[] }]),
+    row("Swift qualified base", L::Swift, "swift",
+        "enum NS { class Base {} }\nclass Child: NS.Base {}\n",
+        &[Owner { qualified_name: "Child", extends: &[to("NS.Base", "NS.Base")], implements: &[], unclassified: &[] }]),
+    row("Swift module import keeps local types", L::Swift, "swift",
+        "import Foundation\nclass Base {}\nclass Child: Base {}\n",
+        &[Owner { qualified_name: "Child", extends: &[to("Base", "Base")], implements: &[], unclassified: &[] }]),
+    row("Swift selective import binds the name", L::Swift, "swift",
+        "import class Lib.Base\nclass Base {}\nclass Child: Base {}\n",
+        &[Owner { qualified_name: "Child", extends: &[], implements: &[], unclassified: &[text("Base")] }]),
+    row("Scala imported alias in a package", L::Scala, "scala",
+        "package sample\nimport lib.{Other => Base}\nclass Base\nclass Child extends Base\n",
+        &[Owner { qualified_name: "sample.Child", extends: &[], implements: &[], unclassified: &[text("Base")] }]),
+    row("Scala imported alias in a block package", L::Scala, "scala",
+        "package sample { import lib.{Other => Base}; class Base; class Child extends Base }\n",
+        &[Owner { qualified_name: "sample.Child", extends: &[], implements: &[], unclassified: &[text("Base")] }]),
+    row("Scala constructor arguments stay written", L::Scala, "scala",
+        "class Base[A](x: Int)\ntrait T\nclass Child extends Base[Int](1) with T\n",
+        &[Owner { qualified_name: "Child", extends: &[to("Base[Int](1)", "Base")], implements: &[to("T", "T")], unclassified: &[] }]),
+
     row(
         "Rust supertrait through an external `::` path",
         L::Rust,
@@ -1222,7 +1298,7 @@ fn relation_resolution_grows_linearly_with_declarations() {
             let resolved = index
                 .symbols
                 .iter()
-                .flat_map(|record| record.relations.extends.iter().chain(&record.relations.implements))
+                .flat_map(|record| record.relations.extends.iter().chain(&record.relations.implements).chain(&record.relations.unclassified_bases))
                 .filter(|target| target.id.is_some())
                 .count();
             assert!(resolved >= declarations, "{}: {resolved} resolved targets for {declarations}", shape.label);

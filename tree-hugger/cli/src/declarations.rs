@@ -439,7 +439,7 @@ fn write_json_lines(
             for (position, record) in selected.records.iter().enumerate() {
                 let line = JsonLine {
                     report_schema_version: REPORT_SCHEMA_VERSION,
-                    schema_version: SchemaVersion::V4_2,
+                    schema_version: SchemaVersion::CURRENT,
                     file: &display,
                     language: selected.language,
                     completed_passes: &selected.completed_passes,

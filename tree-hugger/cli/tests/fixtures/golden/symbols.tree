@@ -97,7 +97,7 @@ rust.rs
 scala.scala
   public trait Named [5:1]
     public method name() [6:3]
-  public class Tag { name: String } [9:1]
+  public class Tag { name: String } implements Named [9:1]
     public method upper() -> String [10:3]
   public module Tag [13:1]
     public method empty() -> Tag [14:3]

@@ -13,14 +13,16 @@ use crate::shared::MetricsFacet;
 /// ([`declared_parameter_count`]). `None` for kinds that are not functions
 /// or where no list is found ([`declared_parameters`]). `has_docs` is whether `doc` (from
 /// [`extract_doc_comment`]) is present; `None` in Lua, Perl, Bash and Zsh,
-/// which have no doc-comment detection. `lines` is [`body_lines`] of the
-/// record's stored body span.
+/// which have no doc-comment detection. `body` is the callable's
+/// [`callable_body`] (`None` for other kinds): `lines` is [`body_lines`] of
+/// its span, the record's `source.body_span`, and `cyclomatic` is
+/// [`cyclomatic`] over its nodes, so both measure the same body.
 pub(crate) fn symbol_metrics(
     kind: SymbolKind,
     declaration: Node<'_>,
     name: Node<'_>,
     doc: Option<&str>,
-    body_span: Option<&TextSpan>,
+    body: Option<CallableBody<'_>>,
     language: ProgrammingLanguage,
     source: &str,
 ) -> MetricsFacet {
@@ -46,11 +48,16 @@ pub(crate) fn symbol_metrics(
         | ProgrammingLanguage::Zsh => None,
         _ => Some(doc.is_some()),
     };
-    MetricsFacet { parameters, has_docs, lines: body_lines(kind, body_span) }
+    MetricsFacet {
+        parameters,
+        has_docs,
+        lines: body_lines(kind, body.map(|body| body.span(source)).as_ref()),
+        cyclomatic: body.filter(|_| kind.is_function()).and_then(|body| cyclomatic(body, language)),
+    }
 }
 
 /// The physical lines a function, method or constructor's body span
-/// ([`callable_body_span`]) touches: `0` for an empty span, otherwise
+/// ([`CallableBody::span`]) touches: `0` for an empty span, otherwise
 /// `end.line - start.line`, plus one unless the span ends at column 1 (it
 /// then stops before that line's first byte). With one-based locations,
 /// CRLF and LF sources count the same. `None` for other kinds, even with a

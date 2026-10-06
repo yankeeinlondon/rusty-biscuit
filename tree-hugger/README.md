@@ -121,7 +121,7 @@ hug lint "src/**/*.rs" --lint-only
 ## JSON Output
 
 `functions`, `types`, `symbols` and `classes` print a versioned report:
-`report_schema_version` (`1`), `schema_version` (`4.1`, the records' schema),
+`report_schema_version` (`1`), `schema_version` (`4.3`, the records' schema),
 `root_dir`, `files` (one entry per file with a match: `file`, `language`,
 `completed_passes`, `completed_capabilities` and the selected `symbols`
 records; `classes` adds `members` keyed by container ID) and a trailing
@@ -153,10 +153,10 @@ syntax tree in the same single parse (no compiler, no extra pass):
   for Rust, TypeScript, Go, Python, Java, C#, C++, Swift and Scala.
   Requirements on anything other than a declared parameter (`where T::Item:
   Copy`, a C++ `requires` clause) go to `type_info.constraints`.
-- **Base types** (`relations.extends`, `relations.implements`): each base as
+- **Base types** (`relations.extends`, `relations.implements`, `relations.unclassified_bases`): each base as
   written, with a same-file `id` only when the name names exactly one
   declaration. A Rust trait impl adds its trait to its members and to the
-  type it implements. C#, Swift and Scala are **planned**.
+  type it implements. C#, Swift and Scala preserve ambiguous bases in `relations.unclassified_bases`.
 - **Modifiers and attributes**: `const fn`, `unsafe`, `mut`, `readonly`,
   `abstract`, `final`, `override`, `virtual`, `sealed`, `mutating`, in one
   fixed order; `attributes` lists the declaration's own attributes,
@@ -170,7 +170,7 @@ syntax tree in the same single parse (no compiler, no extra pass):
   - class Square extends Base<number>; implements Shape, Comparable<Square> [3:1]
   ```
 
-The record schema is now **4.1** (the `lines` key). Cache entries written by
+The record schema is now **4.3** (unclassified bases, relation source spans and the required cyclomatic metric). Cache entries written by
 earlier versions are re-analyzed once. Records converted to the older
 `SymbolInfo` model lose these facts, since that model has no field for them.
 

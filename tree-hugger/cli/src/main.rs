@@ -1005,7 +1005,7 @@ fn main() -> Result<(), TreeHuggerError> {
                 .unwrap_or(ProgrammingLanguage::Rust);
 
             let output = JsonOutput {
-                schema_version: SchemaVersion::V4_2,
+                schema_version: SchemaVersion::CURRENT,
                 root_dir,
                 language: package_language,
                 files: summaries.clone(),

@@ -28,8 +28,14 @@ impl SchemaVersion {
     pub const V4_0: Self = Self { major: 4, minor: 0 };
     /// Shape with the required `metrics.lines` key; no longer emitted.
     pub const V4_1: Self = Self { major: 4, minor: 1 };
-    /// Current shape: unclassified bases and optional relation source spans.
+    /// Shape with unclassified bases and optional relation source spans,
+    /// before `metrics.cyclomatic`; no longer emitted.
     pub const V4_2: Self = Self { major: 4, minor: 2 };
+    /// Shape with the required `metrics.cyclomatic` key.
+    pub const V4_3: Self = Self { major: 4, minor: 3 };
+    /// The shape records, file indexes, CLI envelopes and cache entries are
+    /// written in, and the only one the cache serves.
+    pub const CURRENT: Self = Self::V4_3;
 }
 
 /// 1-based text location.

@@ -242,7 +242,12 @@ fn flags_and_metrics_run_with_the_declarations_only() {
     assert!(!old.visibility.is_test, "a scratch file outside any package `tests/`");
     assert_eq!(
         old.metrics,
-        Some(MetricsFacet { parameters: Some(1), has_docs: Some(true), lines: Some(1) })
+        Some(MetricsFacet {
+            parameters: Some(1),
+            has_docs: Some(true),
+            lines: Some(1),
+            cyclomatic: Some(1),
+        })
     );
     assert!(old.relations.references.is_empty(), "references were not bound");
     assert!(old.relations.parent.is_none(), "containment was not requested");
@@ -250,7 +255,12 @@ fn flags_and_metrics_run_with_the_declarations_only() {
     assert!(old.docs.parsed.is_none(), "structured docs were not requested");
     assert_eq!(
         named("helper").metrics,
-        Some(MetricsFacet { parameters: Some(0), has_docs: Some(false), lines: Some(1) })
+        Some(MetricsFacet {
+            parameters: Some(0),
+            has_docs: Some(false),
+            lines: Some(1),
+            cyclomatic: Some(1),
+        })
     );
 
     let plain = tree_file.query(&SymbolQuery::new().kinds([SymbolKindV2::Function])).expect("query");
@@ -652,6 +662,7 @@ fn declaration_facts(record: &SymbolRecord) -> Value {
         "attributes": record.attributes,
         "extends": record.relations.extends,
         "implements": record.relations.implements,
+        "unclassified_bases": record.relations.unclassified_bases,
         "parent": record.relations.parent,
         "container": record.relations.container,
         "members": record.relations.members,

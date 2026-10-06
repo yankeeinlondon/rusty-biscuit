@@ -241,6 +241,14 @@ pub struct MetricsFacet {
     /// and for a callable without a body.
     #[serde(deserialize_with = "nullable")]
     pub lines: Option<u32>,
+    /// Cyclomatic complexity of a Function, Method or Constructor's body
+    /// (the one `lines` counts): 1 plus one per decision the language's
+    /// reviewed rules count, nested callables and types excluded. `None`
+    /// means unavailable for this declaration: another kind, no body, a
+    /// language without reviewed rules, a syntax error in the counted body,
+    /// or a total beyond `u32`. Never read `None` as zero.
+    #[serde(deserialize_with = "nullable")]
+    pub cyclomatic: Option<u32>,
 }
 
 /// A required value that may be `null`; unlike a plain `Option` field, an

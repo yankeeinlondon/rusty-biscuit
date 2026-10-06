@@ -1,10 +1,11 @@
 # Declared Type Relations
 
 Every type-like record (class, interface, trait, type, enum) carries the base
-types its declaration writes in its own header:
+types its declaration writes in its own header, plus same-file Swift extension conformances:
 
 - `relations.extends`: classes, interfaces and traits it inherits from;
-- `relations.implements`: interfaces and traits it declares conformance to.
+- `relations.implements`: interfaces and traits it declares conformance to;
+- `relations.unclassified_bases`: written bases whose category is unknown.
 
 Each entry is a `SymbolRef`. Its `name` is always the base **as written**. It
 gets an `id` and an in-file `qualified_name` only when the name provably
@@ -15,7 +16,7 @@ to.
 These facts come from the syntax tree alone, during the parse pass. A
 declarations-only query returns them, and no references, semantic, docs or
 diagnostics pass is involved. `hug types --tree` and `hug symbols --tree`
-show both lists at the end of each type's row (see
+show nonempty lists at the end of each type's row (see
 [Symbol Reports](./symbol-reports.md#declared-bases-on-type-rows)).
 
 ```typescript
@@ -47,7 +48,9 @@ written text.
 | Java | class `extends`, interface `extends` | class, enum and record `implements` | |
 | C++ | every base specifier, private and `virtual` bases included | — | the `public`/`private`/`virtual` keywords (not part of the text) |
 | PHP | class and interface `extends` | class and enum `implements` | trait `use` (composition) |
-| C#, Swift, Scala | **planned** (see [below](#c-swift-and-scala)): nothing is recorded yet | | |
+| C# | interface inheritance; proven class bases | struct/record-struct interfaces; entries after a class's first base; proven interface targets | enum underlying types |
+| Swift | protocol inheritance; proven class bases | structs/actors, local-owner extensions, entries after a class's first base, proven protocol targets | proven enum raw-value types |
+| Scala | trait inheritance; proven class bases | mixins after the first parent; proven trait targets on concrete owners | |
 | C, Bash, Zsh | — (no inheritance) | — | |
 | Perl | — | — | `@ISA`, `use parent` |
 | Lua | — | — | metatables |
@@ -75,16 +78,16 @@ segments looked up, each inside the one before it.
 ```mermaid
 flowchart TD
     W["written base"] --> P{"a plain name path?<br/>(Base, pkg.Base, crate::m::W)"}
-    P -- "no: call, reference, tuple, dyn, higher-ranked bound" --> U["text only"]
+    P -- "no: dynamic call, reference, tuple, dyn, higher-ranked bound" --> U["text only"]
     P -- yes --> A{"how does it start?"}
     A -- "Rust ::name (external crate)" --> U
-    A -- "rooted: crate::, C++ ::, PHP leading backslash" --> G["first segment at the file root"]
+    A -- "rooted: crate::, C++ ::, C# global::,<br/>PHP leading backslash" --> G["first segment at the file root"]
     A -- "Rust self:: / super::" --> M["first segment in that module"]
     A -- relative --> T{"first segment is a<br/>visible type parameter?"}
     T -- yes --> U
     T -- no --> S["look the first segment up in each<br/>enclosing scope, innermost first"]
     S --> B{"this scope binds it?"}
-    B -- "an import, or a wildcard import /<br/>using-directive in this scope" --> U
+    B -- "a named import, or a wildcard import /<br/>using-directive without a stronger local binding" --> U
     B -- "no, try the next scope out" --> S
     B -- "no scope left, or a scope<br/>the lookup cannot pass" --> U
     B -- "yes: a declaration of any kind" --> G2["first segment decided here"]
@@ -119,7 +122,7 @@ The rules, with an example of each:
 | An imported name has no declaration at its scope | Rust `use m::V; impl Tr for V` | text only |
 | An import binds its name in the scope that holds it | Python `def g(): from lib import Base` then `class C(Base)` inside `g`, next to a module-level `Base` | text only |
 | A wildcard import or C++ `using namespace` may bind any name | C++ `namespace n { using namespace other; struct C : B {}; }` next to a global `B` | text only |
-| A Java or C++ type with bases may inherit the name, so lookup stops there | Java `class Sub extends A { class C extends Base {} }`, where `A` declares `Base` | text only |
+| A Java, C++, C#, Swift or Scala type with bases may inherit the name, so lookup stops there | Java `class Sub extends A { class C extends Base {} }`, where `A` declares `Base` | text only |
 | A class body is never a lexical scope in JS/TS | TypeScript `class Outer { Base = 1; m() { class C extends Base {} } }` | the module-level `Base` |
 | A Python class body is a lexical scope only for code written directly in it: a nested class, method or function skips every enclosing class body, with its classes, variables and imports, and continues to the enclosing functions and the module | Python `class Outer: class Base` … `class Middle: class C(Base)`, or `def m(self): class C(Base)` | the module-level `Base`; text only when the module has none |
 | A dynamic expression | JavaScript `class D extends mix(Base)` | text only |
@@ -127,12 +130,19 @@ The rules, with an example of each:
 | Rust `crate::`, `self::` and `super::` anchor the path | `trait U: crate::Base` | the crate-root `Base` |
 | A Rust leading `::` names an external crate | `trait U: ::a::Dup` next to a local `mod a { trait Dup {} }` | text only |
 | A C++ leading `::` anchors at the global namespace | `namespace ns { struct C : ::B {}; }` next to `ns::B` | the global `B` |
+| C# `global::` anchors at the file root | `namespace N { class Child : global::Base {} }` next to a global `Base` | the global `Base` |
 | A PHP leading `\` anchors at the file root | `implements \App\Other` | `App\Other` |
 | A PHP name without a leading `\` is relative to its namespace only | `namespace Other; class C extends App\Root {}` next to `App\Root` | text only (it names `Other\App\Root`) |
 
 A resolved target's `qualified_name` is the in-file name. The scan-root or
 module prefix that reports add (`file.rs#Base`) never enters a stored
 target.
+
+In C#, Swift and Scala, a local declaration in the current scope takes
+precedence over a wildcard or whole-module import. Explicit named imports
+still stop the lookup. For example, `import Foundation; class Base {}` and
+`class Child: Base {}` link to the local `Base`, while `import class Lib.Base`
+leaves that base unresolved.
 
 The lookup uses one per-file index of every declaration by in-file qualified
 name. The index is built once per file from every record, including records
@@ -189,34 +199,89 @@ from stored records. See [Cache design](./cache-design.md).
 
 ## C#, Swift and Scala
 
-**Planned.** These three languages write a type's base class and the
-interfaces, protocols or traits it conforms to in one list:
+These languages can mix inheritance and conformance in one written list.
+Classification comes from syntax first, then from an unambiguous same-file
+target declaration. It is independent of target identity: an external
+interface can be known conformance while its `id` stays absent.
 
 ```csharp
-class Child : Base, IDisposable {}   // C#
+interface I {}
+class Child : External, I {}
+struct Value : IDisposable {}
 ```
+
+`Child` records `External` in `unclassified_bases` and `I` in `implements`.
+`Value` records `IDisposable` in `implements` even without a local interface
+declaration, because a struct's list can only declare interfaces. A class's
+first entry can be either a superclass or an interface; subsequent entries
+are interfaces. Interface inheritance stays in `extends`. Enum underlying
+types do not create relations. A primary constructor's base invocation,
+such as `class Child(int x) : External(x)`, establishes inheritance without
+requiring a local target declaration; its relation retains `External(x)`.
 
 ```swift
-struct Point: Codable {}             // Swift
-extension Point: Equatable {}        // Swift: conformance added elsewhere
+protocol P {}
+struct Point: P {}
+extension Point: Codable {}
+class Child: External {}
 ```
+
+`Point` records `P` and `Codable` in `implements`; `Child` keeps `External`
+in `unclassified_bases`. Struct, actor and extension lists declare
+conformance. A class's first entry is classified only when its target is
+proved; later entries are protocols. Protocol inheritance stays in `extends`.
+Enum raw-value types established by raw-value cases or standard raw-type
+names are excluded; a same-file protocol can classify an enum's first entry.
+
+Extension conformances attach only to a uniquely resolved local class,
+struct or enum. A qualified external owner, alias, or ambiguous name never
+attaches to a same-named local type. The owner's header entries come first,
+then extension entries in file order, with equal written expressions removed.
+The relation is a written conformance summary: a conditional extension's
+`where` requirements are not represented as edge conditions.
+
+Swift targets retain `source_span`, the written target's location in the
+same file. This evidence survives cache hits and distinguishes header
+conformance from extension conformance. With `--signatures full`, an outline
+shows `struct Point: P implements Codable`, retaining the extension addition
+without repeating `P`.
 
 ```scala
-class Child extends Base with Logging   // Scala
+trait T
+class Child extends External with T
 ```
 
-When a listed type is declared in another file, the source alone does not
-say whether it is a class (inheritance) or an interface/protocol/trait
-(conformance), and the meaning of `extends` for such an entry has not been
-decided. Until it is, records in these languages have empty
-`relations.extends` and `relations.implements`, and their outline rows show
-no bases. Every other fact (generics, modifiers, attributes, body lines) is
-read for them as for any other language.
+`Child` keeps `External` in `unclassified_bases` and `T` in `implements`.
+Mixins following the first parent are conformance; a first parent resolving
+to a local class is `extends`, and one resolving to a local trait is
+`implements`. Objects follow the same rule as classes; their `Module`
+records retain the written parents. A trait's own parent list remains
+`extends`. Written generic and constructor arguments remain intact, such as
+`Base[Int](1)`; the type's path is resolved independently of those arguments.
+
+```mermaid
+flowchart TD
+    W[Written base] --> S{Syntax establishes category?}
+    S -- yes --> C[extends or implements]
+    S -- no --> L{Unique local class or interface/trait?}
+    L -- yes --> C
+    L -- no --> U[unclassified_bases]
+    C --> I{Target identity proved in this file?}
+    I -- yes --> R[Include id and qualified_name]
+    I -- no --> T[Keep written text, no id]
+```
+
+Uncertainty never changes the meaning of `extends`. Outlines label the
+third list `unclassified bases External`; JSON and JSONL expose
+`relations.unclassified_bases`. Each list preserves its own source order.
 
 ## Limitations
 
-- C#, Swift and Scala base lists are not read yet (**planned**, see
-  [above](#c-swift-and-scala)).
+- Swift extension conformances on external, aliased or ambiguous owners
+  cannot be attached to a local record. Conditional conformance requirements
+  are not retained on the relation edge.
+- An external first base in a mixed list remains unclassified when syntax
+  cannot establish its category. This preserves the source fact.
 - Go: a named type embedded in an interface constraint cannot be told apart
   from an embedded interface by syntax. Only the predeclared non-interface
   types (`bool`, `int`, `string`, …) are excluded.

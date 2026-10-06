@@ -18,8 +18,8 @@ use tree_sitter::Node;
 use crate::analysis::counters::{count_relation_link, count_shared_context_steps};
 use crate::analysis::qualifying_prefixes;
 use crate::file::extract::{
-    BasePath, ImplHeader, ImportBinding, PathAnchor, WrittenBase, declared_bases,
-    declared_generics, impl_header, impl_of_member, impl_type_parameters, import_binding,
+    BasePath, ImplHeader, ImportBinding, PathAnchor, WrittenBase, declared_bases, declaration_keyword, base_path,
+    declared_generics, file_namespace_index, namespace_name, impl_header, impl_of_member, impl_type_parameters, import_binding,
 };
 use crate::shared::{ProgrammingLanguage, SymbolKindV2, SymbolRecord, SymbolRef};
 
@@ -123,7 +123,8 @@ fn class_scope_is_lexical(language: ProgrammingLanguage, innermost: bool) -> boo
 /// Whether a type's inherited members are found by unqualified lookup from
 /// inside it, so a type with bases hides what lies outside it.
 fn inherits_member_names(language: ProgrammingLanguage) -> bool {
-    matches!(language, ProgrammingLanguage::Java | ProgrammingLanguage::Cpp)
+    matches!(language, ProgrammingLanguage::Java | ProgrammingLanguage::Cpp | ProgrammingLanguage::CSharp
+        | ProgrammingLanguage::Swift | ProgrammingLanguage::Scala)
 }
 
 /// Languages with an [`import_binding`] reader (Rust also needs the walk
@@ -137,6 +138,9 @@ fn reads_imports(language: ProgrammingLanguage) -> bool {
             | ProgrammingLanguage::Python
             | ProgrammingLanguage::TypeScript
             | ProgrammingLanguage::JavaScript
+            | ProgrammingLanguage::CSharp
+            | ProgrammingLanguage::Swift
+            | ProgrammingLanguage::Scala
     )
 }
 
@@ -144,13 +148,13 @@ fn reads_imports(language: ProgrammingLanguage) -> bool {
 /// its tree, made on the first lookup that needs it.
 #[derive(Default)]
 struct FileWalk<'a, 'tree> {
-    /// `(scope, name)`: an import in the scope with this in-file qualified
-    /// name (`""` for the root) binds `name`.
-    imports: HashSet<(&'a str, &'a str)>,
+    /// Names imported at each in-file scope (`""` for the root).
+    imports: HashMap<String, HashSet<&'a str>>,
     /// Scopes holding a wildcard import or C++ using-directive.
-    opaque: HashSet<&'a str>,
+    opaque: HashSet<String>,
     /// Rust `impl` blocks in source order.
     impls: Vec<Node<'tree>>,
+    extensions: Vec<Node<'tree>>,
 }
 
 /// What the resolver reads of one declaration: its record or, before
@@ -261,10 +265,20 @@ impl<'a, 'tree> Declarations<'a, 'tree> {
                 return walk;
             }
             let mut statement_namespace = "";
+            let namespaces = if matches!(self.language, ProgrammingLanguage::CSharp | ProgrammingLanguage::Scala) {
+                file_namespace_index(self.root, self.language, self.source)
+            } else {
+                HashMap::new()
+            };
             let mut stack = vec![self.root];
             while let Some(node) = stack.pop() {
                 if self.language == ProgrammingLanguage::Rust && node.kind() == "impl_item" {
                     walk.impls.push(node);
+                }
+                if self.language == ProgrammingLanguage::Swift
+                    && declaration_keyword(node, self.language).as_deref() == Some("extension")
+                {
+                    walk.extensions.push(node);
                 }
                 if self.language == ProgrammingLanguage::Php
                     && node.kind() == "namespace_definition"
@@ -278,9 +292,27 @@ impl<'a, 'tree> Declarations<'a, 'tree> {
                         .map_or("", str::trim);
                 }
                 if let Some(binding) = import_binding(node, self.language, self.source) {
-                    let scope = self.enclosing_scope(node).map_or(statement_namespace, |idx| self.qualified_name(idx));
+                    let scope = self.enclosing_scope(node).map(|idx| self.qualified_name(idx).to_string()).unwrap_or_else(|| {
+                        let mut top = node;
+                        let mut blocks = Vec::new();
+                        while let Some(parent) = top.parent() {
+                            if parent.id() == self.root.id() { break; }
+                            if self.language == ProgrammingLanguage::Scala && parent.kind() == "package_clause"
+                                && parent.child_by_field_name("body").is_some()
+                                && let Some(name) = namespace_name(parent, self.source) {
+                                blocks.push(name);
+                            }
+                            top = parent;
+                        }
+                        let mut scope = namespaces.get(&top.id()).and_then(|name| name.as_deref())
+                            .unwrap_or(statement_namespace).to_string();
+                        for block in blocks.into_iter().rev() {
+                            scope = self.join(&scope, &block);
+                        }
+                        scope
+                    });
                     match binding {
-                        ImportBinding::Names(names) => walk.imports.extend(names.into_iter().map(|name| (scope, name))),
+                        ImportBinding::Names(names) => walk.imports.entry(scope).or_default().extend(names),
                         ImportBinding::Opaque => {
                             walk.opaque.insert(scope);
                         }
@@ -332,9 +364,9 @@ impl<'a, 'tree> Declarations<'a, 'tree> {
     /// The first scope that binds the segment decides; outer scopes are
     /// never tried after it. A binding is a declaration (of any kind, so a
     /// parameter, variable or alias shadows), a qualifier of one, or an
-    /// import, which never resolves. A scope holding a wildcard import or
-    /// using-directive, a Java/C++ type with bases (whose inherited member
-    /// types are found first), and in Rust a module (an item does not see
+    /// import, which never resolves. A wildcard import or using-directive
+    /// without a stronger local binding, a type with inherited member names
+    /// (whose member types are found first), and in Rust a module (an item does not see
     /// its parent module's names) end the search unresolved. Class scopes
     /// are skipped where they are not lexical: always in JS/TS, and in
     /// Python every class scope but the innermost (`scopes[0]`, the body the
@@ -348,17 +380,23 @@ impl<'a, 'tree> Declarations<'a, 'tree> {
             if is_class && !class_scope_is_lexical(self.language, position == 0) {
                 continue;
             }
-            if walk.opaque.contains(prefix) || walk.imports.contains(&(prefix, first)) {
+            let local_before_wildcard = matches!(self.language, ProgrammingLanguage::CSharp
+                | ProgrammingLanguage::Swift | ProgrammingLanguage::Scala);
+            if walk.imports.get(prefix).is_some_and(|names| names.contains(first))
+                || (!local_before_wildcard && walk.opaque.contains(prefix)) {
                 return None;
             }
             if self.is_bound(&self.join(prefix, first)) {
                 return Some(prefix);
             }
+            if walk.opaque.contains(prefix) {
+                return None;
+            }
             if inherits_member_names(self.language)
                 && owners.iter().any(|&idx| {
                     is_type_like_kind(self.entries[idx].kind) && {
                         let bases = declared_bases(self.entries[idx].name, self.language, self.source);
-                        !(bases.extends.is_empty() && bases.implements.is_empty())
+                        !(bases.extends.is_empty() && bases.implements.is_empty() && bases.unclassified.is_empty())
                     }
                 })
             {
@@ -447,6 +485,7 @@ impl<'a, 'tree> Declarations<'a, 'tree> {
             id: resolved.map(|record| record.id.clone()),
             name: base.text.clone(),
             qualified_name: resolved.map(|record| record.identity.qualified_name.clone()),
+            source_span: base.source_span.clone(),
         }
     }
 
@@ -503,14 +542,17 @@ struct ResolvedImpl {
     implements: Option<SymbolRef>,
 }
 
+enum BaseRelation { Extends, Implements, Unclassified }
+
 /// One change to apply to a record.
 enum Change {
     Extends(usize, SymbolRef),
     Implements(usize, SymbolRef),
+    Unclassified(usize, SymbolRef),
     Container(usize, SymbolRef, bool),
 }
 
-/// Fills `extends`/`implements` on the selected records and, when
+/// Fills classified and unclassified bases on the selected records and, when
 /// `containment` is asked, links each Rust impl member to its self type
 /// (`relations.container`, and `parent` when the self type resolves).
 pub(super) fn link_relations(
@@ -540,12 +582,16 @@ pub(super) fn link_relations(
         if language == ProgrammingLanguage::Rust {
             impl_relations(&declarations, records, inputs, containment, &mut changes);
         }
+        if language == ProgrammingLanguage::Swift {
+            swift_extensions(&declarations, records, inputs, &mut changes);
+        }
         changes
     };
     for change in changes {
         match change {
             Change::Extends(idx, target) => push_unique(&mut records[idx].relations.extends, target),
             Change::Implements(idx, target) => push_unique(&mut records[idx].relations.implements, target),
+            Change::Unclassified(idx, target) => push_unique(&mut records[idx].relations.unclassified_bases, target),
             Change::Container(idx, container, resolved) => {
                 let relations = &mut records[idx].relations;
                 relations.parent = resolved.then(|| container.clone());
@@ -572,24 +618,78 @@ fn written_bases(
 ) {
     let language = declarations.language;
     for (idx, (record, input)) in records.iter().zip(inputs).enumerate() {
-        if !input.wanted || !declares_bases(record.kind) {
+        if !input.wanted || !(declares_bases(record.kind)
+            || (language == ProgrammingLanguage::Scala && record.kind == SymbolKindV2::Module)) {
             continue;
         }
         let bases = declared_bases(input.name, language, declarations.source);
-        if bases.extends.is_empty() && bases.implements.is_empty() {
+        if bases.extends.is_empty() && bases.implements.is_empty() && bases.unclassified.is_empty() {
             continue;
         }
         let own = record.type_info.generic_params.iter().map(|param| param.name.clone()).collect();
         let type_params = declarations.type_parameters_around(input.declaration, Some(idx), own);
         let scopes = scope_chain(crate::analysis::owner_path(&record.identity.qualified_name).unwrap_or(""), language);
         let modules = declarations.enclosing_modules(input.declaration);
-        for base in &bases.extends {
-            let target = declarations.target(records, base, &scopes, &modules, &type_params, is_base_kind);
-            changes.push(Change::Extends(idx, target));
+        let mut ordered: Vec<_> = bases.extends.iter().map(|base| (base, BaseRelation::Extends))
+            .chain(bases.implements.iter().map(|base| (base, BaseRelation::Implements)))
+            .chain(bases.unclassified.iter().map(|base| (base, BaseRelation::Unclassified))).collect();
+        ordered.sort_by_key(|(base, _)| base.start_byte);
+        for (base, mut category) in ordered {
+            let resolved = base.path.as_ref().and_then(|path| {
+                declarations.resolve(path, &scopes, &modules, &type_params, is_base_kind)
+            });
+            if language == ProgrammingLanguage::Swift && resolved.is_none()
+                && declaration_keyword(input.declaration, language).as_deref() == Some("enum")
+                && matches!(category, BaseRelation::Unclassified)
+                && matches!(base.text.as_str(), "Int" | "Int8" | "Int16" | "Int32" | "Int64"
+                    | "UInt" | "UInt8" | "UInt16" | "UInt32" | "UInt64" | "String" | "Character"
+                    | "Float" | "Double" | "Unicode.Scalar") {
+                continue;
+            }
+            let target = SymbolRef {
+                id: resolved.map(|owner| records[owner].id.clone()),
+                name: base.text.clone(),
+                qualified_name: resolved.map(|owner| records[owner].identity.qualified_name.clone()),
+                source_span: base.source_span.clone(),
+            };
+            if matches!(category, BaseRelation::Unclassified) {
+                category = match resolved.map(|owner| &declarations.entries[owner]) {
+                    Some(owner) if matches!(owner.kind, SymbolKindV2::Interface | SymbolKindV2::Trait) => BaseRelation::Implements,
+                    Some(owner) if owner.kind == SymbolKindV2::Class
+                        || (language == ProgrammingLanguage::Swift
+                            && declaration_keyword(owner.declaration, language).as_deref() == Some("class")) => BaseRelation::Extends,
+                    _ => BaseRelation::Unclassified,
+                };
+            }
+            changes.push(match category {
+                BaseRelation::Extends => Change::Extends(idx, target),
+                BaseRelation::Implements => Change::Implements(idx, target),
+                BaseRelation::Unclassified => Change::Unclassified(idx, target),
+            });
         }
-        for base in &bases.implements {
-            let target = declarations.target(records, base, &scopes, &modules, &type_params, is_base_kind);
-            changes.push(Change::Implements(idx, target));
+    }
+}
+
+/// Extension owners use the same conservative lookup as base targets. An
+/// external or ambiguous owner has no record on which to preserve conformance.
+fn swift_extensions(
+    declarations: &Declarations<'_, '_>,
+    records: &[SymbolRecord],
+    inputs: &[RelationInput<'_>],
+    changes: &mut Vec<Change>,
+) {
+    for &extension in &declarations.walk().extensions {
+        let Some(name) = extension.child_by_field_name("name") else { continue };
+        let Some(path) = base_path(name, ProgrammingLanguage::Swift, declarations.source) else { continue };
+        let scope = declarations.enclosing_scope(extension).map_or("", |idx| declarations.qualified_name(idx));
+        let scopes = scope_chain(scope, ProgrammingLanguage::Swift);
+        let Some(owner) = declarations.resolve(&path, &scopes, &[], &[], is_self_type_kind) else { continue };
+        if !inputs[owner].wanted { continue; }
+        let type_params = declarations.type_parameters_around(extension, None,
+            records[owner].type_info.generic_params.iter().map(|param| param.name.clone()).collect());
+        for base in declared_bases(name, ProgrammingLanguage::Swift, declarations.source).implements {
+            let target = declarations.target(records, &base, &scopes, &[], &type_params, is_base_kind);
+            changes.push(Change::Implements(owner, target));
         }
     }
 }
@@ -644,9 +744,10 @@ fn impl_relations(
                         id: Some(owner.id.clone()),
                         name: owner.identity.name.clone(),
                         qualified_name: Some(owner.identity.qualified_name.clone()),
+                        source_span: None,
                     }
                 }
-                None => SymbolRef { id: None, name: resolved.header.self_text.clone(), qualified_name: None },
+                None => SymbolRef { id: None, name: resolved.header.self_text.clone(), qualified_name: None, source_span: None },
             };
             changes.push(Change::Container(idx, container, resolved.self_type.is_some()));
         }

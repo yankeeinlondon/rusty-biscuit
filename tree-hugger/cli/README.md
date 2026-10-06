@@ -44,7 +44,7 @@ hug imports --json "tests/fixtures/**/*.js"
 - `--stats` - Counts by kind, visibility and language plus doc coverage, as tables; with `--json`, a stats envelope
 - `--format plain|table` - The listing without styles, links or wrapping, or one table per file (Location, Kind, Visibility, Name, Signature)
 - `--signatures full|short|none` - The declaration header as written, the compact form (default; field lists past four end in `… +N`), or names only
-- `--tree` - Nest members under their container (`functions`, `types`, `symbols`); type rows end with their declared bases (`extends Base; implements Shape`)
+- `--tree` - Nest members under their container (`functions`, `types`, `symbols`); type rows end with their declared bases (`extends Base; implements Shape; unclassified bases External`)
 
 ### Selectors
 
@@ -174,7 +174,7 @@ With `--json`, `functions`, `types`, `symbols` and `classes` print one report:
 
 (Records are shown abridged.)
 
-- `symbols` holds only the command's records, as schema 4.1 `SymbolRecord`s,
+- `symbols` holds only the command's records, as schema 4.3 `SymbolRecord`s,
   ordered by `--sort` within each file. File entries are always in portable
   path order, and a file with no match has no entry; an empty selection is
   `files: []`.
@@ -183,7 +183,7 @@ With `--json`, `functions`, `types`, `symbols` and `classes` print one report:
   `--instance-only` apply). Fields stay in the container's `kind_data`.
 - Records carry their declared facts on every JSON format: generic
   parameters and constraints (`type_info`), `modifiers`, `attributes` and the
-  written bases (`relations.extends`/`implements`). The `metrics` facet,
+  written bases (`relations.extends`/`implements`/`unclassified_bases`). The `metrics` facet,
   including a callable's body size `metrics.lines`, is only in `--json-full`.
 - Records carry the declaration header (`source.signature_text`) but not the
   declaration's source text, attached comments or work the command did not

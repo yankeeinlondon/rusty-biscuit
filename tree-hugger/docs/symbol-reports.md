@@ -560,8 +560,15 @@ for a Rust method's parameters is the `impl` type.
 
 #### Declared bases on type rows
 
+C#, Swift and Scala preserve bases with an unknown category in
+`relations.unclassified_bases`, displayed as `unclassified bases External`.
+Swift extension conformances follow the type's header entries. Under full
+signatures, source-span evidence hides only entries written in the header,
+so `struct Box: P` plus `extension Box: Q` shows
+`struct Box: P implements Q`.
+
 A type row (class, interface, trait, type, enum) ends with the bases its
-record declares: `extends` then `implements`, each as written, in source
+record declares: `extends`, `implements`, then `unclassified bases`, each as written, in source
 order, joined by `; `. A list that is empty is left out, so a type with no
 bases looks as it always did. The row shows its bases even when no member
 of it is listed, as in `hug types --tree`:

@@ -3,12 +3,14 @@
 //! These functions were carved out of `tree_file.rs` to separate the
 //! `TreeFile` type and its query orchestration from the large body of
 //! language-specific AST extraction logic. Submodules group helpers by
-//! responsibility; all but `attributes` are re-exported here so each submodule can reach the
-//! others via `use super::*`.
+//! responsibility; all but `attributes` are re-exported here (`complexity`
+//! only through `cyclomatic`) so each submodule can reach the others via
+//! `use super::*`.
 
 pub(crate) mod attributes;
 pub(crate) mod c_declarators;
 pub(crate) mod classify;
+pub(crate) mod complexity;
 pub(crate) mod declaration;
 pub(crate) mod doc_comments;
 pub(crate) mod flags;
@@ -28,6 +30,7 @@ pub(crate) mod visibility;
 
 pub(crate) use c_declarators::*;
 pub(crate) use classify::*;
+pub(crate) use complexity::cyclomatic;
 pub(crate) use declaration::*;
 pub(crate) use doc_comments::*;
 pub(crate) use flags::*;

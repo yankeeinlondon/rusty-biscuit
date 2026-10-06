@@ -57,8 +57,8 @@ pub enum Capability {
     /// package `tests/`) are applied to every result after analysis or cache
     /// lookup.
     Flags,
-    /// The `metrics` facet (`parameters`, `has_docs` and `lines`), read
-    /// while the declarations are extracted.
+    /// The `metrics` facet (`parameters`, `has_docs`, `lines` and
+    /// `cyclomatic`), read while the declarations are extracted.
     Metrics,
 }
 

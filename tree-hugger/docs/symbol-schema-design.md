@@ -4,7 +4,7 @@
 
 Draft design for a major refactor, partly implemented. `SymbolRecord` and
 `FileSymbolIndex` ship in `lib/src/shared/schema_v2/` and serialize as schema
-**4.1** (the Rust module and type names keep their historical `v2`). Sections
+**4.3** (the Rust module and type names keep their historical `v2`). Sections
 below describe the implemented shape unless marked **planned**. Per-language
 extraction rules for kinds, visibility and `static` are in
 [Symbol Kinds, Visibility and `static`](./symbol-kinds-and-visibility.md).
@@ -131,9 +131,9 @@ field (`type_info.generic_params` and `type_info.constraints`, see
 [Generic parameters](#generic-parameters); `attributes` and the written
 modifiers, see [Attributes and Modifiers](#attributes-and-modifiers))
 changes no shape and only moves `EXTRACTOR_REVISION`. One part of the
-record is declared but still empty on every record: `relations.overrides`,
-and `extends`/`implements` in C#, Swift and Scala (**planned**; see
-[Relation Facet](#relation-facet)).
+record is declared but still empty on every record: `relations.overrides`.
+Mixed inheritance/conformance lists preserve uncertain entries separately
+in `relations.unclassified_bases` (see [Relation Facet](#relation-facet)).
 
 | Fact | When computed |
 |---|---|
@@ -141,7 +141,7 @@ and `extends`/`implements` in C#, Swift and Scala (**planned**; see
 | `visibility.is_test`, `visibility.is_deprecated` | with `Capability::Flags`; without it both are `false`, meaning "not computed" (`hug --json`, `--jsonl` and `--json-full` always ask for it) |
 | `type_info.generic_params`, `type_info.constraints` | always, on every selected record (no capability needed); empty on a record a kind selection leaves out |
 | `attributes`, the modifiers other than `static` and `async` | always, on every selected record (no capability needed); empty on a record a kind selection leaves out |
-| `metrics` (`parameters`, `has_docs`, `lines`) | with `Capability::Metrics`, on every selected record; without it the facet is absent (`hug --json-full` and `--stats` ask for it) |
+| `metrics` (`parameters`, `has_docs`, `lines`, `cyclomatic`) | with `Capability::Metrics`, on every selected record; without it the facet is absent (`hug --json-full` and `--stats` ask for it) |
 
 Scope, `async` and the qualified name are lightweight and every record needs
 them (the qualified name feeds the ID, and scope decides the default
@@ -173,15 +173,25 @@ Perl, Bash and Zsh. `has_docs` is whether `docs.raw_doc` is present; it is
 `lines` counts the physical lines a function, method or constructor's
 `source.body_span` touches (`0` for an empty Lua body); it is `null` for
 every other kind, even one with a body span, and for a callable without a
-body (see [Body lines](./symbol-kinds-and-visibility.md#body-lines)). A
-schema 4.0 facet without the key is malformed,
-never read as `null`. A predicate never matches a `null` metric, so `undocumented(true)` skips a Lua
+body (see [Body lines](./symbol-kinds-and-visibility.md#body-lines)).
+`cyclomatic` is the cyclomatic complexity of that same body: 1 plus one per
+decision (`if`/else-if, a loop with a condition, a ternary, `&&`/`||`/`??`
+and `&&=`/`||=`/`??=`, every Rust `match` arm but the last, every JS/TS
+`switch` arm but `default` (labels sharing one body are one arm), a guard,
+a Rust `let … else`, a `catch`), nested functions, closures, classes and
+items left out. It is `null` for every other kind, a callable without a
+body, a language without reviewed counting rules (every language but Rust,
+JavaScript and TypeScript today), a syntax error inside the counted body,
+or a total beyond `u32`;
+`null` is never zero. A facet without either key (schema 4.0 without
+`lines`, 4.2 without `cyclomatic`) is malformed, never read as `null`. A predicate never matches a `null` metric, so `undocumented(true)` skips a Lua
 function rather than reporting it as undocumented:
 
 ```json
-"metrics": { "parameters": 2, "has_docs": false, "lines": 3 }      // Python: measured
-"metrics": { "parameters": null, "has_docs": null, "lines": null } // Bash: unsupported
-                                                     // no "metrics" key: not requested
+"metrics": { "parameters": 2, "has_docs": false, "lines": 3, "cyclomatic": 2 }         // Rust, JavaScript, TypeScript: measured
+"metrics": { "parameters": 2, "has_docs": false, "lines": 3, "cyclomatic": null }      // Python: no counting rules
+"metrics": { "parameters": null, "has_docs": null, "lines": null, "cyclomatic": null } // Bash: unsupported
+                                                                     // no "metrics" key: not requested
 ```
 
 The flag rules are in
@@ -821,6 +831,7 @@ pub struct RelationFacet {
     pub members: Vec<SymbolRef>,
     pub extends: Vec<SymbolRef>,
     pub implements: Vec<SymbolRef>,
+    pub unclassified_bases: Vec<SymbolRef>,
     pub overrides: Vec<SymbolRef>,
     pub references: Vec<SymbolRef>,
     pub referenced_by: Vec<SymbolRef>,
@@ -835,9 +846,11 @@ same-file `id` and in-file `qualified_name` only when the path names exactly
 one eligible declaration. A Rust trait impl adds its trait to each of its
 members and to the resolved self type. The per-language table, the
 resolution rules and Rust impl ownership are in
-[Declared Type Relations](./type-relations.md). C#, Swift and Scala base
-lists are not read yet (**planned**; see
-[C#, Swift and Scala](./type-relations.md#c-swift-and-scala)).
+[Declared Type Relations](./type-relations.md). C#, Swift and Scala classify
+bases from syntax or proven same-file target kinds; uncertain entries go to
+`unclassified_bases` rather than changing the meaning of `extends`. Swift
+conformances added by local-owner extensions retain `source_span` evidence
+for full-signature rendering.
 
 ### Semantic Facet
 
@@ -1338,10 +1351,13 @@ Version history:
 | 2.0 | first emitted record shape; no longer emitted |
 | 3.0 | kinds decided at extraction (Constructor, Property, TypeAlias, EnumVariant no longer collapse to Unknown); visibility for every kind with the C# compound levels; `Modifier::StaticStorage`; `identity.container_kind`; `declaration_text`; Rust `relations.implements`; `is_exported` no longer derived from a Public level. Emitted on records, file indexes, CLI envelopes and analyzer fingerprints |
 | 4.0 | `identity.module_path` renamed `container_name`; `identity.keyword` added; `source.signature_text` filled; `provenance.created_at_epoch_ms` and `updated_at_epoch_ms` removed. Later extended, still as 4.0, with the [additive 4.x fields](#top-level-symbol-record); no longer emitted |
-| 4.1 (current) | the required `metrics.lines` key inside a present `metrics` facet. Emitted on records, file indexes, CLI envelopes and analyzer fingerprints |
+| 4.1 | the required `metrics.lines` key inside a present `metrics` facet; no longer emitted |
+| 4.2 | `relations.unclassified_bases` and the optional `source_span` on a relation's `SymbolRef`; no longer emitted |
+| 4.3 (current) | the required `metrics.cyclomatic` key inside a present `metrics` facet. Emitted on records, file indexes, CLI envelopes and analyzer fingerprints |
 
 The additive 4.x fields did not follow the minor-bump rule: records still
-said 4.0. `metrics.lines` does follow it, so 4.1 marks it. A consumer of 4.0 output only sees new keys, but
+said 4.0. `metrics.lines` and `metrics.cyclomatic` do follow it, so 4.1
+and 4.3 mark them. A consumer of 4.0 output only sees new keys, but
 `scope`, `identity.qualified_name`, `identity.is_namespace_rooted` and
 `visibility.is_test` are required when a record is read back, so a record
 written before them does not deserialize. Within this crate, persisted
@@ -1407,7 +1423,7 @@ converted to `SymbolInfo` and back therefore has none of these.
 2. Add adapters:
    1. `impl From<SymbolInfo> for SymbolRecord`.
    2. `impl TryFrom<SymbolRecord> for SymbolInfo` (best effort).
-3. Update CLI `--json` to emit the schema version (done; currently 4.1).
+3. Update CLI `--json` to emit the schema version (done; currently 4.3).
 4. The v1 API (`TreeFile::symbols()`, `SymbolInfo`) and both adapters are
    retained; removing v1 is a separate decision.
 

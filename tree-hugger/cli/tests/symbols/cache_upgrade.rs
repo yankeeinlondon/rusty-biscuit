@@ -1242,6 +1242,46 @@ fn entry_from_extractor_revision_twenty_three_is_not_served_after_path_meaning()
     });
 }
 
+#[test]
+fn entry_from_extractor_revision_twenty_four_is_not_served_after_python_scope_repair() {
+    assert_stale_revision_is_not_served(&StaleRevision {
+        revision: "24",
+        key: OldKey::Computed,
+        file: "nested.py",
+        language: "python",
+        source: "class Base: pass\nclass Outer:\n    class Base: pass\n    class Middle:\n        class Leaf(Base): pass\nclass Sentinel: pass\n".to_string(),
+        sentinel: "Sentinel",
+        probe: |out| go_record(out, "Leaf")["relations"]["extends"][0]["qualified_name"].clone(),
+        repaired: Value::from("Base"),
+        stale: Value::from("Outer.Base"),
+        revert: |snapshot| {
+            let wrong_id = snapshot["records"].as_array().expect("records").iter()
+                .find(|record| record["identity"]["qualified_name"] == "Outer.Base").expect("outer base")["id"].clone();
+            let target = &mut record_named(snapshot, "Leaf")["relations"]["extends"][0];
+            target["id"] = wrong_id;
+            target["qualified_name"] = Value::from("Outer.Base");
+        },
+    });
+}
+
+#[test]
+fn entry_from_extractor_revision_twenty_five_is_not_served_after_mixed_base_readers() {
+    assert_stale_revision_is_not_served(&StaleRevision {
+        revision: "25",
+        key: OldKey::Computed,
+        file: "mixed.cs",
+        language: "c_sharp",
+        source: "class Child : External {}\nclass Sentinel {}\n".to_string(),
+        sentinel: "Sentinel",
+        probe: |out| go_record(out, "Child")["relations"]["unclassified_bases"].clone(),
+        repaired: serde_json::json!([{ "name": "External" }]),
+        stale: Value::Null,
+        revert: |snapshot| {
+            record_named(snapshot, "Child")["relations"].as_object_mut().expect("relations").remove("unclassified_bases");
+        },
+    });
+}
+
 const UPGRADE_PROBE_PY: &str = "\n\nclass UpgradeProbe:\n    def __init__(self, seed):\n        pass\n";
 
 /// The stable key of `UpgradeProbe.__init__` in `deferred.py` when it reports
@@ -1298,13 +1338,53 @@ fn entry_from_extractor_revision_thirteen_is_not_served_after_the_repairs() {
 }
 
 /// Revision 17 wrote schema 4.0 records whose `metrics` had no `lines` key;
-/// revision 18 writes schema 4.1 with the key. Unlike the repairs above, the
-/// old payload is not readable even under the current key (its versions and
-/// metrics shape are rejected), so it is recomputed both there and under its
-/// own key, and the rewritten entry holds 4.1 records with `lines`.
+/// revision 18 writes schema 4.1 with the key.
 #[test]
 fn entry_from_extractor_revision_seventeen_is_not_served_after_the_schema_bump() {
+    assert_schema_bump_entry_is_not_served("17", serde_json::json!({ "major": 4, "minor": 0 }), "lines");
+}
+
+/// Revision 26 wrote schema 4.2 records whose `metrics` had no `cyclomatic`
+/// key; revision 27 writes schema 4.3 with the key.
+#[test]
+fn entry_from_extractor_revision_twenty_six_is_not_served_after_the_schema_bump() {
+    assert_schema_bump_entry_is_not_served("26", serde_json::json!({ "major": 4, "minor": 2 }), "cyclomatic");
+}
+
+/// Revision 27 counted cyclomatic complexity for Rust only, so a JavaScript
+/// or TypeScript function's `metrics.cyclomatic` was `null`; revision 28
+/// counts both.
+#[test]
+fn entry_from_extractor_revision_twenty_seven_is_not_served_after_the_ecmascript_rules() {
+    for (file, language, source) in [
+        ("branchy.js", "javascript", "function branchy(a) { return a ? 1 : 2; }\nfunction sentinel() {}\n"),
+        ("branchy.ts", "typescript", "function branchy(a: boolean) { return a ? 1 : 2; }\nfunction sentinel(): void {}\n"),
+    ] {
+        assert_stale_revision_is_not_served(&StaleRevision {
+            revision: "27",
+            key: OldKey::Computed,
+            file,
+            language,
+            source: source.to_string(),
+            sentinel: "sentinel",
+            probe: |out| go_record(out, "branchy")["metrics"]["cyclomatic"].clone(),
+            repaired: Value::from(2),
+            stale: Value::Null,
+            revert: |snapshot| {
+                record_named(snapshot, "branchy")["metrics"]["cyclomatic"] = Value::Null;
+            },
+        });
+    }
+}
+
+/// An entry an earlier `revision` wrote in `schema`, whose `metrics` lacked
+/// the `metric` key the bump added. Unlike the repairs above, the old payload
+/// is not readable even under the current key (its versions and metrics
+/// shape are rejected), so it is recomputed both there and under its own
+/// key, and the rewritten entry holds current records with the key.
+fn assert_schema_bump_entry_is_not_served(revision: &str, schema: Value, metric: &str) {
     const PROBE: &str = "python.py";
+    let label = format!("revision {revision}");
     let args = ["--json-full", "symbols", PROBE];
     let scratch = Scratch::new(&[(PROBE, PYTHON_FIXTURE)]);
 
@@ -1325,18 +1405,17 @@ fn entry_from_extractor_revision_seventeen_is_not_served_after_the_schema_bump()
         .expect("entry key")
         .to_string();
     assert_eq!(computed_revision_key(EXTRACTOR_REVISION, &file_path), current_key, "computed key formula");
-    let old_key = computed_revision_key("17", &file_path);
-    assert_ne!(old_key, current_key, "revision 17 has its own key");
+    let old_key = computed_revision_key(revision, &file_path);
+    assert_ne!(old_key, current_key, "{label} has its own key");
 
-    let schema_4_0 = serde_json::json!({ "major": 4, "minor": 0 });
     let mut stale = current.clone();
-    stale["schema_version"] = schema_4_0.clone();
+    stale["schema_version"] = schema.clone();
     for record in stale["records"].as_array_mut().expect("entry records") {
-        record["schema_version"] = schema_4_0.clone();
+        record["schema_version"] = schema.clone();
         record["metrics"]
             .as_object_mut()
             .expect("a complete index stores metrics on every record")
-            .remove("lines");
+            .remove(metric);
     }
     rename_record(&mut stale, "module_function", STALE_NAME);
 
@@ -1344,24 +1423,24 @@ fn entry_from_extractor_revision_seventeen_is_not_served_after_the_schema_bump()
     let control = TempDir::new().expect("control temp");
     write_json(&entry_path(&control.path().join(&relative_project), &current_key), &stale);
     let recomputed = json_of(&stdout_of(scratch.hug_with_temp(control.path(), &args), &args));
-    assert_eq!(recomputed, fresh, "a revision 17 payload under the current key is recomputed");
+    assert_eq!(recomputed, fresh, "a {label} payload under the current key is recomputed");
 
     // Under its own key: never read; run 1 writes the current entry.
     let project_dir = scratch.temp.path().join(&relative_project);
     write_json(&entry_path(&project_dir, &old_key), &stale);
     let run1 = json_of(&scratch.stdout(&args));
-    assert!(!names(&run1).iter().any(|name| name == STALE_NAME), "run 1 served the revision 17 entry");
+    assert!(!names(&run1).iter().any(|name| name == STALE_NAME), "run 1 served the {label} entry");
     assert_eq!(run1, fresh, "run 1 matches an uncached run");
     let new_entry = entry_path(&project_dir, &current_key);
     let written = read_json(&new_entry);
-    let schema_4_1 = serde_json::json!({ "major": 4, "minor": 1 });
-    assert_eq!(written["schema_version"], schema_4_1, "the rewritten entry is schema 4.1");
+    let current_schema = serde_json::to_value(tree_hugger::SchemaVersion::CURRENT).expect("schema");
+    assert_eq!(written["schema_version"], current_schema, "the rewritten entry is current");
     assert!(
         written["records"].as_array().expect("records").iter().all(|record| {
-            record["schema_version"] == schema_4_1
-                && record["metrics"].as_object().is_some_and(|metrics| metrics.contains_key("lines"))
+            record["schema_version"] == current_schema
+                && record["metrics"].as_object().is_some_and(|metrics| metrics.contains_key(metric))
         }),
-        "every rewritten record is schema 4.1 with a `lines` key"
+        "every rewritten record is current with a `{metric}` key"
     );
 
     // Run 2 hits the rewritten entry.

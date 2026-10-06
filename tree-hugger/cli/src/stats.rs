@@ -248,6 +248,7 @@ mod tests {
             parameters: None,
             has_docs,
             lines: None,
+            cyclomatic: None,
         });
         record
     }

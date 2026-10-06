@@ -1758,9 +1758,15 @@ impl TreeFile {
         } in definitions
         {
             let wanted = selection.wants(symbol.kind);
-            // `metrics.lines` counts this span, so the two never disagree.
+            // `metrics.lines` and `metrics.cyclomatic` measure this body, so
+            // they never disagree with the stored span.
+            let callable = symbol
+                .kind
+                .is_function()
+                .then(|| callable_body(declaration, self.language))
+                .flatten();
             let body_span = if symbol.kind.is_function() {
-                callable_body_span(declaration, self.language, &self.source)
+                callable.map(|body| body.span(&self.source))
             } else {
                 body_span_for_declaration(anchor)
             };
@@ -1770,7 +1776,7 @@ impl TreeFile {
                     declaration,
                     name,
                     symbol.doc_comment.as_deref(),
-                    body_span.as_ref(),
+                    callable,
                     self.language,
                     &self.source,
                 )

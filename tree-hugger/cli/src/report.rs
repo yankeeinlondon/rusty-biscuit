@@ -178,7 +178,7 @@ impl<W: Write> JsonReport<W> {
     /// Writes the envelope up to the opening of the entries array.
     pub(crate) fn begin(mut out: W, root_dir: &str, entries: Entries) -> io::Result<Self> {
         write!(out, "{{\"report_schema_version\":{REPORT_SCHEMA_VERSION},\"schema_version\":")?;
-        serde_json::to_writer(&mut out, &SchemaVersion::V4_2)?;
+        serde_json::to_writer(&mut out, &SchemaVersion::CURRENT)?;
         out.write_all(b",\"root_dir\":")?;
         serde_json::to_writer(&mut out, root_dir)?;
         write!(out, ",\"{}\":[", entries.key())?;

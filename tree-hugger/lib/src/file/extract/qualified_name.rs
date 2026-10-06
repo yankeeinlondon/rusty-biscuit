@@ -376,7 +376,7 @@ fn has_file_level_namespaces(language: ProgrammingLanguage) -> bool {
 /// at or before the child (a later one replaces an earlier one), or every
 /// Scala package clause at or before it, outermost first (`package outer`
 /// then `package inner` is `outer.inner`: Scala clauses nest).
-fn file_namespace_index(
+pub(crate) fn file_namespace_index(
     root: Node<'_>,
     language: ProgrammingLanguage,
     source: &str,

@@ -281,3 +281,38 @@ fn written(list: &Value) -> Vec<String> {
 fn to_strings(names: &[&str]) -> Vec<String> {
     names.iter().map(|name| (*name).to_string()).collect()
 }
+
+#[test]
+fn mixed_bases_and_swift_extension_conformances_survive_signature_modes_and_cache() {
+    let swift = "protocol P {}\nprotocol Q {}\nstruct Box: P {}\nextension Box: Q {}\nclass Unknown: External {}\n";
+    let scratch = Scratch::new(&[("mixed.swift", swift)]);
+    for mode in ["none", "short", "full"] {
+        let args = ["--plain", "types", "--tree", "--signatures", mode, "mixed.swift"];
+        let cold = scratch.stdout(&args);
+        assert_eq!(scratch.stdout(&args), cold, "{mode}: warm output");
+        let owner = cold.lines().find(|row| row.contains(" Box")).expect("Box row");
+        if mode == "full" {
+            assert!(owner.contains("Box: P implements Q"), "{owner}");
+            assert!(!owner.contains("implements P"), "header conformance must not repeat: {owner}");
+        } else {
+            assert!(owner.contains("implements P, Q"), "{mode}: {owner}");
+        }
+        let unknown = cold.lines().find(|row| row.contains(" Unknown")).expect("Unknown row");
+        if mode == "full" {
+            assert!(unknown.contains("Unknown: External"), "{unknown}");
+            assert!(!unknown.contains("unclassified bases"), "header base must not repeat: {unknown}");
+        } else {
+            assert!(unknown.contains("unclassified bases External"), "{unknown}");
+        }
+    }
+    scratch.stdout(&["--json", "types", "mixed.swift"]);
+    let output = scratch.hug(&["--verbose", "--json", "types", "mixed.swift"]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("1 hits") && stderr.contains("parsed 0 files"), "{stderr}");
+    let json = json_of(&stdout_of(output, &["--json", "types"]));
+    let box_record = json["files"][0]["symbols"].as_array().expect("symbols").iter()
+        .find(|record| record["identity"]["name"] == "Box").expect("Box");
+    assert_eq!(written(&box_record["relations"]["implements"]), ["P", "Q"]);
+    let source = &box_record["relations"]["implements"][1]["source_span"];
+    assert_eq!(source["start"]["line"], 4, "extension evidence survives the CLI cache");
+}

@@ -411,7 +411,7 @@ impl Renderer {
     }
 
     /// ` extends A, B; implements C` for a type row of `--tree`: the
-    /// record's `relations.extends` and `relations.implements` as written,
+    /// record's classified and unclassified bases as written,
     /// in source order, empty lists left out. Only type kinds get one, so a
     /// Rust method's trait relation never heads its row. A list the
     /// `--signatures full` header already writes is not repeated.
@@ -424,12 +424,14 @@ impl Renderer {
         let clauses: Vec<String> = [
             ("extends", &relations.extends, BaseList::Extends),
             ("implements", &relations.implements, BaseList::Implements),
+            ("unclassified bases", &relations.unclassified_bases, BaseList::Unclassified),
         ]
         .into_iter()
-        .filter(|(_, bases, list)| !bases.is_empty() && !(shows_header && header_writes(record.language, *list)))
-        .map(|(keyword, bases, _)| {
-            let names: Vec<String> = bases.iter().map(|base| literal(&base.name)).collect();
-            format!("{keyword} {}", names.join(", "))
+        .filter_map(|(keyword, bases, list)| {
+            let names: Vec<String> = bases.iter()
+                .filter(|base| !(shows_header && header_writes(record, list, base)))
+                .map(|base| literal(&base.name)).collect();
+            (!names.is_empty()).then(|| format!("{keyword} {}", names.join(", ")))
         })
         .collect();
         if clauses.is_empty() {
@@ -998,16 +1000,22 @@ fn label(record: &SymbolRecord) -> String {
 enum BaseList {
     Extends,
     Implements,
+    Unclassified,
 }
 
-/// Whether the extractor reads `list` from the type's own header, so that
-/// `source.signature_text` already writes every entry. Two lists come from
-/// elsewhere: a Rust type's `implements` from its `impl` blocks, and Go's
-/// `extends` from the embeds in an interface body. Deciding by text instead
-/// would hide `impl Display for W` behind `struct W<T: Display>`.
-fn header_writes(language: ProgrammingLanguage, list: BaseList) -> bool {
+/// Whether this entry is already written in the type's own header.
+/// Rust impls and Go interface embeds come from outside that header; Swift
+/// source spans distinguish header conformances from extension conformances.
+/// A text search would hide `impl Display for W` behind `struct W<T: Display>`.
+fn header_writes(record: &SymbolRecord, list: BaseList, base: &tree_hugger::SymbolRef) -> bool {
+    if record.language == ProgrammingLanguage::Swift && matches!(list, BaseList::Implements) {
+        return base.source_span.as_ref().is_some_and(|span| {
+            span.start_byte >= record.source.declaration_span.start_byte
+                && span.end_byte <= record.source.declaration_span.end_byte
+        });
+    }
     !matches!(
-        (language, list),
+        (record.language, list),
         (ProgrammingLanguage::Rust, BaseList::Implements) | (ProgrammingLanguage::Go, _)
     )
 }

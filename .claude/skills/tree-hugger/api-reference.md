@@ -285,10 +285,12 @@ The v1 ↔ v2 adapter (`From<SymbolInfo> for SymbolRecord`,
 `qualified_name` and `is_namespace_rooted` (an empty v1 `qualified_name`
 converts as the bare name). Records also carry `visibility.is_test` and
 `is_deprecated` (`Capability::Flags`; `false` = not computed without it) and
-an optional `metrics` facet (`MetricsFacet { parameters, has_docs, lines }`,
-each `Option` = unsupported, every key required (schema 4.1 added `lines`:
-a function, method or constructor's body lines, counted from its
-`source.body_span`); absent facet = not requested; `Capability::Metrics`).
+an optional `metrics` facet (`MetricsFacet { parameters, has_docs, lines,
+cyclomatic }`, each `Option` = unsupported, every key required (schema 4.1
+added `lines`: a function, method or constructor's body lines, counted from
+its `source.body_span`; schema 4.3 added `cyclomatic`: that body's
+cyclomatic complexity, `None` = unavailable, never zero); absent facet = not
+requested; `Capability::Metrics`).
 None of them exists on `SymbolInfo`, so the adapter does not carry them;
 nor does it carry `type_info.generic_params`/`constraints`,
 `relations.extends`/`implements`, `attributes` or modifiers other than
@@ -300,7 +302,8 @@ wildcard-free `match`: adding a variant on one side is a compile error until
 the other side handles it. A converted record is never `is_exported` (export
 comes from declaration syntax, set by `symbol_records()` and the bind pass),
 and a function-like kind always converts back with `Some(signature)`.
-Records, file indexes and analyzer fingerprints carry `SchemaVersion::V4_1`:
+Records, file indexes and analyzer fingerprints carry `SchemaVersion::CURRENT`
+(4.3):
 no timestamps in `provenance`, the container in `identity.container_name`
 (formerly `module_path`).
 
@@ -320,8 +323,9 @@ and the written `modifiers` (`Const`, `Unsafe`, `Readonly`, `Mut`,
 as written, `id` and in-file `qualified_name` only when the path names exactly
 one eligible same-file declaration; a Rust trait impl adds its trait as written
 to each member and to the resolved self type; see
-`tree-hugger/docs/type-relations.md`; C#/Swift/Scala lists are not read yet,
-**planned**). A Rust `impl` member's
+`tree-hugger/docs/type-relations.md`; C#/Swift/Scala retain unknown categories
+in `relations.unclassified_bases`, and Swift local-owner extensions add
+conformance with `SymbolRef::source_span` evidence). A Rust `impl` member's
 `identity.container_name` is the implemented type's last path segment without
 generics; its container kind is the kind of the declaration the self type
 resolves to by the relation resolver (`relations::impl_self_types`, called
@@ -590,7 +594,7 @@ pub enum TreeHuggerError {
 
 The declaration commands (`functions`, `types`, `symbols`, `classes`) do not
 use these types: their `--json` report is a CLI-local envelope
-(`cli/src/report.rs`) of schema 4.1 `SymbolRecord`s, described in
+(`cli/src/report.rs`) of schema 4.3 `SymbolRecord`s, described in
 `tree-hugger/docs/symbol-reports.md`. `PackageSummary` remains the shape of
 `hug imports --json` and `hug lint --json` and of library callers:
 
