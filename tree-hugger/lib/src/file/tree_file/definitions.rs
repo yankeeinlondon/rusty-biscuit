@@ -2,13 +2,14 @@
 //! captures are removed, and only then is metadata extracted, for the
 //! winning capture of each selected kind.
 
+use std::cell::OnceCell;
 use std::collections::{BTreeSet, HashMap};
 
 use tree_sitter::{QueryCursor, StreamingIterator};
 
 use super::TreeFile;
 use crate::analysis::counters::{count_definition_capture, count_shared_context_steps};
-use crate::analysis::agrees_with_owner_path;
+use crate::analysis::{owner_path, qualifying_prefixes, segment_suffixes};
 use crate::error::TreeHuggerError;
 use crate::file::extract::*;
 use crate::queries::{QueryKind, query_for};
@@ -270,11 +271,7 @@ impl TreeFile {
                     .or_insert(entry.extracted.symbol.kind);
             }
         }
-        // Every symbol of a name, in order, for the containers found by name.
-        let mut by_name: HashMap<&str, Vec<usize>> = HashMap::new();
-        for (index, entry) in pending.iter().enumerate() {
-            by_name.entry(&entry.extracted.symbol.name).or_default().push(index);
-        }
+        let owner_kinds = OwnerKinds::default();
         let container_kinds: Vec<Option<SymbolKind>> = pending
             .iter()
             .map(|entry| {
@@ -283,7 +280,7 @@ impl TreeFile {
                     &entry.extracted.symbol.qualified_name,
                     &kinds_by_node,
                     &pending,
-                    &by_name,
+                    &owner_kinds,
                 )
             })
             .collect();
@@ -666,41 +663,121 @@ fn reconcile_variants(listed: Vec<VariantInfo>, mut standalone: Vec<(usize, Vari
 /// kind only from same-named declarations whose qualified name agrees with
 /// the member's explicit qualification (`agrees_with_owner_path`): the
 /// members of `impl other::W` take no kind from an unrelated local `W`.
-fn resolve_container_kind(
+/// Absent when no such declaration exists or when they disagree on kind.
+fn resolve_container_kind<'a>(
     container: Option<&ContainerRef<'_>>,
     qualified_name: &str,
     kinds_by_node: &HashMap<usize, SymbolKind>,
-    symbols: &[PendingSymbol<'_>],
-    by_name: &HashMap<&str, Vec<usize>>,
+    symbols: &'a [PendingSymbol<'_>],
+    owner_kinds: &OwnerKinds<'a>,
 ) -> Option<SymbolKind> {
     let container = container?;
-    let agrees =
-        |candidate: &SymbolInfo| agrees_with_owner_path(&candidate.qualified_name, qualified_name);
-    let named = || {
-        let indices = by_name.get(container.name.as_str()).map_or(&[][..], Vec::as_slice);
-        count_shared_context_steps(indices.len());
-        indices.iter().map(|&index| &symbols[index].extracted.symbol)
-    };
     match container.lookup {
         ContainerLookup::Node { node, fallback } => {
             Some(kinds_by_node.get(&node.id()).copied().unwrap_or(fallback))
         }
         // The table's kind when the file's item-scoped declarations of
         // that name agree on one.
-        ContainerLookup::SameFileTable => {
-            let mut kinds = named()
-                .filter(|symbol| symbol.scope == SymbolScope::Item && agrees(symbol))
-                .map(|symbol| symbol.kind);
-            let first = kinds.next()?;
-            kinds.all(|kind| kind == first).then_some(first)
+        ContainerLookup::SameFileTable => owner_kinds
+            .tables
+            .get_or_init(|| KindAgreement::of(symbols, |symbol| symbol.scope == SymbolScope::Item))
+            .agreed(&container.name, qualified_name),
+        ContainerLookup::SameFileType => owner_kinds
+            .types
+            .get_or_init(|| KindAgreement::of(symbols, |symbol| symbol.kind.is_type()))
+            .agreed(&container.name, qualified_name),
+    }
+}
+
+/// The per-file indexes behind [`resolve_container_kind`], each built on
+/// the first member that needs it.
+#[derive(Default)]
+struct OwnerKinds<'a> {
+    /// Over the item-scoped declarations (`SameFileTable`).
+    tables: OnceCell<KindAgreement<'a>>,
+    /// Over the type declarations (`SameFileType`).
+    types: OnceCell<KindAgreement<'a>>,
+}
+
+/// What a set of same-named declarations says about their kind.
+#[derive(Clone, Copy, PartialEq)]
+enum Agreement {
+    Kind(SymbolKind),
+    Disagree,
+}
+
+impl Agreement {
+    fn with(current: Option<Self>, next: Option<Self>) -> Option<Self> {
+        match (current, next) {
+            (None, next) => next,
+            (current, None) => current,
+            (Some(current), Some(next)) if current == next => Some(current),
+            _ => Some(Self::Disagree),
         }
-        // Absent when the type is declared elsewhere, or when same-named
-        // declarations in this file disagree on kind.
-        ContainerLookup::SameFileType => {
-            let mut kinds = named().filter(|symbol| symbol.kind.is_type() && agrees(symbol))
-                .map(|symbol| symbol.kind);
-            let first = kinds.next()?;
-            kinds.all(|kind| kind == first).then_some(first)
+    }
+}
+
+/// The kind agreement of a file's eligible declarations, by name, so that a
+/// member reads the decision its candidates share instead of scanning every
+/// same-named declaration: a candidate agrees with a member's qualified name
+/// when it qualifies it (one of [`qualifying_prefixes`]) or ends with its
+/// owner path (one of the candidate's [`segment_suffixes`]), and with every
+/// member when the member records no owner path.
+struct KindAgreement<'a> {
+    by_name: HashMap<&'a str, Agreement>,
+    by_qualified: HashMap<(&'a str, &'a str), Agreement>,
+    by_suffix: HashMap<(&'a str, &'a str), Agreement>,
+}
+
+impl<'a> KindAgreement<'a> {
+    fn of(symbols: &'a [PendingSymbol<'_>], eligible: impl Fn(&SymbolInfo) -> bool) -> Self {
+        fn add<K: std::hash::Hash + Eq>(map: &mut HashMap<K, Agreement>, key: K, kind: SymbolKind) {
+            map.entry(key)
+                .and_modify(|agreement| {
+                    if *agreement != Agreement::Kind(kind) {
+                        *agreement = Agreement::Disagree;
+                    }
+                })
+                .or_insert(Agreement::Kind(kind));
+        }
+        let mut agreement =
+            Self { by_name: HashMap::new(), by_qualified: HashMap::new(), by_suffix: HashMap::new() };
+        let mut steps = 0;
+        for symbol in symbols.iter().map(|entry| &entry.extracted.symbol) {
+            steps += 1;
+            if !eligible(symbol) {
+                continue;
+            }
+            let name = symbol.name.as_str();
+            let qualified = symbol.qualified_name.as_str();
+            add(&mut agreement.by_name, name, symbol.kind);
+            add(&mut agreement.by_qualified, (name, qualified), symbol.kind);
+            for tail in segment_suffixes(qualified) {
+                add(&mut agreement.by_suffix, (name, tail), symbol.kind);
+                steps += 1;
+            }
+        }
+        count_shared_context_steps(steps);
+        agreement
+    }
+
+    /// The kind every declaration called `name` that agrees with `member`
+    /// has, if they share one.
+    fn agreed(&self, name: &str, member: &str) -> Option<SymbolKind> {
+        count_shared_context_steps(1);
+        let agreement = match owner_path(member) {
+            None => self.by_name.get(name).copied(),
+            Some(path) => qualifying_prefixes(member).fold(
+                self.by_suffix.get(&(name, path)).copied(),
+                |agreement, prefix| {
+                    count_shared_context_steps(1);
+                    Agreement::with(agreement, self.by_qualified.get(&(name, prefix)).copied())
+                },
+            ),
+        };
+        match agreement? {
+            Agreement::Kind(kind) => Some(kind),
+            Agreement::Disagree => None,
         }
     }
 }

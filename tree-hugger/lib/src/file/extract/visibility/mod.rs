@@ -7,7 +7,7 @@
 //! file.
 
 use std::cell::{OnceCell, RefCell};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::*;
 use crate::analysis::counters::count_shared_context_steps;
@@ -79,9 +79,10 @@ pub(crate) struct VisibilityMemo<'tree> {
     /// sections.
     cpp_sections: RefCell<HashMap<usize, SectionsInForce>>,
     /// Scala: every identifier segment of the file's `package` clauses.
-    scala_package_segments: OnceCell<Vec<&'tree str>>,
-    /// Rust: the levels of the file's traits, by name.
-    rust_trait_levels: OnceCell<HashMap<&'tree str, Vec<Visibility>>>,
+    scala_package_segments: OnceCell<HashSet<&'tree str>>,
+    /// Rust: trait name → the level its same-named traits agree on (`None`
+    /// when they disagree).
+    rust_trait_levels: OnceCell<HashMap<&'tree str, Option<Visibility>>>,
 }
 
 /// Child node id → the C++ access section in force before that child

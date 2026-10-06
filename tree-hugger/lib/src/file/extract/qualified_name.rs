@@ -37,7 +37,8 @@ pub(crate) struct QualifiedName {
 /// qualified name is reused), a Rust `impl` block (its self type's path as
 /// written, see [`rust_impl_prefix`]), a named
 /// node that is not extracted (a C# static constructor, a Java compact
-/// record constructor), or a container the extractor knows but does not list
+/// record constructor), a Scala block package (`package p { … }`, a rooting
+/// namespace segment), or a container the extractor knows but does not list
 /// as a symbol (a Swift extension). The
 /// walk ends at an unnamed owner (anonymous class, object literal, class
 /// expression, Scala `given … with`), as the container search does, and at
@@ -204,6 +205,14 @@ impl<'tree> Builder<'_, 'tree> {
                     }
                 }
                 None if is_unnamed_type_owner(node) => return Prefix::Unnamed,
+                // Scala package clauses are never extracted; a block-form one
+                // names everything in its body, nested blocks included.
+                None if is_scala_block_package(node, self.language) => {
+                    if let Some(text) = namespace_name(node, self.source) {
+                        let segments = vec![Segment { text, is_namespace: true }];
+                        return Prefix::Named { segments, node };
+                    }
+                }
                 None => {
                     if let Some(text) = self.unextracted_name(node) {
                         let segments = vec![Segment { text, is_namespace: false }];
@@ -389,6 +398,14 @@ fn file_namespace_index(
     }
     count_shared_context_steps(index.len());
     index
+}
+
+/// Whether `node` is a Scala `package p { … }` clause: it scopes its body,
+/// not the file statements after it (see [`file_level_namespace`]).
+fn is_scala_block_package(node: Node<'_>, language: ProgrammingLanguage) -> bool {
+    language == ProgrammingLanguage::Scala
+        && node.kind() == "package_clause"
+        && node.child_by_field_name("body").is_some()
 }
 
 fn file_level_namespace(node: Node<'_>, language: ProgrammingLanguage, source: &str) -> Option<String> {

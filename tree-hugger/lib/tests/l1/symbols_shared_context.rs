@@ -3,6 +3,10 @@
 //! namespace in force, sibling-scoped containers, inner `#![cfg(test)]`
 //! attributes, C++ access sections, same-file Rust traits, C/C++ `static`
 //! prototypes, Scala package segments, same-file owners and type members.
+//! Review 9 added repeated names: same-named traits, owners and tables in
+//! successive modules, namespace-distinct and overloaded C++ functions,
+//! namespace-qualified definitions, growing Scala block packages, and the
+//! containment consumer that links members to those owners.
 //!
 //! Each is derived once per file (or per module or class body), so
 //! `WorkCounters::shared_context_steps` grows linearly with the number of
@@ -16,7 +20,9 @@
 use std::fmt::Write as _;
 
 use tempfile::TempDir;
-use tree_hugger::{TreeFile, work_counters};
+use tree_hugger::{
+    Capability, SymbolKindV2, SymbolQuery, SymbolRecord, SymbolRef, TreeFile, VisibilityLevel, work_counters,
+};
 
 const SMALL: usize = 200;
 const LARGE: usize = 2 * SMALL;
@@ -138,14 +144,43 @@ fn source_for(shape: &Shape, declarations: usize) -> String {
 /// and metrics included) of `shape` with `declarations` declarations, and
 /// the number of records it produced.
 fn steps_for(shape: &Shape, declarations: usize) -> (u64, usize) {
+    let (steps, records) = analyze(shape, declarations, Analysis::Complete);
+    (steps, records.len())
+}
+
+/// Which public entry point [`analyze`] measures.
+#[derive(Clone, Copy)]
+enum Analysis {
+    /// `symbol_index_v2`: every pass, in-file qualified names.
+    Complete,
+    /// `TreeFile::query` asking only for containment.
+    Containment,
+}
+
+/// The shared-context steps of one analysis of `shape` with `declarations`
+/// declarations, and the records it produced.
+fn analyze(shape: &Shape, declarations: usize, analysis: Analysis) -> (u64, Vec<SymbolRecord>) {
     let dir = TempDir::new().expect("temp dir");
     let path = dir.path().join(shape.file_name);
     std::fs::write(&path, source_for(shape, declarations)).expect("write source");
     let file = TreeFile::new(&path).expect("parse");
     let before = work_counters();
-    let index = file.symbol_index_v2().expect("complete index");
+    let records = match analysis {
+        Analysis::Complete => file.symbol_index_v2().expect("complete index").symbols,
+        Analysis::Containment => {
+            let query = SymbolQuery::new().capabilities([Capability::Containment]);
+            file.query(&query).expect("containment query").index.symbols
+        }
+    };
     let steps = work_counters().since(before).shared_context_steps;
-    (steps, index.symbols.len())
+    (steps, records)
+}
+
+/// Linear growth doubles the steps (plus the header's constant share); a
+/// per-declaration rescan would quadruple them. The steps per record are
+/// bounded whatever the shape.
+fn grows_linearly(small_steps: u64, large_steps: u64, large_records: usize) -> bool {
+    large_steps <= 2 * small_steps + 64 && large_steps <= 16 * large_records as u64
 }
 
 #[test]
@@ -159,12 +194,7 @@ fn shared_context_work_grows_linearly_with_declarations() {
             "{}: the larger file must add a record per declaration ({small_records} then {large_records})",
             shape.label
         );
-        // Linear growth doubles the steps (plus the header's constant
-        // share); a per-declaration rescan would quadruple them.
-        let linear = large_steps <= 2 * small_steps + 64;
-        // A bounded number of steps per record, whatever the shape.
-        let bounded = large_steps <= 16 * large_records as u64;
-        if !(linear && bounded) {
+        if !grows_linearly(small_steps, large_steps, large_records) {
             let _ = writeln!(
                 failures,
                 "{}: {small_steps} steps for {SMALL} declarations ({small_records} records), \
@@ -217,3 +247,292 @@ fn file_level_namespaces_keep_their_rules_at_every_position() {
         }
     }
 }
+
+/// A generated shape whose declarations repeat one name (or grow one shared
+/// list), with the public results each copy must keep.
+struct RepeatedShape {
+    shape: Shape,
+    /// Checks the records of a file with `n` declarations.
+    check: fn(&[SymbolRecord], usize) -> Result<(), String>,
+}
+
+/// The records whose in-file qualified name (without the `file#` prefix a
+/// finished result adds) is `qualified_name`.
+fn named<'a>(records: &'a [SymbolRecord], qualified_name: &str) -> Vec<&'a SymbolRecord> {
+    records
+        .iter()
+        .filter(|record| {
+            let name = &record.identity.qualified_name;
+            name.split_once('#').map_or(name.as_str(), |(_, in_file)| in_file) == qualified_name
+        })
+        .collect()
+}
+
+fn one_of<'a>(
+    records: &'a [SymbolRecord],
+    qualified_name: &str,
+    kind: SymbolKindV2,
+) -> Result<&'a SymbolRecord, String> {
+    let found: Vec<&SymbolRecord> = named(records, qualified_name)
+        .into_iter()
+        .filter(|record| record.kind == kind)
+        .collect();
+    match found.as_slice() {
+        [only] => Ok(only),
+        other => Err(format!("expected one {kind:?} `{qualified_name}`, found {}", other.len())),
+    }
+}
+
+fn level_is(record: &SymbolRecord, expected: VisibilityLevel) -> Result<(), String> {
+    if record.visibility.level == expected {
+        Ok(())
+    } else {
+        Err(format!(
+            "`{}`: expected {expected:?}, found {:?}",
+            record.identity.qualified_name, record.visibility.level
+        ))
+    }
+}
+
+/// `member`'s container and parent are `owner`.
+fn owned_by(member: &SymbolRecord, owner: &SymbolRecord) -> Result<(), String> {
+    let linked = |link: &Option<SymbolRef>| {
+        link.as_ref().and_then(|link| link.id.as_ref()) == Some(&owner.id)
+    };
+    if linked(&member.relations.container) && linked(&member.relations.parent) {
+        Ok(())
+    } else {
+        Err(format!(
+            "`{}` at byte {}: not linked to its owner `{}` at byte {}",
+            member.identity.qualified_name,
+            member.source.declaration_span.start_byte,
+            owner.identity.qualified_name,
+            owner.source.declaration_span.start_byte
+        ))
+    }
+}
+
+/// Every `static` declaration and every later definition of the same
+/// function is ModulePrivate: the definition's own earlier declaration, not
+/// a same-named function of another namespace or overload, decides it.
+fn check_cpp_functions(records: &[SymbolRecord], n: usize) -> Result<(), String> {
+    let functions: Vec<&SymbolRecord> =
+        records.iter().filter(|record| record.kind == SymbolKindV2::Function).collect();
+    if functions.len() != 2 * n {
+        return Err(format!("expected {} function records, found {}", 2 * n, functions.len()));
+    }
+    functions
+        .into_iter()
+        .try_for_each(|function| level_is(function, VisibilityLevel::ModulePrivate))
+}
+
+/// `Probe` repeated in every module: the impl method's level comes from the
+/// same-file traits, which all agree on Public.
+fn check_rust_traits(records: &[SymbolRecord], n: usize) -> Result<(), String> {
+    for i in 0..n {
+        level_is(one_of(records, &format!("r9_{i}::Probe"), SymbolKindV2::Trait)?, VisibilityLevel::Public)?;
+        level_is(one_of(records, &format!("r9_{i}::S{i}::m"), SymbolKindV2::Method)?, VisibilityLevel::Public)?;
+    }
+    Ok(())
+}
+
+/// Each module's `impl Probe` method is Private and belongs to that module's
+/// `struct Probe`.
+fn check_rust_owners(records: &[SymbolRecord], n: usize) -> Result<(), String> {
+    for i in 0..n {
+        let owner = one_of(records, &format!("r9_{i}::Probe"), SymbolKindV2::Type)?;
+        let method = one_of(records, &format!("r9_{i}::Probe::m"), SymbolKindV2::Method)?;
+        level_is(method, VisibilityLevel::Private)?;
+        owned_by(method, owner)?;
+    }
+    Ok(())
+}
+
+/// Every `function Probe:m()` belongs to the nearest preceding
+/// `local Probe = {}`.
+fn check_lua_tables(records: &[SymbolRecord], n: usize) -> Result<(), String> {
+    let mut tables: Vec<&SymbolRecord> = named(records, "Probe")
+        .into_iter()
+        .filter(|record| record.kind == SymbolKindV2::Variable)
+        .collect();
+    let mut methods: Vec<&SymbolRecord> = named(records, "Probe:m");
+    if tables.len() != n || methods.len() != n {
+        return Err(format!("expected {n} tables and methods, found {} and {}", tables.len(), methods.len()));
+    }
+    tables.sort_by_key(|record| record.source.declaration_span.start_byte);
+    methods.sort_by_key(|record| record.source.declaration_span.start_byte);
+    for (table, method) in tables.iter().zip(&methods) {
+        owned_by(method, table)?;
+    }
+    Ok(())
+}
+
+/// Each namespace's declaration and definition are both `r9_i::probe`.
+fn check_cpp_namespaces(records: &[SymbolRecord], n: usize) -> Result<(), String> {
+    for i in 0..n {
+        let found = named(records, &format!("r9_{i}::probe")).len();
+        if found != 2 {
+            return Err(format!("expected two `r9_{i}::probe` records, found {found}"));
+        }
+    }
+    check_cpp_functions(records, n)
+}
+
+fn check_scala_packages(records: &[SymbolRecord], n: usize) -> Result<(), String> {
+    for i in 0..n {
+        level_is(one_of(records, &format!("r9_{i}.P.f"), SymbolKindV2::Method)?, VisibilityLevel::Package)?;
+    }
+    Ok(())
+}
+
+const RUST_REPEATED_OWNER: Shape = Shape {
+    label: "Rust struct `Probe` and its impl repeated per module",
+    file_name: "owners.rs",
+    header: "",
+    body: |i| format!("mod r9_{i} {{ struct Probe; impl Probe {{ fn m(&self) {{}} }} }}\n"),
+    footer: "",
+};
+
+const LUA_REPEATED_TABLE: Shape = Shape {
+    label: "Lua `local Probe` table and its method repeated",
+    file_name: "tables.lua",
+    header: "",
+    body: |i| format!("local Probe = {{}}\nfunction Probe:m() return {i} end\n"),
+    footer: "return Probe\n",
+};
+
+const REPEATED_SHAPES: &[RepeatedShape] = &[
+    RepeatedShape {
+        shape: Shape {
+            label: "Rust trait `Probe` repeated per module",
+            file_name: "traits.rs",
+            header: "",
+            body: |i| {
+                format!(
+                    "mod r9_{i} {{ pub trait Probe {{ fn m(&self); }} struct S{i};\n    \
+                     impl Probe for S{i} {{ fn m(&self) {{}} }} }}\n"
+                )
+            },
+            footer: "",
+        },
+        check: check_rust_traits,
+    },
+    RepeatedShape { shape: RUST_REPEATED_OWNER, check: check_rust_owners },
+    RepeatedShape { shape: LUA_REPEATED_TABLE, check: check_lua_tables },
+    RepeatedShape {
+        shape: Shape {
+            label: "C++ `static void probe(); void probe() {}` repeated per namespace",
+            file_name: "namespaces.cpp",
+            header: "",
+            body: |i| format!("namespace r9_{i} {{ static void probe(); void probe() {{}} }}\n"),
+            footer: "",
+        },
+        check: check_cpp_namespaces,
+    },
+    RepeatedShape {
+        shape: Shape {
+            label: "C++ out-of-body `void r9_i::probe() {}` after a namespaced `static`",
+            file_name: "out_of_body.cpp",
+            header: "",
+            body: |i| format!("namespace r9_{i} {{ static void probe(); }}\nvoid r9_{i}::probe() {{}}\n"),
+            footer: "",
+        },
+        check: check_cpp_functions,
+    },
+    RepeatedShape {
+        shape: Shape {
+            label: "C++ overloads `static void probe(R9_i); void probe(R9_i) {}`",
+            file_name: "overloads.cpp",
+            header: "",
+            body: |i| format!("struct R9_{i} {{}};\nstatic void probe(R9_{i});\nvoid probe(R9_{i}) {{}}\n"),
+            footer: "",
+        },
+        check: check_cpp_functions,
+    },
+    RepeatedShape {
+        shape: Shape {
+            label: "C++ distinct namespace-qualified definitions",
+            file_name: "qualified.cpp",
+            header: "",
+            body: |i| format!("namespace r9_{i} {{ static void probe{i}(); }}\nvoid r9_{i}::probe{i}() {{}}\n"),
+            footer: "",
+        },
+        check: check_cpp_functions,
+    },
+    RepeatedShape {
+        shape: Shape {
+            label: "Scala sibling block packages with package-qualified access",
+            file_name: "packages.scala",
+            header: "",
+            body: |i| format!("package r9_{i} {{ object P {{ private[r9_{i}] def f() = 1 }} }}\n"),
+            footer: "",
+        },
+        check: check_scala_packages,
+    },
+];
+
+#[test]
+fn repeated_names_keep_shared_context_linear_and_results_intact() {
+    let mut failures = String::new();
+    for RepeatedShape { shape, check } in REPEATED_SHAPES {
+        let (small_steps, small_records) = analyze(shape, SMALL, Analysis::Complete);
+        let (large_steps, large_records) = analyze(shape, LARGE, Analysis::Complete);
+        for (n, records) in [(SMALL, &small_records), (LARGE, &large_records)] {
+            if let Err(problem) = check(records, n) {
+                let _ = writeln!(failures, "{} (n = {n}): {problem}", shape.label);
+            }
+        }
+        if !grows_linearly(small_steps, large_steps, large_records.len()) {
+            let _ = writeln!(
+                failures,
+                "{}: {small_steps} steps for {SMALL} declarations ({} records), {large_steps} for {LARGE} ({} records)",
+                shape.label,
+                small_records.len(),
+                large_records.len()
+            );
+        }
+    }
+    assert!(failures.is_empty(), "repeated names broke results or linear shared context:\n{failures}");
+}
+
+/// The containment consumer links each member to its same-module (Rust) or
+/// nearest preceding (Lua) owner without revisiting every same-named owner.
+#[test]
+fn containment_of_repeated_owners_stays_linear() {
+    let mut failures = String::new();
+    let shapes: [(&Shape, fn(&[SymbolRecord], usize) -> Result<(), String>); 2] =
+        [(&RUST_REPEATED_OWNER, check_rust_owners), (&LUA_REPEATED_TABLE, check_lua_tables)];
+    for (shape, check) in shapes {
+        let (small_steps, small_records) = analyze(shape, SMALL, Analysis::Containment);
+        let (large_steps, large_records) = analyze(shape, LARGE, Analysis::Containment);
+        for (n, records) in [(SMALL, &small_records), (LARGE, &large_records)] {
+            if let Err(problem) = check(records, n) {
+                let _ = writeln!(failures, "{} (n = {n}): {problem}", shape.label);
+            }
+        }
+        if !grows_linearly(small_steps, large_steps, large_records.len()) {
+            let _ = writeln!(
+                failures,
+                "{}: {small_steps} containment steps for {SMALL} declarations, {large_steps} for {LARGE}",
+                shape.label
+            );
+        }
+    }
+    assert!(failures.is_empty(), "containment of repeated owners:\n{failures}");
+}
+
+/// Step counts at 100, 200 and 400 declarations for every repeated shape;
+/// run with `--ignored --nocapture` to refresh the figures in a report.
+#[test]
+#[ignore = "prints step counts for reports; asserts nothing"]
+fn print_repeated_shape_step_counts() {
+    for RepeatedShape { shape, .. } in REPEATED_SHAPES {
+        let counts: Vec<u64> = [100, 200, 400].map(|n| analyze(shape, n, Analysis::Complete).0).to_vec();
+        println!("{}: {counts:?}", shape.label);
+    }
+    for shape in [&RUST_REPEATED_OWNER, &LUA_REPEATED_TABLE] {
+        let counts: Vec<u64> = [100, 200, 400].map(|n| analyze(shape, n, Analysis::Containment).0).to_vec();
+        println!("containment, {}: {counts:?}", shape.label);
+    }
+}
+

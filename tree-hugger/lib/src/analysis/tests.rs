@@ -6,8 +6,8 @@ use tempfile::TempDir;
 use crate::TreeFile;
 use crate::analysis::{
     NameIndex, OwnerSymbolIndex, RefSet, agrees_with_owner_path, analyze_file, ends_with_segments,
-    export_record, find_container_symbol, find_export_target, last_name_segment,
-    nearest_qualifying_owner, owner_path, qualifies,
+    export_record, find_container_symbol, find_export_target, last_name_segment, owner_path,
+    qualifies, resolve_containers,
 };
 use crate::shared::{
     AnalysisPass, DocsFacet, ExportRecord, IdentityFacet, ProgrammingLanguage, ProvenanceFacet,
@@ -179,7 +179,7 @@ fn scan_container_symbol(
                     && symbols[idx].kind == container_kind
             })
             .collect();
-        nearest_qualifying_owner(symbols, child, &of_kind).or_else(|| {
+        scan_nearest_qualifying_owner(symbols, child, &of_kind).or_else(|| {
             let named: Vec<usize> = of_kind
                 .into_iter()
                 .filter(|&idx| {
@@ -191,6 +191,39 @@ fn scan_container_symbol(
             (named.len() == 1).then(|| named[0])
         })
     })
+}
+
+/// The scan of every candidate `nearest_qualifying_owner` did before the
+/// owner index: the longest qualifying name, then the nearest declaration
+/// before the child, else the first after it.
+fn scan_nearest_qualifying_owner(
+    symbols: &[SymbolRecord],
+    child: &SymbolRecord,
+    candidates: &[usize],
+) -> Option<usize> {
+    let child_start = i64::from(child.source.declaration_span.start_byte);
+    candidates
+        .iter()
+        .copied()
+        .filter(|&idx| qualifies(&symbols[idx].identity.qualified_name, &child.identity.qualified_name))
+        .max_by_key(|&idx| {
+            let start = i64::from(symbols[idx].source.declaration_span.start_byte);
+            let nearness = if start <= child_start { start } else { -start - 1 };
+            (symbols[idx].identity.qualified_name.len(), start <= child_start, nearness)
+        })
+}
+
+/// Every child's container by the scan, in record order, as
+/// `resolve_containers` reports it.
+fn scan_containers(symbols: &[SymbolRecord]) -> Vec<(usize, usize)> {
+    symbols
+        .iter()
+        .enumerate()
+        .filter_map(|(child_idx, symbol)| {
+            let container_name = symbol.identity.container_name.as_deref()?;
+            Some((child_idx, scan_container_symbol(symbols, child_idx, container_name)?))
+        })
+        .collect()
 }
 
 /// The full scan `find_export_target` did before the name index.
@@ -241,6 +274,7 @@ fn name_index_selects_the_same_targets_as_a_full_scan() {
             );
             containers += 1;
         }
+        assert_eq!(resolve_containers(&symbols, &names), scan_containers(&symbols), "{label}: containers");
 
         for export in tree_file.exported_symbols().expect("exports") {
             let export = export_record(&export);
@@ -257,6 +291,40 @@ fn name_index_selects_the_same_targets_as_a_full_scan() {
         references > 1000 && containers > 300 && exports > 30,
         "fixtures exercised too little: {references} references, {containers} containers, {exports} exports"
     );
+}
+
+/// Repeated and nested same-named owners, where one file's children share
+/// the owner index and the enclosing sweep, resolve as the scan does.
+#[test]
+fn owner_index_resolves_repeated_owners_as_the_scan_does() {
+    let dir = TempDir::new().expect("temp dir");
+    let mut rust = String::from("struct Probe;\nimpl Probe { fn m(&self) {} }\n");
+    let mut lua = String::new();
+    let mut cpp = String::new();
+    for i in 0..12 {
+        rust.push_str(&format!(
+            "mod r{i} {{ struct Probe; impl Probe {{ fn m(&self) {{}} }} \
+             mod Probe {{ fn Probe() {{ fn Probe() {{}} }} }} impl super::Probe {{ fn n(&self) {{}} }} }}\n"
+        ));
+        lua.push_str(&format!(
+            "local Probe = {{}}\nfunction Probe:m() return {i} end\ndo local Probe = {{}} function Probe.f() end end\n"
+        ));
+        cpp.push_str(&format!(
+            "namespace Probe {{ struct Probe {{ void m(); }}; }}\nvoid Probe::Probe::m() {{}}\nstruct Probe{i} {{}};\n"
+        ));
+    }
+    lua.push_str("function Probe:late() end\nreturn Probe\n");
+    let mut containers = 0;
+    for (file_name, source) in [("owners.rs", rust), ("tables.lua", lua), ("owners.cpp", cpp)] {
+        let path = dir.path().join(file_name);
+        fs::write(&path, source).expect("write source");
+        let symbols = TreeFile::new(&path).expect("parse").symbol_records().expect("records");
+        let names = NameIndex::new(&symbols);
+        let resolved = resolve_containers(&symbols, &names);
+        assert_eq!(resolved, scan_containers(&symbols), "{file_name}: containers");
+        containers += resolved.len();
+    }
+    assert!(containers > 100, "only {containers} containers resolved");
 }
 
 #[test]

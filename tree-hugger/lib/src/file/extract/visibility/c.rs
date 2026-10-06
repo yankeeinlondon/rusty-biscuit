@@ -170,36 +170,36 @@ fn has_earlier_static_declaration(
     else {
         return false;
     };
-    let before = declaration.start_byte();
-    index.static_functions.get(own.name).is_some_and(|earlier| {
-        earlier
-            .iter()
-            .take_while(|(start, _)| *start < before)
-            .inspect(|_| count_shared_context_steps(1))
-            .any(|(_, earlier)| own.redeclares(earlier, cpp))
-    })
+    count_shared_context_steps(1);
+    index
+        .static_functions
+        .get(&own.linkage_key(cpp))
+        .is_some_and(|earliest| *earliest < declaration.start_byte())
 }
 
 /// What the earlier-`static` rule reads from the whole file, collected once
 /// per file into [`VisibilityMemo`]: the namespaces it declares (C++ only)
 /// and the identity of every function a namespace-scope `static`
 /// declaration declares. An earlier declaration's identity depends only on
-/// what precedes it, never on the declaration it is compared with.
+/// what precedes it, never on the declaration it is compared with, so each
+/// identity keeps only its earliest `static` declaration.
 pub(super) struct LinkageIndex<'src> {
-    namespaces: Vec<(usize, Vec<&'src str>)>,
-    /// By function name: the declaring `static` declaration's start byte
-    /// and the function's identity, in source order.
-    static_functions: HashMap<&'src str, Vec<(usize, FunctionIdentity<'src>)>>,
+    /// Namespace path → the start of the earliest block declaring it.
+    namespaces: Namespaces<'src>,
+    /// Function identity ([`FunctionIdentity::linkage_key`]) → the start byte
+    /// of its earliest `static` declaration.
+    static_functions: HashMap<FunctionIdentity<'src>, usize>,
 }
+
+type Namespaces<'src> = HashMap<Vec<&'src str>, usize>;
 
 impl<'src> LinkageIndex<'src> {
     fn of(root: Node<'_>, source: &'src str, cpp: bool) -> Self {
-        let namespaces = if cpp { declared_namespaces(root, source) } else { Vec::new() };
+        let namespaces = if cpp { declared_namespaces(root, source) } else { HashMap::new() };
         let mut declarations = Vec::new();
         collect_scope_declarations(root, &mut declarations);
         count_shared_context_steps(declarations.len() + namespaces.len());
-        let mut static_functions: HashMap<&'src str, Vec<(usize, FunctionIdentity<'src>)>> =
-            HashMap::new();
+        let mut static_functions: HashMap<FunctionIdentity<'src>, usize> = HashMap::new();
         for candidate in declarations {
             if !has_specifier(candidate, "storage_class_specifier", "static", source) {
                 continue;
@@ -208,10 +208,10 @@ impl<'src> LinkageIndex<'src> {
                 if let Some(identity) =
                     FunctionIdentity::of(candidate, &function, source, &namespaces)
                 {
+                    // Declarations arrive in source order, so the first is the earliest.
                     static_functions
-                        .entry(identity.name)
-                        .or_default()
-                        .push((candidate.start_byte(), identity));
+                        .entry(identity.linkage_key(cpp))
+                        .or_insert(candidate.start_byte());
                 }
             }
         }
@@ -241,6 +241,7 @@ fn collect_scope_declarations<'tree>(node: Node<'tree>, found: &mut Vec<Node<'tr
 /// `namespace a::b {}` versus `namespace a { namespace b {} }`. Type names
 /// are compared as written, so a typedef and its target, or `long` and
 /// `long int`, differ.
+#[derive(PartialEq, Eq, Hash)]
 struct FunctionIdentity<'src> {
     name: &'src str,
     /// The one namespace the declared name belongs to, as flat segments.
@@ -259,7 +260,7 @@ struct FunctionIdentity<'src> {
 /// is compared as written, so `requires A<T>` placed after the header and
 /// after the parameters differ, as do `auto f() -> int` and `int f()`; the
 /// exception specification is not part of it.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq, Hash)]
 struct TemplateSignature<'src> {
     /// The `template<…>` parameter tokens, or `None` for an abbreviated
     /// template (one with an `auto` parameter and no header).
@@ -282,7 +283,7 @@ impl<'src> FunctionIdentity<'src> {
         declaration: Node<'_>,
         function: &DeclaredFunction<'_>,
         source: &'src str,
-        namespaces: &[(usize, Vec<&'src str>)],
+        namespaces: &Namespaces<'src>,
     ) -> Option<Self> {
         let mut scope = Vec::new();
         let mut absolute = false;
@@ -301,9 +302,10 @@ impl<'src> FunctionIdentity<'src> {
             None => enclosing,
             Some(first) => (0..=enclosing.len()).rev().find_map(|depth| {
                 let looked_up = [&enclosing[..depth], &[*first]].concat();
+                count_shared_context_steps(1);
                 namespaces
-                    .iter()
-                    .any(|(start, path)| *start < declaration.start_byte() && *path == looked_up)
+                    .get(&looked_up)
+                    .is_some_and(|start| *start < declaration.start_byte())
                     .then(|| [&enclosing[..depth], scope.as_slice()].concat())
             })?,
         };
@@ -316,13 +318,14 @@ impl<'src> FunctionIdentity<'src> {
         Some(Self { name: node_text(name, source), namespace, parameters, template })
     }
 
-    /// Whether `earlier` declares this same function.
-    fn redeclares(&self, earlier: &Self, cpp: bool) -> bool {
-        self.name == earlier.name
-            && (!cpp
-                || (self.namespace == earlier.namespace
-                    && self.parameters == earlier.parameters
-                    && self.template == earlier.template))
+    /// The part of this identity that decides whether two declarations
+    /// declare the same function: all of it in C++, the name alone in C.
+    fn linkage_key(self, cpp: bool) -> Self {
+        if cpp {
+            self
+        } else {
+            Self { name: self.name, namespace: Vec::new(), parameters: Vec::new(), template: None }
+        }
     }
 }
 
@@ -431,10 +434,11 @@ fn own_namespace_segments<'src>(namespace: Node<'_>, source: &'src str) -> Vec<&
     segments
 }
 
-/// Every namespace the file declares, with the start of the declaring
-/// `namespace` block: `namespace a::b {}` declares both `a` and `a::b`.
-fn declared_namespaces<'src>(root: Node<'_>, source: &'src str) -> Vec<(usize, Vec<&'src str>)> {
-    let mut found = Vec::new();
+/// Every namespace the file declares, with the start of the earliest
+/// declaring `namespace` block: `namespace a::b {}` declares both `a` and
+/// `a::b`.
+fn declared_namespaces<'src>(root: Node<'_>, source: &'src str) -> Namespaces<'src> {
+    let mut found: Namespaces<'src> = HashMap::new();
     let mut pending = vec![root];
     while let Some(node) = pending.pop() {
         let mut cursor = node.walk();
@@ -444,7 +448,11 @@ fn declared_namespaces<'src>(root: Node<'_>, source: &'src str) -> Vec<(usize, V
                     let outer = enclosing_namespaces(child, source);
                     let own = own_namespace_segments(child, source);
                     for depth in 1..=own.len() {
-                        found.push((child.start_byte(), [outer.as_slice(), &own[..depth]].concat()));
+                        let start = child.start_byte();
+                        found
+                            .entry([outer.as_slice(), &own[..depth]].concat())
+                            .and_modify(|earliest| *earliest = (*earliest).min(start))
+                            .or_insert(start);
                     }
                     pending.push(child);
                 }
@@ -471,7 +479,7 @@ fn namespace_segments<'src>(name: Node<'_>, source: &'src str, segments: &mut Ve
 }
 
 /// One parameter's type as C++ compares it.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq, Hash)]
 struct ParameterType<'src> {
     /// `const`/`volatile` written among the specifiers, in sorted order so
     /// `const int` and `int const` agree.
@@ -483,7 +491,7 @@ struct ParameterType<'src> {
     declarators: Vec<Declarator<'src>>,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq, Hash)]
 enum Declarator<'src> {
     Pointer(Vec<&'src str>),
     Reference(&'src str),

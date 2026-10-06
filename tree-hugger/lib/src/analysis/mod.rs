@@ -3,8 +3,11 @@
 //! requested capabilities, runs each needed pass once, after its
 //! prerequisites.
 
+use std::cell::OnceCell;
+use std::cmp::Reverse;
 use std::collections::{HashMap, HashSet};
 
+use crate::analysis::counters::count_shared_context_steps;
 use crate::error::TreeHuggerError;
 use crate::file::query::{Capability, SymbolQuery, SymbolQueryResult};
 use crate::file::tree_file::{MetadataSelection, RecordFacts, TreeFile};
@@ -208,16 +211,8 @@ fn link_containers(symbols: &mut [SymbolRecord], names: &NameIndex) {
     let mut parent_links: Vec<Option<SymbolRef>> = vec![None; symbols.len()];
     let mut members_by_parent: HashMap<SymbolId, Vec<SymbolRef>> = HashMap::new();
 
-    for (child_idx, symbol) in symbols.iter().enumerate() {
-        let Some(container_name) = symbol.identity.container_name.as_deref() else {
-            continue;
-        };
-
-        let Some(parent_idx) = find_container_symbol(symbols, names, child_idx, container_name)
-        else {
-            continue;
-        };
-
+    for (child_idx, parent_idx) in resolve_containers(symbols, names) {
+        let symbol = &symbols[child_idx];
         parent_links[child_idx] = Some(symbol_ref(&symbols[parent_idx]));
         members_by_parent
             .entry(symbols[parent_idx].id.clone())
@@ -230,6 +225,59 @@ fn link_containers(symbols: &mut [SymbolRecord], names: &NameIndex) {
         symbol.relations.parent = parent;
         symbol.relations.members = members_by_parent.remove(&symbol.id).unwrap_or_default();
     }
+}
+
+/// Each record that names a container, paired with the record its container
+/// names, in record order. The rules are those of [`smallest_enclosing`],
+/// then [`find_container_by_identity`].
+fn resolve_containers(symbols: &[SymbolRecord], names: &NameIndex) -> Vec<(usize, usize)> {
+    let children: Vec<ContainerRequest<'_>> = symbols
+        .iter()
+        .enumerate()
+        .filter_map(|(child_idx, symbol)| {
+            let container_name = symbol.identity.container_name.as_deref()?;
+            // A record may itself carry a dotted name (C# `namespace A.B`).
+            let bare = if names.named(container_name).is_empty() {
+                last_name_segment(container_name)
+            } else {
+                container_name
+            };
+            Some(ContainerRequest { child_idx, container_name, bare })
+        })
+        .collect();
+    let enclosing = smallest_enclosing(symbols, names, &children);
+    let owners = OnceCell::new();
+    children
+        .iter()
+        .zip(enclosing)
+        .filter_map(|(request, enclosing)| {
+            let parent_idx = enclosing.or_else(|| {
+                let owners = owners.get_or_init(|| OwnerIndex::new(symbols));
+                find_container_by_identity(symbols, owners, request)
+            })?;
+            Some((request.child_idx, parent_idx))
+        })
+        .collect()
+}
+
+/// The record `container_name` names for the one child `child_idx`, by the
+/// rules [`resolve_containers`] applies to a whole file.
+#[cfg(test)]
+fn find_container_symbol(
+    symbols: &[SymbolRecord],
+    names: &NameIndex,
+    child_idx: usize,
+    container_name: &str,
+) -> Option<usize> {
+    let bare = if names.named(container_name).is_empty() {
+        last_name_segment(container_name)
+    } else {
+        container_name
+    };
+    let request = ContainerRequest { child_idx, container_name, bare };
+    smallest_enclosing(symbols, names, std::slice::from_ref(&request))[0].or_else(|| {
+        find_container_by_identity(symbols, &OwnerIndex::new(symbols), &request)
+    })
 }
 
 /// The rest of the bind pass, after [`link_containers`]: reference,
@@ -511,69 +559,175 @@ impl OwnerSymbolNode {
     }
 }
 
-/// Finds the record a child's container names.
+/// One record whose container is named: the name as recorded and the name
+/// its candidates are called (the last segment of a qualified container
+/// name that no record is called).
+struct ContainerRequest<'a> {
+    child_idx: usize,
+    container_name: &'a str,
+    bare: &'a str,
+}
+
+/// The first rule of a child's container: the smallest record called its
+/// `bare` container name whose declaration span encloses the child's (the
+/// first in record order among equal spans), never the child itself.
 ///
-/// The container is the smallest declaration called `container_name` that
-/// encloses the child (the first of equal size). A member declared outside
-/// its type (a Rust `impl` member, a Swift extension member) is matched by
-/// identity instead: among the records of the recorded container kind, the
-/// one whose in-file qualified name qualifies the child's (longest first),
-/// else the only one whose qualified name ends with the child's owner path
-/// (the child's qualified name minus its last segment). Same-named owners in
-/// different modules or types are never confused: when several candidates
-/// remain and none qualifies the child, there is no container, and a sole
-/// candidate never overrides an explicit qualification that names another
-/// owner (`impl other::W` beside a local `W` has no same-file container).
+/// Each name's records and children are swept once in span order, keeping
+/// the records still open at the sweep position as a stack of nested spans,
+/// so a child never scans the records of its name. Declaration spans come
+/// from one syntax tree, so two of them are nested or disjoint.
+fn smallest_enclosing(
+    symbols: &[SymbolRecord],
+    names: &NameIndex,
+    children: &[ContainerRequest<'_>],
+) -> Vec<Option<usize>> {
+    let span = |idx: usize| {
+        let span = &symbols[idx].source.declaration_span;
+        (span.start_byte, span.end_byte)
+    };
+    let mut by_name: HashMap<&str, Vec<usize>> = HashMap::new();
+    for (position, request) in children.iter().enumerate() {
+        by_name.entry(request.bare).or_default().push(position);
+    }
+
+    let mut enclosing = vec![None; children.len()];
+    let mut steps = 0;
+    for (bare, mut positions) in by_name {
+        let mut owners = names.named(bare).to_vec();
+        // Outer spans first at one start; among equal spans the first record
+        // ends on top of the stack.
+        owners.sort_by_key(|&idx| {
+            let (start, end) = span(idx);
+            (start, Reverse(end), Reverse(idx))
+        });
+        positions.sort_by_key(|&position| span(children[position].child_idx).0);
+
+        let mut open: Vec<usize> = Vec::new();
+        let mut owners = owners.into_iter().peekable();
+        for position in positions {
+            let child_idx = children[position].child_idx;
+            let (child_start, child_end) = span(child_idx);
+            while let Some(owner) = owners.next_if(|&owner| span(owner).0 <= child_start) {
+                steps += 1;
+                while open.last().is_some_and(|&top| span(top).1 < span(owner).1) {
+                    open.pop();
+                    steps += 1;
+                }
+                open.push(owner);
+            }
+            while open.last().is_some_and(|&top| span(top).1 < child_start) {
+                open.pop();
+                steps += 1;
+            }
+            enclosing[position] = open
+                .iter()
+                .rev()
+                .inspect(|_| steps += 1)
+                .find(|&&owner| owner != child_idx && span(owner).1 >= child_end)
+                .copied();
+        }
+    }
+    count_shared_context_steps(steps + children.len());
+    enclosing
+}
+
+/// A file's records indexed by the identity a member declared outside its
+/// type names its owner by, built once per file on the first such member.
+struct OwnerIndex<'a> {
+    symbols: &'a [SymbolRecord],
+    /// Name, kind and in-file qualified name → `(start byte, index)`, in
+    /// that order.
+    by_qualified: HashMap<(&'a str, SymbolKindV2, &'a str), Vec<(u32, usize)>>,
+    /// Built on the first member no owner qualifies.
+    tails: OnceCell<OwnerTails<'a>>,
+}
+
+struct OwnerTails<'a> {
+    /// Name and kind → record indexes, in record order.
+    by_kind: HashMap<(&'a str, SymbolKindV2), Vec<usize>>,
+    /// Name, kind and every whole-segment tail of the qualified name
+    /// ([`segment_suffixes`]) → record indexes, in record order.
+    by_suffix: HashMap<(&'a str, SymbolKindV2, &'a str), Vec<usize>>,
+}
+
+impl<'a> OwnerIndex<'a> {
+    fn new(symbols: &'a [SymbolRecord]) -> Self {
+        let mut by_qualified: HashMap<_, Vec<(u32, usize)>> = HashMap::new();
+        for (idx, symbol) in symbols.iter().enumerate() {
+            by_qualified
+                .entry((symbol.identity.name.as_str(), symbol.kind, symbol.identity.qualified_name.as_str()))
+                .or_default()
+                .push((symbol.source.declaration_span.start_byte, idx));
+        }
+        for bucket in by_qualified.values_mut() {
+            bucket.sort_unstable();
+        }
+        count_shared_context_steps(symbols.len());
+        Self { symbols, by_qualified, tails: OnceCell::new() }
+    }
+
+    fn tails(&self) -> &OwnerTails<'a> {
+        self.tails.get_or_init(|| {
+            let mut tails = OwnerTails { by_kind: HashMap::new(), by_suffix: HashMap::new() };
+            let mut steps = 0;
+            for (idx, symbol) in self.symbols.iter().enumerate() {
+                let name = symbol.identity.name.as_str();
+                tails.by_kind.entry((name, symbol.kind)).or_default().push(idx);
+                for tail in segment_suffixes(&symbol.identity.qualified_name) {
+                    tails.by_suffix.entry((name, symbol.kind, tail)).or_default().push(idx);
+                    steps += 1;
+                }
+                steps += 1;
+            }
+            count_shared_context_steps(steps);
+            tails
+        })
+    }
+}
+
+/// The remaining rules of a child's container, for a member declared
+/// outside its type (a Rust `impl` member, a Swift extension member), which
+/// is matched by identity: among the records of the recorded container kind,
+/// the one whose in-file qualified name qualifies the child's (longest
+/// first, see [`nearest_qualifying_owner`]), else the only one whose
+/// qualified name agrees with the child's owner path
+/// ([`agrees_with_owner_path`]). Same-named owners in different modules or
+/// types are never confused: when several candidates remain and none
+/// qualifies the child, there is no container, and a sole candidate never
+/// overrides an explicit qualification that names another owner
+/// (`impl other::W` beside a local `W` has no same-file container).
 ///
 /// A qualified `container_name` (Swift `extension Left.Repeated`) that no
 /// record is called is looked up by its last segment and, without a
 /// qualifying match, must be the tail of the candidate's qualified name.
-fn find_container_symbol(
+fn find_container_by_identity(
     symbols: &[SymbolRecord],
-    names: &NameIndex,
-    child_idx: usize,
-    container_name: &str,
+    owners: &OwnerIndex<'_>,
+    request: &ContainerRequest<'_>,
 ) -> Option<usize> {
+    let &ContainerRequest { child_idx, container_name, bare } = request;
     let child = &symbols[child_idx];
-    // A record may itself carry a dotted name (C# `namespace A.B`).
-    let bare = if names.named(container_name).is_empty() {
-        last_name_segment(container_name)
-    } else {
-        container_name
-    };
-    let candidates = names
-        .named(bare)
-        .iter()
-        .copied()
-        .filter(|&idx| idx != child_idx);
-    let enclosing = candidates
-        .clone()
-        .filter(|&idx| {
-            let span = &symbols[idx].source.declaration_span;
-            span.start_byte <= child.source.declaration_span.start_byte
-                && span.end_byte >= child.source.declaration_span.end_byte
-        })
-        .min_by_key(|&idx| {
-            let span = &symbols[idx].source.declaration_span;
-            span.end_byte.saturating_sub(span.start_byte)
+    let container_kind = child.identity.container_kind?;
+    let child_name = child.identity.qualified_name.as_str();
+    nearest_qualifying_owner(owners, bare, container_kind, child).or_else(|| {
+        // No candidate qualifies the child, so a candidate agrees with its
+        // owner path only by ending with it.
+        count_shared_context_steps(1);
+        let tails = owners.tails();
+        let pool = match owner_path(child_name) {
+            Some(path) => tails.by_suffix.get(&(bare, container_kind, path)),
+            None if bare == container_name => tails.by_kind.get(&(bare, container_kind)),
+            None => tails.by_suffix.get(&(bare, container_kind, container_name)),
+        };
+        let mut named = pool.map_or(&[][..], Vec::as_slice).iter().copied().filter(|&idx| {
+            count_shared_context_steps(1);
+            let owner = &symbols[idx].identity.qualified_name;
+            idx != child_idx
+                && (bare == container_name || ends_with_segments(owner, container_name))
+                && agrees_with_owner_path(owner, child_name)
         });
-
-    enclosing.or_else(|| {
-        let container_kind = child.identity.container_kind?;
-        let of_kind: Vec<usize> = candidates
-            .filter(|&idx| symbols[idx].kind == container_kind)
-            .collect();
-        nearest_qualifying_owner(symbols, child, &of_kind).or_else(|| {
-            let named: Vec<usize> = of_kind
-                .into_iter()
-                .filter(|&idx| {
-                    let owner = &symbols[idx].identity.qualified_name;
-                    (bare == container_name || ends_with_segments(owner, container_name))
-                        && agrees_with_owner_path(owner, &child.identity.qualified_name)
-                })
-                .collect();
-            (named.len() == 1).then(|| named[0])
-        })
+        let only = named.next()?;
+        named.next().is_none().then_some(only)
     })
 }
 
@@ -590,7 +744,7 @@ pub(crate) fn agrees_with_owner_path(owner: &str, member: &str) -> bool {
 /// The owner path a qualified name records: the name minus its last segment
 /// (`other::W` for `other::W::probe`, `M` for Lua `M:m`), `None` when the
 /// name is a single segment.
-fn owner_path(qualified_name: &str) -> Option<&str> {
+pub(crate) fn owner_path(qualified_name: &str) -> Option<&str> {
     let last = qualified_name.rfind(['.', ':', '\\'])?;
     let head = &qualified_name[..last];
     let head = if qualified_name[last..].starts_with(':') {
@@ -601,25 +755,51 @@ fn owner_path(qualified_name: &str) -> Option<&str> {
     Some(head).filter(|path| !path.is_empty())
 }
 
-/// Of `candidates`, the owner whose qualified name qualifies the child's:
-/// the longest such name, and among equal names (two Lua `local M = {}`
-/// tables in different blocks) the nearest declaration before the child,
-/// else the first after it.
+/// Of the records called `bare` of kind `kind`, the owner whose qualified
+/// name qualifies the child's: the longest such name, and among equal names
+/// (two Lua `local M = {}` tables in different blocks) the nearest
+/// declaration before the child, else the first after it (the last in
+/// record order among equal starts).
 fn nearest_qualifying_owner(
-    symbols: &[SymbolRecord],
+    owners: &OwnerIndex<'_>,
+    bare: &str,
+    kind: SymbolKindV2,
     child: &SymbolRecord,
-    candidates: &[usize],
 ) -> Option<usize> {
-    let child_start = i64::from(child.source.declaration_span.start_byte);
-    candidates
-        .iter()
-        .copied()
-        .filter(|&idx| qualifies(&symbols[idx].identity.qualified_name, &child.identity.qualified_name))
-        .max_by_key(|&idx| {
-            let start = i64::from(symbols[idx].source.declaration_span.start_byte);
-            let nearness = if start <= child_start { start } else { -start - 1 };
-            (symbols[idx].identity.qualified_name.len(), start <= child_start, nearness)
+    let child_start = child.source.declaration_span.start_byte;
+    qualifying_prefixes(&child.identity.qualified_name).find_map(|prefix| {
+        count_shared_context_steps(1);
+        let bucket = owners.by_qualified.get(&(bare, kind, prefix))?;
+        let before = bucket.partition_point(|&(start, _)| start <= child_start);
+        let nearest = if before > 0 {
+            before - 1
+        } else {
+            let first_start = bucket.first()?.0;
+            bucket.partition_point(|&(start, _)| start <= first_start) - 1
+        };
+        Some(bucket[nearest].1)
+    })
+}
+
+/// Every whole-segment prefix of `member` that [`qualifies`] it, longest
+/// first.
+pub(crate) fn qualifying_prefixes(member: &str) -> impl Iterator<Item = &str> {
+    (0..member.len())
+        .rev()
+        .filter(move |&end| member.is_char_boundary(end) && member[end..].starts_with(['.', ':', '\\']))
+        .map(move |end| &member[..end])
+        .filter(move |prefix| qualifies(prefix, member))
+}
+
+/// Every tail of `name` that [`ends_with_segments`] accepts, `name` itself
+/// included.
+pub(crate) fn segment_suffixes(name: &str) -> impl Iterator<Item = &str> {
+    (0..=name.len())
+        .filter(move |&start| {
+            start == 0 || (name.is_char_boundary(start) && name[..start].ends_with(['.', ':', '\\']))
         })
+        .map(move |start| &name[start..])
+        .filter(move |tail| ends_with_segments(name, tail))
 }
 
 /// Separators between qualified-name segments.
