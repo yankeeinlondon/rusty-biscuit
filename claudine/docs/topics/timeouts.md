@@ -422,6 +422,59 @@ synthesised `session_end` JSONL event with the corresponding
 A double-fire guard ensures only the **first** breach wins, even if both
 rules would expire on the same tick.
 
+## Waiting for the stream readers after the agent exits
+
+A structured run reads the agent's stdout and stderr on two reader threads.
+The stdout reader parses each line, renders assistant text, and writes it to
+the terminal. When the agent exits, Claudine stops its process group and then
+waits for both readers to finish, because the run's summary (result, cost,
+`error_kind`) comes from the stdout parser.
+
+That wait has two bounds, chosen by what the reader is doing:
+
+| Reader state | Bound | Why |
+|---|---|---|
+| Blocked reading its pipe for at least 250 ms, before EOF | 5 s | Another process can inherit the pipe and hold it open forever. More waiting would not help. |
+| Handling a line it already read, or past EOF | 120 s | The reader is making progress. Usually it is writing a large final message to a terminal that is slow to accept it. |
+
+```mermaid
+stateDiagram-v2
+    [*] --> Waiting: pull next line
+    Waiting --> Processing: line read
+    Processing --> Waiting: pull next line
+    Waiting --> EOF: pipe closed
+    Waiting --> TimedOut: 5 s after exit, blocked 250 ms
+    Processing --> TimedOut: 120 s after exit
+    EOF --> TimedOut: 120 s after exit
+    EOF --> Joined: final render done
+```
+
+Both bounds count from the same instant, just after the process-group
+teardown. A reader that finishes a slow line and then blocks on a pipe that
+is still open times out 250 ms later if 5 s have already passed. The 250 ms
+settle exists because a reader moving between two buffered lines is briefly
+in a read too, and must not be mistaken for one blocked on a held pipe.
+
+The bounds are constants, not configuration. The 120 s bound is twice the
+longest reader stall recorded in Claudine's own logs. It still ends, so a
+terminal that never accepts output cannot hang the wrapper forever.
+
+### Outcomes
+
+| Outcome | Summary | Shown on stderr |
+|---|---|---|
+| Reader finished | The parser's real summary | Nothing |
+| Reader panicked | `error_kind: parse_failure`, message `Stream parser thread panicked: <panic message>` | The run's error |
+| Timed out after parsing every line (stuck in its final render) | The parser's real summary; the agent's exit code is kept | A warning that the output may be incomplete |
+| Timed out with lines still unparsed | `error_kind: stream_reader_timeout`, with a message naming the cause (pipe held open, or output still being processed) | A warning with the same message |
+
+A stderr reader that panics or times out shows a warning and contributes no
+captured stderr. It does not change the summary.
+
+For example, if the agent exits 0 while the terminal takes 30 s to accept
+its last screen of Markdown, the reader is handling output rather than
+waiting on its pipe, so the 120 s bound applies. The run finishes with the agent's own result and exit code.
+
 ## Subagent diagnostics in error reports
 
 When `step_timeout` fires, the ticker snapshots any active subagents

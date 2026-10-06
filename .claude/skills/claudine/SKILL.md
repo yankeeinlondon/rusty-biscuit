@@ -182,7 +182,7 @@ of a topic doc.
 - [Composition](topics/composition.md) — `compose`, `inline-compose`, `sequence`, lifecycle stacks, provider selection
 - [Lifecycle](topics/flow-control/lifecycle.md) — the seven events, notification fields, action forms, `err`/`timing`/`current` globals, validation errors
 - [Flow Control](topics/flow-control/flow-control.md) and [Flow Control Reference](topics/flow-control/flow-control-reference.md) — the `stop`/`skip`/`error`/`retry`/`resume`/`proxy`/`defer` directives, per-event runtime limits, retry/resume re-entry, `proxy` handoffs and the `with:` overlay
-- [Timeouts](topics/timeouts.md) — the two timeout rules, four env vars, precedence, termination path, exit reasons, and the three runaway content guards
+- [Timeouts](topics/timeouts.md) — the two timeout rules, four env vars, precedence, termination path, the post-exit stream-reader wait (`stream_reader_timeout`), exit reasons, and the three runaway content guards
 - [Signal Handling](topics/signal-handling.md) — user Ctrl+C vs wrapper-driven SIGTERM/SIGKILL, the unified wait loop, termination labels (`Aborted`/`Interrupted`/`TimedOut`), non-interactive ladder, Windows parity
 - [System Prompt](topics/system-prompt.md) — launch-context discovery, `--append`/`--replace`, Darkmatter preparation, per-provider delivery
 - [MCP Catalog](topics/mcp-catalog.md) and [MCP Mode](topics/mcp-mode.md)

@@ -6,13 +6,13 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use claudine::stream::parser::SemanticStreamParser;
-use claudine::stream::summary::StreamExecutionSummary;
 use color_eyre::eyre::Result;
 
 pub(crate) mod control;
 pub(crate) mod exit;
 pub(crate) mod codex_app_server;
 pub(crate) mod pi_rpc;
+pub(crate) mod reader_join;
 pub(crate) mod spawn;
 pub(crate) mod stream_capture;
 #[cfg(test)]
@@ -216,66 +216,27 @@ pub(crate) type SemanticParserBuilder = Box<
         + 'static,
 >;
 
-/// Minimal fallback parser used when the real parser thread panics.
-struct ErrorParser {
-    exit_code: i32,
+/// Join a reader thread, detaching it once `timeout` passes.
+fn join_with_timeout(handle: thread::JoinHandle<()>, timeout: Duration) {
+    join_with_timeout_or(handle, timeout, ());
 }
 
-impl SemanticStreamParser for ErrorParser {
-    fn feed_line(&mut self, _line: &str) {}
-
-    fn finish(self: Box<Self>, _exit_code: i32) -> StreamExecutionSummary {
-        StreamExecutionSummary {
-            is_error: true,
-            error_kind: Some("parse_failure".into()),
-            error_message: Some("Stream parser thread panicked".into()),
-            exit_code: self.exit_code,
-            ..Default::default()
-        }
-    }
-}
-
-/// Join a thread with a timeout. Returns `true` if the thread joined
-/// successfully within the deadline, `false` if it timed out.
-///
-/// On timeout the thread is **leaked** (detached) rather than panicked,
-/// because the reader threads only terminate when their pipe closes and
-/// there is no safe way to interrupt a blocking `BufReader::lines()` call
-/// from outside.
-fn join_with_timeout(handle: thread::JoinHandle<()>, timeout: Duration) -> bool {
-    let start = Instant::now();
-    while start.elapsed() < timeout {
-        // `is_finished()` is available on Rust 1.69+ and does not block.
-        if handle.is_finished() {
-            let _ = handle.join();
-            return true;
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
-    tracing::warn!(
-        "reader thread did not exit within {:?}; detaching (pipe may still be held open by a descendant process)",
-        timeout
-    );
-    std::mem::forget(handle);
-    false
-}
-
-/// Join a thread that returns a value, with a timeout. Returns the value
-/// on success or a fallback on timeout.
+/// Join a reader thread that returns a value, detaching it once `timeout`
+/// passes. A panic or a timeout yields `fallback` and is logged by kind.
 fn join_with_timeout_or<T>(handle: thread::JoinHandle<T>, timeout: Duration, fallback: T) -> T {
-    let start = Instant::now();
-    while start.elapsed() < timeout {
-        if handle.is_finished() {
-            return handle.join().unwrap_or(fallback);
+    match reader_join::join_within(handle, timeout) {
+        reader_join::JoinOutcome::Joined(value) => value,
+        reader_join::JoinOutcome::Panicked(message) => {
+            tracing::warn!("reader thread panicked: {message}; using fallback result");
+            fallback
         }
-        std::thread::sleep(Duration::from_millis(50));
+        reader_join::JoinOutcome::TimedOut(_) => {
+            tracing::warn!(
+                "reader thread did not exit within {timeout:?}; detaching (pipe may still be held open by a descendant process)"
+            );
+            fallback
+        }
     }
-    tracing::warn!(
-        "reader thread did not exit within {:?}; using fallback result",
-        timeout
-    );
-    std::mem::forget(handle);
-    fallback
 }
 
 /// After the main child exits, kill any orphaned descendant processes so

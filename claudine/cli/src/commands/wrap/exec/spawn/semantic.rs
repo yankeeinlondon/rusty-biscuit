@@ -9,7 +9,7 @@ use std::path::Path;
 use std::process::{Child, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::status::{Status, StatusState};
@@ -35,10 +35,13 @@ use super::super::timeouts::TimeoutConfig;
 use super::super::watchdog::{
     spawn_flush_if_idle_ticker, spawn_prompt_timing_monitor, spawn_timeout_watchdog_ticker,
 };
+use super::super::reader_join::{
+    JoinOutcome, ParserSlot, ReaderBudget, ReaderProgress, join_reader, settle_parser,
+    timeout_message,
+};
 use super::super::{
-    ErrorParser, OutputTextCallback, ProcessResult, ProcessTelemetry, ReasoningCallback,
-    SemanticParserBuilder, join_with_timeout_or, kill_process_group, new_assistant_stream_inset,
-    resolve_first_response, stop_timing_ticker,
+    OutputTextCallback, ProcessResult, ProcessTelemetry, ReasoningCallback, SemanticParserBuilder,
+    kill_process_group, new_assistant_stream_inset, resolve_first_response, stop_timing_ticker,
 };
 use super::retained::{LineSource, Preflight, spawn_retained};
 use super::setup;
@@ -336,6 +339,10 @@ pub(crate) fn run_child_stream_semantic(
     let stdout_tail_ring: Arc<std::sync::Mutex<std::collections::VecDeque<String>>> =
         Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new()));
     let stdout_tail_ring_clone = Arc::clone(&stdout_tail_ring);
+    let stdout_progress = ReaderProgress::default();
+    let stdout_reader_progress = stdout_progress.clone();
+    let parser_slot: ParserSlot = Arc::new(Mutex::new(None));
+    let reader_parser_slot = Arc::clone(&parser_slot);
     let stdout_handle = thread::spawn(move || {
         let _stream_guard = stream_span.enter();
         let _parse_span = info_span!("stream_parse").entered();
@@ -386,7 +393,7 @@ pub(crate) fn run_child_stream_semantic(
             build_parser(output_cb, reasoning_cb, Some(captured_pid));
         let mut stream_capture = stream_capture_owned;
 
-        for line in stdout_source {
+        for line in stdout_reader_progress.track(stdout_source) {
             let Ok(line) = line else { break };
 
             let line_at = Instant::now();
@@ -439,8 +446,10 @@ pub(crate) fn run_child_stream_semantic(
             parser.feed_line(&line);
         }
 
+        // Handed back before the final render so a render that outlives the
+        // join still leaves the run its real summary.
+        *reader_parser_slot.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(parser);
         drain_close(&text_renderer, &framed_close, &mut out);
-        parser
     });
 
     let prefixes: Vec<String> = stderr_noise_prefixes
@@ -475,10 +484,12 @@ pub(crate) fn run_child_stream_semantic(
     let stderr_tail_ring: Arc<std::sync::Mutex<std::collections::VecDeque<String>>> =
         Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new()));
     let stderr_tail_ring_clone = Arc::clone(&stderr_tail_ring);
+    let stderr_progress = ReaderProgress::default();
+    let stderr_reader_progress = stderr_progress.clone();
     let stderr_handle = thread::spawn(move || {
         let _stderr_guard = stderr_span.enter();
         let mut captured = String::new();
-        for line in stderr_source {
+        for line in stderr_reader_progress.track(stderr_source) {
             let Ok(line) = line else { break };
 
             // Refresh the byte heartbeat for every non-empty stderr line,
@@ -645,14 +656,24 @@ pub(crate) fn run_child_stream_semantic(
     stop_timing_ticker(timing_monitor);
     stop_timing_ticker(watchdog_ticker);
 
-    let thread_join_timeout = Duration::from_secs(5);
-    let parser: Box<dyn SemanticStreamParser> = join_with_timeout_or(
-        stdout_handle,
-        thread_join_timeout,
-        Box::new(ErrorParser { exit_code }),
-    );
-
-    let captured = join_with_timeout_or(stderr_handle, thread_join_timeout, String::new());
+    let reader_budget = ReaderBudget::default();
+    let readers_since = Instant::now();
+    let stdout_outcome = join_reader(stdout_handle, &stdout_progress, reader_budget, readers_since);
+    let (parser, stdout_warning) = settle_parser(stdout_outcome, &parser_slot, exit_code, reader_budget);
+    let (captured, stderr_warning) =
+        match join_reader(stderr_handle, &stderr_progress, reader_budget, readers_since) {
+            JoinOutcome::Joined(captured) => (captured, None),
+            JoinOutcome::Panicked(message) => {
+                (String::new(), Some(format!("The agent's stderr reader panicked: {message}")))
+            }
+            JoinOutcome::TimedOut(stall) => {
+                (String::new(), Some(timeout_message("stderr", stall, reader_budget)))
+            }
+        };
+    for warning in [stdout_warning, stderr_warning].into_iter().flatten() {
+        tracing::warn!("{warning}");
+        stream_output.emit_stderr_line(&Status::new(&warning).state(StatusState::Warning).render(&termination_term));
+    }
     if suppress_stderr_on_success && exit_code != 0 && !captured.is_empty() {
         eprintln!("{captured}");
     }
