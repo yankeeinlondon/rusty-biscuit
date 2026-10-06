@@ -151,7 +151,15 @@ Measured 2026-10-05 on macOS 27.2 (arm64) for Sniff's path-usage query:
   descriptor, not proof of an FSEvents subscription.
 - Another user's process (PID 1) fails every per-PID call with `EPERM`, while
   `proc_listpids` still lists every PID. Treat EPERM as "not inspected", never
-  as "no matches".
+  as "no matches". That includes `PROC_PIDTBSDINFO`, the only flavor with a
+  start time, so such a process has no creation token;
+  `PROC_PIDT_SHORTBSDINFO` succeeds for it but carries no start time.
+- `proc_pidinfo`/`proc_pidfdinfo` return **0, not -1**, on failure and set
+  `errno`. Zero `errno` before the call: `PROC_PIDLISTFDS` returning 0 with
+  `errno` still 0 is an empty table, not an error.
+- `vinfo_stat.vst_dev` is `u32`, but `st_dev` is `i32` and
+  `std::os::unix::fs::MetadataExt::dev()` sign-extends it. Compare with
+  `vst_dev as i32 as u64`, or a device with the high bit set never matches.
 
 ## Host conditions that look like repo failures
 

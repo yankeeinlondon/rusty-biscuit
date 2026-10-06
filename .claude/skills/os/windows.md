@@ -264,3 +264,15 @@ Simulate Medium integrity with a filtered token, or use a desktop session.
   named constant in `windows` 0.62) needs a `STATUS_INFO_LENGTH_MISMATCH`
   retry loop; the snapshot was about 100k handles, 4 MB.
   `EnumProcessModulesEx` also needs a size retry.
+- A live loaded-module test needs no fixture DLL: hard-link (or copy) the
+  running test executable into the temp tree and start it there. Its main
+  module is then reported at the link's path. `GetModuleFileNameExW`
+  returns a plain `C:\...` spelling, while a `filesystem::query` report's
+  `matched_paths` sit under the verbatim `\\?\` canonical root, so compare
+  against `canonicalize()`, not the plain spelling (found 2026-10-06; eight
+  tests failed only on Windows for this reason).
+- `fsutil.exe file setCaseSensitiveInfo <dir> enable` works on
+  build-win-native (2026-10-06) and needs the directory to exist. Whether the
+  hosted `windows-latest` runner allows it is unverified; the
+  `filesystem::query` case-sensitivity test fails, rather than skips, where it
+  cannot.
