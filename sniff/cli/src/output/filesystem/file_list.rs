@@ -12,12 +12,19 @@
 //!   `url::Url::from_file_path` (the same primitive `biscuit-terminal`
 //!   delegates to), returning `None` on any representability failure.
 //! - [`render_file_list`] sorts the captured paths and renders them as a
-//!   `Prose`-item unordered list with OSC8 hyperlinks.
+//!   `Prose`-item unordered list, with OSC8 hyperlinks only when the
+//!   terminal supports them.
 //!
 //! Escape layering is fixed: the reversible label is built first (no ESC byte
 //! survives it, so `Prose::escape_text`'s ANSI pass-through can never fire),
 //! markup escaping is applied second, and the hyperlink `href` is built from
 //! the native target and attribute-escaped separately.
+//!
+//! No anchor is emitted when the terminal lacks OSC8 support (piped output,
+//! `--plain` from a pipe): `biscuit-terminal` lowers such an anchor to a
+//! Markdown-style `[label](url)` fallback that backslash-escapes every `]` in
+//! the label, which would change the reversible spelling of a name such as
+//! `photo[x].png`.
 //!
 //! ## Label notation
 //!
@@ -200,21 +207,37 @@ pub(super) fn escape_href(url: &str) -> String {
 /// never re-rooted. The join is lexical — no `exists()` probe, no
 /// canonicalize — and any representability failure returns `None` so the
 /// caller can silently fall back to the escaped label without a link.
+///
+/// `[ ] ( )` are percent-encoded on top of the `url` crate's encoding: the
+/// Prose parser reads a `[text](target)` run inside an `href` value as a
+/// nested link, which would split the OSC8 destination of a name such as
+/// `c[d](e).png`. The encoded URL decodes to the same native path.
 pub(super) fn link_target(root: &Path, path: &Path) -> Option<String> {
     let absolute = if path.is_absolute() {
         path.to_path_buf()
     } else {
         root.join(path)
     };
-    url::Url::from_file_path(absolute).ok().map(String::from)
+    let url = String::from(url::Url::from_file_path(absolute).ok()?);
+    let mut encoded = String::with_capacity(url.len());
+    for c in url.chars() {
+        match c {
+            '[' => encoded.push_str("%5B"),
+            ']' => encoded.push_str("%5D"),
+            '(' => encoded.push_str("%28"),
+            ')' => encoded.push_str("%29"),
+            _ => encoded.push(c),
+        }
+    }
+    Some(encoded)
 }
 
 /// Renders the `Files:` section for a filtered verbose association report.
 ///
 /// Paths sort by native `PathBuf` order before formatting. Each entry is one
-/// `Prose` list item — a linked, dim-directory/bold-name label when
-/// [`link_target`] succeeds, or the plain styled label when it fails
-/// (silently: no diagnostic, no link). An empty slice renders nothing at all,
+/// `Prose` list item — a linked, dim-directory/bold-name label when the
+/// terminal supports OSC8 and [`link_target`] succeeds, otherwise the same
+/// styled label with no link (silently: no diagnostic). An empty slice renders nothing at all,
 /// heading included.
 pub(super) fn render_file_list(files: &[PathBuf], root: &Path, term: &Terminal) -> String {
     if files.is_empty() {
@@ -225,7 +248,7 @@ pub(super) fn render_file_list(files: &[PathBuf], root: &Path, term: &Terminal) 
 
     let mut list = UnorderedList::empty();
     for path in sorted {
-        list.add(Prose::new(file_list_item_markup(path, root)));
+        list.add(Prose::new(file_list_item_markup(path, root, term.osc_link_support)));
     }
 
     let mut out = String::new();
@@ -238,8 +261,10 @@ pub(super) fn render_file_list(files: &[PathBuf], root: &Path, term: &Terminal) 
 
 /// Builds the Prose markup for one file-list entry, applying the fixed
 /// escape layering: reversible label, then markup escaping, with the href
-/// built from the native target and attribute-escaped separately.
-fn file_list_item_markup(path: &Path, root: &Path) -> String {
+/// built from the native target and attribute-escaped separately. Without
+/// `hyperlinks` the entry is the bare styled label (see the module docs for
+/// why the renderer's own link fallback is not used).
+fn file_list_item_markup(path: &Path, root: &Path, hyperlinks: bool) -> String {
     let label = reversible_label(path);
     let body = match split_label_dir_name(&label) {
         Some((dir, name)) => format!(
@@ -249,6 +274,9 @@ fn file_list_item_markup(path: &Path, root: &Path) -> String {
         ),
         None => format!("<blue><b>{}</b></blue>", escape_for_prose(&label)),
     };
+    if !hyperlinks {
+        return body;
+    }
     match link_target(root, path) {
         Some(url) => format!("<a href={}>{body}</a>", escape_href(&url)),
         None => body,
@@ -670,6 +698,15 @@ mod tests {
     }
 
     #[test]
+    fn link_target_encodes_prose_link_delimiters() {
+        let root = std::env::current_dir().unwrap();
+        let url = link_target(&root, Path::new("a(b)/c[d](e).png")).expect("representable");
+        assert!(url.ends_with("/a%28b%29/c%5Bd%5D%28e%29.png"), "{url}");
+        let decoded = url::Url::parse(&url).unwrap().to_file_path().unwrap();
+        assert_eq!(decoded, root.join("a(b)/c[d](e).png"));
+    }
+
+    #[test]
     fn link_target_never_probes_the_filesystem() {
         // The path does not exist; the link is still built (removed files
         // remain listed and linked after discovery).
@@ -716,6 +753,12 @@ mod tests {
         // UNC share.
         let url = link_target(&PathBuf::from(r"\\server\share"), Path::new(r"a b.png"));
         assert_eq!(url.as_deref(), Some("file://server/share/a%20b.png"));
+        // Verbatim UNC share: identifies the same file as the plain share.
+        let url = link_target(
+            &PathBuf::from(r"\\?\UNC\server\share\work"),
+            Path::new(r"lib\a b.png"),
+        );
+        assert_eq!(url.as_deref(), Some("file://server/share/work/lib/a%20b.png"));
         // A non-Unicode component (lone surrogate) errs -> per-entry fallback.
         use std::ffi::OsString;
         use std::os::windows::ffi::OsStringExt;
@@ -906,5 +949,73 @@ mod tests {
             "controls spelled visibly: {text:?}"
         );
         assert!(!text.contains('\x1b'), "{text:?}");
+    }
+
+    /// Names whose characters the renderer's Markdown-style link fallback
+    /// would rewrite (`]`) or that the Prose grammar treats as markup, in
+    /// both the basename and a directory segment.
+    fn bracketed_paths() -> Vec<PathBuf> {
+        paths_from_strs(&[
+            "photo[x].png",
+            "dir[x]/ordinary.png",
+            "a(b)/c[d](e).png",
+            "m*a_r`k<b>&.png",
+            "x*y*z_w_v.png",
+            "back\\slash].png",
+        ])
+    }
+
+    fn expected_list(files: &[PathBuf]) -> String {
+        let mut sorted: Vec<&PathBuf> = files.iter().collect();
+        sorted.sort();
+        let mut expected = String::from("Files:\n");
+        for path in sorted {
+            expected.push_str(&format!("- {}\n", reversible_label(path)));
+        }
+        expected
+    }
+
+    #[test]
+    fn file_list_capability_fallback_keeps_bracketed_labels_literal() {
+        let root = std::env::current_dir().unwrap();
+        let files = bracketed_paths();
+        let expected = expected_list(&files);
+
+        let linked = render_file_list(&files, &root, &Terminal::new_optimistic(200));
+        let mut sorted: Vec<&PathBuf> = files.iter().collect();
+        sorted.sort();
+        let expected_destinations: Vec<String> = sorted
+            .iter()
+            .map(|path| link_target(&root, path).expect("representable"))
+            .collect();
+        assert_eq!(
+            osc8_destinations(&linked),
+            expected_destinations,
+            "OSC8-capable terminal links every entry, one whole destination each"
+        );
+
+        // Identical to the capable terminal except for OSC8 support.
+        let mut unlinked_term = Terminal::new_optimistic(200);
+        unlinked_term.osc_link_support = false;
+        let fallback = render_file_list(&files, &root, &unlinked_term);
+        assert!(!fallback.contains("\x1b]8;"), "no OSC8 without support:\n{fallback:?}");
+        assert!(!fallback.contains("file://"), "no link fallback text:\n{fallback:?}");
+
+        // The URL-failure branch on a capable terminal renders the same.
+        let url_failure = render_file_list(
+            &files,
+            Path::new("not-absolute"),
+            &Terminal::new_optimistic(200),
+        );
+
+        // Rich (OSC8), capability fallback, URL failure, and plain (the same
+        // strip `emit_text` applies) all show the reversible labels exactly.
+        for (branch, out) in [
+            ("osc8", &linked),
+            ("capability fallback", &fallback),
+            ("url failure", &url_failure),
+        ] {
+            assert_eq!(visible(out), expected, "{branch} branch");
+        }
     }
 }

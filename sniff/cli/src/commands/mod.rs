@@ -2666,5 +2666,151 @@ mod tests {
                 "{error}"
             );
         }
+
+        /// A relative base with no owning package and an unreadable current
+        /// directory is a failure, never a root guessed from the spelling.
+        /// The CLI cannot reach this branch (detection fails on the same
+        /// cwd first), so it is proven here. Changing the process cwd is safe
+        /// because nextest runs each test in its own process.
+        #[cfg(unix)]
+        #[test]
+        fn relative_base_with_unreadable_cwd_fails() {
+            let original = std::env::current_dir().unwrap();
+            let gone = tempfile::TempDir::new().unwrap();
+            let gone_path = gone.path().to_path_buf();
+            std::env::set_current_dir(&gone_path).unwrap();
+            gone.close().unwrap();
+            let outcome =
+                resolve_files_link_root(&SniffResult::default(), Some(std::path::Path::new("repo")));
+            std::env::set_current_dir(&original).unwrap();
+            let error = outcome.expect_err("an unreadable cwd cannot anchor a relative base");
+            assert!(
+                error.contains("relative base") && error.contains("current directory"),
+                "{error}"
+            );
+        }
+
+        /// Root preparation and text rendering run on the captured result
+        /// only: under a request collector they record no acquisition work
+        /// (scan, classification, manifest, Git, docs, process, or network
+        /// counters), with or without the filtered verbose list. The one
+        /// filesystem probe allowed is the base canonicalization inside
+        /// `RepoInfo::package_for_dir`, the ownership authority the spec
+        /// mandates; it is paid once per report, never per listed file.
+        #[test]
+        fn root_preparation_and_text_rendering_perform_no_acquisition() {
+            let workspace = tempfile::TempDir::new().unwrap();
+            let repo_root = workspace.path().canonicalize().unwrap();
+            let package_root = repo_root.join("area/lib");
+            std::fs::create_dir_all(package_root.join("src")).unwrap();
+            std::fs::create_dir_all(package_root.join("assets")).unwrap();
+            git2::Repository::init(&repo_root).unwrap();
+            std::fs::write(
+                repo_root.join("Cargo.toml"),
+                "[workspace]\nmembers = [\"area/lib\"]\n",
+            )
+            .unwrap();
+            std::fs::write(
+                package_root.join("Cargo.toml"),
+                "[package]\nname = \"sample\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+            )
+            .unwrap();
+            std::fs::write(package_root.join("src/lib.rs"), "pub fn sample() {}\n").unwrap();
+            std::fs::write(package_root.join("assets/logo.png"), b"\x89PNG\r\n\x1a\n").unwrap();
+
+            // The `files` command's request shape, captured outside the
+            // collector so only the post-capture work is measured below.
+            let plan = DetectionPlan::new()
+                .without_os()
+                .without_hardware()
+                .without_network()
+                .filesystem(
+                    FilesystemRequest::new()
+                        .git(GitRequest::identity())
+                        .repo(RepoRequest::structure())
+                        .without_docs()
+                        .without_formatting(),
+                )
+                .base_dir(package_root.clone());
+            let result = detect_with_plan(plan).expect("fixture detection succeeds");
+            let filter = FilesFilter {
+                association: Some(sniff::filesystem::FileAssociation::Image),
+            };
+
+            let acquisition = |counters: &std::collections::BTreeMap<String, u64>| {
+                counters
+                    .iter()
+                    .filter(|(name, value)| {
+                        **value > 0
+                            && ["filesystem.", "git.", "process.", "remote.", "network."]
+                                .iter()
+                                .any(|prefix| name.starts_with(prefix))
+                    })
+                    .map(|(name, value)| (name.clone(), *value))
+                    .collect::<std::collections::BTreeMap<String, u64>>()
+            };
+            let authority = {
+                let collector = sniff::performance::PerformanceCollector::new_shared();
+                let repo = result
+                    .filesystem
+                    .as_ref()
+                    .and_then(|fs| fs.repo.as_ref())
+                    .expect("fixture repository captured");
+                sniff::performance::with_current_collector(Some(collector.clone()), || {
+                    assert!(repo.package_for_dir(&package_root).is_some());
+                });
+                acquisition(&collector.snapshot(std::time::Duration::ZERO).counters)
+            };
+            assert!(
+                authority
+                    .keys()
+                    .all(|name| name == sniff::performance::counters::FS_CANONICALIZATIONS),
+                "the ownership lookup probes nothing but the base: {authority:?}"
+            );
+
+            for verbose in [0_u8, 1] {
+                let collector = sniff::performance::PerformanceCollector::new_shared();
+                let text =
+                    sniff::performance::with_current_collector(Some(collector.clone()), || {
+                        let link_root = (verbose > 0).then(|| {
+                            resolve_files_link_root(&result, Some(&package_root))
+                                .expect("link root resolves")
+                        });
+                        output::render_text(
+                            &result,
+                            verbose,
+                            OutputFilter::Files,
+                            0,
+                            &DocsFilter::default(),
+                            &filter,
+                            link_root.as_deref(),
+                            None,
+                            Some(&package_root),
+                            false,
+                        )
+                    });
+                let measured = acquisition(&collector.snapshot(std::time::Duration::ZERO).counters);
+                let expected = if verbose > 0 {
+                    authority.clone()
+                } else {
+                    std::collections::BTreeMap::new()
+                };
+                assert_eq!(
+                    measured, expected,
+                    "verbose={verbose}: rendering captured results must not acquire"
+                );
+                let visible = biscuit_terminal::prelude::strip_escape_codes(&text);
+                assert_eq!(
+                    visible.contains("Files:"),
+                    verbose > 0,
+                    "verbose={verbose} must exercise the intended path:\n{visible}"
+                );
+                if verbose > 0 {
+                    let expected = std::path::Path::new("assets").join("logo.png");
+                    let label = expected.to_string_lossy().replace('\\', "\\\\");
+                    assert!(visible.contains(&label), "{visible}");
+                }
+            }
+        }
     }
 }

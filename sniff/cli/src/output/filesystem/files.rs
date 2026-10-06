@@ -211,7 +211,7 @@ mod tests {
 
     /// Strips renderer styling so assertions are independent of the test
     /// host's detected terminal capabilities (a non-tty harness renders the
-    /// `[label](url)` link fallback instead of OSC8).
+    /// file list without OSC8 links).
     fn visible(rendered: &str) -> String {
         biscuit_terminal::prelude::strip_escape_codes(rendered)
     }
@@ -265,13 +265,16 @@ mod tests {
 
     #[test]
     fn file_list_precedes_framework_and_language_details() {
+        use sniff::filesystem::{FileAssociation, FrameworkKind, FrameworkStats, ProgrammingLanguage};
+        // An association filter keeps only its own detail projection, so each
+        // detail heading is reached through the filter that retains it.
         let files = FileAssociationBreakdown {
-            by_association: vec![stats_with_files(
-                sniff::filesystem::FileAssociation::ProgrammingLanguage,
-                &["src/main.rs"],
-            )],
+            by_association: vec![
+                stats_with_files(FileAssociation::ProgrammingLanguage, &["src/main.rs"]),
+                stats_with_files(FileAssociation::FrameworkFile, &["web/App.vue"]),
+            ],
             by_language: vec![sniff::filesystem::ProgrammingLanguageStats {
-                language: sniff::filesystem::ProgrammingLanguage::Rust,
+                language: ProgrammingLanguage::Rust,
                 language_type: sniff::filesystem::ProgrammingLanguageType::CompiledBinary,
                 direct_file_count: 1,
                 framework_file_count: 0,
@@ -281,17 +284,60 @@ mod tests {
                 direct_files: vec![PathBuf::from("src/main.rs")],
                 framework_files: vec![],
             }],
+            by_framework: vec![FrameworkStats {
+                framework: FrameworkKind::Vue,
+                file_count: 1,
+                explicit_file_count: 1,
+                inferred_file_count: 0,
+                related_languages: vec![],
+                files: vec![PathBuf::from("web/App.vue")],
+            }],
             ..FileAssociationBreakdown::default()
         };
-        let filter = FilesFilter {
-            association: Some(sniff::filesystem::FileAssociation::ProgrammingLanguage),
-        };
-        let rendered = render_files_section(&files, 1, &filter, Some(Path::new("/work")));
-        let text = visible(&rendered);
-        let heading = text.find("Files:").expect("list heading");
-        let languages = text.find("Languages:").expect("language details");
-        assert!(heading < languages, "{text}");
-        assert!(text.contains("src/main.rs"), "{text}");
+        for (association, path, details) in [
+            (FileAssociation::ProgrammingLanguage, "src/main.rs", "Languages: Rust (1)"),
+            (FileAssociation::FrameworkFile, "web/App.vue", "Frameworks: Vue (1)"),
+        ] {
+            let filter = FilesFilter {
+                association: Some(association),
+            };
+            let rendered = render_files_section(&files, 1, &filter, Some(Path::new("/work")));
+            let text = visible(&rendered);
+            let heading = text.find("Files:").expect("list heading");
+            let entry = text.find(path).expect("listed path");
+            let detail = text.find(details).expect("retained details");
+            assert!(heading < entry && entry < detail, "{association:?}: {text}");
+        }
+    }
+
+    #[test]
+    fn every_category_projection_keeps_bracketed_labels_literal() {
+        use sniff::filesystem::FileAssociation;
+        for (association, extension) in [
+            (FileAssociation::Image, "png"),
+            (FileAssociation::ProgrammingLanguage, "rs"),
+            (FileAssociation::FrameworkFile, "vue"),
+            (FileAssociation::Unknown, "zzz"),
+        ] {
+            let names = [
+                format!("dir[x]/ordinary.{extension}"),
+                format!("photo[x].{extension}"),
+            ];
+            let name_refs: Vec<&str> = names.iter().map(String::as_str).collect();
+            let files = FileAssociationBreakdown {
+                by_association: vec![stats_with_files(association, &name_refs)],
+                ..FileAssociationBreakdown::default()
+            };
+            let filter = FilesFilter {
+                association: Some(association),
+            };
+            let rendered = render_files_section(&files, 1, &filter, Some(Path::new("/work")));
+            let text = visible(&rendered);
+            let list = &text[text.find("Files:").expect("list heading")..];
+            let expected = format!("Files:\n- {}\n- {}\n", names[0], names[1]);
+            assert!(list.starts_with(&expected), "{association:?}: {list:?}");
+            assert!(!text.contains("\\]"), "{association:?}: {text:?}");
+        }
     }
 
     #[test]
@@ -417,9 +463,16 @@ mod tests {
         let rendered = render_files_section(&files, 1, &filter, Some(&root));
         let text = visible(&rendered);
         assert!(text.contains("vanished/gone.png"), "{text}");
+        // The section's terminal is host-detected (no OSC8 under a test
+        // harness), so prove the link on an OSC8-capable terminal.
+        let linked = render_file_list(
+            &files.by_association[0].files,
+            &root,
+            &Terminal::new_optimistic(200),
+        );
         assert!(
-            rendered.contains("file://"),
-            "the removed file keeps its hyperlink:\n{rendered}"
+            linked.contains("\x1b]8;;file://"),
+            "the removed file keeps its hyperlink:\n{linked:?}"
         );
     }
 }
