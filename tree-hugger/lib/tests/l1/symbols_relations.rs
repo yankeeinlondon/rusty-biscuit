@@ -633,3 +633,96 @@ fn relations_need_only_the_parse_pass() {
     assert_eq!(local.relations.implements.len(), 4);
     assert!(local.relations.members.is_empty(), "containment is not computed");
 }
+
+/// A generated file whose declarations each write bases or impls: header,
+/// then `body(i)` for every `i < n`.
+struct RelationShape {
+    label: &'static str,
+    extension: &'static str,
+    header: &'static str,
+    body: fn(usize) -> String,
+}
+
+const RELATION_SHAPES: &[RelationShape] = &[
+    RelationShape {
+        label: "Rust modules with a supertrait, a trait impl and an external impl each",
+        extension: "rs",
+        header: "pub trait Base {}\n",
+        body: |i| {
+            format!(
+                "mod m{i} {{ pub trait T: super::Base + Clone {{}} pub struct S;\n    \
+                 impl T for S {{ fn m(&self) {{}} }} impl super::Base for S {{}} impl other::X for S {{}} }}\n"
+            )
+        },
+    },
+    RelationShape {
+        label: "TypeScript classes extending and implementing",
+        extension: "ts",
+        header: "interface I {}\nclass Root {}\n",
+        body: |i| format!("class C{i} extends Root implements I, lib.J<number> {{}}\n"),
+    },
+    RelationShape {
+        label: "Java nested classes extending an outer type",
+        extension: "java",
+        header: "interface I {}\n",
+        body: |i| format!("class O{i} {{ static class Base {{}} static class C extends Base implements I {{}} }}\n"),
+    },
+    RelationShape {
+        label: "C++ namespaces with a local and an external base",
+        extension: "cpp",
+        header: "struct B {};\n",
+        body: |i| format!("namespace n{i} {{ struct B {{}}; struct C : public B, virtual ext::D {{}}; }}\n"),
+    },
+    RelationShape {
+        label: "Python classes with positional bases",
+        extension: "py",
+        header: "class Base:\n    pass\n",
+        body: |i| format!("class C{i}(Base, mod.Other, metaclass=M):\n    pass\n"),
+    },
+];
+
+/// Resolving written bases and Rust impls stays linear in the declarations:
+/// the declaration index is built once per file and each target is looked
+/// up in it, never by rescanning the file per declaration. Results are
+/// checked at both sizes so the shapes are known to produce relations.
+#[test]
+fn relation_resolution_grows_linearly_with_declarations() {
+    use crate::symbols_shared_context::{LARGE, SMALL, grows_linearly};
+
+    let dir = tempfile::TempDir::new().expect("temp");
+    let mut failures = Vec::new();
+    for shape in RELATION_SHAPES {
+        let mut measured = Vec::new();
+        for declarations in [SMALL, LARGE] {
+            let mut source = shape.header.to_string();
+            for idx in 0..declarations {
+                source.push_str(&(shape.body)(idx));
+            }
+            let path = dir.path().join(format!("shape_{declarations}.{}", shape.extension));
+            std::fs::write(&path, source).expect("write shape");
+            let file = TreeFile::new(&path).expect("parse");
+            let before = tree_hugger::work_counters();
+            let index = file.symbol_index_v2().expect("complete index");
+            let work = tree_hugger::work_counters().since(before);
+            assert_eq!(work.relation_links, 1, "{}: one relation link", shape.label);
+            let resolved = index
+                .symbols
+                .iter()
+                .flat_map(|record| record.relations.extends.iter().chain(&record.relations.implements))
+                .filter(|target| target.id.is_some())
+                .count();
+            assert!(resolved >= declarations, "{}: {resolved} resolved targets for {declarations}", shape.label);
+            measured.push((work.shared_context_steps, index.symbols.len()));
+        }
+        let [(small_steps, _), (large_steps, large_records)] = measured[..] else {
+            unreachable!("two sizes")
+        };
+        if !grows_linearly(small_steps, large_steps, large_records) {
+            failures.push(format!(
+                "{}: {small_steps} steps for {SMALL} declarations, {large_steps} for {LARGE} ({large_records} records)",
+                shape.label
+            ));
+        }
+    }
+    assert!(failures.is_empty(), "relation resolution grew faster than the declarations:\n{}", failures.join("\n"));
+}

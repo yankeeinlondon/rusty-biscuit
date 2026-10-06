@@ -762,3 +762,50 @@ fn new_record_fields_read_per_shape() {
     assert!(serde_json::from_str::<SymbolRecord>(&measured).is_ok(), "control for the trailing cell");
     assert!(serde_json::from_str::<SymbolRecord>(&format!("{measured} trailing")).is_err(), "trailing content");
 }
+
+/// The older `SymbolInfo` model has no slot for the declaration facts that
+/// records now carry, so `SymbolRecord -> SymbolInfo -> SymbolRecord` is
+/// lossy for them, by design: structured generic parameters and
+/// constraints, `extends`/`implements`, raw attributes, the `metrics` facet
+/// (and so `lines`), and every modifier other than `Static`,
+/// `StaticStorage` and `Async` come back empty. Pinned over every source of
+/// the generics, modifiers, body-lines and relations matrices; each loss
+/// must actually occur somewhere, so a fixed adapter flips this test.
+#[test]
+fn record_only_declaration_facts_are_lost_through_the_older_model() {
+    let dir = tempfile::TempDir::new().expect("temp");
+    let mut lost = [0usize; 6];
+    for (label, path) in crate::symbols_relations::write_declaration_fact_sources(dir.path()) {
+        let index = TreeFile::new(&path).expect("parse").symbol_index_v2().expect("complete index");
+        for record in index.symbols {
+            let cell = format!("{label}: `{}`", record.identity.qualified_name);
+            let back = SymbolRecord::from(SymbolInfo::try_from(record.clone()).expect("named record"));
+            let kept: Vec<Modifier> = record
+                .modifiers
+                .iter()
+                .filter(|modifier| matches!(modifier, Modifier::Static | Modifier::StaticStorage | Modifier::Async))
+                .cloned()
+                .collect();
+            assert_eq!(back.modifiers, kept, "{cell}: modifiers");
+            assert!(back.type_info.generic_params.is_empty(), "{cell}: generic parameters");
+            assert!(back.type_info.constraints.is_empty(), "{cell}: constraints");
+            assert!(back.relations.extends.is_empty(), "{cell}: extends");
+            assert!(back.relations.implements.is_empty(), "{cell}: implements");
+            assert!(back.attributes.is_empty(), "{cell}: attributes");
+            assert!(back.metrics.is_none(), "{cell}: metrics");
+
+            lost[0] += usize::from(!record.type_info.generic_params.is_empty());
+            lost[1] += usize::from(!record.type_info.constraints.is_empty());
+            lost[2] += usize::from(!record.relations.extends.is_empty() || !record.relations.implements.is_empty());
+            lost[3] += usize::from(!record.attributes.is_empty());
+            lost[4] += usize::from(record.metrics.as_ref().is_some_and(|metrics| metrics.lines.is_some()));
+            lost[5] += usize::from(back.modifiers.len() < record.modifiers.len());
+        }
+    }
+    for (fact, count) in ["generic parameters", "constraints", "relations", "attributes", "lines", "modifiers"]
+        .iter()
+        .zip(lost)
+    {
+        assert!(count > 0, "no record lost its {fact}: the adapter now carries it; update the docs and this test");
+    }
+}

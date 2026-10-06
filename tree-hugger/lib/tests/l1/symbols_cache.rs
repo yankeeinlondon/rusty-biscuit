@@ -1040,3 +1040,133 @@ fn warm_enum_case_payloads_equal_uncached_results() {
         }
     }
 }
+
+/// Every source of the generics, modifiers, body-lines and relations
+/// matrices (and the Rust impls) is stored complete, served warm as a real
+/// `Hit` with no work, and projected to each narrower query exactly as an
+/// uncached query computes it: generic parameters, modifiers, attributes and
+/// relation targets kept, Rust impl containers and `metrics` dropped where
+/// the query does not ask for them.
+#[test]
+fn declaration_fact_sources_are_warm_hits_and_project_to_uncached_queries() {
+    let method: &[SymbolKindV2] = &[SymbolKindV2::Method];
+    let cells: [(Option<&[SymbolKindV2]>, &[Capability]); 6] = [
+        (None, &[Capability::Declarations]),
+        (None, &[Capability::Containment]),
+        (None, &[Capability::Metrics]),
+        (Some(method), &[Capability::Declarations]),
+        (Some(method), &[Capability::Containment]),
+        (Some(&TYPE_KINDS), &[Capability::Containment, Capability::Metrics]),
+    ];
+    let sources = TempDir::new().expect("sources");
+    let dir = TempDir::new().expect("temp");
+    let cache = cache_in(&dir);
+    let complete = SymbolQuery::complete_index();
+    let mut dropped_containers = 0usize;
+    let mut dropped_lines = 0usize;
+    let mut kept_relations = 0usize;
+
+    for (label, path) in crate::symbols_relations::write_declaration_fact_sources(sources.path()) {
+        let expected = uncached(&path, &complete);
+        let (lookup, cold, _) = cached(&cache, read(&path), &complete);
+        assert_eq!(lookup, CacheLookup::Miss(CacheMiss::Absent), "{label}: cold");
+        assert_eq!(cold, expected, "{label}: cold result");
+        let (lookup, warm, work) = cached(&cache, read(&path), &complete);
+        assert_eq!(lookup, CacheLookup::Hit, "{label}: warm");
+        assert_eq!(work, WorkCounters::default(), "{label}: a complete hit did work");
+        assert_eq!(warm, expected, "{label}: warm result");
+
+        for (kinds, capabilities) in cells {
+            let mut query = SymbolQuery::new().capabilities(capabilities.iter().copied());
+            if let Some(kinds) = kinds {
+                query = query.kinds(kinds.iter().copied());
+            }
+            let cell = format!("{label}: kinds {kinds:?}, capabilities {capabilities:?}");
+            let (lookup, served, work) = cached(&cache, read(&path), &query);
+            assert_eq!(lookup, CacheLookup::Hit, "{cell}");
+            assert_eq!(work, WorkCounters::default(), "{cell}: work");
+            assert_eq!(served, uncached(&path, &query), "{cell}");
+            if !query.requires(Capability::Containment) {
+                dropped_containers += count_records(&expected, |record| !record["relations"]["container"].is_null());
+            }
+            if !query.requires(Capability::Metrics) {
+                dropped_lines += count_records(&expected, |record| record["metrics"]["lines"].is_u64());
+            }
+            kept_relations += count_records(&served, |record| {
+                record["relations"]["extends"].as_array().is_some_and(|list| !list.is_empty())
+                    || record["relations"]["implements"].as_array().is_some_and(|list| !list.is_empty())
+            });
+        }
+    }
+    assert!(dropped_containers > 0, "no projection removed a container");
+    assert!(dropped_lines > 0, "no projection removed `metrics.lines`");
+    assert!(kept_relations > 0, "no projection kept a relation");
+}
+
+/// Widening a declarations-only entry of the same sources: Containment is
+/// added from the stored records alone, except in Rust, where an impl
+/// member's container is its impl's resolved self type, which no record
+/// retains, so it parses once; Metrics always parses once. Each widened
+/// result equals an uncached query, the entry then records every request,
+/// and each request (and the declarations-only narrowing) is a `Hit` with
+/// no work.
+#[test]
+fn declaration_fact_entries_widen_by_containment_and_metrics() {
+    let sources = TempDir::new().expect("sources");
+    let declarations = SymbolQuery::new();
+    let containment = SymbolQuery::new().capabilities([Capability::Containment]);
+    let metrics = SymbolQuery::new().capabilities([Capability::Containment, Capability::Metrics]);
+    let mut rust_rows = 0usize;
+
+    for (label, path) in crate::symbols_relations::write_declaration_fact_sources(sources.path()) {
+        let is_rust = path.extension().is_some_and(|extension| extension == "rs");
+        rust_rows += usize::from(is_rust);
+        let dir = TempDir::new().expect("temp");
+        let cache = cache_in(&dir);
+        cached(&cache, read(&path), &declarations);
+
+        for (query, parsed) in [(&containment, is_rust), (&metrics, true)] {
+            let cell = format!("{label}: widen to {query:?}");
+            let (lookup, widened, work) = cached(&cache, read(&path), query);
+            assert_eq!(lookup, CacheLookup::WidenedCapabilities { parsed }, "{cell}");
+            assert_eq!(work.parser_constructions, u64::from(parsed), "{cell}: parses");
+            assert_eq!(work.definition_captures, u64::from(parsed), "{cell}: captures");
+            assert_eq!(work.relation_links, u64::from(parsed), "{cell}: relation links");
+            assert_eq!(work.diagnostics_runs, 0, "{cell}: diagnostics");
+            assert_eq!(widened, uncached(&path, query), "{cell}: widened result");
+        }
+        let entry = read_entry(&only_entry(&dir));
+        assert_eq!(coverage_query(&entry), metrics, "{label}: the entry records every request");
+        for query in [&declarations, &containment, &metrics] {
+            let (lookup, served, work) = cached(&cache, read(&path), query);
+            assert_eq!(lookup, CacheLookup::Hit, "{label}: then {query:?}");
+            assert_eq!(work, WorkCounters::default(), "{label}: then {query:?}");
+            assert_eq!(served, uncached(&path, query), "{label}: then {query:?}");
+        }
+    }
+    assert!(rust_rows >= 5, "the Rust rows exercise the parsing path ({rust_rows})");
+}
+
+/// An entry of the Rust impl source whose records carry the previous schema
+/// version (4.0, without `metrics.lines`) is never served or widened.
+#[test]
+fn a_declaration_fact_entry_of_an_older_record_schema_is_a_miss() {
+    let sources = TempDir::new().expect("sources");
+    let (label, path) = crate::symbols_relations::write_declaration_fact_sources(sources.path())
+        .into_iter()
+        .find(|(label, _)| label.starts_with("rust impls"))
+        .expect("the Rust impl source");
+    let dir = TempDir::new().expect("temp");
+    let cache = cache_in(&dir);
+    cached(&cache, read(&path), &SymbolQuery::new());
+    let entry_path = only_entry(&dir);
+    let mut entry = read_entry(&entry_path);
+    for record in entry["records"].as_array_mut().expect("records") {
+        record["schema_version"] = json!({ "major": 4, "minor": 0 });
+    }
+    write_entry(&entry_path, &entry);
+    let query = SymbolQuery::new().capabilities([Capability::Containment]);
+    let (lookup, served, _) = cached(&cache, read(&path), &query);
+    assert_eq!(lookup, CacheLookup::Miss(CacheMiss::Mismatched("record schema version")), "{label}");
+    assert_eq!(served, uncached(&path, &query), "{label}");
+}

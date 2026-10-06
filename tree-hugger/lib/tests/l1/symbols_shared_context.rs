@@ -25,8 +25,8 @@ use tree_hugger::{
     Capability, SymbolKindV2, SymbolQuery, SymbolRecord, SymbolRef, TreeFile, VisibilityLevel, work_counters,
 };
 
-const SMALL: usize = 200;
-const LARGE: usize = 2 * SMALL;
+pub const SMALL: usize = 200;
+pub const LARGE: usize = 2 * SMALL;
 
 /// One generated file shape: a header, then `body(i)` for every `i < n`,
 /// then a footer.
@@ -180,7 +180,7 @@ fn analyze(shape: &Shape, declarations: usize, analysis: Analysis) -> (u64, Vec<
 /// Linear growth doubles the steps (plus the header's constant share); a
 /// per-declaration rescan would quadruple them. The steps per record are
 /// bounded whatever the shape.
-fn grows_linearly(small_steps: u64, large_steps: u64, large_records: usize) -> bool {
+pub fn grows_linearly(small_steps: u64, large_steps: u64, large_records: usize) -> bool {
     large_steps <= 2 * small_steps + 64 && large_steps <= 16 * large_records as u64
 }
 
