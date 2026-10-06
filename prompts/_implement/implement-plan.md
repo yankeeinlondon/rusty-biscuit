@@ -132,8 +132,6 @@ Your task is to implement phase {{phase}} of the plan found in '@{{area}}/{{plan
 > **NOTE:** this plan is based on the specification file: {{spec}}
 ::end-block
 
-::file ../_test-tiers.md
-
 ## Logging
 
 You will log your implementation progress to: {{log}}
@@ -204,6 +202,34 @@ You are done when:
 - all tests meet the design requirements for testing (stated above)
 - all lints are passing (using `just lint` in the {{ctx.current_package_area}} package area)
 - all GFM tasks/todos in the plan have been completed (and have been marked as complete)
+
+### When the Test and Lint Gates May Be Skipped
+
+`just test` and `just lint` are required unless the CI scope calculator shows
+that this phase changed nothing any package reads. You do not decide that by
+judgment; you decide it by running this from the repository root after all of
+the phase's edits (including plan, log, and spec frontmatter) are saved:
+
+```sh
+git status --porcelain --untracked-files=all | awk '{print $NF}' \
+  | xargs python3 scripts/ci/affected_scope.py
+```
+
+The uncommitted working tree is exactly this phase's changes, because each
+earlier phase is committed when it succeeds.
+
+- if the output has `"packages": []`, the gates may be skipped
+    - record the command and its `packages` / `change_class` values in the log
+      under `## Phase {{phase}}`, and state in your final summary that the
+      gates were skipped and why
+- in every other case run both gates, including when:
+    - `packages` is non-empty: a "documentation" file such as a Markdown
+      fixture, golden file, or `include_str!` target counts as source when
+      compiled code reads it, and the calculator knows that while you may not
+    - the command errors or its output cannot be read
+    - you listed any file in `source_files_during_phase_{{phase}}`
+- never skip a gate because the change is small, "only a rename", "only
+  comments", or "only tests"; those all compile
     - NOTE: you should mark tasks as complete as soon as you believe they are complete (e.g., implemented and any relevant tests suggest this is complete). Doing this allows an immediate feedback loop but also helps in recovering from a phase that didn't complete
 
 ### Plan and Log Frontmatter
@@ -275,7 +301,7 @@ complete until they are saved to disk.
 ::end-block
 - Do NOT commit or stage files to git, this will be done as a separate process.
 - Report a summary of what you did including all the source files you changed.
-- You do not need to run tests across the entire monorepo as this will take far too long. Only 
+- You do not need to run tests across the entire monorepo as this will take far too long. Only run the gates for the '{{ctx.current_package_area}}' package area, and skip them only as described in "When the Test and Lint Gates May Be Skipped".
 - once the implementation is complete update the '{{ctx.current_package_area}}' if there were any notable changes needed in this skill
 - you are running as part of a non-interactive session! Do not ask the user for feedback or permissions as they can not answer!
 
