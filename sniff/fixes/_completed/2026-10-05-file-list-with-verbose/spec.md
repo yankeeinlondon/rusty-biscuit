@@ -29,7 +29,7 @@ packages:
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-05
-review_iterations: 0
+review_iterations: 2
 clarified: true
 clarified_by: codex/gpt-6.1-sol
 needs_rulings: false
@@ -46,6 +46,7 @@ message_to_agent: |-
     rather than \xNN so it cannot collide with the invalid byte of the
     same value (Phase 2 design decision 1); override there if a different
     spelling is wanted.
+completed: true
 ---
 
 # File Lists for Filtered Verbose Association Reports
