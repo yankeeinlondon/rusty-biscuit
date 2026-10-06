@@ -1779,6 +1779,17 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             std::process::exit(code);
         }
     } else {
+        // The filtered verbose file list links against the root its captured
+        // paths are relative to. Resolving it here — before any stdout is
+        // written — keeps `render_text` infallible; JSON, unfiltered, and
+        // non-verbose reports never resolve a root, so they cannot gain
+        // root-resolution failures.
+        let files_link_root = match (output_filter, cli.verbose > 0, files_filter.association) {
+            (OutputFilter::Files, true, Some(_)) => {
+                Some(resolve_files_link_root(&result, base_dir.as_deref())?)
+            }
+            _ => None,
+        };
         let text = output::render_text(
             &result,
             cli.verbose,
@@ -1786,6 +1797,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             history_count,
             &docs_filter,
             &files_filter,
+            files_link_root.as_deref(),
             repo_action.as_ref(),
             base_dir.as_deref(),
             latest_versions_enabled,
@@ -1799,6 +1811,68 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     Ok(())
+}
+
+/// Resolves the root that a filtered verbose `files` list's captured paths
+/// are relative to.
+///
+/// The scan stores each captured path relative to the owning package root
+/// when the effective base lies inside one — selected through
+/// [`sniff::filesystem::repo::types::RepoInfo::package_for_dir`], the same
+/// authority the scan itself used — otherwise relative to the effective base
+/// itself. A relative base absolutizes lexically against the current
+/// directory; nothing is probed or canonicalized per file.
+///
+/// ## Errors
+///
+/// The root cannot be established when a relative base (or the invocation
+/// directory itself) meets an unusable current directory, or when a relative
+/// package root has no absolute repository root to anchor it. The caller
+/// reports the failure before any stdout is written and exits nonzero
+/// rather than linking against a guessed root.
+fn resolve_files_link_root(
+    result: &SniffResult,
+    base_dir: Option<&std::path::Path>,
+) -> Result<std::path::PathBuf, String> {
+    let dir = match base_dir {
+        Some(base) => base.to_path_buf(),
+        // Mirror the library's own effective base: the current directory,
+        // falling back to `.` when it is unreadable.
+        None => std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
+    };
+    // No repository means no owning package: the effective base is the root.
+    let owning = result
+        .filesystem
+        .as_ref()
+        .and_then(|fs| fs.repo.as_ref())
+        .and_then(|repo| repo.package_for_dir(&dir).map(|package| (repo, package)));
+    if let Some((repo, package)) = owning {
+        if package.path.is_absolute() {
+            return Ok(package.path.clone());
+        }
+        let anchored = repo.root.join(&package.path);
+        if anchored.is_absolute() {
+            return Ok(anchored);
+        }
+        return Err(unanchored_package_root_message(&package.path));
+    }
+    if dir.is_absolute() {
+        return Ok(dir);
+    }
+    let cwd = std::env::current_dir().map_err(|_| {
+        format!(
+            "cannot establish the link root for the file list: relative base '{}' requires a readable current directory",
+            dir.display()
+        )
+    })?;
+    Ok(cwd.join(dir))
+}
+
+fn unanchored_package_root_message(package_root: &std::path::Path) -> String {
+    format!(
+        "cannot establish the link root for the file list: package root '{}' is relative and no absolute repository root anchors it",
+        package_root.display()
+    )
 }
 
 /// Prints shell completions setup instructions.
@@ -2467,5 +2541,130 @@ mod tests {
             "--completions".to_string(),
             "zsh".to_string(),
         ]));
+    }
+
+    mod files_link_root {
+        use super::*;
+
+        fn result_with_repo(repo: sniff::filesystem::repo::types::RepoInfo) -> SniffResult {
+            SniffResult {
+                filesystem: Some(sniff::filesystem::FilesystemInfo {
+                    repo: Some(repo),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }
+        }
+
+        fn package(
+            path: &str,
+            relative: &str,
+        ) -> sniff::filesystem::repo::types::Package {
+            sniff::filesystem::repo::types::Package {
+                path: std::path::PathBuf::from(path),
+                relative: relative.to_string(),
+                ..Default::default()
+            }
+        }
+
+        #[test]
+        fn owning_package_root_wins_over_base() {
+            let workspace = tempfile::TempDir::new().unwrap();
+            let repo_root = workspace.path().canonicalize().unwrap();
+            let package_root = repo_root.join("area/lib");
+            std::fs::create_dir_all(package_root.join("src")).unwrap();
+            let repo = sniff::filesystem::repo::types::RepoInfo {
+                root: repo_root.clone(),
+                packages: Some(vec![package(
+                    package_root.to_str().unwrap(),
+                    "area/lib",
+                )]),
+                ..Default::default()
+            };
+            // Invoking from a package subdirectory must not make that
+            // subdirectory the link root: the captured paths are relative to
+            // the package root.
+            let base = package_root.join("src");
+            let resolved = resolve_files_link_root(&result_with_repo(repo), Some(&base)).unwrap();
+            assert_eq!(resolved, package_root);
+        }
+
+        #[test]
+        fn base_without_owning_package_is_the_root() {
+            let workspace = tempfile::TempDir::new().unwrap();
+            let repo_root = workspace.path().canonicalize().unwrap();
+            let package_root = repo_root.join("area/lib");
+            std::fs::create_dir_all(&package_root).unwrap();
+            std::fs::create_dir_all(repo_root.join("unowned")).unwrap();
+            let repo = sniff::filesystem::repo::types::RepoInfo {
+                root: repo_root.clone(),
+                packages: Some(vec![package(
+                    package_root.to_str().unwrap(),
+                    "area/lib",
+                )]),
+                ..Default::default()
+            };
+            // A directory no package owns falls back to the effective base.
+            let base = repo_root.join("unowned");
+            let resolved = resolve_files_link_root(&result_with_repo(repo), Some(&base)).unwrap();
+            assert_eq!(resolved, base);
+        }
+
+        #[test]
+        fn no_repository_uses_the_absolute_base() {
+            let result = SniffResult::default();
+            let base = tempfile::TempDir::new().unwrap();
+            let resolved = resolve_files_link_root(&result, Some(base.path())).unwrap();
+            assert_eq!(resolved, base.path());
+        }
+
+        #[test]
+        fn relative_base_absolutizes_lexically_against_cwd() {
+            let result = SniffResult::default();
+            let resolved =
+                resolve_files_link_root(&result, Some(std::path::Path::new("somewhere/inside")))
+                    .unwrap();
+            assert_eq!(
+                resolved,
+                std::env::current_dir().unwrap().join("somewhere/inside")
+            );
+        }
+
+        #[test]
+        fn relative_package_root_anchors_on_absolute_repo_root() {
+            // A repo frame anchored at the live working directory keeps the
+            // fixture absolute on every OS; the stored package root and the
+            // queried dir stay in that frame's relative spelling.
+            let anchor = std::env::current_dir().unwrap();
+            let repo = sniff::filesystem::repo::types::RepoInfo {
+                root: anchor.clone(),
+                packages: Some(vec![package("area/lib", "area/lib")]),
+                ..Default::default()
+            };
+            let dir = anchor.join("area/lib/src");
+            let resolved = resolve_files_link_root(&result_with_repo(repo), Some(&dir)).unwrap();
+            assert_eq!(resolved, anchor.join("area/lib"));
+        }
+
+        #[test]
+        fn relative_package_root_without_absolute_anchor_fails() {
+            // Ruling 2(b): a relative package root with no absolute repository
+            // root to anchor it is a failure, never a guessed root. The
+            // platform-neutral stand-in for a cwd that cannot be read.
+            let repo = sniff::filesystem::repo::types::RepoInfo {
+                root: std::path::PathBuf::from("."),
+                packages: Some(vec![package("area/lib", "area/lib")]),
+                ..Default::default()
+            };
+            let error = resolve_files_link_root(
+                &result_with_repo(repo),
+                Some(std::path::Path::new("area/lib/src")),
+            )
+            .unwrap_err();
+            assert!(
+                error.contains("package root") && error.contains("relative"),
+                "{error}"
+            );
+        }
     }
 }
