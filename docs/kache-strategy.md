@@ -382,14 +382,22 @@ Swept artifacts come back as link-restores, not recompiles.
 
 ## Other hosts
 
-- **build-linux** (ZFS; `zfs_bclone_enabled=1` on the PVE kernel, yet `cp --reflink=always`
-  from the store to a target directory fails with "operation not permitted", so kache runs in
-  **hardlink mode** there) — the probe does not qualify, so `just init` leaves kache off and
-  never installs it; the below-floor 0.12.0 install found there gets at most the confirmed
-  binary-only upgrade path (2026-09-23 ruling; reality on 2026-09-09:
-  kache 0.12.0 installed, a daemon running, a 39 GiB store at kache's 50 GiB default cap, and
-  sessions had exported `RUSTC_WRAPPER=kache` inside the standing `ci-verification` clone, whose
-  target then held 89 read-only hard links that broke every unwrapped rebuild). The host's
+- **build-linux** — kache is off. The 2026-10-06 store-to-checkout clone probe
+  on ZFS failed with "operation not permitted", so this host does not qualify.
+  A legacy `/usr/local/bin/cargo` shim nevertheless enabled kache 0.12.0 for
+  cold builds (508 cache hits in the preceding 24 hours). It was backed up and
+  replaced with the rustup Cargo proxy. Unix cross-check scripts now explicitly
+  export empty `RUSTC_WRAPPER` and `RUSTC_WORKSPACE_WRAPPER` values before
+  compiling, overriding host configuration as well as automatic shims.
+  One affected checkout held 492 read-only artifacts linked to cache blobs;
+  those were replaced with independent writable copies. A follow-up repaired
+  another 2,372 cache-linked artifacts in six clones. The final scan of 15
+  target trees under `~/coding`, `~/ci-verification`, and `~/scratch` found zero
+  remaining cache links; copied contents and unchanged cache blob metadata
+  were verified. For any future recurrence, verify device/inode identity against the
+  store before repairing links, and never chmod a shared inode. Passing a
+  package feature only bypasses the release build and changes test coverage;
+  it does not repair cache drift. The host's
   `~/.cargo/config.toml` also records that activation disables incremental compilation at ~670 ms
   per edit-rebuild. Sweep is scheduled here by **cron, daily 04:00** (`crontab -l`), logging to
   `~/.local/state/rusty-biscuit-sweep.log`, and it sweeps `~/coding/rusty-biscuit`, not
@@ -399,8 +407,9 @@ Swept artifacts come back as link-restores, not recompiles.
     init's config write cannot land either, which is one more reason the probe keeps it off — and
     `~/.config/systemd/user` is unavailable — hence cron rather than a systemd user timer. The
     kache store therefore sits at kache's own 50 GiB default cap.
-  - The volume is **160 G**, so the 120GB `--maxsize` backstop is not a guard rail on this host:
-    120GB of target plus the rest of the system is ~84% full before pass 4 even fires.
+  - The volume reported **200 G**, with 101 G available on 2026-10-06; the
+    retained kache store was 44.9 GiB. A 120GB target backstop must account for
+    that store and the rest of the system, not just target bytes.
 - **build-win** (ext4 in WSL2) — kache deferred. Hardlink mode means the store is a real second copy,
   and there's one worktree so nothing to dedup against. If adopted: `local_max_size` ~30GiB against
   its 196 G filesystem, or give it a btrfs/XFS-reflink second VHDX (the ext4 probe does not
