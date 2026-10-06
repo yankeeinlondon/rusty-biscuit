@@ -60,11 +60,23 @@
   (#set! reference.kind "namespace"))
 
 ; Function definitions - capture full node for context
-(template_function
-  name: (identifier) @local.definition.function) @local.scope @local.definition.function.context
+; An explicit specialization's name (`template <> void f<int>() {}`,
+; `void N::f<int>()`, `void S::m<int>()`). A `template_function` or
+; `template_method` outside a function declarator is a use (`f<int>()`,
+; `obj.template m<int>()`), never a definition.
+(function_declarator
+  declarator: [
+    (template_function
+      name: (identifier) @local.definition.function)
+    (qualified_identifier
+      name: (template_function
+        name: (identifier) @local.definition.function))
+  ]) @local.scope @local.definition.function.context
 
-(template_method
-  name: (field_identifier) @local.definition.method) @local.scope @local.definition.method.context
+(function_declarator
+  declarator: (qualified_identifier
+    name: (template_method
+      name: (field_identifier) @local.definition.method))) @local.scope @local.definition.method.context
 
 (function_declarator
   declarator: (qualified_identifier

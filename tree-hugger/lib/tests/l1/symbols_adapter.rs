@@ -794,19 +794,23 @@ fn new_record_fields_read_per_shape() {
     assert!(serde_json::from_str::<SymbolRecord>(&format!("{measured} trailing")).is_err(), "trailing content");
 }
 
+crate::symbols_relations::declaration_fact_group_tests!(
+    record_only_declaration_facts_are_lost_through_the_older_model => record_only_facts_are_lost
+);
+
 /// The older `SymbolInfo` model has no slot for the declaration facts that
 /// records now carry, so `SymbolRecord -> SymbolInfo -> SymbolRecord` is
 /// lossy for them, by design: structured generic parameters and
 /// constraints, `extends`/`implements`, raw attributes, the `metrics` facet
 /// (and so `lines` and `cyclomatic`: never invented), and every modifier other than `Static`,
-/// `StaticStorage` and `Async` come back empty. Pinned over every source of
-/// the generics, modifiers, body-lines and relations matrices; each loss
-/// must actually occur somewhere, so a fixed adapter flips this test.
-#[test]
-fn record_only_declaration_facts_are_lost_through_the_older_model() {
+/// `StaticStorage` and `Async` come back empty. Pinned over every
+/// declaration-fact source, one test per corpus group; each loss must
+/// actually occur in the per-language group, so a fixed adapter flips this
+/// test.
+fn record_only_facts_are_lost(group: usize) {
     let dir = tempfile::TempDir::new().expect("temp");
     let mut lost = [0usize; 7];
-    for (label, path) in crate::symbols_relations::write_declaration_fact_sources(dir.path()) {
+    for (label, path) in crate::symbols_relations::write_declaration_fact_group(dir.path(), group) {
         let index = TreeFile::new(&path).expect("parse").symbol_index_v2().expect("complete index");
         for record in index.symbols {
             let cell = format!("{label}: `{}`", record.identity.qualified_name);
@@ -834,6 +838,9 @@ fn record_only_declaration_facts_are_lost_through_the_older_model() {
             lost[5] += usize::from(back.modifiers.len() < record.modifiers.len());
             lost[6] += usize::from(record.metrics.as_ref().is_some_and(|metrics| metrics.cyclomatic.is_some()));
         }
+    }
+    if group != crate::symbols_relations::PER_LANGUAGE_FACT_GROUP {
+        return;
     }
     for (fact, count) in ["generic parameters", "constraints", "relations", "attributes", "lines", "modifiers", "cyclomatic"]
         .iter()

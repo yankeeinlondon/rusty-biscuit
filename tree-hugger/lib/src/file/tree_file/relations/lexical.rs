@@ -163,7 +163,15 @@ enum Directive {
 }
 
 const fn rule(categories: u8, visible_from: usize) -> BindingRule {
-    BindingRule { categories, placement: Placement::Innermost, visible_from, ordered: false, callable: false }
+    BindingRule {
+        categories,
+        placement: Placement::Innermost,
+        visible_from,
+        visible_until: None,
+        local: false,
+        ordered: false,
+        callable: false,
+    }
 }
 
 impl<'a> Lexical<'a> {
@@ -190,6 +198,7 @@ impl<'a> Lexical<'a> {
         };
         let mut stack = vec![root];
         let mut shared = Vec::new();
+        let mut dynamics = Vec::new();
         while let Some(node) = stack.pop() {
             if language == ProgrammingLanguage::Rust && node.kind() == "impl_item" {
                 collected.impls.push(node);
@@ -207,6 +216,7 @@ impl<'a> Lexical<'a> {
             if let Some(rules) = rules {
                 shared.clear();
                 rules.binding_sites(node, source, &mut shared);
+                dynamics.extend(rules.dynamic(node, source));
                 sites.extend(shared.drain(..).filter(|site| !site.is_import).map(|mut site| {
                     // A type parameter never resolves, in a type or a value
                     // position alike.
@@ -230,7 +240,12 @@ impl<'a> Lexical<'a> {
             stack.extend(children.into_iter().rev());
         }
 
-        let tree = ScopeTree::with_rules(rules, root, scope_nodes);
+        let mut tree = ScopeTree::with_rules(rules, root, scope_nodes);
+        // A `with` body or a function holding a direct `eval` may bind any
+        // name: a glob for every lookup that reaches it.
+        for dynamic in dynamics {
+            tree.add_dynamic(dynamic);
+        }
         // One step per scope and per binding site: the walk itself visits
         // each node once, like the parse.
         count_shared_context_steps(tree.len() + sites.len());
@@ -737,6 +752,13 @@ fn scope_role(language: ProgrammingLanguage, node: Node<'_>) -> Option<(Role, bo
             "class_body" => (body, false),
             // A namespace body is a named scope.
             "statement_block" if matches!(parent(), "internal_module" | "module") => return None,
+            _ if node.parent().is_some_and(|parent| {
+                parent.kind() == "with_statement"
+                    && parent.child_by_field_name("body").is_some_and(|body| body.id() == node.id())
+            }) =>
+            {
+                (Role::Plain, true)
+            }
             _ if opens(&[
                 "function_declaration", "function_expression", "function", "generator_function",
                 "generator_function_declaration", "arrow_function", "method_definition", "class_static_block",

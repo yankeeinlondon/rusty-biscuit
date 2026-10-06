@@ -164,6 +164,138 @@ const RECURSION_MATRIX: &[RecursionRow] = &[
     ("javascript direct self-call", "js", "function f(n) { return n && f(n - 1); }\n", &[("f", Yes)]),
     ("python is limited", "py", "def f(n):\n    return f(n - 1)\n\n\ndef g():\n    pass\n", &[("f", Unknown), ("g", Unknown)]),
     ("go is limited", "go", "package p\n\nfunc f() { f() }\n", &[("f", Unknown)]),
+    (
+        "an inline module's call does not reach the parent's function",
+        "rs",
+        "fn f() {}\nmod m { pub fn g() { f(); } }\n",
+        &[("f", No), ("g", No)],
+    ),
+    (
+        "a nested function's own name wins over an enclosing `let`",
+        "rs",
+        "fn outer() { let g = || {}; fn g() { g(); } }\n",
+        &[("g", Yes), ("outer", No)],
+    ),
+    (
+        "a nested `const` cannot call an enclosing `let`",
+        "rs",
+        "fn f() { let x = || {}; const Y: () = x(); }\n",
+        &[("f", No)],
+    ),
+    (
+        "a nested `static` cannot call an enclosing `let`",
+        "rs",
+        "fn f() { let x = || {}; static Y: () = x(); }\n",
+        &[("f", No)],
+    ),
+    (
+        "a closure calling a captured `let` is the closure's (control)",
+        "rs",
+        "fn f() { let x = || {}; let _g = || x(); }\n",
+        &[("f", No)],
+    ),
+    (
+        "the `else` of an `if let` calls the function, not the binding",
+        "rs",
+        "fn f(x: Option<fn()>) { if let Some(f) = x { f(); } else { f(x); } }\n",
+        &[("f", Yes)],
+    ),
+    (
+        "the `else` of a `let` chain calls the function, not the binding",
+        "rs",
+        "fn f(x: Option<fn()>) { if let Some(f) = x && true { f(); } else { f(x); } }\n",
+        &[("f", Yes)],
+    ),
+    (
+        "a `while let` body calls the binding (control)",
+        "rs",
+        "fn f(x: Option<fn()>) { while let Some(f) = x { f(); } }\n",
+        &[("f", Unknown)],
+    ),
+    (
+        "a `for` body calls the binding (control)",
+        "rs",
+        "fn f(xs: Vec<fn()>) { for f in xs { f(); } }\n",
+        &[("f", Unknown)],
+    ),
+    // A named function or generator expression's self-call binds the
+    // expression's own name, which no record carries (the expression is
+    // not extracted as a callable), so it proves nothing about the outer
+    // declaration of that name: the outer function stays `No`.
+    (
+        "a typescript named function expression's self-call is its own",
+        "ts",
+        "function f() {}\nconst g = function f() { f(); };\nfunction h() { const k = function h() { h(); }; }\n",
+        &[("f", No), ("h", No)],
+    ),
+    (
+        "a javascript named function expression's self-call is its own",
+        "js",
+        "function f() {}\nconst g = function f() { f(); };\nfunction h() { const k = function h() { h(); }; }\n",
+        &[("f", No), ("h", No)],
+    ),
+    (
+        "a typescript named generator expression's self-call is its own",
+        "ts",
+        "function f() {}\nconst g = function* f() { f(); };\nfunction h() { const k = function* h() { h(); }; }\n",
+        &[("f", No), ("h", No)],
+    ),
+    (
+        "a javascript named generator expression's self-call is its own",
+        "js",
+        "function f() {}\nconst g = function* f() { f(); };\nfunction h() { const k = function* h() { h(); }; }\n",
+        &[("f", No), ("h", No)],
+    ),
+    (
+        "an outer self-call beside a same-named function expression (control)",
+        "js",
+        "function h() { const k = function h() { h(); }; h(); }\n",
+        &[("h", Yes)],
+    ),
+    (
+        "a typescript `with` body may intercept the self-call",
+        "ts",
+        "function f(obj: any) { with (obj) { f(obj); } }\n",
+        &[("f", Unknown)],
+    ),
+    (
+        "a javascript `with` body may intercept the self-call",
+        "js",
+        "function f(obj) { with (obj) { f(obj); } }\n",
+        &[("f", Unknown)],
+    ),
+    (
+        "a direct `eval` may shadow the function in its body",
+        "js",
+        "function f() { eval(\"1\"); f(); }\n",
+        &[("f", Unknown)],
+    ),
+    (
+        "a file-level `eval` adds no nearer binding (control)",
+        "js",
+        "eval(\"1\");\nfunction f(n) { return n && f(n - 1); }\n",
+        &[("f", Yes)],
+    ),
+    (
+        "a default argument calls the outer function (control)",
+        "ts",
+        "function f() {}\nfunction g(x = f()) { function f() {} }\n",
+        &[("g", No)],
+    ),
+    // Transparent wrappers around the callee keep a proven self-call.
+    ("a parenthesized self-call", "rs", "fn f(n: u32) { if n > 0 { ((f))(n - 1) } }\n", &[("f", Yes)]),
+    ("a parenthesized turbofish self-call", "rs", "fn f<T>() { (f::<T>)(); }\n", &[("f", Yes)]),
+    ("a parenthesized self-call", "ts", "function f(n: number) { if (n) ((f))(n - 1); }\n", &[("f", Yes)]),
+    ("an `as` self-call", "ts", "function f() { (f as () => void)(); }\n", &[("f", Yes)]),
+    ("a `satisfies` self-call", "ts", "function f() { (f satisfies () => void)(); }\n", &[("f", Yes)]),
+    ("a type-assertion self-call", "ts", "function f() { (<() => void>f)(); }\n", &[("f", Yes)]),
+    ("a non-null self-call", "ts", "function f() { f!(); }\n", &[("f", Yes)]),
+    ("a parenthesized self-call", "js", "function f(n) { if (n) ((f))(n - 1); }\n", &[("f", Yes)]),
+    // Not wrappers: the callee is another value, so nothing is proven.
+    ("a self-reference as an argument is no call", "rs", "fn f() { g((f)); }\nfn g(_: fn()) {}\n", &[("f", No)]),
+    ("a dereferenced callee is no self-call", "rs", "fn f() { let p = &f; (*p)(); }\n", &[("f", Unknown)]),
+    ("a sequence callee is no self-call", "js", "function f() { (0, f)(); }\n", &[("f", Unknown)]),
+    ("a conditional callee is no self-call", "ts", "function f(c: boolean) { (c ? f : f)(); }\n", &[("f", Unknown)]),
 ];
 
 #[test]
@@ -426,4 +558,76 @@ fn usages_feed_summaries_but_not_recursion() {
     assert_eq!(usage.kind, OccurrenceKind::Usage);
     let owners: Vec<&str> = f.relations.referenced_by.iter().map(|owner| owner.name.as_str()).collect();
     assert_eq!(owners, ["f", "g"]);
+}
+
+/// A name that crosses a boundary establishing no binding (an inline
+/// module, a nested item, an `if let` past its consequence, a `with` body)
+/// makes no edge in either direction; the binding that is in view does.
+/// A declaration inside a named function or generator expression that calls
+/// the expression's name calls the expression, never the outer declaration
+/// of that name: no edge to it, and it has no caller there.
+#[test]
+fn expression_local_names_make_no_summary_edges() {
+    for extension in ["ts", "js"] {
+        for star in ["", "*"] {
+            let source = format!(
+                "function f() {{}}\nconst g = function{star} f() {{ function inner() {{ f(); }} }};\nfunction later() {{ f(); }}\n"
+            );
+            let file = complete(&source, extension);
+            let outer = file
+                .symbols
+                .iter()
+                .find(|record| record.identity.name == "f" && record.kind == SymbolKindV2::Function)
+                .expect("outer f");
+            let inner = record(&file, "inner");
+            assert!(
+                inner.relations.references.iter().all(|reference| reference.id.as_ref() != Some(&outer.id)),
+                "{extension}{star}: {:#?}",
+                inner.relations
+            );
+            assert_eq!(
+                outer.relations.referenced_by.iter().map(|owner| owner.name.as_str()).collect::<Vec<_>>(),
+                ["later"],
+                "{extension}{star}"
+            );
+        }
+    }
+}
+
+#[test]
+fn boundary_crossing_names_make_no_summary_edges() {
+    let module = complete("fn f() {}\nmod m { pub fn g() { f(); } }\n", "rs");
+    assert!(record(&module, "g").relations.references.iter().all(|reference| reference.id.is_none()));
+    assert!(record(&module, "f").relations.referenced_by.is_empty(), "no caller across the module");
+
+    let nested = complete("fn f() {\n    let x = || {};\n    fn g() { x(); }\n    let _c = || x();\n}\n", "rs");
+    assert!(record(&nested, "g").relations.references.is_empty(), "the nested item cannot capture `x`");
+    assert!(record(&nested, "x").relations.referenced_by.is_empty(), "only the ownerless closure uses `x`");
+
+    let conditional = complete(
+        "fn f() {}\nfn g(x: Option<fn()>) { if let Some(f) = x { f(); } else { f(); } }\n",
+        "rs",
+    );
+    let outer = conditional
+        .symbols
+        .iter()
+        .find(|record| record.identity.name == "f" && record.kind == SymbolKindV2::Function)
+        .expect("outer f");
+    let g = record(&conditional, "g");
+    assert!(
+        g.relations.references.iter().any(|reference| reference.id.as_ref() == Some(&outer.id)),
+        "the `else` call is the outer function's: {:#?}",
+        g.relations.references
+    );
+    assert_eq!(outer.relations.referenced_by.iter().map(|owner| owner.name.as_str()).collect::<Vec<_>>(), ["g"]);
+
+    for extension in ["ts", "js"] {
+        let with = complete("function f(obj) { with (obj) { f(obj); } }\n", extension);
+        let f = record(&with, "f");
+        assert!(f.relations.referenced_by.is_empty(), "{extension}: no proven caller inside `with`");
+        assert!(
+            f.relations.references.iter().all(|reference| reference.id.as_ref() != Some(&f.id)),
+            "{extension}: no proven self-reference"
+        );
+    }
 }

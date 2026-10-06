@@ -45,6 +45,10 @@ pub(crate) struct WrittenBase {
 pub(crate) struct BasePath {
     pub(crate) anchor: PathAnchor,
     pub(crate) segments: Vec<String>,
+    /// The number of generic arguments written on each segment (`0` when
+    /// none are): `H<int>.Base` is `[1, 0]`. A C# name with a different
+    /// argument count is a different type.
+    pub(crate) arities: Vec<usize>,
 }
 
 /// Where a written path starts.
@@ -120,7 +124,8 @@ pub(crate) fn written_base(node: Node<'_>, language: ProgrammingLanguage, source
 /// name.
 pub(crate) fn base_path(node: Node<'_>, language: ProgrammingLanguage, source: &str) -> Option<BasePath> {
     let mut segments = Vec::new();
-    collect_segments(node, source, &mut segments)?;
+    let mut arities = Vec::new();
+    collect_segments(node, source, &mut segments, &mut arities)?;
     let mut anchor = PathAnchor::Relative;
     match language {
         ProgrammingLanguage::Rust if starts_at_global_scope(node) => anchor = PathAnchor::Extern,
@@ -135,6 +140,7 @@ pub(crate) fn base_path(node: Node<'_>, language: ProgrammingLanguage, source: &
                 if alias != "global" { return None; }
                 anchor = PathAnchor::Root;
                 segments.remove(0);
+                arities.remove(0);
             }
         }
         ProgrammingLanguage::Rust => {
@@ -156,6 +162,7 @@ pub(crate) fn base_path(node: Node<'_>, language: ProgrammingLanguage, source: &
                 }
             };
             segments.drain(..skip);
+            arities.drain(..skip);
         }
         ProgrammingLanguage::Php
             if node.kind() == "qualified_name"
@@ -165,7 +172,7 @@ pub(crate) fn base_path(node: Node<'_>, language: ProgrammingLanguage, source: &
         }
         _ => {}
     }
-    (!segments.is_empty()).then_some(BasePath { anchor, segments })
+    (!segments.is_empty()).then_some(BasePath { anchor, segments, arities })
 }
 
 /// Whether a Rust or C++ path is written with a leading `::`: its leftmost
@@ -192,22 +199,35 @@ fn starts_at_global_scope(node: Node<'_>) -> bool {
     }
 }
 
-fn collect_segments(node: Node<'_>, source: &str, segments: &mut Vec<String>) -> Option<()> {
+fn collect_segments(node: Node<'_>, source: &str, segments: &mut Vec<String>, arities: &mut Vec<usize>) -> Option<()> {
     match node.kind() {
         // A leaf name.
         "identifier" | "simple_identifier" | "type_identifier" | "name" | "property_identifier" | "namespace_identifier"
         | "package_identifier" | "crate" | "self" | "super" => {
             let text = node.utf8_text(source.as_bytes()).ok()?.trim();
-            (!text.is_empty()).then(|| segments.push(text.to_string()))
+            (!text.is_empty()).then(|| {
+                segments.push(text.to_string());
+                arities.push(0);
+            })
         }
-        // An instantiation: the path of the instantiated name.
+        // An instantiation: the path of the instantiated name, whose last
+        // segment carries the written argument count.
         "generic_type" | "generic_name" | "template_type" | "subscript" => {
             let named = node
                 .child_by_field_name("type")
                 .or_else(|| node.child_by_field_name("name"))
                 .or_else(|| node.child_by_field_name("value"))
                 .or_else(|| node.named_child(0))?;
-            collect_segments(named, source, segments)
+            collect_segments(named, source, segments, arities)?;
+            let mut cursor = node.walk();
+            let written = node
+                .named_children(&mut cursor)
+                .find(|child| matches!(child.kind(), "type_arguments" | "type_argument_list" | "template_argument_list"))
+                .map_or(0, |list| named_entries(list).len());
+            if let Some(last) = arities.last_mut() {
+                *last = written;
+            }
+            Some(())
         }
         // A qualified name: every named part in order, generic arguments
         // excluded.
@@ -220,7 +240,7 @@ fn collect_segments(node: Node<'_>, source: &str, segments: &mut Vec<String>) ->
                 if matches!(child.kind(), "type_arguments" | "type_argument_list" | "template_argument_list" | "comment") {
                     continue;
                 }
-                collect_segments(child, source, segments)?;
+                collect_segments(child, source, segments, arities)?;
                 any = true;
             }
             any.then_some(())
@@ -262,6 +282,47 @@ pub(crate) fn is_csharp_struct(declaration: Node<'_>) -> bool {
         }
         _ => false,
     }
+}
+
+/// Whether a C# type declaration is written `partial`. The modifier alone
+/// proves no shared identity: only `partial` declarations that also agree
+/// on [`csharp_partial_shape`] and enclosing owner are fragments of one
+/// type.
+pub(crate) fn is_csharp_partial(declaration: Node<'_>, source: &str) -> bool {
+    let mut cursor = declaration.walk();
+    declaration
+        .children(&mut cursor)
+        .any(|child| child.kind() == "modifier" && source.get(child.start_byte()..child.end_byte()) == Some("partial"))
+}
+
+/// What a C# `partial` type declaration must share with another of the same
+/// bound name and enclosing owner to be a fragment of the same type: its
+/// category (class, struct, interface, record class, record struct; a
+/// `record` and a `record class` are one category) and its generic arity.
+/// `None` for a declaration that is not a `partial` type.
+pub(crate) fn csharp_partial_shape(declaration: Node<'_>, source: &str) -> Option<(u8, usize)> {
+    let category = match declaration.kind() {
+        "class_declaration" => 0,
+        "struct_declaration" => 1,
+        "interface_declaration" => 2,
+        "record_declaration" if is_csharp_struct(declaration) => 4,
+        "record_declaration" => 3,
+        _ => return None,
+    };
+    is_csharp_partial(declaration, source).then(|| (category, csharp_arity(declaration)))
+}
+
+/// The generic arity a C# type declaration writes: the length of its own
+/// type parameter list.
+pub(crate) fn csharp_arity(declaration: Node<'_>) -> usize {
+    let mut cursor = declaration.walk();
+    declaration
+        .children(&mut cursor)
+        .find(|child| child.kind() == "type_parameter_list")
+        .map_or(0, |list| {
+            let mut cursor = list.walk();
+            list.named_children(&mut cursor).filter(|child| child.kind() == "type_parameter").count()
+        })
 }
 
 fn csharp_bases(owner: Node<'_>, source: &str, bases: &mut DeclaredBases) {

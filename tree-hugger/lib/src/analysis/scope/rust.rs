@@ -6,19 +6,45 @@
 //! `let` of a block wins. Associated items (`impl` and `trait` members) are
 //! never lexical names. Types, values and macros are separate categories; a
 //! tuple or unit struct is both a type and a value.
+//!
+//! An item cannot capture: code in a nested `fn`, `const`, `static`, type,
+//! trait or `impl` sees the items of the blocks around it, never their
+//! `let`s, parameters, pattern bindings or generic parameters (closures
+//! do capture). An inline `mod` sees nothing of its parent but
+//! `macro_rules!` macros. A pattern binding of an `if let` (or a `let` in a
+//! chain) is visible from its `let` to the end of the consequence, never in
+//! the `else` branch.
 
 use tree_sitter::Node;
 
-use super::{ANY_CATEGORY, BindingRule, BindingSite, MACRO, Placement, TYPE, VALUE};
+use super::{ANY_CATEGORY, BindingRule, BindingSite, Boundary, MACRO, Placement, TYPE, VALUE};
 
 /// Scopes the vendored locals query lacks: an inline `mod` body, a trait,
-/// and the declarations whose generic parameters would otherwise leak into
-/// the enclosing scope.
+/// the declarations whose generic parameters would otherwise leak into the
+/// enclosing scope, and `const`/`static` items, whose initializers cannot
+/// capture the locals around them.
 pub(super) fn extra_scope(node: Node<'_>) -> bool {
     match node.kind() {
         "declaration_list" => node.parent().is_some_and(|parent| parent.kind() == "mod_item"),
-        "trait_item" | "type_item" | "union_item" | "function_signature_item" => true,
+        "trait_item" | "type_item" | "union_item" | "function_signature_item" | "const_item" | "static_item" => true,
         _ => false,
+    }
+}
+
+/// What leaving `node` leaves behind: an inline `mod` its parent's names,
+/// any other item that is not an associated item its enclosing locals (an
+/// associated item still sees its `impl`'s or trait's generic parameters).
+pub(super) fn boundary(node: Node<'_>) -> Boundary {
+    match node.kind() {
+        "mod_item" => Boundary::Module,
+        "function_item" | "function_signature_item" | "const_item" | "static_item" | "type_item"
+            if is_associated(node) =>
+        {
+            Boundary::None
+        }
+        "function_item" | "function_signature_item" | "const_item" | "static_item" | "type_item" | "struct_item"
+        | "enum_item" | "union_item" | "trait_item" | "impl_item" => Boundary::Item,
+        _ => Boundary::None,
     }
 }
 
@@ -27,9 +53,39 @@ const fn item(categories: u8, callable: bool) -> BindingRule {
         categories,
         placement: Placement::Innermost,
         visible_from: 0,
+        visible_until: None,
+        local: false,
         ordered: false,
         callable,
     }
+}
+
+/// A binding of an item's body or header, which nested items cannot see.
+const fn local(categories: u8) -> BindingRule {
+    BindingRule { local: true, ..item(categories, false) }
+}
+
+/// Where an `if let` condition's bindings stop being visible: the end of
+/// the consequence (through a `let` chain). `None` elsewhere (`while let`,
+/// a match guard), whose scope ends with the body anyway.
+fn conditional_end(condition: Node<'_>) -> Option<usize> {
+    let mut node = condition;
+    while let Some(parent) = node.parent() {
+        match parent.kind() {
+            "let_chain" => node = parent,
+            "if_expression" => {
+                let in_condition = parent
+                    .child_by_field_name("condition")
+                    .is_some_and(|written| written.id() == node.id());
+                return in_condition
+                    .then(|| parent.child_by_field_name("consequence"))
+                    .flatten()
+                    .map(|consequence| consequence.end_byte());
+            }
+            _ => return None,
+        }
+    }
+    None
 }
 
 /// An `impl` or `trait` member: reached only through a path or a receiver.
@@ -62,8 +118,8 @@ pub(super) fn binding_sites<'tree>(node: Node<'tree>, source: &str, sites: &mut 
         }
         "union_item" | "enum_item" | "trait_item" | "mod_item" => push(name, item(TYPE, false)),
         "type_item" if !is_associated(node) => push(name, item(TYPE, false)),
-        "type_parameter" => push(name, item(TYPE, false)),
-        "const_parameter" => push(name, item(VALUE, false)),
+        "type_parameter" => push(name, local(TYPE)),
+        "const_parameter" => push(name, local(VALUE)),
         "macro_definition" => push(
             name,
             BindingRule {
@@ -76,20 +132,20 @@ pub(super) fn binding_sites<'tree>(node: Node<'tree>, source: &str, sites: &mut 
             let rule = BindingRule {
                 visible_from: node.end_byte(),
                 ordered: true,
-                ..item(VALUE, false)
+                ..local(VALUE)
             };
             pattern_names(node.child_by_field_name("pattern"), false, source, &mut |name| push(Some(name), rule));
         }
         "parameter" => {
             pattern_names(node.child_by_field_name("pattern"), false, source, &mut |name| {
-                push(Some(name), item(VALUE, false));
+                push(Some(name), local(VALUE));
             });
         }
         "closure_parameters" => {
             let mut cursor = node.walk();
             for child in node.named_children(&mut cursor) {
                 if child.kind() != "parameter" {
-                    pattern_names(Some(child), false, source, &mut |name| push(Some(name), item(VALUE, false)));
+                    pattern_names(Some(child), false, source, &mut |name| push(Some(name), local(VALUE)));
                 }
             }
         }
@@ -97,7 +153,7 @@ pub(super) fn binding_sites<'tree>(node: Node<'tree>, source: &str, sites: &mut 
             let visible_from = node
                 .child_by_field_name("body")
                 .map_or(node.end_byte(), |body| body.start_byte());
-            let rule = BindingRule { visible_from, ..item(VALUE, false) };
+            let rule = BindingRule { visible_from, ..local(VALUE) };
             pattern_names(node.child_by_field_name("pattern"), false, source, &mut |name| push(Some(name), rule));
         }
         "match_pattern" => {
@@ -106,12 +162,13 @@ pub(super) fn binding_sites<'tree>(node: Node<'tree>, source: &str, sites: &mut 
                 node.child_by_field_name("condition")
                     .is_none_or(|condition| condition.id() != pattern.id())
             });
-            pattern_names(pattern, true, source, &mut |name| push(Some(name), item(VALUE, false)));
+            pattern_names(pattern, true, source, &mut |name| push(Some(name), local(VALUE)));
         }
         "let_condition" => {
             let rule = BindingRule {
                 visible_from: node.end_byte(),
-                ..item(VALUE, false)
+                visible_until: conditional_end(node),
+                ..local(VALUE)
             };
             pattern_names(node.child_by_field_name("pattern"), true, source, &mut |name| push(Some(name), rule));
         }

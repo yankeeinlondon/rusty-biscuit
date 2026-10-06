@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use tree_sitter::Language;
 
 use super::stored_evidence::{
-    nullable, read_coverage, read_occurrences, validate_evidence, write_coverage, write_occurrences,
+    StoredEvidence, nullable, read_coverage, read_occurrences, validate_evidence, write_coverage, write_occurrences,
 };
 use super::{CacheError, PassFingerprint, PersistentCache, canonical_digest};
 use crate::analysis::coverage::{add_record_passes, project, record_passes_suffice};
@@ -189,9 +189,10 @@ pub enum CacheLookup {
     Hit,
     /// The entry held every requested kind but not every capability; the
     /// missing ones were computed and the entry rewritten to hold both.
-    /// `parsed` is whether that needed the file to be parsed (only the docs,
-    /// semantics and, for an entry of every kind, containment passes work
-    /// from the stored records alone).
+    /// `parsed` is whether that needed the file to be parsed (only the docs
+    /// pass, semantics over stored occurrences and, for an entry of every
+    /// kind outside Rust and Swift, containment work from the stored entry
+    /// alone).
     WidenedCapabilities { parsed: bool },
     /// The entry lacked a requested kind; the file was analyzed once for the
     /// union of stored and requested kinds and capabilities, and the entry
@@ -626,13 +627,16 @@ impl StoredEntry {
         {
             return Err(CacheMiss::Inconsistent("a record without metrics under the metrics capability"));
         }
-        validate_evidence(
-            source.source(),
-            capabilities.contains(&Capability::Occurrences),
-            &self.occurrences,
-            &self.reference_coverage,
-            &self.records,
-        )
+        validate_evidence(&StoredEvidence {
+            source: source.source(),
+            language: self.language,
+            capabilities,
+            all_kinds: self.covered_kinds.0.is_none(),
+            occurrences: &self.occurrences,
+            coverage: &self.reference_coverage,
+            records: &self.records,
+            imports: &self.imports,
+        })
         .map_err(CacheMiss::Inconsistent)?;
         if let Some(kinds) = &self.covered_kinds.0
             && self.records.iter().any(|record| !kinds.contains(&record.kind))

@@ -12,6 +12,14 @@
 //! outward; the first scope that binds it decides. Lookup never falls back
 //! to "any declaration with this name": that is the caller's `NameOnly`.
 //!
+//! Not every enclosing scope is reachable. Leaving a Rust item (a nested
+//! `fn`, `const`, `static`, type, trait or `impl`) leaves its enclosing
+//! locals and generic parameters behind ([`Boundary::Item`]); leaving an
+//! inline `mod` leaves every name but a `macro_rules!` macro behind
+//! ([`Boundary::Module`]). A scope whose names may come from somewhere the
+//! file does not say (a Rust glob import, an ECMA `with` body, the function
+//! around a direct `eval`) ends the search as [`Lookup::Glob`].
+//!
 //! User contract: `tree-hugger/docs/references.md`.
 
 use std::collections::HashMap;
@@ -53,6 +61,13 @@ pub(crate) struct BindingRule {
     /// The first byte at which the binding is visible; `0` for the whole
     /// scope (items, hoisted declarations, the TDZ of `let`).
     pub(crate) visible_from: usize,
+    /// The first byte at which the binding is no longer visible; `None`
+    /// for the rest of the scope. A Rust `if let` binding ends with its
+    /// consequence, so the `else` branch does not see it.
+    pub(crate) visible_until: Option<usize>,
+    /// A binding of one item's body or header (a Rust `let`, parameter,
+    /// pattern or generic parameter): a nested item cannot name it.
+    pub(crate) local: bool,
     /// A Rust `let`: among the visible ones of a scope the latest wins.
     pub(crate) ordered: bool,
     /// Calling the name invokes the declaration itself (a function, a
@@ -85,6 +100,28 @@ pub(crate) struct Binding {
     pub(crate) name_start: usize,
     pub(crate) rule: BindingRule,
     pub(crate) target: BindingTarget,
+}
+
+/// What leaving a scope for its parent leaves behind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Boundary {
+    None,
+    /// A Rust item: the enclosing [`BindingRule::local`] bindings.
+    Item,
+    /// A Rust inline `mod`: everything but macros.
+    Module,
+}
+
+/// A construct that may bind any name in a scope the file cannot tell.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Dynamic<'tree> {
+    /// This node is a scope, every name of which may come from elsewhere
+    /// (the body of an ECMA `with`, whose object's properties are names).
+    Scope(Node<'tree>),
+    /// The function around this node may gain any `var` (a direct `eval`
+    /// call in sloppy code). Strict code cannot, but the file does not
+    /// always say which it is, so every direct `eval` counts.
+    FunctionOf(Node<'tree>),
 }
 
 /// The syntax-level rules of one supported language.
@@ -134,6 +171,23 @@ impl LanguageRules {
         self == Self::Rust && node.kind() == "use_wildcard"
     }
 
+    /// The dynamic name source `node` introduces, if any.
+    pub(crate) fn dynamic<'tree>(self, node: Node<'tree>, source: &str) -> Option<Dynamic<'tree>> {
+        match self {
+            Self::Rust => None,
+            Self::Ecma { .. } => ecma::dynamic(node, source),
+        }
+    }
+
+    /// What leaving the scope node `node` (or any node between it and its
+    /// parent scope) leaves behind.
+    fn boundary(self, node: Node<'_>) -> Boundary {
+        match self {
+            Self::Rust => rust::boundary(node),
+            Self::Ecma { .. } => Boundary::None,
+        }
+    }
+
     /// The categories a reference written as `node` looks up.
     pub(crate) fn reference_category(self, node: Node<'_>) -> u8 {
         match self {
@@ -159,9 +213,12 @@ pub(crate) struct ScopeTree<'tree> {
     nodes: Vec<Node<'tree>>,
     parents: Vec<Option<usize>>,
     by_node: HashMap<usize, usize>,
+    /// What leaving each scope for its parent leaves behind.
+    boundaries: Vec<Boundary>,
     has_glob: Vec<bool>,
     bindings: Vec<Binding>,
-    /// `(scope, name)` → binding indexes, in name position order.
+    /// `(scope, name)` → binding indexes, in binding order, not position
+    /// order: `visible_in` picks the latest `ordered` binding by name position.
     table: HashMap<(usize, &'tree str), Vec<usize>>,
 }
 
@@ -209,12 +266,32 @@ impl<'tree> ScopeTree<'tree> {
         }
         let by_node: HashMap<usize, usize> =
             nodes.iter().enumerate().map(|(idx, node)| (node.id(), idx)).collect();
-        let parents = nodes
+        let parents: Vec<Option<usize>> = nodes
             .iter()
             .map(|node| ancestors(*node).find_map(|ancestor| by_node.get(&ancestor.id()).copied()))
             .collect();
+        let boundaries = nodes
+            .iter()
+            .zip(&parents)
+            .map(|(node, parent)| {
+                let Some(rules) = rules else { return Boundary::None };
+                let parent = parent.map(|parent| nodes[parent].id());
+                // The strongest boundary between the scope node (included)
+                // and its parent scope's node (excluded).
+                std::iter::once(*node)
+                    .chain(ancestors(*node))
+                    .take_while(|ancestor| Some(ancestor.id()) != parent)
+                    .map(|ancestor| rules.boundary(ancestor))
+                    .fold(Boundary::None, |strongest, next| match (strongest, next) {
+                        (Boundary::Module, _) | (_, Boundary::Module) => Boundary::Module,
+                        (Boundary::Item, _) | (_, Boundary::Item) => Boundary::Item,
+                        _ => Boundary::None,
+                    })
+            })
+            .collect();
         Self {
             rules,
+            boundaries,
             has_glob: vec![false; nodes.len()],
             nodes,
             parents,
@@ -235,6 +312,30 @@ impl<'tree> ScopeTree<'tree> {
     pub(crate) fn add_glob(&mut self, node: Node<'_>) {
         let scope = self.scope_around(node);
         self.has_glob[scope] = true;
+    }
+
+    /// Marks the scope a [`Dynamic`] name source reaches. A direct `eval`
+    /// outside every function is not marked: a `var` it adds there is the
+    /// same global binding an assignment could change, never a nearer one.
+    pub(crate) fn add_dynamic(&mut self, dynamic: Dynamic<'_>) {
+        let scope = match dynamic {
+            Dynamic::Scope(node) => self.scope_of(node),
+            Dynamic::FunctionOf(node) => {
+                let rule = BindingRule {
+                    categories: ANY_CATEGORY,
+                    placement: Placement::FunctionScope,
+                    visible_from: 0,
+                    visible_until: None,
+                    local: false,
+                    ordered: false,
+                    callable: false,
+                };
+                Some(self.placement(node, rule)).filter(|&scope| scope != 0)
+            }
+        };
+        if let Some(scope) = scope {
+            self.has_glob[scope] = true;
+        }
     }
 
     /// Places a binding of `name` (whose text is `text`).
@@ -299,10 +400,12 @@ impl<'tree> ScopeTree<'tree> {
     }
 
     /// The scope node `scope` declares `name` as its own name (`fn f`,
-    /// `class C`), which is visible around the scope, not inside it.
+    /// `class C`), which is visible around the scope, not inside it. An ECMA
+    /// function, generator or class expression's name is the opposite:
+    /// visible only inside the expression.
     fn names_itself(&self, scope: usize, name: Node<'_>) -> bool {
         let node = self.nodes[scope];
-        !matches!(node.kind(), "function_expression" | "function" | "class")
+        !matches!(node.kind(), "function_expression" | "function" | "generator_function" | "class")
             && node.child_by_field_name("name").is_some_and(|own| own.id() == name.id())
     }
 
@@ -316,15 +419,28 @@ impl<'tree> ScopeTree<'tree> {
         self.lookup_from(self.scope_around(node), node.start_byte(), name, categories)
     }
 
-    /// [`Self::lookup`] from `scope` at byte `position`.
-    pub(crate) fn lookup_from(&self, scope: usize, position: usize, name: &str, categories: u8) -> Lookup {
+    /// [`Self::lookup`] from `scope` at byte `position`, through the
+    /// [`Boundary`] of every scope it leaves.
+    pub(crate) fn lookup_from(&self, scope: usize, position: usize, name: &str, mut categories: u8) -> Lookup {
         let mut scope = Some(scope);
+        let mut items_only = false;
         while let Some(current) = scope {
-            if let Some(found) = self.visible_in(current, position, name, categories) {
+            if let Some(found) = self.visible(current, position, name, categories, items_only) {
                 return Lookup::Found(found);
             }
             if self.has_glob[current] {
                 return Lookup::Glob;
+            }
+            match self.boundaries[current] {
+                Boundary::None => {}
+                Boundary::Item => items_only = true,
+                Boundary::Module => {
+                    items_only = true;
+                    categories &= MACRO;
+                    if categories == 0 {
+                        return Lookup::NotFound;
+                    }
+                }
             }
             scope = self.parents[current];
         }
@@ -335,10 +451,19 @@ impl<'tree> ScopeTree<'tree> {
     /// visible at byte `position` in the given categories, `None` when it
     /// binds no such name: among ordered ones (Rust `let`) the latest wins.
     pub(crate) fn visible_in(&self, scope: usize, position: usize, name: &str, categories: u8) -> Option<Vec<usize>> {
+        self.visible(scope, position, name, categories, false)
+    }
+
+    /// [`Self::visible_in`], without [`BindingRule::local`] bindings when
+    /// `items_only`.
+    fn visible(&self, scope: usize, position: usize, name: &str, categories: u8, items_only: bool) -> Option<Vec<usize>> {
         let bucket = self.table.get(&(scope, name))?;
         let visible = bucket.iter().copied().filter(|&idx| {
             let rule = self.bindings[idx].rule;
-            rule.categories & categories != 0 && rule.visible_from <= position
+            rule.categories & categories != 0
+                && rule.visible_from <= position
+                && rule.visible_until.is_none_or(|until| position < until)
+                && !(items_only && rule.local)
         });
         let (ordered, free): (Vec<usize>, Vec<usize>) = visible.partition(|&idx| self.bindings[idx].rule.ordered);
         if let Some(&latest) = ordered.iter().max_by_key(|&&idx| self.bindings[idx].name_start) {

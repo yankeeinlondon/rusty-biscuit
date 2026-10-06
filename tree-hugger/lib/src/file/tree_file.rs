@@ -307,8 +307,10 @@ impl TreeFile {
     }
 
     /// Runs the references query once: one capture per captured node span,
-    /// in first-match order. `None` when the language's query has no
-    /// patterns.
+    /// in first-match order, then the member callees behind transparent
+    /// wrappers that no pattern reaches
+    /// ([`wrapped_member_callees`](crate::analysis::occurrences::wrapped_member_callees)).
+    /// `None` when the language's query has no patterns.
     pub(crate) fn reference_captures(
         &self,
     ) -> Result<Option<Vec<ReferenceCapture<'_>>>, TreeHuggerError> {
@@ -346,6 +348,16 @@ impl TreeFile {
                 }
             }
             matches.advance();
+        }
+        for node in crate::analysis::occurrences::wrapped_member_callees(self.tree.root_node(), self.language) {
+            let range = (node.start_byte(), node.end_byte());
+            match by_range.get(&range) {
+                Some(&idx) => captures[idx].is_member = true,
+                None => {
+                    by_range.insert(range, captures.len());
+                    captures.push(ReferenceCapture { node, is_reference: false, is_member: true });
+                }
+            }
         }
 
         Ok(Some(captures))

@@ -22,3 +22,9 @@
 ; Composite literal type reference
 (composite_literal
   type: (type_identifier) @reference)
+
+; A method or package-qualified function invoked through a selector
+; (`obj.m()`, `pkg.F()`): the callee name, an occurrence only
+(call_expression
+  function: (selector_expression
+    field: (field_identifier) @reference.member))

@@ -7,16 +7,21 @@
 //! every binding is visible throughout its scope. TypeScript `interface` and
 //! `type` are types only, `class`, `enum` and `namespace` both; JavaScript
 //! has values only.
+//!
+//! A `with` body looks every name up in its object first, and a direct
+//! `eval` may add a `var` to its function: neither establishes a binding
+//! for a name the file declares further out ([`super::Dynamic`]).
 
 use tree_sitter::Node;
 
-use super::{ANY_CATEGORY, BindingRule, BindingSite, Placement, TYPE, VALUE};
+use super::{ANY_CATEGORY, BindingRule, BindingSite, Dynamic, Placement, TYPE, VALUE};
 
 /// Scopes the vendored locals query lacks: generators, class static blocks,
-/// `switch` bodies, and the declarations whose type or signature parameters
-/// would otherwise leak into the enclosing scope.
+/// `switch` bodies, a `with` body, and the declarations whose type or
+/// signature parameters would otherwise leak into the enclosing scope.
 pub(super) fn extra_scope(node: Node<'_>) -> bool {
-    matches!(
+    is_with_body(node)
+        || matches!(
         node.kind(),
         "generator_function_declaration"
             | "generator_function"
@@ -35,7 +40,27 @@ pub(super) fn extra_scope(node: Node<'_>) -> bool {
             | "construct_signature"
             | "function_type"
             | "constructor_type"
-    )
+        )
+}
+
+/// The `body` of a `with` statement.
+fn is_with_body(node: Node<'_>) -> bool {
+    node.parent().is_some_and(|parent| {
+        parent.kind() == "with_statement"
+            && parent.child_by_field_name("body").is_some_and(|body| body.id() == node.id())
+    })
+}
+
+/// A `with` body, or the function around a direct `eval(…)` call.
+pub(super) fn dynamic<'tree>(node: Node<'tree>, source: &str) -> Option<Dynamic<'tree>> {
+    if is_with_body(node) {
+        return Some(Dynamic::Scope(node));
+    }
+    let is_direct_eval = node.kind() == "call_expression"
+        && node
+            .child_by_field_name("function")
+            .is_some_and(|function| function.kind() == "identifier" && function.utf8_text(source.as_bytes()) == Ok("eval"));
+    is_direct_eval.then_some(Dynamic::FunctionOf(node))
 }
 
 /// The scopes a `var` belongs to.
@@ -58,6 +83,8 @@ const fn declared(categories: u8, callable: bool) -> BindingRule {
         categories,
         placement: Placement::Innermost,
         visible_from: 0,
+        visible_until: None,
+        local: false,
         ordered: false,
         callable,
     }
@@ -76,6 +103,9 @@ pub(super) fn binding_sites<'tree>(node: Node<'tree>, typed: bool, sites: &mut V
         "function_declaration" | "generator_function_declaration" | "function_signature" => {
             named(declared(VALUE, true));
         }
+        // A named function or generator expression's name is visible only
+        // inside the expression (its parameters and body), never around it.
+        "function_expression" | "function" | "generator_function" => named(declared(VALUE, true)),
         // A class expression's name is visible only inside the class.
         "class_declaration" | "abstract_class_declaration" | "class" => named(declared(both, true)),
         "interface_declaration" | "type_alias_declaration" => named(declared(TYPE, false)),

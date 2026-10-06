@@ -1110,14 +1110,17 @@ fn warm_enum_case_payloads_equal_uncached_results() {
     }
 }
 
-/// Every source of the generics, modifiers, body-lines and relations
-/// matrices (and the Rust impls) is stored complete, served warm as a real
-/// `Hit` with no work, and projected to each narrower query exactly as an
-/// uncached query computes it: generic parameters, modifiers, attributes and
-/// relation targets kept, Rust impl containers and `metrics` dropped where
-/// the query does not ask for them.
-#[test]
-fn declaration_fact_sources_are_warm_hits_and_project_to_uncached_queries() {
+crate::symbols_relations::declaration_fact_group_tests!(
+    declaration_fact_sources_are_warm_hits_and_project_to_uncached_queries => warm_hits_project_to_uncached_queries
+);
+
+/// Every source of `group` of the declaration-fact corpus is stored
+/// complete, served warm as a real `Hit` with no work, and projected to each
+/// narrower query exactly as an uncached query computes it: generic
+/// parameters, modifiers, attributes and relation targets kept, Rust impl
+/// containers and `metrics` dropped where the query does not ask for them.
+/// The per-language group must exercise each projection.
+fn warm_hits_project_to_uncached_queries(group: usize) {
     let method: &[SymbolKindV2] = &[SymbolKindV2::Method];
     let cells: [(Option<&[SymbolKindV2]>, &[Capability]); 6] = [
         (None, &[Capability::Declarations]),
@@ -1135,7 +1138,7 @@ fn declaration_fact_sources_are_warm_hits_and_project_to_uncached_queries() {
     let mut dropped_lines = 0usize;
     let mut kept_relations = 0usize;
 
-    for (label, path) in crate::symbols_relations::write_declaration_fact_sources(sources.path()) {
+    for (label, path) in crate::symbols_relations::write_declaration_fact_group(sources.path(), group) {
         let expected = uncached(&path, &complete);
         let (lookup, cold, _) = cached(&cache, read(&path), &complete);
         assert_eq!(lookup, CacheLookup::Miss(CacheMiss::Absent), "{label}: cold");
@@ -1167,28 +1170,35 @@ fn declaration_fact_sources_are_warm_hits_and_project_to_uncached_queries() {
             });
         }
     }
+    if group != crate::symbols_relations::PER_LANGUAGE_FACT_GROUP {
+        return;
+    }
     assert!(dropped_containers > 0, "no projection removed a container");
     assert!(dropped_lines > 0, "no projection removed `metrics.lines`");
     assert!(kept_relations > 0, "no projection kept a relation");
 }
 
-/// Widening a declarations-only entry of the same sources: Containment is
+crate::symbols_relations::declaration_fact_group_tests!(
+    declaration_fact_entries_widen_by_containment_and_metrics => entries_widen_by_containment_and_metrics
+);
+
+/// Widening a declarations-only entry of the same sources (one corpus
+/// group): Containment is
 /// added from the stored records alone, except in Rust and Swift, where an
 /// impl member's container is its impl's resolved self type and an
 /// extension member's its extension's resolved owner, which no record
 /// retains, so it parses once; Metrics always parses once. Each widened
 /// result equals an uncached query, the entry then records every request,
 /// and each request (and the declarations-only narrowing) is a `Hit` with
-/// no work.
-#[test]
-fn declaration_fact_entries_widen_by_containment_and_metrics() {
+/// no work. The per-language group must reach the parsing path through Rust.
+fn entries_widen_by_containment_and_metrics(group: usize) {
     let sources = TempDir::new().expect("sources");
     let declarations = SymbolQuery::new();
     let containment = SymbolQuery::new().capabilities([Capability::Containment]);
     let metrics = SymbolQuery::new().capabilities([Capability::Containment, Capability::Metrics]);
     let mut rust_rows = 0usize;
 
-    for (label, path) in crate::symbols_relations::write_declaration_fact_sources(sources.path()) {
+    for (label, path) in crate::symbols_relations::write_declaration_fact_group(sources.path(), group) {
         let is_rust = path.extension().is_some_and(|extension| extension == "rs");
         rust_rows += usize::from(is_rust);
         let needs_tree = is_rust || path.extension().is_some_and(|extension| extension == "swift");
@@ -1215,7 +1225,9 @@ fn declaration_fact_entries_widen_by_containment_and_metrics() {
             assert_eq!(served, uncached(&path, query), "{label}: then {query:?}");
         }
     }
-    assert!(rust_rows >= 5, "the Rust rows exercise the parsing path ({rust_rows})");
+    if group == crate::symbols_relations::PER_LANGUAGE_FACT_GROUP {
+        assert!(rust_rows >= 5, "the Rust rows exercise the parsing path ({rust_rows})");
+    }
 }
 
 /// An entry of the Rust impl source whose records carry the previous schema
@@ -1223,10 +1235,11 @@ fn declaration_fact_entries_widen_by_containment_and_metrics() {
 #[test]
 fn a_declaration_fact_entry_of_an_older_record_schema_is_a_miss() {
     let sources = TempDir::new().expect("sources");
-    let (label, path) = crate::symbols_relations::write_declaration_fact_sources(sources.path())
-        .into_iter()
-        .find(|(label, _)| label.starts_with("rust impls"))
-        .expect("the Rust impl source");
+    let (label, path) =
+        crate::symbols_relations::write_declaration_fact_group(sources.path(), crate::symbols_relations::PER_LANGUAGE_FACT_GROUP)
+            .into_iter()
+            .find(|(label, _)| label.starts_with("rust impls"))
+            .expect("the Rust impl source");
     let dir = TempDir::new().expect("temp");
     let cache = cache_in(&dir);
     cached(&cache, read(&path), &SymbolQuery::new());
@@ -1242,8 +1255,9 @@ fn a_declaration_fact_entry_of_an_older_record_schema_is_a_miss() {
     assert_eq!(served, uncached(&path, &query), "{label}");
 }
 
-/// The Rust impl rows of the path-meaning matrix, cached declarations-only
-/// and then asked for Containment: the widened result parses once and
+/// The impl-member rows of the path-meaning matrix (Rust impls and the C#
+/// containment control), cached declarations-only and then asked for
+/// Containment: the widened result (parsed once for Rust) and
 /// reports exactly the uncached facts (a self type through an external `::`
 /// path, an enclosing generic parameter or a block import stays a textual
 /// container with no parent and no membership, and the same-named
@@ -1268,8 +1282,11 @@ fn path_meaning_impl_rows_widen_to_containment_with_the_same_facts() {
 
         let (widened, work) = counted(|| cache.query(read(&path), &containment).expect("widen"));
         let label = format!("{}: widened", row.label);
-        assert_eq!(widened.lookup, CacheLookup::WidenedCapabilities { parsed: true }, "{label}");
-        assert_eq!(work.parser_constructions, 1, "{label}: one parse");
+        // Rust impl and Swift extension owners are resolved from the tree;
+        // every other language links containers from the stored records.
+        let parsed = matches!(row.language, ProgrammingLanguage::Rust | ProgrammingLanguage::Swift);
+        assert_eq!(widened.lookup, CacheLookup::WidenedCapabilities { parsed }, "{label}");
+        assert_eq!(work.parser_constructions, u64::from(parsed), "{label}: parses only when needed");
         assert_eq!(as_value(&widened.result), uncached(&path, &containment), "{label}: equals uncached");
         check_impl_facts(&label, row, &complete, &widened.result.index, true);
 
@@ -1282,19 +1299,21 @@ fn path_meaning_impl_rows_widen_to_containment_with_the_same_facts() {
     assert!(rows >= 5, "the impl rows ran ({rows})");
 }
 
-/// Every path-meaning row ([`path_meaning_rows`](crate::symbols_relations::path_meaning_rows))
+crate::symbols_relations::declaration_fact_group_tests!(shared path_meaning_rows_hold_on_warm_hits => rows_hold_on_warm_hits);
+
+/// Every path-meaning row of `group`
+/// ([`path_meaning_group`](crate::symbols_relations::path_meaning_group))
 /// with written bases, stored complete, is served warm as a real `Hit`
 /// on the complete index and on a type-only query, and each owner keeps
 /// exactly its uncached targets and target IDs.
-#[test]
-fn path_meaning_rows_hold_on_warm_hits() {
-    use crate::symbols_relations::{check_owner_targets, path_meaning_rows};
+fn rows_hold_on_warm_hits(group: usize) {
+    use crate::symbols_relations::{check_owner_targets, path_meaning_group};
 
     let sources = TempDir::new().expect("sources");
     let complete_query = SymbolQuery::complete_index();
     let types_only = SymbolQuery::new().kinds(TYPE_KINDS);
     let mut rows = 0;
-    for (idx, row) in path_meaning_rows().filter(|row| !row.owners.is_empty()).enumerate() {
+    for (idx, row) in path_meaning_group(group).filter(|row| !row.owners.is_empty()).enumerate() {
         rows += 1;
         let path = sources.path().join(format!("row_{idx}.{}", row.extension));
         std::fs::write(&path, row.source).expect("write row source");
@@ -1310,7 +1329,7 @@ fn path_meaning_rows_hold_on_warm_hits() {
             check_owner_targets(&label, &complete, &warm.result.index, row.owners);
         }
     }
-    assert!(rows >= 30, "the written-base rows ran ({rows})");
+    assert!(rows > 0, "group {group}: no written-base row ran");
 }
 
 /// The member-binding repairs through the cache: a Python member rebound
@@ -1570,4 +1589,190 @@ fn swift_nested_generic_extensions_hold_through_widening_and_warm_hits() {
             assert_eq!(as_value(&warm.result), uncached(&path, query));
         }
     }
+}
+
+/// One edit to a written entry and the lookup it must get: `None` = `Hit`,
+/// `Some(what)` = `Miss(Inconsistent(what))`.
+struct EvidenceEdit {
+    label: &'static str,
+    edit: fn(&mut Value),
+    refused: Option<&'static str>,
+}
+
+fn first_occurrence_of<'a>(entry: &'a mut Value, name: &str) -> &'a mut Value {
+    entry["occurrences"]
+        .as_array_mut()
+        .expect("occurrences")
+        .iter_mut()
+        .find(|occurrence| occurrence["target"]["name"] == name)
+        .unwrap_or_else(|| panic!("no occurrence of `{name}`"))
+}
+
+fn entry_record_id(entry: &Value, name: &str) -> Value {
+    entry["records"]
+        .as_array()
+        .expect("records")
+        .iter()
+        .find(|record| record["identity"]["name"] == name)
+        .unwrap_or_else(|| panic!("no `{name}` record"))["id"]
+        .clone()
+}
+
+const NAME_MISMATCH: &str = "an occurrence whose target ID and candidates contradict its confidence";
+const MALFORMED_ID: &str = "an ID that is not a generated declaration ID";
+
+/// Writes `source` with `query`, then serves each edit of the written entry
+/// (restored before every edit) and checks the lookup it gets; a refused
+/// entry's result equals an uncached run.
+fn assert_evidence_edits(file: &str, source: &str, query: &SymbolQuery, edits: &[EvidenceEdit]) {
+    let sources = TempDir::new().expect("sources");
+    let path = sources.path().join(file);
+    std::fs::write(&path, source).expect("write source");
+    let expected = uncached(&path, query);
+    let dir = TempDir::new().expect("cache");
+    let cache = cache_in(&dir);
+    assert_eq!(cached(&cache, read(&path), query).0, CacheLookup::Miss(CacheMiss::Absent), "{file}: cold");
+    let entry = only_entry(&dir);
+    let written = read_entry(&entry);
+    for row in edits {
+        let label = format!("{file}: {}", row.label);
+        let mut edited = written.clone();
+        (row.edit)(&mut edited);
+        write_entry(&entry, &edited);
+        let (lookup, served, _) = cached(&cache, read(&path), query);
+        let wanted = row.refused.map_or(CacheLookup::Hit, |what| CacheLookup::Miss(CacheMiss::Inconsistent(what)));
+        assert_eq!(lookup, wanted, "{label}");
+        assert_eq!(served, expected, "{label}: result");
+    }
+}
+
+/// The reader validates what an entry can prove and nothing more. A
+/// kind-narrowed entry keeps evidence naming declarations it omits, so an ID
+/// is checked against a record only when the record is retained, and is
+/// always checked for the generated form; a retained callable with a body
+/// always has its region. A language without binding rules resolves by name
+/// over every record, so its name-only evidence holds every retained record
+/// of the name, and in an every-kind entry nothing else.
+#[test]
+fn stored_evidence_is_checked_against_what_the_entry_retains() {
+    const NARROW_TS: &str = "class C {}\nfunction f() { return new C(); }\nfunction g() {}\nf();\n";
+    let narrow = SymbolQuery::new().kinds(FUNCTION_KINDS).capabilities([Capability::Occurrences]);
+    assert_evidence_edits(
+        "narrow.ts",
+        NARROW_TS,
+        &narrow,
+        &[
+            EvidenceEdit {
+                label: "control: a target ID of an omitted class",
+                edit: |_| {},
+                refused: None,
+            },
+            EvidenceEdit {
+                label: "an ownerless target naming a retained declaration of another name",
+                edit: |entry| {
+                    let id = entry_record_id(entry, "g");
+                    first_occurrence_of(entry, "f")["target"]["id"] = id;
+                },
+                refused: Some(NAME_MISMATCH),
+            },
+            EvidenceEdit {
+                label: "an ownerless target with a malformed ID",
+                edit: |entry| first_occurrence_of(entry, "f")["target"]["id"] = json!("bogus"),
+                refused: Some(MALFORMED_ID),
+            },
+            EvidenceEdit {
+                label: "an ownerless target that lost its ID",
+                edit: |entry| first_occurrence_of(entry, "f")["target"]["id"] = Value::Null,
+                refused: Some("a scoped occurrence with no target ID and no binding of its name"),
+            },
+            EvidenceEdit {
+                label: "an omitted class's target with a malformed ID",
+                edit: |entry| first_occurrence_of(entry, "C")["target"]["id"] = json!("bogus"),
+                refused: Some(MALFORMED_ID),
+            },
+            EvidenceEdit {
+                label: "a retained callable's region removed",
+                edit: |entry| {
+                    entry["reference_coverage"]
+                        .as_array_mut()
+                        .expect("coverage")
+                        .retain(|region| region["owner"]["name"] != "g");
+                },
+                refused: Some("a callable with a body and no coverage region"),
+            },
+        ],
+    );
+
+    const PYTHON: &str = "def f():\n    g()\n\ndef g():\n    pass\n\ndef g():\n    pass\n\nclass K:\n    pass\n\nK()\n";
+    assert_evidence_edits(
+        "complete.py",
+        PYTHON,
+        &SymbolQuery::complete_index(),
+        &[
+            EvidenceEdit { label: "control", edit: |_| {}, refused: None },
+            EvidenceEdit {
+                label: "a name-only candidate dropped",
+                edit: |entry| {
+                    first_occurrence_of(entry, "g")["candidates"].as_array_mut().expect("candidates").pop();
+                },
+                refused: Some(NAME_MISMATCH),
+            },
+            EvidenceEdit {
+                label: "unresolved beside a declaration of its name",
+                edit: |entry| {
+                    let occurrence = first_occurrence_of(entry, "K");
+                    occurrence["confidence"] = json!("Unresolved");
+                    occurrence["candidates"] = json!([]);
+                },
+                refused: Some(NAME_MISMATCH),
+            },
+            EvidenceEdit {
+                label: "scoped in a language without binding rules",
+                edit: |entry| {
+                    let id = entry_record_id(entry, "K");
+                    let occurrence = first_occurrence_of(entry, "K");
+                    occurrence["confidence"] = json!("Scoped");
+                    occurrence["candidates"] = json!([]);
+                    occurrence["target"]["id"] = id;
+                },
+                refused: Some(NAME_MISMATCH),
+            },
+            EvidenceEdit {
+                label: "a region without the unsupported-language limit",
+                edit: |entry| {
+                    let region = &mut entry["reference_coverage"][1];
+                    region["state"] = json!("Complete");
+                    region["reasons"] = json!([]);
+                },
+                refused: Some("an unsupported-language limit that does not match the language"),
+            },
+        ],
+    );
+
+    // Narrowed, the same name-only evidence names a class the entry omits,
+    // while every retained record of the name stays a candidate.
+    assert_evidence_edits(
+        "narrow.py",
+        PYTHON,
+        &narrow,
+        &[
+            EvidenceEdit { label: "control: a candidate of an omitted class", edit: |_| {}, refused: None },
+            EvidenceEdit {
+                label: "a retained candidate dropped",
+                edit: |entry| {
+                    first_occurrence_of(entry, "g")["candidates"].as_array_mut().expect("candidates").pop();
+                },
+                refused: Some(NAME_MISMATCH),
+            },
+            EvidenceEdit {
+                label: "unresolved beside a retained declaration of its name",
+                edit: |entry| {
+                    let occurrence = first_occurrence_of(entry, "g");
+                    occurrence["confidence"] = json!("Unresolved");
+                    occurrence["candidates"] = json!([]);
+                },
+                refused: Some(NAME_MISMATCH),
+            },
+        ],
+    );
 }

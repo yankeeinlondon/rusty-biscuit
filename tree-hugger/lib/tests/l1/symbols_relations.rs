@@ -369,7 +369,68 @@ pub struct FactSource {
     pub label: String,
     pub extension: &'static str,
     pub source: String,
+    /// The corpus group ([`write_declaration_fact_group`]) whose tests check
+    /// this source.
+    pub group: usize,
 }
+
+/// The group holding the one-row-per-language matrices (generics,
+/// modifiers, body lines LF and CRLF, relations) and the Rust impl source.
+/// It grows only with the language count, and each consumer's "some source
+/// exercised this fact" guards are asserted on it alone, which implies them
+/// for the whole corpus.
+pub const PER_LANGUAGE_FACT_GROUP: usize = 0;
+
+/// Groups the owner-identity and path-meaning rows are dealt into, round
+/// robin, so every group mixes languages and matrices.
+pub const SHARED_FACT_GROUPS: usize = 6;
+
+pub const DECLARATION_FACT_GROUP_COUNT: usize = 1 + SHARED_FACT_GROUPS;
+
+/// The most sources one group may hold. Each consumer runs one nextest test
+/// per group, so this bounds every test's runtime as the matrices grow:
+/// when a new row overflows a group, raise [`SHARED_FACT_GROUPS`] and stamp
+/// the new group in [`declaration_fact_group_tests`].
+pub const MAX_FACT_GROUP_SOURCES: usize = 140;
+
+/// Stamps one `#[test]` per declaration-fact group, each calling the
+/// sibling function `$check` with its group, inside a module named
+/// `$consumer`; `GROUPS` lists the stamped groups for
+/// `declaration_fact_groups_partition_the_corpus`. The `shared` form stamps
+/// only the shared groups, for consumers of [`path_meaning_group`].
+macro_rules! declaration_fact_group_tests {
+    ($consumer:ident => $check:ident) => {
+        $crate::symbols_relations::declaration_fact_group_tests!(@stamp $consumer, $check, [
+            per_language_matrices 0,
+        ] shared);
+    };
+    (shared $consumer:ident => $check:ident) => {
+        $crate::symbols_relations::declaration_fact_group_tests!(@stamp $consumer, $check, [] shared);
+    };
+    (@stamp $consumer:ident, $check:ident, [$($first:ident $first_group:literal,)*] shared) => {
+        $crate::symbols_relations::declaration_fact_group_tests!(@stamp $consumer, $check, [
+            $($first $first_group,)*
+            shared_rows_1 1,
+            shared_rows_2 2,
+            shared_rows_3 3,
+            shared_rows_4 4,
+            shared_rows_5 5,
+            shared_rows_6 6,
+        ]);
+    };
+    (@stamp $consumer:ident, $check:ident, [$($name:ident $group:literal),+ $(,)?]) => {
+        pub(crate) mod $consumer {
+            pub const GROUPS: &[usize] = &[$($group),+];
+            $(
+                #[test]
+                fn $name() {
+                    super::$check($group);
+                }
+            )+
+        }
+    };
+}
+pub(crate) use declaration_fact_group_tests;
 
 /// Every source of the generics, modifiers, body-lines (LF and CRLF),
 /// relations, path-meaning and Swift nested-shadow and unproved owner
@@ -384,7 +445,12 @@ pub fn declaration_fact_sources() -> Vec<FactSource> {
 
     let mut sources = Vec::new();
     let mut push = |matrix: &str, language: ProgrammingLanguage, extension: &'static str, source: String| {
-        sources.push(FactSource { label: format!("{matrix} {}", language.name()), extension, source });
+        sources.push(FactSource {
+            label: format!("{matrix} {}", language.name()),
+            extension,
+            source,
+            group: PER_LANGUAGE_FACT_GROUP,
+        });
     };
     for row in GENERICS_MATRIX {
         push("generics", row.language, row.extension, row.source.to_string());
@@ -400,41 +466,118 @@ pub fn declaration_fact_sources() -> Vec<FactSource> {
         push("relations", row.language, row.extension, row.source.to_string());
     }
     push("rust impls", ProgrammingLanguage::Rust, "rs", RUST_IMPLS.to_string());
+
+    let mut shared = Vec::new();
+    // Path-meaning rows must stay last: `path_meaning_group` offsets past
+    // the owner-identity rows.
     for row in crate::symbols_owner_identity::NESTED_SHADOW_MATRIX {
-        sources.push(FactSource {
-            label: format!("owner identity Swift: {}", row.label),
-            extension: "swift",
-            source: row.source.to_string(),
-        });
+        shared.push((format!("owner identity Swift: {}", row.label), "swift", row.source));
     }
     for row in crate::symbols_owner_identity::UNPROVED_OWNER_MATRIX {
-        sources.push(FactSource {
-            label: format!("owner identity Swift unproved: {}", row.label),
-            extension: "swift",
-            source: row.source.to_string(),
-        });
+        shared.push((format!("owner identity Swift unproved: {}", row.label), "swift", row.source));
     }
     for row in path_meaning_rows() {
-        sources.push(FactSource {
-            label: format!("path meaning {}: {}", row.language.name(), row.label),
-            extension: row.extension,
-            source: row.source.to_string(),
-        });
+        shared.push((format!("path meaning {}: {}", row.language.name(), row.label), row.extension, row.source));
     }
+    sources.extend(shared.into_iter().enumerate().map(|(idx, (label, extension, source))| FactSource {
+        label,
+        extension,
+        source: source.to_string(),
+        group: shared_fact_group(idx),
+    }));
     sources
 }
 
-/// Writes each of [`declaration_fact_sources`] into `dir`, one file each.
-pub fn write_declaration_fact_sources(dir: &std::path::Path) -> Vec<(String, std::path::PathBuf)> {
+/// The group of the `idx`-th shared (owner-identity or path-meaning) source.
+fn shared_fact_group(idx: usize) -> usize {
+    1 + idx % SHARED_FACT_GROUPS
+}
+
+/// The [`path_meaning_rows`] whose declaration-fact sources are in `group`,
+/// for the path-meaning consumers that check rows rather than sources.
+pub fn path_meaning_group(group: usize) -> impl Iterator<Item = &'static PathMeaningRow> {
+    let offset = crate::symbols_owner_identity::NESTED_SHADOW_MATRIX.len()
+        + crate::symbols_owner_identity::UNPROVED_OWNER_MATRIX.len();
+    path_meaning_rows().enumerate().filter(move |(idx, _)| shared_fact_group(offset + idx) == group).map(|(_, row)| row)
+}
+
+/// Writes the [`declaration_fact_sources`] of `group` into `dir`, one file
+/// each, named by the source's corpus position.
+pub fn write_declaration_fact_group(dir: &std::path::Path, group: usize) -> Vec<(String, std::path::PathBuf)> {
     declaration_fact_sources()
         .into_iter()
         .enumerate()
+        .filter(|(_, fact)| fact.group == group)
         .map(|(idx, fact)| {
             let path = dir.join(format!("fact_{idx}.{}", fact.extension));
             std::fs::write(&path, &fact.source).expect("write fact source");
             (fact.label, path)
         })
         .collect()
+}
+
+/// The stamped groups are exactly `0..DECLARATION_FACT_GROUP_COUNT`, every
+/// corpus source lands in exactly one of them, and none outgrows
+/// [`MAX_FACT_GROUP_SOURCES`].
+#[test]
+fn declaration_fact_groups_partition_the_corpus() {
+    let groups: Vec<usize> = (0..DECLARATION_FACT_GROUP_COUNT).collect();
+    for (consumer, stamped) in [
+        ("query equivalence", crate::symbols_query::declaration_facts_of_narrow_queries_equal_the_complete_index::GROUPS),
+        ("query work", crate::symbols_query::declaration_facts_need_one_parse_one_capture_and_one_relation_link::GROUPS),
+        ("cache projection", crate::symbols_cache::declaration_fact_sources_are_warm_hits_and_project_to_uncached_queries::GROUPS),
+        ("cache widening", crate::symbols_cache::declaration_fact_entries_widen_by_containment_and_metrics::GROUPS),
+        ("adapter loss", crate::symbols_adapter::record_only_declaration_facts_are_lost_through_the_older_model::GROUPS),
+    ] {
+        assert_eq!(stamped, groups.as_slice(), "{consumer}: stamped groups");
+    }
+    let shared_groups: Vec<usize> = (1..DECLARATION_FACT_GROUP_COUNT).collect();
+    for (consumer, stamped) in [
+        ("path-meaning owners", path_meaning_matrix_holds_on_complete_and_declarations_only_paths::GROUPS),
+        ("path-meaning warm hits", crate::symbols_cache::path_meaning_rows_hold_on_warm_hits::GROUPS),
+    ] {
+        assert_eq!(stamped, shared_groups.as_slice(), "{consumer}: stamped groups");
+    }
+    let mut row_groups: Vec<&str> = Vec::new();
+    for &group in &shared_groups {
+        let rows: Vec<&str> = path_meaning_group(group).map(|row| row.label).collect();
+        assert!(!rows.is_empty() && rows.len() <= MAX_FACT_GROUP_SOURCES, "path-meaning group {group}: {}", rows.len());
+        row_groups.extend(rows);
+    }
+    assert_eq!(row_groups.len(), path_meaning_rows().count(), "every path-meaning row in exactly one group");
+    let mut all: Vec<&str> = path_meaning_rows().map(|row| row.label).collect();
+    all.sort_unstable();
+    row_groups.sort_unstable();
+    assert_eq!(row_groups, all, "the path-meaning groups are the path-meaning rows");
+    let written_base_rows = path_meaning_rows().filter(|row| !row.owners.is_empty()).count();
+    assert!(written_base_rows >= 30, "the written-base rows the warm-hit test runs ({written_base_rows})");
+
+    let corpus = declaration_fact_sources();
+    let dir = tempfile::TempDir::new().expect("temp");
+    let mut seen = vec![0usize; corpus.len()];
+    for group in groups {
+        let written = write_declaration_fact_group(dir.path(), group);
+        assert!(!written.is_empty(), "group {group} is empty");
+        assert!(
+            written.len() <= MAX_FACT_GROUP_SOURCES,
+            "group {group} holds {} sources; add a group",
+            written.len()
+        );
+        for (label, path) in written {
+            let idx: usize = path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .and_then(|stem| stem.strip_prefix("fact_"))
+                .and_then(|idx| idx.parse().ok())
+                .expect("fact file name");
+            assert_eq!(label, corpus[idx].label, "group {group}: source {idx}");
+            assert_eq!(std::fs::read_to_string(&path).expect("read"), corpus[idx].source, "{label}");
+            seen[idx] += 1;
+        }
+    }
+    let misplaced: Vec<&str> =
+        corpus.iter().zip(&seen).filter(|(_, count)| **count != 1).map(|(fact, _)| fact.label.as_str()).collect();
+    assert!(misplaced.is_empty(), "sources not in exactly one group: {misplaced:?}");
 }
 
 fn write_temp(source: &str, extension: &str) -> tempfile::NamedTempFile {
@@ -1855,6 +1998,42 @@ pub const PATH_MEANING_MATRIX: &[PathMeaningRow] = &[
     row("JavaScript class `extends` is a value", L::JavaScript, "js",
         "class ReviewBase {}\nfunction f(ReviewBase) { class ReviewChild extends ReviewBase {} }\n",
         &[bases("f.ReviewChild", &[text("ReviewBase")])]),
+    row("JavaScript `with` body and direct `eval` may bind the base", L::JavaScript, "js",
+        "class ReviewBase {}\n\
+         function w(o) { with (o) { class ReviewChild extends ReviewBase {} } }\n\
+         function e() { eval(\"1\"); class ReviewChild extends ReviewBase {} }\n\
+         function n() { class ReviewChild extends ReviewBase {} }\n",
+        &[bases("w.ReviewChild", &[text("ReviewBase")]),
+          bases("e.ReviewChild", &[text("ReviewBase")]),
+          bases("n.ReviewChild", &[to("ReviewBase", "ReviewBase")])]),
+    row("TypeScript `with` body and direct `eval` may bind the base", L::TypeScript, "ts",
+        "class ReviewBase {}\n\
+         function w(o: any) { with (o) { class ReviewChild extends ReviewBase {} } }\n\
+         function e() { eval(\"1\"); class ReviewChild extends ReviewBase {} }\n\
+         function n() { class ReviewChild extends ReviewBase {} }\n",
+        &[bases("w.ReviewChild", &[text("ReviewBase")]),
+          bases("e.ReviewChild", &[text("ReviewBase")]),
+          bases("n.ReviewChild", &[to("ReviewBase", "ReviewBase")])]),
+    row("JavaScript named function and generator expressions bind their own name", L::JavaScript, "js",
+        "class ReviewBase {}\n\
+         const g = function ReviewBase() { class ReviewFunction extends ReviewBase {} };\n\
+         const h = function* ReviewBase() { class ReviewGenerator extends ReviewBase {} };\n\
+         const k = function () { class ReviewUnnamed extends ReviewBase {} };\n\
+         const G = class ReviewBase { m() { class ReviewClass extends ReviewBase {} } };\n",
+        &[bases("ReviewBase.ReviewFunction", &[text("ReviewBase")]),
+          bases("ReviewBase.ReviewGenerator", &[text("ReviewBase")]),
+          bases("ReviewUnnamed", &[to("ReviewBase", "ReviewBase")]),
+          bases("m.ReviewClass", &[text("ReviewBase")])]),
+    row("TypeScript named function and generator expressions bind their own name", L::TypeScript, "ts",
+        "class ReviewBase {}\n\
+         const g = function ReviewBase() { class ReviewFunction extends ReviewBase {} };\n\
+         const h = function* ReviewBase() { class ReviewGenerator extends ReviewBase {} };\n\
+         const k = function () { class ReviewUnnamed extends ReviewBase {} };\n\
+         const G = class ReviewBase { m() { class ReviewClass extends ReviewBase {} } };\n",
+        &[bases("ReviewBase.ReviewFunction", &[text("ReviewBase")]),
+          bases("ReviewBase.ReviewGenerator", &[text("ReviewBase")]),
+          bases("ReviewUnnamed", &[to("ReviewBase", "ReviewBase")]),
+          bases("m.ReviewClass", &[text("ReviewBase")])]),
     row("Python simple parameter", L::Python, "py",
         "class ReviewBase:\n    pass\n\ndef f(ReviewBase):\n    class ReviewChild(ReviewBase):\n        pass\n",
         &[bases("f.ReviewChild", &[text("ReviewBase")])]),
@@ -3416,9 +3595,432 @@ fn swift_unproved_owner_rows() -> Vec<PathMeaningRow> {
 static SWIFT_UNPROVED_OWNER_ROWS: std::sync::LazyLock<Vec<PathMeaningRow>> =
     std::sync::LazyLock::new(swift_unproved_owner_rows);
 
+macro_rules! rust_holder {
+    ($second:literal) => {
+        concat!("mod ReviewHolder {\n",
+            "    pub trait ReviewBase {}\n",
+            "    pub trait ReviewChild: ReviewBase {}\n",
+            "    pub trait ReviewSelf: self::ReviewBase {}\n",
+            "    mod inner { pub trait ReviewUp: super::ReviewBase {} }\n",
+            "}\n",
+            "mod ReviewHolder { ", $second, " }\n")
+    };
+}
+
+const fn rust_own(written: &'static str) -> Target {
+    to_at(written, "ReviewHolder::ReviewBase", 2)
+}
+
+macro_rules! rust_impl_row {
+    ($label:literal, $body:literal, $import:literal, $members:expr, $implements:expr) => {
+        PathMeaningRow {
+            label: concat!("Rust ", $label, ", sibling module imports `", $import, "`"),
+            language: L::Rust,
+            extension: "rs",
+            source: concat!("mod ReviewHolder {\n",
+                "    pub struct ReviewBase;\n",
+                "    pub trait ReviewTrait {}\n",
+                "    ", $body, "\n",
+                "}\n",
+                "mod ReviewHolder { use external::", $import, "; }\n"),
+            owners: &[implementing("ReviewHolder::ReviewBase", $implements)],
+            impl_members: $members,
+            untouched: &[],
+        }
+    };
+}
+
+const OWN_TRAIT: Target = to_at("ReviewTrait", "ReviewHolder::ReviewTrait", 3);
+const TRAIT_MEMBER: &[ImplMember] = &[ImplMember {
+    method: "review_probe",
+    container: "ReviewBase",
+    owner: Some("ReviewHolder::ReviewBase"),
+    implements: Some(OWN_TRAIT),
+    container_kind: Some(SymbolKindV2::Type),
+}];
+const INHERENT_MEMBER: &[ImplMember] = &[ImplMember {
+    method: "review_probe",
+    container: "ReviewBase",
+    owner: Some("ReviewHolder::ReviewBase"),
+    implements: None,
+    container_kind: Some(SymbolKindV2::Type),
+}];
+
+/// Lookups made inside one of several same-named owners read that
+/// owner's own imports, wildcard and unrecorded bindings, inherited-name
+/// barrier and possible built-in shadowing, never another same-named
+/// owner's. Reopened namespaces and C# `partial` fragments still share one
+/// lookup, and the same facts inside the actual owner still leave the
+/// target unproved. The Rust impl rows check every
+/// impl consumer: self type, trait, empty and inherent impls.
+const SOURCE_OWNER_MATRIX: &[PathMeaningRow] = &[
+        // --- Rust: imports and globs of a sibling module.
+        row("Rust sibling module import: bare, self:: and inner super::", L::Rust, "rs",
+            rust_holder!("use external::ReviewBase;"),
+            &[bases("ReviewHolder::ReviewChild", &[rust_own("ReviewBase")]),
+              bases("ReviewHolder::ReviewSelf", &[rust_own("self::ReviewBase")]),
+              bases("ReviewHolder::inner::ReviewUp", &[rust_own("super::ReviewBase")])]),
+        row("Rust sibling module glob: bare, and self:: as a control", L::Rust, "rs",
+            rust_holder!("use external::*;"),
+            &[bases("ReviewHolder::ReviewChild", &[rust_own("ReviewBase")]),
+              bases("ReviewHolder::ReviewSelf", &[rust_own("self::ReviewBase")])]),
+        row("Rust function-local modules, sibling import (control)", L::Rust, "rs",
+            "fn review_scope() {\n\
+             \x20   mod ReviewHolder { pub trait ReviewBase {} pub trait ReviewChild: ReviewBase {} pub trait ReviewSelf: self::ReviewBase {} }\n\
+             \x20   mod ReviewHolder { use external::ReviewBase; }\n\
+             }\n",
+            &[bases("review_scope::ReviewHolder::ReviewChild", &[to_at("ReviewBase", "review_scope::ReviewHolder::ReviewBase", 2)]),
+              bases("review_scope::ReviewHolder::ReviewSelf", &[to_at("self::ReviewBase", "review_scope::ReviewHolder::ReviewBase", 2)])]),
+        row("Rust import inside the actual module (negative control)", L::Rust, "rs",
+            "mod ReviewHolder {\n\
+             \x20   pub trait ReviewBase {}\n\
+             \x20   use external::ReviewBase;\n\
+             \x20   pub trait ReviewChild: ReviewBase {}\n\
+             \x20   pub trait ReviewSelf: self::ReviewBase {}\n\
+             }\n\
+             mod ReviewHolder {}\n",
+            &[bases("ReviewHolder::ReviewChild", &[text("ReviewBase")]),
+              bases("ReviewHolder::ReviewSelf", &[text("self::ReviewBase")])]),
+        // --- Python: class-body imports and bindings of a sibling class.
+        row("Python sibling class imports the base through builtins", L::Python, "py",
+            "class ReviewHolder:\n    class ReviewBase:\n        pass\n    class ReviewChild(ReviewBase):\n        pass\n\
+             class ReviewHolder:\n    from builtins import object as ReviewBase\n",
+            &[bases("ReviewHolder.ReviewChild", &[to_at("ReviewBase", "ReviewHolder.ReviewBase", 2)])]),
+        row("Python sibling class imports the base", L::Python, "py",
+            "class ReviewHolder:\n    class ReviewBase:\n        pass\n    class ReviewChild(ReviewBase):\n        pass\n\
+             class ReviewHolder:\n    from external import ReviewBase\n",
+            &[bases("ReviewHolder.ReviewChild", &[to_at("ReviewBase", "ReviewHolder.ReviewBase", 2)])]),
+        row("Python sibling class binds the base by a tuple target (control)", L::Python, "py",
+            "class ReviewHolder:\n    class ReviewBase:\n        pass\n    class ReviewChild(ReviewBase):\n        pass\n\
+             class ReviewHolder:\n    ReviewBase, other = value\n",
+            &[bases("ReviewHolder.ReviewChild", &[to_at("ReviewBase", "ReviewHolder.ReviewBase", 2)])]),
+        row("Python sibling class with only an external base (control)", L::Python, "py",
+            "class ReviewHolder:\n    class ReviewBase:\n        pass\n    class ReviewChild(ReviewBase):\n        pass\n\
+             class ReviewHolder(External):\n    pass\n",
+            &[bases("ReviewHolder.ReviewChild", &[to_at("ReviewBase", "ReviewHolder.ReviewBase", 2)])]),
+        row("Python import inside the actual class (negative control)", L::Python, "py",
+            "class ReviewHolder:\n    class ReviewBase:\n        pass\n    from external import ReviewBase\n    class ReviewChild(ReviewBase):\n        pass\n\
+             class ReviewHolder:\n    pass\n",
+            &[bases("ReviewHolder.ReviewChild", &[text("ReviewBase")])]),
+        // --- Scala: imports, wildcards and patterns of a sibling object.
+        row("Scala sibling object imports the base", L::Scala, "scala",
+            "object ReviewHolder {\n  class ReviewBase\n  class ReviewChild extends ReviewBase\n}\n\
+             object ReviewHolder { import external.ReviewBase }\n",
+            &[bases("ReviewHolder.ReviewChild", &[to_at("ReviewBase", "ReviewHolder.ReviewBase", 2)])]),
+        row("Scala sibling object wildcard import", L::Scala, "scala",
+            "class ReviewBase\n\
+             object ReviewHolder {\n  class ReviewChild extends ReviewBase\n}\n\
+             object ReviewHolder { import external._ }\n",
+            &[bases("ReviewHolder.ReviewChild", &[to_at("ReviewBase", "ReviewBase", 1)])]),
+        row("Scala sibling object pattern bindings (control)", L::Scala, "scala",
+            "object ReviewHolder {\n  class ReviewBase\n  class ReviewChild extends ReviewBase\n}\n\
+             object ReviewHolder {\n  val (reviewBase, x) = (1, 2)\n  val (ReviewBase, y) = (3, 4)\n}\n",
+            &[bases("ReviewHolder.ReviewChild", &[to_at("ReviewBase", "ReviewHolder.ReviewBase", 2)])]),
+        row("Scala import inside the actual object (negative control)", L::Scala, "scala",
+            "object ReviewHolder {\n  class ReviewBase\n  import external.ReviewBase\n  class ReviewChild extends ReviewBase\n}\n\
+             object ReviewHolder\n",
+            &[unclassified("ReviewHolder.ReviewChild", &[text("ReviewBase")])]),
+        // --- Inherited-name barriers of a sibling owner.
+        row("Java sibling class with a base", L::Java, "java",
+            "class ReviewBase {}\nclass ReviewHolder { static class ReviewChild extends ReviewBase {} }\nclass ReviewHolder extends External {}\n",
+            &[bases("ReviewHolder.ReviewChild", &[to_at("ReviewBase", "ReviewBase", 1)])]),
+        row("Java actual class with a base (negative control)", L::Java, "java",
+            "class ReviewBase {}\nclass ReviewHolder extends External { static class ReviewChild extends ReviewBase {} }\nclass ReviewHolder {}\n",
+            &[bases("ReviewHolder.ReviewChild", &[text("ReviewBase")])]),
+        row("Java own member beside a sibling's (control)", L::Java, "java",
+            "class ReviewHolder { static class ReviewBase {} static class ReviewChild extends ReviewBase {} }\nclass ReviewHolder { static class ReviewBase {} }\n",
+            &[bases("ReviewHolder.ReviewChild", &[to_at("ReviewBase", "ReviewHolder.ReviewBase", 1)])]),
+        row("Java sibling generic parameter (control)", L::Java, "java",
+            "class ReviewHolder { static class ReviewBase {} static class ReviewChild extends ReviewBase {} }\nclass ReviewHolder<ReviewBase> {}\n",
+            &[bases("ReviewHolder.ReviewChild", &[to_at("ReviewBase", "ReviewHolder.ReviewBase", 1)])]),
+        row("Swift sibling type with a base", L::Swift, "swift",
+            "class ReviewBase {}\nstruct ReviewHolder {\nclass ReviewChild: ReviewBase {}\n}\nstruct ReviewHolder: External {}\n",
+            &[bases("ReviewHolder.ReviewChild", &[to_at("ReviewBase", "ReviewBase", 1)])]),
+        row("Swift actual type with a base (negative control)", L::Swift, "swift",
+            "class ReviewBase {}\nstruct ReviewHolder: External {\nclass ReviewChild: ReviewBase {}\n}\nstruct ReviewHolder {}\n",
+            &[unclassified("ReviewHolder.ReviewChild", &[text("ReviewBase")])]),
+        row("Swift own member beside a sibling's (control)", L::Swift, "swift",
+            "struct ReviewHolder {\nclass ReviewBase {}\nclass ReviewChild: ReviewBase {}\n}\nstruct ReviewHolder {\nclass ReviewBase {}\n}\n",
+            &[bases("ReviewHolder.ReviewChild", &[to_at("ReviewBase", "ReviewHolder.ReviewBase", 2)])]),
+        row("Swift sibling generic parameter (control)", L::Swift, "swift",
+            "struct ReviewHolder {\nclass ReviewBase {}\nclass ReviewChild: ReviewBase {}\n}\nstruct ReviewHolder<ReviewBase> {}\n",
+            &[bases("ReviewHolder.ReviewChild", &[to_at("ReviewBase", "ReviewHolder.ReviewBase", 2)])]),
+        row("Swift extension of an unproved nested owner, sibling with a base (control)", L::Swift, "swift",
+            "class ReviewBase {}\nstruct ReviewHolder {\nstruct ReviewInner {}\n}\nstruct ReviewHolder: External {}\n\
+             extension ReviewHolder.ReviewInner {\nclass ReviewChild: ReviewBase {}\n}\n",
+            &[unclassified("ReviewHolder.ReviewInner.ReviewChild", &[text("ReviewBase")])]),
+        row("Scala sibling object with a base", L::Scala, "scala",
+            "class ReviewBase\nobject ReviewHolder {\n  class ReviewChild extends ReviewBase\n}\nobject ReviewHolder extends External\n",
+            &[bases("ReviewHolder.ReviewChild", &[to_at("ReviewBase", "ReviewBase", 1)])]),
+        row("Scala sibling generic class (control)", L::Scala, "scala",
+            "object ReviewHolder {\n  class ReviewBase\n  class ReviewChild extends ReviewBase\n}\nclass ReviewHolder[ReviewBase]\n",
+            &[bases("ReviewHolder.ReviewChild", &[to_at("ReviewBase", "ReviewHolder.ReviewBase", 2)])]),
+        row("C# sibling non-partial class with a base", L::CSharp, "cs",
+            "class ReviewBase {}\nclass ReviewHolder { class ReviewChild : ReviewBase {} }\nclass ReviewHolder : External {}\n",
+            &[bases("ReviewHolder.ReviewChild", &[to_at("ReviewBase", "ReviewBase", 1)])]),
+        row("C# own member beside a non-partial sibling's", L::CSharp, "cs",
+            "class ReviewHolder { class ReviewBase {} class ReviewChild : ReviewBase {} }\nclass ReviewHolder { class ReviewBase {} }\n",
+            &[bases("ReviewHolder.ReviewChild", &[to_at("ReviewBase", "ReviewHolder.ReviewBase", 1)])]),
+        row("C# partial fragments share members (control)", L::CSharp, "cs",
+            "partial class ReviewHolder { class ReviewChild : ReviewBase {} }\npartial class ReviewHolder { class ReviewBase {} }\n",
+            &[bases("ReviewHolder.ReviewChild", &[to_at("ReviewBase", "ReviewHolder.ReviewBase", 2)])]),
+        row("C# partial fragments, qualified path from outside (control)", L::CSharp, "cs",
+            "partial class ReviewHolder { class ReviewBase {} }\npartial class ReviewHolder {}\nclass ReviewChild : ReviewHolder.ReviewBase {}\n",
+            &[bases("ReviewChild", &[to_at("ReviewHolder.ReviewBase", "ReviewHolder.ReviewBase", 1)])]),
+        row("C# non-partial types, qualified path from outside (control)", L::CSharp, "cs",
+            "class ReviewHolder { class ReviewBase {} }\nclass ReviewHolder {}\nclass ReviewChild : ReviewHolder.ReviewBase {}\n",
+            &[unclassified("ReviewChild", &[text("ReviewHolder.ReviewBase")])]),
+        row("C# partial fragment with a base is the whole type's barrier (control)", L::CSharp, "cs",
+            "class ReviewBase {}\npartial class ReviewHolder { class ReviewChild : ReviewBase {} }\npartial class ReviewHolder : External {}\n",
+            &[unclassified("ReviewHolder.ReviewChild", &[text("ReviewBase")])]),
+        row("C# sibling generic parameter (control)", L::CSharp, "cs",
+            "class ReviewHolder { class ReviewBase {} class ReviewChild : ReviewBase {} }\nclass ReviewHolder<ReviewBase> {}\n",
+            &[bases("ReviewHolder.ReviewChild", &[to_at("ReviewBase", "ReviewHolder.ReviewBase", 1)])]),
+        // --- C++.
+        row("C++ struct owner beside a same-named namespace's using-directive", L::Cpp, "cpp",
+            "struct ReviewHolder { struct ReviewBase {}; struct ReviewChild : ReviewBase {}; };\n\
+             namespace ReviewHolder { using namespace external; }\n",
+            &[bases("ReviewHolder::ReviewChild", &[to_at("ReviewBase", "ReviewHolder::ReviewBase", 1)])]),
+        row("C++ using-directive in the actual namespace (negative control)", L::Cpp, "cpp",
+            "struct ReviewBase {};\nnamespace ReviewHolder { using namespace external; struct ReviewChild : ReviewBase {}; }\n",
+            &[bases("ReviewHolder::ReviewChild", &[text("ReviewBase")])]),
+        row("C++ own member beside a sibling's (control)", L::Cpp, "cpp",
+            "struct ReviewHolder { struct ReviewBase {}; struct ReviewChild : ReviewBase {}; };\nstruct ReviewHolder { struct ReviewBase {}; };\n",
+            &[bases("ReviewHolder::ReviewChild", &[to_at("ReviewBase", "ReviewHolder::ReviewBase", 1)])]),
+        row("C++ sibling struct with a base", L::Cpp, "cpp",
+            "struct ReviewBase {};\nstruct ReviewHolder { struct ReviewChild : ReviewBase {}; };\nstruct ReviewHolder : External {};\n",
+            &[bases("ReviewHolder::ReviewChild", &[to_at("ReviewBase", "ReviewBase", 1)])]),
+        row("C++ sibling template parameter (control)", L::Cpp, "cpp",
+            "struct ReviewHolder { struct ReviewBase {}; struct ReviewChild : ReviewBase {}; };\ntemplate <typename ReviewBase> struct ReviewHolder {};\n",
+            &[bases("ReviewHolder::ReviewChild", &[to_at("ReviewBase", "ReviewHolder::ReviewBase", 1)])]),
+        // --- Intentional sharing and other languages' controls.
+        row("TypeScript reopened namespace, unqualified base in a sibling fragment (control)", L::TypeScript, "ts",
+            "namespace ReviewNs { export class ReviewBase {} }\nnamespace ReviewNs { class ReviewChild extends ReviewBase {} }\n",
+            &[bases("ReviewNs.ReviewChild", &[to_at("ReviewBase", "ReviewNs.ReviewBase", 1)])]),
+        row("PHP reopened block namespace, unqualified base (control)", L::Php, "php",
+            "<?php\nnamespace ReviewNs { class ReviewBase {} }\nnamespace ReviewNs { class ReviewChild extends ReviewBase {} }\n",
+            &[bases("ReviewNs\\ReviewChild", &[to_at("ReviewBase", "ReviewNs\\ReviewBase", 2)])]),
+        row("JavaScript method-local base, sibling class with a base (control)", L::JavaScript, "js",
+            "class ReviewHolder { review() { class ReviewBase {}\nclass ReviewChild extends ReviewBase {} } }\nclass ReviewHolder extends External {}\n",
+            &[bases("ReviewHolder.review.ReviewChild", &[to_at("ReviewBase", "ReviewHolder.review.ReviewBase", 1)])]),
+        row("Go same-named interfaces, one embedding External (control)", L::Go, "go",
+            "package shapes\n\ntype ReviewBase interface{ M() }\ntype ReviewHolder interface{ N() }\ntype ReviewHolder interface{ External }\n\
+             type ReviewChild interface{ ReviewBase }\n",
+            &[bases("shapes.ReviewChild", &[to_at("ReviewBase", "shapes.ReviewBase", 3)])]),
+    // --- Rust impls inside the first module; the sibling imports one name.
+    rust_impl_row!("trait impl's self type", "impl ReviewTrait for ReviewBase { fn review_probe(&self) {} }", "ReviewBase", TRAIT_MEMBER, &[OWN_TRAIT]),
+    rust_impl_row!("trait impl's trait", "impl ReviewTrait for ReviewBase { fn review_probe(&self) {} }", "ReviewTrait", TRAIT_MEMBER, &[OWN_TRAIT]),
+    rust_impl_row!("empty trait impl", "impl ReviewTrait for ReviewBase {}", "ReviewBase", &[], &[OWN_TRAIT]),
+    rust_impl_row!("inherent impl", "impl ReviewBase { fn review_probe(&self) {} }", "ReviewBase", INHERENT_MEMBER, &[]),
+];
+
+/// Every Swift standard raw-type spelling whose first segment only the
+/// second of two same-named owners declares: no base, as without it.
+fn swift_sibling_shadow_rows() -> Vec<PathMeaningRow> {
+    fn leak(value: String) -> &'static str { Box::leak(value.into_boxed_str()) }
+    let mut rows = Vec::new();
+    let simple = ["Int", "Int8", "Int16", "Int32", "Int64", "UInt", "UInt8", "UInt16", "UInt32", "UInt64", "String", "Character", "Float", "Double"];
+    let spellings = simple
+        .iter()
+        .flat_map(|name| [(*name, *name), ("Swift", leak(format!("Swift.{name}")))])
+        .chain([("Unicode", "Unicode.Scalar"), ("Swift", "Swift.Unicode.Scalar")]);
+    for (shadow, target) in spellings {
+        rows.push(row(leak(format!("Swift raw type {target} shadowed only in a sibling owner")), L::Swift, "swift",
+            leak(format!("struct ReviewHolder {{\nenum ReviewChild: {target} {{ case value }}\n}}\nstruct ReviewHolder {{\nclass {shadow} {{}}\n}}\n")),
+            Box::leak(vec![bases("ReviewHolder.ReviewChild", &[])].into_boxed_slice())));
+    }
+    rows
+}
+
+static SWIFT_SIBLING_SHADOW_ROWS: std::sync::LazyLock<Vec<PathMeaningRow>> = std::sync::LazyLock::new(swift_sibling_shadow_rows);
+
+/// The six written C# forms a `partial` type may take; `record` and
+/// `record class` are one category.
+const CSHARP_PARTIAL_FORMS: [&str; 6] = ["class", "struct", "interface", "record", "record struct", "record class"];
+
+/// Whether two written C# forms declare one category of type.
+fn csharp_forms_compatible(first: &str, second: &str) -> bool {
+    fn category(form: &str) -> &str { if form == "record class" { "record" } else { form } }
+    category(first) == category(second)
+}
+
+/// The C# `partial` identity rows: declarations of one bound name are
+/// fragments of one type only when every fragment is `partial` and they
+/// agree on category, generic arity and enclosing owner. `ReviewChild`
+/// sits in the first owner and writes `ReviewBase`, which (unless the row
+/// says otherwise) only the second owner declares: a genuine fragment's
+/// member resolves (`extends`, line 2), any other owner's stays text with
+/// no ID in `unclassified_bases`.
+fn csharp_partial_identity_rows() -> Vec<PathMeaningRow> {
+    fn leak(value: String) -> &'static str { Box::leak(value.into_boxed_str()) }
+    fn owners(owner: &str, target: Target) -> &'static [Owner] {
+        let targets: &'static [Target] = Box::leak(vec![target].into_boxed_slice());
+        let resolved = target.resolves_to.is_some();
+        Box::leak(vec![Owner {
+            qualified_name: leak(owner.to_string()),
+            extends: if resolved { targets } else { &[] },
+            implements: &[],
+            unclassified: if resolved { &[] } else { targets },
+        }].into_boxed_slice())
+    }
+    const CHILD: &str = "ReviewHolder.ReviewChild";
+    const SECOND: Target = to_at("ReviewBase", "ReviewHolder.ReviewBase", 2);
+    let parameters = |arity: usize| ["", "<T>", "<T, U>"][arity];
+    let pair = |first: &str, second: &str| {
+        format!("partial {first} {{ class ReviewChild : ReviewBase {{}} }}\npartial {second} {{ class ReviewBase {{}} }}\n")
+    };
+    let mut rows = Vec::new();
+    let mut add = |label: String, source: String, owners: &'static [Owner]| {
+        rows.push(row(leak(format!("C# partial identity: {label}")), L::CSharp, "cs", leak(source), owners));
+    };
+    for form in CSHARP_PARTIAL_FORMS {
+        let arities: &[(usize, usize)] = if form == "record class" { &[(1, 2)] } else { &[(0, 1), (0, 2), (1, 2)] };
+        for &(first, second) in arities {
+            add(format!("{form} arities {first}/{second}"),
+                pair(&format!("{form} ReviewHolder{}", parameters(first)), &format!("{form} ReviewHolder{}", parameters(second))),
+                owners(CHILD, text("ReviewBase")));
+        }
+    }
+    for form in CSHARP_PARTIAL_FORMS {
+        let arities: &[usize] = if form == "record class" { &[1] } else { &[0, 1] };
+        for &arity in arities {
+            let written = format!("{form} ReviewHolder{}", parameters(arity));
+            add(format!("matching {form} fragments at arity {arity} (control)"), pair(&written, &written), owners(CHILD, SECOND));
+        }
+    }
+    for first in CSHARP_PARTIAL_FORMS {
+        for second in CSHARP_PARTIAL_FORMS.into_iter().filter(|second| *second != first) {
+            let compatible = csharp_forms_compatible(first, second);
+            add(format!("{first} then {second}{}", if compatible { " (compatible control)" } else { "" }),
+                pair(&format!("{first} ReviewHolder"), &format!("{second} ReviewHolder")),
+                owners(CHILD, if compatible { SECOND } else { text("ReviewBase") }));
+        }
+    }
+    add("own member beside a different arity's".into(),
+        "partial class ReviewHolder { class ReviewBase {} class ReviewChild : ReviewBase {} }\n\
+         partial class ReviewHolder<T> { class ReviewBase {} }\n".into(),
+        owners(CHILD, to_at("ReviewBase", "ReviewHolder.ReviewBase", 1)));
+    add("inherited-name barrier only on a different arity".into(),
+        "class ReviewBase {}\npartial class ReviewHolder { class ReviewChild : ReviewBase {} }\n\
+         partial class ReviewHolder<T> : External {}\n".into(),
+        owners(CHILD, to_at("ReviewBase", "ReviewBase", 1)));
+    add("outside path, member only in the generic type".into(),
+        "partial class ReviewHolder {}\npartial class ReviewHolder<T> { public class ReviewBase {} }\n\
+         class ReviewChild : ReviewHolder.ReviewBase {}\n".into(),
+        owners("ReviewChild", text("ReviewHolder.ReviewBase")));
+    add("outside path, bare name denotes the arity-0 type (control)".into(),
+        "partial class ReviewHolder { public class ReviewBase {} }\npartial class ReviewHolder<T> { public class ReviewBase {} }\n\
+         class ReviewChild : ReviewHolder.ReviewBase {}\n".into(),
+        owners("ReviewChild", to_at("ReviewHolder.ReviewBase", "ReviewHolder.ReviewBase", 1)));
+    add("outside path, written type argument denotes the generic type (control)".into(),
+        "partial class ReviewHolder { public class ReviewBase {} }\npartial class ReviewHolder<T> { public class ReviewBase {} }\n\
+         class ReviewChild : ReviewHolder<int>.ReviewBase {}\n".into(),
+        owners("ReviewChild", to_at("ReviewHolder<int>.ReviewBase", "ReviewHolder.ReviewBase", 2)));
+    add("nested owner, partial enclosing types of different arity".into(),
+        "partial class ReviewOuter { partial class ReviewHolder { class ReviewChild : ReviewBase {} } }\n\
+         partial class ReviewOuter<T> { partial class ReviewHolder { class ReviewBase {} } }\n".into(),
+        owners("ReviewOuter.ReviewHolder.ReviewChild", text("ReviewBase")));
+    add("nested owner, non-partial enclosing types of different arity".into(),
+        "class ReviewOuter { partial class ReviewHolder { class ReviewChild : ReviewBase {} } }\n\
+         class ReviewOuter<T> { partial class ReviewHolder { class ReviewBase {} } }\n".into(),
+        owners("ReviewOuter.ReviewHolder.ReviewChild", text("ReviewBase")));
+    add("nested owner, matching partial enclosing fragments (control)".into(),
+        "partial class ReviewOuter { partial class ReviewHolder { class ReviewChild : ReviewBase {} } }\n\
+         partial class ReviewOuter { partial class ReviewHolder { class ReviewBase {} } }\n".into(),
+        owners("ReviewOuter.ReviewHolder.ReviewChild", to_at("ReviewBase", "ReviewOuter.ReviewHolder.ReviewBase", 2)));
+    add("namespace beside a partial type".into(),
+        "partial class ReviewHolder { class ReviewChild : ReviewBase {} }\nnamespace ReviewHolder { class ReviewBase {} }\n".into(),
+        owners(CHILD, text("ReviewBase")));
+    add("matching fragments beside a different arity (control)".into(),
+        "partial class ReviewHolder { class ReviewChild : ReviewBase {} }\npartial class ReviewHolder<T> { class ReviewBase {} }\n\
+         partial class ReviewHolder { class ReviewBase {} }\n".into(),
+        owners(CHILD, to_at("ReviewBase", "ReviewHolder.ReviewBase", 3)));
+    add("generic parameter of a different arity (control)".into(),
+        "class ReviewBase {}\npartial class ReviewHolder { class ReviewChild : ReviewBase {} }\n\
+         partial class ReviewHolder<ReviewBase> {}\n".into(),
+        owners(CHILD, to_at("ReviewBase", "ReviewBase", 1)));
+    add("non-partial types of different arity (control)".into(),
+        "class ReviewHolder { class ReviewChild : ReviewBase {} }\nclass ReviewHolder<T> { class ReviewBase {} }\n".into(),
+        owners(CHILD, text("ReviewBase")));
+    rows.push(PathMeaningRow {
+        label: "C# partial identity: containment, Probe in the first owner's Child (control)",
+        language: L::CSharp,
+        extension: "cs",
+        source: CSHARP_PARTIAL_CONTAINMENT,
+        owners: owners(CHILD, text("ReviewBase")),
+        impl_members: &[ImplMember {
+            method: "Probe",
+            container: "ReviewHolder.ReviewChild",
+            owner: Some("ReviewHolder.ReviewChild"),
+            implements: None,
+            container_kind: Some(SymbolKindV2::Class),
+        }],
+        untouched: &[],
+    });
+    rows
+}
+
+const CSHARP_PARTIAL_CONTAINMENT: &str = "partial class ReviewHolder { class ReviewChild : ReviewBase { void Probe() {} } }\n\
+    partial class ReviewHolder<T> { class ReviewBase {} }\n";
+
+static CSHARP_PARTIAL_IDENTITY_ROWS: std::sync::LazyLock<Vec<PathMeaningRow>> =
+    std::sync::LazyLock::new(csharp_partial_identity_rows);
+
+/// The C# identity rows hold every swept shape: 16 arity rows, 11
+/// matching-fragment controls, the 30 directed category pairs (two of them
+/// the `record`/`record class` controls) and 13 owner, path, enclosing,
+/// namespace, generic, non-partial and containment rows.
+#[test]
+fn csharp_partial_identity_rows_cover_every_swept_shape() {
+    let rows = &*CSHARP_PARTIAL_IDENTITY_ROWS;
+    assert_eq!(rows.len(), 70);
+    assert_eq!(rows.iter().filter(|row| row.label.contains(" arities ")).count(), 16);
+    assert_eq!(rows.iter().filter(|row| row.label.contains(": matching ") && row.label.contains(" at arity ")).count(), 11);
+    assert_eq!(rows.iter().filter(|row| row.label.contains(" then ")).count(), 30);
+    assert_eq!(rows.iter().filter(|row| row.label.contains(" then ") && row.label.ends_with("(compatible control)")).count(), 2);
+}
+
+/// The containment control keeps source-contained memberships: `ReviewChild`
+/// belongs to the first (non-generic) `ReviewHolder` and `Probe` to
+/// `ReviewChild`, on the complete index and on a Containment query, while
+/// its base names no declaration.
+#[test]
+fn csharp_partial_identity_keeps_source_contained_memberships() {
+    let file = write_temp(CSHARP_PARTIAL_CONTAINMENT, "cs");
+    let tree_file = TreeFile::new(file.path()).expect("parse");
+    assert!(tree_file.syntax_diagnostics().is_empty(), "{:?}", tree_file.syntax_diagnostics());
+    let complete = tree_file.symbol_index_v2().expect("complete index");
+    let contained = tree_file
+        .query(&SymbolQuery::new().kinds([SymbolKindV2::Class, SymbolKindV2::Method]).capabilities([tree_hugger::Capability::Containment]))
+        .expect("containment query")
+        .index;
+    for (label, index) in [("complete", &complete), ("containment", &contained)] {
+        let holder = type_record_at(index, label, "ReviewHolder", Some(1));
+        let child = type_record(index, label, "ReviewHolder.ReviewChild");
+        let probe = method(index, "Probe");
+        let parent = |record: &SymbolRecord| record.relations.parent.as_ref().and_then(|parent| parent.id.clone());
+        assert_eq!(parent(child), Some(holder.id.clone()), "{label}: ReviewChild belongs to the first ReviewHolder");
+        assert_eq!(parent(probe), Some(child.id.clone()), "{label}: Probe belongs to ReviewChild");
+        assert!(holder.relations.members.iter().any(|member| member.id.as_ref() == Some(&child.id)), "{label}: listed");
+        let [base] = &child.relations.unclassified_bases[..] else { panic!("{label}: one uncertain base") };
+        assert_eq!((base.name.as_str(), base.id.as_ref(), base.qualified_name.as_deref()), ("ReviewBase", None, None), "{label}");
+        assert!(child.relations.extends.is_empty(), "{label}: no proved superclass");
+    }
+}
+
+/// The source-owner rows cover all four Rust impl consumers and all 30
+/// Swift raw-type spellings.
+#[test]
+fn source_owner_rows_cover_every_swept_site() {
+    assert_eq!(SWIFT_SIBLING_SHADOW_ROWS.len(), 30);
+    assert_eq!(SOURCE_OWNER_MATRIX.iter().filter(|row| row.label.contains(", sibling module imports")).count(), 4);
+}
+
 /// Every path-meaning row: [`PATH_MEANING_MATRIX`], the generated Python
 /// member-binding rows ([`PYTHON_MEMBER_SHAPES`]), the Swift nested generic
-/// rows, [`OWNER_AMBIGUITY_MATRIX`] and the Swift unproved-owner rows.
+/// rows, [`OWNER_AMBIGUITY_MATRIX`], the Swift unproved-owner rows and the
+/// source-owner rows ([`SOURCE_OWNER_MATRIX`], the Swift sibling-shadow
+/// rows) and the C# `partial` identity rows.
 pub fn path_meaning_rows() -> impl Iterator<Item = &'static PathMeaningRow> {
     PATH_MEANING_MATRIX
         .iter()
@@ -3426,13 +4028,17 @@ pub fn path_meaning_rows() -> impl Iterator<Item = &'static PathMeaningRow> {
         .chain(SWIFT_NESTED_GENERIC_ROWS.iter())
         .chain(OWNER_AMBIGUITY_MATRIX)
         .chain(SWIFT_UNPROVED_OWNER_ROWS.iter())
+        .chain(SOURCE_OWNER_MATRIX)
+        .chain(SWIFT_SIBLING_SHADOW_ROWS.iter())
+        .chain(CSHARP_PARTIAL_IDENTITY_ROWS.iter())
 }
 
-/// Every path-meaning row's ([`path_meaning_rows`]) owners hold on the complete index and
+declaration_fact_group_tests!(shared path_meaning_matrix_holds_on_complete_and_declarations_only_paths => owners_hold_on_complete_and_declarations_only_paths);
+
+/// Every path-meaning row's ([`path_meaning_group`]) owners hold on the complete index and
 /// on a declarations-only query of the owner's kind.
-#[test]
-fn path_meaning_matrix_holds_on_complete_and_declarations_only_paths() {
-    let failed = failing_rows(path_meaning_rows(), |row| {
+fn owners_hold_on_complete_and_declarations_only_paths(group: usize) {
+    let failed = failing_rows(path_meaning_group(group), |row| {
         let label = format!("{}: {}", row.language.name(), row.label);
         check_owners(&label, row.extension, row.source, row.owners);
     });
@@ -3681,14 +4287,14 @@ fn relations_need_only_the_parse_pass() {
 
 /// A generated file whose declarations each write bases or impls: header,
 /// then `body(i)` for every `i < n`.
-struct RelationShape {
-    label: &'static str,
+pub struct RelationShape {
+    pub label: &'static str,
     extension: &'static str,
     header: &'static str,
     body: fn(usize) -> String,
 }
 
-const RELATION_SHAPES: &[RelationShape] = &[
+pub const RELATION_SHAPES: &[RelationShape] = &[
     RelationShape {
         label: "Rust modules with a supertrait, a trait impl and an external impl each",
         extension: "rs",
@@ -3726,12 +4332,19 @@ const RELATION_SHAPES: &[RelationShape] = &[
     },
 ];
 
+crate::symbols_shared_context::shape_tests!(relation_resolution_grows_linearly_with_declarations => relation_shape_grows_linearly {
+    rust_modules => "Rust modules with a supertrait, a trait impl and an external impl each",
+    typescript_classes => "TypeScript classes extending and implementing",
+    java_nested_classes => "Java nested classes extending an outer type",
+    cpp_namespaces => "C++ namespaces with a local and an external base",
+    python_classes => "Python classes with positional bases",
+});
+
 /// Resolving written bases and Rust impls stays linear in the declarations:
 /// the declaration index is built once per file and each target is looked
 /// up in it, never by rescanning the file per declaration. Results are
 /// checked at both sizes so the shapes are known to produce relations.
-#[test]
-fn relation_resolution_grows_linearly_with_declarations() {
+fn relation_shape_grows_linearly(label: &str) {
     use crate::symbols_shared_context::{LARGE, SMALL, grows_linearly_within};
 
     // Relation resolution counts every lookup segment, candidate visit and
@@ -3742,7 +4355,8 @@ fn relation_resolution_grows_linearly_with_declarations() {
 
     let dir = tempfile::TempDir::new().expect("temp");
     let mut failures = Vec::new();
-    for shape in RELATION_SHAPES {
+    {
+        let shape = crate::symbols_shared_context::shape_labeled(RELATION_SHAPES, label, |shape| shape.label);
         let mut measured = Vec::new();
         for declarations in [SMALL, LARGE] {
             let mut source = shape.header.to_string();

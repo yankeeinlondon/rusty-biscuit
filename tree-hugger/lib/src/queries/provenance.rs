@@ -150,6 +150,7 @@ fn vendored_locals_changes(language: ProgrammingLanguage) -> &'static [&'static 
             "classes captured as `@local.definition.class`; `using` aliases as `@local.definition.type_alias`",
             "replaced the class-body method patterns with one member-function pattern under any return declarator (`int *m(int);`, `int (*m(int))(long) {}`), its context supplied by Tree Hugger; added a qualified function-name pattern behind an attribute or parentheses (`int S::f [[deprecated]] (int) {}`)",
             "added reference-declarator field and typedef-name patterns (`int &ref;`, `typedef int &Ref;`)",
+            "`template_function`/`template_method` names are definitions only inside a function declarator (an explicit specialization, bare or qualified); upstream also captured every use (`f<int>()`), turning calls into function records",
         ],
         ProgrammingLanguage::CSharp => &[
             "properties captured as `@local.definition.property`",

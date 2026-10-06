@@ -786,15 +786,18 @@ fn expected_facts(complete: &SymbolRecord, query: &SymbolQuery) -> Value {
     facts
 }
 
-/// Over every source of the generics, modifiers, body-lines and relations
-/// matrices (and the Rust impls), a narrow query reports, for each record it
-/// selects, the same generic parameters, modifiers, attributes, relations
-/// targets (IDs included), Rust impl container links and `metrics` as the
-/// complete index, under each capability set; facts a capability set does
-/// not compute are absent. The selected records are exactly the complete
-/// index's records of the selected kinds.
-#[test]
-fn declaration_facts_of_narrow_queries_equal_the_complete_index() {
+crate::symbols_relations::declaration_fact_group_tests!(
+    declaration_facts_of_narrow_queries_equal_the_complete_index => narrow_queries_equal_the_complete_index
+);
+
+/// Over every source of `group` of the declaration-fact corpus, a narrow
+/// query reports, for each record it selects, the same generic parameters,
+/// modifiers, attributes, relations targets (IDs included), Rust impl
+/// container links and `metrics` as the complete index, under each
+/// capability set; facts a capability set does not compute are absent. The
+/// selected records are exactly the complete index's records of the selected
+/// kinds. The per-language group must exercise every compared fact.
+fn narrow_queries_equal_the_complete_index(group: usize) {
     let kind_sets: [(&str, Option<&[SymbolKindV2]>); 4] = [
         ("every kind", None),
         ("functions", Some(&FUNCTION_KINDS)),
@@ -813,7 +816,7 @@ fn declaration_facts_of_narrow_queries_equal_the_complete_index() {
     let mut compared = 0usize;
     let mut nonempty = [0usize; 6];
 
-    for (label, path) in crate::symbols_relations::write_declaration_fact_sources(dir.path()) {
+    for (label, path) in crate::symbols_relations::write_declaration_fact_group(dir.path(), group) {
         let source = TreeFile::new(&path).expect("parse");
         assert!(source.syntax_diagnostics().is_empty(), "{label}: {:?}", source.syntax_diagnostics());
         let complete = source.query(&SymbolQuery::complete_index()).expect("complete").index;
@@ -855,6 +858,10 @@ fn declaration_facts_of_narrow_queries_equal_the_complete_index() {
             }
         }
     }
+    assert!(compared > 0, "group {group}: no record compared");
+    if group != crate::symbols_relations::PER_LANGUAGE_FACT_GROUP {
+        return;
+    }
     assert!(compared > 1000, "too few records compared ({compared})");
     for (fact, count) in
         ["generic parameters", "modifiers", "attributes", "relations", "textual impl containers", "body lines"]
@@ -865,14 +872,17 @@ fn declaration_facts_of_narrow_queries_equal_the_complete_index() {
     }
 }
 
+crate::symbols_relations::declaration_fact_group_tests!(
+    declaration_facts_need_one_parse_one_capture_and_one_relation_link => one_parse_one_capture_and_one_relation_link
+);
+
 /// A declarations-only query over the same sources runs the parse pass
 /// alone: one parse, one definitions query, one relation link (one
 /// declaration index and, in Rust, one impl walk) per file, and no
 /// diagnostics. The complete index links relations once too.
-#[test]
-fn declaration_facts_need_one_parse_one_capture_and_one_relation_link() {
+fn one_parse_one_capture_and_one_relation_link(group: usize) {
     let dir = TempDir::new().expect("temp");
-    for (label, path) in crate::symbols_relations::write_declaration_fact_sources(dir.path()) {
+    for (label, path) in crate::symbols_relations::write_declaration_fact_group(dir.path(), group) {
         for query in [SymbolQuery::new(), SymbolQuery::new().kinds([SymbolKindV2::Method]), SymbolQuery::complete_index()] {
             let cell = format!("{label}: {query:?}");
             let (result, work) =

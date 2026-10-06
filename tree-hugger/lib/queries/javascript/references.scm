@@ -39,3 +39,4 @@
       (property_identifier)
       (private_property_identifier)
     ] @reference.member))
+

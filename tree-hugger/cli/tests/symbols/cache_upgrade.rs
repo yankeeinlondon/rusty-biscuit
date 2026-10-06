@@ -57,7 +57,10 @@ fn write_json(path: &Path, value: &Value) {
 }
 
 /// Renames the record called `from` (name and display name) in a snapshot,
-/// and the reference evidence owners and candidates naming it.
+/// and the reference evidence owners, candidates and reference summaries
+/// naming it. An occurrence keeps its name as written, and the reader checks
+/// a target's or candidate's record against it, so a record named where an
+/// occurrence is written cannot be renamed consistently.
 pub(crate) fn rename_record(snapshot: &mut Value, from: &str, to: &str) {
     let record = snapshot["records"]
         .as_array_mut()
@@ -68,12 +71,15 @@ pub(crate) fn rename_record(snapshot: &mut Value, from: &str, to: &str) {
     record["identity"]["name"] = Value::from(to);
     record["identity"]["display_name"] = Value::from(to);
     let id = record["id"].clone();
+    let written = snapshot["occurrences"].as_array().into_iter().flatten().any(|occurrence| occurrence["target"]["name"] == from);
+    assert!(!written, "`{from}` is written at an occurrence; pick a sentinel no occurrence names");
     set_evidence_references(snapshot, &id, "name", Value::from(to));
 }
 
-/// Sets `field` of every reference evidence owner and candidate naming the
-/// record `id`. They repeat the record's name and qualified name, and the
-/// reader checks that they do; a target keeps the name as written.
+/// Sets `field` of every reference evidence owner and candidate, and every
+/// `references`/`referenced_by` summary entry, naming the record `id`. They
+/// repeat the record's name and qualified name, and the reader checks that
+/// they do; a target keeps the name as written.
 fn set_evidence_references(snapshot: &mut Value, id: &Value, field: &str, value: Value) {
     let mut references: Vec<&mut Value> = Vec::new();
     for (key, list) in snapshot.as_object_mut().expect("entry object") {
@@ -92,6 +98,16 @@ fn set_evidence_references(snapshot: &mut Value, id: &Value, field: &str, value:
                 }
             }
             "reference_coverage" => references.extend(list.iter_mut().map(|region| &mut region["owner"])),
+            "records" => {
+                for record in list {
+                    let Some(relations) = record.get_mut("relations").and_then(Value::as_object_mut) else { continue };
+                    for (summary, entries) in relations.iter_mut() {
+                        if summary == "references" || summary == "referenced_by" {
+                            references.extend(entries.as_array_mut().into_iter().flatten());
+                        }
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -296,6 +312,12 @@ struct StaleRevision {
     revert: fn(&mut Value),
 }
 
+/// Revisions whose pre-repair value contradicts the stored evidence it is
+/// derived from, so the reader refuses that payload under any key: revision
+/// 5's `is_recursive: No` beside the `Limited` region every Python callable
+/// has.
+const CONTENT_REJECTED: &[&str] = &["5"];
+
 /// How an earlier revision's entry key is formed.
 enum OldKey {
     /// The analyzer-fingerprint key of revisions 1 to 5, whose records
@@ -408,11 +430,17 @@ fn assert_stale_revision_is_not_served(case: &StaleRevision) {
     (case.revert)(&mut stale);
 
     // Control: the stale payload is servable; under the current key the
-    // pre-repair value reaches the output.
+    // pre-repair value reaches the output. A payload the reader now refuses
+    // on content is recomputed there instead.
     let control = TempDir::new().expect("control temp");
     write_json(&entry_path(&control.path().join(&relative_project), &current_key), &stale);
     let served = json_of(&stdout_of(scratch.hug_with_temp(control.path(), &args), &args));
-    assert_eq!((case.probe)(&served), case.stale, "control: {label} payload under the current key must be served");
+    let control_value = if CONTENT_REJECTED.contains(&case.revision) { &case.repaired } else { &case.stale };
+    assert_eq!(
+        (case.probe)(&served),
+        *control_value,
+        "control: {label} payload under the current key must be served unless refused on content"
+    );
 
     let project_dir = scratch.temp.path().join(&relative_project);
     write_json(&entry_path(&project_dir, &old_key), &stale);
@@ -1216,8 +1244,8 @@ fn entry_from_extractor_revision_twenty_one_is_not_served_after_the_repairs() {
     });
 }
 
-const UPGRADE_BASES_PY: &str =
-    "class UpgradeBase:\n    pass\n\nclass UpgradeChild(UpgradeBase, other.Mixin):\n    pass\n";
+const UPGRADE_BASES_PY: &str = "class UpgradeBase:\n    pass\n\nclass UpgradeChild(UpgradeBase, other.Mixin):\n    pass\n\n\
+     class UpgradeSentinel:\n    pass\n";
 
 /// `UpgradeChild`'s `relations.extends` as `[name, has id]` pairs, in a
 /// `hug --json-full` report.
@@ -1242,7 +1270,7 @@ fn entry_from_extractor_revision_twenty_two_is_not_served_after_the_relations() 
         file: "bases.py",
         language: "python",
         source: UPGRADE_BASES_PY.to_string(),
-        sentinel: "UpgradeBase",
+        sentinel: "UpgradeSentinel",
         probe: upgrade_extends,
         repaired: serde_json::json!([["UpgradeBase", true], ["other.Mixin", false]]),
         stale: serde_json::json!([]),
@@ -1734,6 +1762,102 @@ struct Sentinel;
             let target = &mut record_named(snapshot, "ReviewChild")["relations"]["extends"][0];
             target["id"] = base["id"].clone();
             target["qualified_name"] = base["identity"]["qualified_name"].clone();
+        },
+    });
+}
+
+/// Revision 36 read a sibling module's import as a binding of the one the
+/// base is written in, so `ReviewBase` inside the first of two same-named
+/// Rust modules stayed text only; revision 37 reads that module's own
+/// imports and gives the base its own module's ID.
+#[test]
+fn entry_from_extractor_revision_thirty_six_is_not_served_after_the_source_owner_repair() {
+    assert_stale_revision_is_not_served(&StaleRevision {
+        revision: "36",
+        key: OldKey::Computed,
+        file: "owners.rs",
+        language: "rust",
+        source: "mod ReviewHolder {\n    pub trait ReviewBase {}\n    pub trait ReviewChild: ReviewBase {}\n}\n\
+                 mod ReviewHolder { use external::ReviewBase; }\nstruct Sentinel;\n"
+            .to_string(),
+        sentinel: "Sentinel",
+        probe: |out| go_record(out, "ReviewChild")["relations"]["extends"][0]["qualified_name"].clone(),
+        repaired: Value::from("ReviewHolder::ReviewBase"),
+        stale: Value::Null,
+        revert: |snapshot| {
+            let target = &mut record_named(snapshot, "ReviewChild")["relations"]["extends"][0];
+            target["id"] = Value::Null;
+            target["qualified_name"] = Value::Null;
+        },
+    });
+}
+
+/// Revision 37 let a call inside a JavaScript `with` body establish the
+/// function around it, so `f` was proven recursive; revision 38 keeps the
+/// call a suggestion (the `with` object may supply `f`) and recursion
+/// unknown.
+#[test]
+fn entry_from_extractor_revision_thirty_seven_is_not_served_after_the_lexical_boundary_repair() {
+    assert_stale_revision_is_not_served(&StaleRevision {
+        revision: "37",
+        key: OldKey::Computed,
+        file: "rec.js",
+        language: "javascript",
+        source: "function f(obj) { with (obj) { f(obj); } }\nfunction Sentinel() {}\n".to_string(),
+        sentinel: "Sentinel",
+        probe: |out| go_record(out, "f")["semantics"]["is_recursive"].clone(),
+        repaired: Value::from("Unknown"),
+        stale: Value::from("Yes"),
+        revert: |snapshot| {
+            let f = record_named(snapshot, "f");
+            let reference = serde_json::json!({
+                "id": f["id"].clone(),
+                "name": "f",
+                "qualified_name": f["identity"]["qualified_name"].clone(),
+            });
+            f["semantics"]["is_recursive"] = Value::from("Yes");
+            f["relations"]["references"].as_array_mut().expect("references").push(reference.clone());
+            f["relations"]["referenced_by"] = Value::Array(vec![reference]);
+            let call = snapshot["occurrences"]
+                .as_array_mut()
+                .expect("occurrences")
+                .iter_mut()
+                .find(|occurrence| occurrence["target"]["name"] == "f")
+                .expect("the self-call");
+            call["target"]["id"] = call["candidates"][0]["id"].clone();
+            call["candidates"] = Value::Array(Vec::new());
+            call["confidence"] = Value::from("Scoped");
+        },
+    });
+}
+
+/// Revision 38 merged every C# `partial` declaration of one name, so
+/// `ReviewChild` in the non-generic `ReviewHolder` borrowed the `ReviewBase`
+/// of `ReviewHolder<T>` as a proved superclass; revision 39 merges only
+/// fragments of one type identity and keeps the base text only.
+#[test]
+fn entry_from_extractor_revision_thirty_eight_is_not_served_after_the_partial_identity_repair() {
+    assert_stale_revision_is_not_served(&StaleRevision {
+        revision: "38",
+        key: OldKey::Computed,
+        file: "partials.cs",
+        language: "c_sharp",
+        source: "partial class ReviewHolder { class ReviewChild : ReviewBase {} }\n\
+                 partial class ReviewHolder<T> { class ReviewBase {} }\nclass Sentinel {}\n"
+            .to_string(),
+        sentinel: "Sentinel",
+        probe: |out| go_record(out, "ReviewChild")["relations"]["extends"][0]["qualified_name"].clone(),
+        repaired: Value::Null,
+        stale: Value::from("ReviewHolder.ReviewBase"),
+        revert: |snapshot| {
+            let base = record_named(snapshot, "ReviewBase");
+            let (id, qualified_name) = (base["id"].clone(), base["identity"]["qualified_name"].clone());
+            let relations = &mut record_named(snapshot, "ReviewChild")["relations"];
+            let mut target = relations["unclassified_bases"][0].clone();
+            target["id"] = id;
+            target["qualified_name"] = qualified_name;
+            relations.as_object_mut().expect("relations").remove("unclassified_bases");
+            relations["extends"] = Value::Array(vec![target]);
         },
     });
 }

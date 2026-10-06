@@ -437,8 +437,9 @@ fn closed(capabilities: impl IntoIterator<Item = Capability>) -> BTreeSet<Capabi
 #[derive(Debug, Clone)]
 pub struct SymbolQueryResult {
     /// The file's identity, language, hash, completed passes, import and
-    /// export records, diagnostics (when required) and the selected records
-    /// that pass the query's predicates. Each record's
+    /// export records, diagnostics and the reference occurrences with their
+    /// coverage (each when required), and the selected records that pass the
+    /// query's predicates. Each record's
     /// `identity.qualified_name` carries the [`name_prefix`](Self::name_prefix)
     /// unless it is namespace-rooted; relation and export references keep the
     /// in-file name.

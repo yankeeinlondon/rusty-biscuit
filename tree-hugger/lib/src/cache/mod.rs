@@ -152,7 +152,7 @@ pub enum CacheUnit {
     /// Reference records from the bind pass.
     References {
         fingerprint: PassFingerprint,
-        // References are not yet stored in FileSymbolIndex; placeholder
+        // Unused: reference evidence is stored with the `SymbolCache` entry; placeholder
     },
     /// Diagnostics from any pass.
     Diagnostics {

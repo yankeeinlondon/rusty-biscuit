@@ -3,7 +3,8 @@
 //! Each shape repeats one name so that every lookup would meet an
 //! input-sized bucket if it scanned one: record-less owners binding the same
 //! parameter name, same-named owners in sibling blocks, a reopened
-//! namespace, a growing written-base list. The counted work
+//! namespace, C# `partial` fragments of one or several type identities, a
+//! growing written-base list. The counted work
 //! (`shared_context_steps`, which also counts candidate visits and
 //! deduplication) must grow with the file, never with the bucket, and the
 //! results must stay exact: every target ID and its source order is checked
@@ -32,8 +33,8 @@ enum Expect {
     Unresolved,
 }
 
-struct WorkShape {
-    label: &'static str,
+pub struct WorkShape {
+    pub label: &'static str,
     extension: &'static str,
     source: fn(usize) -> String,
     /// Name prefixes of the records written with bases and of their
@@ -75,7 +76,7 @@ fn shared_intermediate(n: usize, opening: &str, around: &str, child: fn(usize) -
     source
 }
 
-const WORK_SHAPES: &[WorkShape] = &[
+pub const WORK_SHAPES: &[WorkShape] = &[
     WorkShape {
         label: "C++ broad inline namespaces: injected", extension: "cpp",
         source: |n| repeat("", |i| format!("namespace ReviewNs {{ inline namespace v{i} {{ struct ReviewBase{i} {{}}; }} }}\nstruct ReviewChild{i} : ReviewNs::ReviewBase{i} {{}};\n"), "", n),
@@ -468,6 +469,38 @@ const WORK_SHAPES: &[WorkShape] = &[
         expect: Expect::OneToAll,
         parameter_units: 0,
     },
+    // C# `partial` owner groups: every fragment repeats one bound name, so
+    // a lookup that scanned the fragments per relation would meet the whole
+    // bucket.
+    WorkShape {
+        label: "C# repeated compatible partial fragments", extension: "cs",
+        source: |n| repeat("", |i| format!("partial class ReviewHolder {{ class ReviewBase{i} {{}} }}\n\
+            partial class ReviewHolder {{ class ReviewChild{i} : ReviewBase{i} {{}} }}\n"), "", n),
+        child: "ReviewChild", base: "ReviewBase", expect: Expect::EachToItsOwn,
+        parameter_units: 0,
+    },
+    WorkShape {
+        label: "C# repeated partial fragments of two arities", extension: "cs",
+        source: |n| repeat("", |i| format!("partial class ReviewHolder {{ class ReviewChild{i} : ReviewBase{i} {{}} }}\n\
+            partial class ReviewHolder<T> {{ class ReviewBase{i} {{}} }}\n"), "", n),
+        child: "ReviewChild", base: "ReviewBase", expect: Expect::Unresolved,
+        parameter_units: 1,
+    },
+    WorkShape {
+        label: "C# compatible fragments beside incompatible categories and arities", extension: "cs",
+        source: |n| repeat("", |i| format!("partial class ReviewHolder {{ class ReviewBase{i} {{}} }}\n\
+            partial struct ReviewHolder {{ class ReviewOther{i} {{}} }}\npartial class ReviewHolder<T> {{ class ReviewOther{i} {{}} }}\n\
+            partial class ReviewHolder {{ class ReviewChild{i} : ReviewBase{i} {{}} }}\n"), "", n),
+        child: "ReviewChild", base: "ReviewBase", expect: Expect::EachToItsOwn,
+        parameter_units: 1,
+    },
+    WorkShape {
+        label: "C# outside paths through repeated fragments of two arities", extension: "cs",
+        source: |n| repeat("", |i| format!("partial class ReviewHolder {{ public class ReviewBase{i} {{}} }}\n\
+            partial class ReviewHolder<T> {{ public class ReviewOther{i} {{}} }}\nclass ReviewChild{i} : ReviewHolder.ReviewBase{i} {{}}\n"), "", n),
+        child: "ReviewChild", base: "ReviewBase", expect: Expect::EachToItsOwn,
+        parameter_units: 1,
+    },
 ];
 
 fn is_type_kind(kind: SymbolKindV2) -> bool {
@@ -560,27 +593,65 @@ fn measure(dir: &TempDir, name: &str, source: &str) -> (u64, Vec<SymbolRecord>) 
     (work.shared_context_steps, records)
 }
 
-#[test]
-fn repeated_names_keep_relation_work_linear() {
+crate::symbols_shared_context::shape_tests!(repeated_names_keep_relation_work_linear => shape_work_is_linear {
+    cpp_broad_inline_injected => "C++ broad inline namespaces: injected",
+    cpp_broad_inline_rooted => "C++ broad inline namespaces: rooted",
+    cpp_broad_inline_bare => "C++ broad inline namespaces: bare",
+    cpp_broad_inline_explicit => "C++ broad inline namespaces: explicit",
+    cpp_broad_inline_ambiguous => "C++ broad inline namespaces: ambiguous",
+    cpp_broad_inline_ordinary => "C++ broad inline namespaces: ordinary",
+    cpp_shared_intermediate_qualified => "C++ inline namespaces sharing an intermediate namespace: qualified",
+    cpp_shared_intermediate_rooted => "C++ inline namespaces sharing an intermediate namespace: rooted",
+    cpp_shared_intermediate_bare => "C++ inline namespaces sharing an intermediate namespace: bare",
+    cpp_shared_intermediate_deeper => "C++ inline namespaces sharing an intermediate namespace: deeper",
+    cpp_shared_intermediate_explicit => "C++ inline namespaces sharing an intermediate namespace: explicit",
+    cpp_ordinary_shared_intermediate_explicit => "C++ ordinary namespaces sharing an intermediate namespace: explicit",
+    cpp_shared_intermediate_same_final_name => "C++ inline namespaces sharing an intermediate namespace: same final name",
+    cpp_shared_intermediate_struct => "C++ inline namespaces sharing an intermediate struct",
+    cpp_functions_named_like_the_intermediate => "C++ inline namespaces declaring functions named like the one intermediate namespace",
+    swift_generic_owner_across_conformances => "Swift shared generic owner across conformance extensions",
+    swift_nested_generic_owner_across_bodies => "Swift shared nested generic owner across extension bodies",
+    rust_recordless_impl_parameters => "Rust record-less impl parameters named like a file-level trait",
+    typescript_recordless_signature_parameters => "TypeScript record-less signature parameters named like a file-level interface",
+    cpp_sibling_blocks => "C++ sibling blocks with same-named Holder/Base",
+    rust_sibling_blocks => "Rust sibling blocks with same-named local modules",
+    java_sibling_blocks => "Java sibling blocks with same-named local classes",
+    swift_sibling_do_blocks => "Swift sibling `do` blocks with same-named local classes",
+    scala_sibling_blocks => "Scala sibling blocks with same-named local objects",
+    python_repeated_functions => "Python repeated same-named functions with a Holder/Base",
+    cpp_reopened_namespace => "C++ namespace reopened per declaration",
+    typescript_reopened_namespace => "TypeScript namespace reopened per declaration",
+    java_generic_owner_nested_pairs => "Java generic owner with one type parameter and one nested pair per declaration",
+    rust_trait_supertraits => "Rust trait with one supertrait per declaration",
+    rust_self_type_trait_impls => "Rust self type with one positive trait impl per declaration",
+    csharp_compatible_partials => "C# repeated compatible partial fragments",
+    csharp_partials_of_two_arities => "C# repeated partial fragments of two arities",
+    csharp_partials_beside_incompatible => "C# compatible fragments beside incompatible categories and arities",
+    csharp_outside_paths_by_arity => "C# outside paths through repeated fragments of two arities",
+});
+
+/// The shape labeled `label`, measured at both sizes: its results are exact
+/// and its counted steps grow linearly.
+fn shape_work_is_linear(label: &str) {
+    let position = WORK_SHAPES.iter().position(|shape| shape.label == label).expect("a registered work shape");
+    let shape = &WORK_SHAPES[position];
     let dir = TempDir::new().expect("temp dir");
     let mut failures = String::new();
-    for (position, shape) in WORK_SHAPES.iter().enumerate() {
-        let mut measured = Vec::new();
-        for n in [SMALL, LARGE] {
-            let (steps, records) = measure(&dir, &format!("shape{position}_{n}.{}", shape.extension), &(shape.source)(n));
-            if let Err(problem) = check(shape, &records, n) {
-                let _ = writeln!(failures, "{} (n = {n}): {problem}", shape.label);
-            }
-            measured.push((steps, records.len()));
+    let mut measured = Vec::new();
+    for n in [SMALL, LARGE] {
+        let (steps, records) = measure(&dir, &format!("shape{position}_{n}.{}", shape.extension), &(shape.source)(n));
+        if let Err(problem) = check(shape, &records, n) {
+            let _ = writeln!(failures, "{} (n = {n}): {problem}", shape.label);
         }
-        let [(small, _), (large, records)] = measured[..] else { unreachable!("two sizes") };
-        if !grows_linearly(small, large, records + shape.parameter_units * LARGE) {
-            let _ = writeln!(
-                failures,
-                "{}: {small} steps for {SMALL}, {large} for {LARGE} ({records} records)",
-                shape.label
-            );
-        }
+        measured.push((steps, records.len()));
+    }
+    let [(small, _), (large, records)] = measured[..] else { unreachable!("two sizes") };
+    if !grows_linearly(small, large, records + shape.parameter_units * LARGE) {
+        let _ = writeln!(
+            failures,
+            "{}: {small} steps for {SMALL}, {large} for {LARGE} ({records} records)",
+            shape.label
+        );
     }
     assert!(failures.is_empty(), "relation work or results broke on repeated names:\n{failures}");
 }
@@ -661,4 +732,3 @@ fn separately_written_generic_bounds_cost_linear_work() {
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
-

@@ -25,6 +25,43 @@ use tree_hugger::{
     Capability, SymbolKindV2, SymbolQuery, SymbolRecord, SymbolRef, TreeFile, VisibilityLevel, work_counters,
 };
 
+/// Stamps one `#[test]` per labeled shape in the module `$module`, each
+/// calling the sibling function `$run` with its label, so every shape of a
+/// growing shape table is scheduled and timed on its own. `STAMPED` lists
+/// the labels for [`assert_every_shape_stamped`].
+macro_rules! shape_tests {
+    ($module:ident => $run:ident { $($name:ident => $label:literal,)+ }) => {
+        pub(crate) mod $module {
+            pub const STAMPED: &[&str] = &[$($label),+];
+            $(
+                #[test]
+                fn $name() {
+                    super::$run($label);
+                }
+            )+
+        }
+    };
+}
+pub(crate) use shape_tests;
+
+/// Every label in `labels` is unique and stamped exactly once, so a new
+/// shape cannot go untested.
+pub fn assert_every_shape_stamped<'a>(table: &str, labels: impl Iterator<Item = &'a str>, stamped: &[&str]) {
+    let mut labels: Vec<&str> = labels.collect();
+    labels.sort_unstable();
+    let mut unique = labels.clone();
+    unique.dedup();
+    assert_eq!(unique, labels, "{table}: labels are unique");
+    let mut stamped = stamped.to_vec();
+    stamped.sort_unstable();
+    assert_eq!(stamped, labels, "{table}: stamp one test per shape");
+}
+
+/// The labeled entry of `table`.
+pub fn shape_labeled<'a, T>(table: &'a [T], label: &str, label_of: fn(&T) -> &str) -> &'a T {
+    table.iter().find(|entry| label_of(entry) == label).unwrap_or_else(|| panic!("no shape labeled {label:?}"))
+}
+
 pub const SMALL: usize = 200;
 pub const LARGE: usize = 2 * SMALL;
 
@@ -189,10 +226,26 @@ pub fn grows_linearly_within(small_steps: u64, large_steps: u64, large_records: 
     large_steps <= 2 * small_steps + 64 && large_steps <= per_record * large_records as u64
 }
 
-#[test]
-fn shared_context_work_grows_linearly_with_declarations() {
+shape_tests!(shared_context_work_grows_linearly_with_declarations => shape_work_grows_linearly {
+    rust_flat_functions => "Rust flat functions, no inner attribute",
+    rust_module_descendants => "Rust descendants of one module",
+    rust_same_file_trait_impls => "Rust members of impls of a same-file trait",
+    typescript_flat_functions => "TypeScript flat functions",
+    python_flat_functions => "Python flat functions",
+    java_package_classes => "Java package, then classes with a field",
+    go_package_types => "Go package clause, then types with a receiver method",
+    php_namespace_functions => "PHP namespace statement, then functions",
+    scala_stacked_packages => "Scala stacked package clauses, then objects with qualified access",
+    csharp_file_scoped_namespace => "C# file-scoped namespace, then classes",
+    perl_package_subs => "Perl package statement, then subs",
+    c_static_prototypes => "C static prototypes, then their definitions",
+    cpp_members_and_namespace_functions => "C++ struct members without an access section, then namespace functions",
+});
+
+fn shape_work_grows_linearly(label: &str) {
     let mut failures = String::new();
-    for shape in SHAPES {
+    {
+        let shape = shape_labeled(SHAPES, label, |shape| shape.label);
         let (small_steps, small_records) = steps_for(shape, SMALL);
         let (large_steps, large_records) = steps_for(shape, LARGE);
         assert!(
@@ -508,10 +561,22 @@ const REPEATED_SHAPES: &[RepeatedShape] = &[
     },
 ];
 
-#[test]
-fn repeated_names_keep_shared_context_linear_and_results_intact() {
+shape_tests!(repeated_names_keep_shared_context_linear_and_results_intact => repeated_shape_stays_linear {
+    rust_traits_per_module => "Rust trait `Probe` repeated per module",
+    rust_owner_per_module => "Rust struct `Probe` and its impl repeated per module",
+    lua_repeated_table => "Lua `local Probe` table and its method repeated",
+    cpp_static_per_namespace => "C++ `static void probe(); void probe() {}` repeated per namespace",
+    cpp_out_of_body_definitions => "C++ out-of-body `void r9_i::probe() {}` after a namespaced `static`",
+    cpp_overloads => "C++ overloads `static void probe(R9_i); void probe(R9_i) {}`",
+    cpp_qualified_definitions => "C++ distinct namespace-qualified definitions",
+    rust_exports_per_module => "Rust `pub fn probe` exported from every module",
+    scala_block_packages => "Scala sibling block packages with package-qualified access",
+});
+
+fn repeated_shape_stays_linear(label: &str) {
     let mut failures = String::new();
-    for RepeatedShape { shape, check } in REPEATED_SHAPES {
+    {
+        let RepeatedShape { shape, check } = shape_labeled(REPEATED_SHAPES, label, |repeated| repeated.shape.label);
         let (small_steps, small_records) = analyze(shape, SMALL, Analysis::Complete);
         let (large_steps, large_records) = analyze(shape, LARGE, Analysis::Complete);
         for (n, records) in [(SMALL, &small_records), (LARGE, &large_records)] {
@@ -530,6 +595,32 @@ fn repeated_names_keep_shared_context_linear_and_results_intact() {
         }
     }
     assert!(failures.is_empty(), "repeated names broke results or linear shared context:\n{failures}");
+}
+
+/// Every shape table here and in `symbols_relation_work` and
+/// `symbols_relations` has one stamped test per labeled shape.
+#[test]
+fn every_linear_work_shape_has_its_own_test() {
+    assert_every_shape_stamped(
+        "SHAPES",
+        SHAPES.iter().map(|shape| shape.label),
+        shared_context_work_grows_linearly_with_declarations::STAMPED,
+    );
+    assert_every_shape_stamped(
+        "REPEATED_SHAPES",
+        REPEATED_SHAPES.iter().map(|repeated| repeated.shape.label),
+        repeated_names_keep_shared_context_linear_and_results_intact::STAMPED,
+    );
+    assert_every_shape_stamped(
+        "WORK_SHAPES",
+        crate::symbols_relation_work::WORK_SHAPES.iter().map(|shape| shape.label),
+        crate::symbols_relation_work::repeated_names_keep_relation_work_linear::STAMPED,
+    );
+    assert_every_shape_stamped(
+        "RELATION_SHAPES",
+        crate::symbols_relations::RELATION_SHAPES.iter().map(|shape| shape.label),
+        crate::symbols_relations::relation_resolution_grows_linearly_with_declarations::STAMPED,
+    );
 }
 
 /// The containment consumer links each member to its same-module (Rust) or

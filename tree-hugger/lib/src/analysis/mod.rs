@@ -428,63 +428,66 @@ pub(crate) fn has_semantics(kind: SymbolKindV2) -> bool {
 /// Semantic pass: fills initial low-risk semantic flags, `is_recursive`
 /// from the index's occurrences and coverage.
 fn semantic_pass(index: &mut FileSymbolIndex) {
+    let facets = semantic_facets(&index.symbols, &index.occurrences, &index.reference_coverage, &index.imports);
+    for (symbol, facet) in index.symbols.iter_mut().zip(facets) {
+        if let Some(facet) = facet {
+            symbol.semantics = facet;
+            symbol.provenance.parse_pass = AnalysisPass::Semantic.as_str().to_string();
+        }
+    }
+}
+
+/// The semantic facet the semantic pass gives each of `symbols` (`None` for
+/// a kind it does not evaluate), read only from the arguments, so the cache
+/// reader can check a stored facet against the stored evidence.
+pub(crate) fn semantic_facets(
+    symbols: &[SymbolRecord],
+    occurrences: &[Occurrence],
+    coverage: &[ReferenceCoverage],
+    imports: &[ImportRecord],
+) -> Vec<Option<SemanticFacet>> {
     let mut calls_by_owner: HashMap<&SymbolId, Vec<&Occurrence>> = HashMap::new();
-    for occurrence in &index.occurrences {
+    for occurrence in occurrences {
         if occurrence.kind == OccurrenceKind::Call
             && let Some(owner) = occurrence.owner.as_ref().and_then(|owner| owner.id.as_ref())
         {
             calls_by_owner.entry(owner).or_default().push(occurrence);
         }
     }
-    let regions: HashMap<&SymbolId, &ReferenceCoverage> = index
-        .reference_coverage
+    let regions: HashMap<&SymbolId, &ReferenceCoverage> = coverage
         .iter()
         .filter_map(|region| Some((region.owner.as_ref()?.id.as_ref()?, region)))
         .collect();
 
     // Each import's (local, original) names, read once for every call.
     let imports: HashSet<(&str, &str)> =
-        index.imports.iter().map(|import| (import_local_name(import), import_original_name(import))).collect();
-    let recursion: Vec<Option<TriState>> = index
-        .symbols
+        imports.iter().map(|import| (import_local_name(import), import_original_name(import))).collect();
+    symbols
         .iter()
         .map(|symbol| {
             has_semantics(symbol.kind).then(|| {
-                direct_recursion(
+                let is_recursive = direct_recursion(
                     symbol,
                     regions.get(&symbol.id).copied(),
                     calls_by_owner.get(&symbol.id).map_or(&[][..], Vec::as_slice),
                     &imports,
-                )
+                );
+                let panics = symbol
+                    .relations
+                    .references
+                    .iter()
+                    .any(|reference| reference.name == "panic" || reference.name == "panic!");
+                SemanticFacet {
+                    is_recursive: Some(is_recursive),
+                    may_panic: Some(if panics { TriState::Yes } else { TriState::Unknown }),
+                    may_throw: Some(TriState::Unknown),
+                    mutates_self: Some(TriState::Unknown),
+                    mutates_arguments: Some(TriState::Unknown),
+                    ..SemanticFacet::default()
+                }
             })
         })
-        .collect();
-
-    for (symbol, is_recursive) in index.symbols.iter_mut().zip(recursion) {
-        if !has_semantics(symbol.kind) {
-            continue;
-        }
-
-        let panics = symbol
-            .relations
-            .references
-            .iter()
-            .any(|reference| reference.name == "panic" || reference.name == "panic!");
-
-        symbol.semantics = SemanticFacet {
-            is_recursive,
-            may_panic: Some(if panics {
-                TriState::Yes
-            } else {
-                TriState::Unknown
-            }),
-            may_throw: Some(TriState::Unknown),
-            mutates_self: Some(TriState::Unknown),
-            mutates_arguments: Some(TriState::Unknown),
-            ..SemanticFacet::default()
-        };
-        symbol.provenance.parse_pass = AnalysisPass::Semantic.as_str().to_string();
-    }
+        .collect()
 }
 
 /// Whether `symbol` calls itself directly, from the calls its own region

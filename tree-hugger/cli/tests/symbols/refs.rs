@@ -482,3 +482,109 @@ fn missing_selectors_conflicts_and_unsupported_formats_are_rejected() {
         assert!(stderr_of(&output).contains(expected), "{args:?}: {}", stderr_of(&output));
     }
 }
+
+/// Lexical lookup stops where no binding is established: a call inside a
+/// `with` body is only a suggestion and its function's recursion stays
+/// unknown; an inline module's call never reaches its parent's function;
+/// an `if let` binding is not the `else` branch's.
+#[test]
+fn boundaries_that_establish_no_binding_list_no_established_rows() {
+    let scratch = Scratch::new(&[
+        ("rec.js", "function f(obj) { with (obj) { f(obj); } }\n"),
+        ("module.rs", "fn f() {}\nmod m { pub fn g() { f(); } }\n"),
+        ("cond.rs", "fn f() {}\nfn g(x: Option<fn()>) {\n    if let Some(f) = x { f(); } else { f(); }\n    f();\n}\n"),
+    ]);
+
+    let with = refs_json(&scratch, &["f", "--callers", "rec.js"]);
+    assert!(rows(&with, "occurrences").is_empty(), "{with}");
+    assert_eq!(rows(&with, "name_only_suggestions"), vec![row("Call", "f", "1:32", "NameOnly")]);
+    let full = json_of(&scratch.stdout(&["--json-full", "symbols", "rec.js"]));
+    let recursion: Vec<&Value> = full["indexes"][0]["symbols"]
+        .as_array()
+        .expect("symbols")
+        .iter()
+        .filter(|record| record["identity"]["name"] == "f")
+        .map(|record| &record["semantics"]["is_recursive"])
+        .collect();
+    assert_eq!(recursion, vec![&Value::from("Unknown")], "a `with` body may intercept the self-call");
+
+    let module = refs_json(&scratch, &["module.rs#f", "--callers", "module.rs"]);
+    assert!(rows(&module, "occurrences").is_empty(), "{module}");
+    assert_eq!(rows(&module, "name_only_suggestions"), vec![row("Call", "f", "2:22", "NameOnly")]);
+
+    let conditional = refs_json(&scratch, &["cond.rs#f", "--callers", "cond.rs"]);
+    assert_eq!(
+        rows(&conditional, "occurrences"),
+        vec![row("Call", "f", "3:40", "Scoped"), row("Call", "f", "4:5", "Scoped")],
+        "the `else` call and the call after the `if`, never the consequence's"
+    );
+}
+
+/// A named function or generator expression's own name is visible only
+/// inside the expression: its inner call is never a caller of the outer
+/// declaration of that name, and only the final outer call is established.
+#[test]
+fn named_function_expressions_never_call_the_outer_declaration() {
+    let source = |star: &str| format!("function f() {{}}\nconst g = function{star} f() {{\n  f();\n}};\nf();\n");
+    let (function, generator) = (source(""), source("*"));
+    let scratch = Scratch::new(&[
+        ("function.ts", function.as_str()),
+        ("function.js", function.as_str()),
+        ("generator.ts", generator.as_str()),
+        ("generator.js", generator.as_str()),
+    ]);
+
+    for file in ["function.ts", "function.js", "generator.ts", "generator.js"] {
+        let callers = refs_json(&scratch, &["f", "--callers", file]);
+        assert_eq!(rows(&callers, "occurrences"), vec![row("Call", "f", "5:1", "Scoped")], "{file}: {callers}");
+        assert!(rows(&callers, "name_only_suggestions").is_empty(), "{file}: {callers}");
+    }
+}
+
+/// A call through transparent wrappers is a call in every report direction:
+/// established in a resolved language, a name-only suggestion in a limited
+/// one. A wrapped name passed as an argument stays a usage.
+#[test]
+fn wrapped_and_command_calls_are_listed_as_calls() {
+    let scratch = Scratch::new(&[
+        (
+            "wrapped.ts",
+            "function f(n: number) {\n  if (n) ((f))(n - 1);\n  (f as () => void)();\n  f!();\n  g((f));\n}\nfunction h() { (f)(); }\n",
+        ),
+        ("wrapped.py", "def f(n):\n    (f)(n)\n    g((f))\n\ndef h(x):\n    ((f))(x)\n"),
+        ("tool.sh", "f() {\n  X=1 f arg\n}\ng() {\n  echo f\n  f\n}\n"),
+    ]);
+
+    let callers = refs_json(&scratch, &["f", "--callers", "wrapped.ts"]);
+    assert_eq!(
+        rows(&callers, "occurrences"),
+        vec![
+            row("Call", "f", "2:12", "Scoped"),
+            row("Call", "f", "3:4", "Scoped"),
+            row("Call", "f", "4:3", "Scoped"),
+            row("Call", "f", "7:17", "Scoped"),
+        ],
+        "the argument `g((f))` is a usage: {callers}"
+    );
+    let callees = refs_json(&scratch, &["h", "--callees", "wrapped.ts"]);
+    assert_eq!(rows(&callees, "occurrences"), vec![row("Call", "f", "7:17", "Scoped")]);
+
+    let python = refs_json(&scratch, &["f", "--callers", "wrapped.py"]);
+    assert!(rows(&python, "occurrences").is_empty(), "{python}");
+    assert_eq!(
+        rows(&python, "name_only_suggestions"),
+        vec![row("Call", "f", "2:6", "NameOnly"), row("Call", "f", "6:7", "NameOnly")]
+    );
+
+    let shell = refs_json(&scratch, &["f", "--callers", "tool.sh"]);
+    assert_eq!(
+        rows(&shell, "name_only_suggestions"),
+        vec![row("Call", "f", "2:7", "NameOnly"), row("Call", "f", "6:3", "NameOnly")],
+        "`echo f` passes `f` as a word: {shell}"
+    );
+    let callees = refs_json(&scratch, &["g", "--callees", "tool.sh"]);
+    assert_eq!(
+        rows(&callees, "occurrences"),
+        vec![row("Call", "echo", "5:3", "Unresolved"), row("Call", "f", "6:3", "NameOnly")]
+    );
+}

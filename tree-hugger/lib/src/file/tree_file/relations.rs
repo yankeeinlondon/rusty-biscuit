@@ -25,7 +25,7 @@ use crate::analysis::scope::{TYPE, VALUE};
 use crate::file::extract::{
     BasePath, ImplHeader, ImportBinding, PathAnchor, RELATION_NAMESPACE, WrittenBase, base_path, declaration_keyword,
     declared_bases, declared_generic_names, file_namespace_index, impl_header, impl_of_member, impl_type_parameters,
-    import_binding, is_csharp_struct, namespace_name,
+    csharp_arity, csharp_partial_shape, import_binding, is_csharp_struct, namespace_name,
 };
 use crate::shared::{ProgrammingLanguage, SymbolKindV2, SymbolRecord, SymbolRef};
 
@@ -213,30 +213,101 @@ fn qualifier_categories(language: ProgrammingLanguage, value: bool) -> u8 {
     }
 }
 
+/// What one named in-file scope binds besides its declarations.
+#[derive(Default)]
+struct ScopeFacts<'a> {
+    /// Names imported there, with the name groups they are bound in.
+    imports: HashMap<&'a str, u8>,
+    /// Names a binding no record reports binds there (a Python module-level
+    /// tuple target, a TS module-level destructured value, a Scala pattern
+    /// `val`, a Rust item's generic parameter, a write a Python function
+    /// makes under `global`), with the name groups of that binding: it hides
+    /// only a lookup in those groups, and never resolves.
+    unrecorded: HashMap<&'a str, u8>,
+    /// A wildcard import, C++ using-directive or Swift whole-module import.
+    opaque: bool,
+    /// An import whose bound names cannot be read.
+    unreadable: bool,
+}
+
+impl<'a> ScopeFacts<'a> {
+    /// Adds `other`'s bindings: the facts of several fragments of one owner.
+    fn absorb(&mut self, other: &ScopeFacts<'a>) {
+        for (&name, &groups) in &other.imports {
+            *self.imports.entry(name).or_default() |= groups;
+        }
+        for (&name, &groups) in &other.unrecorded {
+            *self.unrecorded.entry(name).or_default() |= groups;
+        }
+        self.opaque |= other.opaque;
+        self.unreadable |= other.unreadable;
+    }
+
+    fn imports_name(&self, name: &str, categories: u8) -> bool {
+        self.imports.get(name).is_some_and(|&groups| groups & categories != 0)
+    }
+
+    fn binds_unrecorded(&self, name: &str, categories: u8) -> bool {
+        self.unrecorded.get(name).is_some_and(|&groups| groups & categories != 0)
+    }
+}
+
+/// A named scope's facts are read either for every declaration bound
+/// under its name (when they are all one owner group) or for one owner
+/// group ([`OwnerGroups`]), where same-named owners compete and the site
+/// lies in that one ([`Declarations::anchor_around`]).
+#[derive(Clone, Copy)]
+enum FactsOf<'s> {
+    Named(&'s str),
+    Owner(usize),
+}
+
+/// What makes repeated named-scope definitions one owner: every definition
+/// of one namespace, or the C# `partial` fragments of one type, which agree
+/// on category, generic arity and enclosing owner group.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum MergeKey {
+    Namespace,
+    Partial { category: u8, arity: usize, enclosing: Option<usize> },
+}
+
+/// The owners of one file: which named-scope declarations are one owner
+/// (reopened namespace definitions, C# `partial` fragments of one type) and
+/// which stand alone. Built once per file; every lookup that selects an
+/// owner reads its group, never the fragments again.
+struct OwnerGroups<'a> {
+    /// Each entry's group, named by its first declaration in record order:
+    /// itself for a declaration that merges with nothing.
+    of: Vec<usize>,
+    /// Whether the entry is a definition that may reopen one owner
+    /// ([`MergeKey`]); the others compete with every same-named declaration.
+    merges: Vec<bool>,
+    /// The number of declarations in each group, by group.
+    size: HashMap<usize, u32>,
+    /// The groups of several declarations one of which writes bases (read
+    /// only where [`inherits_member_names`]).
+    with_bases: HashSet<usize>,
+    /// C#: the owner group a bound name written with this many generic
+    /// arguments denotes, `None` when several groups share the arity (a
+    /// class and a struct, two non-`partial` types, a namespace and a type).
+    by_arity: HashMap<Cow<'a, str>, HashMap<usize, Option<usize>>>,
+}
+
 /// The import bindings, lexical scopes and (Rust) impl blocks of one file,
 /// from one walk of its tree, made on the first lookup that needs it.
 struct FileWalk<'a> {
-    /// Names imported at each named in-file scope (`""` for the root), with
-    /// the name groups they are bound in.
-    imports: HashMap<String, HashMap<&'a str, u8>>,
-    /// Names a binding no record reports binds at each named in-file scope
-    /// (a Python module-level tuple target, a TS module-level destructured
-    /// value, a Scala pattern `val`, a Rust item's generic parameter, a
-    /// write a Python function makes under `global`), with
-    /// the name groups of that binding: it hides only a lookup in those
-    /// groups, and never resolves.
-    unrecorded: HashMap<String, HashMap<&'a str, u8>>,
+    /// The facts of each named in-file scope (`""` for the root) by bound
+    /// name: every same-named owner's together.
+    named: HashMap<String, ScopeFacts<'a>>,
+    /// The same facts by the declaration whose scope holds them: one
+    /// owner's alone, read where same-named owners compete.
+    by_owner: HashMap<usize, ScopeFacts<'a>>,
     /// The same bindings of owners without a record (a Rust impl's generic
     /// parameters), by owning lexical scope and name: the name groups. They
     /// bind only for a lookup made inside that scope.
     owned: HashMap<(usize, &'a str), u8>,
     /// The names in `owned`, so a lookup of any other name climbs nothing.
     owned_names: HashSet<&'a str>,
-    /// Scopes holding a wildcard import, C++ using-directive or Swift
-    /// whole-module import.
-    opaque: HashSet<String>,
-    /// Scopes holding an import whose bound names cannot be read.
-    unreadable: HashSet<String>,
     /// Python attribute write targets ([`lexical::Collected::qualified_writes`]).
     qualified_writes: Vec<Node<'a>>,
     /// Rust `impl` blocks in source order.
@@ -305,9 +376,10 @@ enum Owner {
     /// own declarations.
     Syntax(usize),
     /// A named-scope owner whose bound name competing owners share, by the
-    /// declaration the site's source lies in: what follows is found among
-    /// that declaration's own declarations, and is unproved when the bound
-    /// name binds it otherwise ([`Declarations::named_member_rebound`]).
+    /// owner group ([`OwnerGroups`]) the site's source lies in or a written
+    /// C# arity denotes: what follows is found among that group's own
+    /// declarations, and is unproved when the group binds it otherwise
+    /// ([`Declarations::owner_rebinds`]).
     Anchored(usize),
 }
 
@@ -315,9 +387,20 @@ enum Owner {
 enum Scope<'s> {
     /// The named scope, by bound name.
     Named(&'s str),
-    /// The members of this declaration, one of several owners sharing a
+    /// The members of this owner group, one of several owners sharing a
     /// bound name, which the site lies in.
     Anchored(usize),
+}
+
+/// What a written C# name with its generic argument count denotes
+/// ([`Declarations::written_group`]).
+enum WrittenGroup {
+    /// No path owner of this file is bound under the name.
+    Undeclared,
+    /// This owner group alone.
+    One(usize),
+    /// No group of that arity, or several.
+    Unproved,
 }
 
 /// Up to two distinct declarations per name group: enough to tell "none",
@@ -380,11 +463,17 @@ struct NameSummary {
     /// The named-scope ([`Reach::Qualified`]) declarations, by group.
     qualified: Few,
     /// Groups in which some named-scope declaration is no path owner
-    /// ([`is_path_owner_kind`]), or no namespace (the one kind whose
-    /// repeated definitions reopen one owner; a Rust `mod` or a Scala
-    /// `object` written twice is two competing owners).
+    /// ([`is_path_owner_kind`]); and groups in which the declarations are
+    /// not all one owner group ([`OwnerGroups`]): one merges with nothing (a
+    /// Rust `mod`, a Scala `object` or any type that is not a C# `partial`
+    /// fragment), or two belong to different groups (a namespace beside a
+    /// `partial` type, `partial` types of different category, arity or
+    /// enclosing owner). Either makes the name competing owners
+    /// ([`Declarations::is_ambiguous_owner`]).
     not_owner: u8,
-    not_namespace: u8,
+    not_merging: u8,
+    /// The group of the first merging declaration, with its name groups.
+    merged: Option<(usize, u8)>,
     /// The distinct canonical owners a C++ spelling reaches through inline
     /// namespaces ([`Declarations::denoted`]), by the groups they are
     /// declared (or, as a qualifier only, the qualifier groups) in: two of them make
@@ -478,6 +567,10 @@ struct Declarations<'a> {
     generic_layers: RefCell<HashMap<usize, Rc<HashSet<String>>>>,
     /// Swift owner contexts include the actual declaration ancestors.
     generic_contexts: RefCell<HashMap<usize, TypeParams>>,
+    /// Which declarations are one owner, built on the first lookup.
+    owner_groups: OnceCell<OwnerGroups<'a>>,
+    /// The scope facts of each group of several declarations, merged once.
+    group_facts: OnceCell<HashMap<usize, ScopeFacts<'a>>>,
 }
 
 impl<'a> Declarations<'a> {
@@ -529,6 +622,8 @@ impl<'a> Declarations<'a> {
             written_named: OnceCell::new(),
             generic_layers: RefCell::new(HashMap::new()),
             generic_contexts: RefCell::new(HashMap::new()),
+            owner_groups: OnceCell::new(),
+            group_facts: OnceCell::new(),
         };
         declarations.bound = (0..declarations.entries.len()).map(|idx| declarations.binding_name(idx)).collect();
         for (idx, name) in declarations.bound.iter().enumerate() {
@@ -786,45 +881,46 @@ impl<'a> Declarations<'a> {
                     && declaration_keyword(node, language).as_deref() == Some("extension")
             });
             let mut walk = FileWalk {
-                imports: HashMap::new(),
-                unrecorded: HashMap::new(),
+                named: HashMap::new(),
+                by_owner: HashMap::new(),
                 owned: HashMap::new(),
                 owned_names: HashSet::new(),
-                opaque: HashSet::new(),
-                unreadable: HashSet::new(),
                 qualified_writes: collected.qualified_writes,
                 impls: collected.impls,
                 extensions: collected.extensions,
                 lexical,
             };
-            let scope_of = |node: Node<'_>| {
-                self.enclosing_scope(node)
-                    .map_or_else(|| self.package_scope(node), |idx| self.bound[idx].to_string())
+            // Each fact goes to its scope's bound name and, inside a record,
+            // to that record too.
+            let record = |walk: &mut FileWalk<'a>, node: Node<'_>, add: &dyn Fn(&mut ScopeFacts<'a>)| {
+                match self.enclosing_scope(node) {
+                    Some(idx) => {
+                        add(walk.named.entry(self.bound[idx].to_string()).or_default());
+                        add(walk.by_owner.entry(idx).or_default());
+                    }
+                    None => add(walk.named.entry(self.package_scope(node)).or_default()),
+                }
             };
             for node in collected.imports {
-                let scope = scope_of(node);
                 match import_binding(node, language, self.source) {
-                    Some(ImportBinding::Names(names, categories)) => {
-                        let bound = walk.imports.entry(scope).or_default();
-                        for name in names {
-                            *bound.entry(name).or_default() |= categories;
+                    Some(ImportBinding::Names(names, categories)) => record(&mut walk, node, &|facts| {
+                        for name in &names {
+                            *facts.imports.entry(*name).or_default() |= categories;
                         }
-                    }
-                    Some(ImportBinding::Opaque) => {
-                        walk.unreadable.insert(scope.clone());
-                        walk.opaque.insert(scope);
-                    }
-                    Some(ImportBinding::Module) => {
-                        walk.opaque.insert(scope);
-                    }
+                    }),
+                    Some(ImportBinding::Opaque) => record(&mut walk, node, &|facts| {
+                        facts.unreadable = true;
+                        facts.opaque = true;
+                    }),
+                    Some(ImportBinding::Module) => record(&mut walk, node, &|facts| facts.opaque = true),
                     None => {}
                 }
             }
             for binding in collected.unrecorded {
                 let Some(text) = self.source.get(binding.name.start_byte()..binding.name.end_byte()) else { continue };
                 if self.names_scope(binding.scope) {
-                    let scope = scope_of(binding.name);
-                    *walk.unrecorded.entry(scope).or_default().entry(text).or_default() |= binding.categories;
+                    let categories = binding.categories;
+                    record(&mut walk, binding.name, &|facts| *facts.unrecorded.entry(text).or_default() |= categories);
                 } else {
                     *walk.owned.entry((binding.scope_index, text)).or_default() |= binding.categories;
                     walk.owned_names.insert(text);
@@ -832,7 +928,7 @@ impl<'a> Declarations<'a> {
             }
             // A Python module is the root scope, `""`.
             for name in collected.global_writes {
-                *walk.unrecorded.entry(String::new()).or_default().entry(name).or_default() |= ALL;
+                *walk.named.entry(String::new()).or_default().unrecorded.entry(name).or_default() |= ALL;
             }
             walk
         })
@@ -902,11 +998,174 @@ impl<'a> Declarations<'a> {
                 if !is_path_owner_kind(entry.kind) {
                     summary.not_owner |= groups;
                 }
-                if entry.kind != SymbolKindV2::Namespace {
-                    summary.not_namespace |= groups;
+                let owners = self.owner_groups();
+                if !owners.merges[idx] {
+                    summary.not_merging |= groups;
+                } else {
+                    match summary.merged {
+                        None => summary.merged = Some((owners.of[idx], groups)),
+                        Some((first, first_groups)) if first != owners.of[idx] => {
+                            summary.not_merging |= groups | first_groups;
+                        }
+                        Some(_) => {}
+                    }
                 }
             }
             summaries
+        })
+    }
+
+    /// Which declarations are one owner ([`OwnerGroups`]), built once: one
+    /// pass over the declarations, like hashing their names (no step beyond
+    /// the record's own), plus one counted ancestor walk per C# `partial`
+    /// fragment for its enclosing owner, whose group must be the same.
+    fn owner_groups(&self) -> &OwnerGroups<'a> {
+        self.owner_groups.get_or_init(|| {
+            let count = self.entries.len();
+            let csharp = self.language == ProgrammingLanguage::CSharp;
+            // What a declaration must share to merge, and (a C# `partial`
+            // fragment) the owner it is declared in.
+            let shapes: Vec<Option<(MergeKey, Option<usize>)>> = (0..count)
+                .map(|idx| {
+                    let entry = &self.entries[idx];
+                    if self.reach(idx) != Reach::Qualified {
+                        return None;
+                    }
+                    if entry.kind == SymbolKindV2::Namespace {
+                        return Some((MergeKey::Namespace, None));
+                    }
+                    if !csharp || !is_type_like_kind(entry.kind) {
+                        return None;
+                    }
+                    let (category, arity) = csharp_partial_shape(entry.declaration, self.source)?;
+                    let enclosing = self.enclosing_scope(entry.declaration);
+                    count_shared_context_steps(1);
+                    Some((MergeKey::Partial { category, arity, enclosing: None }, enclosing))
+                })
+                .collect();
+            let mut of = vec![usize::MAX; count];
+            let mut keys: HashMap<(&str, MergeKey), usize> = HashMap::new();
+            for start in 0..count {
+                if of[start] != usize::MAX {
+                    continue;
+                }
+                // An enclosing owner is a proper ancestor, so the chain of
+                // undecided owners ends; the outermost is decided first.
+                let mut chain = vec![start];
+                while let Some((_, Some(outer))) = shapes[chain[chain.len() - 1]]
+                    && of[outer] == usize::MAX
+                {
+                    chain.push(outer);
+                }
+                for idx in chain.into_iter().rev() {
+                    of[idx] = match shapes[idx] {
+                        None => idx,
+                        Some((key, outer)) => {
+                            let key = match key {
+                                MergeKey::Partial { category, arity, .. } => {
+                                    MergeKey::Partial { category, arity, enclosing: outer.map(|outer| of[outer]) }
+                                }
+                                key => key,
+                            };
+                            *keys.entry((self.bound[idx].as_ref(), key)).or_insert(idx)
+                        }
+                    };
+                }
+            }
+            let mut size: HashMap<usize, u32> = HashMap::new();
+            for &group in &of {
+                *size.entry(group).or_default() += 1;
+            }
+            let mut with_bases = HashSet::new();
+            let mut by_arity: HashMap<Cow<'a, str>, HashMap<usize, Option<usize>>> = HashMap::new();
+            for (idx, entry) in self.entries.iter().enumerate() {
+                let group = of[idx];
+                if size[&group] > 1
+                    && is_type_like_kind(entry.kind)
+                    && inherits_member_names(self.language)
+                    && !with_bases.contains(&group)
+                {
+                    let bases = declared_bases(entry.name, self.language, self.source);
+                    if !(bases.extends.is_empty() && bases.implements.is_empty() && bases.unclassified.is_empty()) {
+                        with_bases.insert(group);
+                    }
+                }
+                if csharp && self.reach(idx) == Reach::Qualified && is_path_owner_kind(entry.kind) {
+                    let arity = if entry.kind == SymbolKindV2::Namespace { 0 } else { csharp_arity(entry.declaration) };
+                    by_arity
+                        .entry(self.bound[idx].clone())
+                        .or_default()
+                        .entry(arity)
+                        .and_modify(|found| {
+                            if *found != Some(group) {
+                                *found = None;
+                            }
+                        })
+                        .or_insert(Some(group));
+                }
+            }
+            OwnerGroups { of, merges: shapes.iter().map(Option::is_some).collect(), size, with_bases, by_arity }
+        })
+    }
+
+    /// The owner group of entry `idx` ([`OwnerGroups`]).
+    fn group_of(&self, idx: usize) -> usize {
+        self.owner_groups().of[idx]
+    }
+
+    /// The declaration of a group of one: the only target a path through it
+    /// may name. A group of several fragments has no one ID.
+    fn sole(&self, group: usize) -> Option<usize> {
+        (self.owner_groups().size.get(&group) == Some(&1)).then_some(group)
+    }
+
+    /// Which owner group a C# path segment spelling the bound name `name`
+    /// with `arity` written generic arguments denotes: none of this file
+    /// when `name` declares no path owner (a qualifier alone, another
+    /// language), else the one group of that arity, else unproved.
+    fn written_group(&self, name: &str, arity: usize) -> WrittenGroup {
+        match self.owner_groups().by_arity.get(name) {
+            None => WrittenGroup::Undeclared,
+            Some(groups) => match groups.get(&arity) {
+                Some(&Some(group)) => WrittenGroup::One(group),
+                _ => WrittenGroup::Unproved,
+            },
+        }
+    }
+
+    /// Whether a C# path segment with `arity` written generic arguments may
+    /// name the type-like declaration `idx`: the counts agree. Always true
+    /// for other kinds and languages.
+    fn arity_fits(&self, idx: usize, arity: usize) -> bool {
+        let entry = &self.entries[idx];
+        self.language != ProgrammingLanguage::CSharp
+            || !is_type_like_kind(entry.kind)
+            || csharp_arity(entry.declaration) == arity
+    }
+
+    /// The scope facts of one owner group: its declaration's, or every
+    /// fragment's merged ([`Self::group_facts`]).
+    fn owner_facts(&self, group: usize) -> Option<&ScopeFacts<'a>> {
+        if self.sole(group).is_some() {
+            self.walk().by_owner.get(&group)
+        } else {
+            self.group_facts().get(&group)
+        }
+    }
+
+    /// The facts of every group of several declarations, merged once from
+    /// its fragments' own.
+    fn group_facts(&self) -> &HashMap<usize, ScopeFacts<'a>> {
+        self.group_facts.get_or_init(|| {
+            let mut merged: HashMap<usize, ScopeFacts<'a>> = HashMap::new();
+            for (&owner, facts) in &self.walk().by_owner {
+                count_shared_context_steps(1);
+                let group = self.group_of(owner);
+                if self.sole(group).is_none() {
+                    merged.entry(group).or_default().absorb(facts);
+                }
+            }
+            merged
         })
     }
 
@@ -941,7 +1200,7 @@ impl<'a> Declarations<'a> {
                         if slots.iter().any(Option::is_some) { combined.canonical.add(position, 1 << bit); }
                     }
                     combined.not_owner |= summary.not_owner;
-                    combined.not_namespace |= summary.not_namespace;
+                    combined.not_merging |= summary.not_merging;
                     combined.type_like |= summary.type_like;
                     combined.type_with_bases |= summary.type_with_bases;
                     combined.module |= summary.module;
@@ -981,8 +1240,11 @@ impl<'a> Declarations<'a> {
     /// The declarations called `segment` in the given groups that `owner`
     /// declares directly in its own body: nearer to it than any other scope
     /// declaration and outside every block, callable and anonymous owner in
-    /// between. Identity is the owner's syntax node, so a same-named owner
-    /// elsewhere contributes nothing. At most two per group, as [`Few`].
+    /// between. Identity is the owner group ([`OwnerGroups`]), so a
+    /// same-named owner elsewhere contributes nothing, and both owners and
+    /// members are groups: a member written in several fragments of one
+    /// group is one member, with no one ID ([`Self::sole`]). At most two per
+    /// group, as [`Few`].
     fn members(&self, owner: usize, segment: &str, categories: u8) -> Vec<usize> {
         let mut found = Vec::new();
         if let Some(few) = self.direct_members().get(&(owner, segment.to_string())) {
@@ -1004,6 +1266,7 @@ impl<'a> Declarations<'a> {
                     continue;
                 }
                 let Some(owner) = self.direct_owner(idx) else { continue };
+                let owner = self.group_of(owner);
                 let (owner_name, name) = (self.bound[owner].as_ref(), self.bound[idx].as_ref());
                 let rest = if owner_name.is_empty() {
                     Some(name)
@@ -1011,7 +1274,10 @@ impl<'a> Declarations<'a> {
                     name.strip_prefix(owner_name).and_then(|rest| rest.strip_prefix(separator))
                 };
                 if let Some(rest) = rest {
-                    index.entry((owner, rest.to_string())).or_default().add(idx, kind_categories(self.language, entry.kind));
+                    index
+                        .entry((owner, rest.to_string()))
+                        .or_default()
+                        .add(self.group_of(idx), kind_categories(self.language, entry.kind));
                 }
             }
             index
@@ -1050,20 +1316,59 @@ impl<'a> Declarations<'a> {
         denoted.beyond_ambiguous
             || denoted.owners.iter().any(|&position| {
                 count_shared_context_steps(1);
-                self.owner_rebinds(&denoted.names[position], segment, categories, writes)
+                self.owner_rebinds(FactsOf::Named(&denoted.names[position]), segment, categories, writes)
             })
     }
 
-    /// [`Self::named_member_rebound`] for one canonical owner name.
-    fn owner_rebinds(&self, owner: &str, segment: &str, categories: u8, writes: bool) -> bool {
+    /// [`Self::named_member_rebound`] for one canonical owner name, or
+    /// (an [`Owner::Anchored`] lookup) for one owner group alone.
+    fn owner_rebinds(&self, owner: FactsOf<'_>, segment: &str, categories: u8, writes: bool) -> bool {
+        self.scope_facts(owner).is_some_and(|facts| {
+            facts.binds_unrecorded(segment, categories)
+                || (imports_bind_members(self.language) && facts.imports_name(segment, categories))
+                || (globs_bind_members(self.language) && facts.opaque)
+        }) || (writes
+            && match owner {
+                FactsOf::Named(owner) => self.written_named().get(owner).is_some_and(|members| members.contains(segment)),
+                FactsOf::Owner(owner) => self.is_written(owner, segment),
+            })
+    }
+
+    /// The imports and unrecorded bindings of a named scope: by bound
+    /// name, or of one owner declaration.
+    fn scope_facts(&self, of: FactsOf<'_>) -> Option<&ScopeFacts<'a>> {
         let walk = self.walk();
-        let binds = |bindings: &HashMap<String, HashMap<&'a str, u8>>| {
-            bindings.get(owner).and_then(|names| names.get(segment)).is_some_and(|&groups| groups & categories != 0)
+        match of {
+            FactsOf::Named(name) => walk.named.get(name),
+            FactsOf::Owner(group) => self.owner_facts(group),
+        }
+    }
+
+    /// [`Self::scope_flags`] of one owner group: whether it is type-like, a
+    /// type-like one some fragment of which writes bases (read only where
+    /// [`inherits_member_names`]), or a module.
+    fn owner_flags(&self, owner: usize) -> (bool, bool, bool) {
+        let entry = &self.entries[owner];
+        let type_like = is_type_like_kind(entry.kind);
+        let with_bases = type_like && inherits_member_names(self.language) && match self.sole(owner) {
+            Some(_) => {
+                let bases = declared_bases(entry.name, self.language, self.source);
+                !(bases.extends.is_empty() && bases.implements.is_empty() && bases.unclassified.is_empty())
+            }
+            None => self.owner_groups().with_bases.contains(&owner),
         };
-        binds(&walk.unrecorded)
-            || (imports_bind_members(self.language) && binds(&walk.imports))
-            || (globs_bind_members(self.language) && walk.opaque.contains(owner))
-            || (writes && self.written_named().get(owner).is_some_and(|members| members.contains(segment)))
+        (type_like, with_bases, entry.kind == SymbolKindV2::Module)
+    }
+
+    /// The flags and facts a lookup at the named scope `prefix` reads from
+    /// `at`: those of the one owner group `at` lies in where same-named
+    /// owners compete ([`Self::anchor_around`]), else those of every
+    /// declaration bound as `prefix`.
+    fn scope_at(&self, prefix: &'_ str, at: Node<'_>) -> (Option<usize>, (bool, bool, bool)) {
+        match self.anchor_around(prefix, at) {
+            Some(owner) => (Some(owner), self.owner_flags(owner)),
+            None => (None, self.scope_flags(prefix)),
+        }
     }
 
     /// Whether the lexical owner's member `member` (named `segment`) shares
@@ -1122,7 +1427,7 @@ impl<'a> Declarations<'a> {
                 let type_params = self.type_parameters_around(write, None, Vec::new());
                 let site = self.site(write, write.start_byte(), scope, type_params, false);
                 if let Some(owner) = self.resolve_path(&path, &site, is_path_owner_kind, false) {
-                    written.insert((owner, member));
+                    written.insert((self.group_of(owner), member));
                 }
             }
             written
@@ -1151,8 +1456,10 @@ impl<'a> Declarations<'a> {
 
     /// Whether a path may continue through the scope called `name`: it
     /// names exactly one owner in the qualifier groups, a namespace-like
-    /// declaration or the definitions of one namespace the language reopens
-    /// (only a namespace merges; repeated Rust modules or Scala objects
+    /// declaration or one owner group ([`OwnerGroups`]: the definitions of
+    /// one namespace the language reopens, or the C# `partial` fragments of
+    /// one type identity; repeated Rust modules, Scala objects, other types
+    /// and `partial` types of different category, arity or enclosing owner
     /// compete), or it exists only as a qualifier. A C++ spelling that
     /// reaches two distinct namespaces through inline namespaces names no
     /// one owner, whatever their members are. Read from the name's summary,
@@ -1160,12 +1467,12 @@ impl<'a> Declarations<'a> {
     fn is_traversable(&self, name: &str, categories: u8) -> bool {
         let mut found = Vec::new();
         let mut canonical = Vec::new();
-        let (mut not_owner, mut not_namespace) = (0, 0);
+        let (mut not_owner, mut not_merging) = (0, 0);
         self.each_summary(name, |summary| {
             summary.qualified.collect(categories, &mut found);
             summary.canonical.collect(categories, &mut canonical);
             not_owner |= summary.not_owner;
-            not_namespace |= summary.not_namespace;
+            not_merging |= summary.not_merging;
         });
         if canonical.len() > 1 {
             return false;
@@ -1173,42 +1480,42 @@ impl<'a> Declarations<'a> {
         if found.is_empty() {
             return self.qualifies(name);
         }
-        not_owner & categories == 0 && (found.len() == 1 || not_namespace & categories == 0)
+        not_owner & categories == 0 && (found.len() == 1 || not_merging & categories == 0)
     }
 
     /// Whether the declarations bound as `name` are several competing
     /// owners rather than one: two declarations in any group that are not
-    /// all definitions of one reopened namespace, or a C++ spelling that
-    /// reaches two distinct inline-namespace members. Such a name never
-    /// tells its owners' members apart by bound name; a lookup made inside
-    /// one of them reads that declaration's own members
-    /// ([`Self::anchors_members`]).
+    /// all one owner group ([`OwnerGroups`]), or a C++ spelling that reaches
+    /// two distinct inline-namespace members. Such a name never tells its
+    /// owners' members, imports, bindings or bases apart by bound name; a
+    /// lookup made inside one of them reads that owner group's own
+    /// ([`Self::anchors_members`], [`Self::anchor_around`]).
     fn is_ambiguous_owner(&self, name: &str) -> bool {
         let mut found = Vec::new();
         let mut canonical = Vec::new();
-        let mut not_namespace = 0;
+        let mut not_merging = 0;
         self.each_summary(name, |summary| {
             summary.qualified.collect(ALL, &mut found);
             summary.canonical.collect(ALL, &mut canonical);
-            not_namespace |= summary.not_namespace;
+            not_merging |= summary.not_merging;
         });
-        canonical.len() > 1 || (found.len() > 1 && not_namespace != 0)
+        canonical.len() > 1 || (found.len() > 1 && not_merging != 0)
     }
 
     /// Whether lookup through the named-scope declaration `owner` must read
-    /// its own members by syntax ([`Owner::Anchored`]): its bound name is
-    /// shared by competing owners ([`Self::is_ambiguous_owner`]). A C# type
-    /// is exempt: its `partial` declarations are one type whose members
-    /// another declaration may hold.
+    /// its owner group's members by syntax ([`Owner::Anchored`]): its bound
+    /// name is shared by competing owners ([`Self::is_ambiguous_owner`]).
     fn anchors_members(&self, owner: usize) -> bool {
-        self.language != ProgrammingLanguage::CSharp && self.is_ambiguous_owner(&self.bound[owner])
+        self.is_ambiguous_owner(&self.bound[owner])
     }
 
-    /// The named-scope declaration around `at` bound as `prefix`, when
-    /// lookup inside it must read its own members ([`Self::anchors_members`]):
-    /// the source says which of the competing owners the site is in.
+    /// The owner group of the named-scope declaration around `at` bound as
+    /// `prefix`, when lookup inside it must read its own members, imports,
+    /// bindings and bases ([`Self::anchors_members`]): the source says which
+    /// of the competing owners the site is in, and the group adds the other
+    /// fragments of that owner alone.
     fn anchor_around(&self, prefix: &str, at: Node<'_>) -> Option<usize> {
-        if prefix.is_empty() || self.language == ProgrammingLanguage::CSharp || !self.is_ambiguous_owner(prefix) {
+        if prefix.is_empty() || !self.is_ambiguous_owner(prefix) {
             return None;
         }
         let mut ancestor = at.parent();
@@ -1217,7 +1524,7 @@ impl<'a> Declarations<'a> {
             if let Some(&idx) = self.scopes_by_node.get(&current.id())
                 && self.bound[idx] == prefix
             {
-                return Some(idx);
+                return Some(self.group_of(idx));
             }
             ancestor = current.parent();
         }
@@ -1245,25 +1552,25 @@ impl<'a> Declarations<'a> {
     /// Declarations of lexical scopes are never seen here; [`Lexical`]
     /// decides them first.
     ///
-    /// A prefix several competing owners share (two Rust modules or Scala
-    /// objects of one name) is read as the one `at` lies in, by its own
-    /// members ([`Scope::Anchored`]), never by the bound name both share.
+    /// A prefix several competing owners share (two Rust modules, Scala
+    /// objects, C# types that are not fragments of one type) is read as the
+    /// owner group `at` lies in: its own members ([`Scope::Anchored`]), imports,
+    /// wildcard and unrecorded bindings, kind and bases
+    /// ([`Self::scope_at`]), never those of the bound name both share.
     fn binding_scope<'s>(&self, first: &str, scopes: &[&'s str], at: Node<'_>, categories: u8) -> Option<Scope<'s>> {
-        let walk = self.walk();
         for (position, &prefix) in scopes.iter().enumerate() {
             count_shared_context_steps(1);
-            let (is_class, with_bases, is_module) = self.scope_flags(prefix);
+            let (anchor, (is_class, with_bases, is_module)) = self.scope_at(prefix, at);
             if is_class && !class_scope_is_lexical(self.language, position == 0) {
                 continue;
             }
-            let binds = |bindings: &HashMap<String, HashMap<&'a str, u8>>| {
-                bindings.get(prefix).and_then(|names| names.get(first)).is_some_and(|&groups| groups & categories != 0)
-            };
-            if binds(&walk.imports) || binds(&walk.unrecorded)
-                || (!local_before_wildcard(self.language) && walk.opaque.contains(prefix)) {
+            let facts = self.scope_facts(anchor.map_or(FactsOf::Named(prefix), FactsOf::Owner));
+            let opaque = facts.is_some_and(|facts| facts.opaque);
+            if facts.is_some_and(|facts| facts.imports_name(first, categories) || facts.binds_unrecorded(first, categories))
+                || (!local_before_wildcard(self.language) && opaque) {
                 return None;
             }
-            match self.anchor_around(prefix, at) {
+            match anchor {
                 Some(owner) if !self.members(owner, first, categories).is_empty() => {
                     return Some(Scope::Anchored(owner));
                 }
@@ -1271,7 +1578,7 @@ impl<'a> Declarations<'a> {
                 None if self.is_bound(&self.join(prefix, first), categories) => return Some(Scope::Named(prefix)),
                 None => {}
             }
-            if walk.opaque.contains(prefix) {
+            if opaque {
                 return None;
             }
             if with_bases || (self.language == ProgrammingLanguage::Rust && is_module) {
@@ -1288,7 +1595,9 @@ impl<'a> Declarations<'a> {
     /// read. Unlike [`Self::binding_scope`] nothing ends the walk early, so
     /// `false` proves that no same-file binding exists; wildcard and
     /// whole-module imports, inherited member types and declarations in
-    /// other files are not evidence.
+    /// other files are not evidence. A scope competing owners share is read
+    /// as the one the site lies in, as in [`Self::binding_scope`], so a
+    /// same-named owner elsewhere is no evidence either.
     fn may_bind(&self, first: &str, site: &Site<'_, 'a>, categories: u8) -> bool {
         let walk = self.walk();
         if walk.lexical.may_bind(first, site.at, site.position, categories)
@@ -1298,14 +1607,16 @@ impl<'a> Declarations<'a> {
         }
         site.scopes.iter().enumerate().any(|(position, &prefix)| {
             count_shared_context_steps(1);
-            let (is_class, _, _) = self.scope_flags(prefix);
+            let (anchor, (is_class, _, _)) = self.scope_at(prefix, site.at);
             if is_class && !class_scope_is_lexical(self.language, position == 0) {
                 return false;
             }
-            [&walk.imports, &walk.unrecorded].into_iter().any(|bindings| {
-                bindings.get(prefix).and_then(|names| names.get(first)).is_some_and(|&groups| groups & categories != 0)
-            }) || walk.unreadable.contains(prefix)
-                || self.is_bound(&self.join(prefix, first), categories)
+            self.scope_facts(anchor.map_or(FactsOf::Named(prefix), FactsOf::Owner)).is_some_and(|facts| {
+                facts.imports_name(first, categories) || facts.binds_unrecorded(first, categories) || facts.unreadable
+            }) || match anchor {
+                Some(owner) => !self.members(owner, first, categories).is_empty(),
+                None => self.is_bound(&self.join(prefix, first), categories),
+            }
         })
     }
 
@@ -1334,10 +1645,15 @@ impl<'a> Declarations<'a> {
     /// ([`Self::is_traversable`]), so a function's local class is not
     /// reachable through the function's name and an ambiguous intermediate
     /// owner stops every later segment. Below a named scope that competing
-    /// owners share (two Rust modules or Scala objects of one name), entered
-    /// from a site inside one of them (`self::`, `super::`, a first segment
-    /// bound there), it is that declaration's own members
-    /// ([`Owner::Anchored`]). Under any owner a segment is unproved when the owner binds its
+    /// owners share (two Rust modules or Scala objects of one name, C#
+    /// types that are not fragments of one type), entered from a site
+    /// inside one of them (`self::`, `super::`, a first segment bound there)
+    /// or, in C#, through a name whose written generic argument count
+    /// denotes one owner group (`H.Base` the non-generic `H`, `H<int>.Base`
+    /// the one-parameter `H`), it is that owner group's own members
+    /// ([`Owner::Anchored`]); a C# name no owner group of that arity
+    /// declares stops the path, and a C# type target must have the written
+    /// arity. Under any owner a segment is unproved when the owner binds its
     /// name by anything but that one declaration (an import, a deletion, a
     /// pattern target, a Python attribute write through the owner's path:
     /// [`Self::named_member_rebound`], [`Self::syntax_member_rebound`]), and
@@ -1346,6 +1662,7 @@ impl<'a> Declarations<'a> {
     /// that name in the base's name groups and `eligible` accepts its kind.
     fn resolve(&self, path: &BasePath, site: &Site<'_, 'a>, eligible: fn(SymbolKindV2) -> bool) -> Option<usize> {
         self.resolve_path(path, site, eligible, true)
+            .filter(|&found| self.arity_fits(found, path.arities.last().copied().unwrap_or(0)))
     }
 
     /// [`Self::resolve`]; `writes` consults the qualified writes (off only
@@ -1370,7 +1687,7 @@ impl<'a> Declarations<'a> {
         };
         let in_module = |module: Option<usize>| match module {
             Some(module) if self.reach(module) != Reach::Qualified => (Owner::Syntax(module), &path.segments[..]),
-            Some(module) if self.anchors_members(module) => (Owner::Anchored(module), &path.segments[..]),
+            Some(module) if self.anchors_members(module) => (Owner::Anchored(self.group_of(module)), &path.segments[..]),
             Some(module) => (Owner::Named(self.join(self.qualified_name(module), first)), rest),
             None => (Owner::Named(first.clone()), rest),
         };
@@ -1406,10 +1723,24 @@ impl<'a> Declarations<'a> {
             PathAnchor::SelfModule => in_module(module_at(0)?),
             PathAnchor::Super(out) => in_module(module_at(out)?),
         };
+        let offset = path.segments.len() - rest.len();
         for (position, segment) in rest.iter().enumerate() {
             count_shared_context_steps(1);
             let last = position + 1 == rest.len();
             let groups = if last { final_groups } else { qualifier_groups };
+            let arity = path.arities.get(offset + position).copied().unwrap_or(0);
+            // A C# name that declares owners is entered as the one owner
+            // group its written argument count denotes: `H.Base` is read in
+            // the non-generic `H` alone, never in `H<T>`.
+            if let Owner::Named(name) = &current {
+                let written = path.arities.get((offset + position).wrapping_sub(1)).copied().unwrap_or(0);
+                let traversable = self.is_traversable(name, qualifier_groups);
+                match self.written_group(name, written) {
+                    WrittenGroup::One(group) if !traversable => current = Owner::Anchored(group),
+                    WrittenGroup::One(_) | WrittenGroup::Undeclared if traversable => {}
+                    _ => return None,
+                }
+            }
             current = match current {
                 Owner::Syntax(owner) => {
                     let [only] = self.members(owner, segment, groups)[..] else { return None };
@@ -1418,25 +1749,28 @@ impl<'a> Declarations<'a> {
                     }
                     let kind = self.entries[only].kind;
                     if last {
-                        return eligible(kind).then_some(only);
+                        return self.sole(only).filter(|_| eligible(kind));
                     }
-                    if !is_path_owner_kind(kind) {
+                    if !is_path_owner_kind(kind) || !self.arity_fits(only, arity) {
                         return None;
                     }
                     Owner::Syntax(only)
                 }
                 Owner::Anchored(owner) => {
+                    // The members of every fragment of the owner group, by
+                    // group: a nested `partial` type is one member.
                     let [only] = self.members(owner, segment, groups)[..] else { return None };
-                    // The anchored declaration's own bindings, not those of
-                    // every namespace its spelling reaches.
-                    if self.owner_rebinds(&self.bound[owner], segment, groups, writes) {
+                    // The anchored group's own bindings, not those of
+                    // every same-named owner or namespace its spelling
+                    // reaches.
+                    if self.owner_rebinds(FactsOf::Owner(owner), segment, groups, writes) {
                         return None;
                     }
                     let kind = self.entries[only].kind;
                     if last {
-                        return eligible(kind).then_some(only);
+                        return self.sole(only).filter(|_| eligible(kind));
                     }
-                    if !is_path_owner_kind(kind) {
+                    if !is_path_owner_kind(kind) || !self.arity_fits(only, arity) {
                         return None;
                     }
                     if self.anchors_members(only) {
@@ -1446,9 +1780,7 @@ impl<'a> Declarations<'a> {
                     }
                 }
                 Owner::Named(name) => {
-                    if !self.is_traversable(&name, qualifier_groups)
-                        || self.named_member_rebound(&name, segment, groups, writes)
-                    {
+                    if self.named_member_rebound(&name, segment, groups, writes) {
                         return None;
                     }
                     Owner::Named(self.join(&name, segment))

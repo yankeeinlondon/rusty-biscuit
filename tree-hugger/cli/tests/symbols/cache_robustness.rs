@@ -68,13 +68,11 @@ const SHAPES: [Shape; 9] = [
 const VERSION_SHAPES: [Shape; 2] = [Shape::IncompatibleMajor, Shape::IncompatibleMinor];
 
 /// `Served(value)`: the entry is read and the field's public value is `value`.
-/// `ServedEmpty`: the entry is read and lists no symbols (so no sentinel).
 enum Outcome {
     Served(Value),
-    ServedEmpty,
     Rejected,
 }
-use Outcome::{Rejected as R, Served as S, ServedEmpty as E};
+use Outcome::{Rejected as R, Served as S};
 
 /// Where a column's field lives.
 #[derive(Clone, Copy)]
@@ -654,16 +652,17 @@ fn columns() -> Vec<Column> {
             public: |out| record(out, METHOD)["schema_version"].clone(),
             outcomes: [S(json!({ "major": 5, "minor": 0 })), R, R, R, R, R, R, R, R],
         },
-        // Entry-level fields: none has a default; only an empty record
-        // list under valid coverage is a servable shape (a file with no
-        // records of the covered kinds).
+        // Entry-level fields: none has a default. An empty record list is
+        // servable only where no stored evidence names a record (a file with
+        // no records of the covered kinds); here the name-only occurrences of
+        // this every-kind entry name records the list no longer holds.
         entry_column("covered_kinds", Some(json!([])), [S(json!(true)), R, R, R, R, R, R, R, R]),
         entry_column("completed_capabilities", None, [S(json!(true)), R, R, R, R, R, R, R, R]),
         entry_column("schema_version", None, [S(json!(true)), R, R, R, R, R, R, R, R]),
         entry_column("fingerprint", None, [S(json!(true)), R, R, R, R, R, R, R, R]),
         entry_column("source_hash", None, [S(json!(true)), R, R, R, R, R, R, R, R]),
         entry_column("diagnostics_fingerprint", None, [S(json!(true)), R, R, R, R, R, R, R, R]),
-        entry_column("records", None, [S(json!(true)), R, R, R, R, R, E, R, R]),
+        entry_column("records", None, [S(json!(true)), R, R, R, R, R, R, R, R]),
         // `""` names another file or no language, so the entry is for other
         // inputs.
         entry_column("file", None, [S(json!(true)), R, R, R, R, R, R, R, R]),
@@ -1061,12 +1060,6 @@ fn check_column(
                     ));
                 }
             }
-            Outcome::ServedEmpty => {
-                let listed = indexed_records(&output).len();
-                if listed != 0 || output == *uncached {
-                    failures.push(format!("{cell}: expected an empty served entry"));
-                }
-            }
             Outcome::Rejected => {
                 if has_sentinel(&output) {
                     failures.push(format!("{cell}: expected rejected, entry was served"));
@@ -1252,13 +1245,19 @@ fn an_absent_metrics_facet_is_not_requested_never_computed_null() {
 }
 
 /// A TypeScript file whose evidence has every confidence, an in-file edge,
-/// a limited region, direct recursion and a non-ASCII character.
+/// a limited region, direct recursion, an ownerless call, a call through an
+/// import, a binding no record reports named like a declaration, a callable
+/// with no occurrences and a non-ASCII character.
 const EVIDENCE_FILE: &str = "evidence.ts";
 const EVIDENCE_SOURCE: &str = "function helper(): number { return 1; }\n\
     function module_function(): number { return helper(); }\n\
     class Box { size(): number { return 1; } }\n\
     function caller(box: Box): number { return box.size() + missing(); }\n\
     function again(n: number): number { return again(n); }\n\
+    again(1);\n\
+    import { external } from \"./external\";\n\
+    function uses_import(): number { return external(); }\n\
+    function shadow(): void { for (const helper of [1]) { helper; } }\n\
     // café\n";
 const EVIDENCE_ARGS: [&str; 3] = ["--json-full", "symbols", EVIDENCE_FILE];
 /// `occurrences[0]`: the `Scoped` call of `helper` in `module_function`.
@@ -1267,6 +1266,16 @@ const SCOPED: &str = "0";
 const NAME_ONLY: &str = "3";
 /// `occurrences[4]`: the `Unresolved` call of `missing`.
 const UNRESOLVED: &str = "4";
+/// `occurrences[5]`: `again`'s `Scoped` call of itself.
+const SELF_CALL: &str = "5";
+/// `occurrences[7]`: the file-level (ownerless) `Scoped` call of `again`.
+const OWNERLESS: &str = "7";
+/// `occurrences[8]`: the `Scoped` call of the import `external` (no ID).
+const IMPORTED: &str = "8";
+/// `occurrences[9]`: the `for` binding `helper` (`Scoped`, no ID).
+const UNREPORTED: &str = "9";
+/// `reference_coverage[1]`: `helper`'s region, which owns no occurrence.
+const EMPTY_CALLABLE: &str = "1";
 /// `reference_coverage[4]`: `caller`'s region, limited by `box.size()`.
 const LIMITED: &str = "4";
 
@@ -1297,8 +1306,23 @@ fn evidence_columns() -> Vec<Column> {
         evidence_column("occurrence candidates", &["occurrences", NAME_ONLY, "candidates"]),
         evidence_column("occurrence span", &["occurrences", SCOPED, "span"]),
         evidence_column("occurrence owner", &["occurrences", SCOPED, "owner"]),
+        evidence_column("occurrence owner_span", &["occurrences", SCOPED, "owner_span"]),
+        evidence_column("ownerless occurrence target.id", &["occurrences", OWNERLESS, "target", "id"]),
+        evidence_column("coverage owner", &["reference_coverage", LIMITED, "owner"]),
+        evidence_column("coverage state", &["reference_coverage", LIMITED, "state"]),
         evidence_column("coverage reasons", &["reference_coverage", LIMITED, "reasons"]),
+        evidence_column("coverage span", &["reference_coverage", LIMITED, "span"]),
     ]
+}
+
+/// The occurrence-shaped reference to the stored record called `name`.
+fn reference_to(entry: &mut Value, name: &str) -> Value {
+    let record = record_mut(entry, name);
+    json!({ "id": record["id"], "name": name, "qualified_name": record["identity"]["qualified_name"] })
+}
+
+fn region<'a>(entry: &'a mut Value, index: &str) -> &'a mut Value {
+    &mut entry["reference_coverage"][index.parse::<usize>().expect("index")]
 }
 
 fn occurrence<'a>(entry: &'a mut Value, index: &str) -> &'a mut Value {
@@ -1407,6 +1431,80 @@ const INCONSISTENT_EVIDENCE: &[EntryEdit] = &[
     ("direct recursion with no call to itself", |entry| {
         record_mut(entry, "helper")["semantics"]["is_recursive"] = json!("Yes");
     }),
+    // A target ID is checked against the record it names wherever that
+    // record is retained, with or without an owner to make an edge.
+    ("an ownerless Scoped target naming another declaration", |entry| {
+        occurrence(entry, OWNERLESS)["target"]["id"] = record_mut(entry, "helper")["id"].clone();
+    }),
+    ("an ownerless Scoped target with a malformed ID", |entry| {
+        occurrence(entry, OWNERLESS)["target"]["id"] = json!("bogus");
+    }),
+    ("an ownerless Scoped target that lost its ID", |entry| {
+        occurrence(entry, OWNERLESS)["target"]["id"] = Value::Null;
+    }),
+    ("a named owner's Scoped target naming another declaration", |entry| {
+        occurrence(entry, SELF_CALL)["target"]["id"] = record_mut(entry, "helper")["id"].clone();
+    }),
+    ("a named owner's Scoped target with a malformed ID", |entry| {
+        occurrence(entry, SELF_CALL)["target"]["id"] = json!("bogus");
+    }),
+    ("a candidate naming a declaration of another name", |entry| {
+        occurrence(entry, NAME_ONLY)["candidates"][0] = reference_to(entry, "helper");
+    }),
+    ("a region owner with a malformed ID", |entry| {
+        region(entry, LIMITED)["owner"]["id"] = json!("bogus");
+    }),
+    ("a region owned by a declaration that is not a callable", |entry| {
+        region(entry, EMPTY_CALLABLE)["owner"] = reference_to(entry, "Box");
+    }),
+    ("a repeated coverage region", |entry| {
+        let list = entry["reference_coverage"].as_array_mut().expect("coverage");
+        let limited = LIMITED.parse::<usize>().expect("index");
+        list.insert(limited, list[limited].clone());
+    }),
+    ("a callable's region removed although it owns no occurrence", |entry| {
+        entry["reference_coverage"]
+            .as_array_mut()
+            .expect("coverage")
+            .remove(EMPTY_CALLABLE.parse::<usize>().expect("index"));
+    }),
+    ("an occurrence owned by a region around its innermost one", |entry| {
+        let file_span = entry["reference_coverage"][0]["span"].clone();
+        let occurrence = occurrence(entry, NAME_ONLY);
+        occurrence["owner"] = Value::Null;
+        occurrence["owner_span"] = file_span;
+    }),
+    ("an unsupported-language limit in a resolving language", |entry| {
+        let region = region(entry, LIMITED);
+        region["reasons"] = json!(["indirect_dispatch", "unsupported_language"]);
+    }),
+    ("a Scoped occurrence whose reference edge is gone", |entry| {
+        record_mut(entry, SENTINEL_TO)["relations"]["references"] = json!([]);
+    }),
+    ("a dependency no import occurrence made", |entry| {
+        let relations = &mut record_mut(entry, "uses_import")["relations"];
+        for summary in ["references", "dependencies"] {
+            relations[summary].as_array_mut().expect("summary").push(json!({ "name": "ghost" }));
+        }
+    }),
+    ("a referenced-by entry whose name is not its record's", |entry| {
+        record_mut(entry, "helper")["relations"]["referenced_by"][0]["name"] = json!("elsewhere");
+    }),
+    ("no recursion while the region is limited", |entry| {
+        record_mut(entry, "caller")["semantics"]["is_recursive"] = json!("No");
+    }),
+    ("no recursion beside a Scoped call to itself", |entry| {
+        record_mut(entry, "again")["semantics"]["is_recursive"] = json!("No");
+    }),
+    ("unknown recursion over a complete region with no call", |entry| {
+        record_mut(entry, "helper")["semantics"]["is_recursive"] = json!("Unknown");
+    }),
+    ("semantics without the semantics capability", |entry| {
+        entry["completed_capabilities"]
+            .as_array_mut()
+            .expect("capabilities")
+            .retain(|capability| capability != "semantics");
+    }),
 ];
 
 /// The cache reader's contract for the reference evidence of an entry that
@@ -1439,6 +1537,18 @@ fn reference_evidence_is_served_only_when_consistent() {
         (json!("caller"), json!("Limited"))
     );
     assert_eq!(record(&uncached, "again")["semantics"]["is_recursive"], "Yes");
+    // The control cells serve these legitimate shapes: an ownerless target
+    // with an ID, and `Scoped` targets with no ID bound to an import and to
+    // a binding no record reports, beside a declaration of the same name.
+    let scoped = |index: &str| {
+        let occurrence = stored("occurrences", index);
+        (occurrence["owner"]["name"].clone(), occurrence["target"]["name"].clone(), occurrence["target"]["id"].is_string())
+    };
+    assert_eq!(scoped(SELF_CALL), (json!("again"), json!("again"), true));
+    assert_eq!(scoped(OWNERLESS), (Value::Null, json!("again"), true));
+    assert_eq!(scoped(IMPORTED), (json!("uses_import"), json!("external"), false));
+    assert_eq!(scoped(UNREPORTED), (json!("shadow"), json!("helper"), false));
+    assert_eq!(stored("reference_coverage", EMPTY_CALLABLE)["owner"]["name"], "helper");
 
     let columns = evidence_columns();
     let mut failures: Vec<String> = std::thread::scope(|scope| {
@@ -1459,22 +1569,40 @@ fn reference_evidence_is_served_only_when_consistent() {
             .collect()
     });
 
-    let temp = TempDir::new().expect("edit temp");
-    let edited_path = temp.path().join(&relative_entry);
-    std::fs::create_dir_all(edited_path.parent().expect("entry parent")).expect("create shard");
     let mut base = original.clone();
     rename_record(&mut base, SENTINEL_FROM, SENTINEL_TO);
-    for (label, edit) in INCONSISTENT_EVIDENCE {
-        let mut edited = base.clone();
-        edit(&mut edited);
-        std::fs::write(&edited_path, serde_json::to_string(&edited).expect("serialize")).expect("write entry");
-        let output = json_of(&stdout_of(scratch.hug_with_temp(temp.path(), &EVIDENCE_ARGS), &EVIDENCE_ARGS));
-        if has_sentinel(&output) {
-            failures.push(format!("{label}: expected rejected, entry was served"));
-        } else if output != uncached {
-            failures.push(format!("{label}: rejected, but output differs from an uncached run"));
-        }
-    }
+    // Each edit chunk serves its edits from its own temp directory.
+    let edit_failures: Vec<String> = std::thread::scope(|scope| {
+        let handles: Vec<_> = INCONSISTENT_EVIDENCE
+            .chunks(INCONSISTENT_EVIDENCE.len().div_ceil(4))
+            .map(|edits| {
+                let (scratch, base, uncached) = (&scratch, &base, &uncached);
+                let relative_entry = relative_entry.as_path();
+                scope.spawn(move || {
+                    let temp = TempDir::new().expect("edit temp");
+                    let edited_path = temp.path().join(relative_entry);
+                    std::fs::create_dir_all(edited_path.parent().expect("entry parent")).expect("create shard");
+                    let mut failures = Vec::new();
+                    for (label, edit) in edits {
+                        let mut edited = base.clone();
+                        edit(&mut edited);
+                        std::fs::write(&edited_path, serde_json::to_string(&edited).expect("serialize"))
+                            .expect("write entry");
+                        let output =
+                            json_of(&stdout_of(scratch.hug_with_temp(temp.path(), &EVIDENCE_ARGS), &EVIDENCE_ARGS));
+                        if has_sentinel(&output) {
+                            failures.push(format!("{label}: expected rejected, entry was served"));
+                        } else if output != *uncached {
+                            failures.push(format!("{label}: rejected, but output differs from an uncached run"));
+                        }
+                    }
+                    failures
+                })
+            })
+            .collect();
+        handles.into_iter().flat_map(|handle| handle.join().expect("edit thread")).collect()
+    });
+    failures.extend(edit_failures);
     assert!(failures.is_empty(), "reference evidence matrix:\n{}", failures.join("\n"));
 
     // An empty list is servable when the file truly has no occurrences.

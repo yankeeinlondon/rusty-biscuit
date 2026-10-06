@@ -1,5 +1,5 @@
 //! The one terminal renderer of the declaration commands (`functions`,
-//! `types`, `symbols`, `classes`), fed from v2 records.
+//! `types`, `symbols`, `classes`) and of `refs`, fed from v2 records.
 //!
 //! Every line is `Prose` markup (inside a biscuit-terminal `UnorderedList`
 //! for listings) or a biscuit-terminal `Table` row, so color, emphasis and

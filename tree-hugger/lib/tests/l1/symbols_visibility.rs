@@ -618,6 +618,9 @@ fn commonjs_evidence_counts_anywhere_in_the_file() {
     );
     assert_level(&lazy_require, "helper", None, MODULE_PRIVATE);
 
+    let wrapped_require = extract_inline("const fs = ((require))(\"fs\");\nconst helper = 1;\n", "js");
+    assert_level(&wrapped_require, "helper", None, MODULE_PRIVATE);
+
     let conditional_export = extract_inline(
         "const helper = 1;\nif (helper) {\n  exports.helper = helper;\n}\n",
         "js",

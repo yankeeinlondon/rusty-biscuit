@@ -7,16 +7,19 @@
 //! each one, so an absent key, `null` and an empty list stay distinct and a
 //! damaged entry is a miss, never evidence read as empty.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use serde::de::Deserializer;
 use serde::ser::Serializer;
 use serde::{Deserialize, Serialize};
 
 use crate::analysis::occurrences::{occurrence_order, whole_file_span};
+use crate::analysis::scope::LanguageRules;
+use crate::analysis::{has_semantics, semantic_facets};
+use crate::file::query::Capability;
 use crate::shared::{
-    Confidence, CoverageState, LimitReason, Occurrence, OccurrenceKind, ReferenceCoverage,
-    SymbolId, SymbolRecord, SymbolRef, TextPoint, TextSpan, TriState,
+    Confidence, CoverageState, ImportRecord, LimitReason, Occurrence, OccurrenceKind, ProgrammingLanguage,
+    ReferenceCoverage, SemanticFacet, SymbolId, SymbolRecord, SymbolRef, TextPoint, TextSpan,
 };
 
 #[derive(Serialize, Deserialize)]
@@ -201,31 +204,57 @@ impl From<StoredSpan> for TextSpan {
     }
 }
 
+/// What a read entry stores that its reference evidence must agree with.
+pub(super) struct StoredEvidence<'a> {
+    pub(super) source: &'a str,
+    pub(super) language: ProgrammingLanguage,
+    pub(super) capabilities: &'a BTreeSet<Capability>,
+    /// The entry covers every kind, so its records are every record the
+    /// analysis resolved against.
+    pub(super) all_kinds: bool,
+    pub(super) occurrences: &'a [Occurrence],
+    pub(super) coverage: &'a [ReferenceCoverage],
+    pub(super) records: &'a [SymbolRecord],
+    pub(super) imports: &'a [ImportRecord],
+}
+
 /// Checks a read entry's evidence against its source, its capability claim
-/// and the records' summaries derived from it. The error names the first
-/// inconsistency found.
+/// and the records' summaries and semantics derived from it. The error names
+/// the first inconsistency found.
 ///
-/// Evidence a fresh analysis could have produced passes; what cannot be told
-/// apart without a parse (a list emptied while nothing derived from it
-/// remains) is beyond these checks.
-pub(super) fn validate_evidence(
-    source: &str,
-    has_occurrences: bool,
-    occurrences: &[Occurrence],
-    coverage: &[ReferenceCoverage],
-    records: &[SymbolRecord],
-) -> Result<(), &'static str> {
+/// Evidence a fresh analysis could have produced passes. A kind-narrowed
+/// entry keeps evidence that names records it does not retain, so an ID is
+/// checked against a record only when that record is retained; what cannot
+/// be told apart without a parse (a list emptied while nothing derived from
+/// it remains, an anonymous region added or removed) is beyond these checks.
+pub(super) fn validate_evidence(stored: &StoredEvidence<'_>) -> Result<(), &'static str> {
+    let StoredEvidence { source, language, capabilities, all_kinds, occurrences, coverage, records, imports } = *stored;
+    let has_occurrences = capabilities.contains(&Capability::Occurrences);
+    if !capabilities.contains(&Capability::Semantics) {
+        if records.iter().any(|record| record.semantics != SemanticFacet::default()) {
+            return Err("semantics stored without the semantics capability");
+        }
+    } else if !has_occurrences {
+        return Err("semantics stored without the occurrences they are read from");
+    }
     if !has_occurrences {
         if occurrences.is_empty() && coverage.is_empty() {
             return Ok(());
         }
         return Err("occurrences stored without the occurrences capability");
     }
+    if !evidence_ids(occurrences, coverage, records).all(is_generated_id) {
+        return Err("an ID that is not a generated declaration ID");
+    }
+    // Only Rust and TS/JS resolve names; every other language's evidence is
+    // name-only and all of its regions are limited by that.
+    let resolves = LanguageRules::for_language(language).is_some();
     let lines = LineStarts::new(source);
     // A reference to a stored record repeats its name and qualified name.
     let by_id: HashMap<&SymbolId, &SymbolRecord> = records.iter().map(|record| (&record.id, record)).collect();
+    let retained = |reference: &SymbolRef| reference.id.as_ref().and_then(|id| by_id.get(id)).copied();
     let names_its_record = |reference: &SymbolRef| {
-        reference.id.as_ref().and_then(|id| by_id.get(id)).is_none_or(|record| {
+        retained(reference).is_none_or(|record| {
             reference.name == record.identity.name
                 && reference.qualified_name.as_deref() == Some(record.identity.qualified_name.as_str())
         })
@@ -239,6 +268,7 @@ pub(super) fn validate_evidence(
         return Err("the first coverage region is not the whole file");
     }
     let mut regions = HashMap::new();
+    let mut owned_regions = HashSet::new();
     let mut previous: Option<(u32, std::cmp::Reverse<u32>)> = None;
     for region in coverage {
         if !lines.is_region(&region.span) {
@@ -248,19 +278,50 @@ pub(super) fn validate_evidence(
         if complete != region.reasons.is_empty() || !region.reasons.is_sorted_by(|left, right| left < right) {
             return Err("coverage reasons that do not match its state");
         }
+        if resolves == region.reasons.contains(&LimitReason::UnsupportedLanguage) {
+            return Err("an unsupported-language limit that does not match the language");
+        }
         let order = (region.span.start_byte, std::cmp::Reverse(region.span.end_byte));
         if previous.is_some_and(|previous| previous > order) {
             return Err("coverage out of order");
         }
         previous = Some(order);
-        if !region.owner.as_ref().is_none_or(names_its_record) {
-            return Err("a region owner that does not name its record");
+        if let Some(owner) = &region.owner {
+            if !names_its_record(owner) {
+                return Err("a region owner that does not name its record");
+            }
+            if retained(owner).is_some_and(|record| !has_semantics(record.kind)) {
+                return Err("a region owner that is not a callable");
+            }
+            // A region's owner is a key here; it is checked for an ID below.
+            if owner.id.as_ref().is_some_and(|id| !owned_regions.insert(id)) {
+                return Err("a repeated coverage region");
+            }
         }
-        regions.insert(region_key(region.owner.as_ref(), &region.span)?, region.owner.as_ref());
+        if regions.insert(region_key(region.owner.as_ref(), &region.span)?, region.owner.as_ref()).is_some() {
+            return Err("a repeated coverage region");
+        }
+    }
+    // Every named callable with a body gets its own region (Python and Lua
+    // read a body that need not be a `body` field, so a region is not
+    // provable for them).
+    if !matches!(language, ProgrammingLanguage::Python | ProgrammingLanguage::Lua)
+        && records.iter().any(|record| {
+            has_semantics(record.kind) && record.source.body_span.is_some() && !owned_regions.contains(&record.id)
+        })
+    {
+        return Err("a callable with a body and no coverage region");
     }
 
+    // Retained record IDs by name, to check what an unresolving language's
+    // name-only lookup over every record must have found.
+    let mut ids_by_name: HashMap<&str, HashSet<&SymbolId>> = HashMap::new();
+    for record in records {
+        ids_by_name.entry(record.identity.name.as_str()).or_default().insert(&record.id);
+    }
     let mut previous: Option<&Occurrence> = None;
     let mut scoped = HashSet::new();
+    let mut unbound = Vec::new();
     for occurrence in occurrences {
         let (start, end) = (occurrence.span.start_byte as usize, occurrence.span.end_byte as usize);
         if start >= end
@@ -271,7 +332,8 @@ pub(super) fn validate_evidence(
         {
             return Err("an occurrence span outside the source, its owner or a character boundary");
         }
-        if source.get(start..end) != Some(occurrence.target.name.as_str()) {
+        let name = occurrence.target.name.as_str();
+        if source.get(start..end) != Some(name) {
             return Err("an occurrence whose target name is not the text at its span");
         }
         if regions.get(&region_key(occurrence.owner.as_ref(), &occurrence.owner_span)?)
@@ -280,16 +342,33 @@ pub(super) fn validate_evidence(
             return Err("an occurrence whose owner is no coverage region");
         }
         let consistent = match occurrence.confidence {
-            Confidence::Scoped => occurrence.candidates.is_empty(),
+            Confidence::Scoped => {
+                resolves
+                    && occurrence.candidates.is_empty()
+                    && retained(&occurrence.target).is_none_or(|record| record.identity.name == name)
+            }
             Confidence::NameOnly => {
                 let mut ids = HashSet::new();
                 occurrence.target.id.is_none()
                     && !occurrence.candidates.is_empty()
                     && occurrence.candidates.iter().all(|candidate| {
-                        candidate.id.as_ref().is_some_and(|id| ids.insert(id)) && names_its_record(candidate)
+                        candidate.name == name
+                            && candidate.id.as_ref().is_some_and(|id| ids.insert(id))
+                            && names_its_record(candidate)
+                    })
+                    && (resolves || {
+                        // The lookup took every record of the name: each
+                        // retained one, and nothing else when all are.
+                        let named = ids_by_name.get(name);
+                        named.is_none_or(|named| named.is_subset(&ids))
+                            && (!all_kinds || named.map_or(0, HashSet::len) == ids.len())
                     })
             }
-            Confidence::Unresolved => occurrence.target.id.is_none() && occurrence.candidates.is_empty(),
+            Confidence::Unresolved => {
+                occurrence.target.id.is_none()
+                    && occurrence.candidates.is_empty()
+                    && (resolves || !ids_by_name.contains_key(name))
+            }
         };
         if !consistent {
             return Err("an occurrence whose target ID and candidates contradict its confidence");
@@ -301,47 +380,214 @@ pub(super) fn validate_evidence(
             }
         }
         previous = Some(occurrence);
-        if occurrence.confidence == Confidence::Scoped
-            && let (Some(owner), Some(target)) = (
-                occurrence.owner.as_ref().and_then(|owner| owner.id.as_ref()),
-                occurrence.target.id.as_ref(),
-            )
-        {
-            scoped.insert((owner, target, occurrence.kind));
+        if occurrence.confidence == Confidence::Scoped {
+            let owner = occurrence.owner.as_ref().and_then(|owner| owner.id.as_ref());
+            match &occurrence.target.id {
+                Some(target) => {
+                    if let Some(owner) = owner {
+                        scoped.insert((owner, Some(target), name, occurrence.kind));
+                    }
+                }
+                None => {
+                    if let Some(owner) = owner {
+                        scoped.insert((owner, None, name, occurrence.kind));
+                    }
+                    unbound.push(occurrence);
+                }
+            }
         }
     }
+    innermost_owners(occurrences, coverage)?;
+    if !unbound.is_empty() {
+        unbound_names_have_a_binding(source, &unbound, occurrences, records)?;
+    }
 
-    // The records' summaries and recursion are derived from the occurrences,
-    // so each established edge needs the occurrence that made it.
-    let made = |owner: &SymbolId, target: &SymbolId| {
+    // The records' summaries are derived from the occurrences, so each edge
+    // needs the occurrence that made it, and each occurrence the edges it
+    // makes between retained records.
+    let made = |owner: &SymbolId, target: Option<&SymbolId>, name: &str| {
         [OccurrenceKind::Call, OccurrenceKind::Usage]
             .iter()
-            .any(|&kind| scoped.contains(&(owner, target, kind)))
+            .any(|&kind| scoped.contains(&(owner, target, name, kind)))
     };
+    let made_to = |owner: &SymbolId, target: &SymbolRecord| made(owner, Some(&target.id), &target.identity.name);
     for record in records {
         let relations = &record.relations;
-        let local_targets = relations
-            .references
-            .iter()
-            .filter(|reference| !relations.dependencies.contains(reference))
-            .filter_map(|reference| reference.id.as_ref());
-        for target in local_targets {
-            if !made(&record.id, target) {
+        let summary = relations.references.iter().chain(&relations.referenced_by).chain(&relations.dependencies);
+        if !summary.clone().filter_map(|reference| reference.id.as_ref()).all(is_generated_id)
+            || !summary.clone().all(&names_its_record)
+        {
+            return Err("a reference summary that does not name its record");
+        }
+        for reference in &relations.references {
+            let is_dependency = relations.dependencies.contains(reference);
+            let found = match &reference.id {
+                Some(target) if !is_dependency => made(&record.id, Some(target), &reference.name),
+                None if is_dependency => true,
+                _ => false,
+            };
+            if !found {
                 return Err("a reference with no scoped occurrence");
             }
         }
-        for owner in relations.referenced_by.iter().filter_map(|owner| owner.id.as_ref()) {
-            if !made(owner, &record.id) {
+        for dependency in &relations.dependencies {
+            if dependency.id.is_some()
+                || !relations.references.contains(dependency)
+                || !made(&record.id, None, &dependency.name)
+            {
+                return Err("a dependency with no scoped occurrence of an import");
+            }
+        }
+        for owner in &relations.referenced_by {
+            let Some(owner) = owner.id.as_ref() else {
+                return Err("a referenced-by edge with no scoped occurrence");
+            };
+            if !made_to(owner, record) {
                 return Err("a referenced-by edge with no scoped occurrence");
             }
         }
-        if record.semantics.is_recursive == Some(TriState::Yes)
-            && !scoped.contains(&(&record.id, &record.id, OccurrenceKind::Call))
-        {
-            return Err("direct recursion with no scoped call to itself");
+    }
+    for &(owner, target, _, _) in &scoped {
+        let (Some(owner), Some(target)) = (by_id.get(owner), target) else { continue };
+        let refers = owner.relations.references.iter().any(|reference| reference.id.as_ref() == Some(target));
+        let referred = by_id.get(target).is_none_or(|target| {
+            target.relations.referenced_by.iter().any(|reference| reference.id.as_ref() == Some(&owner.id))
+        });
+        if !refers || !referred {
+            return Err("a scoped occurrence whose reference edge is missing");
+        }
+    }
+
+    if capabilities.contains(&Capability::Semantics) {
+        let expected = semantic_facets(records, occurrences, coverage, imports);
+        for (record, facet) in records.iter().zip(expected) {
+            if record.semantics != facet.unwrap_or_default() {
+                return Err("semantics that the stored evidence does not produce");
+            }
         }
     }
     Ok(())
+}
+
+/// Every ID the evidence stores.
+fn evidence_ids<'a>(
+    occurrences: &'a [Occurrence],
+    coverage: &'a [ReferenceCoverage],
+    records: &'a [SymbolRecord],
+) -> impl Iterator<Item = &'a SymbolId> {
+    let occurrence_refs = occurrences.iter().flat_map(|occurrence| {
+        occurrence.owner.iter().chain(std::iter::once(&occurrence.target)).chain(&occurrence.candidates)
+    });
+    occurrence_refs
+        .chain(coverage.iter().filter_map(|region| region.owner.as_ref()))
+        .filter_map(|reference| reference.id.as_ref())
+        .chain(records.iter().map(|record| &record.id))
+}
+
+/// Whether `id` has the form every declaration ID has: a BLAKE3 digest in
+/// lowercase hex.
+fn is_generated_id(id: &SymbolId) -> bool {
+    id.0.len() == 64 && id.0.bytes().all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+}
+
+/// Each occurrence's owner is the innermost region around it: regions are
+/// syntax nodes, so they nest, and the analysis owns a reference by the
+/// nearest one. Regions of one span are interchangeable here; their owners
+/// were matched by key already.
+fn innermost_owners(occurrences: &[Occurrence], coverage: &[ReferenceCoverage]) -> Result<(), &'static str> {
+    let contains = |outer: &TextSpan, inner: &TextSpan| {
+        outer.start_byte <= inner.start_byte && inner.end_byte <= outer.end_byte
+    };
+    let mut open: Vec<&TextSpan> = Vec::new();
+    let mut next = coverage.iter().peekable();
+    for occurrence in occurrences {
+        while let Some(region) = next.next_if(|region| region.span.start_byte <= occurrence.span.start_byte) {
+            while open.last().is_some_and(|last| !contains(last, &region.span)) {
+                open.pop();
+            }
+            open.push(&region.span);
+        }
+        while open.last().is_some_and(|last| !contains(last, &occurrence.span)) {
+            open.pop();
+        }
+        if open.last() != Some(&&occurrence.owner_span) {
+            return Err("an occurrence owned by a region around the innermost one");
+        }
+    }
+    Ok(())
+}
+
+/// A `Scoped` occurrence with no target ID is bound to an import or to a
+/// binding no record reports, and either is written somewhere in the source
+/// as the same identifier: never at a record's name (that binding has an
+/// ID) and never at an occurrence (binding names are not occurrences). An
+/// identifier with no such other spelling has lost its target.
+///
+/// Identifiers are read as maximal runs of ASCII letters, digits, `_` and
+/// `$`, each run also as its `$`-free pieces (`$` is part of a TS/JS
+/// identifier but starts a Rust macro metavariable); a name outside that
+/// alphabet is not checked. Any other character ends a run, so an
+/// identifier is only ever read as more spellings, never fewer, and the
+/// rule never rejects evidence a fresh analysis could produce.
+fn unbound_names_have_a_binding(
+    source: &str,
+    unbound: &[&Occurrence],
+    occurrences: &[Occurrence],
+    records: &[SymbolRecord],
+) -> Result<(), &'static str> {
+    let is_identifier_byte = |byte: u8| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'$';
+    let checked: HashSet<&str> = unbound
+        .iter()
+        .map(|occurrence| occurrence.target.name.as_str())
+        .filter(|name| name.bytes().all(is_identifier_byte))
+        .collect();
+    if checked.is_empty() {
+        return Ok(());
+    }
+    let taken: HashSet<(u32, u32)> = occurrences
+        .iter()
+        .map(|occurrence| &occurrence.span)
+        .chain(records.iter().filter_map(|record| record.source.name_span.as_ref()))
+        .map(|span| (span.start_byte, span.end_byte))
+        .collect();
+    let mut written: HashSet<&str> = HashSet::new();
+    let bytes = source.as_bytes();
+    let mut start = 0;
+    while start < bytes.len() {
+        if !is_identifier_byte(bytes[start]) {
+            start += 1;
+            continue;
+        }
+        let end = (start..bytes.len()).find(|&at| !is_identifier_byte(bytes[at])).unwrap_or(bytes.len());
+        for (from, to) in identifier_readings(start, &bytes[start..end]) {
+            if !taken.contains(&(from as u32, to as u32))
+                && let Some(text) = source.get(from..to)
+                && checked.contains(text)
+            {
+                written.insert(text);
+            }
+        }
+        start = end;
+    }
+    if checked.iter().all(|name| written.contains(name)) {
+        Ok(())
+    } else {
+        Err("a scoped occurrence with no target ID and no binding of its name")
+    }
+}
+
+/// The byte ranges one run of identifier bytes starting at `start` can be
+/// read as: the whole run and each `$`-free piece of it.
+fn identifier_readings(start: usize, run: &[u8]) -> Vec<(usize, usize)> {
+    let mut readings = vec![(start, start + run.len())];
+    let mut offset = start;
+    for piece in run.split(|&byte| byte == b'$') {
+        if !piece.is_empty() && piece.len() != run.len() {
+            readings.push((offset, offset + piece.len()));
+        }
+        offset += piece.len() + 1;
+    }
+    readings
 }
 
 /// A region's identity: its owner's ID (a named owner must have one) and
@@ -407,5 +653,21 @@ mod tests {
         assert_eq!(lines.point(4), Some(TextPoint { line: 2, column: 1 }));
         assert_eq!(lines.point(6), Some(TextPoint { line: 2, column: 3 }), "end of source");
         assert_eq!(lines.point(7), None, "past the end");
+    }
+
+    #[test]
+    fn a_dollar_run_is_also_read_as_its_pieces() {
+        assert_eq!(identifier_readings(3, b"f"), [(3, 4)]);
+        assert_eq!(identifier_readings(0, b"$f"), [(0, 2), (1, 2)]);
+        assert_eq!(identifier_readings(10, b"a$$bc$"), [(10, 16), (10, 11), (13, 15)]);
+    }
+
+    #[test]
+    fn generated_ids_are_lowercase_blake3_hex() {
+        let id = crate::shared::symbol_id_from_stable_key("rust::a.rs::Function::f::0");
+        assert!(is_generated_id(&id));
+        assert!(!is_generated_id(&SymbolId(id.0.to_uppercase())));
+        assert!(!is_generated_id(&SymbolId(id.0[1..].to_string())));
+        assert!(!is_generated_id(&SymbolId("bogus".to_string())));
     }
 }

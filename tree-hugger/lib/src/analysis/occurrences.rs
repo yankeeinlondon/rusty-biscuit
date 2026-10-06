@@ -12,7 +12,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 
 use tree_sitter::Node;
 
-use super::scope::{BindingRule, BindingSite, BindingTarget, LanguageRules, Lookup, ScopeTree, ancestors};
+use super::scope::{BindingRule, BindingSite, BindingTarget, Dynamic, LanguageRules, Lookup, ScopeTree, ancestors};
 use super::symbol_ref;
 use crate::file::extract::{is_definition_like_reference, text_span_for_node};
 use crate::file::tree_file::{ExtractedSymbol, ReferenceCapture};
@@ -217,6 +217,7 @@ struct Walk<'tree> {
     extra_scopes: Vec<Node<'tree>>,
     sites: Vec<BindingSite<'tree>>,
     globs: Vec<Node<'tree>>,
+    dynamics: Vec<Dynamic<'tree>>,
 }
 
 impl<'tree> Walk<'tree> {
@@ -257,6 +258,7 @@ impl<'tree> Walk<'tree> {
         if rules.is_glob_import(node) {
             self.globs.push(node);
         }
+        self.dynamics.extend(rules.dynamic(node, source));
         match rules {
             LanguageRules::Rust => self.visit_rust(node),
             LanguageRules::Ecma { .. } => self.visit_ecma(node, source),
@@ -455,6 +457,9 @@ impl<'a, 'tree> Resolver<'a, 'tree> {
             for &glob in &walk.globs {
                 tree.add_glob(glob);
             }
+            for &dynamic in &walk.dynamics {
+                tree.add_dynamic(dynamic);
+            }
             bind_all(&mut tree, syntax, rules, walk);
             tree
         });
@@ -485,7 +490,7 @@ impl<'a, 'tree> Resolver<'a, 'tree> {
             return None;
         }
 
-        let kind = if is_call_target(node, self.syntax.language) {
+        let kind = if is_call_target(node, self.syntax.language, self.syntax.source) {
             OccurrenceKind::Call
         } else {
             OccurrenceKind::Usage
@@ -799,6 +804,8 @@ fn record_rule(rules: LanguageRules, kind: SymbolKind) -> BindingRule {
         categories,
         placement: Placement::Innermost,
         visible_from: 0,
+        visible_until: None,
+        local: rules == LanguageRules::Rust && matches!(kind, SymbolKind::Variable | SymbolKind::Parameter),
         ordered: false,
         callable: kind.is_function() || kind == SymbolKind::Class,
     }
@@ -844,12 +851,33 @@ const QUALIFYING_KINDS: &[&str] = &[
 ];
 
 /// The fields that hold a qualifier or receiver in [`QUALIFYING_KINDS`].
-const QUALIFIER_FIELDS: &[&str] = &["path", "value", "object", "operand", "scope", "module", "expression", "table"];
+const QUALIFIER_FIELDS: &[&str] = &[
+    "path",
+    "value",
+    "object",
+    "operand",
+    "scope",
+    "module",
+    "expression",
+    "table",
+    "argument",
+    "prefix",
+    "qualifier",
+];
 
 /// The node `node` qualifies, when `node` is the written qualifier's name
 /// part: the parent path or member expression.
 fn qualified_parent(node: Node<'_>) -> Option<Node<'_>> {
     let parent = node.parent()?;
+    // Swift holds a member name in a `navigation_suffix` below its
+    // `navigation_expression`.
+    if parent.kind() == "navigation_suffix" {
+        return parent
+            .child_by_field_name("suffix")
+            .filter(|suffix| suffix.id() == node.id())
+            .and(parent.parent())
+            .filter(|navigation| navigation.kind() == "navigation_expression");
+    }
     if !QUALIFYING_KINDS.contains(&parent.kind()) {
         return None;
     }
@@ -867,38 +895,241 @@ fn written_path(node: Node<'_>, source: &str) -> Option<String> {
     source.get(parent.start_byte()..node.end_byte()).map(str::to_string)
 }
 
-/// Whether `node` names the target of an invocation: a call's function or
-/// a constructor, directly or as the name part of a path, receiver
-/// expression or Rust turbofish.
-fn is_call_target(node: Node<'_>, language: ProgrammingLanguage) -> bool {
+/// Whether `node` names the target of an invocation: a call's function, a
+/// method name, a constructed type or an applied decorator, directly or as
+/// the name part of a path, receiver expression or generic instantiation,
+/// and through wrappers that only restate their operand
+/// ([`transparent_wrapper`]). A receiver, an argument, an operand of a
+/// sequence or conditional, and a dereference are never the target.
+fn is_call_target(node: Node<'_>, language: ProgrammingLanguage, source: &str) -> bool {
+    match language {
+        ProgrammingLanguage::Bash | ProgrammingLanguage::Zsh => return is_shell_command_name(node),
+        ProgrammingLanguage::Perl => return is_perl_invocation(node, source),
+        _ => {}
+    }
     let mut target = node;
     loop {
+        while let Some(wrapper) = transparent_wrapper(target, language) {
+            target = wrapper;
+        }
         let Some(parent) = target.parent() else { return false };
         let holds = |field: &str| parent.child_by_field_name(field).is_some_and(|child| child.id() == target.id());
+        let is_first = || first_operand(parent).is_some_and(|first| first.id() == target.id());
         let invoked = match parent.kind() {
             "call_expression" | "call" | "invocation_expression" | "function_call_expression" => {
-                holds("function")
-                    || (parent.child_by_field_name("function").is_none()
-                        && parent.named_child(0).is_some_and(|first| first.id() == target.id()))
+                holds("function") || (parent.child_by_field_name("function").is_none() && is_first())
             }
-            "new_expression" => holds("constructor"),
-            "object_creation_expression" => holds("type"),
-            "method_invocation" | "member_call_expression" | "scoped_call_expression" | "function_call" => {
-                holds("name")
+            "new_expression" => holds("constructor") || holds("type"),
+            "object_creation_expression" => {
+                holds("type") || (language == ProgrammingLanguage::Php && is_first())
+            }
+            "instance_expression" => language == ProgrammingLanguage::Scala && is_first(),
+            "method_invocation"
+            | "member_call_expression"
+            | "nullsafe_member_call_expression"
+            | "scoped_call_expression"
+            | "function_call" => holds("name"),
+            // `obj m 1` and `obj m` apply the method `m`.
+            "infix_expression" => language == ProgrammingLanguage::Scala && holds("operator"),
+            "postfix_expression" => {
+                language == ProgrammingLanguage::Scala
+                    && parent.named_child_count() > 1
+                    && parent
+                        .named_child(parent.named_child_count() as u32 - 1)
+                        .is_some_and(|last| last.id() == target.id())
+            }
+            // `@f` calls `f` with the decorated declaration.
+            "decorator" => {
+                matches!(
+                    language,
+                    ProgrammingLanguage::Python | ProgrammingLanguage::TypeScript | ProgrammingLanguage::JavaScript
+                ) && is_first()
             }
             _ => false,
         };
         if invoked {
             return true;
         }
-        if language == ProgrammingLanguage::Rust && parent.kind() == "generic_function" && holds("function") {
-            target = parent;
+        if let Some(generic) = generic_instantiation(target, parent, language) {
+            target = generic;
         } else if let Some(qualified) = qualified_parent(target) {
             target = qualified;
         } else {
             return false;
         }
     }
+}
+
+/// The first named child of `node` that is not a comment.
+fn first_operand(node: Node<'_>) -> Option<Node<'_>> {
+    let mut cursor = node.walk();
+    node.named_children(&mut cursor).find(|child| !child.kind().contains("comment"))
+}
+
+/// The wrapper around `node` that evaluates to exactly `node`'s value, so
+/// invoking the wrapper invokes `node`: parentheses holding nothing else
+/// (Swift writes them as a one-element, unlabeled `tuple_expression`), and
+/// the TypeScript type-only forms `x as T`, `x satisfies T`, `<T>x` and `x!`.
+///
+/// PHP parentheses are not transparent: a bare name inside them is a
+/// constant, so `(f)()` calls the constant's value, never function `f`.
+/// Casts, dereferences (`(*f)()`), sequences (`(a, f)()`) and conditionals
+/// (`(c ? f : g)()`) compute a different value and are never wrappers.
+fn transparent_wrapper<'tree>(node: Node<'tree>, language: ProgrammingLanguage) -> Option<Node<'tree>> {
+    let parent = node.parent()?;
+    wrapper_operand(parent, language).filter(|operand| operand.id() == node.id()).map(|_| parent)
+}
+
+/// The value `wrapper` restates, when it is one of
+/// [`transparent_wrapper`]'s wrappers.
+fn wrapper_operand<'tree>(wrapper: Node<'tree>, language: ProgrammingLanguage) -> Option<Node<'tree>> {
+    let only_operand = || {
+        let mut cursor = wrapper.walk();
+        let mut operands = wrapper.named_children(&mut cursor).filter(|child| !child.kind().contains("comment"));
+        let only = operands.next();
+        if operands.next().is_some() { None } else { only }
+    };
+    match (language, wrapper.kind()) {
+        (ProgrammingLanguage::Php, "parenthesized_expression") => None,
+        (_, "parenthesized_expression") => only_operand(),
+        (ProgrammingLanguage::Swift, "tuple_expression") if wrapper.child_by_field_name("name").is_none() => only_operand(),
+        (ProgrammingLanguage::TypeScript, "as_expression" | "satisfies_expression" | "non_null_expression") => {
+            first_operand(wrapper)
+        }
+        (ProgrammingLanguage::TypeScript, "type_assertion") => wrapper
+            .named_child((wrapper.named_child_count() as u32).saturating_sub(1))
+            .filter(|operand| operand.kind() != "type_arguments"),
+        _ => None,
+    }
+}
+
+/// The member names invoked through a member access written inside
+/// transparent wrappers (`((obj.m))()`, `(obj.m as T)()`, `(<T>obj.m)()`,
+/// Go `((pkg.F))()`, C++ `(obj.template m<T>)()`, `new ((ns.W))()`), which
+/// no query pattern can reach at every depth. Direct member calls are
+/// captured by the reference query; a duplicate span is merged by the
+/// caller. Rust is absent: `(x.f)()` calls the field `f`, never a method.
+pub(crate) fn wrapped_member_callees<'tree>(root: Node<'tree>, language: ProgrammingLanguage) -> Vec<Node<'tree>> {
+    let callee_field: &[(&str, &str)] = match language {
+        ProgrammingLanguage::TypeScript | ProgrammingLanguage::JavaScript => {
+            &[("call_expression", "function"), ("new_expression", "constructor")]
+        }
+        ProgrammingLanguage::Go | ProgrammingLanguage::C | ProgrammingLanguage::Cpp => &[("call_expression", "function")],
+        _ => return Vec::new(),
+    };
+    let mut names = Vec::new();
+    let mut cursor = root.walk();
+    loop {
+        let node = cursor.node();
+        if let Some(&(_, field)) = callee_field.iter().find(|(kind, _)| *kind == node.kind())
+            && let Some(mut callee) = node.child_by_field_name(field)
+        {
+            let mut wrapped = false;
+            while let Some(operand) = wrapper_operand(callee, language) {
+                callee = operand;
+                wrapped = true;
+            }
+            if wrapped && let Some(name) = member_name(callee, language) {
+                names.push(name);
+            }
+        }
+        if cursor.goto_first_child() || cursor.goto_next_sibling() {
+            continue;
+        }
+        loop {
+            if !cursor.goto_parent() {
+                return names;
+            }
+            if cursor.goto_next_sibling() {
+                break;
+            }
+        }
+    }
+}
+
+/// The member name a member access `access` writes: TS/JS `obj.m`, Go
+/// `x.m`, C/C++ `s.m`, `p->m`, `obj.template m<T>`.
+fn member_name<'tree>(access: Node<'tree>, language: ProgrammingLanguage) -> Option<Node<'tree>> {
+    let name = match (language, access.kind()) {
+        (ProgrammingLanguage::TypeScript | ProgrammingLanguage::JavaScript, "member_expression") => {
+            access.child_by_field_name("property")?
+        }
+        (ProgrammingLanguage::Go, "selector_expression") => access.child_by_field_name("field")?,
+        (ProgrammingLanguage::C | ProgrammingLanguage::Cpp, "field_expression") => {
+            let mut field = access.child_by_field_name("field")?;
+            if field.kind() == "dependent_name" {
+                field = first_operand(field)?;
+            }
+            if field.kind() == "template_method" {
+                field = field.child_by_field_name("name")?;
+            }
+            field
+        }
+        _ => return None,
+    };
+    matches!(name.kind(), "property_identifier" | "private_property_identifier" | "field_identifier").then_some(name)
+}
+
+/// The generic instantiation `node` is the function part of: Rust
+/// `f::<T>`, Scala `f[T]`, C++ `f<T>` (also `obj.template m<T>`), C# `f<T>`. Go `f[T]` is not one: the
+/// grammar writes it as an `index_expression`, the same node as `fs[0]`.
+fn generic_instantiation<'tree>(node: Node<'tree>, parent: Node<'tree>, language: ProgrammingLanguage) -> Option<Node<'tree>> {
+    let field = match (language, parent.kind()) {
+        (ProgrammingLanguage::Rust | ProgrammingLanguage::Scala, "generic_function") => "function",
+        (ProgrammingLanguage::Cpp, "template_function" | "template_method") => "name",
+        (ProgrammingLanguage::CSharp, "generic_name") | (ProgrammingLanguage::Cpp, "dependent_name") => {
+            return first_operand(parent).filter(|first| first.id() == node.id()).map(|_| parent);
+        }
+        _ => return None,
+    };
+    parent.child_by_field_name(field).filter(|child| child.id() == node.id()).map(|_| parent)
+}
+
+/// Whether `node` is a Bash/Zsh command's name (`f`, `X=1 f arg`, `$(f)`).
+fn is_shell_command_name(node: Node<'_>) -> bool {
+    let name = if node.kind() == "command_name" {
+        Some(node)
+    } else {
+        node.parent().filter(|parent| parent.kind() == "command_name")
+    };
+    name.and_then(|name| name.parent().map(|command| (name, command)))
+        .is_some_and(|(name, command)| {
+            command.kind() == "command" && command.child_by_field_name("name").is_some_and(|held| held.id() == name.id())
+        })
+}
+
+/// Whether `node` is the sub a Perl invocation calls: a bareword call in
+/// any of its forms (`f()`, `f 1`, `f`, `&f()`, `&f`, `Pkg::f()`,
+/// `goto &f`) or a method name (`$obj->f()`, `Pkg->f()`). A reference
+/// `\&f` and the existence tests `defined &f` / `exists &f` name the sub
+/// without calling it.
+fn is_perl_invocation(node: Node<'_>, source: &str) -> bool {
+    let Some(parent) = node.parent() else { return false };
+    let holds = parent.child_by_field_name("function_name").is_some_and(|held| held.id() == node.id());
+    match parent.kind() {
+        "method_invocation" => holds,
+        "call_expression_with_bareword" => holds && !is_perl_sub_name_only(parent, source),
+        _ => false,
+    }
+}
+
+/// Whether the bareword call `call` only names its sub: `\&f`, or `&f`
+/// as the argument of `defined` or `exists`.
+fn is_perl_sub_name_only(call: Node<'_>, source: &str) -> bool {
+    let Some(parent) = call.parent() else { return false };
+    if parent.kind() == "to_reference" {
+        return true;
+    }
+    let ampersand = source.get(call.start_byte()..).is_some_and(|text| text.starts_with('&'));
+    ampersand
+        && parent.kind() == "arguments"
+        && parent
+            .parent()
+            .filter(|outer| outer.kind() == "call_expression_with_spaced_args")
+            .and_then(|outer| outer.named_child(0))
+            .and_then(|callee| callee.child_by_field_name("function_name"))
+            .and_then(|callee| source.get(callee.start_byte()..callee.end_byte()))
+            .is_some_and(|callee| matches!(callee, "defined" | "exists"))
 }
 
 #[cfg(test)]

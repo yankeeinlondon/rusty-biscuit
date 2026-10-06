@@ -734,3 +734,906 @@ fn ecma_with_and_eval_limit_their_region() {
         [LimitReason::UnsupportedBindingForm, LimitReason::IndirectDispatch]
     );
 }
+
+// ---- Boundaries of lexical lookup ------------------------------------------
+
+/// What one boundary row expects of an occurrence.
+#[derive(Debug, Clone, Copy)]
+enum Bound {
+    /// `Scoped` to the record called `name` whose name starts on `line`.
+    To(&'static str, u32),
+    /// `Scoped`, whatever the target (a binding without a record).
+    Established,
+    /// Never `Scoped`, never an ID.
+    Uncertain,
+    /// `Scoped` with no ID: a binding no record reports (an expression's
+    /// own name).
+    Local,
+    /// No occurrence of the name on the line at all (a declaration name).
+    Absent,
+}
+
+/// `(label, extension, source, [(line, name, nth on that line, expected)])`.
+type BoundaryRow = (&'static str, &'static str, &'static str, &'static [(u32, &'static str, usize, Bound)]);
+
+/// One row per scope boundary: Rust items and inline modules, conditional
+/// pattern bindings, ECMA `with` bodies and direct `eval`, each with the
+/// controls that must stay established.
+const LEXICAL_BOUNDARY_MATRIX: &[BoundaryRow] = &[
+    (
+        "an inline module cannot see its parent's items",
+        "rs",
+        "fn f() {}\nmod m { pub fn g() { f(); } }\n",
+        &[(2, "f", 0, Bound::Uncertain)],
+    ),
+    (
+        "an inline module's import binds the name (control)",
+        "rs",
+        "fn f() {}\nmod m { use super::f; pub fn g() { f(); } }\n",
+        &[(2, "f", 0, Bound::Established)],
+    ),
+    (
+        "an inline module sees an earlier `macro_rules!` (control)",
+        "rs",
+        "macro_rules! mm { () => {} }\nmod m { fn g() { mm!(); } }\n",
+        &[(2, "mm", 0, Bound::To("mm", 1))],
+    ),
+    (
+        "a nested function cannot capture an enclosing `let`",
+        "rs",
+        "fn f() {\n    let x = || {};\n    fn g() { x(); }\n}\n",
+        &[(3, "x", 0, Bound::Uncertain)],
+    ),
+    (
+        "a nested function sees the enclosing block's items (control)",
+        "rs",
+        "fn f() {\n    fn h() {}\n    fn g() { h(); }\n    struct S;\n    impl S { fn m() { h(); } }\n}\n",
+        &[(3, "h", 0, Bound::To("h", 2)), (5, "h", 0, Bound::To("h", 2))],
+    ),
+    (
+        "a nested function's own name wins over an enclosing `let`",
+        "rs",
+        "fn f() {\n    let g = 1;\n    fn g() { g(); }\n}\n",
+        &[(3, "g", 0, Bound::To("g", 3))],
+    ),
+    (
+        "a nested function cannot see an enclosing function's parameter",
+        "rs",
+        "fn f(p: fn()) {\n    fn g() { p(); }\n}\n",
+        &[(2, "p", 0, Bound::Uncertain)],
+    ),
+    (
+        "a nested function cannot see an enclosing generic parameter",
+        "rs",
+        "fn f<T>() {\n    fn g(_: T) {}\n}\n",
+        &[(2, "T", 0, Bound::Uncertain)],
+    ),
+    (
+        "a method sees its impl's generic parameter (control)",
+        "rs",
+        "struct S<T>(T);\nimpl<T> S<T> {\n    fn m(x: T) {}\n}\n",
+        &[(3, "T", 0, Bound::Established)],
+    ),
+    (
+        "a nested `const` cannot capture an enclosing `let`",
+        "rs",
+        "fn f() {\n    let x = || {};\n    const Y: () = x();\n}\n",
+        &[(3, "x", 0, Bound::Uncertain)],
+    ),
+    (
+        "a nested `static` cannot capture an enclosing `let`",
+        "rs",
+        "fn f() {\n    let x = || {};\n    static Y: () = x();\n}\n",
+        &[(3, "x", 0, Bound::Uncertain)],
+    ),
+    (
+        "a closure captures an enclosing `let` (control)",
+        "rs",
+        "fn f() {\n    let x = || {};\n    let g = || x();\n}\n",
+        &[(3, "x", 0, Bound::To("x", 2))],
+    ),
+    (
+        "an `if let` binding ends with its consequence",
+        "rs",
+        "fn f() {}\nfn g(x: Option<fn()>) {\n    if let Some(f) = x { f(); } else { f(); }\n    f();\n}\n",
+        &[
+            (3, "f", 0, Bound::To("f", 3)),
+            (3, "f", 1, Bound::To("f", 1)),
+            (4, "f", 0, Bound::To("f", 1)),
+        ],
+    ),
+    (
+        "a `let` chain's bindings end with its consequence",
+        "rs",
+        "fn f() {}\nfn g(x: Option<fn()>) {\n    if let Some(f) = x && true { f(); } else { f(); }\n    f();\n}\n",
+        &[
+            (3, "f", 0, Bound::To("f", 3)),
+            (3, "f", 1, Bound::To("f", 1)),
+            (4, "f", 0, Bound::To("f", 1)),
+        ],
+    ),
+    (
+        "a later `let` of a chain reads an earlier one (control)",
+        "rs",
+        "fn g(x: Option<u8>) {\n    if let Some(a) = x && let Some(b) = Some(a) { b; }\n}\n",
+        &[(2, "a", 0, Bound::To("a", 2)), (2, "b", 0, Bound::To("b", 2))],
+    ),
+    (
+        "an `else if let` sees only its own binding",
+        "rs",
+        "fn f() {}\nfn g(x: Option<fn()>) {\n    if true {} else if let Some(f) = x { f(); } else { f(); }\n}\n",
+        &[(3, "f", 0, Bound::To("f", 3)), (3, "f", 1, Bound::To("f", 1))],
+    ),
+    (
+        "a `while let` binding is the loop body's (control)",
+        "rs",
+        "fn f() {}\nfn g(x: Option<fn()>) {\n    while let Some(f) = x { f(); }\n    f();\n}\n",
+        &[(3, "f", 0, Bound::To("f", 3)), (4, "f", 0, Bound::To("f", 1))],
+    ),
+    (
+        "a `for` binding is the loop body's (control)",
+        "rs",
+        "fn f() {}\nfn g(xs: Vec<fn()>) {\n    for f in xs { f(); }\n    f();\n}\n",
+        &[(3, "f", 0, Bound::To("f", 3)), (4, "f", 0, Bound::To("f", 1))],
+    ),
+    (
+        "a `let … else` binds after the statement, not in its `else` (control)",
+        "rs",
+        "fn f() {}\nfn g(x: Option<fn()>) {\n    let Some(f) = x else { f(); return; };\n    f();\n}\n",
+        &[(3, "f", 0, Bound::To("f", 1)), (4, "f", 0, Bound::To("f", 3))],
+    ),
+    (
+        "a match arm's binding is the arm's own (control)",
+        "rs",
+        "fn f() {}\nfn g(x: Option<fn()>) {\n    match x { Some(f) => f(), None => f() }\n}\n",
+        &[(3, "f", 0, Bound::To("f", 3)), (3, "f", 1, Bound::To("f", 1))],
+    ),
+    (
+        "a typescript `with` body may supply any name",
+        "ts",
+        "function f(obj: any) { with (obj) { f(obj); } }\n",
+        &[(1, "f", 0, Bound::Uncertain)],
+    ),
+    (
+        "a javascript `with` body may supply any name",
+        "js",
+        "function f(obj) { with (obj) { f(obj); } }\n",
+        &[(1, "f", 0, Bound::Uncertain)],
+    ),
+    (
+        "a javascript `with` statement without a block",
+        "js",
+        "function f(obj) { with (obj) f(obj); }\n",
+        &[(1, "f", 0, Bound::Uncertain)],
+    ),
+    (
+        "a declaration inside a `with` body is established (control)",
+        "js",
+        "function f() {}\nfunction g(o) { with (o) { let f = 1; f; } }\nf();\n",
+        &[(2, "f", 0, Bound::To("f", 2)), (3, "f", 0, Bound::To("f", 1))],
+    ),
+    (
+        "a direct `eval` may add a `var` to its function",
+        "js",
+        "function f() {}\nfunction g() { eval(\"var f = 1\"); f(); }\nf();\neval(\"1\");\nf();\n",
+        &[
+            (2, "f", 0, Bound::Uncertain),
+            (3, "f", 0, Bound::To("f", 1)),
+            (5, "f", 0, Bound::To("f", 1)),
+        ],
+    ),
+    (
+        "a typescript default argument reads the outer scope (control)",
+        "ts",
+        "function f() {}\nfunction g(x = f()) { function f() {} }\n",
+        &[(2, "f", 0, Bound::To("f", 1))],
+    ),
+    (
+        "a javascript default argument reads the outer scope (control)",
+        "js",
+        "function f() {}\nfunction g(x = f()) { function f() {} }\n",
+        &[(2, "f", 0, Bound::To("f", 1))],
+    ),
+];
+
+#[test]
+fn lexical_lookup_stops_at_boundaries_that_establish_no_binding() {
+    assert_bound_rows(LEXICAL_BOUNDARY_MATRIX);
+}
+
+fn assert_bound_rows(rows: &[BoundaryRow]) {
+    for &(label, extension, source, checks) in rows {
+        let file = Analyzed::new(source, extension);
+        for &(line, name, nth, expected) in checks {
+            if matches!(expected, Bound::Absent) {
+                let written = file
+                    .all(name)
+                    .into_iter()
+                    .filter(|occurrence| occurrence.span.start.line == line)
+                    .collect::<Vec<_>>();
+                assert!(written.is_empty(), "{label}: `{name}` on line {line} is no occurrence: {written:#?}");
+                continue;
+            }
+            let occurrence = file.at(line, name, nth);
+            match expected {
+                Bound::To(target, target_line) => {
+                    assert_eq!(occurrence.confidence, Confidence::Scoped, "{label}: {occurrence:#?}");
+                    assert_eq!(
+                        occurrence.target.id.as_ref(),
+                        Some(file.named(target, target_line)),
+                        "{label}: {occurrence:#?}"
+                    );
+                }
+                Bound::Established => assert_eq!(occurrence.confidence, Confidence::Scoped, "{label}: {occurrence:#?}"),
+                Bound::Local => {
+                    assert_eq!(occurrence.confidence, Confidence::Scoped, "{label}: {occurrence:#?}");
+                    assert_eq!(occurrence.target.id, None, "{label}: {occurrence:#?}");
+                    assert!(occurrence.candidates.is_empty(), "{label}: {occurrence:#?}");
+                }
+                Bound::Uncertain => {
+                    assert_ne!(occurrence.confidence, Confidence::Scoped, "{label}: {occurrence:#?}");
+                    assert_eq!(occurrence.target.id, None, "{label}: {occurrence:#?}");
+                }
+                Bound::Absent => unreachable!("handled above"),
+            }
+        }
+    }
+}
+
+/// Every name an expression declares for itself alone (ECMA named function,
+/// generator and class expressions), in both languages, with the controls
+/// that keep binding the outer declaration; and the Rust names in a
+/// separate namespace (loop and block labels, lifetimes), which are never
+/// occurrences. In each ECMA row the expression's own name (line 2) is no
+/// occurrence, its inner use (line 3) binds the expression-local name with
+/// no ID, and the final use (line 5) keeps the outer declaration.
+const EXPRESSION_NAME_MATRIX: &[BoundaryRow] = &[
+    (
+        "a typescript named function expression",
+        "ts",
+        "function f() {}\nconst g = function f() {\n  f();\n};\nf();\n",
+        &[(2, "f", 0, Bound::Absent), (3, "f", 0, Bound::Local), (5, "f", 0, Bound::To("f", 1))],
+    ),
+    (
+        "a javascript named function expression",
+        "js",
+        "function f() {}\nconst g = function f() {\n  f();\n};\nf();\n",
+        &[(2, "f", 0, Bound::Absent), (3, "f", 0, Bound::Local), (5, "f", 0, Bound::To("f", 1))],
+    ),
+    (
+        "a typescript named generator expression",
+        "ts",
+        "function f() {}\nconst g = function* f() {\n  f();\n};\nf();\n",
+        &[(2, "f", 0, Bound::Absent), (3, "f", 0, Bound::Local), (5, "f", 0, Bound::To("f", 1))],
+    ),
+    (
+        "a javascript named generator expression",
+        "js",
+        "function f() {}\nconst g = function* f() {\n  f();\n};\nf();\n",
+        &[(2, "f", 0, Bound::Absent), (3, "f", 0, Bound::Local), (5, "f", 0, Bound::To("f", 1))],
+    ),
+    (
+        "a named function expression's parameters see its name",
+        "js",
+        "function f() {}\nconst g = function f(x = f) {\n  return x;\n};\nf();\n",
+        &[(2, "f", 0, Bound::Local), (5, "f", 0, Bound::To("f", 1))],
+    ),
+    (
+        "a typescript named generator expression's parameters see its name",
+        "ts",
+        "function f() {}\nconst g = function* f(x = f) {\n  yield x;\n};\nf();\n",
+        &[(2, "f", 0, Bound::Local), (5, "f", 0, Bound::To("f", 1))],
+    ),
+    (
+        "a named function expression passed as an argument",
+        "ts",
+        "function f() {}\n[1].map(function f() {\n  f();\n});\nf();\n",
+        &[(2, "f", 0, Bound::Absent), (3, "f", 0, Bound::Local), (5, "f", 0, Bound::To("f", 1))],
+    ),
+    (
+        "a nested function expression's name shadows only inside it",
+        "js",
+        "function f() {}\nfunction h() {\n  const g = function f() { f(); };\n  f();\n}\n",
+        &[(3, "f", 0, Bound::Local), (4, "f", 0, Bound::To("f", 1))],
+    ),
+    (
+        "a typescript unnamed function expression (control)",
+        "ts",
+        "function f() {}\nconst g = function () {\n  f();\n};\nf();\n",
+        &[(3, "f", 0, Bound::To("f", 1)), (5, "f", 0, Bound::To("f", 1))],
+    ),
+    (
+        "a javascript unnamed function expression (control)",
+        "js",
+        "function f() {}\nconst g = function () {\n  f();\n};\nf();\n",
+        &[(3, "f", 0, Bound::To("f", 1)), (5, "f", 0, Bound::To("f", 1))],
+    ),
+    (
+        "a typescript unnamed generator expression (control)",
+        "ts",
+        "function f() {}\nconst g = function* () {\n  f();\n};\nf();\n",
+        &[(3, "f", 0, Bound::To("f", 1)), (5, "f", 0, Bound::To("f", 1))],
+    ),
+    (
+        "a javascript unnamed generator expression (control)",
+        "js",
+        "function f() {}\nconst g = function* () {\n  f();\n};\nf();\n",
+        &[(3, "f", 0, Bound::To("f", 1)), (5, "f", 0, Bound::To("f", 1))],
+    ),
+    (
+        "a typescript class expression (control)",
+        "ts",
+        "class F {}\nconst G = class F {\n  m() { return F; }\n};\nF;\n",
+        &[(2, "F", 0, Bound::Absent), (3, "F", 0, Bound::Local), (5, "F", 0, Bound::To("F", 1))],
+    ),
+    (
+        "a javascript class expression (control)",
+        "js",
+        "class F {}\nconst G = class F {\n  m() { return F; }\n};\nF;\n",
+        &[(2, "F", 0, Bound::Absent), (3, "F", 0, Bound::Local), (5, "F", 0, Bound::To("F", 1))],
+    ),
+    (
+        "a typescript class expression's heritage sees its own name",
+        "ts",
+        "class F {}\nconst G = class F extends F {\n  m() { return F; }\n};\nF;\n",
+        &[(2, "F", 0, Bound::Local), (3, "F", 0, Bound::Local), (5, "F", 0, Bound::To("F", 1))],
+    ),
+    (
+        "a javascript class expression's heritage sees its own name",
+        "js",
+        "class F {}\nconst G = class F extends F {\n  m() { return F; }\n};\nF;\n",
+        &[(2, "F", 0, Bound::Local), (3, "F", 0, Bound::Local), (5, "F", 0, Bound::To("F", 1))],
+    ),
+    (
+        "a typescript arrow parameter (control)",
+        "ts",
+        "function f() {}\nconst g = (f: () => void) => {\n  f();\n};\nf();\n",
+        &[(2, "f", 0, Bound::Absent), (3, "f", 0, Bound::To("f", 2)), (5, "f", 0, Bound::To("f", 1))],
+    ),
+    (
+        "a javascript arrow parameter (control)",
+        "js",
+        "function f() {}\nconst g = f => {\n  f();\n};\nf();\n",
+        &[(2, "f", 0, Bound::Absent), (3, "f", 0, Bound::Established), (5, "f", 0, Bound::To("f", 1))],
+    ),
+    (
+        "a rust loop label is no occurrence",
+        "rs",
+        "fn f() {}\nfn g() {\n    'f: loop { break 'f; }\n    f();\n}\n",
+        &[(3, "f", 0, Bound::Absent), (4, "f", 0, Bound::To("f", 1))],
+    ),
+    (
+        "a rust block label is no occurrence",
+        "rs",
+        "fn f() {}\nfn g() {\n    'f: { break 'f; }\n    f();\n}\n",
+        &[(3, "f", 0, Bound::Absent), (4, "f", 0, Bound::To("f", 1))],
+    ),
+    (
+        "a rust lifetime is no occurrence",
+        "rs",
+        "fn a() {}\nfn g<'a>(x: &'a u8) -> &'a u8 {\n    a();\n    x\n}\n",
+        &[(2, "a", 0, Bound::Absent), (3, "a", 0, Bound::To("a", 1))],
+    ),
+];
+
+#[test]
+fn expression_local_names_bind_only_inside_their_expression() {
+    assert_bound_rows(EXPRESSION_NAME_MATRIX);
+}
+
+// ---- Invocation forms ----------------------------------------------------------
+
+const CALL: OccurrenceKind = OccurrenceKind::Call;
+const USAGE: OccurrenceKind = OccurrenceKind::Usage;
+
+/// `(language, extension, source, [(line, name, nth on that line, kind)])`.
+type InvocationRow = (
+    ProgrammingLanguage,
+    &'static str,
+    &'static str,
+    &'static [(u32, &'static str, usize, OccurrenceKind)],
+);
+
+/// Every invocation form each pinned grammar writes, direct and through
+/// transparent wrappers (parentheses, TypeScript `as`/`satisfies`/`<T>x`/
+/// `x!`), with the negative controls on the same lines: an argument, a
+/// receiver, a dereference, a sequence and a conditional are never the
+/// callee. Binding confidence may stay limited; only `kind` is checked.
+const INVOCATION_MATRIX: &[InvocationRow] = &[
+    (
+        ProgrammingLanguage::Rust,
+        "rs",
+        "fn f() {\n    f();\n    (f)();\n    ((f))();\n    g((f));\n    (obj).m();\n    (f::<u8>)();\n    (W::new)();\n    (*p)();\n}\n",
+        &[
+            (2, "f", 0, CALL),
+            (3, "f", 0, CALL),
+            (4, "f", 0, CALL),
+            (5, "g", 0, CALL),
+            (5, "f", 0, USAGE),
+            (6, "obj", 0, USAGE),
+            (6, "m", 0, CALL),
+            (7, "f", 0, CALL),
+            (8, "W", 0, USAGE),
+            (8, "new", 0, CALL),
+            (9, "p", 0, USAGE),
+        ],
+    ),
+    (
+        ProgrammingLanguage::TypeScript,
+        "ts",
+        "function f() {\n  f();\n  (f)();\n  ((f))();\n  (f as () => void)();\n  (<any>f)();\n  f!();\n  (f satisfies any)();\n  ((f as any)!)();\n  g((f));\n  (obj).m();\n  (obj.m)();\n  obj.m!();\n  (g, f)();\n  (c ? f : g)();\n  new (F)();\n}\n@f class K {}\n",
+        &[
+            (2, "f", 0, CALL),
+            (3, "f", 0, CALL),
+            (4, "f", 0, CALL),
+            (5, "f", 0, CALL),
+            (6, "f", 0, CALL),
+            (7, "f", 0, CALL),
+            (8, "f", 0, CALL),
+            (9, "f", 0, CALL),
+            (10, "g", 0, CALL),
+            (10, "f", 0, USAGE),
+            (11, "obj", 0, USAGE),
+            (11, "m", 0, CALL),
+            (12, "obj", 0, USAGE),
+            (12, "m", 0, CALL),
+            (13, "m", 0, CALL),
+            (14, "g", 0, USAGE),
+            (14, "f", 0, USAGE),
+            (15, "c", 0, USAGE),
+            (15, "f", 0, USAGE),
+            (16, "F", 0, CALL),
+            (18, "f", 0, CALL),
+        ],
+    ),
+    (
+        ProgrammingLanguage::JavaScript,
+        "js",
+        "function f() {\n  f();\n  (f)();\n  ((f))();\n  g((f));\n  (obj).m();\n  (obj.m)();\n  (g, f)();\n  (c ? f : g)();\n  new (F)();\n  f`x`;\n}\n@f class K {}\n",
+        &[
+            (2, "f", 0, CALL),
+            (3, "f", 0, CALL),
+            (4, "f", 0, CALL),
+            (5, "g", 0, CALL),
+            (5, "f", 0, USAGE),
+            (6, "obj", 0, USAGE),
+            (6, "m", 0, CALL),
+            (7, "m", 0, CALL),
+            (8, "f", 0, USAGE),
+            (9, "f", 0, USAGE),
+            (10, "F", 0, CALL),
+            (11, "f", 0, CALL),
+            (13, "f", 0, CALL),
+        ],
+    ),
+    (
+        ProgrammingLanguage::Python,
+        "py",
+        "def f():\n    f()\n    (f)()\n    ((f))()\n    g((f))\n    (obj).m()\n    (f if c else g)()\n@f\n@a.b\ndef h():\n    pass\n",
+        &[
+            (2, "f", 0, CALL),
+            (3, "f", 0, CALL),
+            (4, "f", 0, CALL),
+            (5, "g", 0, CALL),
+            (5, "f", 0, USAGE),
+            (6, "obj", 0, USAGE),
+            (6, "m", 0, CALL),
+            (7, "f", 0, USAGE),
+            (8, "f", 0, CALL),
+            (9, "a", 0, USAGE),
+            (9, "b", 0, CALL),
+        ],
+    ),
+    (
+        ProgrammingLanguage::Go,
+        "go",
+        "package p\n\nfunc f() {\n\tf()\n\t(f)()\n\t((f))()\n\tg((f))\n\t(obj).m()\n\tpkg.F()\n\tf[int]()\n}\n",
+        &[
+            (4, "f", 0, CALL),
+            (5, "f", 0, CALL),
+            (6, "f", 0, CALL),
+            (7, "g", 0, CALL),
+            (7, "f", 0, USAGE),
+            (8, "obj", 0, USAGE),
+            (8, "m", 0, CALL),
+            (9, "pkg", 0, USAGE),
+            (9, "F", 0, CALL),
+            // Grammar limit: `f[int]` is an `index_expression`, the same
+            // node as indexing `fs[0]`, so it is never read as the callee.
+            (10, "f", 0, USAGE),
+        ],
+    ),
+    (
+        ProgrammingLanguage::C,
+        "c",
+        "void f() {\n    f();\n    (f)();\n    ((f))();\n    g((f));\n    (*f)();\n    s.cb();\n    p->cb();\n    (g, f)();\n}\n",
+        &[
+            (2, "f", 0, CALL),
+            (3, "f", 0, CALL),
+            (4, "f", 0, CALL),
+            (5, "g", 0, CALL),
+            (5, "f", 0, USAGE),
+            (6, "f", 0, USAGE),
+            (7, "s", 0, USAGE),
+            (7, "cb", 0, CALL),
+            (8, "cb", 0, CALL),
+            (9, "f", 0, USAGE),
+        ],
+    ),
+    (
+        ProgrammingLanguage::Cpp,
+        "cpp",
+        "void f() {\n    f();\n    (f)();\n    ((f))();\n    g((f));\n    f<int>();\n    (f<int>)();\n    ns::f<int>();\n    obj.m();\n    (obj).m();\n    obj.template m<int>();\n    new F();\n}\n",
+        &[
+            (2, "f", 0, CALL),
+            (3, "f", 0, CALL),
+            (4, "f", 0, CALL),
+            (5, "g", 0, CALL),
+            (5, "f", 0, USAGE),
+            (6, "f", 0, CALL),
+            (7, "f", 0, CALL),
+            (8, "ns", 0, USAGE),
+            (8, "f", 0, CALL),
+            (9, "obj", 0, USAGE),
+            (9, "m", 0, CALL),
+            (10, "obj", 0, USAGE),
+            (10, "m", 0, CALL),
+            (11, "m", 0, CALL),
+            (12, "F", 0, CALL),
+        ],
+    ),
+    (
+        ProgrammingLanguage::CSharp,
+        "cs",
+        "class C {\n    void f() {\n        f();\n        (f)();\n        ((f))();\n        g((f));\n        f<int>();\n        (obj).m();\n        new F();\n        new List<int>();\n    }\n}\n",
+        &[
+            (3, "f", 0, CALL),
+            (4, "f", 0, CALL),
+            (5, "f", 0, CALL),
+            (6, "g", 0, CALL),
+            (6, "f", 0, USAGE),
+            (7, "f", 0, CALL),
+            (8, "obj", 0, USAGE),
+            (8, "m", 0, CALL),
+            (9, "F", 0, CALL),
+            (10, "List", 0, CALL),
+        ],
+    ),
+    (
+        ProgrammingLanguage::Java,
+        "java",
+        "class A {\n    void f() {\n        f();\n        g((f));\n        new F();\n        (obj).m();\n        this.<T>f();\n    }\n}\n",
+        &[
+            (3, "f", 0, CALL),
+            (4, "g", 0, CALL),
+            (4, "f", 0, USAGE),
+            (5, "F", 0, CALL),
+            (6, "obj", 0, USAGE),
+            (6, "m", 0, CALL),
+            (7, "f", 0, CALL),
+        ],
+    ),
+    (
+        ProgrammingLanguage::Swift,
+        "swift",
+        "func f() {\n    f();\n    (f)();\n    ((f))();\n    g((f));\n    f { };\n    (obj).m();\n    obj.m();\n    F();\n}\n",
+        &[
+            (2, "f", 0, CALL),
+            (3, "f", 0, CALL),
+            (4, "f", 0, CALL),
+            (5, "g", 0, CALL),
+            (5, "f", 0, USAGE),
+            (6, "f", 0, CALL),
+            (7, "obj", 0, USAGE),
+            (7, "m", 0, CALL),
+            (8, "obj", 0, USAGE),
+            (8, "m", 0, CALL),
+            (9, "F", 0, CALL),
+        ],
+    ),
+    (
+        ProgrammingLanguage::Scala,
+        "scala",
+        "object O {\n  def f(): Unit = {\n    f();\n    (f)();\n    ((f))();\n    g((f));\n    new F();\n    f[Int]();\n    obj m 1;\n    (obj).m();\n    f { 1 };\n    obj m;\n  }\n}\n",
+        &[
+            (3, "f", 0, CALL),
+            (4, "f", 0, CALL),
+            (5, "f", 0, CALL),
+            (6, "g", 0, CALL),
+            (6, "f", 0, USAGE),
+            (7, "F", 0, CALL),
+            (8, "f", 0, CALL),
+            (9, "obj", 0, USAGE),
+            (9, "m", 0, CALL),
+            (10, "obj", 0, USAGE),
+            (10, "m", 0, CALL),
+            (11, "f", 0, CALL),
+            (12, "m", 0, CALL),
+        ],
+    ),
+    (
+        ProgrammingLanguage::Php,
+        "php",
+        "<?php\nfunction f() {\n    f();\n    (f)();\n    g((f));\n    new F();\n    new F;\n    F::m();\n    $obj->m();\n    $obj?->m();\n    ($obj)->m();\n    N\\f();\n}\n",
+        &[
+            (3, "f", 0, CALL),
+            // A bare name in parentheses is a constant: `(f)()` calls the
+            // constant's value, never function `f`.
+            (4, "f", 0, USAGE),
+            (5, "g", 0, CALL),
+            (5, "f", 0, USAGE),
+            (6, "F", 0, CALL),
+            (7, "F", 0, CALL),
+            (8, "F", 0, USAGE),
+            (8, "m", 0, CALL),
+            (9, "m", 0, CALL),
+            (10, "m", 0, CALL),
+            (11, "obj", 0, USAGE),
+            (11, "m", 0, CALL),
+            (12, "N", 0, USAGE),
+            (12, "f", 0, CALL),
+        ],
+    ),
+    (
+        ProgrammingLanguage::Lua,
+        "lua",
+        "function f()\n  f()\n  ;(f)()\n  ;((f))()\n  g((f))\n  f \"s\"\n  f {}\n  obj:m()\n  ;(obj).m()\nend\n",
+        &[
+            (2, "f", 0, CALL),
+            (3, "f", 0, CALL),
+            (4, "f", 0, CALL),
+            (5, "g", 0, CALL),
+            (5, "f", 0, USAGE),
+            (6, "f", 0, CALL),
+            (7, "f", 0, CALL),
+            (8, "obj", 0, USAGE),
+            (8, "m", 0, CALL),
+            (9, "obj", 0, USAGE),
+            (9, "m", 0, CALL),
+        ],
+    ),
+    (
+        ProgrammingLanguage::Perl,
+        "pl",
+        "sub f {\n    f();\n    &f();\n    &f;\n    f 1;\n    f;\n    Pkg::f();\n    $obj->f();\n    my $r = \\&f;\n    defined &f;\n    goto &f;\n}\n",
+        &[
+            (2, "f", 0, CALL),
+            (3, "f", 0, CALL),
+            (4, "f", 0, CALL),
+            (5, "f", 0, CALL),
+            (6, "f", 0, CALL),
+            (7, "f", 0, CALL),
+            (8, "f", 0, CALL),
+            (9, "f", 0, USAGE),
+            (10, "f", 0, USAGE),
+            (11, "f", 0, CALL),
+        ],
+    ),
+    (
+        ProgrammingLanguage::Bash,
+        "sh",
+        "f() {\n  f\n  X=1 f\n  f arg\n  echo f\n  v=$(f)\n}\n",
+        &[
+            (2, "f", 0, CALL),
+            (3, "f", 0, CALL),
+            (4, "f", 0, CALL),
+            (4, "arg", 0, USAGE),
+            (5, "echo", 0, CALL),
+            (5, "f", 0, USAGE),
+            (6, "f", 0, CALL),
+        ],
+    ),
+    (
+        ProgrammingLanguage::Zsh,
+        "zsh",
+        "f() {\n  f\n  X=1 f\n  f arg\n  echo f\n  v=$(f)\n}\n",
+        &[
+            (2, "f", 0, CALL),
+            (3, "f", 0, CALL),
+            (4, "f", 0, CALL),
+            (4, "arg", 0, USAGE),
+            (5, "echo", 0, CALL),
+            (5, "f", 0, USAGE),
+            (6, "f", 0, CALL),
+        ],
+    ),
+    // Member callees behind any depth of wrappers.
+    (
+        ProgrammingLanguage::TypeScript,
+        "ts",
+        "function f() {\n  ((obj.m))();\n  (obj.m as any)();\n  (obj.m!)();\n  (<any>obj.m)();\n  (((obj.m as any)!) satisfies any)();\n  new ((ns.W))();\n  ((obj).m)();\n}\n",
+        &[
+            (2, "obj", 0, USAGE),
+            (2, "m", 0, CALL),
+            (3, "m", 0, CALL),
+            (4, "m", 0, CALL),
+            (5, "m", 0, CALL),
+            (6, "m", 0, CALL),
+            (7, "W", 0, CALL),
+            (8, "obj", 0, USAGE),
+            (8, "m", 0, CALL),
+        ],
+    ),
+    (
+        ProgrammingLanguage::JavaScript,
+        "js",
+        "function f() {\n  ((obj.m))();\n  new ((ns.W))();\n  (((obj.#p)))();\n}\n",
+        &[(2, "m", 0, CALL), (3, "W", 0, CALL), (4, "#p", 0, CALL)],
+    ),
+    (
+        ProgrammingLanguage::Go,
+        "go",
+        "package p\n\nfunc f() {\n\t((obj.m))()\n\t((pkg.F))()\n}\n",
+        &[(4, "obj", 0, USAGE), (4, "m", 0, CALL), (5, "F", 0, CALL)],
+    ),
+    (
+        ProgrammingLanguage::C,
+        "c",
+        "void f() {\n    ((s.cb))();\n    ((p->cb))();\n}\n",
+        &[(2, "s", 0, USAGE), (2, "cb", 0, CALL), (3, "cb", 0, CALL)],
+    ),
+    (
+        ProgrammingLanguage::Cpp,
+        "cpp",
+        "void f() {\n    ((obj.m))();\n    ((obj.template m<int>))();\n    ((f<int>))();\n    ((ns::f<int>))();\n    ((p->m))();\n}\n",
+        &[(2, "m", 0, CALL), (3, "m", 0, CALL), (4, "f", 0, CALL), (5, "f", 0, CALL), (6, "m", 0, CALL)],
+    ),
+    (
+        ProgrammingLanguage::Python,
+        "py",
+        "def f():\n    ((obj.m))()\n",
+        &[(2, "obj", 0, USAGE), (2, "m", 0, CALL)],
+    ),
+    (
+        ProgrammingLanguage::CSharp,
+        "cs",
+        "class C {\n    void f() {\n        ((obj.m))();\n    }\n}\n",
+        &[(3, "obj", 0, USAGE), (3, "m", 0, CALL)],
+    ),
+    (
+        ProgrammingLanguage::Swift,
+        "swift",
+        "func f() {\n    ((obj.m))();\n}\n",
+        &[(2, "obj", 0, USAGE), (2, "m", 0, CALL)],
+    ),
+    (
+        ProgrammingLanguage::Scala,
+        "scala",
+        "object O {\n  def f(): Unit = {\n    ((obj.m))();\n  }\n}\n",
+        &[(3, "obj", 0, USAGE), (3, "m", 0, CALL)],
+    ),
+    (
+        ProgrammingLanguage::Lua,
+        "lua",
+        "function f()\n  ;((obj.m))()\nend\n",
+        &[(2, "obj", 0, USAGE), (2, "m", 0, CALL)],
+    ),
+];
+
+/// `(language, extension, source, [(line, name)])`: names on these lines
+/// that are never a `Call`, whether or not they are occurrences at all.
+type NotCalledRow = (ProgrammingLanguage, &'static str, &'static str, &'static [(u32, &'static str)]);
+
+/// Member accesses that are not the callee: an argument, a sequence, a
+/// conditional, a dereference.
+const NOT_CALLED_MATRIX: &[NotCalledRow] = &[
+    (
+        ProgrammingLanguage::TypeScript,
+        "ts",
+        "function f() {\n  g((obj.m));\n  (g, obj.m)();\n  (c ? obj.m : obj.n)();\n  g(((obj.m as any)!));\n}\n",
+        &[(2, "m"), (3, "m"), (4, "m"), (4, "n"), (5, "m")],
+    ),
+    (
+        ProgrammingLanguage::JavaScript,
+        "js",
+        "function f() {\n  g((obj.m));\n  (g, obj.m)();\n  (c ? obj.m : obj.n)();\n}\n",
+        &[(2, "m"), (3, "m"), (4, "m"), (4, "n")],
+    ),
+    (ProgrammingLanguage::Go, "go", "package p\n\nfunc f() {\n\tg((obj.m))\n}\n", &[(4, "m")]),
+    (
+        ProgrammingLanguage::C,
+        "c",
+        "void f() {\n    g((s.cb));\n    (g, s.cb)();\n    (*s.cb)();\n}\n",
+        &[(2, "cb"), (3, "cb"), (4, "cb")],
+    ),
+    (
+        ProgrammingLanguage::Cpp,
+        "cpp",
+        "void f() {\n    g((obj.m));\n    (g, obj.m)();\n    (c ? obj.m : obj.n)();\n}\n",
+        &[(2, "m"), (3, "m"), (4, "m"), (4, "n")],
+    ),
+    // A Rust parenthesized field is the field's value, never a method.
+    (ProgrammingLanguage::Rust, "rs", "fn f() {\n    (x.m)();\n}\n", &[(2, "m")]),
+];
+
+#[test]
+fn member_accesses_that_are_not_the_callee_are_never_calls() {
+    for &(language, extension, source, checks) in NOT_CALLED_MATRIX {
+        let file = Analyzed::new(source, extension);
+        for &(line, name) in checks {
+            let calls = file
+                .all(name)
+                .into_iter()
+                .filter(|occurrence| occurrence.span.start.line == line && occurrence.kind == CALL)
+                .collect::<Vec<_>>();
+            assert!(calls.is_empty(), "{}: `{name}` on line {line}: {calls:#?}", language.name());
+        }
+    }
+}
+
+#[test]
+fn invocation_forms_are_calls_in_every_language() {
+    for language in ProgrammingLanguage::all() {
+        assert!(
+            INVOCATION_MATRIX.iter().any(|row| row.0 == language),
+            "{}: no invocation row",
+            language.name()
+        );
+    }
+    for &(language, extension, source, checks) in INVOCATION_MATRIX {
+        let file = Analyzed::new(source, extension);
+        for &(line, name, nth, kind) in checks {
+            let occurrence = file.at(line, name, nth);
+            assert_eq!(occurrence.kind, kind, "{}: `{name}` on line {line}: {occurrence:#?}", language.name());
+        }
+    }
+}
+
+/// A wrapped self-call keeps the binding a direct one has, in every
+/// language that resolves bindings.
+const WRAPPED_CALL_BINDINGS: &[BoundaryRow] = &[
+    (
+        "rust parentheses",
+        "rs",
+        "fn f() {\n    (f)();\n    ((f::<u8>))();\n}\n",
+        &[(2, "f", 0, Bound::To("f", 1)), (3, "f", 0, Bound::To("f", 1))],
+    ),
+    (
+        "typescript wrappers",
+        "ts",
+        "function f() {\n  ((f))();\n  (f as () => void)();\n  (<any>f)();\n  f!();\n  (f satisfies any)();\n}\n",
+        &[
+            (2, "f", 0, Bound::To("f", 1)),
+            (3, "f", 0, Bound::To("f", 1)),
+            (4, "f", 0, Bound::To("f", 1)),
+            (5, "f", 0, Bound::To("f", 1)),
+            (6, "f", 0, Bound::To("f", 1)),
+        ],
+    ),
+    ("javascript parentheses", "js", "function f() {\n  ((f))();\n}\n", &[(2, "f", 0, Bound::To("f", 1))]),
+];
+
+#[test]
+fn wrapped_calls_keep_their_binding() {
+    assert_bound_rows(WRAPPED_CALL_BINDINGS);
+    for &(label, extension, source, _) in WRAPPED_CALL_BINDINGS {
+        let file = Analyzed::new(source, extension);
+        assert!(
+            file.all("f").iter().filter(|occurrence| occurrence.span.start.line > 1).all(|occurrence| occurrence.kind == CALL),
+            "{label}"
+        );
+    }
+}
+
+/// A C++ template call (`f<int>()`, `obj.template m<int>()`) is a use, not a
+/// declaration; an explicit specialization (`template <> void f<int>()`)
+/// still declares `f`.
+#[test]
+fn cpp_template_calls_are_calls_not_declarations() {
+    let file = Analyzed::new(
+        "template <class T> void f() {}\nvoid g() { f<int>(); obj.template m<int>(); }\ntemplate <> void f<long>() {}\n",
+        "cpp",
+    );
+    let declared = |name: &str| {
+        file.index
+            .symbols
+            .iter()
+            .filter(|record| record.identity.name == name)
+            .filter_map(|record| record.source.name_span.as_ref().map(|span| span.start.line))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(declared("f"), [1, 3]);
+    assert!(declared("m").is_empty());
+    assert_eq!(file.at(2, "f", 0).kind, CALL);
+    assert_eq!(file.at(2, "m", 0).kind, CALL);
+}

@@ -101,6 +101,7 @@ fn has_commonjs_evidence(node: Node<'_>, source: &str) -> bool {
         "call_expression"
             if node
                 .child_by_field_name("function")
+                .map(unparenthesized)
                 .is_some_and(|function| function.kind() == "identifier" && text(function) == "require") =>
         {
             return true;
@@ -118,6 +119,18 @@ fn has_commonjs_evidence(node: Node<'_>, source: &str) -> bool {
     let mut cursor = node.walk();
     node.named_children(&mut cursor)
         .any(|child| has_commonjs_evidence(child, source))
+}
+
+/// `function` inside any parentheses around it: `(require)("fs")` calls
+/// `require`; a sequence `(0, require)` is not `require`.
+fn unparenthesized(mut function: Node<'_>) -> Node<'_> {
+    while function.kind() == "parenthesized_expression"
+        && function.named_child_count() == 1
+        && let Some(inner) = function.named_child(0)
+    {
+        function = inner;
+    }
+    function
 }
 
 /// `module.exports`, `exports.x`, `module.exports.x` and the like.
