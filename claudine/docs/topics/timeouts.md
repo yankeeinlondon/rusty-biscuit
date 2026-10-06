@@ -425,8 +425,10 @@ rules would expire on the same tick.
 ## Waiting for the stream readers after the agent exits
 
 A structured run reads the agent's stdout and stderr on two reader threads.
-The stdout reader parses each line, renders assistant text, and writes it to
-the terminal. When the agent exits, Claudine stops its process group and then
+The stdout reader parses each line and renders assistant text; the rendered
+frames are queued for the terminal rather than written by the reader (see
+[A terminal that stops accepting output](#a-terminal-that-stops-accepting-output)).
+When the agent exits, Claudine stops its process group and then
 waits for both readers to finish, because the run's summary (result, cost,
 `error_kind`) comes from the stdout parser.
 
@@ -456,8 +458,10 @@ settle exists because a reader moving between two buffered lines is briefly
 in a read too, and must not be mistaken for one blocked on a held pipe.
 
 The bounds are constants, not configuration. The 120 s bound is twice the
-longest reader stall recorded in Claudine's own logs. It still ends, so a
-terminal that never accepts output cannot hang the wrapper forever.
+longest reader stall recorded in Claudine's own logs. It still ends. The join
+alone does not keep a blocked terminal from hanging the wrapper, though: the
+trailer and warnings that follow it are written too, and that is what the
+output worker below bounds.
 
 ### Outcomes
 
@@ -467,6 +471,20 @@ terminal that never accepts output cannot hang the wrapper forever.
 | Reader panicked | `error_kind: parse_failure`, message `Stream parser thread panicked: <panic message>` | The run's error |
 | Timed out after parsing every line (stuck in its final render) | The parser's real summary; the agent's exit code is kept | A warning that the output may be incomplete |
 | Timed out with lines still unparsed | `error_kind: stream_reader_timeout`, with a message naming the cause (pipe held open, or output still being processed) | A warning with the same message |
+
+A reader timeout never makes a run succeed or hides why it failed. For a
+reader that stalled while still holding its parser, what the provider had
+already reported decides the outcome:
+
+| The run | Reported |
+|---|---|
+| Exit 0 and a completed result | Success, exit 0, with a warning that output may be incomplete |
+| Exit 0, result says it failed | The provider's error, exit 0 kept, plus the warning |
+| Exit 0 and no result yet | `stream_reader_timeout` (an incomplete stream); no result is invented |
+| Nonzero exit or interrupted | The exit code is kept; with no result read, `stream_reader_timeout` |
+| Provider timeout, rate limit, or other early termination | That cause; it is applied after the reader is settled |
+
+A reader that really panicked stays `parse_failure`, unless the provider timed the run out first.
 
 A stderr reader that panics or times out shows a warning and contributes no
 captured stderr. It does not change the summary.
@@ -484,6 +502,60 @@ stderr, so it shows with tracing off. Their readers are tracked the same way:
 For example, if the agent exits 0 while the terminal takes 30 s to accept
 its last screen of Markdown, the reader is handling output rather than
 waiting on its pipe, so the 120 s bound applies. The run finishes with the agent's own result and exit code.
+
+### A terminal that stops accepting output
+
+A terminal that stops reading blocks a write in the kernel, and nothing can
+interrupt that write from outside. If the stdout reader made it from inside
+the stream parser's callback, the parser would stall holding the only copy of
+the run's result, and every later write (warnings, trailer, summary) would
+queue behind the same lock.
+
+So no thread that parses or settles a run writes to the terminal. Every
+terminal write is a whole frame queued on one **output worker** thread, and
+queueing never blocks:
+
+```mermaid
+flowchart LR
+    R[stdout reader] -- frames --> Q[(bounded queue)]
+    M[main thread: warnings, trailer, summary] -- frames --> Q
+    Q --> W[output worker] --> T[terminal]
+    M -- drain until the shared clock --> W
+```
+
+- **Order and bytes are unchanged** for a terminal that keeps up.
+- **The wait is bounded.** After the readers are joined, the wrapper waits for
+  the worker until the same 120 s clock the readers were joined against, and
+  again after the trailer. If the worker is still writing when the clock
+  runs out, delivery is *disabled*: the worker is abandoned, queued frames are
+  discarded, and later frames are refused immediately. Nothing starts a
+  second writer, and the process exits without flushing a stdout the stuck
+  thread may hold.
+- **The loss is recorded, not shown.** A terminal that stopped listening
+  cannot show a warning about it. The session-end record carries an
+  `output_incomplete` object (`dropped_frames`, `rejected_frames`, `stalled`).
+- **One worker serves the process.** A `compose` loop runs many iterations in
+  one process. A terminal found stalled in one iteration stays disabled for
+  the rest.
+- **Memory is bounded.** The queue holds at most 4096 frames and 8 MiB. Beyond
+  that, whole presentation frames are dropped and counted. Provider bytes,
+  semantic events, and the result are never queued here, so they are never
+  dropped.
+- **A reader past its cutoff is silent.** Once the wrapper settles the
+  summary, a reader still running has its output and lifecycle events
+  discarded, so it cannot write into the next iteration or emit events for a
+  finished run.
+- **A stalled reader still leaves its result.** The reader publishes a
+  completed turn or a terminal provider error before it renders anything. If
+  the reader is still holding its parser at the cutoff, an exit-0 run with a
+  published completed turn keeps its result (without the assistant text) and
+  shows the incomplete-output warning; a published terminal error is kept; with
+  nothing published the run is `stream_reader_timeout`.
+
+Rendering a large final message was also slowed by font detection: each
+Markdown block rebuilt the detected terminal options, and on iTerm2 each build
+ran a `defaults read` subprocess. The detected font is now cached for the
+process.
 
 ## Subagent diagnostics in error reports
 
