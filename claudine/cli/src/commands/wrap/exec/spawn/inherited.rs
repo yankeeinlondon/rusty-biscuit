@@ -8,16 +8,20 @@ use std::path::Path;
 use std::process::Stdio;
 use std::sync::Arc;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use claudine::stream::logs::EarlyTermination;
 use color_eyre::eyre::Result;
 use tracing::Span;
 
 use super::super::termination::wait_with_signal_and_early_termination;
+use super::super::reader_join::{
+    JoinOutcome, ReaderBudget, ReaderProgress, ReaderStream, eprint_reader_warning, join_reader,
+    reader_failure,
+};
 use super::super::timeouts::TimeoutConfig;
 use super::super::{
-    ChildIoOptions, ProcessResult, ProcessTelemetry, join_with_timeout, kill_process_group,
+    ChildIoOptions, ProcessResult, ProcessTelemetry, kill_process_group,
     resolve_first_response, stop_timing_ticker,
 };
 use super::setup;
@@ -138,28 +142,23 @@ pub(crate) fn run_child(
             .collect();
         let plain = crate::log::is_plain();
         let first_at = first_stdout_at.clone().expect("set when filter_stdout");
-        Some(thread::spawn(move || {
-            let reader = BufReader::new(pipe);
-            let mut out = std::io::stdout().lock();
-            for line in reader.lines() {
-                let Ok(line) = line else { break };
-                if prefixes.iter().any(|p| line.starts_with(p.as_str())) {
-                    continue;
-                }
-                {
-                    let mut g = first_at.lock().unwrap();
-                    if g.is_none() {
-                        *g = Some(Instant::now());
-                    }
-                }
-                let stripped = if plain {
-                    biscuit_terminal::prelude::strip_escape_codes(&line)
-                } else {
-                    line
-                };
-                let _ = writeln!(out, "{stripped}");
-            }
-        }))
+        let progress = ReaderProgress::default();
+        let reader_progress = progress.clone();
+        let handle = thread::spawn(move || {
+            forward_lines(
+                BufReader::new(pipe),
+                &mut std::io::stdout().lock(),
+                &prefixes,
+                &first_at,
+                plain,
+                &reader_progress,
+            )
+        });
+        Some(ForwardReader {
+            stream: ReaderStream::Stdout,
+            progress,
+            handle,
+        })
     } else {
         None
     };
@@ -175,28 +174,23 @@ pub(crate) fn run_child(
             .collect();
         let plain = crate::log::is_plain();
         let first_at = first_stderr_at.clone().expect("set when filter_stderr");
-        Some(thread::spawn(move || {
-            let reader = BufReader::new(pipe);
-            let mut err = std::io::stderr().lock();
-            for line in reader.lines() {
-                let Ok(line) = line else { break };
-                if prefixes.iter().any(|p| line.starts_with(p.as_str())) {
-                    continue;
-                }
-                {
-                    let mut g = first_at.lock().unwrap();
-                    if g.is_none() {
-                        *g = Some(Instant::now());
-                    }
-                }
-                let stripped = if plain {
-                    biscuit_terminal::prelude::strip_escape_codes(&line)
-                } else {
-                    line
-                };
-                let _ = writeln!(err, "{stripped}");
-            }
-        }))
+        let progress = ReaderProgress::default();
+        let reader_progress = progress.clone();
+        let handle = thread::spawn(move || {
+            forward_lines(
+                BufReader::new(pipe),
+                &mut std::io::stderr().lock(),
+                &prefixes,
+                &first_at,
+                plain,
+                &reader_progress,
+            )
+        });
+        Some(ForwardReader {
+            stream: ReaderStream::Stderr,
+            progress,
+            handle,
+        })
     } else {
         None
     };
@@ -240,12 +234,14 @@ pub(crate) fn run_child(
         kill_process_group(&mut child);
     }
 
-    let thread_join_timeout = Duration::from_secs(5);
-    if let Some(handle) = stdout_handle {
-        join_with_timeout(handle, thread_join_timeout);
-    }
-    if let Some(handle) = stderr_handle {
-        join_with_timeout(handle, thread_join_timeout);
+    let reader_warnings = join_forwarders(
+        [stdout_handle, stderr_handle],
+        ReaderBudget::default(),
+        Instant::now(),
+    );
+    for warning in &reader_warnings {
+        tracing::warn!("{warning}");
+        eprint_reader_warning(warning);
     }
 
     let total_elapsed = spawned_at.elapsed();
@@ -269,5 +265,75 @@ pub(crate) fn run_child(
         guard_context: None,
         signals: Vec::new(),
         stream_tails: None,
+        reader_warnings,
     })
+}
+
+/// A thread forwarding one of the child's streams to this process's own.
+pub(super) struct ForwardReader {
+    pub(super) stream: ReaderStream,
+    pub(super) progress: ReaderProgress,
+    pub(super) handle: thread::JoinHandle<Option<std::io::Error>>,
+}
+
+/// Join the forwarders under one shared clock and return a warning for each
+/// that panicked, outlived its bound, or failed to write.
+///
+/// A forwarding problem never changes the run's outcome: the child's exit
+/// code and termination are already known, and only its output may be
+/// incomplete.
+pub(super) fn join_forwarders(
+    readers: [Option<ForwardReader>; 2],
+    budget: ReaderBudget,
+    since: Instant,
+) -> Vec<String> {
+    let mut warnings = Vec::new();
+    for reader in readers.into_iter().flatten() {
+        let outcome = join_reader(reader.handle, &reader.progress, budget, since);
+        match &outcome {
+            JoinOutcome::Joined(Some(error)) => warnings.push(format!(
+                "Claudine could not forward the agent's {} to the terminal: {error}",
+                reader.stream.label()
+            )),
+            _ => warnings
+                .extend(reader_failure(reader.stream, &outcome, budget).map(|f| f.message)),
+        }
+    }
+    warnings
+}
+
+/// Copy `reader`'s lines to `out`, skipping noise lines.
+///
+/// Keeps draining the pipe after a write fails, so the child is never wedged
+/// on a full pipe, and returns the first write error.
+pub(super) fn forward_lines<R: BufRead, W: Write>(
+    reader: R,
+    out: &mut W,
+    prefixes: &[String],
+    first_at: &Arc<std::sync::Mutex<Option<Instant>>>,
+    plain: bool,
+    progress: &ReaderProgress,
+) -> Option<std::io::Error> {
+    let mut first_error = None;
+    for line in progress.track(reader.lines()) {
+        let Ok(line) = line else { break };
+        if prefixes.iter().any(|p| line.starts_with(p.as_str())) {
+            continue;
+        }
+        {
+            let mut g = first_at.lock().unwrap();
+            if g.is_none() {
+                *g = Some(Instant::now());
+            }
+        }
+        let stripped = if plain {
+            biscuit_terminal::prelude::strip_escape_codes(&line)
+        } else {
+            line
+        };
+        if let Err(error) = writeln!(out, "{stripped}") {
+            first_error.get_or_insert(error);
+        }
+    }
+    first_error
 }

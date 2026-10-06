@@ -6,9 +6,9 @@ use std::ffi::OsString;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::process::Stdio;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use claudine::signals::{SignalHub, SignalSource};
 use claudine::stream::logs::EarlyTermination;
@@ -19,9 +19,12 @@ use super::super::termination::{
     early_termination_guard_context, trip_to_early_termination,
     wait_with_signal_and_early_termination,
 };
+use super::super::reader_join::{
+    ReaderBudget, ReaderProgress, ReaderStream, eprint_reader_warning, join_reader, reader_failure,
+};
 use super::super::timeouts::TimeoutConfig;
 use super::super::{
-    ChildIoOptions, ProcessResult, ProcessTelemetry, join_with_timeout_or, kill_process_group,
+    ChildIoOptions, ProcessResult, ProcessTelemetry, kill_process_group,
     resolve_first_response, stop_timing_ticker,
 };
 use super::setup;
@@ -31,6 +34,49 @@ pub(crate) struct CapturedChildOutput {
     pub(crate) exit_code: i32,
     pub(crate) stdout: String,
     pub(crate) stderr: String,
+    /// A reader panicked or outlived its bound, so `stdout` or `stderr` holds
+    /// only what the reader had collected by then.
+    //
+    // Read by the attempt outcome once the session record carries it.
+    #[allow(dead_code)]
+    pub(crate) incomplete: bool,
+}
+
+/// One captured stream: the buffer its reader appends to, the reader's
+/// progress, and its thread.
+pub(super) struct CaptureReader {
+    pub(super) stream: ReaderStream,
+    pub(super) buffer: Arc<Mutex<String>>,
+    pub(super) progress: ReaderProgress,
+    pub(super) handle: thread::JoinHandle<()>,
+}
+
+/// Join both capture readers under one shared clock and return the two
+/// buffers with the failure message of each reader that did not finish.
+///
+/// The buffers are shared with the reader threads, so a reader that panicked
+/// or was abandoned still yields what it had collected.
+pub(super) fn join_captures(
+    readers: [CaptureReader; 2],
+    budget: ReaderBudget,
+    since: Instant,
+) -> ([String; 2], Vec<String>) {
+    let mut buffers = Vec::new();
+    let mut warnings = Vec::new();
+    for reader in readers {
+        let outcome = join_reader(reader.handle, &reader.progress, budget, since);
+        warnings.extend(reader_failure(reader.stream, &outcome, budget).map(|f| f.message));
+        buffers.push(
+            reader
+                .buffer
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone(),
+        );
+    }
+    let stderr = buffers.pop().unwrap_or_default();
+    let stdout = buffers.pop().unwrap_or_default();
+    ([stdout, stderr], warnings)
 }
 
 /// Spawn a provider child process and capture its output.
@@ -106,16 +152,23 @@ pub(crate) fn run_child_capture(
     let first_stdout_at_clone = Arc::clone(&first_stdout_at);
     let stdout_cap = volume_cap.clone();
     let stdout_early_tx = early_tx.clone();
-    let stdout_handle = thread::spawn(move || {
-        let reader = BufReader::new(stdout_pipe);
-        capture_stream_with_volume_cap(
-            reader,
-            &stdout_noise,
-            &first_stdout_at_clone,
-            stdout_cap.as_ref(),
-            &stdout_early_tx,
-        )
-    });
+    let stdout_buffer = Arc::new(Mutex::new(String::new()));
+    let stdout_progress = ReaderProgress::default();
+    let stdout_handle = {
+        let (buffer, progress) = (Arc::clone(&stdout_buffer), stdout_progress.clone());
+        thread::spawn(move || {
+            let reader = BufReader::new(stdout_pipe);
+            capture_stream_with_volume_cap(
+                reader,
+                &stdout_noise,
+                &first_stdout_at_clone,
+                stdout_cap.as_ref(),
+                &stdout_early_tx,
+                &buffer,
+                &progress,
+            );
+        })
+    };
 
     // Capture stderr into a string, applying noise filtering
     let stderr_pipe = child
@@ -130,16 +183,23 @@ pub(crate) fn run_child_capture(
     let first_stderr_at_clone = Arc::clone(&first_stderr_at);
     let stderr_cap = volume_cap.clone();
     let stderr_early_tx = early_tx.clone();
-    let stderr_handle = thread::spawn(move || {
-        let reader = BufReader::new(stderr_pipe);
-        capture_stream_with_volume_cap(
-            reader,
-            &stderr_noise,
-            &first_stderr_at_clone,
-            stderr_cap.as_ref(),
-            &stderr_early_tx,
-        )
-    });
+    let stderr_buffer = Arc::new(Mutex::new(String::new()));
+    let stderr_progress = ReaderProgress::default();
+    let stderr_handle = {
+        let (buffer, progress) = (Arc::clone(&stderr_buffer), stderr_progress.clone());
+        thread::spawn(move || {
+            let reader = BufReader::new(stderr_pipe);
+            capture_stream_with_volume_cap(
+                reader,
+                &stderr_noise,
+                &first_stderr_at_clone,
+                stderr_cap.as_ref(),
+                &stderr_early_tx,
+                &buffer,
+                &progress,
+            );
+        })
+    };
 
     // Write stdin seed AFTER reader threads are spawned (see run_child deadlock note).
     // A `BrokenPipe` here is benign — the child closed stdin or exited before
@@ -177,9 +237,28 @@ pub(crate) fn run_child_capture(
 
     kill_process_group(&mut child);
 
-    let thread_join_timeout = Duration::from_secs(5);
-    let stdout = join_with_timeout_or(stdout_handle, thread_join_timeout, String::new());
-    let stderr = join_with_timeout_or(stderr_handle, thread_join_timeout, String::new());
+    let ([stdout, stderr], reader_warnings) = join_captures(
+        [
+            CaptureReader {
+                stream: ReaderStream::Stdout,
+                buffer: stdout_buffer,
+                progress: stdout_progress,
+                handle: stdout_handle,
+            },
+            CaptureReader {
+                stream: ReaderStream::Stderr,
+                buffer: stderr_buffer,
+                progress: stderr_progress,
+                handle: stderr_handle,
+            },
+        ],
+        ReaderBudget::default(),
+        Instant::now(),
+    );
+    for warning in &reader_warnings {
+        tracing::warn!("{warning}");
+        eprint_reader_warning(warning);
+    }
 
     // Bespoke signal mirror (E5) for the capture path's terminations
     // (per-run volume cap, wall-clock timeout).
@@ -217,6 +296,7 @@ pub(crate) fn run_child_capture(
             exit_code,
             stdout,
             stderr,
+            incomplete: !reader_warnings.is_empty(),
         },
         termination,
         telemetry: ProcessTelemetry {
@@ -227,15 +307,17 @@ pub(crate) fn run_child_capture(
         guard_context,
         signals,
         stream_tails: None,
+        reader_warnings,
     })
 }
 
 /// Read a captured stream line-by-line, applying noise filtering and the
 /// per-run volume cap (Phase 6, F3).
 ///
-/// Returns the accumulated (noise-filtered) capture buffer. While the cap is
-/// under its thresholds, each kept line is appended and counted. The moment
-/// the running line/byte totals breach the cap, an
+/// Lines are appended to `buffer` as they are kept, so a caller that stops
+/// waiting for this reader still has everything collected so far. While the
+/// cap is under its thresholds, each kept line is appended and counted. The
+/// moment the running line/byte totals breach the cap, an
 /// [`EarlyTermination::RunawayVolume`] is sent once on `early_tx` (so the
 /// wait loop terminates the child) and the buffer **stops growing** — further
 /// lines are drained from the pipe but discarded, bounding memory. A `None`
@@ -243,15 +325,16 @@ pub(crate) fn run_child_capture(
 pub(super) fn capture_stream_with_volume_cap<R: BufRead>(
     reader: R,
     noise_prefixes: &[String],
-    first_at: &Arc<std::sync::Mutex<Option<Instant>>>,
+    first_at: &Arc<Mutex<Option<Instant>>>,
     cap: Option<&claudine::runaway::CaptureVolumeCap>,
     early_tx: &std::sync::mpsc::Sender<EarlyTermination>,
-) -> String {
-    let mut captured = String::new();
+    buffer: &Mutex<String>,
+    progress: &ReaderProgress,
+) {
     let mut lines: u64 = 0;
     let mut bytes: u64 = 0;
     let mut tripped = false;
-    for line in reader.lines() {
+    for line in progress.track(reader.lines()) {
         let Ok(line) = line else { break };
         if noise_prefixes.iter().any(|p| line.starts_with(p.as_str())) {
             continue;
@@ -283,10 +366,12 @@ pub(super) fn capture_stream_with_volume_cap<R: BufRead>(
             continue;
         }
 
+        let mut captured = buffer
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         if !captured.is_empty() {
             captured.push('\n');
         }
         captured.push_str(&line);
     }
-    captured
 }

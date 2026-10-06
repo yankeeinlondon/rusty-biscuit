@@ -215,3 +215,57 @@ fn a_reader_past_the_drain_limit_after_feeding_every_line_keeps_the_real_summary
     assert!(warning.contains("result is kept"), "{warning}");
     release.send(()).unwrap();
 }
+
+#[test]
+fn reader_failure_names_each_outcome_with_the_same_wording_for_every_stream() {
+    let joined: JoinOutcome<()> = JoinOutcome::Joined(());
+    assert_eq!(reader_failure(ReaderStream::Stdout, &joined, BUDGET), None);
+
+    let panicked: JoinOutcome<()> = JoinOutcome::Panicked("boom".into());
+    let failure = reader_failure(ReaderStream::Stderr, &panicked, BUDGET).unwrap();
+    assert_eq!(failure.error_kind, "parse_failure");
+    assert_eq!(failure.message, "Stream stderr reader thread panicked: boom");
+
+    let non_string: JoinOutcome<()> = JoinOutcome::Panicked(panic_message(&42_u8));
+    let failure = reader_failure(ReaderStream::Output, &non_string, BUDGET).unwrap();
+    assert_eq!(
+        failure.message,
+        "Stream parser thread panicked: the panic payload was not a string"
+    );
+
+    for (stall, expected) in [
+        (ReaderStall::PipeOpen, "pipe is still open"),
+        (ReaderStall::Processing, "terminal was not accepting output"),
+    ] {
+        let timed_out: JoinOutcome<()> = JoinOutcome::TimedOut(stall);
+        let failure = reader_failure(ReaderStream::Stdout, &timed_out, BUDGET).unwrap();
+        assert_eq!(failure.error_kind, "stream_reader_timeout");
+        assert!(failure.message.contains("agent's stdout"), "{}", failure.message);
+        assert!(failure.message.contains(expected), "{}", failure.message);
+    }
+}
+
+#[test]
+fn a_reader_that_finished_is_joined_even_when_the_clock_ran_out_long_ago() {
+    let progress = ReaderProgress::default();
+    let reader_progress = progress.clone();
+    let handle = thread::spawn(move || for _line in reader_progress.track(["x"].into_iter()) {});
+    wait_until(|| progress.reached_eof());
+    while !handle.is_finished() {
+        thread::sleep(Duration::from_millis(1));
+    }
+    let long_ago = Instant::now()
+        .checked_sub(Duration::from_secs(3600))
+        .unwrap_or_else(Instant::now);
+
+    let outcome = join_reader(handle, &progress, BUDGET, long_ago);
+
+    assert!(matches!(outcome, JoinOutcome::Joined(())), "{outcome:?}");
+}
+
+#[test]
+fn the_warning_line_carries_the_message_through_the_status_component() {
+    let term = Terminal::default();
+    let line = reader_warning_line("output may be incomplete", &term);
+    assert!(line.contains("output may be incomplete"), "{line}");
+}

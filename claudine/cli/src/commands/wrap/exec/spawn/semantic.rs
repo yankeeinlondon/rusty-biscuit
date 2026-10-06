@@ -36,8 +36,8 @@ use super::super::watchdog::{
     spawn_flush_if_idle_ticker, spawn_prompt_timing_monitor, spawn_timeout_watchdog_ticker,
 };
 use super::super::reader_join::{
-    JoinOutcome, ParserSlot, ReaderBudget, ReaderProgress, join_reader, settle_parser,
-    timeout_message,
+    JoinOutcome, ParserSlot, ReaderBudget, ReaderProgress, ReaderStream, join_reader,
+    reader_failure, reader_warning_line, settle_parser,
 };
 use super::super::{
     OutputTextCallback, ProcessResult, ProcessTelemetry, ReasoningCallback, SemanticParserBuilder,
@@ -660,19 +660,18 @@ pub(crate) fn run_child_stream_semantic(
     let readers_since = Instant::now();
     let stdout_outcome = join_reader(stdout_handle, &stdout_progress, reader_budget, readers_since);
     let (parser, stdout_warning) = settle_parser(stdout_outcome, &parser_slot, exit_code, reader_budget);
-    let (captured, stderr_warning) =
-        match join_reader(stderr_handle, &stderr_progress, reader_budget, readers_since) {
-            JoinOutcome::Joined(captured) => (captured, None),
-            JoinOutcome::Panicked(message) => {
-                (String::new(), Some(format!("The agent's stderr reader panicked: {message}")))
-            }
-            JoinOutcome::TimedOut(stall) => {
-                (String::new(), Some(timeout_message("stderr", stall, reader_budget)))
-            }
-        };
-    for warning in [stdout_warning, stderr_warning].into_iter().flatten() {
+    let stderr_outcome = join_reader(stderr_handle, &stderr_progress, reader_budget, readers_since);
+    let stderr_warning = reader_failure(ReaderStream::Stderr, &stderr_outcome, reader_budget)
+        .map(|failure| failure.message);
+    let captured = match stderr_outcome {
+        JoinOutcome::Joined(captured) => captured,
+        JoinOutcome::Panicked(_) | JoinOutcome::TimedOut(_) => String::new(),
+    };
+    let reader_warnings: Vec<String> =
+        [stdout_warning, stderr_warning].into_iter().flatten().collect();
+    for warning in &reader_warnings {
         tracing::warn!("{warning}");
-        stream_output.emit_stderr_line(&Status::new(&warning).state(StatusState::Warning).render(&termination_term));
+        stream_output.emit_stderr_line(&reader_warning_line(warning, &termination_term));
     }
     if suppress_stderr_on_success && exit_code != 0 && !captured.is_empty() {
         eprintln!("{captured}");
@@ -762,6 +761,7 @@ pub(crate) fn run_child_stream_semantic(
         agent_pid: Some(captured_pid),
         guard_context,
         signals: signal_hub.drain(),
+        reader_warnings,
         stream_tails: Some(super::super::StreamTails {
             stdout: stdout_tail,
             stderr: stderr_tail_ring.lock().unwrap().iter().cloned().collect::<Vec<_>>().join("\n"),

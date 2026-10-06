@@ -119,6 +119,14 @@ pub(crate) struct ProcessResult<T> {
     /// both streams; the captured path returns whole streams in `data`, and
     /// the inherited and wire paths leave this `None`.
     pub(crate) stream_tails: Option<StreamTails>,
+    /// Warnings for output readers that panicked, timed out, or failed to
+    /// forward after the child exited. Never a provider failure: the child's
+    /// own outcome stands, only its output may be incomplete.
+    //
+    // Already shown on stderr by each spawn path; kept for the session
+    // record, whose output-loss field lands with the output worker.
+    #[allow(dead_code)]
+    pub(crate) reader_warnings: Vec<String>,
 }
 
 /// The last raw lines of a structured child's stdout and stderr, bounded by
@@ -215,29 +223,6 @@ pub(crate) type SemanticParserBuilder = Box<
         + Send
         + 'static,
 >;
-
-/// Join a reader thread, detaching it once `timeout` passes.
-fn join_with_timeout(handle: thread::JoinHandle<()>, timeout: Duration) {
-    join_with_timeout_or(handle, timeout, ());
-}
-
-/// Join a reader thread that returns a value, detaching it once `timeout`
-/// passes. A panic or a timeout yields `fallback` and is logged by kind.
-fn join_with_timeout_or<T>(handle: thread::JoinHandle<T>, timeout: Duration, fallback: T) -> T {
-    match reader_join::join_within(handle, timeout) {
-        reader_join::JoinOutcome::Joined(value) => value,
-        reader_join::JoinOutcome::Panicked(message) => {
-            tracing::warn!("reader thread panicked: {message}; using fallback result");
-            fallback
-        }
-        reader_join::JoinOutcome::TimedOut(_) => {
-            tracing::warn!(
-                "reader thread did not exit within {timeout:?}; detaching (pipe may still be held open by a descendant process)"
-            );
-            fallback
-        }
-    }
-}
 
 /// After the main child exits, kill any orphaned descendant processes so
 /// inherited pipe fds are closed and reader threads unblock. Without this,

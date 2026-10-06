@@ -15,6 +15,9 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use biscuit_terminal::components::renderable::TerminalRenderable;
+use biscuit_terminal::components::status::{Status, StatusState};
+use biscuit_terminal::terminal::Terminal;
 use claudine::stream::parser::SemanticStreamParser;
 use claudine::stream::summary::StreamExecutionSummary;
 
@@ -75,8 +78,6 @@ pub(crate) enum ReaderStall {
     PipeOpen,
     /// Handling output it had already read, or past EOF.
     Processing,
-    /// The caller did not track the reader's progress.
-    Unknown,
 }
 
 /// How waiting for a reader thread ended.
@@ -209,19 +210,6 @@ pub(crate) fn join_reader<T>(
     }
 }
 
-/// Wait at most `timeout` for a thread whose progress is not tracked.
-pub(crate) fn join_within<T>(handle: thread::JoinHandle<T>, timeout: Duration) -> JoinOutcome<T> {
-    let start = Instant::now();
-    while start.elapsed() < timeout {
-        if handle.is_finished() {
-            return joined(handle);
-        }
-        thread::sleep(POLL);
-    }
-    std::mem::forget(handle);
-    JoinOutcome::TimedOut(ReaderStall::Unknown)
-}
-
 fn joined<T>(handle: thread::JoinHandle<T>) -> JoinOutcome<T> {
     match handle.join() {
         Ok(value) => JoinOutcome::Joined(value),
@@ -230,7 +218,8 @@ fn joined<T>(handle: thread::JoinHandle<T>) -> JoinOutcome<T> {
 }
 
 /// The message of a `panic!` payload, which is a `&str` or a `String` for
-/// every panic raised with a message.
+/// every panic raised with a message. Any other payload type (`panic_any`)
+/// yields a message saying so, so the report never claims a payload it lacks.
 pub(crate) fn panic_message(payload: &(dyn Any + Send)) -> String {
     if let Some(message) = payload.downcast_ref::<&str>() {
         (*message).to_string()
@@ -241,6 +230,75 @@ pub(crate) fn panic_message(payload: &(dyn Any + Send)) -> String {
     }
 }
 
+/// Which reader a [`JoinOutcome`] belongs to; it names the reader in the
+/// messages [`reader_failure`] builds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ReaderStream {
+    /// The structured stdout reader that feeds the stream parser.
+    Output,
+    /// A reader that collects or forwards the agent's stdout.
+    Stdout,
+    /// A reader that collects or forwards the agent's stderr.
+    Stderr,
+}
+
+impl ReaderStream {
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::Output => "output",
+            Self::Stdout => "stdout",
+            Self::Stderr => "stderr",
+        }
+    }
+
+    fn thread_name(self) -> &'static str {
+        match self {
+            Self::Output => "parser",
+            Self::Stdout => "stdout reader",
+            Self::Stderr => "stderr reader",
+        }
+    }
+}
+
+/// A reader that did not finish cleanly, as every spawn path reports it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ReaderFailure {
+    /// `parse_failure` for a panic, `stream_reader_timeout` for a timeout.
+    pub(crate) error_kind: &'static str,
+    pub(crate) message: String,
+}
+
+/// The failure a join outcome stands for, or `None` for a reader that
+/// finished.
+pub(crate) fn reader_failure<T>(
+    stream: ReaderStream,
+    outcome: &JoinOutcome<T>,
+    budget: ReaderBudget,
+) -> Option<ReaderFailure> {
+    match outcome {
+        JoinOutcome::Joined(_) => None,
+        JoinOutcome::Panicked(message) => Some(ReaderFailure {
+            error_kind: "parse_failure",
+            message: format!("Stream {} thread panicked: {message}", stream.thread_name()),
+        }),
+        JoinOutcome::TimedOut(stall) => Some(ReaderFailure {
+            error_kind: "stream_reader_timeout",
+            message: timeout_message(stream.label(), *stall, budget),
+        }),
+    }
+}
+
+/// `message` as the warning line every spawn path shows.
+pub(crate) fn reader_warning_line(message: &str, term: &Terminal) -> String {
+    Status::new(message).state(StatusState::Warning).render(term)
+}
+
+/// Show a reader warning on stderr directly, so it is visible without
+/// tracing enabled.
+pub(crate) fn eprint_reader_warning(message: &str) {
+    eprintln!("{}", reader_warning_line(message, &crate::log::terminal()));
+}
+
 /// The user-facing explanation of a reader that outlived its bound.
 pub(crate) fn timeout_message(stream: &str, stall: ReaderStall, budget: ReaderBudget) -> String {
     match stall {
@@ -249,7 +307,7 @@ pub(crate) fn timeout_message(stream: &str, stall: ReaderStall, budget: ReaderBu
              the pipe is still open, most likely held by a process the agent started",
             budget.pipe_cap.as_secs()
         ),
-        ReaderStall::Processing | ReaderStall::Unknown => format!(
+        ReaderStall::Processing => format!(
             "Claudine stopped waiting for the agent's {stream} {}s after the agent exited: \
              it was still being processed, most likely because the terminal was not \
              accepting output",
@@ -311,26 +369,25 @@ pub(crate) fn settle_parser(
                 None,
             ),
         },
-        JoinOutcome::Panicked(message) => (
-            fallback(
-                exit_code,
-                "parse_failure",
-                format!("Stream parser thread panicked: {message}"),
-            ),
-            None,
-        ),
-        JoinOutcome::TimedOut(stall) => {
-            let message = timeout_message("output", stall, budget);
+        JoinOutcome::Panicked(_) => {
+            let failure = reader_failure(ReaderStream::Output, &outcome, budget)
+                .expect("a panic is a failure");
+            (fallback(exit_code, failure.error_kind, failure.message), None)
+        }
+        JoinOutcome::TimedOut(_) => {
+            let failure = reader_failure(ReaderStream::Output, &outcome, budget)
+                .expect("a timeout is a failure");
             match parsed() {
                 Some(parser) => (
                     parser,
                     Some(format!(
-                        "{message}. The run's result is kept; its output may be incomplete"
+                        "{}. The run's result is kept; its output may be incomplete",
+                        failure.message
                     )),
                 ),
                 None => (
-                    fallback(exit_code, "stream_reader_timeout", message.clone()),
-                    Some(message),
+                    fallback(exit_code, failure.error_kind, failure.message.clone()),
+                    Some(failure.message),
                 ),
             }
         }
