@@ -29,7 +29,7 @@ The second owned cost center is graph data collection in the library, [`worktree
 
 `wt list` makes no PR request of its own. The detached worker every listing launches (see [Live Remote Head](#live-remote-head)) asks for open PRs on every run, beside its live-head check, and the listing waits for both within one budget ([`pull_requests.rs`](../lib/src/pull_requests.rs), [`list/wait.rs`](../lib/src/list/wait.rs)).
 
-- Every stored answer is bound to a digest of the exact `git remote get-url origin` value, so every run pays that one git call before it may show stored badges.
+- Every stored answer is bound to a digest of `origin`'s URL exactly as `git remote get-url origin` would print it. The listing reads that URL in-process (see [Git processes](#git-processes)), so binding the answer starts no git process.
 - The worker's PR half asks whenever it wins the nonblocking lock beside the store, whatever the stored answer's age, under a 10 s deadline (`REFRESH_DEADLINE`). A contender makes no request, so overlapping listings keep at most one PR request in flight. A failure is never stored, and a repository in `~/.wt.json` makes no request.
 - The two halves run concurrently, so an ordinary listing waits for the slower of the PR request and the head update (check plus any fetch), never their sum, and never more than 3 s. A stalled PR request now costs the whole 3 s even when the head answers at once; that is the accepted price of showing this run's answer.
 - In `--perf`, `origin_lookup` is the origin lookup before the wait. The origin recheck and the stored-answer read after the wait are `pr_cache_read`, a child of the region that spans the wait (see [Runtime `--perf` flag](#runtime---perf-flag)). Neither makes a request, and neither adds to `local_gather`. The PR request runs in the worker; the foreground sees its time only inside `refresh_worker`, and the worker's own report shows it as `pr_request`.
@@ -86,6 +86,29 @@ An observation, not a threshold: one quick sample on the macOS development host 
 - **The local work is hidden inside the wait.** The group is the wait plus the PR reread (about 6 ms); the 190 ms list gather, and with `-v` the 175–181 ms verbose gather beside it, add nothing. Run sequentially, as before this change, runs 2–3 would have taken about 190 ms longer.
 - **No regather happened**: the tips did not move during any run, so none paid for a second gather. A run whose fetch moves a tip pays one more ref-dependent gather, shown as the `regather` row.
 - The first run's list gather (526.5 ms) still finished inside its slower wait.
+
+## Git processes
+
+Starting a git process is the dominant cost of the refresh worker on Windows: about 47 ms each there, against about 5 ms on macOS (measured 2026-10-05 on `build-win-native` and the macOS development host). So the metadata both `wt list` and its worker read repeatedly is read in-process with `gix`, and git runs only for work that needs it ([`git_metadata.rs`](../lib/src/git_metadata.rs)):
+
+| Read | Answers the same as |
+| --- | --- |
+| `origin`'s URL, with `url.<base>.insteadOf` applied | `git remote get-url origin` |
+| the default branch (`origin/HEAD`'s target, else `main` or `master`) | `git symbolic-ref refs/remotes/origin/HEAD`, then `git rev-parse --verify` |
+| whether a name is a usable branch name | `git check-ref-format --branch` |
+| `core.sshCommand` | `git config --get core.sshCommand` |
+| a tracking ref's object ID | `git rev-parse --verify --quiet` |
+
+- Each read opens the repository afresh, so a configuration change between two reads (an `origin` replaced while the worker runs) is still seen.
+- When `gix` cannot read the repository (an owner it does not trust, a reftable repository), that read runs the git command in the right-hand column instead.
+- Parity tests in `git_metadata.rs` compare every read with its git command, and `remote_update::tests::a_fetching_attempt_starts_only_ls_remote_and_fetch` pins a fetching attempt to exactly two git processes.
+
+A fetching attempt used to start 14 git processes in sequence, 12 of them these reads:
+
+| Same probe, same host | Before | After |
+| --- | ---: | ---: |
+| worker, Windows | 1021 ms | 425 ms |
+| `wt list`, Windows | 1315 ms | 644 ms |
 
 ## Ahead/Behind + Merge Result Cache
 
@@ -390,7 +413,7 @@ For contention-free wall-clock measurement of the SLA, run perf tests serially v
 
 Asserts the subprocess-count bounds the optimization guarantees, on a fixture repository with one linked feature worktree:
 
-- `list_worktrees()` resolves the default branch exactly once (one `symbolic-ref` call) and reads tips with one `for-each-ref`. Wall-clock is printed for observability; the full-command SLA that subsumes this piece is asserted by the integration test below.
+- `list_worktrees()` resolves the default branch in-process (no `symbolic-ref` process) and reads tips with one `for-each-ref`. Wall-clock is printed for observability; the full-command SLA that subsumes this piece is asserted by the integration test below.
 - The base-view `gather` on that fixture, where every branch has only the default lane as a candidate, issues one `rev-parse` (the shallow check); per branch, two `merge-base --is-ancestor` (its tip and its lane's boundary), one fork `merge-base`, and one `rev-list` (the boundary's first-parent chain); and one `git log` per branch plus one for the default lane.
 
 ### `graph_and_verbose_share_one_merge_base` (unit test, `lib/src/graph/tests.rs`)
