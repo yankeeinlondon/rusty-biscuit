@@ -86,6 +86,8 @@ fn a_sibling_run_body_is_walked_from_first_to_last() {
     static PYTHON_IFS: Rules = Rules {
         boundaries: &["function_definition"],
         opaque: &[],
+        types: &[],
+        type_sides: &[],
         decisions: &[Decision { kind: "if_statement", counts: Counts::Always }],
     };
     let source = "def f(a):  # if a:\n    # if a:\n    if a:\n        pass\n    if a:\n        pass\n\nif a:\n    pass\n";
@@ -94,4 +96,45 @@ fn a_sibling_run_body_is_walked_from_first_to_last() {
     let body = callable_body(function, ProgrammingLanguage::Python).expect("a body");
     assert!(matches!(body, CallableBody::Run { .. }), "{body:?}");
     assert_eq!(count(body, &PYTHON_IFS), Some(3));
+}
+
+/// The kinds a grammar's `node-types.json` files under `supertypes`.
+fn subtypes(node_types: &str, supertypes: &[&str]) -> Vec<String> {
+    let entries: Vec<serde_json::Value> = serde_json::from_str(node_types).expect("node types parse");
+    let mut found = 0;
+    let mut kinds = Vec::new();
+    for entry in entries.iter().filter(|entry| supertypes.iter().any(|name| entry["type"] == *name)) {
+        // The keyword `type` has an entry of its own, with no subtypes.
+        let Some(listed) = entry["subtypes"].as_array() else { continue };
+        found += 1;
+        for subtype in listed {
+            let kind = subtype["type"].as_str().expect("a kind");
+            if !supertypes.contains(&kind) {
+                kinds.push(kind.to_string());
+            }
+        }
+    }
+    assert_eq!(found, supertypes.len(), "the grammar declares every supertype in {supertypes:?}");
+    kinds
+}
+
+/// Every kind the grammar files under its type supertypes is pruned as type
+/// syntax, except the kinds it shares with value syntax.
+#[test]
+fn every_grammar_type_kind_is_pruned_or_a_shared_value_kind() {
+    const TS_SHARED: &[&str] = &["call_expression", "member_expression", "const"];
+    let cases: [(&str, &[&str], &Rules, &[&str]); 3] = [
+        (tree_sitter_rust::NODE_TYPES, &["_type"], &rust::RULES, &["macro_invocation", "metavariable"]),
+        (tree_sitter_typescript::TYPESCRIPT_NODE_TYPES, &["type", "primary_type"], &typescript::RULES, TS_SHARED),
+        (tree_sitter_typescript::TSX_NODE_TYPES, &["type", "primary_type"], &typescript::RULES, TS_SHARED),
+    ];
+    for (node_types, supertypes, rules, shared) in cases {
+        for kind in subtypes(node_types, supertypes) {
+            let kind = kind.as_str();
+            assert!(
+                rules.types.contains(&kind) != shared.contains(&kind),
+                "{supertypes:?}: `{kind}` is either pruned as a type or a listed value kind"
+            );
+        }
+    }
 }

@@ -1136,6 +1136,13 @@ const RUST_CYCLOMATIC: &[CyclomaticRow] = &[
         source: "fn two_arms(x: bool) -> i32 { match x { true => 1, false => 2 } }\n",
         cases: &[("two_arms", Some(2))],
     },
+    // An or-pattern is one arm; a match's arms are never grouped across
+    // `,`, so the last-arm convention holds whatever the patterns.
+    CyclomaticRow {
+        source: "fn grouped_pattern(x: u8) -> u8 { match x { 1 | 2 => 1, _ => 2 } }\n\
+                 fn wildcard_first(x: u8) -> u8 { match x { _ if x > 1 => 1, 1 | 2 => 2, _ => 3 } }\n",
+        cases: &[("grouped_pattern", Some(2)), ("wildcard_first", Some(4))],
+    },
     CyclomaticRow {
         source: "fn guard_and(x: Option<i32>) -> i32 { match x { Some(n) if n > 3 && n < 9 => 1, _ => 0 } }\n",
         cases: &[("guard_and", Some(4))],
@@ -1183,6 +1190,56 @@ const RUST_CYCLOMATIC: &[CyclomaticRow] = &[
     CyclomaticRow {
         source: "fn blocks(a: bool) {\n    let _f = async { if a {} };\n    unsafe { if a {} }\n    'l: { if a { break 'l; } }\n}\n",
         cases: &[("blocks", Some(4))],
+    },
+    // Type syntax in the body adds nothing, wherever the type is written;
+    // the value beside it (a cast operand, a call's arguments, an array
+    // repeat length, an inline `const` block) still counts.
+    CyclomaticRow {
+        source: "fn array_annotation() { let _x: [u8; if true { 1 } else { 2 }]; }\n\
+                 fn reference_annotation() { let _x: &[u8; if true { 1 } else { 2 }]; }\n\
+                 fn tuple_annotation() { let _x: ([u8; if true { 1 } else { 2 }],); }\n\
+                 fn pointer_annotation() { let _x: *const [u8; if true { 1 } else { 2 }]; }\n\
+                 fn fn_pointer_annotation() { let _x: fn([u8; if true { 1 } else { 2 }]); }\n",
+        cases: &[
+            ("array_annotation", Some(1)),
+            ("reference_annotation", Some(1)),
+            ("tuple_annotation", Some(1)),
+            ("pointer_annotation", Some(1)),
+            ("fn_pointer_annotation", Some(1)),
+        ],
+    },
+    CyclomaticRow {
+        source: "struct Buf<const N: usize>;\n\
+                 fn make<const N: usize>() {}\n\
+                 fn generic_argument() { let _x: Buf<{ if true { 1 } else { 2 } }> = Buf; }\n\
+                 fn call_turbofish() { make::<{ if true { 1 } else { 2 } }>(); }\n\
+                 fn value_turbofish() { let _x = Buf::<{ if true { 1 } else { 2 } }>; }\n\
+                 fn turbofish_arguments(a: bool) { let _x = Some::<u8>(if a { 1 } else { 2 }); }\n",
+        cases: &[
+            ("make", Some(1)),
+            ("generic_argument", Some(1)),
+            ("call_turbofish", Some(1)),
+            ("value_turbofish", Some(1)),
+            ("turbofish_arguments", Some(2)),
+        ],
+    },
+    CyclomaticRow {
+        source: "fn cast_target() { let _x = std::ptr::null::<u8>() as *const [u8; if true { 1 } else { 2 }]; }\n\
+                 fn cast_operand(a: bool) { let _x = (if a { 1 } else { 2 }) as u8; }\n\
+                 fn qualified_path() { let _x = <[u8; if true { 1 } else { 2 }] as Default>::default(); }\n",
+        cases: &[("cast_target", Some(1)), ("cast_operand", Some(2)), ("qualified_path", Some(1))],
+    },
+    CyclomaticRow {
+        source: "fn named_types() {\n    type Buffer = [u8; if true { 1 } else { 2 }];\n    struct S([u8; if true { 1 } else { 2 }]);\n    let _x: Buffer;\n}\n\
+                 fn header(_p: [u8; if true { 1 } else { 2 }]) -> [u8; if true { 1 } else { 2 }] { [0; 1] }\n\
+                 fn nested_const() { const X: usize = if true { 1 } else { 2 }; }\n",
+        cases: &[("named_types", Some(1)), ("header", Some(1)), ("nested_const", Some(1))],
+    },
+    CyclomaticRow {
+        source: "fn inline_const() { let _x = const { if true { 1 } else { 2 } }; }\n\
+                 fn repeat_length() { let _x = [0; if true { 1 } else { 2 }]; }\n\
+                 fn initializer() { let _x = if true { 1 } else { 2 }; }\n",
+        cases: &[("inline_const", Some(2)), ("repeat_length", Some(2)), ("initializer", Some(2))],
     },
     // Methods and constructors measure; bodyless declarations do not.
     CyclomaticRow {
@@ -1264,6 +1321,10 @@ const JAVASCRIPT_CYCLOMATIC: &[CyclomaticRow] = &[
         cases: &[("literal", Some(2))],
     },
     CyclomaticRow {
+        source: "function anonymousClass(a) { return class { x = a ? 1 : 2; }; }\n",
+        cases: &[("anonymousClass", Some(1))],
+    },
+    CyclomaticRow {
         source: "class K {\n    constructor(a) { if (a) {} }\n    get g() { return this.a || 0; }\n    static s(a) { while (a) {} }\n}\n",
         cases: &[("constructor", Some(2)), ("g", Some(2)), ("s", Some(2))],
     },
@@ -1273,9 +1334,10 @@ const JAVASCRIPT_CYCLOMATIC: &[CyclomaticRow] = &[
     },
 ];
 
-/// The TypeScript rules: JavaScript's decisions, plus forms that contribute
-/// 0 (type-level conditionals, `as`, `satisfies`, `!`), type declarations
-/// and namespaces as boundaries, and bodyless declarations as `None`.
+/// The TypeScript rules, for `.ts` and `.tsx`: JavaScript's decisions, plus
+/// forms that contribute 0 (type syntax wherever it is written, `as`,
+/// `satisfies`, `!`), type declarations and namespaces as boundaries, and
+/// bodyless declarations as `None`.
 const TYPESCRIPT_CYCLOMATIC: &[CyclomaticRow] = &[
     CyclomaticRow {
         source: "function typed<T>(a: boolean): T extends string ? 1 : 2 { let x: T extends string ? 1 : 2; return x as any; }\n",
@@ -1315,12 +1377,100 @@ const TYPESCRIPT_CYCLOMATIC: &[CyclomaticRow] = &[
         source: "class C {\n    constructor(private a: boolean) { if (a) {} }\n}\n",
         cases: &[("constructor", Some(2))],
     },
+    // Type syntax in the body adds nothing, wherever the type is written;
+    // the value beside it (an assertion operand, a call's arguments, an
+    // object literal) still counts.
+    CyclomaticRow {
+        source: "function objectAnnotation(a: boolean) { let x: { [a ? 1 : 2]: string }; }\n\
+                 function arrayAnnotation(a: boolean) { let x: { [a ? 1 : 2]: string }[]; let y: [{ [a ? 1 : 2]: string }]; }\n\
+                 function typeQuery(a: boolean) { let x: typeof import(a ? 'a' : 'b'); }\n\
+                 function conditionalType<T>() { let x: T extends string ? number : boolean; }\n",
+        cases: &[
+            ("objectAnnotation", Some(1)),
+            ("arrayAnnotation", Some(1)),
+            ("typeQuery", Some(1)),
+            ("conditionalType", Some(1)),
+        ],
+    },
+    CyclomaticRow {
+        source: "function asTarget(a: boolean) { return {} as { [a ? 1 : 2]: string }; }\n\
+                 function importTarget(a: boolean) { return {} as import(a ? 'a' : 'b'); }\n\
+                 function satisfiesTarget(a: boolean) { return {} satisfies { [a ? 1 : 2]: string }; }\n\
+                 function asOperand(a: boolean) { return (a ? 1 : 2) as number; }\n",
+        cases: &[("asTarget", Some(1)), ("importTarget", Some(1)), ("satisfiesTarget", Some(1)), ("asOperand", Some(2))],
+    },
+    CyclomaticRow {
+        source: "function f<T>(x?: number) {}\n\
+                 function typeArgument(a: boolean) { f<{ [a ? 1 : 2]: string }>(); }\n\
+                 function callArguments(a: boolean) { f<number>(a ? 1 : 2); }\n",
+        cases: &[("f", Some(1)), ("typeArgument", Some(1)), ("callArguments", Some(2))],
+    },
+    CyclomaticRow {
+        source: "function header(p: { [a ? 1 : 2]: string }): { [a ? 1 : 2]: string } { return p; }\n\
+                 function namedTypes(a: boolean) { type O = { [a ? 1 : 2]: string }; interface I { [a ? 1 : 2]: string } }\n\
+                 function nestedClass(a: boolean) { class C { x = a ? 1 : 2; } }\n\
+                 function objectValue(a: boolean) { return { p: a ? 1 : 2 }; }\n",
+        cases: &[("header", Some(1)), ("namedTypes", Some(1)), ("nestedClass", Some(1)), ("objectValue", Some(2))],
+    },
     // A declaration without a body has no value.
     CyclomaticRow {
         source: "abstract class A {\n    abstract m(): void;\n    n(a: boolean): number { return a ? 1 : 0; }\n}\n",
         cases: &[("m", None), ("n", Some(2))],
     },
 ];
+
+/// Switch label groups, run as JavaScript, TypeScript and TSX: labels
+/// sharing one body are one arm, decided by the whole group, so a `default`
+/// anywhere in it makes the group add nothing whatever the label order; a
+/// `default` with a body of its own, a bodyless final case and comments
+/// between labels keep their meaning.
+const SWITCH_GROUP_CYCLOMATIC: &[CyclomaticRow] = &[
+    CyclomaticRow {
+        source: "function defaultFirst(x) { switch (x) { default: case 1: break; } }\n\
+                 function defaultMiddle(x) { switch (x) { case 1: default: case 2: break; } }\n\
+                 function defaultLast(x) { switch (x) { case 1: default: break; } }\n",
+        cases: &[("defaultFirst", Some(1)), ("defaultMiddle", Some(1)), ("defaultLast", Some(1))],
+    },
+    CyclomaticRow {
+        source: "function commentedDefault(x) { switch (x) { default: /* c */ case 1: /* d */ case 2: break; } }\n\
+                 function lineCommentedDefault(x) {\n    switch (x) {\n        default: // c\n        case 1:\n            break;\n    }\n}\n",
+        cases: &[("commentedDefault", Some(1)), ("lineCommentedDefault", Some(1))],
+    },
+    CyclomaticRow {
+        source: "function emptyDefaultFirst(x) { switch (x) { default: case 1: } }\n\
+                 function emptyDefaultLast(x) { switch (x) { case 1: default: } }\n\
+                 function defaultOnly(x) { switch (x) { default: break; } }\n",
+        cases: &[("emptyDefaultFirst", Some(1)), ("emptyDefaultLast", Some(1)), ("defaultOnly", Some(1))],
+    },
+    CyclomaticRow {
+        source: "function defaultBody(x) { switch (x) { default: x++; case 1: break; } }\n\
+                 function ordinaryGroup(x) { switch (x) { case 1: case 2: break; } }\n\
+                 function finalEmptyCase(x) { switch (x) { case 1: break; case 2: } }\n\
+                 function separateBodies(x) { switch (x) { case 1: x++; case 2: x--; break; default: break; } }\n",
+        cases: &[
+            ("defaultBody", Some(2)),
+            ("ordinaryGroup", Some(2)),
+            ("finalEmptyCase", Some(3)),
+            ("separateBodies", Some(3)),
+        ],
+    },
+    // Each group is decided on its own: the `default` of the second group
+    // does not reach back across the first group's body. `groups` is the
+    // example in `docs/cyclomatic-complexity.md`.
+    CyclomaticRow {
+        source: "function twoGroups(x) { switch (x) { case 1: case 2: break; case 3: default: case 4: break; case 5: } }\n\
+                 function groups(x) {\n  switch (x) {\n    default:\n    case 1: break;\n    case 2:\n    case 3: break;\n    case 4:\n  }\n}\n",
+        cases: &[("twoGroups", Some(3)), ("groups", Some(3))],
+    },
+];
+
+/// TypeScript rows that only `.ts` parses: the angle-bracket assertion is
+/// JSX in `.tsx`.
+const TS_ONLY_CYCLOMATIC: &[CyclomaticRow] = &[CyclomaticRow {
+    source: "function angleTarget(a: boolean) { return <{ [a ? 1 : 2]: string }>{}; }\n\
+             function angleOperand(a: boolean) { return <number>(a ? 1 : 2); }\n",
+    cases: &[("angleTarget", Some(1)), ("angleOperand", Some(2))],
+}];
 
 fn write_snippet(dir: &TempDir, file: &str, source: &str) -> std::path::PathBuf {
     let path = dir.path().join(file);
@@ -1382,8 +1532,17 @@ fn javascript_cyclomatic_follows_the_counting_rules() {
 }
 
 #[test]
+fn switch_groups_are_decided_by_every_label_in_the_group() {
+    for extension in ["js", "ts", "tsx"] {
+        assert_cyclomatic_rows(SWITCH_GROUP_CYCLOMATIC, extension);
+    }
+}
+
+#[test]
 fn typescript_cyclomatic_follows_the_counting_rules() {
     assert_cyclomatic_rows(TYPESCRIPT_CYCLOMATIC, "ts");
+    assert_cyclomatic_rows(TYPESCRIPT_CYCLOMATIC, "tsx");
+    assert_cyclomatic_rows(TS_ONLY_CYCLOMATIC, "ts");
 }
 
 /// `(extension, source)`: functions `broken` (an error in its own body),

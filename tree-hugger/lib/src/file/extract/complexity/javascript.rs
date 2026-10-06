@@ -1,9 +1,9 @@
 //! JavaScript counting rules (tree-sitter-javascript 0.25.0). TypeScript
 //! shares [`DECISIONS`].
 //!
-//! Zero by design: plain `else`, `default`, `finally`, `for (;;)`, `?.`,
-//! `return`/`break`/`continue`/`throw`, compound assignments other than
-//! `&&=`/`||=`/`??=`. Object literal values run inline and are counted; the
+//! Zero by design: plain `else`, `default` and every label grouped with it,
+//! `finally`, `for (;;)`, `?.`, `return`/`break`/`continue`/`throw`,
+//! compound assignments other than `&&=`/`||=`/`??=`. Object literal values run inline and are counted; the
 //! literal's methods, getters and setters are boundaries.
 
 use super::{Counts, Decision, Rules};
@@ -21,6 +21,8 @@ pub(super) static RULES: Rules = Rules {
         "class",
     ],
     opaque: &[],
+    types: &[],
+    type_sides: &[],
     decisions: DECISIONS,
 };
 
@@ -41,8 +43,9 @@ pub(super) const DECISIONS: &[Decision] = &[
         kind: "augmented_assignment_expression",
         counts: Counts::Operator(&["&&=", "||=", "??="]),
     },
-    // `case 1: case 2: …` is one arm: only the last label of a group has a
-    // `body`. `switch_default` is not counted.
-    Decision { kind: "switch_case", counts: Counts::Arm("body") },
+    // Labels sharing one body are one arm, and a group with a `default`
+    // label anywhere in it is the default arm. `switch_default` itself is
+    // not counted.
+    Decision { kind: "switch_case", counts: Counts::Arm { body: "body", default: "switch_default" } },
     Decision { kind: "catch_clause", counts: Counts::Always },
 ];

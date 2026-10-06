@@ -72,6 +72,7 @@ flowchart TD
     BODY -- yes --> WALK["walk the body's syntax tree, starting at 1"]
     WALK --> NODE{"each node"}
     NODE -- "nested function, closure,<br/>class or other declaration" --> SKIP["skip it and everything inside"]
+    NODE -- "type syntax: annotation,<br/>type arguments, cast target" --> SKIP
     NODE -- "syntax error" --> NULL3["null"]
     NODE -- "decision point" --> ADD["+1, keep walking inside"]
     NODE -- "anything else" --> GO["keep walking inside"]
@@ -102,6 +103,31 @@ function lookAlikes(a, b = a ? 1 : 2) { // a parameter default is not body
 
 A chain of operators counts each operator: `a && b || c` adds 2.
 
+### Type syntax never adds
+
+A type written inside the body is not code that runs: type annotations, type
+arguments (a Rust turbofish `make::<…>()` or TypeScript `f<…>()`), and the
+target of a cast, assertion or `satisfies` add nothing, whatever they
+contain. The value beside the type still counts, so writing a type inline
+instead of naming it never changes the total.
+
+```rust
+fn typed(a: bool) {
+    let _x: [u8; if true { 1 } else { 2 }]   // a type's array length: 0
+        = [0; if a { 1 } else { 2 }];        // a value's repeat length: +1
+}                                            // cyclomatic = 2
+```
+
+```ts
+function typed(a: boolean) {
+  let x: { [a ? 1 : 2]: string };          // annotation: 0
+  return (a ? x : null) as { [a ? 1 : 2]: string }; // operand +1, target 0
+}                                          // cyclomatic = 2
+```
+
+A syntax error inside such a type still makes the value `null`: the type is
+part of the body.
+
 ### Rust
 
 ```rust
@@ -125,7 +151,9 @@ fn arms(x: Option<i32>) -> i32 {
 | `match` arms | 1 per arm **except the last** | `match x { true => 1, false => 2 }` → 2 |
 | arm guard `if …` | 1 | see the example above |
 | `?` | 0 | `g()?; Ok(())` → 1 |
-| `async { }`, `unsafe { }`, labeled `'l: { }` blocks | counted as part of the function | `let f = async { if a {} };` → 2 |
+| `async { }`, `unsafe { }`, labeled `'l: { }` and inline `const { }` blocks | counted as part of the function | `let f = async { if a {} };` → 2 |
+| types: `let` annotations, cast targets (`as …`), generic arguments | 0 | `let _x: [u8; if true { 1 } else { 2 }];` → 1 |
+| an array's repeat length | counted, it is a value | `[0; if true { 1 } else { 2 }]` → 2 |
 
 A `match` must cover every case, so its last arm is its default whatever its
 pattern: a two-arm `match` scores the same as `if`/`else`.
@@ -159,10 +187,28 @@ function cases(a) {
 | `&&`, `\|\|`, `??` | 1 each | `(a && b \|\| c) ?? d` → 4 |
 | `&&=`, `\|\|=`, `??=` | 1 each | `a &&= b; a \|\|= b; a ??= b; a += 1;` → 4 |
 | optional chaining `?.` | 0 | `o?.x?.y` → 1 |
-| `switch` arms | 1 per arm other than `default`; labels sharing one body are one arm; labels grouped with `default` add nothing | `case 1: default: break;` → 1 |
+| `switch` arms | 1 per arm other than `default`; labels sharing one body are one arm; a group with `default` anywhere in it adds nothing | `default: case 1: break;` → 1 |
 | `catch` | 1 | `try {} catch (e) {} finally {}` → 2 |
 | decisions in template substitutions and JSX expressions | counted | `` `${a ? 1 : 2}` `` → 2; `<div>{a && <b />}</div>` → 2 |
 | object literal values | counted, they run right there | `return { p: a ? 1 : 2 }` → 2 |
+
+Consecutive labels that share one body are one arm, wherever `default`
+sits among them: a `default` anywhere in the group makes the whole group the
+default arm, so it adds nothing. A `default` with a body of its own ends its
+group, and a final label with no body is still an arm. Comments between
+labels do not split a group.
+
+```js
+function groups(x) {
+  switch (x) {
+    default:          // `default` heads the group:
+    case 1: break;    // the whole group adds 0
+    case 2:           // grouped with `case 3`: one arm
+    case 3: break;    // arm +1
+    case 4:           // last label, no body: arm +1
+  }
+}                     // cyclomatic = 3
+```
 
 Not part of the function's own count: nested function declarations and
 expressions, generators, arrow functions, methods (including an object
@@ -177,6 +223,8 @@ TypeScript uses every JavaScript rule above. Type syntax never adds:
 |---|---|---|
 | a type-level conditional `T extends U ? X : Y` | 0, it is a type, not a ternary | `let x: T extends string ? 1 : 2;` → 1 |
 | `as`, `satisfies`, non-null `!` | 0 | `(a as number) ?? (b! satisfies number)` → 2 (the `??`) |
+| type annotations, including `typeof` queries | 0 | `let x: { [a ? 1 : 2]: string };` → 1 |
+| type arguments, `as`/`satisfies`/`<T>x` targets | 0 | `f<{ [a ? 1 : 2]: string }>()` → 1; `{} as { [a ? 1 : 2]: string }` → 1 |
 
 Also not part of the function's own count: `interface`, `type` alias,
 `enum`, `class` and `abstract class` declarations and `namespace`/`module`

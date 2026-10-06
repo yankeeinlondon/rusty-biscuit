@@ -273,9 +273,10 @@ pub(crate) type ComplexitySource = (&'static str, &'static str, &'static [(&'sta
 
 /// One source per complexity case: a reviewed language's callables with a
 /// body (`Some`), bodyless ones (`None`), and a language without counting
-/// rules (`None` for every record, the other metrics still measured).
+/// rules (`None` for every record, the other metrics still measured), type
+/// syntax beside a counted value in the body, and switch label groups.
 /// `(file name, source, expected cyclomatic by name)`.
-pub(crate) const COMPLEXITY_SOURCES: [ComplexitySource; 4] = [
+pub(crate) const COMPLEXITY_SOURCES: [ComplexitySource; 8] = [
     (
         "walks.rs",
         "fn branch(x: bool) -> u8 { if x { 1 } else { 2 } }\nstruct S;\nimpl S { fn both(&self) -> bool { true && false } }\ntrait T { fn bodyless(&self); }\n",
@@ -295,6 +296,26 @@ pub(crate) const COMPLEXITY_SOURCES: [ComplexitySource; 4] = [
         "walks.go",
         "package p\n\nfunc branch(a bool) int {\n\tif a {\n\t\treturn 1\n\t}\n\treturn 0\n}\n",
         &[("branch", None)],
+    ),
+    (
+        "types.rs",
+        "fn typed(a: bool) { let _x: [u8; if true { 1 } else { 2 }] = [0; if a { 1 } else { 2 }]; }\n",
+        &[("typed", Some(2))],
+    ),
+    (
+        "types.ts",
+        "function typed(a: boolean) { let x: { [a ? 1 : 2]: string } = {} as { [a ? 1 : 2]: string }; return a || x; }\n",
+        &[("typed", Some(2))],
+    ),
+    (
+        "types.tsx",
+        "function typed(a: boolean) { return {} satisfies { [a ? 1 : 2]: string } ?? a; }\n",
+        &[("typed", Some(2))],
+    ),
+    (
+        "switches.js",
+        "function grouped(x) { switch (x) { default: case 1: break; case 2: case 3: break; } }\n",
+        &[("grouped", Some(2))],
     ),
 ];
 

@@ -1377,6 +1377,34 @@ fn entry_from_extractor_revision_twenty_seven_is_not_served_after_the_ecmascript
     }
 }
 
+/// Revision 28 counted decisions written inside type syntax in a body (an
+/// array type's length, a TypeScript object type's computed key) and a
+/// switch label grouped with an earlier `default` (`default: case 1:`), so
+/// these functions reported 2; revision 29 reports 1 for each.
+#[test]
+fn entry_from_extractor_revision_twenty_eight_is_not_served_after_the_complexity_repairs() {
+    for (file, language, source) in [
+        ("typed.rs", "rust", "fn measured() { let _x: [u8; if true { 1 } else { 2 }]; }\nfn sentinel() {}\n"),
+        ("typed.ts", "typescript", "function measured(a: boolean) { let x: { [a ? 1 : 2]: string }; }\nfunction sentinel(): void {}\n"),
+        ("switched.js", "javascript", "function measured(x) { switch (x) { default: case 1: break; } }\nfunction sentinel() {}\n"),
+    ] {
+        assert_stale_revision_is_not_served(&StaleRevision {
+            revision: "28",
+            key: OldKey::Computed,
+            file,
+            language,
+            source: source.to_string(),
+            sentinel: "sentinel",
+            probe: |out| go_record(out, "measured")["metrics"]["cyclomatic"].clone(),
+            repaired: Value::from(1),
+            stale: Value::from(2),
+            revert: |snapshot| {
+                record_named(snapshot, "measured")["metrics"]["cyclomatic"] = Value::from(2);
+            },
+        });
+    }
+}
+
 /// An entry an earlier `revision` wrote in `schema`, whose `metrics` lacked
 /// the `metric` key the bump added. Unlike the repairs above, the old payload
 /// is not readable even under the current key (its versions and metrics
