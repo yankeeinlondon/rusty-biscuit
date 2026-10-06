@@ -19,7 +19,8 @@ human_review_items:
     say which is which. Every other language's relations are now recorded;
     these three are still empty, and tasks 6.5-6.7 are waiting on this answer.
     It should be settled before Phase 8, which prints these lists in
-    `hug types --tree`, and before Phase 7 finalizes what the cache must keep.
+    `hug types --tree`. (Phase 7 is done; options A and C fit the cache as
+    it stands, while option B would add a cache column and a schema bump.)
 
     - **Option A: put every listed type in `extends`, except entries proved to be conformance.**
       An entry goes to `implements` only when this file declares it as an
@@ -47,41 +48,30 @@ human_review_items:
     type declared in another file may be dropped (documented as a
     limitation) rather than attached to a same-named local type.
 message_to_agent: |-
-  Phase 6 is done except tasks 6.5-6.7 (C#, Swift, Scala base lists), which
-  wait on ruling 1 (see human_review_items). Read `## Phase 6` of
-  implementation-log.md. Facts that matter for Phase 7 and later:
+  Phase 7 is done (read `## Phase 7` of implementation-log.md). Tasks
+  6.5-6.7 (C#, Swift, Scala base lists) still wait on ruling 1 (see
+  human_review_items); Phase 8 renders whatever relations exist, so it does
+  not depend on the ruling, but its outline tests should not assume those
+  three languages report bases yet.
 
-  - Relations are filled at the end of `TreeFile::records_from` by
-    `tree_file/relations.rs::link_relations`: one `Declarations` index per
-    file over every record (selected or not), and one walk over Rust
-    `impl_item`s per file. Per-language base readers live in
-    `extract/relations.rs` (`declared_bases`); C#/Swift/Scala return nothing
-    in `declared_bases`'s match and get one function each there when ruling
-    1 is answered. Their `RELATIONS_MATRIX` rows are `Support::Pending`,
-    which asserts nothing is recorded; flip them to `Supported` with owners.
-  - Rust impl members (and what the container search places on the impl's
-    type from inside them, such as a method's `self`) are linked under
-    Containment by `records_from` itself (`RecordFacts::containment`), from
-    `ContainerLookup::SameFileType { impl_item }` /
-    `ExtractedSymbol::container_impl`. `analysis::link_containers` keeps any
-    record that already has a container. No record retains the self-type
-    resolution, so `coverage::record_passes_suffice` now takes the language
-    and a Rust entry widened by Containment parses once (pinned by the new
-    Rust row of `symbols_cache::widening_capabilities_runs_only_the_missing_passes`).
-    Phase 7.1 should confirm that fallback or persist the evidence (that
-    would be a schema addition).
-  - EXTRACTOR_REVISION is "23" (bumped from 22). The concurrent session of
-    2026-10-03-symbol-filters-and-reports also bumps it: read the constant
-    right before bumping, and add the current value as the newest
-    `StaleRevision` (`OldKey::Computed`) in `cli/tests/symbols/cache_upgrade.rs`
-    (revision 22 is now the newest example).
-  - An unresolved Rust impl member now has `relations.container` =
-    `{ name: <self type as written>, id: None }`. `render::Outline` heads it
-    by that name (`[in &Local]`, `[in other::W]`); Phase 8 should check the
-    outline goldens for that case.
-  - The concurrent session edits `analysis/mod.rs`, `tree_file.rs`,
-    `symbols_shared_context.rs`, `symbol-schema-design.md` and the skill;
-    keep edits there to the hunks you need.
+  Facts that matter for Phase 8 and later:
+
+  - No record changed in Phase 7: EXTRACTOR_REVISION is still "23" and the
+    schema 4.1, so the JSON/JSONL goldens need no regeneration for Phase 7.
+  - Ruling for 7.1, now final: widening a cached Rust entry by Containment
+    parses once (`WidenedCapabilities { parsed: true }`); no record carries
+    the impl self-type evidence. Do not add a field for it.
+  - New `WorkCounters::relation_links` (one per analysis). New shared corpus
+    `symbols_relations::declaration_fact_sources()` (every generics,
+    modifiers, body-lines and relations matrix source plus the Rust impls).
+    If 6.5-6.7 land, their rows join it automatically through
+    RELATIONS_MATRIX; flip their `Support::Pending` rows to `Supported`.
+  - An unresolved Rust impl member still has `relations.container` =
+    `{ name: <self type as written>, id: None }`, so `render::Outline`
+    heads it `[in &Local]` / `[in other::W]`. No golden covers that yet;
+    8.2/8.3 should.
+  - `symbols_shared_context.rs` (the concurrent session's file) now exposes
+    `SMALL`, `LARGE` and `grows_linearly` as `pub`; keep edits there minimal.
 $schema:
   status: |-
     enum(

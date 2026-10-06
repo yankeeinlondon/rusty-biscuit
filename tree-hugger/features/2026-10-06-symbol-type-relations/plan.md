@@ -158,6 +158,23 @@ docs_created_during_phase_6:
 skills_files_updated_during_phase_6:
   - .claude/skills/tree-hugger/SKILL.md
   - .claude/skills/tree-hugger/api-reference.md
+source_files_during_phase_7:
+  - tree-hugger/lib/src/analysis/counters.rs
+  - tree-hugger/lib/src/analysis/coverage.rs
+  - tree-hugger/lib/src/file/query.rs
+  - tree-hugger/lib/src/file/tree_file/relations.rs
+  - tree-hugger/lib/tests/l1/symbols_adapter.rs
+  - tree-hugger/lib/tests/l1/symbols_cache.rs
+  - tree-hugger/lib/tests/l1/symbols_query.rs
+  - tree-hugger/lib/tests/l1/symbols_relations.rs
+  - tree-hugger/lib/tests/l1/symbols_shared_context.rs
+docs_updated_during_phase_7:
+  - tree-hugger/docs/symbol-schema-design.md
+  - tree-hugger/docs/symbol-kinds-and-visibility.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+  - .claude/skills/tree-hugger/SKILL.md
+  - .claude/skills/tree-hugger/api-reference.md
 ---
 
 # Plan: generics, inheritance, modifiers, attributes and body line counts
@@ -621,7 +638,7 @@ ruling 1 is unanswered, and then listed as an open item, not skipped silently).
 
 ### Wave 1 (single owner)
 
-- [ ] **7.1 Planner and projection**
+- [x] **7.1 Planner and projection**
     - Extend `analysis/coverage.rs` and `file/query.rs` so Declarations carries
       generics, modifiers, attributes and extends/implements with conservative
       IDs (selected records get full metadata; unselected records stay light
@@ -637,22 +654,22 @@ ruling 1 is unanswered, and then listed as an open item, not skipped silently).
 
 ### Wave 2 (parallel; disjoint test files)
 
-- [ ] **7.2 Query tests** — `symbols_query.rs`: narrow query equals the matching
+- [x] **7.2 Query tests** — `symbols_query.rs`: narrow query equals the matching
   slice of the complete index under each capability set; declarations-only
   skips optional passes (assert via the work counters).
-- [ ] **7.3 Cache tests** — `symbols_cache.rs`: a real warm `CacheLookup::Hit`
+- [x] **7.3 Cache tests** — `symbols_cache.rs`: a real warm `CacheLookup::Hit`
   (not silent recomputation), projection, widening (declarations →
   containment, → metrics), narrowing, invalidation by the new
   `EXTRACTOR_REVISION`/schema version, and the Phase 2 matrix.
-- [ ] **7.4 Adapter tests** — `symbols_adapter.rs`: the record-only older-model
+- [x] **7.4 Adapter tests** — `symbols_adapter.rs`: the record-only older-model
   adapters remain explicitly lossy for structured generics, relations, raw
   attributes and new modifiers; assert and document the losses.
-- [ ] **7.5 Counter checks** — assert no repeated definitions query and no
+- [x] **7.5 Counter checks** — assert no repeated definitions query and no
   per-symbol whole-file walk (one impl traversal, one index build per file).
 
 ### Wave 3 (sequential)
 
-- [ ] **7.6 Verify** — `just test` and `just lint`.
+- [x] **7.6 Verify** — `just test` and `just lint`.
 
 **Validation checkpoint:** equivalence proven for every capability combination.
 

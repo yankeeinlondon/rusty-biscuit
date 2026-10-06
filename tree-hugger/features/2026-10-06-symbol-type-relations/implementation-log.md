@@ -154,6 +154,23 @@ docs_created_during_phase_6:
 skills_files_updated_during_phase_6:
   - .claude/skills/tree-hugger/SKILL.md
   - .claude/skills/tree-hugger/api-reference.md
+source_files_during_phase_7:
+  - tree-hugger/lib/src/analysis/counters.rs
+  - tree-hugger/lib/src/analysis/coverage.rs
+  - tree-hugger/lib/src/file/query.rs
+  - tree-hugger/lib/src/file/tree_file/relations.rs
+  - tree-hugger/lib/tests/l1/symbols_adapter.rs
+  - tree-hugger/lib/tests/l1/symbols_cache.rs
+  - tree-hugger/lib/tests/l1/symbols_query.rs
+  - tree-hugger/lib/tests/l1/symbols_relations.rs
+  - tree-hugger/lib/tests/l1/symbols_shared_context.rs
+docs_updated_during_phase_7:
+  - tree-hugger/docs/symbol-schema-design.md
+  - tree-hugger/docs/symbol-kinds-and-visibility.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+  - .claude/skills/tree-hugger/SKILL.md
+  - .claude/skills/tree-hugger/api-reference.md
 ---
 
 # Implementation Log for 2026-10-06-symbol-type-relations (9 phases)
@@ -1332,3 +1349,128 @@ column (`relations.implements`) is already in `cache_robustness`.
   member by `container.name` (`[in other::Local]`), which is the self type as
   written rather than the old in-file owner path; no golden covers that case
   yet.
+
+## Phase 7
+
+Capabilities, cache and query/index equivalence. No record changed, so
+neither `EXTRACTOR_REVISION` (still 23) nor the schema (4.1) was bumped. The
+library gained one public counter field (`WorkCounters::relation_links`) and
+doc corrections. Everything else is new tests. Tasks 7.1–7.6 are done; 6.5–6.7
+still wait on ruling 1.
+
+### 7.1 Planner and projection: decisions
+
+- **Declarations** already carries generic parameters, constraints,
+  modifiers, attributes and `extends`/`implements` (Phases 3, 4 and 6), for
+  selected records. Targets resolve against every record of the file,
+  selected or not. These facts do not depend on any capability or on kind
+  selection, so `coverage::project` keeps them unchanged; no projection rule
+  was needed. Its module doc and `Capability::Declarations` /
+  `Capability::Containment` docs now say so.
+- **Containment** carries the Rust impl links (`RecordFacts::containment`
+  in `records_from`) and `link_containers` for everything else; projection
+  already drops `parent`/`container`/`members` without it.
+- **Metrics** carries `parameters`, `has_docs` and `lines` together.
+  Widening parses once, and narrowing drops the whole facet. Both were
+  already in place.
+- **Self-type evidence (final ruling):** no record retains a Rust impl's
+  resolved self type. Widening a Rust entry by Containment parses once
+  (`WidenedCapabilities { parsed: true }`), the spec's documented fallback,
+  and stays that way. Persisting the evidence was rejected, for two
+  reasons. First, a new record field means a schema bump and another cache
+  column. Second, storing pre-linked containers on a Declarations-only entry
+  would make a stored entry differ from the uncached result of its own
+  coverage, which every cache invariant relies on. The cost is one parse,
+  only on that one widening path. Already documented in `type-relations.md`
+  and `cache-design.md`.
+- No new capability. One definitions query, one parse and one relation link
+  per analysis (asserted below).
+
+### Library change
+
+- `WorkCounters::relation_links` (`analysis/counters.rs`), incremented once
+  per `tree_file/relations.rs::link_relations` call. The linker builds the
+  per-file `Declarations` index and, in Rust, walks the impls once, so this
+  counter is how a test proves "one index build, one impl traversal per
+  file". The CLI only uses `since`, so the new field needed no change there.
+
+### Shared test corpus
+
+`symbols_relations::declaration_fact_sources` returns every source of
+`GENERICS_MATRIX`, `MODIFIERS_MATRIX`, `BODY_LINES_MATRIX` (LF and CRLF) and
+`RELATIONS_MATRIX`, plus `RUST_IMPLS`. `write_declaration_fact_sources`
+writes them to a temp dir. These are the forms built to exercise the new
+facts (bounds, `where` clauses, attribute repetitions, body spans, external
+and ambiguous targets, multiple, empty and negative impls). The primary
+fixtures used by the older equivalence tests hold few of them.
+
+### Requirement → test
+
+| Requirement | Test |
+|---|---|
+| Narrow query = matching slice of the complete index for generics, constraints, modifiers, attributes, `extends`/`implements` (IDs included), container/parent/members, `metrics`, under Declarations / Containment / Metrics / Flags / Containment+Metrics / all, for every kind, functions, types and methods only; absent where the capability is not asked | `symbols_query::declaration_facts_of_narrow_queries_equal_the_complete_index` (asserts each fact kind occurs in the corpus, textual impl containers included) |
+| Declarations-only skips optional passes; one parse, one definitions query, one relation link, no diagnostics (complete index: one diagnostics run, one link) | `symbols_query::declaration_facts_need_one_parse_one_capture_and_one_relation_link` |
+| No per-declaration rescan in base/impl resolution; one relation link per file | `symbols_relations::relation_resolution_grows_linearly_with_declarations` (Rust modules with supertraits and local/external impls, TS, Java nested, C++ namespaces with `virtual ext::D`, Python; resolved targets checked at both sizes) |
+| Real warm `CacheLookup::Hit` with zero work, cold `Miss(Absent)`, projection to narrower queries equal to uncached (containers and `lines` dropped, relations kept) | `symbols_cache::declaration_fact_sources_are_warm_hits_and_project_to_uncached_queries` |
+| Widening declarations → containment (record-only except Rust, which parses once) → metrics (parses once); widened = uncached; entry records the union; each request then a `Hit` with no work, narrowing included | `symbols_cache::declaration_fact_entries_widen_by_containment_and_metrics` |
+| Invalidation by schema version | `symbols_cache::a_declaration_fact_entry_of_an_older_record_schema_is_a_miss` (4.0 records on the Rust impl entry), plus the existing `incompatible_record_schema_versions_are_misses_never_served_or_widened` |
+| Invalidation by `EXTRACTOR_REVISION` | existing `symbols_cache::each_key_input_and_stored_identity_decides_a_miss` (revision is a fingerprint input) and `cache_upgrade::entry_from_extractor_revision_twenty_two_is_not_served_after_the_relations` (Phase 6, rev.22 → 23); no bump this phase |
+| Phase 2 matrix (`metrics.lines` reader shapes) | existing `symbols_adapter::new_record_fields_read_per_shape` and `cli/tests/symbols/cache_robustness.rs`, green |
+| Older-model adapters lossy for structured generics, constraints, relations, attributes, `metrics.lines` and new modifiers | `symbols_adapter::record_only_declaration_facts_are_lost_through_the_older_model` (each loss must actually occur, so a fixed adapter flips it) |
+
+Mutation checks, run once by hand and reverted:
+
+- Building the `Declarations` index from selected records only made
+  `declaration_facts_of_narrow_queries_equal_the_complete_index` fail
+  (`generics Rust: functions with [Containment]`).
+- Charging `records.len()` steps per `resolve` call made the linear test
+  fail for all five shapes (about 4× the steps at 2× declarations).
+- Letting Rust Containment widen from records made
+  `declaration_fact_entries_widen_by_containment_and_metrics` fail.
+
+Input Robustness Matrix: not applicable. No reader of a file format or
+configuration changed; the record and cache readers are untouched.
+
+### Gates
+
+- `just test` (tree-hugger): **1068 / 1068 passed**, 0 skipped.
+- `just lint` (clippy `--all-targets -D warnings`, both packages): green.
+- `just check-tier-coverage tree-hugger`: nothing stranded. The seven new
+  tests are L1 in the declared `l1` binary, and no name carries a tier marker.
+- `just test-l2`: not run. No rendering changed.
+- Cross-OS: not run. The new code is a counter and tests over temp files
+  with in-memory sources (CRLF variants included). No path comparison,
+  process or OS API is involved, and CI proves Linux and macOS on the pull
+  request.
+- Pre-existing failures: none.
+
+### Docs and skill
+
+- `symbol-schema-design.md`: the adapter list now names `generic_params`,
+  `constraints`, `extends`/`implements` and `metrics.lines` and states the
+  round trip; the work-counter paragraph adds `relation_links`. Drift fixed:
+  the migration step said "currently 4.0"; it is 4.1.
+- `symbol-kinds-and-visibility.md`: "Adapter gaps" now covers the record →
+  `SymbolInfo` direction.
+- `type-relations.md` and `cache-design.md` already described the Rust
+  widening fallback and the relation adapter loss; unchanged.
+- Skill: `SKILL.md` relations bullet (counter and shared corpus),
+  `api-reference.md` work counters.
+- Comments: `Capability::Declarations`/`Containment` docs and the
+  `coverage.rs` module doc (which facts projection keeps).
+
+### Notes
+
+- To share `SMALL`, `LARGE` and `grows_linearly`, I made them `pub` in
+  `symbols_shared_context.rs` (the concurrent session's file). That is a
+  one-word change on three lines, so both linear tests use one bound.
+- While this phase was running, another process made commit `4be249d1a`
+  ("feat(tree-hugger): extract type relations for symbol records", Phase 6).
+  It also swept in this phase's edits to `analysis/counters.rs`,
+  `analysis/coverage.rs`, `file/query.rs`, `file/tree_file/relations.rs` and
+  `tests/l1/symbols_query.rs`, which were in the working tree at the time.
+  This phase staged and committed nothing. The remaining Phase 7 changes are
+  uncommitted (`symbols_adapter.rs`, `symbols_cache.rs`,
+  `symbols_relations.rs`, `symbols_shared_context.rs`, docs, skill, plan,
+  log, spec). The frontmatter lists every file this phase touched,
+  committed or not.
