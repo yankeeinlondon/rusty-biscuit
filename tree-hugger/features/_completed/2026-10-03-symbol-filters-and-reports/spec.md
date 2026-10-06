@@ -9,7 +9,7 @@ reviewed: true
 reviewed_by: claude/opus
 reviewed_on: 2026-10-04
 review_note: "the clarification process served as a review"
-review_iterations: 9
+review_iterations: 10
 needs_rulings: false
 implemented: true
 implemented_by: \"claude/opus\"
@@ -59,6 +59,7 @@ message_to_agent: |-
     departure, not changeable here.
   - Windows evidence is still missing: cross-check builds and archives for windows-latest but
     the consume step fails _storage_preflight (15 GiB free, needs 50). Linux passes (248).
+completed: true
 ---
 
 # Precise, filterable symbol reports

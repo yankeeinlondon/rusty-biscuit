@@ -13,10 +13,13 @@ reviewed_by: codex/gpt-6.1-sol
 recurrence: true
 created: "2026-10-05T17:42:23-07:00"
 spec: 2026-10-03-symbol-filters-and-reports/spec.md
-implemented: false
+implemented: true
+implemented_by: claude/opus
+log: tree-hugger/features/2026-10-03-symbol-filters-and-reports/log.md
 description: "A **feature** review of `2026-10-03-symbol-filters-and-reports/spec.md`"
 feature: 2026-10-03-symbol-filters-and-reports/review-9.md
 previous: 2026-10-03-symbol-filters-and-reports/review-8.md
+next: 2026-10-03-symbol-filters-and-reports/review-10.md
 ---
 
 The feature is **not production ready**. Scala block-form packages are omitted from names, breaking qualified selectors and making declarations in different packages indistinguishable by name. The previous performance repair removes the original flat-file scans, but several shared-context lookups still grow quadratically when declarations repeat names or introduce additional package scopes. These are two unblocked findings; neither needs a human design decision.

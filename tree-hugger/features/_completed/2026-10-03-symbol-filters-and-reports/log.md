@@ -8,6 +8,7 @@ implementation_5: "2026-10-05T15:41:32-07:00"
 implementation_6: "2026-10-05T16:19:15-07:00"
 implementation_7: "2026-10-05T16:52:58-07:00"
 implementation_8: "2026-10-05T17:12:11-07:00"
+implementation_9: "2026-10-05T17:51:06-07:00"
 ---
 
 ## Implementation of Review Findings #1
@@ -388,3 +389,44 @@ The files changed in this cycle are `tree-hugger/lib/src/file/extract/qualified_
         - verification: new tests 4/4 L1 and 1/1 CLI pass; `just lint` clean; `just check-tier-coverage tree-hugger` 0 stranded; nextest over both packages excluding `probe_tmp`: 1046/1049, the 3 failures in `symbols_metrics` (`lines`/body-span rows) are from the concurrent symbol-type-relations session's live edits to `metrics.rs`/`symbols_metrics.rs` (modified 18:01–18:02, files this cycle did not touch); `just test` also stops on that session's untracked `probe_tmp` tests
 - work completed for 'Scala block packages disappear from qualified names and selectors' at 18:03:30
 - starting the work on 'Shared-context lookups still rescan repeated names and package segments' at 18:03:40
+        - defect class: a per-file index retains growing candidate lists, then repeatedly scans those lists for individual declarations instead of indexing or memoizing the decision those declarations share
+        - discovery: two sites outside the review table had the same shape, both uncounted: `bind_references` export targets (each export scanned every record of its name) and `TreeFile::symbol_records` `implements` IDs (each `impl Trait for T` member scanned every record)
+        - discovery: before the fix, the C++ namespace scan in `FunctionIdentity::of` and the containment candidate visits were uncounted; they were counted temporarily to get the before figures
+        - discovery: a C++ out-of-body definition `void r9_i::probe() {}` has in-file name `probe` (the documented out-of-class limit), so its row asserts access level and record count, not the name
+        - completed: `visibility/rust.rs`/`mod.rs`: `rust_trait_levels` holds one agreed `Option<Visibility>` per trait name
+        - completed: `visibility/c.rs`: earlier `static` declarations keyed by complete `FunctionIdentity` (`linkage_key`: every field for C++, name alone for C) to the earliest start; namespaces a `HashMap` from path to earliest start, each lookup counted
+        - completed: `visibility/scala.rs`: package segments are a `HashSet` (block-package collection from finding 1 kept)
+        - completed: `tree_file/definitions.rs`: `resolve_container_kind` reads a lazily built `KindAgreement` (by name, qualified name and segment tail) for tables and types
+        - completed: `analysis/mod.rs`: `resolve_containers` replaces `find_container_symbol` (span-ordered `smallest_enclosing` per name, `OwnerIndex`/`find_container_by_identity` for owners declared elsewhere, lazy tail index), export targets by name span (`ExportTargets`); all visits counted
+        - completed: `tree_file.rs`: `implements` IDs from a per-file map of unique traits
+        - completed: tests
+                - `symbols_shared_context::repeated_names_keep_shared_context_linear_and_results_intact` (9 `REPEATED_SHAPES`; asserts qualified names, Rust impl Public/Private, C++ ModulePrivate, Scala `private[r9_i]` = Package, Rust `pub fn` exported, `implements` and owner IDs)
+                - `symbols_shared_context::containment_of_repeated_owners_stays_linear` (`Capability::Containment` over Rust and Lua owner shapes)
+                - `analysis::tests::owner_index_resolves_repeated_owners_as_the_scan_does` and the full-scan oracle now comparing batch `resolve_containers` on every fixture
+                - both new L1 tests fail on the pre-fix code on growth alone
+        - measurement: `shared_context_steps` at N=100/200/400, before → after
+                - Rust trait `Probe` per module: 33,201/126,401/492,801 → 9,400/18,800/37,600 (after includes export and `implements` lookups)
+                - Rust `struct Probe` + impl per module: 61,400/242,800/965,600 → 4,900/9,800/19,600
+                - Lua repeated `local Probe`: 30,000/120,000/480,000 → 1,100/2,200/4,400
+                - C++ namespace `static`/definition pairs: 5,750/21,500/83,000 → 1,500/3,000/6,000
+                - C++ out-of-body definitions: 10,600/41,200/162,400 → 1,300/2,600/5,200
+                - C++ overloads on `R9_i`: 5,250/20,500/81,000 → 300/600/1,200
+                - C++ distinct namespace-qualified names: 5,650/21,300/82,600 → 1,300/2,600/5,200
+                - Rust `pub fn probe` exports: uncounted N² before → 1,400/2,800/5,600
+                - Scala block packages: 15,650/61,300/242,600 → 1,099/2,199/4,399
+                - containment, Rust owners: 60,100/240,200/960,400 → 3,600/7,200/14,400
+                - containment, Lua tables: 30,000/120,000/480,000 → 1,100/2,200/4,400
+        - completed: output byte-identical (goldens and cache tests unchanged), so `EXTRACTOR_REVISION` stays at 21
+        - completed: docs `symbol-schema-design.md` (shared-context decision table), `counters.rs` doc, tree-hugger skill `SKILL.md`/`api-reference.md`; the linear shared-context promise is kept because every case now meets it
+        - note: the concurrent commit `4bd92fd37` captured finding 1 and part of this finding's in-progress source; the rest is uncommitted
+- class sweep: a per-file index retains growing candidate lists and rescans them per declaration; sites checked: Rust `same_file_trait_level`, `resolve_container_kind` (`SameFileType`, `SameFileTable`), C/C++ `has_earlier_static_declaration`, `FunctionIdentity::of` namespace lookup, Scala `extract_scala_visibility`, `find_container_symbol`, bind export targets, `symbol_records` `implements` IDs, `NameIndex` reference binding, C linkage reader, Go `SameFileType`, `SiblingScopes`, inner `cfg(test)` map, `qualified_names` namespace index, C++ access sections, field/variant owner grouping, god-files callouts, CLI prelude/`members_by_id`/outline; fixed here: `same_file_trait_level`, `resolve_container_kind` (both lookups), `has_earlier_static_declaration`, `FunctionIdentity::of`, `extract_scala_visibility`, `find_container_symbol`, export-target lookup, `implements`-ID lookup; clean: `NameIndex` binding, C linkage, Go `SameFileType`, `SiblingScopes`, `cfg(test)` map, namespace index, C++ access sections, field/variant grouping, god-files callouts, CLI prelude/members/outline
+- work completed for 'Shared-context lookups still rescan repeated names and package segments' at 18:28:00
+- verification at close (18:28): `just test` 1055 passed, 0 failed, 0 skipped; `just check-tier-coverage tree-hugger` 0 stranded (subagent run); `just lint` fails only on `dead_code` in the untracked `tree-hugger/lib/src/file/extract/relations.rs`, a file the concurrent symbol-type-relations session is creating (its relations phase, not yet wired); it passed for this cycle's changes before that file appeared
+
+### Successful Completion
+
+The implementation of review cycle 9 has completed successfully in about 38 minutes (17:51:06 → 18:29). During this implementation all 2 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 2 were fixed, 0 were deferred (see reasons below):
+
+- no finding was deferred; the performance finding is proven with work counters, not timing, so no CPU-load-dependent measurement was required and `deferred_perf_measurement` is not set
+
+The files changed in this cycle are `tree-hugger/lib/src/file/extract/qualified_name.rs`, `visibility/{c,mod,rust,scala}.rs`, `tree-hugger/lib/src/file/tree_file.rs`, `tree_file/definitions.rs`, `tree-hugger/lib/src/analysis/{mod,tests,counters}.rs`, `tree-hugger/lib/src/file/mod.rs` (`EXTRACTOR_REVISION` 21), `tree-hugger/lib/tests/l1/symbols_namespace_bodies.rs` (new), `symbols_shared_context.rs`, `l1/main.rs`, `tree-hugger/cli/tests/symbols/{filters,cache_upgrade}.rs`, goldens `symbols.json`/`symbols.jsonl`, `tree-hugger/docs/{symbol-kinds-and-visibility,symbol-schema-design,cache-design}.md`, `.claude/skills/tree-hugger/SKILL.md`, `api-reference.md`, this log and `review-9.md` (frontmatter). Part of the source was included in the concurrent commit `4bd92fd37`.
