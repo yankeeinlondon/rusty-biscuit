@@ -221,3 +221,37 @@ because overlapping host-network detections fail-fast the test process
 
 A cross-compile is compile evidence. Behavioral evidence comes from
 `just cross-check <pkg> --os windows` or the `windows-latest` CI leg.
+
+## Inspecting another process's handles
+
+Measured 2026-10-05 on `BUILD_WIN` for Sniff's path-usage query. The SSH
+session there is **elevated** (High integrity, SeDebugPrivilege), so
+handle/permission counts taken over SSH overstate what a normal user sees.
+Simulate Medium integrity with a filtered token, or use a desktop session.
+
+- **Identity queries on a duplicated *disk* handle can block indefinitely.**
+  If the owning process has synchronous I/O pending on that file object (for
+  example a synchronous handle waiting in `LockFileEx`), the following all
+  block until the owner's I/O ends: `GetFileInformationByHandleEx`
+  (`FileIdInfo`, `FileBasicInfo`), `NtQueryInformationFile`
+  (`FileModeInformation`), `GetFinalPathNameByHandleW`, and
+  `NtQueryObject(ObjectNameInformation)`. `CancelSynchronousIo` on the stuck
+  thread fails with 1168, because the thread is waiting on the file-object
+  lock, not on its own I/O. A synchronous named-pipe server blocks the name
+  queries the same way. `GetFileType` never blocked, so it is the only safe
+  in-process pre-filter.
+- **Terminating a helper process does release it.** A helper process stuck
+  in those calls exited 1.0-1.5 ms after `TerminateProcess`, in 7 of 7
+  trials, and the owner's lock state was unchanged. A thread inside your own
+  process cannot be rescued this way; never terminate it.
+- A process's current directory appears in its handle table as an ordinary
+  directory handle (access `0x100020`), so a FileId match finds it. It cannot
+  be told apart from any other directory handle without reading the PEB.
+- On ReFS (`B:` on that host), `FileIdInfo` is a full 128-bit id, and files in
+  one directory share the upper 64 bits. Compare the pair
+  `(VolumeSerialNumber, 128-bit id)`; the 64-bit
+  `GetFileInformationByHandle` index is not enough.
+- `NtQuerySystemInformation(64)` (`SystemExtendedHandleInformation`, not a
+  named constant in `windows` 0.62) needs a `STATUS_INFO_LENGTH_MISMATCH`
+  retry loop; the snapshot was about 100k handles, 4 MB.
+  `EnumProcessModulesEx` also needs a size retry.

@@ -112,6 +112,47 @@ cap to this leg, not to Linux. It is also the only leg where Level 3
 focus-stealing tests could run, and they do not run on CI at all. Details in
 [ci-runners.md](ci-runners.md).
 
+## Finding filesystem watchers
+
+An open-file scan does not enumerate FSEvents directory watches. On 2026-10-05,
+a Node `fs.watch(path, { recursive: true })` process with cwd `/` received a
+created-file event, but `lsof -nP -a -p <pid> -Fftn` contained no watched path.
+The probe used a temporary directory and waited for delivery before inspecting
+its descriptors. A process whose cwd is inside a worktree may still be found
+through cwd inspection; that is evidence of directory use, not a watch record.
+
+Apple's `FSEventStreamCopyPathsBeingWatched` inspects a stream reference owned
+by the caller, not a system-wide list of other processes' registrations. Do
+not treat an empty `lsof` or vnode-descriptor scan as proof that no process
+watches a directory. See the [FSEvents guide](https://developer.apple.com/library/archive/documentation/Darwin/Conceptual/FSEvents_ProgGuide/UsingtheFSEventsFramework/UsingtheFSEventsFramework.html)
+and [Node's platform mapping](https://nodejs.org/api/fs.html#availability).
+
+### Reading other processes' descriptors and cwd
+
+Measured 2026-10-05 on macOS 27.2 (arm64) for Sniff's path-usage query:
+
+- The `libproc` crate (0.14.11) is a poor fit. `pids_by_path` /
+  `pids_by_type_and_path` is **not recursive**: it matches only processes whose
+  fd or cwd is the queried vnode itself, never anything beneath a directory.
+  Its `is_volume` and `exclude_event_only` flags are silently ignored, because
+  `sys/macos.rs` passes `pathflags` only on the sizing call. `pidcwd` returns
+  "not implemented for macos". Its `build.rs` also runs bindgen, so the build
+  needs libclang.
+- Raw `libc::proc_pidinfo(PROC_PIDLISTFDS)` plus
+  `proc_pidfdinfo(PROC_PIDFDVNODEPATHINFO = 2)` gives each vnode fd's canonical
+  `/private/...` path, `vst_dev`, `vst_ino`, and `fi_openflags`.
+  `proc_pidinfo(PROC_PIDVNODEPATHINFO)` gives the cwd the same way. `libc`
+  lacks `proc_fileinfo`, `vnode_fdinfowithpath`, and that constant, so define
+  them locally.
+- `PROC_PIDLISTFDS` fills only the buffer you pass and does not report that it
+  was too small. Retry larger whenever the returned count equals the capacity.
+  `pbi_nfiles` is table capacity, not the open count.
+- An `O_EVTONLY` open is visible (`fi_openflags = 0x8001`). It is a
+  descriptor, not proof of an FSEvents subscription.
+- Another user's process (PID 1) fails every per-PID call with `EPERM`, while
+  `proc_listpids` still lists every PID. Treat EPERM as "not inspected", never
+  as "no matches".
+
 ## Host conditions that look like repo failures
 
 - **A Homebrew upgrade of `libgit2` breaks linking with `ld: library 'git2'

@@ -62,6 +62,9 @@ environment's cell and how to record an execution ban.
 | Red only on `windows-latest`, a path in the message | 8.3 short-name TEMP (`RUNNER~1`) or verbatim `\\?\` spelling | [windows-paths.md](windows-paths.md) |
 | Red only on `windows-latest`, elapsed time equals some child's timeout | handle inheritance keeps pipes open | [windows.md](windows.md#environment-and-processes) |
 | Red only on `windows-latest` with an empty failure message | a std handle redirected to `CONOUT$` | [windows-console.md](windows-console.md#attaching-a-console-inside-a-nextest-process) |
+| macOS watcher receives events but its target is absent from `lsof` | FSEvents directory watches do not require an open descriptor naming the target | [macos.md](macos.md#finding-filesystem-watchers) |
+| A per-handle file query hangs only on Windows; `CancelSynchronousIo` returns 1168 | the handle's owner has synchronous I/O pending on that file object | [windows.md](windows.md#inspecting-another-processs-handles) |
+| `/proc` fd scan finds nothing for a process you know holds files | `procfs` skips per-fd `EACCES`, or `sdev` was compared without decoding | [linux.md](linux.md#reading-proc-for-another-processs-descriptors) |
 | Green gates that did not test your worktree | Bash `cd <area>` followed `CDPATH` into the main checkout | [macos.md](macos.md) |
 | macOS host L2 red with a shell prompt in the captured frame | a host shell-startup prompt swallowed the input; not a repo defect | [macos.md](macos.md) |
 | Slow on one leg only, or a timing delta under 15% | runner size and per-leg profile; noise is 5–15% per leg | [ci-runners.md](ci-runners.md) |
