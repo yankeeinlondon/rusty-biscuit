@@ -47,9 +47,10 @@ framework details. Rules the list follows:
   root — the same relative form JSON reports — never rebased onto your
   current directory.
 - Each entry is a hyperlink to the actual file when the terminal supports
-  hyperlinks; terminals without that support show the same label as plain
-  text. `--plain` prints the same paths with no color or hyperlink escape
-  sequences.
+  hyperlinks; terminals without that support, including redirected or piped
+  output, show the same label as plain text with no link syntax added, so
+  `photo[x].png` stays `photo[x].png`. `--plain` prints the same paths with
+  no color or hyperlink escape sequences.
 - Filenames are rendered as literal text. Control characters appear as
   visible escapes (`\n`, `\t`), and a literal backslash doubles (`\\`), so a
   filename can never inject extra report lines or terminal sequences and an

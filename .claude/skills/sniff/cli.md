@@ -85,7 +85,14 @@ and exits nonzero rather than guessing. JSON, unfiltered, and non-verbose
 reports never resolve a root. Labels are reversible (controls visible,
 backslashes doubled) and are markup-escaped after label construction; entries
 whose target cannot become a faithful `file://` URL fall back to the plain
-label, silently.
+label, silently. When the terminal lacks OSC8 (`osc_link_support` false, e.g.
+piped output) no anchor is emitted at all: `biscuit-terminal`'s
+`[label](url)` link fallback escapes every `]`, which would change the
+reversible label. `link_target` also percent-encodes `[ ] ( )`, because the
+Prose parser reads a `[text](target)` run inside an `href` as a nested link.
+A piped CLI test therefore sees bare labels only; L1 tests decode
+destinations by running the report in a Unix PTY with
+`TERM_PROGRAM=WezTerm`.
 
 ## Common host commands
 
