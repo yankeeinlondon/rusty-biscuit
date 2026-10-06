@@ -125,6 +125,39 @@ docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
   - .claude/skills/tree-hugger/SKILL.md
   - .claude/skills/tree-hugger/api-reference.md
+source_files_during_phase_6:
+  - tree-hugger/lib/src/file/extract/relations.rs
+  - tree-hugger/lib/src/file/extract/mod.rs
+  - tree-hugger/lib/src/file/extract/rust_impl.rs
+  - tree-hugger/lib/src/file/extract/classify.rs
+  - tree-hugger/lib/src/file/tree_file.rs
+  - tree-hugger/lib/src/file/tree_file/relations.rs
+  - tree-hugger/lib/src/file/tree_file/definitions.rs
+  - tree-hugger/lib/src/file/mod.rs
+  - tree-hugger/lib/src/analysis/mod.rs
+  - tree-hugger/lib/src/analysis/coverage.rs
+  - tree-hugger/lib/src/cache/symbol_cache.rs
+  - tree-hugger/lib/tests/l1/symbols_relations.rs
+  - tree-hugger/lib/tests/l1/main.rs
+  - tree-hugger/lib/tests/l1/symbols_coverage.rs
+  - tree-hugger/lib/tests/l1/symbols_kinds.rs
+  - tree-hugger/lib/tests/l1/symbols_owner_identity.rs
+  - tree-hugger/lib/tests/l1/symbols_shared_context.rs
+  - tree-hugger/lib/tests/l1/symbols_cache.rs
+  - tree-hugger/cli/tests/symbols/cache_upgrade.rs
+  - tree-hugger/cli/tests/fixtures/golden/symbols.json
+  - tree-hugger/cli/tests/fixtures/golden/symbols.jsonl
+docs_updated_during_phase_6:
+  - tree-hugger/README.md
+  - tree-hugger/lib/README.md
+  - tree-hugger/docs/cache-design.md
+  - tree-hugger/docs/symbol-kinds-and-visibility.md
+  - tree-hugger/docs/symbol-schema-design.md
+docs_created_during_phase_6:
+  - tree-hugger/docs/type-relations.md
+skills_files_updated_during_phase_6:
+  - .claude/skills/tree-hugger/SKILL.md
+  - .claude/skills/tree-hugger/api-reference.md
 ---
 
 # Plan: generics, inheritance, modifiers, attributes and body line counts
@@ -515,12 +548,12 @@ after Phases 3–5 merge to avoid conflicts in `tree_file.rs`.
 
 ### Wave 1 (sequential; one owner for the shared index)
 
-- [ ] **6.1 Per-file light-declaration index**
+- [x] **6.1 Per-file light-declaration index**
     - Build once per file from all light declarations (independent of kind
       selection) keyed for bare-name and qualified lookup with scope. No
       per-relation or per-symbol rescans. Records unselected by the query still
       feed it.
-- [ ] **6.2 Target resolution rules**
+- [x] **6.2 Target resolution rules**
     - `name` = complete written base expression, outer whitespace trimmed
       (`pkg.Base<T>` stays whole). `id` and in-file `qualified_name` only when
       syntax, qualification and lexical scope identify exactly one eligible
@@ -531,7 +564,7 @@ after Phases 3–5 merge to avoid conflicts in `tree_file.rs`.
       no scan-root or module prefix in stored targets. Preserve source order,
       dedup equal target expressions per list, keep distinct instantiations.
       No inherited or transitive edges.
-- [ ] **6.3 Plain-language relations** — wire `extends`/`implements` from the
+- [x] **6.3 Plain-language relations** — wire `extends`/`implements` from the
   per-language table: TS (class extends/implements, interface extends), JS
   (written extends expression, unresolved if dynamic), Java, PHP (trait `use`
   is composition), Python (positional bases; `metaclass=` excluded), Go
@@ -543,7 +576,7 @@ after Phases 3–5 merge to avoid conflicts in `tree_file.rs`.
 
 ### Wave 2 (sequential; Rust impl ownership)
 
-- [ ] **6.4 Rust impl traversal**
+- [x] **6.4 Rust impl traversal**
     - In `rust_impl.rs`, traverse impl declarations once, including empty impls
       (`impl Marker for Local {}`); stop shortening the trait to its last path
       segment; keep `implements` on each directly declared trait-impl member
@@ -572,7 +605,7 @@ after Phases 3–5 merge to avoid conflicts in `tree_file.rs`.
 
 ### Wave 4 (sequential)
 
-- [ ] **6.8 Relations matrix**
+- [x] **6.8 Relations matrix**
     - New matrix under the symbols framework with a row for all 16 languages.
       Required cases: qualified external target sharing a local short name,
       duplicate names in different scopes, ambiguous and alias targets, type

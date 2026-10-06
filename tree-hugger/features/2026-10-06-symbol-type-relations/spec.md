@@ -7,39 +7,81 @@ reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-05
 review_iterations: 0
-human_review: false
-message_to_agent: |-
-  Phases 1-5 are done; read `## Phase 4` and `## Phase 5` of
-  implementation-log.md. Facts that matter for Phase 6 and later:
+human_review: true
+human_review_items:
+  - |-
+    **How should C#, Swift and Scala base lists be recorded?** (the spec's Open Question, "ruling 1")
 
-  - A second session (review cycles of 2026-10-03-symbol-filters-and-reports)
-    works in this same worktree and also bumps `EXTRACTOR_REVISION`. Read
-    the constant (`lib/src/file/mod.rs`) right before you bump it: it was
-    "21" from that session when Phase 5 started and is "22" now. Bump from
-    whatever is current and add that value as the newest `StaleRevision`
-    (`OldKey::Computed`) in `cli/tests/symbols/cache_upgrade.rs` (the
-    revision-21 test added in Phase 5 is the newest example). Do not edit
-    files that session is changing; a lint or compile error in one of its
-    files is its own (Phase 5 hit one in `symbols_shared_context.rs`).
-  - Regenerate goldens with `HUG_UPDATE_GOLDEN=1` and compare record by
-    record against HEAD, not by line count.
-  - `TreeFile::records_from` (`tree_file.rs`) computes the body span first
-    (`callable_body_span` for callables, `body_span_for_declaration` for
-    the rest), then metrics from it; inside `if wanted` it fills generics,
-    `attributes`, then `modifiers`, all before the one
-    `normalize_modifiers` call. Per-record relation facts go in the same
-    block; anything per file (the light-declaration index) is built once
-    before the loop.
-  - Java/C# modifier and attribute hosts go through
-    `attributes::modifier_host`; reuse it.
-  - The `cache_robustness` matrix has twenty-four record columns; a new
-    load-bearing record field adds a column and updates the count in
-    `docs/cache-design.md` and the skill.
-  - Carried from Phase 1: ruling 1 (mixed C#/Swift/Scala base lists) is
-    still unanswered and gates only tasks 6.5-6.7. Grammar quirks for the
-    relation readers are in the Phase 1 probe tables (Scala `with` tokens
-    carry field `type:`; a TS `extends_clause` splits `value:` and
-    `type_arguments:`; Swift puts a bound under field `name:`).
+    In C#, Swift and Scala one list after the type name mixes the class a type
+    inherits from with the interfaces/protocols/traits it conforms to, for
+    example `class Child : Base, IDisposable` or Swift `struct S: Codable`.
+    When a listed type is declared in another file, the source alone does not
+    say which is which. Every other language's relations are now recorded;
+    these three are still empty, and tasks 6.5-6.7 are waiting on this answer.
+    It should be settled before Phase 8, which prints these lists in
+    `hug types --tree`, and before Phase 7 finalizes what the cache must keep.
+
+    - **Option A: put every listed type in `extends`, except entries proved to be conformance.**
+      An entry goes to `implements` only when this file declares it as an
+      interface/protocol/trait and the owner is a concrete type. Interface,
+      protocol and trait inheritance stays `extends`. Swift `extension X: P`
+      entries go to `implements` on `X`, but only when `X` is declared in this
+      file; otherwise they cannot be attached and are documented as lost.
+      - Pros: keeps every written base; no schema change; matches how the
+        other languages are already stored.
+      - Cons: for these languages `extends` means "written base", not
+        strictly "class inheritance", so consumers must accept the broader
+        meaning; extensions of external types lose their conformances.
+    - **Option B: add a new "unclassified base" list to the record.**
+      - Pros: `extends` and `implements` keep exact meanings.
+      - Cons: a schema change (version bump, cache column, another output
+        label, more consumer handling).
+    - **Option C: record only the entries whose category can be proved.**
+      - Pros: precise fields; no schema change.
+      - Cons: silently drops most real-world bases (anything from a library),
+        which defeats the purpose of recording written bases.
+
+    **Recommendation: Option A.** It is what the spec recommends, it keeps
+    every fact the source states, and it needs no schema change. If you
+    accept it, please also confirm that Swift extension conformances on a
+    type declared in another file may be dropped (documented as a
+    limitation) rather than attached to a same-named local type.
+message_to_agent: |-
+  Phase 6 is done except tasks 6.5-6.7 (C#, Swift, Scala base lists), which
+  wait on ruling 1 (see human_review_items). Read `## Phase 6` of
+  implementation-log.md. Facts that matter for Phase 7 and later:
+
+  - Relations are filled at the end of `TreeFile::records_from` by
+    `tree_file/relations.rs::link_relations`: one `Declarations` index per
+    file over every record (selected or not), and one walk over Rust
+    `impl_item`s per file. Per-language base readers live in
+    `extract/relations.rs` (`declared_bases`); C#/Swift/Scala return nothing
+    in `declared_bases`'s match and get one function each there when ruling
+    1 is answered. Their `RELATIONS_MATRIX` rows are `Support::Pending`,
+    which asserts nothing is recorded; flip them to `Supported` with owners.
+  - Rust impl members (and what the container search places on the impl's
+    type from inside them, such as a method's `self`) are linked under
+    Containment by `records_from` itself (`RecordFacts::containment`), from
+    `ContainerLookup::SameFileType { impl_item }` /
+    `ExtractedSymbol::container_impl`. `analysis::link_containers` keeps any
+    record that already has a container. No record retains the self-type
+    resolution, so `coverage::record_passes_suffice` now takes the language
+    and a Rust entry widened by Containment parses once (pinned by the new
+    Rust row of `symbols_cache::widening_capabilities_runs_only_the_missing_passes`).
+    Phase 7.1 should confirm that fallback or persist the evidence (that
+    would be a schema addition).
+  - EXTRACTOR_REVISION is "23" (bumped from 22). The concurrent session of
+    2026-10-03-symbol-filters-and-reports also bumps it: read the constant
+    right before bumping, and add the current value as the newest
+    `StaleRevision` (`OldKey::Computed`) in `cli/tests/symbols/cache_upgrade.rs`
+    (revision 22 is now the newest example).
+  - An unresolved Rust impl member now has `relations.container` =
+    `{ name: <self type as written>, id: None }`. `render::Outline` heads it
+    by that name (`[in &Local]`, `[in other::W]`); Phase 8 should check the
+    outline goldens for that case.
+  - The concurrent session edits `analysis/mod.rs`, `tree_file.rs`,
+    `symbols_shared_context.rs`, `symbol-schema-design.md` and the skill;
+    keep edits there to the hunks you need.
 $schema:
   status: |-
     enum(

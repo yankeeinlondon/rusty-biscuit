@@ -121,6 +121,39 @@ docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
   - .claude/skills/tree-hugger/SKILL.md
   - .claude/skills/tree-hugger/api-reference.md
+source_files_during_phase_6:
+  - tree-hugger/lib/src/file/extract/relations.rs
+  - tree-hugger/lib/src/file/extract/mod.rs
+  - tree-hugger/lib/src/file/extract/rust_impl.rs
+  - tree-hugger/lib/src/file/extract/classify.rs
+  - tree-hugger/lib/src/file/tree_file.rs
+  - tree-hugger/lib/src/file/tree_file/relations.rs
+  - tree-hugger/lib/src/file/tree_file/definitions.rs
+  - tree-hugger/lib/src/file/mod.rs
+  - tree-hugger/lib/src/analysis/mod.rs
+  - tree-hugger/lib/src/analysis/coverage.rs
+  - tree-hugger/lib/src/cache/symbol_cache.rs
+  - tree-hugger/lib/tests/l1/symbols_relations.rs
+  - tree-hugger/lib/tests/l1/main.rs
+  - tree-hugger/lib/tests/l1/symbols_coverage.rs
+  - tree-hugger/lib/tests/l1/symbols_kinds.rs
+  - tree-hugger/lib/tests/l1/symbols_owner_identity.rs
+  - tree-hugger/lib/tests/l1/symbols_shared_context.rs
+  - tree-hugger/lib/tests/l1/symbols_cache.rs
+  - tree-hugger/cli/tests/symbols/cache_upgrade.rs
+  - tree-hugger/cli/tests/fixtures/golden/symbols.json
+  - tree-hugger/cli/tests/fixtures/golden/symbols.jsonl
+docs_updated_during_phase_6:
+  - tree-hugger/README.md
+  - tree-hugger/lib/README.md
+  - tree-hugger/docs/cache-design.md
+  - tree-hugger/docs/symbol-kinds-and-visibility.md
+  - tree-hugger/docs/symbol-schema-design.md
+docs_created_during_phase_6:
+  - tree-hugger/docs/type-relations.md
+skills_files_updated_during_phase_6:
+  - .claude/skills/tree-hugger/SKILL.md
+  - .claude/skills/tree-hugger/api-reference.md
 ---
 
 # Implementation Log for 2026-10-06-symbol-type-relations (9 phases)
@@ -1078,3 +1111,224 @@ column exist since Phase 2). Smell grep on the reader is unchanged.
   `tree-hugger-cli` 292/292. The earlier full `just test` (1052/1052)
   included this phase's lib unit test
   (`metrics::tests::body_lines_follow_the_spec_formula`).
+
+## Phase 6
+
+Declared type relations (`relations.extends` / `relations.implements`) for
+every language except C#, Swift and Scala, plus Rust impl ownership.
+Extractor revision 22 → **23** (read right before the bump; the concurrent
+session had left it at 22). Schema unchanged (4.1): only existing fields are
+filled. Tasks 6.1–6.4 and 6.8 are done. **6.5–6.7 stay open**: ruling 1
+(how to classify mixed C#/Swift/Scala base lists) is still unanswered, and
+the plan says to leave them open rather than guess.
+
+### Probe (throwaway, deleted)
+
+A `/tmp/th-probe6` crate pinned to the grammar versions in
+`lib/Cargo.toml` (deleted at the end of the phase) dumped base-list trees for
+TS, JS, Java, PHP, Python, Go, C++ and Rust. The Phase 1 tables held. Facts
+the readers depend on:
+
+- TS `extends_clause` = `value:` + separate `type_arguments:`, so the written
+  text runs from the value through its arguments. JS `class_heritage` holds
+  the expression directly.
+- Java: `superclass`, `super_interfaces` → `type_list`, `extends_interfaces`
+  → `type_list` (enum and record `interfaces:` too).
+- PHP `qualified_name` keeps the leading `\` as `prefix:` tokens, so the root
+  anchor is read from the text.
+- Python `superclasses: argument_list` entries are `identifier`, `attribute`,
+  `subscript`, `call`, `list_splat`, `keyword_argument` and
+  `dictionary_splat`.
+- Go `interface_type` → `type_elem` (one child for an embed; a union or
+  `~` term has several or a `negated_type`), plus `method_elem`.
+- C++ `base_class_clause`: an `access_specifier` node, an anonymous
+  `'virtual` token, then the type node.
+- Rust supertraits: `bounds: trait_bounds` entries (`lifetime`,
+  `removed_trait_bound` `?Sized`, `higher_ranked_trait_bound`); a negative
+  impl has an anonymous `'!` token; `impl dyn Tr` self type is
+  `dynamic_type`.
+
+### 6.1 Per-file declaration index
+
+`tree_file/relations.rs::Declarations` is built once per file at the end of
+`records_from`, from **every** record (selected kinds or not): in-file
+qualified name → record indexes, plus scope-naming records by declaration and
+anchor node id. One `count_shared_context_steps(records.len())` for the build
+and one step per scope probed, so `symbols_shared_context` still sees linear
+growth. No per-relation or per-symbol rescan.
+
+### 6.2 Resolution rules
+
+`Declarations::resolve` (doc comment carries the contract). The written path
+(`extract/relations.rs::BasePath`: segments with generic arguments dropped,
+plus an anchor) is joined onto each enclosing scope, innermost first. Rust
+`crate::`, `self::` and `super::` and a PHP leading `\` anchor the path.
+
+- The **first** scope at which any declaration has the joined name decides,
+  and it resolves only if that is the only declaration and its kind is
+  eligible. So a nearer type alias, variable or duplicate shadows an outer
+  type instead of letting the lookup fall through.
+- A visible type parameter shadows. That means the owner's own parameters
+  and those of enclosing declarations (`declared_generics`), or an impl's
+  `<T>`.
+- Rust relative paths stop at the nearest module, because an item does not
+  see its parent module's names.
+- Imports are not read. An imported name has no declaration at its scope, so
+  it stays unresolved.
+- Eligible kinds: base targets Class/Interface/Trait/Type; impl self types
+  Type/Class/Enum; impl traits Trait.
+- Targets keep the written text and the in-file qualified name, never the
+  scan-root prefix (`finish` does not touch relation targets).
+- Lists keep source order. Equal text appears once; distinct instantiations
+  stay distinct.
+
+### 6.3 Plain-language readers
+
+`extract/relations.rs::declared_bases(name, …)` reads the name's parent node
+(the declaration that writes the list, for example a Go `type_spec` or a C++
+`class_specifier`), one function per language: TS/JS, Java, PHP, Python, Go,
+C++ and Rust supertraits. C, Perl, Bash, Zsh and Lua read nothing; their
+matrix rows hold the forms that must not be inferred (`@ISA`, `use parent`,
+metatables, a C struct embed).
+
+Decisions recorded here (also in `docs/type-relations.md`):
+
+- Python `*bases` is kept as written and unresolved. `**options` and
+  keyword arguments are not bases.
+- Go: syntax cannot tell a named type embedded in an interface constraint
+  from an embedded interface. Only the predeclared non-interface types
+  (`bool`, `int*`, `uint*`, `float*`, `complex*`, `byte`, `rune`, `string`,
+  `uintptr`) are excluded; `error`, `any` and `comparable` are kept.
+- Rust supertraits drop `?Sized`. A higher-ranked bound is kept as written
+  with no path.
+
+### 6.4 Rust impl ownership
+
+- `extract/rust_impl.rs::impl_header` reads the trait as written, negativity,
+  the self type's text and path, and the impl's own type parameters.
+  `relations::impl_relations` walks the tree once per Rust file. Every
+  positive trait impl, empty ones included, adds its trait to the resolved
+  self type's `implements` (selected records only, file order, deduplicated by
+  text) and to each direct member's.
+- The old "exactly one same-named trait in the file" link loop in
+  `records_from` (which the concurrent session had just rewritten to an index)
+  is gone, replaced by the shared resolver. Its `count_shared_context_steps`
+  import went with it.
+- Containment: `ContainerLookup::SameFileType` now carries
+  `impl_item: Option<Node>` (Rust only), and `definitions()` copies it onto
+  the new `ExtractedSymbol::container_impl`. Under `RecordFacts::containment`
+  (new field, set from `PassPlan::containment`), every record whose container
+  search ended at an impl is pre-linked:
+    - resolved self type: `relations.container` and `parent` are that record;
+    - unresolved: `relations.container` is the self type as written, with no
+      ID and no parent (ruling 6).
+- This covers parameters of impl methods too. By existing design (owner
+  matrix row `W::rooted::self`) those belong to the impl type. Linking only
+  methods would have left `fn by_ref(&self)` in `impl Tr for &Local`
+  unlinked while its `self` joined `Local`.
+- `analysis::link_containers` keeps pre-linked records and adds them to their
+  parent's `members` in record order. `resolve_containers` skips them.
+- Persistence (ruling for Phase 7, decided now so the existing equivalence
+  tests stay green): no record retains the self-type resolution or the
+  written self-type text (`container_name` stays the bare last segment, and
+  qualified names are unchanged). So `coverage::record_passes_suffice` now
+  takes the language, and Containment on a Rust entry parses once
+  (`WidenedCapabilities { parsed: true }`). This is the spec's "reparse once on
+  that path" fallback. Pinned by a new `symbols_cache` widening row.
+- Qualified names, `identity.container_name`, `identity.container_kind` and
+  symbol IDs are unchanged.
+
+### Changed tests (intended; each follows a spec rule)
+
+| Test | Old expectation | New, and why |
+|---|---|---|
+| `symbols_kinds::rust_trait_impl_members_record_the_implemented_trait` | `Display` | `fmt::Display`: full written text (ruling 4) |
+| `symbols_kinds::rust_impl_members_are_members_of_the_implemented_type` | `impl PrivateTrait for String` member has no container | textual container `String`, no ID, no parent (ruling 6) |
+| `symbols_owner_identity::a_sole_same_named_record_never_overrides_an_explicit_owner` | container `None` | no container **ID** (textual container allowed, ruling 6) |
+| `symbols_owner_identity` OWNER_MATRIX row "unqualified, rooted or imported impl" | `use a::V; impl V` → owned by `a::V` | case removed and the row renamed: an imported name stays unresolved (spec); the case now lives in `symbols_relations::rust_impl_members_join_the_resolved_self_type_only` |
+| `symbols_shared_context::check_rust_traits` (the concurrent session's file) | `implements Probe` with no ID (several traits share the name) | ID of the impl's own module's `r9_i::Probe`: resolved by lexical scope, not bare name |
+| goldens `symbols.json` / `symbols.jsonl` | — | `extractor_version` rev.23 on every record; `typescript.ts` `Panel` gains `implements Sized` with the same-file ID. No other record changed (compared record by record) |
+
+The owner-identity and shared-context tests belong to the review cycle of
+`2026-10-03-symbol-filters-and-reports`. They were edited only where this
+spec's rules changed the expectation, with a comment at each site.
+
+### Requirement → test
+
+| Requirement | Test |
+|---|---|
+| Full written text; access/`virtual` not in C++ text; source order; dedup; instantiations kept | `symbols_relations::relations_matrix_holds_on_complete_and_declarations_only_paths` (rows Rust, TS, JS, Go, Python, Java, C++, PHP) |
+| Qualified external target sharing a local short name stays unresolved | same matrix: Rust `other::Base`, TS `other.Root`/`lib.Base`, Java `other.Root`, C++ `other::B`, PHP `\Lib\Base`, Python `mod.Base` |
+| Duplicate names in different scopes resolve lexically | matrix: Rust `a::Dup`, Python `Outer.Base`, Java `p.Outer.Base`, C++ `ns::N : B` → `ns::B`; Rust `b::UsesOuter: Base` stays unresolved (module boundary) |
+| Ambiguous / alias / type-parameter / dynamic targets stay unresolved | matrix: Rust `Amb`, TS `Alias`, C++ `Alias` and `template <class T> … : T`, Java `class Param<Root> extends Root`, TS `Gen<T> extends T<string>`, JS/TS `mix(Root)`, Python `make()` |
+| `crate::`/`self::`/`super::`, PHP `\` anchors | matrix: Rust `a::UsesDup`, PHP `\App\Other` |
+| Go named embeds only; struct embeds are composition | matrix Go row (`int`, `~string`, unions excluded; `S` has none) |
+| Python `metaclass=`/`**` not bases | matrix Python `Child` |
+| Unselected records feed the index | matrix declarations-only path (owner kind only; targets of other kinds still get IDs) |
+| C, Perl, Bash, Zsh, Lua: none, with negative forms | matrix Absent rows assert no relation on any record |
+| C#, Swift, Scala pending (ruling 1) | matrix Pending rows assert nothing is read yet |
+| One row per language | `symbols_coverage::every_language_has_one_row_in_each_report_matrix` (`RELATIONS_MATRIX` added) |
+| Multiple and empty Rust impls aggregate in file order; negative adds none; reference/alias/imported/external/type-parameter self types do not attach | `symbols_relations::rust_trait_impls_aggregate_on_the_resolved_self_type` |
+| Member keeps its trait relation; method-only query | `symbols_relations::rust_impl_members_keep_their_trait_on_a_method_only_query` |
+| Containment aggregation; textual container for unresolved; no membership; qualified names unchanged | `symbols_relations::rust_impl_members_join_the_resolved_self_type_only` |
+| Declarations-only runs the parse pass alone; no containment computed | `symbols_relations::relations_need_only_the_parse_pass` |
+| Rust containment widening reparses once and equals the uncached result | `symbols_cache::widening_capabilities_runs_only_the_missing_passes` (new Rust Containment row, `parsed: true`) |
+| Narrow query = projected cache result for every fixture | existing `symbols_cache::projected_results_equal_uncached_queries` (+ `multi/` twin), green |
+| Revision bump invalidates entries | `cache_upgrade::entry_from_extractor_revision_twenty_two_is_not_served_after_the_relations` (Python bases, `OldKey::Computed`) |
+| Linear shared context | existing `symbols_shared_context` tests, green |
+
+Input Robustness Matrix: not applicable. No file format or configuration
+reader changed; relations reuse the existing `SymbolRef` lists, whose cache
+column (`relations.implements`) is already in `cache_robustness`.
+
+### Gates
+
+- `just test` (tree-hugger area): **1061 / 1061 passed**, 0 skipped.
+- `just lint`: green (two clippy `collapsible_*` findings in the new files,
+  fixed).
+- `just check-tier-coverage tree-hugger`: nothing stranded; the five new
+  `symbols_relations` tests are L1 in the declared `l1` binary.
+- `just test-l2`: not run. No terminal rendering changed (outline output is
+  Phase 8). The plain and table goldens are unchanged.
+- Cross-OS: not run. The change is pure tree-walking over source text, with
+  no paths, processes or OS APIs; CI covers Linux/macOS on the pull request.
+- Pre-existing failures: none.
+
+### Docs and skill
+
+- New `docs/type-relations.md`: per-language table, resolution rules with
+  examples and a Mermaid flow, the Rust impl table, cache widening, and
+  limitations. C#/Swift/Scala are marked **planned**.
+- Corrected stale text: `symbol-kinds-and-visibility.md` (records table,
+  adapter losses, impl owner rule: `impl V` after `use a::V` no longer links,
+  the trait is no longer its last segment); `symbol-schema-design.md` (what is
+  still empty, Relation Facet, shared-context table row);
+  `cache-design.md` (containment widening rule for Rust, rev.23);
+  `lib/README.md`; `README.md` (link to the new page).
+- Skill: `SKILL.md` (new relations bullet, doc link, revision list) and
+  `api-reference.md` (relations, container under Containment).
+- Comments: `rust_impl.rs` module doc rewritten; `ContainerLookup::SameFileType`
+  doc; `coverage.rs` module doc and `record_passes_suffice` doc;
+  `link_containers` doc; `RecordFacts` field doc.
+
+### Notes
+
+- The concurrent session was editing `analysis/mod.rs`,
+  `analysis/tests.rs`, `analysis/counters.rs`, `tree_file.rs`,
+  `symbols_shared_context.rs`, `symbol-schema-design.md` and the skill during
+  this phase. Edits here were limited to the hunks this phase needed:
+  `link_containers`/`resolve_containers` and the `RecordFacts` literal in
+  `analysis/mod.rs`; the trait-link block in `tree_file.rs`.
+- Containment ties: `find_container_by_identity` still picks the nearest
+  preceding owner when several records share a qualified name (Lua repeated
+  `local M`). Rust impl members no longer use it, because the resolver
+  requires exactly one. Non-impl records are unchanged.
+- For Phase 7: the self-type evidence is not persisted (see 6.4); the
+  equivalence tests already hold with the reparse. Phase 7.1 should decide
+  whether that is final or whether a record field should carry it (a schema
+  addition).
+- For Phase 8: an unresolved impl member now has a textual
+  `relations.container` with no ID. `render::Outline` already heads such a
+  member by `container.name` (`[in other::Local]`), which is the self type as
+  written rather than the old in-file owner path; no golden covers that case
+  yet.
