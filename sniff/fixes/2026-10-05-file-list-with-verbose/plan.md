@@ -8,7 +8,24 @@ source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
-packages: []
+source_files_during_phase_2:
+    - sniff/cli/src/output/filesystem/file_list.rs
+    - sniff/cli/src/output/filesystem/files.rs
+    - sniff/cli/src/output/filesystem/mod.rs
+    - sniff/cli/src/output/mod.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+    - sniff/cli/src/commands/mod.rs
+    - sniff/cli/src/output/mod.rs
+    - sniff/cli/src/output/filesystem/files.rs
+    - sniff/cli/tests/l1/cli.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+packages:
+    - sniff-cli
 ---
 
 # Plan: File Lists for Filtered Verbose Association Reports
@@ -231,7 +248,7 @@ the same directory) and `files.rs`.
 
 Wave 1 (parallel; independent pure functions, disjoint code):
 
-- [ ] **2.1 Reversible label** *(Wave 1)*
+- [x] **2.1 Reversible label** *(Wave 1)*
     - `fn reversible_label(path: &Path) -> String` implementing rulings 5–6
       step 1: per-segment on native components, `\\` for backslash, `\n \r \t
       \x1B`, other controls, Unix invalid bytes `\xNN`
@@ -242,13 +259,13 @@ Wave 1 (parallel; independent pure functions, disjoint code):
     - Compiles on all four OS targets; provide a platform-neutral
       `label_from_units`-style inner function over `&[u8]`/`&[u16]` so every OS
       can unit test both notations without illegal on-disk names (AC 7).
-- [ ] **2.2 Markup/attribute escaping** *(Wave 1)*
+- [x] **2.2 Markup/attribute escaping** *(Wave 1)*
     - `fn escape_for_prose(label: &str) -> String` (ruling 6 step 2) and
       `fn escape_href(url: &str) -> String` (step 3). Tests: label containing
       `<b>`, `&amp;`, `[x](y)`, `*bold*`, `_it_`, `"`; assert the final
       `InlineProse::render` text equals the original label, and that a quote or
       `>` in a URL cannot end the `href`.
-- [ ] **2.3 Link target** *(Wave 1)*
+- [x] **2.3 Link target** *(Wave 1)*
     - `fn link_target(root: &Path, path: &Path) -> Option<String>`: join
       relative onto root (absolute stays absolute), delegate to the file-URL
       contract chosen in 1.2, return `None` on any representability failure.
@@ -259,7 +276,7 @@ Wave 1 (parallel; independent pure functions, disjoint code):
 
 Wave 2 (depends on Wave 1):
 
-- [ ] **2.4 Entry and list renderer**
+- [x] **2.4 Entry and list renderer**
     - `fn render_file_list(files: &[PathBuf], root: &Path, term: &Terminal) ->
       String`: sort by `PathBuf` order, build one item per path (linked label,
       or plain escaped label when `link_target` is `None`, silently), render via
@@ -267,7 +284,7 @@ Wave 2 (depends on Wave 1):
     - Styling reuses existing conventions (dim directory, bold name, blue) via
       the new formatter, not by editing `format_styled_filepath`.
     - Empty slice → empty string (no heading).
-- [ ] **2.5 Hook into `render_files_section`**
+- [x] **2.5 Hook into `render_files_section`**
     - Add a `link_root: Option<&Path>` parameter (explicit, not in JSON).
       After the table and notice and before frameworks/languages, when
       `verbose > 0 && filter.association.is_some()` and the filtered category
@@ -287,7 +304,7 @@ target → label, no link, no panic, no diagnostic).
 Goal: connect the renderer to the CLI honoring streams, JSON, and failure
 semantics.
 
-- [ ] **3.1 Resolve link root** (command layer)
+- [x] **3.1 Resolve link root** (command layer)
     - In `commands/mod.rs`, before `render_text`, when text mode, filter is
       `Files`, `cli.verbose > 0`, and `files_filter.association.is_some()`:
       compute the root per rulings 1–3 using
@@ -296,12 +313,12 @@ semantics.
       error convention), nothing on stdout.
     - Absolutize a relative `--base` against the invocation directory.
     - Not executed for JSON, unfiltered, or non-verbose.
-- [ ] **3.2 Thread root through `output::render_text`**
+- [x] **3.2 Thread root through `output::render_text`**
     - Add the explicit parameter (or a small context struct if the argument
       list is already unwieldy; do not refactor adjacent signatures). Update
       all callers; confirm `OutputFilter::All`/`Filesystem` pass `None` and do
       not render the list.
-- [ ] **3.3 Update the existing association regression** in
+- [x] **3.3 Update the existing association regression** in
       `tests/l1/cli.rs` that currently asserts identical verbose/non-verbose
       text: expect the new list in verbose, keep the scope/count/percentage
       assertions.
@@ -309,7 +326,7 @@ semantics.
 Wave 3 (parallel tests; each in its own test function, shared fixture helper
 in `tests/common` only if needed, via `SniffCliFixture`):
 
-- [ ] **3.4 Parity and JSON tests** *(Wave 3)* — AC 1, 2, 3
+- [x] **3.4 Parity and JSON tests** *(Wave 3)* — AC 1, 2, 3
     - Complete small fixture; filtered verbose text lists exactly the paths in
       filtered JSON (compare through the label function), once each, native
       order; images plus a second association plus `unknown`; language/framework
@@ -319,7 +336,7 @@ in `tests/common` only if needed, via `SniffCliFixture`):
     - JSON equal with and without `-v` (no `--perf`); `--json --perf -v` stdout
       parses as one document with no `Files:` and no terminal bytes.
     - Unfiltered `-v`, filtered non-verbose, `filesystem` reports unchanged.
-- [ ] **3.5 Names and roots tests** *(Wave 3)* — AC 4
+- [x] **3.5 Names and roots tests** *(Wave 3)* — AC 4
     - Fixtures: duplicate basenames in different directories, spaces, Unicode,
       markup characters valid on the host OS (skip `<>:"|?*` on Windows).
     - Invocation from a package subdirectory; base outside any package;
@@ -330,12 +347,12 @@ in `tests/common` only if needed, via `SniffCliFixture`):
       aliases once (macOS `/var` → `/private/var`); no per-file probes.
     - Capability fallback: run with the existing no-hyperlink/no-color
       environment and assert labels present.
-- [ ] **3.6 Empty/truncated tests** *(Wave 3)* — AC 5
+- [x] **3.6 Empty/truncated tests** *(Wave 3)* — AC 5
     - Empty category: table only, no `Files:`, exit 0, JSON zero-count shape.
     - Truncated: one constructed `FileAssociationBreakdown` rendered to text and
       projected to JSON; notice precedes the list and survives an empty filter.
       Reuse the existing cap tests; no new large tree.
-- [ ] **3.7 Counters and failure tests** *(Wave 3)* — AC 6, 8
+- [x] **3.7 Counters and failure tests** *(Wave 3)* — AC 6, 8
     - `--perf --json` counters with and without `-v` on a small fixture:
       compare scan/classification, manifest parsing, Git discovery/status, and
       docs counters, treating absent as zero, ignoring timings/presentation.

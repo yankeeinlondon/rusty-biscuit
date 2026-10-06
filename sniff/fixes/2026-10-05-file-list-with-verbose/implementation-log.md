@@ -7,7 +7,24 @@ source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
-packages: []
+source_files_during_phase_2:
+    - sniff/cli/src/output/filesystem/file_list.rs
+    - sniff/cli/src/output/filesystem/files.rs
+    - sniff/cli/src/output/filesystem/mod.rs
+    - sniff/cli/src/output/mod.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+    - sniff/cli/src/commands/mod.rs
+    - sniff/cli/src/output/mod.rs
+    - sniff/cli/src/output/filesystem/files.rs
+    - sniff/cli/tests/l1/cli.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+packages:
+    - sniff-cli
 ---
 
 # Implementation Log for 2026-10-05-file-list-with-verbose (4 phases)
@@ -220,3 +237,277 @@ The gate run for this phase is the baseline itself: `just test` in
 `sniff/` — 3135 passed / 32 skipped / 0 failed (Task 1.1). No skipped or
 pre-existing failures to report beyond the 32 routine tier/env skips
 reported by the suite.
+
+## Phase 2
+
+Phase 2 built the library-free rendering core (plan tasks 2.1–2.5): the
+reversible label, the two escape layers, the file-URL link target, the
+list renderer, and the `render_files_section` hook. No command wiring —
+`output::render_text` still passes `link_root: None` (interim), so CLI
+behavior is unchanged until Phase 3, and the pre-existing
+verbose==non-verbose association regression still passes as-is.
+
+### Files
+
+- **Created** `sniff/cli/src/output/filesystem/file_list.rs` — tasks
+  2.1–2.4: `reversible_label` (dispatching to `label_from_bytes` on Unix /
+  `label_from_units` on Windows), `escape_for_prose` (`Prose::escape_text`),
+  `escape_href` (`Prose::quoted_attr`), `link_target`
+  (`url::Url::from_file_path`, Err → `None`), `file_list_item_markup`, and
+  `render_file_list` (sort, `Prose`-item `UnorderedList`, `Files:` heading).
+  28 unit tests including test-side decoders that prove exact round-trips.
+- **Updated** `sniff/cli/src/output/filesystem/files.rs` — task 2.5:
+  `render_files_section` gained `link_root: Option<&Path>`; after the table
+  and incomplete-scan notice, before framework/language details, a filtered
+  verbose report with a root appends the list of captured
+  `filtered.by_association[..].files`. `None` renders no list (the caller,
+  Phase 3, resolves the root or reports why it cannot — never guessed
+  here). Module header and function docs updated; 6 section-level tests.
+- **Updated** `sniff/cli/src/output/filesystem/mod.rs` — registered
+  `mod file_list;`.
+- **Updated** `sniff/cli/src/output/mod.rs` — the `OutputFilter::Files`
+  call site passes `None` pending Phase 3 threading.
+
+`path_format.rs` is untouched (ruling 7: existing formatter's callers
+unchanged); the new sibling module owns the list's styling
+(dim directory, bold name, blue, OSC8 through the Prose grammar).
+
+### Design decisions recorded
+
+1. **Ruling-5 precision (the one deviation from a plan ruling's letter).**
+   A C1 control *code point* in a Unix path (valid UTF-8, e.g. U+0085 as
+   `C2 85`) labels as `\u{0085}`, not `\x85`. Ruling 5's sentence "every
+   other C0/C1 control and DEL uses `\xNN` on Unix" is written in the
+   native-unit (byte) domain; applying `\xNN` to a C1 *scalar* would
+   collide with the invalid byte of the same value (`a C2 85 b` and
+   `a 85 b` would both label `a\x85b`), violating the spec's
+   "distinct native filename spellings must remain distinguishable". The
+   ruling's own first sentence supplies the collision-free notation
+   (`\u{XXXX}` cannot collide with `\xNN` or readable Unicode), so the
+   ruling's intent — visible, reversible, collision-free — is preserved
+   and only the notation for this one case is adjusted. C0 controls, DEL,
+   `\n \r \t \x1B`, invalid bytes, and readable Unicode follow the ruling
+   exactly; on Windows everything follows the ruling exactly. Documented
+   in `file_list.rs`'s module docs; round-trip tests
+   (`bytes_label_escapes_c1_code_points_without_byte_collision`,
+   `bytes_label_round_trips_*`) pin it. No AC distinguishes the two
+   spellings, so no spec change is needed; flagged here for the author's
+   review-cycle override if wanted.
+2. **Dim/bold styling splits the label, not the native path.** The label
+   is split at its last separator (`/` on Unix; `\\` or `/` on Windows) so
+   the styled parts concatenate back to exactly the full label — a native
+   `parent()`/`file_name()` split would double the separator for
+   root-only parents (`/x.png` → `//x.png`).
+3. **Spacing.** The section already emits one blank line after the
+   table/notice; `render_file_list` starts directly with `Files:` so the
+   spec example's single blank line holds, and an empty category adds
+   nothing (no heading, no blank).
+4. **Platform-neutral inner functions** are `#[cfg(any(unix, test))]` /
+   `#[cfg(any(windows, test))]`: every OS runs both notations' unit tests
+   (AC 7 without illegal on-disk names), while platform lib builds compile
+   only their own notation (no dead code).
+5. **Per-entry fallback construction.** A relative root makes every
+   `link_target` fail (`Url::from_file_path` rejects non-absolute), which
+   gives a deterministic, platform-neutral way to exercise the silent
+   no-link fallback; Windows-only tests additionally use a lone-surrogate
+   path for a real representability failure.
+
+### Test-design requirement mapping (Phase 2)
+
+| Changed behavior | Tests |
+| --- | --- |
+| 2.1 reversible label — controls visible | `bytes_label_spells_controls_visibly`, `units_label_spells_controls_visibly` |
+| 2.1 literal escape-lookalikes distinguishable (original hostile inputs: `re\nport` vs `re\nport`, `e\x1b` vs `e\x1B`) | `bytes_label_distinguishes_literal_escape_lookalikes`, `units_label_keeps_lone_surrogates_distinct_and_readable_astral` |
+| 2.1 invalid Unix bytes / Windows lone surrogates (representation variants: paired vs unpaired, C1 scalar vs byte) | `bytes_label_preserves_invalid_bytes_hex_escaped`, `bytes_label_escapes_c1_code_points_without_byte_collision`, `units_label_keeps_lone_surrogates_distinct_and_readable_astral` |
+| 2.1 reversibility (round trip both notations; every byte value; arbitrary unit sweeps) | `bytes_label_round_trips_every_single_byte`, `bytes_label_round_trips_mixed_sequences`, `units_label_round_trips_arbitrary_units` |
+| 2.2 markup escaping neutralizes injection (labels `<b>`, `&amp;`, `[x](y)`, `*bold*`, `_it_`, `"`, backslash labels) — final render equals original label | `escape_for_prose_renders_markup_sensitive_labels_literally`, `escape_for_prose_survives_styling_wrappers` |
+| 2.2 href cannot be terminated (URLs with `"`, `>`, `'`, `<`) | `escape_href_cannot_be_terminated_by_quotes_or_angle_brackets` |
+| 2.3 join/absolute/no-probe/None semantics (neutral + `#[cfg(unix)]` + `#[cfg(windows)]`) | `link_target_joins_relative_and_keeps_absolute_platform_neutral`, `link_target_never_probes_the_filesystem`, `link_target_returns_none_when_result_is_not_absolute`, `link_target_percent_encodes_non_utf8_unix_bytes`, `link_target_encodes_spaces_and_unicode_on_unix`, `link_target_encodes_drive_verbatim_and_unc_paths` |
+| 2.4 sort order, heading, once-each, empty→nothing, rich/plain parity, list-level injection | `file_list_sorts_paths_in_native_order`, `file_list_marks_heading_and_bullets`, `file_list_lists_each_captured_path_once`, `file_list_empty_renders_nothing`, `file_list_rich_and_plain_labels_agree_after_stripping`, `file_list_label_cannot_inject_lines_or_terminal_sequences` |
+| AC 8 per-entry fallback: failing target → label, no link, no panic, no diagnostic | `file_list_falls_back_to_label_silently_when_target_fails`, `file_list_falls_back_per_entry_for_non_unicode_windows_values` (Windows-gated) |
+| 2.5 section integration: list after table, before framework/language details; notice precedes list; `unknown` category; no list when non-verbose / unfiltered / empty category / no root | `verbose_filtered_report_lists_captured_paths_after_table`, `file_list_precedes_framework_and_language_details`, `unknown_association_lists_paths_and_notice_precedes_list`, `no_list_without_link_root`, `no_list_when_not_verbose_unfiltered_or_empty`, `truncated_files_report_discloses_partial_sample_even_without_matches` (updated call site) |
+
+Downstream state assertions: the captured `files` vectors are unchanged
+by verbosity (`no_list_when_not_verbose_unfiltered_or_empty` re-asserts
+the input stats), and stripped rich renders equal the plain-mode label
+bytes (`file_list_rich_and_plain_labels_agree_after_stripping` mirrors
+`emit_text(plain)`'s strip, ruling 8).
+
+### Evidence (gates run, 2026-10-05)
+
+- `cargo test -p sniff-cli --lib` — **503 passed / 0 failed**
+  (Checkpoint 2; baseline 468 → +35 tests).
+- `just test` in `sniff/` — **3170 run, 3170 passed, 32 skipped, 0 failed**
+  (baseline 3135).
+- `just lint` in `sniff/` — clean.
+- `cargo clippy -p sniff --all-targets -- -D warnings` — clean.
+- `cargo clippy -p sniff-cli --all-targets -- -D warnings` — clean.
+- Windows compile evidence from macOS:
+  `cargo check -p sniff-cli --all-targets --target x86_64-pc-windows-gnu`
+  — clean; `cargo clippy -p sniff-cli --lib --target …gnu -- -D warnings
+  -A clippy::result_large_err` — clean.
+- Behavioral cross-rig evidence (`just cross-check sniff-cli`):
+  **windows pass** (filters `file_list`, `filesystem::file`), **linux
+  pass** (filter `filesystem::file`). These runs caught and fixed a real
+  defect: two tests had hard-coded the Unix-spelled root `/work`, which is
+  *relative* on Windows, so no links rendered; both now anchor on the live
+  working directory.
+
+### Pre-existing findings (not from this change, no action)
+
+- `darkmatter` fails `clippy::result_large_err` and
+  `sniff/cli/tests/l1/cli.rs:4731` fails `clippy::permissions_set_readonly_false`
+  under the `x86_64-pc-windows-gnu` clippy target only. No gate runs
+  clippy for that target (CI lint is Linux-only; local lint is the host
+  OS), so neither can fail CI; both predate this fix.
+- The 32 routine tier/env skips in `just test` are the suite's normal
+  skips.
+
+### Skipped or out-of-scope work
+
+None for Phase 2. Command wiring, root resolution, CLI integration tests
+(plan 3.1–3.7) and docs (4.1) belong to later phases by design.
+
+## Phase 3
+
+### Session recovery note
+
+This phase began from an interrupted prior session: the worktree carried a
+complete-looking Phase 3 implementation (plan checkboxes 3.1–3.7 already
+ticked, `commands/mod.rs` wiring, and 12 new integration tests in
+`tests/l1/cli.rs`) but no `## Phase 3` log section and no frontmatter. This
+session therefore *verified* that implementation task by task against the
+plan rather than redoing it (Rule 3), fixed what it found, added the
+cross-OS evidence, and wrote this record.
+
+Verification found the implementation sound; two defects were corrected,
+both stray comment edits the interrupted pass had introduced in code it was
+not supposed to touch (Rule 3 / comment-drift policy — the original
+comments were correct):
+
+1. `print_completions` doc comment in `commands/mod.rs` had been rewritten
+   to the nonsensical "the CLI sources a command that calls back to the
+   CLI"; restored "the shell sources a command that calls back to the CLI".
+2. A comment in `run_isolated_software` (`tests/l1/cli.rs`) had been
+   grammar-mangled to "version-probe"; restored "version-probed".
+
+### What Phase 3 delivered
+
+- **3.1 Root resolution (command layer).** `resolve_files_link_root` in
+  `commands/mod.rs`: called only on the text path when the filter is
+  `Files`, `cli.verbose > 0`, and an association filter is set — never for
+  JSON, unfiltered, or non-verbose. Root = owning package root via
+  `result.filesystem.repo.package_for_dir(&dir)` (a relative package root
+  anchors on the absolute repo root; if none, that is a failure), else the
+  effective base, with a relative base absolutized lexically against
+  `current_dir()` (ruling 3; no per-file canonicalize). Failures propagate
+  through `run()`'s `Result` to `main()`'s existing convention —
+  `Error: …` on **stderr**, `exit(1)` — before any stdout is written
+  (`render_text`/`emit_text` are strictly after the resolution). Six unit
+  tests in `commands::tests::files_link_root`.
+- **3.2 Threading.** `output::render_text` gained `link_root:
+  Option<&Path>` (parameter list already carries `#[allow(clippy::
+  too_many_arguments)]`; no context-struct refactor needed). It is the only
+  caller of `render_files_section`; every other filter arm passes `None`
+  and cannot render a list.
+- **3.3 Regression updated.** `files_association_is_stable_inside_a_large_
+  monorepo` now expects the captured list in verbose (labels derived from
+  the same per-base relative basis the scan uses) and asserts **no**
+  `Files:` heading in non-verbose, keeping its scope/count/percentage
+  assertions.
+- **3.4–3.7 Wave 3 tests** in `tests/l1/cli.rs` (all L1, no tier markers,
+  no features) plus two section-level tests in `files.rs`
+  (`truncated_breakdown_projects_one_observation_to_text_and_json`,
+  `removed_file_remains_listed_and_linked_after_discovery`), which satisfy
+  the plan's "constructed breakdown" and "removed-file renderer test"
+  bullets at the level the plan asked for.
+
+Test-harness design decisions worth recording:
+
+- A piped subprocess has no OSC8 capability, so the hyperlink renders as
+  the `[label](url)` fallback. `assert_files_list_entries` matches entries
+  in whitespace-flattened text (the hanging-indent wrap can break anywhere
+  inside an entry), and `file_list_destinations` decodes the fallback form
+  back to URLs — including undoing the wrap (a line-final `-` is the
+  renderer's break marker; the fixtures contain no literal hyphens) and
+  the `\]` escaping of a literal `]` in a label. `file_url_to_native_path`
+  converts back to a native path, allowing exactly the Windows URL forms
+  the encoder produces (forward slashes, lowered drive letter,
+  `file://server/share`); `identity_path` normalizes Windows
+  `\\?\`-canonicalize output and case for comparison. macOS `/var` →
+  `/private/var` fixture alias is normalized once via
+  `canonical_fixture_path` (plan: "normalize fixture-root aliases once").
+- The unix root-failure integration test deletes the cwd between fork and
+  exec (`pre_exec` chdir + rmdir). With the cwd gone, the Git discovery
+  every `files` request performs fails first with its own cwd error, so
+  the test asserts the boundary contract (nonzero exit, empty stdout,
+  `Error:` on stderr, no `file://` anywhere) rather than one specific
+  message; the resolver's own failure branches are pinned by the
+  `files_link_root` unit tests (rulings 2(a) message included, 2(b)
+  constructed without needing an unreadable cwd — the Windows fallback the
+  plan prescribed, since cwd deletion is not possible there).
+- Counters comparison treats an absent counter as zero, ignores timings,
+  and additionally asserts the scoped request keeps
+  `filesystem.docs.documents_parsed` and `git.status_walks` at zero in
+  both modes (no request widening with `-v`).
+
+### Requirement-to-test mapping (Phase 3)
+
+| Changed behavior | Tests |
+| --- | --- |
+| 3.1 owning package root wins; base without package; relative base absolutizes; failure cases 2(a)/2(b) | `owning_package_root_wins_over_base`, `base_without_owning_package_is_the_root`, `no_repository_uses_the_absolute_base`, `relative_base_absolutizes_lexically_against_cwd`, `relative_package_root_anchors_on_absolute_repo_root`, `relative_package_root_without_absolute_anchor_fails` |
+| 3.1 root failure → stderr error, nonzero exit, empty stdout, no guessed links | `files_verbose_root_failure_errors_on_stderr_without_stdout` (`#[cfg(unix)]`, deleted cwd) |
+| 3.2 list renders only for the Files filter with root; nothing for others | `files_unfiltered_nonverbose_and_filesystem_reports_gain_no_list`; lib `no_list_without_link_root` (Phase 2) |
+| 3.3 verbose regression expectation | `files_association_is_stable_inside_a_large_monorepo` |
+| AC 1 verbose text lists exactly filtered-JSON paths, once each, native order; image + `unknown` + `programming-language`; language details after list | `files_filtered_verbose_text_lists_exactly_the_captured_json_paths` |
+| AC 2 JSON byte-identical ±`-v`; `--json --perf -v` one document, no `Files:`, no terminal bytes; unfiltered/filtered-non-verbose/`filesystem` unchanged | `files_json_is_byte_identical_with_and_without_verbose`, `files_json_perf_verbose_stdout_is_one_json_document`, `files_unfiltered_nonverbose_and_filesystem_reports_gain_no_list` |
+| AC 3 `-v` position-independent, `-vv`, once each; `--plain` no ANSI/OSC | `files_verbose_flag_position_and_level_show_one_list`, `files_plain_verbose_output_has_no_terminal_escape_sequences` |
+| AC 4 duplicate basenames, spaces, Unicode, markup names (Windows-safe subset); package-subdirectory invocation; base outside any package; relative + absolute `--base` from outside the repo; decoded destination identity; capability fallback | `files_verbose_link_destinations_match_native_absolute_paths`, `files_verbose_keeps_duplicate_and_markup_sensitive_names_distinguishable`, `files_verbose_capability_fallback_still_shows_labels` |
+| AC 5 empty category: table only, no `Files:`, exit 0, JSON zero-count shape | `files_filtered_verbose_empty_category_keeps_table_and_zero_counts` |
+| AC 5 truncated: one constructed breakdown shared by text + JSON projections; notice precedes list; survives an empty filter | lib `truncated_breakdown_projects_one_observation_to_text_and_json`, `unknown_association_lists_paths_and_notice_precedes_list`, `truncated_files_report_discloses_partial_sample_even_without_matches` |
+| AC 6 work counters identical with/without `-v` (absent = 0); docs/status counters stay zero | `files_verbose_work_counters_match_non_verbose` |
+| AC 8 removed file still listed and linked, no probe, success | lib `removed_file_remains_listed_and_linked_after_discovery`; `link_target_never_probes_the_filesystem` (Phase 2) |
+
+Tier/placement audit: every new test lives in the declared `l1` target
+(`tests/l1/main.rs` → `mod cli;`) or the `sniff`/`sniff-cli` lib/bin
+`#[cfg(test)]` modules; none carries a tier marker, so nothing is stranded
+(`just check-tier-coverage` unchanged by this phase). No test reads a
+repository file, so no `include_str!`/`repo_root()` declaration is needed.
+
+### Evidence (gates run, 2026-10-06)
+
+- `just test` in `sniff/` — **3190 run, 3190 passed, 32 skipped, 0
+  failed** (Phase 2 close: 3170; +8 lib/bin tests, +12 integration tests).
+- `cargo nextest run -p sniff-cli --lib` — **511 passed / 0 failed**
+  (Phase 2 close: 503).
+- `just lint` in `sniff/` — clean.
+- `cargo clippy -p sniff --all-targets -- -D warnings` — clean.
+- `cargo clippy -p sniff-cli --all-targets -- -D warnings` — clean.
+- Cross-rig (`just cross-check sniff-cli`):
+  - **windows pass** — 12/12 `cli::files_` integration tests and 6/6
+    `files_link_root` resolver unit tests (the Windows substitute for the
+    unix cwd-deletion test, per plan 3.7).
+  - **linux pass** — 13/13 `cli::files_` (includes the `#[cfg(unix)]`
+    root-failure test). First attempt failed to build on the standing
+    clone's `target/release` — the documented kache-hardlink poisoning
+    (os skill, build-hosts.md); retried on the native path with
+    `--features test-fixtures`, per the documented workaround. No action
+    needed on this fix's part.
+- `git diff` scope re-checked: only `sniff-cli` sources/tests and this
+  fixes directory; no JSON serialization, no `biscuit-terminal`, no sniff
+  library code touched.
+
+### Pre-existing findings (not from this change, no action)
+
+- The 32 routine tier/env skips in `just test` (unchanged since baseline).
+- `build-linux` standing clone's `target/release` remains kache-poisoned
+  (documented in the `os` skill; affects any archive-path cross-check,
+  workaround is a feature flag).
+
+### Skipped or out-of-scope work
+
+- WSL2 not exercised locally: the new code paths are shared with Linux
+  (same `#[cfg(unix)]` branch), and nightly CI covers WSL2; the plan
+  schedules no WSL2-specific evidence for Phase 3.
+- Docs, skills, final lint sweep, and hand-off are Phase 4 by design
+  (plan 4.1–4.5); none were updated in this phase.
