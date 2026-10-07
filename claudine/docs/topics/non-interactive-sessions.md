@@ -38,7 +38,7 @@ Non-interactive runs also force a safety appendix into the effective system prom
 Each provider has a typed protocol module under [`claudine/lib/src/stream/protocol/`](../../lib/src/stream/protocol/) (one file per provider) plus a semantic parser under [`claudine/lib/src/stream/`](../../lib/src/stream/) (e.g. `claude_semantic.rs`, `opencode_semantic.rs`).
 
 - **Protocol modules** define a serde-derived `*Event` enum tagged on `"type"`. Every field is `#[serde(default)]`, so format evolution never breaks deserialization. Unknown event types fail typed deserialization and are routed to a fallback arm that emits a `SemanticEvent::ProviderExtension` so nothing is dropped.
-- **Semantic parsers** implement `SemanticStreamParser`. Each line is parsed first to `serde_json::Value` (preserves the malformed-line warning path), then to the provider-specific tagged enum. Successful parses dispatch to handler methods that translate provider events into provider-agnostic [`SemanticEvent`](../../lib/src/stream/semantic.rs) variants.
+- **Semantic parsers** implement `SemanticStreamParser`. Each line is parsed first to `serde_json::Value` (preserves the malformed-line warning path), then to the provider-specific tagged enum. Successful parses dispatch to handler methods that translate provider events into provider-agnostic [`SemanticEvent`](../../lib/src/stream/semantic.rs) variants. `finish` turns the parser's accumulated state into the run's summary; `snapshot` computes the same summary without consuming the parser, so the wrapper keeps the result if the reader that owns the parser is abandoned at a cutoff (see [Timeouts](timeouts.md)).
 
 The `SemanticEvent` model is the cross-provider contract:
 
