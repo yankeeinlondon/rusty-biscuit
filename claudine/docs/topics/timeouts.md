@@ -495,7 +495,7 @@ output worker below bounds.
 | Reader finished | The parser's real summary | Nothing |
 | Reader panicked | `error_kind: parse_failure`, message `Stream parser thread panicked: <panic message>` | The run's error |
 | Timed out after parsing every line (stuck in its final render) | The parser's real summary; the agent's exit code is kept | A warning that the output may be incomplete |
-| Timed out with lines still unparsed | `error_kind: stream_reader_timeout`, with a message naming the cause (pipe held open, or output still being processed) | A warning with the same message |
+| Timed out with lines still unparsed | Preserve any established provider failure; otherwise native exit 0 selects `error_kind: claudine_completion_delayed` | A subordinate warning naming the observed pipe wait or unfinished cleanup |
 
 A reader timeout never makes a run succeed or hides why it failed. For a
 reader that stalled while still holding its parser, what the provider had
@@ -505,8 +505,8 @@ already reported decides the outcome:
 |---|---|
 | Exit 0 and a completed result | Success, exit 0, with a warning that output may be incomplete |
 | Exit 0, result says it failed | The provider's error, exit 0 kept, plus the warning |
-| Exit 0 and no result yet | `stream_reader_timeout` (an incomplete stream); no result is invented |
-| Nonzero exit or interrupted | The exit code is kept; with no result read, `stream_reader_timeout` |
+| Exit 0 and no result yet | `claudine_completion_delayed`; no result is invented |
+| Nonzero exit or interrupted | The exit code is kept; with no result read, `exit_failure` (or `interrupted` for exit 130). A published answer and session are retained |
 | Provider timeout, rate limit, or other early termination | That cause; it is applied after the reader is settled |
 
 A reader that really panicked stays `parse_failure`, unless the provider timed the run out first.
@@ -670,11 +670,12 @@ flowchart LR
   | parsed the result line | 0 | the full summary, success or the provider's failure |
   | parsed a line reporting a failure | nonzero | the provider's failure, with the real exit code |
   | not parsed a result, but a stderr bridge reported a terminal error | any | that provider error |
-  | published nothing | any | `stream_reader_timeout` |
+  | published nothing | 0 | `claudine_completion_delayed` |
+  | published nothing | nonzero | `exit_failure` (or `interrupted` for exit 130) |
 
   For example, a Claude run whose `result` line reads as success while a
   sub-agent was stopped reports `incomplete_subagents` with the answer, even
-  when the `turn_complete` hook never returns. Every row except the last shows
+  when the `turn_complete` hook never returns. Rows with a published result show
   the incomplete-output warning beside the result. A child that exits nonzero
   after a successful-looking result is never reported as a success. No result
   is built from lines the parser never handled, and a run is never reported
@@ -733,11 +734,49 @@ session state, and did not deliberately saturate the CPU. It therefore does
 not establish the historical cause, but does not support ordinary final-answer
 JSON decoding alone as an explanation for a delay of tens of seconds.
 
+### Completion observations and retained prefixes
+
+Structured stdout runs retain separate 256 KiB prefixes of the identified
+answer and exact raw stdout bytes before parsing or callbacks. These diagnostic
+prefixes do not limit normal parser answers. An empty identified answer is
+`""`; an unidentified answer is null. Clipped or partial answers are incomplete.
+Valid UTF-8 raw bytes serialize as a string; invalid UTF-8 uses
+`{ "encoding": "base64", "data": "…" }` with standard padded base64.
+Raw truncation reports omitted observed bytes, never unread pipe data.
+
+At reader cutoff, retained data and operation observations freeze. Late reader
+activity cannot change that snapshot or submit events to a finished run.
+Reader and settlement operations use coherent atomic tag/time pairs with
+monotonic microsecond offsets. The output worker records active delivery
+separately from queued frames and counters; a queued frame cannot replace the
+operation of a blocked write. A delivery started before the current run is
+marked explicitly. The shared cleanup clock and its budget are unchanged.
+
+Opt-in `CLAUDINE_RAW_STREAM_DIR` capture files retain their envelope format
+and persist until their owner deletes them. An existing path can be retained
+without acquiring the reader's buffered writer. Because the envelope omits
+original delimiters, even a successful flush does not prove byte-complete raw
+coverage. Frozen flags stay conservative if a detached reader later writes.
+
+Reader warnings report waiting for pipe data or unfinished cleanup. They do
+not infer which process holds a pipe or why processing has stalled. Populated
+lifecycle diagnostics remain planned below; the frozen observations are
+currently carried by the execution result. Stdout settlement now selects
+`claudine_completion_delayed` only for native exit 0 without a published
+verdict or stronger failure. `stream_reader_timeout` remains a subordinate
+reader identity, never the primary stdout summary error.
+
+The direct wrapper still projects the native exit without the semantic
+failure flag. Consequently its caller can receive exit 0 for an unconfirmed
+verdict, although the settled summary is failed. Caller projection and
+populated diagnostic transport still need implementation.
+
 ### Planned: delayed Claudine completion
 
-**Planned, not yet implemented:** when the cleanup deadline expires without
-a confirmed provider completion verdict, Claudine will report
-`ClaudineCompletionDelayed`, with diagnostic code
+**Partially implemented:** settlement reports internal kind
+`claudine_completion_delayed` when the cleanup deadline expires without a
+confirmed provider completion verdict and native exit is 0. The typed
+`ClaudineCompletionDelayed` diagnostic remains planned, with diagnostic code
 `timeout.claudine_completion_delayed`. For example, an agent can exit 0 and
 leave nonempty answer text while its completion record remains unprocessed;
 that condition will carry the available answer instead of claiming a panic.
