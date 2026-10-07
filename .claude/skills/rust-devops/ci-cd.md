@@ -546,6 +546,18 @@ forbids it, `_archive_drop_build_flags` removes the Cargo build flags, and a
 missing `cargo-nextest` is a hard error — the `cargo test` fallback recompiles,
 which is the one thing an archive consumer must never do.
 
+The verified `<build>/tools/ci-build[.exe]` is also the planner's key helper:
+`_ci_build_verify` emits `key_helper=${tool}` only after verification, the
+`gate` step (not `expected`) requires it nonempty and exports
+`BISCUIT_CI_BUILD_BIN`, and `just cross-check` binds the same variable in its
+Unix and Windows archive scripts. Without it `scripts/ci/build_key.py` runs
+`cargo run --bin ci-build`, a cold compile. `planned_keys` strips
+`BISCUIT_CI_BUILD_WRAP` and sets `RUSTC_WRAPPER=""` for the helper child so it
+never runs as a compiler wrapper. A `requires-toolchain` suite still makes its
+own deliberate Cargo calls; only the helper build is avoided. On BUILD_WIN a
+planner test passes in ~0.3 s when `python3` is the Store alias — check captured
+output, not PASS.
+
 `scripts/ci/fixtures/archive-portability/` is the proof: a three-member
 workspace carrying one of every payload class, built in one checkout and run
 from another with the producer's target directory renamed away and no Cargo,

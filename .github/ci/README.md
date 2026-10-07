@@ -859,6 +859,25 @@ nothing compiles a replacement. The tier then runs the canonical recipe in
 archive mode (`--archive-file`, `--workspace-remap`), and its status records the
 planned key, producer, and realized digest it executed.
 
+**The verifier is also the planner's key helper.** After verification succeeds,
+`_ci_build_verify` reports the shipped verifier (`<build>/tools/ci-build[.exe]`)
+as its `key_helper` output, and the `gate` step exports it as
+`BISCUIT_CI_BUILD_BIN` before the canonical recipe runs (a missing value stops
+the cell). Planner-running tests, which ask `scripts/ci/build_key.py` for build
+keys, then execute that binary instead of falling back to `cargo run --bin
+ci-build` and paying a cold compile in a checkout that has no `ci-build`. The
+helper runs without compiler-wrapper mode (`BISCUIT_CI_BUILD_WRAP` removed,
+`RUSTC_WRAPPER` empty). The `expected` step gets no binding. A
+`requires-toolchain` suite that runs the planner avoids the helper build but
+keeps its own deliberate Cargo calls. `just cross-check` binds the same
+variable in its archive mode on Unix and Windows hosts.
+
+```sh
+# gate step, archive branch (after verification, before the test recipe)
+: "${ARCHIVE_KEY_HELPER:?verification did not report the ci-build key helper}"
+export BISCUIT_CI_BUILD_BIN="$ARCHIVE_KEY_HELPER"
+```
+
 **One Linux build, two environments.** `wsl2-ubuntu` downloads the same
 artifact, checksum, and realized digest as native Linux and keeps its own JUnit
 and status cell. `_wsl-ci.yml` owns no producer job any more. Verification runs

@@ -316,6 +316,28 @@ native Windows and WSL2 are structurally incompatible and can never pair. Clippy
 check-only example/bench targets stay their own compile configurations, in their own jobs, with
 their own caches.
 
+The verifier a consumer just ran is also the planner's **key helper**. Tests that compute build
+keys go through `scripts/ci/build_key.py`, which otherwise falls back to `cargo run --bin ci-build`
+— a cold compile in a checkout with no `ci-build`. So once verification succeeds,
+`_ci_build_verify` reports `key_helper=<build>/tools/ci-build[.exe]`, and the `gate` step exports it
+as `BISCUIT_CI_BUILD_BIN` before the recipe runs; an empty value stops the cell. The `expected`
+step gets no binding, and the helper runs with compiler-wrapper mode removed (`BISCUIT_CI_BUILD_WRAP`
+unset, `RUSTC_WRAPPER` empty). A `requires-toolchain` suite that runs the planner avoids the helper
+build but keeps its intentional Cargo calls. `just cross-check` binds the same variable for Unix and
+Windows archive hosts.
+
+```sh
+: "${ARCHIVE_KEY_HELPER:?verification did not report the ci-build key helper}"
+export BISCUIT_CI_BUILD_BIN="$ARCHIVE_KEY_HELPER"   # then: just _test ...
+```
+
+```mermaid
+flowchart LR
+    V[ci-build verify] -->|succeeds| O[key_helper output]
+    O --> E[export BISCUIT_CI_BUILD_BIN]
+    E --> P[planner runs the shipped verifier]
+```
+
 A build record is **plumbing, never a result cell**: no `{package, environment, tier}` identity, no
 JUnit, no baseline entry. A failed, cancelled, or unuploadable owner makes each dependent cell
 `MISSING — blocked by build <key>`, which blocks; unaffected areas and environments proceed.
