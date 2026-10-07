@@ -61,6 +61,21 @@ conditions that masquerade as repository defects.
   under `/tmp` when `$TMPDIR` is long, as `real_kache_worktree_restore`
   (`tools/test-toolkit`) does; `/tmp` is on the same APFS volume.
 
+## Process groups
+
+- One `kill(-pgid, SIGKILL)` does not reach a child that a group member is
+  forking at that moment: XNU does not make `fork` atomic with a group signal,
+  so the child joins the group unsignalled and survives. Killing
+  `sh -c 'echo started; sleep 300'` on reading `started` left `sleep` running
+  in 63–74 of 2,000 tries on this host, and in 0 of 2,000 in a Linux
+  container. Repeat the group kill until it fails. A group that holds only
+  zombies answers `EPERM` on macOS but `0` on Linux, so "until it fails" ends
+  on macOS while the unreaped leader is a zombie and spins on Linux; Claudine's
+  `ProcessTree` drop repeats only off Linux, under a 250 ms bound.
+- The escaped child holds whatever the group inherited. With a test's stderr
+  inherited, nextest reports `LEAK-FAIL` about 30 s after the test passed,
+  even though every pid the test watched was reaped.
+
 ## Linux and Windows evidence from this host
 
 "macOS-only host, cross-platform runs not executable" is wrong here.
