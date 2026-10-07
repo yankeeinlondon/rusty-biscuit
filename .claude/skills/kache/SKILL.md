@@ -76,8 +76,11 @@ filesystems (ext4, NTFS, WSL's ext4-in-VHDX): init never installs kache and name
 the reason; a below-floor install there upgrades only after interactive
 confirmation, binary-only (`just install-kache true`). APFS/btrfs/XFS-reflink/ReFS
 qualify when the clone probe passes. A `target/` is always wrapped or never
-wrapped — cross-check clones use `RUSTC_WRAPPER=""` (the empty value wins over
-the config file). Version floor `.github/kache-min-version` = **0.23.0** (the
+wrapped — Unix cross-check clones explicitly export `RUSTC_WRAPPER=""` and
+`RUSTC_WORKSPACE_WRAPPER=""` (empty values win over config files and host shims).
+On the non-qualifying Linux rig, the automatic cold-build Cargo shim was removed
+on 2026-10-06; older clones can retain cache hardlinks. See the `os` skill
+[host repair guidance](../os/build-hosts.md#compiler-cache-on-the-hosts). Version floor `.github/kache-min-version` = **0.23.0** (the
 measured line; a check, never a pin). `just kache-status` reports the same probe
 facts init used and exits non-zero on drift while active. Details:
 `docs/kache-strategy.md`, `docs/initialization.md`.

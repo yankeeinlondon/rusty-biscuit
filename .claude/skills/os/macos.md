@@ -60,6 +60,12 @@ conditions that masquerade as repository defects.
   binding `daemon.control.v2.sock` inside its store. Root such a fixture
   under `/tmp` when `$TMPDIR` is long, as `real_kache_worktree_restore`
   (`tools/test-toolkit`) does; `/tmp` is on the same APFS volume.
+- `getcwd` (Rust `std::env::current_dir()`) in a process whose current
+  directory was deleted fails with `ENOENT` here, but only after about two
+  seconds. A unit test that proves an
+  unreadable-cwd branch therefore costs ~2 s per lookup on macOS, as
+  sniff-cli's `relative_base_with_unreadable_cwd_fails` does (measured
+  2026-10-06). Keep such a test to one lookup.
 
 ## Process groups
 

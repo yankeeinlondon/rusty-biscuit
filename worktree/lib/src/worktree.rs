@@ -115,8 +115,13 @@ pub fn default_branch() -> Result<String, WorktreeError> {
 }
 
 /// Detect the default branch name of the repository at `repo`: the target of
-/// `origin/HEAD`, else a local `main` or `master`.
+/// `origin/HEAD`, else a local `main` or `master`. Read in-process; git runs
+/// only when `gix` cannot read the repository.
 pub fn default_branch_in(repo: &Path) -> Result<String, WorktreeError> {
+    if let Some(branch) = crate::git_metadata::default_branch(repo) {
+        return branch.ok_or_else(|| WorktreeError::GitParse("cannot determine default branch".into()));
+    }
+
     // Try symbolic-ref for the remote HEAD
     if let Ok(output) = git_from(repo, repo, &["symbolic-ref", "refs/remotes/origin/HEAD"])
         && let Some(branch) = output.strip_prefix("refs/remotes/origin/")

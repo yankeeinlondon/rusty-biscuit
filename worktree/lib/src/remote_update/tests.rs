@@ -239,6 +239,27 @@ fn variance_fetches_and_publishes_the_fetched_tip() {
     assert_eq!(finished(&state), (Phase::Fetching, Some(Outcome::Fetched), None));
 }
 
+/// Each git process costs about 47 ms on Windows, so an attempt starts only
+/// the two that talk to `origin`; its metadata reads (origin, default
+/// branch, branch name, SSH command, tracking tip) are in-process.
+#[test]
+fn a_fetching_attempt_starts_only_ls_remote_and_fetch() {
+    let repo = TestRepo::with_origin();
+    let pushed = repo.push_commit_to_origin("main", "upstream.txt");
+    let clock = Clock::new();
+    let api = Api::unsupported(&clock);
+    let git = Git::real(&repo.path());
+
+    let scope = crate::git::calls::CallScope::enter();
+    let end = run(&repo, &api, &git, &clock);
+    let started = scope.finish();
+
+    assert_eq!(end, AttemptEnd::Finished(Outcome::Fetched));
+    assert_eq!(repo.sha("origin/main"), pushed);
+    assert_eq!((git.live_calls(), git.fetch_calls()), (1, 1));
+    assert_eq!(started, 2, "ls-remote and fetch, nothing else");
+}
+
 #[test]
 fn a_remote_move_between_check_and_fetch_is_reported_from_the_fetched_tip() {
     let repo = TestRepo::with_origin();

@@ -225,6 +225,10 @@
   nonblocking lock on `<repo hash>.prs.lock`, which lets only one background
   refresh of the PR store make a request; the PR store binds its answer to a
   `biscuit-hash` BLAKE3 digest of `origin`'s URL.
+- `worktree/lib` uses `gix` (pinned `=0.84.0`, the version `sniff` builds, with
+  only `sha1` and `revision`) to read repository metadata in-process: `origin`'s
+  URL, the default branch, branch-name validity, `core.sshCommand`, and ref
+  targets. Each read replaced a git process, which costs ~47 ms on Windows.
 - `worktree/cli` uses `insta` as a development dependency to snapshot the shell
   wrappers `wt --completions` generates and the `wt list` table, and
   `serde_json` (development) to seed the PR store and edit a handoff record in

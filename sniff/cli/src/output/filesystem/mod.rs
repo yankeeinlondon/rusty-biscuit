@@ -74,6 +74,7 @@ pub(crate) fn filter_packages<'a>(packages: &'a [Package], filters: &[String]) -
 
 mod deps;
 mod docs;
+mod file_list;
 mod files;
 mod language;
 mod lockfile;

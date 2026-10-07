@@ -29,6 +29,25 @@ hold the rest:
   `HANDLE_FLAG_INHERIT` on the current process's stdio before setting the
   detached creation flags (`windows` crate features `Win32_Foundation` and
   `Win32_System_Console`). Unix never sees this; fds are close-on-exec.
+- **Python's piped stdout is cp1252 on a Windows runner.** A script that
+  prints non-ASCII (a check mark, a box-drawing character) raises
+  `UnicodeEncodeError` the moment its output is piped, which every CI step
+  is. `PYTHONUTF8=1` fixes it; `_package-ci.yml` and `_wsl-ci.yml` set it at
+  workflow level, and a contract test keeps it there. Found 2026-10-06:
+  `completion.py`'s check mark failed every Windows L1 cell whose tests had
+  all passed, so Windows could not go green on `main`. Read the job's last
+  step before blaming a runner: these failures were first mistaken for the
+  unrelated "bash startup failure" text that `install-action` prints.
+- **A git process costs ~47 ms on Windows, ~5 ms on macOS.** Process start
+  dominates any code that runs many small git commands, and git for Windows
+  also routes a local-path transport through MSYS `sh.exe`. Symptom: a
+  Windows-only timeout where `GIT_TRACE` shows the same metadata command
+  (`remote get-url`, `symbolic-ref`, `config --get`) run repeatedly. Do not
+  raise the budget; read the metadata in-process (`worktree`'s
+  `git_metadata`, `sniff`'s `gix` use) and keep git for transport. Measure
+  with `GIT_TRACE=<file>` on the child, which timestamps every process. Found
+  2026-10-05: `wt list`'s refresh worker started 14 git processes per fetch
+  and missed its 3 s wait on `windows-latest`.
 - **A refused loopback connection is slow.** Connecting to a closed
   `127.0.0.1` port fails in milliseconds on macOS and Linux, but native
   Windows retries the SYN and reports the refusal after about 2 s. A test
@@ -47,6 +66,13 @@ hold the rest:
   hosted `windows-latest` image installs the real interpreter under that name.
   Found 2026-09-14 by the first native-Windows run of `repo-deps`
   (`scripts/ci-rollup-tests.rs::python_interpreter`).
+- **BUILD_WIN SSH sessions resolve `python3`/`python` to the WindowsApps
+  aliases ahead of the real interpreter.** `--version` fails, so tests gated on
+  `python_interpreter()` skip and nextest reports PASS in ~0.3 s having run
+  nothing. Before a `just cross-check` run that needs Python, prepend the real
+  interpreter's directory to a process-scoped `PATH` (confirm a successful
+  `--version`; do not assume the install directory, e.g. Python313). A PASS
+  alone is not evidence: read the captured output for the planner's own lines.
 - **A `.cmd`/`.bat` cannot receive an argument containing a newline** ("batch
   file arguments are invalid"). A fake provider that receives a multi-line
   prompt must be a compiled `.exe`; see the rustc-built fixture in claudine's

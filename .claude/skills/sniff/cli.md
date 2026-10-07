@@ -87,6 +87,36 @@ Three traps when asserting against it:
 
 The structured `performance` field in `--json` is unaffected by any of this.
 
+## File association reports
+
+`sniff files` requests Git identity, structure-only repository membership, and
+file inventory, with docs and formatting disabled. This makes the shared walk
+package/base-scoped. Do not use the default full filesystem request here:
+filtering a capped repository-wide inventory afterward produces a changing
+sample of the requested directory. `--association` preserves percentages of
+all scanned files; `-v` changes only display detail. Capped text reports must
+disclose the partial sample, even when the association filter matches nothing.
+
+A filtered verbose report lists the captured matching paths after the table
+(and any incomplete-scan notice), before language/framework details. The list
+comes from the captured `files` field — never a second walk. Hyperlinks
+resolve against the root the paths are relative to: the owning package root
+via `RepoInfo::package_for_dir` (the scan's own authority; not the git root),
+else the effective base. That root is resolved in the command layer
+(`resolve_files_link_root`) before any stdout; on failure it errors to stderr
+and exits nonzero rather than guessing. JSON, unfiltered, and non-verbose
+reports never resolve a root. Labels are reversible (controls visible,
+backslashes doubled) and are markup-escaped after label construction; entries
+whose target cannot become a faithful `file://` URL fall back to the plain
+label, silently. When the terminal lacks OSC8 (`osc_link_support` false, e.g.
+piped output) no anchor is emitted at all: `biscuit-terminal`'s
+`[label](url)` link fallback escapes every `]`, which would change the
+reversible label. `link_target` also percent-encodes `[ ] ( )`, because the
+Prose parser reads a `[text](target)` run inside an `href` as a nested link.
+A piped CLI test therefore sees bare labels only; L1 tests decode
+destinations by running the report in a Unix PTY with
+`TERM_PROGRAM=WezTerm`.
+
 ## Common host commands
 
 ```text

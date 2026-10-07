@@ -49,7 +49,7 @@ Selection does not depend on whether a branch is merged.
 
 - The default branch and every worktree branch.
 - A branch's recorded parent is used only when that parent is also drawn.
-- When the graph is taller than the rows `wt list` gives it (`GitGraph::with_max_rows`: whatever the rest of the listing leaves on screen, less four, at least 12; see `list_table::graph_row_budget`), `GitGraph` keeps the most recently active lanes (each line carries its tip's commit time, in whole seconds; lanes whose tips share a second keep their lane order) and `wt list` notes "N worktrees aren't in the graph". A lane is kept together with its parent's lane and the lanes holding its fork and merge commits. The focused view is never cut this way.
+- When the graph is taller than the rows `wt list` gives it (`GitGraph::with_max_rows`: whatever the rest of the listing leaves on screen, less four, at least 12; see `list_table::graph_row_budget`), `GitGraph` keeps the most recently active lanes (each line carries its tip's commit time, in whole seconds; lanes whose tips share a second count as equally recent, so one that doesn't fit gives way to the others before the graph stops adding lanes) and `wt list` notes "N worktrees aren't in the graph". A lane is kept together with its parent's lane and the lanes holding its fork and merge commits. The focused view is never cut this way.
 
 ## The default lane
 
