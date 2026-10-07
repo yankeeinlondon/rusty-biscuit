@@ -6,10 +6,33 @@ status: draft-spec
 related:
   - 2026-09-19-less-brittle
   - 2026-10-05-worker-git-processes
-reviewed: false
+reviewed: true
+reviewed_by: codex/gpt-6.1-sol
+reviewed_on: "2026-10-06"
+review_iterations: 0
 clarified: false
 implemented: false
 human_review: true
+$schema:
+  status: |-
+    enum(
+        draft-spec,
+        finalized-spec,
+        planned,
+        implemented,
+        review-findings,
+        human-in-the-loop,
+        completed,
+        on-hold,
+        abandoned
+    ) -> an indicator of progress for this specification
+  reviewed: boolean -> indicates whether the specification file has been reviewed by another agent from the one which created the spec
+  reviewed_by: string -> the agent and model used in the spec review
+  reviewed_on: date -> the date the spec was reviewed
+  review_iterations: number -> the number of implementation reviews have taken place in the review/fix cycle
+  clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
+  implemented: boolean -> indicates whether this spec's plan has been implemented
+  implemented_by: string -> the agent who implemented the plan
 ---
 
 # The archive-path guard always scans the full tree
@@ -17,8 +40,9 @@ human_review: true
 ## Summary
 
 The archive-path guard stops reading its scan scope from the resolved plan and
-always scans the full eligible corpus. The planner keeps deciding **whether**
-the guard runs (its selection rules are unchanged) but no longer tells it
+always scans the full eligible corpus: the Rust files admitted by the existing
+scanner's exclusions. The planner keeps deciding **whether**
+the guard runs (its scheduling rules are unchanged) but no longer tells it
 **what** to scan, so the plan's `archive_guard` section, its Python emitter and
 validator, its Rust reader, and the two cross-language contract tests that run
 the whole planner to exercise that handoff are removed. The resolved plan's
@@ -32,12 +56,15 @@ reliable **selection** of the guard, is kept as it is.
 
 ### What the guard is
 
-`tools/test-toolkit/src/archive_guard.rs` lexes Rust source and refuses
+The [archive guard library](../../tools/test-toolkit/src/archive_guard.rs) in
+the `test-toolkit` package lexes Rust source and refuses
 compile-time paths that do not survive an archived run:
 `env!("CARGO_MANIFEST_DIR")`, `env!("CARGO_BIN_EXE_…")`, and literal
 `/home/runner/work/…` paths, except through the runtime-first macros
 (`biscuit_test_harness::manifest_dir!`, `bin_exe!`) or an `ALLOWED` entry with a
-reason. Its driver is `tools/test-toolkit/tests/archive_path_guard.rs`, run by
+reason. It also recognizes the existing, narrowly defined inline runtime-first
+fallbacks; this fix does not change which expressions are accepted. Its
+[driver](../../tools/test-toolkit/tests/archive_path_guard.rs) is run by
 `just archive-path-guard` in `tools/test-toolkit`. The driver has two tests:
 
 | Test | Scope today |
@@ -73,9 +100,14 @@ Rust source or one of `ARCHIVE_GUARD_OWN_INPUTS` triggers the guard; the guard
 is not selected when the event schedules no `ubuntu-latest` cell; a full-scope
 run selects it. When the owner (`test-toolkit`) is not otherwise impacted,
 `archive_guard_only_selection` adds a `test-toolkit` lint cell that runs the
-guard alone. Selection is already visible to every reader as that cell's
-`companions` entry named `archive-path-guard`, independently of the
-`archive_guard` section.
+guard alone. Actual scheduled execution is already visible to every reader as
+a lint cell's `companions` entry named `archive-path-guard`, independently of
+the `archive_guard` section. There is one important distinction: an ordinary
+`test-toolkit` lint cell always includes that companion through the package's
+manifest, even when the separate guard-trigger decision is false. This fix
+preserves that attachment. After the change, such an invocation checks the
+whole eligible tree instead of doing an empty violation scan plus full-tree
+exemption maintenance.
 
 ## Problem
 
@@ -89,8 +121,10 @@ Measured on CI (PR #116, run 37537695506, `test-toolkit` lint on
 | `every_allowlist_entry_still_names_a_live_site` | full tree, 4,038 files | 3.9 s |
 | `no_archive_executed_target_bakes_in_a_producer_path` | `changed(1 listed)` | 0.03 s |
 
-The cell already pays for a full-tree pass on every guard run, so scoping the
-other test saves at most about 4 s. Recent full-tree runs report
+The cell already pays for a full-tree pass on every guard run, so narrowing
+the other test removes only one of two source passes. The 3.9 s measurement
+gives an approximate scale for the added work, not an upper bound on the
+violation scan or the whole suite. Recent full-tree runs report
 `files-checked=4038 … violations=5` (all five allowed).
 
 ### The handoff's contract tests time out
@@ -130,135 +164,320 @@ pull request.
 ### Why the original reason no longer holds
 
 `2026-09-19-less-brittle` scoped a pull request's scan to its changed files.
-With the allow-list keeping the full tree green, and pushes to `main` already
-scanning the full tree, a pull request cannot inherit a violation from `main`:
-one could not have reached `main` in the first place. Changed-only scanning
-therefore buys nothing a full scan does not, at a measured 3.9 s.
+The currently passing full-tree scans and maintained exemption list make
+finding an inherited violation unlikely. They do not guarantee its absence:
+event scheduling, canceled runs, and policy changes can leave a tree unchecked.
+The intended behavior is now that a selected scan detects every unexempted
+violation in the eligible tree, including one outside the changed files. The
+small expected increase in scan time is preferable to maintaining a second
+scan policy and a plan reader solely for it.
 
 ## Decision
 
-1. The guard always scans the full eligible corpus. It reads no plan and no
-   scope variable.
-2. The planner's selection rules are unchanged: what triggers the guard, the
-   `ubuntu-latest`-only rule, full-scope runs, and the guard-only `test-toolkit`
-   lint cell.
-3. The resolved plan no longer carries the guard's scope. Selection remains
-   expressed by the lint cell's `archive-path-guard` companion, and the
-   guard-only cell keeps its human-readable `reason`.
-4. The resolved plan's schema version moves from 7 to 8 under
-   `docs/cicd/schema-versions.md`'s rules.
+1. Every guard invocation scans the full eligible corpus. The scanner reads
+   no plan and no scope variable. It continues to use the existing runtime
+   checkout lookup, so an archived binary checks the consumer's checkout.
+2. Scheduling is unchanged: the same changed paths trigger a guard-only
+   `test-toolkit` lint cell, the same ordinary owner lint cells carry the
+   companion, and no guard cell forces `ubuntu-latest` into an event that does
+   not schedule it. A scheduled guard can now fail for a violation in an
+   untouched file; that wider detection is intentional.
+3. The resolved plan no longer carries the guard's scope. Its lint cells'
+   `archive-path-guard` companions describe scheduled execution, and a
+   guard-only cell keeps its human-readable selection reason.
+4. The resolved plan's schema version moves from 7 to 8 under the
+   [schema version rules](../../docs/cicd/schema-versions.md). Validation
+   receipt and scope receipt versions do not change.
+5. Guard lint cells remain non-reusable. Removing the mode distinction does
+   not make package-local receipts identify all repository-wide scan inputs.
+
+> **Review note — preserve execution ownership.** Removing the scanner's
+> plan reader does not remove the workflow's need for the plan. The workflow
+> still resolves its cell, decides which companions to execute, and records
+> their results from that document. Likewise, retaining the ordinary lint
+> cell's companion avoids an unrelated scheduling change. The simplification
+> removes the file-list handoff; it does not create a second scheduler or
+> weaken the merge gate.
 
 ## Requirements
 
-### R1. The guard (`tools/test-toolkit`)
+### Guard library and driver (`test-toolkit`)
 
-- `scan` checks the full eligible corpus; the eligibility policy
-  (`is_eligible`, `SKIPPED_DIRS`), `ALLOWED`, the matcher, and exemption
-  maintenance are unchanged.
-- Remove `GuardPlan`, `ScanMode` (or reduce it to the full-tree case if a
-  remaining caller needs a mode type; prefer removal), plan parsing
-  (`from_plan_json`, `from_env`), `PLAN_SCHEMA_VERSION`, and every reference to
-  `BISCUIT_ARCHIVE_GUARD_PLAN`.
-- `archive_path_guard.rs` keeps its two tests. The printed summary still states
-  the mode (`full-tree`) and the file count, so a run that checked nothing
-  cannot pass silently.
-- `tools/test-toolkit/src/lib.rs` re-exports and `matcher_tests.rs` follow the
-  removals.
+- Change [scan](../../tools/test-toolkit/src/archive_guard.rs), the
+  `test-toolkit` function that discovers and checks source, to
+  `scan(root: &Path) -> Result<ScanReport, GuardError>`. It always uses the
+  existing full-tree discovery. Keep the eligibility policy, directory and
+  own-source exclusions, exemption list, matcher, traversal behavior, and
+  filesystem error handling unchanged.
+- Remove [GuardPlan and ScanMode](../../tools/test-toolkit/src/archive_guard.rs),
+  the `test-toolkit` types that parse the plan and represent selectable scan
+  modes. Remove their helpers, the plan constants (`PLAN_ENV`, `PLAN_KEY`,
+  `PLAN_SCHEMA_VERSION`, `PLAN_SCOPE_FIELDS`), and changed-list-only error
+  variants and validation helpers once no caller needs them. Do not keep a
+  one-variant mode type or a compatibility reader.
+- Simplify [ScanReport](../../tools/test-toolkit/src/archive_guard.rs), the
+  `test-toolkit` scan result: retain the checked-file count and violations;
+  remove stored mode and changed-list-only `ineligible` state. Its summary
+  still identifies `mode=full-tree` and the actual checked-file count.
+- Keep both tests in the [real-checkout driver](../../tools/test-toolkit/tests/archive_path_guard.rs).
+  The violation test prints the summary and explicitly fails if it checked
+  zero files. Printing a zero count alone does not prevent a false pass.
+  This assertion belongs in the repository driver; a generic scan of an empty
+  fixture tree may still return a valid empty report.
+- Keep exemption maintenance's raw full-tree lookup. It must still recognize
+  accepted runtime-first fallbacks as live sites, so exemptions are not
+  incorrectly removed just because those sites produce no violation. Keep
+  the two passes and two driver tests; sharing or caching their work is not
+  needed for this fix.
+- Update callers and relevant module, function, and driver comments, including
+  `raw_live_form_files` documentation and the scanner fixture tests. Remove
+  stale claims about a plan, changed-file scans, or selectable modes. Update
+  any affected public exports; `src/lib.rs` currently exposes the module
+  rather than re-exporting the removed types.
+- Move `serde_json` back to `[dev-dependencies]` in
+  [the package manifest](../../tools/test-toolkit/Cargo.toml): the plan reader
+  is its only current library user, while contract tests still need JSON.
+  Update the dependency comment and dependency documentation together.
 
-### R2. The planner (`scripts/ci/affected_scope.py`)
+### Planner selection (`repo-deps`)
 
-- Keep the selection logic: `archive_guard_eligible`,
-  `archive_guard_triggered`, `ARCHIVE_GUARD_OWN_INPUTS`, the
-  `LINT_ENVIRONMENT` check, full-scope selection, and
-  `archive_guard_only_selection` with its cell `reason`.
-- Replace `archive_guard_scope`'s three-shape result with a selection decision
-  (selected or not, with a reason used where a reason is shown today); remove
-  `mode`, `paths`, and the top-level `archive_guard` plan field.
-- Keep `SUITE_REGISTRY["archive-path-guard"]` and the
-  `.github/ci/schemas/archive_guard_cases.json` test-input mapping only if
-  still needed after `archive_guard_cases.json` is removed (R3); otherwise
-  remove the mapping entry too.
+The Python planner in the `repo-deps` package owns scheduling.
 
-### R3. The resolved plan schema (version 7 → 8)
+- Replace [archive_guard_scope](../../scripts/ci/affected_scope.py), the helper
+  that currently combines selection and scan scope, with an internal
+  selection decision and a readable reason. It is not serialized as a second
+  plan section. Remove branches and arguments used only to choose scan mode
+  or produce a scan list. Keep deletion input if needed to preserve triggers.
+- Preserve the existing eligible-source trigger, owned-input list, skipped
+  directories, build-script exclusion, full-scope selection, and check for
+  `ubuntu-latest` among the environments actually scheduled. In particular,
+  an eligible deletion still triggers maintenance even though there is no
+  remaining source file to scan; pushes that have already proved Linux do
+  not gain another Linux execution.
+- Preserve [archive_guard_only_selection](../../scripts/ci/affected_scope.py),
+  the `repo-deps` helper that schedules only the guard when its owner has no
+  other required work. It still adds exactly one
+  `{test-toolkit, ubuntu-latest, lint}` cell with `companions_only: true`,
+  no Clippy work, no unrelated companions, and no dependent compile work.
+  Its reason identifies a changed trigger or a full-scope request without
+  claiming a changed-file scan was performed.
+- When the owner already has an ordinary lint cell, retain its guard
+  companion, with no duplicate cell or companion and no `companions_only`
+  flag. This also preserves existing attachment when the separate
+  guard-specific trigger is false. A documentation-only input does not add
+  a guard-only cell, but a separate ownership rule can still select an
+  ordinary lint cell carrying the guard.
+- Keep `SUITE_REGISTRY["archive-path-guard"]`, its lint-only recipe and Just
+  tuple, and the manifest's companion binding unconditionally. They are how
+  CI still executes the guard. Remove only the exact
+  `.github/ci/schemas/archive_guard_cases.json` ownership mapping in
+  `SUITE_OWNER_PATHS` when its retired corpus is deleted. Keep
+  `contract.json` ownership for its surviving cross-language readers.
+- Refresh selection and registry comments that explain the former scope
+  contract; keep the eligibility and owned-input agreement tests.
 
-Follow `docs/cicd/schema-versions.md`. In one change:
+### Resolved plan schema (version 7 → 8)
 
-- `scripts/ci/schema.py`: drop `archive_guard` from the required fields and
-  remove `_archive_guard`, `ARCHIVE_GUARD_FIELDS`, `ARCHIVE_GUARD_MODES`;
-  bump `RESOLVED_PLAN_SCHEMA_VERSION` to 8.
-- Regenerate `.github/ci/schemas/contract.json`; delete
-  `.github/ci/schemas/archive_guard_cases.json` and its readers.
-- Move every mirror the changelog lists: `ci-rollup.rs::PLAN_SCHEMA_VERSION`;
-  `test_toolkit::archive_guard::PLAN_SCHEMA_VERSION` is removed with R1
-  (record that in the changelog row); the `.githooks/tests/fixtures/plan-*.json`
-  fixtures and `affected_scope_stub.py`; `scripts/ci/plan_fixtures.py`.
-- `change_inventory.deleted` was added in version 5 for the guard. Check every
-  reader (`scripts/ci-rollup.rs` has a `deleted` symbol; `diff_scope.py` and
-  the planner's own tests use it). Keep it if anything but the guard reads it;
-  otherwise remove it in the same bump. Record which in the changelog row.
-- Add a version 8 row to `docs/cicd/schema-versions.md` naming this fix by
-  `2026-10-06-archive-guard-full-tree`, and state that a scope receipt from an
-  earlier generation misses once as `scope-schema`.
-- `scripts/ci-plan.rs` (the plan renderer) and its tests stop reading the
-  section.
+Follow the [schema version rules](../../docs/cicd/schema-versions.md) in one
+implementation change:
 
-### R4. Workflows and the local runner
+- In [the Python schema owner](../../scripts/ci/schema.py), remove the
+  top-level `archive_guard` field, its validation call, `_archive_guard`,
+  `ARCHIVE_GUARD_FIELDS`, `ARCHIVE_GUARD_MODES`, and its exported contract
+  metadata. Set `RESOLVED_PLAN_SCHEMA_VERSION` to 8 and regenerate
+  `.github/ci/schemas/contract.json` with `python3 scripts/ci/schema.py`.
+- Delete `.github/ci/schemas/archive_guard_cases.json` and tests whose only
+  purpose is validating that retired scope shape. Keep tests of the rest of
+  the resolved plan contract.
+- Update every version mirror listed in the changelog, including the
+  `repo-deps` [rollup reader](../../scripts/ci-rollup.rs), the pre-push hook's
+  `plan-*.json` fixtures and `affected_scope_stub.py`, and
+  `scripts/ci/plan_fixtures.py`. Remove the guard's mirror altogether.
+  Search other plan fixtures and assertions for hard-coded version 7.
+- **Keep `change_inventory.deleted` and the `--deleted` argument.** They are
+  part of the existing declared change inventory, validated independently
+  of scan scope. Keep the shared `diff_scope.py` parser and the deletion and
+  rename declarations in CI, the local runner, and the pre-push hook. Removing
+  them is a separate contract change with no benefit to this simplification.
+- Update the changelog's current-version table and mirror list, and add a
+  version 8 history row naming `2026-10-06-archive-guard-full-tree`. Record
+  removal of the guard scope and its Rust version mirror, and retention of
+  deletion inventory. This history entry is the exception to the rule that
+  current behavior docs do not name a fix.
+- Readers that enforce the plan version still reject older generations
+  before validating the remaining fields. A version-7 scope receipt misses
+  once as `scope-schema`; CI calculates a fresh plan. Do not upgrade stored
+  receipts in place or change validation receipt versions. Existing passing
+  cell evidence remains eligible under its usual input-equivalence rules;
+  the plan bump alone is not grounds to reject it.
 
-- `.github/workflows/_package-ci.yml`: remove `BISCUIT_ARCHIVE_GUARD_PLAN` and
-  its comment from the companion step. The "a missing plan is an error"
-  safeguard it describes no longer applies, because the guard's result no
-  longer depends on a plan.
-- `just/ci-local.just`: stop exporting `BISCUIT_ARCHIVE_GUARD_PLAN`; update the
-  `jq` that reads `.archive_guard` (around line 351) to read selection from the
-  cell companions, or remove it if it only reported scope. Keep the advisory
-  "the planned ubuntu-latest execution remains OUTSTANDING" wording.
-- `tools/test-toolkit/justfile`: update the `archive-path-guard` recipe's
-  comment.
+### Workflows, local runner, and plan display
 
-### R5. Tests
+- In [the package workflow](../../.github/workflows/_package-ci.yml), remove
+  `BISCUIT_ARCHIVE_GUARD_PLAN` and its scanner-specific comment from the lint
+  companion step. **Keep the required resolved-plan download and cell
+  resolution.** A missing or unreadable execution plan still fails the job;
+  the guard itself simply no longer reads that document.
+- Keep companion selection, the companions-only Clippy condition, producer
+  status, completion records, area coverage auditing, and the existing
+  `ci-gate` failure propagation. Do not add jobs, matrix cells, or receipt
+  formats for the full-tree scan.
+- In [the local runner](../../just/ci-local.just), remove the scope-variable
+  export. Keep executing the canonical recipe only when a planned lint cell
+  carries the guard companion and the local run requests lint. Keep the
+  `companions_only` behavior and the advisory message that the planned
+  `ubuntu-latest` execution remains `OUTSTANDING` on another host. A local
+  pass does not replace a non-reusable CI lint cell, including on Linux.
+- Replace the old scan-scope summary on both display surfaces:
+  [ci-plan](../../scripts/ci-plan.rs), the `repo-deps` terminal renderer, and
+  the local runner's `jq` fallback. They derive guard presence from lint-cell
+  companions and describe a full-tree scan when attached, or say that no
+  guard execution is planned when none is attached. Cell selection reasons
+  and execution states remain visible in the existing cell display. A
+  prohibited cell must not be presented as a completed scan. Do not invent
+  an unselected reason that is no longer carried in the plan.
+- Remove `ci-plan`'s `ArchiveGuard` scope model and use its existing
+  `TerminalRenderable` components for the replacement summary. Add defaulted
+  companion-name deserialization to its cell model, which currently omits
+  `companions`, so older accepted cell documents still render. Rendering
+  must not run the scanner, inspect Git, or recalculate selection. Older
+  plans that this advisory renderer already accepts retain their ordinary
+  cell display; their retired scope field is ignored.
+- Update [the guard recipe](../../tools/test-toolkit/justfile) comments and
+  keep `--no-capture`, so passing runs still expose their file counts.
 
-- Delete `the_shipped_planner_emits_plans_the_guards_reader_accepts` and
-  `the_shipped_planner_omits_deletions_and_the_reader_refuses_an_unexpected_absence`,
-  and any other contract in `ci_workflow_contracts.rs` that pins the removed
-  section or variable (about 27 references today).
-- Python suites under `scripts/ci/`: guard-scope tests in
-  `test_affected_scope.py` become selection tests (a documentation change
-  selects no guard; an eligible `.rs` change selects it; an owned input selects
-  it; a deleted eligible file still selects it; a full-scope run selects it; an
-  event without `ubuntu-latest` does not; the guard-only cell appears when
-  `test-toolkit` is not otherwise impacted). Update `test_schema.py`,
-  `test_resolved_plan.py`, `test_ci_local.py`, `test_evidence_reuse.py`, and
-  `test_local_evidence.py` for the removed field and the version.
-- `scripts/ci-plan-tests.rs` and `scripts/ci-rollup-tests.rs` follow R3.
-- No timeout is raised anywhere.
+### Tests
 
-### R6. Documentation
+- In the `test-toolkit` [workflow contract suite](../../tools/test-toolkit/tests/ci_workflow_contracts.rs),
+  delete the two expensive tests named in the Problem section, plus the
+  passive field-set, shared scope-corpus, and guard-specific schema-version
+  tests whose reader no longer exists. Do not replace them with other
+  invocations of the shipped planner over the real workspace.
+- Adapt shared contracts rather than deleting them just because they mention
+  the removed variable. Keep coverage of guard-only execution, required plan
+  download and cell resolution, canonical recipe agreement, absence of
+  consumer-side diffs, eligibility and owned-input agreement, deletion
+  declaration, and failure propagation through the merge gate.
+- Convert Python guard-scope tests in `scripts/ci/test_affected_scope.py` to
+  internal selection tests and assertions about actual lint-cell companions.
+  Use fixture metadata containing the guard owner for execution assertions:
+  a fixture without `test-toolkit` cannot prove that a cell is attached.
+  Cover eligible changes inside and outside workspace members, owned inputs,
+  excluded paths, deletions, full-scope requests, no scheduled Linux, the
+  ordinary owner lint cell, and the guard-only cell. Include an ordinary
+  owner selection with no separate guard trigger to pin existing attachment.
+- Update `test_schema.py`, `test_resolved_plan.py`, `test_ci_local.py`,
+  `test_evidence_reuse.py`, `test_local_evidence.py`, and shared plan fixtures
+  for the retired field and version. Retain version-first refusal, the
+  `scope-schema` miss, and unchanged validation receipt behavior. Guard lint
+  cells remain non-reusable.
+- Adapt existing temporary-tree scanner tests to the mode-free API and retain
+  full-tree traversal, matcher, filesystem failure, and exemption checks.
+  Demonstrate that violations in multiple eligible files are found without
+  a path list and that the real-checkout driver rejects a zero-file pass.
+  Remove tests solely about parsing plans or validating changed-path lists.
+- Update `scripts/ci-plan-tests.rs` to cover both companion-present and
+  companion-absent summaries without a scope block, and keep
+  `scripts/ci-rollup-tests.rs` version and companion-result coverage.
+- No timeout, retry policy, eligibility rule, or exemption is relaxed to make
+  validation pass.
 
-The `docs/` tree and these pages describe current behavior, so update them in
-the same change: `.github/ci/README.md`, `.github/ci/schemas/README.md`,
-`.claude/skills/rust-devops/ci-cd.md`, and the guard's mention in
-`docs/dependencies.md`. A docs page states the full-tree behavior in its own
-words and does not name this spec.
+### Documentation
+
+Update current behavior in `.github/ci/README.md`,
+`.github/ci/schemas/README.md`, `.claude/skills/rust-devops/ci-cd.md`, and
+`docs/dependencies.md` alongside implementation. Update any affected area
+README or topic page that describes the public scan API. Explain full-tree
+scanning, ordinary versus guard-only attachment, the still-required execution
+plan, non-reusable guard evidence, and the retained exclusions. Describe the
+guard's environment rule in terms of the environments actually scheduled,
+rather than depending on a hard-coded claim about the nightly event. The
+nightly policy discrepancy is recorded in Resolved Questions below; this fix
+does not change the environment table. Current docs state behavior directly
+and do not name this fix. Historical specs and schema history rows remain
+snapshots.
 
 ## Acceptance
 
-1. Outside `docs/cicd/schema-versions.md`'s history rows and this spec, no file
-   contains `BISCUIT_ARCHIVE_GUARD_PLAN`, `GuardPlan`, `archive_guard_cases`,
-   or a reference to the plan's `archive_guard` field (verify with `rg`).
-2. Selection behavior is unchanged, proven by the Python selection tests in R5.
-3. These pass locally: `python3 -m unittest` in `scripts/ci`;
-   `just test` and `just lint` in `tools/test-toolkit`; `repo-deps` L1
-   (`just test repo-deps` from the root); the pre-push hook's own tests under
-   `.githooks/tests`.
-4. `just cross-check test-toolkit --os windows` passes with no timeout, and the
-   guard reports `mode=full-tree` in CI's `test-toolkit` lint cell in under
-   about 5 s.
-5. The pull request carries `ci:all-os`, and its `test-toolkit` cells pass on
-   every environment it schedules.
+1. A targeted `rg` audit finds no active code, test, fixture, or current
+   behavior documentation still using `BISCUIT_ARCHIVE_GUARD_PLAN`,
+   `GuardPlan`, `ScanMode` in the archive guard, `archive_guard_cases`, or
+   the plan's removed `archive_guard` field. Historical specs, this spec,
+   and schema history rows are excluded; the `archive_guard` module name
+   remains valid. All current plan writers and required-version readers
+   agree on version 8, and the generated contract matches the schema owner.
+2. Selection and companion tests prove unchanged scheduling, including
+   guard-only and ordinary owner cells. The scanner detects violations across
+   the full eligible fixture tree, preserves exemption maintenance, and the
+   real-checkout driver fails on a zero-file scan. Both human plan displays
+   agree with the lint-cell companions without reading a scope block.
+3. Implementation validation passes: `python3 -m unittest discover` in
+   `scripts/ci`; `just archive-path-guard`, `just test`, and `just lint` in
+   `tools/test-toolkit`; `just test repo-deps` from the root, with its default
+   `local-tools` feature so the plan renderer is tested; and
+   `just test-githooks` from the root. These are implementation checks, not
+   prerequisites for this document-only review.
+4. `just cross-check test-toolkit --os windows` passes without the removed
+   planner-reader timeouts. Reuse qualifying evidence for required cells on
+   each environment and run cells lacking it. Review `just ci-local --plan`
+   before an implementation push. Normal event scheduling applies; no
+   `ci:all-os` label or full-workspace CI run is required just to review or
+   validate this simplification. Existing execution bans remain binding.
+5. The selected Ubuntu lint companion reports `mode=full-tree` and a positive
+   file count; a failing or unreported required companion cannot pass its
+   cell. Record durations from the normal validation run for context. The
+   existing measurements justify removing the handoff without a performance
+   spike or a new timing threshold: 3.9 s measured one raw-form pass, not the
+   total duration of two tests, compilation, or CI setup.
+
+## Resolved Questions
+
+### Which environments should the nightly event schedule?
+
+**Decided 2026-10-06 by the author: keep the checked-in environment table as
+it is for this fix, and resolve nightly policy separately.** This fix does not
+change `.github/ci/environments.json`; a nightly run continues to schedule
+WSL2 alone, so it does not execute the guard. The options as reviewed:
+
+The repository instructions describe a nightly run covering Linux, Windows,
+and WSL2. However, the checked-in
+[environment table](../../.github/ci/environments.json) assigns `schedule`
+only to WSL2, and [the workflow](../../.github/workflows/ci.yml) describes
+that same rule. This matters because the guard is hosted on `ubuntu-latest`:
+a WSL2-only nightly cannot run it. This is a pre-existing policy discrepancy,
+not a consequence of removing scan scope.
+
+- **Preserve the checked-in table for this fix; resolve nightly policy
+  separately (chosen).** Pros: keeps scheduling unchanged and avoids
+  adding CI work unrelated to the guard's plan reader. Cons: the disagreement
+  with the repository instructions remains, and the current nightly does not
+  execute the guard. Recommended because this fix can satisfy its design
+  goal without deciding or expanding the nightly matrix. The author should
+  confirm the intended policy and correct its owning documents separately.
+- **Include a separately justified nightly-policy change.** Add `schedule`
+  to Linux and Windows in the environment table, then update the event tests
+  and current documentation together. Pros: brings the executable schedule
+  into agreement with the stated repository policy and runs the guard on
+  the nightly event. Cons: adds Linux and Windows work across the nightly
+  full-workspace plan, increasing runner time and making this fix responsible
+  for a broader scheduling change. It requires an explicit author decision
+  and a scope-based cost estimate before adding those cells.
+
+Either option leaves the guard rule unchanged: it runs only when the resolved
+plan contains a lint cell carrying its companion on `ubuntu-latest`. This
+policy question does not block implementing the scan simplification against
+the current table. The archive-mode planner slowdown remains an independent
+investigation below.
 
 ## Not in scope
 
 These are open and recorded so they are not lost:
+
+- **Nightly environment policy.** The repository instructions and the
+  `rust-devops` CI page describe a nightly run covering Linux, Windows, and
+  WSL2, while `.github/ci/environments.json` schedules `schedule` on WSL2
+  alone. Deciding the intended policy and correcting whichever side is wrong
+  is a separate change (see Resolved Questions).
 
 - **Archive-mode planner slowdown.** The `-- README.md` plan takes about 30 s
   in nextest archive mode against about 3 s from a checkout on the same WSL
