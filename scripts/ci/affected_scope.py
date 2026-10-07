@@ -1801,10 +1801,10 @@ def package_ci_policy(
 
 
 def workspace_packages(metadata: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    members = set(metadata["workspace_members"])
+    members = set(_expect_strings(metadata.get("workspace_members"), "metadata", "workspace_members"))
     return {
         package["id"]: package
-        for package in metadata["packages"]
+        for package in _expect(metadata.get("packages"), list, "metadata", "packages")
         if package["id"] in members
     }
 
@@ -2303,10 +2303,13 @@ def _solve_member_graph(nodes: dict[str, _GraphNode], members: list[str]) -> Mem
                     indexes = keyed(node_id, key)
                     if not indexes:
                         raise _graph_error(node.label, f"feature '{feature}' names unknown dependency '{key}'")
-                    if not weak:
-                        queue.append(("dep", node_id, key, origin))
-                        if key in node.features and any(node.entries[i].optional for i in indexes):
-                            queue.append(("feature", node_id, key, origin))
+                    # Cargo's dependency resolver, which `cargo metadata` reports,
+                    # activates `k` for the weak form too; only the same-named
+                    # feature stays off. The feature resolver that decides what
+                    # compiles is stricter, but it is not what the planner read.
+                    queue.append(("dep", node_id, key, origin))
+                    if not weak and key in node.features and any(node.entries[i].optional for i in indexes):
+                        queue.append(("feature", node_id, key, origin))
                     requests.setdefault((node_id, key), set()).add(requested)
                     for index in indexes:
                         if (node_id, index) in entries_on and node.entries[index].target:

@@ -5,7 +5,10 @@ from __future__ import annotations
 
 import itertools
 import json
+import ntpath
 import os
+import posixpath
+import shutil
 import shlex
 import subprocess
 import sys
@@ -74,13 +77,13 @@ from affected_scope import (
 # Pinned so an expiry test asserts the rule, not today's date.
 TODAY = date(2026, 7, 27)
 
-#: Every job that runs this suite provisions a toolchain, so a missing Cargo
-#: here is a provisioning regression rather than a host without Rust. Both set
-#: BISCUIT_REQUIRE_CARGO; a developer host without Cargo still skips.
+#: The `Companion suites` step of `_package-ci.yml` runs this suite and sets
+#: BISCUIT_REQUIRE_CARGO after the Rust gate has already run Cargo there, so a
+#: missing Cargo is a provisioning regression rather than a host without Rust.
+#: A developer host without Cargo still skips.
 CARGO_ENFORCED_BY = (
-    "`ci.yml`'s `preflight` matrix on every selected operating system and by "
-    "its `ci-tooling` job, both of which set up the pinned Rust toolchain and "
-    "set BISCUIT_REQUIRE_CARGO"
+    "the `Companion suites` step of `_package-ci.yml`, which runs after the "
+    "package's Rust gate on a pinned toolchain and sets BISCUIT_REQUIRE_CARGO"
 )
 
 #: Git is how every one of those jobs obtained the checkout it runs this suite
@@ -5698,7 +5701,7 @@ class L2BackendAxisTests(unittest.TestCase):
 
 
 class RealWorkspaceNativeGuardTests(unittest.TestCase):
-    """The native union rides the workspace-unified resolve (latent coupling).
+    """The native union rides the workspace-unified member graph (latent coupling).
 
     `build_closure` sees an OPTIONAL edge only while some workspace member
     enables it. biscuit-speaks -> playa is the known instance: if every
@@ -5720,8 +5723,30 @@ class RealWorkspaceNativeGuardTests(unittest.TestCase):
             "playa",
             names,
             "the biscuit-speaks -> playa optional edge vanished from the "
-            "workspace-unified resolve; biscuit-speaks would silently lose "
+            "workspace-unified member graph; biscuit-speaks would silently lose "
             "playa's ALSA/PulseAudio native requirements",
+        )
+
+    def test_biscuit_speaks_inherits_playas_system_libraries(self) -> None:
+        metadata = load_metadata(ROOT)
+        packages = workspace_packages(metadata)
+        speaks_id = next(
+            package_id
+            for package_id, package in packages.items()
+            if package["name"] == "biscuit-speaks"
+        )
+        policy = package_ci_policy(
+            packages,
+            {"ubuntu-latest", "windows-latest", "macos-latest"},
+            root=ROOT,
+        )
+        native = affected_scope.native_closure(
+            speaks_id, member_dependency_graph(metadata), packages, policy
+        )
+        self.assertTrue(
+            {"libasound2-dev", "libpulse-dev"} <= set(native.get("ubuntu-latest", [])),
+            "biscuit-speaks reaches playa through the optional edge, so its "
+            f"Linux build must provision playa's ALSA and PulseAudio headers: {native}",
         )
 
 
@@ -8710,6 +8735,886 @@ class ArgumentsFileTests(unittest.TestCase):
         )
         inventory = json.loads(result.stdout)["change_inventory"]
         self.assertEqual(["docs/comment-quality.md"], inventory["deleted"])
+
+
+# ---------------------------------------------------------------------------
+# Member dependency graph: derived from `cargo metadata --no-deps`, compared
+# with Cargo's own full resolve.
+# ---------------------------------------------------------------------------
+
+CARGO_PACKAGE_HEADER = '[package]\nname = "{name}"\nversion = "0.1.0"\nedition = "2021"\n\n'
+
+
+def write_cargo_workspace(
+    root: Path,
+    members: dict[str, str],
+    workspace_extra: str = "",
+    outside: dict[str, str] | None = None,
+) -> Path:
+    """A path-only workspace at `root/ws`; `outside` packages sit beside it at `root/<name>`.
+
+    A member's body is appended to a `[package]` header; an outside package is
+    written verbatim so it can be its own workspace root. Nothing here needs a
+    registry, so a full `cargo metadata --offline` resolves it from an empty
+    `CARGO_HOME`.
+    """
+    workspace = root / "ws"
+    workspace.mkdir(parents=True)
+    # The pinned toolchain is the one the job provisioned; a temp directory
+    # would otherwise fall back to whatever rustup default the host has.
+    shutil.copyfile(ROOT / "rust-toolchain.toml", root / "rust-toolchain.toml")
+    names = ", ".join(f'"{name}"' for name in members)
+    (workspace / "Cargo.toml").write_text(
+        f'[workspace]\nmembers = [{names}]\nresolver = "2"\n{workspace_extra}\n',
+        encoding="utf-8",
+    )
+    for name, body in members.items():
+        (workspace / name / "src").mkdir(parents=True)
+        (workspace / name / "Cargo.toml").write_text(
+            CARGO_PACKAGE_HEADER.format(name=name) + body, encoding="utf-8"
+        )
+        (workspace / name / "src" / "lib.rs").write_text("", encoding="utf-8")
+    for name, manifest in (outside or {}).items():
+        (root / name / "src").mkdir(parents=True)
+        (root / name / "Cargo.toml").write_text(manifest, encoding="utf-8")
+        (root / name / "src" / "lib.rs").write_text("", encoding="utf-8")
+    return workspace
+
+
+def cargo_metadata(workspace: Path, cargo_home: Path, *flags: str) -> dict[str, object]:
+    """Run `cargo metadata --offline` with an empty `CARGO_HOME`; no compile happens."""
+    result = subprocess.run(
+        ["cargo", "metadata", "--offline", "--format-version", "1", *flags],
+        cwd=workspace,
+        env={**os.environ, "CARGO_HOME": str(cargo_home)},
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    if result.returncode != 0:
+        raise AssertionError(f"cargo metadata {flags} failed in {workspace}:\n{result.stderr}")
+    return json.loads(result.stdout)
+
+
+def named_edges(
+    metadata: dict[str, object], edges: dict[str, dict[str, set[str | None]]]
+) -> dict[str, dict[str, set[str]]]:
+    """A member graph by package name, kinds spelled `normal` / `dev` / `build`, empties dropped."""
+    names = {record["id"]: record["name"] for record in metadata["packages"]}  # type: ignore[index]
+    return {
+        names[source]: {
+            names[target]: {kind or "normal" for kind in kinds} for target, kinds in targets.items()
+        }
+        for source, targets in edges.items()
+        if targets
+    }
+
+
+def derived_edges(no_deps: dict[str, object]) -> dict[str, dict[str, set[str]]]:
+    return named_edges(no_deps, member_dependency_graph(no_deps))
+
+
+def resolved_edges(full: dict[str, object]) -> dict[str, dict[str, set[str]]]:
+    """Cargo's own member-to-member edges from a full resolve, by package name."""
+    members = set(full["workspace_members"])  # type: ignore[arg-type]
+    edges: dict[str, dict[str, set[str | None]]] = {}
+    for node in full["resolve"]["nodes"]:  # type: ignore[index]
+        if node["id"] not in members:
+            continue
+        edges[node["id"]] = {
+            dependency["pkg"]: {kind["kind"] for kind in dependency["dep_kinds"]}
+            for dependency in node["deps"]
+            if dependency["pkg"] in members
+        }
+    return named_edges(full, edges)
+
+
+def edge_set(*edges: tuple[str, str, str]) -> dict[str, dict[str, set[str]]]:
+    """Hand-written expected edges: `("a", "b", "normal")`, kinds unioned per pair."""
+    expected: dict[str, dict[str, set[str]]] = {}
+    for source, target, kind in edges:
+        expected.setdefault(source, {}).setdefault(target, set()).add(kind)
+    return expected
+
+
+OPTIONAL_B = '[dependencies]\nb = { path = "../b", optional = true }\n'
+WITH_B_AND_Z = (
+    '[dependencies]\nb = { path = "../b", optional = true }\nz = { path = "../z", optional = true }\n'
+    '[features]\nb = ["dep:b", "dep:z"]\n'
+)
+B_WITH_EXTRA = (
+    '[dependencies]\nc = { path = "../c", optional = true }\n[features]\nextra = ["dep:c"]\n'
+)
+
+#: One row per activation rule. `members` bodies are appended to a package
+#: header; the expected graph is written by hand and ALSO compared with Cargo's
+#: own resolve unless `compare` is false (Cargo rejects the shape outright).
+RULE_CASES: list[dict[str, object]] = [
+    {
+        "name": "default feature enables an optional member dependency",
+        "members": {"a": OPTIONAL_B + '[features]\ndefault = ["b"]\n', "b": "", "c": ""},
+        "expected": edge_set(("a", "b", "normal")),
+    },
+    {
+        "name": "an optional dependency no feature enables is inactive; no `default` is valid",
+        "members": {"a": OPTIONAL_B, "b": "", "c": ""},
+        "expected": {},
+    },
+    {
+        "name": "dep: syntax activates the dependency",
+        "members": {
+            "a": OPTIONAL_B + '[features]\ndefault = ["fast"]\nfast = ["dep:b"]\n',
+            "b": "",
+            "c": "",
+        },
+        "expected": edge_set(("a", "b", "normal")),
+    },
+    {
+        "name": "dep: syntax suppresses the implicit feature and an off feature stays off",
+        "members": {"a": OPTIONAL_B + '[features]\nfast = ["dep:b"]\n', "b": "", "c": ""},
+        "expected": {},
+    },
+    {
+        "name": "k/g activates k and requests g on it",
+        "members": {
+            "a": OPTIONAL_B + '[features]\ndefault = ["b/extra"]\n',
+            "b": B_WITH_EXTRA,
+            "c": "",
+        },
+        "expected": edge_set(("a", "b", "normal"), ("b", "c", "normal")),
+    },
+    {
+        "name": "weak k?/g still activates k in the resolve Cargo reports",
+        "members": {
+            "a": OPTIONAL_B + '[features]\ndefault = ["b?/extra"]\n',
+            "b": B_WITH_EXTRA,
+            "c": "",
+        },
+        "expected": edge_set(("a", "b", "normal"), ("b", "c", "normal")),
+    },
+    {
+        "name": "weak k?/g leaves the same-named feature off",
+        "members": {
+            "a": WITH_B_AND_Z + 'default = ["b?/extra"]\n',
+            "b": B_WITH_EXTRA,
+            "c": "",
+            "z": "",
+        },
+        "expected": edge_set(("a", "b", "normal"), ("b", "c", "normal")),
+    },
+    {
+        "name": "k/g turns the same-named feature on, which activates another dependency",
+        "members": {
+            "a": WITH_B_AND_Z + 'default = ["b/extra"]\n',
+            "b": B_WITH_EXTRA,
+            "c": "",
+            "z": "",
+        },
+        "expected": edge_set(("a", "b", "normal"), ("a", "z", "normal"), ("b", "c", "normal")),
+    },
+    {
+        "name": "weak k?/g takes effect once another item activates k (weak item first)",
+        "members": {
+            "a": OPTIONAL_B + '[features]\ndefault = ["b?/extra", "second"]\nsecond = ["dep:b"]\n',
+            "b": B_WITH_EXTRA,
+            "c": "",
+        },
+        "expected": edge_set(("a", "b", "normal"), ("b", "c", "normal")),
+    },
+    {
+        "name": "weak k?/g takes effect once another item activates k (weak item last)",
+        "members": {
+            "a": OPTIONAL_B + '[features]\ndefault = ["dep:b", "b?/extra"]\n',
+            "b": B_WITH_EXTRA,
+            "c": "",
+        },
+        "expected": edge_set(("a", "b", "normal"), ("b", "c", "normal")),
+    },
+    {
+        "name": "a renamed dependency is keyed by its rename",
+        "members": {
+            "a": '[dependencies]\nbee = { path = "../b", package = "b", optional = true }\n'
+            '[features]\ndefault = ["bee/extra"]\n',
+            "b": B_WITH_EXTRA,
+            "c": "",
+        },
+        "expected": edge_set(("a", "b", "normal"), ("b", "c", "normal")),
+    },
+    {
+        "name": "a member requesting features on a member enables its optional dependency",
+        "members": {"a": '[dependencies]\nb = { path = "../b", features = ["extra"] }\n', "b": B_WITH_EXTRA, "c": ""},
+        "expected": edge_set(("a", "b", "normal"), ("b", "c", "normal")),
+    },
+    {
+        "name": "a member keeps its own default features despite an incoming default-features = false",
+        "members": {
+            "a": '[dependencies]\nb = { path = "../b", default-features = false }\n',
+            "b": '[dependencies]\nc = { path = "../c", optional = true }\n[features]\ndefault = ["dep:c"]\n',
+            "c": "",
+        },
+        "expected": edge_set(("a", "b", "normal"), ("b", "c", "normal")),
+    },
+    {
+        "name": "a dev dependency beside an inactive optional normal one is dev only",
+        "members": {
+            "a": OPTIONAL_B + '[dev-dependencies]\nb = { path = "../b" }\n',
+            "b": "",
+            "c": "",
+        },
+        "expected": edge_set(("a", "b", "dev")),
+    },
+    {
+        "name": "several declarations of one dependency union their kinds",
+        "members": {
+            "a": '[dependencies]\nb = { path = "../b" }\n[build-dependencies]\nb = { path = "../b" }\n'
+            '[dev-dependencies]\nb = { path = "../b" }\n',
+            "b": "",
+            "c": "",
+        },
+        "expected": edge_set(("a", "b", "normal"), ("a", "b", "build"), ("a", "b", "dev")),
+    },
+    {
+        "name": "a target-specific entry counts on every platform",
+        "members": {
+            "a": "[target.'cfg(windows)'.dependencies]\nb = { path = \"../b\" }\n",
+            "b": "",
+            "c": "",
+        },
+        "expected": edge_set(("a", "b", "normal")),
+    },
+    {
+        "name": "a dependency cycle through a dev dependency terminates with both edges",
+        "members": {
+            "a": '[dev-dependencies]\nb = { path = "../b" }\n',
+            "b": '[dependencies]\na = { path = "../a" }\n',
+            "c": "",
+        },
+        "expected": edge_set(("a", "b", "dev"), ("b", "a", "normal")),
+    },
+    {
+        "name": "an inherited workspace dependency is an edge",
+        "members": {"a": "[dependencies]\nb = { workspace = true }\n", "b": "", "c": ""},
+        "workspace_extra": '[workspace.dependencies]\nb = { path = "b" }\n',
+        "expected": edge_set(("a", "b", "normal")),
+    },
+    {
+        "name": "an inherited workspace dependency can be optional and feature-enabled",
+        "members": {
+            "a": '[dependencies]\nb = { workspace = true, optional = true }\n[features]\ndefault = ["b"]\n',
+            "b": B_WITH_EXTRA,
+            "c": "",
+        },
+        "workspace_extra": '[workspace.dependencies]\nb = { path = "b", features = ["extra"] }\n',
+        "expected": edge_set(("a", "b", "normal"), ("b", "c", "normal")),
+    },
+    {
+        "name": "an outside local package feeds a feature request onto a member",
+        "members": {"a": '[dependencies]\noutside = { path = "../../outside" }\n', "b": B_WITH_EXTRA, "c": ""},
+        "outside": {
+            "outside": '[package]\nname = "outside"\nversion = "0.1.0"\nedition = "2021"\n'
+            '[dependencies]\nb = { path = "../ws/b", features = ["extra"] }\n'
+        },
+        "expected": edge_set(("b", "c", "normal")),
+    },
+    {
+        "name": "an outside package inheriting a workspace dependency feeds the same request",
+        "members": {"a": '[dependencies]\noutside = { path = "../../outside" }\n', "b": B_WITH_EXTRA, "c": ""},
+        "outside": {
+            "outside": '[workspace]\n[workspace.dependencies]\nb = { path = "../ws/b", features = ["extra"] }\n'
+            '[package]\nname = "outside"\nversion = "0.1.0"\nedition = "2021"\n'
+            "[dependencies]\nb = { workspace = true }\n"
+        },
+        "expected": edge_set(("b", "c", "normal")),
+    },
+    {
+        "name": "an outside package's dev dependency requests nothing",
+        "members": {"a": '[dependencies]\noutside = { path = "../../outside" }\n', "b": B_WITH_EXTRA, "c": ""},
+        "outside": {
+            "outside": '[package]\nname = "outside"\nversion = "0.1.0"\nedition = "2021"\n'
+            '[dev-dependencies]\nb = { path = "../ws/b", features = ["extra"] }\n'
+        },
+        "expected": {},
+    },
+    {
+        "name": "an outside package between two members is not bridged into an edge",
+        "members": {"a": '[dependencies]\noutside = { path = "../../outside" }\n', "b": "", "c": ""},
+        "outside": {
+            "outside": '[package]\nname = "outside"\nversion = "0.1.0"\nedition = "2021"\n'
+            '[dependencies]\nb = { path = "../ws/b" }\n'
+        },
+        "expected": {},
+    },
+    {
+        "name": "a cycle through an outside package terminates",
+        "members": {"a": '[dependencies]\noutside = { path = "../../outside" }\n', "b": B_WITH_EXTRA, "c": ""},
+        "outside": {
+            "outside": '[package]\nname = "outside"\nversion = "0.1.0"\nedition = "2021"\n'
+            '[dependencies]\na = { path = "../ws/a" }\nb = { path = "../ws/b", features = ["extra"] }\n'
+        },
+        "expected": edge_set(("b", "c", "normal")),
+        "compare": False,
+    },
+]
+
+
+@unittest.skipIf(affected_scope.tomllib is None, "the outside-package loader needs tomllib")
+class CargoComparisonTests(unittest.TestCase):
+    """The derived member graph equals Cargo's own resolve, edge for edge and kind for kind.
+
+    Every fixture is all-local, so Cargo resolves it offline with an empty
+    `CARGO_HOME` and nothing is compiled. A host without Cargo skips here; the
+    `Companion suites` step of `_package-ci.yml` fails instead. A skip is never
+    acceptance evidence.
+    """
+
+    def setUp(self) -> None:
+        require_tools("cargo", enforced_by=CARGO_ENFORCED_BY)
+
+    def test_every_rule_case_matches_the_hand_written_graph_and_cargos_resolve(self) -> None:
+        for case in RULE_CASES:
+            with self.subTest(case=case["name"]), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary).resolve()
+                cargo_home = root / "cargo-home"
+                cargo_home.mkdir()
+                workspace = write_cargo_workspace(
+                    root,
+                    case["members"],  # type: ignore[arg-type]
+                    str(case.get("workspace_extra", "")),
+                    case.get("outside"),  # type: ignore[arg-type]
+                )
+                derived = derived_edges(cargo_metadata(workspace, cargo_home, "--no-deps"))
+                self.assertEqual(case["expected"], derived)
+                if case.get("compare", True):
+                    self.assertEqual(
+                        resolved_edges(cargo_metadata(workspace, cargo_home)),
+                        derived,
+                        "the derived graph departs from Cargo's own resolve",
+                    )
+                self.assertEqual(
+                    [],
+                    [item.name for item in cargo_home.iterdir() if item.name in ("registry", "git")],
+                    "no registry or git cache may appear",
+                )
+
+    def test_the_comparison_notices_a_missing_edge(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            workspace = write_cargo_workspace(
+                root, {"a": '[dependencies]\nb = { path = "../b" }\n', "b": ""}
+            )
+            home = root / "cargo-home"
+            home.mkdir()
+            full = resolved_edges(cargo_metadata(workspace, home))
+            self.assertEqual(edge_set(("a", "b", "normal")), full)
+            self.assertNotEqual({}, full, "an empty comparison would prove nothing")
+
+
+class DerivedGraphBase(unittest.TestCase):
+    """A real `--no-deps` document to edit, shared by the error and matrix tests.
+
+    Workspace: `a` depends on `b` (feature `extra`) and optionally on `c`
+    (enabled by `a`'s default); `b` reaches `c` only through `extra`. So `c`'s
+    unchanged dependents are `a` and `b`, and each edit below moves that answer
+    or fails loudly.
+    """
+
+    BASE_MEMBERS = {
+        "a": '[dependencies]\nb = { path = "../b", features = ["extra"] }\n'
+        'c = { path = "../c", optional = true }\n[features]\ndefault = ["c"]\n',
+        "b": B_WITH_EXTRA,
+        "c": "",
+    }
+    base: dict[str, object]
+    base_root: Path
+    keep: tempfile.TemporaryDirectory  # type: ignore[type-arg]
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        require_tools("cargo", enforced_by=CARGO_ENFORCED_BY)
+        cls.keep = tempfile.TemporaryDirectory()
+        root = Path(cls.keep.name).resolve()
+        (root / "cargo-home").mkdir()
+        workspace = write_cargo_workspace(root, cls.BASE_MEMBERS)
+        cls.base = cargo_metadata(workspace, root / "cargo-home", "--no-deps")
+        cls.base_root = workspace
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.keep.cleanup()
+
+    def fresh(self) -> dict[str, object]:
+        return copy.deepcopy(self.base)
+
+    @staticmethod
+    def record(metadata: dict[str, object], name: str) -> dict[str, object]:
+        return next(item for item in metadata["packages"] if item["name"] == name)  # type: ignore[attr-defined,index]
+
+    @classmethod
+    def entry(cls, metadata: dict[str, object], owner: str, dependency: str) -> dict[str, object]:
+        return next(
+            item for item in cls.record(metadata, owner)["dependencies"] if item["name"] == dependency  # type: ignore[attr-defined]
+        )
+
+
+class GraphErrorTests(DerivedGraphBase):
+    def test_the_control_document_is_the_positive_result(self) -> None:
+        self.assertEqual(
+            edge_set(("a", "b", "normal"), ("a", "c", "normal"), ("b", "c", "normal")),
+            derived_edges(self.base),
+        )
+
+    def assertGraphError(self, metadata: dict[str, object], *fragments: str) -> None:
+        with self.assertRaises(RuntimeError) as raised:
+            member_dependency_graph(metadata)
+        message = str(raised.exception)
+        self.assertTrue(message.startswith("member dependency graph: "), message)
+        for fragment in fragments:
+            self.assertIn(fragment, message)
+
+    def test_a_feature_request_naming_no_feature_of_the_member_is_an_error(self) -> None:
+        metadata = self.fresh()
+        self.entry(metadata, "a", "b")["features"] = ["nope"]
+        self.assertGraphError(metadata, "unknown feature 'nope'")
+
+    def test_dep_syntax_leaves_no_implicit_feature_to_request(self) -> None:
+        metadata = self.fresh()
+        self.entry(metadata, "a", "b")["features"] = ["c"]
+        self.assertGraphError(metadata, "unknown feature 'c'")
+
+    def test_a_feature_item_naming_an_unknown_dependency_is_an_error(self) -> None:
+        metadata = self.fresh()
+        self.record(metadata, "b")["features"]["extra"] = ["dep:c", "zzz/foo"]  # type: ignore[index]
+        self.assertGraphError(metadata, "package 'b'", "unknown dependency 'zzz'")
+
+    def test_dep_naming_no_dependency_is_an_error(self) -> None:
+        metadata = self.fresh()
+        self.record(metadata, "b")["features"]["extra"] = ["dep:zzz"]  # type: ignore[index]
+        self.assertGraphError(metadata, "package 'b'", "unknown dependency 'zzz'")
+
+    def test_two_members_sharing_a_manifest_directory_are_ambiguous(self) -> None:
+        metadata = self.fresh()
+        self.record(metadata, "c")["manifest_path"] = self.record(metadata, "b")["manifest_path"]
+        self.assertGraphError(metadata, "package 'c'", "shares manifest directory")
+
+    def test_a_path_matching_no_member_and_no_manifest_is_an_error(self) -> None:
+        metadata = self.fresh()
+        self.entry(metadata, "a", "c")["path"] = str(self.base_root / "does-not-exist")
+        self.assertGraphError(metadata, "package 'a' dependency 'c'", "has no Cargo.toml")
+
+    def test_a_feature_cycle_terminates_with_the_same_edges(self) -> None:
+        metadata = self.fresh()
+        self.record(metadata, "b")["features"] = {"extra": ["dep:c", "other"], "other": ["extra"]}
+        self.assertEqual(
+            edge_set(("a", "b", "normal"), ("a", "c", "normal"), ("b", "c", "normal")),
+            derived_edges(metadata),
+        )
+
+    def test_a_non_member_record_is_not_a_node_and_adds_no_edge(self) -> None:
+        metadata = self.fresh()
+        stranger = copy.deepcopy(self.record(metadata, "a"))
+        stranger.update(id="stranger", name="stranger")
+        metadata["packages"].append(stranger)  # type: ignore[attr-defined]
+        graph = member_dependency_graph(metadata)
+        self.assertNotIn("stranger", graph)
+        self.assertEqual(set(metadata["workspace_members"]), set(graph))  # type: ignore[arg-type]
+        self.assertEqual(derived_edges(self.base), derived_edges(metadata))
+
+    def test_a_registry_dependency_named_like_a_member_is_no_edge(self) -> None:
+        metadata = self.fresh()
+        self.entry(metadata, "a", "c").update(
+            source="registry+https://github.com/rust-lang/crates.io-index", path=None
+        )
+        self.assertEqual(
+            edge_set(("a", "b", "normal"), ("b", "c", "normal")), derived_edges(metadata)
+        )
+
+    def test_a_path_through_a_symlink_names_the_same_member(self) -> None:
+        link = self.base_root / "link-to-b"
+        try:
+            link.symlink_to(self.base_root / "b", target_is_directory=True)
+        except OSError as error:
+            self.skipTest(f"cannot create a symlink on this host: {error}")
+        self.addCleanup(link.unlink)
+        metadata = self.fresh()
+        self.entry(metadata, "a", "b")["path"] = str(link)
+        self.assertEqual(derived_edges(self.base), derived_edges(metadata))
+
+
+def hand_built(
+    members: dict[str, str], edges: dict[str, list[tuple[str, str]]]
+) -> dict[str, object]:
+    """Metadata for members at the given directories, with `(dependency, path)` edges."""
+    records = []
+    for name, directory in members.items():
+        records.append(
+            {
+                "id": name,
+                "name": name,
+                "manifest_path": f"{directory}/Cargo.toml",
+                "features": {},
+                "dependencies": [
+                    {
+                        "name": dependency,
+                        "kind": None,
+                        "rename": None,
+                        "optional": False,
+                        "uses_default_features": True,
+                        "features": [],
+                        "path": path,
+                    }
+                    for dependency, path in edges.get(name, [])
+                ],
+            }
+        )
+    return {"workspace_members": list(members), "packages": records, "resolve": None}
+
+
+class PathIdentityTests(unittest.TestCase):
+    """Directories are compared in the host's own spelling, once per distinct path."""
+
+    def identity_realpath(self):  # type: ignore[no-untyped-def]
+        return unittest.mock.patch.object(os.path, "realpath", side_effect=lambda path: path)
+
+    def test_windows_spelling_matches_by_separator_and_case(self) -> None:
+        metadata = hand_built(
+            {"a": "C:/Repo/ws/a", "b": "C:/Repo/ws/b"}, {"a": [("b", "c:\\repo\\ws\\b")]}
+        )
+        with self.identity_realpath(), unittest.mock.patch.object(
+            os.path, "normcase", side_effect=ntpath.normcase
+        ):
+            self.assertEqual(edge_set(("a", "b", "normal")), derived_edges(metadata))
+
+    def test_unix_spelling_never_folds_case(self) -> None:
+        metadata = hand_built(
+            {"a": "/Fixture/ws/a", "b": "/Fixture/ws/b"}, {"a": [("b", "/Fixture/ws/B")]}
+        )
+        with self.identity_realpath(), unittest.mock.patch.object(
+            os.path, "normcase", side_effect=posixpath.normcase
+        ):
+            with self.assertRaises(RuntimeError) as raised:
+                member_dependency_graph(metadata)
+        self.assertIn("package 'a' dependency 'b'", str(raised.exception))
+
+    def test_a_member_is_never_matched_by_name(self) -> None:
+        metadata = hand_built(
+            {"a": "/Fixture/ws/a", "b": "/Fixture/ws/b"}, {"a": [("b", "/elsewhere/b")]}
+        )
+        with self.identity_realpath():
+            with self.assertRaises(RuntimeError) as raised:
+                member_dependency_graph(metadata)
+        self.assertIn("has no Cargo.toml", str(raised.exception))
+
+
+@unittest.skipIf(affected_scope.tomllib is None, "the replacement guard and loader need tomllib")
+class ReplacementAndLoaderGuardTests(unittest.TestCase):
+    """`[patch]`, `[replace]` and config overrides that could map onto a member are refused."""
+
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name).resolve() / "ws"
+        for name in ("a", "b"):
+            (self.root / name).mkdir(parents=True)
+        self.home = Path(self.temporary.name).resolve() / "cargo-home"
+        self.home.mkdir()
+        environment = unittest.mock.patch.dict(os.environ, {"CARGO_HOME": str(self.home)})
+        environment.start()
+        self.addCleanup(environment.stop)
+
+    def metadata(self) -> dict[str, object]:
+        document = hand_built(
+            {"a": str(self.root / "a"), "b": str(self.root / "b")},
+            {"a": [("b", str(self.root / "b"))]},
+        )
+        document["workspace_root"] = str(self.root)
+        return document
+
+    def write_root(self, text: str) -> None:
+        (self.root / "Cargo.toml").write_text(f'[workspace]\nmembers = ["a", "b"]\n{text}', encoding="utf-8")
+
+    def test_control_without_a_replacement_resolves(self) -> None:
+        self.write_root("")
+        self.assertEqual(edge_set(("a", "b", "normal")), derived_edges(self.metadata()))
+
+    def test_patching_a_member_by_name_is_refused(self) -> None:
+        self.write_root('[patch.crates-io]\nb = { path = "b" }\n')
+        with self.assertRaises(RuntimeError) as raised:
+            member_dependency_graph(self.metadata())
+        self.assertIn("[patch]/[replace] of 'b'", str(raised.exception))
+
+    def test_patching_another_name_onto_a_member_directory_is_refused(self) -> None:
+        self.write_root('[patch.crates-io]\nother = { path = "b" }\n')
+        with self.assertRaises(RuntimeError) as raised:
+            member_dependency_graph(self.metadata())
+        self.assertIn("[patch]/[replace] of 'other'", str(raised.exception))
+
+    def test_replacing_a_member_is_refused(self) -> None:
+        self.write_root('[replace]\n"b:0.1.0" = { path = "b" }\n')
+        with self.assertRaises(RuntimeError) as raised:
+            member_dependency_graph(self.metadata())
+        self.assertIn("[patch]/[replace] of 'b'", str(raised.exception))
+
+    def test_a_patch_of_a_non_member_is_allowed(self) -> None:
+        self.write_root('[patch.crates-io]\nzzz = { path = "zzz" }\n')
+        self.assertEqual(edge_set(("a", "b", "normal")), derived_edges(self.metadata()))
+
+    def test_a_config_file_override_is_refused_from_the_workspace_and_from_cargo_home(self) -> None:
+        self.write_root("")
+        (self.home / "config.toml").write_text('[patch.crates-io]\nb = { path = "b" }\n', encoding="utf-8")
+        with self.assertRaises(RuntimeError) as raised:
+            member_dependency_graph(self.metadata())
+        self.assertIn("config.toml", str(raised.exception))
+        (self.home / "config.toml").unlink()
+        (self.root / ".cargo").mkdir()
+        (self.root / ".cargo" / "config.toml").write_text(
+            '[patch.crates-io]\nb = { path = "b" }\n', encoding="utf-8"
+        )
+        with self.assertRaises(RuntimeError) as raised:
+            member_dependency_graph(self.metadata())
+        self.assertIn("[patch]/[replace] of 'b'", str(raised.exception))
+
+
+class MissingTomllibTests(unittest.TestCase):
+    """Without `tomllib` the planner refuses by name, and only when an outside manifest is needed."""
+
+    def test_an_outside_package_refuses_by_name_and_a_member_only_graph_does_not(self) -> None:
+        require_tools("cargo", enforced_by=CARGO_ENFORCED_BY)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            (root / "cargo-home").mkdir()
+            workspace = write_cargo_workspace(
+                root,
+                {"a": '[dependencies]\noutside = { path = "../../outside" }\n', "b": ""},
+                outside={
+                    "outside": '[package]\nname = "outside"\nversion = "0.1.0"\nedition = "2021"\n'
+                },
+            )
+            outside_metadata = cargo_metadata(workspace, root / "cargo-home", "--no-deps")
+            only_members = hand_built({"a": "/x/a", "b": "/x/b"}, {})
+            with unittest.mock.patch.object(affected_scope, "tomllib", None):
+                with self.assertRaises(RuntimeError) as raised:
+                    member_dependency_graph(outside_metadata)
+                self.assertEqual({}, derived_edges(only_members))
+        self.assertIn("tomllib", str(raised.exception))
+        self.assertIn("outside", str(raised.exception))
+
+
+class MemberGraphRobustnessMatrixTests(DerivedGraphBase):
+    """Each load-bearing field of the metadata has a defined outcome in every shape.
+
+    One edit per cell on a real `--no-deps` document, asserted through the
+    public plan: the unchanged dependents of the changed member `c`. The control
+    row proves the unedited document reaches `a` and `b`, so each edit is known
+    to be load-bearing. `resolve` is never read; the JSON duplicate-key and
+    trailing-content cells are covered below at the loader.
+    """
+
+    ROWS: list[tuple[str, str, object]] = []  # filled by `rows`
+
+    def plan_dependents_of_c(self, metadata: dict[str, object]) -> list[str]:
+        root = Path(metadata["workspace_root"])  # type: ignore[arg-type]
+        seed_build_inputs(root)
+        policy = package_ci_policy(
+            workspace_packages_from(self.base),
+            {"ubuntu-latest", "windows-latest", "macos-latest"},
+            root=root,
+            today=TODAY,
+        )
+        plan = calculate_scope(
+            ["c/src/lib.rs"], root, metadata, environments_for_tests(), policy  # type: ignore[arg-type]
+        )
+        return plan["reverse_dependencies"]
+
+    def rows(self) -> list[tuple[str, object, object]]:
+        """`(label, edit, outcome)`; outcome is a dependents list or an error fragment."""
+
+        def package_field(owner: str, field: str, value: object):  # type: ignore[no-untyped-def]
+            def edit(metadata: dict[str, object]) -> None:
+                self.record(metadata, owner)[field] = value
+
+            return edit
+
+        def remove_package_field(owner: str, field: str):  # type: ignore[no-untyped-def]
+            def edit(metadata: dict[str, object]) -> None:
+                del self.record(metadata, owner)[field]
+
+            return edit
+
+        def entry_field(owner: str, dependency: str, field: str, value: object):  # type: ignore[no-untyped-def]
+            def edit(metadata: dict[str, object]) -> None:
+                self.entry(metadata, owner, dependency)[field] = value
+
+            return edit
+
+        def remove_entry_field(owner: str, dependency: str, field: str):  # type: ignore[no-untyped-def]
+            def edit(metadata: dict[str, object]) -> None:
+                del self.entry(metadata, owner, dependency)[field]
+
+            return edit
+
+        def top(field: str, value: object):  # type: ignore[no-untyped-def]
+            def edit(metadata: dict[str, object]) -> None:
+                metadata[field] = value
+
+            return edit
+
+        def drop_top(field: str):  # type: ignore[no-untyped-def]
+            def edit(metadata: dict[str, object]) -> None:
+                del metadata[field]
+
+            return edit
+
+        def duplicate_entry_as_dev(metadata: dict[str, object]) -> None:
+            duplicate = copy.deepcopy(self.entry(metadata, "a", "b"))
+            duplicate["kind"] = "dev"
+            self.record(metadata, "a")["dependencies"].append(duplicate)  # type: ignore[attr-defined]
+
+        def both_empty(metadata: dict[str, object]) -> None:
+            self.record(metadata, "a")["dependencies"] = []
+            self.record(metadata, "a")["features"] = {}
+
+        ab = ["a", "b"]
+        return [
+            ("control", lambda metadata: None, ab),
+            # packages[].features
+            ("features absent", remove_package_field("a", "features"), "'features'"),
+            ("features null", package_field("a", "features", None), "'features'"),
+            ("features wrong type", package_field("a", "features", 123), "'features'"),
+            ("features one element wrong", package_field("b", "features", {"extra": ["dep:c", 7]}), "extra"),
+            ("features every element wrong", package_field("b", "features", {"extra": [7]}), "extra"),
+            ("features empty on a: no default, no c edge", package_field("a", "features", {}), ["b"]),
+            # packages[].dependencies
+            ("dependencies absent", remove_package_field("a", "dependencies"), "'dependencies'"),
+            ("dependencies null", package_field("a", "dependencies", None), "'dependencies'"),
+            ("dependencies wrong type", package_field("a", "dependencies", "x"), "'dependencies'"),
+            ("dependencies one element wrong", package_field("a", "dependencies", [123]), "dependencies item"),
+            ("dependencies empty but a feature still names a", package_field("a", "dependencies", []), "unknown dependency 'c'"),
+            ("dependencies and features empty: no edges from a", both_empty, []),
+            ("duplicate entries merge their kinds", duplicate_entry_as_dev, ab),
+            # dependency path
+            ("path absent is an external entry", remove_entry_field("a", "c", "path"), ["b"]),
+            ("path null is an external entry", entry_field("a", "c", "path", None), ["b"]),
+            ("path wrong type", entry_field("a", "c", "path", 123), "'path'"),
+            ("path empty", entry_field("a", "c", "path", ""), "'path' is empty"),
+            # dependency kind
+            ("kind absent is normal", remove_entry_field("a", "c", "kind"), ab),
+            ("kind null is normal", entry_field("a", "c", "kind", None), ab),
+            ("kind wrong type", entry_field("a", "c", "kind", 123), "unsupported dependency kind"),
+            ("kind unknown", entry_field("a", "c", "kind", "bogus"), "unsupported dependency kind"),
+            # optional / uses_default_features
+            ("optional absent", remove_entry_field("a", "c", "optional"), "'optional'"),
+            ("optional null", entry_field("a", "c", "optional", None), "'optional'"),
+            ("optional wrong type", entry_field("a", "c", "optional", "yes"), "'optional'"),
+            ("uses_default_features absent", remove_entry_field("a", "b", "uses_default_features"), "'uses_default_features'"),
+            ("uses_default_features null", entry_field("a", "b", "uses_default_features", None), "'uses_default_features'"),
+            ("uses_default_features wrong type", entry_field("a", "b", "uses_default_features", 1), "'uses_default_features'"),
+            # dependency features / rename
+            ("dependency features absent", remove_entry_field("a", "b", "features"), "'features'"),
+            ("dependency features null", entry_field("a", "b", "features", None), "'features'"),
+            ("dependency features wrong type", entry_field("a", "b", "features", "extra"), "'features'"),
+            ("dependency features one element wrong", entry_field("a", "b", "features", ["extra", 5]), "features item"),
+            ("dependency features empty: b no longer reaches c", entry_field("a", "b", "features", []), ["a"]),
+            ("rename absent is the name", remove_entry_field("a", "b", "rename"), ab),
+            ("rename null is the name", entry_field("a", "b", "rename", None), ab),
+            ("rename wrong type", entry_field("a", "b", "rename", 5), "'rename'"),
+            # workspace_members
+            ("workspace_members absent", drop_top("workspace_members"), "'workspace_members'"),
+            ("workspace_members null", top("workspace_members", None), "'workspace_members'"),
+            ("workspace_members wrong type", top("workspace_members", "a"), "'workspace_members'"),
+            ("workspace_members one element wrong", top("workspace_members", [1]), "workspace_members item"),
+            # resolve is never read
+            ("resolve garbage is ignored", top("resolve", {"nodes": "garbage"}), ab),
+            ("resolve absent is ignored", drop_top("resolve"), ab),
+        ]
+
+    def test_every_cell_has_its_defined_outcome_through_the_public_plan(self) -> None:
+        for label, edit, outcome in self.rows():
+            with self.subTest(cell=label):
+                metadata = self.fresh()
+                edit(metadata)  # type: ignore[operator]
+                if isinstance(outcome, str):
+                    with self.assertRaises(RuntimeError) as raised:
+                        self.plan_dependents_of_c(metadata)
+                    self.assertIn("member dependency graph: ", str(raised.exception))
+                    self.assertIn(outcome, str(raised.exception))
+                else:
+                    self.assertEqual(outcome, self.plan_dependents_of_c(metadata))
+
+    def test_an_empty_member_list_is_an_empty_graph(self) -> None:
+        metadata = self.fresh()
+        metadata["workspace_members"] = []
+        self.assertEqual({}, member_dependency_graph(metadata))
+
+    def test_duplicate_entries_union_their_kinds_in_the_graph(self) -> None:
+        metadata = self.fresh()
+        duplicate = copy.deepcopy(self.entry(metadata, "a", "b"))
+        duplicate["kind"] = "dev"
+        self.record(metadata, "a")["dependencies"].append(duplicate)  # type: ignore[attr-defined]
+        self.assertEqual(
+            edge_set(("a", "b", "normal"), ("a", "b", "dev"), ("a", "c", "normal"), ("b", "c", "normal")),
+            derived_edges(metadata),
+        )
+
+    def test_the_matrix_has_no_silent_default_on_a_load_bearing_field(self) -> None:
+        source = Path(affected_scope.__file__).read_text(encoding="utf-8")
+        start = source.index("    def member_node(")
+        end = source.index("def _reject_member_replacements")
+        graph_code = source[start:end]
+        for smell in ("filter_map", "unwrap_or_default", " or []", " or {}"):
+            with self.subTest(smell=smell):
+                self.assertNotIn(smell, graph_code)
+
+
+class LoadMetadataBoundaryTests(unittest.TestCase):
+    """`load_metadata` is the one place the planner runs Cargo."""
+
+    def completed(self, stdout: str) -> subprocess.CompletedProcess:  # type: ignore[type-arg]
+        return subprocess.CompletedProcess(args=[], returncode=0, stdout=stdout, stderr="")
+
+    def test_it_asks_cargo_for_registry_free_utf8_metadata(self) -> None:
+        with unittest.mock.patch.object(
+            affected_scope.subprocess, "run", return_value=self.completed('{"packages": []}')
+        ) as run:
+            self.assertEqual({"packages": []}, load_metadata(Path("/x")))
+        command = run.call_args.args[0]
+        self.assertEqual(["cargo", "metadata"], command[:2])
+        self.assertIn("--no-deps", command)
+        self.assertIn("--offline", command)
+        self.assertEqual(["--format-version", "1"], command[-2:])
+        self.assertEqual("utf-8", run.call_args.kwargs["encoding"])
+        self.assertTrue(run.call_args.kwargs["check"])
+
+    def test_a_cargo_failure_propagates_without_a_second_attempt(self) -> None:
+        failure = subprocess.CalledProcessError(101, ["cargo"])
+        with unittest.mock.patch.object(affected_scope.subprocess, "run", side_effect=failure) as run:
+            with self.assertRaises(subprocess.CalledProcessError):
+                load_metadata(Path("/x"))
+        self.assertEqual(1, run.call_count, "there is no fallback to a full resolve")
+
+    def test_trailing_content_after_the_document_is_rejected(self) -> None:
+        with unittest.mock.patch.object(
+            affected_scope.subprocess, "run", return_value=self.completed('{"packages": []} garbage')
+        ):
+            with self.assertRaises(json.JSONDecodeError):
+                load_metadata(Path("/x"))
+
+    def test_the_shipped_workspace_loads_offline_from_an_empty_cargo_home(self) -> None:
+        require_tools("cargo", enforced_by=CARGO_ENFORCED_BY)
+        lockfile_path = ROOT / "Cargo.lock"
+        lockfile_before = lockfile_path.read_bytes()
+        with tempfile.TemporaryDirectory() as home:
+            with unittest.mock.patch.dict(os.environ, {"CARGO_HOME": home}):
+                metadata = load_metadata(ROOT)
+                graph = member_dependency_graph(metadata)
+            self.assertEqual(
+                [],
+                [item.name for item in Path(home).iterdir() if item.name in ("registry", "git")],
+                "no registry or git cache may appear",
+            )
+        self.assertIsNone(metadata["resolve"])
+        self.assertEqual(lockfile_before, lockfile_path.read_bytes(), "Cargo.lock must not change")
+        self.assertEqual(set(metadata["workspace_members"]), set(graph))
+        self.assertTrue(any(targets for targets in graph.values()), "the real graph has edges")
 
 
 if __name__ == "__main__":
