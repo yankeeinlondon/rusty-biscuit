@@ -193,6 +193,22 @@ fn the_compiler_work_wrapper_is_never_global() {
     }
 }
 
+/// Every workflow that runs on a Windows host runs Python in UTF-8 mode.
+///
+/// CI's scripts print non-ASCII, and a Windows runner's piped stdout is cp1252
+/// otherwise: `completion.py`'s check mark raised `UnicodeEncodeError` after
+/// every test of a Windows cell had passed, so no Windows cell could go green.
+#[test]
+fn windows_hosted_workflows_run_python_in_utf8_mode() {
+    for file in ["_package-ci.yml", "_wsl-ci.yml"] {
+        let source = read(&format!(".github/workflows/{file}"));
+        assert!(
+            source.lines().any(|line| line == "  PYTHONUTF8: \"1\""),
+            "{file}: must set `PYTHONUTF8: \"1\"` in its workflow-level `env:`"
+        );
+    }
+}
+
 /// Measuring compiler work changes no cell, artifact, or gate.
 ///
 /// The switch defaults off on every path, and its steps publish a measurement
@@ -456,6 +472,25 @@ fn every_cargo_workflow_neutralizes_a_stray_rustc_wrapper() {
         assert!(
             source.contains("RUSTC_WRAPPER"),
             "{name} can invoke Cargo but does not clear RUSTC_WRAPPER"
+        );
+    }
+}
+
+#[test]
+fn cross_check_unix_builds_neutralize_host_compiler_wrappers() {
+    let source = read("scripts/cross-check.sh");
+    let prelude = source
+        .split_once("unix_prelude() {")
+        .expect("Unix remote prelude")
+        .1
+        .split_once("\nEOF\n}")
+        .expect("end of Unix remote prelude")
+        .0;
+    for variable in ["RUSTC_WRAPPER", "RUSTC_WORKSPACE_WRAPPER"] {
+        assert!(
+            prelude.contains(&format!("export {variable}=\"\"")),
+            "cross-check must clear {variable} before native and archive builds; \
+             unsetting it permits host config or cold-build shims to reactivate caching"
         );
     }
 }

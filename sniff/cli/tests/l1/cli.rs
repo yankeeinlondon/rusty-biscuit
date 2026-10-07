@@ -6,6 +6,123 @@ use serde_json::Value;
 use crate::common;
 use common::DisposableAmbientContext as _;
 
+#[test]
+fn files_association_is_stable_inside_a_large_monorepo() {
+    let fixture = common::SniffCliFixture::named("sniff-files-association");
+    let root = fixture.cwd();
+    git2::Repository::init(root).unwrap();
+    let area = root.join("area");
+    let package = area.join("lib");
+    std::fs::create_dir_all(package.join("src")).unwrap();
+    std::fs::write(
+        root.join("Cargo.toml"),
+        "[workspace]\nmembers = [\"area/lib\"]\n",
+    )
+    .unwrap();
+    std::fs::write(
+        package.join("Cargo.toml"),
+        "[package]\nname = \"sample\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+    )
+    .unwrap();
+    std::fs::write(package.join("src/lib.rs"), "pub fn sample() {}\n").unwrap();
+    for index in 0..3 {
+        std::fs::write(
+            package.join(format!("image-{index}.png")),
+            b"\x89PNG\r\n\x1a\n",
+        )
+        .unwrap();
+    }
+    for index in 0..7 {
+        std::fs::write(package.join(format!("note-{index}.txt")), "text\n").unwrap();
+    }
+    std::fs::write(area.join("README.md"), "# Area\n").unwrap();
+    std::fs::write(area.join("justfile"), "default:\n    echo sample\n").unwrap();
+    let unrelated = root.join("unrelated");
+    std::fs::create_dir(&unrelated).unwrap();
+    for index in 0..10_050 {
+        std::fs::write(unrelated.join(format!("file-{index}.txt")), "text\n").unwrap();
+    }
+
+    for (base, total) in [(&area, 14), (&package.join("src"), 12)] {
+        let output = fixture
+            .command()
+            .args([
+                "--base", base.to_str().unwrap(), "--perf", "files", "--json",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        let json: Value = serde_json::from_slice(&output).unwrap();
+        let counters = &json["performance"]["counters"];
+        assert_eq!(counters["filesystem.file_inventory.files_accepted"], total, "{json}");
+        for counter in [
+            "git.status_walks",
+            "filesystem.docs.documents_parsed",
+            "filesystem.file_inventory.entries_over_cap",
+        ] {
+            assert_eq!(counters[counter].as_u64().unwrap_or(0), 0, "{json}");
+        }
+        let mut previous = None;
+        for verbose in [false, true, false] {
+            let mut command = fixture.command();
+            command.args([
+                "--base", base.to_str().unwrap(), "files", "--association", "image", "--json",
+            ]);
+            if verbose {
+                command.arg("-v");
+            }
+            let output = command.assert().success().get_output().stdout.clone();
+            let json: Value = serde_json::from_slice(&output).unwrap();
+            assert!(json.get("truncated").is_none(), "{json}");
+            assert_eq!(json["total_files"], 3);
+            assert_eq!(json["by_association"][0]["file_count"], 3);
+            let percentage = json["by_association"][0]["percentage"].as_f64().unwrap();
+            assert!(
+                (percentage - 300.0 / f64::from(total)).abs() < 0.0001,
+                "{json}"
+            );
+            if let Some(previous) = previous.as_ref() {
+                assert_eq!(&json, previous);
+            }
+            previous = Some(json);
+        }
+        // Verbose filtered text appends the captured image list; non-verbose
+        // keeps the existing report. The captured paths are relative to the
+        // scan root — the owning package root for the package-subdirectory
+        // base, the area base itself otherwise.
+        let expected_labels: Vec<String> = if base == &area {
+            (0..3)
+                .map(|index| plain_files_label(&Path::new("lib").join(format!("image-{index}.png"))))
+                .collect()
+        } else {
+            (0..3).map(|index| format!("image-{index}.png")).collect()
+        };
+        for verbose in [false, true, false] {
+            let mut command = fixture.command();
+            command.args([
+                "--base", base.to_str().unwrap(), "--plain", "files", "--association", "image",
+            ]);
+            if verbose {
+                command.arg("-v");
+            }
+            let output = command.assert().success().get_output().stdout.clone();
+            let text = String::from_utf8(output).unwrap();
+            assert!(
+                text.contains(&format!("3 ({:.1}%)", 300.0 / f64::from(total))),
+                "{text}"
+            );
+            assert!(!text.contains("Incomplete scan"), "{text}");
+            if verbose {
+                assert_files_list_entries(&text, &expected_labels);
+            } else {
+                assert!(!text.contains("Files:"), "{text}");
+            }
+        }
+    }
+}
+
 fn run_isolated_software(args: &[&str]) -> assert_cmd::assert::Assert {
     // These tests verify the CLI contract, not the host's installed inventory.
     // The fake-only escape proves no host executable can be version-probed.
@@ -18,6 +135,921 @@ fn run_isolated_software(args: &[&str]) -> assert_cmd::assert::Assert {
         .build()
         .args(args)
         .assert()
+}
+
+// ============================================================================
+// Filtered verbose file-list helpers
+// ============================================================================
+
+/// The reversible label for a well-formed Unicode relative path. The only
+/// applicable label transform for such names is backslash doubling (native
+/// Windows separators); control bytes and non-Unicode values do not occur in
+/// these fixtures and are covered by renderer unit tests.
+fn plain_files_label(relative: &Path) -> String {
+    relative.to_string_lossy().replace('\\', "\\\\")
+}
+
+/// The file-list entries of a report, in order: the text after each bullet,
+/// with any hanging-indent continuation lines joined by one space.
+///
+/// The list ends at the first blank or unindented line after its heading
+/// (the language and framework details are unindented).
+fn file_list_entries(text: &str) -> Vec<String> {
+    let mut lines = text.lines();
+    lines
+        .by_ref()
+        .find(|line| line.trim() == "Files:")
+        .unwrap_or_else(|| panic!("verbose filtered report must carry a Files: heading:\n{text}"));
+    let mut entries: Vec<String> = Vec::new();
+    for line in lines {
+        let trimmed = line.trim();
+        if let Some(entry) = trimmed.strip_prefix("- ") {
+            entries.push(entry.to_string());
+        } else if !trimmed.is_empty()
+            && line.starts_with(char::is_whitespace)
+            && let Some(entry) = entries.last_mut()
+        {
+            entry.push(' ');
+            entry.push_str(trimmed);
+        } else {
+            break;
+        }
+    }
+    entries
+}
+
+/// Asserts a filtered verbose `files` report lists exactly `labels`, once
+/// each, under a `Files:` heading, in the given native sorted order.
+///
+/// Each entry must equal its reversible label exactly: a piped subprocess
+/// has no OSC8 capability, and the list then renders the bare label with no
+/// link syntax or added escapes.
+fn assert_files_list_entries(text: &str, labels: &[String]) {
+    assert_eq!(
+        file_list_entries(text),
+        labels,
+        "file list must hold exactly the reversible labels, in native order:\n{text}"
+    );
+}
+
+/// Runs a filtered verbose report inside a pseudo-terminal that advertises
+/// OSC8 support, returning the raw output (escape sequences included).
+///
+/// A piped subprocess renders no hyperlinks, so destination identity needs a
+/// TTY; the `WezTerm` program name is one `biscuit-terminal` recognizes as
+/// OSC8-capable.
+#[cfg(unix)]
+fn osc8_report(mut command: std::process::Command) -> String {
+    use expectrl::{Eof, Expect, Session};
+    command.env("TERM_PROGRAM", "WezTerm");
+    let mut session = Session::spawn(command).expect("spawn sniff in a PTY");
+    session.set_expect_timeout(Some(std::time::Duration::from_secs(60)));
+    let captures = session.expect(Eof).expect("report runs to EOF");
+    let raw = String::from_utf8_lossy(captures.as_bytes()).into_owned();
+    let status = session.get_process_mut().wait().expect("child exit status");
+    assert!(
+        format!("{status:?}").ends_with(", 0)"),
+        "report must succeed ({status:?}):\n{raw:?}"
+    );
+    raw
+}
+
+/// The non-empty OSC8 destinations of a raw report, in order (closing
+/// sequences carry an empty destination and are skipped).
+#[cfg(unix)]
+fn osc8_destinations(raw: &str) -> Vec<String> {
+    raw.split("\x1b]8;;")
+        .skip(1)
+        .filter_map(|rest| {
+            let end = rest.find(['\x1b', '\x07'])?;
+            let destination = &rest[..end];
+            (!destination.is_empty()).then(|| destination.to_string())
+        })
+        .collect()
+}
+
+/// Asserts an OSC8 report links each listed label to its native absolute
+/// file, and that the rich labels equal the plain reversible labels once the
+/// renderer's styling and OSC8 sequences are stripped.
+#[cfg(unix)]
+fn assert_osc8_destination_identity(
+    command: std::process::Command,
+    root: &Path,
+    stored_paths: &[PathBuf],
+    labels: &[String],
+) {
+    let raw = osc8_report(command);
+    let visible = biscuit_terminal::prelude::strip_escape_codes(&raw).replace('\r', "");
+    assert_files_list_entries(&visible, labels);
+    let destinations = osc8_destinations(&raw);
+    let mut expected: Vec<PathBuf> = stored_paths
+        .iter()
+        .map(|relative| identity_path(&root.join(relative)))
+        .collect();
+    expected.sort();
+    assert_eq!(
+        destinations.len(),
+        expected.len(),
+        "one destination per listed file:\n{raw:?}"
+    );
+    for (destination, expected) in destinations.iter().zip(&expected) {
+        let native = identity_path(&file_url_to_native_path(destination));
+        assert_eq!(
+            &native, expected,
+            "decoded destination {destination} must identify the native file"
+        );
+    }
+}
+
+/// Percent-decodes a file-URL path segment per RFC 3986 (tests only).
+fn percent_decode(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' && index + 2 < bytes.len() {
+            let hex = std::str::from_utf8(&bytes[index + 1..index + 3]).unwrap_or("");
+            if let Ok(byte) = u8::from_str_radix(hex, 16) {
+                out.push(byte);
+                index += 3;
+                continue;
+            }
+        }
+        out.push(bytes[index]);
+        index += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// Converts a `file://` URL back to its native path for identity comparison,
+/// allowing the URL forms the encoder produces on Windows (forward slashes,
+/// lowered drive letter, `file://server/share` network shares).
+fn file_url_to_native_path(url: &str) -> PathBuf {
+    let rest = url.strip_prefix("file://").expect("file URL");
+    // `file:///…` has an empty authority; `file://server/share/…` names a
+    // network share (Windows encoder output).
+    let (server, path_part) = match rest.strip_prefix('/') {
+        Some(after) => (None, after),
+        None => {
+            let (server, share) = rest.split_once('/').expect("UNC share path");
+            (Some(server), share)
+        }
+    };
+    let decoded = percent_decode(path_part);
+    #[cfg(windows)]
+    {
+        let decoded = decoded.replace('/', "\\");
+        if let Some(server) = server {
+            return PathBuf::from(format!(r"\\{server}\{decoded}"));
+        }
+        let mut chars = decoded.chars();
+        match (chars.next(), chars.next()) {
+            // Restore the conventional uppercase drive spelling the URL
+            // encoder lowered.
+            (Some(letter), Some(':')) if letter.is_ascii_alphabetic() => {
+                let rest: String = chars.collect();
+                PathBuf::from(format!("{}:\\{}", letter.to_ascii_uppercase(), rest))
+            }
+            _ => PathBuf::from(decoded),
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = server;
+        let mut path = PathBuf::from("/");
+        path.push(decoded.as_str());
+        path
+    }
+}
+
+/// Normalizes a path for link-identity comparison. On Windows,
+/// `canonicalize` returns extended-length `\\?\` paths while file URLs carry
+/// the plain drive spelling, and NTFS identity is case-insensitive; other
+/// platforms compare natively.
+fn identity_path(path: &Path) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let text = path.to_string_lossy();
+        let stripped = match text.strip_prefix(r"\\?\UNC\") {
+            Some(rest) => format!(r"\\{rest}"),
+            None => match text.strip_prefix(r"\\?\") {
+                Some(rest) => rest.to_string(),
+                None => text.into_owned(),
+            },
+        };
+        PathBuf::from(stripped.to_lowercase())
+    }
+    #[cfg(not(windows))]
+    {
+        path.to_path_buf()
+    }
+}
+
+/// The fixture path as the CLI resolves it: one canonicalization of the
+/// fixture-root alias (macOS `/var` → `/private/var`) so link-identity
+/// comparisons never probe per file.
+fn canonical_fixture_path(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+}
+
+// ============================================================================
+// Filtered verbose file-list fixtures
+// ============================================================================
+
+/// A small complete fixture for filtered verbose `files` reports: a git
+/// workspace whose `area/lib` package holds image files (duplicate basenames
+/// across directories, spaces, Unicode, markup-sensitive names), Rust
+/// sources, Vue framework files, and unknown-association files. The image,
+/// programming-language, and unknown associations each include a bracketed
+/// name or directory (`photo[x].png`, `dir[x]/…`).
+struct FilesListFixture {
+    fixture: common::SniffCliFixture,
+    /// `repo/area` — inside the repository, outside any package.
+    area_root: PathBuf,
+    /// `repo/area/lib` — the workspace package whose files get captured.
+    package_root: PathBuf,
+    /// Canonical package root (fixture alias normalized once).
+    canonical_package_root: PathBuf,
+}
+
+impl FilesListFixture {
+    fn new(prefix: &str) -> Self {
+        let fixture = common::SniffCliFixture::named(prefix);
+        let repo_root = fixture.workspace_path().join("repo");
+        let area_root = repo_root.join("area");
+        let package_root = area_root.join("lib");
+        for dir in ["src", "assets", "brand"] {
+            std::fs::create_dir_all(package_root.join(dir)).unwrap();
+        }
+        git2::Repository::init(&repo_root).unwrap();
+        std::fs::write(
+            repo_root.join("Cargo.toml"),
+            "[workspace]\nmembers = [\"area/lib\"]\n",
+        )
+        .unwrap();
+        std::fs::write(
+            package_root.join("Cargo.toml"),
+            "[package]\nname = \"sample\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .unwrap();
+        std::fs::write(package_root.join("src/lib.rs"), "pub fn sample() {}\n").unwrap();
+        let png = b"\x89PNG\r\n\x1a\n";
+        let mut image_names = vec![
+            "assets/logo.png",
+            "brand/logo.png",
+            "assets/sp ace.png",
+            "assets/héllo→😀.png",
+        ];
+        image_names.extend(Self::markup_image_names());
+        for name in image_names {
+            std::fs::write(package_root.join(name), png).unwrap();
+        }
+        std::fs::create_dir_all(package_root.join("dir[x]")).unwrap();
+        std::fs::write(package_root.join("dir[x]/ordinary.png"), png).unwrap();
+        std::fs::write(package_root.join("photo[x].png"), png).unwrap();
+        std::fs::write(package_root.join("dir[x]/mod[y].rs"), "pub fn bracketed() {}\n")
+            .unwrap();
+        std::fs::write(package_root.join("odd[x].zzz"), b"zzz").unwrap();
+        std::fs::create_dir_all(package_root.join("web")).unwrap();
+        std::fs::write(package_root.join("web/App.vue"), "<template><div /></template>\n")
+            .unwrap();
+        std::fs::write(package_root.join("mystery.zzz"), b"zzz").unwrap();
+        std::fs::write(package_root.join("noext"), b"x").unwrap();
+        std::fs::write(area_root.join("README.md"), "# Area\n").unwrap();
+        let canonical_package_root = canonical_fixture_path(&package_root);
+        Self {
+            fixture,
+            area_root,
+            package_root,
+            canonical_package_root,
+        }
+    }
+
+    /// Markup-sensitive filenames that are legal on the test OS. Windows
+    /// cannot host `<>:"|?*`, so its subset keeps the characters the label
+    /// must render literally there.
+    fn markup_image_names() -> &'static [&'static str] {
+        if cfg!(windows) {
+            &["assets/markup_&_[x](y).png", "assets/under_score.png"]
+        } else {
+            &[
+                "assets/markup_<b>&[x](y)*.png",
+                "assets/under_score.png",
+                "assets/we\\ird.png",
+            ]
+        }
+    }
+
+    /// The filtered JSON `files` for one association, sorted natively.
+    fn json_paths(&self, association: &str, base: &Path) -> Vec<PathBuf> {
+        let output = self
+            .fixture
+            .command()
+            .args([
+                "--base",
+                base.to_str().unwrap(),
+                "--json",
+                "files",
+                "--association",
+                association,
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        let json: Value = serde_json::from_slice(&output).expect("filtered files JSON");
+        let mut paths: Vec<PathBuf> = json["by_association"][0]["files"]
+            .as_array()
+            .expect("files array")
+            .iter()
+            .map(|entry| PathBuf::from(entry.as_str().expect("path string")))
+            .collect();
+        paths.sort();
+        paths
+    }
+
+    /// Runs a filtered verbose text report over `base`.
+    fn verbose_text(&self, base: &Path, association: &str) -> String {
+        let output = self
+            .fixture
+            .command()
+            .args([
+                "--base",
+                base.to_str().unwrap(),
+                "--plain",
+                "files",
+                "--association",
+                association,
+                "-v",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        String::from_utf8(output).expect("utf8 text report")
+    }
+}
+
+// ============================================================================
+// Task 3.4 — parity and JSON tests (AC 1, 2, 3)
+// ============================================================================
+
+#[test]
+fn files_filtered_verbose_text_lists_exactly_the_captured_json_paths() {
+    let fx = FilesListFixture::new("sniff_files_verbose_parity");
+    // Images plus other associations plus `unknown` (AC 1); the fixture is
+    // complete and its names are all representable in JSON.
+    for association in ["image", "unknown", "programming-language", "framework-file"] {
+        let paths = fx.json_paths(association, &fx.package_root);
+        assert!(!paths.is_empty(), "{association} must have matches");
+        let labels: Vec<String> = paths.iter().map(|path| plain_files_label(path)).collect();
+        let text = fx.verbose_text(&fx.package_root, association);
+        assert_files_list_entries(&text, &labels);
+
+        // Language and framework details survive and follow the list; each
+        // is retained only by the filter that selects its association.
+        let details = match association {
+            "programming-language" => Some("Languages:"),
+            "framework-file" => Some("Frameworks: Vue"),
+            _ => None,
+        };
+        if let Some(details) = details {
+            let list_heading = text.find("Files:").expect("Files: heading");
+            let detail = text.find(details).expect("retained details line");
+            assert!(
+                detail > list_heading,
+                "{details} must follow the list:\n{text}"
+            );
+        }
+    }
+}
+
+#[test]
+fn files_verbose_flag_position_and_level_show_one_list() {
+    let fx = FilesListFixture::new("sniff_files_verbose_position");
+    let labels: Vec<String> = fx
+        .json_paths("image", &fx.package_root)
+        .iter()
+        .map(|path| plain_files_label(path))
+        .collect();
+    let base = fx.package_root.to_str().unwrap();
+    // `-v` before the subcommand, after it, `-vv`, and `-vv` after: every
+    // spelling renders the same list, each path exactly once.
+    for args in [
+        vec!["--base", base, "-v", "files", "--association", "image", "--plain"],
+        vec!["--base", base, "files", "-v", "--association", "image", "--plain"],
+        vec!["--base", base, "-vv", "files", "--association", "image", "--plain"],
+        vec![
+            "--base", base, "files", "--association", "image", "-vv", "--plain",
+        ],
+    ] {
+        let output = fx
+            .fixture
+            .command()
+            .args(&args)
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        let text = String::from_utf8(output).expect("utf8");
+        assert_files_list_entries(&text, &labels);
+    }
+}
+
+#[test]
+fn files_plain_verbose_output_has_no_terminal_escape_sequences() {
+    let fx = FilesListFixture::new("sniff_files_verbose_plain");
+    let text = fx.verbose_text(&fx.package_root, "image");
+    assert!(
+        !text.contains('\x1b'),
+        "--plain output must carry no ANSI/OSC bytes:\n{text:?}"
+    );
+    let labels: Vec<String> = fx
+        .json_paths("image", &fx.package_root)
+        .iter()
+        .map(|path| plain_files_label(path))
+        .collect();
+    assert_files_list_entries(&text, &labels);
+}
+
+/// A piped run never emits OSC8 or color, so `--plain` must also be proven
+/// where the rich report would carry both: an OSC8-capable PTY.
+#[cfg(unix)]
+#[test]
+fn files_plain_verbose_strips_links_on_an_osc8_terminal() {
+    let fx = FilesListFixture::new("sniff_files_verbose_plain_pty");
+    let paths = fx.json_paths("image", &fx.package_root);
+    let labels: Vec<String> = paths.iter().map(|path| plain_files_label(path)).collect();
+    let base = fx.package_root.to_str().unwrap();
+
+    let mut rich = fx.fixture.command_std();
+    rich.args(["--base", base, "files", "--association", "image", "-v"]);
+    let rich = osc8_report(rich);
+    assert!(
+        rich.contains("\x1b]8;;file://"),
+        "the same terminal must link the rich report, or this test proves nothing:\n{rich:?}"
+    );
+
+    let mut plain = fx.fixture.command_std();
+    plain.args(["--base", base, "--plain", "files", "--association", "image", "-v"]);
+    let plain = osc8_report(plain).replace('\r', "");
+    // A PTY run also captures the terminal-capability queries (OSC 10/11,
+    // DA1) that detection writes before the report; they are not report
+    // content, so the check covers the new section the fix renders.
+    let section = &plain[plain.find("Files:").expect("Files: heading")..];
+    assert!(
+        !section.contains('\x1b'),
+        "--plain must carry no ANSI/OSC bytes on a capable terminal:\n{plain:?}"
+    );
+    assert_files_list_entries(&plain, &labels);
+}
+
+#[test]
+fn files_json_is_byte_identical_with_and_without_verbose() {
+    let fx = FilesListFixture::new("sniff_files_verbose_json");
+    let base = fx.package_root.to_str().unwrap();
+    let plain = fx
+        .fixture
+        .command()
+        .args(["--base", base, "--json", "files", "--association", "image"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let verbose = fx
+        .fixture
+        .command()
+        .args(["--base", base, "--json", "-v", "files", "--association", "image"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    assert_eq!(plain, verbose, "verbosity must not change JSON stdout");
+}
+
+#[test]
+fn files_json_perf_verbose_stdout_is_one_json_document() {
+    let fx = FilesListFixture::new("sniff_files_verbose_json_perf");
+    let output = fx
+        .fixture
+        .command()
+        .args([
+            "--base",
+            fx.package_root.to_str().unwrap(),
+            "--perf",
+            "--json",
+            "-v",
+            "files",
+            "--association",
+            "image",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let text = String::from_utf8(output.clone()).expect("utf8");
+    assert!(
+        !text.contains("Files:"),
+        "JSON stdout must not carry the file list:\n{text}"
+    );
+    assert!(!text.contains('\x1b'), "no terminal bytes in JSON");
+    let json: Value = serde_json::from_slice(&output).expect("one valid JSON document");
+    assert!(json["performance"].is_object(), "perf attached: {json}");
+}
+
+#[test]
+fn files_unfiltered_nonverbose_and_filesystem_reports_gain_no_list() {
+    let fx = FilesListFixture::new("sniff_files_verbose_unchanged");
+    let base = fx.package_root.to_str().unwrap();
+    // Unfiltered verbose: table and language details, no list.
+    let output = fx
+        .fixture
+        .command()
+        .args(["--base", base, "--plain", "files", "-v"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let text = String::from_utf8(output).expect("utf8");
+    assert!(!text.contains("Files:"), "unfiltered verbose must not list:\n{text}");
+    assert!(text.contains("Languages:"), "details kept:\n{text}");
+
+    // Filtered non-verbose: unchanged report, no list.
+    let output = fx
+        .fixture
+        .command()
+        .args(["--base", base, "--plain", "files", "--association", "image"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let text = String::from_utf8(output).expect("utf8");
+    assert!(
+        !text.contains("Files:"),
+        "filtered non-verbose must not list:\n{text}"
+    );
+
+    // Aggregate `filesystem` report gains no list either.
+    let output = fx
+        .fixture
+        .command()
+        .args(["--base", base, "--plain", "filesystem", "-v"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let text = String::from_utf8(output).expect("utf8");
+    assert!(
+        !text.contains("Files:"),
+        "aggregate filesystem report must not list:\n{text}"
+    );
+}
+
+// ============================================================================
+// Task 3.5 — names and roots tests (AC 4)
+// ============================================================================
+
+/// Labels are exact in piped plain output for every root shape; on Unix a
+/// PTY run also decodes each OSC8 destination and compares it with the full
+/// native absolute file (canonical fixture root joined with the stored
+/// relative path).
+#[test]
+fn files_verbose_link_destinations_match_native_absolute_paths() {
+    let fx = FilesListFixture::new("sniff_files_verbose_roots");
+    let package_args = ["files", "--association", "image", "-v"];
+    let relative_base_args = [
+        "--base",
+        "../repo/area/lib",
+        "files",
+        "--association",
+        "image",
+        "-v",
+    ];
+
+    // (a) Invocation from a package subdirectory, no `--base`: the owning
+    // package root is the link root even though the process runs deeper.
+    let output = fx
+        .fixture
+        .command_builder()
+        .ambient_context(&fx.package_root.join("src"))
+        .build()
+        .args(package_args)
+        .arg("--plain")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let text = String::from_utf8(output).expect("utf8");
+    let paths = fx.json_paths("image", &fx.package_root);
+    let labels: Vec<String> = paths.iter().map(|path| plain_files_label(path)).collect();
+    assert_files_list_entries(&text, &labels);
+    #[cfg(unix)]
+    {
+        let mut command = fx
+            .fixture
+            .command_builder()
+            .ambient_context(&fx.package_root.join("src"))
+            .build_std();
+        command.args(package_args);
+        assert_osc8_destination_identity(command, &fx.canonical_package_root, &paths, &labels);
+    }
+
+    // (b) Absolute `--base` from outside the repository (fixture cwd is
+    // outside the git repo): same labels, same targets.
+    let text = fx.verbose_text(&fx.package_root, "image");
+    assert_files_list_entries(&text, &labels);
+    #[cfg(unix)]
+    {
+        let mut command = fx.fixture.command_std();
+        command.args(["--base", fx.package_root.to_str().unwrap()]).args(package_args);
+        assert_osc8_destination_identity(command, &fx.canonical_package_root, &paths, &labels);
+    }
+
+    // (c) Relative `--base` from outside the repository resolves against the
+    // invocation directory, not the git root.
+    let output = fx
+        .fixture
+        .command()
+        .args(relative_base_args)
+        .arg("--plain")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let text = String::from_utf8(output).expect("utf8");
+    assert_files_list_entries(&text, &labels);
+    #[cfg(unix)]
+    {
+        let mut command = fx.fixture.command_std();
+        command.args(relative_base_args);
+        assert_osc8_destination_identity(command, &fx.canonical_package_root, &paths, &labels);
+    }
+
+    // (d) A base outside any package is itself the link root: labels and
+    // targets are area-relative.
+    let paths = fx.json_paths("image", &fx.area_root);
+    let labels: Vec<String> = paths.iter().map(|path| plain_files_label(path)).collect();
+    let text = fx.verbose_text(&fx.area_root, "image");
+    assert_files_list_entries(&text, &labels);
+    #[cfg(unix)]
+    {
+        let mut command = fx.fixture.command_std();
+        command.args(["--base", fx.area_root.to_str().unwrap()]).args(package_args);
+        assert_osc8_destination_identity(
+            command,
+            &canonical_fixture_path(&fx.area_root),
+            &paths,
+            &labels,
+        );
+    }
+}
+
+#[test]
+fn files_verbose_keeps_duplicate_and_markup_sensitive_names_distinguishable() {
+    let fx = FilesListFixture::new("sniff_files_verbose_names");
+    let paths = fx.json_paths("image", &fx.package_root);
+    let labels: Vec<String> = paths.iter().map(|path| plain_files_label(path)).collect();
+
+    // Duplicate basenames in different directories both appear with
+    // distinguishable labels.
+    for directory in ["assets", "brand"] {
+        let expected = plain_files_label(&Path::new(directory).join("logo.png"));
+        assert!(
+            labels.contains(&expected),
+            "{directory}/logo.png must be listed: {labels:?}"
+        );
+    }
+    let text = fx.verbose_text(&fx.package_root, "image");
+    assert_files_list_entries(&text, &labels);
+
+    // Hostile names survive the whole pipeline: spaces, Unicode, brackets,
+    // markup characters, and (on Unix) a literal backslash.
+    for name in FilesListFixture::markup_image_names() {
+        assert!(
+            paths.iter().any(|path| path == &PathBuf::from(name)),
+            "{name} must be captured: {paths:?}"
+        );
+    }
+
+    // Destinations are distinct per file and each decodes to its native file.
+    #[cfg(unix)]
+    {
+        let mut command = fx.fixture.command_std();
+        command
+            .args(["--base", fx.package_root.to_str().unwrap()])
+            .args(["files", "--association", "image", "-v"]);
+        assert_osc8_destination_identity(command, &fx.canonical_package_root, &paths, &labels);
+    }
+}
+
+#[test]
+fn files_verbose_capability_fallback_shows_literal_labels_without_links() {
+    // A piped subprocess is hyperlink-incapable: without `--plain`, every
+    // entry is its exact reversible label (brackets unescaped) and no
+    // Markdown-style link text replaces the missing OSC8 link.
+    let fx = FilesListFixture::new("sniff_files_verbose_fallback");
+    for association in ["image", "unknown", "programming-language"] {
+        let paths = fx.json_paths(association, &fx.package_root);
+        assert!(
+            paths.iter().any(|path| path.to_string_lossy().contains(']')),
+            "{association} fixture must hold a bracketed name: {paths:?}"
+        );
+        let labels: Vec<String> = paths.iter().map(|path| plain_files_label(path)).collect();
+        let output = fx
+            .fixture
+            .command()
+            .args([
+                "--base",
+                fx.package_root.to_str().unwrap(),
+                "files",
+                "--association",
+                association,
+                "-v",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        let text = String::from_utf8(output).expect("utf8");
+        assert_files_list_entries(&text, &labels);
+        assert!(!text.contains("file://"), "no link fallback text:\n{text}");
+        assert!(!text.contains('\x1b'), "no escape sequences when piped:\n{text:?}");
+    }
+}
+
+// ============================================================================
+// Task 3.6 — empty and truncated observations (AC 5)
+// ============================================================================
+
+#[test]
+fn files_filtered_verbose_empty_category_keeps_table_and_zero_counts() {
+    let fx = FilesListFixture::new("sniff_files_verbose_empty");
+    // `video` has no captured files in the fixture: an empty successful
+    // observation keeps the summary behavior and omits the list, exit 0.
+    let output = fx
+        .fixture
+        .command()
+        .args([
+            "--base",
+            fx.package_root.to_str().unwrap(),
+            "--plain",
+            "files",
+            "--association",
+            "video",
+            "-v",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let text = String::from_utf8(output).expect("utf8");
+    assert!(
+        !text.contains("Files:"),
+        "an empty category must not grow a list:\n{text}"
+    );
+
+    let output = fx
+        .fixture
+        .command()
+        .args([
+            "--base",
+            fx.package_root.to_str().unwrap(),
+            "--json",
+            "files",
+            "--association",
+            "video",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("filtered JSON");
+    assert_eq!(json["total_files"], 0, "zero-count JSON shape: {json}");
+}
+
+// ============================================================================
+// Task 3.7 — counters and failure semantics (AC 6, 8)
+// ============================================================================
+
+#[test]
+fn files_verbose_work_counters_match_non_verbose() {
+    let fx = FilesListFixture::new("sniff_files_verbose_counters");
+    let run = |verbose: bool| -> Value {
+        let mut command = fx.fixture.command();
+        command.args([
+            "--base",
+            fx.package_root.to_str().unwrap(),
+            "--perf",
+            "--json",
+            "files",
+            "--association",
+            "image",
+        ]);
+        if verbose {
+            command.arg("-v");
+        }
+        let output = command.assert().success().get_output().stdout.clone();
+        serde_json::from_slice::<Value>(&output).expect("one JSON document")
+    };
+    let plain = run(false)["performance"]["counters"].clone();
+    let verbose = run(true)["performance"]["counters"].clone();
+    assert!(
+        plain
+            .get("filesystem.file_inventory.files_accepted")
+            .is_some_and(|value| value.as_u64() > Some(0)),
+        "the fixture must have done real scan work: {plain}"
+    );
+    // Verbosity changes presentation only: every acquisition counter (scan,
+    // classification, manifest parsing, Git discovery/status, docs) is
+    // identical, treating an absent counter as zero. Timings live outside
+    // `counters` and are not compared.
+    let plain_map = plain.as_object().expect("counter map");
+    let verbose_map = verbose.as_object().expect("counter map");
+    let mut keys: Vec<&String> = plain_map.keys().collect();
+    keys.extend(verbose_map.keys());
+    for key in keys {
+        let left = plain_map.get(key).and_then(Value::as_u64).unwrap_or(0);
+        let right = verbose_map.get(key).and_then(Value::as_u64).unwrap_or(0);
+        assert_eq!(left, right, "counter {key} must not change with verbosity");
+    }
+    // The scoped request keeps docs and status walks off in both modes.
+    for mode in [&plain_map, &verbose_map] {
+        assert_eq!(
+            mode.get("filesystem.docs.documents_parsed")
+                .and_then(Value::as_u64)
+                .unwrap_or(0),
+            0
+        );
+        assert_eq!(
+            mode.get("git.status_walks").and_then(Value::as_u64).unwrap_or(0),
+            0
+        );
+    }
+}
+
+/// Ruling 2(a): a relative base whose current directory cannot be read must
+/// not produce a report or guessed links — stderr error, nonzero exit,
+/// nothing on stdout. The cwd is deleted between fork and exec so the child
+/// launches with an unusable working directory; the Git discovery that every
+/// `files` request performs fails first with its own cwd error, so the
+/// assertion holds for the first failing boundary rather than one specific
+/// message (the resolver's own branch is exercised by unit tests).
+#[cfg(unix)]
+#[test]
+fn files_verbose_root_failure_errors_on_stderr_without_stdout() {
+    use std::os::unix::process::CommandExt;
+
+    let fx = FilesListFixture::new("sniff_files_verbose_rootfail");
+    let gone = fx.fixture.tmp_dir().join("deleted_cwd");
+    std::fs::create_dir_all(&gone).unwrap();
+    // The fixture's raw-command surface carries the full environment policy;
+    // std applies its own chdir (to the fixture cwd) before pre_exec
+    // closures, so the closure's deleted-cwd chdir is the one that sticks.
+    let mut command = fx.fixture.command_std();
+    // The base is relative (and unresolvable with the cwd gone), verbose,
+    // filtered: exactly the shape that must resolve a link root.
+    command.args(["--base", "repo", "-v", "files", "--association", "image"]);
+    let deleted = gone.clone();
+    unsafe {
+        command.pre_exec(move || {
+            std::env::set_current_dir(&deleted)?;
+            std::fs::remove_dir(&deleted)?;
+            Ok(())
+        });
+    }
+    let output = command.output().expect("spawn must succeed");
+    assert!(
+        !output.status.success(),
+        "an unresolvable root must exit nonzero"
+    );
+    assert!(
+        output.stdout.is_empty(),
+        "no report on stdout for a root failure, got:\n{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Error:") && !stderr.trim().is_empty(),
+        "the failure must be reported on stderr:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("file://"),
+        "no guessed links: {stderr}"
+    );
 }
 
 // ============================================================================

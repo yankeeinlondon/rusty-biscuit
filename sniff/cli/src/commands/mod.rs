@@ -1327,7 +1327,13 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             .without_os()
             .without_hardware()
             .without_network()
-            .filesystem(FilesystemRequest::new().git(git_request.clone())),
+            .filesystem(
+                FilesystemRequest::new()
+                    .git(GitRequest::identity())
+                    .repo(RepoRequest::structure())
+                    .without_docs()
+                    .without_formatting(),
+            ),
         OutputFilter::Docs => DetectionPlan::new()
             .without_os()
             .without_hardware()
@@ -1773,6 +1779,17 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             std::process::exit(code);
         }
     } else {
+        // The filtered verbose file list links against the root its captured
+        // paths are relative to. Resolving it here — before any stdout is
+        // written — keeps `render_text` infallible; JSON, unfiltered, and
+        // non-verbose reports never resolve a root, so they cannot gain
+        // root-resolution failures.
+        let files_link_root = match (output_filter, cli.verbose > 0, files_filter.association) {
+            (OutputFilter::Files, true, Some(_)) => {
+                Some(resolve_files_link_root(&result, base_dir.as_deref())?)
+            }
+            _ => None,
+        };
         let text = output::render_text(
             &result,
             cli.verbose,
@@ -1780,6 +1797,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             history_count,
             &docs_filter,
             &files_filter,
+            files_link_root.as_deref(),
             repo_action.as_ref(),
             base_dir.as_deref(),
             latest_versions_enabled,
@@ -1793,6 +1811,68 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     Ok(())
+}
+
+/// Resolves the root that a filtered verbose `files` list's captured paths
+/// are relative to.
+///
+/// The scan stores each captured path relative to the owning package root
+/// when the effective base lies inside one — selected through
+/// [`sniff::filesystem::repo::types::RepoInfo::package_for_dir`], the same
+/// authority the scan itself used — otherwise relative to the effective base
+/// itself. A relative base absolutizes lexically against the current
+/// directory; nothing is probed or canonicalized per file.
+///
+/// ## Errors
+///
+/// The root cannot be established when a relative base (or the invocation
+/// directory itself) meets an unusable current directory, or when a relative
+/// package root has no absolute repository root to anchor it. The caller
+/// reports the failure before any stdout is written and exits nonzero
+/// rather than linking against a guessed root.
+fn resolve_files_link_root(
+    result: &SniffResult,
+    base_dir: Option<&std::path::Path>,
+) -> Result<std::path::PathBuf, String> {
+    let dir = match base_dir {
+        Some(base) => base.to_path_buf(),
+        // Mirror the library's own effective base: the current directory,
+        // falling back to `.` when it is unreadable.
+        None => std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
+    };
+    // No repository means no owning package: the effective base is the root.
+    let owning = result
+        .filesystem
+        .as_ref()
+        .and_then(|fs| fs.repo.as_ref())
+        .and_then(|repo| repo.package_for_dir(&dir).map(|package| (repo, package)));
+    if let Some((repo, package)) = owning {
+        if package.path.is_absolute() {
+            return Ok(package.path.clone());
+        }
+        let anchored = repo.root.join(&package.path);
+        if anchored.is_absolute() {
+            return Ok(anchored);
+        }
+        return Err(unanchored_package_root_message(&package.path));
+    }
+    if dir.is_absolute() {
+        return Ok(dir);
+    }
+    let cwd = std::env::current_dir().map_err(|_| {
+        format!(
+            "cannot establish the link root for the file list: relative base '{}' requires a readable current directory",
+            dir.display()
+        )
+    })?;
+    Ok(cwd.join(dir))
+}
+
+fn unanchored_package_root_message(package_root: &std::path::Path) -> String {
+    format!(
+        "cannot establish the link root for the file list: package root '{}' is relative and no absolute repository root anchors it",
+        package_root.display()
+    )
 }
 
 /// Prints shell completions setup instructions.
@@ -2461,5 +2541,276 @@ mod tests {
             "--completions".to_string(),
             "zsh".to_string(),
         ]));
+    }
+
+    mod files_link_root {
+        use super::*;
+
+        fn result_with_repo(repo: sniff::filesystem::repo::types::RepoInfo) -> SniffResult {
+            SniffResult {
+                filesystem: Some(sniff::filesystem::FilesystemInfo {
+                    repo: Some(repo),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }
+        }
+
+        fn package(
+            path: &str,
+            relative: &str,
+        ) -> sniff::filesystem::repo::types::Package {
+            sniff::filesystem::repo::types::Package {
+                path: std::path::PathBuf::from(path),
+                relative: relative.to_string(),
+                ..Default::default()
+            }
+        }
+
+        #[test]
+        fn owning_package_root_wins_over_base() {
+            let workspace = tempfile::TempDir::new().unwrap();
+            let repo_root = workspace.path().canonicalize().unwrap();
+            let package_root = repo_root.join("area/lib");
+            std::fs::create_dir_all(package_root.join("src")).unwrap();
+            let repo = sniff::filesystem::repo::types::RepoInfo {
+                root: repo_root.clone(),
+                packages: Some(vec![package(
+                    package_root.to_str().unwrap(),
+                    "area/lib",
+                )]),
+                ..Default::default()
+            };
+            // Invoking from a package subdirectory must not make that
+            // subdirectory the link root: the captured paths are relative to
+            // the package root.
+            let base = package_root.join("src");
+            let resolved = resolve_files_link_root(&result_with_repo(repo), Some(&base)).unwrap();
+            assert_eq!(resolved, package_root);
+        }
+
+        #[test]
+        fn base_without_owning_package_is_the_root() {
+            let workspace = tempfile::TempDir::new().unwrap();
+            let repo_root = workspace.path().canonicalize().unwrap();
+            let package_root = repo_root.join("area/lib");
+            std::fs::create_dir_all(&package_root).unwrap();
+            std::fs::create_dir_all(repo_root.join("unowned")).unwrap();
+            let repo = sniff::filesystem::repo::types::RepoInfo {
+                root: repo_root.clone(),
+                packages: Some(vec![package(
+                    package_root.to_str().unwrap(),
+                    "area/lib",
+                )]),
+                ..Default::default()
+            };
+            // A directory no package owns falls back to the effective base.
+            let base = repo_root.join("unowned");
+            let resolved = resolve_files_link_root(&result_with_repo(repo), Some(&base)).unwrap();
+            assert_eq!(resolved, base);
+        }
+
+        #[test]
+        fn no_repository_uses_the_absolute_base() {
+            let result = SniffResult::default();
+            let base = tempfile::TempDir::new().unwrap();
+            let resolved = resolve_files_link_root(&result, Some(base.path())).unwrap();
+            assert_eq!(resolved, base.path());
+        }
+
+        #[test]
+        fn relative_base_absolutizes_lexically_against_cwd() {
+            let result = SniffResult::default();
+            let resolved =
+                resolve_files_link_root(&result, Some(std::path::Path::new("somewhere/inside")))
+                    .unwrap();
+            assert_eq!(
+                resolved,
+                std::env::current_dir().unwrap().join("somewhere/inside")
+            );
+        }
+
+        #[test]
+        fn relative_package_root_anchors_on_absolute_repo_root() {
+            // A repo frame anchored at the live working directory keeps the
+            // fixture absolute on every OS; the stored package root and the
+            // queried dir stay in that frame's relative spelling.
+            let anchor = std::env::current_dir().unwrap();
+            let repo = sniff::filesystem::repo::types::RepoInfo {
+                root: anchor.clone(),
+                packages: Some(vec![package("area/lib", "area/lib")]),
+                ..Default::default()
+            };
+            let dir = anchor.join("area/lib/src");
+            let resolved = resolve_files_link_root(&result_with_repo(repo), Some(&dir)).unwrap();
+            assert_eq!(resolved, anchor.join("area/lib"));
+        }
+
+        #[test]
+        fn relative_package_root_without_absolute_anchor_fails() {
+            // Ruling 2(b): a relative package root with no absolute repository
+            // root to anchor it is a failure, never a guessed root. The
+            // platform-neutral stand-in for a cwd that cannot be read.
+            let repo = sniff::filesystem::repo::types::RepoInfo {
+                root: std::path::PathBuf::from("."),
+                packages: Some(vec![package("area/lib", "area/lib")]),
+                ..Default::default()
+            };
+            let error = resolve_files_link_root(
+                &result_with_repo(repo),
+                Some(std::path::Path::new("area/lib/src")),
+            )
+            .unwrap_err();
+            assert!(
+                error.contains("package root") && error.contains("relative"),
+                "{error}"
+            );
+        }
+
+        /// A relative base with no owning package and an unreadable current
+        /// directory is a failure, never a root guessed from the spelling.
+        /// The CLI cannot reach this branch (detection fails on the same
+        /// cwd first), so it is proven here. Changing the process cwd is safe
+        /// because nextest runs each test in its own process.
+        #[cfg(unix)]
+        #[test]
+        fn relative_base_with_unreadable_cwd_fails() {
+            let original = std::env::current_dir().unwrap();
+            let gone = tempfile::TempDir::new().unwrap();
+            let gone_path = gone.path().to_path_buf();
+            std::env::set_current_dir(&gone_path).unwrap();
+            gone.close().unwrap();
+            let outcome =
+                resolve_files_link_root(&SniffResult::default(), Some(std::path::Path::new("repo")));
+            std::env::set_current_dir(&original).unwrap();
+            let error = outcome.expect_err("an unreadable cwd cannot anchor a relative base");
+            assert!(
+                error.contains("relative base") && error.contains("current directory"),
+                "{error}"
+            );
+        }
+
+        /// Root preparation and text rendering run on the captured result
+        /// only: under a request collector they record no acquisition work
+        /// (scan, classification, manifest, Git, docs, process, or network
+        /// counters), with or without the filtered verbose list. The one
+        /// filesystem probe allowed is the base canonicalization inside
+        /// `RepoInfo::package_for_dir`, the ownership authority the spec
+        /// mandates; it is paid once per report, never per listed file.
+        #[test]
+        fn root_preparation_and_text_rendering_perform_no_acquisition() {
+            let workspace = tempfile::TempDir::new().unwrap();
+            let repo_root = workspace.path().canonicalize().unwrap();
+            let package_root = repo_root.join("area/lib");
+            std::fs::create_dir_all(package_root.join("src")).unwrap();
+            std::fs::create_dir_all(package_root.join("assets")).unwrap();
+            git2::Repository::init(&repo_root).unwrap();
+            std::fs::write(
+                repo_root.join("Cargo.toml"),
+                "[workspace]\nmembers = [\"area/lib\"]\n",
+            )
+            .unwrap();
+            std::fs::write(
+                package_root.join("Cargo.toml"),
+                "[package]\nname = \"sample\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+            )
+            .unwrap();
+            std::fs::write(package_root.join("src/lib.rs"), "pub fn sample() {}\n").unwrap();
+            std::fs::write(package_root.join("assets/logo.png"), b"\x89PNG\r\n\x1a\n").unwrap();
+
+            // The `files` command's request shape, captured outside the
+            // collector so only the post-capture work is measured below.
+            let plan = DetectionPlan::new()
+                .without_os()
+                .without_hardware()
+                .without_network()
+                .filesystem(
+                    FilesystemRequest::new()
+                        .git(GitRequest::identity())
+                        .repo(RepoRequest::structure())
+                        .without_docs()
+                        .without_formatting(),
+                )
+                .base_dir(package_root.clone());
+            let result = detect_with_plan(plan).expect("fixture detection succeeds");
+            let filter = FilesFilter {
+                association: Some(sniff::filesystem::FileAssociation::Image),
+            };
+
+            let acquisition = |counters: &std::collections::BTreeMap<String, u64>| {
+                counters
+                    .iter()
+                    .filter(|(name, value)| {
+                        **value > 0
+                            && ["filesystem.", "git.", "process.", "remote.", "network."]
+                                .iter()
+                                .any(|prefix| name.starts_with(prefix))
+                    })
+                    .map(|(name, value)| (name.clone(), *value))
+                    .collect::<std::collections::BTreeMap<String, u64>>()
+            };
+            let authority = {
+                let collector = sniff::performance::PerformanceCollector::new_shared();
+                let repo = result
+                    .filesystem
+                    .as_ref()
+                    .and_then(|fs| fs.repo.as_ref())
+                    .expect("fixture repository captured");
+                sniff::performance::with_current_collector(Some(collector.clone()), || {
+                    assert!(repo.package_for_dir(&package_root).is_some());
+                });
+                acquisition(&collector.snapshot(std::time::Duration::ZERO).counters)
+            };
+            assert!(
+                authority
+                    .keys()
+                    .all(|name| name == sniff::performance::counters::FS_CANONICALIZATIONS),
+                "the ownership lookup probes nothing but the base: {authority:?}"
+            );
+
+            for verbose in [0_u8, 1] {
+                let collector = sniff::performance::PerformanceCollector::new_shared();
+                let text =
+                    sniff::performance::with_current_collector(Some(collector.clone()), || {
+                        let link_root = (verbose > 0).then(|| {
+                            resolve_files_link_root(&result, Some(&package_root))
+                                .expect("link root resolves")
+                        });
+                        output::render_text(
+                            &result,
+                            verbose,
+                            OutputFilter::Files,
+                            0,
+                            &DocsFilter::default(),
+                            &filter,
+                            link_root.as_deref(),
+                            None,
+                            Some(&package_root),
+                            false,
+                        )
+                    });
+                let measured = acquisition(&collector.snapshot(std::time::Duration::ZERO).counters);
+                let expected = if verbose > 0 {
+                    authority.clone()
+                } else {
+                    std::collections::BTreeMap::new()
+                };
+                assert_eq!(
+                    measured, expected,
+                    "verbose={verbose}: rendering captured results must not acquire"
+                );
+                let visible = biscuit_terminal::prelude::strip_escape_codes(&text);
+                assert_eq!(
+                    visible.contains("Files:"),
+                    verbose > 0,
+                    "verbose={verbose} must exercise the intended path:\n{visible}"
+                );
+                if verbose > 0 {
+                    let expected = std::path::Path::new("assets").join("logo.png");
+                    let label = expected.to_string_lossy().replace('\\', "\\\\");
+                    assert!(visible.contains(&label), "{visible}");
+                }
+            }
+        }
     }
 }

@@ -127,9 +127,8 @@ impl RemoteHeads for LsRemote<'_> {
 /// Whether `branch` is a branch name git accepts as written
 /// (`check-ref-format --branch`). A name git would expand, such as `@{-1}`,
 /// is refused.
-pub fn is_valid_branch_name(base: &Path, branch: &str) -> bool {
-    !branch.starts_with('-')
-        && git_from(base, base, &["check-ref-format", "--branch", branch]).is_ok_and(|normalized| normalized == branch)
+pub fn is_valid_branch_name(branch: &str) -> bool {
+    crate::git_metadata::is_valid_branch_name(branch)
 }
 
 /// The fetch that brings exactly `refs/remotes/origin/<branch>` up to date.
@@ -165,7 +164,7 @@ pub fn fetch_argv(branch: &str) -> Vec<String> {
 /// valid branch name ([`is_valid_branch_name`]); otherwise the fetch's own
 /// failure.
 pub fn fetch_tracking_ref(base: &Path, branch: &str, deadline: Duration) -> Result<(), TransportError> {
-    if !is_valid_branch_name(base, branch) {
+    if !is_valid_branch_name(branch) {
         return Err(TransportError::other("not a valid branch name"));
     }
     let argv = fetch_argv(branch);
@@ -356,8 +355,8 @@ fn batch_ssh_command(base: &Path) -> String {
         .ok()
         .filter(|value| !value.trim().is_empty())
         .or_else(|| {
-            git_from(base, base, &["config", "--get", "core.sshCommand"])
-                .ok()
+            crate::git_metadata::ssh_command(base)
+                .unwrap_or_else(|| git_from(base, base, &["config", "--get", "core.sshCommand"]).ok())
                 .filter(|value| !value.is_empty())
         })
         .unwrap_or_else(|| "ssh".to_string());
@@ -772,13 +771,13 @@ pub(crate) mod tests {
         let server = Loopback::unauthorized();
         let repo = http_origin(&server);
         for branch in ["ma..in", "-x", "@{-1}", "a b", "main.lock", "", "feat/x:refs/heads/y"] {
-            assert!(!is_valid_branch_name(&repo.path(), branch), "{branch:?}");
+            assert!(!is_valid_branch_name(branch), "{branch:?}");
             let error = fetch_tracking_ref(&repo.path(), branch, Duration::from_secs(10)).unwrap_err();
             assert_eq!(error.failure, GitFailure::Other, "{branch:?}");
         }
         assert_eq!(server.accepted(), 0, "no invalid name reached the origin");
         for branch in ["main", "feat/x", "ü"] {
-            assert!(is_valid_branch_name(&repo.path(), branch), "{branch:?}");
+            assert!(is_valid_branch_name(branch), "{branch:?}");
         }
     }
 
