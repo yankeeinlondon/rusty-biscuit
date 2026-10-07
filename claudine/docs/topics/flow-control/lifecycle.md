@@ -525,6 +525,30 @@ failure:
       action: { notify: "Cannot write {{ err.detail.path }} — check permissions" }
 ```
 
+#### Planned: delayed-completion diagnostic
+
+**Planned, not yet implemented:** `ClaudineCompletionDelayed` will use
+`err.code == 'timeout.claudine_completion_delayed'` when Claudine reaches its
+cleanup deadline without a confirmed provider completion verdict. Its
+`err.detail` will retain available response data and the observed cleanup
+state, with explicit completeness flags. `err.msg` will remain a concise
+headline and will not include the response body.
+
+For example, a failure handler will be able to print an identified answer:
+
+```yaml
+failure:
+  stack:
+    - when: "err.code == 'timeout.claudine_completion_delayed' && err.detail.response_text != null"
+      action: { stdout: "{{ err.detail.response_text }}" }
+```
+
+Printing the answer will not repair the failed transaction. Existing recovery
+directives and sequence/loop `fail_fast` policy will govern subsequent work.
+A confirmed successful provider result with delayed presentation will remain
+success and will not fire this failure handler. See
+[planned completion behavior](../timeouts.md#planned-delayed-claudine-completion).
+
 #### Deprecated aliases
 
 The original `err` fields remain available for backward compatibility but are **deprecated** — new documents should match the faceted fields above.

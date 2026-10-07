@@ -557,6 +557,33 @@ Markdown block rebuilt the detected terminal options, and on iTerm2 each build
 ran a `defaults read` subprocess. The detected font is now cached for the
 process.
 
+### Planned: delayed Claudine completion
+
+**Planned, not yet implemented:** when the cleanup deadline expires without
+a confirmed provider completion verdict, Claudine will report
+`ClaudineCompletionDelayed`, with diagnostic code
+`timeout.claudine_completion_delayed`. For example, an agent can exit 0 and
+leave nonempty answer text while its completion record remains unprocessed;
+that condition will carry the available answer instead of claiming a panic.
+
+A parsed successful completion plus native exit 0 will continue to return
+success when only presentation is unfinished. A genuine provider failure,
+nonzero exit, interruption, or actual reader panic will retain its primary
+outcome. Answer prose mentioning an error will not itself establish failure.
+
+The planned diagnostic will expose available answer text and retained raw
+provider output separately, with completeness/truncation flags, the native
+exit code, cleanup timing, and the last observed Claudine operation. Raw output
+may be JSONL; unread bytes cannot be presented as a complete response. CPU
+observations will be supporting evidence when available and will not select
+the deadline. The existing 120 s processing budget will remain unchanged.
+
+Authors will handle this condition through the existing failure/finalize
+diagnostic interface. Printing a retained answer will not convert an
+unconfirmed transaction into success; recovery and `fail_fast` will retain
+their existing rules. See the [planned lifecycle example](flow-control/lifecycle.md#planned-delayed-completion-diagnostic).
+This planned behavior does not change terminal delivery after abandonment.
+
 ## Subagent diagnostics in error reports
 
 When `step_timeout` fires, the ticker snapshots any active subagents
