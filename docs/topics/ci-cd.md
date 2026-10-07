@@ -247,7 +247,7 @@ reordering a row is a contract change.
 
 A source-changed package receives lint, L1 across its environments, and its declared higher tiers.
 Compile-check is no longer blanket: the planner reads each package's declared Cargo targets from
-`cargo metadata`, credits the L1 build with the `lib`, `bin`, and `test` kinds, and schedules a
+`cargo metadata --no-deps`, credits the L1 build with the `lib`, `bin`, and `test` kinds, and schedules a
 `check` cell on `ubuntu-latest` alone where `example` or `bench` targets exist, with
 explicit `--examples`/`--benches` selectors in place of `--all-targets`. A package with unchanged
 direct reverse dependents also owns a `check` cell on `ubuntu-latest`, which compiles them against
@@ -297,6 +297,88 @@ so a declared `name:` containing `${{ matrix.… }}` reaches the Checks tab as r
 (63 such labels in run 34638047631). Omitting `name:` makes the label the job id when skipped and
 `job-id (matrix values)` when it runs — which is also how `lint`'s environment stays visible.
 
+### How the planner reads the workspace
+
+The scope job runs `cargo metadata --no-deps --offline --format-version 1`. That lists the
+workspace members, their declared dependencies, and their `[features]` tables, and it downloads
+nothing: no registry index, no crate sources, no git checkouts, and no `Cargo.lock` rewrite. The
+`resolve` section is `null`, and no planning code reads it. The planner needs only edges between
+members (who must be rebuilt, which native libraries a package inherits, which directories feed a
+build), so `member_dependency_graph` derives those edges from the member records using Cargo's
+own feature-activation rules.
+
+```mermaid
+flowchart TD
+    M["member records<br/>dependencies + features"] --> S["start: every member's default feature<br/>(unless an incoming request disabled defaults)"]
+    S --> A{"feature enabled?"}
+    A -->|"dep:k or k/g"| D["dependency k becomes active"]
+    A -->|"k?/g"| W["request on k recorded<br/>(k still becomes active in Cargo's resolve)"]
+    A -->|"plain name"| F["enable that feature in the same member"]
+    D --> G["k/g: enable g in member k"]
+    G --> A
+    F --> A
+    D --> E["edge member → k, kinds from active entries"]
+```
+
+Each rule, with the smallest example:
+
+- **Defaults on, all platforms.** A member's `default` feature is enabled and `target = ...` on a
+  dependency is ignored, so `[target.'cfg(windows)'.dependencies] b = { path = "../b" }` is an
+  edge on every host. The graph is one platform-independent view, as the full resolve was.
+- **Optional dependencies need an activator.** `b = { path = "../b", optional = true }` is an edge
+  only when an enabled feature names it: `dep:b`, `b/x`, `b?/x`, or the implicit feature `b` (which
+  `dep:b` anywhere in the same `[features]` table suppresses).
+- **`k/g` turns `k` on and requests `g` in it.** `x = ["b/extra"]` activates `b` and enables
+  `extra` in member `b`, which can activate `b`'s own optional dependencies in turn.
+- **`k?/g` requests `g` only if `k` is otherwise active, but Cargo's resolve still reports the
+  edge.** With `default = ["b?/extra"]`, `a → b` appears in `cargo metadata`, so it appears here;
+  the difference from `k/g` is only that the requester's same-named feature `b` stays off.
+- **Kinds are a union over active entries.** A dev entry beside an inactive optional normal entry
+  yields a `dev` edge only; two active entries yield both kinds.
+- **A member without `default` is valid; `default-features = false` is honored per entry,** but a
+  member's own `default` still applies when another member depends on it with defaults.
+- **Matching is by manifest directory, never by name.** Paths go through one host-native
+  `normcase(realpath(...))`, so Windows spelling and macOS `/var` symlinks compare correctly. A
+  registry dependency that shares a member's name is not an edge.
+
+Anything the planner cannot interpret stops with an error naming the package and entry: an
+unknown feature, `dep:k` or `k/g` naming no dependency, a missing or wrongly typed field, two
+members sharing a directory, or a path dependency that matches no member. It never defaults a
+field.
+
+**Local packages outside the workspace.** A path dependency that is not a member (for example an
+excluded package) is read from its own `Cargo.toml`, because its feature requests can switch on
+optional member dependencies. It never appears in results: no node, no native union, no input
+directory, and no bridged `a → outside → b` edge. Its dev dependencies are ignored, and
+`workspace = true` entries inherit from the nearest workspace root. This loader needs `tomllib`
+(Python 3.11+) and refuses by name when it is missing and a manifest is needed; the scope job
+runs Python 3.12.
+
+**Unsupported: replacements.** `[patch]` or `[replace]` in the root manifest, or in a
+`.cargo/config(.toml)` from the root upward or under `CARGO_HOME`, that names a member or points
+at a member directory makes the planner stop with an error; the derived graph would no longer
+match Cargo's resolve.
+
+**The toolchain is still required.** `cargo metadata` runs through the pinned toolchain
+(`rustup show`) and the prebuilt helper, exactly as before. Only the registry is no longer needed.
+
+**Checking the graph against Cargo.** Small all-local workspaces in
+`scripts/ci/test_affected_scope.py` run in the Ubuntu `Companion suites` step: each is compared
+with Cargo's full resolve using `--offline`, an empty temporary `CARGO_HOME`, and no compile.
+The real workspace is not compared on every push; that is a local check, run when member
+manifests, features, or the toolchain change:
+
+```sh
+cargo metadata --format-version 1 --locked > /tmp/full.json
+cargo metadata --no-deps --offline --format-version 1 > /tmp/nodeps.json
+cd scripts/ci && python3 -c "import json, test_affected_scope as t; \
+nd=json.load(open('/tmp/nodeps.json')); full=json.load(open('/tmp/full.json')); \
+print(t.derived_edges(nd) == t.resolved_edges(full))"
+```
+
+It must print `True`. A recurring check on the real workspace is deliberately not scheduled, so
+a manifest change that makes the two diverge is found by this command, not by CI.
+
 ### One native owner compiles, every tier consumes
 
 Every executing L1, L2, and browser cell names exactly one **build record** in the resolved plan,
@@ -315,6 +397,28 @@ compiling in place. Linux and WSL2 share one Linux archive and publish two separ
 native Windows and WSL2 are structurally incompatible and can never pair. Clippy and the
 check-only example/bench targets stay their own compile configurations, in their own jobs, with
 their own caches.
+
+The verifier a consumer just ran is also the planner's **key helper**. Tests that compute build
+keys go through `scripts/ci/build_key.py`, which otherwise falls back to `cargo run --bin ci-build`
+— a cold compile in a checkout with no `ci-build`. So once verification succeeds,
+`_ci_build_verify` reports `key_helper=<build>/tools/ci-build[.exe]`, and the `gate` step exports it
+as `BISCUIT_CI_BUILD_BIN` before the recipe runs; an empty value stops the cell. The `expected`
+step gets no binding, and the helper runs with compiler-wrapper mode removed (`BISCUIT_CI_BUILD_WRAP`
+unset, `RUSTC_WRAPPER` empty). A `requires-toolchain` suite that runs the planner avoids the helper
+build but keeps its intentional Cargo calls. `just cross-check` binds the same variable for Unix and
+Windows archive hosts.
+
+```sh
+: "${ARCHIVE_KEY_HELPER:?verification did not report the ci-build key helper}"
+export BISCUIT_CI_BUILD_BIN="$ARCHIVE_KEY_HELPER"   # then: just _test ...
+```
+
+```mermaid
+flowchart LR
+    V[ci-build verify] -->|succeeds| O[key_helper output]
+    O --> E[export BISCUIT_CI_BUILD_BIN]
+    E --> P[planner runs the shipped verifier]
+```
 
 A build record is **plumbing, never a result cell**: no `{package, environment, tier}` identity, no
 JUnit, no baseline entry. A failed, cancelled, or unuploadable owner makes each dependent cell

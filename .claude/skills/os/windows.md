@@ -66,6 +66,13 @@ hold the rest:
   hosted `windows-latest` image installs the real interpreter under that name.
   Found 2026-09-14 by the first native-Windows run of `repo-deps`
   (`scripts/ci-rollup-tests.rs::python_interpreter`).
+- **BUILD_WIN SSH sessions resolve `python3`/`python` to the WindowsApps
+  aliases ahead of the real interpreter.** `--version` fails, so tests gated on
+  `python_interpreter()` skip and nextest reports PASS in ~0.3 s having run
+  nothing. Before a `just cross-check` run that needs Python, prepend the real
+  interpreter's directory to a process-scoped `PATH` (confirm a successful
+  `--version`; do not assume the install directory, e.g. Python313). A PASS
+  alone is not evidence: read the captured output for the planner's own lines.
 - **A `.cmd`/`.bat` cannot receive an argument containing a newline** ("batch
   file arguments are invalid"). A fake provider that receives a multi-line
   prompt must be a compiled `.exe`; see the rustc-built fixture in claudine's
