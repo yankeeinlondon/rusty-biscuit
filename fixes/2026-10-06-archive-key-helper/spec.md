@@ -9,12 +9,13 @@ related:
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: "2026-10-06"
-review_iterations: 0
+review_iterations: 1
+completed: true
 clarified: false
-implemented: false
+implemented: true
 human_review: false
 message_to_agent: |-
-  Phase 3 done: workflow contracts, generated-script tests, negative checks, and the Windows evidence run (AC5/AC6) are complete; temporary diagnostics removed and `build_key.py` has no diff against HEAD. Phase 4 is docs only: CI README, docs/topics/ci-cd.md, rust-devops ci-cd.md skill, and a drift pass. Measured facts for wording: on native Windows the planner ran `<consume>\build\tools\ci-build.exe` as its key helper (three calls, no Cargo); `the_real_planners_plan_rolls_up` took 4.8 s with a real Python; the `the_shipped_planner_*` guard tests no longer exist. Note BUILD_WIN needs a real Python on PATH or planner tests skip and PASS in 0.3 s.
+  Phase 4 done: docs (CI README, docs/topics/ci-cd.md, rust-devops ci-cd skill) updated; plan complete and ready for author review.
 $schema:
   status: |-
     enum(

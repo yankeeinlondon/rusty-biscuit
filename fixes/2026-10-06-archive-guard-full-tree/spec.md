@@ -6,6 +6,7 @@ status: draft-spec
 related:
   - 2026-09-19-less-brittle
   - 2026-10-05-worker-git-processes
+  - 2026-10-06-archive-key-helper
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: "2026-10-06"
@@ -127,7 +128,7 @@ gives an approximate scale for the added work, not an upper bound on the
 violation scan or the whole suite. Recent full-tree runs report
 `files-checked=4038 … violations=5` (all five allowed).
 
-### The handoff's contract tests time out
+### The handoff's contract tests are expensive in archive mode
 
 Two tests in `tools/test-toolkit/tests/ci_workflow_contracts.rs` exist only to
 prove that the Python emitter and the Rust reader agree:
@@ -140,26 +141,27 @@ prove that the Python emitter and the Rust reader agree:
   checks that deleted paths are omitted from `changed` and that the reader
   refuses a listed path that does not exist.
 
-Their cost, for the same two tests:
-
-| Host and mode | Time |
-| --- | ---: |
-| macOS development host, native | ~4 s |
-| `BUILD_LINUX`, native | 16 s |
-| `BUILD_WSL`, native | 1.9 s + 5.9 s |
-| `BUILD_WSL`, nextest archive mode (as CI runs it) | 51 s + 52 s |
-| `ubuntu-latest` CI | 64–82 s each |
-| `windows-latest` CI | **timed out at 90 s** (runs 37529082394, 37537695506) |
-
-In archive mode the `-- README.md` plan alone took 30.1 s against about 3 s
-from a checkout; `--all` and a `.rs` change took about 1.2 s and
-`cargo metadata` about 1.1 s. The `README.md` plan is the expensive one
-because a non-source change runs the planner's test-input scan
-(`scripts/ci/test_inputs.py`) over every test-reachable Rust file, which the
-guard's answer does not depend on. Why archive mode makes that scan about ten
-times slower is unexplained (see Not in scope). These timeouts keep
+On hosted CI, each test took 64–82 s on `ubuntu-latest`, and both timed out
+at 90 s on `windows-latest` (runs 37529082394, 37537695506). These timeouts keep
 `test-toolkit` L1 red on `windows-latest`, on `main` and on any `ci:all-os`
 pull request.
+
+Archive-mode runs on the build hosts (`BUILD_WSL` and `BUILD_WIN` through
+`just cross-check`) located the cause. Their durations do not predict hosted CI
+durations, so they are not quoted here. On both hosts, most of each test's time
+was the planner's first build-key call. An archive checkout has no `target/`,
+so `scripts/ci/build_key.py` falls back to `cargo run` and compiles `ci-build`.
+Every plan computes at least one key, including a plan for a `README.md`-only
+change. In the same runs, the test-input scan was a small share of the time.
+Giving test 1 an input that skips the scan left both tests above nextest's
+30 s slow mark on `BUILD_WIN`.
+
+`2026-10-06-archive-key-helper` removes that compile by binding the artifact's
+verifier as the key helper. The timeouts are therefore not, on their own, a
+reason for this spec. Deleting the two tests removes their cost along with the
+handoff they prove, but the case for removing the handoff rests on the
+subsections before and after this one: the scan cost and the detection goal. Whether the `windows-latest`
+timeout clears is judged from `windows-latest` runs.
 
 ### Why the original reason no longer holds
 
@@ -417,9 +419,8 @@ snapshots.
    `local-tools` feature so the plan renderer is tested; and
    `just test-githooks` from the root. These are implementation checks, not
    prerequisites for this document-only review.
-4. `just cross-check test-toolkit --os windows` passes without the removed
-   planner-reader timeouts. Reuse qualifying evidence for required cells on
-   each environment and run cells lacking it. Review `just ci-local --plan`
+4. `just cross-check test-toolkit --os windows` passes. Reuse qualifying
+   evidence for required cells on each environment and run cells lacking it. Review `just ci-local --plan`
    before an implementation push. Normal event scheduling applies; no
    `ci:all-os` label or full-workspace CI run is required just to review or
    validate this simplification. Existing execution bans remain binding.
@@ -466,8 +467,7 @@ not a consequence of removing scan scope.
 Either option leaves the guard rule unchanged: it runs only when the resolved
 plan contains a lint cell carrying its companion on `ubuntu-latest`. This
 policy question does not block implementing the scan simplification against
-the current table. The archive-mode planner slowdown remains an independent
-investigation below.
+the current table.
 
 ## Not in scope
 
@@ -479,11 +479,6 @@ These are open and recorded so they are not lost:
   alone. Deciding the intended policy and correcting whichever side is wrong
   is a separate change (see Resolved Questions).
 
-- **Archive-mode planner slowdown.** The `-- README.md` plan takes about 30 s
-  in nextest archive mode against about 3 s from a checkout on the same WSL
-  guest; `cargo metadata` and the other plan kinds are normal, and file reads
-  are plain `read_text`. CI's own scope job plans from a normal checkout, so it
-  is not affected; tests that run the planner are. Not yet explained.
 - **Planner in Rust.** `scripts/ci/test_inputs.py` is a Rust lexer written in
   Python and the expensive part of planning; moving it into Rust, sharing the
   guard's lexer, is the proposed first step of an incremental migration. It

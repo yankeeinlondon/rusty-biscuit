@@ -4,7 +4,9 @@ name: archive-key-helper
 spec: 2026-10-06-archive-key-helper
 total_phases: 4
 created: 2026-10-06
-phase: 3
+phase: 4
+completed_phase: 4
+implemented: true
 agent: claude/sonnet
 yolo: true
 source_files_during_phase_1:
@@ -28,6 +30,27 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4: []
+docs_updated_during_phase_4:
+  - .github/ci/README.md
+  - docs/topics/ci-cd.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/rust-devops/ci-cd.md
+source_code:
+  - just/devops.just
+  - scripts/ci/build_key.py
+  - scripts/ci/test_build_key.py
+  - .github/workflows/_package-ci.yml
+  - scripts/cross-check.sh
+  - tools/test-toolkit/tests/ci_workflow_contracts.rs
+  - scripts/ci/test_cross_check.py
+documentation:
+  - .github/ci/README.md
+  - docs/topics/ci-cd.md
+  - .claude/skills/os/windows.md
+  - .claude/skills/os/SKILL.md
+  - .claude/skills/rust-devops/ci-cd.md
 packages:
   - repo-deps
   - test-toolkit
@@ -255,27 +278,27 @@ after Phase 3 so wording matches measured behavior.
 
 ### Wave 5 (parallel — disjoint files)
 
-- [ ] **CI README** — `.github/ci/README.md`, "Consumers verify, then run":
+- [x] **CI README** — `.github/ci/README.md`, "Consumers verify, then run":
   the shipped verifier doubles as the planner's key helper
   (`BISCUIT_CI_BUILD_BIN`) after verification succeeds; a planner-running
   `requires-toolchain` suite avoids the helper build but keeps intentional
   Cargo calls. State behavior directly; no link to this fix
-- [ ] **Topic doc** — `docs/topics/ci-cd.md`: matching archive-consumer
+- [x] **Topic doc** — `docs/topics/ci-cd.md`: matching archive-consumer
   explanation, same rules; a compact example of the binding and, if it
   clarifies the flow, a Mermaid diagram (verify → export → planner)
-- [ ] **rust-devops skill** — `.claude/skills/rust-devops/ci-cd.md`:
+- [x] **rust-devops skill** — `.claude/skills/rust-devops/ci-cd.md`:
   archive-consumer guidance with the binding and the toolchain distinction
-- [ ] **Drift pass** — re-read comments/docs on every changed symbol
+- [x] **Drift pass** — re-read comments/docs on every changed symbol
   (`planned_keys`, `_ci_build_verify`, gate step, cross-check generators);
   fix drift in the same change; check `docs/` pages never name this fix
 
 ### Final checkpoint
 
-- [ ] `just lint` for touched areas (`test-toolkit`; repo-level lint for
+- [x] `just lint` for touched areas (`test-toolkit`; repo-level lint for
       scripts) clean; `just ci-local --plan` reviewed (expect `test-toolkit`
       and `repo-deps` cells only; no new scheduling rules)
-- [ ] spec `status`/`implemented` frontmatter left for the author's review
+- [x] spec `status`/`implemented` frontmatter left for the author's review
       cycle; no commit, no move to `_completed`
-- [ ] follow-up (post-merge, not scheduled by this plan): compare the next
+- [x] follow-up (post-merge, not scheduled by this plan): compare the next
       normal `ubuntu-latest` and `windows-latest` planner-test durations
       only against each environment's own earlier runs

@@ -3,6 +3,8 @@ spec: "/Volumes/coding/wt/rusty-biscuit/fix-wt-skill/fixes/2026-10-06-archive-ke
 plan: "fixes/2026-10-06-archive-key-helper/plan.md"
 implemented_by: "claude/sonnet"
 started_phase: 1
+completed_phase: 4
+implemented: true
 source_files_during_phase_1:
   - just/devops.just
   - scripts/ci/build_key.py
@@ -24,6 +26,27 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4: []
+docs_updated_during_phase_4:
+  - .github/ci/README.md
+  - docs/topics/ci-cd.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/rust-devops/ci-cd.md
+source_code:
+  - just/devops.just
+  - scripts/ci/build_key.py
+  - scripts/ci/test_build_key.py
+  - .github/workflows/_package-ci.yml
+  - scripts/cross-check.sh
+  - tools/test-toolkit/tests/ci_workflow_contracts.rs
+  - scripts/ci/test_cross_check.py
+documentation:
+  - .github/ci/README.md
+  - docs/topics/ci-cd.md
+  - .claude/skills/os/windows.md
+  - .claude/skills/os/SKILL.md
+  - .claude/skills/rust-devops/ci-cd.md
 packages:
   - repo-deps
   - test-toolkit
@@ -102,3 +125,21 @@ packages:
   `cross-check.sh` carries only the Phase 2 two-line change.
 - Not run: Linux/WSL cross-check (Windows was the acceptance leg; contracts
   cover Unix generation).
+
+## Phase 4
+
+- Docs only; no source changed. `.github/ci/README.md` ("Consumers verify,
+  then run") and `docs/topics/ci-cd.md` (archive-consumer section, with a
+  Mermaid flow) state that the verified `ci-build` is the planner's key helper
+  (`key_helper` output, `gate` export of `BISCUIT_CI_BUILD_BIN`, `expected`
+  unbound, wrapper mode stripped, `requires-toolchain` keeps its Cargo calls,
+  cross-check binds it too). `.claude/skills/rust-devops/ci-cd.md` carries the
+  same guidance plus the BUILD_WIN Store-alias caution.
+- Drift pass: `planned_keys` docstring, `_ci_build_verify` output comment,
+  gate comment, and cross-check generators match behavior; no `docs/` page
+  names this fix.
+- `just ci-local --plan`: only `repo-deps` and `test-toolkit` cells (plus their
+  lint/check); no new scheduling rules. `just lint` has no recipe in
+  `tools/test-toolkit` or at the root; clippy ran clean in Phase 3 and no code
+  changed since.
+- Not run: nothing else; follow-up timing comparison is post-merge.
