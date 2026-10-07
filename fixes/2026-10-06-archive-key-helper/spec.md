@@ -12,7 +12,9 @@ reviewed_on: "2026-10-06"
 review_iterations: 0
 clarified: false
 implemented: false
-human_review: true
+human_review: false
+message_to_agent: |-
+  Phase 1 done: `key_helper` output exists in _ci_build_verify and planned_keys isolates wrapper mode. Gate/cross-check bindings can now be added safely.
 $schema:
   status: |-
     enum(
@@ -50,12 +52,13 @@ planner invocation starts a fresh helper build. Concurrent invocations in the
 same checkout can wait on that build; they do not necessarily compile separate
 copies.
 
-That compile accounts for most of the measured archive-mode duration of the
-two planner contract tests in
-`tools/test-toolkit/tests/ci_workflow_contracts.rs`. It is
-consistent with the reported 64–82 s on `ubuntu-latest` and the 90 s timeout
-on `windows-latest`; the measurements below reproduce the helper cost on
-developer build hosts, rather than measuring those hosted CI runs directly.
+On the build hosts, that compile accounts for most of the archive-mode
+duration of the two planner contract tests in
+`tools/test-toolkit/tests/ci_workflow_contracts.rs`. The hosted CI consumer
+takes the same code path (see Evidence). Build-host durations say nothing about
+hosted-runner durations, so this spec makes no claim about how much CI time
+the fix saves. That is judged only against earlier runs of the same CI
+environment.
 
 The consumer already holds `ci-build`: the producer-built verifier that
 travels in every build artifact as `<build>/tools/ci-build[.exe]`. This fix
@@ -121,8 +124,9 @@ The CI consumer is in the same position. `_package-ci.yml`'s archive tier
 "installs no toolchain … restores no Cargo cache" (`.github/ci/README.md`,
 "Consumers verify, then run"), and its verifier lives under
 `$RUNNER_TEMP/build/tools/`, not `target/`. A `requires-toolchain` suite gets
-a toolchain but no cache, so the CI compile is colder than the build hosts'
-and also downloads crates. This is read from the workflow, not measured in CI.
+a toolchain but no Cargo cache, so its first planner call reaches the same
+`cargo run` fallback. This is read from the workflow; it establishes the
+code path, not the cost.
 
 ## Design decisions and scope
 
@@ -397,8 +401,10 @@ build packages, contact build hosts, or trigger CI.
   canonical planner schedule affected packages and file-reader contracts;
   do not add scheduling rules to guarantee these checks. Observe the next
   normally scheduled `ubuntu-latest` and `windows-latest` results where the
-  planner tests still exist. These observations are follow-up evidence, not
-  a reason to trigger a full-workspace run or require `ci:all-os`.
+  planner tests still exist. Compare each environment's durations only with
+  that environment's own earlier runs, never with the build-host figures in
+  Evidence. These observations are follow-up evidence, not a reason to
+  trigger a full-workspace run or require `ci:all-os`.
 
 ## Risks
 
