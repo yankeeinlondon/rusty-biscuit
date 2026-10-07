@@ -19,7 +19,7 @@ use tree_hugger::cache::{
 };
 use tree_hugger::queries::QueryKind;
 use tree_hugger::{
-    Capability, EXTRACTOR_REVISION, NamePattern, ProgrammingLanguage, SourceFile, SymbolKindV2,
+    Capability, EXTRACTOR_REVISION, NamePattern, Occurrence, OccurrenceKind, ProgrammingLanguage, SourceFile, SymbolKindV2,
     SymbolQuery, SymbolQueryResult, TreeFile, WorkCounters, stable_symbol_key,
     symbol_id_from_stable_key, work_counters,
 };
@@ -1619,11 +1619,35 @@ fn entry_record_id(entry: &Value, name: &str) -> Value {
 }
 
 const NAME_MISMATCH: &str = "an occurrence whose target ID and candidates contradict its confidence";
+const REGION_MISMATCH: &str = "a callable whose coverage region does not match its body";
+const OWNER_MISMATCH: &str = "a region owner that does not name its record";
+
+/// A well-formed ID no declaration has.
+fn phantom_id() -> Value {
+    json!("0".repeat(64))
+}
+
+/// Adds, right after the region owned by `name`, a copy of it owned by a
+/// declaration no record is: order and spans stay valid.
+fn add_phantom_region_after(entry: &mut Value, name: &str) {
+    let regions = entry["reference_coverage"].as_array_mut().expect("coverage");
+    let at = regions.iter().position(|region| region["owner"]["name"] == name).expect("owned region");
+    let mut phantom = regions[at].clone();
+    phantom["owner"] = json!({ "id": phantom_id(), "name": "phantom", "qualified_name": "phantom" });
+    regions.insert(at + 1, phantom);
+}
+
+fn remove_region_of(entry: &mut Value, name: &str) {
+    let regions = entry["reference_coverage"].as_array_mut().expect("coverage");
+    let before = regions.len();
+    regions.retain(|region| region["owner"]["name"] != name);
+    assert_eq!(regions.len(), before - 1, "one region owned by `{name}`");
+}
 const MALFORMED_ID: &str = "an ID that is not a generated declaration ID";
 
 /// Writes `source` with `query`, then serves each edit of the written entry
-/// (restored before every edit) and checks the lookup it gets; a refused
-/// entry's result equals an uncached run.
+/// (restored before every edit) and checks the lookup it gets; a refused or
+/// unedited entry's result equals an uncached run.
 fn assert_evidence_edits(file: &str, source: &str, query: &SymbolQuery, edits: &[EvidenceEdit]) {
     let sources = TempDir::new().expect("sources");
     let path = sources.path().join(file);
@@ -1642,20 +1666,24 @@ fn assert_evidence_edits(file: &str, source: &str, query: &SymbolQuery, edits: &
         let (lookup, served, _) = cached(&cache, read(&path), query);
         let wanted = row.refused.map_or(CacheLookup::Hit, |what| CacheLookup::Miss(CacheMiss::Inconsistent(what)));
         assert_eq!(lookup, wanted, "{label}");
-        assert_eq!(served, expected, "{label}: result");
+        // A served edit is served as written.
+        if row.refused.is_some() || edited == written {
+            assert_eq!(served, expected, "{label}: result");
+        }
     }
 }
 
 /// The reader validates what an entry can prove and nothing more. A
 /// kind-narrowed entry keeps evidence naming declarations it omits, so an ID
-/// is checked against a record only when the record is retained, and is
-/// always checked for the generated form; a retained callable with a body
-/// always has its region. A language without binding rules resolves by name
-/// over every record, so its name-only evidence holds every retained record
-/// of the name, and in an every-kind entry nothing else.
+/// naming no retained record passes only when the entry omits a kind that
+/// record could have (an owner is a callable), and every ID is checked for
+/// the generated form; a retained callable has its region exactly when it
+/// has a body. A language without binding rules resolves by name over every
+/// record, so its name-only evidence holds every retained record of the
+/// name, and in an every-kind entry nothing else.
 #[test]
 fn stored_evidence_is_checked_against_what_the_entry_retains() {
-    const NARROW_TS: &str = "class C {}\nfunction f() { return new C(); }\nfunction g() {}\nf();\n";
+    const NARROW_TS: &str = "class C {}\nfunction f() { return new C(); }\nfunction g() {}\nf();\nnew C();\n";
     let narrow = SymbolQuery::new().kinds(FUNCTION_KINDS).capabilities([Capability::Occurrences]);
     assert_evidence_edits(
         "narrow.ts",
@@ -1698,10 +1726,150 @@ fn stored_evidence_is_checked_against_what_the_entry_retains() {
                         .expect("coverage")
                         .retain(|region| region["owner"]["name"] != "g");
                 },
-                refused: Some("a callable with a body and no coverage region"),
+                refused: Some(REGION_MISMATCH),
+            },
+            EvidenceEdit {
+                label: "control: an ownerless target naming no record, of a kind the entry omits",
+                edit: |entry| {
+                    let occurrence = entry["occurrences"]
+                        .as_array_mut()
+                        .expect("occurrences")
+                        .iter_mut()
+                        .rfind(|occurrence| occurrence["target"]["name"] == "C")
+                        .expect("ownerless `C`");
+                    assert!(occurrence["owner"].is_null(), "the last `C` is ownerless");
+                    occurrence["target"]["id"] = phantom_id();
+                },
+                refused: None,
+            },
+            EvidenceEdit {
+                label: "a region owner naming no record although no callable kind is omitted",
+                edit: |entry| add_phantom_region_after(entry, "g"),
+                refused: Some(OWNER_MISMATCH),
             },
         ],
     );
+
+    // Omitting a callable kind leaves a region owner of that kind unproved.
+    const METHODS_TS: &str = "class K { m() { return 1; } }\nfunction f() {}\n";
+    assert_evidence_edits(
+        "functions-only.ts",
+        METHODS_TS,
+        &SymbolQuery::new().kinds([SymbolKindV2::Function]).capabilities([Capability::Occurrences]),
+        &[
+            EvidenceEdit { label: "control: a region owned by an omitted method", edit: |_| {}, refused: None },
+            EvidenceEdit {
+                label: "control: a region owner naming no record, of a kind the entry omits",
+                edit: |entry| add_phantom_region_after(entry, "f"),
+                refused: None,
+            },
+        ],
+    );
+
+    // An every-kind entry omits nothing: every ID names a retained record.
+    const COMPLETE_TS: &str = "class K { m() { return 1; } }\n\
+        function h(o: K) { return o.m() + g(); }\n\
+        function g() { return 2; }\n\
+        function e() {}\n\
+        g();\n";
+    assert_evidence_edits(
+        "complete.ts",
+        COMPLETE_TS,
+        &SymbolQuery::complete_index(),
+        &[
+            EvidenceEdit { label: "control", edit: |_| {}, refused: None },
+            EvidenceEdit {
+                label: "an ownerless target naming no record",
+                edit: |entry| {
+                    let occurrence = entry["occurrences"]
+                        .as_array_mut()
+                        .expect("occurrences")
+                        .iter_mut()
+                        .find(|occurrence| occurrence["target"]["name"] == "g" && occurrence["owner"].is_null())
+                        .expect("ownerless `g`");
+                    occurrence["target"]["id"] = phantom_id();
+                },
+                refused: Some(NAME_MISMATCH),
+            },
+            EvidenceEdit {
+                label: "a candidate naming no record",
+                edit: |entry| first_occurrence_of(entry, "m")["candidates"][0]["id"] = phantom_id(),
+                refused: Some(NAME_MISMATCH),
+            },
+            EvidenceEdit {
+                label: "a region owner naming no record",
+                edit: |entry| add_phantom_region_after(entry, "e"),
+                refused: Some(OWNER_MISMATCH),
+            },
+            EvidenceEdit {
+                label: "a reference summary naming no record",
+                edit: |entry| {
+                    let record = entry["records"]
+                        .as_array_mut()
+                        .expect("records")
+                        .iter_mut()
+                        .find(|record| record["identity"]["name"] == "g")
+                        .expect("`g`");
+                    record["relations"]["referenced_by"][0]["id"] = phantom_id();
+                },
+                refused: Some("a reference summary that does not name its record"),
+            },
+            EvidenceEdit {
+                label: "an empty callable's region removed",
+                edit: |entry| remove_region_of(entry, "e"),
+                refused: Some(REGION_MISMATCH),
+            },
+        ],
+    );
+
+    // A region belongs to a callable with a body, and only to one.
+    assert_evidence_edits(
+        "bodiless.rs",
+        "trait T {\n    fn r();\n    fn p() {}\n}\n",
+        &SymbolQuery::complete_index(),
+        &[
+            EvidenceEdit { label: "control", edit: |_| {}, refused: None },
+            EvidenceEdit {
+                label: "a region owned by a callable with no body",
+                edit: |entry| {
+                    let id = entry_record_id(entry, "r");
+                    let regions = entry["reference_coverage"].as_array_mut().expect("coverage");
+                    let at = regions.iter().position(|region| region["owner"]["name"] == "p").expect("`p`");
+                    let mut region = regions[at].clone();
+                    region["owner"] = json!({ "id": id, "name": "r", "qualified_name": "T::r" });
+                    regions.insert(at + 1, region);
+                },
+                refused: Some(REGION_MISMATCH),
+            },
+        ],
+    );
+
+    // Python and Lua read a body as a run of children, and a Lua body can
+    // have no `block` at all; a callable with a body still has its region.
+    for (file, source) in [
+        ("empty.py", "def e():\n    pass\n\ndef f():\n    e()\n"),
+        ("empty.lua", "function e() end\n\nfunction f()\n  e()\nend\n"),
+        ("comment.lua", "function e()\n  -- nothing yet\nend\n\nfunction f()\n  e()\nend\n"),
+    ] {
+        assert_evidence_edits(
+            file,
+            source,
+            &SymbolQuery::complete_index(),
+            &[
+                EvidenceEdit { label: "control", edit: |_| {}, refused: None },
+                EvidenceEdit {
+                    label: "an empty callable's region removed",
+                    edit: |entry| remove_region_of(entry, "e"),
+                    refused: Some(REGION_MISMATCH),
+                },
+                EvidenceEdit {
+                    label: "a region owner naming no record",
+                    edit: |entry| add_phantom_region_after(entry, "e"),
+                    refused: Some(OWNER_MISMATCH),
+                },
+            ],
+        );
+    }
 
     const PYTHON: &str = "def f():\n    g()\n\ndef g():\n    pass\n\ndef g():\n    pass\n\nclass K:\n    pass\n\nK()\n";
     assert_evidence_edits(
@@ -1775,4 +1943,771 @@ fn stored_evidence_is_checked_against_what_the_entry_retains() {
             },
         ],
     );
+}
+
+const PATH_MISMATCH: &str = "an occurrence whose written path is not the source text ending at its name";
+const PATH_START: &str = "an occurrence whose written path disagrees with its stored start";
+const CANDIDATE_ORDER: &str = "candidates out of declaration order";
+const REPEATED_EDGE: &str = "a reference summary that repeats an edge";
+const EDGE_ORDER: &str = "a reference summary out of first-occurrence order";
+
+/// `u` calls the import `a` after a loop binding of the same name: its first
+/// no-ID `a` precedes `helper`, while the import edge follows it.
+const GEOMETRY_RS: &str = "struct S;\n\
+    impl S {\n    fn h() {}\n    fn f() { Self::h(); }\n}\n\
+    struct A;\nimpl A { fn m(&self) {} }\n\
+    struct B;\nimpl B { fn m(&self) {} }\n\
+    use other::a;\nuse other::b;\n\
+    fn helper() {}\n\
+    fn f2() {}\n\
+    fn g(x: A) { helper(); a(); b(); f2(); helper(); x.m(); }\n\
+    fn j() { f2(); }\n\
+    fn u() { for a in [1] { a; } helper(); a(); }\n\
+    fn empty() {}\n";
+
+fn entry_record<'a>(entry: &'a mut Value, name: &str) -> &'a mut Value {
+    entry["records"]
+        .as_array_mut()
+        .expect("records")
+        .iter_mut()
+        .find(|record| record["identity"]["name"] == name)
+        .unwrap_or_else(|| panic!("no `{name}` record"))
+}
+
+fn relation<'a>(entry: &'a mut Value, name: &str, list: &str) -> &'a mut Vec<Value> {
+    entry_record(entry, name)["relations"][list].as_array_mut().expect("summary list")
+}
+
+fn duplicate_first(list: &mut Vec<Value>) {
+    list.insert(1, list[0].clone());
+}
+
+/// Source-derived facts the reader can check without a parse: a retained
+/// callable's region holds its retained body, a written path is the source
+/// text ending at its name and agrees with its stored start (`null` together,
+/// so a path or start deleted alone is refused), candidates are in
+/// declaration order, and each summary lists every edge once in
+/// first-occurrence order. Narrowed controls: an omitted record's position is
+/// unknown, so only the retained candidates are compared, while an omitted
+/// member's written path is checked like any other; summaries are still
+/// ordered by their occurrences. Deleting a path and its start together is
+/// the documented coordinated-forgery limit.
+#[test]
+fn stored_evidence_geometry_paths_and_order_are_checked() {
+    assert_evidence_edits(
+        "geometry.rs",
+        GEOMETRY_RS,
+        &SymbolQuery::complete_index(),
+        &[
+            EvidenceEdit { label: "control (unqualified paths are null)", edit: |_| {}, refused: None },
+            EvidenceEdit {
+                label: "a callable's region shrunk to its name, outside its body",
+                edit: |entry| {
+                    let name_span = entry_record(entry, "empty")["source"]["name_span"].clone();
+                    let regions = entry["reference_coverage"].as_array_mut().expect("coverage");
+                    let region = regions.iter_mut().find(|region| region["owner"]["name"] == "empty").expect("`empty`");
+                    region["span"] = name_span;
+                },
+                refused: Some(REGION_MISMATCH),
+            },
+            EvidenceEdit {
+                label: "a written path the source does not write",
+                edit: |entry| first_occurrence_of(entry, "h")["target"]["qualified_name"] = json!("Other::h"),
+                refused: Some(PATH_MISMATCH),
+            },
+            EvidenceEdit {
+                label: "an empty written path on a qualified name",
+                edit: |entry| first_occurrence_of(entry, "h")["target"]["qualified_name"] = json!(""),
+                refused: Some(PATH_MISMATCH),
+            },
+            EvidenceEdit {
+                label: "an empty written path on an unqualified name",
+                edit: |entry| first_occurrence_of(entry, "helper")["target"]["qualified_name"] = json!(""),
+                refused: Some(PATH_MISMATCH),
+            },
+            EvidenceEdit {
+                label: "a written path that is only the name",
+                edit: |entry| first_occurrence_of(entry, "helper")["target"]["qualified_name"] = json!("helper"),
+                refused: Some(PATH_MISMATCH),
+            },
+            EvidenceEdit {
+                label: "a scoped member that lost its qualifier",
+                edit: |entry| first_occurrence_of(entry, "h")["target"]["qualified_name"] = Value::Null,
+                refused: Some(PATH_START),
+            },
+            EvidenceEdit {
+                label: "a member call that lost its receiver",
+                edit: |entry| first_occurrence_of(entry, "m")["target"]["qualified_name"] = Value::Null,
+                refused: Some(PATH_START),
+            },
+            EvidenceEdit {
+                label: "a written path whose stored start is null",
+                edit: |entry| first_occurrence_of(entry, "h")["path_start_byte"] = Value::Null,
+                refused: Some(PATH_START),
+            },
+            EvidenceEdit {
+                label: "a written path whose stored start is one byte off",
+                edit: |entry| {
+                    let occurrence = first_occurrence_of(entry, "h");
+                    let start = occurrence["path_start_byte"].as_u64().expect("a stored start");
+                    occurrence["path_start_byte"] = json!(start + 1);
+                },
+                refused: Some(PATH_START),
+            },
+            EvidenceEdit {
+                label: "a stored start on an unqualified name",
+                edit: |entry| {
+                    let occurrence = first_occurrence_of(entry, "helper");
+                    assert!(occurrence["path_start_byte"].is_null(), "an unqualified name has no stored start");
+                    occurrence["path_start_byte"] = occurrence["span"]["start_byte"].clone();
+                },
+                refused: Some(PATH_START),
+            },
+            EvidenceEdit {
+                label: "candidates reversed",
+                edit: |entry| first_occurrence_of(entry, "m")["candidates"].as_array_mut().expect("candidates").reverse(),
+                refused: Some(CANDIDATE_ORDER),
+            },
+            EvidenceEdit {
+                label: "a repeated candidate",
+                edit: |entry| duplicate_first(first_occurrence_of(entry, "m")["candidates"].as_array_mut().expect("candidates")),
+                refused: Some(NAME_MISMATCH),
+            },
+            EvidenceEdit {
+                label: "a repeated reference",
+                edit: |entry| duplicate_first(relation(entry, "g", "references")),
+                refused: Some(REPEATED_EDGE),
+            },
+            EvidenceEdit {
+                label: "references reversed",
+                edit: |entry| relation(entry, "g", "references").reverse(),
+                refused: Some(EDGE_ORDER),
+            },
+            EvidenceEdit {
+                label: "a repeated referenced-by owner",
+                edit: |entry| duplicate_first(relation(entry, "f2", "referenced_by")),
+                refused: Some(REPEATED_EDGE),
+            },
+            EvidenceEdit {
+                label: "referenced-by owners reversed",
+                edit: |entry| relation(entry, "f2", "referenced_by").reverse(),
+                refused: Some(EDGE_ORDER),
+            },
+            EvidenceEdit {
+                label: "a repeated dependency",
+                edit: |entry| duplicate_first(relation(entry, "g", "dependencies")),
+                refused: Some(REPEATED_EDGE),
+            },
+            EvidenceEdit {
+                label: "dependencies reversed",
+                edit: |entry| relation(entry, "g", "dependencies").reverse(),
+                refused: Some(EDGE_ORDER),
+            },
+            EvidenceEdit {
+                label: "an import edge moved before the binding-named occurrence's resolved edge",
+                edit: |entry| relation(entry, "u", "references").reverse(),
+                refused: Some(EDGE_ORDER),
+            },
+            EvidenceEdit {
+                label: "occurrences reversed",
+                edit: |entry| entry["occurrences"].as_array_mut().expect("occurrences").reverse(),
+                refused: Some("occurrences out of order or repeated"),
+            },
+            EvidenceEdit {
+                label: "a repeated occurrence",
+                edit: |entry| duplicate_first(entry["occurrences"].as_array_mut().expect("occurrences")),
+                refused: Some("occurrences out of order or repeated"),
+            },
+            EvidenceEdit {
+                label: "coverage regions swapped",
+                edit: |entry| entry["reference_coverage"].as_array_mut().expect("coverage").swap(1, 2),
+                refused: Some("coverage out of order"),
+            },
+        ],
+    );
+
+    // Methods omitted: their positions and scopes are unknown, while the
+    // occurrences still order every summary.
+    assert_evidence_edits(
+        "geometry-narrow.rs",
+        GEOMETRY_RS,
+        &SymbolQuery::new().kinds([SymbolKindV2::Function]).capabilities([Capability::Occurrences]),
+        &[
+            EvidenceEdit { label: "control", edit: |_| {}, refused: None },
+            EvidenceEdit {
+                label: "limit: candidates of omitted methods are not ordered",
+                edit: |entry| first_occurrence_of(entry, "m")["candidates"].as_array_mut().expect("candidates").reverse(),
+                refused: None,
+            },
+            EvidenceEdit {
+                label: "an omitted member's lost qualifier",
+                edit: |entry| first_occurrence_of(entry, "h")["target"]["qualified_name"] = Value::Null,
+                refused: Some(PATH_START),
+            },
+            EvidenceEdit {
+                label: "an omitted member's receiver lost",
+                edit: |entry| first_occurrence_of(entry, "m")["target"]["qualified_name"] = Value::Null,
+                refused: Some(PATH_START),
+            },
+            EvidenceEdit {
+                label: "an omitted member's stored start lost",
+                edit: |entry| first_occurrence_of(entry, "m")["path_start_byte"] = Value::Null,
+                refused: Some(PATH_START),
+            },
+            EvidenceEdit {
+                label: "limit: a path and its start deleted together",
+                edit: |entry| {
+                    let occurrence = first_occurrence_of(entry, "h");
+                    occurrence["target"]["qualified_name"] = Value::Null;
+                    occurrence["path_start_byte"] = Value::Null;
+                },
+                refused: None,
+            },
+            EvidenceEdit {
+                label: "an omitted method's written path is still source text",
+                edit: |entry| first_occurrence_of(entry, "h")["target"]["qualified_name"] = json!("Other::h"),
+                refused: Some(PATH_MISMATCH),
+            },
+            EvidenceEdit {
+                label: "references reversed",
+                edit: |entry| relation(entry, "g", "references").reverse(),
+                refused: Some(EDGE_ORDER),
+            },
+            EvidenceEdit {
+                label: "a repeated dependency",
+                edit: |entry| duplicate_first(relation(entry, "g", "dependencies")),
+                refused: Some(REPEATED_EDGE),
+            },
+        ],
+    );
+}
+
+/// An entry written before occurrences stored `path_start_byte` (extractor
+/// revision 42 and earlier, already refused by key) is malformed even under
+/// the current key: the key is required, never read as `null`.
+#[test]
+fn an_occurrence_without_a_stored_path_start_is_malformed() {
+    let sources = TempDir::new().expect("sources");
+    let path = sources.path().join("lost.rs");
+    std::fs::write(&path, LOST_PATH_RS).expect("write source");
+    let query = SymbolQuery::complete_index();
+    let dir = TempDir::new().expect("cache");
+    let cache = cache_in(&dir);
+    cached(&cache, read(&path), &query);
+    let entry = only_entry(&dir);
+    let mut edited = read_entry(&entry);
+    for occurrence in edited["occurrences"].as_array_mut().expect("occurrences") {
+        occurrence.as_object_mut().expect("occurrence").remove("path_start_byte").expect("a stored start");
+    }
+    write_entry(&entry, &edited);
+    let (lookup, served, _) = cached(&cache, read(&path), &query);
+    let CacheLookup::Miss(CacheMiss::Malformed(reason)) = lookup else {
+        panic!("expected a malformed entry, got {lookup:?}");
+    };
+    assert!(reason.contains("missing field `path_start_byte`"), "{reason}");
+    assert_eq!(served, uncached(&path, &query));
+}
+
+/// `g` calls the unresolved item path `other::external`; `S::m` is a member
+/// the narrowed query omits, reached through its receiver.
+const LOST_PATH_RS: &str = "fn g() { other::external(); }\nstruct S;\nimpl S { fn m(&self) {} }\nfn k(s: S) { s.m(); }\n";
+
+/// A written path deleted from a stored entry (`target.qualified_name` set to
+/// `null`, its stored start kept) is a miss whose recomputed result writes the
+/// path again, whether the entry and query are complete, narrowed to
+/// functions (the member's record omitted), or a complete entry projected to
+/// the narrowed query; the rewritten entry is then a hit with the path.
+#[test]
+fn a_deleted_written_path_is_recomputed_in_complete_narrowed_and_projected_results() {
+    let sources = TempDir::new().expect("sources");
+    let path = sources.path().join("lost.rs");
+    std::fs::write(&path, LOST_PATH_RS).expect("write source");
+    let complete = SymbolQuery::complete_index();
+    let narrow = SymbolQuery::new().kinds(FUNCTION_KINDS).capabilities([Capability::Occurrences]);
+    let paths = |result: &Value| -> Vec<Value> {
+        result["index"]["occurrences"]
+            .as_array()
+            .expect("occurrences")
+            .iter()
+            .filter(|occurrence| ["external", "m"].contains(&occurrence["target"]["name"].as_str().unwrap_or("")))
+            .map(|occurrence| occurrence["target"]["qualified_name"].clone())
+            .collect()
+    };
+    let drop_paths = |entry: &mut Value| {
+        for name in ["external", "m"] {
+            first_occurrence_of(entry, name)["target"]["qualified_name"] = Value::Null;
+        }
+    };
+    // (step, query that writes the entry, query that reads the edited entry)
+    for (step, writer, reader) in [("complete", &complete, &complete), ("narrowed", &narrow, &narrow), ("projected", &complete, &narrow)] {
+        let dir = TempDir::new().expect("cache");
+        let cache = cache_in(&dir);
+        cached(&cache, read(&path), writer);
+        let entry = only_entry(&dir);
+        let mut edited = read_entry(&entry);
+        drop_paths(&mut edited);
+        write_entry(&entry, &edited);
+        let expected = uncached(&path, reader);
+        assert_eq!(paths(&expected), [json!("other::external"), json!("s.m")], "{step}: uncached");
+        let (lookup, served, _) = cached(&cache, read(&path), reader);
+        assert_eq!(lookup, CacheLookup::Miss(CacheMiss::Inconsistent(PATH_START)), "{step}");
+        assert_eq!(served, expected, "{step}: recomputed");
+        let (lookup, served, work) = cached(&cache, read(&path), reader);
+        assert_eq!(lookup, CacheLookup::Hit, "{step}: rewritten");
+        assert_eq!(work, WorkCounters::default(), "{step}: rewritten");
+        assert_eq!(served, expected, "{step}: rewritten");
+    }
+}
+
+/// A call of a Rust value (`Self::C()` with `const C: fn()`) stored as
+/// occurrences keeps its `indirect_dispatch` limit when semantics are
+/// widened from the stored evidence without a parse, and on a warm hit:
+/// `f` stays `Unknown`, beside a proven self-call (`Yes`) and a call of
+/// another member function (`No`).
+#[test]
+fn stored_value_calls_widen_to_unknown_recursion() {
+    use tree_hugger::{Confidence, CoverageState, LimitReason, OccurrenceKind, TriState};
+
+    const SOURCE: &str = "struct S;\nimpl S {\n    const C: fn() = Self::f;\n    fn f() { Self::C(); }\n    fn h() {}\n    fn g() { Self::h(); }\n    fn r() { Self::r(); }\n}\n";
+    let sources = TempDir::new().expect("sources");
+    let path = sources.path().join("values.rs");
+    std::fs::write(&path, SOURCE).expect("write source");
+    let dir = TempDir::new().expect("temp");
+    let cache = cache_in(&dir);
+
+    let check = |result: &SymbolQueryResult, label: &str| {
+        let calls: Vec<(u32, &str, Confidence)> = result
+            .index
+            .occurrences
+            .iter()
+            .filter(|occurrence| occurrence.kind == OccurrenceKind::Call)
+            .map(|occurrence| (occurrence.span.start.line, occurrence.target.name.as_str(), occurrence.confidence))
+            .collect();
+        assert_eq!(
+            calls,
+            [(4, "C", Confidence::Scoped), (6, "h", Confidence::Scoped), (7, "r", Confidence::Scoped)],
+            "{label}: calls"
+        );
+        let region = result
+            .index
+            .reference_coverage
+            .iter()
+            .find(|coverage| coverage.owner.as_ref().is_some_and(|owner| owner.name == "f"))
+            .expect("`f` region");
+        assert_eq!(
+            (region.state, region.reasons.as_slice()),
+            (CoverageState::Limited, &[LimitReason::IndirectDispatch][..]),
+            "{label}: `f` coverage"
+        );
+    };
+    let recursion = |result: &SymbolQueryResult, name: &str| {
+        result
+            .index
+            .symbols
+            .iter()
+            .find(|record| record.identity.name == name)
+            .and_then(|record| record.semantics.is_recursive)
+    };
+    let verdicts = |result: &SymbolQueryResult, label: &str| {
+        assert_eq!(recursion(result, "f"), Some(TriState::Unknown), "{label}: `f`");
+        assert_eq!(recursion(result, "g"), Some(TriState::No), "{label}: `g`");
+        assert_eq!(recursion(result, "r"), Some(TriState::Yes), "{label}: `r`");
+    };
+
+    let narrow = SymbolQuery::new().kinds(FUNCTION_KINDS).capabilities([Capability::Occurrences]);
+    let outcome = cache.query(read(&path), &narrow).expect("narrow");
+    assert_eq!(outcome.lookup, CacheLookup::Miss(CacheMiss::Absent));
+    check(&outcome.result, "narrow");
+
+    let semantics = SymbolQuery::new().kinds(FUNCTION_KINDS).capabilities([Capability::Semantics]);
+    let outcome = cache.query(read(&path), &semantics).expect("widened");
+    assert_eq!(outcome.lookup, CacheLookup::WidenedCapabilities { parsed: false });
+    check(&outcome.result, "widened");
+    verdicts(&outcome.result, "widened");
+    assert_eq!(as_value(&outcome.result), uncached(&path, &semantics));
+
+    let (outcome, work) = counted(|| cache.query(read(&path), &semantics).expect("warm"));
+    assert_eq!(outcome.lookup, CacheLookup::Hit);
+    assert_eq!(work, WorkCounters::default());
+    check(&outcome.result, "warm");
+    verdicts(&outcome.result, "warm");
+}
+
+/// TypeScript instantiation-expression calls (`(f<number>)()`,
+/// `new (C<number>)()`, `(obj.m<number>)()`) survive a narrow entry, its
+/// widening and a warm hit as calls with the same recursion verdicts: each
+/// step is checked against the expected evidence, not only against an
+/// uncached run.
+#[test]
+fn instantiation_expression_calls_survive_narrow_widened_and_warm_entries() {
+    use tree_hugger::{Confidence, OccurrenceKind, TriState};
+
+    const SOURCE: &str = "function f<T>() { (f<number>)(); }\nclass W { m<T>() {} }\nclass C<T> {}\nfunction g(obj: W) {\n  ((f<number>))();\n  new (C<number>)();\n  (obj.m<number>)();\n  const x = f<number>;\n}\nfunction h() { (f<number>)(); new (C<number>)(); }\n";
+    let sources = TempDir::new().expect("sources");
+    let path = sources.path().join("instantiation.ts");
+    std::fs::write(&path, SOURCE).expect("write source");
+    let dir = TempDir::new().expect("temp");
+    let cache = cache_in(&dir);
+
+    let check = |result: &SymbolQueryResult, label: &str| {
+        let calls: Vec<(u32, &str, Confidence)> = result
+            .index
+            .occurrences
+            .iter()
+            .filter(|occurrence| occurrence.kind == OccurrenceKind::Call)
+            .map(|occurrence| (occurrence.span.start.line, occurrence.target.name.as_str(), occurrence.confidence))
+            .collect();
+        assert_eq!(
+            calls,
+            [
+                (1, "f", Confidence::Scoped),
+                (5, "f", Confidence::Scoped), (6, "C", Confidence::Scoped), (7, "m", Confidence::NameOnly),
+                (10, "f", Confidence::Scoped),
+                (10, "C", Confidence::Scoped),
+            ],
+            "{label}: calls"
+        );
+    };
+    let recursion = |result: &SymbolQueryResult, name: &str| {
+        result
+            .index
+            .symbols
+            .iter()
+            .find(|record| record.identity.name == name)
+            .and_then(|record| record.semantics.is_recursive)
+    };
+
+    let narrow = SymbolQuery::new()
+        .kinds([SymbolKindV2::Class])
+        .capabilities([Capability::Occurrences]);
+    let outcome = cache.query(read(&path), &narrow).expect("narrow");
+    assert_eq!(outcome.lookup, CacheLookup::Miss(CacheMiss::Absent));
+    check(&outcome.result, "narrow");
+
+    let functions = SymbolQuery::new().kinds(FUNCTION_KINDS).capabilities([Capability::Semantics]);
+    let outcome = cache.query(read(&path), &functions).expect("widened");
+    assert_eq!(outcome.lookup, CacheLookup::WidenedKinds);
+    check(&outcome.result, "widened");
+    assert_eq!(recursion(&outcome.result, "f"), Some(TriState::Yes), "widened");
+    assert_eq!(recursion(&outcome.result, "h"), Some(TriState::No), "widened");
+    assert_eq!(recursion(&outcome.result, "g"), Some(TriState::Unknown), "widened: the member call stays indirect");
+    assert_eq!(as_value(&outcome.result), uncached(&path, &functions));
+
+    let (outcome, work) = counted(|| cache.query(read(&path), &functions).expect("warm"));
+    assert_eq!(outcome.lookup, CacheLookup::Hit);
+    assert_eq!(work, WorkCounters::default());
+    check(&outcome.result, "warm");
+    assert_eq!(recursion(&outcome.result, "f"), Some(TriState::Yes), "warm");
+    assert_eq!(recursion(&outcome.result, "h"), Some(TriState::No), "warm");
+    assert_eq!(recursion(&outcome.result, "g"), Some(TriState::Unknown), "warm");
+}
+
+/// The `eval` call forms that bind nothing (optional, tagged, through
+/// another value) keep the nested self-call and the `Base` target
+/// established, and `f` `Yes`, through a narrow entry, its widening and a
+/// warm hit; a direct `eval` keeps them uncertain at every step. Each step
+/// is checked against the expected evidence, not only an uncached run.
+#[test]
+fn eval_call_modes_survive_narrow_widened_and_warm_entries() {
+    use tree_hugger::{Confidence, TriState};
+
+    use crate::symbols_occurrences::{EVAL_CALL_FORMS, EvalMode, eval_source};
+
+    for &(label, extensions, statement, mode) in EVAL_CALL_FORMS {
+        for &extension in extensions {
+            let label = format!("{extension} {label} eval");
+            let sources = TempDir::new().expect("sources");
+            let path = sources.path().join(format!("eval.{extension}"));
+            std::fs::write(&path, eval_source(statement)).expect("write source");
+            let dir = TempDir::new().expect("temp");
+            let cache = cache_in(&dir);
+            let expected_recursion = if mode == EvalMode::Direct { TriState::Unknown } else { TriState::Yes };
+
+            let check = |result: &SymbolQueryResult, step: &str| {
+                let f_id = result
+                    .index
+                    .occurrences
+                    .iter()
+                    .find_map(|occurrence| {
+                        occurrence
+                            .owner
+                            .as_ref()
+                            .filter(|owner| owner.name == "f")
+                            .and_then(|owner| owner.id.clone())
+                    })
+                    .expect("an occurrence owned by `f`");
+                let at = |line: u32, name: &str| {
+                    result
+                        .index
+                        .occurrences
+                        .iter()
+                        .find(|occurrence| occurrence.span.start.line == line && occurrence.target.name == name)
+                        .unwrap_or_else(|| panic!("{label} {step}: no `{name}` on line {line}"))
+                };
+                let (call, base) = (at(6, "f"), at(5, "Base"));
+                if mode == EvalMode::Direct {
+                    assert_eq!((call.confidence == Confidence::Scoped, call.target.id.as_ref()), (false, None), "{label} {step}");
+                    assert_eq!((base.confidence == Confidence::Scoped, base.target.id.as_ref()), (false, None), "{label} {step}");
+                } else {
+                    assert_eq!((call.confidence, call.target.id.as_ref()), (Confidence::Scoped, Some(&f_id)), "{label} {step}");
+                    assert_eq!(base.confidence, Confidence::Scoped, "{label} {step}");
+                    assert!(base.target.id.is_some(), "{label} {step}");
+                }
+                let region = result
+                    .index
+                    .reference_coverage
+                    .iter()
+                    .find(|coverage| coverage.owner.as_ref().and_then(|owner| owner.id.as_ref()) == Some(&f_id))
+                    .expect("`f` region");
+                assert_eq!(region.reasons.as_slice(), mode.reasons(), "{label} {step}");
+            };
+            let recursion = |result: &SymbolQueryResult| {
+                result
+                    .index
+                    .symbols
+                    .iter()
+                    .find(|record| record.identity.name == "f")
+                    .and_then(|record| record.semantics.is_recursive)
+            };
+
+            let narrow = SymbolQuery::new().kinds([SymbolKindV2::Class]).capabilities([Capability::Occurrences]);
+            let outcome = cache.query(read(&path), &narrow).expect("narrow");
+            assert_eq!(outcome.lookup, CacheLookup::Miss(CacheMiss::Absent), "{label}");
+            check(&outcome.result, "narrow");
+
+            let functions = SymbolQuery::new().kinds(FUNCTION_KINDS).capabilities([Capability::Semantics]);
+            let outcome = cache.query(read(&path), &functions).expect("widened");
+            assert_eq!(outcome.lookup, CacheLookup::WidenedKinds, "{label}");
+            check(&outcome.result, "widened");
+            assert_eq!(recursion(&outcome.result), Some(expected_recursion), "{label} widened");
+            assert_eq!(as_value(&outcome.result), uncached(&path, &functions), "{label}");
+
+            let (outcome, work) = counted(|| cache.query(read(&path), &functions).expect("warm"));
+            assert_eq!(outcome.lookup, CacheLookup::Hit, "{label}");
+            assert_eq!(work, WorkCounters::default(), "{label}");
+            check(&outcome.result, "warm");
+            assert_eq!(recursion(&outcome.result), Some(expected_recursion), "{label} warm");
+        }
+    }
+}
+
+/// One file per path-shape family (`R4-F1`): the rooted Rust self-call and
+/// shadowing local, C++ roots/right-nested/generic paths, C# alias and
+/// conditional paths, PHP nullsafe and namespace paths, and Perl package
+/// and receiver paths, with `(line, name, nth, written path)` known from
+/// the source.
+/// `(line, name, nth on that line, written path)`.
+type ExpectedPath = (u32, &'static str, usize, &'static str);
+
+const WRITTEN_PATH_SOURCES: &[(&str, &str, &[ExpectedPath])] = &[
+    (
+        "rooted.rs",
+        "fn f() {\n    ::f();\n}\nfn g() {\n    let f = || {};\n    ::f();\n    ::m::f();\n}\n",
+        &[(2, "f", 0, "::f"), (6, "f", 0, "::f"), (7, "m", 0, "::m"), (7, "f", 0, "::m::f")],
+    ),
+    (
+        "paths.cpp",
+        "class W {};\nvoid g() {\n    ::f();\n    A::B::f();\n    r4::f<int>();\n    obj.template m<int>();\n    N::C<int>::member();\n}\n",
+        &[
+            (3, "f", 0, "::f"),
+            (4, "B", 0, "A::B"),
+            (4, "f", 0, "A::B::f"),
+            (5, "f", 0, "r4::f"),
+            (6, "m", 0, "obj.template m"),
+            (7, "C", 0, "N::C"),
+            (7, "member", 0, "N::C<int>::member"),
+        ],
+    ),
+    (
+        "paths.cs",
+        "class G { void g(W obj) {\n    obj?.A?.Invoke();\n    global::N.C h;\n    obj.M<int>();\n} }\n",
+        &[(2, "A", 0, "obj?.A"), (2, "Invoke", 0, "obj?.A?.Invoke"), (3, "N", 0, "global::N"), (3, "C", 0, "global::N.C"), (4, "M", 0, "obj.M")],
+    ),
+    (
+        "paths.php",
+        "<?php\nclass W {}\nfunction g($o) {\n    $o?->m();\n    \\A\\B\\f();\n}\n",
+        &[(4, "m", 0, "$o?->m"), (5, "B", 0, "\\A\\B"), (5, "f", 0, "\\A\\B\\f")],
+    ),
+    (
+        "paths.pl",
+        "package W;\nsub g {\n    R4::r4f();\n    R4->r4f();\n    $obj->r4f();\n}\n",
+        &[(3, "r4f", 0, "R4::r4f"), (4, "r4f", 0, "R4->r4f"), (5, "r4f", 0, "$obj->r4f")],
+    ),
+];
+
+/// Written paths survive a narrow (types-only) entry, its widening to the
+/// callables, a warm `Hit` and a name-filtered warm `Hit`, each checked
+/// against the paths the source writes; the rooted Rust self-call stays
+/// `Unknown` (never `No`) at every step and the shadowing local is never
+/// its target.
+#[test]
+fn written_paths_survive_narrow_widened_and_warm_entries() {
+    use tree_hugger::{Confidence, TriState};
+
+    let sources = TempDir::new().expect("sources");
+    for &(name, source, expected) in WRITTEN_PATH_SOURCES {
+        let path = sources.path().join(name);
+        std::fs::write(&path, source).expect("write source");
+        let dir = TempDir::new().expect("temp");
+        let cache = cache_in(&dir);
+
+        let check = |result: &SymbolQueryResult, step: &str| {
+            for &(line, written, nth, expected_path) in expected {
+                let occurrence = result
+                    .index
+                    .occurrences
+                    .iter()
+                    .filter(|occurrence| occurrence.span.start.line == line && occurrence.target.name == written)
+                    .nth(nth)
+                    .unwrap_or_else(|| panic!("{name} {step}: no `{written}` on line {line}"));
+                assert_eq!(
+                    occurrence.target.qualified_name.as_deref(),
+                    Some(expected_path),
+                    "{name} {step}: `{written}` on line {line}"
+                );
+            }
+            if name.ends_with(".rs") {
+                let local = result
+                    .index
+                    .symbols
+                    .iter()
+                    .find(|record| record.identity.name == "f" && record.kind == SymbolKindV2::Variable)
+                    .map(|record| record.id.clone());
+                for occurrence in result.index.occurrences.iter().filter(|occurrence| occurrence.target.qualified_name.is_some()) {
+                    assert_ne!(occurrence.confidence, Confidence::Scoped, "{name} {step}: {occurrence:#?}");
+                    assert!(local.is_none() || occurrence.candidates.iter().all(|candidate| candidate.id != local));
+                }
+            }
+        };
+        let recursion = |result: &SymbolQueryResult, step: &str| {
+            if !name.ends_with(".rs") {
+                return;
+            }
+            let verdict = |callable: &str| {
+                result
+                    .index
+                    .symbols
+                    .iter()
+                    .find(|record| record.identity.name == callable && record.kind == SymbolKindV2::Function)
+                    .and_then(|record| record.semantics.is_recursive)
+            };
+            assert_eq!(verdict("f"), Some(TriState::Unknown), "{name} {step}: the rooted self-call");
+            assert_eq!(verdict("g"), Some(TriState::No), "{name} {step}: `::f` is not `g`");
+        };
+
+        let narrow = SymbolQuery::new().kinds(TYPE_KINDS).capabilities([Capability::Occurrences]);
+        let outcome = cache.query(read(&path), &narrow).expect("narrow");
+        assert_eq!(outcome.lookup, CacheLookup::Miss(CacheMiss::Absent), "{name}");
+        check(&outcome.result, "narrow");
+
+        let functions = SymbolQuery::new().kinds(FUNCTION_KINDS).capabilities([Capability::Semantics]);
+        let outcome = cache.query(read(&path), &functions).expect("widened");
+        assert_eq!(outcome.lookup, CacheLookup::WidenedKinds, "{name}");
+        check(&outcome.result, "widened");
+        recursion(&outcome.result, "widened");
+        assert_eq!(as_value(&outcome.result), uncached(&path, &functions), "{name}");
+
+        let (outcome, work) = counted(|| cache.query(read(&path), &functions).expect("warm"));
+        assert_eq!(outcome.lookup, CacheLookup::Hit, "{name}");
+        assert_eq!(work, WorkCounters::default(), "{name}");
+        check(&outcome.result, "warm");
+        recursion(&outcome.result, "warm");
+
+        let named = functions.clone().name(NamePattern::new("g"));
+        let outcome = cache.query(read(&path), &named).expect("named warm");
+        assert_eq!(outcome.lookup, CacheLookup::Hit, "{name}");
+        check(&outcome.result, "named warm");
+    }
+}
+
+type KindRow = (&'static str, &'static str, &'static [(u32, &'static str, OccurrenceKind)]);
+
+/// `(file name, source, [(line, name, kind)])`: invocation repairs of
+/// review 4 (R4-F2) whose kind the cache must store and serve as computed.
+const INVOCATION_KIND_SOURCES: &[KindRow] = &[
+    (
+        "rooted.rs",
+        "fn f() {\n    ::f();\n    ((::f))();\n}\n",
+        &[(2, "f", OccurrenceKind::Call), (3, "f", OccurrenceKind::Call)],
+    ),
+    (
+        "rooted.cpp",
+        "void f() {\n    ::f();\n    ((::f))();\n}\n",
+        &[(2, "f", OccurrenceKind::Call), (3, "f", OccurrenceKind::Call)],
+    ),
+    (
+        "conditional.cs",
+        "class W {\n    void F(W obj) {\n        obj?.F();\n        obj?.A?.Invoke();\n    }\n}\n",
+        &[
+            (3, "obj", OccurrenceKind::Usage),
+            (3, "F", OccurrenceKind::Call),
+            (4, "A", OccurrenceKind::Usage),
+            (4, "Invoke", OccurrenceKind::Call),
+        ],
+    ),
+    (
+        "callables.php",
+        "<?php\nfunction f() {}\nfunction g($cb, $o) {\n    f(...);\n    $o->m(...);\n    $cb();\n    ($cb)();\n    f(...$cb);\n}\n",
+        &[
+            (4, "f", OccurrenceKind::Usage),
+            (5, "m", OccurrenceKind::Usage),
+            (6, "cb", OccurrenceKind::Call),
+            (7, "cb", OccurrenceKind::Call),
+            (8, "f", OccurrenceKind::Call),
+        ],
+    ),
+    (
+        "coderef.pl",
+        "sub g {\n    $cb->();\n    &$cb();\n    $cb->m();\n}\n",
+        &[
+            (2, "$cb", OccurrenceKind::Call),
+            (3, "$cb", OccurrenceKind::Call),
+            (4, "$cb", OccurrenceKind::Usage),
+            (4, "m", OccurrenceKind::Call),
+        ],
+    ),
+];
+
+/// Asserts each expected kind in a served result's occurrences.
+fn assert_invocation_kinds(served: &Value, expected: &[(u32, &str, OccurrenceKind)], cell: &str) {
+    let occurrences: Vec<Occurrence> =
+        serde_json::from_value(served["index"]["occurrences"].clone()).expect("occurrences");
+    for &(line, name, kind) in expected {
+        let found = occurrences
+            .iter()
+            .find(|occurrence| occurrence.span.start.line == line && occurrence.target.name == name)
+            .unwrap_or_else(|| panic!("{cell}: no `{name}` on line {line}: {occurrences:#?}"));
+        assert_eq!(found.kind, kind, "{cell}: `{name}` on line {line}");
+    }
+}
+
+/// R4-F2.C4: rooted, conditional, PHP variable/callable-creation and Perl
+/// code-reference kinds are served as computed by a narrow entry, its warm
+/// `Hit`, the entry widened by kinds, the widened entry's warm `Hit` and a
+/// narrower query projected from it; each equals an uncached run.
+#[test]
+fn invocation_kinds_hold_through_narrow_widened_projected_and_warm_results() {
+    let narrow = SymbolQuery::new().kinds(FUNCTION_KINDS).capabilities([Capability::Occurrences]);
+    let complete = SymbolQuery::complete_index();
+    let projected = SymbolQuery::new().kinds(TYPE_KINDS).capabilities([Capability::Occurrences]);
+    for &(name, source, expected) in INVOCATION_KIND_SOURCES {
+        let dir = TempDir::new().expect("temp");
+        let path = dir.path().join(name);
+        std::fs::write(&path, source).expect("write source");
+        let cache = cache_in(&dir);
+        let steps: [(&str, &SymbolQuery, CacheLookup); 5] = [
+            ("narrow cold", &narrow, CacheLookup::Miss(CacheMiss::Absent)),
+            ("narrow warm", &narrow, CacheLookup::Hit),
+            ("widened", &complete, CacheLookup::WidenedKinds),
+            ("complete warm", &complete, CacheLookup::Hit),
+            ("projected", &projected, CacheLookup::Hit),
+        ];
+        for (step, query, expected_lookup) in steps {
+            let cell = format!("{name}: {step}");
+            let (lookup, served, _) = cached(&cache, read(&path), query);
+            assert_eq!(lookup, expected_lookup, "{cell}");
+            assert_eq!(served, uncached(&path, query), "{cell}: equals an uncached run");
+            assert_invocation_kinds(&served, expected, &cell);
+        }
+    }
 }

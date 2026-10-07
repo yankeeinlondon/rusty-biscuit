@@ -159,6 +159,33 @@ impl TreeFile {
         Ok((definitions, scopes))
     }
 
+    /// Drops the captures that declare nothing, decided exactly as
+    /// reference occurrences decide them (`analysis::occurrences`): the path
+    /// of a Rust tuple-struct or struct pattern (`Some` in `Some(x)`), a
+    /// TypeScript/JavaScript parameter default (`a` in `b = a`), and a Rust
+    /// pattern name that reads a constant, unit struct or `const` parameter,
+    /// or whose identity is unknown in a refutable pattern (an import or
+    /// glob may supply a constant: no declaration is proved, so none is
+    /// reported). The Rust walk runs only when a variable or parameter was
+    /// captured.
+    fn drop_non_declarations<'tree>(
+        &'tree self,
+        groups: &mut Vec<((usize, usize, String), CaptureGroup<'tree>)>,
+        local_scopes: &[Node<'tree>],
+    ) {
+        use crate::analysis::occurrences::{is_false_capture, rust_pattern_non_bindings};
+        let Some(rules) = crate::analysis::scope::LanguageRules::for_language(self.language) else { return };
+        groups.retain(|(_, group)| !is_false_capture(rules, group.winner.name));
+        let pattern_capture = |group: &CaptureGroup<'_>| matches!(group.winner.kind, SymbolKind::Variable | SymbolKind::Parameter);
+        if self.language != ProgrammingLanguage::Rust || !groups.iter().any(|(_, group)| pattern_capture(group)) {
+            return;
+        }
+        let non_bindings = rust_pattern_non_bindings(self.tree.root_node(), &self.source, local_scopes);
+        if !non_bindings.is_empty() {
+            groups.retain(|((start, end, _), _)| !non_bindings.contains(&(*start, *end)));
+        }
+    }
+
     fn capture_definitions<'tree>(
         &'tree self,
         selection: &MetadataSelection,
@@ -170,6 +197,8 @@ impl TreeFile {
         let root = self.tree.root_node();
         let capture_names = query.capture_names();
         let mut groups: HashMap<(usize, usize, String), CaptureGroup<'_>> = HashMap::new();
+        // Rust pattern names are decided by lookup through these scopes.
+        let mut local_scopes: Vec<Node<'tree>> = Vec::new();
         let is_ecma_module = matches!(
             self.language,
             ProgrammingLanguage::JavaScript | ProgrammingLanguage::TypeScript
@@ -201,6 +230,9 @@ impl TreeFile {
                 if capture_name == "local.scope" {
                     if let Some(scopes) = scopes.as_deref_mut() {
                         scopes.push(capture.node);
+                    }
+                    if self.language == ProgrammingLanguage::Rust {
+                        local_scopes.push(capture.node);
                     }
                     continue;
                 }
@@ -267,6 +299,7 @@ impl TreeFile {
         let mut groups: Vec<((usize, usize, String), CaptureGroup<'_>)> =
             groups.into_iter().collect();
         groups.sort_by_key(|((start, end, _), _)| (*start, *end));
+        self.drop_non_declarations(&mut groups, &local_scopes);
 
         let facts = FileFacts {
             root,

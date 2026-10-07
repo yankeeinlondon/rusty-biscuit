@@ -218,6 +218,10 @@ impl<'a> Lexical<'a> {
                 shared.clear();
                 rules.binding_sites(node, &mut shared);
                 dynamics.extend(rules.dynamic(node, source));
+                // A bare Rust pattern name (`BindingSite::bare_pattern`) is
+                // placed as a binding without deciding whether it reads a
+                // constant: it is a value, and no Rust relation lookup reads
+                // the value group.
                 sites.extend(shared.drain(..).filter(|site| !site.is_import).map(|mut site| {
                     // A type parameter never resolves, in a type or a value
                     // position alike.
@@ -513,7 +517,7 @@ impl<'a> Lexical<'a> {
         found.iter().all(|&binding| match self.tree.binding(binding).target {
             BindingTarget::Record(record) => record == idx,
             BindingTarget::Import => !imports,
-            BindingTarget::Unreported => false,
+            BindingTarget::Unreported | BindingTarget::Unknown => false,
         })
     }
 
@@ -991,9 +995,8 @@ fn python_captures<'a>(pattern: Node<'a>, source: &str, bind: &mut impl FnMut(No
 }
 
 /// Scala binding sites no record reports: the names a pattern `val`/`var`,
-/// a `for` generator or a `case` binds (lowercase identifiers: an uppercase
-/// one is a stable identifier pattern), and a polymorphic lambda's type
-/// parameters.
+/// a `for` generator or a `case` binds ([`scala_pattern_names`]), and a
+/// polymorphic lambda's type parameters.
 fn scala_sites<'a>(node: Node<'a>, source: &str, sites: &mut Vec<Site<'a>>) {
     let mut bind = |name: Node<'a>, categories: u8| {
         sites.push(Site { site: BindingSite { name, rule: rule(categories, 0), is_import: false, bare_pattern: None }, scope_hint: None, directive: None });
@@ -1032,18 +1035,24 @@ fn scala_sites<'a>(node: Node<'a>, source: &str, sites: &mut Vec<Site<'a>>) {
     }
 }
 
-/// The variable names a Scala pattern binds.
+/// The variable names a Scala pattern binds. Scala decides by the lexical
+/// form, not by lookup: a simple identifier pattern is a variable when it
+/// is a `varid` (first character a lower-case letter or `_`; a backquoted
+/// or upper-case one is a stable identifier pattern, a reference). A
+/// binder's name (`x @ p`) binds whatever its spelling: Scala 2.13's
+/// grammar writes it `varid`, scalac binds any identifier, and binding it
+/// can only leave a base unresolved, never resolve it wrongly.
 fn scala_pattern_names<'a>(pattern: Option<Node<'a>>, source: &str, bind: &mut impl FnMut(Node<'a>)) {
     let Some(pattern) = pattern else { return };
     let mut stack = vec![pattern];
     while let Some(node) = stack.pop() {
         match node.kind() {
             "identifier" => {
-                let lowercase = source
+                let is_varid = source
                     .get(node.start_byte()..node.end_byte())
                     .and_then(|text| text.chars().next())
-                    .is_some_and(|first| first.is_lowercase());
-                if lowercase {
+                    .is_some_and(|first| first == '_' || first.is_lowercase());
+                if is_varid {
                     bind(node);
                 }
             }
@@ -1052,7 +1061,9 @@ fn scala_pattern_names<'a>(pattern: Option<Node<'a>>, source: &str, bind: &mut i
                 let mut cursor = node.walk();
                 for (index, child) in node.children(&mut cursor).enumerate() {
                     let field = node.field_name_for_child(index as u32);
-                    if child.is_named() && !matches!(field, Some("type" | "operator")) {
+                    if node.kind() == "capture_pattern" && field == Some("name") && child.kind() == "identifier" {
+                        bind(child);
+                    } else if child.is_named() && !matches!(field, Some("type" | "operator")) {
                         stack.push(child);
                     }
                 }

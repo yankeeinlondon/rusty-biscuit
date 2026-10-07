@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use tree_sitter::Language;
 
 use super::stored_evidence::{
-    StoredEvidence, nullable, read_coverage, read_occurrences, validate_evidence, write_coverage, write_occurrences,
+    ReadOccurrences, StoredEvidence, nullable, read_coverage, read_occurrences, validate_evidence, write_coverage, write_occurrences,
 };
 use super::{CacheError, PassFingerprint, PersistentCache, canonical_digest};
 use crate::analysis::coverage::{add_record_passes, project, record_passes_suffice};
@@ -563,7 +563,7 @@ struct StoredEntry {
     /// `stored_evidence` reads; non-empty only under the occurrences
     /// capability.
     #[serde(deserialize_with = "read_occurrences")]
-    occurrences: Vec<Occurrence>,
+    occurrences: ReadOccurrences,
     #[serde(deserialize_with = "read_coverage")]
     reference_coverage: Vec<ReferenceCoverage>,
 }
@@ -631,8 +631,9 @@ impl StoredEntry {
             source: source.source(),
             language: self.language,
             capabilities,
-            all_kinds: self.covered_kinds.0.is_none(),
-            occurrences: &self.occurrences,
+            covered_kinds: self.covered_kinds.0.as_ref(),
+            occurrences: &self.occurrences.occurrences,
+            path_starts: &self.occurrences.path_starts,
             coverage: &self.reference_coverage,
             records: &self.records,
             imports: &self.imports,
@@ -663,7 +664,7 @@ impl StoredEntry {
             imports: self.imports,
             exports: self.exports,
             diagnostics: self.diagnostics,
-            occurrences: self.occurrences,
+            occurrences: self.occurrences.occurrences,
             reference_coverage: self.reference_coverage,
         };
         (coverage, self.diagnostics_fingerprint, index)

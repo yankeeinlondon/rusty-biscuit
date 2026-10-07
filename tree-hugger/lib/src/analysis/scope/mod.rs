@@ -31,6 +31,8 @@ use crate::shared::ProgrammingLanguage;
 mod ecma;
 mod rust;
 
+pub(crate) use ecma::is_direct_eval;
+
 /// A type name: Rust `struct`/`enum`/`trait`/`mod`, TypeScript
 /// `interface`/`type`, generic type parameters.
 pub(crate) const TYPE: u8 = 1;
@@ -194,11 +196,20 @@ impl LanguageRules {
         self == Self::Rust && node.kind() == "use_wildcard"
     }
 
+    /// The language these rules read.
+    pub(crate) fn language(self) -> ProgrammingLanguage {
+        match self {
+            Self::Rust => ProgrammingLanguage::Rust,
+            Self::Ecma { typed: true } => ProgrammingLanguage::TypeScript,
+            Self::Ecma { typed: false } => ProgrammingLanguage::JavaScript,
+        }
+    }
+
     /// The dynamic name source `node` introduces, if any.
     pub(crate) fn dynamic<'tree>(self, node: Node<'tree>, source: &str) -> Option<Dynamic<'tree>> {
         match self {
             Self::Rust => None,
-            Self::Ecma { .. } => ecma::dynamic(node, source),
+            Self::Ecma { .. } => ecma::dynamic(node, self.language(), source),
         }
     }
 

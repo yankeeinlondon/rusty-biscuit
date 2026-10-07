@@ -2014,6 +2014,49 @@ pub const PATH_MEANING_MATRIX: &[PathMeaningRow] = &[
         &[bases("w.ReviewChild", &[text("ReviewBase")]),
           bases("e.ReviewChild", &[text("ReviewBase")]),
           bases("n.ReviewChild", &[to("ReviewBase", "ReviewBase")])]),
+    // Only a direct `eval` may bind the base: an optional call is an
+    // indirect eval, a tagged template evaluates nothing, and `eval`
+    // through another value is indirect.
+    row("JavaScript optional, tagged and indirect `eval` keep the base", L::JavaScript, "js",
+        "class ReviewBase {}\n\
+         function o() { eval?.(\"1\"); class ReviewChild extends ReviewBase {} }\n\
+         function p() { (eval)?.(\"1\"); class ReviewChild extends ReviewBase {} }\n\
+         function t() { eval`1`; class ReviewChild extends ReviewBase {} }\n\
+         function u() { (eval)`1`; class ReviewChild extends ReviewBase {} }\n\
+         function s() { (0, eval)(\"1\"); class ReviewChild extends ReviewBase {} }\n\
+         function m() { globalThis.eval(\"1\"); class ReviewChild extends ReviewBase {} }\n\
+         function a() { const e = eval; e(\"1\"); class ReviewChild extends ReviewBase {} }\n\
+         function d() { ((eval))(\"1\"); class ReviewChild extends ReviewBase {} }\n\
+         function outer() { function f() { eval?.(\"var f = 1\"); class D extends ReviewBase {} f(); } }\n",
+        &[bases("o.ReviewChild", &[to("ReviewBase", "ReviewBase")]),
+          bases("p.ReviewChild", &[to("ReviewBase", "ReviewBase")]),
+          bases("t.ReviewChild", &[to("ReviewBase", "ReviewBase")]),
+          bases("u.ReviewChild", &[to("ReviewBase", "ReviewBase")]),
+          bases("s.ReviewChild", &[to("ReviewBase", "ReviewBase")]),
+          bases("m.ReviewChild", &[to("ReviewBase", "ReviewBase")]),
+          bases("a.ReviewChild", &[to("ReviewBase", "ReviewBase")]),
+          bases("d.ReviewChild", &[text("ReviewBase")]),
+          bases("outer.f.D", &[to("ReviewBase", "ReviewBase")])]),
+    row("TypeScript optional, tagged and indirect `eval` keep the base", L::TypeScript, "ts",
+        "class ReviewBase {}\n\
+         function o() { eval?.(\"1\"); class ReviewChild extends ReviewBase {} }\n\
+         function p() { (eval as any)?.(\"1\"); class ReviewChild extends ReviewBase {} }\n\
+         function t() { eval`1`; class ReviewChild extends ReviewBase {} }\n\
+         function u() { (eval!)`1`; class ReviewChild extends ReviewBase {} }\n\
+         function s() { (0, eval)(\"1\"); class ReviewChild extends ReviewBase {} }\n\
+         function m() { globalThis.eval(\"1\"); class ReviewChild extends ReviewBase {} }\n\
+         function a() { const e = eval; e(\"1\"); class ReviewChild extends ReviewBase {} }\n\
+         function d() { (eval as any)(\"1\"); class ReviewChild extends ReviewBase {} }\n\
+         function outer() { function f() { eval`var f = 1`; class D extends ReviewBase {} f(); } }\n",
+        &[bases("o.ReviewChild", &[to("ReviewBase", "ReviewBase")]),
+          bases("p.ReviewChild", &[to("ReviewBase", "ReviewBase")]),
+          bases("t.ReviewChild", &[to("ReviewBase", "ReviewBase")]),
+          bases("u.ReviewChild", &[to("ReviewBase", "ReviewBase")]),
+          bases("s.ReviewChild", &[to("ReviewBase", "ReviewBase")]),
+          bases("m.ReviewChild", &[to("ReviewBase", "ReviewBase")]),
+          bases("a.ReviewChild", &[to("ReviewBase", "ReviewBase")]),
+          bases("d.ReviewChild", &[text("ReviewBase")]),
+          bases("outer.f.D", &[to("ReviewBase", "ReviewBase")])]),
     row("JavaScript named function and generator expressions bind their own name", L::JavaScript, "js",
         "class ReviewBase {}\n\
          const g = function ReviewBase() { class ReviewFunction extends ReviewBase {} };\n\
@@ -2224,6 +2267,14 @@ pub const PATH_MEANING_MATRIX: &[PathMeaningRow] = &[
           unclassified("Holder.simple.ReviewChild", &[text("reviewNs.ReviewBase")]),
           unclassified("Holder.forTuple.ReviewChild", &[text("reviewNs.ReviewBase")]),
           bases("Holder.plain.ReviewChild", &[to("reviewNs.ReviewBase", "reviewNs.ReviewBase")])]),
+    row("Scala pattern variables by lexical form, binders by position", L::Scala, "scala",
+        "object _reviewNs { class ReviewBase }\nobject ReviewNs { class ReviewBase }\nobject Holder {\n\
+         \x20 def underscore(x: Int): Unit = x match {\n    case _reviewNs => { class ReviewChild extends _reviewNs.ReviewBase }\n  }\n\
+         \x20 def binder(x: Option[Int]): Unit = x match {\n    case ReviewNs @ Some(_) => { class ReviewChild extends ReviewNs.ReviewBase }\n  }\n\
+         \x20 def stable(x: Any): Unit = x match {\n    case ReviewNs => { class ReviewChild extends ReviewNs.ReviewBase }\n  }\n}\n",
+        &[unclassified("Holder.underscore.ReviewChild", &[text("_reviewNs.ReviewBase")]),
+          unclassified("Holder.binder.ReviewChild", &[text("ReviewNs.ReviewBase")]),
+          bases("Holder.stable.ReviewChild", &[to("ReviewNs.ReviewBase", "ReviewNs.ReviewBase")])]),
     row("Scala typed lambda parameter qualifier", L::Scala, "scala",
         "object reviewNs { class ReviewBase }\nobject Holder {\n  val f = (reviewNs: Int) => { class ReviewChild extends reviewNs.ReviewBase }\n}\n",
         &[unclassified("Holder.ReviewChild", &[text("reviewNs.ReviewBase")])]),

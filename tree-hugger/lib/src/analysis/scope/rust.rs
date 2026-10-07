@@ -14,10 +14,15 @@
 //! `macro_rules!` macros. A pattern binding of an `if let` (or a `let` in a
 //! chain) is visible from its `let` to the end of the consequence, never in
 //! the `else` branch.
+//!
+//! Whether a pattern name binds is never read from its spelling (naming
+//! conventions are lints): `mut x`, `ref x` and `x @ …` always bind, and a
+//! bare name is a [`BindingSite::bare_pattern`] that reference resolution
+//! decides by lookup (`analysis::occurrences::bare_pattern_meaning`).
 
 use tree_sitter::Node;
 
-use super::{ANY_CATEGORY, BindingRule, BindingSite, Boundary, MACRO, Placement, TYPE, VALUE};
+use super::{ANY_CATEGORY, BindingRule, BindingSite, Boundary, MACRO, Placement, Refutability, TYPE, VALUE};
 
 /// Scopes the vendored locals query lacks: an inline `mod` body, a trait,
 /// the declarations whose generic parameters would otherwise leak into the
@@ -57,6 +62,7 @@ const fn item(categories: u8, callable: bool) -> BindingRule {
         local: false,
         ordered: false,
         callable,
+        pattern_constant: false,
     }
 }
 
@@ -140,17 +146,23 @@ pub(super) fn binding_sites<'tree>(node: Node<'tree>, sites: &mut Vec<BindingSit
             };
             // `let mut x`: the grammar puts the `mut` beside the pattern.
             let written_mut = has_child(node, "mutable_specifier");
-            pattern_sites(node.child_by_field_name("pattern"), rule, written_mut, sites);
+            let refutability = if node.child_by_field_name("alternative").is_some() {
+                Refutability::Refutable
+            } else {
+                Refutability::Irrefutable
+            };
+            pattern_sites(node.child_by_field_name("pattern"), rule, written_mut, refutability, sites);
         }
         "parameter" => {
             let written_mut = has_child(node, "mutable_specifier");
-            pattern_sites(node.child_by_field_name("pattern"), local(VALUE), written_mut, sites);
+            let pattern = node.child_by_field_name("pattern");
+            pattern_sites(pattern, local(VALUE), written_mut, Refutability::Irrefutable, sites);
         }
         "closure_parameters" => {
             let mut cursor = node.walk();
             for child in node.named_children(&mut cursor) {
                 if child.kind() != "parameter" {
-                    pattern_sites(Some(child), local(VALUE), false, sites);
+                    pattern_sites(Some(child), local(VALUE), false, Refutability::Irrefutable, sites);
                 }
             }
         }
@@ -159,7 +171,7 @@ pub(super) fn binding_sites<'tree>(node: Node<'tree>, sites: &mut Vec<BindingSit
                 .child_by_field_name("body")
                 .map_or(node.end_byte(), |body| body.start_byte());
             let rule = BindingRule { visible_from, ..local(VALUE) };
-            pattern_sites(node.child_by_field_name("pattern"), rule, false, sites);
+            pattern_sites(node.child_by_field_name("pattern"), rule, false, Refutability::Irrefutable, sites);
         }
         "match_pattern" => {
             // The guard (`condition`) reads the bindings; it binds none.
@@ -167,7 +179,7 @@ pub(super) fn binding_sites<'tree>(node: Node<'tree>, sites: &mut Vec<BindingSit
                 node.child_by_field_name("condition")
                     .is_none_or(|condition| condition.id() != pattern.id())
             });
-            pattern_sites(pattern, local(VALUE), false, sites);
+            pattern_sites(pattern, local(VALUE), false, Refutability::Refutable, sites);
         }
         "let_condition" => {
             let rule = BindingRule {
@@ -175,7 +187,7 @@ pub(super) fn binding_sites<'tree>(node: Node<'tree>, sites: &mut Vec<BindingSit
                 visible_until: conditional_end(node),
                 ..local(VALUE)
             };
-            pattern_sites(node.child_by_field_name("pattern"), rule, false, sites);
+            pattern_sites(node.child_by_field_name("pattern"), rule, false, Refutability::Refutable, sites);
         }
         "use_declaration" => {
             use_names(node.child_by_field_name("argument"), &mut |name| {
@@ -205,11 +217,12 @@ fn pattern_sites<'tree>(
     pattern: Option<Node<'tree>>,
     rule: BindingRule,
     written_mut: bool,
+    refutability: Refutability,
     sites: &mut Vec<BindingSite<'tree>>,
 ) {
-    pattern_names(pattern, &mut |name, bare_pattern| {
-        let bare_pattern = bare_pattern && !(written_mut && pattern.is_some_and(|pattern| pattern.id() == name.id()));
-        sites.push(BindingSite { name, rule, is_import: false, bare_pattern });
+    pattern_names(pattern, &mut |name, bare| {
+        let bare = bare && !(written_mut && pattern.is_some_and(|pattern| pattern.id() == name.id()));
+        sites.push(BindingSite { name, rule, is_import: false, bare_pattern: bare.then_some(refutability) });
     });
 }
 

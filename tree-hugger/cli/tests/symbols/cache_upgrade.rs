@@ -315,8 +315,9 @@ struct StaleRevision {
 /// Revisions whose pre-repair value contradicts the stored evidence it is
 /// derived from, so the reader refuses that payload under any key: revision
 /// 5's `is_recursive: No` beside the `Limited` region every Python callable
-/// has.
-const CONTENT_REJECTED: &[&str] = &["5"];
+/// has, and revision 21's callable with no `body_span` beside the coverage
+/// region only a callable with a body owns.
+const CONTENT_REJECTED: &[&str] = &["5", "21"];
 
 /// How an earlier revision's entry key is formed.
 enum OldKey {
@@ -1933,6 +1934,77 @@ fn entry_from_extractor_revision_forty_is_not_served_after_the_parameter_environ
                 .find(|occurrence| occurrence["target"]["name"] == "f")
                 .expect("the default's call");
             call["target"]["id"] = local_ref["id"].clone();
+        },
+    });
+}
+
+/// Revision 41 did not read a TypeScript instantiation expression's operand,
+/// so `(f<number>)()` was a usage that limited its owner's coverage and left
+/// `g`'s recursion `Unknown`; revision 42 reads it as a call of `f`.
+#[test]
+fn entry_from_extractor_revision_forty_one_is_not_served_after_the_instantiation_expression_repair() {
+    assert_stale_revision_is_not_served(&StaleRevision {
+        revision: "41",
+        key: OldKey::Computed,
+        file: "instantiation.ts",
+        language: "typescript",
+        source: "function f<T>() {}\nfunction g() { (f<number>)(); }\nfunction Sentinel() {}\n".to_string(),
+        sentinel: "Sentinel",
+        probe: |out| go_record(out, "g")["semantics"]["is_recursive"].clone(),
+        repaired: Value::from("No"),
+        stale: Value::from("Unknown"),
+        revert: |snapshot| {
+            let call = snapshot["occurrences"]
+                .as_array_mut()
+                .expect("occurrences")
+                .iter_mut()
+                .find(|occurrence| occurrence["target"]["name"] == "f")
+                .expect("the instantiated call");
+            call["kind"] = Value::from("Usage");
+            let region = snapshot["reference_coverage"]
+                .as_array_mut()
+                .expect("coverage")
+                .iter_mut()
+                .find(|region| region["owner"]["name"] == "g")
+                .expect("`g`'s region");
+            region["state"] = Value::from("Limited");
+            region["reasons"] = serde_json::json!(["indirect_dispatch"]);
+            record_named(snapshot, "g")["semantics"]["is_recursive"] = Value::from("Unknown");
+        },
+    });
+}
+
+/// Revision 42 read a written path from the name's immediate parent only,
+/// so the rooted Rust self-call `::f()` lost its root, was a usage and left
+/// `f`'s recursion `No`; revision 43 keeps `::f` and reads it as a call
+/// whose root binding is unproved (`Unknown`).
+#[test]
+fn entry_from_extractor_revision_forty_two_is_not_served_after_the_written_path_repair() {
+    assert_stale_revision_is_not_served(&StaleRevision {
+        revision: "42",
+        key: OldKey::Computed,
+        file: "rooted.rs",
+        language: "rust",
+        source: "fn f() { ::f(); }\nfn Sentinel() {}\n".to_string(),
+        sentinel: "Sentinel",
+        probe: |out| go_record(out, "f")["semantics"]["is_recursive"].clone(),
+        repaired: Value::from("Unknown"),
+        stale: Value::from("No"),
+        revert: |snapshot| {
+            let call = snapshot["occurrences"]
+                .as_array_mut()
+                .expect("occurrences")
+                .iter_mut()
+                .find(|occurrence| occurrence["target"]["name"] == "f")
+                .expect("the rooted call");
+            assert_eq!(call["target"]["qualified_name"], "::f");
+            call["kind"] = Value::from("Usage");
+            call["target"]["qualified_name"] = Value::Null;
+            // Revision 42 wrote no `path_start_byte` at all, which the
+            // current reader refuses on shape; `null` with the path keeps
+            // the payload servable, so the control shows the key decides.
+            call["path_start_byte"] = Value::Null;
+            record_named(snapshot, "f")["semantics"]["is_recursive"] = Value::from("No");
         },
     });
 }

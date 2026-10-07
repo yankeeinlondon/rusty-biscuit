@@ -332,6 +332,7 @@ impl TreeFile {
                 let (is_reference, is_member) = match capture_names.get(capture.index as usize) {
                     Some(&"reference") => (true, false),
                     Some(&"reference.member") => (false, true),
+                    Some(&"reference.pattern") => (false, false),
                     _ => continue,
                 };
                 let node = capture.node;
@@ -1984,7 +1985,9 @@ pub(crate) struct ReferenceCapture<'tree> {
     /// diagnostics and by reference occurrences.
     pub(crate) is_reference: bool,
     /// Captured as `@reference.member`: a method-call or constructor member
-    /// name, read only by reference occurrences.
+    /// name, read only by reference occurrences. A capture that is neither
+    /// (`@reference.pattern`, a Rust struct-pattern field shorthand) is read
+    /// only by reference occurrences, as a plain name.
     pub(crate) is_member: bool,
 }
 

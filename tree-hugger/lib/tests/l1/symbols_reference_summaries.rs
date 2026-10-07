@@ -12,6 +12,7 @@ use tree_hugger::{
 };
 
 use crate::symbols_fixtures::{all_fixtures, display_name, primary_fixture};
+use crate::symbols_occurrences::{EVAL_CALL_FORMS, EvalMode, eval_source};
 
 fn counted<T>(work: impl FnOnce() -> T) -> (T, WorkCounters) {
     let before = work_counters();
@@ -136,6 +137,29 @@ const RECURSION_MATRIX: &[RecursionRow] = &[
         "use crate::other as again;\nfn f() { again(); }\n",
         &[("f", No)],
     ),
+    // `::f` is the crate root's `f` (2015) or the crate `f` (2018): the
+    // file-local rules prove neither, so a rooted self-call is uncertain,
+    // never `No` (rustc warns that the 2015 form recurses).
+    ("rooted self-call", "rs", "fn f() { ::f(); }\n", &[("f", Unknown)]),
+    ("wrapped rooted self-call", "rs", "fn f() { ((::f))(); }\n", &[("f", Unknown)]),
+    (
+        "rooted call beside a shadowing local is not the local",
+        "rs",
+        "fn f() {}\nfn g() { let f = || {}; ::f(); }\n",
+        &[("f", No), ("g", No)],
+    ),
+    (
+        "rooted self-call of a method",
+        "rs",
+        "struct W;\nimpl W { fn m(&self) { ::m(); } }\n",
+        &[("m", Unknown)],
+    ),
+    (
+        "rooted module path names another function",
+        "rs",
+        "mod m { pub fn f() {} }\nfn h() { ::m::f(); }\n",
+        &[("f", No), ("h", No)],
+    ),
     (
         "typescript direct self-call",
         "ts",
@@ -164,6 +188,19 @@ const RECURSION_MATRIX: &[RecursionRow] = &[
     ("javascript direct self-call", "js", "function f(n) { return n && f(n - 1); }\n", &[("f", Yes)]),
     ("python is limited", "py", "def f(n):\n    return f(n - 1)\n\n\ndef g():\n    pass\n", &[("f", Unknown), ("g", Unknown)]),
     ("go is limited", "go", "package p\n\nfunc f() { f() }\n", &[("f", Unknown)]),
+    (
+        "a c# conditional self-call is limited",
+        "cs",
+        "class W { void F(W obj) { obj?.F(); } }\n",
+        &[("F", Unknown)],
+    ),
+    (
+        "php callable creation and a variable call are limited",
+        "php",
+        "<?php\nfunction f() { f(...); }\nfunction g($cb) { $cb(); }\n",
+        &[("f", Unknown), ("g", Unknown)],
+    ),
+    ("a perl code-reference call is limited", "pl", "sub g { $cb->(); }\n", &[("g", Unknown)]),
     (
         "an inline module's call does not reach the parent's function",
         "rs",
@@ -290,12 +327,237 @@ const RECURSION_MATRIX: &[RecursionRow] = &[
     ("a `satisfies` self-call", "ts", "function f() { (f satisfies () => void)(); }\n", &[("f", Yes)]),
     ("a type-assertion self-call", "ts", "function f() { (<() => void>f)(); }\n", &[("f", Yes)]),
     ("a non-null self-call", "ts", "function f() { f!(); }\n", &[("f", Yes)]),
+    ("an instantiation-expression self-call", "ts", "function f<T>() { (f<number>)(); }\n", &[("f", Yes)]),
     ("a parenthesized self-call", "js", "function f(n) { if (n) ((f))(n - 1); }\n", &[("f", Yes)]),
+    // A wrapped call to another established declaration is as direct as an
+    // unwrapped one: coverage reads the callee through the same wrappers as
+    // invocation, so the caller is `No`, never `Unknown`.
+    ("a direct call to another function (control)", "rs", "fn f() {}\nfn g() { f(); }\n", &[("g", No)]),
+    ("a parenthesized call to another function", "rs", "fn f() {}\nfn g() { (f)(); ((f))(); }\n", &[("g", No)]),
+    ("a parenthesized turbofish call to another function", "rs", "fn f<T>() {}\nfn g() { (f::<u8>)(); }\n", &[("g", No)]),
+    (
+        "a parenthesized type-path call to the one inherent function",
+        "rs",
+        "struct S;\nimpl S { fn f() {} }\nfn g() { (S::f)(); }\n",
+        &[("g", No)],
+    ),
+    (
+        "a parenthesized generic type-path call to the one inherent function",
+        "rs",
+        "struct S;\nimpl S { fn f<T>() {} }\nfn g() { (S::f::<u8>)(); }\n",
+        &[("g", No)],
+    ),
+    ("a direct call to another function (control)", "ts", "function f() {}\nfunction g() { f(); }\n", &[("g", No)]),
+    ("a parenthesized call to another function", "ts", "function f() {}\nfunction g() { (f)(); ((f))(); }\n", &[("g", No)]),
+    ("an `as` call to another function", "ts", "function f() {}\nfunction g() { (f as (() => void))(); }\n", &[("g", No)]),
+    (
+        "a doubled `as` call to another function",
+        "ts",
+        "function f() {}\nfunction g() { (f as any as () => void)(); }\n",
+        &[("g", No)],
+    ),
+    (
+        "a `satisfies` call to another function",
+        "ts",
+        "function f() {}\nfunction g() { (f satisfies (() => void))(); }\n",
+        &[("g", No)],
+    ),
+    (
+        "a type-assertion call to another function",
+        "ts",
+        "function f() {}\nfunction g() { (<(() => void)>f)(); }\n",
+        &[("g", No)],
+    ),
+    ("a non-null call to another function", "ts", "function f() {}\nfunction g() { f!(); (f!)(); }\n", &[("g", No)]),
+    ("an optional call to another function", "ts", "function f() {}\nfunction g() { f?.(); (f)?.(); }\n", &[("g", No)]),
+    (
+        "a parenthesized tag of another function",
+        "ts",
+        "function f(_: TemplateStringsArray) {}\nfunction g() { (f)`x`; }\n",
+        &[("g", No)],
+    ),
+    // A TypeScript instantiation expression (`f<number>` apart from its
+    // call) is as direct as the instantiated name, at any wrapper depth.
+    ("a direct generic call to another function (control)", "ts", "function f<T>() {}\nfunction g() { f<number>(); }\n", &[("g", No)]),
+    ("an instantiation-expression call to another function", "ts", "function f<T>() {}\nfunction g() { (f<number>)(); }\n", &[("g", No)]),
+    ("a doubly parenthesized instantiation call", "ts", "function f<T>() {}\nfunction g() { ((f<number>))(); }\n", &[("g", No)]),
+    ("a non-null instantiation call", "ts", "function f<T>() {}\nfunction g() { (f<number>)!(); }\n", &[("g", No)]),
+    ("an `as` instantiation call", "ts", "function f<T>() {}\nfunction g() { (f<number> as () => void)(); }\n", &[("g", No)]),
+    (
+        "a `satisfies` instantiation call",
+        "ts",
+        "function f<T>() {}\nfunction g() { (f<number> satisfies () => void)(); }\n",
+        &[("g", No)],
+    ),
+    ("a type-assertion instantiation call", "ts", "function f<T>() {}\nfunction g() { (<() => void>f<number>)(); }\n", &[("g", No)]),
+    ("constructing an instantiated local class", "ts", "class C<T> {}\nfunction g() { new (C<number>)(); }\n", &[("g", No)]),
+    (
+        "an instantiated member call stays a receiver call",
+        "ts",
+        "class W { m<T>() {} }\nfunction g(obj: W) { (obj.m<number>)(); }\n",
+        &[("g", Unknown)],
+    ),
+    ("constructing a local class (control)", "ts", "class F {}\nfunction g() { new F(); }\n", &[("g", No)]),
+    ("constructing a parenthesized local class", "ts", "class F {}\nfunction g() { new (F)(); new ((F))(); }\n", &[("g", No)]),
+    ("constructing an `as` local class", "ts", "class F {}\nfunction g() { new (F as typeof F)(); }\n", &[("g", No)]),
+    ("a direct call to another function (control)", "js", "function f() {}\nfunction g() { f(); }\n", &[("g", No)]),
+    ("a parenthesized call to another function", "js", "function f() {}\nfunction g() { (f)(); ((f))(); }\n", &[("g", No)]),
+    ("an optional call to another function", "js", "function f() {}\nfunction g() { f?.(); (f)?.(); }\n", &[("g", No)]),
+    ("a parenthesized tag of another function", "js", "function f() {}\nfunction g() { (f)`x`; }\n", &[("g", No)]),
+    ("constructing a local class (control)", "js", "class F {}\nfunction g() { new F(); }\n", &[("g", No)]),
+    ("constructing a parenthesized local class", "js", "class F {}\nfunction g() { new (F)(); new ((F))(); }\n", &[("g", No)]),
+    // A parenthesized `eval` is still a direct `eval` (the parentheses
+    // pass the reference through), so it may shadow the function; a
+    // sequence makes it indirect.
+    (
+        "a parenthesized direct `eval` may shadow the function",
+        "js",
+        "function f() { (eval)(\"1\"); f(); }\n",
+        &[("f", Unknown)],
+    ),
+    (
+        "an `as` direct `eval` may shadow the function",
+        "ts",
+        "function f() { (eval as any)(\"1\"); f(); }\n",
+        &[("f", Unknown)],
+    ),
+    ("an indirect `eval` adds no binding (control)", "js", "function f() { (0, eval)(\"1\"); f(); }\n", &[("f", Yes)]),
+    // Only a direct call of `eval` can bind: an optional call is an
+    // indirect eval and a tagged template evaluates nothing.
+    ("an optional `eval` adds no binding", "js", "function f() { eval?.(\"1\"); f(); }\n", &[("f", Yes)]),
+    ("a parenthesized optional `eval` adds no binding", "ts", "function f() { (eval)?.(\"1\"); f(); }\n", &[("f", Yes)]),
+    ("a tagged `eval` adds no binding", "ts", "function f() { eval`1`; f(); }\n", &[("f", Yes)]),
+    ("a parenthesized tagged `eval` adds no binding", "js", "function f() { (eval)`1`; f(); }\n", &[("f", Yes)]),
+    (
+        "a tagged `eval` limits nothing for another function",
+        "js",
+        "function f() {}\nfunction g() { eval`1`; f(); }\n",
+        &[("f", No), ("g", No)],
+    ),
+    (
+        "an optional `eval` may still call anything",
+        "ts",
+        "function f() {}\nfunction g() { eval?.(\"1\"); f(); }\n",
+        &[("f", No), ("g", Unknown)],
+    ),
+    // The other callee shapes stay uncertain for another declaration too.
+    ("a member call of another function", "ts", "const o = { f() {} };\nfunction g() { o.f(); }\n", &[("g", Unknown)]),
+    ("a variable holding another function", "ts", "function f() {}\nfunction g() { const h = f; h(); }\n", &[("g", Unknown)]),
+    ("a sequence callee of another function", "js", "function f() {}\nfunction g() { (0, f)(); }\n", &[("g", Unknown)]),
+    (
+        "a conditional callee of another function",
+        "ts",
+        "function f() {}\nfunction g(c: boolean) { (c ? f : f)(); }\n",
+        &[("g", Unknown)],
+    ),
+    ("a dereferenced callee of another function", "rs", "fn f() {}\nfn g() { let p = &f; (*p)(); }\n", &[("g", Unknown)]),
+    ("a parenthesized local variable", "rs", "fn f() {}\nfn g() { let h = f; (h)(); }\n", &[("g", Unknown)]),
     // Not wrappers: the callee is another value, so nothing is proven.
     ("a self-reference as an argument is no call", "rs", "fn f() { g((f)); }\nfn g(_: fn()) {}\n", &[("f", No)]),
     ("a dereferenced callee is no self-call", "rs", "fn f() { let p = &f; (*p)(); }\n", &[("f", Unknown)]),
     ("a sequence callee is no self-call", "js", "function f() { (0, f)(); }\n", &[("f", Unknown)]),
     ("a conditional callee is no self-call", "ts", "function f(c: boolean) { (c ? f : f)(); }\n", &[("f", Unknown)]),
+    // A Rust pattern name binds or reads a constant by lookup, never by
+    // spelling (`symbols_occurrences::PATTERN_IDENTITY_MATRIX`): a
+    // capitalized pattern named like the function binds a new local.
+    ("an `if let` name named like the function", "rs", "fn F(x: fn()) { if let F = x { F(); } }\n", &[("F", Unknown)]),
+    (
+        "a `while let` name named like the function",
+        "rs",
+        "fn F(x: fn()) { while let F = x { F(); break; } }\n",
+        &[("F", Unknown)],
+    ),
+    ("a match arm name named like the function", "rs", "fn F(x: fn()) { match x { F => F() } }\n", &[("F", Unknown)]),
+    ("a `mut` match binding named like the function", "rs", "fn F(x: fn()) { match x { mut F => F() } }\n", &[("F", Unknown)]),
+    ("a `ref` match binding named like the function", "rs", "fn F(x: fn()) { match x { ref F => F() } }\n", &[("F", Unknown)]),
+    (
+        "a lowercase constant read by patterns is no call",
+        "rs",
+        "const f: u8 = 1;\nfn g(x: u8) { match x { f => { f; } _ => {} } if let f = x { f; } while let f = x { f; break; } }\n",
+        &[("g", No)],
+    ),
+    (
+        "a captured tuple-struct local, then a proven self-call",
+        "rs",
+        "fn F(x: Option<fn()>) { if let Some(F) = x { F(); } F(None); }\n",
+        &[("F", Yes)],
+    ),
+    (
+        "irrefutable `let`, parameter and `for` names are locals",
+        "rs",
+        "fn F(x: fn()) { let F = x; F(); }\nfn G(G: fn()) { G(); }\nfn H(xs: Vec<fn()>) { for H in xs { H(); } }\n",
+        &[("F", Unknown), ("G", Unknown), ("H", Unknown)],
+    ),
+    (
+        "a struct shorthand named like the function",
+        "rs",
+        "struct S { F: fn() }\nfn F(s: S) { if let S { F } = s { F(); } }\n",
+        &[("F", Unknown)],
+    ),
+    // Calling a value (a `const`/`static` holding a function pointer) is
+    // indirect even when the value is established: its initializer is
+    // never followed, whether it names the caller or not.
+    ("value `Self::C()`", "rs", "struct S;\nimpl S { const C: fn() = Self::f; fn f() { Self::C(); } }\n", &[("f", Unknown)]),
+    ("value `S::C()`", "rs", "struct S;\nimpl S { const C: fn() = S::f; fn f() { S::C(); } }\n", &[("f", Unknown)]),
+    (
+        "wrapped value `(Self::C)()`",
+        "rs",
+        "struct S;\nimpl S { const C: fn() = Self::f; fn f() { (Self::C)(); ((Self::C))(); } }\n",
+        &[("f", Unknown)],
+    ),
+    ("wrapped value `(S::C)()`", "rs", "struct S;\nimpl S { const C: fn() = Self::f; fn f() { (S::C)(); } }\n", &[("f", Unknown)]),
+    (
+        "value in a generic impl",
+        "rs",
+        "struct S<T>(T);\nimpl<T> S<T> { const C: fn() = Self::f; fn f() { Self::C(); } }\n",
+        &[("f", Unknown)],
+    ),
+    (
+        "value candidate behind `S::<u8>::C()`",
+        "rs",
+        "struct S<T>(T);\nimpl<T> S<T> { const C: fn() = Self::f; fn f() { S::<u8>::C(); } }\n",
+        &[("f", Unknown)],
+    ),
+    ("enum value `Self::C()`", "rs", "enum E { A }\nimpl E { const C: fn() = Self::f; fn f() { Self::C(); } }\n", &[("f", Unknown)]),
+    (
+        "trait value candidates behind `Self::C()`",
+        "rs",
+        "trait T { const C: fn(); fn f() { Self::C(); } }\nstruct S;\nimpl T for S { const C: fn() = Self::f; }\n",
+        &[("f", Unknown)],
+    ),
+    (
+        "trait value candidates behind `S::C()`",
+        "rs",
+        "trait T { const C: fn(); fn f() { S::C(); } }\nstruct S;\nimpl T for S { const C: fn() = Self::f; }\n",
+        &[("f", Unknown)],
+    ),
+    (
+        "a value with an unrelated initializer",
+        "rs",
+        "fn h() {}\nstruct S;\nimpl S { const C: fn() = h; fn f() { Self::C(); } }\n",
+        &[("f", Unknown), ("h", No)],
+    ),
+    ("top-level `const` value", "rs", "const C: fn() = f;\nfn f() { C(); }\n", &[("f", Unknown)]),
+    ("top-level `static` value", "rs", "static C: fn() = f;\nfn f() { C(); }\n", &[("f", Unknown)]),
+    (
+        "a member function and a member self-call",
+        "rs",
+        "struct S;\nimpl S { fn h() {} fn f() { Self::h(); } fn g() { Self::g(); } }\n",
+        &[("f", No), ("g", Yes), ("h", No)],
+    ),
+    ("a variant constructor call", "rs", "enum E { V(u8) }\nfn f() { let _ = E::V(1); }\n", &[("f", No)]),
+    (
+        "reading a value without calling it",
+        "rs",
+        "struct S;\nimpl S { const C: fn() = Self::f; fn f() { let _p = Self::C; } }\n",
+        &[("f", No)],
+    ),
+    (
+        "a refutable name a glob may supply stays uncertain",
+        "rs",
+        "mod m { pub fn helper() {} }\nuse m::*;\nfn F(x: fn()) { match x { F => F() } }\n",
+        &[("F", Unknown)],
+    ),
 ];
 
 #[test]
@@ -431,6 +693,64 @@ fn bound_imports_are_dependencies_of_their_owners_only() {
         );
     }
     assert!(record(&index, "h").relations.dependencies.is_empty());
+}
+
+/// Calling an established value keeps its summary edge to the value and
+/// never adds one to the function its initializer names.
+#[test]
+fn value_calls_reference_the_value_not_its_initializer() {
+    let index = complete(
+        "struct S;\nimpl S { const C: fn() = Self::f; fn f() { Self::C(); (S::C)(); } }\n",
+        "rs",
+    );
+    let (value, caller, owner) = (record(&index, "C"), record(&index, "f"), record(&index, "S"));
+    let ids = |refs: &[SymbolRef]| refs.iter().map(|reference| reference.id.clone()).collect::<Vec<_>>();
+    // `S` is the type usage in `(S::C)()`.
+    assert_eq!(ids(&caller.relations.references), [Some(value.id.clone()), Some(owner.id.clone())]);
+    assert_eq!(ids(&value.relations.referenced_by), [Some(caller.id.clone())]);
+    assert!(caller.relations.referenced_by.is_empty(), "`f` is named only outside any callable");
+}
+
+/// A rooted Rust name (`::f`) never reaches ordinary lexical lookup: it
+/// keeps its written root, binds neither the shadowing `let f` nor the
+/// root function, and so makes no summary edge to either.
+#[test]
+fn rooted_rust_names_never_summarize_a_shadowing_local() {
+    let index = complete("fn f() {}\nfn g() { let f = || {}; ::f(); (::f)(); }\nfn h() { ::m::f(); }\n", "rs");
+    let (function, caller, other) = (record(&index, "f"), record(&index, "g"), record(&index, "h"));
+    let local = index
+        .symbols
+        .iter()
+        .find(|record| record.identity.name == "f" && record.kind == SymbolKindV2::Variable)
+        .expect("the `let f` record");
+    assert!(caller.relations.references.is_empty(), "{:#?}", caller.relations.references);
+    assert!(other.relations.references.is_empty(), "{:#?}", other.relations.references);
+    assert!(local.relations.referenced_by.is_empty(), "the local is never the rooted target");
+    assert!(function.relations.referenced_by.is_empty(), "the root binding is unproved");
+    let rooted: Vec<_> = index
+        .occurrences
+        .iter()
+        .filter(|occurrence| occurrence.target.qualified_name.as_deref().is_some_and(|path| path.starts_with("::")))
+        .map(|occurrence| {
+            (occurrence.target.name.as_str(), occurrence.target.qualified_name.as_deref(), occurrence.kind)
+        })
+        .collect();
+    assert_eq!(
+        rooted,
+        [
+            ("f", Some("::f"), OccurrenceKind::Call),
+            ("f", Some("::f"), OccurrenceKind::Call),
+            ("m", Some("::m"), OccurrenceKind::Usage),
+            ("f", Some("::m::f"), OccurrenceKind::Call),
+        ]
+    );
+    for occurrence in index.occurrences.iter().filter(|occurrence| occurrence.target.qualified_name.is_some()) {
+        assert_ne!(occurrence.confidence, Confidence::Scoped, "{occurrence:#?}");
+        assert!(
+            occurrence.candidates.iter().all(|candidate| candidate.id.as_ref() != Some(&local.id)),
+            "the local is never a candidate: {occurrence:#?}"
+        );
+    }
 }
 
 /// A language without resolver rules establishes nothing, so it has no
@@ -590,6 +910,34 @@ fn expression_local_names_make_no_summary_edges() {
                 ["later"],
                 "{extension}{star}"
             );
+        }
+    }
+}
+
+/// Every `eval` call form of `symbols_occurrences::EVAL_CALL_FORMS`, in a
+/// nested function: only a direct `eval` cuts the function's edges to its
+/// own declaration and to `Base`; every other form keeps both, in both
+/// directions.
+#[test]
+fn only_a_direct_eval_cuts_summary_edges() {
+    for &(label, extensions, statement, mode) in EVAL_CALL_FORMS {
+        for &extension in extensions {
+            let label = format!("{extension} {label} eval");
+            let index = complete(&eval_source(statement), extension);
+            let f = record(&index, "f");
+            let base = record(&index, "Base");
+            let references_to = |id| f.relations.references.iter().any(|reference| reference.id.as_ref() == Some(id));
+            let callers = |target: &SymbolRecord| -> Vec<String> {
+                target.relations.referenced_by.iter().map(|owner| owner.name.clone()).collect()
+            };
+            if mode == EvalMode::Direct {
+                assert!(!references_to(&f.id) && !references_to(&base.id), "{label}: {:#?}", f.relations);
+                assert!(callers(f).is_empty() && callers(base).is_empty(), "{label}");
+            } else {
+                assert!(references_to(&f.id) && references_to(&base.id), "{label}: {:#?}", f.relations);
+                assert_eq!(callers(f), ["f"], "{label}");
+                assert_eq!(callers(base), ["f"], "{label}");
+            }
         }
     }
 }

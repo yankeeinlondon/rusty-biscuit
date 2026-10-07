@@ -6,6 +6,14 @@
 //! The entry writes every key instead (`null`, `[]`), and the reader requires
 //! each one, so an absent key, `null` and an empty list stay distinct and a
 //! damaged entry is a miss, never evidence read as empty.
+//!
+//! Each stored occurrence also holds `path_start_byte`, a cache-only copy of
+//! where its written path (`target.qualified_name`) starts in the source, or
+//! `null` exactly when it has none. Nothing derived from the source can tell
+//! a `null` path that was never written from one that was deleted (Rust macro
+//! token trees, a leading `::` and JS spread all put punctuation before
+//! unqualified names), so this redundant fact is what makes a single edit of
+//! either field detectable.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
@@ -19,7 +27,8 @@ use crate::analysis::{has_semantics, semantic_facets};
 use crate::file::query::Capability;
 use crate::shared::{
     Confidence, CoverageState, ImportRecord, LimitReason, Occurrence, OccurrenceKind, ProgrammingLanguage,
-    ReferenceCoverage, SemanticFacet, SymbolId, SymbolRecord, SymbolRef, TextPoint, TextSpan,
+    ReferenceCoverage, SemanticFacet, SymbolId, SymbolKindV2, SymbolRecord, SymbolRef, TextPoint,
+    TextSpan,
 };
 
 #[derive(Serialize, Deserialize)]
@@ -29,6 +38,9 @@ struct StoredOccurrence {
     owner: Option<StoredRef>,
     owner_span: StoredSpan,
     target: StoredRef,
+    /// Where `target.qualified_name` starts; `null` iff it is `null`.
+    #[serde(deserialize_with = "nullable")]
+    path_start_byte: Option<u32>,
     candidates: Vec<StoredRef>,
     span: StoredSpan,
     kind: OccurrenceKind,
@@ -89,11 +101,17 @@ pub(super) fn write_occurrences<S: Serializer>(
     serializer.collect_seq(occurrences.iter().map(StoredOccurrence::from))
 }
 
-pub(super) fn read_occurrences<'de, D: Deserializer<'de>>(
-    deserializer: D,
-) -> Result<Vec<Occurrence>, D::Error> {
+/// A read entry's occurrences and, aligned with them, each one's stored
+/// `path_start_byte`, which [`validate_evidence`] compares with its path.
+pub(super) struct ReadOccurrences {
+    pub(super) occurrences: Vec<Occurrence>,
+    pub(super) path_starts: Vec<Option<u32>>,
+}
+
+pub(super) fn read_occurrences<'de, D: Deserializer<'de>>(deserializer: D) -> Result<ReadOccurrences, D::Error> {
     let stored = Vec::<StoredOccurrence>::deserialize(deserializer)?;
-    Ok(stored.into_iter().map(Occurrence::from).collect())
+    let path_starts = stored.iter().map(|occurrence| occurrence.path_start_byte).collect();
+    Ok(ReadOccurrences { occurrences: stored.into_iter().map(Occurrence::from).collect(), path_starts })
 }
 
 pub(super) fn write_coverage<S: Serializer>(
@@ -116,6 +134,13 @@ impl From<&Occurrence> for StoredOccurrence {
             owner: occurrence.owner.as_ref().map(StoredRef::from),
             owner_span: StoredSpan::from(&occurrence.owner_span),
             target: StoredRef::from(&occurrence.target),
+            // A written path is the source text ending at the name, so it
+            // starts its length before the occurrence's end.
+            path_start_byte: occurrence
+                .target
+                .qualified_name
+                .as_ref()
+                .map(|path| occurrence.span.end_byte.saturating_sub(u32::try_from(path.len()).unwrap_or(u32::MAX))),
             candidates: occurrence.candidates.iter().map(StoredRef::from).collect(),
             span: StoredSpan::from(&occurrence.span),
             kind: occurrence.kind,
@@ -209,10 +234,13 @@ pub(super) struct StoredEvidence<'a> {
     pub(super) source: &'a str,
     pub(super) language: ProgrammingLanguage,
     pub(super) capabilities: &'a BTreeSet<Capability>,
-    /// The entry covers every kind, so its records are every record the
-    /// analysis resolved against.
-    pub(super) all_kinds: bool,
+    /// The kinds the entry covers (`None`: every kind). Its records are
+    /// every record of these kinds the analysis resolved against; evidence
+    /// may still name a declaration of any other kind.
+    pub(super) covered_kinds: Option<&'a BTreeSet<SymbolKindV2>>,
     pub(super) occurrences: &'a [Occurrence],
+    /// Each occurrence's stored `path_start_byte`, in the same order.
+    pub(super) path_starts: &'a [Option<u32>],
     pub(super) coverage: &'a [ReferenceCoverage],
     pub(super) records: &'a [SymbolRecord],
     pub(super) imports: &'a [ImportRecord],
@@ -222,13 +250,33 @@ pub(super) struct StoredEvidence<'a> {
 /// and the records' summaries and semantics derived from it. The error names
 /// the first inconsistency found.
 ///
-/// Evidence a fresh analysis could have produced passes. A kind-narrowed
-/// entry keeps evidence that names records it does not retain, so an ID is
-/// checked against a record only when that record is retained; what cannot
-/// be told apart without a parse (a list emptied while nothing derived from
-/// it remains, an anonymous region added or removed) is beyond these checks.
+/// Evidence a fresh analysis could have produced passes. Every ID names a
+/// retained record of its name, except where the entry omits a kind the ID
+/// could have: a kind-narrowed entry keeps evidence that names records it
+/// does not retain (an owner is always a callable, so an owner ID is exempt
+/// only when a callable kind is omitted). What cannot be told apart without
+/// a parse (a list emptied while nothing derived from it remains, an
+/// anonymous region added or removed, a written path and its stored start
+/// both set to `null` together, the order of omitted candidates) is beyond
+/// these checks.
 pub(super) fn validate_evidence(stored: &StoredEvidence<'_>) -> Result<(), &'static str> {
-    let StoredEvidence { source, language, capabilities, all_kinds, occurrences, coverage, records, imports } = *stored;
+    let StoredEvidence {
+        source,
+        language,
+        capabilities,
+        covered_kinds,
+        occurrences,
+        path_starts,
+        coverage,
+        records,
+        imports,
+    } = *stored;
+    let all_kinds = covered_kinds.is_none();
+    // Whether a record of one of `kinds` may be absent from the records.
+    let omits = |kinds: &[SymbolKindV2]| covered_kinds.is_some_and(|covered| kinds.iter().any(|kind| !covered.contains(kind)));
+    // Any kind: a target, candidate or reference summary.
+    let omits_any = !all_kinds;
+    let omits_callables = omits(&[SymbolKindV2::Function, SymbolKindV2::Method, SymbolKindV2::Constructor]);
     let has_occurrences = capabilities.contains(&Capability::Occurrences);
     if !capabilities.contains(&Capability::Semantics) {
         if records.iter().any(|record| record.semantics != SemanticFacet::default()) {
@@ -253,11 +301,14 @@ pub(super) fn validate_evidence(stored: &StoredEvidence<'_>) -> Result<(), &'sta
     // A reference to a stored record repeats its name and qualified name.
     let by_id: HashMap<&SymbolId, &SymbolRecord> = records.iter().map(|record| (&record.id, record)).collect();
     let retained = |reference: &SymbolRef| reference.id.as_ref().and_then(|id| by_id.get(id)).copied();
-    let names_its_record = |reference: &SymbolRef| {
-        retained(reference).is_none_or(|record| {
+    // An ID that names no retained record passes only when its record may
+    // have been omitted.
+    let names_its_record = |reference: &SymbolRef, may_be_omitted: bool| match retained(reference) {
+        Some(record) => {
             reference.name == record.identity.name
                 && reference.qualified_name.as_deref() == Some(record.identity.qualified_name.as_str())
-        })
+        }
+        None => reference.id.is_none() || may_be_omitted,
     };
 
     // Every analysis has the file-level region, first.
@@ -268,7 +319,7 @@ pub(super) fn validate_evidence(stored: &StoredEvidence<'_>) -> Result<(), &'sta
         return Err("the first coverage region is not the whole file");
     }
     let mut regions = HashMap::new();
-    let mut owned_regions = HashSet::new();
+    let mut owned_regions: HashMap<&SymbolId, &TextSpan> = HashMap::new();
     let mut previous: Option<(u32, std::cmp::Reverse<u32>)> = None;
     for region in coverage {
         if !lines.is_region(&region.span) {
@@ -287,14 +338,14 @@ pub(super) fn validate_evidence(stored: &StoredEvidence<'_>) -> Result<(), &'sta
         }
         previous = Some(order);
         if let Some(owner) = &region.owner {
-            if !names_its_record(owner) {
+            if !names_its_record(owner, omits_callables) {
                 return Err("a region owner that does not name its record");
             }
             if retained(owner).is_some_and(|record| !has_semantics(record.kind)) {
                 return Err("a region owner that is not a callable");
             }
             // A region's owner is a key here; it is checked for an ID below.
-            if owner.id.as_ref().is_some_and(|id| !owned_regions.insert(id)) {
+            if owner.id.as_ref().is_some_and(|id| owned_regions.insert(id, &region.span).is_some()) {
                 return Err("a repeated coverage region");
             }
         }
@@ -302,15 +353,20 @@ pub(super) fn validate_evidence(stored: &StoredEvidence<'_>) -> Result<(), &'sta
             return Err("a repeated coverage region");
         }
     }
-    // Every named callable with a body gets its own region (Python and Lua
-    // read a body that need not be a `body` field, so a region is not
-    // provable for them).
-    if !matches!(language, ProgrammingLanguage::Python | ProgrammingLanguage::Lua)
-        && records.iter().any(|record| {
-            has_semantics(record.kind) && record.source.body_span.is_some() && !owned_regions.contains(&record.id)
-        })
-    {
-        return Err("a callable with a body and no coverage region");
+    // A named callable has its own region exactly when it has a body
+    // (`body_span`, empty bodies included), in every language, and that
+    // region holds the body. It need not equal the declaration span: a C/C++
+    // record keeps only its declarator, while the region is the definition.
+    if records.iter().any(|record| {
+        has_semantics(record.kind)
+            && match (&record.source.body_span, owned_regions.get(&record.id)) {
+                (Some(body), Some(region)) => {
+                    body.start_byte < region.start_byte || region.end_byte < body.end_byte
+                }
+                (body, region) => body.is_some() != region.is_some(),
+            }
+    }) {
+        return Err("a callable whose coverage region does not match its body");
     }
 
     // Retained record IDs by name, to check what an unresolving language's
@@ -321,8 +377,10 @@ pub(super) fn validate_evidence(stored: &StoredEvidence<'_>) -> Result<(), &'sta
     }
     let mut previous: Option<&Occurrence> = None;
     let mut scoped = HashSet::new();
+    // What each owner's summaries were derived from.
+    let mut scoped_by_owner: ScopedByOwner<'_> = HashMap::new();
     let mut unbound = Vec::new();
-    for occurrence in occurrences {
+    for (position, occurrence) in occurrences.iter().enumerate() {
         let (start, end) = (occurrence.span.start_byte as usize, occurrence.span.end_byte as usize);
         if start >= end
             || !lines.is_region(&occurrence.span)
@@ -336,6 +394,34 @@ pub(super) fn validate_evidence(stored: &StoredEvidence<'_>) -> Result<(), &'sta
         if source.get(start..end) != Some(name) {
             return Err("an occurrence whose target name is not the text at its span");
         }
+        // A target's qualified name is its written path: the source text from
+        // the qualifier through the name, so strictly longer than the name.
+        let path = occurrence.target.qualified_name.as_deref();
+        if let Some(path) = path
+            && (path.len() <= name.len() || end < path.len() || source.get(end - path.len()..end) != Some(path))
+        {
+            return Err("an occurrence whose written path is not the source text ending at its name");
+        }
+        // Its stored start must agree, in every language and whether or not
+        // the target's record is retained: a path set to `null` alone, or a
+        // start set to `null` alone, is refused.
+        match (path, path_starts.get(position).copied().flatten()) {
+            (None, None) => {}
+            (Some(path), Some(path_start)) if path_start as usize == end - path.len() => {}
+            _ => return Err("an occurrence whose written path disagrees with its stored start"),
+        }
+        // Candidates are in declaration order (name position, then ID). An
+        // omitted record's position is unknown, so only the retained ones
+        // are compared.
+        if !occurrence
+            .candidates
+            .iter()
+            .filter_map(retained)
+            .map(|record| (record.source.name_span.as_ref().map_or(0, |span| span.start_byte), &record.id.0))
+            .is_sorted()
+        {
+            return Err("candidates out of declaration order");
+        }
         if regions.get(&region_key(occurrence.owner.as_ref(), &occurrence.owner_span)?)
             != Some(&occurrence.owner.as_ref())
         {
@@ -345,7 +431,11 @@ pub(super) fn validate_evidence(stored: &StoredEvidence<'_>) -> Result<(), &'sta
             Confidence::Scoped => {
                 resolves
                     && occurrence.candidates.is_empty()
-                    && retained(&occurrence.target).is_none_or(|record| record.identity.name == name)
+                    // A target repeats only its record's name.
+                    && match retained(&occurrence.target) {
+                        Some(record) => record.identity.name == name,
+                        None => occurrence.target.id.is_none() || omits_any,
+                    }
             }
             Confidence::NameOnly => {
                 let mut ids = HashSet::new();
@@ -354,7 +444,7 @@ pub(super) fn validate_evidence(stored: &StoredEvidence<'_>) -> Result<(), &'sta
                     && occurrence.candidates.iter().all(|candidate| {
                         candidate.name == name
                             && candidate.id.as_ref().is_some_and(|id| ids.insert(id))
-                            && names_its_record(candidate)
+                            && names_its_record(candidate, omits_any)
                     })
                     && (resolves || {
                         // The lookup took every record of the name: each
@@ -382,6 +472,9 @@ pub(super) fn validate_evidence(stored: &StoredEvidence<'_>) -> Result<(), &'sta
         previous = Some(occurrence);
         if occurrence.confidence == Confidence::Scoped {
             let owner = occurrence.owner.as_ref().and_then(|owner| owner.id.as_ref());
+            if let Some(owner) = owner {
+                scoped_by_owner.entry(owner).or_default().push((position, occurrence.target.id.as_ref(), name));
+            }
             match &occurrence.target.id {
                 Some(target) => {
                     if let Some(owner) = owner {
@@ -414,8 +507,10 @@ pub(super) fn validate_evidence(stored: &StoredEvidence<'_>) -> Result<(), &'sta
     for record in records {
         let relations = &record.relations;
         let summary = relations.references.iter().chain(&relations.referenced_by).chain(&relations.dependencies);
+        // A referencing record is an owner, so a callable.
         if !summary.clone().filter_map(|reference| reference.id.as_ref()).all(is_generated_id)
-            || !summary.clone().all(&names_its_record)
+            || !relations.references.iter().chain(&relations.dependencies).all(|reference| names_its_record(reference, omits_any))
+            || !relations.referenced_by.iter().all(|reference| names_its_record(reference, omits_callables))
         {
             return Err("a reference summary that does not name its record");
         }
@@ -446,6 +541,7 @@ pub(super) fn validate_evidence(stored: &StoredEvidence<'_>) -> Result<(), &'sta
                 return Err("a referenced-by edge with no scoped occurrence");
             }
         }
+        summaries_in_first_occurrence_order(record, &scoped_by_owner)?;
     }
     for &(owner, target, _, _) in &scoped {
         let (Some(owner), Some(target)) = (by_id.get(owner), target) else { continue };
@@ -464,6 +560,77 @@ pub(super) fn validate_evidence(stored: &StoredEvidence<'_>) -> Result<(), &'sta
             if record.semantics != facet.unwrap_or_default() {
                 return Err("semantics that the stored evidence does not produce");
             }
+        }
+    }
+    Ok(())
+}
+
+/// Each owner's `Scoped` occurrences, in order: (position in the
+/// occurrences, target ID, written name).
+type ScopedByOwner<'a> = HashMap<&'a SymbolId, Vec<(usize, Option<&'a SymbolId>, &'a str)>>;
+
+/// A record's summaries list each edge once (an ID once; an import, which
+/// has none, once per name and qualified name) in the order of the first
+/// occurrence that made it, as the bind pass derives them.
+///
+/// A resolved edge's first occurrence is known exactly: the owner's first
+/// `Scoped` occurrence of that target ID. Which `Scoped` occurrence with no
+/// ID was bound to the import, rather than to a binding no record reports,
+/// is not stored, so an import edge may take any of the owner's no-ID
+/// occurrences of its name; the list is accepted when some choice is
+/// strictly increasing (chosen greedily, earliest first, which finds one
+/// whenever one exists). This never rejects a derived list.
+fn summaries_in_first_occurrence_order(
+    record: &SymbolRecord,
+    scoped_by_owner: &ScopedByOwner<'_>,
+) -> Result<(), &'static str> {
+    let relations = &record.relations;
+    for list in [&relations.references, &relations.dependencies, &relations.referenced_by] {
+        let mut seen = HashSet::new();
+        if !list.iter().all(|reference| {
+            seen.insert(match &reference.id {
+                Some(id) => (Some(id), None, None),
+                None => (None, Some(reference.name.as_str()), reference.qualified_name.as_deref()),
+            })
+        }) {
+            return Err("a reference summary that repeats an edge");
+        }
+    }
+    let empty = Vec::new();
+    let own = scoped_by_owner.get(&record.id).unwrap_or(&empty);
+    let in_order = |list: &[SymbolRef]| {
+        let mut last: Option<usize> = None;
+        list.iter().all(|reference| {
+            let after = |&&(position, _, _): &&(usize, Option<&SymbolId>, &str)| last.is_none_or(|last| position > last);
+            let next = match &reference.id {
+                // The first occurrence of the target, which must follow.
+                Some(id) => own
+                    .iter()
+                    .find(|(_, target, _)| *target == Some(id))
+                    .filter(after),
+                None => own
+                    .iter()
+                    .filter(|(_, target, name)| target.is_none() && *name == reference.name)
+                    .find(after),
+            };
+            next.map(|&(position, _, _)| last = Some(position)).is_some()
+        })
+    };
+    if !in_order(&relations.references) || !in_order(&relations.dependencies) {
+        return Err("a reference summary out of first-occurrence order");
+    }
+    // A target's owners, by each one's first `Scoped` occurrence of it.
+    let mut last: Option<usize> = None;
+    for owner in &relations.referenced_by {
+        let first = owner
+            .id
+            .as_ref()
+            .and_then(|owner| scoped_by_owner.get(owner))
+            .and_then(|list| list.iter().find(|(_, target, _)| *target == Some(&record.id)))
+            .map(|&(position, _, _)| position);
+        match first {
+            Some(position) if last.is_none_or(|last| position > last) => last = Some(position),
+            _ => return Err("a reference summary out of first-occurrence order"),
         }
     }
     Ok(())

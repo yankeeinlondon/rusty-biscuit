@@ -1,7 +1,8 @@
 //! `hug refs`: selecting one declaration (exact smart-case names, qualified
 //! and file-prefixed names, `--id`, locals), the ambiguity error, empty
 //! reports, the three directions, the versioned `--json` envelope, the text
-//! report, rejected flags and formats, and the file-local boundary.
+//! report, rejected flags and formats, the file-local boundary, and Rust
+//! pattern names (no invented self-calls or declarations).
 
 use std::process::Output;
 
@@ -520,6 +521,104 @@ fn boundaries_that_establish_no_binding_list_no_established_rows() {
     );
 }
 
+/// A Rust pattern name binds or reads a constant by lookup, never by its
+/// spelling: a capitalized pattern named like the function binds a new
+/// local, so the function has no caller and is not recursive, and a
+/// lowercase constant's pattern and body names are both references to it.
+#[test]
+fn rust_pattern_names_never_invent_self_calls_or_hide_constant_reads() {
+    let scratch = Scratch::new(&[
+        (
+            "upper.rs",
+            "fn F(x: fn()) {\n    if let F = x { F(); }\n    while let F = x { F(); }\n    match x { F => F() }\n    \
+             match x { mut F => F() }\n    match x { ref F => F() }\n}\n",
+        ),
+        (
+            "lower.rs",
+            "const f: u8 = 1;\npub fn g(x: u8) {\n    match x { f => { f; }, _ => {} }\n    if let f = x { f; }\n    \
+             while let f = x { f; }\n    match x { f if f == 1 => {}, _ => {} }\n}\n",
+        ),
+    ]);
+
+    let callers = refs_json(&scratch, &["F", "--callers", "upper.rs"]);
+    assert!(rows(&callers, "occurrences").is_empty(), "{callers}");
+    assert!(rows(&callers, "name_only_suggestions").is_empty(), "{callers}");
+    let full = json_of(&scratch.stdout(&["--json-full", "symbols", "upper.rs"]));
+    let recursion: Vec<&Value> = full["indexes"][0]["symbols"]
+        .as_array()
+        .expect("symbols")
+        .iter()
+        .filter(|record| record["identity"]["name"] == "F")
+        .map(|record| &record["semantics"]["is_recursive"])
+        .collect();
+    assert_eq!(recursion, vec![&Value::from("Unknown")], "each call goes through a pattern local");
+
+    let constant = refs_json(&scratch, &["f", "lower.rs"]);
+    assert_eq!(
+        rows(&constant, "occurrences"),
+        vec![
+            row("Usage", "f", "3:15", "Scoped"),
+            row("Usage", "f", "3:22", "Scoped"),
+            row("Usage", "f", "4:12", "Scoped"),
+            row("Usage", "f", "4:20", "Scoped"),
+            row("Usage", "f", "5:15", "Scoped"),
+            row("Usage", "f", "5:23", "Scoped"),
+            row("Usage", "f", "6:15", "Scoped"),
+            row("Usage", "f", "6:20", "Scoped"),
+        ],
+        "every pattern and body `f` reads the constant: {constant}"
+    );
+}
+
+/// `hug symbols` lists no declaration for a pattern name that binds
+/// nothing (the rule `refs` follows): `Some(C)` reading a constant in
+/// `if let`, `while let` and `match`, a struct shorthand reading one, a
+/// refutable name an import may supply, and `Some` itself; `Some(x)` and
+/// `Some(C)` with no constant in view are locals, `Some(mut C)` binds but
+/// the locals query records no moded name.
+#[test]
+fn symbols_list_no_declaration_for_pattern_names_that_bind_nothing() {
+    let scratch = Scratch::new(&[
+        (
+            "reads.rs",
+            "const C: u8 = 1;\npub struct S {\n    pub C: u8,\n}\nmod m {\n    pub const D: u8 = 2;\n}\nuse m::D;\n\
+             pub fn g(x: Option<u8>, s: S) {\n    if let Some(C) = x {}\n    while let Some(C) = x {\n        break;\n    }\n    \
+             match x {\n        Some(C) => {}\n        Some(D) => {}\n        _ => {}\n    }\n    if let S { C } = s {}\n}\n",
+        ),
+        (
+            "binds.rs",
+            "pub fn h(x: Option<u8>) {\n    if let Some(y) = x {\n        y;\n    }\n    if let Some(C) = x {\n        C;\n    }\n    \
+             if let Some(mut M) = x {\n        M += 1;\n        M;\n    }\n}\n",
+        ),
+    ]);
+
+    let json = json_of(&scratch.stdout(&["--json", "symbols", "--all-scopes", "reads.rs", "binds.rs"]));
+    let mut listed: Vec<(String, String, u64)> = json["files"]
+        .as_array()
+        .expect("files")
+        .iter()
+        .flat_map(|file| file["symbols"].as_array().expect("symbols").clone())
+        .filter(|record| record["scope"] == "Local")
+        .map(|record| {
+            let file = record["source"]["file_path"].as_str().expect("file").to_string();
+            let name = record["identity"]["name"].as_str().expect("name").to_string();
+            (file, name, record["source"]["name_span"]["start"]["line"].as_u64().expect("line"))
+        })
+        .collect();
+    listed.sort();
+    let expected: Vec<(String, String, u64)> = [
+        ("binds.rs", "C", 5),
+        ("binds.rs", "x", 1),
+        ("binds.rs", "y", 2),
+        ("reads.rs", "s", 9),
+        ("reads.rs", "x", 9),
+    ]
+    .into_iter()
+    .map(|(file, name, line)| (file.to_string(), name.to_string(), line))
+    .collect();
+    assert_eq!(listed, expected, "{json}");
+}
+
 /// A named function or generator expression's own name is visible only
 /// inside the expression: its inner call is never a caller of the outer
 /// declaration of that name, and only the final outer call is established.
@@ -656,4 +755,475 @@ fn wrapped_and_command_calls_are_listed_as_calls() {
         rows(&callees, "occurrences"),
         vec![row("Call", "echo", "5:3", "Unresolved"), row("Call", "f", "6:3", "NameOnly")]
     );
+}
+
+/// A TypeScript instantiation expression (`f<number>` written apart from
+/// its call) is a call of its operand in both directions, behind every
+/// transparent wrapper; a member instantiated that way is a name-only
+/// suggestion, and an instantiation that is only a value or an argument is
+/// no call.
+#[test]
+fn instantiation_expression_calls_are_listed_as_calls() {
+    let scratch = Scratch::new(&[(
+        "generic.ts",
+        "function f<T>() { (f<number>)(); }\nclass W { m<T>() {} }\nclass C<T> {}\nfunction g(obj: W) {\n  ((f<number>))();\n  (f<number>)!();\n  (f<number> as () => void)();\n  (f<number> satisfies () => void)();\n  (<() => void>f<number>)();\n  new (C<number>)();\n  (obj.m<number>)();\n  const x = f<number>;\n  consume(f<number>);\n}\n",
+    )]);
+
+    let callers = refs_json(&scratch, &["f", "--callers", "generic.ts"]);
+    assert_eq!(
+        rows(&callers, "occurrences"),
+        vec![
+            row("Call", "f", "1:20", "Scoped"),
+            row("Call", "f", "5:5", "Scoped"),
+            row("Call", "f", "6:4", "Scoped"),
+            row("Call", "f", "7:4", "Scoped"),
+            row("Call", "f", "8:4", "Scoped"),
+            row("Call", "f", "9:16", "Scoped"),
+        ],
+        "the value and argument instantiations are usages: {callers}"
+    );
+
+    let callees = refs_json(&scratch, &["g", "--callees", "generic.ts"]);
+    assert_eq!(
+        rows(&callees, "occurrences"),
+        vec![
+            row("Call", "f", "5:5", "Scoped"),
+            row("Call", "f", "6:4", "Scoped"),
+            row("Call", "f", "7:4", "Scoped"),
+            row("Call", "f", "8:4", "Scoped"),
+            row("Call", "f", "9:16", "Scoped"),
+            row("Call", "C", "10:8", "Scoped"),
+            row("Call", "obj.m", "11:8", "NameOnly"),
+            row("Call", "consume", "13:3", "Unresolved"),
+        ]
+    );
+
+    let member = refs_json(&scratch, &["generic.ts#W.m", "generic.ts"]);
+    assert!(rows(&member, "occurrences").is_empty(), "{member}");
+    assert_eq!(rows(&member, "name_only_suggestions"), vec![row("Call", "obj.m", "11:8", "NameOnly")]);
+}
+
+/// Calling a Rust value (`Self::C()` with `const C: fn() = Self::f`) is
+/// listed as a call of the value, never of the function its initializer
+/// names, and the caller's own region is limited by `indirect_dispatch`, in
+/// JSON and text.
+#[test]
+fn value_calls_are_listed_against_the_value_with_limited_coverage() {
+    let scratch = Scratch::new(&[(
+        "values.rs",
+        "struct S;\nimpl S {\n    const C: fn() = Self::f;\n    fn f() { Self::C(); }\n}\n",
+    )]);
+    let value_id = declaration_id(&refs_json(&scratch, &["values.rs#S::C", "values.rs"]));
+    let id = declaration_id(&refs_json(&scratch, &["values.rs#S::f", "values.rs"]));
+
+    let callees = refs_json(&scratch, &["--id", &id, "--callees", "values.rs"]);
+    assert_eq!(rows(&callees, "occurrences"), vec![row("Call", "Self::C", "4:20", "Scoped")]);
+    assert_eq!(callees["files"][0]["occurrences"][0]["target"]["id"], value_id.as_str());
+    let coverage = callees["files"][0]["coverage"].as_array().expect("coverage");
+    let own: Vec<&Value> = coverage.iter().filter(|region| region["owner"]["id"] == id.as_str()).collect();
+    assert_eq!(own.len(), 1, "{coverage:?}");
+    assert_eq!(own[0]["state"], "Limited", "{coverage:?}");
+    assert_eq!(own[0]["reasons"], serde_json::json!(["indirect_dispatch"]), "{coverage:?}");
+
+    let text = scratch.stdout(&["refs", "--id", &id, "--callees", "values.rs"]);
+    assert!(text.contains("limited (indirect_dispatch)"), "{text}");
+}
+
+/// Only a direct `eval` may add a `var` to its function: after an
+/// optional (`eval?.(…)`) or tagged (``eval`…` ``) call, the nested
+/// self-call is an established caller row of the inner `f` (fresh and on
+/// a warm cache), `f` is recursive and `D` extends `Base`'s ID; after a
+/// direct `eval` there is no established row.
+#[test]
+fn optional_and_tagged_eval_keep_established_callers() {
+    let source = |statement: &str| {
+        format!(
+            "class Base {{}}\nfunction outer() {{\n    function f() {{\n        {statement}\n        class D extends Base {{}}\n        f();\n    }}\n}}\n"
+        )
+    };
+    let files = [
+        ("optional.js", source("eval?.(\"var f = 1\");"), true),
+        ("tagged.js", source("eval`var f = 1`;"), true),
+        ("optional.ts", source("(eval as any)?.(\"var f = 1\");"), true),
+        ("tagged.ts", source("(eval)`var f = 1`;"), true),
+        ("direct.js", source("eval(\"var f = 1\");"), false),
+        ("direct.ts", source("((eval))(\"var f = 1\");"), false),
+    ];
+    let scratch = Scratch::new(&files.iter().map(|(name, text, _)| (*name, text.as_str())).collect::<Vec<_>>());
+
+    for (file, _, binds_nothing) in &files {
+        let id = declaration_id(&refs_json(&scratch, &[&format!("{file}#outer.f"), file]));
+        for run in ["fresh", "warm"] {
+            let callers = refs_json(&scratch, &["--id", &id, "--callers", file]);
+            if *binds_nothing {
+                assert_eq!(rows(&callers, "occurrences"), vec![row("Call", "f", "6:9", "Scoped")], "{file} {run}: {callers}");
+                assert_eq!(callers["files"][0]["occurrences"][0]["target"]["id"], id.as_str(), "{file} {run}");
+                assert_eq!(callers["files"][0]["occurrences"][0]["owner"]["id"], id.as_str(), "{file} {run}");
+            } else {
+                assert!(rows(&callers, "occurrences").is_empty(), "{file} {run}: {callers}");
+            }
+            assert!(rows(&callers, "name_only_suggestions").is_empty(), "{file} {run}: {callers}");
+        }
+
+        let full = json_of(&scratch.stdout(&["--json-full", "symbols", file]));
+        let symbols = full["indexes"][0]["symbols"].as_array().expect("symbols");
+        let named = |name: &str| symbols.iter().find(|record| record["identity"]["name"] == name).expect("record");
+        let expected = if *binds_nothing { "Yes" } else { "Unknown" };
+        assert_eq!(named("f")["semantics"]["is_recursive"], expected, "{file}");
+        let base = &named("D")["relations"]["extends"][0];
+        if *binds_nothing {
+            assert_eq!(base["id"], named("Base")["id"], "{file}: {base}");
+        } else {
+            assert!(base["id"].is_null(), "{file}: {base}");
+        }
+    }
+}
+
+/// A cached entry whose written path for `Self::h()` was changed to
+/// `Other::h` is refused and recomputed, so the callees report shows the
+/// path the source writes, in text and JSON; the unedited entry is a hit
+/// with the same report.
+#[test]
+fn a_stored_written_path_the_source_does_not_write_is_recomputed() {
+    let scratch = Scratch::new(&[("paths.rs", "struct S;\nimpl S {\n    fn h() {}\n    fn f() { Self::h(); }\n}\n")]);
+    let id = declaration_id(&refs_json(&scratch, &["paths.rs#S::f", "paths.rs"]));
+    let entry = crate::cache_upgrade::only_entry(scratch.temp.path());
+    let written = crate::cache_upgrade::read_json(&entry);
+    let mut edited = written.clone();
+    let occurrence = edited["occurrences"]
+        .as_array_mut()
+        .expect("occurrences")
+        .iter_mut()
+        .find(|occurrence| occurrence["target"]["name"] == "h")
+        .expect("the `h` call");
+    assert_eq!(occurrence["target"]["qualified_name"], "Self::h");
+    occurrence["target"]["qualified_name"] = Value::String("Other::h".into());
+    let edited = serde_json::to_string(&edited).expect("serialize");
+
+    for format in [None, Some("--json")] {
+        std::fs::write(&entry, &edited).expect("write the edited entry");
+        let mut args: Vec<&str> = format.into_iter().collect();
+        args.extend(["--verbose", "refs", "--id", &id, "--callees", "paths.rs"]);
+        let output = scratch.hug(&args);
+        let stderr = stderr_of(&output);
+        assert!(
+            stderr.contains("inconsistent entry: an occurrence whose written path is not the source text ending at its name"),
+            "{format:?}: {stderr}"
+        );
+        assert!(stderr.contains("cache: 0 hits, 0 partial hits, 1 misses; parsed 1 files"), "{format:?}: {stderr}");
+        let stdout = stdout_of(output, &args);
+        assert!(!stdout.contains("Other::h"), "{format:?}: {stdout}");
+        if format.is_some() {
+            assert_eq!(rows(&json_of(&stdout), "occurrences"), vec![row("Call", "Self::h", "4:20", "Scoped")]);
+        } else {
+            assert!(stdout.lines().any(|line| line.trim_end().ends_with("Call Self::h 4:20")), "{stdout}");
+        }
+
+        // The recomputed entry is served unedited.
+        let warm = scratch.hug(&args);
+        assert!(stderr_of(&warm).contains("cache: 1 hits, 0 partial hits, 0 misses; parsed 0 files"));
+        assert_eq!(stdout_of(warm, &args), stdout);
+    }
+}
+
+/// A cached entry whose written path for `other::external()` was set to
+/// `null` (its stored start kept) is refused and recomputed, so the callees
+/// report keeps the path in text and JSON, never the bare `external`; the
+/// recomputed entry is then a hit with the same report.
+#[test]
+fn a_deleted_written_path_is_recomputed_for_callees() {
+    let scratch = Scratch::new(&[("lost.rs", "fn g() { other::external(); }\n")]);
+    refs_json(&scratch, &["g", "lost.rs"]);
+    let entry = crate::cache_upgrade::only_entry(scratch.temp.path());
+    let mut edited = crate::cache_upgrade::read_json(&entry);
+    let occurrence = edited["occurrences"]
+        .as_array_mut()
+        .expect("occurrences")
+        .iter_mut()
+        .find(|occurrence| occurrence["target"]["name"] == "external")
+        .expect("the `external` call");
+    assert_eq!(occurrence["target"]["qualified_name"], "other::external");
+    occurrence["target"]["qualified_name"] = Value::Null;
+    let edited = serde_json::to_string(&edited).expect("serialize");
+
+    for format in [None, Some("--json")] {
+        std::fs::write(&entry, &edited).expect("write the edited entry");
+        let mut args: Vec<&str> = format.into_iter().collect();
+        args.extend(["--verbose", "refs", "g", "--callees", "lost.rs"]);
+        let output = scratch.hug(&args);
+        let stderr = stderr_of(&output);
+        assert!(
+            stderr.contains("inconsistent entry: an occurrence whose written path disagrees with its stored start"),
+            "{format:?}: {stderr}"
+        );
+        assert!(stderr.contains("cache: 0 hits, 0 partial hits, 1 misses; parsed 1 files"), "{format:?}: {stderr}");
+        let stdout = stdout_of(output, &args);
+        if format.is_some() {
+            assert_eq!(rows(&json_of(&stdout), "occurrences"), vec![row("Call", "other::external", "1:17", "Unresolved")]);
+        } else {
+            assert!(stdout.lines().any(|line| line.contains("Call other::external 1:17")), "{stdout}");
+            assert!(!stdout.lines().any(|line| line.contains("Call external ")), "{stdout}");
+        }
+
+        let warm = scratch.hug(&args);
+        assert!(stderr_of(&warm).contains("cache: 1 hits, 0 partial hits, 0 misses; parsed 0 files"));
+        assert_eq!(stdout_of(warm, &args), stdout);
+    }
+}
+
+/// Callees and callers show the full written target (`R4-F1`): roots,
+/// right-nested and generic C++ paths, C# conditional receivers, PHP
+/// nullsafe receivers and namespaces, Perl package and receiver paths, in
+/// JSON and text. A rooted Rust self-call (`::f()`) is a name-only
+/// suggestion of the root function, never an established row, and the
+/// shadowing `let f` beside a rooted call has no row at all.
+#[test]
+fn callees_and_callers_show_the_full_written_target() {
+    let scratch = Scratch::new(&[
+        ("rooted.rs", "fn f() {\n    ::f();\n}\nfn g() {\n    let f = || {};\n    ::f();\n}\n"),
+        (
+            "paths.cpp",
+            "void g() {\n    ::f();\n    A::B::f();\n    r4::f<int>();\n    obj.template m<int>();\n    N::C<int>::member();\n}\n",
+        ),
+        (
+            "paths.cs",
+            "class W { public void F() {} public System.Action A; }\nclass G { void g(W obj) {\n    obj?.F();\n    obj?.A?.Invoke();\n    global::N.C.M();\n} }\n",
+        ),
+        ("paths.php", "<?php\nfunction g($o) {\n    $o?->m();\n    \\Ns\\f();\n}\n"),
+        ("paths.pl", "sub g {\n    R4::r4f();\n    R4->r4f();\n    $obj->r4f();\n}\n"),
+    ]);
+
+    let callees = |file: &str, name: &str| refs_json(&scratch, &[name, "--callees", file]);
+    type Row = (String, String, String, String);
+    // `(file, selector, callee rows)`.
+    let expected: &[(&str, &str, Vec<Row>)] = &[
+        ("rooted.rs", "rooted.rs#f", vec![row("Call", "::f", "2:7", "NameOnly")]),
+        ("rooted.rs", "rooted.rs#g", vec![row("Call", "::f", "6:7", "NameOnly")]),
+        (
+            "paths.cpp",
+            "g",
+            vec![
+                row("Call", "::f", "2:7", "Unresolved"),
+                row("Call", "A::B::f", "3:11", "Unresolved"),
+                row("Call", "r4::f", "4:9", "Unresolved"),
+                row("Call", "obj.template m", "5:18", "Unresolved"),
+                row("Call", "N::C<int>::member", "6:16", "Unresolved"),
+            ],
+        ),
+        (
+            "paths.cs",
+            "paths.cs#G.g",
+            vec![
+                row("Call", "obj?.F", "3:10", "NameOnly"),
+                row("Call", "obj?.A?.Invoke", "4:13", "Unresolved"),
+                row("Call", "global::N.C.M", "5:17", "Unresolved"),
+            ],
+        ),
+        (
+            "paths.php",
+            "g",
+            vec![row("Call", "$o?->m", "3:10", "Unresolved"), row("Call", "\\Ns\\f", "4:9", "Unresolved")],
+        ),
+        (
+            "paths.pl",
+            "g",
+            vec![
+                row("Call", "R4::r4f", "2:9", "Unresolved"),
+                row("Call", "R4->r4f", "3:9", "Unresolved"),
+                row("Call", "$obj->r4f", "4:11", "Unresolved"),
+            ],
+        ),
+    ];
+    for (file, name, rows_expected) in expected {
+        let json = callees(file, name);
+        assert_eq!(&rows(&json, "occurrences"), rows_expected, "{file} {name} fresh: {json}");
+        let args = ["--verbose", "--json", "refs", name, "--callees", file];
+        let warm = scratch.hug(&args);
+        let stderr = stderr_of(&warm);
+        assert!(stderr.contains("cache: 1 hits, 0 partial hits, 0 misses; parsed 0 files"), "{file}: {stderr}");
+        let json = json_of(&stdout_of(warm, &args));
+        assert_eq!(&rows(&json, "occurrences"), rows_expected, "{file} {name} warm: {json}");
+        let text = scratch.stdout(&["refs", name, "--callees", file]);
+        for (kind, written, at, _) in rows_expected {
+            let listed = format!("{kind} {written} {at}");
+            assert!(
+                text.lines().any(|line| {
+                    let line = line.trim_end();
+                    line.ends_with(&listed) || line.contains(&format!("{listed} —"))
+                }),
+                "{file} {name}: `{listed}` in {text}"
+            );
+        }
+    }
+
+    // The rooted calls suggest the root function only; nothing is
+    // established, and the local `let f` is never a target or candidate.
+    let callers = refs_json(&scratch, &["rooted.rs#f", "--callers", "rooted.rs"]);
+    assert!(rows(&callers, "occurrences").is_empty(), "{callers}");
+    assert_eq!(
+        rows(&callers, "name_only_suggestions"),
+        vec![row("Call", "::f", "2:7", "NameOnly"), row("Call", "::f", "6:7", "NameOnly")]
+    );
+    let local = refs_json(&scratch, &["rooted.rs#g::f", "rooted.rs"]);
+    assert!(rows(&local, "occurrences").is_empty(), "{local}");
+    assert!(rows(&local, "name_only_suggestions").is_empty(), "{local}");
+    let text = scratch.stdout(&["refs", "rooted.rs#g::f", "rooted.rs"]);
+    assert!(!text.contains("::f 6:7"), "{text}");
+
+    let full = json_of(&scratch.stdout(&["--json-full", "symbols", "rooted.rs"]));
+    let symbols = full["indexes"][0]["symbols"].as_array().expect("symbols");
+    let recursion = |name: &str| {
+        symbols
+            .iter()
+            .find(|record| record["identity"]["name"] == name && record["kind"] == "Function")
+            .map(|record| record["semantics"]["is_recursive"].clone())
+    };
+    assert_eq!(recursion("f"), Some(Value::String("Unknown".into())), "never a false `No`");
+    assert_eq!(recursion("g"), Some(Value::String("No".into())));
+}
+
+/// Invocation kinds in both directions (`R4-F2`): rooted wrapped calls,
+/// C# conditional member calls, PHP variable calls and dynamic
+/// construction, and Perl code-reference calls are listed as calls; PHP
+/// callable creation (`f(...)`) is no call, so it is absent from callees
+/// and callers and stays a usage in the default report. Cold and warm
+/// JSON, and text.
+#[test]
+fn invocation_kinds_decide_callees_callers_and_the_default_report() {
+    let scratch = Scratch::new(&[
+        ("rooted.rs", "fn f() {}\nfn g() {\n    (::f)();\n    ((::f))();\n}\n"),
+        ("rooted.cpp", "void f() {}\nvoid g() {\n    (::f)();\n    ((::f))();\n}\n"),
+        (
+            "calls.cs",
+            "class W { public void F() {} public void M<T>() {} public System.Action A; }\nclass G { void g(W obj) {\n    obj?.F();\n    obj?.M<int>();\n    obj?.A();\n    obj?.A?.Invoke();\n} }\n",
+        ),
+        (
+            "calls.php",
+            "<?php\nfunction f() {}\nfunction g($cb, $o, $args) {\n    f(...);\n    consume(f(...));\n    $o->m(...);\n    $cb(...);\n    $cb();\n    ($cb)();\n    new $C();\n    f(...$args);\n}\n",
+        ),
+        ("calls.pl", "sub g {\n    $cb->();\n    &$cb();\n    $cb->m();\n}\n"),
+    ]);
+    type Row = (String, String, String, String);
+    // `(file, selector, direction, key, rows)`.
+    let expected: Vec<(&str, &str, &str, &str, Vec<Row>)> = vec![
+        (
+            "rooted.rs",
+            "g",
+            "--callees",
+            "occurrences",
+            vec![row("Call", "::f", "3:8", "NameOnly"), row("Call", "::f", "4:9", "NameOnly")],
+        ),
+        (
+            "rooted.rs",
+            "f",
+            "--callers",
+            "name_only_suggestions",
+            vec![row("Call", "::f", "3:8", "NameOnly"), row("Call", "::f", "4:9", "NameOnly")],
+        ),
+        (
+            "rooted.cpp",
+            "g",
+            "--callees",
+            "occurrences",
+            vec![row("Call", "::f", "3:8", "NameOnly"), row("Call", "::f", "4:9", "NameOnly")],
+        ),
+        (
+            "calls.cs",
+            "calls.cs#G.g",
+            "--callees",
+            "occurrences",
+            vec![
+                row("Call", "obj?.F", "3:10", "NameOnly"),
+                row("Call", "obj?.M", "4:10", "NameOnly"),
+                row("Call", "obj?.A", "5:10", "NameOnly"),
+                row("Call", "obj?.A?.Invoke", "6:13", "Unresolved"),
+            ],
+        ),
+        (
+            "calls.cs",
+            "calls.cs#W.F",
+            "--callers",
+            "name_only_suggestions",
+            vec![row("Call", "obj?.F", "3:10", "NameOnly")],
+        ),
+        (
+            "calls.cs",
+            "calls.cs#W.A",
+            "--all",
+            "name_only_suggestions",
+            vec![row("Call", "obj?.A", "5:10", "NameOnly"), row("Usage", "obj?.A", "6:10", "NameOnly")],
+        ),
+        (
+            "calls.php",
+            "g",
+            "--callees",
+            "occurrences",
+            vec![
+                row("Call", "consume", "5:5", "Unresolved"),
+                row("Call", "cb", "8:6", "NameOnly"),
+                row("Call", "cb", "9:7", "NameOnly"),
+                row("Call", "C", "10:10", "Unresolved"),
+                row("Call", "f", "11:5", "NameOnly"),
+            ],
+        ),
+        (
+            "calls.php",
+            "f",
+            "--callers",
+            "name_only_suggestions",
+            vec![row("Call", "f", "11:5", "NameOnly")],
+        ),
+        (
+            "calls.php",
+            "f",
+            "--all",
+            "name_only_suggestions",
+            vec![
+                row("Usage", "f", "4:5", "NameOnly"),
+                row("Usage", "f", "5:13", "NameOnly"),
+                row("Call", "f", "11:5", "NameOnly"),
+            ],
+        ),
+        (
+            "calls.pl",
+            "g",
+            "--callees",
+            "occurrences",
+            vec![
+                row("Call", "$cb", "2:5", "Unresolved"),
+                row("Call", "$cb", "3:6", "Unresolved"),
+                row("Call", "$cb->m", "4:10", "Unresolved"),
+            ],
+        ),
+    ];
+    for (file, name, direction, key, rows_expected) in &expected {
+        let mut args = vec!["--verbose", "--json", "refs", name];
+        if *direction != "--all" {
+            args.push(direction);
+        }
+        args.push(file);
+        let cold = json_of(&scratch.stdout(&args));
+        assert_eq!(&rows(&cold, key), rows_expected, "{file} {name} {direction} cold: {cold}");
+        let warm = scratch.hug(&args);
+        let stderr = stderr_of(&warm);
+        assert!(stderr.contains("cache: 1 hits, 0 partial hits, 0 misses; parsed 0 files"), "{file}: {stderr}");
+        let warm = json_of(&stdout_of(warm, &args));
+        assert_eq!(&rows(&warm, key), rows_expected, "{file} {name} {direction} warm: {warm}");
+
+        let text_args: Vec<&str> = args.iter().copied().filter(|arg| !matches!(*arg, "--verbose" | "--json")).collect();
+        let text = scratch.stdout(&text_args);
+        for (kind, written, at, _) in rows_expected {
+            let listed = format!("{kind} {written} {at}");
+            assert!(
+                text.lines().any(|line| line.trim_end().ends_with(&listed) || line.contains(&format!("{listed} —"))),
+                "{file} {name} {direction}: `{listed}` in {text}"
+            );
+        }
+        // PHP callable creation (lines 4–7) is never a call row.
+        if *file == "calls.php" && *direction != "--all" {
+            for at in ["4:5", "5:13", "6:9", "7:6"] {
+                assert!(!text.contains(&format!(" {at}")), "{name} {direction}: `{at}` listed in {text}");
+            }
+        }
+    }
 }

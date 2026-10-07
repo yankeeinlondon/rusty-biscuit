@@ -16,6 +16,9 @@
 
 use tree_sitter::Node;
 
+use crate::shared::ProgrammingLanguage;
+use crate::analysis::occurrences::invoked_operand;
+
 use super::{ANY_CATEGORY, BindingRule, BindingSite, Dynamic, Placement, TYPE, VALUE};
 
 /// Scopes the vendored locals query lacks: generators, class static blocks,
@@ -53,16 +56,40 @@ fn is_with_body(node: Node<'_>) -> bool {
     })
 }
 
-/// A `with` body, or the function around a direct `eval(…)` call.
-pub(super) fn dynamic<'tree>(node: Node<'tree>, source: &str) -> Option<Dynamic<'tree>> {
+/// A `with` body, or the function around a direct `eval` call
+/// ([`is_direct_eval`]).
+pub(super) fn dynamic<'tree>(node: Node<'tree>, language: ProgrammingLanguage, source: &str) -> Option<Dynamic<'tree>> {
     if is_with_body(node) {
         return Some(Dynamic::Scope(node));
     }
-    let is_direct_eval = node.kind() == "call_expression"
-        && node
-            .child_by_field_name("function")
-            .is_some_and(|function| function.kind() == "identifier" && function.utf8_text(source.as_bytes()) == Ok("eval"));
-    is_direct_eval.then_some(Dynamic::FunctionOf(node))
+    is_direct_eval(node, language, source).then_some(Dynamic::FunctionOf(node))
+}
+
+/// Whether `node` is a direct `eval` call, the only call that can add a
+/// `var` to the function around it: an ordinary (not optional) call with an
+/// argument list whose callee is the identifier `eval`. A callee that only
+/// restates `eval` (`(eval)(…)`, TS `(eval as any)(…)`, `eval!`) keeps the
+/// call direct: the parentheses pass the reference through, and the
+/// type-only forms are erased. An optional call (`eval?.(…)`) is an indirect
+/// eval, which runs in the global scope, and a tagged template (``eval`…` ``)
+/// passes a strings array, which `eval` returns unevaluated; neither can
+/// bind a name here. Binding placement and coverage both read this.
+pub(crate) fn is_direct_eval(node: Node<'_>, language: ProgrammingLanguage, source: &str) -> bool {
+    if node.kind() != "call_expression"
+        || node.child_by_field_name("arguments").is_none_or(|arguments| arguments.kind() != "arguments")
+    {
+        return false;
+    }
+    // JavaScript writes `?.` as an `optional_chain` node, TypeScript as an
+    // anonymous token.
+    let mut cursor = node.walk();
+    if node.children(&mut cursor).any(|child| matches!(child.kind(), "optional_chain" | "?.")) {
+        return false;
+    }
+    node.child_by_field_name("function").is_some_and(|function| {
+        let function = invoked_operand(function, language);
+        function.kind() == "identifier" && function.utf8_text(source.as_bytes()) == Ok("eval")
+    })
 }
 
 /// The scopes a `var` belongs to.
