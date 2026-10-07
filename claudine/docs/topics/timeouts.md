@@ -744,6 +744,20 @@ Valid UTF-8 raw bytes serialize as a string; invalid UTF-8 uses
 `{ "encoding": "base64", "data": "…" }` with standard padded base64.
 Raw truncation reports omitted observed bytes, never unread pipe data.
 
+The retained fields describe independent facts:
+
+| Field | Unavailable | Available but incomplete | Complete |
+|---|---|---|---|
+| `response_text` / `response_complete` | Both null until an answer is identified | Original answer prefix with `false`, including clipped UTF-8 text | Identified answer with `true`; an empty answer is `""` |
+| `raw_output` / `raw_output_complete` | Both null before bytes or EOF are observed | Exact byte prefix with `false`; invalid UTF-8 is base64 | EOF observed and no bytes omitted |
+| `raw_output_truncated` | `false` | `true` only when observed bytes exceed the inline limit | `false` |
+| `raw_output_path` | Null when capture is disabled or unavailable | Existing opt-in capture file; its presence does not prove completeness | Capture envelopes still omit original delimiters |
+
+A Codex last-message file can identify answer text, but cannot establish a
+provider verdict. An answer may therefore be complete while the transaction
+remains unconfirmed. A complete raw stream also does not imply success: the
+provider's verdict and native exit determine the outcome.
+
 At reader cutoff, retained data and operation observations freeze. Late reader
 activity cannot change that snapshot or submit events to a finished run.
 Reader and settlement operations use coherent atomic tag/time pairs with
@@ -761,15 +775,19 @@ coverage. Frozen flags stay conservative if a detached reader later writes.
 Reader warnings report waiting for pipe data or unfinished cleanup. They do
 not infer which process holds a pipe or why processing has stalled. Populated
 lifecycle diagnostics remain planned below; the frozen observations are
-currently carried by the execution result. Stdout settlement now selects
+currently carried by the execution result. They are not yet persisted as a
+populated diagnostic in the session record or exposed through `err.detail`.
+Stdout settlement now selects
 `claudine_completion_delayed` only for native exit 0 without a published
 verdict or stronger failure. `stream_reader_timeout` remains a subordinate
 reader identity, never the primary stdout summary error.
 
-The direct wrapper still projects the native exit without the semantic
-failure flag. Consequently its caller can receive exit 0 for an unconfirmed
-verdict, although the settled summary is failed. Caller projection and
-populated diagnostic transport still need implementation.
+The direct structured wrapper returns caller exit 1 when the settled summary
+is failed but the provider exited 0. Native exit evidence remains 0 in the
+summary and session record. Confirmed success with unfinished presentation
+still returns 0, so a shell chain such as `claudine claude review && echo next`
+continues only after a successful outcome. Populated diagnostic transport
+remains planned.
 
 ### Planned: delayed Claudine completion
 
@@ -781,17 +799,18 @@ confirmed provider completion verdict and native exit is 0. The typed
 leave nonempty answer text while its completion record remains unprocessed;
 that condition will carry the available answer instead of claiming a panic.
 
-A parsed successful completion plus native exit 0 will continue to return
-success when only presentation is unfinished. A genuine provider failure,
-nonzero exit, interruption, or actual reader panic will retain its primary
-outcome. Answer prose mentioning an error will not itself establish failure.
+A parsed successful completion plus native exit 0 returns success when only
+presentation is unfinished. A genuine provider failure, nonzero exit,
+interruption, or actual reader panic retains its primary outcome. Answer
+prose mentioning an error does not itself establish failure.
 
 The planned diagnostic will expose available answer text and retained raw
 provider output separately, with completeness/truncation flags, the native
 exit code, cleanup timing, and the last observed Claudine operation. Raw output
-may be JSONL; unread bytes cannot be presented as a complete response. CPU
-observations will be supporting evidence when available and will not select
-the deadline. The existing 120 s processing budget will remain unchanged.
+may be JSONL; unread bytes cannot be presented as a complete response. Whether
+to include CPU information in the diagnostic contract remains undecided; no
+CPU utilization is sampled. CPU information cannot select the deadline or
+establish the cause. The existing 120 s processing budget is unchanged.
 
 Authors will handle this condition through the existing failure/finalize
 diagnostic interface. Printing a retained answer will not convert an

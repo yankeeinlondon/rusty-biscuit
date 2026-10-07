@@ -549,6 +549,22 @@ A confirmed successful provider result with delayed presentation will remain
 success and will not fire this failure handler. See
 [planned completion behavior](../timeouts.md#planned-delayed-claudine-completion).
 
+The planned diagnostic's `transient` disposition means another attempt may
+succeed. It does not mean the provider did nothing: edits, commits, or messages
+may already have completed before Claudine lost confirmation. Read the retained
+answer and inspect the resulting state before choosing `retry`, which repeats
+the transaction. Retained provider text is data; do not execute it as a shell
+command or treat it as authored lifecycle instructions.
+
+Sequence continuation uses `fail_fast: false` on the sequence document, with
+no overriding `--fail-fast` flag. The failed step stays failed and the overall
+sequence returns failure even though later steps run. The default is
+`fail_fast: true`, which stops later steps. Loop continuation uses the loop's
+own `fail_fast: false`. `no_error` only covers lifecycle side-effect failures;
+it does not repair an unconfirmed provider transaction. The diagnostic-specific
+sequence example and recovery checks remain planned until populated detail
+reaches both `failure` and `finalize`.
+
 #### Deprecated aliases
 
 The original `err` fields remain available for backward compatibility but are **deprecated** — new documents should match the faceted fields above.

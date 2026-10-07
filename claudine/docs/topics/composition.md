@@ -1514,6 +1514,17 @@ Recovery is expressed through the lifecycle stacks, not a separate handler DSL. 
 
 See [Flow Control](flow-control/flow-control.md) for the full recovery-action reference and the [migration table](#migrating-from-the-retired-harness-dsl) for the mapping from the removed `handle_*` keys.
 
+**Planned completion-delay handling:** a provider may have finished its work
+while Claudine still lacks a confirmed completion verdict. The internal
+`claudine_completion_delayed` outcome exists, but its populated lifecycle
+diagnostic is not yet available. The planned
+[lifecycle contract](flow-control/lifecycle.md#planned-delayed-completion-diagnostic)
+lets a handler inspect retained response data before choosing recovery.
+`retry` repeats the provider transaction, including side effects that may
+already have happened. Printing an answer will not make the failed step
+successful. To run later sequence steps while retaining a failed step, use
+`fail_fast: false`; the sequence still exits with failure.
+
 ### Shell Policy
 
 All shell commands — `::shell` directives in the template, top-level frontmatter `$(cmd)` expressions, and lifecycle `shell` stack actions — are approved upfront during the pre-flight phase, before the provider session starts. Each is approved with the bytes it will execute with, including a command in a transcluded partial that interpolates a value its parent supplies. A later preparation with different state — a `proxy` target, a `retry` or `resume`, a loop iteration — audits the commands that state produces; after the first attempt that audit is deny-only, so an approval never covers a changed command. See [Pre-Flight Shell Approval](pre-flight-checks.md) for the full flow. A command in a transcluded partial that fails without a fallback fails the composition exactly as it would written inline, so moving facts into a shared partial never lets a stage launch without them (see [Block Transclusion](../../../darkmatter/docs/transclusion/block-transclusion.md#when-an-included-file-fails)).
