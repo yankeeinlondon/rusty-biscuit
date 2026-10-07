@@ -4,7 +4,7 @@ name: archive-key-helper
 spec: 2026-10-06-archive-key-helper
 total_phases: 4
 created: 2026-10-06
-phase: 1
+phase: 3
 agent: claude/sonnet
 yolo: true
 source_files_during_phase_1:
@@ -14,8 +14,23 @@ source_files_during_phase_1:
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - .github/workflows/_package-ci.yml
+  - scripts/cross-check.sh
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+  - .claude/skills/os/windows.md
+  - .claude/skills/os/SKILL.md
+source_files_during_phase_3:
+  - tools/test-toolkit/tests/ci_workflow_contracts.rs
+  - scripts/ci/test_cross_check.py
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
 packages:
   - repo-deps
+  - test-toolkit
 ---
 
 # Plan: archive consumers reuse the shipped build-key helper
@@ -146,7 +161,7 @@ isolation must be in place before the binding is safe in measured gates).
 
 ### Wave 2 (parallel — disjoint files)
 
-- [ ] **Gate binding** — `.github/workflows/_package-ci.yml`, `test` job
+- [x] **Gate binding** — `.github/workflows/_package-ci.yml`, `test` job
   `gate` step only:
     - add step env `ARCHIVE_KEY_HELPER: ${{ steps.verified.outputs.key_helper }}`
       beside `ARCHIVE_WORKSPACE` (~line 760)
@@ -156,14 +171,14 @@ isolation must be in place before the binding is safe in measured gates).
     - do not touch the `expected` step (~line 697–727) or native branches
     - extend the archive-branch comment to name the planner key helper as
       another unintended build avoided
-- [ ] **Cross-check Unix** — `scripts/cross-check.sh` `unix_run_archive`
+- [x] **Cross-check Unix** — `scripts/cross-check.sh` `unix_run_archive`
   step 7 (~line 662): add `export BISCUIT_CI_BUILD_BIN="\$consume/build/tools/ci-build"`
   after verification, before `just _test`; verify the `\$` escape disappears
   in the generated script and spaces stay quoted
-- [ ] **Cross-check Windows** — `windows_run_archive` (~line 862): add
+- [x] **Cross-check Windows** — `windows_run_archive` (~line 862): add
   `\$env:BISCUIT_CI_BUILD_BIN = "\$consume\\build\\tools\\ci-build.exe"`
   next to `BISCUIT_NEXTEST_BIN`; native mode unchanged
-- [ ] **OS skill fact** — `.claude/skills/os/windows.md` ("Environment and
+- [x] **OS skill fact** — `.claude/skills/os/windows.md` ("Environment and
   processes") and a matching row in `.claude/skills/os/SKILL.md` symptom
   table: BUILD_WIN SSH sessions resolve `python3`/`python` to WindowsApps
   Store aliases ahead of the real interpreter; `--version` fails; tests
@@ -174,14 +189,14 @@ isolation must be in place before the binding is safe in measured gates).
 
 ### Checkpoint 2
 
-- [ ] `bash -n scripts/cross-check.sh` clean; workflow YAML parses
+- [x] `bash -n scripts/cross-check.sh` clean; workflow YAML parses
       (`python3 -c 'import yaml…'` or the repo's workflow lint)
 
 ## Phase 3: Contracts, then end-to-end evidence
 
 ### Wave 3 (parallel — disjoint files)
 
-- [ ] **Workflow contracts** —
+- [x] **Workflow contracts** —
   `tools/test-toolkit/tests/ci_workflow_contracts.rs` (load `rust-testing`
   skill first; follow the suite's existing helpers):
     - `gate` knob list gains `export BISCUIT_CI_BUILD_BIN="$ARCHIVE_KEY_HELPER"`
@@ -195,7 +210,7 @@ isolation must be in place before the binding is safe in measured gates).
     - update the no-Cargo contract doc comment: runner setup vs. deliberate
       Cargo calls in `requires-toolchain` tests; name the planner key helper
       as another unintended build this binding prevents
-- [ ] **Generated-script tests** — `scripts/ci/test_cross_check.py`:
+- [x] **Generated-script tests** — `scripts/ci/test_cross_check.py`:
     - Unix archive sequence test (Linux, macOS, WSL simulated hosts): quoted
       `BISCUIT_CI_BUILD_BIN` binding present; ordering
       verification → binding → test recipe; no leftover `\$` escapes
@@ -205,17 +220,17 @@ isolation must be in place before the binding is safe in measured gates).
 
 ### Checkpoint 3 (negative checks, AC3 — local, no remote builds)
 
-- [ ] remove gate binding → workflow contract fails → restore
-- [ ] remove gate export → workflow contract fails → restore
-- [ ] remove `key_helper=` output from the recipe → native-path contract
+- [x] remove gate binding → workflow contract fails → restore
+- [x] remove gate export → workflow contract fails → restore
+- [x] remove `key_helper=` output from the recipe → native-path contract
       fails → restore
-- [ ] `just test test-toolkit` and
+- [x] `just test test-toolkit` and
       `python3 -m unittest scripts/ci/test_build_key.py scripts/ci/test_cross_check.py`
       green (record counts)
 
 ### Wave 4 (sequential — needs a build host)
 
-- [ ] **Focused Windows archive run** (AC5/AC6):
+- [x] **Focused Windows archive run** (AC5/AC6):
     - decide test target per ruling 5:
       `just cross-check test-toolkit --os windows the_shipped_planner`, else
       `just cross-check repo-deps --os windows the_real_planners_plan_rolls_up`

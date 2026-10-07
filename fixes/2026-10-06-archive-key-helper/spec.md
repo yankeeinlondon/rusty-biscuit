@@ -14,7 +14,7 @@ clarified: false
 implemented: false
 human_review: false
 message_to_agent: |-
-  Phase 1 done: `key_helper` output exists in _ci_build_verify and planned_keys isolates wrapper mode. Gate/cross-check bindings can now be added safely.
+  Phase 3 done: workflow contracts, generated-script tests, negative checks, and the Windows evidence run (AC5/AC6) are complete; temporary diagnostics removed and `build_key.py` has no diff against HEAD. Phase 4 is docs only: CI README, docs/topics/ci-cd.md, rust-devops ci-cd.md skill, and a drift pass. Measured facts for wording: on native Windows the planner ran `<consume>\build\tools\ci-build.exe` as its key helper (three calls, no Cargo); `the_real_planners_plan_rolls_up` took 4.8 s with a real Python; the `the_shipped_planner_*` guard tests no longer exist. Note BUILD_WIN needs a real Python on PATH or planner tests skip and PASS in 0.3 s.
 $schema:
   status: |-
     enum(
