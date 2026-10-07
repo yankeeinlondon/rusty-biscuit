@@ -111,9 +111,13 @@ scenario directories and the compiled fake completion provider. Stdout
 settlement selects `claudine_completion_delayed` for native exit 0
 without a verdict, `exit_failure` for native failure, and `interrupted` for
 exit 130; reader timeouts remain subordinate warnings. Published answer/session
-data survives a native failure. Typed completion-delay diagnostics, populated
-lifecycle transport, and the direct wrapper caller projection remain planned;
-the diagnostic field contract still awaits the author's CPU ruling. See
+data survives a native failure. Typed completion-delay diagnostics and populated
+lifecycle transport remain planned: the frozen execution observation is not
+yet a populated session diagnostic or author-visible `err.detail`. Do not
+publish a runnable retained-response recovery example until that transport
+and its sequence policy tests land. Direct structured wrappers project semantic
+failure/native exit 0 to caller exit 1 while retaining native evidence.
+The diagnostic field contract still awaits the author's CPU ruling. See
 [Timeouts](topics/timeouts.md#completion-observations-and-retained-prefixes).
 
 The **local control plane** is platform-native and per stable OS user: a Unix-domain socket on macOS/Linux/WSL, a Windows named pipe on native Windows, qualified by the effective UID or process-token SID from `sniff::os::current_user_id()` — never a username. One portable `spawn_local_server` binds it to a transport-neutral daemon built exactly once. Read `claudine/docs/rendezvous/local-ipc.md` before changing endpoint, daemon-boot, or connector behavior; see [architecture.md](architecture.md) → Rendezvous Package-Area Family for the crate roles, the local-IPC rules, and the `SessionLogManager` module boundary.
