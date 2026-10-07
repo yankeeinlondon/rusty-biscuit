@@ -121,7 +121,7 @@ fn assert_cell(label: &str, (summary, warned): (StreamExecutionSummary, bool), w
 }
 
 fn leak(kind: &str) -> &'static str {
-    ["stream_reader_timeout", "parse_failure", "api_remote", "no_result", "exit_failure", "timeout"]
+    ["claudine_completion_delayed", "interrupted", "parse_failure", "api_remote", "no_result", "exit_failure", "timeout"]
         .into_iter()
         .find(|known| *known == kind)
         .unwrap_or_else(|| panic!("unexpected error kind {kind}"))
@@ -131,10 +131,10 @@ fn leak(kind: &str) -> &'static str {
 fn a_reader_stalled_before_handing_back_its_parser_never_turns_a_run_into_success() {
     let wanted: [Cell; 6] = [
         (0, None, true),
-        (0, Some("stream_reader_timeout"), true),
+        (0, Some("claudine_completion_delayed"), true),
         (0, Some("api_remote"), true),
-        (2, Some("stream_reader_timeout"), true),
-        (130, Some("stream_reader_timeout"), true),
+        (2, Some("exit_failure"), true),
+        (130, Some("interrupted"), true),
         (1, Some("timeout"), true),
     ];
     for stall in [ReaderStall::Processing, ReaderStall::PipeOpen] {

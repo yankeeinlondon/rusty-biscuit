@@ -235,6 +235,7 @@ impl SemanticEventSink for LiveSemanticSink {
         //    zero or more emission units (empty = silent / verbosity-gated);
         //    each unit is routed to its section exactly as the previous
         //    per-arm `emit_section_line` calls did.
+        run_scope::observe(run_scope::observation::Operation::RenderComputation);
         let units = self.renderer.render(&event, &self.terminal, self.verbosity);
         for unit in units {
             self.emit_section_line(super::section_for(unit.class), &unit.text);
@@ -249,10 +250,15 @@ impl SemanticEventSink for LiveSemanticSink {
         let agentic = Self::to_agentic(&event);
         let log_agentic = agentic.unwrap_or(AgenticEvent::Notification);
         let meta = self.dispatch_meta(&event, log_agentic);
+        if run_scope::current_closed() { return; }
         if let Some(emit_log) = self.emit_event_log.as_ref() {
+            run_scope::observe(run_scope::observation::Operation::SemanticLogging);
             emit_log(&event, &meta);
         }
+        // A logger admitted before cutoff may resume after the run settled.
+        if run_scope::current_closed() { return; }
         if let Some(agentic) = agentic {
+            run_scope::observe(run_scope::observation::Operation::HookCallback);
             (self.dispatch)(agentic, meta);
         }
     }

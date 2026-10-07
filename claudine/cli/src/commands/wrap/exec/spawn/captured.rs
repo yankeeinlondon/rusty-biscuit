@@ -294,6 +294,7 @@ pub(crate) fn run_child_capture(
     );
 
     Ok(ProcessResult {
+        completion_observation: None,
         data: CapturedChildOutput {
             exit_code,
             stdout,

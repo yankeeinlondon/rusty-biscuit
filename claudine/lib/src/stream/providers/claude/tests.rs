@@ -1123,3 +1123,20 @@ fn a_padded_terminal_status_reaches_the_summary_byte_for_byte() {
         vec![Some("  Evaporated  ".to_string()), Some("  stopped ".to_string())]
     );
 }
+
+#[test]
+fn original_answer_observation_precedes_display_newline_normalization() {
+    struct OriginalAnswer(String);
+    impl SemanticEventSink for OriginalAnswer {
+        fn on_response_text(&mut self, text: &str) { self.0.push_str(text); }
+        fn on_semantic_event(&mut self, event: SemanticEvent) {
+            if let SemanticEvent::OutputText { text, .. } = event {
+                assert_eq!(self.0, "original answer");
+                assert_eq!(text, "original answer\n");
+            }
+        }
+    }
+    let mut parser = ClaudeSemanticStreamParser::new(OriginalAnswer(String::new()));
+    parser.feed_line(r#"{"type":"assistant","message":{"content":[{"type":"text","text":"original answer"}]}}"#);
+    assert_eq!(parser.snapshot(0).assistant_text, "original answer");
+}

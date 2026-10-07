@@ -329,6 +329,7 @@ pub(crate) fn run_kimi_wire_session(
         .as_ref()
         .and_then(super::super::termination::early_termination_guard_context);
     Ok(ProcessResult {
+        completion_observation: None,
         data: summary,
         termination,
         telemetry: ProcessTelemetry {

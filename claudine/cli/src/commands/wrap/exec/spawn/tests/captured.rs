@@ -122,7 +122,7 @@ fn a_held_open_capture_pipe_keeps_the_partial_buffer_and_warns() {
     assert_eq!(warnings.len(), 1, "{warnings:?}");
     assert!(warnings[0].contains("agent's stdout"), "{}", warnings[0]);
     assert!(
-        warnings[0].contains("held by a process the agent started"),
+        warnings[0].contains("waiting for pipe data"),
         "{}",
         warnings[0]
     );
@@ -167,7 +167,7 @@ fn capture_readers_report_panics_apart_from_timeouts() {
         "Stream stdout reader thread panicked: reader exploded"
     );
     assert!(warnings[1].contains("agent's stderr"), "{}", warnings[1]);
-    assert!(warnings[1].contains("pipe is still open"), "{}", warnings[1]);
+    assert!(warnings[1].contains("waiting for pipe data"), "{}", warnings[1]);
 
     let (_, warnings) = join_captures(
         [

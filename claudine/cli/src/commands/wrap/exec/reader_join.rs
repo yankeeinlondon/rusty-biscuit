@@ -4,9 +4,8 @@
 //! handling every line, so the wait for it must be bounded: a process the
 //! provider started can inherit the pipe and hold it open indefinitely (see
 //! `kill_process_group`). But a reader that is not waiting on its pipe is
-//! still working through output it already has, typically writing it to a
-//! terminal that is slow to drain, and cutting that off turns a successful run
-//! into a failure. [`join_reader`] therefore applies the short cap only while
+//! still working through output it already has. A processing stall does not
+//! identify its cause; confirmed provider outcomes survive a cleanup cutoff. [`join_reader`] therefore applies the short cap only while
 //! the reader is blocked reading its pipe.
 
 use std::any::Any;
@@ -44,7 +43,7 @@ pub(crate) const READER_DRAIN_LIMIT: Duration = Duration::from_secs(120);
 // reader between two buffered lines is briefly "waiting" too. Without this a
 // reader that had just finished a slow line would be cut off at the first
 // poll that caught it between lines. A quarter second of continuous blocking
-// after the child exited means nothing is left to read.
+// after the child exited avoids treating a brief buffered pull as a stall.
 pub(crate) const READER_PIPE_SETTLE: Duration = Duration::from_millis(250);
 
 const POLL: Duration = Duration::from_millis(10);
@@ -122,7 +121,12 @@ impl ReaderProgress {
         TrackedLines {
             lines,
             progress: self.clone(),
+            observation: None,
         }
+    }
+
+    pub(crate) fn track_observed<I: Iterator>(&self, lines: I, scope: super::super::run_scope::RunScope, stderr: bool) -> TrackedLines<I> {
+        TrackedLines { lines, progress: self.clone(), observation: Some((scope, stderr)) }
     }
 
     fn mark_waiting(&self) {
@@ -155,14 +159,23 @@ impl ReaderProgress {
 pub(crate) struct TrackedLines<I> {
     lines: I,
     progress: ReaderProgress,
+    observation: Option<(super::super::run_scope::RunScope, bool)>,
 }
 
 impl<I: Iterator> Iterator for TrackedLines<I> {
     type Item = I::Item;
 
     fn next(&mut self) -> Option<I::Item> {
+        use super::super::run_scope::observation::Operation;
+        let observe = |operation| {
+            if let Some((scope, stderr)) = &self.observation {
+                if *stderr { scope.observe_stderr(operation); } else { scope.observe_stdout(operation); }
+            }
+        };
         self.progress.mark_waiting();
+        observe(Operation::PipeWait);
         let next = self.lines.next();
+        observe(if next.is_some() { Operation::RecordProcessing } else { Operation::Eof });
         self.progress.store(if next.is_some() {
             PROCESSING
         } else {
@@ -263,7 +276,8 @@ impl ReaderStream {
 /// A reader that did not finish cleanly, as every spawn path reports it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ReaderFailure {
-    /// `parse_failure` for a panic, `stream_reader_timeout` for a timeout.
+    /// Reader identity only; stdout settlement selects the primary run outcome.
+    /// Timeouts remain subordinate `stream_reader_timeout` observations.
     pub(crate) error_kind: &'static str,
     pub(crate) message: String,
 }
@@ -313,13 +327,12 @@ pub(crate) fn timeout_message(stream: &str, stall: ReaderStall, budget: ReaderBu
     match stall {
         ReaderStall::PipeOpen => format!(
             "Claudine stopped waiting for the agent's {stream} {}s after the agent exited: \
-             the pipe is still open, most likely held by a process the agent started",
+             the reader is waiting for pipe data",
             budget.pipe_cap.as_secs()
         ),
         ReaderStall::Processing => format!(
             "Claudine stopped waiting for the agent's {stream} {}s after the agent exited: \
-             it was still being processed, most likely because the terminal was not \
-             accepting output",
+             a Claudine cleanup operation remains unfinished",
             budget.drain_limit.as_secs()
         ),
     }
@@ -362,8 +375,9 @@ impl SemanticStreamParser for FallbackParser {
 ///   0, and kept with the real exit code when it is a failure;
 /// - otherwise a terminal error (from a stderr bridge) is kept as the run's
 ///   error;
-/// - anything else is an incomplete stream. No result is invented from lines
-///   the reader never parsed.
+/// - a native failure keeps `exit_failure` (or `interrupted` for exit 130);
+/// - native exit 0 without a verdict is `claudine_completion_delayed`. No
+///   result is invented from lines the reader never parsed.
 ///
 /// A panic stays a `parse_failure`. Early terminations (provider timeout, rate
 /// limit) and the termination label are applied by the caller afterward, so a
@@ -407,10 +421,14 @@ pub(crate) fn settle_parser(
                 );
                 return (parser, Some(warning));
             }
-            if let Some(summary) = &snapshot.summary
-                && (exit_code == 0 || summary.is_error)
-            {
+            if let Some(summary) = &snapshot.summary {
                 let mut summary = summary.clone();
+                if !summary.is_error && exit_code != 0 {
+                    let (kind, message) = native_failure(exit_code);
+                    summary.is_error = true;
+                    summary.error_kind = Some(kind.into());
+                    summary.error_message = Some(message);
+                }
                 let kept = if summary.is_error {
                     "The provider's error is kept"
                 } else {
@@ -426,11 +444,24 @@ pub(crate) fn settle_parser(
                 let warning = format!("{}. The provider's error is kept", failure.message);
                 return (failed_with(exit_code, kind.clone(), message.clone()), Some(warning));
             }
-            (
-                failed(exit_code, failure.error_kind, failure.message.clone()),
-                Some(failure.message),
-            )
+            let (kind, message) = if exit_code != 0 {
+                native_failure(exit_code)
+            } else {
+                (
+                    "claudine_completion_delayed",
+                    "Claudine's cleanup deadline expired; the provider completion verdict remains unconfirmed".into(),
+                )
+            };
+            (failed(exit_code, kind, message), Some(failure.message))
         }
+    }
+}
+
+fn native_failure(exit_code: i32) -> (&'static str, String) {
+    if exit_code == 130 {
+        ("interrupted", "The provider was interrupted".into())
+    } else {
+        ("exit_failure", format!("The provider exited with code {exit_code}"))
     }
 }
 

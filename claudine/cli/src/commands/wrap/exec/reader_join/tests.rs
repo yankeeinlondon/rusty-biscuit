@@ -71,14 +71,12 @@ fn a_reader_blocked_on_its_pipe_past_the_cap_times_out_rather_than_panicking() {
     );
     let (parser, warning) = settle_parser(outcome, &empty_slot(), 0, BUDGET, &ResultSnapshot::default());
     let summary = parser.finish(0);
-    assert_eq!(summary.error_kind.as_deref(), Some("stream_reader_timeout"));
+    assert_eq!(summary.error_kind.as_deref(), Some("claudine_completion_delayed"));
     let message = summary.error_message.expect("a timeout explains itself");
     assert!(!message.contains("panicked"), "{message}");
-    assert!(
-        message.contains("held by a process the agent started"),
-        "{message}"
-    );
-    assert_eq!(warning.as_deref(), Some(message.as_str()));
+    assert!(message.contains("cleanup deadline expired"), "{message}");
+    assert!(message.contains("verdict remains unconfirmed"), "{message}");
+    assert!(warning.unwrap().contains("waiting for pipe data"));
     drop(held_open);
 }
 
@@ -238,8 +236,8 @@ fn reader_failure_names_each_outcome_with_the_same_wording_for_every_stream() {
     );
 
     for (stall, expected) in [
-        (ReaderStall::PipeOpen, "pipe is still open"),
-        (ReaderStall::Processing, "terminal was not accepting output"),
+        (ReaderStall::PipeOpen, "waiting for pipe data"),
+        (ReaderStall::Processing, "cleanup operation remains unfinished"),
     ] {
         let timed_out: JoinOutcome<()> = JoinOutcome::TimedOut(stall);
         let failure = reader_failure(ReaderStream::Stdout, &timed_out, BUDGET).unwrap();
@@ -309,7 +307,7 @@ fn a_stalled_reader_with_no_published_result_is_an_incomplete_stream() {
 
     let summary = parser.finish(0);
     assert!(summary.is_error);
-    assert_eq!(summary.error_kind.as_deref(), Some("stream_reader_timeout"));
+    assert_eq!(summary.error_kind.as_deref(), Some("claudine_completion_delayed"));
     assert!(warning.is_some());
 }
 
@@ -325,7 +323,7 @@ fn a_published_successful_summary_does_not_turn_a_nonzero_exit_into_success() {
 
     let summary = parser.finish(2);
     assert!(summary.is_error);
-    assert_eq!(summary.error_kind.as_deref(), Some("stream_reader_timeout"));
+    assert_eq!(summary.error_kind.as_deref(), Some("exit_failure"));
     assert_eq!(summary.exit_code, 2);
 }
 
@@ -354,4 +352,28 @@ fn reader_warnings_are_queued_not_written_by_the_settling_thread() {
     assert_eq!(written.len(), 1, "{written:?}");
     assert_eq!(written[0].0, Stream::Stderr);
     assert!(String::from_utf8_lossy(&written[0].1).contains("the reader timed out"));
+}
+
+#[test]
+fn native_failure_after_a_published_success_keeps_the_answer_and_session() {
+    let snapshot = ResultSnapshot {
+        summary: Some(StreamExecutionSummary {
+            assistant_text: "review-answer".into(),
+            session_id: Some("session-1".into()),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    for (exit_code, kind) in [(1, "exit_failure"), (2, "exit_failure"), (130, "interrupted"), (137, "exit_failure")] {
+        for stall in [ReaderStall::PipeOpen, ReaderStall::Processing] {
+            let (parser, warning) = settle_parser(JoinOutcome::TimedOut(stall), &empty_slot(), exit_code, BUDGET, &snapshot);
+            let summary = parser.finish(exit_code);
+            assert!(summary.is_error);
+            assert_eq!(summary.exit_code, exit_code);
+            assert_eq!(summary.error_kind.as_deref(), Some(kind));
+            assert_eq!(summary.assistant_text, "review-answer");
+            assert_eq!(summary.session_id.as_deref(), Some("session-1"));
+            assert!(warning.is_some());
+        }
+    }
 }

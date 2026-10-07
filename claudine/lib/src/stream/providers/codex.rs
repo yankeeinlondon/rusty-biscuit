@@ -20,7 +20,8 @@
 //! to stdout). It also does NOT leak the event as a `ProviderExtension` —
 //! the text is preserved in the summary's `assistant_text` field and any
 //! consumer that needs the raw event can inspect the captured JSONL log
-//! directly.
+//! directly. Original message text is also published through the sink
+//! observation callback before its Reasoning event can block.
 //!
 //! A managed app-server run (`codex app-server`) writes JSON-RPC instead.
 //! Its notifications are projected onto the same exec events
@@ -234,6 +235,7 @@ impl<S: SemanticEventSink> CodexSemanticStreamParser<S> {
         // BlockQuote and the final stdout is intentional and rare.
         if let Some(text) = msg.collected_text() {
             self.assistant_text.push_str(&text);
+            self.sink.on_response_text(&text);
             let mut extra = self.base_extra(raw_kind);
             extra.insert("origin".into(), Value::from("agent_message"));
             self.sink.on_semantic_event(SemanticEvent::Reasoning {

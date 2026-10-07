@@ -231,6 +231,8 @@ fn main() -> Result<()> {
     if let Some(code) = run_audio_worker_if_requested()? {
         std::process::exit(code);
     }
+    #[cfg(feature = "test-fixtures")]
+    commands::wrap::exec::completion_fixture::initialize()?;
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();

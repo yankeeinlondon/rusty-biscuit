@@ -163,6 +163,7 @@ impl StreamOutput {
             self.worker.reject();
             return false;
         }
+        run_scope::observe(run_scope::observation::Operation::OutputSubmission);
         self.worker.submit(stream, bytes) == Submitted::Queued
     }
 
@@ -366,6 +367,10 @@ impl StreamOutput {
     }
 
     /// Terminal output lost so far in this process; see [`OutputLoss::since`].
+    pub(crate) fn observation_since(&self, origin: Instant) -> super::output_worker::DeliveryObservation {
+        self.worker.observation_since(origin)
+    }
+
     pub(crate) fn loss(&self) -> OutputLoss {
         self.worker.loss()
     }

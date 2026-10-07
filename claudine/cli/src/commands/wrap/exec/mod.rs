@@ -8,6 +8,8 @@ use std::time::{Duration, Instant};
 use claudine::stream::parser::SemanticStreamParser;
 use color_eyre::eyre::Result;
 
+#[cfg(feature = "test-fixtures")]
+pub(crate) mod completion_fixture;
 pub(crate) mod control;
 pub(crate) mod exit;
 pub(crate) mod codex_app_server;
@@ -84,6 +86,9 @@ impl ProcessTelemetry {
 /// Result of a child process execution, enriched with termination info.
 pub(crate) struct ProcessResult<T> {
     pub(crate) data: T,
+    /// Frozen pre-callback observations; diagnostic projection is added at settlement.
+    #[allow(dead_code)]
+    pub(crate) completion_observation: Option<super::run_scope::CompletionObservation>,
     pub(crate) termination: claudine::harness::ProcessTermination,
     pub(crate) telemetry: ProcessTelemetry,
     /// Immediate child PID returned by `std::process::Command::spawn()`,

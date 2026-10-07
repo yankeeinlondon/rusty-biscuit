@@ -266,6 +266,7 @@ pub(super) fn run_child_on(
     );
 
     Ok(ProcessResult {
+        completion_observation: None,
         data: exit_code,
         termination,
         telemetry: ProcessTelemetry {

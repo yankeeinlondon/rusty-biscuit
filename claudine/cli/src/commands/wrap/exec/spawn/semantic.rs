@@ -44,6 +44,8 @@ use super::super::{
     OutputTextCallback, ProcessResult, ProcessTelemetry, ReasoningCallback, SemanticParserBuilder,
     kill_process_group, new_assistant_stream_inset, resolve_first_response, stop_timing_ticker,
 };
+use super::super::super::run_scope::observation::Operation;
+use super::super::super::run_scope::retention::{RetainingReader, last_message};
 use super::retained::{LineSource, Preflight, spawn_retained};
 use super::setup;
 use crate::commands::wrap::section::SectionTracker;
@@ -170,6 +172,7 @@ pub(crate) fn run_child_stream_semantic(
 
     let started_at = Instant::now();
     let started_at_wall = chrono::Local::now();
+    let run_scope = RunScope::with_origin(started_at);
 
     // A control session needs a task to submit; without one the child runs
     // exactly as an ordinary structured stream would.
@@ -179,7 +182,7 @@ pub(crate) fn run_child_stream_semantic(
     let (mut child, stdout_source, stderr_source, control_receivers): (Child, LineSource, LineSource, _) =
         match &control {
             Some((session, task)) => {
-                match spawn_retained(binary, args, env, cwd, session, task, child_spawned)? {
+                match spawn_retained(binary, args, env, cwd, session, task, child_spawned, run_scope.clone())? {
                     Preflight::Ready(ready) => {
                         let ready = *ready;
                         #[cfg(unix)]
@@ -249,7 +252,7 @@ pub(crate) fn run_child_stream_semantic(
                     .stderr
                     .take()
                     .expect("child stderr must be piped: Stdio::piped() was set on the child Command above");
-                (child, Box::new(BufReader::new(stdout).lines()), Box::new(BufReader::new(stderr).lines()), None)
+                (child, Box::new(BufReader::new(RetainingReader::new(stdout, run_scope.clone())).lines()), Box::new(BufReader::new(stderr).lines()), None)
             }
         };
     let captured_pid = child.id();
@@ -327,7 +330,8 @@ pub(crate) fn run_child_stream_semantic(
     let control_replies = control.as_ref().map(|(session, _)| Arc::clone(session));
     // Opt-in raw NDJSON capture for post-mortem analysis. Activated by
     // `CLAUDINE_RAW_STREAM_DIR`; `None` (and zero overhead) otherwise.
-    let stream_capture_owned = StreamCapture::open(timeout_config.provider, captured_pid, started_at);
+    let mut stream_capture_owned = StreamCapture::open(timeout_config.provider, captured_pid, started_at);
+    if let Some(capture) = stream_capture_owned.as_mut() { capture.observe_with(run_scope.clone()); }
     // Signal detection (Phase E4/E5): the run's shared hub observes every
     // stdout JSON line, independent of the semantic parser. Other producers
     // (the OpenCode stderr bridge, the post-wait termination synthesis
@@ -343,7 +347,6 @@ pub(crate) fn run_child_stream_semantic(
     let stdout_progress = ReaderProgress::default();
     let stdout_reader_progress = stdout_progress.clone();
     let parser_slot: ParserSlot = Arc::new(Mutex::new(None));
-    let run_scope = RunScope::default();
     let reader_run_scope = run_scope.clone();
     let reader_parser_slot = Arc::clone(&parser_slot);
     let stdout_handle = thread::spawn(move || {
@@ -368,6 +371,7 @@ pub(crate) fn run_child_stream_semantic(
                     }
                 }
                 if let Ok(mut r) = text.lock() {
+                    super::super::super::run_scope::observe(Operation::RenderComputation);
                     let frames = r.append(chunk);
                     match framed.as_ref() {
                         // Framed: the writer emits only complete lines through
@@ -397,9 +401,11 @@ pub(crate) fn run_child_stream_semantic(
             build_parser(output_cb, reasoning_cb, Some(captured_pid));
         let mut stream_capture = stream_capture_owned;
 
-        for line in stdout_reader_progress.track(stdout_source) {
-            let Ok(line) = line else { break };
+        let mut read_failed = false;
+        for line in stdout_reader_progress.track_observed(stdout_source, reader_run_scope.clone(), false) {
+            let Ok(line) = line else { read_failed = true; break };
 
+            reader_run_scope.observe_stdout(Operation::RecordProcessing);
             let line_at = Instant::now();
             {
                 let mut g = first_raw_stdout_at_clone.lock().unwrap();
@@ -439,16 +445,21 @@ pub(crate) fn run_child_stream_semantic(
             // is silently skipped here — the parser path already reports
             // malformed lines. Version auto-narrowing lives inside the hub.
             {
+                reader_run_scope.observe_stdout(Operation::JsonDecode);
                 let trimmed = line.trim_start();
                 if trimmed.starts_with('{')
                     && let Ok(payload) = serde_json::from_str::<serde_json::Value>(trimmed)
                 {
+                    reader_run_scope.observe_stdout(Operation::SignalObservation);
                     stdout_signal_hub.observe_json(SignalSource::Stream, &payload);
                 }
             }
 
             feed_and_publish(&mut *parser, &line);
         }
+
+        if !read_failed && let Some(capture) = stream_capture.as_mut() { capture.reached_eof(); }
+        drop(stream_capture);
 
         // Handed back before the final render so a render that outlives the
         // join still leaves the run its real summary.
@@ -496,10 +507,11 @@ pub(crate) fn run_child_stream_semantic(
         let _stderr_guard = stderr_span.enter();
         // The same run as the stdout reader: once it is closed, passthrough
         // lines are refused instead of landing in a later run.
-        let _scope_guard = stderr_run_scope.enter();
+        let _scope_guard = stderr_run_scope.enter_stderr();
         let mut captured = String::new();
-        for line in stderr_reader_progress.track(stderr_source) {
+        for line in stderr_reader_progress.track_observed(stderr_source, stderr_run_scope.clone(), true) {
             let Ok(line) = line else { break };
+            stderr_run_scope.observe_stderr(Operation::RecordProcessing);
 
             // Refresh the byte heartbeat for every non-empty stderr line,
             // including noise-prefixed and bridge-consumed lines — those are
@@ -664,9 +676,23 @@ pub(crate) fn run_child_stream_semantic(
     stop_timing_ticker(timing_monitor);
     stop_timing_ticker(watchdog_ticker);
 
+    #[cfg(feature = "test-fixtures")]
+    let reader_budget = super::super::completion_fixture::budget();
+    #[cfg(not(feature = "test-fixtures"))]
     let reader_budget = ReaderBudget::default();
     let readers_since = Instant::now();
+    run_scope.observe_settlement(Operation::JoinStart);
     let stdout_outcome = join_reader(stdout_handle, &stdout_progress, reader_budget, readers_since);
+    run_scope.observe_settlement(if matches!(stdout_outcome, JoinOutcome::TimedOut(_)) { Operation::Cutoff } else { Operation::JoinEnd });
+    if timeout_config.provider == Some(claudine::provider::Provider::Codex)
+        && let Some(index) = args.iter().position(|arg| arg == "--output-last-message")
+        && let Some(path) = args.get(index + 1)
+        && let Ok((text, complete)) = last_message(Path::new(path))
+    {
+        // File text never establishes a verdict or replaces parsed text.
+        run_scope.retain_fallback_answer(&text, complete);
+    }
+    let completion_observation = run_scope.freeze_with_output(Some(stream_output.observation_since(started_at)));
     let (parser, stdout_warning) = settle_parser(
         stdout_outcome,
         &parser_slot,
@@ -717,7 +743,9 @@ pub(crate) fn run_child_stream_semantic(
         &claudine::signals::exit_source_payload(exit_code, &stdout_tail, &captured),
     );
 
+    run_scope.observe_settlement(Operation::SummaryConstruction);
     let mut summary = parser.finish(exit_code);
+    run_scope.observe_settlement(Operation::Settlement);
     if summary.duration_ms.is_none() {
         summary.duration_ms = Some(started_at.elapsed().as_millis() as u64);
     }
@@ -774,8 +802,12 @@ pub(crate) fn run_child_stream_semantic(
     // candidates when opted in; a no-op otherwise.
     claudine::signals::harvest::flush_hub(&signal_hub);
 
+    #[cfg(feature = "test-fixtures")]
+    super::super::completion_fixture::publish(timeout_config.provider, exit_code, &completion_observation)?;
+
     let result = ProcessResult {
         data: summary,
+        completion_observation: Some(completion_observation),
         termination,
         telemetry: ProcessTelemetry {
             total_elapsed: started_at.elapsed(),

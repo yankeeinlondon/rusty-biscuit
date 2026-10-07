@@ -330,3 +330,23 @@ fn failed_writes_are_measured_since_a_reading() {
     worker.drain(soon());
     assert_eq!(worker.loss().since(&mark).failed_writes, 1);
 }
+
+#[test]
+fn queued_frames_do_not_replace_active_delivery() {
+    let (gate, entered) = Gate::new(false);
+    let worker = OutputWorker::new(Box::new(gate.clone()));
+    worker.submit(Stream::Stdout, b"active".to_vec());
+    entered.recv_timeout(Duration::from_secs(10)).unwrap();
+    let active = worker.observation().active;
+    worker.submit(Stream::Stderr, b"queued".to_vec());
+    let observation = worker.observation();
+    assert_eq!(observation.active, active);
+    assert_eq!(observation.active.unwrap().operation, Operation::TerminalDelivery);
+    assert_eq!(observation.queued_frames, 1);
+    assert_eq!(observation.queued_bytes, 6);
+    assert_eq!(observation.submitted, 2);
+    assert_eq!(observation.delivered, 0);
+    assert_eq!(worker.drain(short()), Drained::Disabled);
+    assert_eq!(worker.observation().active, active);
+    gate.release();
+}

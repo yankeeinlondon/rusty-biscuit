@@ -169,7 +169,7 @@ fn a_reader_cut_off_before_any_result_is_still_an_incomplete_stream() {
     let (summary, _warning) = settle_held_open(Provider::Claude, &CLAUDE_ANSWER[..2], 0);
 
     assert!(summary.is_error);
-    assert_eq!(summary.error_kind.as_deref(), Some("stream_reader_timeout"));
+    assert_eq!(summary.error_kind.as_deref(), Some("claudine_completion_delayed"));
     assert!(summary.assistant_text.is_empty(), "no result is invented from a partial stream");
 }
 
@@ -178,6 +178,7 @@ fn a_reader_cut_off_before_any_result_is_still_an_incomplete_stream() {
 enum Held {
     /// The JSONL event logger.
     Log,
+    Answer,
     /// Lifecycle hook dispatch.
     Hook,
 }
@@ -196,6 +197,8 @@ struct HeldSettlement {
     settled: StreamExecutionSummary,
     warning: Option<String>,
     unblocked: StreamExecutionSummary,
+    observation: run_scope::CompletionObservation,
+    completion_dispatches: usize,
 }
 
 /// Feed `lines` to a reader for `provider`, built through the production
@@ -215,6 +218,8 @@ fn settle_held_in_completion(
     let (release_tx, release) = mpsc::channel::<()>();
     let release = Arc::new(Mutex::new(release));
     let (finished_tx, finished) = mpsc::channel::<()>();
+    let completion_dispatches = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let dispatches = completion_dispatches.clone();
     let owned: Vec<String> = lines.iter().map(|line| (*line).to_string()).collect();
     let (reader_scope, reader_progress, reader_slot) =
         (scope.clone(), progress.clone(), Arc::clone(&slot));
@@ -231,11 +236,22 @@ fn settle_held_in_completion(
         };
         let (dispatch, logger): (SemanticDispatchFn, SemanticEventLoggerFn) = match held {
             Held::Log => (
-                Box::new(|_event, _meta| {}),
+                Box::new(move |event, _meta| {
+                    if matches!(event, AgenticEvent::TurnComplete | AgenticEvent::TurnError) {
+                        dispatches.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    }
+                }),
                 Box::new(move |event, _meta| {
                     if completes(event) {
                         hold();
                     }
+                }),
+            ),
+            Held::Answer => (
+                Box::new(|_event, _meta| {}),
+                Box::new(move |event, _meta| {
+                    if matches!(event, SemanticEvent::OutputText { .. })
+                        || matches!(event, SemanticEvent::Reasoning { extra, .. } if extra["origin"] == "agent_message") { hold(); }
                 }),
             ),
             Held::Hook => (
@@ -276,12 +292,15 @@ fn settle_held_in_completion(
     );
     let (parser, warning) = settle_parser(outcome, &slot, exit_code, budget, &scope.snapshot());
     let settled = parser.finish(exit_code);
-    scope.close();
+    let observation = scope.freeze();
     release_tx.send(()).expect("the held callback is still waiting");
     finished.recv_timeout(Duration::from_secs(10)).expect("the released reader finishes");
     let unblocked = slot.lock().unwrap().take().expect("the reader hands back its parser");
+    assert_eq!(scope.freeze(), observation, "late reader cannot mutate frozen data");
     HeldSettlement {
         settled,
+        observation,
+        completion_dispatches: completion_dispatches.load(std::sync::atomic::Ordering::Acquire),
         warning,
         unblocked: unblocked.finish(exit_code),
     }
@@ -362,6 +381,10 @@ const STRUCTURED_ANSWERS: &[AnswerCase] = &[
 
 /// The settled summary carries what the parser itself concluded.
 fn assert_matches_unblocked(label: &str, run: &HeldSettlement) {
+    assert!(run.observation.verdict_received);
+    let expected = if run.settled.is_error && run.settled.assistant_text.is_empty() { None }
+        else { Some(run.settled.assistant_text.as_str()) };
+    assert_eq!(run.observation.retained.response_text.as_deref(), expected);
     let (settled, unblocked) = (&run.settled, &run.unblocked);
     assert_eq!(settled.assistant_text, unblocked.assistant_text, "{label}");
     assert_eq!(settled.is_error, unblocked.is_error, "{label}");
@@ -420,4 +443,32 @@ fn a_reader_stalled_in_a_completion_callback_keeps_the_provider_error() {
         assert_matches_unblocked(&label, &run);
         assert!(run.warning.is_some(), "{label}");
     }
+}
+
+fn assert_early_answer(provider: Provider, lines: &[&str]) {
+    let run = settle_held_in_completion(provider, lines, Held::Answer, 0);
+    assert!(run.settled.is_error);
+    assert_eq!(run.settled.error_kind.as_deref(), Some("claudine_completion_delayed"));
+    assert_eq!(run.settled.exit_code, 0);
+    assert!(run.warning.is_some());
+    assert!(!run.observation.verdict_received);
+    assert_eq!(run.observation.retained.response_text.as_deref(), Some("review-answer"));
+    assert_eq!(run.observation.retained.response_complete, Some(false));
+}
+
+#[test]
+fn an_answer_callback_before_the_verdict_retains_partial_text_without_success() {
+    assert_early_answer(Provider::Claude, CLAUDE_ANSWER);
+    assert_early_answer(Provider::Codex, &[
+        r#"{"type":"thread.started","thread_id":"th-1"}"#,
+        r#"{"type":"item.completed","item":{"id":"a1","type":"agent_message","text":"review-answer"}}"#,
+        r#"{"type":"turn.completed","usage":{"input_tokens":100,"output_tokens":50}}"#,
+    ]);
+}
+
+#[test]
+fn released_completion_logger_cannot_dispatch_into_a_settled_run() {
+    let run = settle_held_in_completion(Provider::Claude, CLAUDE_ANSWER, Held::Log, 0);
+    assert!(!run.settled.is_error);
+    assert_eq!(run.completion_dispatches, 0);
 }

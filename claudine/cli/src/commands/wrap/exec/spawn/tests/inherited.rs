@@ -203,7 +203,7 @@ fn a_stalled_terminal_times_out_the_forwarder_as_a_warning() {
     assert_eq!(warnings.len(), 1, "{warnings:?}");
     assert!(warnings[0].contains("agent's stderr"), "{}", warnings[0]);
     assert!(
-        warnings[0].contains("terminal was not accepting output"),
+        warnings[0].contains("cleanup operation remains unfinished"),
         "{}",
         warnings[0]
     );
@@ -374,7 +374,7 @@ fn a_forwarder_released_after_cutoff_presents_nothing() {
 
     let warnings = join_forwarders([None, Some(reader)], BUDGET, Instant::now());
     assert_eq!(warnings.len(), 1, "{warnings:?}");
-    assert!(warnings[0].contains("pipe is still open"), "{}", warnings[0]);
+    assert!(warnings[0].contains("waiting for pipe data"), "{}", warnings[0]);
     scope.close();
     release.send(()).unwrap();
     eof_rx.recv_timeout(Duration::from_secs(10)).unwrap();

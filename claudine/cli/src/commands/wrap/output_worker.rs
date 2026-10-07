@@ -25,6 +25,21 @@ use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread;
 use std::time::Instant;
+use super::run_scope::observation::{Operation, OperationLane, OperationSnapshot, increment};
+
+#[derive(Debug, Clone, serde::Serialize, PartialEq)]
+pub(crate) struct DeliveryObservation {
+    pub(crate) active: Option<OperationSnapshot>,
+    pub(crate) queued_frames: u64,
+    pub(crate) queued_bytes: u64,
+    pub(crate) submitted: u64,
+    pub(crate) delivered: u64,
+    pub(crate) failed: u64,
+    pub(crate) dropped: u64,
+    pub(crate) rejected: u64,
+    pub(crate) disabled: bool,
+}
+
 
 /// Most frames the queue holds before presentation frames are dropped.
 //
@@ -64,6 +79,8 @@ pub(crate) struct TerminalSink;
 
 impl FrameSink for TerminalSink {
     fn write(&mut self, stream: Stream, bytes: &[u8]) -> io::Result<()> {
+        #[cfg(feature = "test-fixtures")]
+        super::exec::completion_fixture::output();
         match stream {
             Stream::Stdout => {
                 let mut out = io::stdout().lock();
@@ -152,6 +169,9 @@ struct Queue {
 }
 
 struct Shared {
+    active: OperationLane,
+    submitted: AtomicU64,
+    delivered: AtomicU64,
     queue: Mutex<Queue>,
     /// Signals both "a frame arrived" (to the worker) and "the queue is idle"
     /// (to a drain).
@@ -179,6 +199,9 @@ impl OutputWorker {
         let process_terminal = sink.is_process_terminal();
         Self {
             shared: Arc::new(Shared {
+                active: OperationLane::new(Instant::now()),
+                submitted: AtomicU64::new(0),
+                delivered: AtomicU64::new(0),
                 queue: Mutex::new(Queue::default()),
                 changed: Condvar::new(),
                 disabled: AtomicBool::new(false),
@@ -197,19 +220,20 @@ impl OutputWorker {
     /// Never blocks on the terminal and holds no lock while the worker writes.
     pub(crate) fn submit(&self, stream: Stream, bytes: Vec<u8>) -> Submitted {
         if self.shared.disabled.load(Ordering::Acquire) {
-            self.shared.rejected_frames.fetch_add(1, Ordering::Relaxed);
+            increment(&self.shared.rejected_frames, 1);
             return Submitted::Rejected;
         }
         self.start_thread();
         let mut queue = lock(&self.shared.queue);
         if self.shared.disabled.load(Ordering::Acquire) {
-            self.shared.rejected_frames.fetch_add(1, Ordering::Relaxed);
+            increment(&self.shared.rejected_frames, 1);
             return Submitted::Rejected;
         }
         if queue.frames.len() >= MAX_QUEUED_FRAMES || queue.bytes + bytes.len() > MAX_QUEUED_BYTES {
-            self.shared.dropped_frames.fetch_add(1, Ordering::Relaxed);
+            increment(&self.shared.dropped_frames, 1);
             return Submitted::Overflowed;
         }
+        increment(&self.shared.submitted, 1);
         queue.bytes += bytes.len();
         queue.frames.push_back(Frame { stream, bytes });
         self.shared.changed.notify_all();
@@ -218,7 +242,7 @@ impl OutputWorker {
 
     /// Record a frame refused before it reached the queue.
     pub(crate) fn reject(&self) {
-        self.shared.rejected_frames.fetch_add(1, Ordering::Relaxed);
+        increment(&self.shared.rejected_frames, 1);
     }
 
     /// Wait until every queued frame is written, or `deadline` passes.
@@ -255,6 +279,26 @@ impl OutputWorker {
         queue.bytes = 0;
         self.shared.changed.notify_all();
         Drained::Disabled
+    }
+
+    pub(crate) fn observation_since(&self, origin: Instant) -> DeliveryObservation {
+        let mut observation = self.observation();
+        observation.active = self.shared.active.snapshot_since(origin);
+        observation
+    }
+
+    pub(crate) fn observation(&self) -> DeliveryObservation {
+        let queue = lock(&self.shared.queue);
+        DeliveryObservation {
+            active: self.shared.active.snapshot(),
+            queued_frames: queue.frames.len() as u64, queued_bytes: queue.bytes as u64,
+            submitted: self.shared.submitted.load(Ordering::Relaxed),
+            delivered: self.shared.delivered.load(Ordering::Relaxed),
+            failed: self.shared.failed_writes.load(Ordering::Relaxed),
+            dropped: self.shared.dropped_frames.load(Ordering::Relaxed),
+            rejected: self.shared.rejected_frames.load(Ordering::Relaxed),
+            disabled: self.shared.disabled.load(Ordering::Acquire),
+        }
     }
 
     pub(crate) fn loss(&self) -> OutputLoss {
@@ -311,8 +355,10 @@ fn write_frames(shared: Arc<Shared>, mut sink: Box<dyn FrameSink>) {
                 if let Some(frame) = queue.frames.pop_front() {
                     queue.bytes -= frame.bytes.len();
                     queue.writing = true;
+                    shared.active.record(Operation::TerminalDelivery);
                     break frame;
                 }
+                shared.active.record(Operation::Idle);
                 queue = shared
                     .changed
                     .wait(queue)
@@ -326,7 +372,11 @@ fn write_frames(shared: Arc<Shared>, mut sink: Box<dyn FrameSink>) {
         let failed = sink.write(frame.stream, &frame.bytes).is_err();
         let mut queue = lock(&shared.queue);
         if failed {
-            shared.failed_writes.fetch_add(1, Ordering::Relaxed);
+            increment(&shared.failed_writes, 1);
+            shared.active.record(Operation::DeliveryFailed);
+        } else {
+            increment(&shared.delivered, 1);
+            shared.active.record(Operation::DeliveryComplete);
         }
         queue.writing = false;
         drop(queue);

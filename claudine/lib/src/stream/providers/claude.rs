@@ -268,6 +268,7 @@ impl<S: SemanticEventSink> ClaudeSemanticStreamParser<S> {
             Some("text_delta") => {
                 if let Some(text) = delta.text {
                     self.assistant_text.push_str(&text);
+                    self.sink.on_response_text(&text);
                     let mut extra = self.base_extra();
                     extra.insert("raw_kind".into(), Value::from(raw_kind));
                     extra.insert("delta_kind".into(), Value::from("text_delta"));
@@ -694,6 +695,7 @@ impl<S: SemanticEventSink> ClaudeSemanticStreamParser<S> {
         }
         let text = std::mem::take(text_parts);
         self.assistant_text.push_str(&text);
+        self.sink.on_response_text(&text);
         self.sink.on_semantic_event(SemanticEvent::OutputText {
             text: super::ensure_message_newline(text),
             extra: self.extra_with(raw_kind),
