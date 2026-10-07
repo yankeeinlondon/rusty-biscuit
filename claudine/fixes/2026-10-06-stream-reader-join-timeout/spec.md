@@ -4,9 +4,9 @@ clarified: false
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-06
-review_iterations: 0
-completed: false
-implemented: false
+review_iterations: 4
+completed: true
+implemented: true
 $schema:
     status: |-
         enum(
@@ -30,16 +30,35 @@ $schema:
 area: claudine
 packages:
     - claudine-cli
-human_review: false
+human_review: true
+human_review_items:
+    - |-
+        **Some terminal writes still bypass the output worker.** This is the last
+        phase, so the decision is for review rather than for a next phase.
+
+        Three writers are not yet routed through the single output worker that
+        keeps a blocked terminal from hanging the wrapper: the stderr reader's
+        passthrough, the forwarding done on the captured and inherited paths,
+        and the Kimi wire writes. A terminal that permanently stops accepting
+        output could still stall those writers. The main run path, trailer,
+        summary, warnings, and exit are covered and tested.
+
+        Options:
+        - **Accept as shipped.** Pros: no further risk; the incident path is
+          fixed. Cons: the three paths keep the old failure mode.
+        - **Route them through the worker in a follow-up.** Pros: closes R4
+          completely. Cons: touches provider-specific paths, needs its own tests.
+        - **Route them now.** Pros: complete at once. Cons: widens this change.
+
+        Recommended: the follow-up. The reported incident does not use these
+        paths, and each needs provider-specific tests to change safely.
 message_to_agent: |-
-    Phase 5 is complete. The outcome rules were already implemented by Phase 4's
-    snapshot-aware settle_parser; Phase 5 added the matrix test
-    (cli/.../exec/reader_join/matrix.rs), the Codex slow-reader fixture, and the
-    outcome table in docs/topics/timeouts.md. For Phase 6: the Phase 4
-    "not routed through the worker" items (stderr reader passthrough,
-    captured/inherited forwarding, Kimi wire) are still open for the author; the
-    signal-handling, composition, and README doc updates are not done yet. The
-    plan's Phase 6 Wave 8 also asks for a repo grep for join_with_timeout_or.
+    All six phases are implemented. Phase 6 only changed docs (timeouts,
+    signal-handling, composition); `just test` (8424 passed) and `just lint`
+    were green. Open for the author: the writers listed in human_review_items,
+    the Kimi wire stderr join (`unwrap_or_default` in exec/wiring/session.rs),
+    and the rulings A to G, which were adopted as defaults. Not done: cross-OS
+    rigs, `just check-tier-coverage` (no such recipe in the claudine area).
 ---
 
 # A successful agent run is reported as a stream parser panic

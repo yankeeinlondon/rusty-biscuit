@@ -1,6 +1,6 @@
 ---
 created: 2026-10-06
-phase: 5
+phase: 6
 total_phases: 6
 agent: claude/sonnet
 yolo: true
@@ -63,6 +63,52 @@ docs_updated_during_phase_5:
     - claudine/docs/topics/timeouts.md
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5: []
+source_files_during_phase_6: []
+docs_updated_during_phase_6:
+    - claudine/docs/topics/timeouts.md
+    - claudine/docs/topics/signal-handling.md
+    - claudine/docs/topics/composition.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6: []
+source_code:
+    - claudine/cli/src/commands/wrap/exec/timeouts.rs
+    - claudine/cli/src/commands/wrap/exec/timeouts/tests.rs
+    - claudine/lib/src/render/final_message.rs
+    - claudine/lib/src/composition/sequence/task/tests.rs
+    - claudine/lib/tests/l1/assistant_stream_width.rs
+    - claudine/lib/tests/l1/main.rs
+    - claudine/cli/src/commands/wrap/exec/reader_join.rs
+    - claudine/cli/src/commands/wrap/exec/reader_join/tests.rs
+    - claudine/cli/src/commands/wrap/exec/mod.rs
+    - claudine/cli/src/commands/wrap/exec/spawn/captured.rs
+    - claudine/cli/src/commands/wrap/exec/spawn/inherited.rs
+    - claudine/cli/src/commands/wrap/exec/spawn/semantic.rs
+    - claudine/cli/src/commands/wrap/exec/spawn/tests/captured.rs
+    - claudine/cli/src/commands/wrap/exec/spawn/tests/inherited.rs
+    - claudine/cli/src/commands/wrap/exec/wiring/session.rs
+    - claudine/cli/src/commands/wrap/output_worker.rs
+    - claudine/cli/src/commands/wrap/output_worker/tests.rs
+    - claudine/cli/src/commands/wrap/run_scope.rs
+    - claudine/cli/src/commands/wrap/run_scope/tests.rs
+    - claudine/cli/src/commands/wrap/stream_io.rs
+    - claudine/cli/src/commands/wrap/stream_io/tests.rs
+    - claudine/cli/src/commands/wrap/mod.rs
+    - claudine/cli/src/commands/wrap/section.rs
+    - claudine/cli/src/commands/wrap/policy.rs
+    - claudine/cli/src/commands/wrap/wrapper_exec.rs
+    - claudine/cli/src/commands/wrap/harness_orch/attempt.rs
+    - claudine/cli/src/commands/wrap/live_semantic_sink/event_sink.rs
+    - claudine/cli/src/output/assistant.rs
+    - claudine/cli/src/shutdown.rs
+    - biscuit-terminal/lib/src/discovery/fonts/mod.rs
+    - claudine/cli/src/commands/wrap/exec/reader_join/matrix.rs
+documentation:
+    - claudine/docs/topics/timeouts.md
+    - .claude/skills/claudine/SKILL.md
+    - claudine/docs/topics/signal-handling.md
+    - claudine/docs/topics/composition.md
+completed_phase: 6
+implemented: true
 packages:
     - claudine
     - claudine-cli
@@ -228,20 +274,20 @@ Depends on Phase 4's snapshot.
 
 ### Wave 7 (parallel)
 
-- [ ] **Topic docs** (audience: a developer new to the repo; lead with what the reader can do, a compact example per rule, a Mermaid diagram for the post-exit flow: teardown, shared clock, reader joins, worker `finish`, `session_end`):
+- [x] **Topic docs** (audience: a developer new to the repo; lead with what the reader can do, a compact example per rule, a Mermaid diagram for the post-exit flow: teardown, shared clock, reader joins, worker `finish`, `session_end`):
     - `docs/topics/timeouts.md`: the post-exit wait as an internal cleanup budget separate from the two provider timeout rules; the three kinds of outcome; the R5 findings; correct the claim that a bounded join alone prevents a blocked terminal from hanging the wrapper; step-timeout durations with units. No link to the fix by name.
     - `docs/topics/signal-handling.md`: interaction of delivery shutdown with Ctrl+C and termination
     - `docs/topics/composition.md`: sequence gutter inset reaching rendered Markdown
     - affected READMEs (`claudine/README.md`, `cli/README.md`, `lib/README.md`) where they describe these behaviors
     - the claudine skill (`.claude/skills/claudine/`) if the topic summaries there change
-- [ ] **Comment drift pass.** For every symbol whose behavior changed, update `///` and `//!` docs and inline comments; delete HOW-narration; report any drift found and how it was resolved.
-- [ ] **Implementation log.** Record departures from the spec, the rulings, the R8 finding, and the spike result at the end of this file.
+- [x] **Comment drift pass.** For every symbol whose behavior changed, update `///` and `//!` docs and inline comments; delete HOW-narration; report any drift found and how it was resolved.
+- [x] **Implementation log.** Record departures from the spec, the rulings, the R8 finding, and the spike result at the end of this file.
 
 ### Wave 8 (sequential)
 
-- [ ] **Verification.** From `claudine/`: focused tests per phase, then `just test`, then `just lint`. Check a repo-wide grep for `join_with_timeout_or`, bare `thread::sleep` readers' state assumptions, and `unwrap_or` on join results. Confirm the portable synthetic tests carry no `cfg(unix)`; Unix-only process-tree fixtures keep honest scope. Do not run `cargo fmt`; no extra CI cells.
-- [ ] **Acceptance checklist.** Tick one test per item: R1 panic vs timeout and stderr visibility; R2 cap, settle, shared deadline; R3 matrix and slow-line case; R4 blocked sink and no cross-iteration leak; R5 doc paragraph; R6 five boundaries; R7 prose, code, narrow, cached, plain; R8 reliable under load.
-- [ ] **Hand-off.** State "implementation complete, ready for review". Do not move the spec to `_completed` and do not commit unless explicitly asked.
+- [x] **Verification.** From `claudine/`: focused tests per phase, then `just test`, then `just lint`. Check a repo-wide grep for `join_with_timeout_or`, bare `thread::sleep` readers' state assumptions, and `unwrap_or` on join results. Confirm the portable synthetic tests carry no `cfg(unix)`; Unix-only process-tree fixtures keep honest scope. Do not run `cargo fmt`; no extra CI cells.
+- [x] **Acceptance checklist.** Tick one test per item: R1 panic vs timeout and stderr visibility; R2 cap, settle, shared deadline; R3 matrix and slow-line case; R4 blocked sink and no cross-iteration leak; R5 doc paragraph; R6 five boundaries; R7 prose, code, narrow, cached, plain; R8 reliable under load.
+- [x] **Hand-off.** State "implementation complete, ready for review". Do not move the spec to `_completed` and do not commit unless explicitly asked.
 
 ## Implementation log
 

@@ -61,6 +61,52 @@ docs_updated_during_phase_5:
     - claudine/docs/topics/timeouts.md
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5: []
+source_files_during_phase_6: []
+docs_updated_during_phase_6:
+    - claudine/docs/topics/timeouts.md
+    - claudine/docs/topics/signal-handling.md
+    - claudine/docs/topics/composition.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6: []
+source_code:
+    - claudine/cli/src/commands/wrap/exec/timeouts.rs
+    - claudine/cli/src/commands/wrap/exec/timeouts/tests.rs
+    - claudine/lib/src/render/final_message.rs
+    - claudine/lib/src/composition/sequence/task/tests.rs
+    - claudine/lib/tests/l1/assistant_stream_width.rs
+    - claudine/lib/tests/l1/main.rs
+    - claudine/cli/src/commands/wrap/exec/reader_join.rs
+    - claudine/cli/src/commands/wrap/exec/reader_join/tests.rs
+    - claudine/cli/src/commands/wrap/exec/mod.rs
+    - claudine/cli/src/commands/wrap/exec/spawn/captured.rs
+    - claudine/cli/src/commands/wrap/exec/spawn/inherited.rs
+    - claudine/cli/src/commands/wrap/exec/spawn/semantic.rs
+    - claudine/cli/src/commands/wrap/exec/spawn/tests/captured.rs
+    - claudine/cli/src/commands/wrap/exec/spawn/tests/inherited.rs
+    - claudine/cli/src/commands/wrap/exec/wiring/session.rs
+    - claudine/cli/src/commands/wrap/output_worker.rs
+    - claudine/cli/src/commands/wrap/output_worker/tests.rs
+    - claudine/cli/src/commands/wrap/run_scope.rs
+    - claudine/cli/src/commands/wrap/run_scope/tests.rs
+    - claudine/cli/src/commands/wrap/stream_io.rs
+    - claudine/cli/src/commands/wrap/stream_io/tests.rs
+    - claudine/cli/src/commands/wrap/mod.rs
+    - claudine/cli/src/commands/wrap/section.rs
+    - claudine/cli/src/commands/wrap/policy.rs
+    - claudine/cli/src/commands/wrap/wrapper_exec.rs
+    - claudine/cli/src/commands/wrap/harness_orch/attempt.rs
+    - claudine/cli/src/commands/wrap/live_semantic_sink/event_sink.rs
+    - claudine/cli/src/output/assistant.rs
+    - claudine/cli/src/shutdown.rs
+    - biscuit-terminal/lib/src/discovery/fonts/mod.rs
+    - claudine/cli/src/commands/wrap/exec/reader_join/matrix.rs
+documentation:
+    - claudine/docs/topics/timeouts.md
+    - .claude/skills/claudine/SKILL.md
+    - claudine/docs/topics/signal-handling.md
+    - claudine/docs/topics/composition.md
+completed_phase: 6
+implemented: true
 packages:
     - claudine
     - claudine-cli
@@ -687,3 +733,397 @@ docs note the panic and early-termination rules.
 `just test` (claudine): 8423 passed, 9 skipped, 0 failed (before the final
 matrix test additions; the new matrix tests pass focused). `just lint`: exit 0.
 Not run: `cargo fmt`, cross-OS rigs (tests are portable, no `cfg(unix)`).
+
+## Phase 6
+
+Docs, drift pass, and verification.
+
+### Docs
+
+- `docs/topics/timeouts.md`: framed the post-exit wait as an internal cleanup
+  budget separate from the two provider rules, added a sequence diagram of the
+  post-exit flow (teardown, shared clock, joins, worker drain, `session_end`),
+  added the R5 findings ("What the stall looked like"), and stated that
+  step-timeout durations always carry a unit. The earlier claim that a bounded
+  join alone keeps a blocked terminal from hanging the wrapper was already
+  corrected in Phase 4.
+- `docs/topics/signal-handling.md`: new "Terminal output at exit" section on
+  the bounded exit-time output wait and its relation to Ctrl+C and wrapper
+  termination.
+- `docs/topics/composition.md`: new "Agent output inside a sequence task"
+  section (gutter inset reaches rendered Markdown, saturation, non-TTY).
+- READMEs and the claudine skill: checked, no change needed. None describes
+  these behaviors, and the skill's timeouts summary already names the worker.
+
+### Drift pass
+
+No drifted comments found in the changed symbols. A repo grep for
+`join_with_timeout_or` and `unwrap_or` on join results finds only
+`exec/wiring/session.rs:314`, the Kimi wire stderr join, which is outside this
+fix (flagged in the spec's `human_review_items`). The portable sink tests carry
+no `cfg(unix)`.
+
+### Requirement-to-test mapping
+
+- R1: `reader_join::tests` (panic vs timeout, stderr visibility), `spawn/tests/{captured,inherited}.rs`
+- R2: `reader_join::tests` (caps, shared deadline, completion before timeout)
+- R3: `reader_join::matrix`, slow-reader fixture, `stream_io` slow-line tests
+- R4: `output_worker::tests`, `stream_io::tests`, `run_scope::tests`
+- R5: timeouts.md paragraph above
+- R6: `format_internal_duration_always_carries_a_unit`
+- R7: `render::final_message` tests, `tests/l1/assistant_stream_width.rs`
+- R8: `an_early_wait_error_still_reaps_the_whole_tree` (Phase 2)
+
+### Gates
+
+`just test` (claudine): 8424 passed, 9 skipped, 0 failed. `just lint`: exit 0.
+Not run: `cargo fmt`, the cross-OS rigs (this phase changed docs only), and
+`check-tier-coverage` (the recipe does not exist in this checkout).
+
+## Review 1: direct terminal writes
+
+### Departure
+
+R4 lists warnings among the writes that must stay bounded on a terminal that
+never drains. Every wrapper-owned write made during or right after a provider
+run now goes through the output worker: reader warnings, inherited forwarding,
+the semantic and Kimi wire stderr passthrough, and the captured response and
+stderr. Status lines written through `crate::log` (61 call sites under
+`commands/wrap/`, plus the step/stall-timeout warnings and the interrupt status
+in `harness_orch`) are not routed through the worker: that would move the
+CLI-wide `crate::log` channel onto it and change stdout/stderr ordering for
+every command. They stay direct writes behind a process-wide terminal gate
+(`cli/src/terminal_gate.rs`) instead. When the process-terminal worker is
+abandoned it closes the gate, and every direct writer checks it first and skips
+the write rather than waiting on the stdout/stderr lock the abandoned write
+still holds. A skipped `crate::log` line or `--perf` report counts in the
+worker's `rejected_frames`. The `harness_orch` `eprintln!` sites now write
+through `crate::log::message` (same bytes), and the same gate covers the
+`--perf` report, `--debug` tracing, and the Ctrl+C notices written from the
+Unix signal handlers and the Windows console handler. Before a stall the gate
+is open and nothing changes; a direct write made while the worker is stuck but
+before the drain deadline has disabled it can still block, as before.
+
+## Review 1: timeout snapshots
+
+### Departure
+
+R3 asks for a result snapshot published before rendered output is submitted.
+The coarse snapshot (completed turn, terminal error) still is, from the event
+sink. The full snapshot, which carries the answer, session, usage, and the
+provider's finalization verdict (Claude's task ledger), cannot be: the sink
+runs inside `feed_line` while the reader holds the parser mutably. The claudine
+library therefore gained `SemanticStreamParser::snapshot`, implemented by every
+provider parser as the summary `finish` would return, and the reader publishes
+it after every line it finishes once a result or terminal error was reported
+(`run_scope::feed_line`). It is finalized at exit 0 because the exit code is
+not yet known; settlement keeps the real exit code for a failure and never
+preserves success for a nonzero exit. A reader that stalls inside the result
+line's own handling still leaves only the coarse snapshot, so such a run keeps
+success without its answer text, as before. Since rendering is queued to the
+output worker, only non-terminal sink work (lifecycle dispatch, logging) can
+stall there.
+
+## Review 1: sequence Markdown in a real pane
+
+### Departure
+
+The R7 record above says both rendering paths honor the gutter inset. The
+Level-2 rows added for this finding showed that two did not. Streamed text
+that arrives mid-line was shown raw, before Markdown rendering, so nothing
+folded it, and the terminal wrapped it back to column 0 outside the gutter. The
+claudine library's `AssistantStream` gained `holding_partial_lines`, which
+`new_assistant_stream_inset` turns on for a nonzero inset on a terminal. The
+task's `TaskFrameWriter` already held an incomplete line, so this causes no
+visible delay. Separately, Codex's final message (the `--output-last-message`
+answer) bypassed the task's frame writer and used the full-width terminal. In a
+sequence task, `execute_harness_attempt` now writes it through
+`emit_framed_final_message`, which uses the gutter and the inset width. Not
+changed: a status line wider than the pane, such as the run trailer with token
+counts, and a code line wider than the panel are still folded by the terminal
+and lose the gutter.
+
+## Review 2: direct diagnostics and panic reporting
+
+### Departure
+
+The review-1 departure above kept `crate::log`, `--perf`, tracing, and the
+Ctrl+C notices as direct writes behind the terminal gate. That left them able
+to block before any drain had found the stall, and a write already blocked was
+not released when the gate closed. It is superseded: once a wrapped run creates
+the process-wide output worker (`StreamOutput::shared`), every diagnostic is a
+frame on it through `crate::terminal_gate::write`, which never blocks. The
+ordering concern that motivated the earlier departure is met by the trigger:
+commands that never create the worker, and anything a wrapped command writes
+before its first run (preflight, interactive prompts), still write directly.
+Details that depart from or extend the spec's wording:
+
+- The library gained `claudine::render::console` (`set_console_writer`,
+  `write_stderr_line`, `write_stdout_line`) so its lifecycle-action, harness
+  report, messaging, overlay-lease, and hook-report lines can join the CLI's
+  worker. Without an installed writer it prints exactly as before.
+- The panic hook is color-eyre's report, written through
+  `terminal_gate::write` instead of color-eyre's `eprintln!`
+  (`terminal_gate::install_report_hooks`).
+- The Unix wrapper SIGINT handler no longer writes its feedback line. The wait
+  loop shows one line per counted press each 75 ms poll, so the line can trail
+  the press by up to 75 ms; the signal still reaches the child at once.
+  `wait_with_signal_handling` on Unix now polls `try_wait` every 75 ms instead
+  of blocking in `wait`, so it can show that line.
+- The Unix compose handler posts one byte per press to a relay thread (the
+  former grace-exit watcher) and never writes to the terminal. The relay shows
+  the notice and, for an exit rung, gives it 250 ms to reach the terminal
+  before `_exit(130)`. If the relay could not be started an exit rung exits
+  immediately without its notice, where it used to write the notice from the
+  handler.
+- A diagnostic queued while an interactive provider shares the terminal is
+  written by the worker as soon as the terminal accepts it, rather than by the
+  thread that produced it; with a healthy terminal the difference is the
+  worker's scheduling delay.
+
+## Review 2: completion handling
+
+### Resolution of the Review 1 timeout-snapshot departure
+
+The Review 1 departure above ("a reader that stalls inside the result line's
+own handling still leaves only the coarse snapshot, so such a run keeps success
+without its answer text") is resolved; that entry is left as written. The
+reader now separates parsing a line from the sink work it causes: every parser
+emits into a `run_scope::DeferredSink`, which, while the reader is inside
+`run_scope::feed_line`, holds each event instead of handing it to the
+`LiveSemanticSink`. A result or terminal error marks the scope reported the
+moment the parser emits it. After the parser has handled the whole line,
+`feed_line` publishes `SemanticStreamParser::snapshot(0)` and only then
+delivers the held events (rendering, logging, hooks). Outside `feed_line` (the
+Kimi wire session, which feeds its parser directly, and anything `finish`
+emits) events are delivered at once, as before.
+
+The coarse completed-turn marker (`ResultSnapshot::turn_complete`,
+`TurnResult`) and the settlement branch that built success from it without the
+answer are removed. A stdout reader cannot hold an unparsed result line with
+sink work outstanding, so that case is unreachable; a reader that stalls before
+the parser emits a result settles as `stream_reader_timeout`. The terminal
+error published by `LiveSemanticSink` is kept, because a stderr bridge (Codex,
+OpenCode) reports through it on a thread that has no parser line.
+
+### Departures
+
+- The events of one line now reach the sink after the parser has handled the
+  whole line rather than as each is emitted. Providers emit one JSON record per
+  line, so the visible difference is the time to parse one line.
+
+## Review 3: terminal write errors
+
+The output worker now counts each frame its sink refuses with an I/O error in
+`OutputLoss::failed_writes`, before it clears `writing`, so a drain that finds
+the queue idle also sees the failure. Every consumer already read
+`OutputLoss`, so the count reaches all of them through that one type:
+
+- inherited forwarding adds `failed_writes` to the counts that raise its
+  forwarding-loss warning;
+- `deliver_capture` returns the loss since a reading taken before it queued
+  anything, instead of `Drained`, and `captured_output_status` takes that
+  loss, so a drain that completed with failed writes is incomplete delivery;
+- structured attempts and the session-end record read
+  `SectionStream::output_loss`, which now includes the count; the record's
+  `output_incomplete` object gains `failed_writes` (additive).
+
+### Departures
+
+- The spec does not say whether a sink that returned an error should be
+  written again. The worker keeps writing later frames and counts each failure,
+  without retrying the failed frame: a write error returns at once, so it
+  cannot stall the run, and a closed stdout says nothing about stderr. A
+  stalled sink is still disabled as before.
+- The loss counters stay process-wide rather than per stream, as before; the
+  record and statuses report that output was lost, not on which stream.
+
+## Incident evidence audit — 2026-10-07
+
+Rechecked the daily Claudine JSONL files against the claims in Implementation
+1, matching both `agent_pid` and `claudine_pid`. File order is not timestamp
+order: duplicate hook/semantic records can be appended after `session_end`
+with timestamps from before it. A record later in the file does not by itself
+establish that processing resumed after the session-end timestamp.
+
+For the original eleven incidents through agent PID 8848, all session-end
+records have child exit code 0. Six have a semantic record timestamped strictly
+after session end within 1 ms; four have their first such record at about
+16.5 ms, 41.3 ms, 6.49 s, and 48.54 s. The remaining Codex run (agent PID
+76722) logged `turn_complete` 0.745 ms before session end and has no subsequent
+semantic record under that process identity in the daily file. The earlier
+claim that ten of eleven resumed within 1 ms is not supported by this audit.
+These are processing/logging times, not terminal-delivery or child-write times.
+
+For the October 6 incident, correlated Claude's native transcript
+(`8079a339-1346-41d5-b021-80d0b69590d3`, under the host's Claude project logs)
+with `/Users/ken/.claudine/logs/2026-10-06.jsonl`:
+
+| Boundary | UTC timestamp | Evidence |
+| --- | --- | --- |
+| Last tool result logged by Claudine | 08:21:13.864267 | Daily log row 6838, stream line 815 |
+| Final answer recorded by Claude | 08:21:29.979 | Native transcript row 595, 4838 characters |
+| Claude stop hook completed | 08:21:30.172 | Native transcript row 598; hook duration 181 ms, no errors, continuation not prevented |
+| Claudine reported the parser panic | 08:22:26.640994 | Daily log row 6845, session end, child exit 0 |
+| Claudine logged the final answer | 08:22:26.641015 | Daily log row 6846, stream line 816; identical to the native answer plus a trailing newline |
+| Claudine logged the result | 08:22:26.641202 | Daily log row 6847, stream line 817 |
+
+The final answer existed in the provider transcript about 56.662 s before
+Claudine logged it. This supports delayed wrapper processing of an already
+produced answer, rather than continued answer generation after the reported
+panic. It does not timestamp the provider's stdout write, entry into rendering,
+the reader-join deadline, or a terminal write's return. The semantic logger
+runs after output rendering/delivery callbacks, and `session_end` is generated
+after summary presentation, so neither timestamp marks the onset of its stall
+or the instant the join timed out.
+
+The native transcript correlation was absent from the earlier recorded
+investigation. The controlled XOFF experiment proves a possible mechanism,
+not the cause of these live incidents. Establishing that cause still requires
+correlation of the other native transcripts and, for a recurrence, timed
+observations at pipe read, render, output-lock, write, and join boundaries.
+No production behavior or author decision was changed by this audit.
+
+### Caller exit, provider identity, and answer length
+
+Traced the code preceding the reader-join repair (`edd641291`'s parent).
+After child exit, `run_child_stream_semantic` waited 5 s for the stdout reader
+and substituted `ErrorParser` if the wait expired. That parser also served
+real panics and always produced `is_error: true`, `parse_failure`, and
+"Stream parser thread panicked", retaining the child's native exit code.
+`classify_failure` treated the error flag as a failure despite native exit 0;
+the harness's terminal failure branch returned 1 for that combination. The
+session record's exit 0 therefore did not establish Claudine's shell exit 0.
+Without lifecycle recovery, a shell chain using `&&` or an enclosing loop
+could stop after an already displayed answer.
+
+The reader rendered before logging semantic events and could keep running
+after its handle was abandoned. Output could appear before the failure banner
+even with the corresponding JSONL answer record after `session_end`. Codex
+also recovered and rendered its last-message file independently of the
+fallback parser's error flag; finding an answer did not clear that flag.
+
+Using stream session-start and semantic provider identities, the original
+eleven cases are nine Claude runs and two Codex runs. Some Codex session-end
+rows say `provider: claude`, so that top-level field alone is unsuitable for
+counting providers in these historical fallback records.
+The old fallback conflated timeout and panic; continued reader events establish
+that many of these were timeouts, but the message alone cannot prove that for
+every case, particularly the Codex run with no later logged semantic events.
+
+| Agent PID | Provider | Final answer characters in Claudine's semantic log |
+| --- | --- | --- |
+| 22643 | Claude | No final answer/result pair identified |
+| 208 | Claude | 4923 |
+| 17960 | Claude | No final answer/result pair identified |
+| 54219 | Claude | 3379 |
+| 69203 | Claude | 5421 |
+| 76722 | Codex | Final answer uses the last-message file, not `output_text` events |
+| 23924 | Claude | 1416 |
+| 11587 | Claude | No final answer/result pair identified |
+| 88503 | Codex | Final answer uses the last-message file, not `output_text` events |
+| 24541 | Claude | 4151 |
+| 8848 | Claude | 4839 |
+
+For the six identifiable Claude final-answer/result pairs, the last output-text
+event has median length 4495 characters, ranging from 1416 to 5421. In 459
+successful Claude session records in the same daily files and before the
+October 6 incident, the last output-text event has median length 3339, a
+90th-percentile order statistic of 4972, and maximum 6876. These are Unicode
+character counts of one presentation segment, including its trailing newline,
+not entire-invocation output sizes. The controls exclude errored records and
+are not matched for prompt, output formatting, CPU load, or terminal state.
+The sample supports somewhat longer answers in these six incidents, but not
+length as a sufficient cause. Three Claude cases lack a logged final pair and
+cannot be included honestly in that comparison.
+
+All nine corresponding native Claude transcripts are available. The last
+native text block is not necessarily the final answer: for example, agent PID
+17960's transcript ends its text well before the reader's remaining tool and
+result records. Native finality and result semantics must be checked before
+treating every incident as the same delayed-final-answer shape.
+
+Longer Markdown, repeated per-block font discovery, and CPU scheduling delays
+can postpone reader completion past a fixed 5 s wait. Per-block font discovery
+was measured in the controlled sample and is now cached. Historical logs have
+no CPU or blocked-stack observations that establish CPU contention or terminal
+backpressure in the live incidents. In particular, one Codex completion was
+already logged before the reported panic, showing that the old fallback could
+discard parsed completion while the reader finished its remaining work. That
+case's logs do not distinguish a timeout from a panic after completion.
+
+Verified the current result-preservation paths with
+`just test-cli commands::wrap::exec::reader_join commands::wrap::output_worker commands::wrap::run_scope`:
+46 tests passed. The suite includes Claude/Codex successful-result preservation,
+all nine structured provider identities with held completion callbacks,
+nonzero/provider-error controls, distinct real panics, and bounded output loss.
+This is synthetic regression evidence, not historical CPU or terminal evidence.
+
+Corrected the timeout topic and the reader-budget WHY comment: the logs do not
+prove that 120 s is twice a measured maximum post-exit terminal stall. No
+timeout constant, exit policy, or terminal-abandonment behavior was changed.
+
+### Parsing and rendering computation spike — 2026-10-07
+
+Measured six native Claude answers corresponding to the identifiable final
+answer/result pairs above. Reconstructed minimal assistant and successful
+result JSON envelopes around each answer; these are representative inputs,
+not the original full wire records. Added synthetic 10x and 100x repetitions
+of the October 6 answer to inspect scaling. The result envelope also includes
+the answer, so each parsing operation processes it in two JSON records.
+
+The temporary example used the current production Claude parser with
+`NullSemanticSink`, checked its success and nonempty answer, and constructed
+both its snapshot and final summary. A combined stage additionally decoded
+each line to `serde_json::Value`, approximating the reader's extra decode for
+signal observation; actual signal matching was excluded. Rendering used
+`FinalMessage` (Darkmatter Markdown, with `Prose` as its fallback) into a
+string with cached options, images disabled, and fixed width 80. No terminal
+output delivery, live semantic sink, logging, hooks, or child process ran in
+the timed operations.
+
+Each stage ran in its own process, with one cold operation, five warmups,
+and an adaptive batch targeting roughly 350 ms, bounded to 5–20000 iterations.
+Measured operation wall time with `Instant`; collected whole-process user and
+system CPU with the parent Python process's child-resource accounting. CPU
+totals include startup, input loading, cold work, and warmups, so they are not
+per-operation CPU measurements. This is an unoptimized Cargo `dev` build on
+this macOS host, with no deliberately induced CPU contention, no affinity
+controls, and no cross-OS claim. It is a baseline computation spike, not a
+reproduction of historical host load or terminal backpressure.
+
+| Work per answer/result pair | Six incident answers, mean wall time range |
+| --- | --- |
+| Generic JSON decoding | 0.017–0.042 ms |
+| Provider parsing, snapshot, and final summary | 0.029–0.055 ms |
+| Generic decoding plus provider parsing and summaries | 0.046–0.095 ms |
+| Markdown rendering of the answer into a string | 1.24–3.18 ms |
+
+| October 6 answer size | Combined decoding/parsing/summaries | Markdown rendering |
+| --- | --- | --- |
+| 4838 characters | 0.089 ms | 2.97 ms |
+| 48380 characters (10x synthetic) | 0.63 ms | 28.73 ms |
+| 483800 characters (100x synthetic) | 5.97 ms | 284.46 ms |
+
+The baseline does not support ordinary final-answer JSON decoding alone as
+the explanation for delays of tens of seconds. Current rendering is also
+fast at the real incident sizes; this measurement does not reproduce the
+previous uncached per-block font discovery or a blocked terminal write.
+Host scheduling, callbacks, signal matching, logging, accumulated parser
+state, and the original full records remain outside the measurement.
+
+There is a possible CPU optimization in sharing the reader's generic JSON
+decode with provider decoding, but that decode costs only tens of microseconds
+at these answer sizes. A refactor is not justified as a remedy for this
+incident by the measurements. Timed observations at the real reader boundaries
+are the better next investigation. The current 120 s processing budget was
+retained; the 5 s settled-pipe-wait budget is separate. No production code or
+timeout constant changed in this spike.
+
+Artifacts on this host:
+
+- `/tmp/claudine-completion-cpu-spike.rs`: temporary benchmark source, removed
+  from the package's examples directory after execution;
+- `/tmp/claudine-completion-cpu-inputs.json`: local private answer fixtures;
+- `/tmp/claudine-completion-cpu-results.json`: all 32 stage measurements;
+- `/tmp/claudine-completion-cpu-build.log`: development-build result.
