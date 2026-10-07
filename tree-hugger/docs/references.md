@@ -38,7 +38,7 @@ Each occurrence has:
 |---|---|
 | `owner` | The nearest enclosing callable declaration record; absent for file-level code, anonymous callables and initializers (see [Ownership](#ownership)). |
 | `owner_span` | The owning region's span: the callable, the initializer, or the whole file. |
-| `target` | The name as written. `target.qualified_name` is the written path or receiver expression including the name (`Self::new`, `other.parse`), not the declaration's qualified name; `target.id` is set only for a `Scoped` binding to a declaration record. |
+| `target` | The name as written. `target.qualified_name` is the written path or receiver expression including the name (`Self::new`, `other.parse`, `::f`; see [Written paths](#written-paths)), not the declaration's qualified name; `target.id` is set only for a `Scoped` binding to a declaration record. |
 | `candidates` | For `NameOnly`: the same-named declarations, in declaration order. Empty otherwise. |
 | `span` | The name token (one-based line and byte column, half-open byte offsets, like every other span). |
 | `kind` | `Call` for an invocation target (a call's function, a method name, `new X()`, a Rust tuple-struct constructor, a decorator, a shell command name; see [Invocation forms](#invocation-forms)), `Usage` for anything else, macro invocations included. |
@@ -51,6 +51,37 @@ everything inside an import statement (`use`, `import`) are not occurrences. Two
 token are one occurrence; two calls on one line are two. Occurrences are
 sorted by span, then owner span, kind, written target and confidence, so the
 result never depends on the order the queries match in.
+
+### Written paths
+
+`target.qualified_name` is the source text from the outermost qualifier,
+root or receiver through the name token, so it always ends at the
+occurrence's `span`, and is absent for a name written alone. Type arguments
+written after the name are outside it; those written inside a qualifier
+stay. The span is still the name token alone, and a name is still one
+occurrence however long its path.
+
+| Written | Name | `qualified_name` |
+|---|---|---|
+| Rust `::f()`, `::m::f()` | `f`; `m` | `::f`, `::m::f`; `::m` |
+| C++ `((::f))()` | `f` | `::f` |
+| C++ `A::B::f()` | `B`; `f` | `A::B`; `A::B::f` |
+| C++ `r4::f<int>()`, `N::C<int>::member()` | `f`; `C`; `member` | `r4::f`; `N::C`; `N::C<int>::member` |
+| C++ `obj.template m<int>()`, `p->template m<int>()` | `m` | `obj.template m`, `p->template m` |
+| C# `new global::N.C<int>()`, `X::C` | `N`; `C` | `global::N`; `global::N.C`, `X::C` |
+| C# `obj?.A?.Invoke()` | `A`; `Invoke` | `obj?.A`; `obj?.A?.Invoke` |
+| PHP `($o)?->m()`, `\A\B\f()` | `m`; `B`; `f` | `($o)?->m`; `\A\B`; `\A\B\f` |
+| Perl `&R4::r4f()`, `R4->r4f()`, `$obj->r4f()` | `r4f` | `R4::r4f`, `R4->r4f`, `$obj->r4f` |
+| Java/Scala `a.b.C`, Swift `Swift.Array<Int>`, Go `pkg.T` | `C`; `Array`; `T` | `a.b.C`; `Swift.Array`; `pkg.T` |
+| Bash/Zsh `other/external` | `other/external` | absent: the command word is the name |
+
+A path is never evidence of one target: a qualified name that no rule
+below establishes (`Self::f` and `Type::f` in Rust) is `NameOnly` or
+`Unresolved`. In particular a rooted Rust name (`::f`) never reaches
+ordinary lookup, so it never binds a `let f` or parameter that shadows the
+item, and its root binding is unproved (`::f` is the crate root's `f` in
+edition 2015 and the crate `f` from 2018), so a function calling `::f()`
+from inside `f` is `is_recursive: Unknown`, never `No`.
 
 ## Invocation forms
 
@@ -70,23 +101,60 @@ g((f));                 // f is a Usage: an argument, not the callee
 (c ? f : g)();          // f and g are Usages: either may be called
 ```
 
+A conditional or nullsafe call (C# `obj?.F()`, TS `obj?.m()`) is still a
+`Call`: the syntax invokes the member, though a null receiver may skip it.
+PHP callable creation is the opposite: `f(...)` (the literal `...`
+placeholder) only makes a closure, so `f` is a `Usage`, while `f(...$args)`
+unpacks arguments into a real call. A variable's value is invoked by PHP
+`$cb()` and Perl `$cb->()` / `&$cb()`; the variable is the `Call`, and no
+initializer is followed to find what it holds.
+
+```php
+f(...);          // f is a Usage: creates a closure
+consume(f(...)); // consume is the Call, f a Usage
+f(...$args);     // f is the Call: unpacking calls
+($cb)();         // cb is the Call: a variable's value
+(f)();           // f is a Usage: the constant f's value is called
+```
+
 | Language | Calls | Wrappers looked through | Never the callee |
 |---|---|---|---|
-| Rust | `f()`, `f::<T>()`, `x.f()`, `Type::f()`, `W(1)` | parentheses | `(*p)()`, `name!(…)` (a `Usage`) |
-| TypeScript | `f()`, `f<T>()`, `f?.()`, `` f`x` ``, `new F()`, `x.m()`, `@f` | parentheses, `as`, `satisfies`, `<T>f`, `f!` | sequence, conditional |
+| Rust | `f()`, `::f()`, `(::f)()`, `f::<T>()`, `x.f()`, `Type::f()`, `W(1)`, a value `cb()` | parentheses | `(*p)()`, `name!(…)` (a `Usage`) |
+| TypeScript | `f()`, `f<T>()`, `f?.()`, `` f`x` ``, `new F()`, `x.m()`, `@f` | parentheses, `as`, `satisfies`, `<T>f`, `f!`, and an instantiation written apart from its call (`(f<T>)()`, `new (C<T>)()`, `(x.m<T>)()`) | sequence, conditional; an instantiation that is only a value or an argument (`const h = f<T>`, `g(f<T>)`) |
 | JavaScript | as TypeScript, without the type forms | parentheses | sequence, conditional |
 | Python | `f()`, `x.m()`, `@f`, `@a.b` | parentheses | conditional expression |
 | Go | `f()`, `x.m()`, `pkg.F()` | parentheses | `f[T]()`: written like indexing `fs[0]()`, so never read as the callee |
 | C | `f()`, `s.cb()`, `p->cb()` | parentheses | `(*f)()`, comma expression |
-| C++ | as C, plus `f<T>()`, `ns::f()`, `obj.m()`, `obj.template m<T>()`, `new F()` | parentheses | as C |
-| C# | `f()`, `f<T>()`, `x.m()`, `new F()`, `new List<T>()` | parentheses | casts |
-| Java | `f()`, `this.<T>f()`, `x.m()`, `new F()` | none: a method name is not an expression | |
+| C++ | as C, plus `f<T>()`, `ns::f()`, `::f()`, `((::f))()`, `obj.m()`, `obj.template m<T>()`, `new F()` | parentheses | as C |
+| C# | `f()`, `f<T>()`, `x.m()`, `x!.m()`, `x?.m()`, `x?.M<T>()`, `x?.A()` (the delegate member), `x?.A?.Invoke()` and `cb?.Invoke()` (the last name), `new F()`, `new List<T>()` | parentheses | casts; `A` in `x?.A?.Invoke()` |
+| Java | `f()`, `this.<T>f()`, `x.m()`, `new F()`, `new a.b.F()` | none: a method name is not an expression | |
 | Swift | `f()`, `f { }`, `x.m()`, `F()` | parentheses | |
-| Scala | `f()`, `f[T]()`, `f { }`, `x.m()`, `x m 1`, `x m`, `new F()` | parentheses | |
-| PHP | `f()`, `N\f()`, `new F()`, `new F`, `F::m()`, `$x->m()`, `$x?->m()` | none | `(f)()`: a bare name in parentheses is a constant, so the call uses the constant's value |
+| Scala | `f()`, `f[T]()`, `f { }`, `x.m()`, `x m 1`, `x m`, `new F()`, `new a.b.F()` | parentheses | |
+| PHP | `f()`, `N\f()`, `new F()`, `new F`, `F::m()`, `$x->m()`, `$x?->m()`, a variable's value `$cb()`, `new $C()`, and argument unpacking (`f(...$args)`, `$cb(...$args)`) | parentheses around a variable only (`($cb)()`, `(($cb))()`) | callable creation `f(...)`, `\Ns\f(...)`, `W::s(...)`, `$o->m(...)`, `$cb(...)`: it makes a closure and calls nothing; `(f)()`: a bare name in parentheses is a constant, so the call uses the constant's value; `($o->m)()` calls a property's value; `$o->$m()`: `$m` holds the method's name |
 | Lua | `f()`, `f "s"`, `f {}`, `x:m()`, `x.m()` | parentheses | |
-| Perl | `f()`, `f 1`, `f`, `&f()`, `&f`, `Pkg::f()`, `goto &f`, `$x->m()`, `Pkg->m()` | | `\&f`, `defined &f`, `exists &f`: they name the sub without calling it |
-| Bash, Zsh | a command's name (`f`, `X=1 f arg`, `$(f)`) | | an argument (`echo f`) |
+| Perl | `f()`, `f 1`, `f`, `&f()`, `&f`, `Pkg::f()`, `goto &f`, `$x->m()`, `Pkg->m()`, a code reference `$cb->()`, `$cb->(1)`, `&$cb()`, `&{$cb}(1)` | | `\&f`, `\&$cb`, `defined &f`, `exists &$cb`: they name the sub without calling it; `$cb` in `$cb->m()` is the receiver |
+| Bash, Zsh | a command's name (`f`, `X=1 f arg`, `$(f)`, `$cmd arg`) | | an argument (`echo f`), the variable a command name expands (`cmd` in `$cmd`) |
+
+Coverage reads a callee the same way. A call whose callee, once these
+wrappers and generic instantiations are removed, is a plain name or path
+(Rust `(f)()`, `(f::<u8>)()`, `(S::f)()`; TS/JS `((f))()`, `(f)?.()`,
+``(f)`x` ``, `new (F)()`; TS `(f as any as () => void)()`, `f!()`,
+`(f<number>)()`, `new (C<number>)()`) limits
+its region no more than `f()` would: a call of a function the name binds is
+`Complete`, so a caller of another function is `is_recursive: No`, never
+`Unknown`. A sequence, conditional, dereference, member access or variable
+still adds `indirect_dispatch` (see [Coverage](#coverage-and-limitation-reasons)). An `eval`
+written inside these wrappers (`(eval)(…)`, `(eval as any)(…)`) is still a
+direct `eval`; `(0, eval)(…)`, `globalThis.eval(…)` and an alias
+(`const e = eval; e(…)`) are not, and neither are an optional call
+(`eval?.(…)`, `(eval)?.(…)`) or a tagged template (``eval`…` ``).
+
+```ts
+function f() {}
+function g() { (f as () => void)(); new (C)(); } // Complete: g is No
+function h() { (0, f)(); }                      // Limited (indirect_dispatch): h is Unknown
+class C {}
+```
 
 A member callee is a call through any depth of these wrappers:
 `((obj.m))()`, `(obj.m as T)()`, `(<T>obj.m)()` and `(obj.m!)()` in
@@ -173,6 +241,24 @@ the language lets the name through:
   itself (strict code cannot do this, but the file does not always say which
   it is). A file-level `eval` changes nothing: a `var` it adds is the global
   binding an assignment could change anyway.
+- Only an ordinary call with an argument list is a direct `eval`. An
+  optional call (`eval?.("var f = 1")`) is an indirect `eval`, which runs in
+  the global scope, and a tagged template (``eval`var f = 1` ``) passes a
+  strings array, which `eval` returns without running it. Neither can add a
+  name to the function around it, so lookup goes on as if the call were not
+  there. An optional `eval` still runs code, so its region keeps
+  `indirect_dispatch`; a tagged one limits nothing.
+
+```javascript
+class Base {}
+function outer() {
+    function f() {
+        eval?.("var f = 1");     // or eval`var f = 1`
+        class D extends Base {}  // D extends Base's ID
+        f();                     // Scoped to this f: is_recursive Yes
+    }
+}
+```
 
 ```rust
 fn f() {}
@@ -191,7 +277,8 @@ function f(obj) { with (obj) { f(obj); } }   // NameOnly: `obj.f` may be called
 
 The same boundaries apply to declared type relations
 ([type-relations.md](type-relations.md)): a base written inside a `with` body
-or in a function holding a direct `eval` stays written text.
+or in a function holding a direct `eval` stays written text; an optional or
+tagged `eval` call changes nothing.
 
 ## Language support
 
@@ -210,11 +297,12 @@ result that looks complete.
 | Item and module boundaries | Code inside a nested item (`fn`, `const`, `static`, type, trait, `impl`) sees the items of the blocks around it but not their `let`s, parameters, pattern bindings or generic parameters; an `impl` or trait member still sees its `impl`'s or trait's generic parameters. An inline `mod` sees only what it declares or imports, plus earlier `macro_rules!` macros. | Resolved |
 | Declaration order | `let` is visible only after its statement, so `let f = f();` reads the *outer* `f` in its initializer. Items (`fn`, `struct`, `const`, `static`, `mod`, `use`) are visible throughout their block, before or after; a `macro_rules!` macro only after its definition. | Resolved |
 | Shadowing | The latest preceding `let` of a name in a block wins; an inner scope's binding hides every outer one. | Resolved |
-| Parameters and patterns | Function and closure parameters, including destructured ones, bind in the body; `while let`/`match` arm/`for` pattern bindings bind in their arm or body; an `if let` binding (and each `let` of a chain) only from its `let` to the end of the consequence, never in `else`; a `let … else` binding after the statement, never in its `else` block. In a `match` arm or `if let` pattern a bare capitalized name (`None`, `MAX`) is read as a constant or unit variant and binds nothing. | Resolved |
+| Parameters and patterns | Function and closure parameters, including destructured ones, bind in the body; `while let`/`match` arm/`for` pattern bindings bind in their arm or body; an `if let` binding (and each `let` of a chain) only from its `let` to the end of the consequence, never in `else`; a `let … else` binding after the statement, never in its `else` block. A struct-pattern field shorthand (`S { x }`) is a pattern name like any other. | Resolved |
+| Pattern names: binding or constant | Spelling decides nothing: Rust's naming conventions are lints. A pattern name written with `mut`, `ref` or `name @ …` always binds. A bare name, in any pattern (`let`, `let … else`, parameters, closure parameters, `for`, `match` arms, `if let`, `while let`, nested in tuple, struct, slice, or `&` patterns), is looked up where it is written, as rustc does: when it reaches a `const`, a unit struct or a `const` generic parameter, the pattern **reads** that declaration (a `Usage`, `Scoped` to it), and so does every use of the name in the arm or body; when it reaches a function, a local or nothing, it **binds** a new local, so `fn F(x: fn()) { if let F = x { F(); } }` calls the local (a call through a value) and is not recursive. `None` (the prelude's unit variant) and `Self` never bind. When an import or glob `use` is reached first, the file cannot tell whether it supplies a constant: in a refutable pattern (`match`, `if let`, `while let`, `let … else`) the name is then a `NameOnly`/`Unresolved` usage and every use of it is uncertain; in an irrefutable one it binds, because only a unit struct or a single-valued constant could be matched there. Declarations follow the same rule: a pattern name that reads a declaration, or whose identity is unknown in a refutable pattern, is never listed as a variable by `hug symbols` (no declaration is proved), and neither is the path of a tuple-struct pattern (`Some` in `Some(x)`) or a TypeScript/JavaScript parameter default (`a` in `b = a`). A binding nested in a pattern with `mut`, `ref` or `@` (`Some(mut x)`), or a bare `match` arm name, binds but has no declaration record either (the declaration query does not capture those forms); `let mut x` and a `mut x` parameter are listed. | Resolved; unknown identity through an import or glob |
 | Name categories | Types (`struct`, `enum`, `trait`, `type`, `mod`, generic type parameters) and values (`fn`, `const`, `static`, `let`, parameters) are separate. A tuple or unit struct is in both, and macros are their own category. A `use` binding enters every category, because the file alone cannot tell which one it names. | Resolved |
 | Imports and aliases | `use a::b as c;` binds `c` locally (`Scoped`, no target ID). The import record keeps the source path and the original name `b`. A glob `use a::*;` never binds a unique target. | Resolved |
 | Associated items | Methods, fields, variants and associated consts are not lexical names: a bare `f()` never reaches an `impl` member. `impl` and trait headers resolve in the enclosing scope, never in the impl body. | Resolved |
-| Paths | `Self::f()` and `Type::f()` are `Scoped` only when `Type` (or the self type of the `impl` around `Self`) resolves to one in-file struct or enum and exactly one inherent `impl` of it declares `f`; `Enum::Variant` resolves the same way. Any other path keeps its written qualifier and is `NameOnly` or `Unresolved`. | Resolved |
+| Paths | `Self::f()` and `Type::f()` are `Scoped` only when `Type` (or the self type of the `impl` around `Self`) resolves to one in-file struct or enum and exactly one inherent `impl` of it declares `f`; `Enum::Variant` resolves the same way. Any other path keeps its written qualifier and is `NameOnly` or `Unresolved`; so is a rooted path (`::f`, `::m::f`), which is never looked up lexically and so never binds a shadowing `let` or parameter. Calling a path that names a value (`Self::C()` or `(S::C)()` with `const C: fn() = Self::f`), or whose candidates include a value, keeps the binding or candidates but is a call through a value: the constant's initializer is never followed. | Resolved; Limited (`indirect_dispatch`) for calls of a value |
 | Method calls | `x.f()` and `self.f()` are `NameOnly` with in-file `f` methods as candidates: trait dispatch and auto-deref can select another implementation. | Limited (`indirect_dispatch`) |
 | Nested callables | A closure is an anonymous owner. A nested `fn` is its own owner and is visible in its enclosing block. Calling a variable or parameter (a closure held in a `let`) is a call through a value. | Limited (`indirect_dispatch`) for calls through a value |
 | Macros | `name!(…)` is a `Usage` of the macro. Its expansion is unknown, so the enclosing region's call coverage is limited. | Limited (`unexpanded_macro`) |
@@ -234,7 +322,7 @@ result that looks complete.
 | Members | Class and interface members are not lexical names. `this.f()` and `obj.f()` are `NameOnly`. | Limited (`indirect_dispatch`) |
 | Class field initializers and static blocks | References resolve lexically, but the owner is absent and the region limited. | Limited (`ownership_unknown`) |
 | Decorators | Evaluated in the scope enclosing the class, and owned by it. | Resolved |
-| Dynamic access | `obj[name]()` and other calls of computed values never bind a unique target. A name inside a `with` body that the body does not declare, and a name inside a function holding a direct `eval(…)` that the function does not declare, is never `Scoped` (`NameOnly` or `Unresolved`), so it proves no caller and no recursion. | Limited (`indirect_dispatch`; `unsupported_binding_form` for `eval` and `with`) |
+| Dynamic access | `obj[name]()` and other calls of computed values never bind a unique target. A name inside a `with` body that the body does not declare, and a name inside a function holding a direct `eval(…)` that the function does not declare, is never `Scoped` (`NameOnly` or `Unresolved`), so it proves no caller and no recursion. An optional `eval?.(…)` or tagged ``eval`…` `` is no direct `eval` and hides no name. | Limited (`indirect_dispatch`; `unsupported_binding_form` for a direct `eval` and `with`; an optional `eval` only `indirect_dispatch`, a tagged one nothing) |
 
 ### Every other language
 
@@ -266,8 +354,10 @@ where the invocation syntax shows it.
 `reference_coverage` lists each owning region of the file (the whole file
 first, then outer regions before inner ones) with an optional owner, its
 span, and a state of `Complete` or `Limited` with machine-readable reasons,
-in ascending order. A named callable has a region even when its body holds no
-occurrence. A reason belongs to the innermost region where it occurs, so a
+in ascending order. A named callable has a region exactly when it has a body,
+even one that holds no occurrence (`function e() end` in Lua, or a Lua body
+holding only a comment); a signature without a body (a Rust trait method
+`fn r();`) has none. A reason belongs to the innermost region where it occurs, so a
 macro inside a closure limits the closure, not the function around it:
 
 | Reason | When |
@@ -275,7 +365,7 @@ macro inside a closure limits the closure, not the function around it:
 | `unsupported_language` | The language has no resolver rules (every region of such a file). |
 | `unsupported_binding_form` | The region uses a binding form the language table does not support. |
 | `missing_call_capture` | The region has invocation syntax the reference query does not capture. |
-| `indirect_dispatch` | A call goes through a receiver, a variable or dynamic access. |
+| `indirect_dispatch` | A call goes through a receiver, a variable or dynamic access, calls a name or path that is, or may be, a value (a constant, static, variable, parameter, field or property, such as Rust `Self::C()` with `const C: fn()`), or calls a value that is not a name or path once [transparent wrappers](#invocation-forms) are removed (a sequence, conditional or dereference). A name of a function, method, constructor, enum variant, tuple struct or other type is never a value. |
 | `unexpanded_macro` | A macro invocation whose expansion could hide calls. |
 | `ownership_unknown` | Code whose evaluating owner cannot be established (for example field initializers). |
 | `parse_error` | The region contains a syntax error. |
@@ -338,8 +428,13 @@ let index = file.query(&query)?.index;
 - The persistent cache stores the evidence with the entry and serves it only
   after checking it against the source, the records it keeps, the
   summaries and `semantics` derived from it, and itself (IDs in generated
-  form, target and candidate IDs naming a record of the written name, one
-  region per callable, each reference owned by its innermost region);
+  form, every ID naming a stored record of the written name unless the
+  entry omits that record's kind, one region per callable with a body that
+  contains that body, each reference owned by its innermost region, each
+  written path the source text ending at its name and agreeing with the
+  cache-only start the entry stores beside it, so a path deleted alone is
+  recomputed in every language, candidates in
+  declaration order, summaries without repeats in first-occurrence order);
   damaged or contradictory evidence is recomputed, never read as "no
   references" (see [the cache design](./cache-design.md#reference-evidence)).
 
@@ -398,6 +493,7 @@ fn countdown(n: u32) -> u32 { if n == 0 { 0 } else { countdown(n - 1) } } // Yes
 fn leaf() -> u32 { 1 }                                                    // No
 fn keep() { let _f = keep; }          // No: a value, not a call
 fn call(cb: fn()) { cb(); }           // Unknown: indirect_dispatch
+impl S { const C: fn() = Self::f; fn f() { Self::C(); } } // f: Unknown: indirect_dispatch, the call is to C
 impl W { fn m(&self) { self.m(); } }  // Unknown: NameOnly receiver call
 fn log() { println!("x"); }           // Unknown: unexpanded_macro
 fn a() { b() } fn b() { a() }         // No, No: mutual recursion is not direct

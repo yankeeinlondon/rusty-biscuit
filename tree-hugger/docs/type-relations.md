@@ -146,7 +146,7 @@ The rules, with an example of each:
 | A class body is never a lexical scope in JS/TS | TypeScript `class Outer { Base = 1; m() { class C extends Base {} } }` | the module-level `Base` |
 | A Python class body is a lexical scope only for code written directly in it: a nested class, method or function skips every enclosing class body, with its classes, variables and imports, and continues to the enclosing functions and the module | Python `class Outer: class Base` … `class Middle: class C(Base)`, or `def m(self): class C(Base)` | the module-level `Base`; text only when the module has none |
 | A dynamic expression | JavaScript `class D extends mix(Base)` | text only |
-| A JS/TS `with` body, or a function holding a direct `eval(…)`, may bind any name it does not declare itself | JavaScript `function w(o) { with (o) { class C extends Base {} } }` or `function e() { eval(s); class C extends Base {} }`, next to a module-level `Base` | text only |
+| A JS/TS `with` body, or a function holding a direct `eval(…)`, may bind any name it does not declare itself; an optional `eval?.(…)` or a tagged ``eval`…` `` is no direct `eval` and keeps the base's ID | JavaScript `function w(o) { with (o) { class C extends Base {} } }` or `function e() { eval(s); class C extends Base {} }`, next to a module-level `Base` | text only |
 | Rust names are looked up only as far as the nearest module | `mod b { trait T: Base {} }` with `Base` at the crate root | text only (`super::Base` resolves) |
 | Rust `crate::`, `self::` and `super::` anchor the path | `trait U: crate::Base` | the crate-root `Base` |
 | A Rust leading `::` names an external crate | `trait U: ::a::Dup` next to a local `mod a { trait Dup {} }` | text only |
@@ -231,8 +231,10 @@ syntax scopes around the base first, innermost first:
   bindings; Python nested, list and starred targets of an assignment, `for`
   or `with`, augmented assignment and `del` targets, `except … as`, walrus
   names and `match` captures; Scala pattern
-  `val`s, `for` generators and `case` patterns (lowercase names; an uppercase
-  name is a stable identifier). Such a binding never resolves. It keeps its
+  `val`s, `for` generators and `case` patterns (a name starting with a
+  lower-case letter or `_`, Scala's variable pattern; an upper-case or
+  backquoted name is a stable identifier, a reference; the name before
+  `@` in `x @ p` always binds). Such a binding never resolves. It keeps its
   name group and its scope wherever it is written, inside a callable or at
   module, package or object level: a destructured value or a pattern `val`
   is a value, so it hides only a value lookup (a JS/TS class `extends`, a
