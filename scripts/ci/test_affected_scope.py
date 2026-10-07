@@ -53,6 +53,7 @@ from affected_scope import (
     load_sidecars,
     validate_no_shadow_workspaces,
     build_closure,
+    member_dependency_graph,
     estimate_jobs,
     load_metadata,
     workspace_packages,
@@ -176,6 +177,10 @@ def package(
         "name": name,
         "manifest_path": str((root / relative_manifest).resolve()),
         "metadata": metadata or None,
+        # `cargo metadata --no-deps` always reports both, so a fixture without
+        # them is a shape no real run produces.
+        "dependencies": [],
+        "features": {},
     }
     if targets is not None:
         record["targets"] = [{"kind": [kind]} for kind in targets]
@@ -187,6 +192,90 @@ def ci_policy(**fields: object) -> dict[str, object]:
     for key, value in fields.items():
         policy[key.replace("_", "-")] = value
     return policy
+
+
+def declare_dependencies(
+    metadata: dict[str, object],
+    edges: dict[str, list[str | tuple[str, str | None]]],
+) -> None:
+    """Declare member-to-member edges on the package records, as `--no-deps` reports them.
+
+    `edges` maps a package name to the members it depends on, each a bare name
+    (a normal dependency) or `(name, kind)` with `kind` of `None`, `"dev"`, or
+    `"build"`. The dependency's `path` is its manifest directory, the one
+    field the planner matches a member by.
+    """
+    assert_no_synthetic_resolve(metadata)
+    records = {record["name"]: record for record in metadata["packages"]}  # type: ignore[index]
+    for name, targets in edges.items():
+        for target in targets:
+            dependency, kind = (target, None) if isinstance(target, str) else target
+            records[name]["dependencies"].append(  # type: ignore[index]
+                {
+                    "name": dependency,
+                    "source": None,
+                    "req": "*",
+                    "kind": kind,
+                    "rename": None,
+                    "optional": False,
+                    "uses_default_features": True,
+                    "features": [],
+                    "target": None,
+                    "registry": None,
+                    "path": str(Path(records[dependency]["manifest_path"]).parent),  # type: ignore[index]
+                }
+            )
+
+
+def assert_no_synthetic_resolve(metadata: dict[str, object]) -> None:
+    """A fixture says its edges with `dependencies`; it never fabricates a `resolve`.
+
+    `cargo metadata --no-deps` reports `"resolve": null`, so a populated one is
+    a shape the planner can never receive.
+    """
+    if metadata.get("resolve") is not None:
+        raise AssertionError(
+            "fixture metadata carries a populated `resolve`; declare edges with "
+            "`declare_dependencies` instead"
+        )
+
+
+class ResolveForbiddenMetadata(dict):  # type: ignore[type-arg]
+    """Metadata whose `resolve` cannot be read: any access fails the test.
+
+    Wraps a fixture so a planning run proves it never consults the resolve, by
+    subscript, `.get`, membership, or whole-mapping iteration and copy.
+    """
+
+    def _refuse(self) -> None:
+        raise AssertionError("the planner read the `resolve` of `cargo metadata`")
+
+    def __getitem__(self, key: object) -> object:
+        if key == "resolve":
+            self._refuse()
+        return super().__getitem__(key)
+
+    def get(self, key: object, default: object = None) -> object:
+        if key == "resolve":
+            self._refuse()
+        return super().get(key, default)
+
+    def __contains__(self, key: object) -> bool:
+        if key == "resolve":
+            self._refuse()
+        return super().__contains__(key)
+
+    def keys(self):  # type: ignore[no-untyped-def]
+        self._refuse()
+
+    def items(self):  # type: ignore[no-untyped-def]
+        self._refuse()
+
+    def __iter__(self):  # type: ignore[no-untyped-def]
+        self._refuse()
+
+    def copy(self):  # type: ignore[no-untyped-def]
+        self._refuse()
 
 
 class AffectedScopeTests(unittest.TestCase):
@@ -203,14 +292,15 @@ class AffectedScopeTests(unittest.TestCase):
         self.metadata = {
             "workspace_members": [item["id"] for item in packages],
             "packages": packages,
-            "resolve": {
-                "nodes": [
-                    {"id": "alpha-core", "deps": [{"pkg": "shared-tests", "dep_kinds": [{"kind": None}]}]},
-                    {"id": "beta-app", "deps": [{"pkg": "alpha-core", "dep_kinds": [{"kind": None}]}]},
-                    {"id": "shared-tests", "deps": []},
-                ]
-            },
+            "resolve": None,
         }
+        declare_dependencies(
+            self.metadata,
+            {
+                "alpha-core": ["shared-tests"],
+                "beta-app": ["alpha-core"],
+            },
+        )
         self.policy = package_ci_policy(
             workspace_packages_from(self.metadata),
             runner_labels={"ubuntu-latest", "windows-latest", "macos-latest"},
@@ -651,6 +741,125 @@ class AffectedScopeTests(unittest.TestCase):
         self.assertTrue(scope["preflight_reason"], "the skip must still state its decision")
 
 
+class NoResolveFixtureTests(unittest.TestCase):
+    """Fixtures say their edges the way `cargo metadata --no-deps` does.
+
+    The planner reads member edges from each package's `dependencies`, never
+    from a `resolve`, so a fixture that fabricates one would pass here and fail
+    against a real run.
+    """
+
+    def setUp(self) -> None:
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary_directory.name)
+        seed_build_inputs(self.root)
+        packages = [
+            package(self.root, "alpha-core", "alpha/lib/Cargo.toml"),
+            package(self.root, "beta-app", "beta/app/Cargo.toml"),
+            package(
+                self.root,
+                "dev-only",
+                "dev/Cargo.toml",
+                ci=ci_policy(native={"ubuntu-latest": ["libdev"]}),
+            ),
+        ]
+        self.metadata: dict[str, object] = {
+            "workspace_members": [item["id"] for item in packages],
+            "packages": packages,
+            "resolve": None,
+        }
+        declare_dependencies(
+            self.metadata, {"beta-app": ["alpha-core", ("dev-only", "dev")]}
+        )
+        self.policy = package_ci_policy(
+            workspace_packages_from(self.metadata),
+            runner_labels={"ubuntu-latest", "windows-latest", "macos-latest"},
+            root=self.root,
+            today=TODAY,
+        )
+
+    def tearDown(self) -> None:
+        self.temporary_directory.cleanup()
+
+    def test_a_populated_resolve_is_rejected_and_null_or_absent_is_accepted(self) -> None:
+        assert_no_synthetic_resolve({"resolve": None})
+        assert_no_synthetic_resolve({})
+        for populated in ({"nodes": []}, {"nodes": [{"id": "a", "deps": []}]}, [], 0):
+            with self.subTest(populated=populated):
+                with self.assertRaises(AssertionError):
+                    assert_no_synthetic_resolve({"resolve": populated})
+        with self.assertRaises(AssertionError):
+            declare_dependencies({"packages": [], "resolve": {"nodes": []}}, {})
+
+    def test_every_fixture_record_has_the_shape_a_no_deps_run_reports(self) -> None:
+        for record in self.metadata["packages"]:  # type: ignore[attr-defined]
+            with self.subTest(package=record["name"]):
+                self.assertIsInstance(record["dependencies"], list)
+                self.assertEqual({}, record["features"])
+        beta = next(item for item in self.metadata["packages"] if item["name"] == "beta-app")  # type: ignore[attr-defined]
+        self.assertEqual(
+            [
+                ("alpha-core", None, str((self.root / "alpha/lib").resolve())),
+                ("dev-only", "dev", str((self.root / "dev").resolve())),
+            ],
+            [(item["name"], item["kind"], item["path"]) for item in beta["dependencies"]],
+        )
+
+    def test_the_resolve_wrapper_refuses_every_read_of_it(self) -> None:
+        wrapped = ResolveForbiddenMetadata(self.metadata)
+        self.assertEqual(self.metadata["packages"], wrapped["packages"])
+        self.assertIn("packages", wrapped)
+        for read in (
+            lambda: wrapped["resolve"],
+            lambda: wrapped.get("resolve"),
+            lambda: "resolve" in wrapped,
+            lambda: list(wrapped),
+            lambda: wrapped.items(),
+        ):
+            with self.assertRaises(AssertionError):
+                read()
+
+    def test_planning_never_reads_the_resolve_and_still_finds_the_edges(self) -> None:
+        plan = calculate_scope(
+            ["alpha/lib/src/lib.rs"],
+            self.root,
+            ResolveForbiddenMetadata(self.metadata),  # type: ignore[arg-type]
+            environments_for_tests(),
+            self.policy,
+        )
+        # `beta-app` is the unchanged direct dependent of the changed member;
+        # that fact exists only in the declared `dependencies`.
+        self.assertEqual(["alpha-core"], [entry["package"] for entry in plan["packages"]])
+        self.assertEqual(["beta-app"], plan["reverse_dependencies"])
+
+    def test_a_dev_dependency_edge_is_a_dependent_and_feeds_the_seeds_native_union(self) -> None:
+        plan = calculate_scope(
+            ["dev/src/lib.rs"],
+            self.root,
+            ResolveForbiddenMetadata(self.metadata),  # type: ignore[arg-type]
+            environments_for_tests(),
+            self.policy,
+        )
+        self.assertEqual(["beta-app"], plan["reverse_dependencies"])
+        plan = calculate_scope(
+            ["beta/app/src/lib.rs"],
+            self.root,
+            ResolveForbiddenMetadata(self.metadata),  # type: ignore[arg-type]
+            environments_for_tests(),
+            self.policy,
+        )
+        contracts = producer_contracts(plan, "beta-app")
+        self.assertEqual(
+            ["libdev"],
+            json.loads(contracts[("ubuntu-latest", "L1")]["native_packages"]),
+        )
+
+    def test_input_directories_need_only_the_package_records(self) -> None:
+        packages = workspace_packages_from(self.metadata)
+        targets = test_inputs.targets_from_metadata(packages.values(), self.root.resolve().as_posix())
+        self.assertEqual([], targets)
+
+
 class ClosureTests(unittest.TestCase):
     """R2 (amended 2026-08-13): a seed selects its DIRECT dependents only."""
 
@@ -672,36 +881,19 @@ class ClosureTests(unittest.TestCase):
         self.metadata = {
             "workspace_members": [item["id"] for item in packages],
             "packages": packages,
-            "resolve": {
-                "nodes": [
-                    {"id": "biscuit-speaks", "deps": []},
-                    {
-                        "id": "biscuit-speaks-cli",
-                        "deps": [{"pkg": "biscuit-speaks", "dep_kinds": [{"kind": None}]}],
-                    },
-                    {
-                        "id": "claudine",
-                        "deps": [{"pkg": "biscuit-speaks", "dep_kinds": [{"kind": None}]}],
-                    },
-                    {
-                        "id": "claudine-cli",
-                        "deps": [{"pkg": "claudine", "dep_kinds": [{"kind": None}]}],
-                    },
-                    {
-                        "id": "claudine-contract",
-                        "deps": [{"pkg": "claudine", "dep_kinds": [{"kind": None}]}],
-                    },
-                    {
-                        "id": "research",
-                        "deps": [{"pkg": "biscuit-speaks", "dep_kinds": [{"kind": None}]}],
-                    },
-                    {
-                        "id": "research-cli",
-                        "deps": [{"pkg": "research", "dep_kinds": [{"kind": None}]}],
-                    },
-                ]
-            },
+            "resolve": None,
         }
+        declare_dependencies(
+            self.metadata,
+            {
+                "biscuit-speaks-cli": ["biscuit-speaks"],
+                "claudine": ["biscuit-speaks"],
+                "claudine-cli": ["claudine"],
+                "claudine-contract": ["claudine"],
+                "research": ["biscuit-speaks"],
+                "research-cli": ["research"],
+            },
+        )
         self.policy = package_ci_policy(
             workspace_packages_from(self.metadata),
             runner_labels={"ubuntu-latest", "windows-latest", "macos-latest"},
@@ -754,16 +946,14 @@ class NativeClosureTests(unittest.TestCase):
         self.metadata = {
             "workspace_members": [item["id"] for item in packages],
             "packages": packages,
-            "resolve": {
-                "nodes": [
-                    {
-                        "id": "consumer",
-                        "deps": [{"pkg": "native-lib", "dep_kinds": [{"kind": None}]}],
-                    },
-                    {"id": "native-lib", "deps": []},
-                ]
-            },
+            "resolve": None,
         }
+        declare_dependencies(
+            self.metadata,
+            {
+                "consumer": ["native-lib"],
+            },
+        )
         self.policy = package_ci_policy(
             workspace_packages_from(self.metadata),
             runner_labels={"ubuntu-latest", "windows-latest", "macos-latest"},
@@ -1623,12 +1813,7 @@ class BuildDerivationTests(unittest.TestCase):
         self.metadata = {
             "workspace_members": [item["id"] for item in packages],
             "packages": packages,
-            "resolve": {
-                "nodes": [
-                    {"id": "alpha-core", "deps": []},
-                    {"id": "beta-app", "deps": []},
-                ]
-            },
+            "resolve": None,
         }
         self.policy = package_ci_policy(
             workspace_packages_from(self.metadata),
@@ -1668,7 +1853,7 @@ class BuildDerivationTests(unittest.TestCase):
             metadata = {
                 "workspace_members": [item["id"] for item in packages],
                 "packages": packages,
-                "resolve": {"nodes": [{"id": "alpha-core", "deps": []}]},
+                "resolve": None,
             }
             policy = package_ci_policy(
                 {item["id"]: item for item in packages},
@@ -1722,7 +1907,7 @@ class BuildDerivationTests(unittest.TestCase):
                 metadata = {
                     "workspace_members": [item["id"] for item in packages],
                     "packages": packages,
-                    "resolve": {"nodes": [{"id": "alpha-core", "deps": []}]},
+                    "resolve": None,
                 }
                 policy = package_ci_policy(
                     {item["id"]: item for item in packages},
@@ -1830,7 +2015,7 @@ class ShadowWorkspaceTests(unittest.TestCase):
             "[package]\nname='alpha'\nversion='0.1.0'\n[workspace]\n"
         )
         alpha = package(root, "alpha", "alpha/Cargo.toml")
-        metadata = {"workspace_members": ["alpha"], "packages": [alpha], "resolve": {"nodes": []}}
+        metadata = {"workspace_members": ["alpha"], "packages": [alpha], "resolve": None}
         with self.assertRaises(RuntimeError) as raised:
             validate_no_shadow_workspaces(metadata, root)
         self.assertIn("shadow", str(raised.exception))
@@ -1871,7 +2056,7 @@ class GatesFalseScopeTests(unittest.TestCase):
         self.metadata = {
             "workspace_members": [item["id"] for item in packages],
             "packages": packages,
-            "resolve": {"nodes": [{"id": "excluded", "deps": []}]},
+            "resolve": None,
         }
         self.policy = package_ci_policy(
             {
@@ -1956,16 +2141,14 @@ class NonPropagationTests(unittest.TestCase):
         self.metadata = {
             "workspace_members": [item["id"] for item in packages],
             "packages": packages,
-            "resolve": {
-                "nodes": [
-                    {
-                        "id": "consumer",
-                        "deps": [{"pkg": "declaring-dep", "dep_kinds": [{"kind": None}]}],
-                    },
-                    {"id": "declaring-dep", "deps": []},
-                ]
-            },
+            "resolve": None,
         }
+        declare_dependencies(
+            self.metadata,
+            {
+                "consumer": ["declaring-dep"],
+            },
+        )
         self.policy = package_ci_policy(
             workspace_packages_from(self.metadata),
             runner_labels={"ubuntu-latest", "windows-latest", "macos-latest"},
@@ -2012,34 +2195,22 @@ class BuildClosureEdgeTests(unittest.TestCase):
         self.metadata = {
             "workspace_members": [item["id"] for item in packages],
             "packages": packages,
-            "resolve": {
-                "nodes": [
-                    {
-                        "id": "seed",
-                        "deps": [
-                            {"pkg": "normal", "dep_kinds": [{"kind": None}]},
-                            {"pkg": "seed-dev", "dep_kinds": [{"kind": "dev"}]},
-                        ],
-                    },
-                    {
-                        "id": "seed-dev",
-                        "deps": [{"pkg": "transitive-dev", "dep_kinds": [{"kind": "dev"}]}],
-                    },
-                    {
-                        "id": "normal",
-                        "deps": [{"pkg": "normal-dev", "dep_kinds": [{"kind": "dev"}]}],
-                    },
-                    {"id": "transitive-dev", "deps": []},
-                    {"id": "normal-dev", "deps": []},
-                ]
-            },
+            "resolve": None,
         }
+        declare_dependencies(
+            self.metadata,
+            {
+                "seed": ["normal", ("seed-dev", "dev")],
+                "seed-dev": [("transitive-dev", "dev")],
+                "normal": [("normal-dev", "dev")],
+            },
+        )
 
     def tearDown(self) -> None:
         self.temporary_directory.cleanup()
 
     def test_dev_dependency_edges(self) -> None:
-        closure = build_closure("seed", self.metadata, self.packages)
+        closure = build_closure("seed", member_dependency_graph(self.metadata), self.packages)
         # The seed's OWN dev-dependencies are compiled to test it...
         self.assertIn("seed-dev", closure)
         self.assertIn("normal", closure)
@@ -2062,16 +2233,14 @@ class LockfileScopeBranchTests(unittest.TestCase):
         self.metadata = {
             "workspace_members": [item["id"] for item in packages],
             "packages": packages,
-            "resolve": {
-                "nodes": [
-                    {"id": "alpha-core", "deps": []},
-                    {
-                        "id": "beta-app",
-                        "deps": [{"pkg": "alpha-core", "dep_kinds": [{"kind": None}]}],
-                    },
-                ]
-            },
+            "resolve": None,
         }
+        declare_dependencies(
+            self.metadata,
+            {
+                "beta-app": ["alpha-core"],
+            },
+        )
         self.policy = package_ci_policy(
             workspace_packages_from(self.metadata),
             runner_labels={"ubuntu-latest", "windows-latest", "macos-latest"},
@@ -2140,13 +2309,7 @@ class TopLevelDirectoryFallbackTests(unittest.TestCase):
         self.metadata = {
             "workspace_members": [item["id"] for item in packages],
             "packages": packages,
-            "resolve": {
-                "nodes": [
-                    {"id": "alpha-core", "deps": []},
-                    {"id": "alpha-cli", "deps": []},
-                    {"id": "beta-app", "deps": []},
-                ]
-            },
+            "resolve": None,
         }
         self.policy = package_ci_policy(
             workspace_packages_from(self.metadata),
@@ -2204,9 +2367,7 @@ class AreaFanOutTests(unittest.TestCase):
         self.metadata = {
             "workspace_members": [item["id"] for item in packages],
             "packages": packages,
-            "resolve": {
-                "nodes": [{"id": item["id"], "deps": []} for item in packages]
-            },
+            "resolve": None,
         }
         self.policy = package_ci_policy(
             workspace_packages_from(self.metadata),
@@ -2345,7 +2506,7 @@ class AllReusedAreaFanOutTests(unittest.TestCase):
         self.metadata = {
             "workspace_members": [item["id"] for item in packages],
             "packages": packages,
-            "resolve": {"nodes": [{"id": item["id"], "deps": []} for item in packages]},
+            "resolve": None,
         }
         self.policy = package_ci_policy(
             workspace_packages_from(self.metadata),
@@ -2419,7 +2580,7 @@ class MatrixLimitTests(unittest.TestCase):
         metadata = {
             "workspace_members": [item["id"] for item in packages],
             "packages": packages,
-            "resolve": {"nodes": [{"id": item["id"], "deps": []} for item in packages]},
+            "resolve": None,
         }
         policy = package_ci_policy(
             workspace_packages_from(metadata),
@@ -2670,7 +2831,7 @@ class EventSchedulingTests(unittest.TestCase):
         self.metadata = {
             "workspace_members": [item["id"] for item in packages],
             "packages": packages,
-            "resolve": {"nodes": [{"id": "alpha-core", "deps": []}]},
+            "resolve": None,
         }
         self.policy = package_ci_policy(
             workspace_packages_from(self.metadata),
@@ -2943,12 +3104,7 @@ class CheckCellScopeTests(unittest.TestCase):
         self.metadata = {
             "workspace_members": [item["id"] for item in packages],
             "packages": packages,
-            "resolve": {
-                "nodes": [
-                    {"id": "alpha-core", "deps": []},
-                    {"id": "beta-app", "deps": []},
-                ]
-            },
+            "resolve": None,
         }
         self.policy = package_ci_policy(
             workspace_packages_from(self.metadata),
@@ -3038,22 +3194,16 @@ class DependentSeamTests(unittest.TestCase):
         self.metadata = {
             "workspace_members": [item["id"] for item in packages],
             "packages": packages,
-            "resolve": {
-                "nodes": [
-                    {"id": "alpha-core", "deps": []},
-                    {"id": "beta-app", "deps": [{"pkg": "alpha-core", "dep_kinds": [{"kind": None}]}]},
-                    {
-                        "id": "gamma-lib",
-                        "deps": [
-                            {"pkg": "alpha-core", "dep_kinds": [{"kind": None}]},
-                            {"pkg": "delta-lib", "dep_kinds": [{"kind": None}]},
-                        ],
-                    },
-                    {"id": "delta-lib", "deps": []},
-                    {"id": "excluded-app", "deps": [{"pkg": "alpha-core", "dep_kinds": [{"kind": None}]}]},
-                ]
-            },
+            "resolve": None,
         }
+        declare_dependencies(
+            self.metadata,
+            {
+                "beta-app": ["alpha-core"],
+                "gamma-lib": ["alpha-core", "delta-lib"],
+                "excluded-app": ["alpha-core"],
+            },
+        )
         self.policy = package_ci_policy(
             workspace_packages_from(self.metadata),
             runner_labels={"ubuntu-latest", "windows-latest", "macos-latest"},
@@ -3385,7 +3535,7 @@ class ApplyFixture(unittest.TestCase):
         self.metadata = {
             "workspace_members": [item["id"] for item in packages],
             "packages": packages,
-            "resolve": {"nodes": [{"id": item["id"], "deps": []} for item in packages]},
+            "resolve": None,
         }
         self.policy = package_ci_policy(
             workspace_packages_from(self.metadata),
@@ -3961,9 +4111,7 @@ class ToolingPathOwnershipTests(unittest.TestCase):
         self.metadata = {
             "workspace_members": [item["id"] for item in packages],
             "packages": packages,
-            "resolve": {
-                "nodes": [{"id": item["id"], "deps": []} for item in packages]
-            },
+            "resolve": None,
         }
         self.policy = package_ci_policy(
             workspace_packages_from(self.metadata),
@@ -4147,7 +4295,7 @@ class PreflightSkipTests(unittest.TestCase):
         self.metadata = {
             "workspace_members": [item["id"] for item in packages],
             "packages": packages,
-            "resolve": {"nodes": [{"id": "alpha-core", "deps": []}]},
+            "resolve": None,
         }
         self.policy = package_ci_policy(
             workspace_packages_from(self.metadata),
@@ -4201,7 +4349,7 @@ class ChangeInventoryTests(unittest.TestCase):
         self.metadata = {
             "workspace_members": [item["id"] for item in packages],
             "packages": packages,
-            "resolve": {"nodes": [{"id": "alpha-core", "deps": []}]},
+            "resolve": None,
         }
         self.policy = package_ci_policy(
             workspace_packages_from(self.metadata),
@@ -4375,7 +4523,7 @@ class AreaDriftFlagTests(unittest.TestCase):
         self.metadata = {
             "workspace_members": [item["id"] for item in packages],
             "packages": packages,
-            "resolve": {"nodes": [{"id": "alpha-core", "deps": []}]},
+            "resolve": None,
         }
         self.policy = package_ci_policy(
             workspace_packages_from(self.metadata),
@@ -4474,7 +4622,7 @@ class ArchiveGuardScopeTests(unittest.TestCase):
         self.metadata = {
             "workspace_members": [item["id"] for item in packages],
             "packages": packages,
-            "resolve": {"nodes": [{"id": "alpha-core", "deps": []}]},
+            "resolve": None,
         }
         self.policy = package_ci_policy(
             workspace_packages_from(self.metadata),
@@ -5566,7 +5714,7 @@ class RealWorkspaceNativeGuardTests(unittest.TestCase):
             for package_id, package in packages.items()
             if package["name"] == "biscuit-speaks"
         )
-        closure = build_closure(speaks_id, metadata, packages)
+        closure = build_closure(speaks_id, member_dependency_graph(metadata), packages)
         names = {packages[member_id]["name"] for member_id in closure}
         self.assertIn(
             "playa",
@@ -7792,7 +7940,7 @@ class TestInputSelectionTests(unittest.TestCase):
         self.metadata = {
             "workspace_members": [item["id"] for item in packages],
             "packages": packages,
-            "resolve": {"nodes": [{"id": "reader", "deps": []}, {"id": "other", "deps": []}]},
+            "resolve": None,
         }
         self.policy = package_ci_policy(
             workspace_packages_from(self.metadata),
@@ -7918,7 +8066,6 @@ class TestInputSelectionTests(unittest.TestCase):
         gated["targets"][1]["required-features"] = ["terminal-tests"]  # type: ignore[index]
         self.metadata["packages"].append(gated)
         self.metadata["workspace_members"].append("gated")
-        self.metadata["resolve"]["nodes"].append({"id": "gated", "deps": []})
         self.policy = package_ci_policy(
             workspace_packages_from(self.metadata),
             runner_labels={"ubuntu-latest", "windows-latest", "macos-latest"},
@@ -7963,7 +8110,6 @@ class TestInputSelectionTests(unittest.TestCase):
             )
         )
         self.metadata["workspace_members"].append("shared")
-        self.metadata["resolve"]["nodes"].append({"id": "shared", "deps": []})
         self.policy = package_ci_policy(
             workspace_packages_from(self.metadata),
             runner_labels={"ubuntu-latest", "windows-latest", "macos-latest"},
@@ -8048,10 +8194,7 @@ class TestInputSelectionTests(unittest.TestCase):
         # changed `darkmatter` AND its tests read a changed document. It must
         # hold one record and not also be an unchanged dependent reported
         # nowhere, which the plan schema refuses.
-        self.metadata["resolve"]["nodes"] = [
-            {"id": "reader", "deps": [{"pkg": "other", "dep_kinds": [{"kind": None}]}]},
-            {"id": "other", "deps": []},
-        ]
+        declare_dependencies(self.metadata, {"reader": ["other"]})
         plan = self.plan(["other/lib/src/lib.rs", "docs/guide.md"])
         self.assertNotIn("reader", plan["reverse_dependencies"])
         self.assertEqual(
@@ -8211,7 +8354,7 @@ class HistoricalDocumentationBlindSpotReplayTests(unittest.TestCase):
         self.metadata = {
             "workspace_members": ["darkmatter"],
             "packages": packages,
-            "resolve": {"nodes": [{"id": "darkmatter", "deps": []}]},
+            "resolve": None,
         }
         self.policy = package_ci_policy(
             workspace_packages_from(self.metadata),
@@ -8326,7 +8469,7 @@ class SourceInputSelectionTests(unittest.TestCase):
         return {
             "workspace_members": [item["id"] for item in packages],
             "packages": packages,
-            "resolve": {"nodes": [{"id": item["id"], "deps": []} for item in packages]},
+            "resolve": None,
         }
 
     def policy(self, metadata: dict[str, object]) -> dict[str, dict[str, object]]:

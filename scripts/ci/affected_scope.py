@@ -25,11 +25,11 @@ import os
 import re
 import subprocess
 import sys
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import date
 from pathlib import Path, PurePosixPath
 from collections.abc import Callable, Sequence
-from typing import Any
+from typing import Any, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -621,8 +621,15 @@ SOURCE_SUFFIXES = {
 
 
 def load_metadata(root: Path) -> dict[str, Any]:
+    """The workspace's package records, read without resolving dependencies.
+
+    `--no-deps` returns `"resolve": null`, so no caller may read `resolve`; the
+    member-to-member edges come from `member_dependency_graph`. `--offline`
+    turns any accidental registry or network access into an error instead of a
+    silent download. There is deliberately no fallback to a full resolve.
+    """
     result = subprocess.run(
-        ["cargo", "metadata", "--format-version", "1"],
+        ["cargo", "metadata", "--no-deps", "--offline", "--format-version", "1"],
         cwd=root,
         check=True,
         capture_output=True,
@@ -1937,25 +1944,425 @@ def package_directories(
     return sorted(directories, key=lambda item: len(item[0].parts), reverse=True)
 
 
+#: A member's active edges to other members: target package id -> dependency
+#: kinds (`None` normal, `"dev"`, `"build"`).
+MemberGraph = dict[str, dict[str, set[Optional[str]]]]
+
+_DEPENDENCY_KINDS = (None, "dev", "build")
+
+
+@dataclass
+class _GraphEntry:
+    """One dependency declaration, in the shape `cargo metadata --no-deps` reports."""
+
+    key: str
+    kind: str | None
+    optional: bool
+    default: bool
+    features: list[str]
+    target: str | None
+
+
+@dataclass
+class _GraphNode:
+    """A package whose features the solver tracks: a member or a reachable local path package."""
+
+    label: str
+    member: bool
+    features: dict[str, list[str]]
+    entries: list[_GraphEntry]
+
+
+def _graph_error(label: str, message: str) -> RuntimeError:
+    return RuntimeError(f"member dependency graph: {label}: {message}")
+
+
+def _expect(value: Any, kind: type, label: str, field: str) -> Any:
+    if not isinstance(value, kind) or (kind is int and isinstance(value, bool)):
+        raise _graph_error(
+            label, f"'{field}' must be {kind.__name__}, got {type(value).__name__}: {value!r}"
+        )
+    return value
+
+
+def _expect_strings(value: Any, label: str, field: str) -> list[str]:
+    _expect(value, list, label, field)
+    for item in value:
+        _expect(item, str, label, f"{field} item")
+    return value
+
+
+class _MemberGraphBuilder:
+    """Reads member records and reachable local manifests into solver nodes.
+
+    Only *member* records come from `cargo metadata`. A local path package
+    outside the member set has no record under `--no-deps`, yet it can request
+    features on members, so each reachable one is read once from its own
+    manifest (`tomllib`, with `workspace = true` inheritance for its dependency
+    entries). Its dev-dependencies are ignored, as Cargo ignores them for a
+    dependency.
+    """
+
+    def __init__(self, member_dirs: dict[str, str]) -> None:
+        self.member_by_dir = member_dirs
+        self.nodes: dict[str, _GraphNode] = {}
+        self._real: dict[str, str] = {}
+        self._documents: dict[str, dict[str, Any]] = {}
+
+    def real_path(self, path: str) -> str:
+        """One host-native spelling per directory: symlinks resolved, case per OS."""
+        spelled = self._real.get(path)
+        if spelled is None:
+            spelled = self._real[path] = os.path.normcase(os.path.realpath(path))
+        return spelled
+
+    def target_for(self, directory: str, label: str) -> str:
+        spelled = self.real_path(directory)
+        member = self.member_by_dir.get(spelled)
+        if member is not None:
+            return member
+        return self.outside_node(spelled, label)
+
+    def document(self, manifest: Path, label: str) -> dict[str, Any]:
+        cached = self._documents.get(str(manifest))
+        if cached is not None:
+            return cached
+        if tomllib is None:
+            raise _graph_error(
+                label,
+                f"depends on the local package {manifest.parent}, outside the workspace, "
+                f"whose features need its manifest read but this interpreter has no "
+                f"`tomllib` (Python {sys.version_info.major}.{sys.version_info.minor}); "
+                "resolving a plan needs Python 3.11 or newer",
+            )
+        try:
+            document = tomllib.loads(manifest.read_text(encoding="utf-8"))
+        except (OSError, tomllib.TOMLDecodeError, UnicodeDecodeError) as error:
+            raise _graph_error(label, f"cannot read {manifest}: {error}") from error
+        self._documents[str(manifest)] = document
+        return document
+
+    def workspace_dependencies(self, directory: Path, label: str) -> tuple[Path, dict[str, Any]]:
+        for candidate in (directory, *directory.parents):
+            manifest = candidate / "Cargo.toml"
+            if not manifest.is_file():
+                continue
+            workspace = self.document(manifest, label).get("workspace")
+            if workspace is not None:
+                dependencies = _expect(
+                    workspace.get("dependencies", {}), dict, str(manifest), "workspace.dependencies"
+                )
+                return candidate, dependencies
+        raise _graph_error(label, f"`workspace = true` but no workspace root above {directory}")
+
+    def outside_node(self, spelled: str, label: str) -> str:
+        node_id = f"outside:{spelled}"
+        if node_id in self.nodes:
+            return node_id
+        directory = Path(spelled)
+        manifest = directory / "Cargo.toml"
+        if not manifest.is_file():
+            raise _graph_error(label, f"path dependency {spelled} has no Cargo.toml")
+        document = self.document(manifest, label)
+        manifest_label = str(manifest)
+        features = {
+            name: list(_expect_strings(items, manifest_label, f"features.{name}"))
+            for name, items in _expect(
+                document.get("features", {}), dict, manifest_label, "features"
+            ).items()
+        }
+        node = self.nodes[node_id] = _GraphNode(manifest_label, False, features, [])
+        sources: list[tuple[Any, str | None]] = [
+            (document.get("dependencies"), None),
+            (document.get("build-dependencies"), "build"),
+        ]
+        for platform in _expect(document.get("target", {}), dict, manifest_label, "target").values():
+            sources.append((platform.get("dependencies"), None))
+            sources.append((platform.get("build-dependencies"), "build"))
+        for table, kind in sources:
+            if table is None:
+                continue
+            _expect(table, dict, manifest_label, "dependencies")
+            for key, spec in table.items():
+                node.entries.append(self.outside_entry(directory, key, spec, kind, manifest_label))
+        for entry in node.entries:
+            if entry.optional and not any(
+                f"dep:{entry.key}" in items for items in features.values()
+            ):
+                features.setdefault(entry.key, [f"dep:{entry.key}"])
+        return node_id
+
+    def outside_entry(
+        self, directory: Path, key: str, spec: Any, kind: str | None, label: str
+    ) -> _GraphEntry:
+        if isinstance(spec, str):
+            spec = {"version": spec}
+        _expect(spec, dict, label, f"dependency '{key}'")
+        base: dict[str, Any] = spec
+        base_directory = directory
+        features = list(_expect_strings(spec.get("features", []), label, f"{key}.features"))
+        if spec.get("workspace") is True:
+            base_directory, workspace_table = self.workspace_dependencies(directory, label)
+            if key not in workspace_table:
+                raise _graph_error(label, f"`{key}` uses `workspace = true` but the workspace has no such dependency")
+            base = workspace_table[key]
+            if isinstance(base, str):
+                base = {"version": base}
+            _expect(base, dict, label, f"workspace dependency '{key}'")
+            features = list(_expect_strings(base.get("features", []), label, f"{key}.features")) + features
+        path = base.get("path")
+        target = None
+        if path is not None:
+            _expect(path, str, label, f"{key}.path")
+            target = self.target_for(str(base_directory / path), f"{label} dependency '{key}'")
+        default = base.get("default-features", base.get("default_features", True))
+        return _GraphEntry(
+            key=key,
+            kind=kind,
+            optional=bool(spec.get("optional", False)),
+            default=bool(default),
+            features=features,
+            target=target,
+        )
+
+    def member_node(self, package: dict[str, Any]) -> None:
+        label = f"package '{package.get('name', package['id'])}'"
+        features = {
+            name: list(_expect_strings(items, label, f"features.{name}"))
+            for name, items in _expect(package.get("features"), dict, label, "features").items()
+        }
+        node = self.nodes[package["id"]] = _GraphNode(label, True, features, [])
+        for raw in _expect(package.get("dependencies"), list, label, "dependencies"):
+            _expect(raw, dict, label, "dependencies item")
+            name = _expect(raw.get("name"), str, label, "dependency name")
+            entry_label = f"{label} dependency '{name}'"
+            kind = raw.get("kind")
+            if kind not in _DEPENDENCY_KINDS:
+                raise _graph_error(entry_label, f"unsupported dependency kind {kind!r}")
+            rename = raw.get("rename")
+            if rename is not None:
+                _expect(rename, str, entry_label, "rename")
+            path = raw.get("path")
+            target = None
+            if path is not None:
+                _expect(path, str, entry_label, "path")
+                if path == "":
+                    raise _graph_error(entry_label, "'path' is empty")
+                target = self.target_for(path, entry_label)
+            node.entries.append(
+                _GraphEntry(
+                    key=rename or name,
+                    kind=kind,
+                    optional=_expect(raw.get("optional"), bool, entry_label, "optional"),
+                    default=_expect(
+                        raw.get("uses_default_features"), bool, entry_label, "uses_default_features"
+                    ),
+                    features=list(_expect_strings(raw.get("features"), entry_label, "features")),
+                    target=target,
+                )
+            )
+
+
+def _reject_member_replacements(
+    metadata: dict[str, Any], member_names: set[str], member_dirs: dict[str, str], builder: _MemberGraphBuilder
+) -> None:
+    """Refuse a `[patch]`, `[replace]` or config override that could name a member.
+
+    A replacement can map a registry dependency onto a member, which path
+    matching cannot see; a missing edge there would under-select silently.
+    """
+    workspace_root = metadata.get("workspace_root")
+    if workspace_root is None:
+        return
+    root = Path(_expect(workspace_root, str, "metadata", "workspace_root"))
+    candidates = [root / "Cargo.toml"]
+    for directory in (root, *root.parents):
+        candidates += [directory / ".cargo" / "config.toml", directory / ".cargo" / "config"]
+    cargo_home = os.environ.get("CARGO_HOME") or str(Path.home() / ".cargo")
+    candidates += [Path(cargo_home) / "config.toml", Path(cargo_home) / "config"]
+    for candidate in candidates:
+        try:
+            text = candidate.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if "[patch" not in text and "[replace" not in text and "patch." not in text:
+            continue
+        document = builder.document(candidate, "workspace replacements")
+        patched: list[tuple[str, Any]] = []
+        for source in (document.get("patch") or {}).values():
+            patched.extend(source.items())
+        patched.extend(
+            (spec.split(":")[0], value) for spec, value in (document.get("replace") or {}).items()
+        )
+        for name, value in patched:
+            path = value.get("path") if isinstance(value, dict) else None
+            if name in member_names or (
+                isinstance(path, str)
+                and builder.real_path(str(candidate.parent / path)) in member_dirs
+            ):
+                raise _graph_error(
+                    str(candidate),
+                    f"[patch]/[replace] of '{name}' could map a dependency onto a workspace "
+                    "member, which the planner's path matching cannot see",
+                )
+
+
+def member_dependency_graph(metadata: dict[str, Any]) -> MemberGraph:
+    """The workspace-wide active member-to-member dependency graph.
+
+    Reproduces the member edges of a full `cargo metadata` resolve from the
+    members' own `--no-deps` records, so no registry or network is needed. The
+    view is the planner's existing one: every member starts with its `default`
+    feature, feature requests unify across the workspace, and `target` cfgs are
+    not evaluated. Nothing here reads `resolve`.
+
+    Features and activated dependency keys only accumulate, so the fixpoint
+    terminates for dependency and feature cycles alike.
+
+    ## Returns
+
+    A key for every member (empty when it has no active member dependency),
+    mapping each target member id to the union of kinds over the source's
+    *active* entries. Packages outside the workspace feed feature requests into
+    the solution but never appear in it, so no `a -> outside -> b` edge is
+    bridged.
+
+    ## Errors
+
+    Raises ``RuntimeError`` naming the package and entry for a malformed record,
+    an unknown feature request on a member, an ambiguous member path, an
+    unsupported dependency kind, or a `[patch]`/`[replace]` that could map onto
+    a member.
+    """
+    members = _expect_strings(metadata.get("workspace_members"), "metadata", "workspace_members")
+    records = _expect(metadata.get("packages"), list, "metadata", "packages")
+    member_ids = set(members)
+    by_id = {record["id"]: record for record in records if record["id"] in member_ids}
+    member_dirs: dict[str, str] = {}
+    builder = _MemberGraphBuilder(member_dirs)
+    for package_id, record in by_id.items():
+        spelled = builder.real_path(str(Path(record["manifest_path"]).parent))
+        if spelled in member_dirs:
+            raise _graph_error(
+                f"package '{record['name']}'",
+                f"shares manifest directory {spelled} with member {member_dirs[spelled]!r}",
+            )
+        member_dirs[spelled] = package_id
+    for record in by_id.values():
+        builder.member_node(record)
+    _reject_member_replacements(
+        metadata, {record["name"] for record in by_id.values()}, member_dirs, builder
+    )
+    return _solve_member_graph(builder.nodes, list(by_id))
+
+
+def _solve_member_graph(nodes: dict[str, _GraphNode], members: list[str]) -> MemberGraph:
+    graph: MemberGraph = {package_id: {} for package_id in members}
+    features_on: set[tuple[str, str]] = set()
+    deps_on: set[tuple[str, str]] = set()
+    entries_on: set[tuple[str, int]] = set()
+    reached: set[str] = set()
+    requests: dict[tuple[str, str], set[str]] = {}
+    queue: list[tuple[Any, ...]] = []
+
+    def reach(node_id: str) -> None:
+        if node_id in reached:
+            return
+        reached.add(node_id)
+        for index, entry in enumerate(nodes[node_id].entries):
+            if not entry.optional:
+                queue.append(("entry", node_id, index))
+
+    def keyed(node_id: str, key: str) -> list[int]:
+        return [i for i, entry in enumerate(nodes[node_id].entries) if entry.key == key]
+
+    for package_id in members:
+        reach(package_id)
+        if "default" in nodes[package_id].features:
+            queue.append(("feature", package_id, "default", "root"))
+
+    while queue:
+        step = queue.pop()
+        node_id = step[1]
+        node = nodes[node_id]
+        if step[0] == "feature":
+            feature, why = step[2], step[3]
+            if (node_id, feature) in features_on:
+                continue
+            if feature not in node.features:
+                raise _graph_error(node.label, f"unknown feature '{feature}' ({why})")
+            features_on.add((node_id, feature))
+            for item in node.features[feature]:
+                origin = f"listed in feature '{feature}'"
+                if item.startswith("dep:"):
+                    queue.append(("dep", node_id, item[4:], origin))
+                elif "/" in item:
+                    key, requested = item.split("/", 1)
+                    weak = key.endswith("?")
+                    key = key.rstrip("?")
+                    indexes = keyed(node_id, key)
+                    if not indexes:
+                        raise _graph_error(node.label, f"feature '{feature}' names unknown dependency '{key}'")
+                    if not weak:
+                        queue.append(("dep", node_id, key, origin))
+                        if key in node.features and any(node.entries[i].optional for i in indexes):
+                            queue.append(("feature", node_id, key, origin))
+                    requests.setdefault((node_id, key), set()).add(requested)
+                    for index in indexes:
+                        if (node_id, index) in entries_on and node.entries[index].target:
+                            queue.append(
+                                ("feature", node.entries[index].target, requested, f"requested by {node.label} via '{item}'")
+                            )
+                else:
+                    queue.append(("feature", node_id, item, origin))
+        elif step[0] == "dep":
+            key = step[2]
+            if (node_id, key) in deps_on:
+                continue
+            indexes = keyed(node_id, key)
+            if not indexes:
+                raise _graph_error(node.label, f"unknown dependency '{key}' ({step[3]})")
+            deps_on.add((node_id, key))
+            queue.extend(("entry", node_id, index) for index in indexes)
+        else:
+            index = step[2]
+            if (node_id, index) in entries_on:
+                continue
+            entries_on.add((node_id, index))
+            entry = node.entries[index]
+            if entry.target is None:
+                continue
+            if node.member and nodes[entry.target].member:
+                graph[node_id].setdefault(entry.target, set()).add(entry.kind)
+            reach(entry.target)
+            why = f"requested by {node.label} dependency '{entry.key}'"
+            for feature in entry.features:
+                queue.append(("feature", entry.target, feature, why))
+            if entry.default and "default" in nodes[entry.target].features:
+                queue.append(("feature", entry.target, "default", why))
+            for feature in sorted(requests.get((node_id, entry.key), ())):
+                queue.append(("feature", entry.target, feature, why))
+    return graph
+
+
 def reverse_dependency_map(
-    metadata: dict[str, Any], packages: dict[str, dict[str, Any]]
+    graph: MemberGraph, packages: dict[str, dict[str, Any]]
 ) -> dict[str, set[str]]:
     """Each workspace member's DIRECT reverse dependencies among the members."""
     reverse_dependencies: dict[str, set[str]] = {
         package_id: set() for package_id in packages
     }
-    for node in metadata["resolve"]["nodes"]:
-        if node["id"] not in packages:
+    for package_id, targets in graph.items():
+        if package_id not in packages:
             continue
-        for dependency in node.get("deps", []):
-            dependency_id = dependency["pkg"]
+        for dependency_id in targets:
             if dependency_id in reverse_dependencies:
-                reverse_dependencies[dependency_id].add(node["id"])
+                reverse_dependencies[dependency_id].add(package_id)
     return reverse_dependencies
 
 
 def direct_dependents(
-    seeds: set[str], metadata: dict[str, Any], packages: dict[str, dict[str, Any]]
+    seeds: set[str], graph: MemberGraph, packages: dict[str, dict[str, Any]]
 ) -> set[str]:
     """The changed packages plus their DIRECT reverse Cargo dependencies.
 
@@ -1965,7 +2372,7 @@ def direct_dependents(
     surfaces the next time the intermediate itself is touched (or on a
     `workflow_dispatch` full run).
     """
-    reverse_dependencies = reverse_dependency_map(metadata, packages)
+    reverse_dependencies = reverse_dependency_map(graph, packages)
 
     affected = set(seeds)
     for package_id in seeds:
@@ -1979,7 +2386,7 @@ def is_package_source_path(path: PurePosixPath) -> bool:
 
 
 def build_closure(
-    seed: str, metadata: dict[str, Any], packages: dict[str, dict[str, Any]]
+    seed: str, graph: MemberGraph, packages: dict[str, dict[str, Any]]
 ) -> set[str]:
     """Forward dependency closure for build provisioning.
 
@@ -1990,26 +2397,21 @@ def build_closure(
     platform is installed on all, which is the safe direction and matches how
     the declarations were consumed before.
 
-    The closure comes from the workspace-unified `cargo metadata` resolve, not
-    from any job's declared feature set: an OPTIONAL edge (e.g.
-    biscuit-speaks -> playa) is present here only because some member enables
-    it. If every enabling edge disappears, the union silently loses the
-    optional package's native requirements. `test_affected_scope.py` pins the
-    known instance (biscuit-speaks -> playa) against the real metadata so the
-    coupling fails loudly instead of silently.
+    The closure comes from the workspace-unified member graph
+    (`member_dependency_graph`), not from any job's declared feature set: an
+    OPTIONAL edge (e.g. biscuit-speaks -> playa) is present here only because
+    some member enables it. If every enabling edge disappears, the union
+    silently loses the optional package's native requirements.
+    `test_affected_scope.py` pins the known instance (biscuit-speaks -> playa)
+    against the real workspace so the coupling fails loudly instead of silently.
     """
-    nodes = {node["id"]: node for node in metadata["resolve"]["nodes"]}
 
     def edges(package_id: str, include_dev: bool) -> list[str]:
-        node = nodes.get(package_id)
-        if node is None:
-            return []
-        reached = []
-        for dependency in node.get("deps", []):
-            kinds = {kind.get("kind") for kind in dependency.get("dep_kinds", [])}
-            if include_dev or kinds != {"dev"}:
-                reached.append(dependency["pkg"])
-        return reached
+        return [
+            dependency
+            for dependency, kinds in graph.get(package_id, {}).items()
+            if include_dev or kinds != {"dev"}
+        ]
 
     closure = {seed}
     pending = [seed]
@@ -3514,6 +3916,7 @@ def calculate_scope(
     `root` when omitted.
     """
     packages = workspace_packages(metadata)
+    graph = member_dependency_graph(metadata)
     table = environments
     cell_environments, deferred_environments, proven_environments = schedule_environments(
         table, event, all_environments, proven_event
@@ -3564,9 +3967,9 @@ def calculate_scope(
     # it contributes no reverse-dependency seam below.
     suite_paths = suite_owner_paths(list(files), packages)
     suite_ids = set(suite_paths) - source_ids
-    reverse_map = reverse_dependency_map(metadata, packages)
+    reverse_map = reverse_dependency_map(graph, packages)
     reverse_ids = (
-        direct_dependents(source_ids, metadata, packages) - source_ids - suite_ids
+        direct_dependents(source_ids, graph, packages) - source_ids - suite_ids
     )
 
     # AC1: an unchanged direct reverse dependent is *reported* here and
@@ -3679,9 +4082,9 @@ def calculate_scope(
             "sidecars": record["sidecars"],
             "l1_include_slow": record["l1_include_slow"],
             "requires_toolchain": record["requires_toolchain"],
-            "native": native_closure(package_id, metadata, packages, policy),
+            "native": native_closure(package_id, graph, packages, policy),
             "input_paths": closure_directories(
-                package_id, root, metadata, packages
+                package_id, root, graph, packages
             ),
         }
         if seam:
@@ -3689,7 +4092,7 @@ def calculate_scope(
                 prerequisite
                 for dependent in seam["dependents"]
                 for prerequisite in native_closure(
-                    packages_by_name[dependent]["id"], metadata, packages, policy
+                    packages_by_name[dependent]["id"], graph, packages, policy
                 ).get(DEPENDENTS_ENVIRONMENT, [])
             })
             package_record["dependent_seam"] = seam
@@ -3726,8 +4129,8 @@ def calculate_scope(
             prohibitions,
             f"archive-path guard selected by {trigger}; this lint cell runs the "
             f"guard alone and no other {guard_owner} work",
-            native_closure(owner_id, metadata, packages, policy),
-            closure_directories(owner_id, root, metadata, packages),
+            native_closure(owner_id, graph, packages, policy),
+            closure_directories(owner_id, root, graph, packages),
         )
         if owned:
             package_records.append(record)
@@ -3750,7 +4153,7 @@ def calculate_scope(
         root,
         cell_environments,
         prohibitions,
-        metadata,
+        graph,
         accepted,
     )
     # As for the guard owner above: a package a changed test input selected now
@@ -3998,13 +4401,13 @@ def non_gating_package_record(
 
 def native_closure(
     package_id: str,
-    metadata: dict[str, Any],
+    graph: MemberGraph,
     packages: dict[str, dict[str, Any]],
     policy: dict[str, dict[str, Any]],
 ) -> dict[str, list[str]]:
     """System packages the whole build closure needs, per runner OS."""
     native: dict[str, list[str]] = {}
-    for member_id in build_closure(package_id, metadata, packages):
+    for member_id in build_closure(package_id, graph, packages):
         member = policy[packages[member_id]["name"]]
         for os_name, declared in member["native"].items():
             bucket = native.setdefault(os_name, [])
@@ -4020,7 +4423,7 @@ def native_closure(
 def closure_directories(
     package_id: str,
     root: Path,
-    metadata: dict[str, Any],
+    graph: MemberGraph,
     packages: dict[str, dict[str, Any]],
 ) -> list[str]:
     """The manifest directories of a package's build closure, sorted.
@@ -4032,7 +4435,7 @@ def closure_directories(
     """
     return sorted(
         manifest_directory(root, packages[member_id]).as_posix()
-        for member_id in build_closure(package_id, metadata, packages)
+        for member_id in build_closure(package_id, graph, packages)
     )
 
 
@@ -4494,7 +4897,7 @@ def select_test_inputs(
     root: Path,
     environments: list[dict[str, Any]],
     prohibitions: dict[str, dict[str, Any]] | None,
-    metadata: dict[str, Any],
+    graph: MemberGraph,
     accepted: dict[tuple[str, str, str], dict[str, Any]],
 ) -> set[str]:
     """Add one narrowed L1 cell per package whose tests read a changed file.
@@ -4572,8 +4975,8 @@ def select_test_inputs(
                 "sidecars": record["sidecars"],
                 "l1_include_slow": record["l1_include_slow"],
                 "requires_toolchain": record["requires_toolchain"],
-                "native": native_closure(package_id, metadata, packages, policy),
-                "input_paths": closure_directories(package_id, root, metadata, packages),
+                "native": native_closure(package_id, graph, packages, policy),
+                "input_paths": closure_directories(package_id, root, graph, packages),
             }
         )
     return selected
