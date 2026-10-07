@@ -212,7 +212,9 @@ policy artifact **without running the planner**, and on any miss —
 `scope-base-mismatch`, `scope-malformed` — it calculates scope exactly as
 before and names the code in the summary's `scope source` row. The job
 materializes the pinned Rust toolchain (`rustup show`) only on that miss,
-immediately before the selection run that reads `cargo metadata`; a hit is
+immediately before the selection run that reads `cargo metadata --no-deps
+--offline` (workspace members only: no registry or git download, so it needs
+the pinned toolchain and the prebuilt helper but no dependency cache); a hit is
 Python and jq end to end and sets up no toolchain (R9). Whichever way the
 scope was sourced, the summary's `validation environments`, `reused passing
 cells`, and `cells retained (evidence incomplete or rejected)` rows report
@@ -357,7 +359,10 @@ map (keyed by `ubuntu-latest`/`macos-latest`/`windows-latest`) and must not
 grow a `wsl2-ubuntu` key.
 
 Cargo metadata — not this file — remains the source of truth for package
-membership.
+membership. The scope job reads it with `--no-deps --offline` and derives the
+member-to-member dependency edges itself (`member_dependency_graph` in
+`scripts/ci/affected_scope.py`); nothing in planning reads Cargo's `resolve`
+section. See `docs/topics/ci-cd.md`, "How the planner reads the workspace".
 
 ## `environments.json`
 

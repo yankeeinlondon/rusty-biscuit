@@ -128,6 +128,10 @@ selected areas with a reason each, the packages contributing to each, and one
 `schema.validate_resolved_plan` is its contract and
 `.github/ci/schemas/contract.json` is the field list Rust tooling asserts
 against. Downstream jobs consume that document rather than rediscovering scope.
+The planner's metadata read is registry-free (`cargo metadata --no-deps --offline`);
+member edges come from `member_dependency_graph`, and nothing may read `resolve`. A new
+input that needs the resolve needs its own decision (docs/topics/ci-cd.md, "How the
+planner reads the workspace").
 Package remains the stored identity everywhere; **area is a derived grouping**,
 computed from the manifest directory with the same rule as
 `sniff repo package-area` and kept honest by a drift contract rather than by a
