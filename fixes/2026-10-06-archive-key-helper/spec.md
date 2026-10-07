@@ -6,7 +6,9 @@ status: draft-spec
 related:
   - 2026-10-06-archive-guard-full-tree
   - 2026-09-12-single-os-compile
-reviewed: false
+reviewed: true
+reviewed_by: codex/gpt-6.1-sol
+reviewed_on: "2026-10-06"
 review_iterations: 0
 clarified: false
 implemented: false
@@ -33,32 +35,49 @@ $schema:
   implemented_by: string -> the agent who implemented the plan
 ---
 
-# Archive consumers hand the planner its prebuilt key helper
+# Archive consumers reuse the shipped build-key helper
 
 ## Summary
 
-Every run of the planner (`scripts/ci/affected_scope.py`) computes at least one
-build key. Build keys come from the `ci-build` helper, which
-`scripts/ci/build_key.py` looks for at `<root>/target/{release,debug}/ci-build`.
-When the helper is not there and `BISCUIT_CI_BUILD_BIN` is unset, it falls back
-to `cargo run … --bin ci-build`. An archive consumer's checkout has no
-`target/` and restores no Cargo cache, so the first planner call in every
-archive-mode test process compiles `ci-build` from scratch.
+The [CI planner](../../scripts/ci/affected_scope.py), owned by the `repo-deps`
+package, computes build keys through that package's
+[build-key module](../../scripts/ci/build_key.py). The module first checks
+`BISCUIT_CI_BUILD_BIN`, then looks for `ci-build[.exe]` under this checkout's
+`target/release` and `target/debug`. Without a helper there, it invokes
+`cargo run … --bin ci-build`. An archive consumer runs prebuilt tests in a
+checkout without these build outputs or a restored Cargo cache, so its first
+planner invocation starts a fresh helper build. Concurrent invocations in the
+same checkout can wait on that build; they do not necessarily compile separate
+copies.
 
-That one compile accounts for most of the time the two planner contract tests in
-`tools/test-toolkit/tests/ci_workflow_contracts.rs` take in archive mode. It is
-why they run 64–82 s on `ubuntu-latest` and hit the 90 s kill on
-`windows-latest`.
+That compile accounts for most of the measured archive-mode duration of the
+two planner contract tests in
+`tools/test-toolkit/tests/ci_workflow_contracts.rs`. It is
+consistent with the reported 64–82 s on `ubuntu-latest` and the 90 s timeout
+on `windows-latest`; the measurements below reproduce the helper cost on
+developer build hosts, rather than measuring those hosted CI runs directly.
 
-The consumer already holds a verified, checksummed `ci-build` binary: the
-verifier that travels in every build artifact as `<build>/tools/ci-build[.exe]`.
-This fix exports that binary as `BISCUIT_CI_BUILD_BIN` in the archive-mode test
-step, in CI and in `just cross-check`, so that no consumer compiles the key
-helper.
+The consumer already holds `ci-build`: the producer-built verifier that
+travels in every build artifact as `<build>/tools/ci-build[.exe]`. This fix
+exports that same binary as `BISCUIT_CI_BUILD_BIN` after successful archive
+verification, in CI and in `just cross-check`, so the planner does not compile
+its key helper.
 
 This is the same class of defect, with the same remedy, as the existing
 "an archive consumer asks Cargo for nothing" bindings
 (`BISCUIT_NEXTEST_BIN`, `BISCUIT_JUNIT_*`, `BISCUIT_BACKEND_PROOF_BIN`).
+
+**Review note:** the shipped verifier checks the manifest, archive, and
+sidecars; the [manifest](../../scripts/ci-build-archive.rs) in `repo-deps`
+does not record a checksum for the verifier itself. Reusing the verifier
+preserves the existing artifact trust boundary. This spec does not add
+self-verification or claim that archive verification independently authenticates
+the helper's bytes.
+
+The archive runner avoids Cargo for its own setup and execution. Tests in a
+`requires-toolchain` suite may still intentionally invoke Cargo, including
+the planner's `cargo metadata` call. Removing the helper build does not remove
+that declared toolchain requirement.
 
 ## Evidence (measured 2026-10-06)
 
@@ -85,11 +104,12 @@ What the measurements rule out:
 - **The test-input scan is not the cause.** It costs 2.2–2.7 s on WSL and
   4.3 s on Windows. Avoiding it (the last row) leaves both tests well above
   the 30 s slow mark on Windows.
-- **Contention is not the main cost.** Test 2 is as slow alone as alongside
-  test 1. The two concurrent compiles share one build behind Cargo's lock, so
-  running the tests one after the other would not save the compile. The 22 s
-  `cargo metadata` lock wait appeared once in three Windows runs.
-- **The cold compile is the main cost, and it happens once per test process.** After it, each
+- **Contention can amplify the cost, but cannot explain it alone.** Test 2
+  still takes 34 s on Windows when run alone. Concurrent helper requests
+  share one build behind Cargo's lock, so serial execution would retain the
+  cold compile. The 22 s `cargo metadata` lock wait appeared once in three
+  Windows runs.
+- **The cold compile is the main cost in a fresh consumer checkout.** After it, each
   key call takes about 0.01 s (the helper is found in `target/debug/`), and a
   whole planner call takes 1.1–2.2 s.
 
@@ -104,25 +124,36 @@ The CI consumer is in the same position. `_package-ci.yml`'s archive tier
 a toolchain but no cache, so the CI compile is colder than the build hosts'
 and also downloads crates. This is read from the workflow, not measured in CI.
 
-## Scope
+## Design decisions and scope
 
-### 1. `_ci_build_verify` reports the helper it verified
+Reuse the binary already shipped with the artifact; do not add a sidecar,
+another helper build, a new hashing implementation, or a new CI job. The
+`ci-build key` protocol, its schema version, and its use of `biscuit-hash`
+remain unchanged. `key_helper` is an internal step output, so it does not
+change a versioned plan, manifest, receipt, or completion-record format.
 
-`just/devops.just::_ci_build_verify` already resolves
-`tool="${dir}/tools/ci-build${suffix}"`, refuses to continue without it, and
-has `ci-build verify` check its checksum. Add one line to its `$GITHUB_OUTPUT`
-block:
+### 1. Verification reports the verifier path after success
+
+The repository's shared [_ci_build_verify recipe](../../just/devops.just)
+already resolves `tool="${dir}/tools/ci-build${suffix}"`, refuses to continue
+without it, and invokes it to verify the artifact. Add one line to its
+existing `$GITHUB_OUTPUT` block, which runs only after verification succeeds:
 
 ```bash
 echo "key_helper=${tool}"
 ```
 
-The path keeps the native spelling the recipe already produces for
-`archive_file` and `workspace`.
+The output is the exact binary used for verification, rather than a later
+search through `PATH` or the checkout's build outputs. Keep the recipe's
+existing executable-permission handling and `.exe` selection. On Windows,
+`_native_path` returns a drive-qualified path with forward slashes, such as
+`D:/a/_temp/build/tools/ci-build.exe`; this works for both Git Bash and native
+programs. Update the recipe's output documentation to include `key_helper`.
 
 ### 2. The CI archive gate exports it
 
-In `.github/workflows/_package-ci.yml`, the `test` job's `gate` step:
+In the [package workflow](../../.github/workflows/_package-ci.yml), the
+`test` job's `gate` step:
 
 - Add the step env `ARCHIVE_KEY_HELPER: ${{ steps.verified.outputs.key_helper }}`
   next to the existing `ARCHIVE_WORKSPACE`.
@@ -130,16 +161,25 @@ In `.github/workflows/_package-ci.yml`, the `test` job's `gate` step:
   and `BISCUIT_JUNIT_WORKSPACE_ROOT`, add:
 
   ```bash
+  : "${ARCHIVE_KEY_HELPER:?verification did not report the ci-build key helper}"
   export BISCUIT_CI_BUILD_BIN="$ARCHIVE_KEY_HELPER"
   ```
 
-The `expected` listing step runs no tests and is left unchanged. Only the archive branch
-exports the variable. A native-mode cell keeps today's behavior, and
-`build_key.py` already ignores an empty value.
+The nonempty check prevents a broken output binding from silently returning
+to Cargo. A nonempty path that is missing or cannot execute already fails in
+the build-key module; retain that behavior and do not retry by building a
+replacement. In archive mode this binding replaces any inherited helper
+override, so every planner subprocess uses the artifact's binary.
+
+The `expected` step starts archived test binaries to list test identities,
+but does not execute their test bodies or the planner; it needs no helper
+binding. Only the archive branch exports the variable. A native-mode cell
+retains its existing helper resolution and any caller-provided override.
 
 ### 3. `just cross-check` matches CI
 
-`scripts/cross-check.sh` reproduces the consumer by hand, so it must bind the
+[The cross-check script](../../scripts/cross-check.sh) reproduces the consumer
+by hand, so it must bind the
 same variable or it stops reproducing CI timing:
 
 - `unix_run_archive`, step 7:
@@ -147,100 +187,244 @@ same variable or it stops reproducing CI timing:
 - `windows_run_archive`: `\$env:BISCUIT_CI_BUILD_BIN =
   "\$consume\\build\\tools\\ci-build.exe"`, next to `BISCUIT_NEXTEST_BIN`.
 
+These assignments are in the generated remote scripts, after successful
+verification and before `just _test`. The backslash before `$` above prevents
+the local Bash heredoc from expanding a remote variable; it must disappear
+in the generated script. Quote paths as shown so spaces remain part of a
+single filename. The PowerShell environment assignment goes directly to the
+native Python process, so its backslashes do not pass through Just's argument
+expansion. Native cross-check mode receives no new assignment.
+
 ### 4. The contract pins it
 
-Extend `an_archive_consumer_asks_cargo_for_nothing_including_metadata` in
-`tools/test-toolkit/tests/ci_workflow_contracts.rs`:
+Extend the archive runner contracts in the `test-toolkit` package's
+[workflow contract suite](../../tools/test-toolkit/tests/ci_workflow_contracts.rs):
 
 - The `gate` step's knob list gains
   `export BISCUIT_CI_BUILD_BIN="$ARCHIVE_KEY_HELPER"`.
 - The `gate` step binds `ARCHIVE_KEY_HELPER` from
   `steps.verified.outputs.key_helper`.
+- The required-value check and export occur inside the archive branch,
+  before the canonical test recipe. Check the relevant branch, rather than
+  accepting the strings anywhere in the job.
 - `_ci_build_verify` writes `key_helper=${tool}` to `$GITHUB_OUTPUT`, where
   `tool` is the path it has already normalized. Assert this in
   `an_archive_consumer_hands_native_programs_native_paths`, which already
-  reads that recipe's body.
-- Update the test's doc comment to name the key helper beside `_stage_junit` and
-  `_backend_proof` as a path that would otherwise reach `cargo run`.
+  reads that recipe's body. Limit the inspected text to that recipe and
+  establish that the output follows successful verification.
+- Update the no-Cargo contract's doc comment to distinguish the runner's
+  setup from deliberate Cargo calls inside `requires-toolchain` tests. Name
+  the planner's key helper as another unintended build this binding prevents.
 
-### 5. `build_key.py` treats an empty value as unset
+Also extend the existing generated-script tests in `repo-deps`'
+[test_cross_check.py](../../scripts/ci/test_cross_check.py). The Unix archive
+sequence test must find the quoted helper binding for Linux, macOS, and WSL;
+the Windows sequence test must find the `.exe` environment assignment. Each
+must establish `verification → binding → test recipe` ordering in the
+generated script, with no leftover local heredoc escapes. Keep native mode's
+existing behavior covered. These tests use the existing simulated hosts;
+they require no extra remote runs or CI cells.
 
-This is already the behavior (`if override:`). Pin it with one case in
-`scripts/ci/test_build_key.py`: an empty `BISCUIT_CI_BUILD_BIN` falls back to
-candidate discovery instead of raising "names '', which is not a file". The
-workflow step relies on this for non-archive cells.
+### 5. Preserve helper resolution and isolate compiler-wrapper mode
+
+Empty-as-unset is already the behavior (`if override:`); no resolver change
+in the `repo-deps` [build-key module](../../scripts/ci/build_key.py) is required.
+Extend its [resolution tests](../../scripts/ci/test_build_key.py) to pin two
+boundaries:
+
+- An empty `BISCUIT_CI_BUILD_BIN` falls back to candidate discovery. Supply
+  a temporary candidate file and substitute `_candidates` so the test does
+  not depend on this host's build outputs or compile a helper.
+- A nonempty override takes precedence even when a candidate exists.
+  Assert the returned command is the override path as one argument,
+  including a path containing spaces. Resolution alone requires no POSIX
+  shim and can be tested on Windows as well.
+
+Use the suite's existing environment restoration and cache-reset pattern.
+Retain its invalid-override and helper-error tests. Empty-as-unset is a
+general resolver contract; the archive branch now rejects an empty verified
+binding before reaching that fallback.
+
+The module's `planned_keys` function, which invokes the helper to hash a batch
+of canonical inputs, does need one environment boundary. Pass a copy of the
+current environment to its helper subprocess with `BISCUIT_CI_BUILD_WRAP`
+removed and `RUSTC_WRAPPER` explicitly empty. The `repo-deps`
+[ci-build executable](../../scripts/ci-build.rs)
+uses that switch to enter rustc-wrapper mode before parsing subcommands;
+a measured CI gate sets it even during archive execution. Without isolation,
+the newly bound helper would try to execute `key` as a compiler command.
+
+**Review decision:** clear the two coupled wrapper bindings only in the
+key-helper child, rather than in the whole gate. If the resolver chooses its
+Cargo fallback, retaining `RUSTC_WRAPPER` while removing the mode switch would
+break compiler-wrapper invocations during that helper build. Disabling both
+keeps helper resolution valid in either mode; an explicitly empty
+`RUSTC_WRAPPER` also prevents Cargo configuration from restoring a wrapper.
+The helper's bootstrap build
+then remains outside compiler-work measurement, as the counter's own bootstrap
+already is. Archive consumers use the explicit binary and perform no such
+build. Preserve the counter directory and the rest of the inherited
+environment, and leave the parent's environment unchanged, so deliberate
+Cargo calls made elsewhere in the suite retain their measurement bindings.
+
+Add one portable subprocess-boundary test using the existing Python unittest
+tools: set wrapper mode in the parent, supply a temporary helper path, and
+replace `subprocess.run` with a captured successful key response. Assert
+the helper's environment omits the mode switch, sets `RUSTC_WRAPPER` to an
+empty string, preserves the counter directory and ordinary variables, and
+leaves the parent's variables intact.
+Reset the helper cache and restore every environment variable changed by
+the test. No real compiler or new test executable is needed.
 
 ### 6. Documentation
 
-- `.github/ci/README.md`, "Consumers verify, then run": one sentence saying
-  that the verified `ci-build` also serves as the planner's key helper
-  (`BISCUIT_CI_BUILD_BIN`), so a `requires-toolchain` suite that runs the
-  planner compiles nothing.
+- [.github/ci/README.md](../../.github/ci/README.md), "Consumers verify, then
+  run", and the matching archive-consumer explanation in
+  [docs/topics/ci-cd.md](../../docs/topics/ci-cd.md): explain that the shipped
+  verifier also serves as the planner's key helper (`BISCUIT_CI_BUILD_BIN`)
+  after verification succeeds. A planner-running `requires-toolchain` suite
+  avoids this helper build while retaining its intentional Cargo calls.
+  State behavior directly without linking current documentation to this fix.
+- [.claude/skills/rust-devops/ci-cd.md](../../.claude/skills/rust-devops/ci-cd.md):
+  update the archive-consumer workflow guidance with the same binding and
+  toolchain distinction.
 - `.claude/skills/os/windows.md`, "Environment and processes" (the CLAUDE.md
   rule to record an OS fact in the same change): on `BUILD_WIN`, SSH sessions
   resolve `python3` and `python` to the WindowsApps Store aliases ahead of
   `C:\Users\ken\AppData\Local\Programs\Python\Python313`. Both fail
   `--version`, so every test gated on `python_interpreter()` skips there
   and nextest reports PASS in about 0.3 s. Verifying a planner test on that
-  host needs the interpreter on `PATH` first. The skill's symptom table gets a
-  matching row.
+  host needs the interpreter on the consuming process's `PATH` first, using
+  a process-scoped change rather than changing the host's persistent setup.
+  Do not assume Python313 is always installed: confirm the real interpreter
+  with a successful `--version`. The [OS skill](../../.claude/skills/os/SKILL.md)'s
+  symptom table gets a matching row. A short duration is only a warning sign;
+  captured output confirming execution, rather than the Python-unavailable
+  early return, is the evidence that the test ran.
 
 ## Out of scope
 
 - **Local fresh worktrees.** A native run in a new worktree still compiles
-  `ci-build` once, into the shared `target/`, and later runs find it.
-  That is the existing, intended fallback.
+  `ci-build` when no override or discoverable helper exists. Candidate
+  discovery currently checks this checkout's `target/`; do not assume a
+  configured external target directory will be discovered. Changing that
+  fallback or worktree build-storage policy is separate work.
 - **`wsl2-ubuntu`.** `test-toolkit` and `repo-deps` declare
   `requires-toolchain = true`, so their WSL2 cells are governed gaps. The
   planner also needs `cargo metadata`, which the guest cannot run.
   `_wsl-ci.yml` is not changed.
 - **`repo-deps`'s own planner tests**
   (`scripts/ci-build-archive-tests.rs`, `scripts/ci-rollup-tests.rs`). They
-  run in archive cells and benefit from §2 without any edit. Having them pass
+  run in archive cells and benefit from the CI archive gate's binding without
+  any edit. Having them pass
   `bin_exe!("ci-build")` explicitly is possible, but nothing here requires it.
 - **Whether the archive guard should always scan the full tree.**
   `2026-10-06-archive-guard-full-tree` is decided on its own merits. This fix
-  removes the timeout that spec cites as motivation, but it neither requires
-  nor rules out that change.
-- **Test-input scan performance.** It costs 2–4 s and is not on the critical
-  path.
+  addresses the helper build that contributes to the timeout cited there;
+  it neither requires nor rules out that change. That draft also removes
+  the two planner-to-guard tests. If it lands first, do not restore those
+  retired tests to measure this fix: keep the runner and resolver contracts,
+  and verify the binding through a surviving `repo-deps` planner test such as
+  `the_real_planners_plan_rolls_up` in
+  [ci-rollup-tests.rs](../../scripts/ci-rollup-tests.rs). The helper binding
+  remains useful to planner callers independently of the guard API.
+- **Test-input scan performance.** It costs 2–4 s and is not the dominant
+  measured cost.
+- **Artifact authentication, WSL toolchain provisioning, and CI scheduling.**
+  Keep the current trust model, governed capability gaps, event policy,
+  package identities, and evidence-reuse rules. This wiring change introduces
+  no new jobs, environments, schema versions, or timeout changes.
 
 ## Acceptance criteria
 
-1. In an archive-mode `just cross-check test-toolkit --os windows
-   the_shipped_planner` run with Python visible, neither planner contract test
-   is marked SLOW (30 s). The expected figure, from the warm calls measured
-   above, is about 10 s or less for test 1 and about 5 s or less for test 2.
-   The run's planner stderr must show no `cargo run` (a temporary probe or
-   `PYTHONVERBOSE` is enough to confirm this; it is not shipped).
-2. The same holds for `--os wsl` (expected about 6 s and 2 s).
-3. `an_archive_consumer_asks_cargo_for_nothing_including_metadata` fails when
-   the new export, the step env binding, or the `key_helper` output is removed.
-   Prove this once by deleting each line in turn.
-4. `test_build_key.py`'s new empty-value case passes.
-5. The first `ubuntu-latest` CI run that schedules `test-toolkit` L1 shows both
-   tests well under 30 s. `windows-latest` evidence arrives with the next push
-   to `main`, or from a pull request labeled `ci:all-os` if the author wants it
-   before merge.
+1. After successful verification, the CI archive gate exports the exact
+   shipped verifier path as `BISCUIT_CI_BUILD_BIN`. An absent or empty
+   `key_helper` output fails before the tier runs. Native mode retains its
+   existing resolver behavior.
+2. Generated Unix and Windows archive scripts bind the transferred helper
+   after verification and before testing. Paths with spaces remain one
+   filename; Windows uses the `.exe` spelling. The workflow, native-path,
+   and generated-script contracts all pass.
+3. The workflow contract fails if its gate binding or export is removed;
+   the native-path contract fails if the recipe's output is removed. Exercise
+   these three removals once, with the owning contract, and restore each
+   before continuing. No remote builds are needed for these negative checks.
+4. The resolver's empty-value and override-precedence cases pass, alongside
+   its existing error and pinned-digest tests. The helper selection changes
+   neither canonical input bytes nor resulting keys. The subprocess-boundary
+   test proves key requests ignore compiler-wrapper mode while preserving
+   the parent's measurement bindings and the child's other environment values.
+5. One focused native-Windows archive run executes the planner tests with a
+   working Python interpreter. A temporary diagnostic at helper resolution
+   records the actual command and nonempty override; it must be the consumer's
+   `<build>/tools/ci-build.exe`, not a Cargo command or a producer path.
+   Remove the diagnostic after collecting this evidence. Use the surviving
+   `repo-deps` planner test if the guard tests have already been retired.
+6. Record test durations from that same run. The two guard tests, if present,
+   should stay below nextest's existing 30 s slow mark; the draft's estimates
+   of roughly 10 s and 5 s are context, not new per-test timing assertions.
+   A remaining slow result requires checking its cause before claiming the
+   timeout is resolved, even if helper selection is correct.
+
+**Review note:** the existing cold-versus-warm measurements already identify
+the avoidable compile. No separate performance spike is needed. The single
+Windows archive run checks real path handling and that the tests execute;
+its durations also show whether removing the build resolved the observed
+slowdown. Absence of `cargo run` in planner stderr is not proof: the build-key
+module captures the helper subprocess's output internally, and
+`PYTHONVERBOSE` does not report its command arguments.
 
 ## Verification plan
 
-- Local: `just test` in `tools/test-toolkit`, and `python3 -m unittest
-  scripts/ci/test_build_key.py`.
-- `./scripts/cross-check.sh test-toolkit --os wsl the_shipped_planner` and the
-  same with `--os windows`. On `BUILD_WIN`, check that the tests did not skip:
-  a PASS in under 1 s means `python_interpreter()` found nothing (see §6).
-- No full-scope CI run. The `_package-ci.yml` and `devops.just` edits schedule
-  their own contract tests through the normal planner.
+These are checks for implementation; this inline document review does not
+build packages, contact build hosts, or trigger CI.
+
+- From the repository root, run `just test test-toolkit` (the toolkit's
+  own justfile does not define `test`), and `python3 -m unittest
+  scripts/ci/test_build_key.py scripts/ci/test_cross_check.py`.
+- Run `just cross-check test-toolkit --os windows the_shipped_planner`
+  once, with the temporary helper-command diagnostic described above. If
+  those tests were removed, use `just cross-check repo-deps --os windows
+  the_real_planners_plan_rolls_up`. Confirm Python succeeds in the remote
+  consumer environment and inspect captured output for the unavailable-Python
+  early return; a nextest PASS alone does not establish execution. Reuse
+  qualifying existing evidence where it answers the same requirement.
+- Other operating systems keep their normal required coverage. Hosted
+  `wsl2-ubuntu` retains the toolchain capability gap for these packages;
+  a developer WSL host with Cargo is a different capability setup. Another
+  timed WSL sample is not required to establish this fix's cause or remedy.
+- Review `just ci-local --plan` before an implementation push. Let the
+  canonical planner schedule affected packages and file-reader contracts;
+  do not add scheduling rules to guarantee these checks. Observe the next
+  normally scheduled `ubuntu-latest` and `windows-latest` results where the
+  planner tests still exist. These observations are follow-up evidence, not
+  a reason to trigger a full-workspace run or require `ci:all-os`.
 
 ## Risks
 
 - **Spelling of the verifier path on Windows.** `_ci_build_verify` already
   exports its other paths through `_native_path`, and `build_key.py` passes
-  the value to `subprocess.run` as `argv[0]`, so a native `D:\…\ci-build.exe`
-  is what is needed. Acceptance criterion 1 exercises this path through
-  `cross-check`. CI exercises it on the first `windows-latest` run.
+  the value to `subprocess.run` as one `argv[0]`. CI uses a drive-qualified
+  forward-slash spelling; PowerShell's direct environment assignment may
+  use native backslashes. The focused Windows archive run checks native
+  execution, while the workflow and recipe contracts check CI's normalized
+  output. The next normally scheduled Windows cell exercises the hosted path.
 - **The helper is a release build from the producer, not a local debug build.**
-  The key algorithm does not depend on the build profile, and `ci-build
-  verify` has already bound this binary to the plan's head revision, so the
-  keys are the ones the producer used.
+  The `repo-deps` [ci-build key command](../../scripts/ci-build.rs) uses
+  `biscuit-hash` independently of build profile. Archive verification binds
+  the archive's source identity to the plan, not the verifier's bytes. Reuse
+  the verifier shipped by the same producer and retain the existing
+  key-schema checks and pinned digest tests; do not claim a stronger
+  guarantee from verification than the implementation supplies.
+- **Compiler-counter wrapper mode.** A measured archive gate can inherit
+  `BISCUIT_CI_BUILD_WRAP`. Isolate key-helper command mode in the build-key
+  module as specified above. Do not unset measurement bindings for the whole
+  suite or change the counter's workflow; intentional Cargo calls still
+  require the existing instrumentation.
+
+## Open Questions
+
+None blocking this design. Reusing the shipped helper is compatible with the
+existing resolver and artifact contracts. The independent guard simplification
+may remove the original timing workload; the alternate verification above
+keeps this fix reviewable without retaining an obsolete guard reader.
