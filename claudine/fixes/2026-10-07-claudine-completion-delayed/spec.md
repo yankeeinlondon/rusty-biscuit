@@ -13,7 +13,7 @@ area: claudine
 human_review: true
 human_review_items:
   - |-
-    Before Phase 2 locks the new diagnostic fields, decide whether this fix
+    Before Phase 3 registers the new diagnostic fields, decide whether this fix
     includes CPU information. The plan reserves this decision for you, and the
     current host-discovery library cannot measure CPU utilization. A published
     diagnostic field cannot later be removed without breaking author handlers.
@@ -30,20 +30,30 @@ human_review_items:
     Recommend omission because operation observations locate the outstanding
     work without a permanently empty field or a new sampling subsystem.
 message_to_agent: |-
-  Phase 1 traced the boundaries and recorded the independent interface design
-  and requirement-to-test map in the implementation log. Trace boundaries is
-  checked; Freeze interfaces remains open only because the plan reserves the
-  CPU-field ruling for the author. No ruling was available in this headless
-  run. Do not treat the recommendation to omit CPU as approval. Independent
-  Phase 2 observation, retention, and fixture work can proceed; registry field
-  locking must wait for that ruling. The current DeferredSink/feed_line code
-  already publishes full answer and verdict before result-line callbacks;
-  preserve its provider_streams regression. Earlier answer callbacks before
-  a verdict still need bounded retention. Capture files omit whitespace-only
-  records and delimiters, so even successful flush alone cannot prove complete
-  raw-byte coverage. Carry DiagnosticSnapshot through existing runtime/error
-  fields rather than adding decision-bearing persisted readers. No source
-  code was changed during Phase 1; see the log for baseline validation results.
+  Phase 3 is PARTIAL, not complete. Select outcomes is checked after 32 focused
+  L1 reader tests passed. Stdout settlement now selects
+  claudine_completion_delayed for native exit 0 without a verdict,
+  exit_failure for native nonzero exit, and interrupted for exit 130, while
+  retaining published answer/session data even when a native failure overrides
+  a successful verdict. Reader warning identities remain subordinate.
+  The author's CPU-field ruling is still pending. Necessary Rule 1 explicitly
+  reserves it for the author; do not treat the omission recommendation as
+  approval. Carry diagnostics and Verify propagation remain unchecked.
+  Do not advance to Phase 4 before finishing Phase 3: register the typed
+  diagnostic and fields after the ruling, then carry the frozen populated
+  snapshot through runtime/session/attempt/composition/sequence/lifecycle and
+  verify storage publication under terminal blockage.
+  The direct wrapper still returns native exit 0 for a missing-verdict semantic
+  failure; fix caller projection while preserving native exit as evidence.
+  Phase 2's ProcessResult.completion_observation contains frozen retained data.
+  The fixed fixture scenarios are completion-callback, answer-callback, and
+  output-delivery; only test-fixtures builds read their control. Keep the
+  native/wrapper exit separation and ready/release handshakes. Frozen prefixes
+  are 256 KiB each; invalid raw UTF-8 uses padded base64. Raw capture envelopes
+  omit original delimiters and cannot prove byte-complete coverage.
+  Run tier coverage and test/lint Cargo commands sequentially: tier listing
+  without test-fixtures can overwrite the executable needed by process tests.
+
 packages:
     - claudine
     - claudine-cli

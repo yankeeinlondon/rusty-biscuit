@@ -10,7 +10,68 @@ docs_updated_during_phase_1:
 docs_created_during_phase_1:
   - claudine/fixes/2026-10-07-claudine-completion-delayed/implementation-log.md
 skills_files_updated_during_phase_1: []
-packages: []
+source_files_during_phase_2:
+  - Cargo.lock
+  - claudine/cli/Cargo.toml
+  - claudine/cli/src/commands/wrap/exec/completion_fixture.rs
+  - claudine/cli/src/commands/wrap/exec/mod.rs
+  - claudine/cli/src/commands/wrap/exec/reader_join.rs
+  - claudine/cli/src/commands/wrap/exec/reader_join/provider_streams.rs
+  - claudine/cli/src/commands/wrap/exec/reader_join/tests.rs
+  - claudine/cli/src/commands/wrap/exec/spawn/captured.rs
+  - claudine/cli/src/commands/wrap/exec/spawn/inherited.rs
+  - claudine/cli/src/commands/wrap/exec/spawn/retained.rs
+  - claudine/cli/src/commands/wrap/exec/spawn/semantic.rs
+  - claudine/cli/src/commands/wrap/exec/spawn/tests/captured.rs
+  - claudine/cli/src/commands/wrap/exec/spawn/tests/inherited.rs
+  - claudine/cli/src/commands/wrap/exec/stream_capture.rs
+  - claudine/cli/src/commands/wrap/exec/wiring/session.rs
+  - claudine/cli/src/commands/wrap/live_semantic_sink/event_sink.rs
+  - claudine/cli/src/commands/wrap/output_worker.rs
+  - claudine/cli/src/commands/wrap/output_worker/tests.rs
+  - claudine/cli/src/commands/wrap/run_scope.rs
+  - claudine/cli/src/commands/wrap/run_scope/observation.rs
+  - claudine/cli/src/commands/wrap/run_scope/retention.rs
+  - claudine/cli/src/commands/wrap/run_scope/tests.rs
+  - claudine/cli/src/commands/wrap/stream_io.rs
+  - claudine/cli/src/main.rs
+  - claudine/cli/tests/bin/fake_completion/main.rs
+  - claudine/cli/tests/l1/completion_delayed.rs
+  - claudine/cli/tests/l1/context_construction_guard.rs
+  - claudine/cli/tests/l1/main.rs
+  - claudine/lib/src/stream/providers/claude.rs
+  - claudine/lib/src/stream/providers/claude/tests.rs
+  - claudine/lib/src/stream/providers/codex.rs
+  - claudine/lib/src/stream/providers/codex/tests.rs
+  - claudine/lib/src/stream/semantic.rs
+  - claudine/lib/src/stream/semantic/tests.rs
+docs_updated_during_phase_2:
+  - claudine/docs/dependencies.md
+  - claudine/docs/providers/dispatch-inventory.json
+  - claudine/docs/topics/timeouts.md
+  - claudine/fixes/2026-10-07-claudine-completion-delayed/implementation-log.md
+  - claudine/fixes/2026-10-07-claudine-completion-delayed/plan.md
+  - claudine/fixes/2026-10-07-claudine-completion-delayed/spec.md
+  - docs/dependencies.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+  - .claude/skills/claudine/SKILL.md
+source_files_during_phase_3:
+  - claudine/cli/src/commands/wrap/exec/reader_join.rs
+  - claudine/cli/src/commands/wrap/exec/reader_join/matrix.rs
+  - claudine/cli/src/commands/wrap/exec/reader_join/provider_streams.rs
+  - claudine/cli/src/commands/wrap/exec/reader_join/tests.rs
+docs_updated_during_phase_3:
+  - claudine/docs/topics/timeouts.md
+  - claudine/fixes/2026-10-07-claudine-completion-delayed/implementation-log.md
+  - claudine/fixes/2026-10-07-claudine-completion-delayed/plan.md
+  - claudine/fixes/2026-10-07-claudine-completion-delayed/spec.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+  - .claude/skills/claudine/SKILL.md
+packages:
+  - claudine
+  - claudine-cli
 ---
 
 # Implementation Log for 2026-10-07-claudine-completion-delayed (5 phases)
@@ -325,3 +386,291 @@ Final reachability check confirmed both cited completion-callback and
 session-publication baseline tests are compiled in the Claudine binary test
 target and selected by the L1 filter. Closing with an incomplete-phase status
 because the author-reserved ruling is unavailable, rather than reporting success.
+
+## Phase 2
+
+### Behavior-to-test map before implementation
+
+- Atomic operation/tag offsets and every named boundary: `run_scope::tests::operation_and_time_are_one_coherent_observation`; reader join held-pipe/shared-clock tests; operation snapshots serialize stable names.
+- Earlier answer callback and result callback stalls: run-scope handshake tests and existing `provider_streams` completion callback regression; frozen response completeness and verdict remain independent.
+- Raw stdout before UTF-8 decoding: retained-reader tests with exact `b"\\xff\\r\\n"`, valid/malformed JSON, delimiters, EOF, read errors, prefix overflow, UTF-8 boundaries, and bounded serialized output after two round trips.
+- Freeze races: concurrent publishers released after close cannot change the snapshot or deliver another sink event.
+- Capture facts: existing envelope tests plus unflushed, failed flush, omission, and completed capture observations; cutoff reads facts without the writer lock.
+- Worker queue versus active write: `output_worker::tests::queued_frames_do_not_replace_active_delivery`, extending the existing gated sink test.
+- Fixture invocation: compiled fake provider with portable protocol output, test-only handshake controls, and POSIX/native Windows chain helpers; tests compiled in declared L1 targets with `test-fixtures`.
+
+These are hermetic L1 boundaries, including filesystem/subprocess checks. No parser acceptance, configuration, or shipped prompt changes are intended. Test controls use fixed scenario names rather than a structured input format. CPU contract remains pending; no registry field is locked in this phase.
+
+### Implementation checkpoints
+
+- Build fixtures complete: compiled `claudine-fake-completion` emits the literal Claude/Codex regression records; the declared L1 module uses CliProcessFixture and normal wrapper invocation. Fixed scenario directory names configure feature-only short budgets and ready/release handshakes. Production default/install builds cannot read the fixture control. POSIX and native cmd shell helpers save wrapper exit independently of marker execution. Three fixture tests passed (both providers and all three stall points). No terminal or browser is opened.
+- Regression-first evidence: the reader warning assertion failed before its implementation change, reporting unsupported pipe-owner inference. The newly added Codex earlier-answer regression then failed because Codex deliberately emits Reasoning rather than OutputText. The parser now publishes original text through a nonblocking sink observation callback before Reasoning, with forwarding in existing sink wrappers. No provider protocol acceptance changed.
+- The early-answer fixture exposed existing caller behavior: reader settlement marks the unconfirmed stream failed, but the direct wrapper currently returns its native exit 0. Phase 2 records the separate exits and checks retained data; enforcing caller exit 1 is Phase 3/4 outcome work, not silently folded into this phase. The next phase must fix that caller projection.
+- Frozen data is carried in `ProcessResult.completion_observation`; no persisted-summary deserializer or registry field was added. Phase 3 must project this data into the typed library diagnostic and carry it to session/lifecycle outputs. CPU ruling remains pending.
+- Capture envelopes cannot prove byte-complete coverage because delimiters are omitted. Tests exercise the generic verified-coverage conjunction, but shipped captures deliberately mark omission and cannot upgrade overflowed inline data to complete. No capture format or retention service changed.
+- Raw and answer prefixes are separately capped at 256 KiB; metadata path is capped at 8 KiB. Buffers move out under the close/publication lock, then JSON/base64 projection happens after releasing mutable-state locks. The frozen scope copy and returned result copy are each bounded; normal parser summaries retain their existing uncapped successful-answer contract.
+
+- Additional regression-first evidence: `clipped_multibyte_answer_stays_a_prefix_after_later_deltas` failed with a later ASCII byte filling a gap left by an omitted multibyte character. Clipping is now sticky until an authoritative replacement, preserving an exact prefix. Both buffers are preallocated at run construction; replacements clear/reuse the answer allocation. The targeted test then passed.
+- Initial broad test runs found test-authoring issues (assuming Codex's existing text-only parser finish already fails; using a nonexistent progress Default constructor). Assertions now check absence of a verdict record and use the normal bridge-created progress cell. These were corrected rather than altering Phase 3 outcomes or broadening a constructor API.
+
+- The full suite's dispatch inventory scan rejected a new provider tuple-array in a test. The earlier-answer regression now calls its shared assertion directly for the two known fixtures, preserving the centralized dispatch rule. Regenerated the existing dispatch inventory through `CLAUDINE_UPDATE_INVENTORY=1 just test-cli dispatch_inventory::`; all 12 inventory tests passed.
+- Original Claude answer observation now precedes display-newline normalization as well as callbacks. Explicit parser text observations prevent duplicate retention of the corresponding OutputText event; event-only providers retain the existing fallback. Separate stdout/stderr thread-local lanes preserve single-writer operation observations, including deferred callbacks.
+- OS review: the `os` skill and build-host instructions were read before adding native Windows cmd handling. Only BUILD_LINUX is declared here; BUILD_WIN/BUILD_WSL/BUILD_MACOS are absent. Remote cross-check was not invoked because its implementation stages a temporary index and creates a transient commit (`scripts/cross-check.sh`), while this session explicitly forbids staging and commits. The portable fixtures were executed on macOS; other OS behavior remains unclaimed and will need CI or an authorized cross-check run.
+
+- Broad validation also caught captured-stdout/stderr tests asserting the removed speculative pipe-owner wording. Their assertions now use the observed pipe-wait wording. This completes the warning-consumer audit across semantic, inherited, and captured readers; actual panic payload assertions remain unchanged. The seam scanner reads source files independently, so the fixture initialization function now has a local test-fixtures gate in addition to its module gate; all 10 seam-gate tests passed.
+
+- Cutoff-race regression: `released_completion_logger_cannot_dispatch_into_a_settled_run` failed with one late TurnComplete hook after the held logger resumed. The live sink now rechecks run closure before logging and again before downstream hook dispatch, without holding observation locks across either callback.
+- Unavailable-answer regression: the provider-error completion callback test failed with Some("") versus null when no answer existed. Failed summaries with no text no longer fabricate an identified empty answer; successful empty results and explicitly observed empty text remain distinguishable.
+- Metadata-bound regression: the path boundary test failed because 16 KiB accepted an 8 KiB-plus-one path. The metadata cap is now 8 KiB; worst-case JSON escaping leaves room inside the 64 KiB metadata allowance. The test includes maximum control-character escaping and the exact oversized boundary.
+
+### Final requirement-to-test mapping and reachability
+
+| Requirement | Concrete coverage |
+| --- | --- |
+| Coherent operations, monotonic offsets, separate reader lanes | `run_scope::tests::{operation_and_time_are_one_coherent_observation, every_operation_has_a_stable_serialized_snapshot, stderr_callbacks_cannot_replace_the_stdout_operation}`; existing held-pipe and shared-clock reader tests |
+| Exact original answer before callbacks, with independent verdict | Claude/Codex `original_answer_*` parser tests, sink wrapper forwarding test, reader `an_answer_callback_before_the_verdict_retains_partial_text_without_success`, and extended all-provider completion-callback test |
+| Bounded raw/answer prefixes, unavailable versus empty, clipping, UTF-8, malformed/read-error bytes, fallback without verdict | `run_scope::tests::{retained_data_shapes_and_size_survive_two_round_trips, raw_read_precedes_decoding_and_preserves_delimiters, a_failed_raw_read_leaves_partial_bytes_and_no_answer, last_message_is_bounded_answer_only_with_honest_completeness, clipped_multibyte_answer_stays_a_prefix_after_later_deltas, a_raw_prefix_split_inside_utf8_remains_lossless, capture_path_limit_keeps_serialized_detail_within_its_bound}`; provider-error test asserts null for an unidentified answer |
+| Capture disabled/unflushed/failed flush/verified coverage | New stream-capture tests plus `capture_completeness_requires_eof_flush_and_no_omissions_or_errors`; existing capture-envelope tests remain unchanged |
+| Freeze and late activity cannot contaminate another run or dispatch completion again | `freezing_retention_rejects_late_publication`, `freezing_discards_deferred_callbacks_from_the_abandoned_run`, `released_completion_logger_cannot_dispatch_into_a_settled_run`, and the completion-callback helper's post-release equality assertion |
+| Active delivery remains separate from queue submission and abandonment | `queued_frames_do_not_replace_active_delivery`; existing output-worker ordering/limits and session-end output-loss tests |
+| Shipped CLI, portable fake providers, shell chain, isolated homes/CWD/PATH/audio, fixed fixture controls | Three `completion_delayed` L1 tests exercise both providers and all stall points, native/wrapper status separation, marker commands, invalid/missing controls, and no audio spool |
+
+Exact added test identities (24), confirmed compiled and matched by the normal
+L1 filter, with none ignored:
+
+- `stream::providers::claude::tests::original_answer_observation_precedes_display_newline_normalization`
+- `stream::providers::codex::tests::original_answer_is_observed_before_its_reasoning_callback`
+- `stream::semantic::tests::sink_wrappers_forward_answer_observation_without_publishing_an_event`
+- `completion_delayed::fixture_handshakes_retain_answers_before_both_callback_stalls`
+- `completion_delayed::fixture_separates_queued_output_from_unfinished_delivery`
+- `completion_delayed::invalid_or_missing_fixture_scenarios_fail_explicitly`
+- `commands::wrap::exec::reader_join::provider_streams::an_answer_callback_before_the_verdict_retains_partial_text_without_success`
+- `commands::wrap::exec::reader_join::provider_streams::released_completion_logger_cannot_dispatch_into_a_settled_run`
+- `commands::wrap::exec::stream_capture::tests::existing_capture_is_visible_without_flushing_the_reader`
+- `commands::wrap::exec::stream_capture::tests::failed_capture_flush_never_upgrades_raw_completeness`
+- `commands::wrap::output_worker::tests::queued_frames_do_not_replace_active_delivery`
+- `commands::wrap::run_scope::tests::a_failed_raw_read_leaves_partial_bytes_and_no_answer`
+- `commands::wrap::run_scope::tests::a_raw_prefix_split_inside_utf8_remains_lossless`
+- `commands::wrap::run_scope::tests::capture_completeness_requires_eof_flush_and_no_omissions_or_errors`
+- `commands::wrap::run_scope::tests::capture_path_limit_keeps_serialized_detail_within_its_bound`
+- `commands::wrap::run_scope::tests::clipped_multibyte_answer_stays_a_prefix_after_later_deltas`
+- `commands::wrap::run_scope::tests::every_operation_has_a_stable_serialized_snapshot`
+- `commands::wrap::run_scope::tests::freezing_discards_deferred_callbacks_from_the_abandoned_run`
+- `commands::wrap::run_scope::tests::freezing_retention_rejects_late_publication`
+- `commands::wrap::run_scope::tests::last_message_is_bounded_answer_only_with_honest_completeness`
+- `commands::wrap::run_scope::tests::operation_and_time_are_one_coherent_observation`
+- `commands::wrap::run_scope::tests::raw_read_precedes_decoding_and_preserves_delimiters`
+- `commands::wrap::run_scope::tests::retained_data_shapes_and_size_survive_two_round_trips`
+- `commands::wrap::run_scope::tests::stderr_callbacks_cannot_replace_the_stdout_operation`
+
+The CLI L1 module is declared in `tests/l1/main.rs`; the compiled provider has
+an explicit Cargo bin target requiring `test-fixtures`, enabled in local
+recipes and CI metadata. In-source tests belong to the existing lib or binary
+test targets. No reserved tier marker was added. `cargo nextest list` matched
+every new identity; `just check-tier-coverage claudine` reported zero stranded
+tests. No new parser/schema/prompt/template/configuration input format was
+introduced, so a shipped-artifact corpus addition and the configuration input
+matrix are not applicable. Existing inventory/corpus guards ran in L1. The
+opaque observation serializer is tested through two JSON round trips; runtime
+failure decisions do not read it back.
+
+### Final validation
+
+- **PASS — `cd claudine && just test`:** 8,506 tests passed across the area's
+  selected targets in 69.007 s, 12 runtime-slow tests, 9 existing ignored tests
+  skipped. Nextest ID `040883b6-180e-4fa4-adc4-94ef316e71b6`. No test failure
+  remains. The initial failed runs described above were corrected.
+- **PASS — `cd claudine && just lint`:** all five packages, transport guards,
+  and lifecycle documentation guard; no formatter is invoked by this recipe.
+  The last lint requested collapsing a nested condition; that equivalent guard
+  expression was changed manually, without formatting adjacent code.
+- **PASS — `cargo clippy -p claudine-cli --all-targets --features test-fixtures
+  -- -D warnings`:** also checks the feature-only fixture code and binaries.
+- **PASS — final `just test-cli reader_join::`:** all 31 reader tests passed
+  after the lint-only guard collapse, including original/null response handling
+  and late logger dispatch. Nextest ID
+  `765af059-d025-4022-ae30-51458ba8bc4d`. The broad passing run is reused because
+  the only subsequent code edit is this behavior-equivalent conditional fold.
+- **PASS — `just check-tier-coverage claudine`:** zero stranded tests.
+- **PASS — final nextest listing:** exact declared-target/L1 reachability for
+  all 24 added tests, including feature-only process tests. The nine ignored
+  tests are the four `completion_perf::perf_*`, one
+  `compose_ttff_perf::compose_emits_first_stderr_byte_within_budget`, and four
+  `system_prompt_perf_bench::bench_*` performance tests identified in Phase 1.
+- **PASS — `git diff --check`:** no whitespace errors. A read-only comparison
+  against HEAD confirms the entire prior Phase 1 log body is preserved.
+- **Existing build warning:** macOS's oversized `__eh_frame` linker warning
+  remains; no change or workaround was introduced for it.
+- **Not run:** remote OS, L2/L3/browser/real-provider tiers, installation, or
+  monorepo-wide testing. These controlled stalls and filesystem/process checks
+  are L1. Remote evidence is unclaimed for the reasons recorded above; the
+  real-provider/install observations belong to Phase 5.
+
+Local scratch validation artifacts are `/tmp/claudine-phase2-test.log`,
+`/tmp/claudine-phase2-lint.log`, `/tmp/claudine-phase2-fixture-lint.log`,
+`/tmp/claudine-phase2-readers-final.log`, `/tmp/claudine-phase2-tiers.log`, and
+`/tmp/claudine-phase2-list.json`. Red regression logs separately record warning,
+multibyte-prefix, path-bound, unavailable-answer, and late-dispatch failures.
+
+### Closing state and handoff
+
+Phase 2's four tasks are implemented, verified, and checked off. The source,
+documentation, skill, and package frontmatter records are complete; the source
+file list includes every changed Rust file and its build manifests. Current
+behavior docs and the Claudine skill describe the observation seam and its
+limits. No file was staged, no commit was created, and cargo fmt was never run.
+The fix remains active, with Phase 2 implementation complete and ready for
+review; no lifecycle directory was moved.
+
+No new author decision arose, but the existing CPU-field ruling is still
+required before Phase 3 registers the diagnostic. `human_review: true` remains
+set, with its existing options updated to identify that next-phase boundary.
+Phase 1's Freeze interfaces checkbox remains open for this ruling; later phase
+checkboxes are untouched. The spec handoff explains the populated observation
+transport, native/wrapper exit gap, original-text callback, conservative
+capture coverage, fixture names, and remaining diagnostic/session/lifecycle
+work. No Phase 3 outcome or registry change is claimed here.
+
+## Phase 3
+
+### Scope and prerequisite
+
+The CPU ruling is still explicitly pending in the spec and prior handoff.
+Necessary Rule 1 reserves it for the author; this headless run cannot settle
+it or treat the omission recommendation as approval. Diagnostic registration
+and populated-detail propagation will remain unfinished rather than publish
+an irreversible field contract without that ruling. Independent settlement
+selection can proceed. No formatting, staging, commits, or lifecycle moves.
+
+### Requirement-to-test mapping before implementation
+
+- Native exit 0 without a published verdict selects
+  `claudine_completion_delayed`: update the existing reader outcome matrix,
+  `a_stalled_reader_with_no_published_result_is_an_incomplete_stream`,
+  held-pipe regression, and provider-stream missing-result test. Assert failed
+  summary, unchanged native exit, and subordinate reader warning. The original
+  Claude stream with its result record excluded remains the protocol input.
+- Native nonzero without a verdict selects `exit_failure`; interruption
+  selects `interrupted`: update matrix rows and successful-snapshot/nonzero
+  regression; add boundary cases including exit 1, 2, 130, and 137. Assert
+  answer/session data are retained when a published success meets native
+  failure, and actual provider errors outrank cleanup.
+- Confirmed success, provider errors, incomplete subagents, early timeout,
+  real panic payloads, and stderr warning-only behavior retain their outcomes:
+  reuse the live-provider-parser callback tests, matrix, panic diagnostics,
+  and session-end/attempt tests. Extend early-answer callback assertions to
+  the new primary identity and its partial-data observation.
+- Caller projection, typed diagnostic facets/catalog, lifecycle/session/
+  sequence populated-detail equality, and blocked-terminal diagnostic storage
+  need integrated tests when the CPU prerequisite is resolved. Existing
+  observation-only CLI fixtures remain coverage of the independent Phase 2
+  seams, not proof of diagnostic propagation.
+
+All settlement tests are ordinary L1 tests in existing declared CLI binary
+targets; no new target or tier marker is needed. No parser/configuration
+acceptance change is planned in this independent work, so the configuration
+robustness matrix and shipped-artifact corpus requirements do not apply.
+
+### Settlement implementation and targeted validation
+
+- Updated stdout fallback selection to delayed completion for exit 0 without
+  a verdict, native `exit_failure` otherwise, and `interrupted` for exit 130.
+  The native exit stays separate from the semantic failure flag. Reader
+  warnings still name observed operations without claiming a cause.
+- Kept published successful summaries' answer/session fields when a later
+  native failure changes their verdict. Published provider failures, terminal
+  bridge errors, genuine panic payloads, early-termination overrides, and
+  stderr warning-only behavior keep the existing precedence. Budgets and
+  teardown were untouched; ProcessResult still carries the frozen observation
+  alongside stronger outcomes.
+- Audited all Rust `stream_reader_timeout` consumers. Only the subordinate
+  `ReaderFailure` identity/assertion remains; stdout summary assertions use
+  the selected primary kind. Session-end/attempt helpers use warning text
+  only and need no behavior change for this independent selection work.
+- Added `native_failure_after_a_published_success_keeps_the_answer_and_session`
+  and strengthened the existing matrix, held-pipe, missing-result, native
+  failure, and early-answer callback tests. Original Claude/Codex protocol
+  fixtures remain unchanged.
+- RED: `just test-cli reader_join::` failed on the matrix missing-verdict
+  row and both provider-stream missing-verdict checks against the old code
+  (14 passed, 3 failed; 15 filtered tests not executed after fail-fast).
+  `/tmp/claudine-phase3-red.log` preserves that proof.
+- GREEN: `just test-cli reader_join::` ran all 32 tests successfully after
+  implementation (`/tmp/claudine-phase3-readers.log`). The newly added test
+  is compiled by the declared bin/claudine target and selected as ordinary L1.
+- Checked Select outcomes immediately after that passing checkpoint. Carry
+  diagnostics and Verify propagation remain open; no populated diagnostic
+  registration/storage/lifecycle or caller-exit completion is claimed.
+- Updated timeout outcome tables and the current skill guidance to distinguish
+  implemented summary selection from the remaining transport/caller gap.
+
+Two command setup mistakes were corrected: the first focused run addressed
+`test-cli` from the repo root instead of the area, and the first edit script
+used repo-relative paths while launched from the area. Neither changed source
+or provides test evidence. Canonical runs above use the claudine area.
+
+### Broader validation in progress
+
+`just check-tier-coverage claudine` passed with zero stranded tests. Running
+it concurrently with `just test` was a coordination mistake: its Cargo
+listing without fixture features overwrote the shared CLI executable while
+the broad feature-enabled process tests were running. The first broad run
+failed in all three existing `completion_delayed` tests because fixture
+controls were absent (4,946 passed, three failed; fail-fast left 3,558 unrun).
+No source workaround or skipped assertion was introduced. Repeat the gates
+sequentially; the initial log is `/tmp/claudine-phase3-test.log`, and the
+sequential rerun is `/tmp/claudine-phase3-test-final.log`. This setup failure
+is distinct from settlement regressions and from the CPU decision blocker.
+
+### Final gates and closing state
+
+- PASS: sequential `just test` in the claudine area — 8,507 passed, nine
+  existing ignored performance tests, no failures. This is one more passing
+  test than Phase 2 because of the new retained-answer/native-failure
+  regression. The fixture tests that failed during concurrent Cargo runs
+  passed in this sequential run. Log: `/tmp/claudine-phase3-test-final.log`.
+- PASS: `just lint` in the claudine area — transport guards, lifecycle-doc
+  checks, and Clippy for catalog types, library, contract, CLI, and generator.
+  Log: `/tmp/claudine-phase3-lint.log`. The recipe invokes no formatter.
+- PASS: `just check-tier-coverage claudine` — zero stranded tests. Log:
+  `/tmp/claudine-phase3-tiers.log`. The 32 focused reader tests were actually
+  executed by the declared bin/claudine target in L1, not just listed.
+- PASS: `git diff --check`. No subsequent source edit affected passing evidence.
+- Ignored tests: `completion_perf::perf_compose_empty_partial_meets_target`,
+  `completion_perf::perf_compose_long_prefix_meets_target`,
+  `completion_perf::perf_inline_compose_empty_partial_meets_target`,
+  `completion_perf::perf_enter_compose_partial_meets_target` (the host's one
+  platform variant),
+  `compose_ttff_perf::compose_emits_first_stderr_byte_within_budget`,
+  `system_prompt_perf_bench::bench_system_prompt_resolution_cold_and_warm`,
+  `system_prompt_perf_bench::bench_resolve_and_prepare_step_by_step`,
+  `system_prompt_perf_bench::bench_request_topology_probe_and_reuse`, and
+  `system_prompt_perf_bench::bench_raw_darkmatter_compose_passes`. These were
+  already ignored; no new skip, retry, or tier change was added.
+- Existing macOS linker warning: oversized `__eh_frame` remains, with no
+  workaround in this change. No pre-existing source test or lint failure
+  remains in the final local gates.
+- Not run: remote OS rigs, L2/L3/browser/live-provider tiers, installation,
+  or monorepo-wide gates. This phase's partial changes are portable summary
+  selection and ordinary L1 tests, with no OS branches or path comparisons
+  changed. No remote OS passing evidence is claimed; caller projection and
+  native Windows shell verification remain work for the unfinished phase.
+
+The four source files changed in this phase are `reader_join.rs`,
+`reader_join/matrix.rs`, `reader_join/provider_streams.rs`, and
+`reader_join/tests.rs` under `claudine/cli/src/commands/wrap/exec/`.
+Documentation/skill/frontmatter file lists are recorded on both the plan and
+this log; the existing package union is preserved. Prior phase log content is
+retained. The spec still sets `human_review: true` and describes the CPU
+choices; its updated handoff explicitly prevents advancing to Phase 4 before
+Phase 3 is finished.
+
+**Phase 3 is not complete.** Select outcomes is complete, tested, and checked;
+Carry diagnostics and Verify propagation remain open. In particular there is
+no registered typed diagnostic, populated snapshot in lifecycle/session/
+sequence output, exactly-once blocked-terminal diagnostic publication proof,
+or fixed direct-wrapper semantic-failure caller projection. Resolve the
+author's reserved CPU-field decision before publishing that field contract,
+then finish those tasks and their integrated regressions. This run closes
+with a nonzero status to report the blocked phase honestly. No file was
+staged or committed, no `cargo fmt` ran, and the fix was not moved.

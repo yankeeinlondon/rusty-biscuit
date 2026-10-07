@@ -2,7 +2,7 @@
 kind: plan
 created: 2026-10-07
 total_phases: 5
-phase: 1
+phase: 3
 agent: codex/gpt-6.1-sol
 yolo: true
 source_files_during_phase_1: []
@@ -12,7 +12,68 @@ docs_updated_during_phase_1:
 docs_created_during_phase_1:
   - claudine/fixes/2026-10-07-claudine-completion-delayed/implementation-log.md
 skills_files_updated_during_phase_1: []
-packages: []
+source_files_during_phase_2:
+  - Cargo.lock
+  - claudine/cli/Cargo.toml
+  - claudine/cli/src/commands/wrap/exec/completion_fixture.rs
+  - claudine/cli/src/commands/wrap/exec/mod.rs
+  - claudine/cli/src/commands/wrap/exec/reader_join.rs
+  - claudine/cli/src/commands/wrap/exec/reader_join/provider_streams.rs
+  - claudine/cli/src/commands/wrap/exec/reader_join/tests.rs
+  - claudine/cli/src/commands/wrap/exec/spawn/captured.rs
+  - claudine/cli/src/commands/wrap/exec/spawn/inherited.rs
+  - claudine/cli/src/commands/wrap/exec/spawn/retained.rs
+  - claudine/cli/src/commands/wrap/exec/spawn/semantic.rs
+  - claudine/cli/src/commands/wrap/exec/spawn/tests/captured.rs
+  - claudine/cli/src/commands/wrap/exec/spawn/tests/inherited.rs
+  - claudine/cli/src/commands/wrap/exec/stream_capture.rs
+  - claudine/cli/src/commands/wrap/exec/wiring/session.rs
+  - claudine/cli/src/commands/wrap/live_semantic_sink/event_sink.rs
+  - claudine/cli/src/commands/wrap/output_worker.rs
+  - claudine/cli/src/commands/wrap/output_worker/tests.rs
+  - claudine/cli/src/commands/wrap/run_scope.rs
+  - claudine/cli/src/commands/wrap/run_scope/observation.rs
+  - claudine/cli/src/commands/wrap/run_scope/retention.rs
+  - claudine/cli/src/commands/wrap/run_scope/tests.rs
+  - claudine/cli/src/commands/wrap/stream_io.rs
+  - claudine/cli/src/main.rs
+  - claudine/cli/tests/bin/fake_completion/main.rs
+  - claudine/cli/tests/l1/completion_delayed.rs
+  - claudine/cli/tests/l1/context_construction_guard.rs
+  - claudine/cli/tests/l1/main.rs
+  - claudine/lib/src/stream/providers/claude.rs
+  - claudine/lib/src/stream/providers/claude/tests.rs
+  - claudine/lib/src/stream/providers/codex.rs
+  - claudine/lib/src/stream/providers/codex/tests.rs
+  - claudine/lib/src/stream/semantic.rs
+  - claudine/lib/src/stream/semantic/tests.rs
+docs_updated_during_phase_2:
+  - claudine/docs/dependencies.md
+  - claudine/docs/providers/dispatch-inventory.json
+  - claudine/docs/topics/timeouts.md
+  - claudine/fixes/2026-10-07-claudine-completion-delayed/implementation-log.md
+  - claudine/fixes/2026-10-07-claudine-completion-delayed/plan.md
+  - claudine/fixes/2026-10-07-claudine-completion-delayed/spec.md
+  - docs/dependencies.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+  - .claude/skills/claudine/SKILL.md
+source_files_during_phase_3:
+  - claudine/cli/src/commands/wrap/exec/reader_join.rs
+  - claudine/cli/src/commands/wrap/exec/reader_join/matrix.rs
+  - claudine/cli/src/commands/wrap/exec/reader_join/provider_streams.rs
+  - claudine/cli/src/commands/wrap/exec/reader_join/tests.rs
+docs_updated_during_phase_3:
+  - claudine/docs/topics/timeouts.md
+  - claudine/fixes/2026-10-07-claudine-completion-delayed/implementation-log.md
+  - claudine/fixes/2026-10-07-claudine-completion-delayed/plan.md
+  - claudine/fixes/2026-10-07-claudine-completion-delayed/spec.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+  - .claude/skills/claudine/SKILL.md
+packages:
+  - claudine
+  - claudine-cli
 ---
 
 # Claudine completion delay implementation plan
@@ -146,7 +207,7 @@ work waits for the author's ruling.
 
 ### Wave 2 — Independent implementation tasks
 
-- [ ] **Observe operations**
+- [x] **Observe operations**
   - Extend the existing run/progress seams with bounded atomic operation tags,
     monotonic offsets, and counters. Cover pipe wait/arrival, record processing,
     JSON decoding/signal observation, provider parsing, verdict publication,
@@ -157,7 +218,7 @@ work waits for the author's ruling.
     inference from processing-timeout warning wording and associated comments.
   - Never hold observation/run-state locks across callbacks, terminal I/O, or
     storage publication. Cutoff must obtain observations without the parser.
-- [ ] **Retain payloads**
+- [x] **Retain payloads**
   - Capture bounded raw stdout before decoding and parsing. Publish identified
     answer data before deferred callbacks, including before a completion-line
     callback. Preserve provider verdict/task-ledger semantics independently.
@@ -170,7 +231,7 @@ work waits for the author's ruling.
   - Freeze retained data at settlement with a race-safe close/publication
     boundary. Release late readers in tests and prove they cannot alter detail,
     emit into the next run, or repeat lifecycle/session completion.
-- [ ] **Build fixtures**
+- [x] **Build fixtures**
   - Prepare portable fake Claude/Codex scripts or compiled stubs using
     `CliProcessFixture` and test-toolkit. Add handshakes for a verdict callback
     stall, an earlier answer callback stall, and unfinished output delivery.
@@ -186,7 +247,7 @@ builds rather than launching overlapping broad Cargo runs.
 
 ### Wave 3 — Observation validation
 
-- [ ] **Verify snapshots**
+- [x] **Verify snapshots**
   - Add focused L1 tests for every observed boundary, queued versus active
     delivery, pipe-held-open state, shared elapsed clock, and frozen snapshots.
   - Test complete, partial, unavailable, empty, overflowed, multibyte-boundary,
@@ -205,7 +266,7 @@ state. Wave 4 depends on this checkpoint.
 
 ### Wave 4 — Settlement and diagnostic tasks
 
-- [ ] **Select outcomes**
+- [x] **Select outcomes**
   - Update stdout reader settlement to the rule 6 precedence and preserve
     confirmed summaries/native exit. Attach reader/output observations to
     stronger outcomes without replacing their primary identity.
