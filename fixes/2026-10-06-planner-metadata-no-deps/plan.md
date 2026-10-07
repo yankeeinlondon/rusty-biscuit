@@ -3,7 +3,16 @@ kind: plan
 name: planner-metadata-no-deps
 total_phases: 5
 created: 2026-10-07
-phase: 3
+phase: 5
+completed_phase: 5
+implemented: true
+source_code:
+  - scripts/ci/affected_scope.py
+  - scripts/ci/test_affected_scope.py
+documentation:
+  - .github/ci/README.md
+  - docs/topics/ci-cd.md
+  - .claude/skills/rust-devops/ci-cd.md
 agent: claude/sonnet
 yolo: true
 source_files_during_phase_1: []
@@ -21,6 +30,19 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+  - scripts/ci/affected_scope.py
+  - scripts/ci/test_affected_scope.py
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+source_files_during_phase_5: []
+docs_updated_during_phase_5:
+  - .github/ci/README.md
+  - docs/topics/ci-cd.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .claude/skills/rust-devops/ci-cd.md
 packages:
   - repo-deps
 ---
@@ -292,13 +314,13 @@ defaults on these fields (Python equivalents: `.get(k, [])`, `or []`,
 
 ## Phase 4: New tests and acceptance verification
 
-- [ ] **4.1 Cargo-comparison fixtures** (Wave 1)
+- [x] **4.1 Cargo-comparison fixtures** (Wave 1)
     - Small all-local temp workspaces; compare derived graph vs a full
       `cargo metadata --offline` resolve with an empty temp `CARGO_HOME`, no
       compile. Use `tool_guard.require_tools`; correct its description to name
       `_package-ci.yml`'s `Companion suites` step. A skip never counts as
       acceptance evidence.
-- [ ] **4.2 Rule fixtures** (Wave 1, parallel with 4.1; may split across two
+- [x] **4.2 Rule fixtures** (Wave 1, parallel with 4.1; may split across two
       subagents by rule group)
     - One case per rule from spec §4's list (default features; `dep:`, `k/g`,
       weak `k?/g` active and inactive; implicit feature; rename; member
@@ -312,15 +334,15 @@ defaults on these fields (Python equivalents: `.get(k, [])`, `or []`,
       identity incl. Windows spelling in the existing Windows suite).
       Expected values hand-written, with the subtle activation cases cross-checked
       against path-only Cargo comparisons.
-- [ ] **4.3 Robustness matrix test** (Wave 1, parallel) — as tabulated in Phase 3.
-- [ ] **4.4 Native guard + no-network guard** (Wave 1, parallel)
+- [x] **4.3 Robustness matrix test** (Wave 1, parallel) — as tabulated in Phase 3.
+- [x] **4.4 Native guard + no-network guard** (Wave 1, parallel)
     - Extend `RealWorkspaceNativeGuardTests` to assert `playa`'s system-library
       requirements via `biscuit-speaks`.
     - Capture the `load_metadata` subprocess call: assert both flags, UTF-8, no
       fallback on Cargo failure. One real run against the shipped workspace with
       an empty temp `CARGO_HOME` asserting null resolve, empty registry/git
       caches, unchanged `Cargo.lock`.
-- [ ] **4.5 Acceptance runs** (Wave 2; after all above)
+- [x] **4.5 Acceptance runs** (Wave 2; after all above)
     - Criterion 2: with the saved metadata, compare canonical serialized plans
       and legacy projections for the five invocations against Task 1.1 goldens;
       also kinds, test-input-only selection, and unchanged-dependent native
@@ -335,12 +357,12 @@ defaults on these fields (Python equivalents: `.get(k, [])`, `or []`,
 
 ### Checkpoint 4
 
-- [ ] All of the above green with no skips among the new Cargo-dependent tests
+- [x] All of the above green with no skips among the new Cargo-dependent tests
       on this host; acceptance criteria 1–4 evidenced.
 
 ## Phase 5: Documentation and closure
 
-- [ ] **5.1 Docs** (Wave 1; three files in parallel)
+- [x] **5.1 Docs** (Wave 1; three files in parallel)
     - `.github/ci/README.md`: scope job reads `cargo metadata --no-deps
       --offline` and derives member edges itself; registry-free metadata and
       graph.
@@ -354,9 +376,9 @@ defaults on these fields (Python equivalents: `.get(k, [])`, `or []`,
       read is registry-free and a new resolve-needing input needs its own
       decision.
     - None of these link to or name this fix.
-- [ ] **5.2 Drift check** (Wave 2) — grep docs, README, and skills for
+- [x] **5.2 Drift check** (Wave 2) — grep docs, README, and skills for
       `cargo metadata` descriptions that still imply a resolve; fix.
-- [ ] **5.3 Report** (Wave 2)
+- [x] **5.3 Report** (Wave 2)
     - Implementation log in the fix directory: departures from spec (notably
       the outside-package manifest-reader ruling), the Windows criterion 5
       status as *pending hosted evidence* (or the run IDs if available).
@@ -365,5 +387,5 @@ defaults on these fields (Python equivalents: `.get(k, [])`, `or []`,
 
 ### Checkpoint 5
 
-- [ ] Docs updated, no spec links in docs, implementation log written, spec
+- [x] Docs updated, no spec links in docs, implementation log written, spec
       frontmatter `implemented` left for the author's review flow.

@@ -3,6 +3,8 @@ spec: /Volumes/coding/wt/rusty-biscuit/fix-wt-skill/fixes/2026-10-06-planner-met
 plan: fixes/2026-10-06-planner-metadata-no-deps/plan.md
 implemented_by: claude/sonnet
 started_phase: 1
+completed_phase: 5
+implemented: true
 source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
@@ -18,6 +20,19 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+  - scripts/ci/affected_scope.py
+  - scripts/ci/test_affected_scope.py
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+source_files_during_phase_5: []
+docs_updated_during_phase_5:
+  - .github/ci/README.md
+  - docs/topics/ci-cd.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .claude/skills/rust-devops/ci-cd.md
 packages:
   - repo-deps
 ---
@@ -53,3 +68,28 @@ packages:
 - Checkpoint 3 evidence (macOS, cargo 1.98.1, tree HEAD `5e5fb189d` + working changes): derived graph on the real workspace vs the saved full resolve `/tmp/pmnd-baseline/full-metadata.json` (`--locked` capture from Phase 1): 205 edges both sides, no missing, no extra, no kind difference (compared by package name, not id); `Cargo.lock` unchanged. Smoke check with a local fixture (`a` -> outside -> `b` with `features = ["extra"]`, `b.extra = ["dep:c"]`): graph `{a: {}, b: {c: normal}, c: {}}`, identical to `cargo metadata --offline`'s resolve.
 - Tests: the 2 `build_closure` call sites were updated to build the graph first. `python3 -m unittest test_affected_scope` 407 tests OK (the 217 Phase-2 reds are green; includes the real-workspace `RealWorkspaceNativeGuardTests`, now through `--no-deps` + the graph); `python3 -m unittest discover` in `scripts/ci`: 1224 tests OK. Not yet added (Phase 4 scope): Cargo-comparison fixtures, per-rule fixtures, the robustness-matrix test, the no-network guard, outside-package tests, the playa native-requirement assertion.
 - Not run: `just test`/`just lint` (no Rust changed); `cross-check` (path identity uses `normcase(realpath)`; Windows-spelling coverage is Phase 4 task 4.2).
+
+## Phase 4
+
+- started Phase 4 (new tests and acceptance verification). Changed `scripts/ci/test_affected_scope.py` (all new tests) and `scripts/ci/affected_scope.py` (two fixes the new tests exposed, below). No docs or skills (Phase 5).
+- **Departure from the spec (found by the Cargo comparison): weak `k?/g` activates `k` in the resolve Cargo reports.** Spec section 2 rule 4 says `k?/g` "never activates `k`". Cargo 1.98.1's `cargo metadata` resolve is the dependency resolver's, not the feature resolver's, and it activates the dependency for the weak form too: a fixture with an optional `b` and `default = ["b?/extra"]` reports `a -> b` and `b -> c` (via `extra`). The only difference from `k/g` is that the same-named feature of the requester stays off (a fixture with `b = ["dep:b", "dep:z"]` reports `z` only for `b/extra`, not for `b?/extra`). The 205-edge real workspace has no weak feature, so Phase 3's check could not see this. `_solve_member_graph` now queues the dependency for both forms and the same-named feature only for the non-weak form; the code comment says why. The docs must state this rule (Phase 5), not the spec's.
+- `workspace_packages` (existing reader, same document) read `metadata["workspace_members"]` bare: `null` raised an unnamed `TypeError` and a string was silently a set of characters. It now goes through the strict `_expect_strings` / `_expect` checks, so the robustness matrix's `workspace_members` and `packages` cells fail by name before the graph is built.
+- **Requirement to test mapping** (all in `scripts/ci/test_affected_scope.py`, selected by the Ubuntu `Companion suites` run of the `test_affected_scope.py` suite; none carries a tier marker):
+  - 4.1 Cargo comparison: `CargoComparisonTests.test_every_rule_case_matches_the_hand_written_graph_and_cargos_resolve` runs 24 `RULE_CASES` (all-local temp workspaces, pinned `rust-toolchain.toml` copied beside them, empty temp `CARGO_HOME`, `--offline`, no compile); each is asserted against a hand-written graph AND Cargo's full resolve (member-to-member edges, kinds, by package name), and that `registry`/`git` never appear in `CARGO_HOME`. `test_the_comparison_notices_a_missing_edge` guards against an empty comparison. `require_tools("cargo")` with `CARGO_ENFORCED_BY` now naming `_package-ci.yml`'s `Companion suites` step (the old text named `preflight`, which does not set `BISCUIT_REQUIRE_CARGO`).
+  - 4.2 Rules, one case each in `RULE_CASES`: default feature; inactive optional / no `default`; `dep:`; `dep:` suppressing the implicit feature; `k/g`; weak with inactive dependency (Cargo-faithful, see above); weak first/last with `dep:k`; weak leaves the same-named feature off; `k/g` turns the same-named feature on; rename; member requesting features on a member; member default despite incoming `default-features = false`; dev beside inactive optional normal; several declarations' kinds; target-specific entry; dev cycle; inherited workspace dependency (plain, optional + feature); outside package feature feedback, with workspace inheritance, dev dependency ignored, no bridged edge, cycle through an outside package (`compare: False` because Cargo rejects the cycle). `GraphErrorTests` covers the error cells (unknown member feature, `dep:` leaving no implicit feature, unknown dependency in `k/g` and `dep:`, ambiguous directory, path matching nothing, feature cycle, non-member record, registry dependency named like a member, symlinked path). `PathIdentityTests`: Windows separator/case spelling (via `ntpath.normcase`, host-independent), Unix never folds case, no match by name. `ReplacementAndLoaderGuardTests`: `[patch]`/`[replace]`/config refusals and the non-member allowance. `MissingTomllibTests`: refuses by name only when an outside manifest is needed. There is no separate Windows suite for the planner (the Python suites run on Ubuntu), so the Windows-spelling case lives with the others.
+  - 4.3 `MemberGraphRobustnessMatrixTests.test_every_cell_has_its_defined_outcome_through_the_public_plan`: one real `--no-deps` document, 41 edits (one per cell of the plan's matrix) asserted through `calculate_scope`'s `reverse_dependencies`, plus a control row. `test_an_empty_member_list_is_an_empty_graph` and `test_duplicate_entries_union_their_kinds_in_the_graph` cover the two cells the plan cannot see through the plan; `test_the_matrix_has_no_silent_default_on_a_load_bearing_field` greps the metadata reader for `filter_map`, `unwrap_or_default`, ` or []`, ` or {}`. Not covered: a JSON duplicate key (Python's `json` is last-wins and nothing in the planner is stricter; recorded here instead of adding a strict parser).
+  - 4.4 `RealWorkspaceNativeGuardTests.test_biscuit_speaks_inherits_playas_system_libraries` (playa's `libasound2-dev` / `libpulse-dev` reach biscuit-speaks' Linux contract); `LoadMetadataBoundaryTests`: both flags and UTF-8 on the subprocess, no second attempt on Cargo failure, trailing garbage rejected, and one real run on the shipped workspace with an empty temp `CARGO_HOME` asserting `"resolve": null`, no `registry`/`git` entries, `Cargo.lock` bytes unchanged, and a graph with edges.
+- **Acceptance runs (macOS, cargo 1.98.1, tree = HEAD `91b748003` + working changes; scratch in `/tmp/pmnd-baseline/`):**
+  - Criterion 1: derived graph from a live `cargo metadata --no-deps --offline` vs the saved full resolve: 205 edges both sides, equal by name and kind. Command: from `scripts/ci`, `python3 -c "import json, test_affected_scope as t; nd=json.load(open('NO_DEPS.json')); full=json.load(open('FULL.json')); print(t.derived_edges(nd) == t.resolved_edges(full))"` where `FULL.json` is `cargo metadata --format-version 1 --locked`. This is the documented local check; no CI cell.
+  - Criterion 2: the old planner (`c95bbbc0d`, `ROOT` pinned to this checkout, saved full-resolve metadata) and the new planner (live `--no-deps` metadata) run on the same input tree for `--all`, `README.md`, `claudine/lib/src/lib.rs`, `Cargo.lock`, `biscuit-speaks/lib/src/lib.rs`, resolved and legacy forms: all 10 outputs byte-identical, and equal to the Phase 1 goldens.
+  - Criterion 3: the real `affected_scope.py --event pull_request ... --resolved-plan --all` CLI with an empty child-only `CARGO_HOME` (`RUSTUP_HOME` retained, `BISCUIT_CI_BUILD_BIN` set to the prebuilt helper) exits 0 with output byte-identical to the old planner's `--all`, `CARGO_HOME` still empty, `Cargo.lock` unchanged.
+  - Criterion 5 (Windows timing): pending hosted evidence; no Windows run was made from this host.
+- **Gates (macOS):** `python3 -m unittest discover` in `scripts/ci`: 1256 tests OK, 0 skipped. `just test repo-deps`: 471 passed, 1 skipped (pre-existing skip). `just test test-toolkit`: 461 passed, 4 skipped (pre-existing). `just lint` (repo root, all areas): 0 failed. `just ci-local --plan` reviewed: only the existing repo-deps / test-toolkit cells, no new job, cell or trigger. The Python suites run on `ubuntu-latest` only in CI and `cross-check` runs the Rust L1 suites, so no Linux run of the new Python tests was made from here; the Linux-sensitive parts (symlink fixture skips when unavailable, pinned toolchain copied beside each fixture, empty `CARGO_HOME`) were chosen for that reason.
+
+## Phase 5
+
+- started Phase 5 (documentation and closure). No source changed.
+- Task 5.1: `.github/ci/README.md` (scope job reads `cargo metadata --no-deps --offline`, derives member edges, no `resolve` read; toolchain still needed, registry not); `docs/topics/ci-cd.md` gained "How the planner reads the workspace" (Mermaid activation flow, one example per rule, outside-local-package boundary, unsupported `[patch]`/`[replace]` error, pinned toolchain still required, the local real-workspace comparison command with its reduced recurring coverage) and the target-reading sentence now says `--no-deps`; `.claude/skills/rust-devops/ci-cd.md` has the registry-free note and "a new resolve-needing input needs its own decision". The docs state the Phase 4 finding (weak `k?/g` still reports the edge as Cargo's resolve does), not the spec's rule 4 wording. None of the pages names or links this fix.
+- Task 5.2 drift check: remaining `cargo metadata` mentions are the preflight no-wrapper probe, the `lib`/`bin`/`test` target read (now `--no-deps`), and an unrelated kache note; none implied a resolve. Nothing else to fix.
+- Task 5.3 departures from the spec, all recorded above: outside-local-package manifests are read with `tomllib` (member manifests are not); weak `k?/g` activates the dependency to match Cargo's resolve. Criterion 5 (Windows timing): **pending hosted evidence**; no Windows run exists from this host.
+- Terminal state: implementation complete, ready for review. The fix directory was not moved and nothing was committed.

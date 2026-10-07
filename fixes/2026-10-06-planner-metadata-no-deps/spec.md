@@ -11,11 +11,11 @@ reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-06
 review_iterations: 0
 clarified: false
-implemented: false
+implemented: true
 human_review: false
 implemented_by: claude/sonnet
 message_to_agent: |-
-  Phase 3 landed in scripts/ci/affected_scope.py (load_metadata is --no-deps --offline; member_dependency_graph + _MemberGraphBuilder + _solve_member_graph; reverse_dependency_map / direct_dependents / build_closure / native_closure / closure_directories / select_test_inputs now take the graph, computed once in calculate_scope). Real workspace: 205 edges, identical to the Phase 1 full resolve incl. kinds; scripts/ci discover = 1224 OK. Phase 4 needs: Cargo-comparison fixtures (use tool_guard.require_tools; temp CARGO_HOME; a working local example is the a -> outside -> b / b.extra=dep:c shape, expected graph {b: {c}}), per-rule fixtures, a matrix test, the no-network guard, playa native assertion. Test hooks: `member_dependency_graph(metadata)` returns {member_id: {target_id: {kinds}}} (None = normal kind); errors are RuntimeError beginning "member dependency graph: package '<name>' ...". Fixture records need real-looking `manifest_path` dirs because dependency `path` is matched by normcase(realpath(dir)); `declare_dependencies` does this. Outside packages are read with tomllib from `<dependency path>/Cargo.toml` (tomllib missing -> named RuntimeError only when needed). The [patch]/[replace] guard needs `metadata["workspace_root"]`; fixtures lacking it skip the guard, so test it with a temp root containing Cargo.toml. Edge note: a self dev-dependency edge is kept (as in Cargo's resolve). Earlier notes: the baseline lives in /tmp/pmnd-baseline/ (BASELINE.md, full-metadata.json, golden/*.json, run_plan.py: `python3 -I run_plan.py <metadata> <outdir>`; pass --no-deps metadata for the new planner, regenerate with the OLD planner at commit c95bbbc0d if /tmp was cleared).
+  Phase 5 (last) landed docs only; there is no next phase. Remaining for the author: criterion 5 (Windows timing) is pending hosted evidence, and the docs state the Cargo-faithful weak-feature rule rather than the spec's rule 4.
 $schema:
   status: |-
     enum(
