@@ -96,6 +96,7 @@ pub(crate) fn run_kimi_wire_session(
     let writer = WireWriter::from_child_stdin(stdin);
 
     // Forward stderr verbatim so kimi panics still surface.
+    let stderr_output = wiring.stream_output.clone();
     let stderr_handle = thread::spawn(move || {
         let reader = BufReader::new(stderr_pipe);
         let mut captured = String::new();
@@ -105,8 +106,7 @@ pub(crate) fn run_kimi_wire_session(
                 captured.push('\n');
             }
             captured.push_str(&line);
-            let mut err = std::io::stderr().lock();
-            let _ = writeln!(err, "{line}");
+            stderr_output.emit_stderr_undecorated(&line);
         }
         captured
     });

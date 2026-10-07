@@ -12,6 +12,9 @@ pub(crate) struct Gate {
     written: Written,
     /// Signalled once the worker is inside its first write.
     entered: Arc<Mutex<Option<mpsc::Sender<()>>>>,
+    /// Writes to this stream fail with `BrokenPipe`, as when the reader of
+    /// the process's pipe has gone away.
+    fails: Option<Stream>,
 }
 
 impl Gate {
@@ -21,8 +24,18 @@ impl Gate {
             open: Arc::new((Mutex::new(open), Condvar::new())),
             written: Arc::new(Mutex::new(Vec::new())),
             entered: Arc::new(Mutex::new(Some(tx))),
+            fails: None,
         };
         (gate, rx)
+    }
+
+    /// An open gate whose writes to `stream` fail with `BrokenPipe`; the other
+    /// stream is healthy.
+    pub(crate) fn failing(stream: Stream) -> Self {
+        Self {
+            fails: Some(stream),
+            ..Self::new(true).0
+        }
     }
 
     pub(crate) fn release(&self) {
@@ -45,9 +58,29 @@ impl FrameSink for Gate {
             open = self.open.1.wait(open).unwrap();
         }
         drop(open);
+        if self.fails == Some(stream) {
+            return Err(io::ErrorKind::BrokenPipe.into());
+        }
         self.written.lock().unwrap().push((stream, bytes.to_vec()));
         Ok(())
     }
+}
+
+/// Block `output`'s worker inside a write to its closed gate, and return only
+/// once it is there.
+///
+/// Call this before the clock of a short drain deadline starts. The deadline
+/// then finds a stalled terminal however late the worker is scheduled, where a
+/// frame queued just before the drain could still be waiting for its first
+/// write when the deadline passes, so the worker would never enter the gate.
+pub(crate) fn wedge_worker(
+    output: &crate::commands::wrap::stream_io::StreamOutput,
+    entered: &mpsc::Receiver<()>,
+) {
+    output.emit_stderr_line("earlier output");
+    entered
+        .recv_timeout(Duration::from_secs(10))
+        .expect("the worker entered its write");
 }
 
 fn soon() -> Instant {
@@ -200,4 +233,100 @@ fn a_stalled_sink_never_gains_a_second_writer_thread() {
 
     assert_eq!(worker.threads_started(), 1);
     gate.release();
+}
+
+/// A [`Gate`] that claims to be the process terminal, so its stall closes the
+/// process-wide terminal gate.
+struct ProcessTerminalGate(Gate);
+
+impl FrameSink for ProcessTerminalGate {
+    fn write(&mut self, stream: Stream, bytes: &[u8]) -> io::Result<()> {
+        self.0.write(stream, bytes)
+    }
+
+    fn is_process_terminal(&self) -> bool {
+        true
+    }
+}
+
+#[test]
+fn a_stalled_process_terminal_closes_the_terminal_gate_and_counts_its_refusals() {
+    let (gate, entered) = Gate::new(false);
+    let worker = OutputWorker::new(Box::new(ProcessTerminalGate(gate.clone())));
+    worker.submit(Stream::Stderr, b"stuck\n".to_vec());
+    entered.recv_timeout(Duration::from_secs(10)).expect("the worker entered its write");
+    assert!(!crate::terminal_gate::is_stalled());
+
+    assert_eq!(worker.drain(short()), Drained::Disabled);
+
+    assert!(crate::terminal_gate::is_stalled());
+    let before = worker.loss().rejected_frames;
+    assert!(!crate::terminal_gate::admit());
+    assert_eq!(worker.loss().rejected_frames, before + 1);
+    gate.release();
+}
+
+#[test]
+fn a_stalled_private_sink_leaves_the_terminal_gate_open() {
+    let (gate, entered) = Gate::new(false);
+    let worker = OutputWorker::new(Box::new(gate.clone()));
+    worker.submit(Stream::Stderr, b"stuck\n".to_vec());
+    entered.recv_timeout(Duration::from_secs(10)).expect("the worker entered its write");
+
+    assert_eq!(worker.drain(short()), Drained::Disabled);
+
+    assert!(!crate::terminal_gate::is_stalled());
+    gate.release();
+}
+
+/// A write the sink refuses with an error is counted as loss, on either
+/// stream, and the drain still completes because nothing is left to write.
+/// The other stream keeps receiving its frames.
+#[test]
+fn a_write_error_on_either_stream_is_counted_as_loss() {
+    for (failing, healthy) in [(Stream::Stdout, Stream::Stderr), (Stream::Stderr, Stream::Stdout)] {
+        let gate = Gate::failing(failing);
+        let worker = OutputWorker::new(Box::new(gate.clone()));
+
+        worker.submit(failing, b"lost\n".to_vec());
+        worker.submit(healthy, b"kept\n".to_vec());
+        worker.submit(failing, b"lost too\n".to_vec());
+
+        assert_eq!(worker.drain(soon()), Drained::Complete, "{failing:?}");
+        let loss = worker.loss();
+        assert_eq!(loss.failed_writes, 2, "{failing:?}: {loss:?}");
+        assert!(!loss.is_empty() && !loss.stalled, "{failing:?}: {loss:?}");
+        assert_eq!(gate.written(), vec![(healthy, b"kept\n".to_vec())], "{failing:?}");
+    }
+}
+
+/// Control: the same frames to a healthy sink lose nothing.
+#[test]
+fn a_healthy_sink_reports_no_failed_writes() {
+    let (gate, _entered) = Gate::new(true);
+    let worker = OutputWorker::new(Box::new(gate.clone()));
+
+    worker.submit(Stream::Stdout, b"kept\n".to_vec());
+    worker.submit(Stream::Stderr, b"kept\n".to_vec());
+
+    assert_eq!(worker.drain(soon()), Drained::Complete);
+    assert_eq!(worker.loss().failed_writes, 0);
+    assert!(worker.loss().is_empty());
+    assert_eq!(gate.written().len(), 2);
+}
+
+/// One run's failed writes are its own: the difference from an earlier
+/// reading excludes failures that came before it.
+#[test]
+fn failed_writes_are_measured_since_a_reading() {
+    let gate = Gate::failing(Stream::Stdout);
+    let worker = OutputWorker::new(Box::new(gate));
+    worker.submit(Stream::Stdout, b"earlier\n".to_vec());
+    worker.drain(soon());
+    let mark = worker.loss();
+
+    assert!(worker.loss().since(&mark).is_empty());
+    worker.submit(Stream::Stdout, b"this run\n".to_vec());
+    worker.drain(soon());
+    assert_eq!(worker.loss().since(&mark).failed_writes, 1);
 }

@@ -23,7 +23,7 @@ use claudine::stream::summary::StreamExecutionSummary;
 use color_eyre::eyre::Result;
 use tracing::{Span, info_span};
 
-use super::super::super::run_scope::RunScope;
+use super::super::super::run_scope::{RunScope, feed_line as feed_and_publish};
 use super::super::control::StdioControl;
 use super::super::stream_capture::StreamCapture;
 use super::super::subagent_watchdog::WatchdogState;
@@ -447,7 +447,7 @@ pub(crate) fn run_child_stream_semantic(
                 }
             }
 
-            parser.feed_line(&line);
+            feed_and_publish(&mut *parser, &line);
         }
 
         // Handed back before the final render so a render that outlives the
@@ -490,8 +490,13 @@ pub(crate) fn run_child_stream_semantic(
     let stderr_tail_ring_clone = Arc::clone(&stderr_tail_ring);
     let stderr_progress = ReaderProgress::default();
     let stderr_reader_progress = stderr_progress.clone();
+    let stderr_output = stream_output.clone();
+    let stderr_run_scope = run_scope.clone();
     let stderr_handle = thread::spawn(move || {
         let _stderr_guard = stderr_span.enter();
+        // The same run as the stdout reader: once it is closed, passthrough
+        // lines are refused instead of landing in a later run.
+        let _scope_guard = stderr_run_scope.enter();
         let mut captured = String::new();
         for line in stderr_reader_progress.track(stderr_source) {
             let Ok(line) = line else { break };
@@ -550,8 +555,7 @@ pub(crate) fn run_child_stream_semantic(
                 captured.push_str(&output_line);
             }
             if !suppress_stderr_on_success {
-                let mut err = std::io::stderr().lock();
-                let _ = writeln!(err, "{output_line}");
+                stderr_output.emit_stderr_undecorated(&output_line);
             }
         }
         captured

@@ -285,8 +285,11 @@ fn a_reader_behind_a_blocked_terminal_still_parses_the_unread_result() {
             self.text.push_str(line);
         }
         fn finish(self: Box<Self>, exit_code: i32) -> StreamExecutionSummary {
+            self.snapshot(exit_code)
+        }
+        fn snapshot(&self, exit_code: i32) -> StreamExecutionSummary {
             StreamExecutionSummary {
-                assistant_text: self.text,
+                assistant_text: self.text.clone(),
                 exit_code,
                 ..Default::default()
             }

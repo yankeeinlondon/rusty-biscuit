@@ -31,6 +31,8 @@ mod completion_sequence;
 mod completion_setter;
 mod compose_caller_file_provenance;
 #[cfg(unix)]
+mod compose_closed_pipe_delivery;
+#[cfg(unix)]
 mod compose_cli;
 #[cfg(unix)]
 mod compose_frontmatter_model;

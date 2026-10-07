@@ -85,9 +85,15 @@ fn marker_path(tag: &str) -> PathBuf {
 /// soon as the kill lands instead of a fixed margin past a write time the
 /// descendant never reached. A survivor still fails, and fails naming the pid
 /// that outlived its command.
+///
+/// The command's process group is watched the same way, because the
+/// descendant is only the member the fixture chose to publish: a process the
+/// command shell forked itself, such as a trailing `sleep`, can outlive the
+/// reap too.
 #[cfg(unix)]
 struct BackgroundedDescendant {
     pid_path: PathBuf,
+    group_path: PathBuf,
 }
 
 #[cfg(unix)]
@@ -101,6 +107,7 @@ impl BackgroundedDescendant {
     fn new(tag: &str) -> Self {
         Self {
             pid_path: marker_path(&format!("{tag}-pid")),
+            group_path: marker_path(&format!("{tag}-pgid")),
         }
     }
 
@@ -125,13 +132,18 @@ impl BackgroundedDescendant {
     /// publication delay stretch together under load — a short attempt budget
     /// can give up on a descendant that was merely starved, failing the test
     /// on fixture timing rather than on the behavior under test.
+    ///
+    /// The command shell first records its own pid, which is the group id:
+    /// the runner makes it the leader of a new group.
     fn background(&self, body: &str) -> String {
         format!(
-            "/bin/sh -c 'echo $$ > \"{pid}\"; {body}' & \
+            "echo $$ > \"{group}\"; \
+             /bin/sh -c 'echo $$ > \"{pid}\"; {body}' & \
              attempts=0; while [ ! -s \"{pid}\" ]; do \
              attempts=$((attempts + 1)); [ $attempts -lt 6000 ] || exit 90; \
              sleep 0.01; done;",
             pid = self.pid_path.display(),
+            group = self.group_path.display(),
         )
     }
 
@@ -159,12 +171,14 @@ impl BackgroundedDescendant {
         format!("while kill -0 $PPID 2>/dev/null; do sleep 0.1; done; {action}; sleep 30")
     }
 
-    /// Block until the recorded process is gone, then drop the pid file.
+    /// Block until the recorded process and every member of the command's
+    /// process group are gone, then drop the pid files.
     ///
     /// ## Panics
     ///
-    /// Panics if the pid was never published, or if the process is still alive
-    /// at [`Self::REAP_DEADLINE`].
+    /// Panics if the pid was never published, or if the process or a group
+    /// member is still alive at [`Self::REAP_DEADLINE`]. A surviving group is
+    /// killed first, so a failed run leaves nothing behind.
     fn assert_reaped(&self) {
         let stop = Instant::now() + Self::REAP_DEADLINE;
         let pid = loop {
@@ -192,6 +206,29 @@ impl BackgroundedDescendant {
              more than {:?}",
             Self::REAP_DEADLINE,
         );
+
+        let group: i32 = fs::read_to_string(&self.group_path)
+            .expect("the command shell records its group before backgrounding")
+            .trim()
+            .parse()
+            .expect("the recorded group id is a number");
+        let _ = fs::remove_file(&self.group_path);
+        while group_has_live_member(group) && Instant::now() < stop {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let survived = group_has_live_member(group);
+        if survived {
+            // SAFETY: `kill(2)` on the group this test's command led.
+            unsafe {
+                libc::kill(-group, libc::SIGKILL);
+            }
+        }
+        assert!(
+            !survived,
+            "a member of the command's process group {group} outlived its \
+             command by more than {:?}",
+            Self::REAP_DEADLINE,
+        );
     }
 }
 
@@ -203,6 +240,15 @@ impl BackgroundedDescendant {
 #[cfg(unix)]
 fn process_is_alive(pid: i32) -> bool {
     unsafe { libc::kill(pid, 0) == 0 }
+}
+
+/// Whether process group `pgid` still has a member that can be signalled.
+///
+/// Like [`process_is_alive`] it counts a zombie on Linux; macOS answers
+/// `EPERM` for a group of zombies, which reads as empty.
+#[cfg(unix)]
+fn group_has_live_member(pgid: i32) -> bool {
+    unsafe { libc::kill(-pgid, 0) == 0 }
 }
 
 // -- fixtures ---------------------------------------------------------------

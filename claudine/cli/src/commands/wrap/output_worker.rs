@@ -12,6 +12,9 @@
 //! frames are rejected instantly, no second writer is created, and the loss is
 //! recorded in an [`OutputLoss`] instead of being written to the very terminal
 //! that stopped listening.
+//! A write the terminal refuses with an error, such as a closed pipe, is
+//! recorded there too: an empty queue means every frame was taken, not that
+//! every frame arrived.
 //!
 //! [`submit`]: OutputWorker::submit
 //! [`drain`]: OutputWorker::drain
@@ -47,6 +50,13 @@ pub(crate) trait FrameSink: Send {
     /// Write `bytes` to `stream` and flush, so a frame is on the terminal when
     /// this returns.
     fn write(&mut self, stream: Stream, bytes: &[u8]) -> io::Result<()>;
+
+    /// Whether this sink writes the process's own stdout and stderr, so that
+    /// abandoning a write leaves std's stream lock held for every other writer
+    /// in the process ([`crate::terminal_gate`]).
+    fn is_process_terminal(&self) -> bool {
+        false
+    }
 }
 
 /// The process's standard output and standard error.
@@ -67,6 +77,10 @@ impl FrameSink for TerminalSink {
             }
         }
     }
+
+    fn is_process_terminal(&self) -> bool {
+        true
+    }
 }
 
 /// What happened to a frame handed to [`OutputWorker::submit`].
@@ -85,8 +99,11 @@ pub(crate) struct OutputLoss {
     /// Frames dropped because the queue was full.
     pub(crate) dropped_frames: u64,
     /// Frames refused because delivery was disabled, or because the run that
-    /// produced them had already ended.
+    /// produced them had already ended. For the process terminal this also
+    /// counts direct writes [`crate::terminal_gate`] refused after a stall.
     pub(crate) rejected_frames: u64,
+    /// Frames the terminal refused with a write error, such as a closed pipe.
+    pub(crate) failed_writes: u64,
     /// The worker did not finish within its deadline and was abandoned.
     pub(crate) stalled: bool,
 }
@@ -105,6 +122,7 @@ impl OutputLoss {
         Self {
             dropped_frames: self.dropped_frames.saturating_sub(earlier.dropped_frames),
             rejected_frames: self.rejected_frames.saturating_sub(earlier.rejected_frames),
+            failed_writes: self.failed_writes.saturating_sub(earlier.failed_writes),
             stalled: self.stalled,
         }
     }
@@ -113,7 +131,8 @@ impl OutputLoss {
 /// How [`OutputWorker::drain`] ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Drained {
-    /// Every queued frame was written.
+    /// The worker took every queued frame; some writes may have failed, which
+    /// [`OutputLoss::failed_writes`] counts.
     Complete,
     /// Delivery is disabled, either already or because this wait ran out.
     Disabled,
@@ -140,6 +159,7 @@ struct Shared {
     disabled: AtomicBool,
     dropped_frames: AtomicU64,
     rejected_frames: AtomicU64,
+    failed_writes: AtomicU64,
     threads_started: AtomicUsize,
 }
 
@@ -148,10 +168,15 @@ pub(crate) struct OutputWorker {
     shared: Arc<Shared>,
     /// Taken by the first [`submit`](Self::submit), which starts the thread.
     sink: Mutex<Option<Box<dyn FrameSink>>>,
+    /// The sink is the process terminal: a stall closes the process-wide
+    /// [`crate::terminal_gate`], and writes that gate refused count as this
+    /// worker's loss.
+    process_terminal: bool,
 }
 
 impl OutputWorker {
     pub(crate) fn new(sink: Box<dyn FrameSink>) -> Self {
+        let process_terminal = sink.is_process_terminal();
         Self {
             shared: Arc::new(Shared {
                 queue: Mutex::new(Queue::default()),
@@ -159,9 +184,11 @@ impl OutputWorker {
                 disabled: AtomicBool::new(false),
                 dropped_frames: AtomicU64::new(0),
                 rejected_frames: AtomicU64::new(0),
+                failed_writes: AtomicU64::new(0),
                 threads_started: AtomicUsize::new(0),
             }),
             sink: Mutex::new(Some(sink)),
+            process_terminal,
         }
     }
 
@@ -198,7 +225,9 @@ impl OutputWorker {
     ///
     /// A deadline that passes with the queue not empty disables delivery for
     /// good: the thread is abandoned, queued frames are discarded, and no
-    /// writer is created in its place.
+    /// writer is created in its place. For the process terminal it also closes
+    /// [`crate::terminal_gate`], because the abandoned write still holds the
+    /// stream lock every direct writer would wait on.
     pub(crate) fn drain(&self, deadline: Instant) -> Drained {
         if self.shared.disabled.load(Ordering::Acquire) {
             return Drained::Disabled;
@@ -219,6 +248,9 @@ impl OutputWorker {
                 .0;
         }
         self.shared.disabled.store(true, Ordering::Release);
+        if self.process_terminal {
+            crate::terminal_gate::mark_stalled();
+        }
         queue.frames.clear();
         queue.bytes = 0;
         self.shared.changed.notify_all();
@@ -226,11 +258,23 @@ impl OutputWorker {
     }
 
     pub(crate) fn loss(&self) -> OutputLoss {
+        let gated = if self.process_terminal {
+            crate::terminal_gate::skipped_writes()
+        } else {
+            0
+        };
         OutputLoss {
             dropped_frames: self.shared.dropped_frames.load(Ordering::Relaxed),
-            rejected_frames: self.shared.rejected_frames.load(Ordering::Relaxed),
+            rejected_frames: self.shared.rejected_frames.load(Ordering::Relaxed) + gated,
+            failed_writes: self.shared.failed_writes.load(Ordering::Relaxed),
             stalled: self.shared.disabled.load(Ordering::Acquire),
         }
+    }
+
+    /// Frames waiting for the worker, not counting one being written.
+    #[cfg(test)]
+    pub(crate) fn queued_frames(&self) -> usize {
+        lock(&self.shared.queue).frames.len()
     }
 
     /// How many writer threads this worker has ever started: at most one.
@@ -275,10 +319,17 @@ fn write_frames(shared: Arc<Shared>, mut sink: Box<dyn FrameSink>) {
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
             }
         };
-        // A failed write is dropped like every terminal write before it: the
-        // frame was presentation, and the run does not depend on it.
-        let _ = sink.write(frame.stream, &frame.bytes);
-        lock(&shared.queue).writing = false;
+        // A failed write is counted, never retried, and does not stop later
+        // frames: unlike a stall it returns at once, and a closed stdout says
+        // nothing about stderr. Counted before `writing` clears, so a drain
+        // that sees the queue idle also sees the failure.
+        let failed = sink.write(frame.stream, &frame.bytes).is_err();
+        let mut queue = lock(&shared.queue);
+        if failed {
+            shared.failed_writes.fetch_add(1, Ordering::Relaxed);
+        }
+        queue.writing = false;
+        drop(queue);
         shared.changed.notify_all();
     }
 }

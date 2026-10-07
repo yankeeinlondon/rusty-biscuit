@@ -643,38 +643,44 @@ impl<S: SemanticEventSink> SemanticStreamParser for CodexSemanticStreamParser<S>
         }
     }
 
-    fn finish(mut self: Box<Self>, mut exit_code: i32) -> StreamExecutionSummary {
+    fn finish(self: Box<Self>, exit_code: i32) -> StreamExecutionSummary {
+        self.snapshot(exit_code)
+    }
+
+    fn snapshot(&self, mut exit_code: i32) -> StreamExecutionSummary {
+        let (mut is_error, mut error_kind, mut error_message) =
+            (self.is_error, self.error_kind.clone(), self.error_message.clone());
         if self.app_server.is_some() {
-            if self.interrupted && !self.is_error {
-                self.is_error = true;
-                self.error_kind = Some("interrupted".to_string());
-                self.error_message = Some("the turn was interrupted and no turn replaced it".to_string());
+            if self.interrupted && !is_error {
+                is_error = true;
+                error_kind = Some("interrupted".to_string());
+                error_message = Some("the turn was interrupted and no turn replaced it".to_string());
             }
             // The app-server exits 0 once its input closes; exec exits 1
             // when the run failed, was interrupted, or hit an unretried error.
-            if exit_code == 0 && self.is_error {
+            if exit_code == 0 && is_error {
                 exit_code = 1;
             }
         }
         super::common::finish_summary(
             Provider::Codex,
             StreamExecutionSummary {
-                session_id: self.session_id,
-                model: self.model,
-                assistant_text: self.assistant_text,
-                provider_status: self.provider_status,
+                session_id: self.session_id.clone(),
+                model: self.model.clone(),
+                assistant_text: self.assistant_text.clone(),
+                provider_status: self.provider_status.clone(),
                 exit_code,
-                is_error: self.is_error,
-                error_kind: self.error_kind,
-                error_message: self.error_message,
+                is_error,
+                error_kind,
+                error_message,
                 duration_ms: self.duration_ms,
                 num_turns: (self.num_turns > 0).then_some(self.num_turns),
-                token_usage: self.token_usage,
+                token_usage: self.token_usage.clone(),
                 cost_usd: self.cost_usd,
                 tool_calls: (self.tool_calls > 0).then_some(self.tool_calls),
                 permission_prompts: (self.permission_prompts > 0).then_some(self.permission_prompts),
                 user_input_prompts: (self.user_input_prompts > 0).then_some(self.user_input_prompts),
-                raw_summary: self.raw_summary,
+                raw_summary: self.raw_summary.clone(),
                 ..Default::default()
             },
         )

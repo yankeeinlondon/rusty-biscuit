@@ -122,10 +122,11 @@ pub(crate) struct ProcessResult<T> {
     /// Warnings for output readers that panicked, timed out, or failed to
     /// forward after the child exited. Never a provider failure: the child's
     /// own outcome stands, only its output may be incomplete.
-    //
-    // Already shown on stderr by each spawn path; kept for the session
-    // record, whose output-loss field lands with the output worker.
-    #[allow(dead_code)]
+    ///
+    /// Each spawn path queues these for stderr; callers also store them on
+    /// the session-end record and the attempt's
+    /// [`OutputStatus`](claudine::harness::OutputStatus), where they survive
+    /// a terminal that could not show them.
     pub(crate) reader_warnings: Vec<String>,
 }
 
@@ -169,7 +170,9 @@ pub(crate) fn structured_native_exit(
 /// rendered lines afterwards. A sequence task frames this stream's lines with a
 /// bar gutter *after* rendering, so the renderer must wrap to a width that
 /// leaves room for it — otherwise every full-width line overflows the terminal
-/// by the gutter's width once the bar is prepended. Pass `0` for an
+/// by the gutter's width once the bar is prepended. A nonzero inset on a
+/// terminal also holds partial lines until they are complete, so they are
+/// rendered (and folded) rather than streamed raw. Pass `0` for an
 /// undecorated stream.
 ///
 /// [`TerminalOptions`]: darkmatter::markdown::output::terminal::TerminalOptions
@@ -191,7 +194,9 @@ pub(crate) fn new_assistant_stream_inset(inset: u32) -> claudine::render::Assist
         opts.image_mode = TerminalImageMode::Never;
         opts
     });
+    let hold_partial_lines = inset > 0 && term.is_some();
     claudine::render::AssistantStream::new(term, terminal_options)
+        .holding_partial_lines(hold_partial_lines)
 }
 
 /// Callback type used by [`run_child_stream_semantic`] for assistant text.

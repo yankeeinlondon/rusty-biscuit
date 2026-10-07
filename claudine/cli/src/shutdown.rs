@@ -95,7 +95,9 @@ fn flush_streams() {
     // run queued before the process exits. A terminal that stopped accepting
     // output leaves that thread holding the stdout lock, and flushing here
     // would wait on it forever.
-    if StreamOutput::shared().drain_final(OUTPUT_DRAIN_BUDGET) == Drained::Disabled {
+    if let Some(output) = StreamOutput::shared_if_created()
+        && output.drain_final(OUTPUT_DRAIN_BUDGET) == Drained::Disabled
+    {
         return;
     }
     let _ = std::io::stdout().flush();

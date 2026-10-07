@@ -883,3 +883,34 @@ fn perf_tree_prep_named_children_reconcile() {
         Duration::from_micros(61_100)
     );
 }
+
+/// During a wrapped run the `--perf` report is queued on the output worker,
+/// so a terminal that stopped reading cannot hold the run at its last step.
+#[test]
+fn the_perf_report_is_queued_while_the_worker_is_stuck() {
+    let routed = crate::terminal_gate::tests::RoutedToBlockedWorker::new();
+    let report = perf_report(
+        Duration::from_millis(100),
+        Duration::from_millis(10),
+        Duration::ZERO,
+        Duration::from_millis(5),
+        vec![],
+        None,
+        None,
+    );
+    let expected = render_perf_report(&report);
+
+    let returned = crate::terminal_gate::tests::returns_while_std_streams_are_locked(move || {
+        crate::perf::emit_report(&report);
+    });
+
+    assert!(returned, "the performance report waited on the terminal");
+    let written = routed.release();
+    assert_eq!(
+        written.last(),
+        Some(&(
+            crate::commands::wrap::output_worker::Stream::Stderr,
+            expected.into_bytes()
+        ))
+    );
+}

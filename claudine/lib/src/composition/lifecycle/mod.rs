@@ -351,7 +351,7 @@ pub trait LifecycleEmitter: Sync {
             .state(StatusState::Info)
             .theme(StatusTheme::Circular)
             .render(term);
-        eprintln!("{rendered}");
+        crate::render::console::write_stderr_line(&rendered);
     }
 
     /// Write a styled `Warning` status line to stderr.
@@ -364,7 +364,7 @@ pub trait LifecycleEmitter: Sync {
             .state(StatusState::Warning)
             .theme(StatusTheme::Circular)
             .render(term);
-        eprintln!("{rendered}");
+        crate::render::console::write_stderr_line(&rendered);
     }
 
     /// Write a styled `Success` status line to stderr.
@@ -377,7 +377,7 @@ pub trait LifecycleEmitter: Sync {
             .state(StatusState::Success)
             .theme(StatusTheme::Circular)
             .render(term);
-        eprintln!("{rendered}");
+        crate::render::console::write_stderr_line(&rendered);
     }
 
     /// Write a plain prose line (no status glyph) to **stdout**.
@@ -387,7 +387,7 @@ pub trait LifecycleEmitter: Sync {
     /// knowing stdout is otherwise reserved for pipeable command data.
     fn emit_stdout(&self, text: &str, term: &Terminal) {
         let rendered = Prose::new(text).with_line_breaks(LineBreaks::Hard).render(term);
-        println!("{rendered}");
+        crate::render::console::write_stdout_line(&rendered);
     }
 }
 
@@ -399,7 +399,7 @@ impl LifecycleEmitter for DefaultLifecycleEmitter {
         // `stderr` carries no status: it is plain prose (rich text/links honored)
         // routed to STDERR. Status glyphs belong to `info`/`warn` only.
         let rendered = Prose::new(text).with_line_breaks(LineBreaks::Hard).render(term);
-        eprintln!("{rendered}");
+        crate::render::console::write_stderr_line(&rendered);
     }
 
     fn emit_message(

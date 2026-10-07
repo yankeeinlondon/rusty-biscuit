@@ -19,6 +19,7 @@ mod messaging_delivery;
 mod messaging_spawn_guard;
 mod model_catalog_integration;
 mod opencode_stderr_lifecycle;
+mod parser_snapshot;
 mod path_lookup_guard;
 mod protocol_fixture_replay;
 mod semantic_fidelity;

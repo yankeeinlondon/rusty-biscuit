@@ -160,6 +160,22 @@ impl<S: SemanticEventSink> AntigravitySemanticStreamParser<S> {
         });
     }
 
+    /// The failure of a run that produced no envelope: the last line of
+    /// whatever it wrote instead, else a nonzero exit.
+    fn unparsed_failure(&self, exit_code: i32) -> Option<String> {
+        if self.emitted {
+            return None;
+        }
+        let raw = self.buffer.trim();
+        if !raw.is_empty() {
+            Some(raw.lines().last().unwrap_or(raw).to_string())
+        } else if exit_code != 0 {
+            Some(format!("agy exited with code {exit_code}"))
+        } else {
+            None
+        }
+    }
+
     fn record_error(&mut self, message: &str) {
         self.is_error = true;
         self.error_message = Some(message.to_string());
@@ -192,14 +208,8 @@ impl<S: SemanticEventSink> SemanticStreamParser for AntigravitySemanticStreamPar
         // Last chance to parse a complete envelope, then diagnose a run that
         // produced no JSON at all (e.g. a plain-text auth failure).
         this.try_emit();
-        if !this.emitted {
-            let raw = this.buffer.trim();
-            if !raw.is_empty() {
-                let message = raw.lines().last().unwrap_or(raw).to_string();
-                this.record_error(&message);
-            } else if exit_code != 0 {
-                this.record_error(&format!("agy exited with code {exit_code}"));
-            }
+        if let Some(message) = this.unparsed_failure(exit_code) {
+            this.record_error(&message);
         }
         super::trace_parser_finish(
             Provider::Antigravity,
@@ -208,23 +218,33 @@ impl<S: SemanticEventSink> SemanticStreamParser for AntigravitySemanticStreamPar
             this.num_turns,
             this.provider_status.as_deref(),
         );
-        super::common::finish_summary(
-            Provider::Antigravity,
-            StreamExecutionSummary {
-                session_id: this.session_id,
-                model: this.model,
-                assistant_text: this.assistant_text,
-                provider_status: this.provider_status,
-                exit_code,
-                is_error: this.is_error,
-                error_kind: this.error_kind,
-                error_message: this.error_message,
-                duration_ms: this.duration_ms,
-                num_turns: (this.num_turns > 0).then_some(this.num_turns),
-                token_usage: this.has_usage.then_some(this.token_usage),
-                ..Default::default()
-            },
-        )
+        this.snapshot(exit_code)
+    }
+
+    /// A run with no envelope yet reports the failure `finish` would record.
+    /// `feed_line` parses the buffer as soon as it holds a whole envelope, so
+    /// an unparsed buffer here is one `finish` would not parse either.
+    fn snapshot(&self, exit_code: i32) -> StreamExecutionSummary {
+        let mut summary = StreamExecutionSummary {
+            session_id: self.session_id.clone(),
+            model: self.model.clone(),
+            assistant_text: self.assistant_text.clone(),
+            provider_status: self.provider_status.clone(),
+            exit_code,
+            is_error: self.is_error,
+            error_kind: self.error_kind.clone(),
+            error_message: self.error_message.clone(),
+            duration_ms: self.duration_ms,
+            num_turns: (self.num_turns > 0).then_some(self.num_turns),
+            token_usage: self.has_usage.then(|| self.token_usage.clone()),
+            ..Default::default()
+        };
+        if let Some(message) = self.unparsed_failure(exit_code) {
+            summary.is_error = true;
+            summary.error_kind = Some(classify_error(&message).as_str().to_string());
+            summary.error_message = Some(message);
+        }
+        super::common::finish_summary(Provider::Antigravity, summary)
     }
 }
 

@@ -22,6 +22,7 @@ use claudine::stream::parser::SemanticStreamParser;
 use claudine::stream::summary::StreamExecutionSummary;
 
 use super::super::run_scope::ResultSnapshot;
+use super::super::stream_io::StreamOutput;
 
 /// How long a reader may stay blocked on its pipe after the child exited.
 pub(crate) const READER_PIPE_CAP: Duration = Duration::from_secs(5);
@@ -29,14 +30,11 @@ pub(crate) const READER_PIPE_CAP: Duration = Duration::from_secs(5);
 /// How long a reader that is not blocked on its pipe may keep working after
 /// the child exited.
 //
-// WHY 120 s: the stalls recorded in the JSONL logs between 2026-09-25 and
-// 2026-10-06 left the reader busy for up to about a minute after the child
-// exited, while it wrote a large final message to a terminal that was not
-// draining. Twice that covers the worst case seen. No `TimeoutConfig` knob
-// fits: `kill_grace` is the SIGTERM-to-SIGKILL interval and `step_timeout`
-// measures the child's silence, not the wrapper's own output. The wait must
-// still end, because a terminal that never drains would otherwise hang the
-// wrapper forever.
+// WHY 120 s: allow substantially more cleanup time than the old 5 s join,
+// while bounding a stuck reader. Incident logs show delayed processing of
+// final answers, but do not timestamp child exit or locate the live stall.
+// No `TimeoutConfig` knob fits: `kill_grace` is the SIGTERM-to-SIGKILL interval
+// and `step_timeout` measures the child's silence, not wrapper cleanup.
 pub(crate) const READER_DRAIN_LIMIT: Duration = Duration::from_secs(120);
 
 /// How long a reader must have been blocked on its pipe, without a line
@@ -295,10 +293,19 @@ pub(crate) fn reader_warning_line(message: &str, term: &Terminal) -> String {
     Status::new(message).state(StatusState::Warning).render(term)
 }
 
-/// Show a reader warning on stderr directly, so it is visible without
-/// tracing enabled.
-pub(crate) fn eprint_reader_warning(message: &str) {
-    eprintln!("{}", reader_warning_line(message, &crate::log::terminal()));
+/// Log each reader warning and queue it for stderr on `output`, so it is
+/// visible without tracing enabled.
+///
+/// Queued rather than written: the stderr a warning is about may be the one a
+/// detached reader or a stalled terminal is holding. The trace is queued too,
+/// because during a wrapped run the tracing writer is a diagnostic
+/// ([`crate::terminal_gate::write`]).
+pub(crate) fn queue_reader_warnings(output: &StreamOutput, warnings: &[String]) {
+    let term = crate::log::terminal();
+    for warning in warnings {
+        tracing::warn!("{warning}");
+        output.emit_stderr_line(&reader_warning_line(warning, &term));
+    }
 }
 
 /// The user-facing explanation of a reader that outlived its bound.
@@ -333,6 +340,10 @@ impl SemanticStreamParser for FallbackParser {
     fn finish(self: Box<Self>, _exit_code: i32) -> StreamExecutionSummary {
         self.summary
     }
+
+    fn snapshot(&self, _exit_code: i32) -> StreamExecutionSummary {
+        self.summary.clone()
+    }
 }
 
 /// The parser whose summary the run reports, and a warning to show on stderr.
@@ -344,11 +355,15 @@ impl SemanticStreamParser for FallbackParser {
 /// A reader that timed out while still holding its parser has published what
 /// the provider had reported by then in `snapshot`:
 ///
-/// - a terminal error is kept as the run's error;
-/// - a completed turn with the child exiting 0 is kept as a successful run,
-///   without the assistant text, which only the parser accumulated;
+/// - the parser's finalized summary, published as soon as the reader parsed
+///   the line that reported the result and before that line's rendering,
+///   logging, or hooks ran: kept whole (answer, session, usage, and the
+///   provider's verdict, such as unfinished sub-agents) when the child exited
+///   0, and kept with the real exit code when it is a failure;
+/// - otherwise a terminal error (from a stderr bridge) is kept as the run's
+///   error;
 /// - anything else is an incomplete stream. No result is invented from lines
-///   the reader never handled.
+///   the reader never parsed.
 ///
 /// A panic stays a `parse_failure`. Early terminations (provider timeout, rate
 /// limit) and the termination label are applied by the caller afterward, so a
@@ -392,22 +407,24 @@ pub(crate) fn settle_parser(
                 );
                 return (parser, Some(warning));
             }
+            if let Some(summary) = &snapshot.summary
+                && (exit_code == 0 || summary.is_error)
+            {
+                let mut summary = summary.clone();
+                let kept = if summary.is_error {
+                    "The provider's error is kept"
+                } else {
+                    "The run's result is kept; its output may be incomplete"
+                };
+                if exit_code != 0 {
+                    summary.exit_code = exit_code;
+                }
+                let warning = format!("{}. {kept}", failure.message);
+                return (Box::new(FallbackParser { summary }), Some(warning));
+            }
             if let Some((kind, message)) = &snapshot.terminal_error {
                 let warning = format!("{}. The provider's error is kept", failure.message);
                 return (failed_with(exit_code, kind.clone(), message.clone()), Some(warning));
-            }
-            if let (Some(turn), 0) = (&snapshot.turn_complete, exit_code) {
-                let warning = format!(
-                    "{}. The run's result is kept; its output may be incomplete",
-                    failure.message
-                );
-                let summary = StreamExecutionSummary {
-                    provider_status: turn.provider_status.clone(),
-                    duration_ms: turn.duration_ms,
-                    exit_code,
-                    ..Default::default()
-                };
-                return (Box::new(FallbackParser { summary }), Some(warning));
             }
             (
                 failed(exit_code, failure.error_kind, failure.message.clone()),
@@ -442,3 +459,9 @@ mod tests;
 
 #[cfg(test)]
 mod matrix;
+
+#[cfg(test)]
+mod provider_streams;
+
+#[cfg(test)]
+mod diagnostics;

@@ -26,7 +26,7 @@ pub(super) fn emit_sequence_summary(
     silent: bool,
 ) -> Result<i32> {
     if !silent {
-        eprintln!();
+        log::message("");
         if summary.failed == 0 {
             let status = Status::from_prose(format!(
                 "Sequence finished: <green>{}</green> succeeded, 0 failed",

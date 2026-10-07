@@ -33,7 +33,7 @@ use super::reasons::{
     CompletionTermination, WatchdogTermination, early_termination_process_outcome,
     watchdog_request_to_early_termination,
 };
-use super::{INTERRUPT_FEEDBACK_FIRST, INTERRUPT_FEEDBACK_REPEAT, POST_SIGKILL_REAP_TIMEOUT};
+use super::{POST_SIGKILL_REAP_TIMEOUT, interrupt_feedback};
 
 /// Everything the console handler needs to terminate one child from a thread
 /// that owns neither the [`Child`] nor any borrow of it.
@@ -106,38 +106,19 @@ impl HandleCloser for JobObjectCloser {
 /// of the step rather than at process exit.
 type OwnedJob = OwnedRawHandle<JobObjectCloser>;
 
-/// Emit the Q14 visible-feedback line once per press.
+/// Show the Q14 feedback line for the `count`th press.
 ///
-/// The Unix ladder emits the identical bytes from its signal handler; both
-/// hosts therefore show the same wording. The write is best-effort — a closed
-/// stderr must not fail the handler.
-/// Write one rung's feedback line straight to stderr.
-///
-/// This deliberately bypasses [`StreamOutput`], the synchronized render sink the
-/// spec's *Reporting Concurrency* section otherwise requires everything to go
-/// through, for a reason that is structural rather than a leftover from the Unix
-/// port: [`claudine_console_ctrl_handler`] is a context-free
-/// `extern "system" fn(u32)` that Windows invokes on its own thread, while the
-/// sink is per-run state living behind an `Arc<Mutex<…>>` in the call chain.
-/// Reaching it from here would mean parking a global handle to the live run's
-/// sink purely so a static byte string can take a lock.
-///
-/// What that costs is bounded and not a torn line: the payload is a single
-/// newline-terminated static slice written in one `write_all`, and `Stderr`
-/// locks internally for the call, so the bytes cannot interleave with another
-/// writer's. The sink's *cursor bookkeeping* simply does not learn about this
-/// line, which can cost one row of alignment in the frame that follows — the
-/// same trade the Unix handler makes, where `libc::write` is additionally forced
-/// by async-signal-safety.
-///
-/// Both hosts emit byte-identical bytes; see [`INTERRUPT_FEEDBACK_FIRST`].
+/// Called from the console-control handler, which Windows runs on a thread of
+/// its own rather than in signal context, so it can submit the line as a
+/// diagnostic ([`crate::terminal_gate::write`]): queued on the output worker
+/// during a wrapped run, so a terminal that stopped reading cannot hold the
+/// handler before it reaches the children's ladder below. Both hosts show
+/// byte-identical lines; see [`INTERRUPT_FEEDBACK_FIRST`](super::INTERRUPT_FEEDBACK_FIRST).
 fn emit_interrupt_feedback(count: u8) {
-    let msg = if count == 1 {
-        INTERRUPT_FEEDBACK_FIRST
-    } else {
-        INTERRUPT_FEEDBACK_REPEAT
-    };
-    let _ = std::io::Write::write_all(&mut std::io::stderr(), msg);
+    crate::terminal_gate::write(
+        crate::commands::wrap::output_worker::Stream::Stderr,
+        interrupt_feedback(count),
+    );
 }
 
 /// Deliver one ladder rung to one child.

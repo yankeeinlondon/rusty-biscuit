@@ -936,30 +936,33 @@ impl<S: SemanticEventSink> SemanticStreamParser for ClaudeSemanticStreamParser<S
     /// own proof of success: the task ledger can flip `is_error` for work the
     /// provider abandoned before exiting 0.
     fn finish(self: Box<Self>, exit_code: i32) -> StreamExecutionSummary {
-        let task_ledger = self.task_ledger;
+        self.snapshot(exit_code)
+    }
+
+    fn snapshot(&self, exit_code: i32) -> StreamExecutionSummary {
         let mut summary = super::common::finish_summary(
             Provider::Claude,
             StreamExecutionSummary {
-                session_id: self.session_id,
-                model: self.model,
-                assistant_text: self.assistant_text,
-                provider_status: self.provider_status,
+                session_id: self.session_id.clone(),
+                model: self.model.clone(),
+                assistant_text: self.assistant_text.clone(),
+                provider_status: self.provider_status.clone(),
                 exit_code,
                 is_error: self.is_error,
-                error_kind: self.error_kind,
-                error_message: self.error_message,
+                error_kind: self.error_kind.clone(),
+                error_message: self.error_message.clone(),
                 duration_ms: self.duration_ms,
                 duration_api_ms: self.duration_api_ms,
                 num_turns: self.num_turns,
-                token_usage: self.token_usage,
+                token_usage: self.token_usage.clone(),
                 cost_usd: self.cost_usd,
                 tool_calls: (self.tool_calls > 0).then_some(self.tool_calls),
-                rate_limit: self.rate_limit,
-                raw_summary: self.raw_summary,
+                rate_limit: self.rate_limit.clone(),
+                raw_summary: self.raw_summary.clone(),
                 ..Default::default()
             },
         );
-        task_ledger.apply_to_summary(&mut summary);
+        self.task_ledger.apply_to_summary(&mut summary);
         summary
     }
 }

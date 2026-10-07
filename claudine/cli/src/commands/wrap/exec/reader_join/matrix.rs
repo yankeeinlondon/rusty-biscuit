@@ -7,7 +7,6 @@
 
 use super::*;
 use crate::commands::wrap::exec::termination::apply_early_termination_to_summary;
-use crate::commands::wrap::run_scope::TurnResult;
 use claudine::stream::logs::EarlyTermination;
 
 const BUDGET: ReaderBudget = ReaderBudget {
@@ -23,6 +22,10 @@ impl SemanticStreamParser for VerdictParser {
     fn feed_line(&mut self, _line: &str) {}
 
     fn finish(self: Box<Self>, exit_code: i32) -> StreamExecutionSummary {
+        self.snapshot(exit_code)
+    }
+
+    fn snapshot(&self, exit_code: i32) -> StreamExecutionSummary {
         StreamExecutionSummary {
             exit_code,
             is_error: self.0.is_some(),
@@ -62,17 +65,13 @@ impl Run {
         }
     }
 
-    /// What the reader had published when it stalled mid-line.
+    /// What the reader had published when it stalled in the sink work of a
+    /// line: the summary of the parser that had parsed the result line.
     fn snapshot(self) -> ResultSnapshot {
-        let turn = Some(TurnResult {
-            provider_status: Some("end_turn".into()),
-            duration_ms: Some(10),
-        });
         match self {
-            Run::ExitZeroWithResult => ResultSnapshot { turn_complete: turn, terminal_error: None },
-            Run::ResultSaysFailureExitZero => ResultSnapshot {
-                turn_complete: turn,
-                terminal_error: Some(("api_remote".into(), "overloaded".into())),
+            Run::ExitZeroWithResult | Run::ResultSaysFailureExitZero => ResultSnapshot {
+                summary: Some(VerdictParser(self.parser_verdict()).snapshot(0)),
+                ..Default::default()
             },
             _ => ResultSnapshot::default(),
         }

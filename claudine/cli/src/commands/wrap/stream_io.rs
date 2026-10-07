@@ -20,6 +20,8 @@ use super::output_worker::{
 };
 use super::run_scope;
 
+static SHARED: std::sync::OnceLock<Arc<StreamOutput>> = std::sync::OnceLock::new();
+
 /// Shared test-only buffer of `(is_stdout, line)` tuples captured by
 /// `StreamOutput`. Wrapped in `Arc<Mutex<…>>` so the writer and the test
 /// observer can share a single recording surface across threads.
@@ -128,9 +130,25 @@ impl StreamOutput {
     /// It is also the one worker for the process: a terminal found stalled in
     /// one iteration of a loop stays disabled for the rest, and no iteration
     /// starts a writer of its own.
+    ///
+    /// Creating it is what starts a wrapped run's ownership of the terminal:
+    /// from then until the process exits, Claudine's own diagnostics are
+    /// frames on this worker too ([`crate::terminal_gate::route_to`]). Only
+    /// wrapped-run code asks for it, so every other command keeps writing
+    /// directly.
     pub(crate) fn shared() -> Arc<Self> {
-        static SHARED: std::sync::OnceLock<Arc<StreamOutput>> = std::sync::OnceLock::new();
-        SHARED.get_or_init(Self::new).clone()
+        SHARED
+            .get_or_init(|| {
+                let output = Self::new();
+                crate::terminal_gate::route_to(Arc::clone(&output));
+                output
+            })
+            .clone()
+    }
+
+    /// The process-wide coordinator, if a wrapped run created it.
+    pub(crate) fn shared_if_created() -> Option<Arc<Self>> {
+        SHARED.get().cloned()
     }
 
     /// Queue one frame, unless the calling thread's run has already ended.
@@ -247,6 +265,15 @@ impl StreamOutput {
         }
     }
 
+    /// The stderr twin of [`stdout_writer`](Self::stdout_writer), for the
+    /// agent's own stderr forwarded line by line: no status gutter, and each
+    /// `write` lands on a fresh row.
+    pub(crate) fn stderr_writer(self: &Arc<Self>) -> StderrWriter {
+        StderrWriter {
+            coordinator: self.clone(),
+        }
+    }
+
     /// Emit a status line to stderr, guaranteeing it lands on a fresh row.
     ///
     /// Queues a `\n` for stdout first when stdout is not newline-terminated,
@@ -270,6 +297,35 @@ impl StreamOutput {
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         self.separate_from_stdout(&mut inner);
         self.submit(Stream::Stderr, format!("{line}\n").into_bytes());
+    }
+
+    /// Queue a diagnostic's bytes unchanged ([`crate::terminal_gate::write`]);
+    /// returns whether they were queued.
+    ///
+    /// A stderr diagnostic gets no fresh-row separation, as a direct write
+    /// would not, and takes no cursor lock, so a panic report from a thread
+    /// that panicked inside this type cannot wait on itself. A stdout
+    /// diagnostic is data, and moves the cursor like any stdout frame.
+    pub(crate) fn submit_diagnostic(&self, stream: Stream, bytes: Vec<u8>) -> bool {
+        #[cfg(test)]
+        if let Some(buf) = &self.test_recorder {
+            buf.lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push((stream == Stream::Stdout, String::from_utf8_lossy(&bytes).into_owned()));
+            return true;
+        }
+        match stream {
+            Stream::Stderr => self.submit(stream, bytes),
+            Stream::Stdout => {
+                let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+                let ends_line = bytes.last().map(|last| *last == b'\n');
+                let queued = self.submit(stream, bytes);
+                if let (true, Some(ends_line)) = (queued, ends_line) {
+                    inner.last_stdout_newline = ends_line;
+                }
+                queued
+            }
+        }
     }
 
     /// Wait for everything queued so far to reach the terminal, up to
@@ -303,6 +359,12 @@ impl StreamOutput {
         self.drain(deadline)
     }
 
+    /// Frames queued behind the one the worker is writing.
+    #[cfg(test)]
+    pub(crate) fn queued_frames(&self) -> usize {
+        self.worker.queued_frames()
+    }
+
     /// Terminal output lost so far in this process; see [`OutputLoss::since`].
     pub(crate) fn loss(&self) -> OutputLoss {
         self.worker.loss()
@@ -330,6 +392,33 @@ impl Write for StdoutWriter {
         {
             inner.last_stdout_newline = *last == b'\n';
         }
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+/// `Write` adapter that queues its bytes for stderr. Each `write` is one frame
+/// placed on a fresh row, so a caller writes a whole line per call.
+pub(crate) struct StderrWriter {
+    coordinator: Arc<StreamOutput>,
+}
+
+impl Write for StderrWriter {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        if buf.is_empty() {
+            return Ok(0);
+        }
+        let mut inner = self
+            .coordinator
+            .inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        self.coordinator.separate_from_stdout(&mut inner);
+        // Refused frames still report success, as for `StdoutWriter`.
+        self.coordinator.submit(Stream::Stderr, buf.to_vec());
         Ok(buf.len())
     }
 

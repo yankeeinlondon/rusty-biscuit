@@ -3,7 +3,7 @@
 //! status rendering, dispatch, and JSONL logging for [`LiveSemanticSink`].
 
 use super::LiveSemanticSink;
-use super::super::run_scope::{self, TurnResult};
+use super::super::run_scope;
 use super::Section;
 use claudine::events::AgenticEvent;
 use claudine::render::StreamRenderable;
@@ -20,28 +20,16 @@ impl SemanticEventSink for LiveSemanticSink {
             return;
         }
 
-        // Published before anything renders: if this reader later stalls, the
-        // wrapper still knows what the provider reported.
-        match &event {
-            SemanticEvent::TurnComplete {
-                provider_status,
-                duration_ms,
-                ..
-            } => run_scope::publish(|snapshot| {
-                snapshot.turn_complete = Some(TurnResult {
-                    provider_status: provider_status.clone(),
-                    duration_ms: *duration_ms,
-                });
-            }),
-            SemanticEvent::Error {
-                message,
-                terminal: true,
-                kind,
-                ..
-            } => run_scope::publish(|snapshot| {
-                snapshot.terminal_error = Some((kind.as_str().to_string(), message.clone()));
-            }),
-            _ => {}
+        // Recorded before anything renders: a terminal error from a stderr
+        // bridge reaches no parser line, so this is how the wrapper learns it.
+        if let SemanticEvent::Error {
+            message,
+            terminal: true,
+            kind,
+            ..
+        } = &event
+        {
+            run_scope::report_terminal_error(kind.as_str().to_string(), message.clone());
         }
 
         // 0. Boundary flush: a buffered thought coalesces and renders before

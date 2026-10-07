@@ -20,7 +20,7 @@ use super::super::termination::{
     wait_with_signal_and_early_termination,
 };
 use super::super::reader_join::{
-    ReaderBudget, ReaderProgress, ReaderStream, eprint_reader_warning, join_reader, reader_failure,
+    ReaderBudget, ReaderProgress, ReaderStream, join_reader, queue_reader_warnings, reader_failure,
 };
 use super::super::timeouts::TimeoutConfig;
 use super::super::{
@@ -28,6 +28,7 @@ use super::super::{
     resolve_first_response, stop_timing_ticker,
 };
 use super::setup;
+use crate::commands::wrap::stream_io::StreamOutput;
 
 /// Captured output from a child process.
 pub(crate) struct CapturedChildOutput {
@@ -35,10 +36,8 @@ pub(crate) struct CapturedChildOutput {
     pub(crate) stdout: String,
     pub(crate) stderr: String,
     /// A reader panicked or outlived its bound, so `stdout` or `stderr` holds
-    /// only what the reader had collected by then.
-    //
-    // Read by the attempt outcome once the session record carries it.
-    #[allow(dead_code)]
+    /// only what the reader had collected by then. Carried to the attempt's
+    /// [`OutputStatus::partial_capture`](claudine::harness::OutputStatus::partial_capture).
     pub(crate) incomplete: bool,
 }
 
@@ -237,6 +236,8 @@ pub(crate) fn run_child_capture(
 
     kill_process_group(&mut child);
 
+    let reader_budget = ReaderBudget::default();
+    let readers_since = Instant::now();
     let ([stdout, stderr], reader_warnings) = join_captures(
         [
             CaptureReader {
@@ -252,12 +253,13 @@ pub(crate) fn run_child_capture(
                 handle: stderr_handle,
             },
         ],
-        ReaderBudget::default(),
-        Instant::now(),
+        reader_budget,
+        readers_since,
     );
-    for warning in &reader_warnings {
-        tracing::warn!("{warning}");
-        eprint_reader_warning(warning);
+    if !reader_warnings.is_empty() {
+        let output = StreamOutput::shared();
+        queue_reader_warnings(&output, &reader_warnings);
+        output.drain(readers_since + reader_budget.drain_limit);
     }
 
     // Bespoke signal mirror (E5) for the capture path's terminations

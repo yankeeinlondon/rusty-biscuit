@@ -19,6 +19,10 @@ impl SemanticStreamParser for EchoParser {
     }
 
     fn finish(self: Box<Self>, exit_code: i32) -> StreamExecutionSummary {
+        self.snapshot(exit_code)
+    }
+
+    fn snapshot(&self, exit_code: i32) -> StreamExecutionSummary {
         StreamExecutionSummary {
             assistant_text: self.lines.join("\n"),
             exit_code,
@@ -277,33 +281,10 @@ fn stalled_with_empty_slot() -> JoinOutcome<()> {
 }
 
 #[test]
-fn a_stalled_reader_with_a_published_turn_and_exit_zero_keeps_the_result() {
-    let snapshot = ResultSnapshot {
-        turn_complete: Some(crate::commands::wrap::run_scope::TurnResult {
-            provider_status: Some("success".into()),
-            duration_ms: Some(1200),
-        }),
-        terminal_error: None,
-    };
-
-    let (parser, warning) =
-        settle_parser(stalled_with_empty_slot(), &empty_slot(), 0, BUDGET, &snapshot);
-
-    let summary = parser.finish(0);
-    assert!(!summary.is_error);
-    assert_eq!(summary.error_kind, None);
-    assert_eq!(summary.exit_code, 0);
-    assert_eq!(summary.provider_status.as_deref(), Some("success"));
-    assert_eq!(summary.duration_ms, Some(1200));
-    let warning = warning.expect("the lost output is announced");
-    assert!(warning.contains("its output may be incomplete"), "{warning}");
-}
-
-#[test]
 fn a_stalled_reader_keeps_the_provider_error_it_had_published() {
     let snapshot = ResultSnapshot {
-        turn_complete: None,
         terminal_error: Some(("api_remote".into(), "overloaded".into())),
+        ..Default::default()
     };
 
     let (parser, warning) =
@@ -333,10 +314,10 @@ fn a_stalled_reader_with_no_published_result_is_an_incomplete_stream() {
 }
 
 #[test]
-fn a_published_turn_does_not_turn_a_nonzero_exit_into_success() {
+fn a_published_successful_summary_does_not_turn_a_nonzero_exit_into_success() {
     let snapshot = ResultSnapshot {
-        turn_complete: Some(Default::default()),
-        terminal_error: None,
+        summary: Some(StreamExecutionSummary::default()),
+        ..Default::default()
     };
 
     let (parser, _warning) =
@@ -346,4 +327,31 @@ fn a_published_turn_does_not_turn_a_nonzero_exit_into_success() {
     assert!(summary.is_error);
     assert_eq!(summary.error_kind.as_deref(), Some("stream_reader_timeout"));
     assert_eq!(summary.exit_code, 2);
+}
+
+/// Reader warnings are queued as stderr frames, so the thread that settles a
+/// run returns at once even when the terminal never takes them, and they
+/// reach a terminal that does.
+#[test]
+fn reader_warnings_are_queued_not_written_by_the_settling_thread() {
+    use crate::commands::wrap::output_worker::tests::Gate;
+    use crate::commands::wrap::output_worker::{Drained, Stream};
+
+    let (blocked, entered) = Gate::new(false);
+    let stalled = StreamOutput::with_sink(Box::new(blocked.clone()));
+    let started = Instant::now();
+    queue_reader_warnings(&stalled, &["first warning".into(), "second warning".into()]);
+    entered.recv_timeout(Duration::from_secs(10)).unwrap();
+    assert!(started.elapsed() < Duration::from_secs(5), "{:?}", started.elapsed());
+    assert_eq!(stalled.drain(Instant::now() + Duration::from_millis(50)), Drained::Disabled);
+    blocked.release();
+
+    let (healthy, _entered) = Gate::new(true);
+    let output = StreamOutput::with_sink(Box::new(healthy.clone()));
+    queue_reader_warnings(&output, &["the reader timed out".into()]);
+    assert_eq!(output.drain(Instant::now() + Duration::from_secs(10)), Drained::Complete);
+    let written = healthy.written();
+    assert_eq!(written.len(), 1, "{written:?}");
+    assert_eq!(written[0].0, Stream::Stderr);
+    assert!(String::from_utf8_lossy(&written[0].1).contains("the reader timed out"));
 }

@@ -208,8 +208,8 @@ pub(crate) fn run_structured_stream_session(
         stream_result.agent_pid,
         &stream_result.signals,
         args.model.as_deref(),
+        &stream_result.reader_warnings,
     );
-    section_stream.drain_final();
 
     Ok(exec::structured_native_exit(
         summary.exit_code,
