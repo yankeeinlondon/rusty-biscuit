@@ -1,4 +1,4 @@
-//! Phase 2 fixture checks use the shipped CLI and portable compiled providers.
+//! Caller regressions use the shipped CLI and portable compiled providers.
 #![cfg(feature = "test-fixtures")]
 use std::fs;
 use std::process::{Command, Stdio};
@@ -62,7 +62,7 @@ fn run(provider: &str, scenario: &str) -> serde_json::Value {
     assert_eq!(fs::read_to_string(directory.join("native-exit.txt")).unwrap(), "0");
     let code = fs::read_to_string(fixture.workspace_path().join("wrapper-exit.txt")).unwrap();
     let code: i32 = code.trim().parse().unwrap();
-    if scenario != "answer-callback" { assert_eq!(code, 0, "{provider}/{scenario}"); }
+    assert_eq!(code, if scenario == "answer-callback" { 1 } else { 0 }, "{provider}/{scenario}");
     assert_eq!(fixture.workspace_path().join("next-command.txt").exists(), code == 0);
     assert!(!fixture.audio_spool().exists());
     let snapshot: serde_json::Value = serde_json::from_slice(&fs::read(directory.join("observation.json")).unwrap()).unwrap();
