@@ -98,6 +98,24 @@ the binary from the ambient CWD is both a cost (the 35-member workspace walk,
 root `system-prompt.md`, the developer's `$HOME`, the host's real provider
 binaries). See the `rust-testing` skill's `spawning-binaries.md`.
 
+Structured stdout cleanup now carries `ProcessResult.completion_observation`:
+separate bounded 256 KiB answer/raw prefixes, coherent atomic reader/settlement
+operations, and separate output-worker queue/active-delivery observations.
+`RunScope::freeze` closes publication and moves buffers before projection;
+late readers cannot mutate the frozen copy or dispatch into another run.
+Claude output and Codex agent messages publish original text through
+`SemanticEventSink::on_response_text` before their Reasoning callbacks; sink
+wrappers must forward this nonblocking observation without treating it as a
+verdict. The `test-fixtures` build alone supports fixed completion-stall
+scenario directories and the compiled fake completion provider. Stdout
+settlement selects `claudine_completion_delayed` for native exit 0
+without a verdict, `exit_failure` for native failure, and `interrupted` for
+exit 130; reader timeouts remain subordinate warnings. Published answer/session
+data survives a native failure. Typed completion-delay diagnostics, populated
+lifecycle transport, and the direct wrapper caller projection remain planned;
+the diagnostic field contract still awaits the author's CPU ruling. See
+[Timeouts](topics/timeouts.md#completion-observations-and-retained-prefixes).
+
 The **local control plane** is platform-native and per stable OS user: a Unix-domain socket on macOS/Linux/WSL, a Windows named pipe on native Windows, qualified by the effective UID or process-token SID from `sniff::os::current_user_id()` — never a username. One portable `spawn_local_server` binds it to a transport-neutral daemon built exactly once. Read `claudine/docs/rendezvous/local-ipc.md` before changing endpoint, daemon-boot, or connector behavior; see [architecture.md](architecture.md) → Rendezvous Package-Area Family for the crate roles, the local-IPC rules, and the `SessionLogManager` module boundary.
 
 **Where to look next:**
