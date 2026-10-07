@@ -30,29 +30,25 @@ human_review_items:
     Recommend omission because operation observations locate the outstanding
     work without a permanently empty field or a new sampling subsystem.
 message_to_agent: |-
-  Phase 3 is PARTIAL, not complete. Select outcomes is checked after 32 focused
-  L1 reader tests passed. Stdout settlement now selects
-  claudine_completion_delayed for native exit 0 without a verdict,
-  exit_failure for native nonzero exit, and interrupted for exit 130, while
-  retaining published answer/session data even when a native failure overrides
-  a successful verdict. Reader warning identities remain subordinate.
-  The author's CPU-field ruling is still pending. Necessary Rule 1 explicitly
-  reserves it for the author; do not treat the omission recommendation as
-  approval. Carry diagnostics and Verify propagation remain unchecked.
-  Do not advance to Phase 4 before finishing Phase 3: register the typed
-  diagnostic and fields after the ruling, then carry the frozen populated
-  snapshot through runtime/session/attempt/composition/sequence/lifecycle and
-  verify storage publication under terminal blockage.
-  The direct wrapper still returns native exit 0 for a missing-verdict semantic
-  failure; fix caller projection while preserving native exit as evidence.
-  Phase 2's ProcessResult.completion_observation contains frozen retained data.
-  The fixed fixture scenarios are completion-callback, answer-callback, and
-  output-delivery; only test-fixtures builds read their control. Keep the
-  native/wrapper exit separation and ready/release handshakes. Frozen prefixes
-  are 256 KiB each; invalid raw UTF-8 uses padded base64. Raw capture envelopes
-  omit original delimiters and cannot prove byte-complete coverage.
-  Run tier coverage and test/lint Cargo commands sequentially: tier listing
-  without test-fixtures can overwrite the executable needed by process tests.
+  Phase 5 is PARTIAL. Current docs now distinguish implemented bounded retention
+  and caller exits from planned populated lifecycle diagnostics, explain honest
+  completeness flags and opt-in capture lifetime, and warn about repeated side
+  effects on retry. No source behavior changed during Phase 5.
+  Phase 1 Freeze interfaces, Phase 3 Carry diagnostics / Verify propagation,
+  and Phase 4 caller controls / author policies remain open. The plan explicitly
+  reserves the CPU-field ruling for the author. Preserve human_review true;
+  the recommendation to omit CPU is not a recorded ruling. After that decision,
+  complete typed registry/catalog registration and transport the frozen payload
+  through production storage, session/attempt, composition/sequence, and both
+  failure/finalize contexts. StoragePublication currently has no production
+  observation site, and only the test-fixtures publisher serializes the frozen
+  completion observation. Complete the missing caller controls and author-policy
+  regressions before publishing a runnable retained-response sequence example.
+  Retention and caller regressions pass locally; see Phase 5's log for final
+  validation and cross-OS outcomes. Re-run only evidence affected by new source
+  changes. Tier coverage and local Cargo checks must be sequential because tier
+  listing without test-fixtures can replace a needed fixture-enabled executable.
+  Do not mark implemented true or completed_phase 5 until every checkpoint is met.
 
 packages:
     - claudine

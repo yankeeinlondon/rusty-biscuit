@@ -2,7 +2,7 @@
 kind: plan
 created: 2026-10-07
 total_phases: 5
-phase: 3
+phase: 5
 agent: codex/gpt-6.1-sol
 yolo: true
 source_files_during_phase_1: []
@@ -74,6 +74,86 @@ skills_files_updated_during_phase_3:
 packages:
   - claudine
   - claudine-cli
+source_files_during_phase_4:
+  - claudine/cli/src/commands/wrap/mod.rs
+  - claudine/cli/src/commands/wrap/wrapper_exec.rs
+  - claudine/cli/src/commands/wrap/wrapper_stages.rs
+  - claudine/cli/tests/l1/completion_delayed.rs
+docs_updated_during_phase_4:
+  - claudine/README.md
+  - claudine/docs/topics/non-interactive-sessions.md
+  - claudine/docs/topics/timeouts.md
+  - claudine/fixes/2026-10-07-claudine-completion-delayed/implementation-log.md
+  - claudine/fixes/2026-10-07-claudine-completion-delayed/plan.md
+  - claudine/fixes/2026-10-07-claudine-completion-delayed/spec.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/claudine/SKILL.md
+source_files_during_phase_5: []
+docs_updated_during_phase_5:
+  - claudine/docs/topics/composition.md
+  - claudine/docs/topics/flow-control/lifecycle.md
+  - claudine/docs/topics/non-interactive-sessions.md
+  - claudine/docs/topics/timeouts.md
+  - claudine/fixes/2026-10-07-claudine-completion-delayed/implementation-log.md
+  - claudine/fixes/2026-10-07-claudine-completion-delayed/plan.md
+  - claudine/fixes/2026-10-07-claudine-completion-delayed/spec.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .claude/skills/claudine/SKILL.md
+source_code:
+  - Cargo.lock
+  - claudine/cli/Cargo.toml
+  - claudine/cli/src/commands/wrap/exec/completion_fixture.rs
+  - claudine/cli/src/commands/wrap/exec/mod.rs
+  - claudine/cli/src/commands/wrap/exec/reader_join.rs
+  - claudine/cli/src/commands/wrap/exec/reader_join/matrix.rs
+  - claudine/cli/src/commands/wrap/exec/reader_join/provider_streams.rs
+  - claudine/cli/src/commands/wrap/exec/reader_join/tests.rs
+  - claudine/cli/src/commands/wrap/exec/spawn/captured.rs
+  - claudine/cli/src/commands/wrap/exec/spawn/inherited.rs
+  - claudine/cli/src/commands/wrap/exec/spawn/retained.rs
+  - claudine/cli/src/commands/wrap/exec/spawn/semantic.rs
+  - claudine/cli/src/commands/wrap/exec/spawn/tests/captured.rs
+  - claudine/cli/src/commands/wrap/exec/spawn/tests/inherited.rs
+  - claudine/cli/src/commands/wrap/exec/stream_capture.rs
+  - claudine/cli/src/commands/wrap/exec/wiring/session.rs
+  - claudine/cli/src/commands/wrap/live_semantic_sink/event_sink.rs
+  - claudine/cli/src/commands/wrap/mod.rs
+  - claudine/cli/src/commands/wrap/output_worker.rs
+  - claudine/cli/src/commands/wrap/output_worker/tests.rs
+  - claudine/cli/src/commands/wrap/run_scope.rs
+  - claudine/cli/src/commands/wrap/run_scope/observation.rs
+  - claudine/cli/src/commands/wrap/run_scope/retention.rs
+  - claudine/cli/src/commands/wrap/run_scope/tests.rs
+  - claudine/cli/src/commands/wrap/stream_io.rs
+  - claudine/cli/src/commands/wrap/wrapper_exec.rs
+  - claudine/cli/src/commands/wrap/wrapper_stages.rs
+  - claudine/cli/src/main.rs
+  - claudine/cli/tests/bin/fake_completion/main.rs
+  - claudine/cli/tests/l1/completion_delayed.rs
+  - claudine/cli/tests/l1/context_construction_guard.rs
+  - claudine/cli/tests/l1/main.rs
+  - claudine/lib/src/stream/providers/claude.rs
+  - claudine/lib/src/stream/providers/claude/tests.rs
+  - claudine/lib/src/stream/providers/codex.rs
+  - claudine/lib/src/stream/providers/codex/tests.rs
+  - claudine/lib/src/stream/semantic.rs
+  - claudine/lib/src/stream/semantic/tests.rs
+documentation:
+  - claudine/README.md
+  - claudine/docs/dependencies.md
+  - claudine/docs/providers/dispatch-inventory.json
+  - claudine/docs/topics/composition.md
+  - claudine/docs/topics/flow-control/lifecycle.md
+  - claudine/docs/topics/non-interactive-sessions.md
+  - claudine/docs/topics/timeouts.md
+  - claudine/fixes/2026-10-07-claudine-completion-delayed/implementation-log.md
+  - claudine/fixes/2026-10-07-claudine-completion-delayed/plan.md
+  - claudine/fixes/2026-10-07-claudine-completion-delayed/spec.md
+  - docs/dependencies.md
+implemented: false
+completed_phase: 2
 ---
 
 # Claudine completion delay implementation plan
@@ -320,7 +400,7 @@ checkpoint and the fixtures from Wave 2.
 ### Wave 6 — Parallel regression suites
 
 - [ ] **Prove caller exits**
-  - For Claude and Codex, execute the shipped CLI in a real shell chain with
+  - [x] For Claude and Codex, execute the shipped CLI in a real shell chain with
     native exit 0, nonempty answer, and a parsed successful verdict. Stall a
     completion callback and, separately, terminal delivery under short budgets.
     Assert Claudine exit 0 and the subsequent marker exists.
@@ -341,6 +421,11 @@ checkpoint and the fixtures from Wave 2.
   - Reuse existing retry/resume/proxy and loop-policy tests; add coverage at the
     new diagnostic seam where needed. Do not add directives or change budgets.
 
+**Partial caller checkpoint:** confirmed-success callback/delivery stalls and
+native-exit-0/no-verdict callback stalls are verified for Claude and Codex.
+The remaining caller controls and author-policy suite are still open; Phase 3's
+populated diagnostic transport awaits the author's CPU-field ruling.
+
 Checkpoint: both portable suites pass using synchronization, with no
 120-second waits, startup sleeps, focused windows, or real-provider CI
 dependencies. Wave 7 starts after these assertions pass.
@@ -350,7 +435,7 @@ dependencies. Wave 7 starts after these assertions pass.
 ### Wave 7 — Parallel review and documentation
 
 - [ ] **Document behavior**
-  - Update `docs/topics/timeouts.md`, including nonzero-exit outcome tables,
+  - [x] Update `docs/topics/timeouts.md`, including nonzero-exit outcome tables,
     operation observations, retention limits/flags, artifact lifetime, and the
     unresolved cause and terminal-visibility limitations.
   - Update lifecycle, composition, and non-interactive-session topic pages with
@@ -360,18 +445,26 @@ dependencies. Wave 7 starts after these assertions pass.
   - Remove implemented planned markers, update affected README descriptions,
     diagnostic catalog guidance, and the claudine skill where architecture or
     workflow changed. Current topic docs must not name/link this fix directory.
-- [ ] **Review invariants**
-  - Audit the combined change for coherent atomic observations, bounded memory
+- [x] **Review invariants**
+  - [x] Audit the combined change for coherent atomic observations, bounded memory
     and persisted data, freeze races, UTF-8/raw-byte handling, callback ordering,
     stronger-outcome precedence, provider identity, and exactly-once storage.
-  - Confirm no new settings, samplers, spool services, terminal writers,
+  - [x] Confirm no new settings, samplers, spool services, terminal writers,
     deadline extensions, protocol-acceptance changes, or new CI gates.
     Check relevant comments for drift and rule 9's matrix applicability.
+
+**Phase 5 review checkpoint:** the implemented retention, settlement, and
+caller paths have been audited and pass local gates plus focused Linux checks.
+The audit confirms that populated diagnostic publication/transport is missing;
+it does not establish exactly-once storage for that unfinished behavior.
+Documentation retains planned markers for it. Native Windows/WSL evidence,
+the runnable author example, installation, and live-provider observation remain
+open behind the missing earlier checkpoints and author ruling.
 
 ### Wave 8 — Final validation and evidence
 
 - [ ] **Run validation**
-  - From `claudine/`, run focused nextest-backed `just test-cli` and
+  - [x] From `claudine/`, run focused nextest-backed `just test-cli` and
     `just test-library` filters during development, then the relevant area
     `just test` and `just lint` after integration. Record commands and results;
     reuse passing evidence if subsequent edits do not affect it.

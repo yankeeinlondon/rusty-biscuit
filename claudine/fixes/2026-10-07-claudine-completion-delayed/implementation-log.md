@@ -72,6 +72,86 @@ skills_files_updated_during_phase_3:
 packages:
   - claudine
   - claudine-cli
+source_files_during_phase_4:
+  - claudine/cli/src/commands/wrap/mod.rs
+  - claudine/cli/src/commands/wrap/wrapper_exec.rs
+  - claudine/cli/src/commands/wrap/wrapper_stages.rs
+  - claudine/cli/tests/l1/completion_delayed.rs
+docs_updated_during_phase_4:
+  - claudine/README.md
+  - claudine/docs/topics/non-interactive-sessions.md
+  - claudine/docs/topics/timeouts.md
+  - claudine/fixes/2026-10-07-claudine-completion-delayed/implementation-log.md
+  - claudine/fixes/2026-10-07-claudine-completion-delayed/plan.md
+  - claudine/fixes/2026-10-07-claudine-completion-delayed/spec.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/claudine/SKILL.md
+source_files_during_phase_5: []
+docs_updated_during_phase_5:
+  - claudine/docs/topics/composition.md
+  - claudine/docs/topics/flow-control/lifecycle.md
+  - claudine/docs/topics/non-interactive-sessions.md
+  - claudine/docs/topics/timeouts.md
+  - claudine/fixes/2026-10-07-claudine-completion-delayed/implementation-log.md
+  - claudine/fixes/2026-10-07-claudine-completion-delayed/plan.md
+  - claudine/fixes/2026-10-07-claudine-completion-delayed/spec.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .claude/skills/claudine/SKILL.md
+source_code:
+  - Cargo.lock
+  - claudine/cli/Cargo.toml
+  - claudine/cli/src/commands/wrap/exec/completion_fixture.rs
+  - claudine/cli/src/commands/wrap/exec/mod.rs
+  - claudine/cli/src/commands/wrap/exec/reader_join.rs
+  - claudine/cli/src/commands/wrap/exec/reader_join/matrix.rs
+  - claudine/cli/src/commands/wrap/exec/reader_join/provider_streams.rs
+  - claudine/cli/src/commands/wrap/exec/reader_join/tests.rs
+  - claudine/cli/src/commands/wrap/exec/spawn/captured.rs
+  - claudine/cli/src/commands/wrap/exec/spawn/inherited.rs
+  - claudine/cli/src/commands/wrap/exec/spawn/retained.rs
+  - claudine/cli/src/commands/wrap/exec/spawn/semantic.rs
+  - claudine/cli/src/commands/wrap/exec/spawn/tests/captured.rs
+  - claudine/cli/src/commands/wrap/exec/spawn/tests/inherited.rs
+  - claudine/cli/src/commands/wrap/exec/stream_capture.rs
+  - claudine/cli/src/commands/wrap/exec/wiring/session.rs
+  - claudine/cli/src/commands/wrap/live_semantic_sink/event_sink.rs
+  - claudine/cli/src/commands/wrap/mod.rs
+  - claudine/cli/src/commands/wrap/output_worker.rs
+  - claudine/cli/src/commands/wrap/output_worker/tests.rs
+  - claudine/cli/src/commands/wrap/run_scope.rs
+  - claudine/cli/src/commands/wrap/run_scope/observation.rs
+  - claudine/cli/src/commands/wrap/run_scope/retention.rs
+  - claudine/cli/src/commands/wrap/run_scope/tests.rs
+  - claudine/cli/src/commands/wrap/stream_io.rs
+  - claudine/cli/src/commands/wrap/wrapper_exec.rs
+  - claudine/cli/src/commands/wrap/wrapper_stages.rs
+  - claudine/cli/src/main.rs
+  - claudine/cli/tests/bin/fake_completion/main.rs
+  - claudine/cli/tests/l1/completion_delayed.rs
+  - claudine/cli/tests/l1/context_construction_guard.rs
+  - claudine/cli/tests/l1/main.rs
+  - claudine/lib/src/stream/providers/claude.rs
+  - claudine/lib/src/stream/providers/claude/tests.rs
+  - claudine/lib/src/stream/providers/codex.rs
+  - claudine/lib/src/stream/providers/codex/tests.rs
+  - claudine/lib/src/stream/semantic.rs
+  - claudine/lib/src/stream/semantic/tests.rs
+documentation:
+  - claudine/README.md
+  - claudine/docs/dependencies.md
+  - claudine/docs/providers/dispatch-inventory.json
+  - claudine/docs/topics/composition.md
+  - claudine/docs/topics/flow-control/lifecycle.md
+  - claudine/docs/topics/non-interactive-sessions.md
+  - claudine/docs/topics/timeouts.md
+  - claudine/fixes/2026-10-07-claudine-completion-delayed/implementation-log.md
+  - claudine/fixes/2026-10-07-claudine-completion-delayed/plan.md
+  - claudine/fixes/2026-10-07-claudine-completion-delayed/spec.md
+  - docs/dependencies.md
+implemented: false
+completed_phase: 2
 ---
 
 # Implementation Log for 2026-10-07-claudine-completion-delayed (5 phases)
@@ -674,3 +754,272 @@ author's reserved CPU-field decision before publishing that field contract,
 then finish those tasks and their integrated regressions. This run closes
 with a nonzero status to report the blocked phase honestly. No file was
 staged or committed, no `cargo fmt` ran, and the fix was not moved.
+
+## Phase 4
+
+### Prerequisite audit and requirement-to-test mapping
+
+Phase 3 remains incomplete: the author-reserved CPU contract decision is
+unresolved, and Carry diagnostics / Verify propagation are unchecked. Do not
+freeze that contract or claim author-policy coverage without those prerequisites.
+This run can independently prepare the caller regression and repair its known
+exit projection; the phase remains partial.
+
+Before implementation changes, the test mapping is:
+
+- Confirmed successful verdict under a blocked completion callback: existing
+  `completion_delayed::fixture_handshakes_retain_answers_before_both_callback_stalls`
+  runs the compiled CLI in a shell for both Claude and Codex and checks native
+  exit, wrapper exit, marker, retained answer, and observation.
+- Confirmed successful verdict under blocked terminal delivery: existing
+  `completion_delayed::fixture_separates_queued_output_from_unfinished_delivery`
+  checks both providers and the shell marker alongside active delivery state.
+- Native exit 0 with text but no published verdict: strengthen the original
+  answer-callback case to require wrapper exit 1 and no subsequent marker,
+  retaining native exit 0 and partial response observations. This assertion
+  must fail before the caller projection repair.
+- Populated failure/finalize detail, continuation, default halting, recovery,
+  and exactly-once lifecycle execution: blocked by missing Phase 3 diagnostic
+  transport. Existing tests cannot establish this new seam.
+- Remaining caller error controls (provider error, nonzero exit, panic,
+  interruption, timeout, and last-message-only): still required by Wave 6;
+  not substituted with the helper matrix or claimed complete.
+
+The changed behavior is caller output, not a configuration reader, parser,
+schema, or shipped template. No input robustness matrix or artifact corpus
+change is applicable. The test file is already declared by `tests/l1/main.rs`,
+and its `test-fixtures` feature is enabled by both `just test-cli` and CI.
+Use existing portable shell forms; no terminal windows are opened.
+
+### Independent caller checkpoint
+
+- RED: strengthened the original Claude/Codex answer-callback shell regression
+  to require caller exit 1 with native exit 0. The old code returned 0 for
+  Claude and allowed its subsequent marker. Two other focused tests passed.
+  Log: `/tmp/claudine-phase4-red.log`.
+- Changed the direct structured execution return to carry native exit evidence
+  and caller exit separately through the execution stage and wrapper outcome.
+  A summary with `is_error` and native exit 0 projects caller exit 1. Native
+  nonzero exits remain unchanged; successful summaries remain caller exit 0.
+  Existing summary/session publication still receives the original native exit.
+- GREEN: `just test-cli completion_delayed::` passed all three tests, exercising
+  both providers' original literal protocol records, both callback positions,
+  and terminal-delivery stalls. The partial-response case now prevents the
+  next shell marker, while successful-verdict cases continue.
+  Log: `/tmp/claudine-phase4-callers.log`.
+- No new test file, target, tier, feature, configuration reader, or deadline
+  was introduced. Updated the behavior docs, README, skill, and stale execution
+  module comments alongside the caller behavior change.
+- One focused command was mistakenly invoked from the repository root, where
+  `test-cli` does not exist; the canonical area invocation above is the evidence.
+
+Neither Wave 6 todo is checked: Prove caller exits still needs the remaining
+error controls, and Prove author policies depends on the unfinished Phase 3
+transport. Checking either would falsely claim its entire task passed.
+
+### Final gates and closing state
+
+- PASS: focused `just test-cli completion_delayed::` — three tests passed.
+  Exact targeted identities: `fixture_handshakes_retain_answers_before_both_callback_stalls`,
+  `fixture_separates_queued_output_from_unfinished_delivery`, and
+  `invalid_or_missing_fixture_scenarios_fail_explicitly`, all in
+  `completion_delayed` under the declared `claudine-cli::l1` target.
+  The first test's strengthened exit assertion is the targeted regression;
+  no new or renamed test was added.
+- PASS: `just check-tier-coverage claudine` — zero stranded tests.
+  Log: `/tmp/claudine-phase4-tiers.log`. Ran before broader Cargo gates.
+- PASS: `just test` in the claudine area — 8,507 passed, nine existing ignored
+  performance tests, no failures. Log: `/tmp/claudine-phase4-test.log`.
+  Ignored identities remain the same nine listed in Phase 3's closing state;
+  no skip, retry, or tier change was added.
+- PASS: `just lint` in the claudine area — transport guards, lifecycle-doc
+  facets, and Clippy for all five area packages. No formatter was invoked.
+  Log: `/tmp/claudine-phase4-lint.log`.
+- PASS: `git diff --check`. The pre-existing macOS oversized `__eh_frame`
+  linker warning remains; no test or lint failure remains after the repair.
+- Not run: cross-OS rigs, L2/L3/browser/live-provider tiers, installation,
+  or monorepo-wide tests. No OS branch or shell fixture form changed; the
+  existing portable shell helper still selects POSIX `sh` or Windows `cmd`.
+  Only macOS behavioral evidence is claimed. `BUILD_LINUX` was declared;
+  Windows/WSL/macOS remote variables were unset on this host.
+
+Checked the completed successful-verdict shell subtask in the plan after its
+passing checkpoint. The parent caller todo remains open for the remaining
+error controls. Author-policy tests remain blocked by Phase 3's missing
+populated diagnostic transport and reserved CPU decision. The spec retains
+`human_review: true` and its decision options; its handoff now describes this
+partial caller repair and the remaining prerequisites. No new decision beyond
+that existing blocker requires human involvement.
+
+All four source files changed are recorded on both frontmatter blocks:
+`cli/src/commands/wrap/mod.rs`, `wrapper_exec.rs`, `wrapper_stages.rs`, and
+`cli/tests/l1/completion_delayed.rs` within claudine. Updated README, timeout
+and non-interactive-session docs, the claudine skill, and plan/log/spec metadata;
+created no documentation files. Preserved prior log content and package union.
+
+**Phase 4 is not complete.** To unblock it, record the author's CPU-field
+ruling, complete Phase 3 Carry diagnostics and Verify propagation, then finish
+the remaining caller controls and author-policy suite. This session reports
+a nonzero closing status rather than claiming the requested phase passed.
+No file was staged or committed, no `cargo fmt` ran, and the fix was not moved.
+
+## Phase 5
+
+### Entry checkpoint and requirement-to-test mapping
+
+Read the Claudine, rust-testing, and OS skills. Phase 5 starts with incomplete
+Phase 1 Freeze interfaces, Phase 3 Carry diagnostics / Verify propagation,
+and Phase 4 caller controls / author policies. The spec still explicitly
+reserves the CPU-field ruling for the author. This non-interactive run cannot
+supply that ruling, and the recommendation is not an approval. Wave 7 requires
+Wave 6 to pass. Preserve planned markers for unavailable behavior rather than
+publishing a runnable example that cannot receive populated detail.
+
+No implementation behavior, parser, configuration, template, or persisted
+reader is changed in this phase; no new regression, corpus, or input robustness
+matrix is applicable. Independent review and verification use these existing
+tests; they do not establish the missing diagnostic transport:
+
+- Retention, unknown/empty/partial/overflow variants, UTF-8, repeated JSON
+  round trips, and freeze isolation: `commands::wrap::run_scope::tests`,
+  particularly `retained_data_shapes_and_size_survive_two_round_trips`,
+  `freezing_retention_rejects_late_publication`,
+  `clipped_multibyte_answer_stays_a_prefix_after_later_deltas`, and
+  `a_raw_prefix_split_inside_utf8_remains_lossless`.
+- Callback ordering and stronger-outcome precedence: reader-join matrix and
+  `provider_streams`, including
+  `an_answer_callback_before_the_verdict_retains_partial_text_without_success`
+  and `released_completion_logger_cannot_dispatch_into_a_settled_run`.
+- Active delivery versus queue state: `commands::wrap::output_worker::tests`
+  and `completion_delayed::fixture_separates_queued_output_from_unfinished_delivery`.
+- Portable Claude/Codex shell exits and retained answers:
+  `completion_delayed::fixture_handshakes_retain_answers_before_both_callback_stalls`;
+  invalid fixture controls: `invalid_or_missing_fixture_scenarios_fail_explicitly`.
+- Populated lifecycle detail, registered diagnostic/catalog, exactly-once
+  diagnostic storage, continuation/default halt/recovery: no completed tests
+  at the new seam. These remain prerequisites, not covered by the above tests.
+
+The CLI process tests are declared in `cli/tests/l1/main.rs` and use the
+`test-fixtures` feature enabled by the area recipe and CI. No test is added
+or renamed. Validation and metadata updates are independent of the author
+ruling. No source files will change without a separate regression mapping.
+
+### Independent documentation and invariant review checkpoint
+
+- Updated timeout documentation with a field-state table distinguishing
+  unavailable, empty, partial, overflowed, and complete data. Preserved the
+  opt-in artifact's owner-deleted lifetime and its delimiter/flush limitations.
+  Corrected drift where already implemented settlement behavior was described
+  in the future tense and where undecided CPU support sounded guaranteed.
+- Lifecycle, composition, non-interactive-session, and skill guidance now state
+  the unavailable populated transport explicitly. Documented `fail_fast: false`
+  continuation versus default halting and the risk of retrying completed side
+  effects. Kept planned markers and withheld a purportedly runnable diagnostic
+  example: the real path cannot yet supply the fields it would read.
+- Reviewed packed atomic operation/time pairs, independent reader/settlement
+  lanes, separate active output delivery, saturating counters, publication-lock
+  ordering, frozen snapshot reuse, 256 KiB per-prefix bounds, UTF-8 clipping and
+  lossless raw-byte base64, bounded capture-path metadata, answer-before-callback
+  publication, last-message non-verdict fallback, primary outcome precedence,
+  and launch-sourced provider/native exit in the controlled fixture. No new
+  settings, CPU samplers, spool services, terminal writers, deadline extensions,
+  protocol acceptance changes, or CI gates were introduced. No configuration
+  reader or persisted-summary deserializer changed, so plan rule 9's input
+  robustness matrix does not apply.
+- Found the remaining production publication gap: `completion_observation` is
+  populated in semantic spawn and otherwise carried in `ProcessResult`; only
+  the test-fixtures publisher serializes that snapshot. `StoragePublication`
+  exists in the operation vocabulary but has no production recording site.
+  The new kind has no diagnostic registry or lifecycle-context mapping.
+  Exactly-once populated diagnostic storage/propagation is therefore unproved,
+  not an invariant established by the existing session-end tests.
+- PASS: `just check-tier-coverage claudine` (zero stranded tests);
+  `just test-cli completion_delayed:: run_scope:: reader_join:: output_worker::`
+  (66 passed, 3,426 filtered); `just test-library stream::`
+  (886 passed, 3,850 filtered). Logs: `/tmp/claudine-phase5-tiers.log`,
+  `/tmp/claudine-phase5-focused-cli.log`,
+  `/tmp/claudine-phase5-focused-library.log`. No new targeted tests were added;
+  exact regression identities and the missing requirements are mapped above.
+
+Checked the independent timeout-documentation and no-new-subsystems subtasks
+as they completed. Parent tasks remain open where required diagnostic and
+author-policy behavior is unavailable. An initial metadata/log edit used the
+root-relative path from the area directory and failed before writing; reran
+it from the repository root. This did not affect the test invocation.
+
+### Local gates and cross-OS scope
+
+- PASS: `just test` from the Claudine area — 8,507 passed, 15 runtime-slow,
+  nine existing ignored performance tests; no failures. The ignored tests are
+  the four `completion_perf::perf_*`, one
+  `compose_ttff_perf::compose_emits_first_stderr_byte_within_budget`, and four
+  `system_prompt_perf_bench::bench_*` identities enumerated in Phase 1.
+  Log: `/tmp/claudine-phase5-test.log`.
+- PASS: `just lint` from the Claudine area — transport guards, lifecycle doc
+  facets, and Clippy across all five area packages. The recipe does not call
+  cargo fmt. Log: `/tmp/claudine-phase5-lint.log`. No new pre-existing test or
+  lint failure was encountered; macOS's previously recorded oversized
+  `__eh_frame` linker warning remains nonfatal.
+- Only `BUILD_LINUX=build-linux` is declared; `BUILD_WIN`, `BUILD_WSL`, and
+  `BUILD_MACOS` are unset. Native Windows and WSL2 were not run; no behavioral
+  evidence for those systems is claimed. L2/L3/browser tiers were not run:
+  documentation and existing hermetic caller/retention checks introduce no
+  new question requiring a terminal, browser, or focus change.
+- Started `GIT_TERMINAL_PROMPT=0 just cross-check claudine-cli --os linux
+  --features test-fixtures completion_delayed:: run_scope:: reader_join::
+  output_worker::`. The supported feature override chooses native nextest,
+  avoids unrelated daemon features, and produces behavioral evidence without
+  an archive-mode receipt. The recipe's disposable snapshot is `f72d9bf7d`
+  over `origin/main` at `d3fcc03ce`, with 224 changed files relative to that
+  remote base, including prior-phase work. It does not modify the local branch
+  or stage local files. Result will be recorded below before this run closes.
+
+Checked the local validation subtask after its passing gates. The parent
+validation task remains open for unavailable diagnostic/author-policy tests
+and missing OS evidence. Installation and live Claude/Codex runs remain
+unattempted because Wave 7 requires the unfinished Wave 6 checkpoint;
+observing an incomplete build cannot satisfy final repair acceptance.
+
+### Final evidence and closing state
+
+- PASS: focused Linux cross-check — all 66 selected tests passed, 3,426 tests
+  filtered out. The three `completion_delayed` process identities each ran;
+  the shell/handshake test checks Claude and Codex inside the same identity.
+  Log: `/tmp/claudine-phase5-linux.log`. This is native Linux behavioral
+  evidence at the disposable snapshot recorded above, not a CI receipt and
+  not evidence for missing diagnostic propagation or author policies.
+- PASS: `git diff --check` after final documentation/metadata edits.
+- Completed Review invariants as an audit task and checked it off; its finding
+  is missing populated production storage/transport, not a claim that the
+  unimplemented invariant passed. Other parent todos retain their honest
+  incomplete status. The documentation's planned recovery example is not
+  promoted to runnable, and no unavailable diagnostic code is advertised as
+  registered. No new or renamed tests, source code, dependency, or config
+  changes occurred during Phase 5.
+- Updated both plan and log with Phase 5 source/docs/skill inventories and
+  all-phase `source_code` / `documentation` unions, preserving the package
+  union (`claudine`, `claudine-cli`) and prior log content. Phase 5 changed
+  four topic documents, the Claudine skill, and plan/log/spec metadata.
+  Created no documents. Source files changed during this phase: **none**.
+- Departure from the requested completion metadata: `implemented` stays false
+  in plan/log/spec, and `completed_phase` is 2 in plan/log, the last wholly
+  implemented phase. Setting them to true/5 would falsely attest that the
+  unregistered diagnostic, populated transport, author examples, and required
+  evidence exist. The spec preserves the existing `human_review: true` and
+  author decision options; no additional author decision was introduced.
+  Its handoff now identifies the exact remaining seams and evidence.
+
+**Phase 5 is partial, not implementation complete.** Finish the reserved CPU
+contract decision, Phase 3 diagnostic registration/transport and propagation
+checks, and Phase 4 error controls/author-policy suite before completing the
+runnable docs, final cross-OS proof, installation, and real observations.
+Those earlier tasks were not silently treated as complete or replaced by a
+broad green test suite. No live provider was invoked, no terminal/browser
+window was focused, no cargo fmt ran, no local branch commit or staging was
+performed, and the fix directory was not moved. The cross-check recipe's
+disposable snapshot left local branch/index untouched. This session reports
+a nonzero closing status to make the unfinished prerequisite work visible.
+
+Final frontmatter validation parsed all three YAML blocks, checked file
+inventories and preserved package unions, and confirmed partial completion
+flags. The final whitespace check passed.
