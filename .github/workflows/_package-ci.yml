@@ -86,6 +86,10 @@ on:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  # CI's Python prints non-ASCII (`completion.py`'s check mark). On a Windows
+  # runner a piped stdout is cp1252 without UTF-8 mode, so the print raised
+  # UnicodeEncodeError and failed every Windows cell whose tests all passed.
+  PYTHONUTF8: "1"
   # The repository tracks no rustc wrapper; cleared explicitly so a stray
   # environment value cannot silently intercept a package's builds.
   #

@@ -193,6 +193,22 @@ fn the_compiler_work_wrapper_is_never_global() {
     }
 }
 
+/// Every workflow that runs on a Windows host runs Python in UTF-8 mode.
+///
+/// CI's scripts print non-ASCII, and a Windows runner's piped stdout is cp1252
+/// otherwise: `completion.py`'s check mark raised `UnicodeEncodeError` after
+/// every test of a Windows cell had passed, so no Windows cell could go green.
+#[test]
+fn windows_hosted_workflows_run_python_in_utf8_mode() {
+    for file in ["_package-ci.yml", "_wsl-ci.yml"] {
+        let source = read(&format!(".github/workflows/{file}"));
+        assert!(
+            source.lines().any(|line| line == "  PYTHONUTF8: \"1\""),
+            "{file}: must set `PYTHONUTF8: \"1\"` in its workflow-level `env:`"
+        );
+    }
+}
+
 /// Measuring compiler work changes no cell, artifact, or gate.
 ///
 /// The switch defaults off on every path, and its steps publish a measurement
