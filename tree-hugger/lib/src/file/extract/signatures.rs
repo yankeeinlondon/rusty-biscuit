@@ -567,18 +567,9 @@ pub(crate) fn extract_typescript_return_type(node: Node<'_>, source: &str) -> Op
 // PHP extraction functions
 // =============================================================================
 
-/// Extracts a PHP parameter from a simple_parameter or property_promotion_parameter node.
-///
-/// PHP AST structure:
-/// ```text
-/// simple_parameter
-///   primitive_type (string/int/etc.) or type_identifier (ClassName)
-///   variable_name
-///     $
-///     name
-///   = (optional, for defaults)
-///   value (optional)
-/// ```
+/// Extracts a PHP parameter from a `simple_parameter`,
+/// `property_promotion_parameter` or `variadic_parameter` node; a default
+/// is the grammar's `default_value` field, never a comment beside the `=`.
 pub(crate) fn extract_php_parameter(node: Node<'_>, source: &str) -> Option<ParameterInfo> {
     let kind = node.kind();
     if kind != "simple_parameter"
@@ -600,8 +591,10 @@ pub(crate) fn extract_php_parameter(node: Node<'_>, source: &str) -> Option<Para
         .and_then(|n| n.utf8_text(source.as_bytes()).ok())
         .map(|s| s.to_string());
 
-    // Find default value
-    let default_value = find_default_value_after_equals(node, source);
+    let default_value = node
+        .child_by_field_name("default_value")
+        .and_then(|value| value.utf8_text(source.as_bytes()).ok())
+        .map(str::to_string);
 
     Some(ParameterInfo {
         name,
@@ -878,19 +871,15 @@ pub(crate) fn extract_c_return_type(node: Node<'_>, source: &str) -> Option<Stri
 /// Extracts a C# parameter from a `parameter` node, or a `params` array
 /// from its `params` token.
 ///
-/// C# AST structure of a `parameter`:
-/// ```text
-/// parameter
-///   predefined_type (string/int/etc.) or type_identifier
-///   identifier
-/// ```
+/// A default (`int y = 2`) is the expression after the `=` that follows
+/// the name; comments around the `=` neither hide nor supply one, and none
+/// is taken for a `params` array's type or name.
 pub(crate) fn extract_csharp_parameter(node: Node<'_>, source: &str) -> Option<ParameterInfo> {
     // The grammar spells a `params` array as three children of the list:
     // the `params` token, then its type and its name.
     if node.kind() == "params" {
-        let type_node = node.next_named_sibling()?;
-        let name = type_node
-            .next_named_sibling()
+        let type_node = next_named_syntax_sibling(node)?;
+        let name = next_named_syntax_sibling(type_node)
             .filter(|name| name.kind() == "identifier")?
             .utf8_text(source.as_bytes())
             .ok()?;
@@ -910,19 +899,26 @@ pub(crate) fn extract_csharp_parameter(node: Node<'_>, source: &str) -> Option<P
         .map(|m| m.utf8_text(source.as_bytes()).ok() == Some("params"))
         .unwrap_or(false);
 
-    // Find the identifier (parameter name)
-    let name = find_child_by_kind(node, "identifier")
+    // A named type (`W x`) and a bare default (`int y = external`) are
+    // identifiers too, so only the fields say which one is the name.
+    let name = node
+        .child_by_field_name("name")
         .and_then(|n| n.utf8_text(source.as_bytes()).ok())
         .map(|s| s.to_string())?;
 
-    // Find the type annotation
-    let type_annotation = find_csharp_type_node(node)
+    let type_annotation = node
+        .child_by_field_name("type")
         .and_then(|n| n.utf8_text(source.as_bytes()).ok())
         .map(|s| s.to_string());
 
-    // Find default value
-    let default_value = find_child_by_kind(node, "equals_value_clause")
-        .and_then(|eq| eq.child(1))
+    // The grammar gives a default no field: it is the expression after the
+    // `=` that follows the name. Comments are children here too, so neither
+    // step may land on one.
+    let default_value = node
+        .child_by_field_name("name")
+        .and_then(next_syntax_sibling)
+        .filter(|equals| equals.kind() == "=")
+        .and_then(next_named_syntax_sibling)
         .and_then(|n| n.utf8_text(source.as_bytes()).ok())
         .map(|s| s.to_string());
 
@@ -1073,13 +1069,13 @@ pub(crate) fn extract_swift_single_parameter(
         node.children(&mut cursor).any(|c| c.kind() == "...")
     };
 
-    // Find default value
-    let default_value = find_default_value_after_equals(node, source);
-
+    // The grammar's `parameter` never holds `= value`: a default is a
+    // field of the enclosing declaration, read by
+    // [`extract_swift_parameters`].
     Some(ParameterInfo {
         name,
         type_annotation,
-        default_value,
+        default_value: None,
         is_variadic,
     })
 }
@@ -1210,17 +1206,8 @@ pub(crate) fn extract_scala_return_type(node: Node<'_>, source: &str) -> Option<
     None
 }
 
-/// Extracts a Scala parameter from a parameter node.
-///
-/// Scala AST structure:
-/// ```text
-/// parameter
-///   identifier (name)
-///   :
-///   type_identifier (type)
-///   = (optional)
-///   value (optional, for defaults)
-/// ```
+/// Extracts a Scala parameter from a `parameter` node; a default is the
+/// grammar's `default_value` field, never a comment beside the `=`.
 pub(crate) fn extract_scala_parameter(node: Node<'_>, source: &str) -> Option<ParameterInfo> {
     if node.kind() != "parameter" {
         return None;
@@ -1243,8 +1230,10 @@ pub(crate) fn extract_scala_parameter(node: Node<'_>, source: &str) -> Option<Pa
             .any(|c| c.kind() == "repeated_parameter_type")
     };
 
-    // Find default value
-    let default_value = find_default_value_after_equals(node, source);
+    let default_value = node
+        .child_by_field_name("default_value")
+        .and_then(|value| value.utf8_text(source.as_bytes()).ok())
+        .map(str::to_string);
 
     Some(ParameterInfo {
         name,
@@ -1275,26 +1264,22 @@ pub(crate) fn find_scala_type_node(node: Node<'_>) -> Option<Node<'_>> {
 // Helper functions
 // =============================================================================
 
-/// Finds a default value after an `=` sign in a parameter.
-pub(crate) fn find_default_value_after_equals(node: Node<'_>, source: &str) -> Option<String> {
-    let mut cursor = node.walk();
-    let mut found_equals = false;
-
-    for child in node.children(&mut cursor) {
-        if child.kind() == "=" {
-            found_equals = true;
-            continue;
-        }
-
-        if found_equals {
-            return child
-                .utf8_text(source.as_bytes())
-                .ok()
-                .map(|s| s.to_string());
-        }
+/// The first sibling after `node` that is not a grammar extra (a comment).
+fn next_syntax_sibling(node: Node<'_>) -> Option<Node<'_>> {
+    let mut sibling = node.next_sibling();
+    while let Some(next) = sibling.filter(Node::is_extra) {
+        sibling = next.next_sibling();
     }
+    sibling
+}
 
-    None
+/// The first named sibling after `node` that is not a grammar extra.
+fn next_named_syntax_sibling(node: Node<'_>) -> Option<Node<'_>> {
+    let mut sibling = node.next_named_sibling();
+    while let Some(next) = sibling.filter(Node::is_extra) {
+        sibling = next.next_named_sibling();
+    }
+    sibling
 }
 
 /// Extracts Lua parameters: plain names, plus `...` as a variadic parameter.

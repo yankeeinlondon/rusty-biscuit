@@ -49,9 +49,21 @@ The `locals.scm` queries follow nvim-treesitter conventions for capturing symbol
 (enum_item name: (type_identifier) @local.definition.enum)
 (trait_item name: (type_identifier) @local.definition.trait)
 
-; Import captures
-(use_declaration) @local.definition.import
+; Import captures: only the token the import binds (never the statement,
+; a qualifier or an aliased original)
+(use_as_clause alias: (identifier) @local.definition.import)
 ```
+
+**Capture the binding field, never "any identifier child".** A pattern such
+as `(parameter (identifier) @local.definition.parameter)` also matches a
+parameter's type (`W x` in C#) and a bare default (`x=external` in Python),
+inventing a declaration whose span then hides the real read. Use the
+grammar's name field (`default_parameter name: (identifier)`), an anchor
+(`(const_element . (name))`), or list the parent kinds whose identifier
+children all bind (Rust `let_condition`). `drop_non_declarations`'
+`is_false_capture` only runs for Rust and TS/JS, so a limited language has
+no second line of defense. `symbols_occurrences::PARAMETER_CAPTURE_MATRIX`
+holds one row per site (declarations and the reads they must keep).
 
 ### Capture to SymbolKind Mapping
 

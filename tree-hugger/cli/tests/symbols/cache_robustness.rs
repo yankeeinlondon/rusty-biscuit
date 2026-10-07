@@ -2164,8 +2164,10 @@ fn written_path_rows() -> Vec<WrittenPathRow> {
         row("javascript.js", Some("\nfunction s09rProbe() { other.external(); }\n"), "external", Some("other.external")),
         row("go.go", None, "Sprint", Some("fmt.Sprint")),
         row("python.py", None, "assigned_through_self", Some("self.assigned_through_self")),
-        row("java.java", None, "example", Some("com.example")),
-        row("c_sharp.cs", None, "Symbols", Some("Example.Symbols")),
+        // The fixtures' `package com.example;` and `namespace Example.Symbols`
+        // declare their components, so the probes write a qualified call.
+        row("java.java", Some("\nclass S09rProbe { void probe() { Other.external(); } }\n"), "external", Some("Other.external")),
+        row("c_sharp.cs", Some("\nclass S09rProbe { void Probe() { Other.External(); } }\n"), "External", Some("Other.External")),
         row("c.c", Some("\nvoid s09r_probe(void) { o.external(); }\n"), "external", Some("o.external")),
         row("cpp.cpp", None, "deprecated", Some("gnu::deprecated")),
         row("swift.swift", Some("\nfunc s09rProbe() { Other.external() }\n"), "external", Some("Other.external")),

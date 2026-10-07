@@ -25,7 +25,7 @@
     "language": "Bash",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -119,7 +119,7 @@
     "language": "Bash",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -226,7 +226,7 @@
     "language": "Bash",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -351,7 +351,7 @@
     "language": "C",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -460,7 +460,7 @@
     "language": "C",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -557,7 +557,7 @@
     "language": "C",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -648,7 +648,7 @@
     "language": "C",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -722,94 +722,6 @@
     "docs": {},
     "id": "<id-8>",
     "identity": {
-      "display_name": "point",
-      "is_namespace_rooted": false,
-      "keyword": "struct",
-      "name": "point",
-      "qualified_name": "c.c#point",
-      "stable_key": "c::c.c::Type::point::1"
-    },
-    "kind": "Type",
-    "kind_data": {
-      "kind_data_type": "Unknown"
-    },
-    "language": "C",
-    "provenance": {
-      "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
-      "parse_pass": "parse"
-    },
-    "relations": {},
-    "schema_version": {
-      "major": 5,
-      "minor": 0
-    },
-    "scope": "Item",
-    "semantics": {},
-    "source": {
-      "declaration_span": {
-        "end": {
-          "column": 21,
-          "line": 8
-        },
-        "end_byte": 91,
-        "start": {
-          "column": 9,
-          "line": 8
-        },
-        "start_byte": 79
-      },
-      "file_path": "c.c",
-      "name_span": {
-        "end": {
-          "column": 21,
-          "line": 8
-        },
-        "end_byte": 91,
-        "start": {
-          "column": 16,
-          "line": 8
-        },
-        "start_byte": 86
-      },
-      "signature_text": "struct point"
-    },
-    "type_info": {},
-    "visibility": {
-      "is_default_export": false,
-      "is_deprecated": false,
-      "is_experimental": false,
-      "is_exported": false,
-      "is_external": false,
-      "is_generated": false,
-      "is_imported": false,
-      "is_reexported": false,
-      "is_synthetic": false,
-      "is_test": false,
-      "level": "Unknown"
-    }
-  },
-  "report_schema_version": 1,
-  "schema_version": {
-    "major": 5,
-    "minor": 0
-  }
-}
-
-{
-  "completed_capabilities": [
-    "declarations",
-    "flags"
-  ],
-  "completed_passes": [
-    "Parse"
-  ],
-  "file": "c.c",
-  "language": "C",
-  "record": {
-    "docs": {},
-    "id": "<id-9>",
-    "identity": {
       "display_name": "origin_count",
       "is_namespace_rooted": false,
       "name": "origin_count",
@@ -828,7 +740,7 @@
     ],
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -900,7 +812,7 @@
   "language": "C",
   "record": {
     "docs": {},
-    "id": "<id-10>",
+    "id": "<id-9>",
     "identity": {
       "display_name": "point_sum",
       "is_namespace_rooted": false,
@@ -934,7 +846,7 @@
     "language": "C",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -1030,7 +942,7 @@
   "language": "C",
   "record": {
     "docs": {},
-    "id": "<id-11>",
+    "id": "<id-10>",
     "identity": {
       "display_name": "reset_origin",
       "is_namespace_rooted": false,
@@ -1053,7 +965,7 @@
     "language": "C",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -1149,7 +1061,7 @@
   "language": "CSharp",
   "record": {
     "docs": {},
-    "id": "<id-12>",
+    "id": "<id-11>",
     "identity": {
       "display_name": "Multi",
       "is_namespace_rooted": true,
@@ -1165,7 +1077,7 @@
     "language": "CSharp",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -1249,7 +1161,7 @@
   "language": "CSharp",
   "record": {
     "docs": {},
-    "id": "<id-13>",
+    "id": "<id-12>",
     "identity": {
       "container_kind": "Namespace",
       "container_name": "Multi",
@@ -1294,7 +1206,7 @@
     "language": "CSharp",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -1378,7 +1290,7 @@
   "language": "CSharp",
   "record": {
     "docs": {},
-    "id": "<id-14>",
+    "id": "<id-13>",
     "identity": {
       "container_kind": "Class",
       "container_name": "Ledger",
@@ -1403,7 +1315,7 @@
     "language": "CSharp",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -1475,7 +1387,7 @@
   "language": "CSharp",
   "record": {
     "docs": {},
-    "id": "<id-15>",
+    "id": "<id-14>",
     "identity": {
       "container_kind": "Class",
       "container_name": "Ledger",
@@ -1500,7 +1412,7 @@
     "language": "CSharp",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -1572,7 +1484,7 @@
   "language": "CSharp",
   "record": {
     "docs": {},
-    "id": "<id-16>",
+    "id": "<id-15>",
     "identity": {
       "container_kind": "Class",
       "container_name": "Ledger",
@@ -1608,7 +1520,7 @@
     "language": "CSharp",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -1704,7 +1616,7 @@
   "language": "CSharp",
   "record": {
     "docs": {},
-    "id": "<id-17>",
+    "id": "<id-16>",
     "identity": {
       "container_kind": "Class",
       "container_name": "Ledger",
@@ -1734,7 +1646,7 @@
     ],
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -1830,7 +1742,7 @@
   "language": "CSharp",
   "record": {
     "docs": {},
-    "id": "<id-18>",
+    "id": "<id-17>",
     "identity": {
       "container_kind": "Namespace",
       "container_name": "Multi",
@@ -1848,7 +1760,7 @@
     "language": "CSharp",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -1932,7 +1844,7 @@
   "language": "CSharp",
   "record": {
     "docs": {},
-    "id": "<id-19>",
+    "id": "<id-18>",
     "identity": {
       "container_kind": "Interface",
       "container_name": "IAuditable",
@@ -1957,7 +1869,7 @@
     "language": "CSharp",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -2041,7 +1953,7 @@
   "language": "Cpp",
   "record": {
     "docs": {},
-    "id": "<id-20>",
+    "id": "<id-19>",
     "identity": {
       "display_name": "geometry",
       "is_namespace_rooted": true,
@@ -2057,7 +1969,7 @@
     "language": "Cpp",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -2129,7 +2041,7 @@
   "language": "Cpp",
   "record": {
     "docs": {},
-    "id": "<id-21>",
+    "id": "<id-20>",
     "identity": {
       "container_kind": "Namespace",
       "container_name": "geometry",
@@ -2174,7 +2086,7 @@
     "language": "Cpp",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -2258,7 +2170,7 @@
   "language": "Cpp",
   "record": {
     "docs": {},
-    "id": "<id-22>",
+    "id": "<id-21>",
     "identity": {
       "container_kind": "Class",
       "container_name": "Vector",
@@ -2302,7 +2214,7 @@
     "language": "Cpp",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -2386,7 +2298,7 @@
   "language": "Cpp",
   "record": {
     "docs": {},
-    "id": "<id-23>",
+    "id": "<id-22>",
     "identity": {
       "container_kind": "Class",
       "container_name": "Vector",
@@ -2411,7 +2323,7 @@
     "language": "Cpp",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -2507,7 +2419,7 @@
   "language": "Cpp",
   "record": {
     "docs": {},
-    "id": "<id-24>",
+    "id": "<id-23>",
     "identity": {
       "container_kind": "Class",
       "container_name": "Vector",
@@ -2532,7 +2444,7 @@
     "language": "Cpp",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -2604,7 +2516,7 @@
   "language": "Cpp",
   "record": {
     "docs": {},
-    "id": "<id-25>",
+    "id": "<id-24>",
     "identity": {
       "container_kind": "Class",
       "container_name": "Vector",
@@ -2629,7 +2541,7 @@
     "language": "Cpp",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -2701,7 +2613,7 @@
   "language": "Cpp",
   "record": {
     "docs": {},
-    "id": "<id-26>",
+    "id": "<id-25>",
     "identity": {
       "container_kind": "Namespace",
       "container_name": "geometry",
@@ -2746,7 +2658,7 @@
     "language": "Cpp",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -2842,7 +2754,7 @@
   "language": "Java",
   "record": {
     "docs": {},
-    "id": "<id-27>",
+    "id": "<id-26>",
     "identity": {
       "display_name": "Counter",
       "is_namespace_rooted": false,
@@ -2876,7 +2788,7 @@
     "language": "Java",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -2960,7 +2872,7 @@
   "language": "Java",
   "record": {
     "docs": {},
-    "id": "<id-28>",
+    "id": "<id-27>",
     "identity": {
       "container_kind": "Class",
       "container_name": "Counter",
@@ -2985,7 +2897,7 @@
     "language": "Java",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -3057,7 +2969,7 @@
   "language": "Java",
   "record": {
     "docs": {},
-    "id": "<id-29>",
+    "id": "<id-28>",
     "identity": {
       "container_kind": "Class",
       "container_name": "Counter",
@@ -3092,7 +3004,7 @@
     "language": "Java",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -3176,7 +3088,7 @@
   "language": "Java",
   "record": {
     "docs": {},
-    "id": "<id-30>",
+    "id": "<id-29>",
     "identity": {
       "container_kind": "Class",
       "container_name": "Counter",
@@ -3201,7 +3113,7 @@
     "language": "Java",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -3297,7 +3209,7 @@
   "language": "Java",
   "record": {
     "docs": {},
-    "id": "<id-31>",
+    "id": "<id-30>",
     "identity": {
       "container_kind": "Class",
       "container_name": "Counter",
@@ -3327,7 +3239,7 @@
     ],
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -3423,7 +3335,7 @@
   "language": "Java",
   "record": {
     "docs": {},
-    "id": "<id-32>",
+    "id": "<id-31>",
     "identity": {
       "display_name": "Resettable",
       "is_namespace_rooted": false,
@@ -3439,7 +3351,7 @@
     "language": "Java",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -3523,7 +3435,7 @@
   "language": "Java",
   "record": {
     "docs": {},
-    "id": "<id-33>",
+    "id": "<id-32>",
     "identity": {
       "container_kind": "Interface",
       "container_name": "Resettable",
@@ -3548,7 +3460,7 @@
     "language": "Java",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -3632,7 +3544,7 @@
   "language": "JavaScript",
   "record": {
     "docs": {},
-    "id": "<id-34>",
+    "id": "<id-33>",
     "identity": {
       "display_name": "Button",
       "is_namespace_rooted": false,
@@ -3648,7 +3560,7 @@
     "language": "JavaScript",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -3732,7 +3644,7 @@
   "language": "JavaScript",
   "record": {
     "docs": {},
-    "id": "<id-35>",
+    "id": "<id-34>",
     "identity": {
       "container_kind": "Class",
       "container_name": "Button",
@@ -3766,7 +3678,7 @@
     "language": "JavaScript",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -3850,7 +3762,7 @@
   "language": "JavaScript",
   "record": {
     "docs": {},
-    "id": "<id-36>",
+    "id": "<id-35>",
     "identity": {
       "container_kind": "Class",
       "container_name": "Button",
@@ -3874,7 +3786,7 @@
     "language": "JavaScript",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -3958,7 +3870,7 @@
   "language": "JavaScript",
   "record": {
     "docs": {},
-    "id": "<id-37>",
+    "id": "<id-36>",
     "identity": {
       "display_name": "buildButton",
       "is_namespace_rooted": false,
@@ -3981,7 +3893,7 @@
     "language": "JavaScript",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -4065,7 +3977,7 @@
   "language": "JavaScript",
   "record": {
     "docs": {},
-    "id": "<id-38>",
+    "id": "<id-37>",
     "identity": {
       "display_name": "DEFAULT_LABEL",
       "is_namespace_rooted": false,
@@ -4081,7 +3993,7 @@
     "language": "JavaScript",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -4153,7 +4065,7 @@
   "language": "Lua",
   "record": {
     "docs": {},
-    "id": "<id-39>",
+    "id": "<id-38>",
     "identity": {
       "display_name": "M",
       "is_namespace_rooted": false,
@@ -4169,7 +4081,7 @@
     "language": "Lua",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -4241,7 +4153,7 @@
   "language": "Lua",
   "record": {
     "docs": {},
-    "id": "<id-40>",
+    "id": "<id-39>",
     "identity": {
       "display_name": "default_size",
       "is_namespace_rooted": false,
@@ -4257,7 +4169,7 @@
     "language": "Lua",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -4329,7 +4241,7 @@
   "language": "Lua",
   "record": {
     "docs": {},
-    "id": "<id-41>",
+    "id": "<id-40>",
     "identity": {
       "container_kind": "Variable",
       "container_name": "M",
@@ -4364,7 +4276,7 @@
     "language": "Lua",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -4448,7 +4360,7 @@
   "language": "Lua",
   "record": {
     "docs": {},
-    "id": "<id-42>",
+    "id": "<id-41>",
     "identity": {
       "container_kind": "Variable",
       "container_name": "M",
@@ -4473,7 +4385,7 @@
     "language": "Lua",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -4557,7 +4469,7 @@
   "language": "Lua",
   "record": {
     "docs": {},
-    "id": "<id-43>",
+    "id": "<id-42>",
     "identity": {
       "display_name": "helper",
       "is_namespace_rooted": false,
@@ -4580,7 +4492,7 @@
     "language": "Lua",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -4666,7 +4578,7 @@
     "docs": {
       "raw_doc": "Multi-file fixture: Go, in a nested directory."
     },
-    "id": "<id-44>",
+    "id": "<id-43>",
     "identity": {
       "display_name": "nested",
       "is_namespace_rooted": true,
@@ -4682,7 +4594,7 @@
     "language": "Go",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -4756,7 +4668,7 @@
     "docs": {
       "raw_doc": "Widget shares its name with the Rust fixture's type."
     },
-    "id": "<id-45>",
+    "id": "<id-44>",
     "identity": {
       "display_name": "Widget",
       "is_namespace_rooted": true,
@@ -4790,7 +4702,7 @@
     "language": "Go",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -4862,7 +4774,7 @@
   "language": "Go",
   "record": {
     "docs": {},
-    "id": "<id-46>",
+    "id": "<id-45>",
     "identity": {
       "container_kind": "Type",
       "container_name": "Widget",
@@ -4887,7 +4799,7 @@
     "language": "Go",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -4959,7 +4871,7 @@
   "language": "Go",
   "record": {
     "docs": {},
-    "id": "<id-47>",
+    "id": "<id-46>",
     "identity": {
       "container_kind": "Type",
       "container_name": "Widget",
@@ -4995,7 +4907,7 @@
     "language": "Go",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -5079,7 +4991,7 @@
   "language": "Go",
   "record": {
     "docs": {},
-    "id": "<id-48>",
+    "id": "<id-47>",
     "identity": {
       "display_name": "MaxSize",
       "is_namespace_rooted": true,
@@ -5095,7 +5007,7 @@
     "language": "Go",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -5167,7 +5079,7 @@
   "language": "Go",
   "record": {
     "docs": {},
-    "id": "<id-49>",
+    "id": "<id-48>",
     "identity": {
       "display_name": "BuildWidget",
       "is_namespace_rooted": true,
@@ -5191,7 +5103,7 @@
     "language": "Go",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -5287,7 +5199,7 @@
   "language": "Python",
   "record": {
     "docs": {},
-    "id": "<id-50>",
+    "id": "<id-49>",
     "identity": {
       "display_name": "MAX_SIZE",
       "is_namespace_rooted": false,
@@ -5302,7 +5214,7 @@
     "language": "Python",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -5376,7 +5288,7 @@
     "docs": {
       "raw_doc": "A gadget with a size."
     },
-    "id": "<id-51>",
+    "id": "<id-50>",
     "identity": {
       "display_name": "Gadget",
       "is_namespace_rooted": false,
@@ -5392,7 +5304,7 @@
     "language": "Python",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -5476,7 +5388,7 @@
   "language": "Python",
   "record": {
     "docs": {},
-    "id": "<id-52>",
+    "id": "<id-51>",
     "identity": {
       "container_kind": "Class",
       "container_name": "Gadget",
@@ -5519,7 +5431,7 @@
     "language": "Python",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -5603,7 +5515,7 @@
   "language": "Python",
   "record": {
     "docs": {},
-    "id": "<id-53>",
+    "id": "<id-52>",
     "identity": {
       "container_kind": "Class",
       "container_name": "Gadget",
@@ -5646,7 +5558,7 @@
     "language": "Python",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -5730,7 +5642,7 @@
   "language": "Python",
   "record": {
     "docs": {},
-    "id": "<id-54>",
+    "id": "<id-53>",
     "identity": {
       "display_name": "build_gadget",
       "is_namespace_rooted": false,
@@ -5753,7 +5665,7 @@
     "language": "Python",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -5837,7 +5749,7 @@
   "language": "Perl",
   "record": {
     "docs": {},
-    "id": "<id-55>",
+    "id": "<id-54>",
     "identity": {
       "display_name": "Multi::Queue",
       "is_namespace_rooted": true,
@@ -5853,7 +5765,7 @@
     "language": "Perl",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -5925,7 +5837,7 @@
   "language": "Perl",
   "record": {
     "docs": {},
-    "id": "<id-56>",
+    "id": "<id-55>",
     "identity": {
       "container_kind": "Module",
       "container_name": "Multi::Queue",
@@ -5943,7 +5855,7 @@
     "language": "Perl",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -6015,7 +5927,7 @@
   "language": "Perl",
   "record": {
     "docs": {},
-    "id": "<id-57>",
+    "id": "<id-56>",
     "identity": {
       "container_kind": "Module",
       "container_name": "Multi::Queue",
@@ -6040,7 +5952,7 @@
     "language": "Perl",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -6124,7 +6036,7 @@
   "language": "Perl",
   "record": {
     "docs": {},
-    "id": "<id-58>",
+    "id": "<id-57>",
     "identity": {
       "container_kind": "Module",
       "container_name": "Multi::Queue",
@@ -6149,7 +6061,7 @@
     "language": "Perl",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -6233,7 +6145,7 @@
   "language": "Php",
   "record": {
     "docs": {},
-    "id": "<id-59>",
+    "id": "<id-58>",
     "identity": {
       "display_name": "Account",
       "is_namespace_rooted": false,
@@ -6267,7 +6179,7 @@
     "language": "Php",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -6351,7 +6263,7 @@
   "language": "Php",
   "record": {
     "docs": {},
-    "id": "<id-60>",
+    "id": "<id-59>",
     "identity": {
       "container_kind": "Class",
       "container_name": "Account",
@@ -6376,7 +6288,7 @@
     "language": "Php",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -6448,7 +6360,7 @@
   "language": "Php",
   "record": {
     "docs": {},
-    "id": "<id-61>",
+    "id": "<id-60>",
     "identity": {
       "container_kind": "Class",
       "container_name": "Account",
@@ -6485,7 +6397,7 @@
     "language": "Php",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -6581,7 +6493,7 @@
   "language": "Php",
   "record": {
     "docs": {},
-    "id": "<id-62>",
+    "id": "<id-61>",
     "identity": {
       "container_kind": "Class",
       "container_name": "Account",
@@ -6612,7 +6524,7 @@
     ],
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -6708,7 +6620,7 @@
   "language": "Php",
   "record": {
     "docs": {},
-    "id": "<id-63>",
+    "id": "<id-62>",
     "identity": {
       "display_name": "open_account",
       "is_namespace_rooted": false,
@@ -6732,7 +6644,7 @@
     "language": "Php",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -6830,7 +6742,7 @@
     "docs": {
       "raw_doc": "A widget with a size."
     },
-    "id": "<id-64>",
+    "id": "<id-63>",
     "identity": {
       "display_name": "Widget",
       "is_namespace_rooted": false,
@@ -6864,7 +6776,7 @@
     "language": "Rust",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -6948,7 +6860,7 @@
   "language": "Rust",
   "record": {
     "docs": {},
-    "id": "<id-65>",
+    "id": "<id-64>",
     "identity": {
       "container_kind": "Type",
       "container_name": "Widget",
@@ -6973,7 +6885,7 @@
     "language": "Rust",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -7045,7 +6957,7 @@
   "language": "Rust",
   "record": {
     "docs": {},
-    "id": "<id-66>",
+    "id": "<id-65>",
     "identity": {
       "container_kind": "Type",
       "container_name": "Widget",
@@ -7087,7 +6999,7 @@
     ],
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -7183,7 +7095,7 @@
   "language": "Rust",
   "record": {
     "docs": {},
-    "id": "<id-67>",
+    "id": "<id-66>",
     "identity": {
       "container_kind": "Type",
       "container_name": "Widget",
@@ -7232,7 +7144,7 @@
     ],
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -7316,7 +7228,7 @@
   "language": "Rust",
   "record": {
     "docs": {},
-    "id": "<id-68>",
+    "id": "<id-67>",
     "identity": {
       "display_name": "Shape",
       "is_namespace_rooted": false,
@@ -7342,7 +7254,7 @@
     "language": "Rust",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -7426,7 +7338,7 @@
   "language": "Rust",
   "record": {
     "docs": {},
-    "id": "<id-69>",
+    "id": "<id-68>",
     "identity": {
       "container_kind": "Enum",
       "container_name": "Shape",
@@ -7443,7 +7355,7 @@
     "language": "Rust",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -7515,7 +7427,7 @@
   "language": "Rust",
   "record": {
     "docs": {},
-    "id": "<id-70>",
+    "id": "<id-69>",
     "identity": {
       "container_kind": "Enum",
       "container_name": "Shape",
@@ -7532,7 +7444,7 @@
     "language": "Rust",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -7604,7 +7516,7 @@
   "language": "Rust",
   "record": {
     "docs": {},
-    "id": "<id-71>",
+    "id": "<id-70>",
     "identity": {
       "display_name": "MAX_SIZE",
       "is_namespace_rooted": false,
@@ -7620,7 +7532,7 @@
     "language": "Rust",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -7692,7 +7604,7 @@
   "language": "Rust",
   "record": {
     "docs": {},
-    "id": "<id-72>",
+    "id": "<id-71>",
     "identity": {
       "display_name": "build_widget",
       "is_namespace_rooted": false,
@@ -7716,7 +7628,7 @@
     "language": "Rust",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -7812,7 +7724,7 @@
   "language": "Scala",
   "record": {
     "docs": {},
-    "id": "<id-73>",
+    "id": "<id-72>",
     "identity": {
       "display_name": "Named",
       "is_namespace_rooted": true,
@@ -7828,7 +7740,7 @@
     "language": "Scala",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -7912,7 +7824,7 @@
   "language": "Scala",
   "record": {
     "docs": {},
-    "id": "<id-74>",
+    "id": "<id-73>",
     "identity": {
       "container_kind": "Trait",
       "container_name": "Named",
@@ -7937,7 +7849,7 @@
     "language": "Scala",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -8009,7 +7921,7 @@
   "language": "Scala",
   "record": {
     "docs": {},
-    "id": "<id-75>",
+    "id": "<id-74>",
     "identity": {
       "display_name": "Tag",
       "is_namespace_rooted": true,
@@ -8042,13 +7954,13 @@
     "language": "Scala",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {
       "implements": [
         {
-          "id": "<id-73>",
+          "id": "<id-72>",
           "name": "Named",
           "qualified_name": "multi.Named"
         }
@@ -8134,7 +8046,7 @@
   "language": "Scala",
   "record": {
     "docs": {},
-    "id": "<id-76>",
+    "id": "<id-75>",
     "identity": {
       "container_kind": "Class",
       "container_name": "Tag",
@@ -8160,7 +8072,7 @@
     "language": "Scala",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -8256,7 +8168,7 @@
   "language": "Scala",
   "record": {
     "docs": {},
-    "id": "<id-77>",
+    "id": "<id-76>",
     "identity": {
       "display_name": "Tag",
       "is_namespace_rooted": true,
@@ -8272,7 +8184,7 @@
     "language": "Scala",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -8356,7 +8268,7 @@
   "language": "Scala",
   "record": {
     "docs": {},
-    "id": "<id-78>",
+    "id": "<id-77>",
     "identity": {
       "container_kind": "Module",
       "container_name": "Tag",
@@ -8387,7 +8299,7 @@
     ],
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -8483,7 +8395,7 @@
   "language": "Swift",
   "record": {
     "docs": {},
-    "id": "<id-79>",
+    "id": "<id-78>",
     "identity": {
       "display_name": "Meter",
       "is_namespace_rooted": false,
@@ -8517,7 +8429,7 @@
     "language": "Swift",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -8601,7 +8513,7 @@
   "language": "Swift",
   "record": {
     "docs": {},
-    "id": "<id-80>",
+    "id": "<id-79>",
     "identity": {
       "container_kind": "Type",
       "container_name": "Meter",
@@ -8627,7 +8539,7 @@
     "language": "Swift",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -8699,7 +8611,7 @@
   "language": "Swift",
   "record": {
     "docs": {},
-    "id": "<id-81>",
+    "id": "<id-80>",
     "identity": {
       "container_kind": "Type",
       "container_name": "Meter",
@@ -8725,7 +8637,7 @@
     "language": "Swift",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -8821,7 +8733,7 @@
   "language": "Swift",
   "record": {
     "docs": {},
-    "id": "<id-82>",
+    "id": "<id-81>",
     "identity": {
       "display_name": "Readable",
       "is_namespace_rooted": false,
@@ -8837,7 +8749,7 @@
     "language": "Swift",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -8921,7 +8833,7 @@
   "language": "Swift",
   "record": {
     "docs": {},
-    "id": "<id-83>",
+    "id": "<id-82>",
     "identity": {
       "container_kind": "Interface",
       "container_name": "Readable",
@@ -8947,7 +8859,7 @@
     "language": "Swift",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -9031,7 +8943,7 @@
   "language": "Swift",
   "record": {
     "docs": {},
-    "id": "<id-84>",
+    "id": "<id-83>",
     "identity": {
       "display_name": "buildMeter",
       "is_namespace_rooted": false,
@@ -9055,7 +8967,7 @@
     "language": "Swift",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -9151,7 +9063,7 @@
   "language": "TypeScript",
   "record": {
     "docs": {},
-    "id": "<id-85>",
+    "id": "<id-84>",
     "identity": {
       "display_name": "Sized",
       "is_namespace_rooted": false,
@@ -9185,7 +9097,7 @@
     "language": "TypeScript",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -9269,7 +9181,7 @@
   "language": "TypeScript",
   "record": {
     "docs": {},
-    "id": "<id-86>",
+    "id": "<id-85>",
     "identity": {
       "container_kind": "Interface",
       "container_name": "Sized",
@@ -9294,7 +9206,7 @@
     "language": "TypeScript",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -9366,7 +9278,7 @@
   "language": "TypeScript",
   "record": {
     "docs": {},
-    "id": "<id-87>",
+    "id": "<id-86>",
     "identity": {
       "display_name": "Size",
       "is_namespace_rooted": false,
@@ -9386,7 +9298,7 @@
     "language": "TypeScript",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -9458,7 +9370,7 @@
   "language": "TypeScript",
   "record": {
     "docs": {},
-    "id": "<id-88>",
+    "id": "<id-87>",
     "identity": {
       "display_name": "Panel",
       "is_namespace_rooted": false,
@@ -9492,13 +9404,13 @@
     "language": "TypeScript",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {
       "implements": [
         {
-          "id": "<id-85>",
+          "id": "<id-84>",
           "name": "Sized",
           "qualified_name": "Sized"
         }
@@ -9584,7 +9496,7 @@
   "language": "TypeScript",
   "record": {
     "docs": {},
-    "id": "<id-89>",
+    "id": "<id-88>",
     "identity": {
       "container_kind": "Class",
       "container_name": "Panel",
@@ -9609,7 +9521,7 @@
     "language": "TypeScript",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -9681,7 +9593,7 @@
   "language": "TypeScript",
   "record": {
     "docs": {},
-    "id": "<id-90>",
+    "id": "<id-89>",
     "identity": {
       "container_kind": "Class",
       "container_name": "Panel",
@@ -9716,7 +9628,7 @@
     "language": "TypeScript",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -9800,7 +9712,7 @@
   "language": "TypeScript",
   "record": {
     "docs": {},
-    "id": "<id-91>",
+    "id": "<id-90>",
     "identity": {
       "container_kind": "Class",
       "container_name": "Panel",
@@ -9836,7 +9748,7 @@
     "language": "TypeScript",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -9932,7 +9844,7 @@
   "language": "TypeScript",
   "record": {
     "docs": {},
-    "id": "<id-92>",
+    "id": "<id-91>",
     "identity": {
       "display_name": "buildPanel",
       "is_namespace_rooted": false,
@@ -9956,7 +9868,7 @@
     "language": "TypeScript",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -10052,7 +9964,7 @@
   "language": "Zsh",
   "record": {
     "docs": {},
-    "id": "<id-93>",
+    "id": "<id-92>",
     "identity": {
       "display_name": "PROMPT_STYLE",
       "is_namespace_rooted": false,
@@ -10068,7 +9980,7 @@
     "language": "Zsh",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -10140,7 +10052,7 @@
   "language": "Zsh",
   "record": {
     "docs": {},
-    "id": "<id-94>",
+    "id": "<id-93>",
     "identity": {
       "display_name": "render_prompt",
       "is_namespace_rooted": false,
@@ -10162,7 +10074,7 @@
     "language": "Zsh",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -10246,7 +10158,7 @@
   "language": "Zsh",
   "record": {
     "docs": {},
-    "id": "<id-95>",
+    "id": "<id-94>",
     "identity": {
       "display_name": "reset_prompt",
       "is_namespace_rooted": false,
@@ -10269,7 +10181,7 @@
     "language": "Zsh",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.43",
+      "extractor_version": "0.1.0+rev.46",
       "parse_pass": "parse"
     },
     "relations": {},

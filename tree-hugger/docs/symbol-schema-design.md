@@ -980,7 +980,11 @@ has none either: its type is never written in as a return type.
 
 A parameter's `default_value` is the default as written. Swift's grammar
 places `= 2` beside the parameter rather than inside it, and it is still
-read: `init(x: Int, y: Int = 2)` gives `y` the default `2`.
+read: `init(x: Int, y: Int = 2)` gives `y` the default `2`. A comment on
+either side of the `=` is never the default and never hides it, so
+`int x /* note */ = /* note */ 1` (C#) and `$x = /* note */ 1` (PHP) both
+have the default `1` and are optional; `is_optional` is `true` exactly when
+a default was read.
 
 ### Type/Class/Interface/Trait Data
 
@@ -1068,7 +1072,8 @@ variants.
 
 `aliased_type_text` is the alias's right-hand side as written, generics
 included (Go `type GenAlias[T any] = []T` gives `[]T`, Swift
-`typealias G<T> = Array<T>` gives `Array<T>`). It is never resolved, and the
+`typealias G<T> = Array<T>` gives `Array<T>`; a comment after the `=` is
+skipped, so `typealias A = /* note */ Int` gives `Int`). It is never resolved, and the
 target's fields are never copied onto the alias. An abstract Scala
 `type Element` and a Swift `associatedtype` declare no alias and have no
 record.

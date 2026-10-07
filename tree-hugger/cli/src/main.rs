@@ -2007,7 +2007,6 @@ fn render_imports(imports: &[ImportSymbol], config: &OutputConfig) {
 
     let groups = group_imports(imports);
     for group in groups {
-        let group = dedupe_import_group(&group);
         let (location, start_line) = format_import_locations(&group);
         let location_display = if config.use_hyperlinks {
             hyperlink(&group[0].file, start_line, &location)

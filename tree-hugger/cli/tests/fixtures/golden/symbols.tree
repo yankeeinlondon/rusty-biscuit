@@ -8,7 +8,6 @@ c.c
     field x [4:9]
     field y [5:9]
   type alias point_t [8:1]
-  struct point [8:9]
   module-private variable origin_count [10:12]
   public function point_sum(p: struct point) -> int [12:5]
   public function reset_origin() -> void [16:6]

@@ -1,6 +1,18 @@
-; Imports
+; Imports: only the name each import binds. A path's last segment
+; (`use a;`, `use a::b;`, `g::h` in a list), an alias (`use a as b;`,
+; `extern crate y as z;`), and for `self` in a list (`use a::{self};`) the
+; list's own path's last segment. A glob (`use a::b::*;`, `use a::{*}`)
+; binds nothing; it is an on-demand import named by its path's last segment
+; (`b`, `a`).
 (extern_crate_declaration
-  name: (identifier) @local.definition.import)
+  name: (identifier) @local.definition.import
+  !alias)
+
+(extern_crate_declaration
+  alias: (identifier) @local.definition.import)
+
+(use_declaration
+  argument: (identifier) @local.definition.import)
 
 (use_declaration
   argument: (scoped_identifier
@@ -11,6 +23,40 @@
 
 (use_list
   (identifier) @local.definition.import) ; use std::process::{Child, Command, Stdio};
+
+(use_list
+  (scoped_identifier
+    name: (identifier) @local.definition.import))
+
+(scoped_use_list
+  path: [
+    (identifier) @local.definition.import
+    (scoped_identifier
+      name: (identifier) @local.definition.import)
+  ]
+  list: (use_list
+    (self)))
+
+(scoped_use_list
+  path: [
+    (identifier) @local.definition.import
+    (scoped_identifier
+      name: (identifier) @local.definition.import)
+  ]
+  list: (use_list
+    (use_wildcard
+      .
+      "*")))
+
+(use_wildcard
+  [
+    (identifier) @local.definition.import
+    (scoped_identifier
+      name: (identifier) @local.definition.import)
+    (crate) @local.definition.import
+    (super) @local.definition.import
+    (self) @local.definition.import
+  ])
 
 ; Functions - capture full node for signature extraction
 (function_item
@@ -43,9 +89,27 @@
 (tuple_pattern
   (identifier) @local.definition.var)
 
+; Only patterns whose identifier children are binding positions: a range
+; bound, a path segment, a generic pattern's path and a macro name read.
 (let_condition
-  pattern: (_
-    (identifier) @local.definition.var))
+  pattern: [
+    (captured_pattern
+      (identifier) @local.definition.var)
+    (mut_pattern
+      (identifier) @local.definition.var)
+    (or_pattern
+      (identifier) @local.definition.var)
+    (ref_pattern
+      (identifier) @local.definition.var)
+    (reference_pattern
+      (identifier) @local.definition.var)
+    (slice_pattern
+      (identifier) @local.definition.var)
+    (tuple_pattern
+      (identifier) @local.definition.var)
+    (tuple_struct_pattern
+      (identifier) @local.definition.var)
+  ])
 
 (tuple_struct_pattern
   (identifier) @local.definition.var)

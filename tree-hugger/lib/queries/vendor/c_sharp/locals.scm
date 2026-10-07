@@ -18,7 +18,7 @@
     (identifier) @local.definition.var))
 
 (parameter
-  (identifier) @local.definition.parameter)
+  name: (identifier) @local.definition.parameter)
 
 ; Methods - capture full node for signature extraction
 (method_declaration
@@ -78,12 +78,33 @@
 (record_declaration
   name: (identifier) @local.definition.type) @local.definition.type.context
 
-; Imports (using directives)
+; Imports (using directives): the name a directive brings in, captured by
+; its place in the directive. An alias directive (`using E = F.G;`) binds its
+; `name:` and its target is a read; a namespace or `static` directive
+; (`using A.B;`, `using static C.D;`, `using global::A.B;`) captures its
+; path's final segment, whose qualifiers are reads.
 (using_directive
-  (qualified_name) @local.definition.import)
+  name: (identifier) @local.definition.import)
 
 (using_directive
-  (identifier) @local.definition.import)
+  !name
+  [
+    (identifier) @local.definition.import
+    (generic_name
+      (identifier) @local.definition.import)
+    (qualified_name
+      name: [
+        (identifier) @local.definition.import
+        (generic_name
+          (identifier) @local.definition.import)
+      ])
+    (alias_qualified_name
+      name: [
+        (identifier) @local.definition.import
+        (generic_name
+          (identifier) @local.definition.import)
+      ])
+  ])
 
 ; References
 (identifier) @local.reference

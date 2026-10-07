@@ -26,11 +26,6 @@ pub(crate) fn find_ancestor_by_kinds<'a>(node: Node<'a>, kinds: &[&str]) -> Opti
     None
 }
 
-/// Extracts the last component of a dotted name (e.g., "foo.bar.baz" -> "baz").
-pub(crate) fn extract_dotted_name(name: &str) -> String {
-    name.rsplit('.').next().unwrap_or(name).to_string()
-}
-
 /// Finds the first child node with the given kind.
 pub(crate) fn find_child_by_kind<'a>(node: Node<'a>, kind: &str) -> Option<Node<'a>> {
     let mut cursor = node.walk();

@@ -227,7 +227,8 @@ fn pattern_sites<'tree>(
 }
 
 /// The names a `use` tree binds: a path's last segment, an alias, every
-/// entry of a list. `self` and globs bind no name here.
+/// entry of a list, and for a `self` entry the last segment of its list's
+/// path (`a` in `use a::{self};`). Globs bind no name here.
 fn use_names<'tree>(node: Option<Node<'tree>>, bind: &mut impl FnMut(Node<'tree>)) {
     let Some(node) = node else { return };
     match node.kind() {
@@ -244,7 +245,19 @@ fn use_names<'tree>(node: Option<Node<'tree>>, bind: &mut impl FnMut(Node<'tree>
                 bind(alias);
             }
         }
-        "scoped_use_list" => use_names(node.child_by_field_name("list"), bind),
+        "scoped_use_list" => {
+            let list = node.child_by_field_name("list");
+            let has_self = list.is_some_and(|list| {
+                let mut cursor = list.walk();
+                list.named_children(&mut cursor).any(|entry| entry.kind() == "self")
+            });
+            if has_self
+                && let Some(path) = node.child_by_field_name("path")
+            {
+                use_names(Some(path), bind);
+            }
+            use_names(list, bind);
+        }
         "use_list" => {
             let mut cursor = node.walk();
             for child in node.named_children(&mut cursor) {

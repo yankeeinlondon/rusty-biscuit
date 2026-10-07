@@ -84,13 +84,49 @@
 (attributed_declarator
   (type_identifier) @local.definition.type_alias)
 
-; Struct definitions - capture full node for context
+; Struct and union definitions (with a body) and declarations written alone
+; (`struct S;`), capturing the full node for context. An elaborated use
+; (`struct S x;`, a parameter `struct S *p`, `typedef struct S T;`) is a
+; type reference, never a declaration.
 (struct_specifier
-  name: (type_identifier) @local.definition.type) @local.definition.type.context
+  name: (type_identifier) @local.definition.type
+  body: (_)) @local.definition.type.context
 
-; Union definitions - capture full node for context
 (union_specifier
-  name: (type_identifier) @local.definition.type) @local.definition.type.context
+  name: (type_identifier) @local.definition.type
+  body: (_)) @local.definition.type.context
+
+(translation_unit
+  [
+    (struct_specifier
+      name: (type_identifier) @local.definition.type
+      !body)
+    (union_specifier
+      name: (type_identifier) @local.definition.type
+      !body)
+  ] @local.definition.type.context)
+
+(declaration
+  type: [
+    (struct_specifier
+      name: (type_identifier) @local.definition.type
+      !body)
+    (union_specifier
+      name: (type_identifier) @local.definition.type
+      !body)
+  ] @local.definition.type.context
+  !declarator)
+
+(field_declaration
+  type: [
+    (struct_specifier
+      name: (type_identifier) @local.definition.type
+      !body)
+    (union_specifier
+      name: (type_identifier) @local.definition.type
+      !body)
+  ] @local.definition.type.context
+  !declarator)
 
 ; goto
 (labeled_statement

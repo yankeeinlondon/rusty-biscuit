@@ -23,20 +23,117 @@
 (variadic_declarator
   (identifier) @local.definition.var)
 
+; Struct, union and class definitions (with a body) and declarations written
+; alone (`class C;`, `struct M;` in a namespace, class, template or linkage
+; body); an elaborated use (`class C *c;`, a parameter `struct S &s`) is a
+; type reference, never a declaration. The C query supplies unqualified
+; `struct`/`union` definitions and their top-level and `declaration` forms.
 (struct_specifier
   name: (qualified_identifier
-    name: (type_identifier) @local.definition.type))
+    name: (type_identifier) @local.definition.type)
+  body: (_))
 
 ; Class definitions - capture full node for context
 (class_specifier
-  name: (type_identifier) @local.definition.class) @local.definition.class.context
+  name: (type_identifier) @local.definition.class
+  body: (_)) @local.definition.class.context
 
 (concept_definition
   name: (identifier) @local.definition.type) @local.definition.type.context
 
 (class_specifier
   name: (qualified_identifier
-    name: (type_identifier) @local.definition.class)) @local.definition.class.context
+    name: (type_identifier) @local.definition.class)
+  body: (_)) @local.definition.class.context
+
+(translation_unit
+  [
+    (struct_specifier
+      name: (qualified_identifier
+        name: (type_identifier) @local.definition.type)
+      !body)
+    (class_specifier
+      name: (type_identifier) @local.definition.class
+      !body) @local.definition.class.context
+    (class_specifier
+      name: (qualified_identifier
+        name: (type_identifier) @local.definition.class)
+      !body) @local.definition.class.context
+  ])
+
+(declaration_list
+  [
+    (struct_specifier
+      name: (type_identifier) @local.definition.type
+      !body) @local.definition.type.context
+    (union_specifier
+      name: (type_identifier) @local.definition.type
+      !body) @local.definition.type.context
+    (struct_specifier
+      name: (qualified_identifier
+        name: (type_identifier) @local.definition.type)
+      !body)
+    (class_specifier
+      name: (type_identifier) @local.definition.class
+      !body) @local.definition.class.context
+    (class_specifier
+      name: (qualified_identifier
+        name: (type_identifier) @local.definition.class)
+      !body) @local.definition.class.context
+  ])
+
+(template_declaration
+  [
+    (struct_specifier
+      name: (type_identifier) @local.definition.type
+      !body) @local.definition.type.context
+    (union_specifier
+      name: (type_identifier) @local.definition.type
+      !body) @local.definition.type.context
+    (struct_specifier
+      name: (qualified_identifier
+        name: (type_identifier) @local.definition.type)
+      !body)
+    (class_specifier
+      name: (type_identifier) @local.definition.class
+      !body) @local.definition.class.context
+    (class_specifier
+      name: (qualified_identifier
+        name: (type_identifier) @local.definition.class)
+      !body) @local.definition.class.context
+  ])
+
+(declaration
+  type: [
+    (struct_specifier
+      name: (qualified_identifier
+        name: (type_identifier) @local.definition.type)
+      !body)
+    (class_specifier
+      name: (type_identifier) @local.definition.class
+      !body) @local.definition.class.context
+    (class_specifier
+      name: (qualified_identifier
+        name: (type_identifier) @local.definition.class)
+      !body) @local.definition.class.context
+  ]
+  !declarator)
+
+(field_declaration
+  type: [
+    (struct_specifier
+      name: (qualified_identifier
+        name: (type_identifier) @local.definition.type)
+      !body)
+    (class_specifier
+      name: (type_identifier) @local.definition.class
+      !body) @local.definition.class.context
+    (class_specifier
+      name: (qualified_identifier
+        name: (type_identifier) @local.definition.class)
+      !body) @local.definition.class.context
+  ]
+  !declarator)
 
 (alias_declaration
   name: (type_identifier) @local.definition.type_alias) @local.definition.type_alias.context

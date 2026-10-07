@@ -481,6 +481,48 @@ mod tests {
         (language.tree_sitter_language(), language.query_name())
     }
 
+    /// The tree-sitter runtime enforces only its built-in predicates and
+    /// returns every other one (`#has-ancestor?`, `#has-parent?`, …) as a
+    /// general predicate that no reader here applies, so a pattern carrying
+    /// one would match as if the condition held. Write the context into the
+    /// pattern's shape instead.
+    #[test]
+    fn no_query_carries_a_predicate_the_runtime_does_not_enforce() {
+        let kinds = [
+            QueryKind::Locals,
+            QueryKind::Imports,
+            QueryKind::References,
+            QueryKind::Lint,
+            QueryKind::Comments,
+        ];
+        for language in ProgrammingLanguage::all() {
+            let (grammar, id) = default_grammar_ref(language);
+            for kind in kinds {
+                let query = query_for(
+                    GrammarRef {
+                        language,
+                        grammar: &grammar,
+                        id,
+                    },
+                    kind,
+                )
+                .unwrap_or_else(|error| panic!("{} {kind}: {error}", language.name()));
+                for pattern in 0..query.pattern_count() {
+                    let unenforced: Vec<&str> = query
+                        .general_predicates(pattern)
+                        .iter()
+                        .map(|predicate| predicate.operator.as_ref())
+                        .collect();
+                    assert!(
+                        unenforced.is_empty(),
+                        "{} {kind} pattern {pattern}: unenforced predicates {unenforced:?}",
+                        language.name()
+                    );
+                }
+            }
+        }
+    }
+
     #[test]
     fn compiles_typescript_locals_query_with_overlay() {
         let (grammar, id) = default_grammar_ref(ProgrammingLanguage::TypeScript);

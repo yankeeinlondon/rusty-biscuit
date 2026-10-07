@@ -844,16 +844,16 @@ pub(crate) fn is_definition_like_reference(node: Node<'_>, language: Programming
     }
 
     match language {
-        ProgrammingLanguage::JavaScript | ProgrammingLanguage::TypeScript => matches!(
-            parent.kind(),
+        ProgrammingLanguage::JavaScript | ProgrammingLanguage::TypeScript => match parent.kind() {
+            // `(a = xs)`: the default in the `value` field is a read.
+            "required_parameter" | "optional_parameter" => parent.child_by_field_name("value") != Some(node),
             "property_signature"
-                | "method_signature"
-                | "required_parameter"
-                | "optional_parameter"
-                | "rest_pattern"
-                | "shorthand_property_identifier_pattern"
-                | "pair_pattern"
-        ),
+            | "method_signature"
+            | "rest_pattern"
+            | "shorthand_property_identifier_pattern"
+            | "pair_pattern" => true,
+            _ => false,
+        },
         ProgrammingLanguage::Rust => match parent.kind() {
             // In `value: Type` / `field: Type`, the binding name (pattern/name)
             // is definition-like, but the `type` child is a genuine reference —
@@ -901,7 +901,9 @@ pub(crate) fn is_named_definition_node(parent: Node<'_>, node: Node<'_>) -> bool
         return false;
     }
 
-    ["name", "alias", "declarator", "value", "parameter", "path"]
+    // Name fields only: `value` (Java `int k = xs`, TS `const k = xs`,
+    // Rust `const K: i32 = XS`) holds the initializer, an expression read.
+    ["name", "alias", "declarator", "parameter", "path"]
         .iter()
         .filter_map(|field| parent.child_by_field_name(field))
         .any(|candidate| candidate.id() == node.id())
@@ -1114,12 +1116,12 @@ pub(crate) fn extract_type_alias_target(
             find_child_by_kind(node, "type_alias")?.child_by_field_name("type")
         }
         // The alias and its target are both under the `name` field; the
-        // target is the node after `=`.
+        // target is the first named node after `=` that is not a comment.
         (ProgrammingLanguage::Swift, "typealias_declaration") => {
             let mut cursor = node.walk();
             node.children(&mut cursor)
                 .skip_while(|child| child.kind() != "=")
-                .find(|child| child.is_named())
+                .find(|child| child.is_named() && !child.is_extra())
         }
         (_, "type_alias_declaration") => node.child_by_field_name("value").or_else(|| {
             let mut cursor = node.walk();

@@ -21,4 +21,4 @@ pub mod tree_file;
 /// earlier commit would otherwise keep serving the old records). The cache
 /// key already digests the grammar and the effective query text, so this
 /// constant is what moves for a change in Rust extraction code.
-pub const EXTRACTOR_REVISION: &str = "43";
+pub const EXTRACTOR_REVISION: &str = "46";

@@ -17,13 +17,13 @@
       "Namespace": 3,
       "Property": 3,
       "Trait": 1,
-      "Type": 5,
+      "Type": 4,
       "TypeAlias": 2,
       "Variable": 8
     },
     "by_language": {
       "Bash": 3,
-      "C": 8,
+      "C": 7,
       "CSharp": 8,
       "Cpp": 7,
       "Go": 6,
@@ -45,12 +45,12 @@
       "Package": 1,
       "Private": 5,
       "Public": 53,
-      "Unknown": 26
+      "Unknown": 25
     },
     "doc_coverage": {
       "documented": 4,
-      "ratio": 0.05,
-      "total": 80,
+      "ratio": 0.05063291139240506,
+      "total": 79,
       "unavailable": 15
     },
     "synthetic_exports": 0

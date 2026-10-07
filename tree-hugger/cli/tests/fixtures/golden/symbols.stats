@@ -14,7 +14,7 @@
 │ namespace    │     3 │
 │ property     │     3 │
 │ trait        │     1 │
-│ type         │     5 │
+│ type         │     4 │
 │ type alias   │     2 │
 │ variable     │     8 │
 └──────────────┴───────┘
@@ -27,14 +27,14 @@
 │ package        │     1 │
 │ private        │     5 │
 │ public         │    53 │
-│ unknown        │    26 │
+│ unknown        │    25 │
 └────────────────┴───────┘
 
 ┌────────────┬───────┐
 │ Language   │ Count │
 ├────────────┼───────┤
 │ Bash       │     3 │
-│ C          │     8 │
+│ C          │     7 │
 │ C#         │     8 │
 │ C++        │     7 │
 │ Go         │     6 │
@@ -51,4 +51,4 @@
 │ Zsh        │     3 │
 └────────────┴───────┘
 
-Doc coverage: 4 of 80 documented (5.0%); 15 unavailable
+Doc coverage: 4 of 79 documented (5.1%); 15 unavailable

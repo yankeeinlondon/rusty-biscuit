@@ -435,20 +435,28 @@ impl ImportSelection {
     }
 
     /// Whether `import` (from a file in `language`) is kept: a pattern
-    /// matches the local name, the alias, or the original name (the whole
-    /// original path for a qualified pattern, else its last segment).
+    /// matches the local name, the alias, or the original name's last
+    /// segment; a qualified pattern matches the imported path instead: the
+    /// original, the source, or the source joined with the original (else
+    /// the name), since languages split a path between the two differently
+    /// (`std::collections` + `HashMap`, `A.B` alone).
     pub(crate) fn matches(&self, import: &ImportRecord, language: ProgrammingLanguage) -> bool {
+        let original = import.symbol.qualified_name.as_deref();
+        let joined = import.source.as_deref().map(|source| {
+            let separator = match language {
+                ProgrammingLanguage::Rust | ProgrammingLanguage::Cpp => "::",
+                ProgrammingLanguage::Php => "\\",
+                _ => ".",
+            };
+            format!("{source}{separator}{}", original.unwrap_or(&import.name))
+        });
         let matches = |pattern: &NamePattern| {
-            let original = import.symbol.qualified_name.as_deref().map(|original| {
-                if pattern.is_qualified_for(language) {
-                    original
-                } else {
-                    last_segment(original)
-                }
-            });
-            pattern.matches(&import.name)
-                || import.alias.as_deref().is_some_and(|alias| pattern.matches(alias))
-                || original.is_some_and(|original| pattern.matches(original))
+            let path_matches = if pattern.is_qualified_for(language) {
+                [original, import.source.as_deref(), joined.as_deref()].into_iter().flatten().any(|path| pattern.matches(path))
+            } else {
+                original.is_some_and(|original| pattern.matches(last_segment(original)))
+            };
+            pattern.matches(&import.name) || import.alias.as_deref().is_some_and(|alias| pattern.matches(alias)) || path_matches
         };
         (self.names.is_empty() || self.names.iter().any(matches))
             && !self.excluded_names.iter().any(matches)

@@ -107,9 +107,13 @@
 (lambda_expression
   parameters: (identifier) @local.definition.parameter) ; x -> ...
 
-((scoped_identifier
-  (identifier) @local.definition.import)
-  (#has-ancestor? @local.definition.import import_declaration))
+; The imported name is the final segment of the import's own path, so the
+; capture is import-scoped by shape (the runtime does not enforce upstream's
+; `#has-ancestor?`, which let every qualified annotation, module name and
+; module directive operand become an import).
+(import_declaration
+  (scoped_identifier
+    name: (identifier) @local.definition.import))
 
 (field_declaration
   declarator: (variable_declarator

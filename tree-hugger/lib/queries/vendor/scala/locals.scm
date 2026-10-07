@@ -89,6 +89,30 @@
       (tuple_pattern
         (identifier) @local.definition.var))))
 
-; Imports
+; Imports: only the name each import binds. A path's final segment (before
+; `,` or at the end), a selector, a rename's alias, and, for an on-demand
+; import (`a.b.*`, `a.b._`, `a.given`, `a.{_, given T}`), the final segment
+; of the path it opens; qualifiers and a rename's original are reads.
 (import_declaration
+  (identifier) @local.definition.import .)
+
+(import_declaration
+  (identifier) @local.definition.import . ",")
+
+(import_declaration
+  (identifier) @local.definition.import . (namespace_wildcard))
+
+(import_declaration
+  (identifier) @local.definition.import .
+  (namespace_selectors [(namespace_wildcard) "given"]))
+
+(namespace_selectors
   (identifier) @local.definition.import)
+
+(namespace_selectors
+  (arrow_renamed_identifier
+    alias: (identifier) @local.definition.import))
+
+(namespace_selectors
+  (as_renamed_identifier
+    alias: (identifier) @local.definition.import))

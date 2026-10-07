@@ -318,11 +318,15 @@ name values; the two lists intersect.
 
 ### `imports`
 
-`imports` takes only file filters positionally, and `--file`, `--name`,
-`--exact` and `--exclude-symbols`. An import matches when its local name, its
-alias or its original name matches, so both `--name HashMap` and `--name Map`
-find `use std::collections::HashMap as Map;`. A qualified pattern
-(`std::collections::*`) matches the whole original path.
+`imports` lists one entry per name an import binds (what each language's
+imports bind is in
+[Scope-Aware References](./references.md#what-an-import-binds)). It takes
+only file filters positionally, and `--file`, `--name`, `--exact` and
+`--exclude-symbols`. An import matches when its local name, its alias or its
+original name matches, so both `--name HashMap` and `--name Map` find
+`use std::collections::HashMap as Map;`. A qualified pattern
+(`std::collections::*`) matches the imported path instead: the original, the
+source, or the source joined with the original (`std::collections::HashMap`).
 
 ### `--prelude`
 

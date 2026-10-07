@@ -13,7 +13,6 @@
 │ c.c:4    │ field      │                │ x            │                          │
 │ c.c:5    │ field      │                │ y            │                          │
 │ c.c:8    │ type alias │                │ point_t      │                          │
-│ c.c:8    │ type       │                │ point        │                          │
 │ c.c:10   │ variable   │ module-private │ origin_count │                          │
 │ c.c:12   │ function   │ public         │ point_sum    │ (p: struct point) -> int │
 │ c.c:16   │ function   │ public         │ reset_origin │ () -> void               │

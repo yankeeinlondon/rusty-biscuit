@@ -33,6 +33,7 @@ use std::collections::{HashMap, HashSet};
 use tree_sitter::Node;
 
 use crate::analysis::counters::count_shared_context_steps;
+use crate::analysis::declaration_names::{python_captures, python_targets, scala_pattern_names};
 use crate::analysis::scope::{
     ANY_CATEGORY, BindingRule, BindingSite, BindingTarget, LanguageRules, MACRO, Placement, ScopeTree, TYPE, VALUE,
     ancestors,
@@ -926,74 +927,6 @@ fn python_sites<'a>(node: Node<'a>, source: &str, sites: &mut Vec<Site<'a>>, wri
     }
 }
 
-/// The names a Python assignment target binds; an attribute whose object
-/// is a dotted name is a qualified write (`writes`), any other attribute
-/// and a subscript bind nothing.
-fn python_targets<'a>(target: Option<Node<'a>>, bind: &mut impl FnMut(Node<'a>), writes: &mut Vec<Node<'a>>) {
-    let Some(target) = target else { return };
-    let mut stack = vec![target];
-    while let Some(node) = stack.pop() {
-        match node.kind() {
-            "identifier" => bind(node),
-            "attribute" if is_dotted_name(node.child_by_field_name("object")) => writes.push(node),
-            "pattern_list" | "tuple_pattern" | "list_pattern" | "tuple" | "list" | "expression_list"
-            | "parenthesized_expression" | "list_splat_pattern" | "list_splat" | "as_pattern_target" => {
-                let mut cursor = node.walk();
-                stack.extend(node.named_children(&mut cursor));
-            }
-            _ => {}
-        }
-    }
-}
-
-/// Whether a Python expression is a plain dotted name (`a`, `a.b.c`): no
-/// call, subscript or other expression a write's owner path could pass
-/// through.
-fn is_dotted_name(node: Option<Node<'_>>) -> bool {
-    let mut current = node;
-    while let Some(node) = current {
-        match node.kind() {
-            "identifier" => return true,
-            "attribute" => current = node.child_by_field_name("object"),
-            _ => return false,
-        }
-    }
-    false
-}
-
-/// The capture names of a Python `case` pattern: a bare name (one-part
-/// dotted name), an `as` alias, a star or double-star name; a dotted name,
-/// a class pattern's class and a keyword pattern's keyword bind nothing.
-fn python_captures<'a>(pattern: Node<'a>, source: &str, bind: &mut impl FnMut(Node<'a>)) {
-    let mut stack = vec![pattern];
-    while let Some(node) = stack.pop() {
-        let mut cursor = node.walk();
-        let children: Vec<Node<'a>> = node.named_children(&mut cursor).collect();
-        match node.kind() {
-            "dotted_name" => {
-                let binds = node.parent().is_some_and(|parent| matches!(parent.kind(), "case_pattern" | "keyword_pattern"))
-                    && children.len() == 1
-                    && source.get(node.start_byte()..node.end_byte()) != Some("_");
-                if binds {
-                    bind(children[0]);
-                }
-            }
-            "class_pattern" => stack.extend(children.into_iter().filter(|child| child.kind() != "dotted_name")),
-            "keyword_pattern" => stack.extend(children.into_iter().skip(1)),
-            "as_pattern" | "splat_pattern" => {
-                for child in children {
-                    if child.kind() == "identifier" {
-                        bind(child);
-                    } else {
-                        stack.push(child);
-                    }
-                }
-            }
-            _ => stack.extend(children),
-        }
-    }
-}
-
 /// Scala binding sites no record reports: the names a pattern `val`/`var`,
 /// a `for` generator or a `case` binds ([`scala_pattern_names`]), and a
 /// polymorphic lambda's type parameters.
@@ -1032,42 +965,5 @@ fn scala_sites<'a>(node: Node<'a>, source: &str, sites: &mut Vec<Site<'a>>) {
             }
         }
         _ => {}
-    }
-}
-
-/// The variable names a Scala pattern binds. Scala decides by the lexical
-/// form, not by lookup: a simple identifier pattern is a variable when it
-/// is a `varid` (first character a lower-case letter or `_`; a backquoted
-/// or upper-case one is a stable identifier pattern, a reference). A
-/// binder's name (`x @ p`) binds whatever its spelling: Scala 2.13's
-/// grammar writes it `varid`, scalac binds any identifier, and binding it
-/// can only leave a base unresolved, never resolve it wrongly.
-fn scala_pattern_names<'a>(pattern: Option<Node<'a>>, source: &str, bind: &mut impl FnMut(Node<'a>)) {
-    let Some(pattern) = pattern else { return };
-    let mut stack = vec![pattern];
-    while let Some(node) = stack.pop() {
-        match node.kind() {
-            "identifier" => {
-                let is_varid = source
-                    .get(node.start_byte()..node.end_byte())
-                    .and_then(|text| text.chars().next())
-                    .is_some_and(|first| first == '_' || first.is_lowercase());
-                if is_varid {
-                    bind(node);
-                }
-            }
-            "stable_identifier" | "type_identifier" | "wildcard" => {}
-            _ => {
-                let mut cursor = node.walk();
-                for (index, child) in node.children(&mut cursor).enumerate() {
-                    let field = node.field_name_for_child(index as u32);
-                    if node.kind() == "capture_pattern" && field == Some("name") && child.kind() == "identifier" {
-                        bind(child);
-                    } else if child.is_named() && !matches!(field, Some("type" | "operator")) {
-                        stack.push(child);
-                    }
-                }
-            }
-        }
     }
 }

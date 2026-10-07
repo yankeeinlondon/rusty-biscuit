@@ -236,6 +236,12 @@ pub(super) fn binding_sites<'tree>(node: Node<'tree>, typed: bool, sites: &mut V
                 });
             }
         }
+        // TypeScript `import q = require("m");` and `import R = N.S;`.
+        "import_require_clause" | "import_alias" => {
+            if let Some(name) = node.named_child(0).filter(|name| name.kind() == "identifier") {
+                sites.push(BindingSite { name, rule: declared(ANY_CATEGORY, true), is_import: true, bare_pattern: None });
+            }
+        }
         _ => {}
     }
     sites.extend(

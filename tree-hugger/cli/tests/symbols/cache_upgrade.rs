@@ -2009,6 +2009,133 @@ fn entry_from_extractor_revision_forty_two_is_not_served_after_the_written_path_
     });
 }
 
+/// Revision 43 captured every identifier child of a Python default
+/// parameter, so `x=external` also declared a parameter `external` whose
+/// span excluded the default's read; revision 44 captures only the name and
+/// keeps that read as a usage.
+#[test]
+fn entry_from_extractor_revision_forty_three_is_not_served_after_the_parameter_capture_repair() {
+    assert_stale_revision_is_not_served(&StaleRevision {
+        revision: "43",
+        key: OldKey::Computed,
+        file: "defaults.py",
+        language: "python",
+        source: "def external(): pass\ndef g(x=external): pass\ndef Sentinel(): pass\n".to_string(),
+        sentinel: "Sentinel",
+        probe: |out| {
+            // An empty list is not serialized.
+            let reads = out["indexes"][0]["occurrences"].as_array().map_or(0, |occurrences| {
+                occurrences.iter().filter(|occurrence| occurrence["target"]["name"] == "external").count()
+            });
+            Value::from(reads)
+        },
+        repaired: Value::from(1),
+        stale: Value::from(0),
+        revert: |snapshot| {
+            let occurrences = snapshot["occurrences"].as_array_mut().expect("occurrences");
+            let before = occurrences.len();
+            occurrences.retain(|occurrence| occurrence["target"]["name"] != "external");
+            assert_eq!(occurrences.len() + 1, before, "the default's one read");
+        },
+    });
+}
+
+/// Revision 44 did not look through a Swift force unwrap or a C#
+/// null-forgiving `!`, so `cb!()` was a usage of `cb`; revision 45 reads
+/// it as a call.
+#[test]
+fn entry_from_extractor_revision_forty_four_is_not_served_after_the_null_assertion_call_repair() {
+    assert_stale_revision_is_not_served(&StaleRevision {
+        revision: "44",
+        key: OldKey::Computed,
+        file: "unwrap.swift",
+        language: "swift",
+        source: "func g(cb: (() -> Void)?) { cb!() }\nfunc Sentinel() {}\n".to_string(),
+        sentinel: "Sentinel",
+        probe: |out| {
+            let occurrences = out["indexes"][0]["occurrences"].as_array().expect("occurrences");
+            let unwrapped = occurrences
+                .iter()
+                .find(|occurrence| occurrence["target"]["name"] == "cb")
+                .expect("the unwrapped call");
+            unwrapped["kind"].clone()
+        },
+        repaired: Value::from("Call"),
+        stale: Value::from("Usage"),
+        revert: |snapshot| {
+            let call = snapshot["occurrences"]
+                .as_array_mut()
+                .expect("occurrences")
+                .iter_mut()
+                .find(|occurrence| occurrence["target"]["name"] == "cb")
+                .expect("the unwrapped call");
+            assert_eq!(call["kind"], "Call");
+            call["kind"] = Value::from("Usage");
+        },
+    });
+}
+
+/// Revision 45 read a Swift precedence group's directive and associativity
+/// value (`associativity: left`) as usages, and took a Java static import
+/// of a member named `var` as a legacy type; revision 46 excludes those
+/// syntax markers. Only occurrences change, so the stale entry differs from
+/// a current one by the two marker occurrences alone.
+#[test]
+fn entry_from_extractor_revision_forty_five_is_not_served_after_the_syntax_marker_repair() {
+    const SOURCE: &str = "precedencegroup A {\n    associativity: left\n}\nfunc Sentinel() {}\n";
+    fn markers(out: &Value) -> usize {
+        // An empty list is not serialized.
+        out["occurrences"].as_array().map_or(0, |occurrences| {
+            occurrences
+                .iter()
+                .filter(|occurrence| matches!(occurrence["target"]["name"].as_str(), Some("associativity" | "left")))
+                .count()
+        })
+    }
+    assert_stale_revision_is_not_served(&StaleRevision {
+        revision: "45",
+        key: OldKey::Computed,
+        file: "precedence.swift",
+        language: "swift",
+        source: SOURCE.to_string(),
+        sentinel: "Sentinel",
+        probe: |out| Value::from(markers(&out["indexes"][0])),
+        repaired: Value::from(0),
+        stale: Value::from(2),
+        revert: |snapshot| {
+            let root = snapshot["reference_coverage"]
+                .as_array()
+                .expect("coverage")
+                .iter()
+                .find(|region| region["owner"].is_null())
+                .expect("the file region")["span"]
+                .clone();
+            let occurrences = snapshot["occurrences"].as_array_mut().expect("occurrences");
+            for (name, column, start) in [("associativity", 5_u64, 24_u64), ("left", 20, 39)] {
+                let width = name.len() as u64;
+                assert_eq!(&SOURCE[start as usize..(start + width) as usize], name);
+                occurrences.push(serde_json::json!({
+                    "owner": null,
+                    "owner_span": root,
+                    "target": { "id": null, "name": name, "qualified_name": null },
+                    "path_start_byte": null,
+                    "candidates": [],
+                    "span": {
+                        "start": { "line": 2, "column": column },
+                        "end": { "line": 2, "column": column + width },
+                        "start_byte": start,
+                        "end_byte": start + width,
+                    },
+                    "kind": "Usage",
+                    "confidence": "Unresolved",
+                }));
+            }
+            occurrences.sort_by_key(|occurrence| occurrence["span"]["start_byte"].as_u64());
+            assert_eq!(markers(snapshot), 2);
+        },
+    });
+}
+
 /// An earlier revision that wrote another schema, and what its entries
 /// lacked.
 struct SchemaBump {

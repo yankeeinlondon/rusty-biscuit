@@ -20,8 +20,10 @@ use crate::shared::{
 
 pub mod counters;
 pub(crate) mod coverage;
+pub(crate) mod declaration_names;
 pub(crate) mod occurrences;
 pub(crate) mod scope;
+pub(crate) mod syntax_markers;
 
 /// Runs the requested passes, after their prerequisites, over every kind, as
 /// [`TreeFile::query`] does.

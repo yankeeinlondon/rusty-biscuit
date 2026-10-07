@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use tree_sitter::{Node, QueryCursor, StreamingIterator};
 
 use crate::analysis::counters::{count_diagnostics_run, count_reference_capture};
+use crate::analysis::declaration_names::{declared_name_tokens, scala_import_path_start, swift_import_selector};
 use crate::error::TreeHuggerError;
 use crate::file::extract::attributes::declaration_attributes;
 use crate::file::extract::*;
@@ -187,21 +188,20 @@ impl TreeFile {
 
                 let node = capture.node;
 
-                // Skip imports that should be filtered out (e.g., package declarations,
-                // intermediate path components in Java/C#)
+                // A Go path captured beside its alias.
                 if self.should_skip_import(node, self.language) {
                     continue;
                 }
+                let node = swift_selective_import_name(node, self.language).unwrap_or(node);
 
                 let mut name = node
                     .utf8_text(self.source.as_bytes())
                     .map(str::to_string)
                     .unwrap_or_default();
 
-                // For Go, if the captured node is a string literal (import path),
-                // extract the package name from the path
-                if self.language == ProgrammingLanguage::Go && name.starts_with('"') {
-                    let path = name.trim_matches('"');
+                // A captured Go import path names its package by its last segment.
+                if self.language == ProgrammingLanguage::Go && matches!(node.kind(), "interpreted_string_literal" | "raw_string_literal") {
+                    let path = go_import_path(&name);
                     name = path.rsplit('/').next().unwrap_or(path).to_string();
                 }
 
@@ -227,6 +227,11 @@ impl TreeFile {
             matches.advance();
         }
 
+        // Two patterns may capture one token (a Rust `use a::{self, *}`, a
+        // Scala `{_, given}`): it is one import. Matches arrive per pattern,
+        // so position is restored here.
+        imports.sort_by_key(|import| (import.range.start_byte, import.range.end_byte));
+        imports.dedup_by_key(|import| (import.range.start_byte, import.range.end_byte));
         Ok(imports)
     }
 
@@ -285,6 +290,7 @@ impl TreeFile {
         let range = range_for_node(node);
         if definition_ranges.contains(&(range.start_byte, range.end_byte))
             || is_definition_like_reference(node, self.language)
+            || crate::analysis::occurrences::is_ecma_export_name(node, self.language)
         {
             return None;
         }
@@ -466,67 +472,18 @@ impl TreeFile {
 
     /// Determines if an import capture should be skipped.
     ///
-    /// This filters out:
-    /// - Package/namespace declarations (Java, C#)
-    /// - Intermediate path components (only keep the final imported symbol)
-    /// - Duplicate captures for aliased imports (Go)
+    /// Only Go needs a filter: an aliased import (a blank `_` included) is
+    /// captured at both its alias and its path, and the path is dropped.
+    /// Every other query captures exactly the name each import brings in.
     fn should_skip_import(&self, node: Node, language: ProgrammingLanguage) -> bool {
         match language {
+            // A dot import (`. "a/fmt"`) has no alias capture, so its path
+            // is kept.
             ProgrammingLanguage::Go => {
-                // For Go, if this is a path capture (string literal) but the import_spec
-                // has a real alias (not blank identifier "_"), skip the path capture
-                if node.kind() == "interpreted_string_literal"
-                    && let Some(import_spec) = find_ancestor_by_kind(node, "import_spec")
-                    && let Some(name_node) = import_spec.child_by_field_name("name")
-                {
-                    // Only skip if the alias is a real package_identifier, not blank "_"
-                    if name_node.kind() == "package_identifier" {
-                        return true; // Skip path when there's a real alias
-                    }
-                }
-                false
-            }
-            ProgrammingLanguage::Java => {
-                // Skip if inside package_declaration
-                if find_ancestor_by_kind(node, "package_declaration").is_some() {
-                    return true;
-                }
-                // For Java imports, only keep the final identifier in the path
-                // We need to find the outermost scoped_identifier and check if this node
-                // is its rightmost identifier
-                if let Some(import_decl) = find_ancestor_by_kind(node, "import_declaration") {
-                    // Find the direct scoped_identifier child of import_declaration
-                    for child in import_decl.children(&mut import_decl.walk()) {
-                        if child.kind() == "scoped_identifier" {
-                            // Get the rightmost identifier (the "name" field)
-                            if let Some(name_node) = child.child_by_field_name("name") {
-                                // Only keep this import if it's the rightmost identifier
-                                return name_node.id() != node.id();
-                            }
-                        }
-                    }
-                }
-                false
-            }
-            ProgrammingLanguage::CSharp => {
-                // Skip if inside namespace_declaration (not using_directive)
-                if find_ancestor_by_kind(node, "namespace_declaration").is_some()
-                    && find_ancestor_by_kind(node, "using_directive").is_none()
-                {
-                    return true;
-                }
-                // For C# using directives, only keep the final identifier
-                if let Some(using_decl) = find_ancestor_by_kind(node, "using_directive") {
-                    // Find the direct qualified_name child
-                    for child in using_decl.children(&mut using_decl.walk()) {
-                        if child.kind() == "qualified_name"
-                            && let Some(name_node) = child.child_by_field_name("name")
-                        {
-                            return name_node.id() != node.id();
-                        }
-                    }
-                }
-                false
+                matches!(node.kind(), "interpreted_string_literal" | "raw_string_literal")
+                    && find_ancestor_by_kind(node, "import_spec")
+                        .and_then(|import_spec| import_spec.child_by_field_name("name"))
+                        .is_some_and(|name| matches!(name.kind(), "package_identifier" | "blank_identifier"))
             }
             _ => false,
         }
@@ -550,7 +507,7 @@ impl TreeFile {
             ProgrammingLanguage::Go => self.extract_go_import_metadata(node, name),
             ProgrammingLanguage::Java => self.extract_java_import_metadata(node),
             ProgrammingLanguage::CSharp => self.extract_csharp_import_metadata(node),
-            ProgrammingLanguage::Php => self.extract_php_import_metadata(node),
+            ProgrammingLanguage::Php => self.extract_php_import_metadata(node, name),
             ProgrammingLanguage::Scala => self.extract_scala_import_metadata(node, name),
             ProgrammingLanguage::Swift => self.extract_swift_import_metadata(node),
             _ => (None, None, None),
@@ -565,7 +522,7 @@ impl TreeFile {
     ) -> Option<CodeRange> {
         let statement = match language {
             ProgrammingLanguage::JavaScript | ProgrammingLanguage::TypeScript => {
-                find_ancestor_by_kind(node, "import_statement")
+                find_ancestor_by_kinds(node, &["import_statement", "import_alias"])
             }
             ProgrammingLanguage::Python => {
                 find_ancestor_by_kinds(node, &["import_from_statement", "import_statement"])
@@ -603,7 +560,8 @@ impl TreeFile {
 
     /// Extracts import metadata for JavaScript/TypeScript.
     /// Handles: `import { foo } from "module"`, `import { foo as bar } from "module"`,
-    /// `import * as ns from "module"`, `import foo from "module"`.
+    /// `import * as ns from "module"`, `import foo from "module"`, and
+    /// TypeScript `import foo = require("module")` and `import Foo = N.S`.
     fn extract_ecma_import_metadata(
         &self,
         node: Node,
@@ -623,8 +581,24 @@ impl TreeFile {
                 .map(|s| s.trim_matches('"').trim_matches('\'').to_string());
         }
 
-        // Check if this is an aliased import (import_specifier with name and alias)
         let parent = node.parent();
+        let text = |node: Node| node.utf8_text(self.source.as_bytes()).ok().map(str::to_string);
+        // TypeScript `import q = require("m");` names its module beside the
+        // binding; `import R = N.S;` aliases an entity path, kept as the
+        // original name.
+        if let Some(clause) = parent.filter(|parent| parent.kind() == "import_require_clause") {
+            let module = clause
+                .child_by_field_name("source")
+                .and_then(text)
+                .map(|module| module.trim_matches('"').trim_matches('\'').to_string());
+            return (module, None, None);
+        }
+        if let Some(alias) = parent.filter(|parent| parent.kind() == "import_alias") {
+            let target = alias.named_child(1).and_then(text);
+            return (None, target, Some(name.to_string()));
+        }
+
+        // Check if this is an aliased import (import_specifier with name and alias)
         if let Some(p) = parent {
             if p.kind() == "import_specifier" {
                 // import { original as alias } from "module"
@@ -656,136 +630,140 @@ impl TreeFile {
         (source, original_name, alias)
     }
 
-    /// Extracts import metadata for Python.
-    /// Handles: `import os`, `from typing import Optional`, `from x import y as z`.
+    /// Extracts import metadata for Python. `source` is the module path as
+    /// written (`a.b` for `import a.b`, whose name is `a`; `m` for
+    /// `from m import x`; `__future__` for a future import); an alias gives
+    /// `alias` and `original_name`, the module path for `import a.b as c`
+    /// and the imported name for `from m import x as y`. An on-demand
+    /// `from a.b import *` is named by `b` (or the relative prefix `.`) with
+    /// `alias` that name, `original_name` `*` and `source` `a.b`.
     fn extract_python_import_metadata(
         &self,
         node: Node,
         name: &str,
     ) -> (Option<String>, Option<String>, Option<String>) {
-        let mut source = None;
-        let mut original_name = None;
-        let mut alias = None;
-
-        // Find import_statement or import_from_statement ancestor
-        let import_stmt = find_ancestor_by_kind(node, "import_statement")
-            .or_else(|| find_ancestor_by_kind(node, "import_from_statement"));
-
-        // Check for aliased import (aliased_import) - do this first to get the correct module name
+        let text = |node: Node| node.utf8_text(self.source.as_bytes()).ok().map(str::to_string);
+        let Some(statement) =
+            find_ancestor_by_kinds(node, &["import_statement", "import_from_statement", "future_import_statement"])
+        else {
+            return (None, None, None);
+        };
+        let module = || match statement.kind() {
+            "import_from_statement" => statement.child_by_field_name("module_name").and_then(text),
+            "future_import_statement" => Some("__future__".to_string()),
+            _ => None,
+        };
         let parent = node.parent();
-        if let Some(p) = parent
-            && p.kind() == "aliased_import"
-        {
-            // This handles both:
-            // - `import X as Y` (name field is module, alias field is local name)
-            // - `from M import X as Y` (name field is original symbol, alias field is local name)
-            if let Some(name_node) = p.child_by_field_name("name") {
-                let orig = name_node
-                    .utf8_text(self.source.as_bytes())
-                    .unwrap_or_default();
-                if let Some(alias_node) = p.child_by_field_name("alias") {
-                    let al = alias_node
-                        .utf8_text(self.source.as_bytes())
-                        .unwrap_or_default();
-                    if name == al {
-                        original_name = Some(extract_dotted_name(orig));
-                        alias = Some(al.to_string());
-
-                        // For `import X as Y`, the source is X (the module name)
-                        if let Some(stmt) = &import_stmt
-                            && stmt.kind() == "import_statement"
-                        {
-                            source = Some(orig.to_string());
-                        }
-                    }
-                }
-            }
+        if let Some(aliased) = parent.filter(|parent| parent.kind() == "aliased_import") {
+            let target = aliased.child_by_field_name("name").and_then(text);
+            return match statement.kind() {
+                "import_statement" => (target.clone(), target, Some(name.to_string())),
+                _ => (module(), target, Some(name.to_string())),
+            };
         }
-
-        // Set source if not already set by aliased import handling
-        if source.is_none()
-            && let Some(stmt) = import_stmt
-        {
-            if stmt.kind() == "import_from_statement" {
-                // from X import Y - extract X as the source
-                if let Some(module_node) = stmt.child_by_field_name("module_name") {
-                    source = module_node
-                        .utf8_text(self.source.as_bytes())
-                        .ok()
-                        .map(|s| s.to_string());
-                }
-            } else {
-                // import X - the module is the source
-                // For `import os`, the source is "os" (same as name)
-                source = Some(name.to_string());
-            }
+        let is_wildcard = {
+            let mut cursor = statement.walk();
+            statement.children(&mut cursor).any(|child| child.kind() == "wildcard_import")
+        };
+        if is_wildcard && statement.kind() == "import_from_statement" {
+            return (module(), Some("*".to_string()), Some(name.to_string()));
         }
-
-        (source, original_name, alias)
+        match statement.kind() {
+            "import_statement" => (parent.and_then(text), None, None),
+            _ => (module(), None, None),
+        }
     }
 
-    /// Extracts import metadata for Rust.
-    /// Handles: `use std::io`, `use std::io::{Read, Write}`, `use foo as bar`.
+    /// Extracts import metadata for Rust. `source` is the path the bound
+    /// name is imported from (`std::io` for `use std::io::Read`, `a::g` for
+    /// `h` in `use a::{g::h}`, none for `use a;`); an alias gives `alias`
+    /// and `original_name`, the aliased path's last segment (`e` in
+    /// `e as f`, `c` in `b::c::{self as cc}`, `y` in `extern crate y as
+    /// z`). A glob is named by its path's last segment, with `alias` that
+    /// name, `original_name` `*` and `source` the whole path (`a::b` for
+    /// `use a::b::*`).
     fn extract_rust_import_metadata(
         &self,
         node: Node,
         name: &str,
     ) -> (Option<String>, Option<String>, Option<String>) {
-        let mut source = None;
-        let mut original_name = None;
-        let mut alias = None;
-
-        // Find use_declaration ancestor
-        let use_decl = find_ancestor_by_kind(node, "use_declaration");
-        if let Some(decl) = use_decl {
-            // Extract the full use path
-            if let Some(arg) = decl.child_by_field_name("argument") {
-                source = self.extract_rust_use_path(arg, name);
-            }
-        }
-
-        // Check for use_as_clause (use foo as bar)
+        let text = |node: Node| node.utf8_text(self.source.as_bytes()).ok().map(str::to_string);
         let parent = node.parent();
-        if let Some(p) = parent
-            && p.kind() == "use_as_clause"
-        {
-            // The captured node is the alias
-            if let Some(path_node) = p.child_by_field_name("path") {
-                let orig = path_node
-                    .utf8_text(self.source.as_bytes())
-                    .unwrap_or_default()
-                    .to_string();
-                original_name = Some(orig);
-                alias = Some(name.to_string());
-            }
+        if let Some(declaration) = parent.filter(|parent| parent.kind() == "extern_crate_declaration") {
+            let original = declaration
+                .child_by_field_name("alias")
+                .is_some_and(|alias| alias.id() == node.id())
+                .then(|| declaration.child_by_field_name("name").and_then(text))
+                .flatten();
+            let alias = original.as_ref().map(|_| name.to_string());
+            return (None, original, alias);
         }
-
-        (source, original_name, alias)
+        if let Some(clause) = parent.filter(|parent| parent.kind() == "use_as_clause") {
+            let Some(original) = clause.child_by_field_name("path").and_then(|path| self.rust_use_segment(path)) else {
+                return (None, None, Some(name.to_string()));
+            };
+            return (self.rust_use_prefix(original), text(original), Some(name.to_string()));
+        }
+        if is_rust_glob_path(node) {
+            let path = match self.rust_use_prefix(node) {
+                Some(prefix) => format!("{prefix}::{name}"),
+                None => name.to_string(),
+            };
+            return (Some(path), Some("*".to_string()), Some(name.to_string()));
+        }
+        (self.rust_use_prefix(node), None, None)
     }
 
-    /// Extracts the full path for a Rust use statement.
-    fn extract_rust_use_path(&self, node: Node, _target_name: &str) -> Option<String> {
-        // Get the full path text
-        let text = node.utf8_text(self.source.as_bytes()).ok()?;
-
-        // Extract module path (everything before the last ::)
-        // For `std::io::Read`, the source is `std::io`
-        // For `std::process::{Child, Command}`, the source is `std::process`
-        if let Some(last_sep) = text.rfind("::") {
-            let path = &text[..last_sep];
-            // Remove any use_list braces
-            let cleaned = path.trim_end_matches('{').trim();
-            if !cleaned.is_empty() {
-                return Some(cleaned.to_string());
+    /// The last segment of a `use` path: the node itself, a scoped path's
+    /// name, or for `self` its list's path's last segment.
+    fn rust_use_segment<'tree>(&self, path: Node<'tree>) -> Option<Node<'tree>> {
+        match path.kind() {
+            "scoped_identifier" => path.child_by_field_name("name"),
+            "self" => {
+                let entry = path.parent().filter(|parent| parent.kind() == "use_as_clause").unwrap_or(path);
+                let list = entry.parent().filter(|parent| parent.kind() == "use_list")?;
+                let owner = list.parent().filter(|parent| parent.kind() == "scoped_use_list")?;
+                owner.child_by_field_name("path").and_then(|path| self.rust_use_segment(path))
             }
+            _ => Some(path),
         }
-
-        // For simple imports like `use foo`, the name is the source
-        Some(text.to_string())
     }
 
-    /// Extracts import metadata for Go.
-    /// Handles: `import "fmt"`, `import alias "fmt"`.
+    /// The path written before the `use` segment `segment`, across the
+    /// lists around it (`a::g` for `h` in `use a::{g::h}`); `None` when
+    /// nothing is written before it.
+    fn rust_use_prefix(&self, segment: Node) -> Option<String> {
+        let text = |node: Node| node.utf8_text(self.source.as_bytes()).ok();
+        let mut parts = Vec::new();
+        let mut current = segment;
+        while let Some(parent) = current.parent() {
+            match parent.kind() {
+                "scoped_identifier"
+                    if parent.child_by_field_name("name").is_some_and(|name| name.id() == current.id()) =>
+                {
+                    parts.extend(parent.child_by_field_name("path").and_then(text));
+                }
+                "use_list" => {
+                    if let Some(owner) = parent.parent().filter(|owner| owner.kind() == "scoped_use_list") {
+                        parts.extend(owner.child_by_field_name("path").and_then(text));
+                        current = owner;
+                        continue;
+                    }
+                }
+                "use_declaration" => break,
+                _ => {}
+            }
+            current = parent;
+        }
+        parts.reverse();
+        (!parts.is_empty()).then(|| parts.join("::"))
+    }
+
+    /// Extracts import metadata for Go: `source` is the path; an alias
+    /// (`f "a/fmt"`, a blank `_ "a/fmt"`) gives `alias` and the path's last
+    /// segment as `original_name`; a dot import (`. "a/fmt"`), named by the
+    /// path's last segment, is on demand: `alias` that name and
+    /// `original_name` `*`.
     fn extract_go_import_metadata(
         &self,
         node: Node,
@@ -803,7 +781,7 @@ impl TreeFile {
                 let path_text = path_node
                     .utf8_text(self.source.as_bytes())
                     .unwrap_or_default();
-                source = Some(path_text.trim_matches('"').to_string());
+                source = Some(go_import_path(path_text).to_string());
             }
 
             // Check if there's an alias (name field)
@@ -811,7 +789,10 @@ impl TreeFile {
                 let alias_text = name_node
                     .utf8_text(self.source.as_bytes())
                     .unwrap_or_default();
-                if alias_text == name {
+                if name_node.kind() == "dot" {
+                    alias = Some(name.to_string());
+                    original_name = Some("*".to_string());
+                } else if alias_text == name {
                     alias = Some(name.to_string());
                     // Original name is derived from the path
                     if let Some(src) = &source {
@@ -874,113 +855,144 @@ impl TreeFile {
         (source, original_name, alias)
     }
 
-    /// Extracts import metadata for C#.
-    /// Handles: `using System.IO`.
+    /// Extracts import metadata for C#: `source` is the directive's path or
+    /// alias target as written (`using A.B;` → `A.B`, `using E = F.G;` →
+    /// `F.G`); an alias directive also gives `alias` and, when its target
+    /// is a name, `original_name` (its final segment, `G`).
     fn extract_csharp_import_metadata(
         &self,
         node: Node,
     ) -> (Option<String>, Option<String>, Option<String>) {
-        let mut source = None;
-
-        // Find using_directive ancestor
-        let using_decl = find_ancestor_by_kind(node, "using_directive");
-        if let Some(decl) = using_decl {
-            // Get the namespace
-            for child in decl.children(&mut decl.walk()) {
-                if child.kind() == "qualified_name" || child.kind() == "identifier" {
-                    source = child
-                        .utf8_text(self.source.as_bytes())
-                        .ok()
-                        .map(|s| s.to_string());
-                    break;
-                }
-            }
-        }
-
-        (source, None, None)
+        let Some(directive) = find_ancestor_by_kind(node, "using_directive") else {
+            return (None, None, None);
+        };
+        let text = |node: Node| node.utf8_text(self.source.as_bytes()).ok().map(str::to_string);
+        let alias_name = directive.child_by_field_name("name");
+        let mut cursor = directive.walk();
+        let Some(target) = directive
+            .named_children(&mut cursor)
+            .find(|child| Some(child.id()) != alias_name.map(|name| name.id()) && !child.is_extra())
+        else {
+            return (None, None, None);
+        };
+        let source = text(target);
+        let Some(alias_name) = alias_name else {
+            return (source, None, None);
+        };
+        let original = csharp_final_name(target).and_then(text);
+        (source, original, text(alias_name))
     }
 
-    /// Extracts import metadata for PHP.
-    /// Handles: `use App\Models\User`, `use App\Models\User as UserModel`.
+    /// Extracts import metadata for PHP: `source` is the clause's path as
+    /// written, with a group's prefix (`A\B` for `B` in `use A\{B};`);
+    /// an alias gives `alias` and `original_name`, the path's last segment
+    /// (`B` in `use A\B as C;`).
     fn extract_php_import_metadata(
         &self,
         node: Node,
+        name: &str,
     ) -> (Option<String>, Option<String>, Option<String>) {
-        let mut source = None;
-        let mut alias = None;
-        let mut original_name = None;
-
-        // Find namespace_use_clause ancestor
-        let use_clause = find_ancestor_by_kind(node, "namespace_use_clause");
-        if let Some(clause) = use_clause {
-            // Get the qualified name
-            for child in clause.children(&mut clause.walk()) {
-                if child.kind() == "qualified_name" || child.kind() == "name" {
-                    source = child
-                        .utf8_text(self.source.as_bytes())
-                        .ok()
-                        .map(|s| s.to_string());
-                }
-                if child.kind() == "namespace_aliasing_clause" {
-                    // Has an alias
-                    if let Some(alias_node) = child.child_by_field_name("alias") {
-                        alias = alias_node
-                            .utf8_text(self.source.as_bytes())
-                            .ok()
-                            .map(|s| s.to_string());
-                        // Original name is the last part of the qualified name
-                        if let Some(src) = &source {
-                            original_name = src.rsplit('\\').next().map(|s| s.to_string());
-                        }
-                    }
-                }
-            }
+        let text = |node: Node| node.utf8_text(self.source.as_bytes()).ok().map(str::to_string);
+        let Some(clause) = find_ancestor_by_kind(node, "namespace_use_clause") else {
+            return (None, None, None);
+        };
+        let alias_node = clause.child_by_field_name("alias");
+        let mut cursor = clause.walk();
+        let path = clause.named_children(&mut cursor).find(|child| {
+            matches!(child.kind(), "name" | "qualified_name") && Some(child.id()) != alias_node.map(|alias| alias.id())
+        });
+        let prefix = clause
+            .parent()
+            .filter(|parent| parent.kind() == "namespace_use_group")
+            .and_then(|group| group.parent())
+            .and_then(|declaration| find_child_by_kind(declaration, "namespace_name"))
+            .and_then(text);
+        let source = path.and_then(text).map(|path| match prefix {
+            Some(prefix) => format!("{prefix}\\{path}"),
+            None => path,
+        });
+        if alias_node.is_none() {
+            return (source, None, None);
         }
-
-        (source, original_name, alias)
+        // A qualified name's last segment is its last `name` child.
+        let original = path
+            .and_then(|path| match path.kind() {
+                "qualified_name" => {
+                    let mut cursor = path.walk();
+                    path.named_children(&mut cursor).filter(|part| part.kind() == "name").last()
+                }
+                _ => Some(path),
+            })
+            .and_then(text);
+        (source, original, Some(name.to_string()))
     }
 
-    /// Extracts import metadata for Scala.
-    /// Handles: `import scala.io._`, `import java.util.{List => JList}`.
+    /// Extracts import metadata for Scala. `source` is the bound name's path
+    /// as written (`a.b.C`), or for a selector its path and original name
+    /// (`a.D` for `E` in `import a.{D => E}`); a rename gives `alias` and
+    /// `original_name` (`D`). An on-demand import (`a.b.*`, `a.b._`,
+    /// `a.{_, given T}`) is named by its path's last segment, with `alias`
+    /// that name, `original_name` `*` (or `given` when it opens only given
+    /// instances) and `source` the path (`a.b`).
     fn extract_scala_import_metadata(
         &self,
         node: Node,
         name: &str,
     ) -> (Option<String>, Option<String>, Option<String>) {
-        let mut source = None;
-        let mut alias = None;
-        let mut original_name = None;
-
-        // Find import_declaration ancestor
-        let import_decl = find_ancestor_by_kind(node, "import_declaration");
-        if let Some(decl) = import_decl {
-            // Extract the full import path
-            let import_text = decl.utf8_text(self.source.as_bytes()).unwrap_or_default();
-            // Parse out the package path (skip "import " prefix)
-            if import_text.contains('.') && import_text.len() > 7 {
-                source = Some(import_text[7..].trim().to_string());
+        let text = |node: Node| node.utf8_text(self.source.as_bytes()).ok().map(str::to_string);
+        let Some(parent) = node.parent() else {
+            return (None, None, None);
+        };
+        let selector_source = |selectors: Node, selected: &str| {
+            let path = selectors.prev_named_sibling().and_then(|last| self.scala_import_path(last))?;
+            Some(format!("{path}.{selected}"))
+        };
+        match parent.kind() {
+            "arrow_renamed_identifier" | "as_renamed_identifier" => {
+                let original = parent.child_by_field_name("name").and_then(text);
+                let source = parent
+                    .parent()
+                    .zip(original.as_deref())
+                    .and_then(|(selectors, original)| selector_source(selectors, original));
+                (source, original, Some(name.to_string()))
+            }
+            "namespace_selectors" => (selector_source(parent, name), None, None),
+            _ => {
+                let path = self.scala_import_path(node);
+                let opened = node.next_named_sibling().and_then(|next| match next.kind() {
+                    "namespace_wildcard" => Some(scala_wildcard(next.utf8_text(self.source.as_bytes()).unwrap_or_default())),
+                    "namespace_selectors" => {
+                        let mut cursor = next.walk();
+                        let mut kinds = next.children(&mut cursor).filter_map(|selector| match selector.kind() {
+                            "namespace_wildcard" => {
+                                Some(scala_wildcard(selector.utf8_text(self.source.as_bytes()).unwrap_or_default()))
+                            }
+                            "given" => Some("given"),
+                            _ => None,
+                        });
+                        let first = kinds.next()?;
+                        Some(if first == "*" || kinds.any(|kind| kind == "*") { "*" } else { first })
+                    }
+                    _ => None,
+                });
+                match opened {
+                    Some(opened) => (path, Some(opened.to_string()), Some(name.to_string())),
+                    None => (path, None, None),
+                }
             }
         }
-
-        // Check for renamed import (import_selectors with rename)
-        let parent = node.parent();
-        if let Some(p) = parent
-            && p.kind() == "renamed_identifier"
-            && let Some(name_node) = p.child(0)
-        {
-            let orig = name_node
-                .utf8_text(self.source.as_bytes())
-                .unwrap_or_default()
-                .to_string();
-            original_name = Some(orig);
-            alias = Some(name.to_string());
-        }
-
-        (source, original_name, alias)
     }
 
-    /// Extracts import metadata for Swift.
-    /// Handles: `import Foundation`, `import UIKit`.
+    /// The written path of the Scala import segment `segment`: from the
+    /// first segment of its `,`-separated expression through `segment`.
+    fn scala_import_path(&self, segment: Node) -> Option<String> {
+        let start = scala_import_path_start(segment).unwrap_or(segment);
+        self.source.get(start.start_byte()..segment.end_byte()).map(str::to_string)
+    }
+
+    /// Extracts import metadata for Swift: the `source` is the path as
+    /// written (`Foundation`, `Foo.Sub`, `Foo.Bar` in `import struct
+    /// Foo.Bar`, whose name is `Bar`).
     fn extract_swift_import_metadata(
         &self,
         node: Node,
@@ -1465,6 +1477,17 @@ impl TreeFile {
 
             // Skip namespace imports (import * as x) - check for common patterns
             if name == "*" || name.contains("*") {
+                continue;
+            }
+
+            // An on-demand import (`import a.b.*`, `use a::*`, `from a
+            // import *`) binds no name of its own to use; a TS/JS
+            // `import * as ns` binds `ns`.
+            let is_ecma = matches!(import.language, ProgrammingLanguage::TypeScript | ProgrammingLanguage::JavaScript);
+            if !is_ecma
+                && (import.original_name.as_deref() == Some("*")
+                    || (import.language == ProgrammingLanguage::Scala && import.original_name.as_deref() == Some("given")))
+            {
                 continue;
             }
 
@@ -1977,6 +2000,20 @@ impl TreeFile {
     }
 }
 
+/// The identifier a C# type name ends in (`G` in `F.G`, `B` in `A.B<C>`,
+/// `T` in `global::T`), or `None` for a type that is no name (`int*`, a
+/// tuple, a predefined type).
+fn csharp_final_name(node: Node<'_>) -> Option<Node<'_>> {
+    match node.kind() {
+        "identifier" => Some(node),
+        "generic_name" => find_child_by_kind(node, "identifier"),
+        "qualified_name" | "alias_qualified_name" => {
+            node.child_by_field_name("name").and_then(csharp_final_name)
+        }
+        _ => None,
+    }
+}
+
 /// One node the references query captured.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ReferenceCapture<'tree> {
@@ -1991,15 +2028,77 @@ pub(crate) struct ReferenceCapture<'tree> {
     pub(crate) is_member: bool,
 }
 
+/// The name a Swift selective import (`import struct Foo.Bar`) binds: the
+/// last segment of its captured path. The path stays the import's `source`;
+/// a whole-module import (`import Foo.Sub`) is named by its whole path.
+fn swift_selective_import_name(path: Node<'_>, language: ProgrammingLanguage) -> Option<Node<'_>> {
+    if language != ProgrammingLanguage::Swift || path.kind() != "identifier" {
+        return None;
+    }
+    path.parent().and_then(swift_import_selector)?;
+    let mut cursor = path.walk();
+    path.named_children(&mut cursor).filter(|segment| segment.kind() == "simple_identifier").last()
+}
+
+/// Whether the Rust import token `node` names the path a glob opens: the
+/// path's last segment in `use a::b::*;` or `use a::{*};`, never in a list
+/// that also holds `self` (`use a::{self, *};` imports `a` itself).
+fn is_rust_glob_path(node: Node<'_>) -> bool {
+    let path = match node.parent() {
+        Some(parent)
+            if parent.kind() == "scoped_identifier"
+                && parent.child_by_field_name("name").is_some_and(|name| name.id() == node.id()) =>
+        {
+            parent
+        }
+        _ => node,
+    };
+    let Some(parent) = path.parent() else { return false };
+    match parent.kind() {
+        "use_wildcard" => true,
+        "scoped_use_list" => {
+            let Some(list) = parent.child_by_field_name("list") else { return false };
+            let mut cursor = list.walk();
+            let entries: Vec<Node<'_>> = list.named_children(&mut cursor).collect();
+            !entries.iter().any(|entry| entry.kind() == "self")
+                && entries.iter().any(|entry| entry.kind() == "use_wildcard" && entry.named_child_count() == 0)
+        }
+        _ => false,
+    }
+}
+
+/// A Go import path without its quotes: `"a/b"` or the raw `` `a/b` ``.
+fn go_import_path(literal: &str) -> &str {
+    ['"', '`']
+        .iter()
+        .find_map(|quote| literal.strip_prefix(*quote).and_then(|path| path.strip_suffix(*quote)))
+        .unwrap_or(literal)
+}
+
+/// The `original_name` of a Scala on-demand import: `given` when it opens
+/// only given instances, else `*` (`*` and Scala 2's `_` alike).
+fn scala_wildcard(written: &str) -> &'static str {
+    if written == "given" { "given" } else { "*" }
+}
+
 /// The name spans of `definitions` and `imports`, which are never
-/// references.
+/// references: each record's name span plus, for a declared path
+/// (`namespace A.B`) or a C++ qualified type name, every name token it
+/// declares ([`declared_name_tokens`]), since a reference capture takes the
+/// tokens one by one.
 pub(crate) fn definition_ranges(
     definitions: &[ExtractedSymbol<'_>],
     imports: &[ImportSymbol],
 ) -> HashSet<(usize, usize)> {
     definitions
         .iter()
-        .map(|extracted| (extracted.symbol.range.start_byte, extracted.symbol.range.end_byte))
+        .flat_map(|extracted| {
+            std::iter::once((extracted.symbol.range.start_byte, extracted.symbol.range.end_byte)).chain(
+                declared_name_tokens(extracted.name)
+                    .into_iter()
+                    .map(|token| (token.start_byte(), token.end_byte())),
+            )
+        })
         .chain(imports.iter().map(|import| (import.range.start_byte, import.range.end_byte)))
         .collect()
 }

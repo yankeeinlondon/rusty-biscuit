@@ -3,9 +3,11 @@
 //! references, arrays and callbacks) neither erase its parameters nor
 //! substitute a returned function's, and each parameter's name is found under
 //! any declarator chain. Parameters bound by a pattern rather than an
-//! identifier keep the pattern and its declared type.
+//! identifier keep the pattern and its declared type. A parameter's name,
+//! type and default come from their own grammar fields, so a comment beside
+//! a default's `=` neither erases the default nor becomes it.
 
-use tree_hugger::{ParameterInfo, SymbolInfo};
+use tree_hugger::{ParameterInfo, SymbolInfo, SymbolKindData};
 
 use crate::symbols_fixtures::{Extracted, extract_inline};
 
@@ -214,4 +216,321 @@ fn patterned_parameters_keep_their_pattern_and_type_text() {
         }
     }
     assert!(failures.is_empty(), "pattern rows failed: {failures:#?}");
+}
+
+/// `(extension, source, function name, expected (name, type text, default))`.
+type ParameterFieldRow = (
+    &'static str,
+    &'static str,
+    &'static str,
+    &'static [(&'static str, Option<&'static str>, Option<&'static str>)],
+);
+
+/// A parameter's type and default value are read from their own fields,
+/// never mistaken for its name: a C# named type (`W x`) and a bare default
+/// (`int y = external`) are identifiers like the name, as is a Python
+/// default (`x=external`).
+const PARAMETER_FIELD_MATRIX: &[ParameterFieldRow] = &[
+    (
+        "cs",
+        "class W {}\nclass G {\n    void g(W x, int y = external, ref W r, params W[] rest) {}\n}\n",
+        "g",
+        &[("x", Some("W"), None), ("y", Some("int"), Some("external")), ("r", Some("W"), None), ("rest", Some("W[]"), None)],
+    ),
+    ("cs", "class W {}\nclass G {\n    G(W x) {}\n}\n", "G", &[("x", Some("W"), None)]),
+    (
+        "py",
+        "def external(): pass\nclass W: pass\ndef g(x=external, y: W=external): pass\n",
+        "g",
+        &[("x", None, Some("external")), ("y", Some("W"), Some("external"))],
+    ),
+];
+
+/// A parameter as `(name, type text, default)`.
+type ParameterFields = (String, Option<String>, Option<String>);
+
+#[test]
+fn parameter_names_types_and_defaults_come_from_their_own_fields() {
+    let mut failures = Vec::new();
+    for (extension, source, name, expected) in PARAMETER_FIELD_MATRIX {
+        let extracted = extract_inline(source, extension);
+        let functions = functions_named(&extracted, name);
+        if functions.is_empty() {
+            failures.push(format!(".{extension} `{name}`: no function symbol"));
+        }
+        for (path, symbol) in functions {
+            let actual: Option<Vec<ParameterFields>> = symbol.signature.as_ref().map(|signature| {
+                signature
+                    .parameters
+                    .iter()
+                    .map(|parameter| {
+                        (parameter.name.clone(), parameter.type_annotation.clone(), parameter.default_value.clone())
+                    })
+                    .collect()
+            });
+            let wanted: Vec<ParameterFields> = expected
+                .iter()
+                .map(|(name, type_text, default)| {
+                    (name.to_string(), type_text.map(str::to_string), default.map(str::to_string))
+                })
+                .collect();
+            if actual.as_ref() != Some(&wanted) {
+                failures.push(format!(".{extension} `{name}` ({path}): {actual:?}, expected {wanted:?}"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "parameter field rows failed: {failures:#?}");
+}
+
+/// Where the comment-position matrix writes comments around a default's
+/// `=`: nowhere (the control), before it, after it, or on both sides.
+const COMMENT_POSITIONS: &[(&str, bool, bool)] =
+    &[("control", false, false), ("before", true, false), ("after", false, true), ("both", true, true)];
+
+/// One default-capable language of the comment-position matrix.
+struct DefaultLanguage {
+    extension: &'static str,
+    /// A parameter written as `name`, its comment-or-empty `before` and
+    /// `after` texts around `=`, and its default.
+    parameter: fn(name: &str, before: &str, after: &str, default: &str) -> String,
+    /// The source declaring every callable in `callables` with `parameters`.
+    source: fn(parameters: &str) -> String,
+    /// Every callable the source declares, each with the parameters.
+    callables: &'static [&'static str],
+    /// The type text every parameter declares.
+    type_text: Option<&'static str>,
+    /// The comment written before and after `=` when the position asks.
+    comments: (&'static str, &'static str),
+}
+
+const BLOCK_COMMENTS: (&str, &str) = (" /* before */ ", " /* after */ ");
+
+/// Every language whose parameters take a default, with each callable form
+/// the language's readers serve: a C# method, constructor and local
+/// function, a PHP function, `__construct` and method, a Scala object and
+/// class method.
+const DEFAULT_LANGUAGES: &[DefaultLanguage] = &[
+    DefaultLanguage {
+        extension: "cs",
+        parameter: |name, before, after, default| format!("int {name}{before}={after}{default}"),
+        source: |parameters| {
+            format!(
+                "class K {{\n    void g({parameters}) {{}}\n    K({parameters}) {{}}\n    \
+                 void Outer() {{ void Local({parameters}) {{}} }}\n}}\n"
+            )
+        },
+        callables: &["g", "K", "Local"],
+        type_text: Some("int"),
+        comments: BLOCK_COMMENTS,
+    },
+    DefaultLanguage {
+        extension: "php",
+        parameter: |name, before, after, default| format!("int ${name}{before}={after}{default}"),
+        source: |parameters| {
+            format!(
+                "<?php\nfunction g({parameters}) {{}}\nclass K {{\n    \
+                 function __construct({parameters}) {{}}\n    function method({parameters}) {{}}\n}}\n"
+            )
+        },
+        callables: &["g", "__construct", "method"],
+        type_text: Some("int"),
+        comments: BLOCK_COMMENTS,
+    },
+    DefaultLanguage {
+        extension: "scala",
+        parameter: |name, before, after, default| format!("{name}: Int{before}={after}{default}"),
+        source: |parameters| {
+            format!(
+                "object O {{\n  def g({parameters}): Int = 1\n}}\n\
+                 class K {{\n  def method({parameters}): Int = 1\n}}\n"
+            )
+        },
+        callables: &["g", "method"],
+        type_text: Some("Int"),
+        comments: BLOCK_COMMENTS,
+    },
+    DefaultLanguage {
+        extension: "swift",
+        parameter: |name, before, after, default| format!("{name}: Int{before}={after}{default}"),
+        source: |parameters| {
+            format!("func g({parameters}) {{}}\nclass K {{\n    init({parameters}) {{}}\n    func method({parameters}) {{}}\n}}\n")
+        },
+        callables: &["g", "init", "method"],
+        type_text: Some("Int"),
+        comments: BLOCK_COMMENTS,
+    },
+    // Python comments run to the end of the line; the parameter list's
+    // parentheses join the lines around them.
+    DefaultLanguage {
+        extension: "py",
+        parameter: |name, before, after, default| format!("\n    {name}: int{before}={after}{default}"),
+        source: |parameters| format!("def g({parameters},\n):\n    pass\n"),
+        callables: &["g"],
+        type_text: Some("int"),
+        comments: ("  # before\n    ", "  # after\n    "),
+    },
+    DefaultLanguage {
+        extension: "js",
+        parameter: |name, before, after, default| format!("{name}{before}={after}{default}"),
+        source: |parameters| format!("function g({parameters}) {{}}\nclass K {{\n    method({parameters}) {{}}\n}}\n"),
+        callables: &["g", "method"],
+        type_text: None,
+        comments: BLOCK_COMMENTS,
+    },
+    DefaultLanguage {
+        extension: "ts",
+        parameter: |name, before, after, default| format!("{name}: number{before}={after}{default}"),
+        source: |parameters| format!("function g({parameters}) {{}}\nclass K {{\n    method({parameters}) {{}}\n}}\n"),
+        callables: &["g", "method"],
+        type_text: Some("number"),
+        comments: BLOCK_COMMENTS,
+    },
+    DefaultLanguage {
+        extension: "cpp",
+        parameter: |name, before, after, default| format!("int {name}{before}={after}{default}"),
+        source: |parameters| {
+            format!("void g({parameters}) {{}}\nstruct K {{\n    K({parameters}) {{}}\n    void method({parameters}) {{}}\n}};\n")
+        },
+        callables: &["g", "K", "method"],
+        type_text: Some("int"),
+        comments: BLOCK_COMMENTS,
+    },
+];
+
+/// A record's parameter as `(name, type text, default, optional, variadic)`.
+type RecordedParameter = (String, Option<String>, Option<String>, bool, bool);
+
+/// The parameters `x = 1, y = 2, z = 3`, each with a comment before and/or
+/// after its `=` as `before` and `after` ask.
+fn commented_parameters(language: &DefaultLanguage, before: bool, after: bool) -> String {
+    let (before_text, after_text) = language.comments;
+    [("x", "1"), ("y", "2"), ("z", "3")]
+        .iter()
+        .map(|(name, default)| {
+            (language.parameter)(
+                name,
+                if before { before_text } else { "" },
+                if after { after_text } else { "" },
+                default,
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// `(kind, in-file name)` of every record, in order: comments add no
+/// declaration and remove none.
+fn record_shape(extracted: &Extracted) -> Vec<String> {
+    extracted
+        .records
+        .iter()
+        .map(|record| format!("{:?} {}", record.kind, crate::symbols_fixtures::in_file_name(record)))
+        .collect()
+}
+
+/// A comment before, after or on both sides of a default's `=` changes
+/// nothing a parameter reports: in every default-capable language and every
+/// callable form, the record keeps the names, types, defaults `1`/`2`/`3`,
+/// optionality, arity and declaration list of the uncommented control, and
+/// the v1 signature the same defaults.
+#[test]
+fn comments_around_a_default_never_erase_or_supply_it() {
+    let mut failures = Vec::new();
+    for language in DEFAULT_LANGUAGES {
+        let extension = language.extension;
+        let control = extract_inline(&(language.source)(&commented_parameters(language, false, false)), extension);
+        for (position, before, after) in COMMENT_POSITIONS {
+            let source = (language.source)(&commented_parameters(language, *before, *after));
+            let extracted = extract_inline(&source, extension);
+            let label = |name: &str| format!(".{extension} {position} `{name}`");
+            if record_shape(&extracted) != record_shape(&control) {
+                failures.push(format!(
+                    ".{extension} {position}: records {:?}, control {:?}",
+                    record_shape(&extracted),
+                    record_shape(&control)
+                ));
+            }
+            for name in language.callables {
+                // A constructor shares its name with its class.
+                let callables: Vec<_> = extracted
+                    .records
+                    .iter()
+                    .filter(|record| record.identity.name == *name)
+                    .filter_map(|record| match &record.kind_data {
+                        SymbolKindData::Function(function) => Some(function),
+                        _ => None,
+                    })
+                    .collect();
+                let [function] = callables.as_slice() else {
+                    failures.push(format!("{}: {} callable records", label(name), callables.len()));
+                    continue;
+                };
+                let actual: Vec<RecordedParameter> = function
+                    .parameters
+                    .iter()
+                    .map(|parameter| {
+                        (
+                            parameter.name.clone(),
+                            parameter.type_text.clone(),
+                            parameter.default_value.clone(),
+                            parameter.is_optional,
+                            parameter.is_variadic,
+                        )
+                    })
+                    .collect();
+                let expected: Vec<RecordedParameter> = [("x", "1"), ("y", "2"), ("z", "3")]
+                    .iter()
+                    .map(|(name, default)| {
+                        (name.to_string(), language.type_text.map(str::to_string), Some(default.to_string()), true, false)
+                    })
+                    .collect();
+                if actual != expected || function.arity != 3 || function.is_variadic {
+                    failures.push(format!(
+                        "{}: {actual:?} (arity {}, variadic {}), expected {expected:?}",
+                        label(name),
+                        function.arity,
+                        function.is_variadic
+                    ));
+                }
+                for (path, symbol) in functions_named(&extracted, name) {
+                    let defaults: Option<Vec<Option<&str>>> = symbol.signature.as_ref().map(|signature| {
+                        signature.parameters.iter().map(|parameter| parameter.default_value.as_deref()).collect()
+                    });
+                    if defaults != Some(vec![Some("1"), Some("2"), Some("3")]) {
+                        failures.push(format!("{} ({path}): defaults {defaults:?}", label(name)));
+                    }
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "comment-position rows failed: {failures:#?}");
+}
+
+/// The siblings of the default readers that took the node beside a token:
+/// a C# `params` array keeps its type and name with comments between them,
+/// and a Swift alias's target is never the comment after its `=`.
+#[test]
+fn comments_beside_params_arrays_and_alias_targets_are_skipped() {
+    for source in [
+        "class K {\n    void p(params int[] xs) {}\n}\n",
+        "class K {\n    void p(params /* c */ int[] /* d */ xs) {}\n}\n",
+    ] {
+        let extracted = extract_inline(source, "cs");
+        let signature = extracted.symbol("p", Some("K")).signature.clone().expect("`p`: signature");
+        let parameters: Vec<(&str, Option<&str>, bool)> = signature
+            .parameters
+            .iter()
+            .map(|parameter| (parameter.name.as_str(), parameter.type_annotation.as_deref(), parameter.is_variadic))
+            .collect();
+        assert_eq!(parameters, [("xs", Some("int[]"), true)], "{source:?}");
+    }
+
+    for source in ["typealias A = Int\n", "typealias A = /* c */ Int\n", "typealias A /* b */ = /* c */ Int\n"] {
+        let extracted = extract_inline(source, "swift");
+        let record = extracted.records.iter().find(|record| record.identity.name == "A").expect("alias record");
+        let SymbolKindData::TypeAlias(alias) = &record.kind_data else {
+            panic!("{source:?}: {:?} is not alias data", record.kind_data);
+        };
+        assert_eq!(alias.aliased_type_text.as_deref(), Some("Int"), "{source:?}");
+    }
 }

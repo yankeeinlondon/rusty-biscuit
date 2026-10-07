@@ -95,6 +95,29 @@ parameter of function type is a Parameter, never a Function: in C and C++
 `int f(void cb(int), void (*ptr)(int))` reports `cb` and `ptr` as Parameters
 (and so are names inside them, such as `value` in `void cb(int value)`).
 
+Only the name a declaration binds is reported. A parameter's type and its
+default value are references, never parameters, in every language: in
+`def g(x: W = external)` (Python) and `void g(W x, int y = external)` (C#)
+the parameters are `x` and `y`, while `W` and `external` are read. The same
+holds for a constant's value (`const B = A;` in PHP declares only `B`), the
+target object of a Python class-body assignment (`obj.attr = 1` declares
+nothing), the value of a walrus operator (`y := external` declares `y`), and
+a range bound or path in a Rust `if let` (`if let 1..=MAX = n`,
+`if let E::A = v` declare nothing).
+
+A C or C++ `struct`, `union` or `class` name is a declaration only when the
+specifier has a body or is written alone (`struct S;`, also as a member or in
+a namespace, template or `extern "C"` body). Anywhere else the name is an
+elaborated type use, a read of the type, and no record:
+
+```c
+struct S { int a; };     // Type S
+struct F;                // Type F (declared alone)
+struct S x;              // Variable x; `S` is a read
+void f(struct S *p);     // Parameter p; `S` is a read
+typedef struct S T;      // TypeAlias T; `S` is a read
+```
+
 **One rule makes a function a method.** A function declared directly in the
 body of a class, struct, enum, trait, interface, protocol, object, `impl`
 block or extension is a Method, whatever its receiver, decorators or
@@ -1907,6 +1930,13 @@ These are limits of the extractor today, not of the grammars, except the
   conformance in `implements`, and uncertain entries in `unclassified_bases`.
   Swift extensions of external or ambiguous owners cannot attach to a local record. See
   [Declared Type Relations](./type-relations.md#c-swift-and-scala).
+- **Some named declarations have no record**: Java annotation types
+  (`@interface A`) and modules, C# events with accessors and `extern alias`
+  names, Scala package clauses and package objects, C++ opaque enum
+  declarations (`enum class E;`) and qualified unions (`union A::U {}`), and
+  Swift macros and precedence groups. Their names are still never reference
+  occurrences (see
+  [Scope-Aware References](./references.md#declaration-names-in-the-other-languages)).
 - **Declarations with no record carry no generics**: a Python
   `type A[T] = …` statement and a C# `delegate` produce no record, so their
   type parameters are not reported anywhere.

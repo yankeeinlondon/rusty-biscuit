@@ -16,6 +16,8 @@ use super::scope::{
     BindingRule, BindingSite, BindingTarget, Dynamic, LanguageRules, Lookup, Refutability, ScopeTree, ancestors,
     is_direct_eval,
 };
+use super::declaration_names::{declaration_names, declared_name_tokens, scala_import_path_start};
+use super::syntax_markers::{SyntaxMarkers, syntax_markers};
 use super::symbol_ref;
 use crate::file::extract::{is_definition_like_reference, text_span_for_node};
 use crate::file::tree_file::{ExtractedSymbol, ReferenceCapture};
@@ -107,8 +109,7 @@ impl<'tree> OccurrenceSyntax<'tree> {
 
     /// The import (index into the `imports` given to [`Self::new`]) whose
     /// binding name starts at `name_start`: the import whose name node it
-    /// is, else the import of that name whose statement holds it (an
-    /// aliased import records the original name's node).
+    /// is, else the import of that name whose statement holds it.
     fn import_at(&self, name_start: usize, name: &str) -> Option<usize> {
         self.imports.iter().position(|site| site.name_start == name_start).or_else(|| {
             self.imports.iter().position(|site| {
@@ -228,6 +229,12 @@ struct Walk<'tree> {
     sites: Vec<BindingSite<'tree>>,
     globs: Vec<Node<'tree>>,
     dynamics: Vec<Dynamic<'tree>>,
+    /// Declaration-name tokens of a language without rules
+    /// ([`declaration_names`]); never occurrences.
+    declarations: Vec<Node<'tree>>,
+    /// Contextual syntax markers of a language without rules
+    /// ([`syntax_markers`]); never occurrences.
+    markers: SyntaxMarkers<'tree>,
 }
 
 impl<'tree> Walk<'tree> {
@@ -245,8 +252,12 @@ impl<'tree> Walk<'tree> {
                 if language_anonymous.contains(&node.kind()) {
                     walk.anonymous.push(node);
                 }
-                if let Some(rules) = rules {
-                    walk.visit(node, rules, source);
+                match rules {
+                    Some(rules) => walk.visit(node, rules, source),
+                    None => {
+                        declaration_names(node, language, source, &mut walk.declarations);
+                        syntax_markers(node, language, source, &mut walk.markers);
+                    }
                 }
             }
             if cursor.goto_first_child() {
@@ -446,8 +457,9 @@ struct Resolver<'a, 'tree> {
     records: &'a [SymbolRecord],
     rules: Option<LanguageRules>,
     scopes: Option<ScopeTree<'tree>>,
-    /// Name spans of binding sites; never occurrences.
-    binding_names: HashSet<(usize, usize)>,
+    /// Name spans of binding sites and of a rule-less language's
+    /// declaration names and syntax markers; never occurrences.
+    excluded_names: HashSet<(usize, usize)>,
     /// What each bare pattern name that binds nothing proved to be.
     pattern_reads: PatternReads,
     /// Record indexes by name, in record order.
@@ -471,13 +483,16 @@ impl<'a, 'tree> Resolver<'a, 'tree> {
             pattern_reads = bind_all(&mut tree, syntax, rules, walk);
             tree
         });
-        let binding_names = walk
+        let excluded_names = walk
             .sites
             .iter()
-            .map(|site| (site.name.start_byte(), site.name.end_byte()))
+            .map(|site| site.name)
+            .chain(walk.declarations.iter().flat_map(|name| declared_name_tokens(*name)))
+            .chain(walk.markers.nodes())
+            .map(|name| (name.start_byte(), name.end_byte()))
             .filter(|range| !pattern_reads.contains(range))
             .collect();
-        Self { syntax, records, rules, scopes, binding_names, pattern_reads, by_name }
+        Self { syntax, records, rules, scopes, excluded_names, pattern_reads, by_name }
     }
 
     fn text(&self, node: Node<'_>) -> &'tree str {
@@ -493,12 +508,15 @@ impl<'a, 'tree> Resolver<'a, 'tree> {
         let name = self.text(node);
         if name.is_empty()
             || self.syntax.excluded.contains(&range)
-            || self.binding_names.contains(&range)
+            || self.excluded_names.contains(&range)
             // Supported languages know their binding names exactly; the
-            // others fall back on the older syntactic filter.
+            // others add the declaration-name sites to the older syntactic
+            // filter.
             || (self.rules.is_none() && is_definition_like_reference(node, self.syntax.language))
-            || ancestors(node).any(|ancestor| is_excluded_context(ancestor.kind()))
+            || ancestors(node).any(|ancestor| is_excluded_context(ancestor.kind(), self.syntax.language))
+            || is_ecma_export_name(node, self.syntax.language)
             || (self.rules == Some(LanguageRules::Rust) && name == "Self")
+            || is_wildcard(name, self.syntax.language)
         {
             return None;
         }
@@ -1002,17 +1020,62 @@ fn record_rule(rules: LanguageRules, kind: SymbolKind) -> BindingRule {
 
 /// Code that holds no occurrences: imports (their names are import
 /// records), attributes, and Rust lifetimes and loop labels (`'_`, `'outer`).
-fn is_excluded_context(kind: &str) -> bool {
-    matches!(
-        kind,
-        "use_declaration"
-            | "extern_crate_declaration"
-            | "attribute_item"
-            | "inner_attribute_item"
-            | "import_statement"
-            | "lifetime"
-            | "label"
-    )
+/// `_` in a language where it is a wildcard keyword that no declaration can
+/// bind (`_ = f()` discards), so it never refers to anything. Elsewhere
+/// (Python, JS/TS, Lua, C/C++, C#, and Java before 9) `_` is an ordinary name a declaration can
+/// bind, and a use of it stays an occurrence.
+fn is_wildcard(name: &str, language: ProgrammingLanguage) -> bool {
+    name == "_"
+        && matches!(
+            language,
+            ProgrammingLanguage::Rust
+                | ProgrammingLanguage::Go
+                | ProgrammingLanguage::Swift
+                | ProgrammingLanguage::Scala
+        )
+}
+
+/// Whether nothing inside a node of `kind` is an occurrence: a Rust `use`
+/// or `extern crate`, a TS/JS `import` statement, an attribute, a lifetime
+/// or a label. Python shares the `import_statement` kind, but a Python
+/// import's module path segments other than the bound name are reads.
+fn is_excluded_context(kind: &str, language: ProgrammingLanguage) -> bool {
+    match kind {
+        "import_statement" => matches!(language, ProgrammingLanguage::TypeScript | ProgrammingLanguage::JavaScript),
+        _ => matches!(
+            kind,
+            "use_declaration" | "extern_crate_declaration" | "attribute_item" | "inner_attribute_item" | "lifetime" | "label"
+        ),
+    }
+}
+
+/// Whether the TS/JS token `node` names a module export rather than reading
+/// a binding: anything in a re-export from another module (`export { k as
+/// j } from "m"`, `export * as ns from "m"`, `export { default } from "m"`,
+/// `export type { T } from "m"`), which names that module's exports like an
+/// `import` statement does; the exported name of a local export (`j` in
+/// `export { k as j }`); and the global name of `export as namespace X`. A
+/// local export's own name (`k` in `export { k }`, `export = k`) reads `k`.
+pub(crate) fn is_ecma_export_name(node: Node<'_>, language: ProgrammingLanguage) -> bool {
+    if !matches!(language, ProgrammingLanguage::TypeScript | ProgrammingLanguage::JavaScript) {
+        return false;
+    }
+    let Some(statement) = ancestors(node).find(|ancestor| ancestor.kind() == "export_statement") else {
+        return false;
+    };
+    if statement.child_by_field_name("source").is_some() {
+        return true;
+    }
+    let Some(parent) = node.parent() else { return false };
+    if parent.kind() == "export_specifier" {
+        return parent.child_by_field_name("alias").is_some_and(|alias| alias.id() == node.id());
+    }
+    // `export as namespace X`: the grammar writes `as` and `namespace` as
+    // anonymous tokens beside `X`.
+    parent.id() == statement.id() && {
+        let mut cursor = statement.walk();
+        statement.children(&mut cursor).any(|child| child.kind() == "namespace")
+    }
 }
 
 /// Parent kinds that write a qualifier or receiver before a name.
@@ -1035,6 +1098,7 @@ const QUALIFYING_KINDS: &[&str] = &[
     "nullsafe_member_call_expression",
     "nullsafe_member_access_expression",
     "class_constant_access_expression",
+    "scoped_property_access_expression",
     "dot_index_expression",
     "method_index_expression",
     "navigation_expression",
@@ -1063,18 +1127,34 @@ const QUALIFIER_FIELDS: &[&str] = &[
 ];
 
 /// Path kinds whose segments carry no field: Java `a.b.C`, Scala `a.b.C`
-/// (types and stable identifiers), Swift `A.B` types. Every segment after
-/// the first is qualified by the ones before it.
-const SEGMENTED_KINDS: &[&str] = &["scoped_type_identifier", "stable_type_identifier", "stable_identifier", "user_type"];
+/// (types and stable identifiers), Swift `A.B` types, PHP `X::K`, Python
+/// module paths (`a.b` in `from a.b import c`) and class patterns. Every
+/// segment after the first is qualified by the ones before it.
+const SEGMENTED_KINDS: &[&str] = &[
+    "dotted_name",
+    "scoped_type_identifier",
+    "stable_type_identifier",
+    "stable_identifier",
+    "user_type",
+    "class_constant_access_expression",
+];
 
 /// The node `node` is the name part of, one step out: a path or member
 /// access whose qualifier, receiver or root (`::f` in Rust and C++) is
-/// written before `node`, or the C# conditional access around the
-/// `member_binding_expression` (`.F`) that holds `node` (`obj?.F`).
+/// written before `node`, the C# conditional access around the
+/// `member_binding_expression` (`.F`) that holds `node` (`obj?.F`), or a
+/// Java construction whose enclosing-instance receiver is written before
+/// `new` (`outer.new C()`, [`construction_receiver`]) and whose type is
+/// `node`.
 fn qualified_parent(node: Node<'_>) -> Option<Node<'_>> {
     let parent = node.parent()?;
     let holds_name = || parent.child_by_field_name("name").is_some_and(|name| name.id() == node.id());
     match parent.kind() {
+        "object_creation_expression" => parent
+            .child_by_field_name("type")
+            .filter(|constructed| constructed.id() == node.id())
+            .and(construction_receiver(parent))
+            .map(|_| parent),
         // Swift holds a member name in a `navigation_suffix` below its
         // `navigation_expression`.
         "navigation_suffix" => parent
@@ -1082,6 +1162,12 @@ fn qualified_parent(node: Node<'_>) -> Option<Node<'_>> {
             .filter(|suffix| suffix.id() == node.id())
             .and(parent.parent())
             .filter(|navigation| navigation.kind() == "navigation_expression"),
+        // PHP holds a static property's name in a `variable_name`
+        // (`X::$f`).
+        "variable_name" => parent.parent().filter(|access| {
+            access.kind() == "scoped_property_access_expression"
+                && access.child_by_field_name("name").is_some_and(|name| name.id() == parent.id())
+        }),
         "member_binding_expression" if holds_name() => parent
             .parent()
             .filter(|access| access.kind() == "conditional_access_expression")
@@ -1104,6 +1190,18 @@ fn qualified_parent(node: Node<'_>) -> Option<Node<'_>> {
     }
 }
 
+/// The receiver a Java qualified construction writes before `new`
+/// (`outer`, `(outer)`, `this`, `factory()`, `holder.outer` in
+/// `….new C()`). The pinned grammar holds it as an unfielded child; Java,
+/// C# and PHP constructions without one start with `new`.
+fn construction_receiver(construction: Node<'_>) -> Option<Node<'_>> {
+    let mut cursor = construction.walk();
+    construction
+        .children(&mut cursor)
+        .take_while(|child| child.kind() != "new")
+        .find(|child| child.is_named() && !child.kind().contains("comment"))
+}
+
 /// Whether `node` follows another named segment of the field-less path
 /// `path` ([`SEGMENTED_KINDS`]).
 fn field_less_segment_follows(path: Node<'_>, node: Node<'_>) -> bool {
@@ -1121,9 +1219,12 @@ fn is_rooted(path: Node<'_>, name: Node<'_>) -> bool {
 
 /// The written path or receiver expression ending at `node` (`Self::new`,
 /// `other.run`, `::f`, `A::B::f`, `r4::f` in `r4::f<int>()`, `obj?.A?.Invoke`,
-/// `R4->r4f`), when `node` is qualified: the source from the outermost
-/// qualifier through `node`. Type arguments after `node` are outside it;
-/// those inside a qualifier (`N::C<int>::member`) stay.
+/// `R4->r4f`, `outer.new C`), when `node` is qualified: the source from the
+/// outermost qualifier through `node`. Type arguments after `node` are
+/// outside it; those inside a qualifier (`N::C<int>::member`) stay, and so
+/// does Java's `new` between a receiver and the constructed type. A Swift
+/// prefix operator applies to the whole member chain, so it is outside it
+/// ([`qualifier_start`]).
 ///
 /// The climb crosses generic instantiations of `node` ([`path_wrapper`]),
 /// every path or access `node` is the name part of ([`qualified_parent`]),
@@ -1134,13 +1235,18 @@ fn written_path(node: Node<'_>, source: &str, language: ProgrammingLanguage) -> 
     if let Some(start) = php_namespace_segment_start(node) {
         return source.get(start..node.end_byte()).map(str::to_string);
     }
+    if language == ProgrammingLanguage::Scala
+        && let Some(first) = scala_import_path_start(node)
+    {
+        return (first.id() != node.id()).then(|| source.get(first.start_byte()..node.end_byte()).map(str::to_string)).flatten();
+    }
     let mut start = None;
     let mut current = node;
     loop {
         if let Some(wrapper) = path_wrapper(current, language) {
             current = wrapper;
         } else if let Some(qualified) = qualified_parent(current) {
-            start = Some(qualifier_start(qualified));
+            start = qualifier_start(qualified, language).or(start);
             current = qualified;
         } else if let Some(scoped) = right_nested_scope(current, language) {
             current = scoped;
@@ -1169,26 +1275,100 @@ fn php_namespace_segment_start(node: Node<'_>) -> Option<usize> {
 }
 
 /// Where the path `qualified` writes its qualifier: its own start, except a
-/// Perl bareword call, whose sigil (`&R4::r4f`) is not part of the path.
-fn qualifier_start(qualified: Node<'_>) -> usize {
-    match qualified.kind() {
-        "call_expression_with_bareword" => qualified
-            .child_by_field_name("package_name")
-            .map_or(qualified.start_byte(), |package| package.start_byte()),
-        _ => qualified.start_byte(),
+/// Perl bareword call, whose sigil (`&R4::r4f`) is not part of the path,
+/// a Swift member chain the grammar starts with a prefix operator
+/// ([`swift_chain_start`]) and a Python attribute chain it starts with an
+/// unpacking star ([`python_chain_start`]). `None` when `qualified` writes no qualifier
+/// after all: a Swift implicit member behind an operator (`some` in
+/// `-.some`).
+fn qualifier_start(qualified: Node<'_>, language: ProgrammingLanguage) -> Option<usize> {
+    match (language, qualified.kind()) {
+        (_, "call_expression_with_bareword") => Some(
+            qualified
+                .child_by_field_name("package_name")
+                .map_or(qualified.start_byte(), |package| package.start_byte()),
+        ),
+        (ProgrammingLanguage::Swift, "navigation_expression") => swift_chain_start(qualified),
+        (ProgrammingLanguage::Python, "attribute") => Some(python_chain_start(qualified)),
+        _ => Some(qualified.start_byte()),
+    }
+}
+
+/// Where the Python attribute chain `attribute` starts once a leading
+/// unpacking star is set aside. In an assignment target the pinned grammar
+/// writes `[*x.s] = r` as `(*x).s`, though the star unpacks the whole
+/// target `x.s` (as it does in `f(*x.s)`, which the grammar nests
+/// correctly), so the chain starts at the star's operand.
+fn python_chain_start(attribute: Node<'_>) -> usize {
+    let mut leftmost = attribute;
+    loop {
+        let next = match leftmost.kind() {
+            "attribute" => leftmost.child_by_field_name("object"),
+            "call" => leftmost.child_by_field_name("function"),
+            "subscript" => leftmost.child_by_field_name("value"),
+            "list_splat" | "dictionary_splat" => return first_operand(leftmost).map_or(attribute.start_byte(), |operand| operand.start_byte()),
+            _ => None,
+        };
+        match next {
+            Some(node) => leftmost = node,
+            None => return attribute.start_byte(),
+        }
+    }
+}
+
+/// Where the Swift member chain `navigation` starts once a leading prefix
+/// operator is set aside. The pinned grammar writes `!x.isEmpty()` as
+/// `(!x).isEmpty()`, but a Swift prefix operator binds looser than member
+/// access, calls, subscripts and postfix `!`/`?`, so it applies to the whole
+/// chain and is no qualifier: the chain starts at the operator's operand
+/// (`x`, also below `!-x`). Before an implicit member the grammar writes
+/// the operator as the navigation's own anonymous `target` (`-.some.f()`):
+/// the chain starts at that member's `.`, and the member itself has no
+/// qualifier (`None`), as without the operator. Written parentheses
+/// (`(!x).f`) are a `tuple_expression` and stay, as does an implicit
+/// member's `.` (`.some.f`).
+fn swift_chain_start(navigation: Node<'_>) -> Option<usize> {
+    let is_operator = |node: Node<'_>| {
+        node.kind() == "prefix_expression"
+            && node.child_by_field_name("operation").is_some_and(|operation| operation.kind() != ".")
+    };
+    let mut leftmost = navigation;
+    loop {
+        let next = match leftmost.kind() {
+            "navigation_expression" => {
+                let target = leftmost.child_by_field_name("target");
+                // `!` is the grammar's one named operator token.
+                if let Some(operator) = target.filter(|target| !target.is_named() || target.kind() == "bang") {
+                    return (leftmost.id() != navigation.id())
+                        .then(|| operator.next_sibling())
+                        .flatten()
+                        .map(|member| member.start_byte());
+                }
+                target
+            }
+            "postfix_expression" => leftmost.child_by_field_name("target"),
+            "call_expression" => first_operand(leftmost),
+            _ if is_operator(leftmost) => {
+                let mut operand = leftmost;
+                while is_operator(operand) {
+                    operand = operand.child_by_field_name("target")?;
+                }
+                return Some(operand.start_byte());
+            }
+            _ => None,
+        };
+        match next {
+            Some(node) => leftmost = node,
+            None => return Some(navigation.start_byte()),
+        }
     }
 }
 
 /// The generic form `node` is the name of, for the written path: every
-/// [`generic_instantiation`] plus a C++ `template_type` (`C` in
-/// `r4::C<int> v`).
+/// [`generic_instantiation`], types included (`C` in `r4::C<int> v`).
 fn path_wrapper<'tree>(node: Node<'tree>, language: ProgrammingLanguage) -> Option<Node<'tree>> {
     let parent = node.parent()?;
-    let operand = match (language, parent.kind()) {
-        (ProgrammingLanguage::Cpp, "template_type") => parent.child_by_field_name("name"),
-        _ => generic_operand(parent, language),
-    };
-    operand.filter(|operand| operand.id() == node.id()).map(|_| parent)
+    generic_instantiation(node, parent, language)
 }
 
 /// The C++ path `node` is the scope of, when that path is itself the name
@@ -1208,14 +1388,18 @@ fn right_nested_scope<'tree>(node: Node<'tree>, language: ProgrammingLanguage) -
 }
 
 /// Whether `node` names the target of an invocation: a call's function, a
-/// method name, a constructed type or an applied decorator, directly or as
-/// the name part of a path (rooted ones included), receiver expression,
-/// conditional access or generic instantiation ([`qualified_parent`]), and
-/// through wrappers that only restate their operand
+/// method name, a constructed type (`new`, Swift `C<Int>()`, C++ braced
+/// `C{}`) or an applied decorator, directly or as the name part of a path
+/// (rooted ones included), receiver expression, conditional access
+/// ([`qualified_parent`]) or generic instantiation of a function or a
+/// constructed type ([`generic_instantiation`]), a Swift implicit member
+/// or Scala mixin base ([`implied_operand`]), and through wrappers that
+/// only restate their operand
 /// ([`transparent_wrapper`]), or a PHP variable whose value is invoked
 /// (`$cb()`, `new $C()`). A receiver, an argument, an operand of a
-/// sequence or conditional, and a dereference are never the target, nor
-/// is the callee of PHP callable creation (`f(...)`), which calls nothing.
+/// sequence or conditional, a dereference and a subscripted operand (Swift
+/// `a[0]`, [`is_swift_subscript`]) are never the target, nor is the callee
+/// of PHP callable creation (`f(...)`), which calls nothing.
 fn is_call_target(node: Node<'_>, language: ProgrammingLanguage, source: &str) -> bool {
     match language {
         ProgrammingLanguage::Bash | ProgrammingLanguage::Zsh => return is_shell_command_name(node),
@@ -1231,10 +1415,20 @@ fn is_call_target(node: Node<'_>, language: ProgrammingLanguage, source: &str) -
         let holds = |field: &str| parent.child_by_field_name(field).is_some_and(|child| child.id() == target.id());
         let is_first = || first_operand(parent).is_some_and(|first| first.id() == target.id());
         let invoked = match parent.kind() {
+            "call_expression" if language == ProgrammingLanguage::Swift && is_swift_subscript(parent) => false,
             "call_expression" | "call" | "invocation_expression" | "function_call_expression" => {
                 holds("function") || (parent.child_by_field_name("function").is_none() && is_first())
             }
-            "new_expression" => holds("constructor") || holds("type"),
+            // A C++ array `new C[n]` writes no constructor call, like Java
+            // and C# array creation.
+            "new_expression" => {
+                holds("constructor") || (holds("type") && parent.child_by_field_name("declarator").is_none())
+            }
+            // Swift `C<Int>()`, `N.C<Int>()`; C++ braced construction
+            // `Plain{}`, `N::C<int>{}` (a C compound literal constructs
+            // nothing).
+            "constructor_expression" => language == ProgrammingLanguage::Swift && holds("constructed_type"),
+            "compound_literal_expression" => language == ProgrammingLanguage::Cpp && holds("type"),
             "object_creation_expression" => {
                 holds("type") || (language == ProgrammingLanguage::Php && is_first())
             }
@@ -1269,12 +1463,55 @@ fn is_call_target(node: Node<'_>, language: ProgrammingLanguage, source: &str) -
         }
         if let Some(generic) = generic_instantiation(target, parent, language) {
             target = generic;
+        } else if let Some(constructed) = implied_operand(target, parent, language) {
+            target = constructed;
         } else if let Some(qualified) = qualified_parent(target) {
             target = qualified;
         } else {
             return false;
         }
     }
+}
+
+/// The form `node` is the invoked part of without being a path or an
+/// instantiation of it, so it adds no written qualifier: a Swift implicit
+/// member (`.f` in `.f()`, `.init()`, `.some(1)`), a Swift name an
+/// operator is written before (`f` in `!f()`, `-f()`), and the class a
+/// Scala mixin construction instantiates (`C` in `new C with T`).
+fn implied_operand<'tree>(node: Node<'tree>, parent: Node<'tree>, language: ProgrammingLanguage) -> Option<Node<'tree>> {
+    let holds = |field: &str| parent.child_by_field_name(field).is_some_and(|child| child.id() == node.id());
+    let implied = match (language, parent.kind()) {
+        // The pinned grammar writes `!f()` as `(!f)()`, but a Swift prefix
+        // operator binds looser than a call, so it applies to the call's
+        // result; written parentheses (`(-f)()`) call the operator's
+        // result and are a `tuple_expression` in between.
+        (ProgrammingLanguage::Swift, "prefix_expression") => {
+            holds("target")
+                && parent.child_by_field_name("operation").is_some_and(|operation| {
+                    operation.kind() == "." || parent.parent().is_some_and(|call| call.kind() == "call_expression")
+                })
+        }
+        (ProgrammingLanguage::Scala, "compound_type") => holds("base"),
+        _ => false,
+    };
+    implied.then_some(parent)
+}
+
+/// Whether the Swift `call_expression` `call` is a subscript (`a[0]`,
+/// `a?[0]`, `a[keyPath: k]`, `a[0] { … }`): tree-sitter-swift 0.7.1 writes
+/// one with the same node as a call, its `value_arguments` bracketed.
+/// A subscript invokes nothing, so its operand is never a call target.
+fn is_swift_subscript(call: Node<'_>) -> bool {
+    let mut cursor = call.walk();
+    let Some(suffix) = call.named_children(&mut cursor).find(|child| child.kind() == "call_suffix") else {
+        return false;
+    };
+    let mut cursor = suffix.walk();
+    let Some(arguments) = suffix.named_children(&mut cursor).find(|child| child.kind() == "value_arguments") else {
+        return false;
+    };
+    let mut cursor = arguments.walk();
+    arguments.children(&mut cursor).any(|token| token.kind() == "[")
 }
 
 /// The PHP variable `$cb` whose name token is `node`: a variable is the
@@ -1305,8 +1542,12 @@ fn first_operand(node: Node<'_>) -> Option<Node<'_>> {
 
 /// The wrapper around `node` that evaluates to exactly `node`'s value, so
 /// invoking the wrapper invokes `node`: parentheses holding nothing else
-/// (Swift writes them as a one-element, unlabeled `tuple_expression`), and
-/// the TypeScript type-only forms `x as T`, `x satisfies T`, `<T>x` and `x!`.
+/// (Swift writes them as a one-element, unlabeled `tuple_expression`), the
+/// TypeScript type-only forms `x as T`, `x satisfies T`, `<T>x` and `x!`,
+/// the Swift force unwrap `x!` and the C# null-forgiving `x!`. Only the
+/// exact `!` operator restates its operand: Swift optional chaining
+/// (`x?()`), postfix `++`/`--` and the Swift infix operators `!!`/`?!`
+/// the pinned grammar lexes from `cb!!()`/`cb?!()` are not wrappers.
 ///
 /// PHP parentheses are transparent only around a variable (`($cb)()`,
 /// `(($cb))()`): a bare name inside them is a constant, so `(f)()` calls the
@@ -1342,6 +1583,18 @@ fn wrapper_operand<'tree>(wrapper: Node<'tree>, language: ProgrammingLanguage) -
         (ProgrammingLanguage::TypeScript, "type_assertion") => wrapper
             .named_child((wrapper.named_child_count() as u32).saturating_sub(1))
             .filter(|operand| operand.kind() != "type_arguments"),
+        // Swift force unwrap `cb!`: the grammar's one named operator token.
+        // `?` in `cb?()` is a call's own token, and `++`/`--` are anonymous.
+        (ProgrammingLanguage::Swift, "postfix_expression") => wrapper
+            .child_by_field_name("operation")
+            .filter(|operation| operation.kind() == "bang")
+            .and_then(|_| wrapper.child_by_field_name("target")),
+        // C# null-forgiving `cb!`, which shares its node with `i++`/`i--`.
+        (ProgrammingLanguage::CSharp, "postfix_unary_expression") => {
+            let mut cursor = wrapper.walk();
+            let operator = wrapper.children(&mut cursor).filter(|child| !child.is_extra()).last();
+            operator.filter(|operator| operator.kind() == "!").and_then(|_| only_operand())
+        }
         _ => None,
     }
 }
@@ -1423,11 +1676,17 @@ fn member_name<'tree>(access: Node<'tree>, language: ProgrammingLanguage) -> Opt
     matches!(name.kind(), "property_identifier" | "private_property_identifier" | "field_identifier").then_some(name)
 }
 
-/// The generic instantiation `node` is the function part of: Rust
+/// The generic instantiation `node` is the function or type part of: Rust
 /// `f::<T>`, Scala `f[T]`, C++ `f<T>` (also `obj.template m<T>`), C# `f<T>`,
-/// and a TypeScript instantiation expression (`f<T>` or `obj.m<T>` written
-/// apart from its call, as in `(f<T>)()`). Go `f[T]` is not one: the
-/// grammar writes it as an `index_expression`, the same node as `fs[0]`.
+/// a TypeScript instantiation expression (`f<T>` or `obj.m<T>` written
+/// apart from its call, as in `(f<T>)()`), and the generic types a
+/// construction names: Java `C<String>` and `a.b.C<>`, Scala `C[Int]`,
+/// C++ `C<int>`, Swift `C<Int>` (a one-segment `user_type`: in `N.C<Int>`
+/// the path step reaches the same node). Go `f[T]` is not one: the grammar
+/// writes it as an `index_expression`, the same node as `fs[0]`.
+///
+/// A generic type is only ever invoked where a construction holds it, so a
+/// type annotation `C<T>` stays a usage.
 fn generic_instantiation<'tree>(node: Node<'tree>, parent: Node<'tree>, language: ProgrammingLanguage) -> Option<Node<'tree>> {
     generic_operand(parent, language).filter(|operand| operand.id() == node.id()).map(|_| parent)
 }
@@ -1437,7 +1696,19 @@ fn generic_instantiation<'tree>(node: Node<'tree>, parent: Node<'tree>, language
 fn generic_operand<'tree>(instantiation: Node<'tree>, language: ProgrammingLanguage) -> Option<Node<'tree>> {
     let field = match (language, instantiation.kind()) {
         (ProgrammingLanguage::Rust | ProgrammingLanguage::Scala, "generic_function") => "function",
-        (ProgrammingLanguage::Cpp, "template_function" | "template_method") => "name",
+        (ProgrammingLanguage::Cpp, "template_function" | "template_method" | "template_type") => "name",
+        (ProgrammingLanguage::Scala, "generic_type") => "type",
+        (ProgrammingLanguage::Java, "generic_type") => {
+            return first_operand(instantiation).filter(|operand| operand.kind() != "type_arguments");
+        }
+        (ProgrammingLanguage::Swift, "user_type") => {
+            let mut cursor = instantiation.walk();
+            let mut segments = instantiation.named_children(&mut cursor).filter(|child| child.kind() == "type_identifier");
+            let only = segments.next().filter(|_| segments.next().is_none())?;
+            let generic = first_operand(instantiation).is_some_and(|first| first.id() == only.id())
+                && only.next_named_sibling().is_some_and(|next| next.kind() == "type_arguments");
+            return generic.then_some(only);
+        }
         (ProgrammingLanguage::CSharp, "generic_name") | (ProgrammingLanguage::Cpp, "dependent_name") => {
             return first_operand(instantiation);
         }

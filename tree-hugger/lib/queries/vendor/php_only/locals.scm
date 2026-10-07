@@ -47,7 +47,7 @@
 ; Definitions
 ;------------
 (simple_parameter
-  (variable_name
+  name: (variable_name
     (name) @local.definition.var))
 
 (foreach_statement
@@ -64,17 +64,28 @@
 
 (property_declaration
   (property_element
-    (variable_name
+    name: (variable_name
       (name) @local.definition.field)))
 
 (const_declaration
   (const_element
+    .
     (name) @local.definition.constant))
 
-; Imports (use statements)
+; Imports (use statements): only the name each clause binds, its alias or
+; else its path's last segment (`use A;`, `use A\B;`, `B` in
+; `use A\{B, C as D};`); a qualifier and an aliased original are reads.
+(namespace_use_clause
+  alias: (name) @local.definition.import)
+
+(namespace_use_clause
+  (name) @local.definition.import
+  !alias)
+
 (namespace_use_clause
   (qualified_name
-    (name) @local.definition.import))
+    (name) @local.definition.import)
+  !alias)
 
 ; References
 ;------------

@@ -740,11 +740,9 @@ pub(crate) fn import_binding<'source>(
             }
         }
         (ProgrammingLanguage::Swift, "import_declaration") => {
-            let mut cursor = node.walk();
-            let selective = node.children(&mut cursor).find_map(|child| match child.kind() {
-                "typealias" | "struct" | "class" | "enum" | "protocol" => Some(crate::analysis::scope::TYPE),
-                "let" | "var" | "func" => Some(crate::analysis::scope::VALUE),
-                _ => None,
+            let selective = crate::analysis::declaration_names::swift_import_selector(node).map(|selector| match selector {
+                "let" | "var" | "func" => crate::analysis::scope::VALUE,
+                _ => crate::analysis::scope::TYPE,
             });
             let Some(group) = selective else { return Some(ImportBinding::Module) };
             categories = group;

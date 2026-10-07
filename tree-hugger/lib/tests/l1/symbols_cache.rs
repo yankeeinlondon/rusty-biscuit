@@ -2711,3 +2711,850 @@ fn invocation_kinds_hold_through_narrow_widened_projected_and_warm_results() {
         }
     }
 }
+
+/// R5-F1 sources: constructed generic types, braced construction and
+/// implicit members, with their type arguments, qualifiers, receivers and
+/// arguments as usages.
+const CONSTRUCTED_KIND_SOURCES: &[KindRow] = &[
+    (
+        "construct.java",
+        "class C<T> { C() {} }\nclass G {\n    void g(Object y) {\n        new C<String>();\n        new a.b.C<>();\n        outer.new C<String>(y);\n    }\n}\n",
+        &[
+            (4, "C", OccurrenceKind::Call),
+            (4, "String", OccurrenceKind::Usage),
+            (5, "a", OccurrenceKind::Usage),
+            (5, "C", OccurrenceKind::Call),
+            (6, "outer", OccurrenceKind::Usage),
+            (6, "C", OccurrenceKind::Call),
+            (6, "y", OccurrenceKind::Usage),
+        ],
+    ),
+    (
+        "construct.scala",
+        "class C[T]\nobject G {\n  def g(y: Int): Unit = {\n    new C[Int](y)\n    new a.b.C[Int] {}\n    new C with T\n  }\n}\n",
+        &[
+            (4, "C", OccurrenceKind::Call),
+            (4, "Int", OccurrenceKind::Usage),
+            (4, "y", OccurrenceKind::Usage),
+            (5, "a", OccurrenceKind::Usage),
+            (5, "C", OccurrenceKind::Call),
+            (6, "C", OccurrenceKind::Call),
+            (6, "T", OccurrenceKind::Usage),
+        ],
+    ),
+    (
+        "construct.swift",
+        "func g(x: Int) {\n    _ = N.C<Int>()\n    let _: E = .some(x)\n    let _: E = .none\n    _ = !f()\n}\n",
+        &[
+            (2, "N", OccurrenceKind::Usage),
+            (2, "C", OccurrenceKind::Call),
+            (2, "Int", OccurrenceKind::Usage),
+            (3, "some", OccurrenceKind::Call),
+            (3, "x", OccurrenceKind::Usage),
+            (4, "none", OccurrenceKind::Usage),
+            (5, "f", OccurrenceKind::Call),
+        ],
+    ),
+    (
+        "construct.cpp",
+        "struct Plain { Plain(int) {} };\nvoid g(int x) {\n    new N::C<int>();\n    Plain{x};\n    new Plain[2];\n}\n",
+        &[
+            (3, "N", OccurrenceKind::Usage),
+            (3, "C", OccurrenceKind::Call),
+            (4, "Plain", OccurrenceKind::Call),
+            (4, "x", OccurrenceKind::Usage),
+            (5, "Plain", OccurrenceKind::Usage),
+        ],
+    ),
+];
+
+/// R5-F1.C4: construction and implicit-member kinds are served as computed
+/// by a functions-only entry, its warm `Hit`, a record-only semantic
+/// widening, a kind widening, the complete warm `Hit` and a projected
+/// type-only result; each equals an uncached run.
+#[test]
+fn constructed_and_implicit_member_kinds_hold_through_the_cache() {
+    let narrow = SymbolQuery::new().kinds(FUNCTION_KINDS).capabilities([Capability::Occurrences]);
+    let semantic = SymbolQuery::new().kinds(FUNCTION_KINDS).capabilities([Capability::Occurrences, Capability::Semantics]);
+    let complete = SymbolQuery::complete_index();
+    let projected = SymbolQuery::new().kinds(TYPE_KINDS).capabilities([Capability::Occurrences]);
+    for &(name, source, expected) in CONSTRUCTED_KIND_SOURCES {
+        let dir = TempDir::new().expect("temp");
+        let path = dir.path().join(name);
+        std::fs::write(&path, source).expect("write source");
+        let cache = cache_in(&dir);
+        let steps: [(&str, &SymbolQuery, CacheLookup); 6] = [
+            ("narrow cold", &narrow, CacheLookup::Miss(CacheMiss::Absent)),
+            ("narrow warm", &narrow, CacheLookup::Hit),
+            ("semantic widening", &semantic, CacheLookup::WidenedCapabilities { parsed: false }),
+            ("kind widening", &complete, CacheLookup::WidenedKinds),
+            ("complete warm", &complete, CacheLookup::Hit),
+            ("projected", &projected, CacheLookup::Hit),
+        ];
+        for (step, query, expected_lookup) in steps {
+            let cell = format!("{name}: {step}");
+            let (lookup, served, _) = cached(&cache, read(&path), query);
+            assert_eq!(lookup, expected_lookup, "{cell}");
+            assert_eq!(served, uncached(&path, query), "{cell}: equals an uncached run");
+            assert_invocation_kinds(&served, expected, &cell);
+        }
+    }
+}
+
+/// `(file name, source, [(line, name, written path, kind)])`.
+type WrittenPathCacheRow = (&'static str, &'static str, &'static [(u32, &'static str, Option<&'static str>, OccurrenceKind)]);
+
+/// R5-F3.C4 sources: Java receivers before `new` (simple, parenthesized,
+/// `this`, evaluated, chained, generic, anonymous body) and Swift prefix
+/// operators kept out of the member chain (R5-F3.S1).
+const WRITTEN_PATH_CACHE_SOURCES: &[WrittenPathCacheRow] = &[
+    (
+        "receivers.java",
+        "class G {\n    class C {}\n    void g(G outer) {\n        outer.new C();\n        (outer).new C();\n        this.new C();\n        factory().new C();\n        holder.outer.new C();\n        outer.new C<String>();\n        outer.new C() {};\n    }\n    G factory() { return this; }\n}\n",
+        &[
+            (4, "C", Some("outer.new C"), OccurrenceKind::Call),
+            (5, "C", Some("(outer).new C"), OccurrenceKind::Call),
+            (6, "C", Some("this.new C"), OccurrenceKind::Call),
+            (7, "factory", None, OccurrenceKind::Call),
+            (7, "C", Some("factory().new C"), OccurrenceKind::Call),
+            (8, "outer", Some("holder.outer"), OccurrenceKind::Usage),
+            (8, "C", Some("holder.outer.new C"), OccurrenceKind::Call),
+            (9, "C", Some("outer.new C"), OccurrenceKind::Call),
+            (9, "String", None, OccurrenceKind::Usage),
+            (10, "C", Some("outer.new C"), OccurrenceKind::Call),
+        ],
+    ),
+    (
+        "operators.swift",
+        "func isEmpty() -> Bool { true }\nfunc g(x: [Int]) {\n    _ = !x.isEmpty()\n    _ = -x.y.f()\n    _ = -.some.f()\n}\n",
+        &[
+            (3, "isEmpty", Some("x.isEmpty"), OccurrenceKind::Call),
+            (4, "y", Some("x.y"), OccurrenceKind::Usage),
+            (4, "f", Some("x.y.f"), OccurrenceKind::Call),
+            (5, "some", None, OccurrenceKind::Usage),
+            (5, "f", Some(".some.f"), OccurrenceKind::Call),
+        ],
+    ),
+    // R5-F1.S17: a Swift subscript's operand is never a call target.
+    (
+        "subscripts.swift",
+        "func f() -> [Int] { [] }\nfunc g(a: [Int]) {\n    _ = a[0]\n    _ = !a[0]\n    _ = x.items[0]\n    _ = f()[0]\n}\n",
+        &[
+            (3, "a", None, OccurrenceKind::Usage),
+            (4, "a", None, OccurrenceKind::Usage),
+            (5, "items", Some("x.items"), OccurrenceKind::Usage),
+            (6, "f", None, OccurrenceKind::Call),
+        ],
+    ),
+    // R5-X.06, R5-X.10: a Python starred target unpacks the whole attribute;
+    // a PHP static member keeps its class scope.
+    (
+        "starred.py",
+        "def g(r):\n    [*x.s] = r\n    *x.s, y = r\n",
+        &[(2, "s", Some("x.s"), OccurrenceKind::Usage), (3, "s", Some("x.s"), OccurrenceKind::Usage)],
+    ),
+    (
+        "statics.php",
+        "<?php\nfunction g() {\n    $a = X::K;\n    ++X::$f;\n    $c = \\N\\X::K;\n}\n",
+        &[
+            (3, "K", Some("X::K"), OccurrenceKind::Usage),
+            (4, "f", Some("X::$f"), OccurrenceKind::Usage),
+            (5, "K", Some("\\N\\X::K"), OccurrenceKind::Usage),
+        ],
+    ),
+];
+
+/// R5-F3.C4: a written receiver path is stored and served as computed by a
+/// functions-only entry, its warm `Hit`, a record-only semantic widening, a
+/// kind widening, the complete warm `Hit` and a projected type-only result;
+/// each equals an uncached run, and each `Hit` proves the stored path passed
+/// the entry's path validation.
+#[test]
+fn written_receiver_paths_hold_through_the_cache() {
+    assert_paths_and_kinds_hold_through_the_cache(WRITTEN_PATH_CACHE_SOURCES);
+}
+
+/// R6-F1 sources: Swift force-unwrapped and C# null-forgiving invocations
+/// at several grouping depths, with their receivers, written paths and a
+/// non-invoked control.
+const NULL_ASSERTION_CACHE_SOURCES: &[WrittenPathCacheRow] = &[
+    (
+        "unwrap.swift",
+        "class X { var cb: (() -> Void)? }\nfunc g(cb: (() -> Void)??, x: X) {\n    (cb!)!()\n    ((cb!)!)()\n    x.cb!()\n    (x.cb!)?()\n    _ = x.cb!\n}\n",
+        &[
+            (3, "cb", None, OccurrenceKind::Call),
+            (4, "cb", None, OccurrenceKind::Call),
+            (5, "x", None, OccurrenceKind::Usage),
+            (5, "cb", Some("x.cb"), OccurrenceKind::Call),
+            (6, "x", None, OccurrenceKind::Usage),
+            (6, "cb", Some("x.cb"), OccurrenceKind::Call),
+            (7, "cb", Some("x.cb"), OccurrenceKind::Usage),
+        ],
+    ),
+    (
+        "forgiving.cs",
+        "class G {\n    System.Action F;\n    void g(System.Action cb, G obj) {\n        cb!();\n        ((cb!)!)();\n        ((obj.F)!)();\n        obj?.F!();\n        obj.F!!();\n        var v = obj.F!;\n        i++;\n    }\n}\n",
+        &[
+            (4, "cb", None, OccurrenceKind::Call),
+            (5, "cb", None, OccurrenceKind::Call),
+            (6, "obj", None, OccurrenceKind::Usage),
+            (6, "F", Some("obj.F"), OccurrenceKind::Call),
+            (7, "obj", None, OccurrenceKind::Usage),
+            (7, "F", Some("obj?.F"), OccurrenceKind::Call),
+            (8, "F", Some("obj.F"), OccurrenceKind::Call),
+            (9, "F", Some("obj.F"), OccurrenceKind::Usage),
+            (10, "i", None, OccurrenceKind::Usage),
+        ],
+    ),
+];
+
+/// R6-F1.C4: a Swift force-unwrapped or C# null-forgiving call keeps its
+/// `Call` kind and written path through the same six cache stages.
+#[test]
+fn null_assertion_invocation_kinds_hold_through_the_cache() {
+    assert_paths_and_kinds_hold_through_the_cache(NULL_ASSERTION_CACHE_SOURCES);
+}
+
+/// Serves every source through a functions-only `Miss`, its warm `Hit`, a
+/// record-only semantic widening, a kind widening, the complete warm `Hit`
+/// and a projected type-only `Hit`, and checks every expected written path
+/// and kind at each stage besides equality with an uncached run.
+fn assert_paths_and_kinds_hold_through_the_cache(sources: &[WrittenPathCacheRow]) {
+    let narrow = SymbolQuery::new().kinds(FUNCTION_KINDS).capabilities([Capability::Occurrences]);
+    let semantic = SymbolQuery::new().kinds(FUNCTION_KINDS).capabilities([Capability::Occurrences, Capability::Semantics]);
+    let complete = SymbolQuery::complete_index();
+    let projected = SymbolQuery::new().kinds(TYPE_KINDS).capabilities([Capability::Occurrences]);
+    for &(name, source, expected) in sources {
+        let dir = TempDir::new().expect("temp");
+        let path = dir.path().join(name);
+        std::fs::write(&path, source).expect("write source");
+        let cache = cache_in(&dir);
+        let steps: [(&str, &SymbolQuery, CacheLookup); 6] = [
+            ("narrow cold", &narrow, CacheLookup::Miss(CacheMiss::Absent)),
+            ("narrow warm", &narrow, CacheLookup::Hit),
+            ("semantic widening", &semantic, CacheLookup::WidenedCapabilities { parsed: false }),
+            ("kind widening", &complete, CacheLookup::WidenedKinds),
+            ("complete warm", &complete, CacheLookup::Hit),
+            ("projected", &projected, CacheLookup::Hit),
+        ];
+        for (step, query, expected_lookup) in steps {
+            let cell = format!("{name}: {step}");
+            let (lookup, served, _) = cached(&cache, read(&path), query);
+            assert_eq!(lookup, expected_lookup, "{cell}");
+            assert_eq!(served, uncached(&path, query), "{cell}: equals an uncached run");
+            let occurrences: Vec<Occurrence> =
+                serde_json::from_value(served["index"]["occurrences"].clone()).expect("occurrences");
+            for &(line, target, written, kind) in expected {
+                let found = occurrences
+                    .iter()
+                    .find(|occurrence| occurrence.span.start.line == line && occurrence.target.name == target)
+                    .unwrap_or_else(|| panic!("{cell}: no `{target}` on line {line}: {occurrences:#?}"));
+                assert_eq!(found.target.qualified_name.as_deref(), written, "{cell}: `{target}` on line {line}");
+                assert_eq!(found.kind, kind, "{cell}: `{target}` on line {line}");
+                assert_eq!(
+                    &source[found.span.start_byte as usize..found.span.end_byte as usize],
+                    target,
+                    "{cell}: the span stays the name token"
+                );
+            }
+        }
+    }
+}
+
+/// `(file name, source, every callable whose parameters are `x`, `y`, `z`
+/// with defaults `1`, `2`, `3`)`: comments sit before, after and on both
+/// sides of each `=`.
+const COMMENTED_DEFAULT_CACHE_SOURCES: &[(&str, &str, &[&str])] = &[
+    (
+        "defaults.cs",
+        "class K {\n    void g(int x /* b */ = 1, int y = /* a */ 2, int z /* b */ = /* a */ 3) {}\n    \
+         K(int x /* b */ = 1, int y = /* a */ 2, int z /* b */ = /* a */ 3) {}\n    \
+         void Outer() { void Local(int x /* b */ = 1, int y = /* a */ 2, int z /* b */ = /* a */ 3) {} }\n}\n",
+        &["g", "K", "Local"],
+    ),
+    (
+        "defaults.php",
+        "<?php\nfunction g($x /* b */ = 1, $y = /* a */ 2, $z /* b */ = /* a */ 3) {}\nclass K {\n    \
+         function __construct($x /* b */ = 1, $y = /* a */ 2, $z /* b */ = /* a */ 3) {}\n    \
+         function method($x /* b */ = 1, $y = /* a */ 2, $z /* b */ = /* a */ 3) {}\n}\n",
+        &["g", "__construct", "method"],
+    ),
+    (
+        "defaults.scala",
+        "object O {\n  def g(x: Int /* b */ = 1, y: Int = /* a */ 2, z: Int /* b */ = /* a */ 3): Int = x\n}\n\
+         class K {\n  def method(x: Int /* b */ = 1, y: Int = /* a */ 2, z: Int /* b */ = /* a */ 3): Int = x\n}\n",
+        &["g", "method"],
+    ),
+];
+
+/// R6-F2.C4: a comment beside a default's `=` neither erases nor becomes
+/// the default at any cache stage: a functions-only `Miss`, its warm `Hit`,
+/// a record-only semantic widening, a kind widening, the complete warm
+/// `Hit` and a functions-only projection of the complete entry.
+#[test]
+fn commented_parameter_defaults_hold_through_the_cache() {
+    let narrow = SymbolQuery::new().kinds(FUNCTION_KINDS).capabilities([Capability::Occurrences]);
+    let semantic = SymbolQuery::new().kinds(FUNCTION_KINDS).capabilities([Capability::Occurrences, Capability::Semantics]);
+    let complete = SymbolQuery::complete_index();
+    let projected = SymbolQuery::new().kinds(FUNCTION_KINDS);
+    for &(name, source, callables) in COMMENTED_DEFAULT_CACHE_SOURCES {
+        let dir = TempDir::new().expect("temp");
+        let path = dir.path().join(name);
+        std::fs::write(&path, source).expect("write source");
+        let cache = cache_in(&dir);
+        let steps: [(&str, &SymbolQuery, CacheLookup); 6] = [
+            ("narrow cold", &narrow, CacheLookup::Miss(CacheMiss::Absent)),
+            ("narrow warm", &narrow, CacheLookup::Hit),
+            ("semantic widening", &semantic, CacheLookup::WidenedCapabilities { parsed: false }),
+            ("kind widening", &complete, CacheLookup::WidenedKinds),
+            ("complete warm", &complete, CacheLookup::Hit),
+            ("projected", &projected, CacheLookup::Hit),
+        ];
+        for (step, query, expected_lookup) in steps {
+            let cell = format!("{name}: {step}");
+            let (lookup, served, _) = cached(&cache, read(&path), query);
+            assert_eq!(lookup, expected_lookup, "{cell}");
+            assert_eq!(served, uncached(&path, query), "{cell}: equals an uncached run");
+            let symbols = served["index"]["symbols"].as_array().expect("symbols");
+            for callable in callables {
+                let parameters: Vec<Value> = symbols
+                    .iter()
+                    .filter(|record| record["identity"]["name"] == *callable)
+                    .filter_map(|record| record["kind_data"]["data"].get("parameters").cloned())
+                    .collect();
+                let [Value::Array(parameters)] = parameters.as_slice() else {
+                    panic!("{cell}: `{callable}` has {parameters:?}");
+                };
+                let actual: Vec<(&str, Option<&str>, bool)> = parameters
+                    .iter()
+                    .map(|parameter| {
+                        (
+                            parameter["name"].as_str().expect("name"),
+                            parameter["default_value"].as_str(),
+                            parameter["is_optional"].as_bool().expect("is_optional"),
+                        )
+                    })
+                    .collect();
+                assert_eq!(
+                    actual,
+                    [("x", Some("1"), true), ("y", Some("2"), true), ("z", Some("3"), true)],
+                    "{cell}: `{callable}`"
+                );
+            }
+        }
+    }
+}
+
+/// `(file name, source, every Parameter record's name in the complete
+/// index, every occurrence of the checked names as (line, column, name,
+/// kind, candidate names))`.
+type ParameterCaptureCacheRow = (
+    &'static str,
+    &'static str,
+    &'static [&'static str],
+    &'static [(u32, u32, &'static str, OccurrenceKind, &'static [&'static str])],
+);
+
+/// R5-F4.C5 sources: a Python default value and lambda default and a C#
+/// parameter type, each a reference whose only candidate is the real
+/// declaration.
+const PARAMETER_CAPTURE_CACHE_SOURCES: &[ParameterCaptureCacheRow] = &[
+    (
+        "defaults.py",
+        "def external(): pass\ndef g(x=external): pass\nh = lambda y=external: y\n",
+        &["x", "y"],
+        &[
+            (2, 9, "external", OccurrenceKind::Usage, &["external"]),
+            (3, 14, "external", OccurrenceKind::Usage, &["external"]),
+        ],
+    ),
+    (
+        "types.cs",
+        "class W {}\nclass G {\n    const int external = 1;\n    void g(W obj, int n = external) {}\n}\n",
+        &["obj", "n"],
+        &[
+            (4, 12, "W", OccurrenceKind::Usage, &["W"]),
+            (4, 27, "external", OccurrenceKind::Usage, &["external"]),
+        ],
+    ),
+];
+
+/// R5-F4.C5: a parameter's default value and type stay references, with
+/// the real declaration as their only candidate and no parameter record of
+/// their name, through a functions-only entry, its warm `Hit`, a record-only
+/// semantic widening, a kind widening, the complete warm `Hit` and a
+/// projected type-only result; each also equals an uncached run.
+#[test]
+fn parameter_defaults_and_types_stay_references_through_the_cache() {
+    let narrow = SymbolQuery::new().kinds(FUNCTION_KINDS).capabilities([Capability::Occurrences]);
+    let semantic = SymbolQuery::new().kinds(FUNCTION_KINDS).capabilities([Capability::Occurrences, Capability::Semantics]);
+    let complete = SymbolQuery::complete_index();
+    let projected = SymbolQuery::new().kinds(TYPE_KINDS).capabilities([Capability::Occurrences]);
+    for &(name, source, parameters, reads) in PARAMETER_CAPTURE_CACHE_SOURCES {
+        let dir = TempDir::new().expect("temp");
+        let path = dir.path().join(name);
+        std::fs::write(&path, source).expect("write source");
+        let cache = cache_in(&dir);
+        let steps: [(&str, &SymbolQuery, CacheLookup); 6] = [
+            ("narrow cold", &narrow, CacheLookup::Miss(CacheMiss::Absent)),
+            ("narrow warm", &narrow, CacheLookup::Hit),
+            ("semantic widening", &semantic, CacheLookup::WidenedCapabilities { parsed: false }),
+            ("kind widening", &complete, CacheLookup::WidenedKinds),
+            ("complete warm", &complete, CacheLookup::Hit),
+            ("projected", &projected, CacheLookup::Hit),
+        ];
+        let names: BTreeSet<&str> = reads.iter().map(|&(_, _, name, _, _)| name).collect();
+        for (step, query, expected_lookup) in steps {
+            let cell = format!("{name}: {step}");
+            let (lookup, served, _) = cached(&cache, read(&path), query);
+            assert_eq!(lookup, expected_lookup, "{cell}");
+            assert_eq!(served, uncached(&path, query), "{cell}: equals an uncached run");
+
+            let occurrences: Vec<Occurrence> =
+                serde_json::from_value(served["index"]["occurrences"].clone()).expect("occurrences");
+            let actual: Vec<(u32, u32, &str, OccurrenceKind, Vec<&str>)> = occurrences
+                .iter()
+                .filter(|occurrence| names.contains(occurrence.target.name.as_str()))
+                .map(|occurrence| {
+                    let candidates = occurrence.candidates.iter().map(|candidate| candidate.name.as_str()).collect();
+                    (occurrence.span.start.line, occurrence.span.start.column, occurrence.target.name.as_str(), occurrence.kind, candidates)
+                })
+                .collect();
+            let expected: Vec<(u32, u32, &str, OccurrenceKind, Vec<&str>)> = reads
+                .iter()
+                .map(|&(line, column, name, kind, candidates)| (line, column, name, kind, candidates.to_vec()))
+                .collect();
+            assert_eq!(actual, expected, "{cell}: reads");
+
+            let records = served["index"]["symbols"].as_array().expect("symbols");
+            let declared: Vec<&str> = records
+                .iter()
+                .filter(|record| record["kind"] == "Parameter")
+                .map(|record| record["identity"]["name"].as_str().expect("name"))
+                .collect();
+            let wanted: &[&str] = if matches!(step, "kind widening" | "complete warm") { parameters } else { &[] };
+            assert_eq!(declared, wanted, "{cell}: parameter records");
+        }
+    }
+}
+
+/// `(file name, source, the declaration tokens as (line, column, name),
+/// every occurrence of the checked names as (line, column, name, candidate
+/// names))`.
+type DeclarationCacheRow = (
+    &'static str,
+    &'static str,
+    &'static [(u32, u32, &'static str)],
+    &'static [(u32, u32, &'static str, &'static [&'static str])],
+);
+
+/// R5-F2.C4 sources: Java type parameters, Python lambda parameters and
+/// pattern captures, and lowercase Scala binders, none of them a record.
+const DECLARATION_CACHE_SOURCES: &[DeclarationCacheRow] = &[
+    (
+        "generics.java",
+        "class Bound {}\nclass G<T> { T f; <U extends Bound> U m(U u) { return u; } }\n",
+        &[(2, 9, "T"), (2, 20, "U")],
+        &[(2, 14, "T", &[]), (2, 30, "Bound", &["Bound"]), (2, 37, "U", &[]), (2, 41, "U", &[])],
+    ),
+    (
+        "patterns.py",
+        "def g(subject):\n    cb = lambda x: x\n    match subject:\n        case [a1, *rest]:\n            return a1, rest\n",
+        &[(2, 17, "x"), (4, 15, "a1"), (4, 20, "rest")],
+        &[(2, 20, "x", &[]), (3, 11, "subject", &["subject"]), (5, 20, "a1", &[]), (5, 24, "rest", &[])],
+    ),
+    (
+        "binders.scala",
+        "object O {\n  def a(xs: List[Int]) = for (x <- xs) yield x\n  def c(o: Option[Int]) = o match { case Some(y) => y; case Stable => 0 }\n}\n",
+        &[(2, 31, "x"), (3, 47, "y")],
+        &[
+            (2, 36, "xs", &["xs"]),
+            (2, 46, "x", &[]),
+            (3, 27, "o", &["o"]),
+            (3, 42, "Some", &[]),
+            (3, 53, "y", &[]),
+            (3, 61, "Stable", &[]),
+        ],
+    ),
+    // R7-F2: annotation types, a C# static constructor and accessor event,
+    // a TypeScript namespace prefix, a Swift macro and selective import, a
+    // qualified Java module: declared names no record (or only a whole
+    // path) reports; the genuine reads beside them stay.
+    (
+        "Annotation.java",
+        "class A {}\nclass G { @interface A { int value() default external; } @A void g() {} }\n",
+        &[(2, 22, "A"), (2, 30, "value")],
+        &[(2, 46, "external", &[]), (2, 59, "A", &["A"])],
+    ),
+    (
+        "Events.cs",
+        "class G { static G() {} event System.Action E {add{} remove{}} void f() { E(); } G x; }\n",
+        &[(1, 18, "G"), (1, 45, "E")],
+        &[(1, 75, "E", &[]), (1, 82, "G", &["G"])],
+    ),
+    (
+        "namespace.ts",
+        "class A {} namespace A.B { export function f(){} } let x:A;\n",
+        &[(1, 22, "A")],
+        &[(1, 58, "A", &[])],
+    ),
+    (
+        "macro.swift",
+        "func foo() {}\nmacro foo() = #externalMacro(module: \"M\", type: \"T\")\nfoo()\n",
+        &[(2, 7, "foo")],
+        &[(3, 1, "foo", &["foo"])],
+    ),
+    (
+        "import.swift",
+        "import struct Foo.Bar\nfunc g() { let z = Bar }\n",
+        &[(1, 19, "Bar")],
+        &[(1, 15, "Foo", &[]), (2, 20, "Bar", &[])],
+    ),
+    (
+        "module-info.java",
+        "module a.b { requires c.d; }\n",
+        &[(1, 8, "a"), (1, 10, "b")],
+        &[(1, 23, "c", &[]), (1, 25, "d", &[])],
+    ),
+];
+
+/// R5-F2.C4: a declaration token no record reports is never an occurrence
+/// and the reads around it stay, with the same candidates, through a
+/// functions-only entry, its warm `Hit`, a record-only semantic widening, a
+/// kind widening, the complete warm `Hit` and a projected type-only result;
+/// each also equals an uncached run.
+#[test]
+fn unreported_declaration_tokens_stay_excluded_through_the_cache() {
+    assert_exclusions_hold_through_the_cache(DECLARATION_CACHE_SOURCES);
+}
+
+/// R6-F3.C5 sources: Lua variable attributes, Java inferred-type `var` and
+/// PHP's class-relative `static`, each beside a same-named declaration
+/// whose real reads stay suggestions for it. The excluded list holds the
+/// markers only.
+const MARKER_CACHE_SOURCES: &[DeclarationCacheRow] = &[
+    (
+        "attributes.lua",
+        "local const=1; local close=2\nlocal x <const> = const\nlocal y <close> = close\nlocal function f() return const, close end\n",
+        &[(2, 10, "const"), (3, 10, "close")],
+        &[
+            (2, 19, "const", &["const"]),
+            (3, 19, "close", &["close"]),
+            (4, 27, "const", &["const"]),
+            (4, 34, "close", &["close"]),
+        ],
+    ),
+    (
+        "Inferred.java",
+        "record R() {\n    void g() { var x=factory(); int var=1; use(var); }\n    void h(java.util.List<String> xs) { for (var y : xs) { use(y); } }\n}\n",
+        &[(2, 16, "var"), (3, 46, "var")],
+        &[(2, 22, "factory", &[]), (2, 48, "var", &["var"]), (3, 54, "xs", &["xs"]), (3, 64, "y", &["y"])],
+    ),
+    (
+        "relative.php",
+        "<?php\nclass C {\n    function static() {}\n    function f(): static { return new static(); }\n    function g() { return $this->static(); }\n}\n",
+        &[(4, 19, "static"), (4, 39, "static")],
+        &[(5, 34, "static", &["static"])],
+    ),
+    // R7-F1: a static import of a member named `var` is no evidence of a
+    // legacy type, so the inferred-type marker stays excluded and the call
+    // and read of the variable keep their candidates.
+    (
+        "StaticImport.java",
+        "import static p.Tools.var;\nrecord G() {\n    void g() { var x = var(); int var = 2; use(var); }\n}\n",
+        &[(1, 23, "var"), (3, 16, "var"), (3, 35, "var")],
+        &[(3, 24, "var", &["var"]), (3, 48, "var", &["var"])],
+    ),
+    // R7-F1: Swift precedence directives and associativity values are
+    // markers; a group reference and same-named locals stay reads.
+    (
+        "precedence.swift",
+        "precedencegroup A {\n    associativity: left\n    higherThan: AdditionPrecedence\n}\nfunc g() {\n    let left = 1, higherThan = 2\n    use(left, higherThan)\n}\n",
+        &[(2, 5, "associativity"), (2, 20, "left"), (3, 5, "higherThan"), (6, 9, "left"), (6, 19, "higherThan")],
+        &[(3, 17, "AdditionPrecedence", &[]), (7, 9, "left", &["left"]), (7, 15, "higherThan", &["higherThan"])],
+    ),
+    // R7-F1.S2/.S3: availability platforms and `#if` operands are markers.
+    (
+        "availability.swift",
+        "#if os(macOS)\nlet x = 1\n#endif\nfunc g() {\n    if #available(macOS 10.15, *) {}\n    let macOS = 1\n    use(macOS)\n}\n",
+        &[(1, 8, "macOS"), (5, 19, "macOS"), (6, 9, "macOS")],
+        &[(7, 9, "macOS", &["macOS"])],
+    ),
+    // R7-F1.S5: named-argument and tuple labels are no reads; the value
+    // after each label stays one.
+    (
+        "keywords.py",
+        "def f(x): pass\nx = 1\nf(x=x)\n",
+        &[(1, 7, "x"), (2, 1, "x"), (3, 3, "x")],
+        &[(3, 5, "x", &["x", "x"])],
+    ),
+    (
+        "labels.swift",
+        "func g() {\n    let x = 1\n    _ = f(x: x)\n    let t = (x: x, y: 2)\n}\n",
+        &[(2, 9, "x"), (3, 11, "x"), (4, 14, "x")],
+        &[(3, 14, "x", &["x"]), (4, 17, "x", &["x"])],
+    ),
+    // R7-F1.S6: a built-in attribute name is a marker; a property
+    // wrapper's name stays a read.
+    (
+        "attributes.swift",
+        "@propertyWrapper struct W { var wrappedValue: Int }\n@objc func h() {}\nstruct S { @W var q: Int }\nfunc g() {\n    let objc = 1\n    use(objc)\n}\n",
+        &[(1, 2, "propertyWrapper"), (1, 25, "W"), (2, 2, "objc"), (5, 9, "objc")],
+        &[(3, 13, "W", &["W"]), (6, 9, "objc", &["objc"])],
+    ),
+    // R6-F3.X1: a bare-identifier initializer is a read beside its
+    // excluded declared name and the inferred-type marker.
+    (
+        "Initializer.java",
+        "class A {\n    int xs = 1; int ys = xs;\n    void g() { int k = xs; var v = xs; }\n}\n",
+        &[(2, 9, "xs"), (2, 21, "ys"), (3, 20, "k"), (3, 28, "var"), (3, 32, "v")],
+        &[(2, 26, "xs", &["xs"]), (3, 24, "xs", &["xs"]), (3, 36, "xs", &["xs"])],
+    ),
+    // R6-F3.X2: zsh declaration-builtin operands are declaration tokens;
+    // the expansion and the call stay reads.
+    (
+        "declare.zsh",
+        "x() { :; }\nf() { local x; export x; echo $x; x; }\n",
+        &[(1, 1, "x"), (2, 13, "x"), (2, 23, "x")],
+        &[(2, 32, "x", &["x"]), (2, 35, "x", &["x"])],
+    ),
+];
+
+/// R6-F3.C5: a contextual syntax marker is never an occurrence, and the
+/// same-named reads keep their candidates, through every cache stage of
+/// [`unreported_declaration_tokens_stay_excluded_through_the_cache`].
+#[test]
+fn contextual_syntax_markers_stay_excluded_through_the_cache() {
+    assert_exclusions_hold_through_the_cache(MARKER_CACHE_SOURCES);
+}
+
+/// `(file, source, [(line, column, name, written path)] every occurrence on
+/// those lines, [(import name, line, column)])`.
+type QualifiedImportCacheRow = (
+    &'static str,
+    &'static str,
+    &'static [(u32, u32, &'static str, Option<&'static str>)],
+    &'static [(&'static str, u32, u32)],
+);
+
+/// R7-F3.C4 sources: a qualified annotation and module service operands are
+/// reads with their paths and no imports; a genuine import keeps only its
+/// final segment; every C# `using` directive is an import whose qualifiers
+/// are reads (`R7-F3.S1`); Scala, Python, Rust, PHP and TS imports report
+/// only the names they bind (`R7-F3.S3`-`.S6`); a C/C++ elaborated type use
+/// is a read (`R7-F2.X1`); TS export clause names are no reads (`R7-F3.X2`)
+/// and a Go raw-string import path is an import (`R7-F3.X3`).
+const QUALIFIED_IMPORT_CACHE_SOURCES: &[QualifiedImportCacheRow] = &[
+    (
+        "G.java",
+        "class A {}\n@p.q.A class G { void f() {} }\n@A class H {}\n",
+        &[(2, 2, "p", None), (2, 4, "q", Some("p.q")), (2, 6, "A", Some("p.q.A")), (3, 2, "A", None)],
+        &[],
+    ),
+    (
+        "module-info.java",
+        "module m {\n    uses a.b.C;\n    provides a.b.C with d.e.D, f.g.F;\n}\nclass C { void f() {} }\n",
+        &[
+            (2, 10, "a", None),
+            (2, 12, "b", Some("a.b")),
+            (2, 14, "C", Some("a.b.C")),
+            (3, 14, "a", None),
+            (3, 16, "b", Some("a.b")),
+            (3, 18, "C", Some("a.b.C")),
+            (3, 25, "d", None),
+            (3, 27, "e", Some("d.e")),
+            (3, 29, "D", Some("d.e.D")),
+            (3, 32, "f", None),
+            (3, 34, "g", Some("f.g")),
+            (3, 36, "F", Some("f.g.F")),
+        ],
+        &[],
+    ),
+    (
+        "K.java",
+        "import a.b.C;\nimport static a.b.C.*;\n@p.q.A class K { void f() {} }\n",
+        &[(1, 8, "a", None), (1, 10, "b", Some("a.b")), (3, 2, "p", None), (3, 4, "q", Some("p.q")), (3, 6, "A", Some("p.q.A"))],
+        &[("C", 1, 12), ("C", 2, 19)],
+    ),
+    (
+        "U.cs",
+        "using A.B;\nusing E = F.G;\nusing static C.D;\nclass Z { void f() {} }\n",
+        &[(1, 7, "A", None), (2, 11, "F", None), (2, 13, "G", Some("F.G")), (3, 14, "C", None)],
+        &[("B", 1, 9), ("E", 2, 7), ("D", 3, 16)],
+    ),
+    (
+        "I.scala",
+        "import a.b.C\nimport a.{D, E => F}\nimport c.d.*\nobject O { def m(): Unit = { C; F } }\n",
+        &[(1, 8, "a", None), (1, 10, "b", Some("a.b")), (2, 8, "a", None), (2, 14, "E", None), (3, 8, "c", None)],
+        &[("C", 1, 12), ("D", 2, 11), ("F", 2, 19), ("d", 3, 10)],
+    ),
+    (
+        "i.py",
+        "import a.b\nfrom g.h import i as j\nfrom l import *\ndef m():\n    return a, j\n",
+        &[(1, 10, "b", Some("a.b")), (2, 6, "g", None), (2, 8, "h", Some("g.h")), (2, 17, "i", None), (5, 12, "a", None), (5, 15, "j", None)],
+        &[("a", 1, 8), ("j", 2, 22), ("l", 3, 6)],
+    ),
+    (
+        "i.rs",
+        "use a;\nuse b::*;\nuse c::{g::h, e as f};\nextern crate y as z;\nfn run() { a::x(); h(); f(); z::w(); }\n",
+        &[(5, 12, "a", None), (5, 15, "x", Some("a::x")), (5, 20, "h", None), (5, 25, "f", None), (5, 30, "z", None), (5, 33, "w", Some("z::w"))],
+        &[("a", 1, 5), ("b", 2, 5), ("h", 3, 12), ("f", 3, 20), ("z", 4, 19)],
+    ),
+    (
+        "i.php",
+        "<?php\nuse A;\nuse B\\C as D;\nuse E\\{F, G as H};\nfunction f() { return new D(); }\n",
+        &[(3, 5, "B", None), (3, 7, "C", Some("B\\C")), (4, 5, "E", None), (4, 11, "G", None), (5, 27, "D", None)],
+        &[("A", 2, 5), ("D", 3, 12), ("F", 4, 8), ("H", 4, 16)],
+    ),
+    (
+        "i.ts",
+        "import d, { a as b } from \"m\";\nimport q = require(\"m\");\nfunction g() { d(); b(); q(); }\n",
+        &[(3, 16, "d", None), (3, 21, "b", None), (3, 26, "q", None)],
+        &[("d", 1, 8), ("b", 1, 18), ("q", 2, 8)],
+    ),
+    (
+        "exports.ts",
+        "function k() {}\nexport { k as j } from \"m\";\nexport { k as g };\nexport * as k from \"m\";\nfunction g() { k(); }\n",
+        &[(3, 10, "k", None), (5, 16, "k", None)],
+        &[],
+    ),
+    (
+        "r.go",
+        "package p\nimport `c/d`\nimport x `e/f`\nfunc f() { d.A(); x.B() }\n",
+        &[(4, 12, "d", None), (4, 14, "A", Some("d.A")), (4, 19, "x", None), (4, 21, "B", Some("x.B"))],
+        &[("d", 2, 8), ("x", 3, 8)],
+    ),
+    (
+        "e.c",
+        "struct S { int a; };\nstruct S x;\nvoid f(struct S *p) {}\n",
+        &[(2, 8, "S", None), (3, 15, "S", None)],
+        &[],
+    ),
+    (
+        "e.cpp",
+        "class C {};\nclass C *c;\nvoid f(class C *p) {}\n",
+        &[(2, 7, "C", None), (3, 14, "C", None)],
+        &[],
+    ),
+];
+
+/// R7-F3.C4: Java qualified annotation and module-directive reads keep their
+/// offsets and paths, and no phantom import appears, through a
+/// functions-only entry, its warm `Hit`, a record-only semantic widening, a
+/// kind widening, the complete warm `Hit` and a projected type-only result;
+/// each also equals an uncached run.
+#[test]
+fn qualified_reads_and_imports_hold_through_the_cache() {
+    let narrow = SymbolQuery::new().kinds(FUNCTION_KINDS).capabilities([Capability::Occurrences]);
+    let semantic = SymbolQuery::new().kinds(FUNCTION_KINDS).capabilities([Capability::Occurrences, Capability::Semantics]);
+    let complete = SymbolQuery::complete_index();
+    let projected = SymbolQuery::new().kinds(TYPE_KINDS).capabilities([Capability::Occurrences]);
+    for &(name, source, reads, imports) in QUALIFIED_IMPORT_CACHE_SOURCES {
+        let dir = TempDir::new().expect("temp");
+        let path = dir.path().join(name);
+        std::fs::write(&path, source).expect("write source");
+        let cache = cache_in(&dir);
+        let steps: [(&str, &SymbolQuery, CacheLookup); 6] = [
+            ("narrow cold", &narrow, CacheLookup::Miss(CacheMiss::Absent)),
+            ("narrow warm", &narrow, CacheLookup::Hit),
+            ("semantic widening", &semantic, CacheLookup::WidenedCapabilities { parsed: false }),
+            ("kind widening", &complete, CacheLookup::WidenedKinds),
+            ("complete warm", &complete, CacheLookup::Hit),
+            ("projected", &projected, CacheLookup::Hit),
+        ];
+        let lines: BTreeSet<u32> = reads.iter().map(|&(line, ..)| line).collect();
+        for (step, query, expected_lookup) in steps {
+            let cell = format!("{name}: {step}");
+            let (lookup, served, _) = cached(&cache, read(&path), query);
+            assert_eq!(lookup, expected_lookup, "{cell}");
+            assert_eq!(served, uncached(&path, query), "{cell}: equals an uncached run");
+
+            let occurrences: Vec<Occurrence> =
+                serde_json::from_value(served["index"]["occurrences"].clone()).expect("occurrences");
+            let actual: Vec<(u32, u32, &str, Option<&str>)> = occurrences
+                .iter()
+                .filter(|occurrence| lines.contains(&occurrence.span.start.line))
+                .map(|occurrence| {
+                    (
+                        occurrence.span.start.line,
+                        occurrence.span.start.column,
+                        occurrence.target.name.as_str(),
+                        occurrence.target.qualified_name.as_deref(),
+                    )
+                })
+                .collect();
+            assert_eq!(actual, reads, "{cell}: reads");
+
+            let served_imports = served["index"]["imports"].as_array().expect("imports");
+            let actual_imports: Vec<(&str, u64, u64)> = served_imports
+                .iter()
+                .map(|import| {
+                    (
+                        import["name"].as_str().expect("import name"),
+                        import["span"]["start"]["line"].as_u64().expect("line"),
+                        import["span"]["start"]["column"].as_u64().expect("column"),
+                    )
+                })
+                .collect();
+            let expected_imports: Vec<(&str, u64, u64)> =
+                imports.iter().map(|&(import, line, column)| (import, u64::from(line), u64::from(column))).collect();
+            assert_eq!(actual_imports, expected_imports, "{cell}: imports");
+        }
+    }
+}
+
+/// Runs each source through a functions-only entry, its warm `Hit`, a
+/// record-only semantic widening, a kind widening, the complete warm `Hit`
+/// and a projected type-only result; each equals an uncached run, holds no
+/// excluded token and exactly the expected reads.
+fn assert_exclusions_hold_through_the_cache(sources: &[DeclarationCacheRow]) {
+    let narrow = SymbolQuery::new().kinds(FUNCTION_KINDS).capabilities([Capability::Occurrences]);
+    let semantic = SymbolQuery::new().kinds(FUNCTION_KINDS).capabilities([Capability::Occurrences, Capability::Semantics]);
+    let complete = SymbolQuery::complete_index();
+    let projected = SymbolQuery::new().kinds(TYPE_KINDS).capabilities([Capability::Occurrences]);
+    for &(name, source, declarations, reads) in sources {
+        let dir = TempDir::new().expect("temp");
+        let path = dir.path().join(name);
+        std::fs::write(&path, source).expect("write source");
+        let cache = cache_in(&dir);
+        let steps: [(&str, &SymbolQuery, CacheLookup); 6] = [
+            ("narrow cold", &narrow, CacheLookup::Miss(CacheMiss::Absent)),
+            ("narrow warm", &narrow, CacheLookup::Hit),
+            ("semantic widening", &semantic, CacheLookup::WidenedCapabilities { parsed: false }),
+            ("kind widening", &complete, CacheLookup::WidenedKinds),
+            ("complete warm", &complete, CacheLookup::Hit),
+            ("projected", &projected, CacheLookup::Hit),
+        ];
+        let names: BTreeSet<&str> = declarations
+            .iter()
+            .map(|&(_, _, name)| name)
+            .chain(reads.iter().map(|&(_, _, name, _)| name))
+            .collect();
+        let expected: Vec<(u32, u32, &str, Vec<&str>)> =
+            reads.iter().map(|&(line, column, name, candidates)| (line, column, name, candidates.to_vec())).collect();
+        for (step, query, expected_lookup) in steps {
+            let cell = format!("{name}: {step}");
+            let (lookup, served, _) = cached(&cache, read(&path), query);
+            assert_eq!(lookup, expected_lookup, "{cell}");
+            assert_eq!(served, uncached(&path, query), "{cell}: equals an uncached run");
+
+            let occurrences: Vec<Occurrence> =
+                serde_json::from_value(served["index"]["occurrences"].clone()).expect("occurrences");
+            let actual: Vec<(u32, u32, &str, Vec<&str>)> = occurrences
+                .iter()
+                .filter(|occurrence| names.contains(occurrence.target.name.as_str()))
+                .map(|occurrence| {
+                    let candidates = occurrence.candidates.iter().map(|candidate| candidate.name.as_str()).collect();
+                    (occurrence.span.start.line, occurrence.span.start.column, occurrence.target.name.as_str(), candidates)
+                })
+                .collect();
+            for &(line, column, declared) in declarations {
+                assert!(
+                    !actual.iter().any(|(l, c, n, _)| (*l, *c, *n) == (line, column, declared)),
+                    "{cell}: the excluded `{declared}` at {line}:{column} is an occurrence"
+                );
+            }
+            assert_eq!(actual, expected, "{cell}: reads");
+        }
+    }
+}

@@ -8,7 +8,6 @@
   - int x [in type point] c.c:4:9
   - int y [in type point] c.c:5:9
   - typedef struct point point_t c.c:8:1
-  - struct point c.c:8:9
   - static int origin_count c.c:10:12
   - int point_sum(struct point p) c.c:12:5
   - void reset_origin(void) c.c:16:6

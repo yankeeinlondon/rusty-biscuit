@@ -2,7 +2,9 @@
 //! and file-prefixed names, `--id`, locals), the ambiguity error, empty
 //! reports, the three directions, the versioned `--json` envelope, the text
 //! report, rejected flags and formats, the file-local boundary, and Rust
-//! pattern names (no invented self-calls or declarations).
+//! pattern names (no invented self-calls or declarations), parameter
+//! defaults and types (references, never parameters), and unreported
+//! declaration tokens (never suggestions).
 
 use std::process::Output;
 
@@ -1225,5 +1227,990 @@ fn invocation_kinds_decide_callees_callers_and_the_default_report() {
                 assert!(!text.contains(&format!(" {at}")), "{name} {direction}: `{at}` listed in {text}");
             }
         }
+    }
+}
+
+/// Swift force-unwrapped and C# null-forgiving invocations (`R6-F1`) at
+/// several grouping depths, bare, through a member and after a conditional
+/// access, are callees of their owner and calls among the invoked
+/// declaration's suggestions, with their written paths; an unwrapped value
+/// that is not invoked is a usage, listed only in the default report.
+/// ID-selected, cold and warm JSON, and text.
+#[test]
+fn null_assertion_invocations_are_callees_and_callers() {
+    let scratch = Scratch::new(&[
+        (
+            "unwrap.swift",
+            "class X { var cb: (() -> Void)? }\nfunc g(cb: (() -> Void)??, x: X) {\n    (cb!)!()\n    ((cb!)!)()\n    x.cb!()\n    (x.cb!)?()\n    _ = x.cb!\n}\n",
+        ),
+        (
+            "forgiving.cs",
+            "class G {\n    System.Action F;\n    void g(System.Action cb, G obj) {\n        cb!();\n        ((cb!)!)();\n        ((obj.F)!)();\n        obj?.F!();\n        obj.F!!();\n        var v = obj.F!;\n    }\n}\n",
+        ),
+    ]);
+    type Row = (String, String, String, String);
+    // `(file, selector resolved to an ID, direction, key, rows)`.
+    let expected: Vec<(&str, &str, &str, &str, Vec<Row>)> = vec![
+        (
+            "unwrap.swift",
+            "unwrap.swift#g",
+            "--callees",
+            "occurrences",
+            vec![
+                row("Call", "cb", "3:6", "NameOnly"),
+                row("Call", "cb", "4:7", "NameOnly"),
+                row("Call", "x.cb", "5:7", "NameOnly"),
+                row("Call", "x.cb", "6:8", "NameOnly"),
+            ],
+        ),
+        (
+            "unwrap.swift",
+            "unwrap.swift#X.cb",
+            "--callers",
+            "name_only_suggestions",
+            vec![
+                row("Call", "cb", "3:6", "NameOnly"),
+                row("Call", "cb", "4:7", "NameOnly"),
+                row("Call", "x.cb", "5:7", "NameOnly"),
+                row("Call", "x.cb", "6:8", "NameOnly"),
+            ],
+        ),
+        (
+            "unwrap.swift",
+            "unwrap.swift#X.cb",
+            "--all",
+            "name_only_suggestions",
+            vec![
+                row("Call", "cb", "3:6", "NameOnly"),
+                row("Call", "cb", "4:7", "NameOnly"),
+                row("Call", "x.cb", "5:7", "NameOnly"),
+                row("Call", "x.cb", "6:8", "NameOnly"),
+                row("Usage", "x.cb", "7:11", "NameOnly"),
+            ],
+        ),
+        (
+            "forgiving.cs",
+            "forgiving.cs#G.g",
+            "--callees",
+            "occurrences",
+            vec![
+                row("Call", "cb", "4:9", "NameOnly"),
+                row("Call", "cb", "5:11", "NameOnly"),
+                row("Call", "obj.F", "6:15", "NameOnly"),
+                row("Call", "obj?.F", "7:14", "NameOnly"),
+                row("Call", "obj.F", "8:13", "NameOnly"),
+            ],
+        ),
+        (
+            "forgiving.cs",
+            "forgiving.cs#G.F",
+            "--callers",
+            "name_only_suggestions",
+            vec![
+                row("Call", "obj.F", "6:15", "NameOnly"),
+                row("Call", "obj?.F", "7:14", "NameOnly"),
+                row("Call", "obj.F", "8:13", "NameOnly"),
+            ],
+        ),
+        (
+            "forgiving.cs",
+            "forgiving.cs#G.F",
+            "--all",
+            "name_only_suggestions",
+            vec![
+                row("Call", "obj.F", "6:15", "NameOnly"),
+                row("Call", "obj?.F", "7:14", "NameOnly"),
+                row("Call", "obj.F", "8:13", "NameOnly"),
+                row("Usage", "obj.F", "9:21", "NameOnly"),
+            ],
+        ),
+    ];
+    for (file, selector, direction, key, rows_expected) in &expected {
+        let id = declaration_id(&refs_json(&scratch, &[selector, file]));
+        let mut args = vec!["--verbose", "--json", "refs", "--id", &id];
+        if *direction != "--all" {
+            args.push(direction);
+        }
+        args.push(file);
+        // The selector lookup above wrote the entries; remove them so this
+        // run is cold.
+        for entry in crate::cache_entries(scratch.temp.path()) {
+            std::fs::remove_file(entry).expect("remove an entry");
+        }
+        let cold = scratch.hug(&args);
+        assert!(stderr_of(&cold).contains("0 hits, 0 partial hits, 1 misses; parsed 1 files"), "{file}: {}", stderr_of(&cold));
+        let cold = json_of(&stdout_of(cold, &args));
+        assert_eq!(&rows(&cold, key), rows_expected, "{file} {selector} {direction} cold: {cold}");
+        let other = if *key == "occurrences" { "name_only_suggestions" } else { "occurrences" };
+        assert!(rows(&cold, other).is_empty(), "{file} {selector} {direction}: {cold}");
+        let warm = scratch.hug(&args);
+        let stderr = stderr_of(&warm);
+        assert!(stderr.contains("cache: 1 hits, 0 partial hits, 0 misses; parsed 0 files"), "{file}: {stderr}");
+        let warm = json_of(&stdout_of(warm, &args));
+        assert_eq!(warm, cold, "{file} {selector} {direction} warm");
+
+        let text_args: Vec<&str> = args.iter().copied().filter(|arg| !matches!(*arg, "--verbose" | "--json")).collect();
+        let text = scratch.stdout(&text_args);
+        for (kind, written, at, _) in rows_expected {
+            let listed = format!("{kind} {written} {at}");
+            assert!(
+                text.lines().any(|line| line.trim_end().ends_with(&listed) || line.contains(&format!("{listed} —"))),
+                "{file} {selector} {direction}: `{listed}` in {text}"
+            );
+        }
+    }
+}
+
+/// Construction and implicit-member invocations (`R5-F1`): Java and Scala
+/// generic construction, Swift specialized construction and implicit
+/// members, C++ template allocation and braced construction are callees of
+/// their owner and calls among the constructed type's suggestions; type
+/// arguments, qualifiers, receivers, arguments, annotations, an implicit
+/// member value and array creation are never call rows. Cold and warm
+/// JSON, and text.
+#[test]
+fn constructed_types_and_implicit_members_are_callees_and_callers() {
+    let scratch = Scratch::new(&[
+        (
+            "construct.java",
+            "class C<T> {}\nclass G {\n    void g(Object y) {\n        new C<String>(y);\n        new a.b.C<>();\n        outer.new C<String>() {};\n        C<String> x = null;\n        Object w = new C<String>[2];\n    }\n}\n",
+        ),
+        (
+            "construct.scala",
+            "class C[T]\nobject G {\n  def g(y: Int): Unit = {\n    new C[Int](y)\n    new a.b.C[Int] {}\n    new C[Int] with T\n    val x: C[Int] = null\n  }\n}\n",
+        ),
+        (
+            "construct.swift",
+            "class C<T> {\n    static func f() -> C<T> { fatalError() }\n}\nfunc g(x: Int) {\n    _ = C<Int>()\n    _ = N.C<Int>()\n    let _: C<Int> = .f()\n    let _: C<Int> = .f\n    let _: E = .some(x)\n}\n",
+        ),
+        (
+            "construct.cpp",
+            "template <typename T> struct C {};\nstruct Plain {};\nvoid g(int x) {\n    new C<int>();\n    new N::C<int>;\n    Plain{x};\n    N::C<int>{};\n    C<int> v{};\n    new Plain[2];\n}\n",
+        ),
+    ]);
+    type Row = (String, String, String, String);
+    // `(file, selector, direction, key, rows)`.
+    let expected: Vec<(&str, &str, &str, &str, Vec<Row>)> = vec![
+        (
+            "construct.java",
+            "construct.java#G.g",
+            "--callees",
+            "occurrences",
+            vec![
+                row("Call", "C", "4:13", "NameOnly"),
+                row("Call", "a.b.C", "5:17", "NameOnly"),
+                row("Call", "outer.new C", "6:19", "NameOnly"),
+            ],
+        ),
+        (
+            "construct.java",
+            "construct.java#C",
+            "--callers",
+            "name_only_suggestions",
+            vec![
+                row("Call", "C", "4:13", "NameOnly"),
+                row("Call", "a.b.C", "5:17", "NameOnly"),
+                row("Call", "outer.new C", "6:19", "NameOnly"),
+            ],
+        ),
+        (
+            "construct.java",
+            "construct.java#C",
+            "--all",
+            "name_only_suggestions",
+            vec![
+                row("Call", "C", "4:13", "NameOnly"),
+                row("Call", "a.b.C", "5:17", "NameOnly"),
+                row("Call", "outer.new C", "6:19", "NameOnly"),
+                row("Usage", "C", "7:9", "NameOnly"),
+                row("Usage", "C", "8:24", "NameOnly"),
+            ],
+        ),
+        (
+            "construct.scala",
+            "construct.scala#G.g",
+            "--callees",
+            "occurrences",
+            vec![
+                row("Call", "C", "4:9", "NameOnly"),
+                row("Call", "a.b.C", "5:13", "NameOnly"),
+                row("Call", "C", "6:9", "NameOnly"),
+            ],
+        ),
+        (
+            "construct.scala",
+            "construct.scala#C",
+            "--all",
+            "name_only_suggestions",
+            vec![
+                row("Call", "C", "4:9", "NameOnly"),
+                row("Call", "a.b.C", "5:13", "NameOnly"),
+                row("Call", "C", "6:9", "NameOnly"),
+                row("Usage", "C", "7:12", "NameOnly"),
+            ],
+        ),
+        (
+            "construct.swift",
+            "construct.swift#g",
+            "--callees",
+            "occurrences",
+            vec![
+                row("Call", "C", "5:9", "NameOnly"),
+                row("Call", "N.C", "6:11", "NameOnly"),
+                row("Call", "f", "7:22", "NameOnly"),
+                row("Call", "some", "9:17", "Unresolved"),
+            ],
+        ),
+        (
+            "construct.swift",
+            "construct.swift#C.f",
+            "--all",
+            "name_only_suggestions",
+            vec![row("Call", "f", "7:22", "NameOnly"), row("Usage", "f", "8:22", "NameOnly")],
+        ),
+        (
+            "construct.cpp",
+            "construct.cpp#g",
+            "--callees",
+            "occurrences",
+            vec![
+                row("Call", "C", "4:9", "NameOnly"),
+                row("Call", "N::C", "5:12", "NameOnly"),
+                row("Call", "Plain", "6:5", "NameOnly"),
+                row("Call", "N::C", "7:8", "NameOnly"),
+            ],
+        ),
+        (
+            "construct.cpp",
+            "construct.cpp#Plain",
+            "--all",
+            "name_only_suggestions",
+            vec![row("Call", "Plain", "6:5", "NameOnly"), row("Usage", "Plain", "9:9", "NameOnly")],
+        ),
+    ];
+    for (file, name, direction, key, rows_expected) in &expected {
+        let mut args = vec!["--verbose", "--json", "refs", name];
+        if *direction != "--all" {
+            args.push(direction);
+        }
+        args.push(file);
+        let cold = json_of(&scratch.stdout(&args));
+        assert_eq!(&rows(&cold, key), rows_expected, "{file} {name} {direction} cold: {cold}");
+        let warm = scratch.hug(&args);
+        let stderr = stderr_of(&warm);
+        assert!(stderr.contains("cache: 1 hits, 0 partial hits, 0 misses; parsed 0 files"), "{file}: {stderr}");
+        let warm = json_of(&stdout_of(warm, &args));
+        assert_eq!(&rows(&warm, key), rows_expected, "{file} {name} {direction} warm: {warm}");
+
+        let text_args: Vec<&str> = args.iter().copied().filter(|arg| !matches!(*arg, "--verbose" | "--json")).collect();
+        let text = scratch.stdout(&text_args);
+        for (kind, written, at, _) in rows_expected {
+            let listed = format!("{kind} {written} {at}");
+            assert!(
+                text.lines().any(|line| line.trim_end().ends_with(&listed) || line.contains(&format!("{listed} —"))),
+                "{file} {name} {direction}: `{listed}` in {text}"
+            );
+        }
+    }
+}
+
+/// Java receivers written before `new` (`R5-F3`): every report row shows
+/// the full written target (`outer.new C`, `(outer).new C`, `this.new C`,
+/// `factory().new C`, `holder.outer.new C`), type arguments and an anonymous
+/// body excluded, in the default report, `--callers` and `--callees`, cold
+/// and warm JSON and text; the receiver call `factory()` stays its own row
+/// and the constructed type stays a `NameOnly` suggestion.
+#[test]
+fn receiver_qualified_constructions_report_their_written_target() {
+    let scratch = Scratch::new(&[(
+        "receivers.java",
+        "class G {\n    class C {}\n    void g(G outer) {\n        outer.new C();\n        (outer).new C();\n        this.new C();\n        factory().new C();\n        holder.outer.new C();\n        outer.new C<String>();\n        outer.new C() {};\n    }\n    G factory() { return this; }\n}\n",
+    )]);
+    let constructed = vec![
+        row("Call", "outer.new C", "4:19", "NameOnly"),
+        row("Call", "(outer).new C", "5:21", "NameOnly"),
+        row("Call", "this.new C", "6:18", "NameOnly"),
+        row("Call", "factory().new C", "7:23", "NameOnly"),
+        row("Call", "holder.outer.new C", "8:26", "NameOnly"),
+        row("Call", "outer.new C", "9:19", "NameOnly"),
+        row("Call", "outer.new C", "10:19", "NameOnly"),
+    ];
+    let mut callees = constructed.clone();
+    callees.insert(3, row("Call", "factory", "7:9", "NameOnly"));
+    type Row = (String, String, String, String);
+    // `(selector, direction, key, rows)`.
+    let expected: [(&str, &str, &str, Vec<Row>); 3] = [
+        ("receivers.java#G.C", "--all", "name_only_suggestions", constructed.clone()),
+        ("receivers.java#G.C", "--callers", "name_only_suggestions", constructed),
+        ("receivers.java#G.g", "--callees", "occurrences", callees),
+    ];
+    for (name, direction, key, rows_expected) in &expected {
+        let mut args = vec!["--verbose", "--json", "refs", name];
+        if *direction != "--all" {
+            args.push(direction);
+        }
+        args.push("receivers.java");
+        let cold = json_of(&scratch.stdout(&args));
+        assert_eq!(&rows(&cold, key), rows_expected, "{name} {direction} cold: {cold}");
+        let warm = scratch.hug(&args);
+        let stderr = stderr_of(&warm);
+        assert!(stderr.contains("cache: 1 hits, 0 partial hits, 0 misses; parsed 0 files"), "{name}: {stderr}");
+        let warm = json_of(&stdout_of(warm, &args));
+        assert_eq!(&rows(&warm, key), rows_expected, "{name} {direction} warm: {warm}");
+
+        let text_args: Vec<&str> = args.iter().copied().filter(|arg| !matches!(*arg, "--verbose" | "--json")).collect();
+        let text = scratch.stdout(&text_args);
+        for (kind, written, at, _) in rows_expected {
+            let listed = format!("{kind} {written} {at}");
+            assert!(
+                text.lines().any(|line| line.trim_end().ends_with(&listed) || line.contains(&format!("{listed} —"))),
+                "{name} {direction}: `{listed}` in {text}"
+            );
+        }
+    }
+}
+
+/// A parameter's default value and type are references, never parameters:
+/// selecting the real `external` or `W` is unambiguous, their reads are
+/// listed as suggestions against them alone, the parameter lists name only
+/// the real parameters, and two real declarations are still ambiguous.
+#[test]
+fn parameter_defaults_and_types_are_references_not_declarations() {
+    let scratch = Scratch::new(&[
+        ("defaults.py", "def external(): pass\ndef g(x=external, y=external()): pass\n"),
+        ("types.cs", "class W {}\nclass G { void g(W obj) {} }\n"),
+    ]);
+    let candidate_names = |json: &Value| -> Vec<Vec<String>> {
+        json["files"][0]["name_only_suggestions"]
+            .as_array()
+            .expect("suggestions")
+            .iter()
+            .map(|row| {
+                row["candidates"]
+                    .as_array()
+                    .expect("candidates")
+                    .iter()
+                    .map(|candidate| candidate["qualified_name"].as_str().expect("candidate").to_string())
+                    .collect()
+            })
+            .collect()
+    };
+
+    let external = refs_json(&scratch, &["external", "--no-cache"]);
+    assert_eq!(external["declaration"]["kind"], "Function", "{external}");
+    assert_eq!(
+        rows(&external, "name_only_suggestions"),
+        vec![row("Usage", "external", "2:9", "NameOnly"), row("Call", "external", "2:21", "NameOnly")]
+    );
+    assert_eq!(candidate_names(&external), vec![vec!["defaults.py#external"]; 2]);
+
+    let w = refs_json(&scratch, &["W", "--no-cache"]);
+    assert_eq!(w["declaration"]["kind"], "Class", "{w}");
+    assert_eq!(rows(&w, "name_only_suggestions"), vec![row("Usage", "W", "2:18", "NameOnly")]);
+    assert_eq!(candidate_names(&w), vec![vec!["types.cs#W"]]);
+
+    let json = json_of(&scratch.stdout(&["--json", "symbols", "--all-scopes", "--no-cache"]));
+    let mut parameters: Vec<(String, String)> = json["files"]
+        .as_array()
+        .expect("files")
+        .iter()
+        .flat_map(|file| file["symbols"].as_array().expect("symbols").clone())
+        .filter(|record| record["kind"] == "Parameter")
+        .map(|record| {
+            let file = record["source"]["file_path"].as_str().expect("file").to_string();
+            (file, record["identity"]["name"].as_str().expect("name").to_string())
+        })
+        .collect();
+    parameters.sort();
+    let expected: Vec<(String, String)> = [("defaults.py", "x"), ("defaults.py", "y"), ("types.cs", "obj")]
+        .into_iter()
+        .map(|(file, name)| (file.to_string(), name.to_string()))
+        .collect();
+    assert_eq!(parameters, expected, "{json}");
+
+    let listing = scratch.stdout(&["--plain", "functions", "types.cs", "--no-cache"]);
+    assert!(listing.contains("g(obj: W)"), "{listing}");
+    assert!(!listing.contains("W: W"), "{listing}");
+
+    let scratch = Scratch::new(&[
+        ("defaults.py", "def external(): pass\ndef g(x=external): pass\n"),
+        ("other.py", "def external(): pass\n"),
+    ]);
+    let output = scratch.hug(&["--json", "refs", "external", "--no-cache"]);
+    assert_eq!(output.status.code(), Some(1), "two real declarations stay ambiguous");
+    assert!(stderr_of(&output).contains("`external` names 2 declarations"), "{}", stderr_of(&output));
+    let narrowed = refs_json(&scratch, &["external", "defaults.py", "--no-cache"]);
+    assert_eq!(rows(&narrowed, "name_only_suggestions"), vec![row("Usage", "external", "2:9", "NameOnly")]);
+}
+
+/// A generic parameter's declaration token is no reference to a same-named
+/// class: the default report for `T` lists only the two type reads (bytes
+/// 24 and 28) as suggestions, never the declaration `<T>` (byte 19), and the
+/// call-only direction lists nothing.
+#[test]
+fn unreported_declaration_tokens_are_never_suggestions() {
+    let source = "class T {} class G<T> { T f(T x){ return x; } }\n";
+    let scratch = Scratch::new(&[("Generic.java", source)]);
+
+    let json = refs_json(&scratch, &["T", "--no-cache"]);
+    assert_eq!(json["declaration"]["kind"], "Class", "{json}");
+    assert_eq!(
+        rows(&json, "name_only_suggestions"),
+        vec![row("Usage", "T", "1:25", "NameOnly"), row("Usage", "T", "1:29", "NameOnly")]
+    );
+    let bytes: Vec<u64> = json["files"][0]["name_only_suggestions"]
+        .as_array()
+        .expect("suggestions")
+        .iter()
+        .map(|row| row["span"]["start_byte"].as_u64().expect("start byte"))
+        .collect();
+    assert_eq!(bytes, vec![24, 28], "{json}");
+    assert_eq!(&source[19..20], "T", "byte 19 is the declaration token");
+    assert_eq!(rows(&json, "occurrences"), Vec::new(), "{json}");
+
+    let callers = refs_json(&scratch, &["T", "--callers", "--no-cache"]);
+    assert_eq!(rows(&callers, "name_only_suggestions"), Vec::new(), "{callers}");
+}
+
+/// A declaration token no record reports, or one component of a declared
+/// path, is no reference (`R7-F2.C5`): the ID-selected default report for
+/// the outer Java class `A` lists only the annotation read `@A` (2:59) as a
+/// suggestion, never the nested annotation type's own name (2:22), and the
+/// one for the TypeScript class `A` lists only the type read (1:58) as a
+/// `Scoped` reference, never the namespace prefix `A.B` (1:22); cold and on
+/// a verified warm hit, in JSON and text.
+#[test]
+fn unreported_and_compound_declaration_names_are_never_references() {
+    let scratch = Scratch::new(&[
+        ("Annotation.java", "class A {}\nclass G { @interface A { int value() default external; } @A void g() {} }\n"),
+        ("namespace.ts", "class A {} namespace A.B { export function f(){} } let x:A;\n"),
+    ]);
+    // `(file, the incoming rows, the suggestions, the declaration positions never listed)`.
+    let expected = [
+        ("Annotation.java", Vec::new(), vec![row("Usage", "A", "2:59", "NameOnly")], "2:22"),
+        ("namespace.ts", vec![row("Usage", "A", "1:58", "Scoped")], Vec::new(), "1:22"),
+    ];
+    for (file, incoming, suggestions, declared) in &expected {
+        let id = declaration_id(&refs_json(&scratch, &["A", file, "--no-cache"]));
+        let args = ["--verbose", "--json", "refs", "--id", id.as_str(), file];
+        for entry in crate::cache_entries(scratch.temp.path()) {
+            std::fs::remove_file(entry).expect("remove an entry");
+        }
+        let cold = scratch.hug(&args);
+        assert!(stderr_of(&cold).contains("0 hits, 0 partial hits, 1 misses; parsed 1 files"), "{file}: {}", stderr_of(&cold));
+        let cold = json_of(&stdout_of(cold, &args));
+        assert_eq!(&rows(&cold, "occurrences"), incoming, "{file} cold: {cold}");
+        assert_eq!(&rows(&cold, "name_only_suggestions"), suggestions, "{file} cold: {cold}");
+        let warm = scratch.hug(&args);
+        let stderr = stderr_of(&warm);
+        assert!(stderr.contains("cache: 1 hits, 0 partial hits, 0 misses; parsed 0 files"), "{file}: {stderr}");
+        let warm = json_of(&stdout_of(warm, &args));
+        assert_eq!(warm, cold, "{file} warm");
+
+        let text = scratch.stdout(&["--plain", "refs", "--id", id.as_str(), file]);
+        for (kind, written, at, _) in incoming {
+            let listed = format!("- {kind} {written} {at}\n");
+            assert!(text.contains(&listed), "{file}: `{listed}` in {text}");
+        }
+        for (kind, written, at, _) in suggestions {
+            let listed = format!("{kind} {written} {at} —");
+            assert!(text.contains(&listed), "{file}: `{listed}` in {text}");
+        }
+        assert!(!text.contains(&format!(" {declared}")), "{file}: declaration {declared} listed in {text}");
+    }
+}
+
+/// A Swift selective import is listed by the name it binds with its path
+/// as the source (`R7-F3.S7`); a whole-module import keeps its path.
+#[test]
+fn swift_selective_imports_are_listed_by_their_bound_name() {
+    let scratch = Scratch::new(&[("I.swift", "import Foo.Sub\nimport struct Foo.Bar\nimport func Foo.baz\n")]);
+    let json = json_of(&scratch.stdout(&["--json", "imports", "I.swift"]));
+    let listed: Vec<(String, Option<String>)> = json["files"][0]["imports"]
+        .as_array()
+        .expect("imports")
+        .iter()
+        .map(|import| (import["name"].as_str().expect("name").to_string(), import["source"].as_str().map(str::to_string)))
+        .collect();
+    let entry = |name: &str, source: &str| (name.to_string(), Some(source.to_string()));
+    assert_eq!(listed, [entry("Foo.Sub", "Foo.Sub"), entry("Bar", "Foo.Bar"), entry("baz", "Foo.baz")], "{json}");
+    let plain = scratch.stdout(&["--plain", "imports", "I.swift"]);
+    for line in ["import Foo.Sub [1:8]", "import Foo.Bar [2:19]", "import Foo.baz [3:17]"] {
+        assert!(plain.contains(line), "`{line}` in {plain}");
+    }
+}
+
+/// A contextual syntax marker is no reference to a same-named declaration
+/// (`R6-F3.C4`, `R7-F1.C5`): the ID-selected default report lists only the
+/// real reads as suggestions, never the Lua attribute, Java's inferred-type
+/// `var` (also beside a static import of a member named `var`, which is no
+/// legacy type), PHP's class-relative `static`, a Swift precedence
+/// group's associativity value, a named-argument label (`R7-F1.S5`) or a
+/// built-in Swift attribute name (`R7-F1.S6`), cold and on a verified warm
+/// hit, in JSON and text.
+#[test]
+fn contextual_syntax_markers_are_never_suggestions() {
+    let scratch = Scratch::new(&[
+        ("attributes.lua", "local const=1; local close=2\nlocal x <const> = const\nlocal y <close> = close\n"),
+        ("Inferred.java", "record R() {\n    void g() { var x=factory(); int var=1; use(var); }\n}\n"),
+        (
+            "relative.php",
+            "<?php\nclass C {\n    function static() {}\n    function f(): static { return new static(); }\n    function g() { return $this->static(); }\n}\n",
+        ),
+        ("StaticImport.java", "import static p.Tools.var;\nrecord G() {\n    void g() { var x = 1; int var = 2; use(var); }\n}\n"),
+        ("precedence.swift", "precedencegroup A {\n    associativity: left\n}\nfunc g() {\n    let left = 1\n    use(left)\n}\n"),
+        ("keywords.py", "x = 1\nf(x=x)\n"),
+        ("labels.swift", "func g() {\n    let x = 1\n    _ = f(x: x)\n}\n"),
+        ("attributes.swift", "@objc func h() {}\nfunc g() {\n    let objc = 1\n    use(objc)\n}\n"),
+    ]);
+    // `(file, name, the suggestions, the marker positions never listed)`.
+    let expected = [
+        ("attributes.lua", "const", vec![row("Usage", "const", "2:19", "NameOnly")], vec!["2:10"]),
+        ("attributes.lua", "close", vec![row("Usage", "close", "3:19", "NameOnly")], vec!["3:10"]),
+        ("Inferred.java", "var", vec![row("Usage", "var", "2:48", "NameOnly")], vec!["2:16"]),
+        ("relative.php", "static", vec![row("Call", "$this->static", "5:34", "NameOnly")], vec!["4:19", "4:39"]),
+        ("StaticImport.java", "var", vec![row("Usage", "var", "3:44", "NameOnly")], vec!["3:16"]),
+        ("precedence.swift", "left", vec![row("Usage", "left", "6:9", "NameOnly")], vec!["2:20"]),
+        ("keywords.py", "x", vec![row("Usage", "x", "2:5", "NameOnly")], vec!["2:3"]),
+        ("labels.swift", "x", vec![row("Usage", "x", "3:14", "NameOnly")], vec!["3:11"]),
+        ("attributes.swift", "objc", vec![row("Usage", "objc", "4:9", "NameOnly")], vec!["1:2"]),
+    ];
+    for (file, name, suggestions, markers) in &expected {
+        let id = declaration_id(&refs_json(&scratch, &[name, file, "--no-cache"]));
+        let args = ["--verbose", "--json", "refs", "--id", id.as_str(), file];
+        for entry in crate::cache_entries(scratch.temp.path()) {
+            std::fs::remove_file(entry).expect("remove an entry");
+        }
+        let cold = scratch.hug(&args);
+        assert!(stderr_of(&cold).contains("0 hits, 0 partial hits, 1 misses; parsed 1 files"), "{file}: {}", stderr_of(&cold));
+        let cold = json_of(&stdout_of(cold, &args));
+        assert_eq!(&rows(&cold, "name_only_suggestions"), suggestions, "{file} `{name}` cold: {cold}");
+        assert_eq!(rows(&cold, "occurrences"), Vec::new(), "{file} `{name}`: {cold}");
+        let warm = scratch.hug(&args);
+        let stderr = stderr_of(&warm);
+        assert!(stderr.contains("cache: 1 hits, 0 partial hits, 0 misses; parsed 0 files"), "{file}: {stderr}");
+        let warm = json_of(&stdout_of(warm, &args));
+        assert_eq!(warm, cold, "{file} `{name}` warm");
+
+        let text_args = ["--plain", "refs", "--id", id.as_str(), file];
+        let text = scratch.stdout(&text_args);
+        for (kind, written, at, _) in suggestions {
+            let listed = format!("{kind} {written} {at} —");
+            assert!(text.contains(&listed), "{file} `{name}`: `{listed}` in {text}");
+        }
+        for marker in markers {
+            assert!(!text.contains(&format!(" {marker} ")), "{file} `{name}`: marker {marker} listed in {text}");
+        }
+    }
+}
+
+/// A qualified Java annotation or module service is a read, never an
+/// import (`R7-F3.C6`): the ID-selected default report for the class lists
+/// it as a suggestion with its written path beside the unqualified control,
+/// cold and on a verified warm hit, in JSON and text; it is no callee or
+/// caller; and `hug imports` lists only the genuine import's final segment.
+#[test]
+fn qualified_java_annotations_and_services_are_suggestions_not_imports() {
+    let scratch = Scratch::new(&[
+        ("G.java", "class A {}\n@p.q.A class G {}\n@A class H {}\n"),
+        ("module-info.java", "module m {\n    uses a.b.C;\n    provides a.b.C with d.e.D;\n}\nclass C {}\n"),
+        ("K.java", "import a.b.Z;\n@p.q.A class K {}\n"),
+    ]);
+    // `(file, name, the suggestions)`.
+    let expected = [
+        (
+            "G.java",
+            "A",
+            vec![row("Usage", "p.q.A", "2:6", "NameOnly"), row("Usage", "A", "3:2", "NameOnly")],
+        ),
+        (
+            "module-info.java",
+            "C",
+            vec![row("Usage", "a.b.C", "2:14", "NameOnly"), row("Usage", "a.b.C", "3:18", "NameOnly")],
+        ),
+    ];
+    for (file, name, suggestions) in &expected {
+        let id = declaration_id(&refs_json(&scratch, &[name, file, "--no-cache"]));
+        let args = ["--verbose", "--json", "refs", "--id", id.as_str(), file];
+        for entry in crate::cache_entries(scratch.temp.path()) {
+            std::fs::remove_file(entry).expect("remove an entry");
+        }
+        let cold = scratch.hug(&args);
+        assert!(stderr_of(&cold).contains("0 hits, 0 partial hits, 1 misses; parsed 1 files"), "{file}: {}", stderr_of(&cold));
+        let cold = json_of(&stdout_of(cold, &args));
+        assert_eq!(&rows(&cold, "name_only_suggestions"), suggestions, "{file} `{name}` cold: {cold}");
+        assert_eq!(rows(&cold, "occurrences"), Vec::new(), "{file} `{name}`: {cold}");
+        let warm = scratch.hug(&args);
+        let stderr = stderr_of(&warm);
+        assert!(stderr.contains("cache: 1 hits, 0 partial hits, 0 misses; parsed 0 files"), "{file}: {stderr}");
+        let warm = json_of(&stdout_of(warm, &args));
+        assert_eq!(warm, cold, "{file} `{name}` warm");
+
+        let text = scratch.stdout(&["--plain", "refs", "--id", id.as_str(), file]);
+        for (kind, written, at, _) in suggestions {
+            let listed = format!("{kind} {written} {at} —");
+            assert!(text.contains(&listed), "{file} `{name}`: `{listed}` in {text}");
+        }
+        let callers = refs_json(&scratch, &["--id", id.as_str(), "--callers", file]);
+        assert_eq!(rows(&callers, "name_only_suggestions"), Vec::new(), "{file}: {callers}");
+    }
+
+    let imports = json_of(&scratch.stdout(&["--json", "imports", "G.java", "module-info.java", "K.java"]));
+    let listed: Vec<(String, String)> = imports["files"]
+        .as_array()
+        .expect("files")
+        .iter()
+        .flat_map(|file| {
+            let path = std::path::Path::new(file["file"].as_str().expect("file"))
+                .file_name()
+                .expect("file name")
+                .to_string_lossy()
+                .into_owned();
+            file["imports"]
+                .as_array()
+                .expect("imports")
+                .iter()
+                .map(move |import| (path.clone(), import["name"].as_str().expect("name").to_string()))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    assert_eq!(listed, [("K.java".to_string(), "Z".to_string())], "{imports}");
+    let plain = scratch.stdout(&["--plain", "imports", "G.java", "module-info.java", "K.java"]);
+    assert_eq!(plain.matches("import ").count(), 1, "{plain}");
+}
+
+/// Every C# `using` directive is an import (`R7-F3.S1`): `hug imports`
+/// lists the namespace, `static` and alias directives, with the alias and
+/// its target, and nothing else.
+#[test]
+fn csharp_using_directives_are_listed_by_imports() {
+    let scratch = Scratch::new(&[(
+        "U.cs",
+        "using System;\nusing A.B;\nusing static C.D;\nusing E = F.G;\nclass Z { E e; }\n",
+    )]);
+    let json = json_of(&scratch.stdout(&["--json", "imports", "U.cs"]));
+    let files = json["files"].as_array().expect("files");
+    assert_eq!(files.len(), 1, "{json}");
+    let listed: Vec<(String, Option<String>, Option<String>)> = files[0]["imports"]
+        .as_array()
+        .expect("imports")
+        .iter()
+        .map(|import| {
+            (
+                import["name"].as_str().expect("name").to_string(),
+                import["alias"].as_str().map(str::to_string),
+                import["source"].as_str().map(str::to_string),
+            )
+        })
+        .collect();
+    let entry = |name: &str, alias: Option<&str>, source: &str| (name.to_string(), alias.map(str::to_string), Some(source.to_string()));
+    assert_eq!(
+        listed,
+        [entry("System", None, "System"), entry("B", None, "A.B"), entry("D", None, "C.D"), entry("E", Some("E"), "F.G")],
+        "{json}"
+    );
+    let plain = scratch.stdout(&["--plain", "imports", "U.cs"]);
+    for line in ["using System [1:7]", "using A.B [2:9]", "using C.D [3:16]", "using E = F.G [4:7]"] {
+        assert!(plain.contains(line), "`{line}` in {plain}");
+    }
+    assert_eq!(plain.matches("using ").count(), 4, "{plain}");
+}
+
+/// A bare-identifier initializer is a read (`R6-F3.X1`) and a zsh
+/// declaration-builtin operand is a declaration token (`R6-F3.X2`): the
+/// ID-selected report for the Java field `xs` lists its field, local and
+/// inferred-local initializer reads, and the one for the zsh function `x`
+/// lists only the expansion and the call, never `local x`/`export x`, cold
+/// and on a verified warm hit, in JSON and text.
+#[test]
+fn bare_initializers_are_suggestions_and_shell_declaration_operands_are_not() {
+    let scratch = Scratch::new(&[
+        ("Initializer.java", "class A {\n    int xs = 1; int ys = xs;\n    void g() { int k = xs; var v = xs; }\n}\n"),
+        ("declare.zsh", "x() { :; }\nf() { local x; export x; echo $x; x; }\n"),
+    ]);
+    // `(file, name, the suggestions, the positions never listed)`.
+    let expected = [
+        (
+            "Initializer.java",
+            "xs",
+            vec![
+                row("Usage", "xs", "2:26", "NameOnly"),
+                row("Usage", "xs", "3:24", "NameOnly"),
+                row("Usage", "xs", "3:36", "NameOnly"),
+            ],
+            vec!["2:9"],
+        ),
+        ("declare.zsh", "x", vec![row("Usage", "x", "2:32", "NameOnly"), row("Call", "x", "2:35", "NameOnly")], vec!["2:13", "2:23"]),
+    ];
+    for (file, name, suggestions, absent) in &expected {
+        let id = declaration_id(&refs_json(&scratch, &[name, file, "--no-cache"]));
+        let args = ["--verbose", "--json", "refs", "--id", id.as_str(), file];
+        for entry in crate::cache_entries(scratch.temp.path()) {
+            std::fs::remove_file(entry).expect("remove an entry");
+        }
+        let cold = scratch.hug(&args);
+        assert!(stderr_of(&cold).contains("0 hits, 0 partial hits, 1 misses; parsed 1 files"), "{file}: {}", stderr_of(&cold));
+        let cold = json_of(&stdout_of(cold, &args));
+        assert_eq!(&rows(&cold, "name_only_suggestions"), suggestions, "{file} `{name}` cold: {cold}");
+        assert_eq!(rows(&cold, "occurrences"), Vec::new(), "{file} `{name}`: {cold}");
+        let warm = scratch.hug(&args);
+        let stderr = stderr_of(&warm);
+        assert!(stderr.contains("cache: 1 hits, 0 partial hits, 0 misses; parsed 0 files"), "{file}: {stderr}");
+        let warm = json_of(&stdout_of(warm, &args));
+        assert_eq!(warm, cold, "{file} `{name}` warm");
+
+        let text_args = ["--plain", "refs", "--id", id.as_str(), file];
+        let text = scratch.stdout(&text_args);
+        for (kind, written, at, _) in suggestions {
+            let listed = format!("{kind} {written} {at} —");
+            assert!(text.contains(&listed), "{file} `{name}`: `{listed}` in {text}");
+        }
+        for position in absent {
+            assert!(!text.contains(&format!(" {position} ")), "{file} `{name}`: {position} listed in {text}");
+        }
+    }
+}
+
+/// A comment before, after or on both sides of a default's `=` neither
+/// erases the default nor becomes it (`R6-F2`): the ID-selected text report
+/// heads every C#, PHP and Scala callable form with its real defaults,
+/// cold and warm.
+#[test]
+fn commented_defaults_show_their_real_values_in_the_reference_header() {
+    let scratch = Scratch::new(&[
+        (
+            "defaults.cs",
+            "class K {\n    void g(int x /* b */ = 1, int y = /* a */ 2, int z /* b */ = /* a */ 3) {}\n    \
+             K(int x /* b */ = 1, int y = /* a */ 2) {}\n    \
+             void Outer() { void Local(int x /* b */ = 1, int y = /* a */ 2) {} }\n}\n",
+        ),
+        (
+            "defaults.php",
+            "<?php\nfunction g($x /* b */ = 1, $y = /* a */ 2, $z /* b */ = /* a */ 3) {}\nclass K {\n    \
+             function __construct($x /* b */ = 1, $y = /* a */ 2) {}\n    \
+             function method(int $x /* b */ = 1, int $y = /* a */ 2) {}\n}\n",
+        ),
+        (
+            "defaults.scala",
+            "object O {\n  def g(x: Int /* b */ = 1, y: Int = /* a */ 2, z: Int /* b */ = /* a */ 3): Int = x\n}\n\
+             class K {\n  def method(x: Int /* b */ = 1, y: Int = /* a */ 2): Int = x\n}\n",
+        ),
+    ]);
+    let listing = json_of(&scratch.stdout(&["--json", "functions", "--no-cache"]));
+    let id_of = |file: &str, name: &str| -> String {
+        let ids: Vec<&str> = listing["files"]
+            .as_array()
+            .expect("files")
+            .iter()
+            .flat_map(|entry| entry["symbols"].as_array().expect("symbols"))
+            .filter(|record| record["source"]["file_path"] == file && record["identity"]["name"] == name)
+            .map(|record| record["id"].as_str().expect("id"))
+            .collect();
+        let [id] = ids.as_slice() else { panic!("{file} `{name}`: {ids:?} in {listing}") };
+        id.to_string()
+    };
+    // `(file, callable, the header's signature)`.
+    let expected = [
+        ("defaults.cs", "g", "g(x: int = 1, y: int = 2, z: int = 3)"),
+        ("defaults.cs", "K", "K(x: int = 1, y: int = 2)"),
+        ("defaults.cs", "Local", "Local(x: int = 1, y: int = 2)"),
+        ("defaults.php", "g", "g(x = 1, y = 2, z = 3)"),
+        ("defaults.php", "__construct", "__construct(x = 1, y = 2)"),
+        ("defaults.php", "method", "method(x: int = 1, y: int = 2)"),
+        ("defaults.scala", "g", "g(x: Int = 1, y: Int = 2, z: Int = 3)"),
+        ("defaults.scala", "method", "method(x: Int = 1, y: Int = 2)"),
+    ];
+    for (file, name, signature) in expected {
+        let id = id_of(file, name);
+        let args = ["--verbose", "--plain", "refs", "--id", id.as_str(), file];
+        // An earlier callable's run wrote this file's entry; remove it so
+        // this run is cold.
+        for entry in crate::cache_entries(scratch.temp.path()) {
+            std::fs::remove_file(entry).expect("remove an entry");
+        }
+        for (run, served) in [("cold", "0 hits, 0 partial hits, 1 misses"), ("warm", "1 hits, 0 partial hits, 0 misses")] {
+            let output = scratch.hug(&args);
+            assert!(stderr_of(&output).contains(served), "{file} `{name}` {run}: {}", stderr_of(&output));
+            let text = stdout_of(output, &args);
+            let header = text.lines().next().unwrap_or_default();
+            assert!(header.starts_with("References to ") && header.contains(signature), "{file} `{name}` {run}: {text}");
+            assert!(!header.contains("/*"), "{file} `{name}` {run}: no comment in {header}");
+        }
+    }
+}
+
+/// `(file, [(name, alias, source)], plain lines)`.
+type ListedImports = (&'static str, Vec<(&'static str, Option<&'static str>, Option<&'static str>)>, Vec<&'static str>);
+
+/// Scala, Python, Rust, PHP and TypeScript imports list only the names
+/// they bind (`R7-F3.S3`-`.S6` and the TS/JS sweep): never a Scala or
+/// Python qualifier or an aliased original, always a braced selector, a
+/// one-segment or grouped PHP clause, a Rust `use a;`, glob or nested list
+/// entry, and a default import, in JSON and plain text.
+#[test]
+fn imports_list_only_the_names_each_import_binds() {
+    let scratch = Scratch::new(&[
+        ("I.scala", "import a.b.C\nimport a.{D, E => F}\nimport c.d.*, e.given\nobject O\n"),
+        ("i.py", "import a.b\nimport c.d as e, f\nfrom g.h import i as j, k\nfrom l import *\nfrom __future__ import annotations\n"),
+        ("i.rs", "use a;\nuse b::*;\nuse c::{g::h, d, e as f};\nextern crate y as z;\nuse k::{self, l};\n"),
+        ("i.php", "<?php\nuse A;\nuse B\\C as D;\nuse E\\{F, G as H};\nuse function I\\j;\n"),
+        ("i.ts", "import d, { a as b } from \"m\";\nimport q = require(\"m\");\n"),
+    ]);
+    let expected: [ListedImports; 5] = [
+        (
+            "I.scala",
+            vec![
+                ("C", None, Some("a.b.C")),
+                ("D", None, Some("a.D")),
+                ("F", Some("F"), Some("a.E")),
+                ("d", Some("d"), Some("c.d")),
+                ("e", Some("e"), Some("e")),
+            ],
+            vec!["import a.b.C [1:12]", "import a.D, a.E as F [2:11, 19]", "import c.d.*, e.given [3:10, 15]"],
+        ),
+        (
+            "i.py",
+            vec![
+                ("a", None, Some("a.b")),
+                ("e", Some("e"), Some("c.d")),
+                ("f", None, Some("f")),
+                ("j", Some("j"), Some("g.h")),
+                ("k", None, Some("g.h")),
+                ("l", Some("l"), Some("l")),
+                ("annotations", None, Some("__future__")),
+            ],
+            vec![
+                "import a.b [1:8]",
+                "import c.d as e, f [2:15, 18]",
+                "from g.h import i as j, k [3:22, 25]",
+                "from l import * [4:6]",
+                "from __future__ import annotations [5:24]",
+            ],
+        ),
+        (
+            "i.rs",
+            vec![
+                ("a", None, None),
+                ("b", Some("b"), Some("b")),
+                ("h", None, Some("c::g")),
+                ("d", None, Some("c")),
+                ("f", Some("f"), Some("c")),
+                ("z", Some("z"), None),
+                ("k", None, None),
+                ("l", None, Some("k")),
+            ],
+            vec!["use a [1:5]", "use b::* [2:5]", "use {c::g::h, c::d, c::e as f} [3:12, 15, 23]", "use y as z [4:19]", "use {k, k::l} [5:5, 15]"],
+        ),
+        (
+            "i.php",
+            vec![
+                ("A", None, Some("A")),
+                ("D", Some("D"), Some("B\\C")),
+                ("F", None, Some("E\\F")),
+                ("H", Some("H"), Some("E\\G")),
+                ("j", None, Some("I\\j")),
+            ],
+            vec!["use A [2:5]", "use B\\C as D [3:12]", "use E\\F, E\\G as H [4:8, 16]", "use I\\j [5:16]"],
+        ),
+        (
+            "i.ts",
+            vec![("d", None, Some("m")), ("b", Some("b"), Some("m")), ("q", None, Some("m"))],
+            vec!["import { d, a as b } from \"m\" [1:8, 18]", "import { q } from \"m\" [2:8]"],
+        ),
+    ];
+    for (file, entries, lines) in &expected {
+        let json = json_of(&scratch.stdout(&["--json", "imports", file]));
+        let listed: Vec<(String, Option<String>, Option<String>)> = json["files"][0]["imports"]
+            .as_array()
+            .expect("imports")
+            .iter()
+            .map(|import| {
+                (
+                    import["name"].as_str().expect("name").to_string(),
+                    import["alias"].as_str().map(str::to_string),
+                    import["source"].as_str().map(str::to_string),
+                )
+            })
+            .collect();
+        let entries: Vec<(String, Option<String>, Option<String>)> = entries
+            .iter()
+            .map(|(name, alias, source)| (name.to_string(), alias.map(str::to_string), source.map(str::to_string)))
+            .collect();
+        assert_eq!(listed, entries, "{file}: {json}");
+        let plain = scratch.stdout(&["--plain", "imports", file]);
+        for line in lines {
+            assert!(plain.contains(&format!("- {line}\n")), "`{line}` in {plain}");
+        }
+        assert_eq!(plain.matches("\n  - ").count(), lines.len(), "{file}: {plain}");
+    }
+}
+
+/// TS/JS export clauses (`R7-F3.X2`): the ID-selected report for the
+/// function `k` lists only its local export `export { k as g }` and the
+/// call in `g`, never the names of a re-export from `"m"` or of
+/// `export * as k`, and the one for `const j` lists nothing for the
+/// exported alias `j`, cold and on a verified warm hit, in JSON and text.
+#[test]
+fn export_clause_names_are_never_references() {
+    let source = "function k() {}\nconst j = 1;\nexport { k as j } from \"m\";\nexport { k as g };\nexport * as k from \"m\";\nfunction g() { k(); }\n";
+    let scratch = Scratch::new(&[("exports.ts", source), ("exports.js", source)]);
+    // `(name, the established rows, the positions never listed)`.
+    let expected = [
+        ("k", vec![row("Usage", "k", "4:10", "Scoped"), row("Call", "k", "6:16", "Scoped")], vec!["3:10", "5:13"]),
+        ("j", vec![], vec!["3:15", "4:15"]),
+    ];
+    for file in ["exports.ts", "exports.js"] {
+        for (name, established, absent) in &expected {
+            let id = declaration_id(&refs_json(&scratch, &[name, file, "--no-cache"]));
+            let args = ["--verbose", "--json", "refs", "--id", id.as_str(), file];
+            for entry in crate::cache_entries(scratch.temp.path()) {
+                std::fs::remove_file(entry).expect("remove an entry");
+            }
+            let cold = scratch.hug(&args);
+            assert!(stderr_of(&cold).contains("0 hits, 0 partial hits, 1 misses; parsed 1 files"), "{file}: {}", stderr_of(&cold));
+            let cold = json_of(&stdout_of(cold, &args));
+            assert_eq!(&rows(&cold, "occurrences"), established, "{file} `{name}` cold: {cold}");
+            assert_eq!(rows(&cold, "name_only_suggestions"), Vec::new(), "{file} `{name}`: {cold}");
+            let warm = scratch.hug(&args);
+            let stderr = stderr_of(&warm);
+            assert!(stderr.contains("cache: 1 hits, 0 partial hits, 0 misses; parsed 0 files"), "{file}: {stderr}");
+            let warm = json_of(&stdout_of(warm, &args));
+            assert_eq!(warm, cold, "{file} `{name}` warm");
+
+            let text = scratch.stdout(&["--plain", "refs", "--id", id.as_str(), file]);
+            for (kind, written, at, _) in established {
+                let listed = format!("- {kind} {written} {at}\n");
+                assert!(text.contains(&listed), "{file} `{name}`: `{listed}` in {text}");
+            }
+            for position in absent {
+                assert!(!text.contains(&format!(" {position}\n")), "{file} `{name}`: {position} listed in {text}");
+            }
+        }
+    }
+}
+
+/// A Go raw-string import path is listed by `hug imports` exactly like
+/// an interpreted one (`R7-F3.X3`), its source without quotes.
+#[test]
+fn go_raw_string_imports_are_listed_by_imports() {
+    let scratch = Scratch::new(&[("r.go", "package p\nimport `c/d`\nimport x `e/f`\nimport \"m/n\"\n")]);
+    let json = json_of(&scratch.stdout(&["--json", "imports", "r.go"]));
+    let listed: Vec<(String, Option<String>, Option<String>)> = json["files"][0]["imports"]
+        .as_array()
+        .expect("imports")
+        .iter()
+        .map(|import| {
+            (
+                import["name"].as_str().expect("name").to_string(),
+                import["alias"].as_str().map(str::to_string),
+                import["source"].as_str().map(str::to_string),
+            )
+        })
+        .collect();
+    let entry = |name: &str, alias: Option<&str>, source: &str| (name.to_string(), alias.map(str::to_string), Some(source.to_string()));
+    assert_eq!(listed, [entry("d", None, "c/d"), entry("x", Some("x"), "e/f"), entry("n", None, "m/n")], "{json}");
+    let plain = scratch.stdout(&["--plain", "imports", "r.go"]);
+    for line in ["- import \"c/d\" [2:8]\n", "- import x \"e/f\" [3:8]\n", "- import \"m/n\" [4:8]\n"] {
+        assert!(plain.contains(line), "`{line}` in {plain}");
     }
 }
