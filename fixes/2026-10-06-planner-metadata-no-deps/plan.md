@@ -3,14 +3,26 @@ kind: plan
 name: planner-metadata-no-deps
 total_phases: 5
 created: 2026-10-07
-phase: 1
+phase: 3
 agent: claude/sonnet
 yolo: true
 source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
-packages: []
+source_files_during_phase_2:
+  - scripts/ci/test_affected_scope.py
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+  - scripts/ci/affected_scope.py
+  - scripts/ci/test_affected_scope.py
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+packages:
+  - repo-deps
 ---
 
 # Plan: the planner reads workspace metadata without resolving dependencies
@@ -164,14 +176,14 @@ patches `load_metadata` to return the saved full-resolve JSON and fixes
 Goal: make the suite express edges the way `--no-deps` does, *before* changing
 the code, so the failing tests define the new behavior.
 
-- [ ] **2.1 Shared fixture shape** (Wave 1)
+- [x] **2.1 Shared fixture shape** (Wave 1)
     - Introduce one shared helper (in `test_affected_scope.py`) that builds
       package records with explicit `dependencies: []` and `features: {}`, and a
       shape assertion rejecting a populated synthetic `resolve` while accepting
       `null`/absent.
     - Add a `resolve`-rejecting mapping wrapper (raises on `[]`, `.get`, `in`)
       and run representative planning inputs through it to prove no read.
-- [ ] **2.2 Migrate edge-bearing fixtures** (Wave 2; split by line range across
+- [x] **2.2 Migrate edge-bearing fixtures** (Wave 2; split by line range across
       up to three subagents, one file region each — same file, so assign
       disjoint line ranges and merge sequentially)
     - Convert every fixture with populated `resolve.nodes[].deps` (sites near
@@ -182,11 +194,11 @@ the code, so the failing tests define the new behavior.
     - Each migrated test keeps its expected dependents / native requirements /
       input directories. Deleting edges and asserting only plan success is not
       acceptable.
-- [ ] **2.3 Migrate empty-resolve fixtures** (Wave 2, parallel with 2.2 on other
+- [x] **2.3 Migrate empty-resolve fixtures** (Wave 2, parallel with 2.2 on other
       line ranges)
     - Replace `"resolve": {"nodes": [... "deps": []]}` literals and the
       `.append`/assign mutations (7921, 7966) with null/absent `resolve`.
-- [ ] **2.4 Other suites** (Wave 2)
+- [x] **2.4 Other suites** (Wave 2)
     - `grep -rn 'resolve' scripts/ci/test_*.py` (excluding `test_schema.py`
       unrelated hits); update any fixture that feeds metadata to the planner.
       `test_inputs.py`'s `targets_from_metadata` reads only members/packages and
@@ -194,18 +206,18 @@ the code, so the failing tests define the new behavior.
 
 ### Checkpoint 2
 
-- [ ] `python3 -m unittest discover` in `scripts/ci`: migrated fixtures fail
+- [x] `python3 -m unittest discover` in `scripts/ci`: migrated fixtures fail
       only where the old code reads `resolve` (expected), and nothing else
       regresses. Fixture-shape and no-resolve assertions exist.
 
 ## Phase 3: Member graph implementation
 
-- [ ] **3.1 `load_metadata` flags** (Wave 1)
+- [x] **3.1 `load_metadata` flags** (Wave 1)
     - Command becomes `cargo metadata --no-deps --offline --format-version 1`;
       keep `encoding="utf-8"`, `check=True`, error propagation; no fallback, no
       `cargo fetch`, no lockfile writes.
     - Update its comment/docstring; tolerate null or absent `resolve`.
-- [ ] **3.2 `member_dependency_graph` core** (Wave 1, parallel with 3.1)
+- [x] **3.2 `member_dependency_graph` core** (Wave 1, parallel with 3.1)
     - Return `dict[package_id, dict[target_id, set[kind]]]`; every member has a
       key (empty map if no edges).
     - Implement spec §2 rules 1–6 as a fixpoint over accumulating sets of
@@ -220,7 +232,7 @@ the code, so the failing tests define the new behavior.
       computed once per distinct path; never match by name. Ambiguous matches,
       unknown member feature requests, and unsupported kinds raise errors naming
       package and entry. Member without `default` is valid.
-- [ ] **3.3 Outside local package loader** (Wave 2; depends on 3.2; per Ruling 2)
+- [x] **3.3 Outside local package loader** (Wave 2; depends on 3.2; per Ruling 2)
     - For path dependencies outside the member set, load each reachable
       manifest once (`tomllib`), resolve `workspace = true` inheritance for
       those entries only, ignore non-member dev dependencies, handle cycles,
@@ -228,7 +240,7 @@ the code, so the failing tests define the new behavior.
       non-member nodes or a bridged `a → b` edge.
     - Detect `[patch]`/`[replace]`/`.cargo/config` replacements that could map
       to a member and raise a clear error.
-- [ ] **3.4 Rewire readers** (Wave 3; depends on 3.2/3.3)
+- [x] **3.4 Rewire readers** (Wave 3; depends on 3.2/3.3)
     - `reverse_dependency_map(graph, packages)` and `build_closure(id, graph,
       packages)` consume the graph; dedupe, keep sorted output, keep semantics
       (direct dependents only; dev-deps of dependencies not propagated; targets
@@ -240,7 +252,7 @@ the code, so the failing tests define the new behavior.
     - Update docstrings and failure messages; keep the `biscuit-speaks` →
       `playa` explanation. Leave `lockfile_impacted_names` untouched and
       uncalled.
-- [ ] **3.5 Comment pass** (Wave 3)
+- [x] **3.5 Comment pass** (Wave 3)
     - Per repo rules, review `///`-equivalent docstrings and inline comments of
       every touched function; fix drift in the same change.
 
@@ -273,9 +285,9 @@ defaults on these fields (Python equivalents: `.get(k, [])`, `or []`,
 
 ### Checkpoint 3
 
-- [ ] `python3 -m unittest discover` in `scripts/ci` passes with migrated
+- [x] `python3 -m unittest discover` in `scripts/ci` passes with migrated
       fixtures.
-- [ ] Graph on the real workspace matches the saved full-resolve baseline from
+- [x] Graph on the real workspace matches the saved full-resolve baseline from
       Task 1.1 (named edges and kind sets), run locally with `--locked`.
 
 ## Phase 4: New tests and acceptance verification
