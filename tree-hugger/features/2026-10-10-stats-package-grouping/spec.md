@@ -2,10 +2,13 @@
 kind: feature
 name: stats-package-grouping
 date: 2026-10-10
-status: draft-spec
+status: implemented
 area: tree-hugger
 packages:
   - tree-hugger-cli
+  - sniff
+  - sniff-cli
+  - claudine-cli
 depends-on:
   - 2026-10-03-symbol-filters-and-reports
 $schema:
@@ -31,7 +34,25 @@ $schema:
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-05
-review_iterations: 0
+review_iterations: 2
+completed: true
+human_review: false
+human_review_items: []
+message_to_agent: |-
+  All five implementation phases are complete, ready for review. Phase 5
+  added the README Package Stats guide, clarified the topic flow, updated
+  tree-hugger skill guidance and corrected two stale declaration-scan path
+  comments. No runtime behavior changed in Phase 5. Final macOS evidence:
+  1,938 L1 tests passed with zero skips; final-tree grouping check 30 passed;
+  lint and tier coverage passed. Requirement-to-test mapping, cumulative
+  inventories and validation exceptions are in the implementation log.
+  Sniff evidence is retained from Phase 1, not rerun under the Phase 5 area
+  limit. Local Linux/Windows/WSL2 execution remains unproven; existing CI
+  includes the platform-specific tests. Earlier staged work is preserved.
+  Do not move this directory: the author closes review and owns that move.
+implemented: true
+implemented_by: codex/gpt-6.1-sol
+
 ---
 
 # Spec: Package Grouping in `hug --stats`
