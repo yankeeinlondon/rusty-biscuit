@@ -66,6 +66,13 @@ with a path in the message. Processes and the environment are in
    preserves them; when a Windows-only failure shows a path missing one
    backslash, suspect Markdown escape handling, not path resolution.
 
+   Windows rejects C0 controls (including TAB and ESC) in filenames before
+   an output writer can observe them (`InvalidFilename`, error 123). For a
+   cross-platform filesystem fixture exercising control neutralization or
+   rejection, use a C1 control such as U+009B; test TAB/ESC cells directly at
+   the writer boundary without creating those filenames. Found in the
+   tree-hugger TSV/ctags export tests on the native Windows rig, 2026-10-08.
+
 6. **`$PWD` in a `shell: bash` step is an MSYS path; `$RUNNER_TEMP` in the
    same shell is a Windows one.** Git Bash answers `/d/a/repo/repo` for the
    checkout and `D:\a\_temp` for the temp directory, and a CI step routinely

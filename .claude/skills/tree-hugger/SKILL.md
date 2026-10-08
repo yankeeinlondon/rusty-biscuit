@@ -317,7 +317,15 @@ When modifying queries or symbol extraction:
    `golden::json_symbols_over_multi_match_the_golden` pins `--json symbols`
    against `symbols.json` (keys sorted, `root_dir` and every 64-hex record ID
    normalized, since IDs hash the absolute path); regenerate with
-   `HUG_UPDATE_GOLDEN=1` only for a deliberate output change. `order.rs`
+   `HUG_UPDATE_GOLDEN=1` only for a deliberate output change. The four export
+   goldens reject raw ESC, C1 CSI/OSC and CR before comparison and normalize
+   only changing file-URL roots, preserving whitespace. The export stability
+   test compares worker counts, cache states and terminal widths.
+   `declarations::export_write_tests::exports_do_no_extra_analysis_beyond_equivalent_listings`
+   compares process-wide work counters for every command and export against
+   the equivalent listing; containment is allowed for outlines and recorded
+   ownership (ctags and classes), with no references, diagnostics, semantic
+   pass or complexity walks. `order.rs`
    builds its oracle from the JSON records (add a root `Cargo.toml` to a
    scratch tree, or every manifest-less directory is its own package and the
    listing splits). Grammar limits
