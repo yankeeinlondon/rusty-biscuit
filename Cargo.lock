@@ -14459,6 +14459,7 @@ dependencies = [
  "tree-sitter-swift",
  "tree-sitter-typescript",
  "tree-sitter-zsh",
+ "unicode-normalization",
 ]
 
 [[package]]
@@ -14472,13 +14473,16 @@ dependencies = [
  "biscuit-test-harness",
  "clap 4.6.1",
  "clap_complete",
+ "git2",
  "ignore",
+ "libgit2-sys",
  "owo-colors",
  "predicates",
  "rayon",
  "serde",
  "serde_json",
  "serial_test",
+ "sniff",
  "tempfile",
  "test-toolkit",
  "tree-hugger",

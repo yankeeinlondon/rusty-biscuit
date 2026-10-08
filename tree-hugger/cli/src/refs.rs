@@ -283,7 +283,6 @@ fn build_report(found: Match, direction: Direction) -> RefsReport {
     let id = &record.id;
     let owned_by_declaration =
         |occurrence: &Occurrence| occurrence.owner.as_ref().and_then(|owner| owner.id.as_ref()) == Some(id);
-    let dependencies: Vec<&str> = record.relations.dependencies.iter().map(|dependency| dependency.name.as_str()).collect();
 
     let mut occurrences = Vec::new();
     let mut suggestions = Vec::new();
@@ -307,9 +306,7 @@ fn build_report(found: Match, direction: Direction) -> RefsReport {
                 }
                 let absent = match (occurrence.confidence, &occurrence.target.id) {
                     (Confidence::Scoped, Some(_)) => None,
-                    // The owner's `dependencies` are exactly its bound imports, by
-                    // their local (written) name.
-                    (Confidence::Scoped, None) if dependencies.contains(&occurrence.target.name.as_str()) => {
+                    (Confidence::Scoped, None) if occurrence.import_span.is_some() => {
                         Some(AbsentId::Import)
                     }
                     (Confidence::Scoped, None) => Some(AbsentId::BindingWithoutRecord),

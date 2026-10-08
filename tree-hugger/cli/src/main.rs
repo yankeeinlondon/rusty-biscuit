@@ -25,6 +25,7 @@ use tree_hugger::{
 };
 use tree_hugger::god_files::{GodAnalysis, GodFiles, RefactorHint, RiskBand, SymbolBlock};
 use url::Url;
+mod changed;
 mod classes;
 mod declarations;
 mod import_format;
@@ -141,11 +142,61 @@ struct SortArgs {
     sort: Option<SortOrder>,
 }
 
+/// `--changed`: the declaration commands' Git-changed file selector,
+/// narrowing the ordinary selection to the files Git reports as changed in
+/// the repository containing the invocation.
+#[derive(clap::Args, Debug, Clone, Default)]
+struct ChangedArgs {
+    /// Select only files Git reports as changed: staged, unstaged and
+    /// nonignored untracked paths, plus the differences from REF's tip
+    /// directly to `HEAD`'s
+    ///
+    /// The reference must use the equals form (`--changed=main`); a bare
+    /// `--changed main` leaves `main` as a positional FILTER. Without a
+    /// value the committed comparison is empty, so only uncommitted
+    /// changes select files. The current on-disk contents are reported.
+    #[arg(
+        long,
+        value_name = "REF",
+        num_args = 0..=1,
+        require_equals = true,
+        value_parser = changed_reference,
+        conflicts_with = "prelude",
+        display_order = 29,
+    )]
+    changed: Option<Option<String>>,
+}
+
+impl ChangedArgs {
+    /// The resolved request, when the flag was given. The flag alone stays
+    /// `Omitted` — never an explicit `HEAD` — so the unborn-`HEAD`
+    /// exception keeps working.
+    fn request(&self) -> Option<changed::ChangedRequest> {
+        self.changed.as_ref().map(|value| match value {
+            None => changed::ChangedRequest::Omitted,
+            Some(reference) => changed::ChangedRequest::Reference(reference.clone()),
+        })
+    }
+}
+
+/// `--changed`'s value: any non-empty reference token. An empty value is an
+/// argument error, not a reference that later fails to resolve.
+fn changed_reference(value: &str) -> Result<String, String> {
+    if value.is_empty() {
+        Err("`--changed=` needs a reference after the equals sign (a bare `--changed` compares only uncommitted changes)".to_string())
+    } else {
+        Ok(value.to_string())
+    }
+}
+
 /// Arguments of `functions`, `types` and `symbols`.
 #[derive(clap::Args, Debug, Clone)]
 struct DeclarationArgs {
     #[clap(flatten)]
     common: CommonArgs,
+
+    #[clap(flatten)]
+    changed: ChangedArgs,
 
     #[clap(flatten)]
     order: SortArgs,
@@ -268,6 +319,9 @@ struct ClassArgs {
 
     #[clap(flatten)]
     selection: SelectionArgs,
+
+    #[clap(flatten)]
+    changed: ChangedArgs,
 
     #[clap(flatten)]
     scan: ScanOptions,
@@ -494,6 +548,15 @@ impl Command {
             Self::Functions(args) | Self::Types(args) | Self::Symbols(args) => args.common.prelude,
             Self::Classes(args) => args.prelude,
             Self::Imports(_) | Self::Lint(_) | Self::Refs(_) | Self::Completions(_) | Self::GodFiles(_) => false,
+        }
+    }
+
+    /// The `--changed` request, when a declaration command gave the flag.
+    fn changed(&self) -> Option<changed::ChangedRequest> {
+        match self {
+            Self::Functions(args) | Self::Types(args) | Self::Symbols(args) => args.changed.request(),
+            Self::Classes(args) => args.changed.request(),
+            Self::Imports(_) | Self::Lint(_) | Self::Refs(_) | Self::Completions(_) | Self::GodFiles(_) => None,
         }
     }
 
@@ -933,6 +996,20 @@ fn main() -> Result<(), TreeHuggerError> {
         reject_json_full_misuse(&cli.command, &scan_filters);
     }
 
+    // The changed set resolves before any file selection: a Git failure —
+    // no repository, bare, unresolved or non-commit reference, conflicts,
+    // corrupt data — exits 1 here, ahead of every scan-path decision. Git's
+    // paths are candidates this set checks the ordinary selection against;
+    // they never become explicit selectors, so fixtures and ignored files
+    // are not re-included.
+    let changed_request = cli.command.changed();
+    let changed_set = changed_request.as_ref().map(|request| {
+        changed::resolve(request, &root_dir).unwrap_or_else(|message| {
+            eprintln!("error: {message}");
+            std::process::exit(1);
+        })
+    });
+
     // `--file` values join the positional file filters as alternatives; a
     // value naming an existing file is scanned whatever the ignore rules say.
     let targets = cli.command.targets();
@@ -945,13 +1022,26 @@ fn main() -> Result<(), TreeHuggerError> {
         None => (Vec::new(), Vec::new()),
     };
     let file_filters: Vec<String> = scan_filters.file_filters.iter().cloned().chain(file_inputs).collect();
-    let files = collect_selected_files(
+    // Under `--changed`, a selection with no eligible file — including the
+    // scanner's `NoSourceFiles` — is an empty report, not an error; every
+    // other scanner error propagates. The intersection keeps the scanner's
+    // order and drops files outside the changed set (or outside the
+    // repository) without a second discovery.
+    let selected = collect_selected_files(
         &pkg_root,
         &file_filters,
         &explicit_files,
         &scan.discovery.exclude_files,
         language,
-    )?;
+    );
+    let files = match (&changed_set, selected) {
+        (Some(changed), Ok(files)) => files
+            .into_iter()
+            .filter(|file| changed.contains(file))
+            .collect(),
+        (Some(_), Err(TreeHuggerError::NoSourceFiles { .. })) => Vec::new(),
+        (_, result) => result?,
+    };
 
     let analyzer = Analyzer::new(symbol_cache(&scan.discovery), language, analysis_options.experimental_semantics);
 

@@ -175,7 +175,7 @@ With `--json`, `functions`, `types`, `symbols` and `classes` print one report:
 
 (Records are shown abridged.)
 
-- `symbols` holds only the command's records, as schema 5.0 `SymbolRecord`s,
+- `symbols` holds only the command's records, as schema 5.1 `SymbolRecord`s,
   ordered by `--sort` within each file. File entries are always in portable
   path order, and a file with no match has no entry; an empty selection is
   `files: []`.
@@ -344,6 +344,9 @@ hug refs --id <ID> --callees 'src/**'                     # calls its body makes
   one's location and ID; an unknown name or ID is an empty report.
 - References are resolved within one file, so a caller in another file is
   never listed, even under the same name. Every report says so.
+- TypeScript type-only imports do not compete with same-named local value
+  declarations: `import type { F }` and `function F() { F(); }` report an
+  established local self-call; an `F` type annotation still names the import.
 - Text and `--json` only; `--exclude-files`, `--language` and `--no-cache`
   work as for the other commands.
 
@@ -383,3 +386,8 @@ Options:
 - `--strict` - Promote warnings to errors
 - `--experimental-semantics` - Enable experimental semantic diagnostics
 - `--list-rules` - Print registered rule metadata and exit
+
+`hug refs --id` matches equivalent Rust raw/NFC and TypeScript/JavaScript
+escaped identifier spellings while displaying the token as written. Imported
+string export names decode as one name; file-local resolution still supplies
+no external declaration ID. See [references](../docs/references.md).
