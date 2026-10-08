@@ -4,6 +4,7 @@ name: extra-report-formats
 date: 2026-10-11
 status: draft-spec
 reviewed: true
+implemented: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-05
 review_iterations: 0

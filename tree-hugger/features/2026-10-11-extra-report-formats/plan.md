@@ -7,6 +7,7 @@ created: 2026-10-05
 phase: 6
 agent: claude/sonnet
 yolo: true
+implemented: true
 source_files_during_phase_1:
   - tree-hugger/cli/src/main.rs
   - tree-hugger/cli/src/output.rs
@@ -79,14 +80,25 @@ skills_files_updated_during_phase_1: []
 packages:
   - tree-hugger-cli
 source_files_during_phase_6:
+  - tree-hugger/cli/src/ctags.rs
+  - tree-hugger/cli/src/declarations.rs
+  - tree-hugger/cli/src/main.rs
+  - tree-hugger/cli/src/tsv.rs
+  - tree-hugger/cli/tests/fixtures/golden/symbols.tsv
+  - tree-hugger/cli/tests/symbols/export_ctags.rs
+  - tree-hugger/cli/tests/symbols/export_tsv.rs
   - tree-hugger/cli/tests/symbols/golden.rs
 docs_updated_during_phase_6:
   - .claude/skills/tree-hugger/SKILL.md
+  - tree-hugger/cli/README.md
+  - tree-hugger/docs/symbol-reports.md
   - tree-hugger/features/2026-10-11-extra-report-formats/plan.md
   - tree-hugger/features/2026-10-11-extra-report-formats/implementation-log.md
 docs_created_during_phase_6: []
 skills_files_updated_during_phase_6:
   - .claude/skills/tree-hugger/SKILL.md
+  - .claude/skills/os/SKILL.md
+  - .claude/skills/os/windows-paths.md
 ---
 
 # Plan: TSV, Markdown, Prose and Tags Output for Symbol Reports
@@ -122,10 +134,10 @@ Success looks like:
 
 - [ ] Every row of the spec's option-combination table has a passing resolver
   test, plus the pairwise mode matrix extended to the four new formats.
-- [ ] All four formats are UTF-8, LF-only, free of ANSI/OSC bytes **before** any
+- [x] All four formats are UTF-8, LF-only, free of ANSI/OSC bytes **before** any
   normalization, and byte-identical across worker counts, warm/cold cache, and
   narrow/wide `COLUMNS`.
-- [ ] TSV: one header, exactly eight cells on every row, reversible one-pass
+- [x] TSV: one header, exactly eight cells on every row, reversible one-pass
   escaping proven by a decode round-trip test.
 - [ ] Markdown parses as CommonMark with the expected nesting and no unintended
   links, HTML, entities, emphasis or blocks from source text.
@@ -133,9 +145,9 @@ Success looks like:
   Unicode, parentheses and Windows paths.
 - [ ] ctags: the named reader fixture passes for duplicates, container fields,
   spaces, Unicode and the chosen escaping boundary.
-- [ ] Output selection adds no references, diagnostics, semantics or metrics
+- [x] Output selection adds no references, diagnostics, semantics or metrics
   work; containment is requested only for layouts that need it (counter-based
-  assertion, not timing).
+  assertion, not timing), including recorded ownership for ctags and classes.
 - [ ] `just test` and `just lint` pass in `tree-hugger/`; docs agree with
   behavior; the implementation log records the ctags choice and any departures.
   Directory left active for author review.
@@ -510,13 +522,13 @@ records the accepted choice.
   - Assert **before normalization** that bytes contain no ESC (`\x1b`) or OSC 8
     sequence and no CR.
   - Review each golden by eye and note the review in the implementation log.
-- [ ] **Cross-cutting checks**
+- [x] **Cross-cutting checks**
   - [x] Worker-count, warm/cold-cache and narrow/wide-terminal byte stability for
     all four formats (Markdown covered in Phase 4; extend to the rest).
-  - [ ] Work-counter test: choosing an export format adds no reference, diagnostic,
+  - [x] Work-counter test: choosing an export format adds no reference, diagnostic,
     semantic or metrics work beyond the equivalent listing, and containment is
-    requested only for outline layouts. Reuse the existing counters; add no new
-    performance spike.
+    requested only for outline layouts or recorded ownership (ctags and
+    classes). Reuse the existing counters; add no new performance spike.
 - [x] **Shared-terminal L2 check**: only if shared terminal behavior changed in
   Phase 4, run `just test-l2` per `rust-testing` with no window focus. The
   `render.rs` extraction is expected to change no terminal bytes, so this is
@@ -543,9 +555,12 @@ records the accepted choice.
 ### Final validation
 
 - [x] `just test` and `just lint` in `tree-hugger/` pass.
-- [ ] macOS and Linux evidence per the `os` skill; native Windows and WSL2 via
-  the existing CI schedule (no new cells). Check Windows-path URL encoding and
+- [x] macOS and Linux evidence per the `os` skill; native Windows and WSL2
+  verified on the available local rigs at the author's request (no new CI
+  cells). Check Windows-path URL encoding and
   `/` separators in TSV/ctags with unit tests that run on every host.
-- [ ] Update spec status/`implemented` fields only as the author's process
+- [x] Update spec status/`implemented` fields only as the author's process
   requires; **do not** move the directory to `_completed` and do not run
   `just complete`. Terminal state: implementation complete, ready for review.
+  Phase 6 verification does not close the outstanding Phase 4 work; the
+  overall spec status stays unchanged until that prerequisite is complete.

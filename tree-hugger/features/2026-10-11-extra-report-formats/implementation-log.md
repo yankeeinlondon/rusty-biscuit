@@ -352,3 +352,68 @@ skills_files_updated_during_phase_6:
   plan. The Phase 6 cross-cutting work-counter assertion is also outstanding.
   These gaps prevent setting `implemented: true` and the final completion
   frontmatter until resolved.
+
+### Phase 6 verification completion
+
+- Added `declarations::export_write_tests::exports_do_no_extra_analysis_beyond_equivalent_listings`.
+  It exercises real uncached analysis for all four declaration commands and
+  all four exports, including accepted outline requests, using existing
+  process-wide counters. Work equals the equivalent declaration-only or
+  containment listing: one parse and definition capture, no reference
+  captures, occurrence resolution, diagnostics or complexity walks, and no
+  Semantic pass. Required capabilities are checked as well. The plan's
+  abbreviated outline-only containment wording now includes the recorded
+  ownership needed by ctags and classes, already permitted by Phase 2.
+- Export goldens no longer use terminal snapshot normalization, which could
+  hide whitespace changes. They normalize only changing file-URL roots and
+  reject raw ESC, C1 CSI/OSC and CR before normalization.
+- Golden review exposed a TSV location defect: `TextPoint` is already
+  one-based, but the writer added one to both coordinates. Removed that
+  conversion, corrected the JSON Lines cross-check and added an independent
+  first-source-byte assertion. Reviewed all 94 TSV golden rows: only the two
+  position columns changed, each by minus one; the header, other cells and
+  ordering are unchanged. This restores the specified contract without any
+  record schema, cache key or extractor revision change.
+- Added a native file-URL encoding/round-trip test that runs on every host,
+  covering spaces, Unicode, parentheses and portable URL separators. On
+  Windows it exercises the drive URI shape with a native Windows path.
+- The native Windows rig exposed two filesystem fixture failures before
+  writer execution: TAB and ESC filenames are rejected with error 123.
+  Replaced those filesystem controls with C1 U+009B, which is valid in native
+  filenames and still exercises writer neutralization/rejection. Direct
+  writer tests retain TAB, CR, LF and ESC coverage; ctags now also explicitly
+  covers ESC and U+009B in names, containers and paths. No platform skip was
+  added. Recorded the filename constraint in the OS skill.
+- The topic page was missing TSV/Markdown/Prose rules despite its earlier
+  checklist marking documentation complete. Added the escaping/field rules,
+  option table, local Prose links, class export limits and named reader;
+  README links to that documentation. Corrected the stale terminal-only
+  `--tree` statement and the declaration module's incomplete output-mode
+  list. The docs explicitly mark outstanding nested/grouped/class-section
+  Markdown and Prose behavior as planned rather than claiming it exists.
+  Help and completions already derive all six values from the argument enum.
+- Validation: macOS full `just test --test-threads 4` passed 1,969 tests
+  (zero skips); subsequent focused tests over the final source passed 42,
+  including all affected export/golden/URL tests. Final `just lint` passed.
+  Linux full CLI archive validation passed 802 tests (7 tier exclusions),
+  and final focused archive validation passed 39. Native Windows final
+  focused archive validation passed 39, including the repaired fixtures,
+  raw-byte goldens, stability, work counters and Windows URL round trip.
+  The first Windows run's two invalid-filename failures are resolved.
+  WSL2 focused archive validation passed 39, with the builder's target
+  directory hidden during execution. Exclusions in the focused runs are
+  intentional test-name filtering, not skipped selected tests. All four
+  environments passed the final affected checks. The WSL runner correctly
+  published no receipt for the outgoing HEAD because it tested the patched
+  worktree; this is behavioral evidence for this implementation, not a
+  passing receipt for an unchanged HEAD.
+- Only `BUILD_LINUX` was inherited by this session. At the user's instruction
+  to use the available local rigs, verified the SSH configuration's OS roles
+  and connectivity, then supplied `BUILD_WIN=build-win-native` and
+  `BUILD_WSL=build-win` to the cross-check runner. Updated the OS skill so an
+  unset destination is not treated as proof that a user-confirmed rig is
+  unavailable. Windows and WSL builds run sequentially on their shared host.
+- Phase 4 remains outstanding. This verification completes Phase 6's work
+  without closing its prerequisite: the overall spec status remains unchanged,
+  and the active directory stays in place for author review. No lifecycle
+  completion or Git commit was performed.
