@@ -4,9 +4,89 @@ feature: extra-report-formats
 spec: spec.md
 total_phases: 6
 created: 2026-10-05
-phase: 1
+phase: 6
 agent: claude/sonnet
 yolo: true
+source_files_during_phase_1:
+  - tree-hugger/cli/src/main.rs
+  - tree-hugger/cli/src/output.rs
+source_files_during_phase_2:
+  - tree-hugger/cli/src/main.rs
+  - tree-hugger/cli/src/declarations.rs
+  - tree-hugger/cli/src/export.rs
+  - tree-hugger/cli/tests/symbols/main.rs
+  - tree-hugger/cli/tests/level2_declarations.rs
+  - tree-hugger/cli/tests/symbols/reports.rs
+  - tree-hugger/cli/tests/symbols/export_plumbing.rs
+docs_updated_during_phase_2:
+  - tree-hugger/features/2026-10-11-extra-report-formats/plan.md
+  - tree-hugger/features/2026-10-11-extra-report-formats/implementation-log.md
+  - tree-hugger/features/2026-10-11-extra-report-formats/spec.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+  - tree-hugger/cli/src/main.rs
+  - tree-hugger/cli/src/declarations.rs
+  - tree-hugger/cli/src/export.rs
+  - tree-hugger/cli/src/tsv.rs
+  - tree-hugger/cli/tests/symbols/main.rs
+  - tree-hugger/cli/tests/level2_declarations.rs
+  - tree-hugger/cli/tests/symbols/export_tsv.rs
+docs_updated_during_phase_3:
+  - tree-hugger/features/2026-10-11-extra-report-formats/plan.md
+  - tree-hugger/features/2026-10-11-extra-report-formats/implementation-log.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+  - tree-hugger/cli/src/declarations.rs
+  - tree-hugger/cli/src/main.rs
+  - tree-hugger/cli/src/markdown.rs
+  - tree-hugger/cli/src/output.rs
+  - tree-hugger/cli/src/prose.rs
+  - tree-hugger/cli/src/render.rs
+  - tree-hugger/cli/tests/symbols/export_prose_markdown.rs
+  - tree-hugger/cli/tests/symbols/main.rs
+  - tree-hugger/cli/tests/level2_declarations.rs
+docs_updated_during_phase_4:
+  - tree-hugger/docs/dependencies.md
+  - tree-hugger/features/2026-10-11-extra-report-formats/plan.md
+  - tree-hugger/features/2026-10-11-extra-report-formats/implementation-log.md
+  - tree-hugger/features/2026-10-11-extra-report-formats/spec.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+source_files_during_phase_5:
+  - tree-hugger/cli/src/ctags.rs
+  - tree-hugger/cli/src/declarations.rs
+  - tree-hugger/cli/src/main.rs
+  - tree-hugger/cli/tests/symbols/export_ctags.rs
+  - tree-hugger/cli/tests/symbols/main.rs
+  - tree-hugger/cli/tests/level2_declarations.rs
+docs_updated_during_phase_5:
+  - tree-hugger/cli/README.md
+  - tree-hugger/docs/symbol-reports.md
+  - tree-hugger/features/2026-10-11-extra-report-formats/plan.md
+  - tree-hugger/features/2026-10-11-extra-report-formats/implementation-log.md
+  - tree-hugger/features/2026-10-11-extra-report-formats/spec.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .claude/skills/tree-hugger/SKILL.md
+docs_updated_during_phase_1:
+  - tree-hugger/features/2026-10-11-extra-report-formats/plan.md
+  - tree-hugger/features/2026-10-11-extra-report-formats/spec.md
+  - tree-hugger/features/2026-10-11-extra-report-formats/implementation-log.md
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+packages:
+  - tree-hugger-cli
+source_files_during_phase_6:
+  - tree-hugger/cli/tests/symbols/golden.rs
+docs_updated_during_phase_6:
+  - .claude/skills/tree-hugger/SKILL.md
+  - tree-hugger/features/2026-10-11-extra-report-formats/plan.md
+  - tree-hugger/features/2026-10-11-extra-report-formats/implementation-log.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+  - .claude/skills/tree-hugger/SKILL.md
 ---
 
 # Plan: TSV, Markdown, Prose and Tags Output for Symbol Reports
@@ -136,7 +216,7 @@ on the recommended answers while rulings are pending.
 
 One spike, run once, before Phase 5. It does not recur in later phases.
 
-- [ ] **Tags reader spike** (one host, macOS, a quick sample): hand-write a tiny
+- [x] **Tags reader spike** (one host, macOS, a quick sample): hand-write a tiny
   tags file with a space in a filename, a non-ASCII name, a duplicate name, a
   `kind:`/`class:` extension field, and `!_TAG_FILE_SORTED 0`. Feed it to
   (a) headless Vim/Neovim via `taglist()` and (b) the candidate Rust crate.
@@ -149,7 +229,7 @@ One spike, run once, before Phase 5. It does not recur in later phases.
 
 ### Tasks
 
-- [ ] **Resolver variants**
+- [x] **Resolver variants**
   - Add `Tsv`, `Markdown`, `Prose`, `Ctags` to `FormatArg` in
     `cli/src/output.rs` with doc comments (the current doc says "the terminal
     layout"; fix it).
@@ -158,7 +238,7 @@ One spike, run once, before Phase 5. It does not recur in later phases.
     `OutputMode::Terminal`.
   - Extend `GivenOutput` with `comments` (explicit flag presence) and update
     `GivenOutput::new` and its call sites in `main.rs`.
-- [ ] **Combination table**
+- [x] **Combination table**
   - Implement every row of the spec's table in `resolve()`: new format with
     `--json/--json-full/--jsonl/--count` and with `--stats` are argument errors
     (exit 2); `--tree` accepted for `markdown`/`prose` on functions, types and
@@ -168,7 +248,7 @@ One spike, run once, before Phase 5. It does not recur in later phases.
   - Update the existing `--tree` check that says "`--tree` is terminal output"
     so it still reads correctly.
   - Update the module doc comment that lists modes ("an explicit `--format`").
-- [ ] **Resolver tests**
+- [x] **Resolver tests**
   - Extend `MODES` in the `output.rs` tests with the four formats; assert each
     pair is rejected except the already-accepted `--stats` pairs, and that
     `--stats` with each new format is rejected.
@@ -188,7 +268,7 @@ depends on Wave 1.
 
 ### Wave 1 (parallel)
 
-- [ ] **Record flattening**
+- [x] **Record flattening**
   - Add a helper (in `cli/src/classes.rs` or a new `cli/src/export.rs`) that
     turns a file's selected declarations into an ordered `Vec<&SymbolRecord>` for
     TSV/ctags: for `classes`, flatten each selected container and its displayed
@@ -198,12 +278,12 @@ depends on Wave 1.
     prelude records for TSV (but not for ctags).
   - Unit tests: a method reached through two containers is emitted once;
     a field-only summary entry is absent; ordering matches `--sort`.
-- [ ] **Path projection**
+- [x] **Path projection**
   - Confirm `portable_relative` (in `report.rs`) gives the `/`-separated
     scan-root-relative file for TSV/ctags and the existing outside-root
     fallback; do not invent paths. Add a unit test for an outside-root file
     that asserts the fallback unchanged and no symbol-identity change.
-- [ ] **Control-character neutralizer reuse**
+- [x] **Control-character neutralizer reuse**
   - Reuse `neutralized`/`literal` in `render.rs` (they already map C0, DEL and
     C1 to `\u{..}` and are `pub(crate)`). Add a TSV-oriented cell encoder in
     Wave 2 that handles backslash/tab/CR/LF first, then defers to `neutralized`
@@ -211,7 +291,7 @@ depends on Wave 1.
 
 ### Wave 2
 
-- [ ] **Format dispatch**
+- [x] **Format dispatch**
   - Add `ReportFormat::Export { format, signatures, plain, ... }` in
     `cli/src/declarations.rs` and a `write_export(...)` arm in the dispatch
     `match scan.format`. Each export writer follows `write_terminal`'s pattern:
@@ -224,7 +304,7 @@ depends on Wave 1.
     which case it is requested only then and a test asserts it).
   - Streaming: after each completed batch write rows; hold at most one file's
     rows beyond existing scan/prelude buffering.
-- [ ] **Shared error behavior tests** (against a stub format or TSV once Phase 3
+- [x] **Shared error behavior tests** (against a stub format or TSV once Phase 3
   lands): one failed file alongside a successful one; empty selection exits 0;
   a scan with no source files keeps the existing discovery error; closed stdout
   pipe exits 0; other write failure exits 1; verbose/cache messages on stderr
@@ -241,7 +321,7 @@ parallel as separate subagents once Phase 2 is merged, provided the
 `render.rs` extraction in Phase 4 does not alter `signature_cell`, which TSV
 reuses (Phase 4 must not change its behavior).
 
-- [ ] **TSV writer** (`cli/src/tsv.rs`)
+- [x] **TSV writer** (`cli/src/tsv.rs`)
   - Header exactly `file\tline\tcolumn\tkind\tname\tqualified_name\tvisibility\tsignature`,
     emitted once, including for an empty selection.
   - `line`/`column` from `declaration_span.start` (1-based, never the
@@ -253,7 +333,7 @@ reuses (Phase 4 must not change its behavior).
     but keeps the header, `full` uses the recorded header with the existing
     short fallback.
   - Exactly eight cells on every row, including trailing empty cells.
-- [ ] **Cell encoder**
+- [x] **Cell encoder**
   - One pass: `\` → `\\`, TAB → `\t`, CR → `\r`, LF → `\n`; other controls via
     the existing visible `\u{..}` notation; never re-escape already encoded
     text; Unicode, quotes and spaces unchanged.
@@ -261,13 +341,13 @@ reuses (Phase 4 must not change its behavior).
     encoded `\n`. Write a one-pass decoder **in the test module** to prove
     reversibility for a corpus including tabs, newlines, CR, backslashes, C1
     controls, and an embedded ANSI sequence.
-- [ ] **Ordering and grouping**
+- [x] **Ordering and grouping**
   - Files in portable path order; `--sort` orders records within each file;
     grouping flags add no headings or blank rows and do not change order.
-- [ ] **Classes in TSV**
+- [x] **Classes in TSV**
   - Use the Phase 2 flattening helper; assert exact agreement with `classes`
     static/instance rules and member selectors.
-- [ ] **TSV tests** (`cli/tests/symbols/`, new `export_tsv.rs` registered in
+- [x] **TSV tests** (`cli/tests/symbols/`, new `export_tsv.rs` registered in
   `main.rs`)
   - Header-only on an empty selection, a row with every empty trailing cell,
     visibility/kind spelling against JSON for the same record, all three
@@ -367,7 +447,7 @@ and output dispatch exist already.
 
 ### Wave 1 (parallel)
 
-- [ ] **Kind/scope mapping table**
+- [x] **Kind/scope mapping table**
   - Create the published mapping for every supported record kind **and**
     language (16 in the `multi/` fixture): Hug kind → tags `kind:` value;
     Unknown and imprecise Type never promoted; where a language has no
@@ -378,7 +458,7 @@ and output dispatch exist already.
     genuine container-qualified name without the scan-root file prefix; a unit
     test with a method whose name equals its class name proves no name-equality
     inference.
-- [ ] **Tag line encoder**
+- [x] **Tag line encoder**
   - Separate encoding for name, filename and extension values per the tags
     standard; **not** the TSV encoder. Apply the ruling-3 policy: an entry
     whose name, container or path contains a tab/CR/LF/other control character
@@ -389,7 +469,7 @@ and output dispatch exist already.
 
 ### Wave 2
 
-- [ ] **ctags writer** (`cli/src/ctags.rs`)
+- [x] **ctags writer** (`cli/src/ctags.rs`)
   - Header lines `!_TAG_FILE_FORMAT	2	/extended format/` and
     `!_TAG_FILE_SORTED	0	/0=unsorted/`; empty output retains the headers.
   - One tag per selected record; preserve per-file report order even with
@@ -399,7 +479,7 @@ and output dispatch exist already.
     by ID.
   - Paths relative to the scan root with `/` separators on all OSes; outside-root
     paths follow the documented policy.
-- [ ] **Reader fixture** (`cli/tests/symbols/export_ctags.rs`)
+- [x] **Reader fixture** (`cli/tests/symbols/export_ctags.rs`)
   - Implement the chosen reader (ruling 2) as a non-interactive test: generate
     tags for a scratch tree containing duplicate names, a container-qualified
     method, a directory with a space, and Unicode names; assert lookup and
@@ -410,7 +490,7 @@ and output dispatch exist already.
     (see `rust-testing`) so a host without it reports a governed skip rather
     than failing.
   - Do not assert or document full Universal Ctags compatibility.
-- [ ] **ctags option tests**: explicit `--signatures`/`--comments` rejected,
+- [x] **ctags option tests**: explicit `--signatures`/`--comments` rejected,
   default signature mode accepted, `--tree` rejected, global `--plain` accepted
   and byte-identical output.
 
@@ -422,7 +502,7 @@ records the accepted choice.
 
 ### Wave 1 (parallel)
 
-- [ ] **Goldens**
+- [x] **Goldens**
   - One golden per format (`tsv`, `markdown`, `prose`, `ctags`) over the
     existing 16-language `multi/` fixture, using the established scratch-copy
     approach in `cli/tests/symbols/golden.rs`, normalizing only changing root
@@ -431,20 +511,20 @@ records the accepted choice.
     sequence and no CR.
   - Review each golden by eye and note the review in the implementation log.
 - [ ] **Cross-cutting checks**
-  - Worker-count, warm/cold-cache and narrow/wide-terminal byte stability for
+  - [x] Worker-count, warm/cold-cache and narrow/wide-terminal byte stability for
     all four formats (Markdown covered in Phase 4; extend to the rest).
-  - Work-counter test: choosing an export format adds no reference, diagnostic,
+  - [ ] Work-counter test: choosing an export format adds no reference, diagnostic,
     semantic or metrics work beyond the equivalent listing, and containment is
     requested only for outline layouts. Reuse the existing counters; add no new
     performance spike.
-- [ ] **Shared-terminal L2 check**: only if shared terminal behavior changed in
+- [x] **Shared-terminal L2 check**: only if shared terminal behavior changed in
   Phase 4, run `just test-l2` per `rust-testing` with no window focus. The
   `render.rs` extraction is expected to change no terminal bytes, so this is
   conditional.
 
 ### Wave 2 (parallel, after Wave 1)
 
-- [ ] **Docs**
+- [x] **Docs**
   - `tree-hugger/cli/README.md`, `tree-hugger/docs/symbol-reports.md` (field and
     escaping rules, option table, literal rendering, class export limits, local
     Prose links, accepted tags-reader subset, kind mapping), `--help` text,
@@ -454,15 +534,15 @@ records the accepted choice.
     never mention this feature or its spec by name.
   - `tree-hugger/docs/dependencies.md` if the Phase 1 ruling added a crate.
   - Note: no record/index schema or cache-revision change; do not bump either.
-- [ ] **Comment drift pass**: review changed renderer/helper comments for claims
+- [x] **Comment drift pass**: review changed renderer/helper comments for claims
   that formats or outlines are terminal-only; fix per the code-comment rule and
   state the fixes in the implementation log.
-- [ ] **Implementation log**: record the accepted tags choice, reader, spike
+- [x] **Implementation log**: record the accepted tags choice, reader, spike
   results, any departure from the spec, and the comment-drift findings.
 
 ### Final validation
 
-- [ ] `just test` and `just lint` in `tree-hugger/` pass.
+- [x] `just test` and `just lint` in `tree-hugger/` pass.
 - [ ] macOS and Linux evidence per the `os` skill; native Windows and WSL2 via
   the existing CI schedule (no new cells). Check Windows-path URL encoding and
   `/` separators in TSV/ctags with unit tests that run on every host.

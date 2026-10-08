@@ -30,6 +30,22 @@ $schema:
 area: tree-hugger
 packages:
   - tree-hugger-cli
+human_review: false
+message_to_agent: |-
+  Phase 5 implemented ctags as the documented extended subset after the user's
+  explicit instruction to implement this phase. It emits format-2 unsorted
+  tags with numeric line addresses and Hug kind/container fields. The
+  headless Neovim reader test is `level2_` and runs through `just test-l2`; it
+  uses `--headless -u NONE -i NONE` and does not open or focus a window.
+  Control characters in a name, recorded container, or scan-relative path
+  cause that record to be skipped, a warning to be printed, and exit status 1.
+
+  Phase 4's checklist remains incomplete: shared ListingStream grouping,
+  `--tree` layout behavior, semantic Markdown emphasis/headings, and the full
+  hostile-input, URL, plain-output and stability coverage still need completion
+  before the plan can be considered complete. Phase 5 did not change those
+  writers. The author should complete or explicitly defer those items before
+  treating Phase 6 validation as final.
 depends-on:
   - 2026-10-03-symbol-filters-and-reports
   - 2026-10-05-deferred-kind-precision
