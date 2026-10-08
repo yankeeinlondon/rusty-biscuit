@@ -6,7 +6,7 @@ pub(crate) mod native_exit;
 pub(crate) mod switches;
 
 pub(crate) use api_errors::try_format_api_error;
-pub(crate) use assistant::emit_final_message;
+pub(crate) use assistant::{emit_final_message, emit_framed_final_message, write_final_message};
 pub(crate) use switches::{style_cli_switches, truncate_args};
 
 use biscuit_terminal::components::list::UnorderedList;

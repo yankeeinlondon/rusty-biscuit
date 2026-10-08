@@ -85,6 +85,9 @@ impl SectionTracker {
 pub struct SectionStream {
     inner: Arc<StreamOutput>,
     state: Arc<Mutex<SectionTracker>>,
+    /// Terminal loss already on the process-wide counters when this stream was
+    /// built, so [`output_loss`](Self::output_loss) reports this run's alone.
+    loss_mark: super::output_worker::OutputLoss,
 }
 
 impl SectionStream {
@@ -100,13 +103,36 @@ impl SectionStream {
     /// emitters inherit the running section state after the live stream
     /// ends.
     pub fn with_tracker(inner: Arc<StreamOutput>, state: Arc<Mutex<SectionTracker>>) -> Self {
-        Self { inner, state }
+        let loss_mark = inner.loss();
+        Self {
+            inner,
+            state,
+            loss_mark,
+        }
     }
 
     /// Clone the shared tracker so external emitters (e.g. the flush-if-idle
     /// ticker) can participate in the same section-spacing state machine.
     pub fn tracker(&self) -> Arc<Mutex<SectionTracker>> {
         self.state.clone()
+    }
+
+    /// The stdout writer behind this stream, so the agent's final message is
+    /// queued with the rest of the run's output rather than written directly.
+    pub(crate) fn stdout_writer(&self) -> super::stream_io::StdoutWriter {
+        self.inner.stdout_writer()
+    }
+
+    /// Wait for everything this run queued to reach the terminal; see
+    /// [`StreamOutput::drain_final`].
+    pub(crate) fn drain_final(&self) {
+        let _ = self.inner.drain_final(super::exec::reader_join::READER_DRAIN_LIMIT);
+    }
+
+    /// Terminal output this run lost, or `None` when it lost none.
+    pub(crate) fn output_loss(&self) -> Option<super::output_worker::OutputLoss> {
+        let loss = self.inner.loss().since(&self.loss_mark);
+        (!loss.is_empty()).then_some(loss)
     }
 
     pub fn emit_stderr(&self, section: Section, line: &str) {

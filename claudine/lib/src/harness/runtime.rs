@@ -1,6 +1,8 @@
 //! Runtime helpers for the harness execution loop.
 
-use crate::harness::model::{AttemptOutcome, FailureEvent, GuardContext, ProcessTermination};
+use crate::harness::model::{
+    AttemptOutcome, FailureEvent, GuardContext, OutputStatus, ProcessTermination,
+};
 use crate::stream::summary::StreamExecutionSummary;
 use biscuit_terminal::discovery::eval::strip_ansi_codes;
 use tracing::info_span;
@@ -85,6 +87,7 @@ pub fn build_attempt_outcome(
         guard_context: None,
         error_message: summary.error_message.clone(),
         timeout_secs: None,
+        output_status: OutputStatus::default(),
     }
 }
 

@@ -229,3 +229,66 @@ fn windows_completion_termination_uses_job_object_path() {
     assert_eq!(termination, claudine::harness::ProcessTermination::Completed);
     assert!(early.is_none(), "completion is not an error path: {early:?}");
 }
+
+/// A press's feedback is submitted by the wait loop, not written by the
+/// SIGINT handler: with the output worker stuck on the terminal and std's
+/// stream locks held, the press still escalates, the loop still returns, and
+/// the feedback line is queued for the terminal.
+#[cfg(unix)]
+#[test]
+fn interrupt_feedback_is_queued_by_the_wait_loop_not_written_by_the_handler() {
+    use std::os::unix::process::CommandExt;
+    use std::process::Command;
+    use std::sync::mpsc::channel;
+
+    // SIGINT's default action would end the test process if a press landed
+    // outside the wait loop's own handler.
+    let _keep_alive = unsafe { signal_hook::low_level::register(libc::SIGINT, || {}) }
+        .expect("register a no-op SIGINT handler");
+    let routed = crate::terminal_gate::tests::RoutedToBlockedWorker::new();
+
+    let returned = crate::terminal_gate::tests::returns_while_std_streams_are_locked(|| {
+        let mut child = Command::new("sleep")
+            .arg("30")
+            .process_group(0)
+            .spawn()
+            .expect("sleep must be available on PATH");
+        let (_early_tx, early_rx) = channel::<EarlyTermination>();
+        let (done_tx, done_rx) = channel();
+        std::thread::spawn(move || {
+            let result = wait_with_signal_and_early_termination(
+                &mut child,
+                true,
+                early_rx,
+                None,
+                Duration::from_secs(1),
+                false,
+            );
+            let _ = done_tx.send(result.map(|(_, termination, _)| termination).ok());
+        });
+        // Press until the wait loop's handler has seen one: a press that
+        // lands before it is registered reaches only the no-op above.
+        let termination = loop {
+            if crate::output::wait_loop_active() {
+                unsafe { libc::raise(libc::SIGINT) };
+            }
+            if let Ok(termination) = done_rx.recv_timeout(Duration::from_millis(100)) {
+                break termination;
+            }
+        };
+        assert_eq!(
+            termination,
+            Some(claudine::harness::ProcessTermination::Interrupted)
+        );
+    });
+
+    assert!(returned, "the interrupted wait waited on the terminal");
+    let written = routed.release();
+    assert!(
+        written.iter().any(|(stream, bytes)| {
+            *stream == crate::commands::wrap::output_worker::Stream::Stderr
+                && bytes.as_slice() == super::super::INTERRUPT_FEEDBACK_FIRST
+        }),
+        "the first press's feedback was queued: {written:?}"
+    );
+}

@@ -34,6 +34,8 @@ pub struct TextOutput {
     pub stderr: String,
 }
 
+pub use filesystem::query::{UNWRAPPED_WIDTH, View as PathUsageView, render_path_usage};
+pub(crate) use filesystem::query::neutralize as neutralize_control_text;
 pub use filesystem::{
     PathListFormat, render_docs_output, render_git_section, render_hash_section, render_path_list,
 };

@@ -107,14 +107,13 @@ pub fn heading_markup(input: &ReportInput<'_>) -> String {
 pub const RELINKED_MARKUP: &str = "<yellow>Its .git file was missing</yellow><dim>; wt restored it to check the \
     files (Git may restore other worktrees' broken links too).</dim>";
 
-/// Dirty and protected included files, then disposable ignored names.
+/// Dirty and protected included files that need consent, plus inventory warnings.
 pub fn files_markup(inventory: &Inventory) -> String {
     let mut out = String::new();
     let dirty = inventory.dirty.len();
     let protected = &inventory.included.needs_consent;
-    let disposable = inventory.disposable_ignored_names();
-    if dirty == 0 && protected.is_empty() && disposable.is_empty() && inventory.included.warnings.is_empty() {
-        return "<dim>No uncommitted or ignored files.</dim>".to_string();
+    if dirty == 0 && protected.is_empty() && inventory.included.warnings.is_empty() {
+        return "<dim>No uncommitted or protected included files.</dim>".to_string();
     }
     if dirty > LIST_LIMIT {
         out.push_str(&format!("<red><b>{dirty} uncommitted files</b></red>\n"));
@@ -130,11 +129,6 @@ pub fn files_markup(inventory: &Inventory) -> String {
             out.push_str(&format!("  <yellow>{}</yellow> <dim>({})</dim>\n",
                 visible_include_path(path), mark.label()));
         }
-    }
-    if !disposable.is_empty() {
-        if !out.is_empty() { out.push('\n'); }
-        out.push_str(&format!("<dim>Also deletes ignored files: {}</dim>\n",
-            disposable.iter().map(|name| visible_include_path(Path::new(name))).collect::<Vec<_>>().join(", ")));
     }
     for warning in &inventory.included.warnings {
         if !out.is_empty() { out.push('\n'); }
@@ -456,22 +450,13 @@ mod tests {
     }
 
     #[test]
-    fn disposable_ignored_entries_get_one_summary_line() {
+    fn disposable_ignored_entries_are_not_reported() {
         let inventory = Inventory {
-            dirty: Vec::new(),
-            ignored: vec![".env".into(), "notes.md".into(), "target/debug/".into(), "target/CACHEDIR.TAG".into()],
-            included: Default::default(),
+            ignored: vec!["darkmatter/build.log".into(), "target/".into()],
+            ..Inventory::default()
         };
-        let markup = files_markup(&inventory);
-        assert!(markup.contains("Also deletes ignored files: .env, notes.md, target/"), "{markup}");
-
-        let many = Inventory {
-            dirty: Vec::new(),
-            ignored: (0..11).map(|i| PathBuf::from(format!("dir{i}/"))).collect(),
-            included: Default::default(),
-        };
-        assert!(files_markup(&many).starts_with("<dim>Also deletes ignored files:"));
-        assert_eq!(files_markup(&Inventory::default()), "<dim>No uncommitted or ignored files.</dim>");
+        assert_eq!(files_markup(&inventory), files_markup(&Inventory::default()));
+        assert_eq!(files_markup(&inventory), "<dim>No uncommitted or protected included files.</dim>");
     }
 
     #[test]

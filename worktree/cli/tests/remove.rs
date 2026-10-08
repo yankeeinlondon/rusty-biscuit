@@ -596,15 +596,32 @@ fn ordinary_ignored_entries_are_disposable() {
             .args(["remove", "feat-x"])
             .assert()
             .code(0)
-            .stderr(predicate::str::contains("Also deletes ignored files"))
-            .stderr(predicate::str::contains("deletes"))
-            .stderr(predicate::str::contains(ignore));
+            .stderr(predicate::str::contains("Also deletes ignored files").not());
         assert!(!wt.exists(), "{ignore}");
     }
 }
 
 #[test]
-fn mixed_ignored_directory_report_names_disposable_files() {
+fn ignored_children_in_tracked_directories_are_not_reported() {
+    let fixture = Fixture::new();
+    fs::write(fixture.repo().join(".gitignore"), b"*.log\ntarget/\n").unwrap();
+    fs::create_dir_all(fixture.repo().join("darkmatter/src")).unwrap();
+    fixture.commit(&fixture.repo(), "darkmatter/src/lib.rs");
+    git(&fixture.repo(), &["add", ".gitignore"]);
+    git(&fixture.repo(), &["commit", "-q", "-m", "ignore"]);
+    let wt = fixture.add_worktree("feat/x", "feat-x");
+    fs::write(wt.join("darkmatter/build.log"), b"cache").unwrap();
+    fs::create_dir_all(wt.join("target")).unwrap();
+    fs::write(wt.join("target/app"), b"generated").unwrap();
+
+    fixture.wt(&fixture.repo()).args(["remove", "feat-x"])
+        .assert().code(0)
+        .stderr(predicate::str::contains("Also deletes ignored files").not());
+    assert!(!wt.exists());
+}
+
+#[test]
+fn mixed_ignored_directory_reports_only_protected_files() {
     let fixture = Fixture::new();
     fs::write(fixture.repo().join(".gitignore"), b"config/\n").unwrap();
     fs::write(fixture.repo().join(".worktreeinclude"), b"config/.env\n").unwrap();
@@ -618,7 +635,7 @@ fn mixed_ignored_directory_report_names_disposable_files() {
     fixture.wt(&fixture.repo()).args(["remove", "feat-x"])
         .assert().code(3)
         .stderr(predicate::str::contains("config/.env (new)"))
-        .stderr(predicate::str::contains("Also deletes ignored files: config/cache.bin"));
+        .stderr(predicate::str::contains("config/cache.bin").not());
     assert!(wt.join("config/.env").exists());
     assert!(wt.join("config/cache.bin").exists());
 }
@@ -2598,7 +2615,7 @@ fn a_missing_directory_has_only_its_record_removed_and_its_safe_branch_deleted()
     assert!(stderr.contains("Removed the record of worktree feat-gone"), "{stderr}");
     assert!(stderr.contains("Deleted branch feat/gone"), "{stderr}");
     // Nothing claims files were checked: there were none.
-    assert!(!stderr.contains("No uncommitted or ignored files"), "{stderr}");
+    assert!(!stderr.contains("No uncommitted or protected included files"), "{stderr}");
     assert!(listed_block(&fixture, &gone).is_none(), "{}", porcelain(&fixture));
     assert!(!fixture.branch_exists("feat/gone"));
     assert!(!gone.exists(), "nothing is recreated");
@@ -2721,7 +2738,7 @@ fn a_clean_unlinked_worktree_is_repaired_and_removed_with_its_safe_branch() {
         .assert()
         .code(0)
         .stderr(predicate::str::contains("Its .git file was missing"))
-        .stderr(predicate::str::contains("No uncommitted or ignored files"))
+        .stderr(predicate::str::contains("No uncommitted or protected included files"))
         .stderr(predicate::str::contains("Removed worktree feat-x"))
         .stderr(predicate::str::contains("Deleted branch feat/x"));
     assert!(!wt.exists());

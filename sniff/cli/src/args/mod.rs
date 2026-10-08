@@ -4,10 +4,12 @@ use std::path::PathBuf;
 
 use crate::output::OutputFilter;
 
+mod filesystem;
 mod recent_commits;
 #[cfg(test)]
 mod recent_commits_flag_shadowing;
 mod repo;
+pub use filesystem::{FilesystemQueryArgs, FilesystemSubcommand};
 pub use recent_commits::RecentCommitsArgs;
 pub use repo::{RepoAction, RepoSubcommand};
 pub(crate) use repo::{repo_package_area_candidates, repo_package_candidates};
@@ -348,6 +350,9 @@ pub enum Commands {
     Network,
 
     /// Show only filesystem information (git, languages, monorepo)
+    // The inventory flags belong to the bare report; with a subcommand they
+    // are a usage error rather than silently ignored.
+    #[command(args_conflicts_with_subcommands = true)]
     Filesystem {
         /// Refresh remote-tracking data before reporting branch and sync status
         #[arg(long)]
@@ -356,6 +361,9 @@ pub enum Commands {
         /// Query package registries for latest dependency versions and report available updates
         #[arg(long)]
         latest_versions: bool,
+
+        #[command(subcommand)]
+        subcommand: Option<FilesystemSubcommand>,
     },
 
     /// Show a table of subsection topics for each top-level command
@@ -1138,6 +1146,8 @@ Commands:
   Repository & Filesystem:
     sniff repo            Show repository name (--json for the scope-complete aggregate; --help for all repo commands)
     sniff filesystem      Show full filesystem report
+    sniff filesystem query <path>
+                          Show processes using a file or directory tree
     sniff language        Show language detection
     sniff files           Show file associations
     sniff docs            Show markdown documents
@@ -1992,6 +2002,7 @@ mod tests {
                 Some(Commands::Filesystem {
                     refresh_remotes: true,
                     latest_versions: true,
+                    subcommand: None,
                 })
             ));
 
@@ -2735,6 +2746,112 @@ mod tests {
             } else {
                 panic!("Expected software editors install with via+no_sudo+force");
             }
+        }
+    }
+
+    mod filesystem_query {
+        use super::*;
+        use clap::error::ErrorKind;
+        use std::ffi::OsString;
+        use std::time::Duration;
+
+        fn query_args(cli: Cli) -> FilesystemQueryArgs {
+            match cli.command {
+                Some(Commands::Filesystem {
+                    subcommand: Some(FilesystemSubcommand::Query(args)),
+                    refresh_remotes: false,
+                    latest_versions: false,
+                }) => args,
+                other => panic!("expected `filesystem query`, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn defaults_are_recursive_with_the_library_deadline() {
+            let args = query_args(parse_args(&["filesystem", "query", "./checkout"]).unwrap());
+            assert_eq!(args.path, OsString::from("./checkout"));
+            assert!(!args.target_only);
+            assert_eq!(args.timeout, None);
+        }
+
+        #[test]
+        fn target_only_and_timeout_parse() {
+            let args = query_args(
+                parse_args(&["filesystem", "query", "x", "--target-only", "--timeout", "250"])
+                    .unwrap(),
+            );
+            assert!(args.target_only);
+            assert_eq!(args.timeout, Some(Duration::from_millis(250)));
+        }
+
+        #[test]
+        fn the_bare_filesystem_report_keeps_its_inventory_flags() {
+            let cli = parse_args(&["filesystem", "--refresh-remotes", "--latest-versions"]).unwrap();
+            assert!(cli.command.as_ref().is_some_and(Commands::refresh_remotes));
+            assert!(cli.command.as_ref().is_some_and(Commands::latest_versions));
+        }
+
+        #[test]
+        fn a_missing_path_is_a_usage_error() {
+            let error = parse_args(&["filesystem", "query"]).err().unwrap();
+            assert_eq!(error.kind(), ErrorKind::MissingRequiredArgument);
+            assert_eq!(error.exit_code(), 2);
+        }
+
+        #[test]
+        fn invalid_timeouts_are_usage_errors() {
+            for value in [
+                "0",
+                "-5",
+                "abc",
+                "1.5",
+                "",
+                "18446744073709551616",
+            ] {
+                let error = parse_args(&["filesystem", "query", "x", "--timeout", value])
+                    .err()
+                    .unwrap_or_else(|| panic!("--timeout {value:?} must be rejected"));
+                assert_eq!(error.kind(), ErrorKind::ValueValidation, "{value:?}");
+                assert_eq!(error.exit_code(), 2, "{value:?}");
+            }
+        }
+
+        #[test]
+        fn inventory_flags_combined_with_query_are_usage_errors() {
+            for argv in [
+                &["filesystem", "--refresh-remotes", "query", "x"][..],
+                &["filesystem", "--latest-versions", "query", "x"],
+                &["filesystem", "query", "x", "--refresh-remotes"],
+                &["filesystem", "query", "x", "--latest-versions"],
+            ] {
+                let error = parse_args(argv)
+                    .err()
+                    .unwrap_or_else(|| panic!("{argv:?} must be rejected"));
+                assert_eq!(error.exit_code(), 2, "{argv:?}");
+            }
+        }
+
+        #[test]
+        fn json_plain_and_perf_reach_the_query() {
+            let cli =
+                parse_args(&["filesystem", "query", "x", "--json", "--plain", "--perf"]).unwrap();
+            assert!(cli.json && cli.plain && cli.perf);
+            query_args(cli);
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn a_non_utf8_path_stays_native() {
+            use std::os::unix::ffi::OsStringExt;
+            let raw = OsString::from_vec(b"dir-\xff".to_vec());
+            let cli = Cli::try_parse_from([
+                OsString::from("sniff"),
+                OsString::from("filesystem"),
+                OsString::from("query"),
+                raw.clone(),
+            ])
+            .unwrap();
+            assert_eq!(query_args(cli).path, raw);
         }
     }
 }

@@ -388,7 +388,7 @@ fn report_notification_failure(error: &MessagingError) {
     let rendered = Status::from_prose(body)
         .state(StatusState::Warning)
         .render(&Terminal::default());
-    eprintln!("{rendered}");
+    crate::render::console::write_stderr_line(&rendered);
 
     debug!(error = text, "desktop notification send failed");
 }
@@ -410,7 +410,7 @@ pub(super) fn report_delivery_panic(label: &DeliveryLabel) {
     let rendered = Status::from_prose(body)
         .state(StatusState::Warning)
         .render(&Terminal::default());
-    eprintln!("{rendered}");
+    crate::render::console::write_stderr_line(&rendered);
 }
 
 /// Render a user-facing Status Warning describing a messaging send failure
@@ -427,7 +427,12 @@ fn report_send_failure(route: &ResolvedMessagingRoute, error: &MessagingError, k
     // their own Display, run the regex here so a variant added later without
     // that treatment still cannot leak a secret to stderr or a test snapshot.
     let safe_error = redact_webhook_urls(&error.to_string());
-    eprintln!("{}", send_failure_text(route, &safe_error, kind, &Terminal::default()));
+    crate::render::console::write_stderr_line(&send_failure_text(
+        route,
+        &safe_error,
+        kind,
+        &Terminal::default(),
+    ));
 
     // Keep a machine-readable breadcrumb for log collectors without the
     // user-facing WARN noise. Use the redacted form so log aggregators never

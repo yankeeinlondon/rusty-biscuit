@@ -69,7 +69,8 @@ use crate::discovery::detection::{TerminalApp, get_terminal_app, is_tty};
 /// Get the font name used by the terminal.
 ///
 /// Detects the font by parsing the terminal's configuration file or
-/// querying system preferences (for macOS terminals like iTerm2).
+/// querying system preferences (for macOS terminals like iTerm2). The result
+/// is detected once and cached for the life of the process.
 ///
 /// ## Supported Terminals
 ///
@@ -98,6 +99,16 @@ use crate::discovery::detection::{TerminalApp, get_terminal_app, is_tty};
 /// }
 /// ```
 pub fn font_name() -> Option<String> {
+    // WHY cached: `Terminal::default()` calls this, and a Markdown renderer
+    // builds one per block. On iTerm2 each uncached call spawns a `defaults
+    // read` subprocess, so a large message multiplied subprocess spawns on the
+    // thread that was rendering it. The terminal's font does not change under a
+    // running process.
+    static FONT_NAME: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    FONT_NAME.get_or_init(detect_font_name).clone()
+}
+
+fn detect_font_name() -> Option<String> {
     let app = get_terminal_app();
 
     // Handle terminals that use macOS preferences instead of config files

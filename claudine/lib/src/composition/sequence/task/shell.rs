@@ -80,6 +80,12 @@ const POLL_INTERVAL: Duration = Duration::from_millis(20);
 #[cfg(unix)]
 const TREE_KILL_GRACE: Duration = Duration::from_millis(250);
 
+/// The most [`ProcessTree`]'s drop spends re-killing a group whose members
+/// were forked while it was being killed. A bound, not a pace: the loop ends
+/// as soon as the group has no live member, normally within a millisecond.
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "android"))))]
+const GROUP_REAP_LIMIT: Duration = Duration::from_millis(250);
+
 /// How long the capture thread gets to notice its pipe closed.
 ///
 /// Bounded rather than joined: the whole defect this guards is a descendant
@@ -736,6 +742,23 @@ impl Drop for ProcessTree {
         // SAFETY: as in `terminate`.
         unsafe {
             libc::kill(-self.pgid, libc::SIGKILL);
+        }
+        // WHY repeat: macOS does not make `fork` atomic with a signal sent to
+        // the forking process's group. A child forked while the kill went out
+        // joins the group without the signal and survives it: about 3 in 100
+        // group kills of `sh -c 'echo started; sleep 300'`, sent on reading
+        // `started`, left `sleep` running. Killing again until the group
+        // answers with an error (`ESRCH` when empty, `EPERM` on macOS when only
+        // zombies are left) reaches every such child. Linux delivers the
+        // signal to a concurrently forked child, and answers `0` for a group
+        // holding only the unreaped command's zombie, so it skips the loop.
+        #[cfg(not(any(target_os = "linux", target_os = "android")))]
+        {
+            let stop = Instant::now() + GROUP_REAP_LIMIT;
+            // SAFETY: as in `terminate`.
+            while unsafe { libc::kill(-self.pgid, libc::SIGKILL) } == 0 && Instant::now() < stop {
+                std::thread::sleep(Duration::from_millis(1));
+            }
         }
     }
 }

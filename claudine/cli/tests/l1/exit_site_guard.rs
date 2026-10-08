@@ -92,40 +92,27 @@ const EXIT_ALLOWLIST: &[AllowedExit] = &[
     },
     AllowedExit {
         file: "commands/compose/interrupt.rs",
-        function: "ensure_grace_exit_watcher",
-        position: BODY,
-        form: "_exit",
-        reason: "the grace-exit watcher, armed only by a repeat Ctrl+C while a \
-                 terminal lifecycle runs: the user asked to stop",
+        function: "exit_after_notice",
+        position: TAIL,
+        form: "force_exit",
+        reason: "a repeat Ctrl+C, or the grace after one expired, once its notice \
+                 is shown (Unix relay thread, Windows console handler): the user \
+                 asked to stop",
     },
     AllowedExit {
         file: "commands/compose/interrupt.rs",
         function: "install_ladder",
-        position: "arm PressRung::GraceExit > else of fd >= 0",
+        position: "arm PressRung::GraceExit > if !post_to_relay(RELAY_GRACE_EXIT)",
         form: "_exit",
-        reason: "a repeat Ctrl+C when no grace-exit watcher could start: the user \
-                 asked to stop now",
+        reason: "a repeat Ctrl+C when no relay could start to wait out the grace: \
+                 the user asked to stop now",
     },
     AllowedExit {
         file: "commands/compose/interrupt.rs",
         function: "install_ladder",
-        position: "arm PressRung::ForceExit",
+        position: "arm PressRung::ForceExit > if !post_to_relay(RELAY_FORCE_EXIT)",
         form: "_exit",
-        reason: "a repeat Ctrl+C: the user asked to stop now",
-    },
-    AllowedExit {
-        file: "commands/compose/interrupt.rs",
-        function: "on_console_interrupt",
-        position: "arm ComposeInterruptEffect::GraceExit",
-        form: "force_exit",
-        reason: "Windows: the grace after a repeat Ctrl+C expired",
-    },
-    AllowedExit {
-        file: "commands/compose/interrupt.rs",
-        function: "on_console_interrupt",
-        position: "arm ComposeInterruptEffect::ForceExit",
-        form: "force_exit",
-        reason: "Windows: a repeat Ctrl+C, the user asked to stop now",
+        reason: "a repeat Ctrl+C when no relay could start: the user asked to stop now",
     },
     AllowedExit {
         file: "commands/compose/interrupt.rs",
@@ -138,9 +125,8 @@ const EXIT_ALLOWLIST: &[AllowedExit] = &[
         file: "commands/compose/interrupt.rs",
         function: "force_exit",
         position: TAIL,
-        form: "process::exit",
-        reason: "the non-Windows build of the forced-exit helper, present so the \
-                 ladder compiles and is tested; nothing calls it there",
+        form: "_exit",
+        reason: "the Unix forced-exit helper; its callers are pinned above",
     },
 ];
 

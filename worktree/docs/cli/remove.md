@@ -1,5 +1,51 @@
 # `wt remove`
 
+## Planned: process usage and recoverable removal
+
+**Planned:** the behavior in this section is not implemented yet. The remaining
+sections describe current behavior.
+
+Before changing a checkout, `wt remove` will query Sniff for observable processes
+using its directory tree. A matching watcher registration, open handle, working
+directory, or loaded module will pause removal and show the PID, available
+identity, matched paths, and evidence. Stop the relevant work and retry the same
+command. Existing force flags will not bypass this refusal. Observed usage does
+not necessarily mean a handle prevents deletion; the refusal is conservative.
+
+When no usage is observed, `wt remove` will move the checkout to a unique hidden
+sibling on the same filesystem, then delete there while observing both paths.
+Discovery is incomplete on some platforms, and a rename does not revoke existing
+handles or prevent a process from recreating the original path.
+
+If unexpected writes appear at either location, removal will stop at the next
+safe boundary, preserve remaining files, and keep pending branch operations
+from running. The report will identify the original and moved locations,
+observed activity, files already deleted, remaining content, Git registration,
+branch outcomes, and a saved report containing full detail. A recreated original
+will never be automatically deleted or overwritten.
+
+For example, a writer may recreate `checkout/.gitnexus/index.db` after the
+checkout has moved to `.wt-remove-checkout-<token>`. The report will direct you
+to stop tasks using either path, inspect both directories, and save new work.
+Retry by the original worktree name will use a verified recovery record even
+when Git has already unregistered it, reassessing usage and consent for retained
+content. New files will not inherit earlier discard approval.
+
+Deletion and observation cannot be atomic with all possible writers. A report
+will identify partial deletion and coverage limits rather than promise that
+every concurrent write was preserved.
+
+```mermaid
+flowchart LR
+    A[Query usage] -->|Usage found| B[Pause; show processes]
+    A -->|No usage observed| C[Move checkout]
+    C --> D[Delete while observing both paths]
+    D -->|Unexpected activity or failure| E[Preserve remnants; report recovery]
+    D -->|Removal verified| F[Finish branch operations]
+```
+
+## Current behavior
+
 Removes a worktree, by branch or directory name, and its local branch when that branch's commits are safe elsewhere. Every decision comes from one question: **would removing this lose work?** If it would, `wt remove` asks first, or refuses when it can't ask.
 
 ```bash
@@ -48,7 +94,7 @@ Branch feat/theme
 - 0 ahead, 0 behind main
 ```
 
-- **The worktree's files**: uncommitted files, and included ignored files (selected by `.worktreeinclude`; see the [README](../../README.md#included-ignored-files)) that are new, changed since `wt create` copied them, or impossible to compare. These need consent. Unchanged included copies and other ignored files (`target/`, `node_modules/`) do not.
+- **The worktree's files**: uncommitted files, and included ignored files (selected by `.worktreeinclude`; see the [README](../../README.md#included-ignored-files)) that are new, changed since `wt create` copied them, or impossible to compare. These need consent. Unchanged included copies and other ignored files (`target/`, `node_modules/`) do not need consent and are omitted from the report.
 - **The branch**, by where its last commit is found:
 
     | Tier | Where the commits are | What happens |
@@ -76,6 +122,19 @@ The flags only stand in for answers to questions the report asked, so they appro
 `--force-branch` without `--force-worktree` on a worktree that has files is a conflict (exit 3 when non-interactive), because the branch can't go before the worktree.
 
 With `--force-remote`, the branch on origin is deleted through origin's push URL. An origin with several push URLs, or one Git would rewrite (`url.<base>.insteadOf` / `pushInsteadOf`) or read as the name of another remote, is refused before anything is removed. If origin can't be reached, the local removal still happens and `wt` exits 1 with the `git push origin --delete <branch>` that finishes the job.
+
+### Background programs writing into the worktree
+
+Stop file watchers or indexers for the target before removing it. A program
+that recreates files while Git deletes them can make removal fail with
+`Directory not empty`. Git may already have unregistered the worktree even
+though the directory remains; `wt` then stops and keeps the local branch.
+
+For example, a GitNexus watcher can recreate `.gitnexus/` during deletion.
+Stop that worktree's watcher using the stop command printed when it started,
+then inspect the remaining directory before deleting leftovers. Check
+`git worktree list` to see whether Git still registers the target. If it no
+longer does, another `wt remove` cannot resolve it by its worktree name.
 
 ### Standing in the worktree you remove
 

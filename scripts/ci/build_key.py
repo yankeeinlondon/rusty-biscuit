@@ -140,6 +140,10 @@ def planned_keys(material: Sequence[str]) -> list[str]:
     One helper invocation for the whole batch: a plan with twelve build records
     is one subprocess, not twelve.
 
+    The helper runs outside compiler-wrapper mode: a measured gate sets
+    ``BISCUIT_CI_BUILD_WRAP``, which would make an explicitly bound helper
+    treat ``key`` as a rustc command.
+
     ## Errors
 
     Raises ``RuntimeError`` when the helper is unavailable, exits non-zero, or
@@ -152,6 +156,13 @@ def planned_keys(material: Sequence[str]) -> list[str]:
         {"schema_version": KEY_SCHEMA_VERSION, "material": list(material)},
         separators=(",", ":"),
     )
+    # The two wrapper bindings are coupled: if the resolver fell back to a Cargo
+    # build, keeping RUSTC_WRAPPER without the mode switch would break it, and
+    # an empty value stops Cargo config from restoring a wrapper. The counter
+    # directory stays so deliberate Cargo calls elsewhere remain measured.
+    helper_env = dict(os.environ)
+    helper_env.pop("BISCUIT_CI_BUILD_WRAP", None)
+    helper_env["RUSTC_WRAPPER"] = ""
     try:
         completed = subprocess.run(
             [*command, "key"],
@@ -160,6 +171,7 @@ def planned_keys(material: Sequence[str]) -> list[str]:
             text=True,
             encoding="utf-8",
             cwd=ROOT,
+            env=helper_env,
         )
     except OSError as error:
         raise RuntimeError(f"could not run the ci-build key helper: {error}") from error

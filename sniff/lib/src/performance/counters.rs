@@ -54,6 +54,45 @@ pub const FS_READ_DIRS: &str = "filesystem.io.read_dirs";
 pub const FS_CANONICALIZATIONS: &str = "filesystem.io.canonicalizations";
 
 // ---------------------------------------------------------------------------
+// Filesystem usage queries (`filesystem::query`)
+// ---------------------------------------------------------------------------
+
+/// Target-tree identity walks started by a usage query.
+///
+/// One per directory query regardless of how many processes are inspected;
+/// a value above one for a single query means a per-process walk.
+pub const QUERY_TREE_WALKS: &str = "filesystem.query.tree_walks";
+
+/// Descendant identity reads attempted during a usage query's tree walk,
+/// including entries whose identity could not be read.
+pub const QUERY_TREE_IDENTITY_READS: &str = "filesystem.query.tree_identity_reads";
+
+/// Process enumeration passes started by a usage query.
+pub const QUERY_PROCESS_ENUMERATIONS: &str = "filesystem.query.process_enumerations";
+
+/// Per-process inspections attempted by a usage query, including denied and
+/// vanished processes.
+pub const QUERY_PROCESS_INSPECTIONS: &str = "filesystem.query.process_inspections";
+
+/// Individual descriptors or handles inspected by a usage-query backend,
+/// including failed inspections.
+pub const QUERY_DESCRIPTOR_INSPECTIONS: &str = "filesystem.query.descriptor_inspections";
+
+/// Watch-registration records read by a usage-query backend (for example one
+/// inotify `fdinfo` read), including failed reads.
+pub const QUERY_WATCH_REGISTRATION_READS: &str = "filesystem.query.watch_registration_reads";
+
+/// Loaded modules read by the Windows usage-query backend, including failed
+/// reads.
+pub const QUERY_MODULE_INSPECTIONS: &str = "filesystem.query.module_inspections";
+
+/// Process identity enrichments attempted for matching processes.
+pub const QUERY_IDENTITY_ENRICHMENTS: &str = "filesystem.query.identity_enrichments";
+
+/// Identity lookups of a backend-observed path that carried no identity.
+pub const QUERY_PATH_LOOKUPS: &str = "filesystem.query.path_lookups";
+
+// ---------------------------------------------------------------------------
 // Repository structure
 // ---------------------------------------------------------------------------
 

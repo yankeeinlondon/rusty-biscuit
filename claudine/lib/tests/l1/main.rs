@@ -7,6 +7,7 @@
 //! not declared below never compiles; `test_layout.rs` rejects one.
 
 mod agent_errors_fleet;
+mod assistant_stream_width;
 mod boundary_lint;
 mod canonical_dispatch;
 mod context_construction_guard;
@@ -18,6 +19,7 @@ mod messaging_delivery;
 mod messaging_spawn_guard;
 mod model_catalog_integration;
 mod opencode_stderr_lifecycle;
+mod parser_snapshot;
 mod path_lookup_guard;
 mod protocol_fixture_replay;
 mod semantic_fidelity;

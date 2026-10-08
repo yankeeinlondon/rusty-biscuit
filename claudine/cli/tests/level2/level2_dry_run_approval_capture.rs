@@ -218,6 +218,11 @@ fn level2_dry_run_approval_prompt_matches_normal_mode_in_tmux() {
     let staged = stage();
 
     let normal = capture_prompt_in_mode(&mut harness, &staged, false);
+    // A fresh pane prevents the second capture from matching the first
+    // invocation's approval prompt while its clear command is still queued.
+    drop(harness);
+    let mut harness = TmuxHarness::new();
+    harness.spawn_shell().expect("isolated dry-run approval pane");
     let dry_run = capture_prompt_in_mode(&mut harness, &staged, true);
 
     let (normal_plain, _) = prompt_region(&normal);

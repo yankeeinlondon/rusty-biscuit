@@ -143,7 +143,6 @@ impl Facts {
                 let mut inventory = collect_inventory(base, &entry.path).map_err(context)?;
                 inventory.included =
                     classify_included(base, &entry.path, entry.branch.as_deref()).map_err(context)?;
-                inventory.expand_mixed_ignored(base, &entry.path).map_err(context)?;
                 let head = match &entry.branch {
                     Some(branch) => git_command(&["rev-parse", &format!("refs/heads/{branch}")]).map_err(context)?,
                     None => entry

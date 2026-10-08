@@ -108,6 +108,9 @@ pub fn current_user_id() -> Result<StableUserId> {
 }
 
 #[cfg(windows)]
+pub(crate) use windows_impl::process_user_sid;
+
+#[cfg(windows)]
 mod windows_impl {
     use super::{Result, StableUserId};
     use crate::SniffError;
@@ -142,7 +145,14 @@ mod windows_impl {
     }
 
     pub(super) fn current_user_id() -> Result<StableUserId> {
-        let token = open_process_token()?;
+        // SAFETY: the pseudo-handle needs no closing.
+        process_user_sid(unsafe { GetCurrentProcess() }).map(StableUserId::WindowsSid)
+    }
+
+    /// The account SID of the process `process` names, as `S-1-...` text.
+    /// The handle needs `PROCESS_QUERY_LIMITED_INFORMATION`.
+    pub(crate) fn process_user_sid(process: HANDLE) -> Result<String> {
+        let token = open_process_token(process)?;
         let buffer = read_token_user(&token)?;
 
         // TOKEN_USER's SID pointer aliases into `buffer`, so every use below
@@ -174,12 +184,12 @@ mod windows_impl {
             });
         }
 
-        Ok(StableUserId::WindowsSid(text))
+        Ok(text)
     }
 
-    fn open_process_token() -> Result<TokenHandle> {
+    fn open_process_token(process: HANDLE) -> Result<TokenHandle> {
         let mut handle = HANDLE::default();
-        unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut handle) }
+        unsafe { OpenProcessToken(process, TOKEN_QUERY, &mut handle) }
             .map_err(|e| SniffError::user_identity("OpenProcessToken", e))?;
         Ok(TokenHandle(handle))
     }

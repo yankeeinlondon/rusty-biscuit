@@ -104,8 +104,8 @@ The **worktree** package area, like many in this monorepo, is composed of both a
 
     Removes a worktree by branch or directory name and, when its commits are safe elsewhere, its local branch. It starts from one question: would removing this lose work? See [`docs/cli/remove.md`](./docs/cli/remove.md) for the full rules and examples.
 
-    - **report first**: before asking or removing anything it prints uncommitted files, included ignored files needing consent (marked new, changed, or unknown), a summary of other ignored entries, the branch's safety tier and supporting ref, ahead/behind against the default branch, its copy on origin (as of your last fetch), and its PR; each question then starts after one blank line
-    - **the worktree**: new, changed, or unknown included files and uncommitted files need consent. An interactive run asks (default No); a non-interactive run needs `--force-worktree` or exits 3 without removing anything. Unchanged included copies and other ignored files do not need consent.
+    - **report first**: before asking or removing anything it prints uncommitted files, included ignored files needing consent (marked new, changed, or unknown), the branch's safety tier and supporting ref, ahead/behind against the default branch, its copy on origin (as of your last fetch), and its PR; each question then starts after one blank line
+    - **the worktree**: new, changed, or unknown included files and uncommitted files need consent. An interactive run asks (default No); a non-interactive run needs `--force-worktree` or exits 3 without removing anything. Unchanged included copies and other ignored files do not need consent and are omitted from the report.
     - **the local branch**, by where its last commit is found:
         - *Safe*: on the default branch (local or `origin/<default>`), or the exact head of an open or merged PR from this repository; deleted
         - *Pretty safe*: on another local branch, a tag, or an `origin/*` branch whose live head `wt` checked with `git ls-remote` (3 s deadline, never prompting for credentials); deleted, and the report names where the commits still live

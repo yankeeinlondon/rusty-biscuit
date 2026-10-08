@@ -789,6 +789,11 @@ fn level2_proxy_routes_share_identity_across_routes_in_tmux() {
 
     let init_staged = stage("claudine-l2-parity-init", INITIALIZE_PROXY_DOC, 0);
     let init = run_in_pane(&mut harness, &init_staged, &TTY_COLOR, &[]);
+    // The terminal route must not inherit the initialize route's exit marker
+    // or error block when asserting its own exactly-once emission.
+    drop(harness);
+    let mut harness = TmuxHarness::new();
+    harness.spawn_shell().expect("isolated terminal proxy pane");
     let term_staged = stage("claudine-l2-parity-term", TERMINAL_PROXY_DOC, 3);
     let term = run_in_pane(&mut harness, &term_staged, &TTY_COLOR, &[]);
 

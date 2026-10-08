@@ -1,5 +1,10 @@
 # Claudine Dependencies
 
+- `claudine-cli` uses `base64` 0.22 to retain invalid UTF-8 stdout losslessly
+  in bounded completion observations. This crate already exists in the
+  workspace dependency graph; no version or native dependency is added.
+
+
 ## Native Path Test Fixtures
 
 - The `claudine` library uses `dunce` as a dev dependency so tests that need a

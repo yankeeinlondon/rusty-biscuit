@@ -125,6 +125,10 @@ fn harvest_enabled() -> bool {
 /// classified lines and the final summary can merge the bridge's
 /// accumulated diagnostics.
 ///
+/// Every parser emits into a [`DeferredSink`](super::run_scope::DeferredSink),
+/// so a line fed through `run_scope::feed_line` publishes the run's summary
+/// before its rendering, logging, and hooks run.
+///
 /// ## Returns
 ///
 /// * `build_parser` — parser-builder closure passed to
@@ -220,7 +224,11 @@ pub(crate) fn build_structured_plumbing(
                     inner.set_output_text_sink(output_cb);
                     inner.set_agent_pid(agent_pid);
                 }
-                claudine::stream::create_semantic_parser(provider, stdout_sink, parser_config)
+                claudine::stream::create_semantic_parser(
+                    provider,
+                    super::run_scope::DeferredSink::new(stdout_sink),
+                    parser_config,
+                )
             });
         // The receiver reaches the wait loop via the bridge handle.
         (build_parser, stderr_bridge, None)
@@ -259,7 +267,11 @@ pub(crate) fn build_structured_plumbing(
                     inner.set_output_text_sink(output_cb);
                     inner.set_agent_pid(agent_pid);
                 }
-                claudine::stream::create_semantic_parser(provider, stdout_sink, parser_config)
+                claudine::stream::create_semantic_parser(
+                    provider,
+                    super::run_scope::DeferredSink::new(stdout_sink),
+                    parser_config,
+                )
             });
         (build_parser, stderr_bridge, content_rx)
     } else {
@@ -277,7 +289,11 @@ pub(crate) fn build_structured_plumbing(
             Box::new(move |output_cb, _reasoning_cb, agent_pid| {
                 let mut sink = sink.with_output_text_sink(output_cb);
                 sink.set_agent_pid(agent_pid);
-                claudine::stream::create_semantic_parser(provider, sink, parser_config)
+                claudine::stream::create_semantic_parser(
+                    provider,
+                    super::run_scope::DeferredSink::new(sink),
+                    parser_config,
+                )
             });
         (build_parser, None, content_rx)
     }
@@ -320,8 +336,22 @@ pub(crate) struct StreamSummaryContext<'a> {
     /// When it names a marked rolling alias, the resolved
     /// `family_latest` stamp is written to the summary row.
     pub(crate) requested_model: Option<&'a str>,
+    /// The run's output-reader warnings ([`ProcessResult::reader_warnings`]),
+    /// stored whole on the session-end record so a reader timeout's cause or
+    /// a stderr reader's panic survives a terminal that could not show it.
+    ///
+    /// [`ProcessResult::reader_warnings`]: super::exec::ProcessResult::reader_warnings
+    pub(crate) reader_warnings: &'a [String],
 }
 
+/// Render the trailer, wait for the run's output to reach the terminal, then
+/// write the run's one session-end record.
+///
+/// The record is written last because the final drain is what discovers a
+/// terminal that stopped accepting the final answer or the trailer; written
+/// earlier, the record would call that run's output complete. The record's
+/// `output_incomplete` object carries both that delivery loss and
+/// `reader_warnings`.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn emit_stream_summary(
     summary: &claudine::stream::summary::StreamExecutionSummary,
@@ -335,6 +365,7 @@ pub(crate) fn emit_stream_summary(
     agent_pid: Option<u32>,
     signals: &[claudine::signals::ObservedSignal],
     requested_model: Option<&str>,
+    reader_warnings: &[String],
 ) {
     emit_stream_summary_inner(
         StreamSummaryContext {
@@ -349,6 +380,7 @@ pub(crate) fn emit_stream_summary(
             agent_pid,
             signals,
             requested_model,
+            reader_warnings,
         },
         None,
     );
@@ -370,6 +402,7 @@ fn emit_stream_summary_inner(
         agent_pid,
         signals,
         requested_model,
+        reader_warnings,
     } = ctx;
     let primary_markup = if verbosity == Verbosity::Silent {
         None
@@ -439,6 +472,31 @@ fn emit_stream_summary_inner(
             }
         }
     }
+
+    // The final answer and the trailer are queued; only this wait can find a
+    // terminal that stopped taking them, so it precedes the record.
+    if let Some(section_stream) = section_stream {
+        section_stream.drain_final();
+    }
+    // Terminal output the run could not deliver, and readers that did not
+    // finish, recorded where the trailer that would have said so cannot go.
+    let output_loss = section_stream.and_then(|stream| stream.output_loss());
+    let output_incomplete_extra = (output_loss.is_some() || !reader_warnings.is_empty()).then(|| {
+        let loss = output_loss.unwrap_or_default();
+        let mut extra = context_extra.cloned().unwrap_or_default();
+        extra.insert(
+            "output_incomplete".to_string(),
+            serde_json::json!({
+                "dropped_frames": loss.dropped_frames,
+                "rejected_frames": loss.rejected_frames,
+                "failed_writes": loss.failed_writes,
+                "stalled": loss.stalled,
+                "reader_warnings": reader_warnings,
+            }),
+        );
+        extra
+    });
+    let context_extra = output_incomplete_extra.as_ref().or(context_extra);
 
     // Write synthetic summary event to JSONL (best-effort)
     if let Some(protocol) = profile.stream_protocol() {
@@ -590,6 +648,10 @@ pub(crate) fn format_verbose_summary_details_prose(
 
     Some(format!("<dim>{}</dim>", parts.join(" \u{00b7} ")))
 }
+
+#[cfg(test)]
+#[path = "policy/session_end_tests.rs"]
+pub(crate) mod session_end_tests;
 
 #[cfg(test)]
 mod tests {

@@ -17,7 +17,8 @@ flowchart LR
 - `included::classify_included` evaluates the target's own rules or, **only when
   missing**, the base checkout's rules.
 - New, changed, and unknown selected ignored files need consent. Unchanged
-  copies and ordinary ignored files are disposable and summarized by name.
+  copies and ordinary ignored files are disposable and omitted from the report.
+  Git's collapsed ignored directories do not need expansion for display.
 
 ### `Inventory::fingerprint` (BLAKE3)
 
@@ -99,6 +100,16 @@ code touches the network.
 - On Windows `remove::remove_worktree` runs `check_not_in_use` (rename to a
   sibling and back) first. A held directory is `WorktreeError::DirectoryInUse`
   (exit 4).
+
+## Concurrent writers during removal
+
+A GitNexus watcher can recreate `.gitnexus/` while Git deletes the checkout.
+Git then fails with `Directory not empty` after unregistering the worktree; the
+CLI stops before deleting the branch. Observed on macOS with a recipe-started
+`gitnexus analyze <target> --watch`: only regenerated index files remained.
+The registry sweep in `just gitnexus` runs on its next invocation, so it does
+not prevent this race. Stop the target's verified watcher process group before
+removal; recovery must inspect leftovers rather than blindly retry deletion.
 
 ## Git facts about broken worktree records
 

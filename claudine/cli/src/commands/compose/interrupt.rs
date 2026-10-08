@@ -24,9 +24,8 @@ pub(crate) struct UserInterruptGuard {
     _handler: crate::commands::wrap::exec::termination::ComposeInterruptHandlerGuard,
 }
 
-/// Force-exit notice written before the force-exit on a second Ctrl+C that
-/// lands outside a child wait loop. Static bytes so the Unix write stays
-/// async-signal-safe (no allocation, no formatting).
+/// Force-exit notice shown before the force-exit on a second Ctrl+C that
+/// lands outside a child wait loop.
 const FORCE_EXIT_NOTICE: &[u8] =
     "\n\u{26a0} second interrupt — force-exiting compose\n".as_bytes();
 
@@ -36,13 +35,13 @@ const FORCE_EXIT_NOTICE: &[u8] =
 pub(crate) const TERMINAL_LIFECYCLE_EXIT_GRACE: std::time::Duration =
     std::time::Duration::from_millis(500);
 
-/// Written when a repeat press arms the [`TERMINAL_LIFECYCLE_EXIT_GRACE`]
-/// deadline. Static bytes for the same async-signal-safety reason.
+/// Shown when a repeat press arms the [`TERMINAL_LIFECYCLE_EXIT_GRACE`]
+/// deadline.
 const GRACE_EXIT_NOTICE: &[u8] =
     "\n\u{26a0} second interrupt — letting the lifecycle event finish (500ms max) before exiting\n"
         .as_bytes();
 
-/// Written when the grace deadline passes with the run still going.
+/// Shown when the grace deadline passes with the run still going.
 const GRACE_EXPIRED_NOTICE: &[u8] =
     "\n\u{26a0} lifecycle event still running — force-exiting compose\n".as_bytes();
 
@@ -91,54 +90,135 @@ pub(crate) const fn press_rung(
     }
 }
 
-/// Write end of the Unix grace-exit self-pipe, or `-1` before the watcher
-/// exists. Read from the SIGINT handler, so it is a plain atomic.
-#[cfg(unix)]
-static GRACE_EXIT_FD: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(-1);
+/// How long a forced exit lets its notice reach the terminal before ending
+/// the process.
+const EXIT_NOTICE_SETTLE: std::time::Duration = std::time::Duration::from_millis(250);
 
-/// Start (once per process) the thread that enforces the grace deadline.
-///
-/// The SIGINT handler cannot wait, so a [`PressRung::GraceExit`] press writes
-/// one byte to a self-pipe; this thread wakes, sleeps
-/// [`TERMINAL_LIFECYCLE_EXIT_GRACE`], and force-exits. A run that finishes in
-/// the meantime has already exited. Both pipe ends live for the whole process
-/// because the handler that writes to them is never unregistered.
+/// What the Unix SIGINT handler asks the relay thread to do.
 #[cfg(unix)]
-fn ensure_grace_exit_watcher() {
-    use std::io::Read as _;
+const RELAY_NOTICE: u8 = b'N';
+#[cfg(unix)]
+const RELAY_GRACE_EXIT: u8 = b'G';
+#[cfg(unix)]
+const RELAY_FORCE_EXIT: u8 = b'F';
+
+/// Write end of the Unix relay's self-pipe, or `-1` before the relay exists.
+/// Read from the SIGINT handler, so it is a plain atomic.
+#[cfg(unix)]
+static RELAY_FD: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(-1);
+
+/// The first-press notice of the most recently installed ladder. The Unix
+/// handler is never unregistered, so neither is its notice.
+#[cfg(unix)]
+static LADDER_NOTICE: std::sync::Mutex<Option<std::sync::Arc<Vec<u8>>>> =
+    std::sync::Mutex::new(None);
+
+/// Ask the relay thread to act on one press; `false` when there is no relay
+/// or the request could not be queued.
+///
+/// One non-blocking `write(2)` of one byte, so it is async-signal-safe and
+/// cannot wait.
+#[cfg(unix)]
+fn post_to_relay(request: u8) -> bool {
+    let fd = RELAY_FD.load(std::sync::atomic::Ordering::SeqCst);
+    let byte = [request];
+    fd >= 0 && unsafe { libc::write(fd, byte.as_ptr() as *const libc::c_void, 1) } == 1
+}
+
+/// Start (once per process) the thread that shows the ladder's notices and
+/// performs its exits.
+///
+/// The SIGINT handler only counts the press and posts one byte here: a
+/// `write(2)` to a terminal that stopped reading would hold the handler, and
+/// the thread it interrupted, for good, so the exit rungs would never exit.
+/// This thread submits each notice as a diagnostic
+/// ([`crate::terminal_gate::write`], queued during a wrapped run), gives an
+/// exit notice [`EXIT_NOTICE_SETTLE`] to reach the terminal, and `_exit`s. A
+/// [`RELAY_GRACE_EXIT`] arms the [`TERMINAL_LIFECYCLE_EXIT_GRACE`] deadline,
+/// which later presses do not extend; a run that finishes in the meantime has
+/// already exited. Both pipe ends live for the whole process because the
+/// handler that writes to them is never unregistered.
+#[cfg(unix)]
+fn ensure_relay() {
     use std::os::fd::IntoRawFd as _;
 
-    static WATCHER: std::sync::Once = std::sync::Once::new();
-    WATCHER.call_once(|| {
-        let Ok((mut reader, writer)) = std::os::unix::net::UnixStream::pair() else {
+    static RELAY: std::sync::Once = std::sync::Once::new();
+    RELAY.call_once(|| {
+        let Ok((reader, writer)) = std::os::unix::net::UnixStream::pair() else {
             return;
         };
+        if writer.set_nonblocking(true).is_err() {
+            return;
+        }
         let spawned = std::thread::Builder::new()
-            .name("compose-grace-exit".into())
-            .spawn(move || {
-                let mut byte = [0u8; 1];
-                loop {
-                    match reader.read(&mut byte) {
-                        Ok(1) => break,
-                        Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
-                        _ => return,
-                    }
-                }
-                std::thread::sleep(TERMINAL_LIFECYCLE_EXIT_GRACE);
-                // SAFETY: `write(2)` and `_exit(2)` on a static buffer.
-                unsafe {
-                    libc::write(
-                        libc::STDERR_FILENO,
-                        GRACE_EXPIRED_NOTICE.as_ptr() as *const libc::c_void,
-                        GRACE_EXPIRED_NOTICE.len(),
-                    );
-                    libc::_exit(USER_INTERRUPT_EXIT_CODE);
-                }
-            });
+            .name("compose-interrupt-relay".into())
+            .spawn(move || run_relay(reader));
         if spawned.is_ok() {
-            GRACE_EXIT_FD.store(writer.into_raw_fd(), std::sync::atomic::Ordering::SeqCst);
+            RELAY_FD.store(writer.into_raw_fd(), std::sync::atomic::Ordering::SeqCst);
         }
     });
+}
+
+#[cfg(unix)]
+fn run_relay(mut reader: std::os::unix::net::UnixStream) {
+    use std::io::Read as _;
+
+    let mut grace_deadline: Option<std::time::Instant> = None;
+    loop {
+        let wait = grace_deadline.map(|deadline| {
+            deadline
+                .saturating_duration_since(std::time::Instant::now())
+                .max(std::time::Duration::from_millis(1))
+        });
+        if reader.set_read_timeout(wait).is_err() {
+            return;
+        }
+        let mut byte = [0u8; 1];
+        match reader.read(&mut byte) {
+            Ok(1) => match byte[0] {
+                RELAY_NOTICE => {
+                    let notice = LADDER_NOTICE
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .clone();
+                    if let Some(notice) = notice {
+                        write_notice(&notice);
+                    }
+                }
+                RELAY_GRACE_EXIT => {
+                    write_notice(GRACE_EXIT_NOTICE);
+                    grace_deadline.get_or_insert_with(|| {
+                        std::time::Instant::now() + TERMINAL_LIFECYCLE_EXIT_GRACE
+                    });
+                }
+                RELAY_FORCE_EXIT => exit_after_notice(FORCE_EXIT_NOTICE),
+                _ => {}
+            },
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) && grace_deadline.is_some() =>
+            {
+                exit_after_notice(GRACE_EXPIRED_NOTICE)
+            }
+            _ => return,
+        }
+    }
+}
+
+/// Show `notice` without waiting on the terminal during a wrapped run.
+fn write_notice(notice: &[u8]) {
+    crate::terminal_gate::write(crate::commands::wrap::output_worker::Stream::Stderr, notice);
+}
+
+/// Show `notice`, give it a bounded chance to reach the terminal, and end the
+/// process with [`USER_INTERRUPT_EXIT_CODE`].
+fn exit_after_notice(notice: &[u8]) -> ! {
+    write_notice(notice);
+    crate::terminal_gate::settle(EXIT_NOTICE_SETTLE);
+    force_exit()
 }
 
 /// Install a process-scoped user-interrupt handler that covers the **entire**
@@ -186,60 +266,40 @@ fn install_ladder(notice: String, earlier_presses: u8) -> UserInterruptGuard {
 
     #[cfg(unix)]
     {
-        ensure_grace_exit_watcher();
-        let bytes_handler = std::sync::Arc::clone(&bytes);
+        ensure_relay();
+        *LADDER_NOTICE
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(std::sync::Arc::clone(&bytes));
         let presses_handler = std::sync::Arc::clone(&presses);
         let hook = unsafe {
             signal_hook::low_level::register(signal_hook::consts::SIGINT, move || {
                 crate::output::mark_user_interrupted();
                 let count = presses_handler.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+                // Only atomics and one non-blocking `write(2)` to the relay:
+                // no allocation, no lock, no `tracing`, and no write to the
+                // terminal, which could block this handler for good.
                 match press_rung(
                     count,
                     crate::output::wait_loop_active(),
                     claudine::interrupt::terminal_lifecycle_active(),
                 ) {
-                    // `write(2)` on a file descriptor is async-signal-safe; the
-                    // Rust stdio macros (`eprintln!`, `println!`) are not, and
-                    // any allocation or `tracing` call would be unsafe here.
                     PressRung::Notice => {
-                        let buf = bytes_handler.as_slice();
-                        libc::write(
-                            libc::STDERR_FILENO,
-                            buf.as_ptr() as *const libc::c_void,
-                            buf.len(),
-                        );
+                        post_to_relay(RELAY_NOTICE);
                     }
                     PressRung::Defer => {}
                     PressRung::GraceExit => {
-                        let fd = GRACE_EXIT_FD.load(std::sync::atomic::Ordering::SeqCst);
-                        if fd >= 0 {
-                            libc::write(
-                                libc::STDERR_FILENO,
-                                GRACE_EXIT_NOTICE.as_ptr() as *const libc::c_void,
-                                GRACE_EXIT_NOTICE.len(),
-                            );
-                            // Arms the watcher; later presses add bytes it never
-                            // reads, so the deadline is not extended.
-                            libc::write(fd, b"!".as_ptr() as *const libc::c_void, 1);
-                        } else {
-                            // No watcher could be started: keep the old rung.
-                            libc::write(
-                                libc::STDERR_FILENO,
-                                FORCE_EXIT_NOTICE.as_ptr() as *const libc::c_void,
-                                FORCE_EXIT_NOTICE.len(),
-                            );
+                        if !post_to_relay(RELAY_GRACE_EXIT) {
+                            // No relay to wait out the grace: exit now, without
+                            // a notice this handler cannot safely write.
                             libc::_exit(USER_INTERRUPT_EXIT_CODE);
                         }
                     }
                     PressRung::ForceExit => {
-                        libc::write(
-                            libc::STDERR_FILENO,
-                            FORCE_EXIT_NOTICE.as_ptr() as *const libc::c_void,
-                            FORCE_EXIT_NOTICE.len(),
-                        );
-                        // `_exit` (not `exit`) is async-signal-safe — it skips
-                        // atexit handlers and destructors.
-                        libc::_exit(USER_INTERRUPT_EXIT_CODE);
+                        if !post_to_relay(RELAY_FORCE_EXIT) {
+                            // `_exit` (not `exit`) is async-signal-safe — it
+                            // skips atexit handlers and destructors.
+                            libc::_exit(USER_INTERRUPT_EXIT_CODE);
+                        }
                     }
                 }
             })
@@ -341,14 +401,11 @@ pub(crate) fn classify_console_interrupt(
 /// Windows counterpart of the Unix SIGINT handler, called from the process-wide
 /// console-control handler with that handler's process-wide press count.
 ///
-/// Writes straight to stderr rather than through the synchronized render sink,
-/// for the reason `termination::windows::emit_interrupt_feedback` documents at
-/// length: the console handler is a context-free `extern "system" fn(u32)`
-/// Windows invokes on its own thread, while the sink is per-run state behind an
-/// `Arc<Mutex<…>>` in the call chain. The payload is a single pre-rendered
-/// buffer written in one `write_all` and `Stderr` locks internally, so the
-/// bytes cannot interleave with another writer's; what it costs is that the
-/// sink's cursor bookkeeping does not learn about this line.
+/// The console handler runs on a thread of its own, not in signal context, so
+/// unlike the Unix handler it needs no relay: it submits each notice as a
+/// diagnostic itself ([`crate::terminal_gate::write`], queued during a wrapped
+/// run), so a terminal that stopped reading cannot keep the exit rungs from
+/// reaching [`force_exit`].
 ///
 /// ## Notes
 ///
@@ -371,46 +428,41 @@ pub(crate) fn on_console_interrupt(count: u8) {
     match effect {
         ComposeInterruptEffect::Inactive | ComposeInterruptEffect::Defer => {}
         ComposeInterruptEffect::Notice(bytes) => {
-            let _ = std::io::Write::write_all(&mut std::io::stderr(), &bytes);
+            write_notice(&bytes);
         }
         ComposeInterruptEffect::GraceExit => {
-            let _ = std::io::Write::write_all(&mut std::io::stderr(), GRACE_EXIT_NOTICE);
+            write_notice(GRACE_EXIT_NOTICE);
             // This is the console handler's own thread, so it can wait out the
             // grace itself; a run that finishes sooner has already exited.
             std::thread::sleep(TERMINAL_LIFECYCLE_EXIT_GRACE);
-            let _ = std::io::Write::write_all(&mut std::io::stderr(), GRACE_EXPIRED_NOTICE);
-            force_exit();
+            exit_after_notice(GRACE_EXPIRED_NOTICE);
         }
         ComposeInterruptEffect::ForceExit => {
-            let _ = std::io::Write::write_all(&mut std::io::stderr(), FORCE_EXIT_NOTICE);
-            force_exit();
+            exit_after_notice(FORCE_EXIT_NOTICE);
         }
     }
 }
 
-/// End the process without running destructors — the Windows analog of the Unix
-/// handler's `_exit`.
+/// End the process without running destructors or atexit handlers.
 ///
-/// `ExitProcess` is used rather than `std::process::exit` because the caller is
-/// a console-handler thread while the main thread is, by construction, wedged
-/// in the synchronous call the user is trying to escape: running atexit
-/// handlers and destructors from here is exactly the wedge being escaped.
+/// The caller is the Unix relay thread or the Windows console-handler thread,
+/// while the main thread is, by construction, wedged in the synchronous call
+/// the user is trying to escape: running atexit handlers and destructors (or
+/// flushing a stdout a stalled terminal is holding) is exactly the wedge being
+/// escaped.
 #[cfg(windows)]
 fn force_exit() -> ! {
     unsafe { windows::Win32::System::Threading::ExitProcess(USER_INTERRUPT_EXIT_CODE as u32) }
 }
 
-/// Present so the ladder above compiles — and is therefore testable — on hosts
-/// whose console handler does not exist. Nothing calls
-/// [`on_console_interrupt`] there.
-#[cfg(not(windows))]
+#[cfg(unix)]
 fn force_exit() -> ! {
-    std::process::exit(USER_INTERRUPT_EXIT_CODE)
+    // SAFETY: `_exit(2)` ends the process; it touches no Rust state.
+    unsafe { libc::_exit(USER_INTERRUPT_EXIT_CODE) }
 }
 
-/// Build the rendered interrupt notice (with a leading newline so the
-/// terminal's echoed `^C` does not share a line) for async-signal-safe
-/// `libc::write(2)` emission from the SIGINT handler.
+/// Build the rendered interrupt notice, with a leading newline so the
+/// terminal's echoed `^C` does not share a line.
 ///
 /// At install time we have only the user's CLI argument (e.g. the
 /// relative path they typed). We use that verbatim as the OSC8 visible
@@ -574,5 +626,39 @@ mod tests {
         on_console_interrupt(1);
 
         assert!(!crate::output::user_interrupt_observed());
+    }
+
+    /// The SIGINT handler only posts the press to the relay; the relay queues
+    /// the notice. With the output worker stuck on the terminal and std's
+    /// stream locks held, a press still returns and the notice is queued.
+    #[cfg(unix)]
+    #[test]
+    #[serial_test::serial]
+    fn a_first_press_notice_is_queued_by_the_relay_not_written_by_the_handler() {
+        crate::output::clear_user_interrupt_for_tests();
+        let routed = crate::terminal_gate::tests::RoutedToBlockedWorker::new();
+        let _guard = install_ladder("relayed notice\n".to_string(), 0);
+        let output = Arc::clone(routed.output());
+
+        let returned = crate::terminal_gate::tests::returns_while_std_streams_are_locked(move || {
+            unsafe { libc::raise(libc::SIGINT) };
+            let started = std::time::Instant::now();
+            while output.queued_frames() == 0 {
+                assert!(
+                    started.elapsed() < std::time::Duration::from_secs(5),
+                    "the relay never queued the notice"
+                );
+                std::thread::yield_now();
+            }
+        });
+
+        assert!(returned, "the press waited on the terminal");
+        assert!(crate::output::user_interrupt_observed());
+        let written = routed.release();
+        assert_eq!(
+            written.last().map(|(_, bytes)| bytes.as_slice()),
+            Some(b"relayed notice\n".as_slice())
+        );
+        crate::output::clear_user_interrupt_for_tests();
     }
 }

@@ -663,6 +663,7 @@ export BISCUIT_NEXTEST_BIN='cargo-nextest nextest'
 export BISCUIT_JUNIT_WORKSPACE_ROOT="\$src"
 export BISCUIT_JUNIT_TARGET_DIR="\$src/target"
 export INSTA_WORKSPACE_ROOT="\$src"
+export BISCUIT_CI_BUILD_BIN="\$consume/build/tools/ci-build"
 export BISCUIT_JUNIT_STAGE_DIR="\$reports"
 export BISCUIT_CI_ENVIRONMENT='${environment}'
 sidecar_dir="\$consume/build/${artifact}-sidecars"
@@ -863,6 +864,7 @@ windows_run_archive() {
     \$env:BISCUIT_JUNIT_WORKSPACE_ROOT = \$nativeSrc
     \$env:BISCUIT_JUNIT_TARGET_DIR = "\$nativeSrc/target"
     \$env:INSTA_WORKSPACE_ROOT = \$nativeSrc
+    \$env:BISCUIT_CI_BUILD_BIN = "\$consume\\build\\tools\\ci-build.exe"
     \$env:BISCUIT_JUNIT_STAGE_DIR = (just _native_path \$reports | Select-Object -Last 1)
     \$env:BISCUIT_CI_ENVIRONMENT = '${environment}'
     \$sidecarDir = "\$consume\\build\\${artifact}-sidecars"

@@ -81,6 +81,7 @@ mod lockfile;
 mod package_areas;
 mod packages;
 mod path_format;
+pub(crate) mod query;
 mod repo;
 
 // Re-exports from submodules

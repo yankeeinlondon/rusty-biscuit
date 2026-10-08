@@ -75,3 +75,29 @@ WSL2 follows these Linux code paths; its archive-mode traps are in
 - Retry once with fewer parallel builds; extra arguments go to
   `cargo nextest run`: `just cross-check <package> --os linux --build-jobs 2`.
   The retry reused the cached build and passed.
+
+## Reading `/proc` for another process's descriptors
+
+Measured 2026-10-05 on `BUILD_LINUX` for Sniff's path-usage query:
+
+- **`procfs` 0.18 hides per-fd permission errors.** `FDsIter` skips every fd
+  whose info fails. For a same-uid, non-dumpable process (`systemd --user`),
+  `/proc/<pid>/fd` listed 34 entries, every per-fd stat gave `EACCES`, and
+  `Process::fd()` returned `Ok` with zero items. Read `/proc` directly when a
+  denial must stay visible. There are two denial shapes: the directory itself
+  is unreadable (other uid), or the listing succeeds and each entry fails.
+- Take an fd target's identity from following `std::fs::metadata
+  ("/proc/<pid>/fd/<n>")`, not from the link text (lossy and descriptive for
+  deleted files), and not from a no-follow stat (that is the magic link's own
+  inode).
+- `readdir("/proc")` lists thread-group leaders only, but `/proc/<tid>` still
+  resolves for any thread ID and looks like a process (`Tgid` != `Pid` in
+  `status`). Enumerate only through `readdir`.
+- inotify `fdinfo` lines carry `sdev` as the kernel-internal `dev_t`
+  (`major << 20 | minor`), not `st_dev`. Decode it and rebuild with
+  `libc::makedev(major, minor)` before comparing. On `BUILD_LINUX` every mount
+  is major 0 with a small minor, so the raw values happen to agree there and
+  a missing decode goes unnoticed. A real block device (WSL2 ext4, major 8)
+  exposes it.
+- Parse `/proc/<pid>/stat` after the last `)`: `comm` can contain spaces and
+  parentheses. Field 22 (`starttime`) is the PID-reuse token.

@@ -134,8 +134,14 @@ fn to_metric_node(node: &PerfNode, wall: Duration, is_root: bool, dry_run: bool)
 /// sites through here keeps the report a human-facing, stderr-only
 /// artifact (G-8) and prevents the headline-sampling logic from drifting
 /// back apart across the wrapper, composition, and sequence paths (TM-1).
+///
+/// The report is a diagnostic ([`crate::terminal_gate::write`]): a wrapped
+/// run queues it on the output worker rather than waiting on the terminal.
 pub(crate) fn emit_report(report: &CommandPerfReport) {
-    eprint!("{}", render_perf_report(report));
+    crate::terminal_gate::write(
+        crate::commands::wrap::output_worker::Stream::Stderr,
+        render_perf_report(report).as_bytes(),
+    );
 }
 
 /// Render a [`CommandPerfReport`] to a styled string suitable for stderr.

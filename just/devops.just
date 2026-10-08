@@ -224,8 +224,10 @@ _ci_build_consumer builds environment gate:
 # standalone `cargo-nextest` binary precisely so listing the archive's inventory
 # cannot reach Cargo.
 #
-# Emits `archive_file`, `sidecar_dir`, `workspace`, `key`, and `digest` as step
-# outputs. The sidecar directory is the producer's answer to every compile-time
+# Emits `archive_file`, `sidecar_dir`, `workspace`, `key`, `digest`, and
+# `key_helper` as step outputs. `key_helper` is the verifier that just ran,
+# which also answers the planner's `ci-build key` requests so a consumer never
+# compiles a second copy. The sidecar directory is the producer's answer to every compile-time
 # tool a consumer used to build for itself: the messenger desktop stubs,
 # darkmatter's `md` fixture, and the L2 harness broker all arrive here, verified.
 # `workspace` is this checkout in the host's own spelling — the value the tier
@@ -286,6 +288,7 @@ _ci_build_verify dir artifact environment plan="":
             echo "archive_file=${archive_file}"
             echo "sidecar_dir=${sidecar_dir}"
             echo "workspace=${workspace}"
+            echo "key_helper=${tool}"
             echo "key=$(jq -r '.key' "${manifest}")"
             echo "digest=$(jq -r '.digest' "${manifest}")"
             echo "download_seconds=${download_seconds:-0}"

@@ -66,6 +66,13 @@ hold the rest:
   hosted `windows-latest` image installs the real interpreter under that name.
   Found 2026-09-14 by the first native-Windows run of `repo-deps`
   (`scripts/ci-rollup-tests.rs::python_interpreter`).
+- **BUILD_WIN SSH sessions resolve `python3`/`python` to the WindowsApps
+  aliases ahead of the real interpreter.** `--version` fails, so tests gated on
+  `python_interpreter()` skip and nextest reports PASS in ~0.3 s having run
+  nothing. Before a `just cross-check` run that needs Python, prepend the real
+  interpreter's directory to a process-scoped `PATH` (confirm a successful
+  `--version`; do not assume the install directory, e.g. Python313). A PASS
+  alone is not evidence: read the captured output for the planner's own lines.
 - **A `.cmd`/`.bat` cannot receive an argument containing a newline** ("batch
   file arguments are invalid"). A fake provider that receives a multi-line
   prompt must be a compiled `.exe`; see the rustc-built fixture in claudine's
@@ -83,6 +90,15 @@ hold the rest:
   child alone (2026-09-22). Verify a host with `IsProcessInJob` before
   blaming the code. Tests that spawn through a Job therefore behave
   differently over `just cross-check` than in an interactive session.
+- **`io::Error::from(windows::core::Error)` keeps the HRESULT as the raw OS
+  error**, so `e.kind()` is never `NotFound` for a missing file: it reports
+  `os error -2147024894` (`0x80070002`) with an uncategorized kind. Code that
+  branches on `ErrorKind` must unwrap a `FACILITY_WIN32` HRESULT
+  (`code & 0xFFFF0000 == 0x80070000`) to `from_raw_os_error(code & 0xFFFF)`
+  first; see `io_error` in `sniff/lib/src/filesystem/query/identity.rs`. It
+  passed every macOS and Linux run and was found by the first native-Windows
+  run of the query's root recheck (2026-10-05), which reported a deleted
+  root as "unverified" instead of "changed".
 - **Overriding `USERPROFILE` alone breaks the per-user known folders.**
   `dirs::data_local_dir()` / `data_dir()` go through `SHGetKnownFolderPath`,
   which resolves `LocalAppData`/`RoamingAppData` *beneath `USERPROFILE`* and
@@ -240,3 +256,89 @@ because overlapping host-network detections fail-fast the test process
 
 A cross-compile is compile evidence. Behavioral evidence comes from
 `just cross-check <pkg> --os windows` or the `windows-latest` CI leg.
+
+## Inspecting another process's handles
+
+Measured 2026-10-05 on `BUILD_WIN` for Sniff's path-usage query. The SSH
+session there is **elevated** (High integrity, SeDebugPrivilege), so
+handle/permission counts taken over SSH overstate what a normal user sees.
+Simulate Medium integrity with a filtered token, or use a desktop session.
+
+- **Identity queries on a duplicated *disk* handle can block indefinitely.**
+  If the owning process has synchronous I/O pending on that file object (for
+  example a synchronous handle waiting in `LockFileEx`), the following all
+  block until the owner's I/O ends: `GetFileInformationByHandleEx`
+  (`FileIdInfo`, `FileBasicInfo`), `NtQueryInformationFile`
+  (`FileModeInformation`), `GetFinalPathNameByHandleW`, and
+  `NtQueryObject(ObjectNameInformation)`. `CancelSynchronousIo` on the stuck
+  thread fails with 1168, because the thread is waiting on the file-object
+  lock, not on its own I/O. A synchronous named-pipe server blocks the name
+  queries the same way. `GetFileType` never blocked, so it is the only safe
+  in-process pre-filter.
+- **Terminating a helper process does release it.** A helper process stuck
+  in those calls exited 1.0-1.5 ms after `TerminateProcess`, in 7 of 7
+  trials, and the owner's lock state was unchanged. A thread inside your own
+  process cannot be rescued this way; never terminate it.
+- A process's current directory appears in its handle table as an ordinary
+  directory handle (access `0x100020`), so a FileId match finds it. It cannot
+  be told apart from any other directory handle without reading the PEB.
+- On ReFS (`B:` on that host), `FileIdInfo` is a full 128-bit id, and files in
+  one directory share the upper 64 bits. Compare the pair
+  `(VolumeSerialNumber, 128-bit id)`; the 64-bit
+  `GetFileInformationByHandle` index is not enough.
+- `NtQuerySystemInformation(64)` (`SystemExtendedHandleInformation`, not a
+  named constant in `windows` 0.62) needs a `STATUS_INFO_LENGTH_MISMATCH`
+  retry loop; the snapshot was about 100k handles, 4 MB.
+  `EnumProcessModulesEx` also needs a size retry.
+- A live loaded-module test needs no fixture DLL: hard-link (or copy) the
+  running test executable into the temp tree and start it there. Its main
+  module is then reported at the link's path. `GetModuleFileNameExW`
+  returns a plain `C:\...` spelling, while a `filesystem::query` report's
+  `matched_paths` sit under the verbatim `\\?\` canonical root, so compare
+  against `canonicalize()`, not the plain spelling (found 2026-10-06; eight
+  tests failed only on Windows for this reason).
+- `fsutil.exe file setCaseSensitiveInfo <dir> enable` works on
+  build-win-native (2026-10-06) and needs the directory to exist. Whether the
+  hosted `windows-latest` runner allows it is unverified; the
+  `filesystem::query` case-sensitivity test fails, rather than skips, where it
+  cannot.
+
+## Asking which processes have a path open
+
+Measured 2026-10-06 on `BUILD_WIN`. This is the safe alternative to resolving
+another process's handles (above): open the path yourself and ask the kernel
+which processes hold it.
+
+- **The call:** `CreateFileW(path, FILE_READ_ATTRIBUTES, FILE_SHARE_READ |
+  FILE_SHARE_WRITE | FILE_SHARE_DELETE, OPEN_EXISTING,
+  FILE_FLAG_BACKUP_SEMANTICS for directories)`, then
+  `NtQueryInformationFile(h, …, 47 /* FileProcessIdsUsingFileInformation */)`.
+  The result is a `u32` count, then `usize` PIDs from byte offset 8. Start with
+  a 4 KiB buffer, because every `STATUS_INFO_LENGTH_MISMATCH` retry repeats the
+  whole costly call.
+- **It does not hang** where the handle-side queries do. It returned
+  promptly while the holder was blocked in `LockFileEx` or in a synchronous
+  `ReadDirectoryChangesW` call. Our open and close did not wake the
+  watcher.
+- **Permissions.** No elevation is needed, and no other process is opened. A
+  non-elevated desktop session saw System (PID 4) and other users' processes,
+  the same holders as the elevated SSH session.
+- **What it reports and what it misses:**
+  - It reports open files and directories, cwd, loaded DLLs, a running exe,
+    share-mode-0 holders, and holders with attribute-only or zero access.
+  - Results never roll up to parent directories.
+  - The caller's own PID is never listed.
+  - A delete-pending file cannot be opened (`0xC0000056`), so its holders
+    are invisible.
+  - Long paths need the `\\?\` prefix.
+- **Cost is per call and scales with the system's handle count, not the
+  tree.** About 4 ms plus about 25 µs per 1,000 system handles, whether or
+  not anything holds the path (6 ms at 100k handles). Calls scale nearly
+  linearly across threads up to the core count, so walk large trees in
+  parallel and in priority order.
+- **Never open a pipe path to probe it.** Opening `\\.\pipe\…`, even
+  `GetFileAttributesW` on it, connects to a waiting server as a client.
+  Take the entry type from the directory walk.
+- **Restart Manager (`RmGetList`) is a worse wrapper for the same question.**
+  It has no directory or long-path support, it is slower per path, and a
+  missing path returns success with an empty list.

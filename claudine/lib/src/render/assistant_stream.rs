@@ -48,6 +48,10 @@ pub struct AssistantStream {
     term: Option<Terminal>,
     /// Cached darkmatter options (created once to avoid repeated theme detection).
     terminal_options: Option<TerminalOptions>,
+    /// When `true`, a partial line waits for its newline and is rendered like
+    /// any other line instead of streaming raw. See
+    /// [`AssistantStream::holding_partial_lines`].
+    hold_partial_lines: bool,
 }
 
 impl AssistantStream {
@@ -68,7 +72,23 @@ impl AssistantStream {
             last_block_growth_at: None,
             term,
             terminal_options,
+            hold_partial_lines: false,
         }
+    }
+
+    /// Stop streaming partial lines raw; render them once their line is
+    /// complete.
+    ///
+    /// A raw partial line bypasses Markdown rendering, so nothing folds it to
+    /// the terminal width. That is harmless when the terminal soft-wraps the
+    /// line itself, but not when a caller prefixes every rendered line with a
+    /// gutter: the overflow wraps back to column 0 without it. Such a caller
+    /// holds partial lines anyway until their newline arrives, so holding them
+    /// here costs no progress.
+    #[must_use]
+    pub fn holding_partial_lines(mut self, hold: bool) -> Self {
+        self.hold_partial_lines = hold;
+        self
     }
 
     fn push_frames(&mut self, frames: &mut Vec<String>, text: &str) {
@@ -100,8 +120,13 @@ impl AssistantStream {
         // through `StreamOutput`, which inserts a newline before writing
         // stderr when stdout is mid-line. Skip when we're inside a fenced
         // block or actively accumulating a markdown block — those paths need
-        // the full block before rendering.
-        if !self.line_buffer.is_empty() && !self.in_code_fence && self.block_buffer.is_empty() {
+        // the full block before rendering — and when the caller holds partial
+        // lines (`holding_partial_lines`).
+        if !self.hold_partial_lines
+            && !self.line_buffer.is_empty()
+            && !self.in_code_fence
+            && self.block_buffer.is_empty()
+        {
             let partial = std::mem::take(&mut self.line_buffer);
             frames.push(partial);
             self.partial_line_committed = true;

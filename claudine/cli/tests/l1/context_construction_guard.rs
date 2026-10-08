@@ -24,6 +24,13 @@ const COMMAND_REPOSITORY: &str =
 
 const ALLOWLIST: &[Allowance] = &[
     Allowance {
+        gate: Gate::AmbientState,
+        path: "commands/wrap/exec/completion_fixture.rs",
+        identifier: "std::env::var_os",
+        count: 1,
+        reason: "test-fixtures-only startup reads the hermetic stall directory once; it supplies no file resolution or ctx values",
+    },
+    Allowance {
         gate: Gate::Construction,
         path: "request.rs",
         identifier: "RequestSnapshot::from_process",

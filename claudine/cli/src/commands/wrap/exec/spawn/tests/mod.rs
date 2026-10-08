@@ -1,5 +1,7 @@
 //! Tests for the three spawn modes, split to match the module tree:
-//! - [`inherited`] — [`run_child`] PID capture and wall-clock timeout.
+//! - [`inherited`] — [`run_child`] PID capture, wall-clock timeout, and
+//!   forwarding through the output worker.
+//! - [`semantic`] — [`run_child_stream_semantic`] stderr passthrough delivery.
 //! - [`captured`] — [`run_child_capture`] PID/env capture, timeout, and the
 //!   [`capture_stream_with_volume_cap`] helper.
 //!
@@ -13,6 +15,7 @@ use std::path::{Path, PathBuf};
 
 mod captured;
 mod inherited;
+mod semantic;
 
 #[cfg(windows)]
 #[test]
