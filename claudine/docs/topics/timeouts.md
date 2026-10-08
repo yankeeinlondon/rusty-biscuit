@@ -637,6 +637,9 @@ flowchart LR
   discarded, so it cannot write into the next iteration or emit events for a
   finished run. This covers both readers of a structured run (the provider's
   stderr passthrough included) and both forwarders of an inherited run.
+  Structured runs wait for both stdout and stderr under the shared reader
+  deadline before freezing publication. For example, an OpenCode model error
+  written to stderr still reaches the caller when stdout reaches EOF first.
 - **A stalled reader still leaves its result.** Parsing a line and acting
   on it are two steps. The reader first lets the provider's parser handle the
   whole line, holding back the events it produces. Once the provider has

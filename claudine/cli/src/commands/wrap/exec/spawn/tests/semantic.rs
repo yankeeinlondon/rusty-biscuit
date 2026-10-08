@@ -32,7 +32,11 @@ impl SemanticStreamParser for ExitOnly {
 }
 
 fn run_with_stderr(output: &Arc<StreamOutput>) -> StreamExecutionSummary {
-    let (binary, args) = test_shell_command("echo passthrough >&2", "1>&2 echo passthrough");
+    run_stderr_script(output, "echo passthrough >&2", "1>&2 echo passthrough")
+}
+
+fn run_stderr_script(output: &Arc<StreamOutput>, unix_script: &str, windows_script: &str) -> StreamExecutionSummary {
+    let (binary, args) = test_shell_command(unix_script, windows_script);
     let mut child_spawned = false;
     run_child_stream_semantic(
         &binary,
@@ -88,6 +92,26 @@ fn semantic_stderr_passthrough_is_delivered_by_the_output_worker() {
         .map(|(_, bytes)| String::from_utf8(bytes).unwrap())
         .collect();
     assert_eq!(stderr.trim_end(), "passthrough");
+}
+
+#[test]
+fn semantic_stderr_buffer_is_drained_before_run_closes() {
+    let (gate, _entered) = Gate::new(true);
+    let output = StreamOutput::with_sink(Box::new(gate.clone()));
+    let summary = run_stderr_script(
+        &output,
+        "exec 1>&-; i=1; while [ $i -le 128 ]; do echo diagnostic-$i >&2; i=$((i + 1)); done",
+        "for /L %i in (1,1,128) do @1>&2 echo diagnostic-%i",
+    );
+
+    assert_eq!(summary.exit_code, 0);
+    assert_eq!(output.drain(Instant::now() + Duration::from_secs(10)), Drained::Complete);
+    let stderr: String = gate.written().into_iter()
+        .filter(|(stream, _)| *stream == Stream::Stderr)
+        .map(|(_, bytes)| String::from_utf8(bytes).unwrap())
+        .collect();
+    let expected: Vec<String> = (1..=128).map(|i| format!("diagnostic-{i}")).collect();
+    assert_eq!(stderr.lines().collect::<Vec<_>>(), expected);
 }
 
 /// On a terminal an earlier run found stalled, the next run's passthrough is

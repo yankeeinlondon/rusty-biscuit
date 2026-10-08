@@ -684,6 +684,9 @@ pub(crate) fn run_child_stream_semantic(
     run_scope.observe_settlement(Operation::JoinStart);
     let stdout_outcome = join_reader(stdout_handle, &stdout_progress, reader_budget, readers_since);
     run_scope.observe_settlement(if matches!(stdout_outcome, JoinOutcome::TimedOut(_)) { Operation::Cutoff } else { Operation::JoinEnd });
+    // Stderr may still hold diagnostics after stdout reaches EOF. Keep its
+    // publication open until it finishes or reaches the shared deadline.
+    let stderr_outcome = join_reader(stderr_handle, &stderr_progress, reader_budget, readers_since);
     if timeout_config.provider == Some(claudine::provider::Provider::Codex)
         && let Some(index) = args.iter().position(|arg| arg == "--output-last-message")
         && let Some(path) = args.get(index + 1)
@@ -704,7 +707,6 @@ pub(crate) fn run_child_stream_semantic(
     // abandoned: its output and lifecycle events are discarded, so it can
     // neither write into the next iteration nor emit for a finished run.
     run_scope.close();
-    let stderr_outcome = join_reader(stderr_handle, &stderr_progress, reader_budget, readers_since);
     let stderr_warning = reader_failure(ReaderStream::Stderr, &stderr_outcome, reader_budget)
         .map(|failure| failure.message);
     let captured = match stderr_outcome {
