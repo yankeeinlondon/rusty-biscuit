@@ -249,6 +249,9 @@ fn normalized_id(text: &str, ids: &mut HashMap<String, usize>) -> String {
 fn normalized_json(stdout: &str) -> String {
     let mut report = json_of(stdout);
     report["root_dir"] = Value::from("<ROOT>");
+    if let Some(root) = report.get_mut("package_root_dir") {
+        *root = Value::from("<ROOT>");
+    }
     let mut text = String::new();
     canonical(&report, 0, &mut HashMap::new(), &mut text);
     text.push('\n');

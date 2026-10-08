@@ -39,6 +39,7 @@ mod scan;
 mod scanner;
 mod selection;
 mod stats;
+mod grouping;
 
 use classes::{ClassSelection, MemberFilter};
 use declarations::{DeclarationScan, Declarations, ReportFormat};
@@ -155,6 +156,7 @@ struct ChangedArgs {
     /// `--changed main` leaves `main` as a positional FILTER. Without a
     /// value the committed comparison is empty, so only uncommitted
     /// changes select files. The current on-disk contents are reported.
+    /// Cannot be combined with --prelude.
     #[arg(
         long,
         value_name = "REF",

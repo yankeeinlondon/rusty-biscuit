@@ -2,24 +2,21 @@
 //! language, and their doc coverage, written as terminal tables or as a
 //! versioned JSON envelope.
 //!
-//! ```json
-//! {"report_schema_version":1,"root_dir":"/repo",
-//!  "stats":{"by_kind":{"Function":3},"by_visibility":{"Public":3},"by_language":{"Rust":3},
-//!           "doc_coverage":{"documented":2,"total":3,"unavailable":0,"ratio":0.6666666666666666},
-//!           "synthetic_exports":0},
-//!  "errors":[]}
-//! ```
+//! Overall and package counters share one stats shape. The additive report
+//! envelope keeps schema version 1; package paths are relative to its
+//! `package_root_dir`, independently of the normal scan `root_dir`.
 
 use std::collections::BTreeMap;
 use std::io::{self, Write};
 
 use biscuit_terminal::prelude::{
-    ColumnType, Table, TableCellContent, TableColumn, Terminal, TerminalRenderable,
+    ColumnType, Prose, WordWrap, Table, TableCellContent, TableColumn, Terminal, TerminalRenderable,
 };
 use serde::Serialize;
 use tree_hugger::{SymbolKind, SymbolRecord, Visibility, VisibilityLevel};
 
-use crate::render::table_terminal;
+use crate::grouping::{Group, PackageIdentity};
+use crate::render::{literal, table_terminal};
 use crate::report::{REPORT_SCHEMA_VERSION, ReportError};
 
 /// The aggregate of one run's selected declarations.
@@ -90,27 +87,52 @@ impl Stats {
         }
     }
 
-    /// Writes the stats JSON envelope, `errors` last.
-    pub(crate) fn write_json(&self, out: &mut dyn Write, root_dir: &str, errors: &[ReportError]) -> io::Result<()> {
+    fn as_json(&self) -> StatsJson<'_> {
+        StatsJson {
+            by_kind: &self.by_kind,
+            by_visibility: &self.by_visibility,
+            by_language: &self.by_language,
+            doc_coverage: CoverageJson {
+                documented: self.doc_coverage.documented,
+                total: self.doc_coverage.total,
+                unavailable: self.doc_coverage.unavailable,
+                ratio: self.doc_coverage.ratio(),
+            },
+            synthetic_exports: self.synthetic_exports,
+        }
+    }
+
+    /// Writes overall and sorted package stats, with `errors` last.
+    pub(crate) fn write_json(&self, out: &mut dyn Write, root_dir: &str, package_root_dir: &str, groups: &[Group], errors: &[ReportError]) -> io::Result<()> {
         let envelope = Envelope {
             report_schema_version: REPORT_SCHEMA_VERSION,
             root_dir,
-            stats: StatsJson {
-                by_kind: &self.by_kind,
-                by_visibility: &self.by_visibility,
-                by_language: &self.by_language,
-                doc_coverage: CoverageJson {
-                    documented: self.doc_coverage.documented,
-                    total: self.doc_coverage.total,
-                    unavailable: self.doc_coverage.unavailable,
-                    ratio: self.doc_coverage.ratio(),
-                },
-                synthetic_exports: self.synthetic_exports,
-            },
+            package_root_dir,
+            stats: self.as_json(),
+            groups: groups.iter().map(|group| GroupJson {
+                package: group.package.as_ref(),
+                stats: group.stats.as_json(),
+            }).collect(),
             errors,
         };
         serde_json::to_writer(&mut *out, &envelope)?;
         out.write_all(b"\n")?;
+        out.flush()
+    }
+
+    /// Package headings are literal text; the counters use the same rendering
+    /// and width policy as the overall section, including empty groups.
+    pub(crate) fn write_grouped_terminal(&self, out: &mut dyn Write, term: &Terminal, plain: bool, groups: &[Group]) -> io::Result<()> {
+        write_heading(out, term, plain, "All selected declarations")?;
+        self.write_terminal(out, term, plain)?;
+        for group in groups {
+            writeln!(out)?;
+            let heading = group.package.as_ref().map_or_else(|| "Unassigned".to_string(), |package| {
+                format!("{} ({})", package.name, package.path)
+            });
+            write_heading(out, term, plain, &heading)?;
+            group.stats.write_terminal(out, term, plain)?;
+        }
         out.flush()
     }
 
@@ -160,8 +182,16 @@ impl Stats {
 struct Envelope<'a> {
     report_schema_version: u32,
     root_dir: &'a str,
+    package_root_dir: &'a str,
     stats: StatsJson<'a>,
+    groups: Vec<GroupJson<'a>>,
     errors: &'a [ReportError],
+}
+
+#[derive(Serialize)]
+struct GroupJson<'a> {
+    package: Option<&'a PackageIdentity>,
+    stats: StatsJson<'a>,
 }
 
 #[derive(Serialize)]
@@ -194,8 +224,14 @@ fn visibility_label(level: VisibilityLevel) -> String {
     Option::<Visibility>::from(level).map_or_else(|| "unknown".to_string(), |visibility| visibility.to_string())
 }
 
-/// Writes rendered table text; plain output strips any escape the table
-/// emitted regardless of color depth.
+fn write_heading(out: &mut dyn Write, term: &Terminal, plain: bool, heading: &str) -> io::Result<()> {
+    let heading = Prose::new(format!("<b>{}</b>", literal(heading)))
+        .with_word_wrap(WordWrap::None);
+    write_rendered(out, &heading.render(term), plain)?;
+    writeln!(out)
+}
+
+/// Plain output strips escapes independently of detected color depth.
 fn write_rendered(out: &mut dyn Write, rendered: &str, plain: bool) -> io::Result<()> {
     let rendered = if plain {
         biscuit_terminal::prelude::strip_escape_codes(rendered.to_string())
@@ -255,7 +291,7 @@ mod tests {
 
     fn text(stats: &Stats) -> String {
         let mut out = Vec::new();
-        stats.write_json(&mut out, "/root", &[]).expect("write");
+        stats.write_json(&mut out, "/root", "/root", &[], &[]).expect("write");
         String::from_utf8(out).expect("utf-8")
     }
 
@@ -291,6 +327,36 @@ mod tests {
         assert!(raw.ends_with(",\"errors\":[]}\n"), "errors comes last: {raw}");
         assert!(raw.starts_with("{\"report_schema_version\":1,\"root_dir\":"), "{raw}");
         assert!(!raw.contains("schema_version\":{"), "no record schema version: {raw}");
+    }
+
+    #[test]
+    fn grouped_terminal_preserves_synthetic_and_unavailable_coverage() {
+        let mut stats = Stats::default();
+        let mut synthetic = record(tree_hugger::SymbolKind::Function, ProgrammingLanguage::Rust, Some(false));
+        synthetic.visibility.is_synthetic = true;
+        stats.add(&synthetic);
+        stats.add(&record(tree_hugger::SymbolKind::Function, ProgrammingLanguage::Bash, None));
+        let mut group_stats = Stats::default();
+        group_stats.add(&synthetic);
+        group_stats.add(&record(tree_hugger::SymbolKind::Function, ProgrammingLanguage::Bash, None));
+        let groups = [Group {
+            package: Some(PackageIdentity { name: "<b>name</b>".into(), path: "dir/<a href='evil'>path</a>\u{1b}\n".into() }),
+            stats: group_stats,
+        }, Group { package: None, stats: Stats::default() }];
+        let mut out = Vec::new();
+        stats.write_grouped_terminal(&mut out, &Terminal::new(), true, &groups).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains("<b>name</b> (dir/<a href='evil'>path</a>\\u{1b}\\u{a})"), "{text}");
+        assert_eq!(text.matches("Synthetic exports: 1").count(), 2);
+        assert_eq!(text.matches("Doc coverage: 0 of 0 documented (n/a); 1 unavailable").count(), 2);
+        assert_eq!(text.matches("Doc coverage: 0 of 0 documented (n/a); 0 unavailable").count(), 1);
+        assert!(!text.contains('\u{1b}'));
+        let mut out = Vec::new();
+        stats.write_json(&mut out, "/scan", "/catalog", &groups, &[]).unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&out).unwrap();
+        assert_eq!(value["groups"][0]["stats"], value["stats"]);
+        assert_eq!(value["groups"][0]["package"]["path"], groups[0].package.as_ref().unwrap().path);
+        assert!(value["groups"][0]["stats"]["doc_coverage"]["ratio"].is_null());
     }
 
     #[test]

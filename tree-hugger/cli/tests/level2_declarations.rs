@@ -73,15 +73,20 @@ struct Fixture {
 
 impl Fixture {
     fn new() -> Self {
+        let fixture = Self::empty();
+        copy_tree(
+            &biscuit_test_harness::manifest_dir!().join("tests/fixtures/declarations"),
+            fixture.repo.path(),
+        );
+        fixture
+    }
+
+    fn empty() -> Self {
         let fixture = Self {
             repo: TempDir::new().expect("scratch repo"),
             home: TempDir::new().expect("scratch home"),
             temp: TempDir::new().expect("scratch temp"),
         };
-        copy_tree(
-            &biscuit_test_harness::manifest_dir!().join("tests/fixtures/declarations"),
-            fixture.repo.path(),
-        );
         let status = std::process::Command::new("git")
             .args(["init", "-q"])
             .current_dir(fixture.repo.path())
@@ -625,10 +630,9 @@ fn check_outline<H: TerminalHarness>(harness: &mut H, pane: &Pane<H>) {
 
 }
 
-/// `--stats`: three bordered count tables (kind, visibility, language) and
-/// the doc-coverage line with its `unavailable` count, the same at the
-/// pane's width and at a width narrower than every table, where each table
-/// keeps its natural width rather than being replaced by a notice.
+/// `--stats` retains every overall and package section at narrow widths.
+/// Each section keeps its natural table width, counters and coverage;
+/// package headings are bold literal text, including untrusted manifest names.
 fn check_stats<H: TerminalHarness>(harness: &mut H, pane: &Pane<H>) {
     let fixture = Fixture::new();
     assert_pane_fits(harness, pane, 80);
@@ -666,9 +670,17 @@ fn check_stats<H: TerminalHarness>(harness: &mut H, pane: &Pane<H>) {
         "└────────────┴───────┘",
         "Doc coverage: 0 of 11 documented (0.0%); 1 unavailable",
     ];
+    let expected: Vec<&str> = ["All selected declarations"].into_iter()
+        .chain(expected.iter().copied())
+        .chain(["Unassigned"])
+        .chain(expected.iter().copied())
+        .collect();
     for env in ["", "COLUMNS=20"] {
         let report = run_hug(harness, pane, &fixture, env, "symbols --stats");
         assert_eq!(shown_rows(&report), expected, "`{env} hug symbols --stats`, report:\n{}", report.plain());
+        for heading in ["All selected declarations", "Unassigned"] {
+            assert_style(&report, heading, heading, &["1"], &["3"], "a bold stats heading");
+        }
         // A blank row separates each table from what follows it.
         let lines: Vec<&str> = report.lines().into_iter().map(str::trim_end).collect();
         for (index, line) in lines.iter().enumerate() {
@@ -676,6 +688,65 @@ fn check_stats<H: TerminalHarness>(harness: &mut H, pane: &Pane<H>) {
                 assert_eq!(lines.get(index + 1).copied(), Some(""), "a blank row after each table: {lines:?}");
             }
         }
+    }
+    check_package_stats(harness, pane);
+}
+
+fn check_package_stats<H: TerminalHarness>(harness: &mut H, pane: &Pane<H>) {
+    let fixture = Fixture::empty();
+    let name = "é <i>x</i> [x](z)\u{1b}[31m\u{7}\n";
+    let heading = "é <i>x</i> [x](z)\\u{1b}[31m\\u{7}\\u{a} (c)";
+    let files = [
+        ("Cargo.toml", "[workspace]\nmembers = [\"a\", \"b\", \"c\", \"d\"]\n".to_string()),
+        ("a/Cargo.toml", "[package]\nname = \"utils\"\nversion = \"0.1.0\"\n".to_string()),
+        ("b/Cargo.toml", "[package]\nname = \"utils\"\nversion = \"0.1.0\"\n".to_string()),
+        ("c/Cargo.toml", format!("[package]\nname = {}\nversion = \"0.1.0\"\n", serde_json::to_string(name).unwrap())),
+        ("d/Cargo.toml", "[package]\nname = \"unselected\"\nversion = \"0.1.0\"\n".to_string()),
+        ("a/src/lib.rs", "/// Documented.\npub fn first() {}\npub fn second() {}\n".to_string()),
+        ("b/src/lib.rs", "pub fn third() {}\n".to_string()),
+        ("c/src/lib.rs", "pub struct Empty;\n".to_string()),
+        ("d/src/lib.rs", "pub fn excluded() {}\n".to_string()),
+        ("loose.rs", "pub fn loose() {}\n".to_string()),
+    ];
+    for (path, contents) in files {
+        let path = fixture.repo.path().join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).expect("package directory");
+        std::fs::write(path, contents).expect("package stats fixture");
+    }
+    let sections = [
+        ("All selected declarations", 4, 1),
+        ("utils (a)", 2, 1),
+        ("utils (b)", 1, 0),
+        (heading, 0, 0),
+        ("Unassigned", 1, 0),
+    ];
+    let mut expected = Vec::new();
+    for (title, count, documented) in sections {
+        expected.push(title.to_string());
+        for (category, label) in [("Kind", "function"), ("Visibility", "public"), ("Language", "Rust")] {
+            let width = category.len().max(if count == 0 { 0 } else { label.len() });
+            let border = "─".repeat(width + 2);
+            expected.push(format!("┌{border}┬───────┐"));
+            expected.push(format!("│ {category:<width$} │ Count │"));
+            expected.push(format!("├{border}┼───────┤"));
+            if count > 0 {
+                expected.push(format!("│ {label:<width$} │ {count:>5} │"));
+            }
+            expected.push(format!("└{border}┴───────┘"));
+        }
+        let ratio = match count { 0 => "n/a", 2 => "50.0%", 4 => "25.0%", _ => "0.0%" };
+        expected.push(format!("Doc coverage: {documented} of {count} documented ({ratio}); 0 unavailable"));
+    }
+    for env in ["", "COLUMNS=20"] {
+        let report = run_hug(harness, pane, &fixture, env, "functions --stats --exclude-files 'd/**'");
+        assert_eq!(shown_rows(&report), expected, "`{env} hug functions --stats`, report:\n{}", report.plain());
+        for (title, _, _) in sections {
+            assert_style(&report, title, title, &["1"], &["3", "31"], "a literal bold package heading");
+        }
+        assert_style(&report, heading, "x</i>", &["1"], &["3", "31"], "markup remains literal without italic cells");
+        assert_style(&report, heading, "(c)", &["1"], &["3", "31"], "controls cannot change later heading cells");
+        let raw = &report.row(heading).raw;
+        assert!(!raw.contains("\u{1b}]8;") && !raw.contains('\u{7}'), "manifest controls must remain visible text: {raw:?}");
     }
 }
 

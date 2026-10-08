@@ -28,6 +28,7 @@ use crate::report::{
 use crate::scan::{Analyzed, Analyzer, CacheStats, CacheUse, chunk_size, flush_at_chunk_end, in_file_order};
 use crate::selection::Selection;
 use crate::stats::Stats;
+use crate::grouping::{Catalog, Group, Grouping};
 
 /// Kinds `functions` lists.
 pub(crate) const FUNCTION_KINDS: [SymbolKindV2; 3] = [
@@ -124,10 +125,10 @@ impl ReportFormat {
 pub(crate) struct DeclarationScan {
     pub(crate) command: Declarations,
     pub(crate) files: Vec<PathBuf>,
-    /// The resolved scan root: JSON `root_dir`, and the anchor of every JSON
-    /// path.
+    /// The resolved scan root: JSON `root_dir` and declaration-path anchor.
+    /// Stats package paths use the captured catalog root instead.
     pub(crate) scan_root: PathBuf,
-    /// Anchor of terminal paths and of package grouping.
+    /// Anchor of terminal declaration paths and listing package sections.
     pub(crate) git_root: PathBuf,
     /// The record selectors, `--exported` included.
     pub(crate) selection: Selection,
@@ -157,6 +158,14 @@ struct FileOutcome {
 /// failed or stdout could not be written. A closed stdout (broken pipe) ends
 /// the run quietly with `0`.
 pub(crate) fn run(scan: DeclarationScan, analyzer: &Analyzer) -> Result<i32, TreeHuggerError> {
+    let catalog = match Catalog::capture(scan.format, &scan.scan_root) {
+        Ok(catalog) => catalog,
+        Err(message) => {
+            let _ = writeln!(io::stderr(), "error: {message}");
+            return Ok(1);
+        }
+    };
+
     // The scan root prefixes each displayed qualified name after the cache
     // lookup; it never enters an entry or an ID.
     let query = match scan.format {
@@ -241,7 +250,7 @@ pub(crate) fn run(scan: DeclarationScan, analyzer: &Analyzer) -> Result<i32, Tre
     let written = match scan.format {
         ReportFormat::Json | ReportFormat::JsonFull => write_json(&scan, &files, work, &mut sink),
         ReportFormat::JsonLines => write_json_lines(&scan, &files, work, &mut sink),
-        ReportFormat::Count | ReportFormat::Stats(_) => write_tally(&scan, &files, work, &mut sink),
+        ReportFormat::Count | ReportFormat::Stats(_) => write_tally(&scan, &files, work, catalog.as_ref(), &mut sink),
         ReportFormat::Terminal { render, view } => {
             let renderer = Renderer::new(render, Some(scan.git_root.clone()));
             match view {
@@ -461,41 +470,64 @@ fn write_json_lines(
     sink.out.flush()
 }
 
-/// `--count` and `--stats`: aggregates the selected records (for `classes`,
-/// the selected containers) and writes the total or the stats once every
-/// file is analyzed. Only the counters are held.
-fn write_tally(
+struct Tally {
+    count: u64,
+    stats: Stats,
+    groups: Vec<Group>,
+}
+
+fn tally(
     scan: &DeclarationScan,
     files: &[PathBuf],
     work: impl Fn(&Path) -> FileOutcome + Sync,
+    catalog: Option<&Catalog>,
     sink: &mut Sink<'_>,
-) -> io::Result<()> {
+) -> Tally {
     let mut count: u64 = 0;
     let mut stats = Stats::default();
-    let _ = in_file_order::<_, ()>(files, work, |_, outcome| {
+    let mut grouping = catalog.map(Grouping::new);
+    let _ = in_file_order::<_, ()>(files, work, |file, outcome| {
+        let group = grouping.as_mut().map(|grouping| grouping.select_file(file));
         if let Some((_, prepared)) = sink.settle(outcome, scan.verbose) {
-            let records: Vec<&SymbolRecord> = match &prepared.classes {
-                Some(summaries) => summaries.iter().map(|summary| &summary.container).collect(),
-                None => prepared.result.index.symbols.iter().collect(),
-            };
-            count += records.len() as u64;
+            let records = prepared.classes.iter().flatten().map(|summary| &summary.container)
+                .chain(prepared.result.index.symbols.iter().filter(|_| prepared.classes.is_none()));
+            let mut group = group;
             for record in records {
+                count += 1;
                 stats.add(record);
+                if let Some(group) = group.as_deref_mut() {
+                    group.add(record);
+                }
             }
         }
         ControlFlow::Continue(())
     });
+    Tally { count, stats, groups: grouping.map_or_else(Vec::new, Grouping::finish) }
+}
+
+/// Aggregates selected records (containers for classes) with only counters
+/// retained. Native analysis paths attribute synthetic exports to their
+/// identity file, even when their source locations point to another package.
+fn write_tally(
+    scan: &DeclarationScan,
+    files: &[PathBuf],
+    work: impl Fn(&Path) -> FileOutcome + Sync,
+    catalog: Option<&Catalog>,
+    sink: &mut Sink<'_>,
+) -> io::Result<()> {
+    let tally = tally(scan, files, work, catalog, sink);
     match scan.format {
         ReportFormat::Stats(None) => {
             let root_dir = biscuit_file::to_portable_string(&scan.scan_root);
-            stats.write_json(&mut *sink.out, &root_dir, sink.errors)
+            let package_root_dir = biscuit_file::to_portable_string(&catalog.expect("stats captures a catalog").root);
+            tally.stats.write_json(&mut *sink.out, &root_dir, &package_root_dir, &tally.groups, sink.errors)
         }
         ReportFormat::Stats(Some(render)) => {
             let renderer = Renderer::new(render, None);
-            stats.write_terminal(&mut *sink.out, renderer.terminal(), !render.styled)
+            tally.stats.write_grouped_terminal(&mut *sink.out, renderer.terminal(), !render.styled, &tally.groups)
         }
         _ => {
-            writeln!(sink.out, "{count}")?;
+            writeln!(sink.out, "{}", tally.count)?;
             sink.out.flush()
         }
     }
@@ -738,3 +770,7 @@ fn prepare(
 fn in_prelude(prelude: Option<&PreludeFilter>, record: &SymbolRecord) -> bool {
     prelude.is_none_or(|filter| filter.names.contains(&record.identity.name))
 }
+
+#[cfg(test)]
+#[path = "declarations_grouping_tests.rs"]
+mod grouping_tests;
