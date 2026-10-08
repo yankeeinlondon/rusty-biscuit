@@ -135,3 +135,17 @@ fn json_full_combines_with_the_flag() {
         "the unchanged committed file is not selected"
     );
 }
+
+#[test]
+fn declaration_help_explains_changed_selection() {
+    let repo = Repo::unborn();
+    for command in ["functions", "types", "symbols", "classes"] {
+        let help = repo.stdout(&[command, "--help"]);
+        let words = help.split_whitespace().collect::<Vec<_>>().join(" ");
+        for phrase in ["--changed[=<REF>]", "--changed=main", "current on-disk", "directly to `HEAD`", "Cannot be combined with --prelude"] {
+            assert!(words.contains(phrase), "hug {command} --help lacks {phrase}: {help}");
+        }
+        let short = repo.stdout(&[command, "-h"]);
+        assert!(short.contains("--changed[=<REF>]"), "hug {command} -h: {short}");
+    }
+}

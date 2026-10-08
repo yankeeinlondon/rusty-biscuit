@@ -13,9 +13,12 @@
 mod cache;
 mod empty;
 mod failure;
+mod index_corruption;
 mod parser;
 mod paths;
+mod ownership;
 mod selection;
+mod type_changes;
 
 use std::path::Path;
 use std::process::Output;

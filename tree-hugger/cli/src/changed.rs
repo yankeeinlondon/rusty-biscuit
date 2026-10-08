@@ -47,7 +47,7 @@ impl fmt::Display for ChangedRequest {
 }
 
 /// The resolved changed-file set one run intersects its selection with:
-/// [`file_identity`] keys of the changed paths that still exist on disk.
+/// [`file_identity`] keys of present changed paths owned by the active checkout.
 #[derive(Debug, Clone)]
 pub(crate) struct ChangedFiles {
     identities: HashSet<PathBuf>,
@@ -73,7 +73,8 @@ impl ChangedFiles {
 ///
 /// A one-line message naming the repository or reference and the cause: no
 /// repository, a bare repository, an unresolved or non-commit reference,
-/// index conflicts anywhere in the repository, or a Git failure.
+/// index conflicts anywhere in the repository, a Git failure, or filesystem
+/// errors while verifying checkout ownership.
 pub(crate) fn resolve(request: &ChangedRequest, cwd: &Path) -> Result<ChangedFiles, String> {
     let repo = match GitRepo::discover(cwd) {
         Ok(Some(repo)) => repo,
@@ -94,13 +95,95 @@ pub(crate) fn resolve(request: &ChangedRequest, cwd: &Path) -> Result<ChangedFil
     let paths = repo
         .changed_paths(request.base())
         .map_err(|error| failure(&error, &root, request))?;
-    let identities = paths
-        .into_iter()
-        .map(|relative| root.join(relative))
-        .filter(|path| path.exists())
-        .map(|path| file_identity(&path))
-        .collect();
+    let identity_root = file_identity(&root);
+    let mut identities = HashSet::new();
+    for relative in paths {
+        let path = root.join(relative);
+        if !path.try_exists().map_err(|error| ownership_error(&path, error))? {
+            continue;
+        }
+        if checkout_owns_path(&path, &identity_root, 40)? {
+            identities.insert(file_identity(&path));
+        }
+    }
     Ok(ChangedFiles { identities })
+}
+
+/// Check each visited directory before `..` can remove it. Alias targets
+/// must obey the same traversal contract before their canonical identity is used.
+fn checkout_owns_path(path: &Path, root: &Path, hops: usize) -> Result<bool, String> {
+    Ok(checkout_path(path, root, hops)?.is_some())
+}
+
+fn checkout_path(path: &Path, root: &Path, hops: usize) -> Result<Option<PathBuf>, String> {
+    if hops == 0 {
+        return Ok(None);
+    }
+    let mut resolved = PathBuf::new();
+    let mut entered = false;
+    for component in path.components() {
+        if matches!(component, std::path::Component::Prefix(_)) {
+            resolved.push(component);
+            continue;
+        }
+        if component == std::path::Component::CurDir {
+            continue;
+        }
+        if component == std::path::Component::ParentDir {
+            if !entered || resolved == root {
+                return Ok(None);
+            }
+            resolved.pop();
+        } else {
+            resolved.push(component);
+            if !entered {
+                resolved = biscuit_file::canonicalize_simplified(&resolved)
+                    .map_err(|error| ownership_error(&resolved, error))?;
+                // Filesystem aliases above the checkout (macOS /var, Windows
+                // short names) are allowed only along the root's own ancestry.
+                if !root.starts_with(&resolved) {
+                    return Ok(None);
+                }
+                entered = resolved == root;
+                continue;
+            }
+            let metadata = std::fs::symlink_metadata(&resolved)
+                .map_err(|error| ownership_error(&resolved, error))?;
+            if metadata.file_type().is_symlink() {
+                let target = std::fs::read_link(&resolved)
+                    .map_err(|error| ownership_error(&resolved, error))?;
+                let target = if target.is_absolute() { target } else { resolved.parent().unwrap().join(target) };
+                let Some(target) = checkout_path(&target, root, hops - 1)? else {
+                    return Ok(None);
+                };
+                resolved = target;
+            } else {
+                resolved = biscuit_file::canonicalize_simplified(&resolved)
+                    .map_err(|error| ownership_error(&resolved, error))?;
+            }
+        }
+        if !resolved.starts_with(root) {
+            return Ok(None);
+        }
+        let metadata = std::fs::metadata(&resolved)
+            .map_err(|error| ownership_error(&resolved, error))?;
+        let directory = if metadata.is_dir() { resolved.as_path() } else { resolved.parent().unwrap() };
+        // Canonicalized reparse points may skip destination ancestors that
+        // were never components of the input spelling.
+        for ancestor in directory.ancestors().take_while(|ancestor| *ancestor != root) {
+            let marker = ancestor.join(".git");
+            match std::fs::symlink_metadata(&marker) {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(ownership_error(&marker, error)),
+                Ok(_) => return Ok(None),
+            }
+        }
+    }
+    Ok(entered.then_some(resolved))
+}
+
+fn ownership_error(path: &Path, error: std::io::Error) -> String {
+    format!("--changed could not verify checkout ownership of {}: {error}", path.display())
 }
 
 /// The exit-1 message for a failed changed-set resolution.
@@ -141,6 +224,15 @@ mod tests {
             ChangedRequest::Reference("HEAD".to_string()).base(),
             ChangedBase::Reference("HEAD".to_string())
         );
+    }
+
+    #[test]
+    fn ownership_inspection_failure_is_an_error_naming_the_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("unavailable.rs");
+        let error = checkout_owns_path(&missing, &file_identity(dir.path()), 40).unwrap_err();
+        assert!(error.contains("--changed could not verify checkout ownership"), "{error}");
+        assert!(error.contains("unavailable.rs"), "{error}");
     }
 
     #[test]
