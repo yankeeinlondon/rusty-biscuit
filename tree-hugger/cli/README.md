@@ -42,7 +42,7 @@ hug imports --json "tests/fixtures/**/*.js"
 - `--sort file|name|kind` - Order of the listed declarations (`functions`, `types`, `symbols` and `classes` only). `file` (the default) lists by file, then source position; `name` by the case-sensitive name; `kind` by kind (modules and types, then callables, then values). Ties fall back to file, position, kind and ID. Give it once; `lint` and `imports` reject it
 - `--jsonl` - One JSON object per selected declaration (JSON Lines); a `classes` line adds the container's `members` list
 - `--count` - Print only the number of selected declarations (`classes`: containers)
-- `--stats` - Counts by kind, visibility and language plus doc coverage, as tables; with `--json`, a stats envelope
+- `--stats` - Counts by kind, visibility and language plus doc coverage, with overall totals and automatic package sections; with `--json`, an additive stats envelope including `package_root_dir` and `groups`. Captures structure-only package metadata first; a discovery failure exits `1` before output. See [Symbol Reports](../docs/symbol-reports.md#--stats).
 - `--format plain|table` - The listing without styles, links or wrapping, or one table per file (Location, Kind, Visibility, Name, Signature)
 - `--signatures full|short|none` - The declaration header as written, the compact form (default; field lists past four end in `… +N`), or names only
 - `--tree` - Nest members under their container (`functions`, `types`, `symbols`); type rows end with their declared bases (`extends Base; implements Shape; unclassified bases External`)
@@ -81,6 +81,50 @@ redirected output never wrap. See `docs/symbol-reports.md`.
 The old `--sort-by-kind` and `--sort-by-module` flags are gone: `--sort kind`
 replaces the first, and the default `--sort file` (portable path, then source
 position) covers the second.
+
+## Package Stats
+
+```bash
+hug symbols --stats
+hug functions --stats --json
+hug classes --stats --format plain
+```
+
+Stats automatically shows **All selected declarations**, then package sections
+labeled `name (path)`, ordered by path and name, with **Unassigned** last.
+File and declaration selectors keep their usual meanings; `classes` counts
+containers. The deepest discovered package owns each selected file, but only
+a manifest-backed name identifies a named group. Unnamed owners and files
+outside the discovery root use Unassigned. Packages without selected files
+are absent; selected files with no matching declarations or failed analysis
+retain a zero group with undefined coverage (`n/a`, or JSON `null`).
+
+JSON keeps overall `stats` and adds `groups`, whose entries have the same stats
+shape and `package: {"name", "path"}`, or `package: null` for Unassigned.
+Summing the groups' category counts, coverage counts and synthetic-export
+counts reproduces the overall fields. Overall coverage uses the overall denominator, rather
+than averaging group ratios. Synthetic exports count under the exporting
+prelude's package and contribute to neither known nor unavailable doc coverage.
+
+`package.path` uses `/` separators relative to `package_root_dir`, with `.`
+for a root package. Discovery starts at the active Git worktree root, or the
+scan root outside Git; `root_dir` remains the scan root. For example, scanning
+`crates/utils` inside `/work/repo` keeps that scan root while reporting the
+group path `crates/utils` relative to `/work/repo`. The discovery-root field is
+present even for an empty successful `--changed` report with `groups: []`;
+ordinary empty scans still fail.
+
+Discovery failures exit `1` with repair guidance on stderr and no report.
+After discovery, file failures retain partial totals, appear once in the
+top-level `errors`, and exit `1`. No discovered packages is a successful
+Unassigned result. Manifest names display literally; `--format plain` emits
+no terminal escapes or hyperlinks. Listings, count, JSON Lines and full-index
+JSON do not acquire a package catalog for grouping.
+
+These additive fields retain `report_schema_version: 1` because existing
+fields keep their meanings. Terminal output intentionally gains headings and
+sections; see the [before/after release example](../docs/release-notes.md#automatic-package-sections-in-stats)
+and [full report contract](../docs/symbol-reports.md#--stats).
 
 ## Default Scan Exclusions
 
@@ -141,6 +185,47 @@ A member ends with `[in <kind> <name>]` naming its container, or
 a Rust `impl` block are grouped under the implemented type, so a method in
 `impl Point` or `impl Display for Point` prints `[in type Point]`, never
 `[in impl Point]`.
+
+### Changed files
+
+Use `--changed` on `functions`, `types`, `symbols`, or `classes` to report
+whole changed files' current on-disk declarations. Git-reported file-type
+replacements count too; an explicit `--file leaf.rs` can select a symlink to
+source in the same checkout, while default walks retain symlink exclusions:
+
+```bash
+hug functions --changed                 # staged, unstaged, nonignored untracked files
+hug symbols --changed=main              # also compare the local main tip directly to HEAD
+hug symbols --changed --file 'src/**'    # intersect with the normal file selection
+hug --json-full symbols --changed       # complete indexes of selected changed files
+hug functions --changed --count         # 0 when no eligible changed files remain
+```
+
+Bare `--changed` uses `HEAD` and selects uncommitted changes only. A reference
+requires `=`; `--changed main` leaves `main` as a positional filter. Reference
+comparison uses local commit tips, without fetching or finding a common
+ancestor. Staged content and historical source are never reported.
+
+Package scope, language rules, ignores, fixture exclusions, and file and
+name selectors still apply. Valid empty selections exit `0`: text shows
+`(no symbols)` (the `classes` terminal/plain outline emits no text), JSON
+Lines emits no lines, count prints `0`, stats have zero totals, and JSON has
+empty `files`/`indexes` with `errors: []`.
+
+Changed aliases must stay in the active checkout: targets in another checkout,
+nested repository, or submodule are excluded, even with an explicit alias or
+target selector. Directory and file aliases cannot cross those boundaries
+and return eligibility to an outer source file, including targets such as
+`inner/../clean.rs` when `inner` is a nested repository. Ordinary directory
+parents remain valid: `ordinary/../clean.rs` can select `clean.rs` when
+`ordinary` belongs to the active checkout. Parents after directory aliases
+follow the alias destination, matching filesystem resolution.
+
+Git failures and conflicts anywhere in the repository exit `1` before any
+report. A truncated index produces a repository/index error on stderr and empty
+stdout; an absent or valid empty index remains allowed. `--changed` conflicts with `--prelude` (exit `2`) and is unavailable
+on non-declaration commands. See [Changed files](../docs/symbol-reports.md#changed-files)
+for selection precedence, unborn repositories, and the selection flow.
 
 ### JSON Output
 

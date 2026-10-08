@@ -2,6 +2,14 @@
 
 ## Recent Dependency Notes
 
+- `tree-hugger-cli` adds a local `sniff` edge with `default-features = false`
+  for path-only Git changed-file selection. It requests no `network`,
+  `remote`, or `metrics` feature and reuses sniff's pinned gix backend without
+  adding gix features. CLI fixtures add dev-only `git2` 0.20.3 (default
+  features off), with `libgit2-sys >=0.18.3, <0.18.6` matching sniff's MSVC
+  pin. See [tree-hugger dependencies](../tree-hugger/docs/dependencies.md)
+  and [sniff dependencies](../sniff/docs/dependencies.md).
+
 - `tree-hugger` adds a direct `unicode-normalization = "0.1"` edge for Rust
   identifier NFC comparison. It was already present in the workspace graph;
   this adds no new package. JS/TS identity decodes Unicode escapes without

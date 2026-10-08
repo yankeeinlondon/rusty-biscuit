@@ -23,6 +23,90 @@ Global flags (`--json`, `--json-full`, `--plain`, `--verbose`) come before
 the command; command flags (`--sort`, `--no-cache`, `--group-by-file`, …)
 come after it.
 
+## Changed files
+
+Use `--changed` on `functions`, `types`, `symbols`, or `classes` to report
+whole files with Git changes, using their **current on-disk declarations**.
+Git-reported file-type replacements count too: replacing `leaf.rs` with a
+symlink to another source in the same checkout still selects it with
+`--file leaf.rs`. Default directory scans retain their symlink exclusion.
+
+```bash
+hug functions --changed                 # staged, unstaged, and nonignored untracked files
+hug symbols --changed=main              # also include differences from the local main tip
+hug symbols --changed --file 'src/**'    # intersect with the normal file selection
+hug --json-full symbols --changed       # complete indexes for selected changed files
+hug functions --changed --count         # 0 when no eligible changed files remain
+```
+
+Bare `--changed` uses `HEAD`: it selects only uncommitted changes. With
+`--changed=main`, Git compares the local `main` commit directly to `HEAD`,
+then adds uncommitted changes. It does not fetch or compare a common
+ancestor; changes on a divergent `main` branch can select files too. Commit
+IDs and tags naming commits also work. Always use `=` for a reference:
+`--changed main` leaves `main` as a positional filter. Empty reference
+values and repeated flags are argument errors.
+
+The changed set intersects the ordinary scan. Running inside a package
+keeps that package's scan scope; positional file selectors and `--file`
+remain alternatives, then `--changed` narrows their combined result.
+`--exclude-files` still wins, and name and declaration selectors apply
+later. Existing language, ignore, and fixture rules remain in effect.
+An explicitly selected changed file outside the package can survive if it
+belongs to the same repository. Ignored untracked files never survive,
+even when explicitly named; tracked ignored files can use normal explicit
+overrides. Linked worktrees use their own checkout and index. Submodule
+contents and independent nested repositories are not scanned recursively
+for changes.
+
+Changed aliases must stay in the active checkout: targets in another checkout,
+nested repository, or submodule are excluded, even with an explicit alias or
+target selector. Directory and file aliases cannot cross those boundaries
+and return eligibility to an outer source file, including targets such as
+`inner/../clean.rs` when `inner` is a nested repository. Ordinary directory
+parents remain valid: `ordinary/../clean.rs` can select `clean.rs` when
+`ordinary` belongs to the active checkout. Parents after directory aliases
+follow the alias destination, matching filesystem resolution.
+
+A file is reported once even if it is both staged and unstaged. Staging an
+edit and undoing it on disk still selects the file, but reports the restored
+content. Deleted paths are skipped unless recreated on disk; renames select
+eligible destinations. Source is never read from a historical commit or the
+index. Selection happens before source analysis and per-file cache lookups;
+the flag and reference do not change cache keys.
+
+A valid request with no eligible files exits `0`: text listings, tables,
+and declaration outlines show `(no symbols)` with no declaration records;
+`classes` terminal/plain outlines emit no text. JSON Lines emits no lines. `--count` prints `0` followed by a newline. Stats have zero
+totals and doc coverage `n/a` (`ratio: null` in JSON); JSON has empty
+`files` (or `indexes` for `--json-full`) and `errors: []`. Without `--changed`, a scan with no source
+files keeps its normal error behavior.
+
+`--changed` cannot be combined with `--prelude` (exit `2`), because prelude
+exports can refer to declarations in other files. The flag is unavailable
+on `imports`, `lint`, `god-files`, and `completions`. Missing or bare
+repositories, unresolved or non-commit references, corrupt Git data, and
+index conflicts anywhere in the repository exit `1` before printing a
+report. A truncated index is one such failure: stderr names the repository and
+index-read cause, stdout stays empty, and no source analysis or symbol-cache lookup
+runs. An absent index or a valid empty index is allowed. An unborn repository
+(no first commit) accepts bare `--changed`;
+explicit `--changed=HEAD` must resolve and therefore fails there. A valid
+explicit base on unborn `HEAD` compares against the empty current commit
+tree. Per-file failures after selection retain the normal partial report
+and exit status. Concurrent edits are not an atomic snapshot.
+
+```mermaid
+flowchart TD
+    G[Validate repository and local reference] --> C[Union: base tip vs HEAD, staged, unstaged, nonignored untracked]
+    G --> E[Git failure: stderr and exit 1]
+    C --> I[Intersect with ordinary file selection]
+    S[Package scope, file selectors, language and exclusions] --> I
+    I --> A[Analyze current on-disk contents and reuse cache]
+    A --> F[Apply declaration selectors and render]
+    I --> Z[No eligible files: empty report and exit 0]
+```
+
 ## The four commands and what they analyze
 
 Each command asks the library for a fixed set of kinds (narrowed by
@@ -642,7 +726,47 @@ Counts of the selected declarations by kind, by visibility and by language,
 and their doc coverage. Every filter applies first. `classes --stats` counts
 selected containers only.
 
+Stats first captures a structure-only package catalog from the active Git
+worktree root, or the scan root outside Git. It does not request an inventory,
+lockfiles, or network data. A discovery error fails with exit `1`, repair
+guidance on stderr, and empty stdout. For example, an unclosed `members = [`
+in the root Cargo manifest prevents a stats report; ordinary listings and
+`--count` still analyze explicitly selected source files without that catalog.
+A directory with no discovered packages remains a successful stats input.
+
+Stats automatically prints **All selected declarations**, followed by one
+section per selected package labeled `name (path)`. Named groups sort by
+portable package path, then name; **Unassigned** comes last. Each section uses
+the same tables, coverage line, and conditional synthetic-export count.
+Names and paths display literally, including markup; control characters are
+shown as Unicode escapes. `--format plain` emits no terminal escapes or links.
+
+A selected file uses its deepest package boundary and only a manifest-backed
+name; unnamed owners and files outside the catalog belong to Unassigned.
+Selected files with zero matches or failed analysis retain a zero group with
+`n/a` coverage. Packages without selected files are absent. An empty successful
+`--changed` selection emits overall zeros and no groups; ordinary empty scans
+retain their existing error. File failures appear once in the top-level errors
+and cause exit `1`, alongside the partial counters. Synthetic exports belong
+to the prelude file even when their displayed declaration location points
+elsewhere. Overall coverage is computed from overall counts, never averaged
+from group ratios.
+
+```mermaid
+flowchart LR
+    File[Selected native file path] --> Owner[Deepest catalog owner]
+    Owner --> Name{Manifest-backed name?}
+    Name -->|Yes| Package[Initialize named group, even if empty]
+    Name -->|No or no owner| Unassigned[Initialize Unassigned, even if empty]
+    File --> Analysis[Analyze and filter declarations]
+    Analysis --> Records[Selected declarations]
+    Records --> Group[Add to the file's group counters]
+    Records --> Overall[Add to overall counters]
+```
+
 ```text
+All selected declarations
+
 ┌──────────┬───────┐
 │ Kind     │ Count │
 ├──────────┼───────┤
@@ -651,10 +775,16 @@ selected containers only.
 └──────────┴───────┘
 …
 Doc coverage: 4 of 78 documented (5.1%); 15 unavailable
+
+utils (crates/utils)
+…
+Doc coverage: 1 of 3 documented (33.3%); 0 unavailable
 ```
 
 A terminal narrower than a table gets that table at its natural width,
 which the terminal then wraps; the tables are never replaced by a notice.
+The [release notes](./release-notes.md#automatic-package-sections-in-stats)
+show the terminal output before and after automatic grouping.
 
 **Doc coverage** counts `documented` declarations (`metrics.has_docs` true)
 over `total` (declarations whose `has_docs` is known). Lua, Perl, Bash and
@@ -904,18 +1034,33 @@ piped line is usable without the rest of the output:
 ### Stats JSON (`--stats --json`)
 
 ```json
-{"report_schema_version":1,"root_dir":"/work/repo",
- "stats":{"by_kind":{"Function":3,"Method":2},"by_visibility":{"Public":5},"by_language":{"Rust":5},
-          "doc_coverage":{"documented":2,"total":4,"unavailable":1,"ratio":0.5},
+{"report_schema_version":1,"root_dir":"/work/repo/crates/utils",
+ "package_root_dir":"/work/repo",
+ "stats":{"by_kind":{"Function":1},"by_visibility":{"Public":1},"by_language":{"Rust":1},
+          "doc_coverage":{"documented":0,"total":1,"unavailable":0,"ratio":0.0},
           "synthetic_exports":0},
+ "groups":[{"package":{"name":"utils","path":"crates/utils"},
+            "stats":{"by_kind":{"Function":1},"by_visibility":{"Public":1},"by_language":{"Rust":1},
+                     "doc_coverage":{"documented":0,"total":1,"unavailable":0,"ratio":0.0},
+                     "synthetic_exports":0}}],
  "errors":[]}
 ```
 
+`stats` retains the overall totals. Each entry in `groups` has the identical
+stats shape and `package: {"name", "path"}`, or `package: null` for Unassigned.
+A real package named `Unassigned` therefore remains distinct. Group paths are
+relative to the portable absolute `package_root_dir`, use `/` separators, and
+are `.` for a root package. That frame is the active worktree root in Git and
+the scan root otherwise; `root_dir` keeps its normal scan frame, so the two
+can differ when invoked inside a package. `package_root_dir` is present even
+for an empty `groups: []` report or an Unassigned-only report.
+
 Keys are spelled as records spell kinds, visibility levels and languages.
 There is no record `schema_version`, since the envelope holds no record.
-`ratio` is `null` when `total` is 0. `root_dir` and `errors` follow the
-`--json` rules: `errors` is always present and last, and a non-empty one
-means exit status `1`.
+`ratio` is `null` when `total` is 0. `errors` is always present and last, and
+a non-empty one means exit status `1`; the envelope ends with a newline.
+Additive report fields retain `report_schema_version: 1` when existing fields
+keep their meanings. The symbol-record schema has its own version policy.
 
 ### `--json-full`
 

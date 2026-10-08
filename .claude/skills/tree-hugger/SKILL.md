@@ -50,6 +50,96 @@ Rust, TypeScript, JavaScript, Go, Python, Java, C#, C, C++, Swift, Scala, PHP, P
 | `<declaration cmd>` selectors | `--file`/`--name`/`--exact`, `--kind`, `--scope`/`--all-scopes`, `--visibility`, `--exported`, `--in`, `--exclude-tests`/`--tests-only`, `--undocumented`, `--deprecated`, `--async`, `--returns`, `--param-type`, `--min-params` (AND across selectors, OR within one; smart-case names) |
 | positional directory (`src/`) or `--file <dir>` | selects no files (`NoSourceFiles`): inputs are `ignore` override globs and a directory pattern does not whitelist its files; use `'src/**'` |
 
+### Changed-file declaration selection
+
+```bash
+hug functions --changed
+hug symbols --changed=main
+hug symbols --changed --file 'src/**'
+hug --json-full symbols --changed
+```
+
+Bare `--changed` uses HEAD for uncommitted-only selection; `=main` adds
+local main-tip vs HEAD-tip differences, never merge-base or fetch. It
+reports whole files' current on-disk content, even when staging and working
+edits cancel. Git-reported regular-file/symlink replacements also select the
+current file; default walks still exclude symlinks, while explicit selectors
+retain their normal symlink resolution. Keep `ChangedRequest::Omitted` distinct from explicit HEAD:
+only omission tolerates unborn HEAD without resolving a base.
+
+`cli/src/changed.rs` discovers from the invocation directory through sniff,
+uses the active worktree root, drops absent candidates, and matches native
+`file_identity` values. `main.rs` validates Git before ordinary file
+selection, intersects before analysis/cache lookup, and treats only
+`NoSourceFiles` as empty under this flag. Never feed Git paths into explicit
+selectors: package scope, ignores, fixtures, forced language and exclusions
+must retain their ordinary behavior. Explicit files outside a package must
+still belong to the active checkout; guard each changed candidate alias hop and
+resolved ancestor against external roots and nested `.git` files/directories
+before inserting its canonical identity. Inspect traversal components before
+`..` cancels visited directories; resolve aliases before applying subsequent
+parents. Ordinary same-checkout parents remain eligible, while an alias through
+`inner/../clean.rs` cannot hide a nested marker. Do not discover a second repository
+or scan submodules; ownership I/O failures are errors, not empty reports.
+
+Empty selections succeed in every format (text `(no symbols)`, classes
+terminal/plain outlines empty; no JSON Lines; count 0; empty files/indexes and errors in JSON). Invalid Git state and conflicts anywhere fail before any
+report, with exit 1. Truncated indexes produce repository/index context and empty
+stdout before source/cache analysis; absent and valid empty indexes remain allowed.
+`changed::index_corruption` checks every prefix on main and linked administrative
+indexes across commands, base variants, and report modes. Syntax errors and `--prelude` conflicts exit 2.
+Changed flags/references never enter cache keys. The L1 tests in the
+`changed` target (`tests/changed/main.rs` declares each module) cover CLI
+selection, errors, empty output, public help and repeated warm cache hits;
+use `just test --test changed`. User-facing details and the flow diagram
+live in [Symbol Reports](../../../tree-hugger/docs/symbol-reports.md#changed-files).
+
+### Package identity for reports
+
+For package reporting, sniff exposes `detect_repo_structure_or_root_package`,
+`PackageNameSource`, and `PackageOwnershipLookup`. Capture one structure catalog
+and borrowing lookup; check the deepest owner's `name_source == Manifest`
+before treating its display name as declared identity. Root `relative` is empty
+(render it as `.`). Use `GitRepo::discover(...).repo_root()` for the active
+worktree root, with the scan root outside Git.
+
+`cli/src/grouping.rs::Catalog::capture` runs only for `ReportFormat::Stats`,
+before prelude/source analysis and any output. Errors exit 1 with catalog/root
+context and repair guidance; absence succeeds. `declarations::tally` creates a
+group from each selected native analysis path before settling its result, then
+adds selected records to both overall and group counters (classes: containers).
+Synthetic export ownership uses the prelude analysis path, never the target
+`source.file_path`. `Grouping::finish` sorts by portable relative path then name,
+Unassigned last; groups use native directory keys and stay outside cache entries.
+`stats::write_json` emits `package_root_dir` before overall `stats`, then
+`groups` before final `errors` at report version 1. One `as_json` projection
+keeps overall/group shapes identical; a null package is Unassigned. Terminal
+`write_grouped_terminal` prints All selected declarations then sorted
+`name (path)` sections and Unassigned, reusing the existing tables. Headings
+use `render::literal` with Prose and no wrapping; plain strips escapes.
+The discovery path frame is independent of scan `root_dir`, and empty reports
+still include it. Output goldens intentionally include the new sections and
+fields; their JSON normalizer redacts both absolute roots. Targeted L1 coverage: `just test grouping
+--test-threads 4`, including bin unit tests and `symbols::grouping_core`.
+`symbols::grouping_acceptance` exercises normal CLI membership (Cargo/npm),
+shipped lib/CLI manifests, linked-worktree roots, external explicit files,
+filters, partial failures, cross-package prelude exports, and warm manifest
+renames with unchanged cache bytes and zero parse work. Its shared assertion
+checks all grouped counters and ratios against overall stats. Alias cases use
+forced-language positional explicit files; outside-root cases use `--file`.
+Native Windows spelling coverage is cfg(windows); filesystem non-UTF-8
+coverage is cfg(target_os = "linux") because APFS rejects those filenames.
+These remain L1 in the declared symbols target, not terminal tests.
+
+User-facing package stats guidance lives in the
+[CLI README](../../../tree-hugger/cli/README.md#package-stats) and
+[Symbol Reports](../../../tree-hugger/docs/symbol-reports.md#--stats).
+The topic's flow distinguishes file-level group initialization (including
+failed/zero-match files) from declaration-level counting. The
+[release notes](../../../tree-hugger/docs/release-notes.md#automatic-package-sections-in-stats)
+show the intentional before/after terminal change; additive envelope fields
+retain report version 1 independently of symbol-record schema versions.
+
 ### Library API (`TreeFile`)
 
 ```rust
