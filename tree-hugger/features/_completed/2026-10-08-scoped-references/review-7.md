@@ -15,12 +15,13 @@ reviewed_by: codex/gpt-6.1-sol
 recurrence: true
 created: 2026-10-06T22:54:38-07:00
 spec: 2026-10-08-scoped-references/spec.md
-implemented: false
-implemented_by: claude/opus
-log: tree-hugger/features/2026-10-08-scoped-references/log.md
+implemented: true
+implemented_by: codex/gpt-6.1-sol
+log: tree-hugger/features/2026-10-08-scoped-references/implementation-log.md
 description: "A **feature** review of `2026-10-08-scoped-references/spec.md`"
 feature: 2026-10-08-scoped-references/review-7.md
 previous: 2026-10-08-scoped-references/review-6.md
+next: 2026-10-08-scoped-references/review-8.md
 ---
 
 # Scoped References: review 7
