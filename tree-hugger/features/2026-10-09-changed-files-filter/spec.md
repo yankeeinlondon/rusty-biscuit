@@ -33,6 +33,22 @@ reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-05
 review_iterations: 0
+human_review: false
+message_to_agent: |-
+  Phase 4 CLI verification is complete: tests/changed/main.rs declares six
+  modules containing 47 hermetic L1 CLI tests. Fixture commits use git2;
+  binary launching uses biscuit_test_harness::bin_exe!("hug") for archive
+  relocation. Added coverage includes tag/commit bases, explicit bases on
+  unborn HEAD, submodules, foreign explicit paths, tracked ignored files,
+  combined file/name selectors, blob errors, empty zero-work assertions,
+  and repeated warm cache reads with full-record equality.
+  Phase 5 owns README/topic/dependency docs and fuller skill guidance.
+  No production changes or spec departures in Phase 4. The working tree
+  includes pre-existing staged changes; preserve them. Cross-check was not
+  used because it stages/commits a temporary snapshot and this session
+  explicitly forbids staging/committing. macOS is local Phase 4 evidence;
+  Linux/Windows/WSL use the existing CI schedule. Non-UTF-8 worktree paths
+  cannot be created on macOS (EILSEQ); Linux/WSL exercise that test.
 ---
 
 # Spec: `--changed` File Selection for Symbol Reports

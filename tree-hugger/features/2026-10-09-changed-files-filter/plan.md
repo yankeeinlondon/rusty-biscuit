@@ -4,9 +4,50 @@ feature: changed-files-filter
 spec: spec.md
 total_phases: 5
 created: 2026-10-05
-phase: 1
+phase: 4
 agent: claude/sonnet
 yolo: true
+packages: [sniff, tree-hugger-cli]
+source_files_during_phase_1: []
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - sniff/lib/src/error.rs
+  - sniff/lib/src/filesystem/mod.rs
+  - sniff/lib/src/filesystem/git/mod.rs
+  - sniff/lib/src/filesystem/git/status.rs
+  - sniff/lib/src/filesystem/git/discovery.rs
+  - sniff/lib/src/filesystem/git/types.rs
+  - sniff/lib/src/filesystem/git/changed_paths_tests.rs
+docs_updated_during_phase_2:
+  - sniff/docs/sniff-library-architecture.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+  - .opencode/skill/sniff/SKILL.md
+  - .opencode/skill/os/macos.md
+source_files_during_phase_3:
+  - tree-hugger/cli/src/changed.rs
+  - tree-hugger/cli/src/main.rs
+  - tree-hugger/cli/Cargo.toml
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+  - .opencode/skill/tree-hugger/SKILL.md
+source_files_during_phase_4:
+  - tree-hugger/cli/tests/changed/main.rs
+  - tree-hugger/cli/tests/changed/parser.rs
+  - tree-hugger/cli/tests/changed/selection.rs
+  - tree-hugger/cli/tests/changed/failure.rs
+  - tree-hugger/cli/tests/changed/empty.rs
+  - tree-hugger/cli/tests/changed/cache.rs
+  - tree-hugger/cli/tests/changed/paths.rs
+docs_updated_during_phase_4:
+  - tree-hugger/features/2026-10-09-changed-files-filter/plan.md
+  - tree-hugger/features/2026-10-09-changed-files-filter/implementation-log.md
+  - tree-hugger/features/2026-10-09-changed-files-filter/spec.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
 ---
 
 # Plan: `--changed` File Selection for Symbol Reports
@@ -81,42 +122,42 @@ the already-enabled `blob-diff`/`revision` features rather than as a spike.
 These need an author ruling (a recommendation is given for each; the plan
 proceeds on the recommendation unless told otherwise).
 
-- [ ] **R1 — `--prelude` combination.** The spec's Open Question. Recommended:
+- [x] **R1 — `--prelude` combination.** The spec's Open Question. Recommended:
   reject `--changed` with `--prelude` as an argument error (exit 2) before Git
   inspection, using clap `conflicts_with` like `--prelude`'s existing
   conflicts. Document in help and `symbol-reports.md`.
-- [ ] **R2 — Where the empty-success exception lives.** Recommended: when
+- [x] **R2 — Where the empty-success exception lives.** Recommended: when
   `--changed` is set and `collect_selected_files` returns `NoSourceFiles`,
   treat it as an empty selection; also treat an empty intersection the same
   way. Any other scanner error propagates. Commands without `--changed` are
   untouched.
-- [ ] **R3 — Ordering of validation.** Recommended: clap syntax → R1 conflict →
+- [x] **R3 — Ordering of validation.** Recommended: clap syntax → R1 conflict →
   Git discovery/reference/conflict/diff failure (exit 1) → file selection →
   intersection → report. Git work runs before any file is read or reported.
-- [ ] **R4 — Dependency features.** Recommended: sniff added to
+- [x] **R4 — Dependency features.** Recommended: sniff added to
   `tree-hugger-cli` with `default-features = false` (no `network`/`remote`/
   `metrics`); confirm sniff compiles that way, otherwise extract the minimal
   feature set and note it in `docs/dependencies.md`.
-- [ ] **R5 — Reference type in the sniff API.** Recommended: a small enum such
+- [x] **R5 — Reference type in the sniff API.** Recommended: a small enum such
   as `ChangedBase { Omitted, Reference(String) }` so the unborn exception is
   type-enforced; `Reference` resolves to a commit (peeling tags) or errors.
   Final names follow sniff's style.
-- [ ] **R6 — Wider measurement.** The spec asks for no timing. Any wall-clock
+- [x] **R6 — Wider measurement.** The spec asks for no timing. Any wall-clock
   benchmark on large repositories is out of scope; the author may request one
   separately.
 
 ### Tasks
 
-- [ ] **Confirm rulings** — record the author's answers to R1–R6 (or the
+- [x] **Confirm rulings** — record the author's answers to R1–R6 (or the
   recommended defaults) at the top of an `implementation-log.md` in this
   feature directory.
-- [ ] **Baseline green** — run `just test` and `just lint` in `tree-hugger` and
+- [x] **Baseline green** — run `just test` and `just lint` in `tree-hugger` and
   `sniff`; note pre-existing failures so they are not attributed to this work
   (the worktree already has uncommitted symbol-feature changes).
-- [ ] **Load skills** — read the `os`, `rust-testing`, `sniff`, `tree-hugger`
+- [x] **Load skills** — read the `os`, `rust-testing`, `sniff`, `tree-hugger`
   and `biscuit-file` skills and `docs/cicd/test-inputs.md`; the new tests
   read no repository files, so no source-inputs declaration is expected.
-- [ ] **Shape the API** — write the signature, error enum variants (not a
+- [x] **Shape the API** — write the signature, error enum variants (not a
   repository, bare, unresolved ref, non-commit ref, conflicts, git failure)
   and result type in the log. This is the contract Wave 1 of Phase 2 and
   Phase 3 both build on.
@@ -127,7 +168,7 @@ proceeds on the recommendation unless told otherwise).
 
 ### Wave 1 (single owner: `sniff/lib/src/filesystem/git/`)
 
-- [ ] **Status path collection** — in `status.rs`, add a path-only
+- [x] **Status path collection** — in `status.rs`, add a path-only
   classification over one `gix` status walk (rename tracking off, so renames
   are delete+add) yielding staged, unstaged and untracked native `PathBuf`s,
   plus index conflict paths from the same observation. Share classification
@@ -135,7 +176,7 @@ proceeds on the recommendation unless told otherwise).
   `repo_status()`, rename conventions or bare behavior. Ignored untracked
   files are excluded. Submodule entries are not descended into.
   - Pre-req: no line stats or blob loads on this path.
-- [ ] **Tree comparison** — resolve the base locally (no fetch) to a commit,
+- [x] **Tree comparison** — resolve the base locally (no fetch) to a commit,
   peeling annotated tags; reject trees/blobs. Diff base tip vs `HEAD` tips
   directly (not merge-base), once, only when the base differs from `HEAD`.
   Include content, mode and type changes; no rename similarity.
@@ -144,7 +185,7 @@ proceeds on the recommendation unless told otherwise).
     explicit `HEAD` on unborn must fail; detached `HEAD` is valid.
   - Check that the already enabled `revision`/`blob-diff` features expose tree
     diff; add the minimal gix feature only if not.
-- [ ] **Public method** — on `GitRepo`, add the fallible method (R5 types)
+- [x] **Public method** — on `GitRepo`, add the fallible method (R5 types)
   returning a deduplicated, deterministically ordered set of native
   repository-relative paths. Reject bare repos explicitly (unlike older
   APIs), return conflicts as an error naming the paths, and wrap gix failures
@@ -153,7 +194,7 @@ proceeds on the recommendation unless told otherwise).
 
 ### Wave 2 (parallel; disjoint files)
 
-- [ ] **sniff L1 tests** — temp repos with explicit branch names and fixture
+- [x] **sniff L1 tests** — temp repos with explicit branch names and fixture
   identity, commits via library APIs (gix writes; git2 dev-dep only where gix
   lacks a write API), no dependence on signing. Cover: staged, unstaged, both,
   untracked, ignored-untracked excluded; staged edit undone on disk; committed
@@ -163,10 +204,10 @@ proceeds on the recommendation unless told otherwise).
   explicit base with unborn `HEAD`; detached `HEAD`; conflicts anywhere; bare
   and non-repo rejection; submodule/nested repo not descended; non-ASCII,
   spaces and (unix-only, `#[cfg]`) non-UTF-8 names.
-- [ ] **Work assertion** — extend the existing status-walk probe/counters to
+- [x] **Work assertion** — extend the existing status-walk probe/counters to
   prove one status observation per request and zero line-stat, patch, network,
   or inventory work.
-- [ ] **sniff docs** — Git API docs and the sniff skill: the new method, local
+- [x] **sniff docs** — Git API docs and the sniff skill: the new method, local
   only cost, error behavior, comparison semantics (tip vs tip, union, unborn).
 
 **Checkpoint:** `just test` and `just lint` pass in `sniff`; method usable
@@ -176,7 +217,7 @@ without the CLI.
 
 ### Wave 1 (single owner: clap surface in `cli/src/main.rs`)
 
-- [ ] **Flag definition** — add `--changed[=<ref>]` to the declaration args
+- [x] **Flag definition** — add `--changed[=<ref>]` to the declaration args
   shared by `functions`, `types`, `symbols` and `classes` only (not
   `ScanOptions`, so `imports`/`lint`/`god-files`/`completions` reject it).
   Use optional value with `require_equals`, `default_missing_value`
@@ -185,27 +226,27 @@ without the CLI.
   rejection. Confirm `--changed main` leaves `main` positional. Allow with
   `--json-full`; `conflicts_with = "prelude"` per R1. Surface it in
   `given_flags`/help consistent with neighbors.
-- [ ] **Dependency** — add sniff to `tree-hugger/cli/Cargo.toml` per R4.
+- [x] **Dependency** — add sniff to `tree-hugger/cli/Cargo.toml` per R4.
 
 ### Wave 2 (sequential; shared run path)
 
-- [ ] **Changed-set resolution** — new focused module (e.g.
+- [x] **Changed-set resolution** — new focused module (e.g.
   `cli/src/changed.rs`): discover the repo from the invocation's cwd (active
   checkout, linked-worktree safe), call the sniff method, map native
   relative paths onto the checkout root, drop absent paths before
   canonicalization, and key the set by `file_identity`. Any failure maps to
   an exit-1 message naming repository/reference and cause; no report printed.
   Runs before file selection (R3).
-- [ ] **Intersection** — after `collect_selected_files`, keep only files whose
+- [x] **Intersection** — after `collect_selected_files`, keep only files whose
   `file_identity` is in the changed set; dedupe; preserve scanner order. Git
   paths are candidates only: never fed into `explicit_files`, so fixtures and
   ignored files are not re-included. Files outside the discovered repository
   are dropped without a second discovery. Explicit files outside the package
   scan root but inside the repo remain eligible.
-- [ ] **Empty success** — per R2, short-circuit to the existing empty report
+- [x] **Empty success** — per R2, short-circuit to the existing empty report
   for the active format: nothing analyzed, no cache lookups, existing
   envelope/`--count`/stats/trailing-newline conventions, `errors: []`.
-- [ ] **Cache key audit** — confirm `--changed` and the reference do not enter
+- [x] **Cache key audit** — confirm `--changed` and the reference do not enter
   the symbol-cache key (no code change expected; fail the plan if one is
   needed).
 
@@ -216,25 +257,25 @@ runs byte-identical (golden fixtures unchanged).
 
 ### Wave 1 (parallel; disjoint test modules under `cli/tests/`)
 
-- [ ] **Parser tests** — optional value, equals form, `--changed main`
+- [x] **Parser tests** — optional value, equals form, `--changed main`
   positional, empty value, repeated flag (exit 2), conflict with `--prelude`,
   rejection on `imports`/`lint`/`god-files`/`completions`, `--json-full` allowed.
-- [ ] **Selection tests** — acceptance-table rows for staged/unstaged/both/
+- [x] **Selection tests** — acceptance-table rows for staged/unstaged/both/
   untracked, restored-on-disk, ignored untracked (incl. explicit selector),
   default fixtures vs explicitly targeted, rename/delete/recreate, supplied
   branch tip, positional/`--file`/`--exclude-files`/`--language` intersection
   including forced-language extensionless file, package invocation, linked
   worktree, outside-package explicit file, submodule/nested repo.
-- [ ] **Failure tests** — missing repo, bare repo, bad/non-commit ref,
+- [x] **Failure tests** — missing repo, bare repo, bad/non-commit ref,
   conflicts outside the package, corrupt Git data: exit 1, stderr names the
   cause, stdout empty (no success JSON).
-- [ ] **Empty-selection tests** — every report mode (terminal, plain, table,
+- [x] **Empty-selection tests** — every report mode (terminal, plain, table,
   outline, JSON, JSON Lines, full JSON, `--count`, stats) with deleted-only,
   excluded, unsupported and out-of-selection changes exits 0 with the
   existing empty representation.
-- [ ] **Cache test** — cold scan then `--changed` scan reads the same file from
+- [x] **Cache test** — cold scan then `--changed` scan reads the same file from
   cache (use existing cache-use stats); also the reverse order.
-- [ ] **Path tests** — spaces, non-ASCII, and unix non-UTF-8 names;
+- [x] **Path tests** — spaces, non-ASCII, and unix non-UTF-8 names;
   case-insensitive filesystem spelling difference (host-gated).
 - Tests use `assert_cmd` with the L1 fixtures; no real terminal windows. If an
   L2 harness test is touched, windows must not gain focus.
@@ -244,7 +285,7 @@ runs byte-identical (golden fixtures unchanged).
 - [ ] **Full runs** — `just test` and `just lint` in `tree-hugger` and `sniff`;
   `just test-l2` in `tree-hugger` only if L2 files changed; confirm existing
   golden fixtures untouched.
-- [ ] **OS review** — apply the `os` skill checklist to `#[cfg]` and path
+- [x] **OS review** — apply the `os` skill checklist to `#[cfg]` and path
   comparison code; list which OS evidence was produced locally and which
   relies on the existing CI schedule.
 
