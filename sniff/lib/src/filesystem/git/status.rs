@@ -85,6 +85,16 @@ fn status_platform(
         .index_worktree_rewrites(None))
 }
 
+/// Index decoding occurs during iterator initialization, before worker startup.
+/// Contain that decoder without adding another status walk or index preflight.
+fn status_iter(repo: &gix::Repository) -> Result<gix::status::Iter> {
+    super::open::guard_index_read(|| {
+        status_platform(repo)?
+            .into_iter(Vec::<gix::bstr::BString>::new())
+            .map_err(|error| crate::SniffError::git("status index", error))
+    })
+}
+
 /// One classified path from a working-tree status walk.
 #[derive(Debug, Clone, Copy)]
 enum StatusPathKind {
@@ -96,6 +106,22 @@ enum StatusPathKind {
     Conflicted,
     /// Nonignored untracked file.
     Untracked,
+}
+
+fn classify_worktree_status<T, U>(
+    status: gix::status::plumbing::index_as_worktree::EntryStatus<T, U>,
+) -> Option<StatusPathKind> {
+    use gix::status::plumbing::index_as_worktree::{Change, EntryStatus};
+    match status {
+        EntryStatus::Conflict { .. } => Some(StatusPathKind::Conflicted),
+        EntryStatus::Change(Change::Removed) => {
+            Some(StatusPathKind::Unstaged(UnstagedKind::Deleted))
+        }
+        EntryStatus::Change(Change::Modification { .. } | Change::Type { .. }) => {
+            Some(StatusPathKind::Unstaged(UnstagedKind::Modified))
+        }
+        _ => None,
+    }
 }
 
 /// Classify every item of one status walk into a native path and its kind.
@@ -112,9 +138,7 @@ fn classify_status_paths(
 ) -> Result<()> {
     use gix::bstr::ByteSlice;
 
-    let iter = status_platform(repo)?
-        .into_iter(Vec::<gix::bstr::BString>::new())
-        .map_err(|e| crate::SniffError::git("status", e))?;
+    let iter = status_iter(repo)?;
 
     for item in iter {
         let item = item.map_err(|e| crate::SniffError::git("status", e))?;
@@ -141,24 +165,10 @@ fn classify_status_paths(
             gix::status::Item::IndexWorktree(item) => match item {
                 gix::status::index_worktree::Item::Modification {
                     status, rela_path, ..
-                } => match status {
-                    gix::status::plumbing::index_as_worktree::EntryStatus::Conflict { .. } => {
-                        on_path(rela_path.as_bstr(), StatusPathKind::Conflicted);
+                } => {
+                    if let Some(kind) = classify_worktree_status(status) {
+                        on_path(rela_path.as_bstr(), kind);
                     }
-                    gix::status::plumbing::index_as_worktree::EntryStatus::Change(
-                        gix::status::plumbing::index_as_worktree::Change::Removed,
-                    ) => {
-                        on_path(rela_path.as_bstr(), StatusPathKind::Unstaged(UnstagedKind::Deleted));
-                    }
-                    gix::status::plumbing::index_as_worktree::EntryStatus::Change(
-                        gix::status::plumbing::index_as_worktree::Change::Modification { .. },
-                    ) => {
-                        on_path(
-                            rela_path.as_bstr(),
-                            StatusPathKind::Unstaged(UnstagedKind::Modified),
-                        );
-                    }
-                    _ => {}
                 },
                 gix::status::index_worktree::Item::DirectoryContents { entry, .. } => {
                     if matches!(entry.status, gix::dir::entry::Status::Untracked) {
@@ -242,9 +252,8 @@ struct SideDiff {
 ///
 /// The HEAD tree and index snapshot were previously re-resolved per file *per
 /// side*, making index snapshots O(dirty files) where one per status walk is
-/// sufficient. `head_tree`/`index` are `None` only when the repository has no
-/// HEAD tree or no readable index; every side treats that as "no evidence" and
-/// degrades to empty stats, matching the prior per-call error fallbacks.
+/// sufficient. Missing HEAD evidence retains the historical empty-stat fallback;
+/// index failures propagate even if the index changed after the status walk.
 struct StatusContext<'repo> {
     repo: &'repo gix::Repository,
     head_tree: Option<gix::Tree<'repo>>,
@@ -253,18 +262,18 @@ struct StatusContext<'repo> {
 }
 
 impl<'repo> StatusContext<'repo> {
-    fn new(repo: &'repo gix::Repository) -> Self {
+    fn new(repo: &'repo gix::Repository) -> Result<Self> {
         let head_tree = repo
             .head_tree_id_or_empty()
             .ok()
             .and_then(|id| repo.find_tree(id).ok());
-        let index = repo.index_or_empty().ok();
-        Self {
+        let index = Some(super::open::read_index(repo)?);
+        Ok(Self {
             repo,
             head_tree,
             index,
             workdir: repo.workdir().map(Path::to_path_buf),
-        }
+        })
     }
 
     /// Index entry for `path` at the unconflicted stage.
@@ -374,7 +383,7 @@ pub(crate) fn get_repo_status_with_changes(
     // The HEAD tree, index snapshot, and workdir are resolved once here rather
     // than per file per side, which is what made index snapshots scale with the
     // number of dirty files.
-    let ctx = StatusContext::new(repo);
+    let ctx = StatusContext::new(repo)?;
 
     for path in &dirty_paths {
         if let Some(kind) = staged.get(path) {
@@ -1044,21 +1053,16 @@ pub(crate) fn get_repo_status_counts(repo: &gix::Repository) -> crate::Result<(b
 /// untracked-inclusive dirty definition, unlike gix's tracked-only
 /// [`gix::Repository::is_dirty`] (which disables the directory walk).
 pub(crate) fn is_repo_dirty(repo: &gix::Repository) -> Result<bool> {
-    let iter = status_platform(repo)?
-        .into_iter(Vec::<gix::bstr::BString>::new())
-        .map_err(|e| crate::SniffError::git("status", e))?;
+    let iter = status_iter(repo)?;
 
     for item in iter {
         match item.map_err(|e| crate::SniffError::git("status", e))? {
             gix::status::Item::TreeIndex(_) => return Ok(true),
             gix::status::Item::IndexWorktree(item) => match item {
-                gix::status::index_worktree::Item::Modification { status, .. } => match status {
-                    gix::status::plumbing::index_as_worktree::EntryStatus::Conflict { .. }
-                    | gix::status::plumbing::index_as_worktree::EntryStatus::Change(
-                        gix::status::plumbing::index_as_worktree::Change::Removed
-                        | gix::status::plumbing::index_as_worktree::Change::Modification { .. },
-                    ) => return Ok(true),
-                    _ => {}
+                gix::status::index_worktree::Item::Modification { status, .. } => {
+                    if classify_worktree_status(status).is_some() {
+                        return Ok(true);
+                    }
                 },
                 gix::status::index_worktree::Item::DirectoryContents { entry, .. } => {
                     if matches!(entry.status, gix::dir::entry::Status::Untracked) {
@@ -1080,22 +1084,17 @@ pub(crate) fn get_repo_status_counts_detailed(
     let mut unstaged = 0usize;
     let mut untracked = 0usize;
 
-    let iter = status_platform(repo)?
-        .into_iter(Vec::<gix::bstr::BString>::new())
-        .map_err(|e| crate::SniffError::git("status", e))?;
+    let iter = status_iter(repo)?;
 
     for item in iter {
         let item = item.map_err(|e| crate::SniffError::git("status", e))?;
         match item {
             gix::status::Item::TreeIndex(_) => staged += 1,
             gix::status::Item::IndexWorktree(item) => match item {
-                gix::status::index_worktree::Item::Modification { status, .. } => match status {
-                    gix::status::plumbing::index_as_worktree::EntryStatus::Conflict { .. }
-                    | gix::status::plumbing::index_as_worktree::EntryStatus::Change(
-                        gix::status::plumbing::index_as_worktree::Change::Removed
-                        | gix::status::plumbing::index_as_worktree::Change::Modification { .. },
-                    ) => unstaged += 1,
-                    _ => {}
+                gix::status::index_worktree::Item::Modification { status, .. } => {
+                    if classify_worktree_status(status).is_some() {
+                        unstaged += 1;
+                    }
                 },
                 gix::status::index_worktree::Item::DirectoryContents { entry, .. } => {
                     if matches!(entry.status, gix::dir::entry::Status::Untracked) {
@@ -1128,21 +1127,7 @@ pub fn detect_merge_conflicts(repo: &gix::Repository) -> Vec<PathBuf> {
 /// An index-read failure propagates as [`SniffError::Git`] rather than being
 /// reported as "no conflicts".
 pub(crate) fn detect_merge_conflicts_fallible(repo: &gix::Repository) -> Result<Vec<PathBuf>> {
-    // Malformed index bytes are external input. Some truncated forms panic in
-    // gix's decoder, so keep that upstream bug behind Sniff's fallible API.
-    let index = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        repo.index_or_empty()
-            .map_err(|error| crate::SniffError::git("index", error))
-    }))
-    .map_err(|_| {
-        crate::SniffError::git(
-            "index",
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "Git index decoder panicked on malformed input",
-            ),
-        )
-    })??;
+    let index = super::open::read_index(repo)?;
 
     let mut conflicted = Vec::new();
     let mut seen = HashSet::new();
@@ -1189,6 +1174,23 @@ mod tests {
         }
 
         (dir, open_gix(&path))
+    }
+
+    #[test]
+    fn status_context_rejects_a_malformed_index_without_a_preceding_walk() {
+        let (dir, _) = setup_repo();
+        let index = dir.path().join(".git/index");
+        let original = std::fs::read(&index).unwrap();
+        assert!(StatusContext::new(&open_gix(dir.path())).is_ok());
+        for length in [0, 1, 4, 8, 11, 12, 13, 16, 20, 31, 84, 103] {
+            std::fs::write(&index, &original).unwrap();
+            std::fs::write(&index, &original[..length]).unwrap();
+            let repo = open_gix(dir.path());
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| StatusContext::new(&repo)));
+            assert!(result.is_ok(), "context must contain decoder panic at {length}");
+            assert!(matches!(result.unwrap(), Err(crate::SniffError::Git { .. })), "context must reject corruption at {length}");
+        }
+        std::fs::write(index, original).unwrap();
     }
 
     /// Stage a path (`git add <path>`).

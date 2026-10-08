@@ -882,7 +882,9 @@ impl GitRepo {
     ///   error names every conflicted path in the repository.
     /// - [`SniffError::UnresolvedReference`] or [`SniffError::NonCommitReference`]:
     ///   the base token names no object, or a non-commit object.
-    /// - [`SniffError::Git`]: status, rev-parse, peel, or tree-diff failure.
+    /// - [`SniffError::Git`]: unreadable or malformed index, status, rev-parse,
+    ///   peel, or tree-diff failure. Decoder panics are contained; absent and
+    ///   valid empty indexes remain valid.
     pub fn changed_paths(&self, base: ChangedBase) -> Result<Vec<PathBuf>> {
         use gix::bstr::ByteSlice;
 

@@ -786,3 +786,73 @@ fn changed_paths_performs_one_status_walk_and_no_diff_work() {
         "no linked-worktree enumeration: {counters:?}"
     );
 }
+
+fn symlink_file(target: &Path, link: &Path) {
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(target, link).expect("create file symlink");
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_file(target, link).expect("file symlink requires Developer Mode or symlink privilege");
+}
+
+#[test]
+fn file_type_replacements_agree_across_status_readers_and_commit_phases() {
+    use super::status::{get_repo_status_counts, get_repo_status_counts_detailed, is_repo_dirty};
+    use super::types::{FileAction, FileStatus};
+    use crate::request::GitRequest;
+
+    for initially_symlink in [false, true] {
+        let (dir, repo) = repo_with_commit(&[("leaf.rs", "fn original() {}\n"), ("target.rs", "fn target() {}\n")]);
+        repo.config().unwrap().set_bool("core.symlinks", true).unwrap();
+        if initially_symlink {
+            std::fs::remove_file(dir.path().join("leaf.rs")).unwrap();
+            symlink_file(Path::new("target.rs"), &dir.path().join("leaf.rs"));
+            stage(dir.path(), "leaf.rs");
+            commit_index(dir.path(), "symlink base", "HEAD");
+        }
+        let base = git2::Repository::open(dir.path()).unwrap().head().unwrap().target().unwrap();
+        std::fs::remove_file(dir.path().join("leaf.rs")).unwrap();
+        if initially_symlink {
+            std::fs::write(dir.path().join("leaf.rs"), "fn restored() {}\n").unwrap();
+        } else {
+            symlink_file(Path::new("target.rs"), &dir.path().join("leaf.rs"));
+        }
+        for staged in [false, true] {
+            if staged { stage(dir.path(), "leaf.rs"); }
+            let observed = discover(dir.path());
+            assert_eq!(observed.changed_paths(omitted()).unwrap(), vec![PathBuf::from("leaf.rs")]);
+            let changes = observed.file_changes().unwrap();
+            assert_eq!(changes.len(), 1, "no missing or extra changed files");
+            assert_eq!(changes[0].path, PathBuf::from("leaf.rs"));
+            assert_eq!(changes[0].action, FileAction::Modified);
+            assert_eq!(changes[0].status, if staged { FileStatus::Staged } else { FileStatus::Modified });
+            let status = observed.repo_status().unwrap();
+            assert!(status.is_dirty);
+            assert_eq!((status.staged_count, status.unstaged_count, status.untracked_count), if staged { (1, 0, 0) } else { (0, 1, 0) });
+            let gix = gix::open(dir.path()).unwrap();
+            assert!(is_repo_dirty(&gix).unwrap());
+            assert_eq!(get_repo_status_counts(&gix).unwrap(), (true, 1));
+            assert_eq!(get_repo_status_counts_detailed(&gix).unwrap(), if staged { (true, 1, 0, 0) } else { (true, 0, 1, 0) });
+            for request in [GitRequest::minimal(), GitRequest::summary()] {
+                assert!(observed.detect_with_request(&request).unwrap().status.unwrap().is_dirty);
+            }
+            let mut counts = GitRequest::minimal();
+            counts.commit_count = 1;
+            let status = observed.detect_with_request(&counts).unwrap().status.unwrap();
+            assert!(status.is_dirty);
+            assert_eq!((status.staged_count, status.unstaged_count, status.untracked_count), if staged { (1, 0, 0) } else { (0, 1, 0) });
+        }
+        commit_index(dir.path(), "type replacement", "HEAD");
+        let observed = discover(dir.path());
+        assert_eq!(observed.changed_paths(reference(&base.to_string())).unwrap(), vec![PathBuf::from("leaf.rs")]);
+        assert!(observed.changed_paths(omitted()).unwrap().is_empty());
+        assert!(observed.file_changes().unwrap().is_empty());
+        assert!(!observed.repo_status().unwrap().is_dirty);
+        let gix = gix::open(dir.path()).unwrap();
+        assert!(!is_repo_dirty(&gix).unwrap());
+        assert_eq!(get_repo_status_counts(&gix).unwrap(), (false, 0));
+        assert_eq!(get_repo_status_counts_detailed(&gix).unwrap(), (false, 0, 0, 0));
+    }
+}
+
+#[path = "index_reads_tests.rs"]
+mod index_reads;

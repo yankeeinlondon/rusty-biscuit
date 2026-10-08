@@ -469,16 +469,14 @@ pub fn get_commit_files_with_cache(
 
 /// Fallible variant of [`get_commit_files`].
 ///
-/// A missing or corrupt commit, tree, parent commit, parent tree, or diff
+/// A missing or corrupt commit, tree, parent commit, parent tree, index, or diff
 /// failure propagates as [`SniffError::Git`] rather than producing an empty or
 /// partial change list.
 pub(crate) fn get_commit_files_fallible(
     repo: &gix::Repository,
     commit_id: gix::ObjectId,
 ) -> Result<Vec<(PathBuf, DeltaKind)>> {
-    let mut cache = repo
-        .diff_resource_cache_for_tree_diff()
-        .map_err(|e| SniffError::git("diff", e))?;
+    let mut cache = super::open::tree_diff_cache(repo)?;
     get_commit_files_with_cache_fallible(repo, commit_id, &mut cache)
 }
 
@@ -555,9 +553,11 @@ pub(crate) fn tip_diff_paths(
     });
 
     let mut paths = Vec::new();
+    let mut cache = super::open::tree_diff_cache(repo)?;
     platform
-        .for_each_to_obtain_tree(
+        .for_each_to_obtain_tree_with_cache(
             &head_tree,
+            &mut cache,
             |change| -> std::result::Result<std::ops::ControlFlow<()>, std::convert::Infallible> {
                 if change.entry_mode().is_tree() {
                     return Ok(std::ops::ControlFlow::Continue(()));
@@ -1033,6 +1033,7 @@ const DIFF_CACHE_CLEAR_INTERVAL: usize = 1_000;
 /// exhausted history from a truncated scan.
 ///
 /// Ref decorations are collected once and reused for all matching commits.
+/// The diff cache also requires a readable index for attribute mappings.
 ///
 /// Errors are suppressed: a corrupt revwalk, object, or ref store yields an
 /// empty result. For error propagation, use [`get_commits_for_path_fallible`].
@@ -1099,9 +1100,7 @@ pub(crate) fn get_commits_for_path_fallible(
             .expect("collected when none supplied")
     });
 
-    let mut diff_cache = repo
-        .diff_resource_cache_for_tree_diff()
-        .map_err(|e| SniffError::git("diff", e))?;
+    let mut diff_cache = super::open::tree_diff_cache(repo)?;
 
     let capped = options.count > 0;
     let mut exhausted = true;
