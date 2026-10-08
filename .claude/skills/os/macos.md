@@ -10,6 +10,14 @@ conditions that masquerade as repository defects.
   "Illegal byte sequence". Git metadata can still record a missing path
   containing it. Exercise such renderer inputs through a real Git record's
   `gitdir` text or the public rendering API rather than creating that filename.
+  The rejection is broader than that codepoint: any filename whose bytes are
+  not valid UTF-8 fails at the syscall level with `EILSEQ` ("Illegal byte
+  sequence"), so a fixture cannot create a genuinely non-UTF-8 path on the
+  worktree here (Linux can). To test that a code path preserves non-UTF-8 Git
+  paths byte-exactly on macOS, build the path through the index and commit
+  trees (e.g. `git2::Index::add_frombuffer` with raw path bytes) and compare
+  committed-tree output, never a worktree file; sniff's
+  `filesystem::git::changed_paths_tests` does exactly this split.
 - `/var` and `/tmp` are symlinks into `/private`. A test that compares a
   `tempfile` path with what a child process reports must canonicalize on
   Unix (the `launched_spelling` helper does) or the two spellings differ.

@@ -1,4 +1,6 @@
 pub mod api;
+#[cfg(test)]
+mod changed_paths_tests;
 pub mod commit_links;
 pub mod discovery;
 mod merge_conflicts;
@@ -37,10 +39,10 @@ pub use recent_commits::{
 };
 pub use status::detect_merge_conflicts;
 pub use types::{
-    BehindStatus, BranchInfo, CommitInfo, ConventionalCommit, FileAction, FileChange, FileStatus,
-    GitConfig, GitHostingProvider, GitHostingProviderMetadata, GitInfo, GitRepo, LocalBranchInfo,
-    RefDecoration, RefKind, RemoteInfo, RemoteTrackingStatus, RepoStatus, UntrackedFile,
-    WorktreeInfo, parse_commit_message,
+    BehindStatus, BranchInfo, ChangedBase, CommitInfo, ConventionalCommit, FileAction, FileChange,
+    FileStatus, GitConfig, GitHostingProvider, GitHostingProviderMetadata, GitInfo, GitRepo,
+    LocalBranchInfo, RefDecoration, RefKind, RemoteInfo, RemoteTrackingStatus, RepoStatus,
+    UntrackedFile, WorktreeInfo, parse_commit_message,
 };
 pub use worktree::{
     WorktreeEntry, current_worktree_name_with_repo, get_current_worktree_info,

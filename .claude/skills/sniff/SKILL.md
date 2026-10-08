@@ -65,6 +65,21 @@ Use module-level APIs when a caller needs one bounded fact, such as
 `GitRepo::discover`, `current_user_id`, or a focused provider query. Do not use
 full host detection as a convenience wrapper around one fact.
 
+`GitRepo::changed_paths(ChangedBase)` is the focused path-only changed-file
+API: one status observation plus (when the base differs from `HEAD`) one
+direct tip-vs-tip tree comparison, returning deduplicated, byte-sorted native
+repository-relative paths. Local only — no fetch, line stats, patches, rename
+similarity, history, or inventory. It rejects bare repositories
+(`SniffError::BareRepository`), unresolved/non-commit references
+(`UnresolvedReference`/`NonCommitReference`), and any unmerged index entry
+(`MergeConflicts`, naming every conflicted path). `ChangedBase::Omitted` makes
+an unborn `HEAD` valid (pure working-tree status); `Reference(token)` peels
+annotated tags and, against an unborn `HEAD`, compares the base with the empty
+tree — `Reference("HEAD")` on unborn is an error, keeping explicit `HEAD`
+distinct from omission. See "Changed Paths" in
+[architecture.md](architecture.md) and
+[sniff-library-architecture.md](../../sniff/docs/sniff-library-architecture.md).
+
 `SniffConfig` remains a compatibility surface, but new code should use request
 plans.
 

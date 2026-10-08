@@ -333,6 +333,48 @@ optional unified hunks are derived from that single diff result. Whole-file adds
 line-counted rather than diffed, so a stats-only request runs zero diffs, and counts-only,
 dirty-flag, and identity requests load no blobs at all.
 
+### Changed Paths
+
+`GitRepo::changed_paths(base)` answers "which repository-relative paths are changed?" with native
+paths only — no line statistics, no patch text, no rename similarity, no history, no inventory, and
+no network access.
+
+```rust
+use sniff::filesystem::git::{ChangedBase, GitRepo};
+
+let repo = GitRepo::discover(std::path::Path::new("."))?.unwrap();
+let paths = repo.changed_paths(ChangedBase::Omitted)?;      // uncommitted changes only
+let paths = repo.changed_paths(ChangedBase::Reference("main".into()))?; // plus committed differences from local main
+```
+
+The result is the **union** of four sources, deduplicated and sorted by path bytes:
+
+1. paths differing between the resolved base commit and `HEAD` — the two tips compared **directly**,
+   never through a merge-base, and only when the tips differ;
+2. staged paths (tree-to-index);
+3. unstaged paths (index-to-worktree);
+4. nonignored untracked paths.
+
+One status observation answers sources 2-4 **and** conflict detection. A path in several categories
+appears once. Whether a path still exists on disk is the caller's concern: a staged deletion still
+selects its path.
+
+`ChangedBase` type-encodes the reference contract:
+
+- `Omitted` contributes no committed comparison, so an unborn `HEAD` (no first commit) is valid and
+  the result is pure working-tree status.
+- `Reference(token)` must resolve locally — no fetch runs — to exactly one commit; annotated tags
+  peel to the commit they name, and a tree or blob is rejected. Against an unborn `HEAD` the base is
+  compared with the empty current tree. `Reference("HEAD")` on an unborn repository is an error,
+  which is what keeps an explicit `HEAD` distinguishable from `Omitted`. A detached `HEAD` uses its
+  commit.
+
+Errors are failures, never empty results: a bare repository
+([`SniffError::BareRepository`](../lib/src/error.rs)), any unmerged index entry
+([`SniffError::MergeConflicts`](../lib/src/error.rs), naming every conflicted path anywhere in the
+repository), an unresolved or non-commit reference, and wrapped gix failures. Renames surface as
+delete/add pairs, and nothing inside a submodule or nested repository entry is descended into.
+
 ### Focused Git Metadata
 
 `GitRequest.metadata` is an `Option<GitMetadataRequest>` giving fine-grained control over commits,
@@ -450,7 +492,7 @@ HTTPS endpoints **sequentially**, stopping at the first strictly parsed IP — s
 attempt discloses the caller's address to exactly one endpoint. Response bodies never reach an error,
 log, or counter.
 
-A **bare repository** (no working directory) discovers successfully — its refs, HEAD, and objects are all readable, so `current_branch()`, `head_id()`, and commit queries stay valid. `GitRepo::is_bare()` reports the distinction, `repo_root()` falls back to the git directory, `try_current_worktree_name()` is `None`, and `merge_conflicts()` is empty (no index). Worktree-dependent APIs (`collect_changed_paths`, `detect_repo_identity_with_repo`) reject a bare repository with `NotARepository` rather than walking the git directory as if it were a source tree.
+A **bare repository** (no working directory) discovers successfully — its refs, HEAD, and objects are all readable, so `current_branch()`, `head_id()`, and commit queries stay valid. `GitRepo::is_bare()` reports the distinction, `repo_root()` falls back to the git directory, `try_current_worktree_name()` is `None`, and `merge_conflicts()` is empty (no index). Worktree-dependent APIs (`collect_changed_paths`, `detect_repo_identity_with_repo`) reject a bare repository with `NotARepository` rather than walking the git directory as if it were a source tree; `GitRepo::changed_paths` rejects one with `SniffError::BareRepository` for the same reason.
 
 ### Actual and Predicted Merge Conflicts
 
