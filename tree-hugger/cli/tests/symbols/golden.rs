@@ -84,18 +84,14 @@ fn assert_export_golden(args: &[&str], file: &str, golden: &str) {
     let scratch = Scratch::new(MULTI_FIXTURES);
     let actual = scratch.stdout(args);
     assert!(!actual.as_bytes().contains(&0x1b), "{} contains ESC", args.join(" "));
-    assert!(!actual.contains("\u{009b}"), "{} contains OSC/control sequence", args.join(" "));
+    assert!(!actual.contains(['\u{009b}', '\u{009d}']), "{} contains CSI/OSC control", args.join(" "));
     assert!(!actual.contains('\r'), "{} contains CR", args.join(" "));
     if std::env::var_os("HUG_UPDATE_GOLDEN").is_some() {
         std::fs::write(manifest_dir!().join("tests/fixtures/golden").join(file), &actual)
             .unwrap_or_else(|error| panic!("write {file} golden: {error}"));
         return;
     }
-    let root = scratch.repo.path();
-    let normalize_export = |text: &str| {
-        normalize_file_urls(&normalized(text, root))
-    };
-    assert_same(&normalize_export(&actual), &normalize_export(golden), &format!("`hug {}`", args.join(" ")), file);
+    assert_same(&normalize_file_urls(&actual), &normalize_file_urls(golden), &format!("`hug {}`", args.join(" ")), file);
 }
 
 fn normalize_file_urls(text: &str) -> String {

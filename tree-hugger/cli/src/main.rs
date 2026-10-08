@@ -2468,6 +2468,19 @@ mod tests {
     }
 
     #[test]
+    fn file_url_preserves_native_paths_with_spaces_unicode_and_parentheses() {
+        let (path, expected) = if cfg!(windows) {
+            (r"C:\repo\a b (é).rs", "file:///C:/repo/a%20b%20(%C3%A9).rs")
+        } else {
+            ("/repo/a b (é).rs", "file:///repo/a%20b%20(%C3%A9).rs")
+        };
+        let url = file_url(Path::new(path)).expect("native file URL");
+        assert_eq!(url, expected);
+        assert_eq!(Url::parse(&url).expect("parse URL").to_file_path().expect("native path"), Path::new(path));
+        assert!(!url.contains('\\'));
+    }
+
+    #[test]
     fn completion_candidate_without_a_prefix_is_the_bare_name() {
         assert_eq!(
             completion_candidate(Path::new(""), "tree-hugger"),

@@ -4,7 +4,7 @@
 //! files in parallel (the library applies the selectors once, after the
 //! cache), orders the records, and writes them in the one output mode: the
 //! terminal listing, outline or table, `--json`, `--json-full`, `--jsonl`,
-//! `--count` or `--stats`.
+//! `--count`, `--stats` or a terminal-independent export.
 
 use std::collections::{BTreeMap, HashMap};
 use std::io::{self, BufWriter, Write};
@@ -860,6 +860,61 @@ mod grouping_tests;
 #[cfg(test)]
 mod export_write_tests {
     use super::*;
+
+    #[test]
+    fn exports_do_no_extra_analysis_beyond_equivalent_listings() {
+        let scratch = tempfile::tempdir().expect("scratch");
+        let file = scratch.path().join("sample.py");
+        std::fs::write(&file, "class Sample:\n    def method(self, value):\n        if value:\n            return self.method(False)\n        return 0\n").expect("source");
+        let selection = Selection::default();
+        let analyzer = Analyzer::new(None, None, false);
+        let measure = |query: &SymbolQuery| {
+            let before = tree_hugger::work_counters();
+            let result = analyzer.analyze(&file, query).expect("analyze").result;
+            assert!(!result.index.symbols.is_empty(), "fixture must exercise declarations");
+            (tree_hugger::work_counters().since(before), result)
+        };
+        for command in [
+            Declarations::Functions,
+            Declarations::Types,
+            Declarations::Symbols,
+            Declarations::Classes(Box::new(ClassSelection::new(&selection, Default::default()))),
+        ] {
+            let listing = command.query(ReportFormat::Count, &selection);
+            let (flat_work, _) = measure(&listing);
+            let owned = listing.clone().capabilities([Capability::Containment]);
+            let (owned_work, _) = measure(&owned);
+            for format in [ExportFormat::Tsv, ExportFormat::Markdown, ExportFormat::Prose, ExportFormat::Ctags] {
+                for tree in [false, true] {
+                    if tree && matches!(format, ExportFormat::Tsv | ExportFormat::Ctags) { continue; }
+                    let containment = format == ExportFormat::Ctags || tree
+                        || (matches!(format, ExportFormat::Markdown | ExportFormat::Prose)
+                            && matches!(command, Declarations::Classes(_)));
+                    let query = command.query(ReportFormat::Export {
+                        format,
+                        signatures: crate::output::SignatureMode::Short,
+                        plain: false,
+                        comments: false,
+                        containment,
+                    }, &selection);
+                    let expected_containment = containment || matches!(command, Declarations::Classes(_));
+                    assert_eq!(query.required_capabilities(), if expected_containment {
+                        vec![Capability::Declarations, Capability::Containment]
+                    } else { vec![Capability::Declarations] }, "{command:?}, {format:?}, tree={tree}");
+                    let (work, result) = measure(&query);
+                    assert_eq!(work, if expected_containment { owned_work } else { flat_work },
+                        "{command:?}, {format:?}, tree={tree}");
+                    assert_eq!(work.parser_constructions, 1);
+                    assert_eq!(work.definition_captures, 1);
+                    assert_eq!(work.reference_captures, 0);
+                    assert_eq!(work.occurrence_resolutions, 0);
+                    assert_eq!(work.diagnostics_runs, 0);
+                    assert_eq!(work.complexity_walks, 0);
+                    assert!(!result.index.completed_passes.contains(&AnalysisPass::Semantic));
+                }
+            }
+        }
+    }
 
     #[test]
     fn export_write_errors_preserve_broken_pipe_and_other_failure_statuses() {

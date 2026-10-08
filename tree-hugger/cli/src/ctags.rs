@@ -93,7 +93,7 @@ mod tests {
     #[test]
     fn name_container_and_path_controls_are_rejected_without_emitting_partial_tags() {
         let (dir, base) = method_record();
-        for control in ['\t', '\r', '\n', '\u{0085}'] {
+        for control in ['\t', '\r', '\n', '\u{001b}', '\u{0085}', '\u{009b}'] {
             for field in ["name", "container", "path"] {
                 let mut record = base.clone();
                 match field {

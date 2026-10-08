@@ -19,7 +19,7 @@ fn ctags_emits_numeric_unsorted_navigation_records_and_preserves_duplicates() {
 
 #[test]
 fn ctags_skips_control_names_with_warning_and_failure_status() {
-    let scratch = Scratch::new(&[("src/unsafe\tfile.rs", "pub fn unsafe_name() {}\n"), ("ok.rs", "pub fn safe() {}\n")]);
+    let scratch = Scratch::new(&[("src/unsafe\u{9b}file.rs", "pub fn unsafe_name() {}\n"), ("ok.rs", "pub fn safe() {}\n")]);
     let output = scratch.hug(&["functions", "--format", "ctags"]);
     assert_eq!(output.status.code(), Some(1));
     let stdout = String::from_utf8(output.stdout).unwrap();

@@ -18,8 +18,8 @@ pub(crate) fn write_rows(
         let span = &record.source.declaration_span.start;
         let cells = [
             file.to_owned(),
-            (span.line + 1).to_string(),
-            (span.column + 1).to_string(),
+            span.line.to_string(),
+            span.column.to_string(),
             kind_name(record.kind).to_owned(),
             record.identity.name.clone(),
             record.identity.qualified_name.clone(),

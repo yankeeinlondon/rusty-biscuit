@@ -2,7 +2,7 @@
 
 How the `hug` declaration commands (`functions`, `types`, `symbols` and
 `classes`) pick what to analyze, what their terminal, table, outline, JSON,
-JSON Lines, count and stats output contain, how output is ordered, and what
+JSON Lines, count, stats and export output contain, how output is ordered, and what
 `--verbose` reports.
 
 ```bash
@@ -24,6 +24,82 @@ Global flags (`--json`, `--json-full`, `--plain`, `--verbose`) come before
 the command; command flags (`--sort`, `--no-cache`, `--group-by-file`, …)
 come after it.
 
+## Text exports
+
+Use `--format tsv`, `markdown`, `prose` or `ctags` to save a UTF-8 report.
+Exports use LF line endings, contain no terminal escape sequences, and do
+not wrap to the terminal width. Files appear in portable path order;
+`--sort` orders declarations within each file. The selection rules are the
+same as for a listing. Export selection adds no references, diagnostics,
+semantics or metrics work; ctags requests containment for recorded ownership,
+and `classes` always needs containment to select its members.
+
+```bash
+hug functions --format tsv > functions.tsv
+hug symbols --format markdown --comments > symbols.md
+hug functions --format prose > functions.prose
+```
+
+| Combination | Result |
+|---|---|
+| Any export with `--json`, `--json-full`, `--jsonl`, `--count` or `--stats` | argument error, exit 2 |
+| `--tree` with TSV or ctags | argument error, exit 2 |
+| `--tree` with Markdown or Prose | accepted on functions, types and symbols; nested rendering is **planned** |
+| `classes --tree` | argument error, exit 2 |
+| `--comments` with TSV or ctags | argument error, exit 2 |
+| Explicit `--signatures`, including `short`, with ctags | argument error, exit 2 |
+| Global `--plain` | accepted; removes generated Prose styles and links, leaves other exports unchanged |
+
+Exports retain successful files when another file fails, report failures on
+stderr, and exit 1. A closed stdout pipe exits 0. Verbose/cache messages
+remain on stderr.
+
+### TSV
+
+TSV always starts with this eight-column header, even for an empty selection:
+
+```text
+file    line    column    kind    name    qualified_name    visibility    signature
+```
+
+The separators are tabs. `line` and `column` are the declaration's one-based
+start, and paths use scan-root-relative `/` spelling with the usual
+[outside-root fallback](#json-reports). `kind` and known visibility values
+use snake_case; unknown visibility is empty. Qualified names retain their
+existing file prefix. Every row has eight cells, including trailing empties.
+
+Each cell escapes backslash as `\\`, tab as `\t`, CR as `\r` and LF as
+`\n` in one pass; other controls use visible `\u{..}` notation. Unicode,
+spaces and quotes stay literal. Thus a written backslash followed by `n`
+is `\\n`, while an actual newline is `\n`.
+
+`--signatures short|full|none` uses the table's signature rules; `none`
+keeps an empty eighth cell. Grouping flags add no headings or blank rows.
+`classes` flattens selected containers and displayed methods/constructors,
+deduplicating by record ID; summary field metadata does not become rows.
+
+### Markdown and Prose
+
+Markdown currently emits a flat list with declaration names, signatures and
+readable source locations, without generated links. Source punctuation is
+escaped as literal CommonMark text. `--comments` adds literal doc lines
+under their declaration; non-newline controls become spaces. Global
+`--plain` leaves Markdown unchanged.
+
+Prose currently emits a flat list using the shared declaration formatter,
+with styles and local `file:` links ending in `#L<line>`. File URLs encode
+reserved characters and Unicode using native file-path conversion. Source
+text is escaped as literal Prose content; control characters become visible
+notation. For example, `hug --plain functions --format prose` omits generated
+styles and links while preserving literal escaping. Each generated tag
+closes within its line. Both formats print `(no symbols)` when empty.
+
+**Planned:** package/file/module headings, nested `--tree` layouts,
+static/instance class sections and Markdown semantic emphasis. Those flags
+are accepted today, but both writers still flatten the selected declarations;
+class-summary field metadata is absent. They do not yet share the terminal
+listing's grouping buffers or guarantee equivalent rendered plain output.
+
 ## Tags output
 
 Use `--format ctags` to write an unsorted format-2 tags file. Each selected
@@ -44,6 +120,10 @@ Names, paths, and container values containing control characters are omitted
 with a warning and make the command exit 1. Spaces and Unicode are preserved.
 This is a documented navigation subset, not a promise of Universal Ctags
 compatibility.
+
+Headless Neovim's `taglist()` and numeric-line navigation verify this subset,
+including duplicate names, container fields, spaces and Unicode. The reader
+test runs without opening or focusing a window.
 
 ```mermaid
 flowchart LR
@@ -601,11 +681,12 @@ flowchart TD
     one -- no --> err["argument error, exit 2"]
     stats -- yes --> with{"also given?"}
     with -- "nothing, --json,<br/>--format table or plain" --> smode["stats in that form"]
-    with -- "--json-full, --jsonl, --count,<br/>--sort, --signatures or --tree" --> err
+    with -- "--json-full, --jsonl, --count,<br/>export formats, --sort, --signatures or --tree" --> err
 ```
 
 `--sort`, `--signatures` and `--tree` are argument errors with `--stats`.
-`--tree` is terminal output only (see [Outline](#outline---tree)).
+`--tree` nests terminal output (see [Outline](#outline---tree)); Markdown
+and Prose accept it, with nested export rendering still **planned**.
 `hug imports` has no `--jsonl`, `--count`, `--stats`, `--format`,
 `--signatures` or `--tree`.
 

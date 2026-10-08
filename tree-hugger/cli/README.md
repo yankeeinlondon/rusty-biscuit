@@ -47,6 +47,12 @@ hug imports --json "tests/fixtures/**/*.js"
 - `--signatures full|short|none` - The declaration header as written, the compact form (default; field lists past four end in `… +N`), or names only
 - `--tree` - Nest members under their container (`functions`, `types`, `symbols`); type rows end with their declared bases (`extends Base; implements Shape; unclassified bases External`)
 
+For exports, use TSV for eight fixed columns, Markdown for a literal list,
+Prose for styled markup with local source links, or ctags for navigation.
+See [Text exports](../docs/symbol-reports.md#text-exports) for escaping and
+option combinations. Markdown and Prose currently emit flat lists; grouped,
+nested and static/instance section layouts are planned.
+
 ### Selectors
 
 `functions`, `types`, `symbols` and `classes` share these record selectors.
