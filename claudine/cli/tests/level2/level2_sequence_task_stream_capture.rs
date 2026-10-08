@@ -37,6 +37,9 @@
 //! - nothing overflows the pane, so the terminal never hard-wraps a frame and
 //!   drops its gutter — the failure mode that made serial work lurch back to
 //!   column 0 while parallel work stayed indented;
+//! - a provider's Markdown answer (long prose and a fenced code block), sent
+//!   as one message, as streamed deltas, or as Codex's final message, folds
+//!   inside the gutter of a narrow pane with every word intact;
 //! - the degraded shapes (`NO_COLOR`, non-UTF-8 locale) survive an actual
 //!   capability handshake rather than a constructed `Terminal`.
 //!
@@ -1306,4 +1309,249 @@ fn level2_zero_step_sequence_renders_a_styled_notice_in_tmux() {
         notice.contains('\u{1b}'),
         "the zero-step notice rendered unstyled: {notice:?}"
     );
+}
+
+/// One prompt task, framed by a colored bar, whose provider answers in
+/// Markdown long enough to need folding in a narrow pane.
+const MARKDOWN_PROMPT_DOC: &str = "\
+---
+sequence:
+  - name: alpha
+    group:
+      name: bundle
+      execution: parallel
+      tasks:
+        - name: md-task
+          prompt: one.md
+---
+
+Body.
+";
+
+/// A single paragraph of distinct words, several times wider than the pane.
+///
+/// Every word is distinct and shorter than the pane, so the content check can
+/// demand each one, in order, whole: a word split across rows, dropped, or
+/// duplicated by a fold fails it.
+const MD_PARAGRAPH: &str = "Aurora basil cobalt dune ember fjord garnet harbor indigo \
+jasper kelp lumen meadow nectar opal pepper quartz raven saffron tundra umber velvet \
+willow xenon yarrow zephyr anchor bramble cinder dapple estuary fennel.";
+
+/// The fenced code block's body lines, each short enough to fit the panel.
+///
+/// Short on purpose: darkmatter pads a code panel to the supplied width but
+/// does not fold a code line wider than it, so a long line would test that
+/// separate behavior rather than the gutter inset.
+const MD_CODE_LINES: [&str; 3] = ["fn gutter_probe() -> u32 {", "    let inset = 2;", "}"];
+
+/// The provider's whole answer: [`MD_PARAGRAPH`], a blank line, then a fenced
+/// `rust` block of [`MD_CODE_LINES`], as JSON string content.
+fn md_answer_json() -> String {
+    let code = MD_CODE_LINES.join("\\n");
+    format!("{MD_PARAGRAPH}\\n\\n```rust\\n{code}\\n```\\n")
+}
+
+/// Scripted `claude` delivering the answer as one `assistant` message — the
+/// shape `claude -p --output-format stream-json` emits without partial
+/// messages, so the whole Markdown reaches the renderer at once.
+fn claude_markdown_message_stub() -> String {
+    let answer = md_answer_json();
+    format!(
+        r#"#!/bin/sh
+printf '%s\n' '{{"type":"system","subtype":"init","session_id":"stub-md","model":"stub-model"}}'
+printf '%s\n' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"{answer}"}}]}}}}'
+printf '%s\n' '{{"type":"result","subtype":"success","is_error":false,"result":"done"}}'
+exit 0
+"#
+    )
+}
+
+/// Scripted `claude` streaming the same answer as `text_delta` chunks, a few
+/// words at a time, with a pause between them.
+///
+/// The chunks split the paragraph mid-line, as a real stream does, so the
+/// renderer sees partial lines with no newline yet — the streaming shape the
+/// cached renderer options serve. The pauses keep each chunk a separate read.
+fn claude_markdown_delta_stub() -> String {
+    let mut script = String::from(
+        "#!/bin/sh\nprintf '%s\\n' '{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"stub-md-delta\",\"model\":\"stub-model\"}'\n",
+    );
+    let words: Vec<&str> = MD_PARAGRAPH.split(' ').collect();
+    let mut chunks: Vec<String> = words.chunks(4).map(|chunk| format!("{} ", chunk.join(" "))).collect();
+    if let Some(last) = chunks.last_mut() {
+        *last = last.trim_end().to_string();
+    }
+    let code = MD_CODE_LINES.join("\\n");
+    chunks.push(format!("\\n\\n```rust\\n{code}\\n```\\n"));
+    for chunk in chunks {
+        script.push_str(&format!(
+            "printf '%s\\n' '{{\"type\":\"content_block_delta\",\"delta\":{{\"type\":\"text_delta\",\"text\":\"{chunk}\"}}}}'\nsleep 0.05\n"
+        ));
+    }
+    script.push_str(
+        "printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"done\"}'\nexit 0\n",
+    );
+    script
+}
+
+/// Scripted `codex` whose answer arrives through its `--output-last-message`
+/// file, which Claudine renders as the final message after the stream ends.
+fn codex_markdown_final_stub() -> String {
+    let answer = md_answer_json();
+    format!(
+        r#"#!/bin/sh
+case "$1" in app-server) exit 2;; esac
+if [ ! -t 0 ]; then cat > /dev/null 2>&1; fi
+sink=none
+prev=
+for a in "$@"; do
+  if [ "$prev" = '--output-last-message' ]; then sink="$a"; fi
+  prev="$a"
+done
+if [ "$sink" != none ]; then printf '{answer}' > "$sink"; fi
+printf '%s\n' '{{"type":"thread.started","thread_id":"codex-md-thread"}}'
+printf '%s\n' '{{"type":"turn.started"}}'
+printf '%s\n' '{{"type":"turn.completed","usage":{{"input_tokens":1,"output_tokens":1}},"status":"completed"}}'
+exit 0
+"#
+    )
+}
+
+/// The narrow pane every Markdown-in-gutter row runs in.
+const MD_COLS: usize = 50;
+
+/// The rows carrying the provider's answer: from the paragraph's first word to
+/// the code block's closing line, inclusive.
+///
+/// Bounded to the answer on purpose. The rows around it are status — the
+/// compose banner and prompt panels before the stream opens (unframed), and
+/// the run trailer after it — whose layout is not the Markdown rendering under
+/// test.
+fn answer_rows<'a>(lines: &[&'a str]) -> Vec<&'a str> {
+    let first_word = MD_PARAGRAPH.split(' ').next().expect("paragraph has words");
+    let start = lines
+        .iter()
+        .position(|line| line.contains(first_word))
+        .unwrap_or_else(|| panic!("the answer never reached the pane.\nregion:\n{lines:#?}"));
+    let inner_code = start
+        + lines[start..]
+            .iter()
+            .position(|line| line.contains(MD_CODE_LINES[1].trim()))
+            .unwrap_or_else(|| panic!("the code block never reached the pane.\nregion:\n{lines:#?}"));
+    let end = inner_code
+        + lines[inner_code..]
+            .iter()
+            .position(|line| line.contains(MD_CODE_LINES[2].trim()))
+            .unwrap_or_else(|| panic!("the code block never closed.\nregion:\n{lines:#?}"));
+    lines[start..=end].to_vec()
+}
+
+/// Assert that the Markdown answer reached the pane whole and inside the
+/// task's gutter.
+///
+/// - **Gutter.** Every answer row starts with the task's bar. A line the
+///   renderer did not fold to the inset width overflows the pane, and the
+///   terminal's own wrap restarts its continuation at column 0 — no bar.
+/// - **Width.** No row is wider than the pane.
+/// - **Content.** Every paragraph word appears, whole and in order, and every
+///   code line appears.
+fn assert_markdown_inside_the_gutter(capture: &Capture, shape: &str) {
+    assert_eq!(
+        capture.exit_code, 0,
+        "the {shape} Markdown task must succeed.\nplain:\n{}",
+        capture.frame.plain
+    );
+    let region: Vec<&str> = capture.frame.plain.lines().collect();
+    let rows = answer_rows(&region);
+    let joined = rows.join("\n");
+
+    for row in &rows {
+        assert!(
+            row.chars().count() <= MD_COLS,
+            "{shape}: a row is wider than the {MD_COLS}-column pane: {row:?}\nrows:\n{joined}"
+        );
+        assert!(
+            row.starts_with('│'),
+            "{shape}: a row escaped the task gutter, so the terminal rather than \
+             the renderer folded it: {row:?}\nrows:\n{joined}"
+        );
+    }
+
+    let words: Vec<&str> = rows
+        .iter()
+        .flat_map(|row| row.trim_start_matches('│').split_whitespace())
+        .collect();
+    let mut cursor = 0;
+    for expected in MD_PARAGRAPH.split(' ') {
+        let found = words[cursor..]
+            .iter()
+            .position(|word| *word == expected)
+            .unwrap_or_else(|| {
+                panic!(
+                    "{shape}: paragraph word `{expected}` is missing, split, or out of \
+                     order.\nrows:\n{joined}"
+                )
+            });
+        cursor += found + 1;
+    }
+
+    for code_line in MD_CODE_LINES {
+        assert!(
+            rows.iter().any(|row| row.contains(code_line.trim())),
+            "{shape}: code line `{code_line}` is missing.\nrows:\n{joined}"
+        );
+    }
+}
+
+/// A complete assistant message — long prose and a fenced code block — stays
+/// inside its task's gutter in a narrow pane.
+///
+/// Level 1 proves the renderer wraps to a supplied width; only a pane proves
+/// the sequence task hands it the *inset* width, so the bar it prepends
+/// afterwards never pushes a row past the edge.
+#[test]
+#[serial(level2_terminal)]
+fn level2_markdown_message_stays_inside_the_task_gutter_in_a_narrow_pane() {
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+
+    let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
+    let staged = stage_prompt(
+        "claudine-l2-md-message",
+        MARKDOWN_PROMPT_DOC,
+        &claude_markdown_message_stub(),
+    );
+    let capture = run_in_pane(&mut harness, &staged, MD_COLS as u32, 200, &[]);
+    assert_markdown_inside_the_gutter(&capture, "assistant message");
+}
+
+/// The same answer streamed as `text_delta` chunks, through the renderer's
+/// cached options, stays inside the gutter too.
+#[test]
+#[serial(level2_terminal)]
+fn level2_streamed_markdown_stays_inside_the_task_gutter_in_a_narrow_pane() {
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+
+    let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
+    let staged = stage_prompt(
+        "claudine-l2-md-stream",
+        MARKDOWN_PROMPT_DOC,
+        &claude_markdown_delta_stub(),
+    );
+    let capture = run_in_pane(&mut harness, &staged, MD_COLS as u32, 200, &[]);
+    assert_markdown_inside_the_gutter(&capture, "streamed");
+}
+
+/// A final message rendered after the stream ends — Codex's
+/// `--output-last-message` answer — stays inside the gutter as well.
+#[test]
+#[serial(level2_terminal)]
+fn level2_final_markdown_message_stays_inside_the_task_gutter_in_a_narrow_pane() {
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+
+    let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
+    let mut staged = stage_prompt("claudine-l2-md-final", MARKDOWN_PROMPT_DOC, "#!/bin/sh\nexit 1\n");
+    write_executable(&staged.bin_dir.join("codex"), &codex_markdown_final_stub());
+    staged.provider_flag = "--codex";
+    let capture = run_in_pane(&mut harness, &staged, MD_COLS as u32, 200, &[]);
+    assert_markdown_inside_the_gutter(&capture, "final message");
 }

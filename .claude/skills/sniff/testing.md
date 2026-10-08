@@ -47,3 +47,10 @@ the shared broker pane. After sending a command, poll the complete final
 `CapturedFrame` predicate with `cli/tests/common::capture_until`; do not add a
 fixed readiness sleep or treat prompt appearance alone as proof that styling
 and layout finished rendering.
+
+`filesystem query` CLI tests (`cli/tests/l1/filesystem_query.rs`) replay a
+report built from library types through the hidden
+`SNIFF_FILESYSTEM_QUERY_REPLAY` variable (a JSON file path). That is how
+they compare text with JSON for one observation and produce `unavailable`
+and `unsupported` outcomes on any host. The fixture scrubs inherited
+`SNIFF_*` variables, so set it per command.

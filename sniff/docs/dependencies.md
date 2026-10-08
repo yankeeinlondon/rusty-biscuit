@@ -37,7 +37,17 @@ added, and what each supplies:
 predate this work and serve other detectors. `Win32_System_Console` supplies
 `GetStdHandle` for `process::configure_detached_child`, which clears
 `HANDLE_FLAG_INHERIT` on the caller's stdio (moved from `playa`, which had
-used `windows-sys`).
+used `windows-sys`). `Win32_Storage_FileSystem` supplies `CreateFileW` and
+`GetFileInformationByHandleEx(FileIdInfo)`, which give the filesystem usage
+query (`filesystem::query`) the volume serial and 128-bit file ID it matches
+the root and tree entries on.
+`Win32_System_ProcessStatus` supplies `EnumProcesses`,
+`EnumProcessModulesEx`, and `GetModuleFileNameExW` for the query's Windows
+loaded-module backend; with `Win32_System_Threading` (`OpenProcess`,
+`GetProcessTimes`, `QueryFullProcessImageNameW`, `GetExitCodeProcess`) it
+reads each process's creation time, image, and modules, and the
+`Win32_Security` token calls above read the account of a process holding
+something in the queried tree.
 
 Note that the Rendezvous daemon declares its **own** `windows` features for the
 DACL work (`Win32_Storage_FileSystem`, and `Win32_Security_Authorization` for

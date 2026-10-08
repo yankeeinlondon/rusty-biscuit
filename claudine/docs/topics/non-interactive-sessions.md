@@ -9,6 +9,21 @@ A session becomes non-interactive when:
 
 `compose` and `inline-compose` default to non-interactive but can be switched to an interactive provider session by `-i` / `--interactive` or an `interactive: true` frontmatter property (resolution precedence: `--no-interactive` > `--interactive` > frontmatter > default). `claudine sequence` is always non-interactive automation and rejects `interactive: true` frontmatter. See [Composition — The `--interactive` and `--no-interactive` Flags](composition.md#the---interactive-and---no-interactive-flags).
 
+For direct structured provider wrappers, a failed semantic outcome returns
+caller exit 1 even when the provider exited 0. Nonempty answer text alone
+cannot establish success if completion remains unconfirmed. The provider's
+native exit stays separate in the summary and session record. Confirmed success
+with delayed presentation still returns 0; for example,
+`claudine claude review && echo next` executes `echo next` only on success.
+See [completion observations](timeouts.md#completion-observations-and-retained-prefixes).
+
+The retained prefixes and operation observations currently stay in the
+execution result; populated completion-delay lifecycle detail remains planned.
+Do not rely on `err.detail.response_text` to recover an answer yet. A provider
+may already have changed files or sent messages despite missing completion
+confirmation, so inspect its effects before repeating the transaction. See
+[planned author handling](flow-control/lifecycle.md#planned-delayed-completion-diagnostic).
+
 ## Information Density Contract
 
 Non-interactive sessions are blind from the caller's perspective: there is no TTY to query, no interactive feedback loop, and the wrapped provider may take minutes or hours to complete. Claudine compensates by surfacing **as much information as possible**, consistent across providers wherever the providers themselves are consistent. The guiding rule:
@@ -38,7 +53,7 @@ Non-interactive runs also force a safety appendix into the effective system prom
 Each provider has a typed protocol module under [`claudine/lib/src/stream/protocol/`](../../lib/src/stream/protocol/) (one file per provider) plus a semantic parser under [`claudine/lib/src/stream/`](../../lib/src/stream/) (e.g. `claude_semantic.rs`, `opencode_semantic.rs`).
 
 - **Protocol modules** define a serde-derived `*Event` enum tagged on `"type"`. Every field is `#[serde(default)]`, so format evolution never breaks deserialization. Unknown event types fail typed deserialization and are routed to a fallback arm that emits a `SemanticEvent::ProviderExtension` so nothing is dropped.
-- **Semantic parsers** implement `SemanticStreamParser`. Each line is parsed first to `serde_json::Value` (preserves the malformed-line warning path), then to the provider-specific tagged enum. Successful parses dispatch to handler methods that translate provider events into provider-agnostic [`SemanticEvent`](../../lib/src/stream/semantic.rs) variants.
+- **Semantic parsers** implement `SemanticStreamParser`. Each line is parsed first to `serde_json::Value` (preserves the malformed-line warning path), then to the provider-specific tagged enum. Successful parses dispatch to handler methods that translate provider events into provider-agnostic [`SemanticEvent`](../../lib/src/stream/semantic.rs) variants. `finish` turns the parser's accumulated state into the run's summary; `snapshot` computes the same summary without consuming the parser, so the wrapper keeps the result if the reader that owns the parser is abandoned at a cutoff (see [Timeouts](timeouts.md)).
 
 The `SemanticEvent` model is the cross-provider contract:
 

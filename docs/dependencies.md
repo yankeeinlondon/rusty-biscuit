@@ -1,5 +1,10 @@
 # Project Dependencies
 
+- `claudine-cli` uses `base64` 0.22 to retain invalid UTF-8 stdout losslessly
+  in bounded completion observations. This crate already exists in the
+  workspace dependency graph; no version or native dependency is added.
+
+
 ## Recent Dependency Notes
 
 - `renderable` adds `pulldown-cmark` 0.13 as a **dev-dependency** with

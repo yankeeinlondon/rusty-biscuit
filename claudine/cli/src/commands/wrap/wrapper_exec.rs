@@ -1,10 +1,8 @@
 //! Structured-stream execution arm for the direct provider wrapper.
 //!
-//! Lifted verbatim from `run_provider_wrapper_inner`'s execution dispatch:
-//! spawns the provider through the semantic stream pipeline (or the Kimi
+//! Spawns the provider through the semantic stream pipeline (or the Kimi
 //! wire transport), records perf, emits the structured summary, and returns
-//! the `(exit_code, captured_stderr)` pair. Behavior is identical to the
-//! inline arm it replaced.
+//! native exit evidence separately from the caller outcome.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -21,7 +19,8 @@ use super::profile::WrapperProfile;
 use super::{StructuredCodexOutput, composition, env, exec, live_semantic_sink, policy, wire_io};
 
 /// Run the provider through the structured-stream pipeline and return the
-/// `(exit_code, captured_stderr)` pair.
+/// native exit evidence and caller exit code. A semantic failure with native
+/// exit 0 returns caller exit 1 without rewriting the provider evidence.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn run_structured_stream_session(
     args: &WrapperArgs,
@@ -46,7 +45,7 @@ pub(crate) fn run_structured_stream_session(
     status_reporter: super::session_report::StatusReporter,
     control: Option<std::sync::Arc<dyn exec::control::StdioControl>>,
     steering: Option<claudine::steering::controller::SteeringController>,
-) -> Result<crate::output::native_exit::NativeExit> {
+) -> Result<(crate::output::native_exit::NativeExit, i32)> {
     let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
     let parser_config = claudine::stream::ParserConfig {
         model: args.model.clone(),
@@ -208,11 +207,13 @@ pub(crate) fn run_structured_stream_session(
         stream_result.agent_pid,
         &stream_result.signals,
         args.model.as_deref(),
+        &stream_result.reader_warnings,
     );
 
-    Ok(exec::structured_native_exit(
+    let caller_exit_code = if summary.exit_code == 0 && summary.is_error { 1 } else { summary.exit_code };
+    Ok((exec::structured_native_exit(
         summary.exit_code,
         stream_result.termination,
         stream_result.stream_tails.as_ref(),
-    ))
+    ), caller_exit_code))
 }

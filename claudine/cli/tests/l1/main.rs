@@ -20,6 +20,7 @@ mod cli_process_fixture;
 mod codex_app_server;
 mod command_routing;
 mod completion_cli;
+mod completion_delayed;
 mod completion_committed_prompt_schema;
 mod completion_compose;
 mod completion_contract;
@@ -30,6 +31,8 @@ mod completion_resolution_round_trip;
 mod completion_sequence;
 mod completion_setter;
 mod compose_caller_file_provenance;
+#[cfg(unix)]
+mod compose_closed_pipe_delivery;
 #[cfg(unix)]
 mod compose_cli;
 #[cfg(unix)]

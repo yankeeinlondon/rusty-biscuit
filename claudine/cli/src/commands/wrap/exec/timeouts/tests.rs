@@ -7,8 +7,7 @@ use rstest::rstest;
 use test_toolkit::EnvGuard;
 
 #[test]
-fn detect_step_timeout_fires_after_silence_exceeds_budget() {
-    let metrics = claudine::stream::progress::new_live_metrics();
+fn detect_step_timeout_fires_after_silence_exceeds_budget() {    let metrics = claudine::stream::progress::new_live_metrics();
     let now = Instant::now();
     {
         let mut state = metrics.lock().unwrap();
@@ -308,6 +307,44 @@ fn timeout_config_resolve_cli_wins_over_frontmatter_env_and_default() {
     let config = TimeoutConfig::resolve(resolved_timeout, resolved_step_timeout);
     assert_eq!(config.timeout, Some(Duration::from_secs(7200)));
     assert_eq!(config.step_timeout, Some(Duration::from_secs(1800)));
+}
+/// Every rendered duration carries its unit: bare seconds below a minute,
+/// minutes (with leftover seconds when nonzero) up to an hour, hours with
+/// minutes beyond it. Regression: the minute band used to print a bare
+/// number, so a 120 s silence read as "no stream activity for 2".
+#[rstest]
+#[case(0, "0s")]
+#[case(59, "59s")]
+#[case(60, "1m")]
+#[case(61, "1m1s")]
+#[case(120, "2m")]
+#[case(3599, "59m59s")]
+#[case(3600, "1h0m")]
+#[case(3661, "1h1m")]
+#[case(7200, "2h0m")]
+fn format_internal_duration_always_carries_a_unit(#[case] secs: u64, #[case] expected: &str) {
+    assert_eq!(format_internal_duration(secs), expected);
+}
+
+#[test]
+fn detect_step_timeout_message_includes_the_unit_suffixed_silence() {
+    let metrics = claudine::stream::progress::new_live_metrics();
+    let now = Instant::now();
+    {
+        let mut state = metrics.lock().unwrap();
+        state.last_event_at = Some(now - Duration::from_secs(120));
+    }
+
+    let detected = detect_step_timeout(&metrics, now, Duration::from_secs(5));
+
+    let message = match detected {
+        Some(EarlyTermination::StepTimeout { ref message, .. }) => message.clone(),
+        other => panic!("expected a step-timeout detection, got: {other:?}"),
+    };
+    assert!(
+        message.contains("no stream activity for 2m;"),
+        "the silence duration must carry its unit, got: {message}"
+    );
 }
 
 // The former `wait_with_timeout_rejects_absurd_timeout_without_panicking`

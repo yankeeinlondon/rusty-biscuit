@@ -51,6 +51,7 @@ pub(crate) struct StreamCapture {
     writer: BufWriter<File>,
     started_at: Instant,
     path: PathBuf,
+    observation: Option<(super::super::run_scope::RunScope, super::super::run_scope::retention::CaptureFacts)>,
 }
 
 impl StreamCapture {
@@ -104,7 +105,26 @@ impl StreamCapture {
             writer: BufWriter::new(file),
             started_at,
             path,
+            observation: None,
         })
+    }
+
+    pub(crate) fn observe_with(&mut self, scope: super::super::run_scope::RunScope) {
+        let facts = super::super::run_scope::retention::CaptureFacts {
+            path: self.path.to_string_lossy().into_owned(),
+            // The envelope omits original delimiters; flush cannot prove byte coverage.
+            omitted: true,
+            ..Default::default()
+        };
+        scope.capture(facts.clone());
+        self.observation = Some((scope, facts));
+    }
+
+    pub(crate) fn reached_eof(&mut self) {
+        if let Some((scope, facts)) = self.observation.as_mut() {
+            facts.eof = true;
+            scope.capture(facts.clone());
+        }
     }
 
     /// Write a single raw line to the capture file, prefixed with elapsed
@@ -131,6 +151,10 @@ impl StreamCapture {
         };
         serialized.push('\n');
         if let Err(err) = self.writer.write_all(serialized.as_bytes()) {
+            if let Some((scope, facts)) = self.observation.as_mut() {
+                facts.failed = true;
+                scope.capture(facts.clone());
+            }
             tracing::debug!(
                 target: "claudine::stream_capture",
                 error = %err,
@@ -143,7 +167,13 @@ impl StreamCapture {
 
 impl Drop for StreamCapture {
     fn drop(&mut self) {
-        if let Err(err) = self.writer.flush() {
+        let flushed = self.writer.flush();
+        if let Some((scope, facts)) = self.observation.as_mut() {
+            facts.flushed = flushed.is_ok();
+            facts.failed |= flushed.is_err();
+            scope.capture(facts.clone());
+        }
+        if let Err(err) = flushed {
             tracing::debug!(
                 target: "claudine::stream_capture",
                 error = %err,
@@ -272,4 +302,41 @@ mod tests {
             "meta has pid: {meta_body}"
         );
     }
+
+    #[test]
+    #[serial]
+    fn existing_capture_is_visible_without_flushing_the_reader() {
+        let dir = tempdir().unwrap();
+        let _env = test_toolkit::EnvGuard::set_safe("CLAUDINE_RAW_STREAM_DIR", dir.path().to_str().unwrap());
+        let scope = super::super::super::run_scope::RunScope::default();
+        let mut capture = StreamCapture::open(Some(Provider::Codex), 43, Instant::now()).unwrap();
+        capture.observe_with(scope.clone());
+        scope.retain_raw(&vec![b'x'; super::super::super::run_scope::retention::INLINE_LIMIT + 1]);
+        capture.record_line("{}", Instant::now());
+        let frozen = scope.freeze();
+        assert!(Path::new(frozen.retained.raw_output_path.as_deref().unwrap()).exists());
+        assert_eq!(frozen.retained.raw_output_complete, Some(false));
+        capture.reached_eof();
+        drop(capture);
+        assert_eq!(scope.freeze(), frozen);
+    }
+
+    #[test]
+    #[serial]
+    fn failed_capture_flush_never_upgrades_raw_completeness() {
+        let dir = tempdir().unwrap();
+        let _env = test_toolkit::EnvGuard::set_safe("CLAUDINE_RAW_STREAM_DIR", dir.path().to_str().unwrap());
+        let scope = super::super::super::run_scope::RunScope::default();
+        let mut capture = StreamCapture::open(Some(Provider::Codex), 44, Instant::now()).unwrap();
+        capture.writer = BufWriter::new(File::open(&capture.path).unwrap());
+        capture.observe_with(scope.clone());
+        scope.retain_raw(&vec![b'x'; super::super::super::run_scope::retention::INLINE_LIMIT + 1]);
+        capture.record_line("{}", Instant::now());
+        capture.reached_eof();
+        drop(capture);
+        let frozen = scope.freeze();
+        assert!(frozen.retained.raw_output_path.is_some());
+        assert_eq!(frozen.retained.raw_output_complete, Some(false));
+    }
+
 }

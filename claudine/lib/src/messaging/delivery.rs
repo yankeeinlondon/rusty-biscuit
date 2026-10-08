@@ -79,7 +79,7 @@ impl DrainOutcome {
             let rendered = Status::from_prose(body)
                 .state(StatusState::Warning)
                 .render(&Terminal::default());
-            eprintln!("{rendered}");
+            crate::render::console::write_stderr_line(&rendered);
         }
     }
 

@@ -13,6 +13,14 @@
 //! gratuitous blank lines when stdout was already newline-terminated.
 use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
+
+use super::output_worker::{
+    Drained, FrameSink, OutputLoss, OutputWorker, Stream, Submitted, TerminalSink,
+};
+use super::run_scope;
+
+static SHARED: std::sync::OnceLock<Arc<StreamOutput>> = std::sync::OnceLock::new();
 
 /// Shared test-only buffer of `(is_stdout, line)` tuples captured by
 /// `StreamOutput`. Wrapped in `Arc<Mutex<…>>` so the writer and the test
@@ -20,11 +28,20 @@ use std::sync::{Arc, Mutex};
 #[cfg(test)]
 pub(crate) type TestRecorder = Arc<Mutex<Vec<(bool, String)>>>;
 
+/// Terminal output of a wrapped run.
+///
+/// Nothing here writes to the terminal on the calling thread. Every emission
+/// is queued on the [`OutputWorker`] as a whole frame, so a terminal that has
+/// stopped accepting output can stall the worker but never the parser or the
+/// wrapper. The cursor bookkeeping below describes the stream as the worker
+/// will leave it once the queue drains.
 pub(crate) struct StreamOutput {
     /// Shared rather than owned so a [`decorated`](StreamOutput::decorated)
     /// handle serializes against the same cursor: per-task decoration must not
     /// buy a second opinion about where the real stdout cursor is.
     inner: Arc<Mutex<StreamOutputInner>>,
+    /// The one writer behind every handle derived from the same coordinator.
+    worker: Arc<OutputWorker>,
     /// Prefix applied to every status line this handle emits, so a sequence
     /// task's status and reasoning carry the same bar as its data (spec →
     /// *Reporting Concurrency*: "every subsequent status/output line").
@@ -45,15 +62,25 @@ struct StreamOutputInner {
     /// True when the most recent byte written to stdout was `\n`. Initial
     /// value is `true` because stdout starts at column zero.
     last_stdout_newline: bool,
+    /// When the wrapper's wait for the terminal ends, set by the run that
+    /// started the clock and consumed by the next [`StreamOutput::drain_final`].
+    drain_deadline: Option<Instant>,
 }
 
 impl StreamOutput {
     /// Construct a new coordinator behind an `Arc` for multi-thread sharing.
     pub(crate) fn new() -> Arc<Self> {
+        Self::with_sink(Box::new(TerminalSink))
+    }
+
+    /// A coordinator whose worker writes to `sink`.
+    pub(crate) fn with_sink(sink: Box<dyn FrameSink>) -> Arc<Self> {
         Arc::new(Self {
             inner: Arc::new(Mutex::new(StreamOutputInner {
                 last_stdout_newline: true,
+                drain_deadline: None,
             })),
+            worker: Arc::new(OutputWorker::new(sink)),
             status_gutter: None,
             #[cfg(test)]
             test_recorder: None,
@@ -61,7 +88,7 @@ impl StreamOutput {
     }
 
     /// A handle whose status lines carry `gutter`, sharing this coordinator's
-    /// cursor state and lock.
+    /// cursor state and worker.
     ///
     /// Derived rather than constructed so the "one synchronized render sink"
     /// rule survives: N tasks each hold their own decorated handle, but every
@@ -69,6 +96,7 @@ impl StreamOutput {
     pub(crate) fn decorated(self: &Arc<Self>, gutter: String) -> Arc<Self> {
         Arc::new(Self {
             inner: Arc::clone(&self.inner),
+            worker: Arc::clone(&self.worker),
             status_gutter: Some(gutter),
             #[cfg(test)]
             test_recorder: self.test_recorder.clone(),
@@ -98,9 +126,55 @@ impl StreamOutput {
     /// harmless while one provider session owned the terminal; a parallel group
     /// puts several writers on it at once, and the spec requires them to share
     /// one synchronized sink (spec → *Reporting Concurrency*).
+    ///
+    /// It is also the one worker for the process: a terminal found stalled in
+    /// one iteration of a loop stays disabled for the rest, and no iteration
+    /// starts a writer of its own.
+    ///
+    /// Creating it is what starts a wrapped run's ownership of the terminal:
+    /// from then until the process exits, Claudine's own diagnostics are
+    /// frames on this worker too ([`crate::terminal_gate::route_to`]). Only
+    /// wrapped-run code asks for it, so every other command keeps writing
+    /// directly.
     pub(crate) fn shared() -> Arc<Self> {
-        static SHARED: std::sync::OnceLock<Arc<StreamOutput>> = std::sync::OnceLock::new();
-        SHARED.get_or_init(Self::new).clone()
+        SHARED
+            .get_or_init(|| {
+                let output = Self::new();
+                crate::terminal_gate::route_to(Arc::clone(&output));
+                output
+            })
+            .clone()
+    }
+
+    /// The process-wide coordinator, if a wrapped run created it.
+    pub(crate) fn shared_if_created() -> Option<Arc<Self>> {
+        SHARED.get().cloned()
+    }
+
+    /// Queue one frame, unless the calling thread's run has already ended.
+    /// Returns whether the frame was queued.
+    ///
+    /// Callers hold `inner` so frames reach the queue in the order the cursor
+    /// bookkeeping assumed; queueing never blocks. A dropped or refused frame
+    /// is counted by the worker and reported through `loss`, and must not move
+    /// the cursor: it never reached the terminal.
+    fn submit(&self, stream: Stream, bytes: Vec<u8>) -> bool {
+        if run_scope::current_closed() {
+            self.worker.reject();
+            return false;
+        }
+        run_scope::observe(run_scope::observation::Operation::OutputSubmission);
+        self.worker.submit(stream, bytes) == Submitted::Queued
+    }
+
+    /// Queue the newline that puts a status line on a fresh row, when stdout
+    /// was left mid-line.
+    fn separate_from_stdout(&self, inner: &mut StreamOutputInner) {
+        if !inner.last_stdout_newline
+            && self.submit(Stream::Stdout, b"\n".to_vec())
+        {
+            inner.last_stdout_newline = true;
+        }
     }
 
     /// Emit already-rendered lines to stderr as one indivisible write.
@@ -120,17 +194,12 @@ impl StreamOutput {
             return;
         }
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        if !inner.last_stdout_newline {
-            let mut stdout = io::stdout().lock();
-            let _ = stdout.write_all(b"\n");
-            let _ = stdout.flush();
-            inner.last_stdout_newline = true;
-        }
-        let mut stderr = io::stderr().lock();
+        self.separate_from_stdout(&mut inner);
+        let mut bytes = Vec::new();
         for line in &frames {
-            let _ = writeln!(stderr, "{line}");
+            let _ = writeln!(bytes, "{line}");
         }
-        let _ = stderr.flush();
+        self.submit(Stream::Stderr, bytes);
     }
 
     /// Emit already-rendered lines to stdout as one indivisible write.
@@ -146,15 +215,16 @@ impl StreamOutput {
             return;
         }
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        let mut stdout = io::stdout().lock();
+        let mut bytes = Vec::new();
         if !inner.last_stdout_newline {
-            let _ = stdout.write_all(b"\n");
+            bytes.push(b'\n');
         }
         for line in frames {
-            let _ = writeln!(stdout, "{line}");
+            let _ = writeln!(bytes, "{line}");
         }
-        let _ = stdout.flush();
-        inner.last_stdout_newline = true;
+        if self.submit(Stream::Stdout, bytes) {
+            inner.last_stdout_newline = true;
+        }
     }
 
     /// Construct a test-only coordinator that captures emissions into the
@@ -162,11 +232,8 @@ impl StreamOutput {
     #[cfg(test)]
     pub(crate) fn test_recorder(buf: TestRecorder) -> Arc<Self> {
         Arc::new(Self {
-            inner: Arc::new(Mutex::new(StreamOutputInner {
-                last_stdout_newline: true,
-            })),
-            status_gutter: None,
             test_recorder: Some(buf),
+            ..Arc::into_inner(Self::new()).expect("a fresh coordinator has one owner")
         })
     }
 
@@ -185,9 +252,9 @@ impl StreamOutput {
             return;
         }
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        let mut stdout = io::stdout().lock();
-        let _ = writeln!(stdout, "{line}");
-        inner.last_stdout_newline = true;
+        if self.submit(Stream::Stdout, format!("{line}\n").into_bytes()) {
+            inner.last_stdout_newline = true;
+        }
     }
 
     /// Obtain a `Write` adapter that routes stdout bytes through this
@@ -199,14 +266,28 @@ impl StreamOutput {
         }
     }
 
+    /// The stderr twin of [`stdout_writer`](Self::stdout_writer), for the
+    /// agent's own stderr forwarded line by line: no status gutter, and each
+    /// `write` lands on a fresh row.
+    pub(crate) fn stderr_writer(self: &Arc<Self>) -> StderrWriter {
+        StderrWriter {
+            coordinator: self.clone(),
+        }
+    }
+
     /// Emit a status line to stderr, guaranteeing it lands on a fresh row.
     ///
-    /// Acquires the coordinator mutex, checks whether stdout is newline-
-    /// terminated, and writes `\n` to stdout first when it is not. Then
-    /// writes the caller-supplied line (without any additional prefix) to
+    /// Queues a `\n` for stdout first when stdout is not newline-terminated,
+    /// then the caller-supplied line (without any additional prefix) for
     /// stderr followed by a newline.
     pub(crate) fn emit_stderr_line(&self, line: &str) {
         let line = &self.decorate_status(line);
+        self.emit_stderr_undecorated(line);
+    }
+
+    /// Like [`emit_stderr_line`](Self::emit_stderr_line), without the status
+    /// gutter: for text that is the agent's own stderr, not Claudine's status.
+    pub(crate) fn emit_stderr_undecorated(&self, line: &str) {
         #[cfg(test)]
         if let Some(buf) = &self.test_recorder {
             buf.lock()
@@ -215,21 +296,89 @@ impl StreamOutput {
             return;
         }
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        if !inner.last_stdout_newline {
-            let mut stdout = io::stdout().lock();
-            let _ = stdout.write_all(b"\n");
-            let _ = stdout.flush();
-            inner.last_stdout_newline = true;
+        self.separate_from_stdout(&mut inner);
+        self.submit(Stream::Stderr, format!("{line}\n").into_bytes());
+    }
+
+    /// Queue a diagnostic's bytes unchanged ([`crate::terminal_gate::write`]);
+    /// returns whether they were queued.
+    ///
+    /// A stderr diagnostic gets no fresh-row separation, as a direct write
+    /// would not, and takes no cursor lock, so a panic report from a thread
+    /// that panicked inside this type cannot wait on itself. A stdout
+    /// diagnostic is data, and moves the cursor like any stdout frame.
+    pub(crate) fn submit_diagnostic(&self, stream: Stream, bytes: Vec<u8>) -> bool {
+        #[cfg(test)]
+        if let Some(buf) = &self.test_recorder {
+            buf.lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push((stream == Stream::Stdout, String::from_utf8_lossy(&bytes).into_owned()));
+            return true;
         }
-        let mut stderr = io::stderr().lock();
-        let _ = writeln!(stderr, "{line}");
+        match stream {
+            Stream::Stderr => self.submit(stream, bytes),
+            Stream::Stdout => {
+                let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+                let ends_line = bytes.last().map(|last| *last == b'\n');
+                let queued = self.submit(stream, bytes);
+                if let (true, Some(ends_line)) = (queued, ends_line) {
+                    inner.last_stdout_newline = ends_line;
+                }
+                queued
+            }
+        }
+    }
+
+    /// Wait for everything queued so far to reach the terminal, up to
+    /// `deadline`.
+    ///
+    /// Expiry disables delivery for the rest of the process and abandons the
+    /// writer; see [`OutputWorker::drain`].
+    pub(crate) fn drain(&self, deadline: Instant) -> Drained {
+        self.worker.drain(deadline)
+    }
+
+    /// Start the clock the trailer and every later write wait against.
+    pub(crate) fn set_drain_deadline(&self, deadline: Instant) {
+        self.inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .drain_deadline = Some(deadline);
+    }
+
+    /// Wait for the queue against the deadline of the run that just ended, or
+    /// `fallback` after it when no run set one. Used after the trailer and
+    /// before the process exits.
+    pub(crate) fn drain_final(&self, fallback: std::time::Duration) -> Drained {
+        let deadline = self
+            .inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .drain_deadline
+            .take()
+            .unwrap_or_else(|| Instant::now() + fallback);
+        self.drain(deadline)
+    }
+
+    /// Frames queued behind the one the worker is writing.
+    #[cfg(test)]
+    pub(crate) fn queued_frames(&self) -> usize {
+        self.worker.queued_frames()
+    }
+
+    /// Terminal output lost so far in this process; see [`OutputLoss::since`].
+    pub(crate) fn observation_since(&self, origin: Instant) -> super::output_worker::DeliveryObservation {
+        self.worker.observation_since(origin)
+    }
+
+    pub(crate) fn loss(&self) -> OutputLoss {
+        self.worker.loss()
     }
 }
 
-/// `Write` adapter that mirrors its bytes to `std::io::stdout` while
-/// updating [`StreamOutput`]'s newline-tracking flag. Any write acquires
-/// the coordinator mutex for the duration of the call, so concurrent
-/// writers cannot interleave bytes inside a single `write_all`.
+/// `Write` adapter that queues its bytes for stdout while updating
+/// [`StreamOutput`]'s newline-tracking flag. Each `write` is one frame, so
+/// concurrent writers cannot interleave bytes inside a single `write_all`.
 pub(crate) struct StdoutWriter {
     coordinator: Arc<StreamOutput>,
 }
@@ -241,150 +390,47 @@ impl Write for StdoutWriter {
             .inner
             .lock()
             .unwrap_or_else(|e| e.into_inner());
-        let mut stdout = io::stdout().lock();
-        let n = stdout.write(buf)?;
-        if let Some(last) = buf.get(..n).and_then(|s| s.last()) {
+        // A frame refused because delivery is disabled still reports success:
+        // the loss is recorded, and the parser must not fail over a terminal.
+        if let Some(last) = buf.last()
+            && self.coordinator.submit(Stream::Stdout, buf.to_vec())
+        {
             inner.last_stdout_newline = *last == b'\n';
         }
-        Ok(n)
+        Ok(buf.len())
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        io::stdout().lock().flush()
+        Ok(())
+    }
+}
+
+/// `Write` adapter that queues its bytes for stderr. Each `write` is one frame
+/// placed on a fresh row, so a caller writes a whole line per call.
+pub(crate) struct StderrWriter {
+    coordinator: Arc<StreamOutput>,
+}
+
+impl Write for StderrWriter {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        if buf.is_empty() {
+            return Ok(0);
+        }
+        let mut inner = self
+            .coordinator
+            .inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        self.coordinator.separate_from_stdout(&mut inner);
+        // Refused frames still report success, as for `StdoutWriter`.
+        self.coordinator.submit(Stream::Stderr, buf.to_vec());
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn fresh_coordinator_treats_stdout_as_newline_terminated() {
-        let coord = StreamOutput::new();
-        let inner = coord.inner.lock().unwrap();
-        assert!(inner.last_stdout_newline);
-    }
-
-    #[test]
-    fn stdout_writer_tracks_trailing_newline() {
-        let coord = StreamOutput::new();
-        let mut writer = coord.stdout_writer();
-
-        writer.write_all(b"hello").unwrap();
-        assert!(!coord.inner.lock().unwrap().last_stdout_newline);
-
-        writer.write_all(b"\n").unwrap();
-        assert!(coord.inner.lock().unwrap().last_stdout_newline);
-    }
-
-    #[test]
-    fn stdout_writer_tracks_no_newline_in_last_write() {
-        let coord = StreamOutput::new();
-        let mut writer = coord.stdout_writer();
-
-        writer.write_all(b"first\n").unwrap();
-        assert!(coord.inner.lock().unwrap().last_stdout_newline);
-
-        writer.write_all(b"second partial").unwrap();
-        assert!(!coord.inner.lock().unwrap().last_stdout_newline);
-    }
-
-    #[test]
-    fn stdout_writer_flags_newline_when_buffer_contains_embedded_newlines() {
-        // Only the final byte matters for cursor state.
-        let coord = StreamOutput::new();
-        let mut writer = coord.stdout_writer();
-
-        writer.write_all(b"alpha\nbeta").unwrap();
-        assert!(!coord.inner.lock().unwrap().last_stdout_newline);
-    }
-
-    #[test]
-    fn emit_stderr_line_after_newline_terminated_stdout_leaves_flag_unchanged() {
-        // When stdout is already on a fresh row, emit_stderr_line must not
-        // push a spurious blank line to stdout. We cannot observe stdout
-        // bytes directly in a unit test but we can assert the bookkeeping
-        // remains consistent.
-        let coord = StreamOutput::new();
-        let mut writer = coord.stdout_writer();
-        writer.write_all(b"done\n").unwrap();
-        coord.emit_stderr_line("tool: bash");
-        assert!(coord.inner.lock().unwrap().last_stdout_newline);
-    }
-
-    /// Provider status and reasoning reach stderr through `emit_stderr_line`.
-    /// A sequence task's handle must decorate them, or a task's body carries the
-    /// bar while its own status lines float unattributed beside it.
-    #[test]
-    fn decorated_handle_attributes_status_lines() {
-        let buf: TestRecorder = Arc::new(Mutex::new(Vec::new()));
-        let coord = StreamOutput::test_recorder(buf.clone()).decorated("│ ".to_string());
-
-        coord.emit_stderr_line("reasoning: weighing options");
-        coord.emit_stderr_frames(&["tool: bash".to_string()]);
-
-        let recorded = buf.lock().unwrap();
-        assert_eq!(
-            recorded
-                .iter()
-                .map(|(is_stdout, line)| (*is_stdout, line.as_str()))
-                .collect::<Vec<_>>(),
-            vec![
-                (false, "│ reasoning: weighing options"),
-                (false, "│ tool: bash"),
-            ],
-        );
-    }
-
-    /// Rendered status is often a multi-line block; an unprefixed continuation
-    /// line would read as belonging to whichever task wrote last.
-    #[test]
-    fn decorated_handle_attributes_every_line_of_a_block() {
-        let buf: TestRecorder = Arc::new(Mutex::new(Vec::new()));
-        let coord = StreamOutput::test_recorder(buf.clone()).decorated("│ ".to_string());
-
-        coord.emit_stderr_line("first\nsecond\nthird");
-
-        let recorded = buf.lock().unwrap();
-        assert_eq!(recorded[0].1, "│ first\n│ second\n│ third");
-    }
-
-    /// A non-sequence run must be byte-identical to before the seam existed.
-    #[test]
-    fn undecorated_handle_leaves_status_untouched() {
-        let buf: TestRecorder = Arc::new(Mutex::new(Vec::new()));
-        let coord = StreamOutput::test_recorder(buf.clone());
-
-        coord.emit_stderr_line("tool: bash");
-
-        assert_eq!(buf.lock().unwrap()[0].1, "tool: bash");
-    }
-
-    /// The decoration is per-handle, but the cursor is one real thing: a
-    /// derived handle must serialize against the same state, or two tasks
-    /// disagree about whether stdout is mid-line.
-    #[test]
-    fn decorated_handle_shares_cursor_state_with_its_parent() {
-        let coord = StreamOutput::new();
-        let decorated = coord.decorated("│ ".to_string());
-
-        let mut writer = coord.stdout_writer();
-        writer.write_all(b"partial").unwrap();
-
-        assert!(!decorated.inner.lock().unwrap().last_stdout_newline);
-        assert!(Arc::ptr_eq(&coord.inner, &decorated.inner));
-    }
-
-    #[test]
-    fn emit_stderr_line_marks_stdout_as_newline_terminated_after_injection() {
-        // After stdout was left mid-line, emit_stderr_line writes `\n` to
-        // stdout; the tracked flag must flip so the next stderr emission
-        // does not inject another `\n`.
-        let coord = StreamOutput::new();
-        let mut writer = coord.stdout_writer();
-        writer.write_all(b"partial text").unwrap();
-        assert!(!coord.inner.lock().unwrap().last_stdout_newline);
-        coord.emit_stderr_line("tool: bash");
-        assert!(coord.inner.lock().unwrap().last_stdout_newline);
-    }
-}
+mod tests;

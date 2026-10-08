@@ -63,27 +63,11 @@ pub(crate) fn execute_harness_attempt(
     let launch = if !use_structured
         && (launch.timeout_config.step_timeout.is_some() || launch.stall_timeout.is_some())
     {
-        use biscuit_terminal::components::renderable::TerminalRenderable;
-        use biscuit_terminal::components::status::{Status, StatusState};
         if launch.timeout_config.step_timeout.is_some() && launch.step_timeout_user_configured {
-            let rendered = Status::new(
-                "step_timeout is only enforced in structured-stream mode; \
-                 ignoring for this capture/passthrough attempt"
-                    .to_string(),
-            )
-            .state(StatusState::Warning)
-            .render(term);
-            eprintln!("{rendered}");
+            warn_unenforced_budget("step_timeout", term);
         }
         if launch.stall_timeout.is_some() && launch.stall_timeout_user_configured {
-            let rendered = Status::new(
-                "stall_timeout is only enforced in structured-stream mode; \
-                 ignoring for this capture/passthrough attempt"
-                    .to_string(),
-            )
-            .state(StatusState::Warning)
-            .render(term);
-            eprintln!("{rendered}");
+            warn_unenforced_budget("stall_timeout", term);
         }
         let mut adjusted = launch.clone();
         adjusted.timeout_config.step_timeout = None;
@@ -170,6 +154,7 @@ pub(crate) fn execute_harness_attempt(
         error_message,
         timeout_secs,
         native_exit,
+        output_status,
     ) = if use_structured
     {
         let summary_details = Arc::new(Mutex::new(
@@ -274,7 +259,7 @@ pub(crate) fn execute_harness_attempt(
                 Some(section_stream.tracker()),
                 content_early_rx,
                 signal_hub,
-                task_frame_writer,
+                task_frame_writer.clone(),
                 control,
             )?
         };
@@ -298,11 +283,21 @@ pub(crate) fn execute_harness_attempt(
             && !summary.assistant_text.is_empty()
             && !crate::output::user_interrupt_observed()
         {
-            crate::output::emit_final_message(
-                &summary.assistant_text,
-                term,
-                Some(&section_stream),
-            )?;
+            match task_frame_writer {
+                // A sequence task: the answer belongs inside the task's gutter,
+                // like the streamed text above it.
+                Some(writer) => crate::output::emit_framed_final_message(
+                    &summary.assistant_text,
+                    term,
+                    &section_stream,
+                    writer,
+                ),
+                None => crate::output::emit_final_message(
+                    &summary.assistant_text,
+                    term,
+                    Some(&section_stream),
+                )?,
+            }
         }
 
         super::super::policy::emit_stream_summary(
@@ -317,7 +312,10 @@ pub(crate) fn execute_harness_attempt(
             captured_agent_pid,
             &stream_result.signals,
             run_model.as_deref(),
+            &stream_result.reader_warnings,
         );
+        let output_status =
+            structured_output_status(&stream_result.reader_warnings, section_stream.output_loss());
 
         let effective_response = {
             let details = summary_details.lock().unwrap();
@@ -381,6 +379,7 @@ pub(crate) fn execute_harness_attempt(
             summary.error_message.clone(),
             timeout_secs,
             native_exit,
+            output_status,
         )
     } else if effective_non_interactive {
         let capture = super::super::exec::run_child_capture(
@@ -415,9 +414,6 @@ pub(crate) fn execute_harness_attempt(
         let response = profile.parse_captured_output(&stdout);
 
         let response_shown = !response.trim().is_empty();
-        if response_shown {
-            crate::output::emit_final_message(&response, term, None)?;
-        }
 
         let unshown = crate::output::native_exit::NativeExit::new(capture.data.exit_code, termination)
             .with_stdout(&stdout, response_shown)
@@ -427,9 +423,20 @@ pub(crate) fn execute_harness_attempt(
         let correlated =
             crate::output::error_report::attributes_to_tail(&unshown, &launch.provider_tail);
         let stderr = mask(stderr);
-        if !correlated && !stderr.trim().is_empty() {
-            eprintln!("{stderr}");
-        }
+        let shown_stderr = (!correlated && !stderr.trim().is_empty()).then_some(stderr.as_str());
+        let queued = response_shown || shown_stderr.is_some();
+        let loss = deliver_capture(
+            &crate::commands::wrap::stream_io::StreamOutput::shared(),
+            term,
+            response_shown.then_some(response.as_str()),
+            shown_stderr,
+            std::time::Instant::now() + crate::commands::wrap::exec::reader_join::READER_DRAIN_LIMIT,
+        )?;
+        let output_status = captured_output_status(
+            capture.data.incomplete,
+            &capture.reader_warnings,
+            loss.filter(|_| queued),
+        );
         let native_exit = unshown.with_stderr(&stderr, !correlated);
 
         // No stream parser on this path, so no synthesized error message;
@@ -457,6 +464,7 @@ pub(crate) fn execute_harness_attempt(
             None,
             capture_timeout_secs,
             native_exit,
+            output_status,
         )
     } else {
         // Interactive TUI path: inherit stdout/stderr directly so the
@@ -509,6 +517,7 @@ pub(crate) fn execute_harness_attempt(
             interactive_timeout_secs,
             // The child owned the terminal; nothing was captured.
             crate::output::native_exit::NativeExit::new(result.data, termination),
+            forwarded_output_status(&result.reader_warnings),
         )
     };
 
@@ -538,9 +547,114 @@ pub(crate) fn execute_harness_attempt(
             guard_context,
             error_message,
             timeout_secs,
+            output_status,
         },
         perf,
         iteration_signals,
         native_exit,
     ))
 }
+
+/// Present a captured attempt's `response` on stdout and its unreported
+/// `stderr` through `output`, then wait for the terminal until `deadline`.
+/// Returns the output the terminal lost meanwhile, `None` when it lost none.
+///
+/// The wait is what keeps a terminal that stopped accepting output from
+/// holding the attempt: lifecycle completion follows this, and a stalled
+/// terminal costs at most the deadline. Expiry disables delivery for the rest
+/// of the process; see [`StreamOutput::drain`].
+///
+/// [`StreamOutput::drain`]: crate::commands::wrap::stream_io::StreamOutput::drain
+fn deliver_capture(
+    output: &Arc<crate::commands::wrap::stream_io::StreamOutput>,
+    term: &Terminal,
+    response: Option<&str>,
+    stderr: Option<&str>,
+    deadline: std::time::Instant,
+) -> std::io::Result<Option<crate::commands::wrap::output_worker::OutputLoss>> {
+    use std::io::IsTerminal;
+
+    let loss_mark = output.loss();
+    if let Some(response) = response {
+        crate::output::write_final_message(
+            response,
+            term,
+            std::io::stdout().is_terminal(),
+            &mut output.stdout_writer(),
+        )?;
+    }
+    if let Some(stderr) = stderr {
+        output.emit_stderr_undecorated(stderr);
+    }
+    output.drain(deadline);
+    let loss = output.loss().since(&loss_mark);
+    Ok((!loss.is_empty()).then_some(loss))
+}
+
+/// The warning for output the terminal did not accept.
+const DELIVERY_LOSS_WARNING: &str =
+    "Claudine could not deliver all of the agent's output to the terminal: it was not accepting output";
+
+/// A structured attempt's output status: its reader warnings, and whether the
+/// terminal lost any of its output, final drain included.
+fn structured_output_status(
+    reader_warnings: &[String],
+    loss: Option<crate::commands::wrap::output_worker::OutputLoss>,
+) -> claudine::harness::OutputStatus {
+    let mut warnings = reader_warnings.to_vec();
+    if loss.is_some() {
+        warnings.push(DELIVERY_LOSS_WARNING.to_string());
+    }
+    claudine::harness::OutputStatus {
+        partial_capture: false,
+        delivery_incomplete: loss.is_some(),
+        warnings,
+    }
+}
+
+/// A captured attempt's output status. `loss` is what the terminal lost while
+/// the captured response and stderr were delivered, `None` when it lost
+/// nothing or nothing was queued.
+fn captured_output_status(
+    incomplete: bool,
+    reader_warnings: &[String],
+    loss: Option<crate::commands::wrap::output_worker::OutputLoss>,
+) -> claudine::harness::OutputStatus {
+    let undelivered = loss.is_some();
+    let mut warnings = reader_warnings.to_vec();
+    if undelivered {
+        warnings.push(DELIVERY_LOSS_WARNING.to_string());
+    }
+    claudine::harness::OutputStatus {
+        partial_capture: incomplete,
+        delivery_incomplete: undelivered,
+        warnings,
+    }
+}
+
+/// An inherited attempt's output status. Every warning its forwarders raise
+/// is a forwarding problem: the child's output was read to be written.
+fn forwarded_output_status(reader_warnings: &[String]) -> claudine::harness::OutputStatus {
+    claudine::harness::OutputStatus {
+        partial_capture: false,
+        delivery_incomplete: !reader_warnings.is_empty(),
+        warnings: reader_warnings.to_vec(),
+    }
+}
+
+/// Warn that `budget` is not enforced outside structured-stream mode.
+fn warn_unenforced_budget(budget: &str, term: &Terminal) {
+    use biscuit_terminal::components::renderable::TerminalRenderable;
+    use biscuit_terminal::components::status::{Status, StatusState};
+    let rendered = Status::new(format!(
+        "{budget} is only enforced in structured-stream mode; \
+         ignoring for this capture/passthrough attempt"
+    ))
+    .state(StatusState::Warning)
+    .render(term);
+    crate::log::message(&rendered);
+}
+
+#[cfg(test)]
+#[path = "attempt/tests.rs"]
+mod tests;

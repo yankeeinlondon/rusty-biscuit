@@ -3,8 +3,10 @@
 pub(crate) mod env;
 pub(crate) mod exec;
 pub(crate) mod live_semantic_sink;
+pub(crate) mod output_worker;
 pub(crate) mod profile;
 pub(crate) mod provider_overlay;
+pub(crate) mod run_scope;
 pub(crate) mod runaway_guard;
 pub(crate) mod section;
 pub(crate) mod session_report;
@@ -204,6 +206,7 @@ enum WrapperOutcome {
     /// report.
     AgentExited {
         exit: Box<crate::output::native_exit::NativeExit>,
+        caller_exit_code: i32,
         /// The passthrough tail, for correlating an argument rejection.
         provider_tail: claudine::composition::ProviderTail,
         model_source: Option<profile::ModelSource>,
@@ -245,6 +248,7 @@ pub fn run_provider_wrapper(
     let code = match wrapper_outcome {
         WrapperOutcome::AgentExited {
             exit,
+            caller_exit_code,
             provider_tail,
             model_source,
         } => {
@@ -259,7 +263,7 @@ pub fn run_provider_wrapper(
                 .report
                 .render(&term);
             }
-            exit.exit_code
+            caller_exit_code
         }
         WrapperOutcome::NotLaunched => 0,
         WrapperOutcome::NoModel => return Ok(1),
@@ -843,7 +847,7 @@ fn run_provider_wrapper_inner(
     if let Some(collector) = perf_collector.as_mut() {
         collector.set_invocation_work(&invocation.work_snapshot());
     }
-    let exit = execution_result?;
+    let (exit, caller_exit_code) = execution_result?;
 
     // ------------------------------------------------------------------
     // Stage 16: Cleanup and return
@@ -852,6 +856,7 @@ fn run_provider_wrapper_inner(
 
     Ok(WrapperOutcome::AgentExited {
         exit: Box::new(exit),
+        caller_exit_code,
         provider_tail,
         model_source,
     })

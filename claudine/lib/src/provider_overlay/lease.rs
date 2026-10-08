@@ -227,7 +227,7 @@ impl Drop for OverlayLease {
         // only channel left that reaches the user.
         if let Some(notice) = self.finish().as_ref().and_then(OverlayRelease::recovery_notice) {
             tracing::error!(root = %self.root.display(), "provider state kept in the overlay root after a failed write-back");
-            eprintln!("{notice}");
+            crate::render::console::write_stderr_line(&notice);
         }
     }
 }

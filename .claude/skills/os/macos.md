@@ -67,6 +67,21 @@ conditions that masquerade as repository defects.
   sniff-cli's `relative_base_with_unreadable_cwd_fails` does (measured
   2026-10-06). Keep such a test to one lookup.
 
+## Process groups
+
+- One `kill(-pgid, SIGKILL)` does not reach a child that a group member is
+  forking at that moment: XNU does not make `fork` atomic with a group signal,
+  so the child joins the group unsignalled and survives. Killing
+  `sh -c 'echo started; sleep 300'` on reading `started` left `sleep` running
+  in 63–74 of 2,000 tries on this host, and in 0 of 2,000 in a Linux
+  container. Repeat the group kill until it fails. A group that holds only
+  zombies answers `EPERM` on macOS but `0` on Linux, so "until it fails" ends
+  on macOS while the unreaped leader is a zombie and spins on Linux; Claudine's
+  `ProcessTree` drop repeats only off Linux, under a 250 ms bound.
+- The escaped child holds whatever the group inherited. With a test's stderr
+  inherited, nextest reports `LEAK-FAIL` about 30 s after the test passed,
+  even though every pid the test watched was reaped.
+
 ## Linux and Windows evidence from this host
 
 "macOS-only host, cross-platform runs not executable" is wrong here.
@@ -117,6 +132,55 @@ slowest leg for Claudine's CLI suite by more than 2x. Tune any concurrency
 cap to this leg, not to Linux. It is also the only leg where Level 3
 focus-stealing tests could run, and they do not run on CI at all. Details in
 [ci-runners.md](ci-runners.md).
+
+## Finding filesystem watchers
+
+An open-file scan does not enumerate FSEvents directory watches. On 2026-10-05,
+a Node `fs.watch(path, { recursive: true })` process with cwd `/` received a
+created-file event, but `lsof -nP -a -p <pid> -Fftn` contained no watched path.
+The probe used a temporary directory and waited for delivery before inspecting
+its descriptors. A process whose cwd is inside a worktree may still be found
+through cwd inspection; that is evidence of directory use, not a watch record.
+
+Apple's `FSEventStreamCopyPathsBeingWatched` inspects a stream reference owned
+by the caller, not a system-wide list of other processes' registrations. Do
+not treat an empty `lsof` or vnode-descriptor scan as proof that no process
+watches a directory. See the [FSEvents guide](https://developer.apple.com/library/archive/documentation/Darwin/Conceptual/FSEvents_ProgGuide/UsingtheFSEventsFramework/UsingtheFSEventsFramework.html)
+and [Node's platform mapping](https://nodejs.org/api/fs.html#availability).
+
+### Reading other processes' descriptors and cwd
+
+Measured 2026-10-05 on macOS 27.2 (arm64) for Sniff's path-usage query:
+
+- The `libproc` crate (0.14.11) is a poor fit. `pids_by_path` /
+  `pids_by_type_and_path` is **not recursive**: it matches only processes whose
+  fd or cwd is the queried vnode itself, never anything beneath a directory.
+  Its `is_volume` and `exclude_event_only` flags are silently ignored, because
+  `sys/macos.rs` passes `pathflags` only on the sizing call. `pidcwd` returns
+  "not implemented for macos". Its `build.rs` also runs bindgen, so the build
+  needs libclang.
+- Raw `libc::proc_pidinfo(PROC_PIDLISTFDS)` plus
+  `proc_pidfdinfo(PROC_PIDFDVNODEPATHINFO = 2)` gives each vnode fd's canonical
+  `/private/...` path, `vst_dev`, `vst_ino`, and `fi_openflags`.
+  `proc_pidinfo(PROC_PIDVNODEPATHINFO)` gives the cwd the same way. `libc`
+  lacks `proc_fileinfo`, `vnode_fdinfowithpath`, and that constant, so define
+  them locally.
+- `PROC_PIDLISTFDS` fills only the buffer you pass and does not report that it
+  was too small. Retry larger whenever the returned count equals the capacity.
+  `pbi_nfiles` is table capacity, not the open count.
+- An `O_EVTONLY` open is visible (`fi_openflags = 0x8001`). It is a
+  descriptor, not proof of an FSEvents subscription.
+- Another user's process (PID 1) fails every per-PID call with `EPERM`, while
+  `proc_listpids` still lists every PID. Treat EPERM as "not inspected", never
+  as "no matches". That includes `PROC_PIDTBSDINFO`, the only flavor with a
+  start time, so such a process has no creation token;
+  `PROC_PIDT_SHORTBSDINFO` succeeds for it but carries no start time.
+- `proc_pidinfo`/`proc_pidfdinfo` return **0, not -1**, on failure and set
+  `errno`. Zero `errno` before the call: `PROC_PIDLISTFDS` returning 0 with
+  `errno` still 0 is an empty table, not an error.
+- `vinfo_stat.vst_dev` is `u32`, but `st_dev` is `i32` and
+  `std::os::unix::fs::MetadataExt::dev()` sign-extends it. Compare with
+  `vst_dev as i32 as u64`, or a device with the high bit set never matches.
 
 ## Host conditions that look like repo failures
 
