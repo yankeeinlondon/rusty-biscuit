@@ -45,6 +45,7 @@ Rust, TypeScript, JavaScript, Go, Python, Java, C#, C, C++, Swift, Scala, PHP, P
 | `<declaration cmd> --jsonl` | One self-describing JSON envelope per selected record (`classes` lines add a `members` list) |
 | `<declaration cmd> --count` / `--stats` | One integer line / counts by kind, visibility, language + doc coverage (`--stats --json` for the envelope) |
 | `<declaration cmd> --format plain\|table` | Unstyled, unwrapped listing / one biscuit-terminal `Table` per file |
+| `<declaration cmd> --format tsv\|markdown\|prose\|ctags` | UTF-8 export; ctags uses unsorted format-2 tags with numeric addresses and Hug kind/container fields |
 | `functions\|types\|symbols --tree` | Members nested under their container (by container ID) |
 | `<declaration cmd> --signatures full\|short\|none` | Header as written / compact with `… +N` past four fields (default) / names only |
 | `<declaration cmd>` selectors | `--file`/`--name`/`--exact`, `--kind`, `--scope`/`--all-scopes`, `--visibility`, `--exported`, `--in`, `--exclude-tests`/`--tests-only`, `--undocumented`, `--deprecated`, `--async`, `--returns`, `--param-type`, `--min-params` (AND across selectors, OR within one; smart-case names) |
@@ -345,7 +346,12 @@ detects the pane's TTY; the styling scenarios pin `COLUMNS=10000`, while
 (`Pane::cols`) and at an injected `COLUMNS`; `check_outline`, `check_stats`,
 `check_signature_modes` and `check_classes_table` compare `--tree`, `--stats`,
 `--signatures full|none` and `classes --format table` row for row and need an
-80-column pane). Every styled view a feature adds needs a check here, called
+80-column pane). `check_stats` checks complete overall/Unassigned sections
+for the mixed-language fixture and complete sections for a temporary named
+workspace at both ordinary width and `COLUMNS=20`. It pins duplicate names
+at distinct paths, bold literal Unicode/markup/control text, zero counters,
+Unassigned last, and absence of an unselected catalog package.
+Every styled view a feature adds needs a check here, called
 from all three backend entry points. Ordinary local L1 omits their harness and targets;
 `just test-l2` and CI enable them. A new `level2_*` target needs a `[[test]]`
 entry with `required-features = ["terminal-tests"]`. Both targets read panes

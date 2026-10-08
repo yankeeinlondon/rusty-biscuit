@@ -14,6 +14,7 @@ hug --json-full symbols       # every file's complete index, diagnostics include
 hug symbols --jsonl | jq -c .record.identity.name   # one JSON object per declaration
 hug symbols --tree            # members nested under their type
 hug functions --format table  # one table row per declaration
+hug symbols --format ctags > tags # numeric-line navigation tags
 hug functions --count         # just the number
 hug symbols --stats           # counts by kind, visibility and language, plus doc coverage
 hug --verbose functions       # same listing, plus cache and work stats on stderr
@@ -22,6 +23,34 @@ hug --verbose functions       # same listing, plus cache and work stats on stder
 Global flags (`--json`, `--json-full`, `--plain`, `--verbose`) come before
 the command; command flags (`--sort`, `--no-cache`, `--group-by-file`, …)
 come after it.
+
+## Tags output
+
+Use `--format ctags` to write an unsorted format-2 tags file. Each selected
+record becomes one tab-separated entry with a numeric source line, a `kind:`
+field, and a `class:` field when the record has recorded container ownership.
+Paths are relative to the scan root and use `/` separators. Duplicate names
+and overloads remain separate entries; synthetic exports and records without a
+source location are omitted. `classes` includes its selected containers and
+displayed methods or constructors, but does not turn summary fields into tags.
+
+The `kind:` value is Hug's lower-case kind name for all 16 supported languages:
+`function`, `method`, `constructor`, `type`, `class`, `interface`, `enum`,
+`trait`, `module`, `namespace`, `field`, `property`, `variable`, `constant`,
+`parameter`, `type_alias`, `enum_variant`, `macro`, or `unknown`. Generic
+`type` and `unknown` values remain generic. A `class:` value comes only from
+recorded ownership; Hug does not infer it by comparing declaration names.
+Names, paths, and container values containing control characters are omitted
+with a warning and make the command exit 1. Spaces and Unicode are preserved.
+This is a documented navigation subset, not a promise of Universal Ctags
+compatibility.
+
+```mermaid
+flowchart LR
+  S[Selected declarations] --> L[Numeric line and relative path]
+  L --> K[Kind and recorded container fields]
+  K --> T[Unsorted format-2 tags output]
+```
 
 ## Changed files
 

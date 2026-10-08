@@ -20,3 +20,7 @@ dev-dependency for commits, branch checkout, and linked worktrees without
 host signing or credentials. The `libgit2-sys >=0.18.3, <0.18.6` constraint
 matches sniff's Windows MSVC compatibility pin. Neither is a production
 Git backend.
+
+The CLI uses `pulldown-cmark` 0.13 as a dev-dependency to parse Markdown export
+output in integration tests. Runtime Markdown writing uses the CLI's escaping
+adapter and adds no parser dependency to the shipped binary.
