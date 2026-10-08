@@ -68,7 +68,7 @@ fn scratch() -> Scratch {
 }
 
 /// A file `hug` cannot read as UTF-8, so its analysis fails.
-fn add_bad_file(scratch: &Scratch, name: &str) {
+pub(crate) fn add_bad_file(scratch: &Scratch, name: &str) {
     std::fs::write(scratch.repo.path().join(name), b"fn ok() {}\n\xff\xfe\n").expect("write bad file");
 }
 

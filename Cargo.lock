@@ -14478,6 +14478,7 @@ dependencies = [
  "libgit2-sys",
  "owo-colors",
  "predicates",
+ "pulldown-cmark",
  "rayon",
  "serde",
  "serde_json",

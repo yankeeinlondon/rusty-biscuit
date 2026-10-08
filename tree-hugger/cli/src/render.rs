@@ -1,4 +1,4 @@
-//! The one terminal renderer of the declaration commands (`functions`,
+//! The shared declaration renderer for the commands (`functions`,
 //! `types`, `symbols`, `classes`) and of `refs`, fed from v2 records.
 //!
 //! Every line is `Prose` markup (inside a biscuit-terminal `UnorderedList`
@@ -524,7 +524,7 @@ impl Renderer {
 
     /// Doc lines as continuation lines of a list item: the list's hanging
     /// indent aligns them under the item text.
-    fn doc_lines(&self, doc: Option<&str>) -> String {
+    pub(crate) fn doc_lines(&self, doc: Option<&str>) -> String {
         self.trimmed_doc(doc)
             .map(|lines| {
                 lines

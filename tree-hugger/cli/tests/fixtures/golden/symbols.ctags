@@ -1,0 +1,96 @@
+!_TAG_FILE_FORMAT	2	/extended format/
+!_TAG_FILE_SORTED	0	/0=unsorted/
+DEFAULT_TARGET	bash.sh	4;"	kind:variable
+build_target	bash.sh	6;"	kind:function
+clean_target	bash.sh	11;"	kind:function
+point	c.c	3;"	kind:type
+x	c.c	4;"	kind:field	class:point
+y	c.c	5;"	kind:field	class:point
+point_t	c.c	8;"	kind:type_alias
+origin_count	c.c	10;"	kind:variable
+point_sum	c.c	12;"	kind:function
+reset_origin	c.c	16;"	kind:function
+Multi	c_sharp.cs	3;"	kind:namespace
+Ledger	c_sharp.cs	5;"	kind:class	class:Multi
+total	c_sharp.cs	7;"	kind:field	class:Multi.Ledger
+Total	c_sharp.cs	9;"	kind:property	class:Multi.Ledger
+Add	c_sharp.cs	11;"	kind:method	class:Multi.Ledger
+Empty	c_sharp.cs	16;"	kind:method	class:Multi.Ledger
+IAuditable	c_sharp.cs	22;"	kind:interface	class:Multi
+Audit	c_sharp.cs	24;"	kind:method	class:Multi.IAuditable
+geometry	cpp.cpp	3;"	kind:namespace
+Vector	cpp.cpp	5;"	kind:class	class:geometry
+Vector	cpp.cpp	7;"	kind:constructor	class:geometry::Vector
+length	cpp.cpp	9;"	kind:method	class:geometry::Vector
+x_	cpp.cpp	12;"	kind:field	class:geometry::Vector
+y_	cpp.cpp	13;"	kind:field	class:geometry::Vector
+dot	cpp.cpp	16;"	kind:function	class:geometry
+Counter	java.java	3;"	kind:class
+count	java.java	4;"	kind:field	class:Counter
+Counter	java.java	6;"	kind:constructor	class:Counter
+increment	java.java	10;"	kind:method	class:Counter
+zero	java.java	14;"	kind:method	class:Counter
+Resettable	java.java	19;"	kind:interface
+reset	java.java	20;"	kind:method	class:Resettable
+Button	javascript.js	3;"	kind:class
+constructor	javascript.js	4;"	kind:constructor	class:Button
+press	javascript.js	8;"	kind:method	class:Button
+buildButton	javascript.js	13;"	kind:function
+DEFAULT_LABEL	javascript.js	17;"	kind:variable
+M	lua.lua	3;"	kind:variable
+default_size	lua.lua	5;"	kind:variable
+new_bag	lua.lua	7;"	kind:function	class:M
+describe	lua.lua	11;"	kind:method	class:M
+helper	lua.lua	15;"	kind:function
+nested	nested/go.go	2;"	kind:namespace
+Widget	nested/go.go	5;"	kind:type
+Size	nested/go.go	6;"	kind:field	class:nested.Widget
+Grow	nested/go.go	9;"	kind:method	class:nested.Widget
+MaxSize	nested/go.go	13;"	kind:constant
+BuildWidget	nested/go.go	15;"	kind:function
+MAX_SIZE	nested/python.py	3;"	kind:variable
+Gadget	nested/python.py	6;"	kind:class
+__init__	nested/python.py	9;"	kind:constructor	class:Gadget
+grow	nested/python.py	12;"	kind:method	class:Gadget
+build_gadget	nested/python.py	16;"	kind:function
+Multi::Queue	perl.pl	2;"	kind:module
+$default_size	perl.pl	4;"	kind:variable	class:Multi::Queue
+new_queue	perl.pl	6;"	kind:function	class:Multi::Queue
+queue_size	perl.pl	11;"	kind:function	class:Multi::Queue
+Account	php.php	4;"	kind:class
+balance	php.php	6;"	kind:field	class:Account
+deposit	php.php	8;"	kind:method	class:Account
+open	php.php	13;"	kind:method	class:Account
+open_account	php.php	19;"	kind:function
+Widget	rust.rs	4;"	kind:type
+size	rust.rs	5;"	kind:field	class:Widget
+new	rust.rs	9;"	kind:method	class:Widget
+grow	rust.rs	13;"	kind:method	class:Widget
+Shape	rust.rs	18;"	kind:enum
+Circle	rust.rs	19;"	kind:enum_variant	class:Shape
+Square	rust.rs	20;"	kind:enum_variant	class:Shape
+MAX_SIZE	rust.rs	23;"	kind:constant
+build_widget	rust.rs	25;"	kind:function
+Named	scala.scala	5;"	kind:trait
+name	scala.scala	6;"	kind:method	class:multi.Named
+Tag	scala.scala	9;"	kind:class
+upper	scala.scala	10;"	kind:method	class:multi.Tag
+Tag	scala.scala	13;"	kind:module
+empty	scala.scala	14;"	kind:method	class:multi.Tag
+Meter	swift.swift	3;"	kind:type
+reading	swift.swift	4;"	kind:field	class:Meter
+doubled	swift.swift	6;"	kind:method	class:Meter
+Readable	swift.swift	11;"	kind:interface
+read	swift.swift	12;"	kind:method	class:Readable
+buildMeter	swift.swift	15;"	kind:function
+Sized	typescript.ts	3;"	kind:interface
+size	typescript.ts	4;"	kind:property	class:Sized
+Size	typescript.ts	7;"	kind:type_alias
+Panel	typescript.ts	9;"	kind:class
+size	typescript.ts	10;"	kind:property	class:Panel
+constructor	typescript.ts	12;"	kind:constructor	class:Panel
+grow	typescript.ts	16;"	kind:method	class:Panel
+buildPanel	typescript.ts	21;"	kind:function
+PROMPT_STYLE	zsh.zsh	4;"	kind:variable
+render_prompt	zsh.zsh	6;"	kind:function
+reset_prompt	zsh.zsh	11;"	kind:function

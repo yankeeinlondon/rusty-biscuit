@@ -1095,3 +1095,39 @@ fn level2_declarations_in_kitty() {
     check_classes_table(harness, &pane);
     check_refs(harness, &pane);
 }
+
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_ctags_reader_resolves_duplicates_and_numeric_lines_headlessly() {
+    let available = std::process::Command::new("nvim").arg("--version").output().is_ok();
+    require_level!(Level::L2, available, "Neovim");
+    let fixture = Fixture::empty();
+    std::fs::write(fixture.repo.path().join("one.rs"), "pub fn duplicate() {}\n").unwrap();
+    std::fs::write(fixture.repo.path().join("two.rs"), "pub fn duplicate() {}\n").unwrap();
+    let spaced = fixture.repo.path().join("dir with space/λ.rs");
+    std::fs::create_dir_all(spaced.parent().unwrap()).unwrap();
+    std::fs::write(&spaced, "pub struct Ω;\nimpl Ω { pub fn inside() {} }\n").unwrap();
+    let config = fixture.home.path().join(".config");
+    let tags = std::process::Command::new(hug())
+        .args(["symbols", "--format", "ctags"])
+        .current_dir(fixture.repo.path())
+        .env("HOME", fixture.home.path())
+        .env("USERPROFILE", fixture.home.path())
+        .env("XDG_CONFIG_HOME", config)
+        .env("TMPDIR", fixture.temp.path())
+        .env("TMP", fixture.temp.path())
+        .env("TEMP", fixture.temp.path())
+        .env("NO_COLOR", "1")
+        .output().unwrap();
+    assert!(tags.status.success(), "{}", String::from_utf8_lossy(&tags.stderr));
+    let tags_path = fixture.temp.path().join("tags");
+    std::fs::write(&tags_path, tags.stdout).unwrap();
+    let set_tags = format!("set tags={}", tags_path.display().to_string().replace(' ', "\\ "));
+    let reader = std::process::Command::new("nvim")
+        .args(["--headless", "-u", "NONE", "-i", "NONE", "-c", &set_tags,
+            "-c", "lua local d=vim.fn.taglist('duplicate'); assert(#d == 2); assert(d[1].cmd == '1'); assert(d[2].cmd == '1'); local m=vim.fn.taglist('inside'); assert(#m == 1); assert(m[1].cmd == '2'); assert(m[1].class == 'Ω'); assert(m[1].filename == 'dir with space/λ.rs'); local u=vim.fn.taglist('Ω'); assert(#u == 1); assert(u[1].cmd == '1')",
+            "-c", "qa!"])
+        .output().unwrap();
+    assert!(reader.status.success(), "{}", String::from_utf8_lossy(&reader.stderr));
+}

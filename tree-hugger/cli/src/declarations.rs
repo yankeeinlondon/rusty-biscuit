@@ -19,7 +19,7 @@ use tree_hugger::{
 use crate::classes::{self, ClassSelection, ClassSummary};
 use crate::order::{compare, portable_path_cmp, sort_file_records};
 use crate::prelude::{PreludeFilter, resolve_prelude_symbols};
-use crate::output::View;
+use crate::output::{ExportFormat, View};
 use crate::render::{FileListing, ListingOptions, ListingStream, RenderOptions, Renderer, listing_order};
 use crate::report::{
     Entries, FileEntry, JsonLine, JsonReport, REPORT_SCHEMA_VERSION, ReportError, portable_relative,
@@ -104,6 +104,8 @@ pub(crate) enum ReportFormat {
     /// `--stats`: as terminal tables written with the options, or as JSON
     /// (`None`).
     Stats(Option<RenderOptions>),
+    /// A terminal-independent declaration export.
+    Export { format: ExportFormat, signatures: crate::output::SignatureMode, plain: bool, comments: bool, containment: bool },
 }
 
 impl ReportFormat {
@@ -116,7 +118,8 @@ impl ReportFormat {
             Self::Json | Self::JsonFull | Self::JsonLines => vec![Capability::Flags],
             Self::Stats(_) => vec![Capability::Metrics],
             Self::Terminal { view: View::Tree, .. } => vec![Capability::Containment],
-            Self::Terminal { .. } | Self::Count => Vec::new(),
+            Self::Export { containment: true, .. } => vec![Capability::Containment],
+            Self::Terminal { .. } | Self::Export { containment: false, .. } | Self::Count => Vec::new(),
         }
     }
 }
@@ -259,19 +262,97 @@ pub(crate) fn run(scan: DeclarationScan, analyzer: &Analyzer) -> Result<i32, Tre
                 View::Tree => write_tree(&scan, &renderer, &files, work, &mut sink),
             }
         }
+        format @ ReportFormat::Export { .. } => write_export(&scan, &files, work, format, &mut sink),
     };
 
     if scan.verbose {
         let _ = writeln!(stderr, "{}", stats.summary());
     }
+    Ok(write_status(written, errors.is_empty(), &mut stderr))
+}
+
+fn write_status(written: io::Result<()>, no_file_errors: bool, stderr: &mut dyn Write) -> i32 {
     match written {
-        Ok(()) => Ok(if errors.is_empty() { 0 } else { 1 }),
-        Err(error) if error.kind() == io::ErrorKind::BrokenPipe => Ok(0),
+        Ok(()) => i32::from(!no_file_errors),
+        Err(error) if error.kind() == io::ErrorKind::BrokenPipe => 0,
         Err(error) => {
             let _ = writeln!(stderr, "error: cannot write output: {error}");
-            Ok(1)
+            1
         }
     }
+}
+
+/// Settles each completed export file before advancing to the next chunk.
+fn write_export(
+    scan: &DeclarationScan,
+    files: &[PathBuf],
+    work: impl Fn(&Path) -> FileOutcome + Sync,
+    format: ReportFormat,
+    sink: &mut Sink<'_>,
+) -> io::Result<()> {
+    let chunk = chunk_size();
+    let mut delivered = 0;
+    let mut wrote_any = false;
+    let is_tsv = matches!(format, ReportFormat::Export { format: ExportFormat::Tsv, .. });
+    let is_ctags = matches!(format, ReportFormat::Export { format: ExportFormat::Ctags, .. });
+    if is_tsv {
+        sink.out.write_all(crate::tsv::HEADER.as_bytes())?;
+    }
+    if is_ctags {
+        sink.out.write_all(crate::ctags::HEADER.as_bytes())?;
+    }
+    let flow = in_file_order(files, work, |file, outcome| {
+        delivered += 1;
+        if let Some((display, prepared)) = sink.settle(outcome, scan.verbose) {
+            let selected = selected_records(scan, &display, prepared);
+            let ReportFormat::Export { format, signatures, plain, comments, .. } = format else { unreachable!() };
+            let rows = crate::export::flatten_selected(
+                &selected.records,
+                selected.members.as_deref(),
+                scan.listing.sort,
+                format != ExportFormat::Ctags,
+            );
+            wrote_any |= !rows.is_empty();
+            if format == ExportFormat::Tsv
+                && let Err(error) = crate::tsv::write_rows(&mut *sink.out, &display, &rows, signatures)
+            {
+                return as_flow(Err(error));
+            }
+            if format == ExportFormat::Ctags {
+                for record in &rows {
+                    match crate::ctags::write_record(&mut *sink.out, record, &scan.scan_root) {
+                        Ok(Some((path, line))) => {
+                            let message = format!("ctags skipped unsupported control character in {path} at line {line}");
+                            let _ = writeln!(sink.stderr, "warning: {message}");
+                            sink.errors.push(ReportError { file: path, kind: "ctags_unsupported", message });
+                        }
+                        Ok(None) => {}
+                        Err(error) => return as_flow(Err(error)),
+                    }
+                }
+            }
+            if matches!(format, ExportFormat::Prose | ExportFormat::Markdown) {
+                let renderer = Renderer::new(
+                    RenderOptions { styled: !plain, show_comments: comments, width: None, signatures },
+                    Some(scan.git_root.clone()),
+                );
+                let result = match format {
+                    ExportFormat::Prose => crate::prose::write_file(&mut *sink.out, &renderer, &rows, file, plain),
+                    ExportFormat::Markdown => crate::markdown::write_file(&mut *sink.out, &renderer, &rows, signatures, comments),
+                    _ => unreachable!(),
+                };
+                if let Err(error) = result { return as_flow(Err(error)); }
+            }
+        }
+        as_flow(flush_at_chunk_end(&mut *sink.out, delivered, chunk, files.len()))
+    });
+    if let ControlFlow::Break(error) = flow {
+        return Err(error);
+    }
+    if !wrote_any && matches!(format, ReportFormat::Export { format: ExportFormat::Markdown | ExportFormat::Prose, .. }) {
+        writeln!(sink.out, "(no symbols)")?;
+    }
+    sink.out.flush()
 }
 
 /// Where a writer puts its output, failures and cache counts.
@@ -774,3 +855,47 @@ fn in_prelude(prelude: Option<&PreludeFilter>, record: &SymbolRecord) -> bool {
 #[cfg(test)]
 #[path = "declarations_grouping_tests.rs"]
 mod grouping_tests;
+
+
+#[cfg(test)]
+mod export_write_tests {
+    use super::*;
+
+    #[test]
+    fn export_write_errors_preserve_broken_pipe_and_other_failure_statuses() {
+        let mut stderr = Vec::new();
+        assert_eq!(
+            write_status(Err(io::Error::from(io::ErrorKind::BrokenPipe)), true, &mut stderr),
+            0
+        );
+        assert!(stderr.is_empty());
+
+        assert_eq!(
+            write_status(Err(io::Error::other("disk full")), true, &mut stderr),
+            1
+        );
+        assert!(String::from_utf8(stderr).expect("stderr").contains("cannot write output: disk full"));
+        assert_eq!(write_status(Ok(()), false, &mut Vec::new()), 1);
+        assert_eq!(write_status(Ok(()), true, &mut Vec::new()), 0);
+    }
+
+    #[test]
+    fn export_capabilities_add_only_requested_containment() {
+        let flat = ReportFormat::Export {
+            format: ExportFormat::Tsv,
+            signatures: crate::output::SignatureMode::Short,
+            plain: false,
+            comments: false,
+            containment: false,
+        };
+        let owned = ReportFormat::Export {
+            format: ExportFormat::Ctags,
+            signatures: crate::output::SignatureMode::Short,
+            plain: false,
+            comments: false,
+            containment: true,
+        };
+        assert!(flat.capabilities().is_empty());
+        assert_eq!(owned.capabilities(), [Capability::Containment]);
+    }
+}

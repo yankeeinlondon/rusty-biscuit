@@ -1,0 +1,94 @@
+- DEFAULT\_TARGET  — bash\.sh:4
+- build\_target \(\) — bash\.sh:6
+- clean\_target \(\) — bash\.sh:11
+- point \{ x: int, y: int \} — c\.c:3
+- x  — c\.c:4
+- y  — c\.c:5
+- point\_t  — c\.c:8
+- origin\_count  — c\.c:10
+- point\_sum \(p: struct point\) \-\> int — c\.c:12
+- reset\_origin \(\) \-\> void — c\.c:16
+- Multi  — c\_sharp\.cs:3
+- Ledger \{ total: int, Total: int \} — c\_sharp\.cs:5
+- total  — c\_sharp\.cs:7
+- Total  — c\_sharp\.cs:9
+- Add \(amount: int\) \-\> void — c\_sharp\.cs:11
+- Empty \(\) \-\> Ledger — c\_sharp\.cs:16
+- IAuditable  — c\_sharp\.cs:22
+- Audit \(\) \-\> void — c\_sharp\.cs:24
+- geometry  — cpp\.cpp:3
+- Vector \{ x\_: int, y\_: int \} — cpp\.cpp:5
+- Vector \(x: int, y: int\) — cpp\.cpp:7
+- length \(\) \-\> int — cpp\.cpp:9
+- x\_  — cpp\.cpp:12
+- y\_  — cpp\.cpp:13
+- dot \(a: Vector, b: Vector\) \-\> int — cpp\.cpp:16
+- Counter \{ count: int \} — java\.java:3
+- count  — java\.java:4
+- Counter \(start: int\) — java\.java:6
+- increment \(\) \-\> void — java\.java:10
+- zero \(\) \-\> Counter — java\.java:14
+- Resettable  — java\.java:19
+- reset \(\) \-\> void — java\.java:20
+- Button  — javascript\.js:3
+- constructor \(label\) — javascript\.js:4
+- press \(\) — javascript\.js:8
+- buildButton \(\) — javascript\.js:13
+- DEFAULT\_LABEL  — javascript\.js:17
+- M  — lua\.lua:3
+- default\_size  — lua\.lua:5
+- new\_bag \(size\) — lua\.lua:7
+- describe \(\) — lua\.lua:11
+- helper \(\) — lua\.lua:15
+- nested  — nested/go\.go:2
+- Widget \{ Size int \} — nested/go\.go:5
+- Size  — nested/go\.go:6
+- Grow \(amount int\) — nested/go\.go:9
+- MaxSize  — nested/go\.go:13
+- BuildWidget \(\) Widget — nested/go\.go:15
+- MAX\_SIZE  — nested/python\.py:3
+- Gadget  — nested/python\.py:6
+- \_\_init\_\_ \(self, size\) — nested/python\.py:9
+- grow \(self, amount\) — nested/python\.py:12
+- build\_gadget \(\) — nested/python\.py:16
+- Multi::Queue  — perl\.pl:2
+- $default\_size  — perl\.pl:4
+- new\_queue \(\) — perl\.pl:6
+- queue\_size \(\) — perl\.pl:11
+- Account \{ balance: int \} — php\.php:4
+- balance  — php\.php:6
+- deposit \(amount: int\) \-\> void — php\.php:8
+- open \(\) \-\> Account — php\.php:13
+- open\_account \(\) \-\> Account — php\.php:19
+- Widget \{ size: u32 \} — rust\.rs:4
+- size  — rust\.rs:5
+- new \(size: u32\) \-\> Self — rust\.rs:9
+- grow \(self, amount: u32\) — rust\.rs:13
+- Shape \{ Circle, Square \} — rust\.rs:18
+- Circle  — rust\.rs:19
+- Square  — rust\.rs:20
+- MAX\_SIZE  — rust\.rs:23
+- build\_widget \(\) \-\> Widget — rust\.rs:25
+- Named  — scala\.scala:5
+- name \(\) — scala\.scala:6
+- Tag \{ name: String \} — scala\.scala:9
+- upper \(\) \-\> String — scala\.scala:10
+- Tag  — scala\.scala:13
+- empty \(\) \-\> Tag — scala\.scala:14
+- Meter \{ reading: Int \} — swift\.swift:3
+- reading  — swift\.swift:4
+- doubled \(\) \-\> Int — swift\.swift:6
+- Readable  — swift\.swift:11
+- read \(\) \-\> Int — swift\.swift:12
+- buildMeter \(\) \-\> Meter — swift\.swift:15
+- Sized \{ size: number \} — typescript\.ts:3
+- size  — typescript\.ts:4
+- Size  — typescript\.ts:7
+- Panel \{ size: Size \} — typescript\.ts:9
+- size  — typescript\.ts:10
+- constructor \(size: Size\) — typescript\.ts:12
+- grow \(amount: number\): void — typescript\.ts:16
+- buildPanel \(\): Panel — typescript\.ts:21
+- PROMPT\_STYLE  — zsh\.zsh:4
+- render\_prompt \(\) — zsh\.zsh:6
+- reset\_prompt \(\) — zsh\.zsh:11

@@ -28,24 +28,29 @@ use url::Url;
 mod changed;
 mod classes;
 mod declarations;
+mod export;
+mod ctags;
 mod import_format;
 mod order;
 mod output;
 mod prelude;
 mod refs;
 mod render;
+mod markdown;
+mod prose;
 mod report;
 mod scan;
 mod scanner;
 mod selection;
 mod stats;
+mod tsv;
 mod grouping;
 
 use classes::{ClassSelection, MemberFilter};
 use declarations::{DeclarationScan, Declarations, ReportFormat};
 use import_format::*;
 use order::SortOrder;
-use output::{GivenOutput, OutputMode, ReportArgs, SignatureMode, StatsOutput};
+use output::{ExportFormat, GivenOutput, OutputMode, ReportArgs, SignatureMode, StatsOutput};
 use render::{ListingOptions, RenderOptions, color_tag_for_kind};
 use scan::{Analyzer, CacheStats, in_file_order};
 use scanner::*;
@@ -962,6 +967,8 @@ fn main() -> Result<(), TreeHuggerError> {
             report,
             cli.command.sort().is_some(),
             matches!(cli.command, Command::Classes(_)),
+            cli.command.scan_options().is_some_and(|scan| scan.comments),
+            cli.plain,
         );
         output::resolve(given).unwrap_or_else(|message| {
             Cli::command()
@@ -1081,6 +1088,16 @@ fn main() -> Result<(), TreeHuggerError> {
             } => ReportFormat::Terminal {
                 render: render(plain, signatures),
                 view,
+            },
+            OutputMode::Export { format, signatures, plain, comments } => ReportFormat::Export {
+                format,
+                signatures,
+                plain,
+                comments,
+                containment: format == ExportFormat::Ctags
+                    || (matches!(format, ExportFormat::Markdown | ExportFormat::Prose)
+                        && (cli.command.report_args().is_some_and(|args| args.tree)
+                            || matches!(command_kind, CommandKind::Classes { .. }))),
             },
         };
         let status = declarations::run(

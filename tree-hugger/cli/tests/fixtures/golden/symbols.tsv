@@ -1,0 +1,95 @@
+file	line	column	kind	name	qualified_name	visibility	signature
+bash.sh	5	2	variable	DEFAULT_TARGET	bash.sh#DEFAULT_TARGET		
+bash.sh	7	2	function	build_target	bash.sh#build_target		()
+bash.sh	12	2	function	clean_target	bash.sh#clean_target		()
+c.c	4	2	type	point	c.c#point		{ x: int, y: int }
+c.c	5	10	field	x	c.c#point.x		
+c.c	6	10	field	y	c.c#point.y		
+c.c	9	2	type_alias	point_t	c.c#point_t		
+c.c	11	13	variable	origin_count	c.c#origin_count	module_private	
+c.c	13	6	function	point_sum	c.c#point_sum	public	(p: struct point) -> int
+c.c	17	7	function	reset_origin	c.c#reset_origin	public	() -> void
+c_sharp.cs	4	2	namespace	Multi	Multi		
+c_sharp.cs	6	6	class	Ledger	Multi.Ledger	public	{ total: int, Total: int }
+c_sharp.cs	8	22	field	total	Multi.Ledger.total	private	
+c_sharp.cs	10	10	property	Total	Multi.Ledger.Total	public	
+c_sharp.cs	12	10	method	Add	Multi.Ledger.Add	public	(amount: int) -> void
+c_sharp.cs	17	10	method	Empty	Multi.Ledger.Empty	public	() -> Ledger
+c_sharp.cs	23	6	interface	IAuditable	Multi.IAuditable	public	
+c_sharp.cs	25	10	method	Audit	Multi.IAuditable.Audit	public	() -> void
+cpp.cpp	4	12	namespace	geometry	geometry		
+cpp.cpp	6	2	class	Vector	geometry::Vector		{ x_: int, y_: int }
+cpp.cpp	8	6	constructor	Vector	geometry::Vector::Vector	public	(x: int, y: int)
+cpp.cpp	10	6	method	length	geometry::Vector::length	public	() -> int
+cpp.cpp	13	10	field	x_	geometry::Vector::x_	private	
+cpp.cpp	14	10	field	y_	geometry::Vector::y_	private	
+cpp.cpp	17	6	function	dot	geometry::dot	public	(a: Vector, b: Vector) -> int
+java.java	4	2	class	Counter	java.java#Counter	public	{ count: int }
+java.java	5	18	field	count	java.java#Counter.count	private	
+java.java	7	6	constructor	Counter	java.java#Counter.Counter	public	(start: int)
+java.java	11	6	method	increment	java.java#Counter.increment	public	() -> void
+java.java	15	6	method	zero	java.java#Counter.zero	public	() -> Counter
+java.java	20	2	interface	Resettable	java.java#Resettable	package	
+java.java	21	6	method	reset	java.java#Resettable.reset	public	() -> void
+javascript.js	4	9	class	Button	javascript.js#Button	public	
+javascript.js	5	4	constructor	constructor	javascript.js#Button.constructor	public	(label)
+javascript.js	9	4	method	press	javascript.js#Button.press	public	()
+javascript.js	14	9	function	buildButton	javascript.js#buildButton	public	()
+javascript.js	18	15	variable	DEFAULT_LABEL	javascript.js#DEFAULT_LABEL	public	
+lua.lua	4	8	variable	M	lua.lua#M	module_private	
+lua.lua	6	8	variable	default_size	lua.lua#default_size	module_private	
+lua.lua	8	2	function	new_bag	lua.lua#M.new_bag		(size)
+lua.lua	12	2	method	describe	lua.lua#M:describe		()
+lua.lua	16	2	function	helper	lua.lua#helper	module_private	()
+nested/go.go	3	10	namespace	nested	nested		
+nested/go.go	6	2	type	Widget	nested.Widget	public	{ Size int }
+nested/go.go	7	3	field	Size	nested.Widget.Size	public	
+nested/go.go	10	2	method	Grow	nested.Widget.Grow	public	(amount int)
+nested/go.go	14	8	constant	MaxSize	nested.MaxSize	public	
+nested/go.go	16	2	function	BuildWidget	nested.BuildWidget	public	() Widget
+nested/python.py	4	2	variable	MAX_SIZE	nested/python.py#MAX_SIZE		
+nested/python.py	7	2	class	Gadget	nested/python.py#Gadget		
+nested/python.py	10	6	constructor	__init__	nested/python.py#Gadget.__init__		(self, size)
+nested/python.py	13	6	method	grow	nested/python.py#Gadget.grow		(self, amount)
+nested/python.py	17	2	function	build_gadget	nested/python.py#build_gadget		()
+perl.pl	3	2	module	Multi::Queue	Multi::Queue		
+perl.pl	5	5	variable	$default_size	Multi::Queue::$default_size		
+perl.pl	7	2	function	new_queue	Multi::Queue::new_queue		()
+perl.pl	12	2	function	queue_size	Multi::Queue::queue_size		()
+php.php	5	2	class	Account	php.php#Account	public	{ balance: int }
+php.php	7	19	field	balance	php.php#Account::balance	private	
+php.php	9	6	method	deposit	php.php#Account::deposit	public	(amount: int) -> void
+php.php	14	6	method	open	php.php#Account::open	public	() -> Account
+php.php	20	2	function	open_account	php.php#open_account	public	() -> Account
+rust.rs	5	2	type	Widget	rust.rs#Widget	public	{ size: u32 }
+rust.rs	6	10	field	size	rust.rs#Widget::size	public	
+rust.rs	10	6	method	new	rust.rs#Widget::new	public	(size: u32) -> Self
+rust.rs	14	6	method	grow	rust.rs#Widget::grow	public	(self, amount: u32)
+rust.rs	19	2	enum	Shape	rust.rs#Shape	public	{ Circle, Square }
+rust.rs	20	6	enum_variant	Circle	rust.rs#Shape::Circle	public	
+rust.rs	21	6	enum_variant	Square	rust.rs#Shape::Square	public	
+rust.rs	24	12	constant	MAX_SIZE	rust.rs#MAX_SIZE	public	
+rust.rs	26	2	function	build_widget	rust.rs#build_widget	public	() -> Widget
+scala.scala	6	2	trait	Named	multi.Named	public	
+scala.scala	7	4	method	name	multi.Named.name	public	()
+scala.scala	10	2	class	Tag	multi.Tag	public	{ name: String }
+scala.scala	11	4	method	upper	multi.Tag.upper	public	() -> String
+scala.scala	14	2	module	Tag	multi.Tag	public	
+scala.scala	15	4	method	empty	multi.Tag.empty	public	() -> Tag
+swift.swift	4	2	type	Meter	swift.swift#Meter	internal	{ reading: Int }
+swift.swift	5	10	field	reading	swift.swift#Meter.reading	internal	
+swift.swift	7	6	method	doubled	swift.swift#Meter.doubled	internal	() -> Int
+swift.swift	12	2	interface	Readable	swift.swift#Readable	internal	
+swift.swift	13	6	method	read	swift.swift#Readable.read	internal	() -> Int
+swift.swift	16	2	function	buildMeter	swift.swift#buildMeter	internal	() -> Meter
+typescript.ts	4	9	interface	Sized	typescript.ts#Sized	public	{ size: number }
+typescript.ts	5	4	property	size	typescript.ts#Sized.size	public	
+typescript.ts	8	9	type_alias	Size	typescript.ts#Size	public	
+typescript.ts	10	9	class	Panel	typescript.ts#Panel	public	{ size: Size }
+typescript.ts	11	4	property	size	typescript.ts#Panel.size	public	
+typescript.ts	13	4	constructor	constructor	typescript.ts#Panel.constructor	public	(size: Size)
+typescript.ts	17	4	method	grow	typescript.ts#Panel.grow	public	(amount: number): void
+typescript.ts	22	9	function	buildPanel	typescript.ts#buildPanel	public	(): Panel
+zsh.zsh	5	13	variable	PROMPT_STYLE	zsh.zsh#PROMPT_STYLE		
+zsh.zsh	7	2	function	render_prompt	zsh.zsh#render_prompt		()
+zsh.zsh	12	2	function	reset_prompt	zsh.zsh#reset_prompt		()

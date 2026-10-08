@@ -56,6 +56,10 @@ const SYMBOLS_SIGNATURES_FULL_GOLDEN: &str = include_str!("../fixtures/golden/sy
 const SYMBOLS_STATS_GOLDEN: &str = include_str!("../fixtures/golden/symbols.stats");
 const SYMBOLS_STATS_JSON_GOLDEN: &str = include_str!("../fixtures/golden/symbols-stats.json");
 const SYMBOLS_JSONL_GOLDEN: &str = include_str!("../fixtures/golden/symbols.jsonl");
+const SYMBOLS_TSV_GOLDEN: &str = include_str!("../fixtures/golden/symbols.tsv");
+const SYMBOLS_MARKDOWN_GOLDEN: &str = include_str!("../fixtures/golden/symbols.markdown");
+const SYMBOLS_PROSE_GOLDEN: &str = include_str!("../fixtures/golden/symbols.prose");
+const SYMBOLS_CTAGS_GOLDEN: &str = include_str!("../fixtures/golden/symbols.ctags");
 
 /// Compares `hug args` over multi/ with the text golden `file` (holding
 /// `golden`), after [`normalized`]; `HUG_UPDATE_GOLDEN` rewrites the file.
@@ -73,6 +77,85 @@ fn assert_text_golden(args: &[&str], file: &str, golden: &str) {
     let actual = normalized(&actual, root);
     let expected = normalized(golden, root);
     assert_same(&actual, &expected, &format!("`hug {}`", args.join(" ")), file);
+}
+
+/// Export formats must be byte-safe before root-path normalization.
+fn assert_export_golden(args: &[&str], file: &str, golden: &str) {
+    let scratch = Scratch::new(MULTI_FIXTURES);
+    let actual = scratch.stdout(args);
+    assert!(!actual.as_bytes().contains(&0x1b), "{} contains ESC", args.join(" "));
+    assert!(!actual.contains("\u{009b}"), "{} contains OSC/control sequence", args.join(" "));
+    assert!(!actual.contains('\r'), "{} contains CR", args.join(" "));
+    if std::env::var_os("HUG_UPDATE_GOLDEN").is_some() {
+        std::fs::write(manifest_dir!().join("tests/fixtures/golden").join(file), &actual)
+            .unwrap_or_else(|error| panic!("write {file} golden: {error}"));
+        return;
+    }
+    let root = scratch.repo.path();
+    let normalize_export = |text: &str| {
+        normalize_file_urls(&normalized(text, root))
+    };
+    assert_same(&normalize_export(&actual), &normalize_export(golden), &format!("`hug {}`", args.join(" ")), file);
+}
+
+fn normalize_file_urls(text: &str) -> String {
+    let mut result = String::with_capacity(text.len());
+    let mut remaining = text;
+    while let Some(start) = remaining.find("file://") {
+        result.push_str(&remaining[..start]);
+        let url_start = start + "file://".len();
+        let after_marker = &remaining[url_start..];
+        let url_end = after_marker.find('"').unwrap_or(after_marker.len());
+        let url = &after_marker[..url_end];
+        let relative = MULTI_FIXTURES
+            .iter()
+            .map(|(path, _)| *path)
+            .filter(|path| url.contains(path))
+            .max_by_key(|path| path.len())
+            .expect("file URL names a multi fixture");
+        let path_start = url.rfind(relative).expect("fixture path in file URL");
+        result.push_str("file://<ROOT>/");
+        result.push_str(&url[path_start..]);
+        remaining = &after_marker[url_end..];
+    }
+    result.push_str(remaining);
+    result
+}
+
+#[test]
+fn tsv_symbols_over_multi_match_the_golden() {
+    assert_export_golden(&["symbols", "--format", "tsv", "--no-cache"], "symbols.tsv", SYMBOLS_TSV_GOLDEN);
+}
+
+#[test]
+fn markdown_symbols_over_multi_match_the_golden() {
+    assert_export_golden(&["symbols", "--format", "markdown", "--no-cache"], "symbols.markdown", SYMBOLS_MARKDOWN_GOLDEN);
+}
+
+#[test]
+fn prose_symbols_over_multi_match_the_golden() {
+    assert_export_golden(&["symbols", "--format", "prose", "--no-cache"], "symbols.prose", SYMBOLS_PROSE_GOLDEN);
+}
+
+#[test]
+fn ctags_symbols_over_multi_match_the_golden() {
+    assert_export_golden(&["symbols", "--format", "ctags", "--no-cache"], "symbols.ctags", SYMBOLS_CTAGS_GOLDEN);
+}
+
+#[test]
+fn export_formats_are_stable_across_workers_cache_and_terminal_width() {
+    let scratch = Scratch::new(MULTI_FIXTURES);
+    for format in ["tsv", "markdown", "prose", "ctags"] {
+        let args = ["symbols", "--format", format];
+        let cold = scratch.hug_with_env(&args, &[("RAYON_NUM_THREADS", "1"), ("COLUMNS", "20")]);
+        assert!(cold.status.success(), "{format}: {}", String::from_utf8_lossy(&cold.stderr));
+        let warm_wide = scratch.hug_with_env(&args, &[("RAYON_NUM_THREADS", "4"), ("COLUMNS", "200")]);
+        assert!(warm_wide.status.success(), "{format}: {}", String::from_utf8_lossy(&warm_wide.stderr));
+        assert_eq!(cold.stdout, warm_wide.stdout, "{format} changed across worker count, cache state, or COLUMNS");
+        let uncached = scratch.hug(&["symbols", "--format", format, "--no-cache"]);
+        assert!(uncached.status.success(), "{format}: {}", String::from_utf8_lossy(&uncached.stderr));
+        assert_eq!(cold.stdout, uncached.stdout, "{format} changed between cached and uncached runs");
+    }
 }
 
 /// Fails with the first differing line of `actual` against the golden `file`.

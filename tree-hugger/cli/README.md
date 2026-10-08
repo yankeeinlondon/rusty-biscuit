@@ -43,7 +43,7 @@ hug imports --json "tests/fixtures/**/*.js"
 - `--jsonl` - One JSON object per selected declaration (JSON Lines); a `classes` line adds the container's `members` list
 - `--count` - Print only the number of selected declarations (`classes`: containers)
 - `--stats` - Counts by kind, visibility and language plus doc coverage, with overall totals and automatic package sections; with `--json`, an additive stats envelope including `package_root_dir` and `groups`. Captures structure-only package metadata first; a discovery failure exits `1` before output. See [Symbol Reports](../docs/symbol-reports.md#--stats).
-- `--format plain|table` - The listing without styles, links or wrapping, or one table per file (Location, Kind, Visibility, Name, Signature)
+- `--format plain|table|tsv|markdown|prose|ctags` - Select a terminal listing or a UTF-8 export; ctags writes unsorted format-2 numeric-line tags with Hug kind/container fields (see [Symbol Reports](../docs/symbol-reports.md#tags-output))
 - `--signatures full|short|none` - The declaration header as written, the compact form (default; field lists past four end in `… +N`), or names only
 - `--tree` - Nest members under their container (`functions`, `types`, `symbols`); type rows end with their declared bases (`extends Base; implements Shape; unclassified bases External`)
 
@@ -139,6 +139,15 @@ file is clean it prints a single `No lint diagnostics in N files.` line. A
 single-file lint still prints `(no diagnostics)` as explicit confirmation.
 
 ## Output Format
+
+### Tags Output
+
+`--format ctags` writes an unsorted format-2 tags file with numeric line
+addresses. Duplicate names and overloads are retained; paths are relative to
+the scan root. Kind names and container fields use recorded Hug metadata, and
+records with unsupported control characters are skipped with a warning and a
+failing exit status. See [Tags output](../docs/symbol-reports.md#tags-output)
+for the supported subset.
 
 ### Pretty Output (default)
 
