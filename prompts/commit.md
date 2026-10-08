@@ -29,7 +29,7 @@ initialize:
               - skip
 start:
     message: |-
-        🗳️  starting **git commits** in {{ ctx.repo }} -> **{{ctx.branch}}** (_<dim>using </dim>{{agent}}/{{model}}_)
+        🗳️  starting **git commits** in {{ ctx.repo }} -> **{{ctx.branch}}** (_<dim>using </dim>{{ctx.agent}}/{{ctx.model}}_)
         {{ ctx.is_monorepo ? '&nbsp;&nbsp;**packages impacted:** ' + as_unordered_list(ctx.dirty_packages) : '' }}
 success:
     message: |-
