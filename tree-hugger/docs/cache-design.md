@@ -193,7 +193,7 @@ file's records, imports, exports and every analysis pass but diagnostics:
 
 | Input | Where it comes from | Changes when |
 |---|---|---|
-| schema version | `SchemaVersion::CURRENT` (5.0) | the record shape or meaning changes |
+| schema version | `SchemaVersion::CURRENT` (5.1) | the record shape or meaning changes |
 | implementation version | crate version and `EXTRACTOR_REVISION` (`0.1.0+rev.42`) | extraction code changes |
 | grammar identity | the compiled grammar: name, declared version (if any), ABI, node-kind, field and parse-state counts | a grammar crate is upgraded |
 | grammar ID | the grammar variant (`typescript` or `tsx`, …) | the file's grammar variant differs |
@@ -232,7 +232,7 @@ rebuilding the crate.
 
 ```json
 {
-  "schema_version": { "major": 5, "minor": 0 },
+  "schema_version": { "major": 5, "minor": 1 },
   "fingerprint": "<records fingerprint digest>",
   "file": "src/lib.rs",
   "language": "Rust",
@@ -242,6 +242,7 @@ rebuilding the crate.
   "diagnostics_fingerprint": null,
   "records": [ ... ],
   "imports": [ ... ],
+  "import_inventory": "<canonical producer inventory digest>",
   "exports": [ ... ],
   "diagnostics": [],
   "occurrences": [],
@@ -412,7 +413,7 @@ decoder's message, which names the field and tells an absent field
 
 An entry is served only when its own `schema_version` **and the
 `schema_version` of every record in it** are exactly the current version
-(5.0). The records are returned as stored, inside an index that claims the
+(5.1). The records are returned as stored, inside an index that claims the
 current version, and the cache never translates between versions, so a
 different minor version is a miss just like a different major one: an older
 minor lacks fields the current version adds, and a newer one carries fields
@@ -443,11 +444,12 @@ No entry-level field has a default:
 | `file`, `language` | miss | miss | miss | miss | miss | miss (`""` is another file or no language) | miss | miss |
 | `diagnostics_fingerprint` | miss | miss (contradicts `diagnostics`) | miss | miss | miss | diagnostics recomputed (one parse; output as uncached) | miss | miss |
 | `records` | miss | miss | miss | miss | miss | **served** when no stored evidence names a record (a file with no records of the covered kinds); miss when name-only evidence of an every-kind entry names records the list no longer holds | miss | miss |
-| `imports`, `exports`, `diagnostics` | miss | miss | miss | miss | miss | **served**: the file has none | miss | miss |
+| `imports` | miss | miss | miss | miss | miss | served for a genuinely empty producer inventory; miss when a populated inventory loses any binding | miss | miss |
+| `exports`, `diagnostics` | miss | miss | miss | miss | miss | **served**: the file has none | miss | miss |
 
 For a version object, "one bad element" and "every element bad" mean one or
 both of `major` and `minor` hold a non-number. A well-formed version other
-than 5.0 is a miss, as described above.
+than 5.1 is a miss, as described above.
 
 A kind list must also be in ascending order with no repeats, and a
 capability list closed under prerequisites. The records must agree with that
@@ -675,7 +677,7 @@ everything else refuses the entry.
 `visibility.is_deprecated`, `kind_data.kind_data_type` and field data
 `is_static` are required: absent, `null`, `""` (an unknown scope, an empty
 qualified name) or `{}` refuses the entry, and a record `schema_version`
-other than exactly 5.0 refuses it too. In an entry that lists `metrics`, the
+other than exactly 5.1 refuses it too. In an entry that lists `metrics`, the
 `metrics` facet is required in the same way (absent, `null`, `{}` or a member
 of the wrong type refuses it), and so is each of its four keys (absent
 refuses, so a 4.0 facet without `lines` or a 4.2 facet without `cyclomatic`
@@ -740,7 +742,7 @@ visited once per run, so they only added copies.
 | A wide entry narrowed to any request equals the uncached request | `projected_results_equal_uncached_queries`, `projected_results_over_multi_equal_uncached_queries` |
 | Widening by capabilities and by kinds; the third narrow run is a hit | `widening_capabilities_runs_only_the_missing_passes`, `widening_kinds_reextracts_once_for_the_union` |
 | Query text, extractor revision, forced language, schema, rules and settings each miss | `each_key_input_and_stored_identity_decides_a_miss` |
-| A record of another schema version (2.0, 3.0, 4.0, 4.1, 4.2, 4.3, 5.1, 6.0) misses for the same and a wider request, never widened | `incompatible_record_schema_versions_are_misses_never_served_or_widened` |
+| A record of another schema version (2.0, 3.0, 4.0, 4.1, 4.2, 4.3, 5.0, 5.2, 6.0) misses for the same and a wider request, never widened | `incompatible_record_schema_versions_are_misses_never_served_or_widened` |
 | Corrupt entries, absent vs `null` reasons, kind-list shapes | `a_corrupt_entry_is_a_miss_and_is_replaced`, `absent_and_null_entry_fields_report_different_reasons`, `covered_kind_lists_are_served_only_in_canonical_form` |
 | A metrics facet or a set flag without its capability, or a record without metrics under `metrics`, is `Inconsistent`; a flags-and-metrics entry serves a flags-only request | `covered_kind_lists_are_served_only_in_canonical_form`, `flags_and_metrics_are_served_only_under_their_capabilities` |
 | A filtered, prefixed query writes in-file names and every record; another scan root is a Hit with the same IDs | `lib/tests/l1/symbols_query_filters.rs` `predicates_and_prefixes_never_reach_the_cache_entry` |
@@ -756,7 +758,7 @@ visited once per run, so they only added copies.
 | Every shape of a qualified nonmember path (`other::external`) and of its `path_start_byte` | `cache_robustness::a_qualified_nonmember_path_and_its_start_are_served_only_unedited` |
 | A deleted written path is recomputed in complete, narrowed (member records omitted) and projected results, then hit with the path; an entry without `path_start_byte` keys is malformed | `lib/tests/l1/symbols_cache.rs` `a_deleted_written_path_is_recomputed_in_complete_narrowed_and_projected_results`, `an_occurrence_without_a_stored_path_start_is_malformed` |
 | `hug refs g --callees` (text and JSON) after a deleted written path shows `other::external`, then hits | `refs::a_deleted_written_path_is_recomputed_for_callees` |
-| The same rules at the library, with exact refusals, including an import edge whose first same-named occurrence is a loop binding (served) and a methods-omitted entry (omitted candidates' order unchecked; an omitted member's deleted path or start refused; a path and start deleted together served, the coordinated-forgery limit; summary order still checked) | `lib/tests/l1/symbols_cache.rs` `stored_evidence_geometry_paths_and_order_are_checked` |
+| The same rules at the library, with exact refusals, including an edge retaining its selected actual import despite a preceding same-named loop binding (served) and a methods-omitted entry (omitted candidates' order unchecked; an omitted member's deleted path or start refused; a path and start deleted together served, the coordinated-forgery limit; summary order still checked) | `lib/tests/l1/symbols_cache.rs` `stored_evidence_geometry_paths_and_order_are_checked` |
 | A warm `hug refs --callees` over an entry whose `Self::h` path was changed to `Other::h` prints `Self::h` in text and JSON, then hits | `refs::a_stored_written_path_the_source_does_not_write_is_recomputed` |
 | In all 16 languages' primary fixtures, an every-kind entry with a phantom coverage owner, a phantom candidate, a phantom ownerless target (Rust/TS/JS), a phantom named-owner target (Rust/TS/JS) or an empty named callable's region removed (every language but Scala, whose fixture has none) is a miss equal to an uncached run; the unedited entry is a hit | `cache_robustness::every_kind_evidence_identities_name_retained_declarations_in_every_language` |
 | An entry from before schema 5.0 (revision 30, no evidence keys) is recomputed under both keys | `cache_upgrade::entry_from_extractor_revision_thirty_is_not_served_after_the_scoped_references_bump` |
@@ -766,3 +768,167 @@ visited once per run, so they only added copies.
 | A reclassified record gets the ID of its new kind; unchanged records and namespace members keep theirs | `reclassified_records_get_new_ids_and_unrelated_ids_stay` |
 | Relative, absolute, `.`/`..`, symlinked-file and symlinked-directory spellings read under one identity, key, record set and entry; missing files keep the given spelling | `lib/tests/l1/file_identity.rs` |
 | The CLI shares one entry across spellings, lists a file once, and `--prelude` reuses it under any spelling | `cli/tests/symbols/spelling.rs`, `cli/tests/symbols/prelude.rs` `prelude_reuse_holds_for_every_spelling_of_an_explicit_file` |
+
+
+Selected import provenance is stored with every occurrence as a required
+nullable `import_span` and `import_start_byte`. Both are null for local or
+uncertain references. Nonnull spans must identify the exact import name and
+agree with its start offset, target name, confidence and absent target ID.
+Dependency summaries must equal the selected imports in first-occurrence
+order. A separate import with the same alias cannot stand in for the selected
+one. Schema 5.1 rejects older 5.0 entries and recomputes them.
+
+The JSON provenance reader's robustness matrix uses restored tool-produced
+entries for every edit. H means a valid Hit; M means miss and recomputation of
+the independently expected public evidence. The nullable control is the local
+binding whose two provenance fields are explicitly null.
+
+| Shape | `import_span` | `import_start_byte` | `import_span.start` | `import_span.end` |
+|---|---|---|---|---|
+| Selected-import control | H | H | H | H |
+| Local-binding null control | H | H | — | — |
+| Absent | M | M | M | M |
+| Explicit null | M for import; H for local | M for import; H for local | M | M |
+| Wrong whole type | M | M | M | M |
+| Wrong one/every element | — | — | — | — |
+| Empty object/list/string | M | M | M | M |
+| Duplicate key | M | M | M | M |
+| Trailing invalid content | M | M | M | M |
+| Valid-shaped contradictory linkage | M | M | M | M |
+
+| Shape | `import_span.start_byte` | `import_span.end_byte` | `import_span.start.line` | `import_span.start.column` | `import_span.end.line` | `import_span.end.column` |
+|---|---|---|---|---|---|---|
+| Selected-import control | H | H | H | H | H | H |
+| Absent | M | M | M | M | M | M |
+| Explicit null | M | M | M | M | M | M |
+| Wrong whole type | M | M | M | M | M | M |
+| Wrong one/every element | — | — | — | — | — | — |
+| Empty object/list/string | M | M | M | M | M | M |
+| Duplicate key | M | M | M | M | M | M |
+| Trailing invalid content | M | M | M | M | M | M |
+| Zero | H only at actual byte zero | H only at actual byte zero | M | M | M | M |
+
+Provenance objects and scalar coordinates have no element shapes. Each nested
+span is checked against the selected import's full span; changing a leaf to a
+well-typed but incorrect coordinate is a miss. A wrong-scope import link with
+both span and start changed is still rejected when its selected original
+contradicts the owner's dependencies. The checks are consistency checks,
+like the written-path checks above, rather than a second lexical analysis of
+arbitrarily coordinated cache forgeries.
+
+
+### Stored import evidence
+
+A cache hit validates imports before projecting kinds or capabilities. The
+private JSON reader requires every import name, name span, and symbol object;
+all span objects require both byte bounds and both one-based points. Unknown
+fields, duplicate keys, invalid elements, and trailing content are malformed.
+Imports have no external symbol ID or symbol source span. The symbol name and
+alias binding must agree with the captured source name. Name coordinates must
+identify that written token, including raw and escaped identifier spelling.
+
+Optional metadata may genuinely be absent or null: `use a;` has no source,
+alias, or original name; a TypeScript entity alias has no module source; a
+C# predefined-type alias has no original identifier. A required `import_inventory`
+witness is a BLAKE3 digest of the canonical grammar-produced complete import
+list, including nullable metadata, exact name/statement geometry, and ordering.
+The writer computes it before projection; the reader compares it with decoded
+imports before serving any capability. Losing one grouped binding, adding a
+record at a declaration token, changing a module, or extending a statement
+range disagrees with the retained witness and causes recomputation. These checks
+also cover Python future imports and Rust extern-crate aliases whose producers
+emit no statement span. They do not parse a tree on warm hits or semantic
+widening. The ten import-producing languages use the same strict reader; C,
+C++, Lua, Perl, Bash, and Zsh reject any populated import inventory because
+their shipped import queries have no captures.
+
+The restored tool-produced JSON corpus (`symbols_cache_imports`) registers
+all ten producers plus Rust, Scala, PHP grouped forms and a C# generic alias.
+Each edit asserts independent public metadata and coordinates, correct fresh
+recursion evidence, then an actual warm hit. H means Hit, M means Miss and
+recomputation, and N means genuine optional null/absence is H while a lost
+meaningful fact is M. Each table describes the independently contradictory
+edits in the restored corpus. Source-consistent inventory and statement-boundary
+edits are M, including grouped-member loss and coordinated byte/point edits
+extending either end of a statement. Each table is one part of the same JSON matrix.
+
+| Shape | `imports` | `name` | `alias` | `source` | `span` | `statement_span` | `symbol` |
+|---|---|---|---|---|---|---|---|
+| Unedited positive control | H | H | H | H | H | H | H |
+| Absent | M | M | N | N | M | N | M |
+| Explicit null | M | M | N | N | M | N | M |
+| Wrong whole type | M | M | M | M | M | M | M |
+| Wrong one/every element | M | — (not a list) | — (not a list) | — (not a list) | — (not a list) | — (not a list) | — (not a list) |
+| Empty | H for genuine empty; M for recognized deleted binding | M | M | M | M | M | M |
+| Duplicate key | M | M | M | M | M | M | M |
+| Trailing invalid content | M | M | M | M | M | M | M |
+| Well-typed contradictory fact | M | M | M | M | M | M | M |
+
+| Shape | `symbol.name` | `symbol.qualified_name` | `symbol.id` | `symbol.source_span` |
+|---|---|---|---|---|
+| Unedited positive control | H | H | H | H |
+| Absent | M | N | H | H |
+| Explicit null | M | N | H | H |
+| Wrong whole type | M | M | M | M |
+| Wrong one/every element | — (not a list) | — (not a list) | — (not a list) | — (not a list) |
+| Empty | M | M | M | M |
+| Duplicate key | M | M | M | M |
+| Trailing invalid content | M | M | M | M |
+| Well-typed contradictory fact | M | M | M | M |
+
+| Shape | `span.start_byte` | `span.end_byte` | `span.start` | `span.end` | `span.start.line` | `span.start.column` | `span.end.line` | `span.end.column` |
+|---|---|---|---|---|---|---|---|---|
+| Unedited positive control | H | H | H | H | H | H | H | H |
+| Absent | M | M | M | M | M | M | M | M |
+| Explicit null | M | M | M | M | M | M | M | M |
+| Wrong whole type | M | M | M | M | M | M | M | M |
+| Wrong one/every element | — (not a list) | — (not a list) | — (not a list) | — (not a list) | — (not a list) | — (not a list) | — (not a list) | — (not a list) |
+| Empty | H if unchanged zero byte; M otherwise | H if unchanged zero byte; M otherwise | M | M | M | M | M | M |
+| Duplicate key | M | M | M | M | M | M | M | M |
+| Trailing invalid content | M | M | M | M | M | M | M | M |
+| Well-typed contradictory fact | M | M | M | M | M | M | M | M |
+
+| Shape | `statement_span.start_byte` | `statement_span.end_byte` | `statement_span.start` | `statement_span.end` | `statement_span.start.line` | `statement_span.start.column` | `statement_span.end.line` | `statement_span.end.column` |
+|---|---|---|---|---|---|---|---|---|
+| Unedited positive control | H | H | H | H | H | H | H | H |
+| Absent | M | M | M | M | M | M | M | M |
+| Explicit null | M | M | M | M | M | M | M | M |
+| Wrong whole type | M | M | M | M | M | M | M | M |
+| Wrong one/every element | — (not a list) | — (not a list) | — (not a list) | — (not a list) | — (not a list) | — (not a list) | — (not a list) | — (not a list) |
+| Empty | H if unchanged zero byte; M otherwise | H if unchanged zero byte; M otherwise | M | M | M | M | M | M |
+| Duplicate key | M | M | M | M | M | M | M | M |
+| Trailing invalid content | M | M | M | M | M | M | M | M |
+| Well-typed contradictory fact | M | M | M | M | M | M | M | M |
+
+Numeric leaves also receive independently invalid zero and out-of-source
+values, and a string as the wrong-type edit. A zero start byte that is already
+the producer's correct bound remains H. A duplicate complete import record is
+M. Optional fields receive fabricated strings on genuinely null controls;
+well-typed invented 64-character external IDs and copied symbol source spans
+are M. Genuine empty controls include side-effect imports, empty Rust lists,
+Scala hidden selectors, Rust opaque macro token trees, PHP trait use and using
+declarations, and import-like text inside strings or regular expressions.
+
+The producer witness removes the approximate source lexer: regexes, extended
+literal delimiters, and comment nesting follow the actual pinned grammar on
+cold analysis, and need no reinterpretation on a warm hit. Independent strict
+shape, source-name geometry, capture order, unsupported-language inventory,
+and selected-import dependency checks still run. The witness is an integrity
+check, not authentication: a coordinated rewrite of facts and every witness
+cannot be distinguished without reanalysis, the existing all-witness boundary.
+
+The shared lexical corpus exercises all 16 languages. Its public-cache tests
+assert error-free source, independently expected imports and metadata through
+six serving stages, then delete real imports or invent source-aligned ones and
+require recomputation. Shipped CLI tests check imports, complete indexes and
+all reference directions in JSON and text, including unchanged zero-parse
+hits. Regex context, Swift extended delimiters, C# quote runs and each
+language's comment boundaries are grammar facts, never warm-cache heuristics.
+
+| Shape | `import_inventory` |
+|---|---|
+| Tool-produced control | H |
+| Absent, null, wrong type, empty or changed digest | M |
+| Duplicate key or trailing invalid content | M |
+
+

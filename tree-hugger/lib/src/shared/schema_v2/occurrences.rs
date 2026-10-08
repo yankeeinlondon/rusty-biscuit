@@ -24,6 +24,11 @@ pub struct Occurrence {
     /// declaration's qualified name; `id` is set only for a `Scoped` binding
     /// to one in-file declaration record.
     pub target: SymbolRef,
+    /// The name span of the particular import this occurrence binds to.
+    /// Absent for in-file declarations, unreported local bindings and
+    /// uncertain references; never inferred from a matching import name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub import_span: Option<TextSpan>,
     /// Same-named in-file declarations for a `NameOnly` occurrence, ordered
     /// by declaration position then ID. Their IDs are suggestions; empty for
     /// `Scoped` and `Unresolved`.

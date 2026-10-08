@@ -4,7 +4,9 @@ use std::path::{Path, PathBuf};
 use tree_sitter::{Node, QueryCursor, StreamingIterator};
 
 use crate::analysis::counters::{count_diagnostics_run, count_reference_capture};
-use crate::analysis::declaration_names::{declared_name_tokens, scala_import_path_start, swift_import_selector};
+use crate::analysis::declaration_names::{
+    declared_name_tokens, is_scala_import_segment, scala_import_binds, scala_import_path_start, swift_import_selector,
+};
 use crate::error::TreeHuggerError;
 use crate::file::extract::attributes::declaration_attributes;
 use crate::file::extract::*;
@@ -472,11 +474,15 @@ impl TreeFile {
 
     /// Determines if an import capture should be skipped.
     ///
-    /// Only Go needs a filter: an aliased import (a blank `_` included) is
-    /// captured at both its alias and its path, and the path is dropped.
-    /// Every other query captures exactly the name each import brings in.
+    /// Go: an aliased import (a blank `_` included) is captured at both its
+    /// alias and its path, and the path is dropped. Scala: every flat path
+    /// segment is captured, since whether one binds depends on what follows
+    /// it past any comment, and only [`scala_import_binds`] segments are
+    /// kept. Every other query captures exactly the name each import brings
+    /// in.
     fn should_skip_import(&self, node: Node, language: ProgrammingLanguage) -> bool {
         match language {
+            ProgrammingLanguage::Scala => is_scala_import_segment(node) && !scala_import_binds(node),
             // A dot import (`. "a/fmt"`) has no alias capture, so its path
             // is kept.
             ProgrammingLanguage::Go => {
@@ -593,8 +599,16 @@ impl TreeFile {
                 .map(|module| module.trim_matches('"').trim_matches('\'').to_string());
             return (module, None, None);
         }
+        // The target is the entity after `=`, whatever comments surround
+        // it, spelled without them: its last segment is the original name
+        // the recursion rule compares.
         if let Some(alias) = parent.filter(|parent| parent.kind() == "import_alias") {
-            let target = alias.named_child(1).and_then(text);
+            let mut cursor = alias.walk();
+            let target = alias
+                .children(&mut cursor)
+                .find(|child| child.kind() == "=")
+                .and_then(next_named_syntax_sibling)
+                .map(|target| tokens_without_extras(target, &self.source));
             return (None, target, Some(name.to_string()));
         }
 
@@ -806,7 +820,8 @@ impl TreeFile {
     }
 
     /// Extracts import metadata for Java.
-    /// Handles: `import com.example.Foo`, `import static java.lang.Math.PI`, `import java.io.*`.
+    /// On-demand paths, including a single identifier, retain the complete source
+    /// and represent `*` under the path's final identifier.
     fn extract_java_import_metadata(
         &self,
         node: Node,
@@ -815,22 +830,17 @@ impl TreeFile {
         let mut original_name = None;
         let mut alias = None;
 
-        // Find import_declaration ancestor
         let import_decl = find_ancestor_by_kind(node, "import_declaration");
         if let Some(decl) = import_decl {
-            // Check if this is a wildcard import (has asterisk child)
             let is_wildcard = decl
                 .children(&mut decl.walk())
                 .any(|c| c.kind() == "asterisk");
 
-            // Get the full import path from scoped_identifier
             for child in decl.children(&mut decl.walk()) {
-                if child.kind() == "scoped_identifier" {
+                if matches!(child.kind(), "scoped_identifier" | "identifier") {
                     let full_path = child.utf8_text(self.source.as_bytes()).unwrap_or_default();
 
                     if is_wildcard {
-                        // For wildcard imports like `import java.io.*`
-                        // The source is the entire path, and the import represents "*"
                         source = Some(full_path.to_string());
                         original_name = Some("*".to_string());
                         alias = Some(
@@ -839,8 +849,6 @@ impl TreeFile {
                                 .to_string(),
                         );
                     } else {
-                        // Extract package path (everything before the last dot)
-                        // For `java.util.List`, source is `java.util`
                         if let Some(last_dot) = full_path.rfind('.') {
                             source = Some(full_path[..last_dot].to_string());
                         } else {
@@ -928,7 +936,7 @@ impl TreeFile {
     }
 
     /// Extracts import metadata for Scala. `source` is the bound name's path
-    /// as written (`a.b.C`), or for a selector its path and original name
+    /// as written (`a.b.C`), or for a rename/selector its path and original name
     /// (`a.D` for `E` in `import a.{D => E}`); a rename gives `alias` and
     /// `original_name` (`D`). An on-demand import (`a.b.*`, `a.b._`,
     /// `a.{_, given T}`) is named by its path's last segment, with `alias`
@@ -944,22 +952,25 @@ impl TreeFile {
             return (None, None, None);
         };
         let selector_source = |selectors: Node, selected: &str| {
-            let path = selectors.prev_named_sibling().and_then(|last| self.scala_import_path(last))?;
+            let path = prev_named_syntax_sibling(selectors).and_then(|last| self.scala_import_path(last))?;
             Some(format!("{path}.{selected}"))
         };
         match parent.kind() {
             "arrow_renamed_identifier" | "as_renamed_identifier" => {
                 let original = parent.child_by_field_name("name").and_then(text);
-                let source = parent
-                    .parent()
-                    .zip(original.as_deref())
-                    .and_then(|(selectors, original)| selector_source(selectors, original));
+                let source = parent.parent().zip(original.as_deref()).and_then(|(context, original)| {
+                    if context.kind() == "namespace_selectors" {
+                        selector_source(context, original)
+                    } else {
+                        selector_source(parent, original)
+                    }
+                });
                 (source, original, Some(name.to_string()))
             }
             "namespace_selectors" => (selector_source(parent, name), None, None),
             _ => {
                 let path = self.scala_import_path(node);
-                let opened = node.next_named_sibling().and_then(|next| match next.kind() {
+                let opened = next_named_syntax_sibling(node).and_then(|next| match next.kind() {
                     "namespace_wildcard" => Some(scala_wildcard(next.utf8_text(self.source.as_bytes()).unwrap_or_default())),
                     "namespace_selectors" => {
                         let mut cursor = next.walk();
@@ -1213,18 +1224,18 @@ impl TreeFile {
         let mut diagnostics = Vec::new();
 
         // Build lookup sets
-        let defined_names: std::collections::HashSet<&str> = definitions
+        let defined_names: std::collections::HashSet<String> = definitions
             .iter()
-            .map(|extracted| extracted.symbol.name.as_str())
+            .map(|extracted| crate::analysis::name_identity::key(self.language, &extracted.symbol.name).into_owned())
             .collect();
-        let imported_names: std::collections::HashSet<&str> =
-            imports.iter().map(|i| i.name.as_str()).collect();
-        let exported_names: std::collections::HashSet<&str> = self
+        let imported_names: std::collections::HashSet<String> =
+            imports.iter().map(|i| crate::analysis::name_identity::key(self.language, i.alias.as_deref().unwrap_or(&i.name)).into_owned()).collect();
+        let exported_names: std::collections::HashSet<String> = self
             .exports_from(definitions)
-            .map(|symbol| symbol.name.as_str())
+            .map(|symbol| crate::analysis::name_identity::key(self.language, &symbol.name).into_owned())
             .collect();
-        let referenced_names: std::collections::HashSet<&str> =
-            references.iter().map(|r| r.name.as_str()).collect();
+        let referenced_names: std::collections::HashSet<String> =
+            references.iter().map(|r| crate::analysis::name_identity::key(self.language, &r.name).into_owned()).collect();
 
         // Check for undefined symbols (experimental)
         if self.experimental_semantics {
@@ -1340,8 +1351,8 @@ impl TreeFile {
     fn check_undefined_symbols(
         &self,
         references: &[ReferencedSymbol],
-        defined_names: &std::collections::HashSet<&str>,
-        imported_names: &std::collections::HashSet<&str>,
+        defined_names: &std::collections::HashSet<String>,
+        imported_names: &std::collections::HashSet<String>,
     ) -> Vec<LintDiagnostic> {
         use crate::builtins::is_builtin;
 
@@ -1358,17 +1369,17 @@ impl TreeFile {
             }
 
             // Skip if defined locally
-            if defined_names.contains(name) {
+            if defined_names.contains(crate::analysis::name_identity::key(self.language, name).as_ref()) {
                 continue;
             }
 
             // Skip if imported
-            if imported_names.contains(name) {
+            if imported_names.contains(crate::analysis::name_identity::key(self.language, name).as_ref()) {
                 continue;
             }
 
             // Skip if it's a language builtin
-            if is_builtin(self.language, name) {
+            if is_builtin(self.language, crate::analysis::name_identity::key(self.language, name).as_ref()) {
                 continue;
             }
 
@@ -1405,8 +1416,8 @@ impl TreeFile {
     fn check_unused_symbols<'a>(
         &self,
         definitions: impl Iterator<Item = &'a SymbolInfo>,
-        exported_names: &std::collections::HashSet<&str>,
-        referenced_names: &std::collections::HashSet<&str>,
+        exported_names: &std::collections::HashSet<String>,
+        referenced_names: &std::collections::HashSet<String>,
     ) -> Vec<LintDiagnostic> {
         let mut diagnostics = Vec::new();
 
@@ -1414,12 +1425,12 @@ impl TreeFile {
             let name = definition.name.as_str();
 
             // Skip if exported
-            if exported_names.contains(name) {
+            if exported_names.contains(crate::analysis::name_identity::key(self.language, name).as_ref()) {
                 continue;
             }
 
             // Skip if referenced
-            if referenced_names.contains(name) {
+            if referenced_names.contains(crate::analysis::name_identity::key(self.language, name).as_ref()) {
                 continue;
             }
 
@@ -1457,7 +1468,7 @@ impl TreeFile {
     fn check_unused_imports(
         &self,
         imports: &[ImportSymbol],
-        referenced_names: &std::collections::HashSet<&str>,
+        referenced_names: &std::collections::HashSet<String>,
     ) -> Vec<LintDiagnostic> {
         let mut diagnostics = Vec::new();
 
@@ -1465,7 +1476,7 @@ impl TreeFile {
             let name = import.name.as_str();
 
             // Skip if referenced
-            if referenced_names.contains(name) {
+            if referenced_names.contains(crate::analysis::name_identity::key(self.language, name).as_ref()) {
                 continue;
             }
 
@@ -1522,8 +1533,8 @@ impl TreeFile {
     fn check_qualified_references(
         &self,
         references: &[ReferencedSymbol],
-        defined_names: &std::collections::HashSet<&str>,
-        imported_names: &std::collections::HashSet<&str>,
+        defined_names: &std::collections::HashSet<String>,
+        imported_names: &std::collections::HashSet<String>,
     ) -> Vec<LintDiagnostic> {
         use crate::builtins::is_builtin;
 
@@ -1552,12 +1563,12 @@ impl TreeFile {
             }
 
             // Skip if the qualifier is defined locally
-            if defined_names.contains(qualifier) {
+            if defined_names.contains(crate::analysis::name_identity::key(self.language, qualifier).as_ref()) {
                 continue;
             }
 
             // Skip if the qualifier is imported
-            if imported_names.contains(qualifier) {
+            if imported_names.contains(crate::analysis::name_identity::key(self.language, qualifier).as_ref()) {
                 continue;
             }
 
@@ -2068,7 +2079,7 @@ fn is_rust_glob_path(node: Node<'_>) -> bool {
 }
 
 /// A Go import path without its quotes: `"a/b"` or the raw `` `a/b` ``.
-fn go_import_path(literal: &str) -> &str {
+pub(crate) fn go_import_path(literal: &str) -> &str {
     ['"', '`']
         .iter()
         .find_map(|quote| literal.strip_prefix(*quote).and_then(|path| path.strip_suffix(*quote)))

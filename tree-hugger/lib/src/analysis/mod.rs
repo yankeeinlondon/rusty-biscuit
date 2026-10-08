@@ -22,6 +22,7 @@ pub mod counters;
 pub(crate) mod coverage;
 pub(crate) mod declaration_names;
 pub(crate) mod occurrences;
+pub(crate) mod name_identity;
 pub(crate) mod scope;
 pub(crate) mod syntax_markers;
 
@@ -461,9 +462,7 @@ pub(crate) fn semantic_facets(
         .filter_map(|region| Some((region.owner.as_ref()?.id.as_ref()?, region)))
         .collect();
 
-    // Each import's (local, original) names, read once for every call.
-    let imports: HashSet<(&str, &str)> =
-        imports.iter().map(|import| (import_local_name(import), import_original_name(import))).collect();
+    let imports: HashMap<_, _> = imports.iter().map(|import| ((import.span.start_byte, import.span.end_byte), import)).collect();
     symbols
         .iter()
         .map(|symbol| {
@@ -505,7 +504,7 @@ fn direct_recursion(
     symbol: &SymbolRecord,
     region: Option<&ReferenceCoverage>,
     calls: &[&Occurrence],
-    imports: &HashSet<(&str, &str)>,
+    imports: &HashMap<(u32, u32), &ImportRecord>,
 ) -> TriState {
     if calls.iter().any(|call| {
         call.confidence == Confidence::Scoped && call.target.id.as_ref() == Some(&symbol.id)
@@ -526,30 +525,21 @@ fn direct_recursion(
 /// (`use crate::f as g;` inside `f`), which no file-local rule can tell
 /// apart from another module's `f`, or, for a constructor, a call of its own
 /// class (`new C()` inside `C`'s constructor), which targets the class.
-fn may_call_itself(symbol: &SymbolRecord, call: &Occurrence, imports: &HashSet<(&str, &str)>) -> bool {
-    let name = symbol.identity.name.as_str();
+fn may_call_itself(symbol: &SymbolRecord, call: &Occurrence, imports: &HashMap<(u32, u32), &ImportRecord>) -> bool {
+    let name = name_identity::key(symbol.language, &symbol.identity.name);
     let class = (symbol.kind == SymbolKindV2::Constructor)
         .then(|| symbol.relations.parent.as_ref().and_then(|parent| parent.id.as_ref()))
         .flatten();
     let is_own = |id: Option<&SymbolId>| id.is_some_and(|id| *id == symbol.id || Some(id) == class);
     match call.confidence {
         Confidence::NameOnly => call.candidates.iter().any(|candidate| is_own(candidate.id.as_ref())),
-        Confidence::Unresolved => call.target.name == name,
+        Confidence::Unresolved => name_identity::key(symbol.language, &call.target.name) == name,
         Confidence::Scoped => match &call.target.id {
             Some(id) => Some(id) == class,
-            None => imports.contains(&(call.target.name.as_str(), name)),
+            None => call.import_span.as_ref().and_then(|span| imports.get(&(span.start_byte, span.end_byte)))
+                .is_some_and(|import| name_identity::original_key(symbol.language, import.symbol.qualified_name.as_deref().unwrap_or(&import.name)) == name),
         },
     }
-}
-
-/// The name an import binds in the file.
-fn import_local_name(import: &ImportRecord) -> &str {
-    import.alias.as_deref().unwrap_or(&import.name)
-}
-
-/// The last segment of the name an import brings in.
-fn import_original_name(import: &ImportRecord) -> &str {
-    last_name_segment(import.symbol.qualified_name.as_deref().unwrap_or(&import.name))
 }
 
 /// Docs pass: parses the extractor's cleaned `raw_doc` into structured

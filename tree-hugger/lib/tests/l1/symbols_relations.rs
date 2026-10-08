@@ -1200,6 +1200,27 @@ pub const PATH_MEANING_MATRIX: &[PathMeaningRow] = &[
     row("Scala wildcard with a stronger local base", L::Scala, "scala",
         "class ReviewBase\nobject ReviewOuter {\n  import lib._\n  class ReviewBase\n  class ReviewChild extends ReviewBase\n}\n",
         &[scala_child(&[to("ReviewBase", "ReviewOuter.ReviewBase")])]),
+    row("R8-F2 relation barrier: unbraced operator original", L::Scala, "scala",
+        "class ReviewBase\nobject ReviewOuter {\n  import lib.++ as ReviewBase\n  class ReviewChild extends ReviewBase\n}\n",
+        &[scala_child(&[text("ReviewBase")])]),
+    row("R8-F2 relation barrier: symbolic qualifier", L::Scala, "scala",
+        "class ReviewBase\nobject ReviewOuter {\n  import lib.+.ReviewBase\n  class ReviewChild extends ReviewBase\n}\n",
+        &[scala_child(&[text("ReviewBase")])]),
+    row("R8-F2 relation barrier: symbolic selector prefix", L::Scala, "scala",
+        "class ReviewBase\nobject ReviewOuter {\n  import lib.+.{ReviewBase}\n  class ReviewChild extends ReviewBase\n}\n",
+        &[scala_child(&[text("ReviewBase")])]),
+    row("R8-F2 relation barrier: symbolic wildcard prefix", L::Scala, "scala",
+        "class ReviewBase\nobject ReviewOuter {\n  import lib.+.*\n  class ReviewChild extends ReviewBase\n}\n",
+        &[scala_child(&[text("ReviewBase")])]),
+    row("R8-F2 relation barrier: commented unbraced operator original", L::Scala, "scala",
+        "class ReviewBase\nobject ReviewOuter {\n  import lib. /* n */ ++ /* n */ as /* n */ ReviewBase\n  class ReviewChild extends ReviewBase\n}\n",
+        &[scala_child(&[text("ReviewBase")])]),
+    row("R8-F2 relation barrier: commented symbolic selector prefix", L::Scala, "scala",
+        "class ReviewBase\nobject ReviewOuter {\n  import lib. /* n */ +. /* n */ {ReviewBase}\n  class ReviewChild extends ReviewBase\n}\n",
+        &[scala_child(&[text("ReviewBase")])]),
+    row("R8-F2 relation barrier: hidden operator original", L::Scala, "scala",
+        "class ReviewBase\nobject ReviewOuter {\n  import lib.++ as _\n  class ReviewChild extends ReviewBase\n}\n",
+        &[scala_child(&[to("ReviewBase", "ReviewBase")])]),
     row("Scala no-import control", L::Scala, "scala",
         "class ReviewBase\nobject ReviewOuter {\n  class ReviewChild extends ReviewBase\n}\n",
         &[scala_child(&[to("ReviewBase", "ReviewBase")])]),
@@ -5031,4 +5052,23 @@ fn swift_nested_extension_sees_unnumbered_enclosing_parameters() {
     assert!(child.relations.extends[0].id.is_none());
     assert!(child.relations.extends[0].qualified_name.is_none());
     assert!(child.type_info.generic_params.is_empty(), "enclosing parameters are lookup context only");
+}
+
+
+#[test]
+fn type_only_imports_preserve_relation_type_owner_barriers() {
+    const F: &[Target] = &[text("F")];
+    const ALIAS: &[Target] = &[text("Alias")];
+    const DEF: &[Target] = &[text("Def")];
+    const Q: &[Target] = &[text("Q")];
+    for &(_, import, name, _) in crate::symbols_occurrences::TYPE_ONLY_IMPORT_MATRIX {
+        let expected = match name { "F" => F, "Alias" => ALIAS, "Def" => DEF, _ => unreachable!() };
+        let source = format!("interface {name} {{}}\n{{ {import} class Child implements {name} {{}} }}\n");
+        check_owners("type-only import barrier", "ts", &source, &[
+            Owner { qualified_name: "Child", extends: &[], implements: expected, unclassified: &[] },
+        ]);
+    }
+    check_owners("entity alias barrier", "ts", "namespace N { export class F {} }\nimport Q = N.F;\nclass Child extends Q {}\n", &[
+        Owner { qualified_name: "Child", extends: Q, implements: &[], unclassified: &[] },
+    ]);
 }

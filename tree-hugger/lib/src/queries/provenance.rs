@@ -126,10 +126,11 @@ fn vendored_locals_changes(language: ProgrammingLanguage) -> &'static [&'static 
             "the import patterns capture only the name each import binds: a bare `use a;`, a list entry's own path's last segment (`h` in `use a::{g::h}`), the list path's last segment for a `self` entry, an `extern crate`'s alias when it has one, and a glob's path's last segment as an on-demand import; upstream missed the first three and a glob, and captured the crate name of `extern crate y as z`",
         ],
         ProgrammingLanguage::Java => &[
+            "import declarations capture both qualified-path final identifiers and direct identifiers (ordinary/static on-demand paths), without capturing qualified names outside imports",
             "classes captured as `@local.definition.class`; added `interface_declaration` and interface-constant (`constant_declaration`) patterns",
             "`package_declaration` also matches a dotted `scoped_identifier` name",
             "added explicit constructors (`constructor_declaration`) as `@local.definition.constructor` and enum constants as `@local.definition.enum_variant`, each with a context capture",
-            "the import pattern captures only the final segment of an `import_declaration`'s own `scoped_identifier`; upstream captured every identifier under any `scoped_identifier` behind a `#has-ancestor?` the runtime does not enforce, importing qualified annotation names, module names and module-directive operands",
+            "the import patterns capture only the final segment of an `import_declaration`'s own path, including its direct `identifier` alternative; upstream captured every identifier under any `scoped_identifier` behind a `#has-ancestor?` the runtime does not enforce, importing qualified annotation names, module names and module-directive operands",
         ],
         ProgrammingLanguage::Python => &[
             "classes captured as `@local.definition.class`",
@@ -182,10 +183,10 @@ fn vendored_locals_changes(language: ProgrammingLanguage) -> &'static [&'static 
         ProgrammingLanguage::Scala => &[
             "added Scala 3 enum cases (`simple_enum_case`, `full_enum_case`) as `@local.definition.enum_variant` and concrete `type` definitions as `@local.definition.type_alias`, each with a context capture",
             "added grouped `val`/`var` definition names (`pattern: (identifiers (identifier))`, as in `val a, b: Int = 1`) as `@local.definition.var`, one capture per name",
-            "the import patterns capture only what an import binds: a path's last segment (before `,` or at the end), a braced selector, a rename's alias, and an on-demand import's (`a.b.*`, `a.b._`, `a.given`, a selector wildcard) path's last segment; upstream captured every identifier of the declaration, importing every qualifier and missing every selector",
+            "the import patterns capture identifier and operator_identifier alternatives for braced selectors, braced/unbraced rename aliases, and every flat path segment of the declaration as a candidate; `TreeFile::imported_symbols` keeps only the segment an import binds (a path's last segment before `,` or at the end, and an on-demand import's (`a.b.*`, `a.b._`, `a.given`, a selector wildcard) path's last segment), stepping over comments a `.` anchor cannot; upstream captured every identifier of the declaration, importing every qualifier and missing every selector",
         ],
         ProgrammingLanguage::TypeScript => &[
-            "inherits the ecma import patterns (see JavaScript); added `import q = require(\"m\")` and `import R = N.S` bindings as `@local.definition.import`",
+            "inherits the ecma import patterns (see JavaScript); added `import q = require(\"m\")` and `import R = N.S` bindings as `@local.definition.import` (an entity alias's name is the identifier before `=`, unanchored, so a comment before it never hides it)",
         ],
         ProgrammingLanguage::Lua
         | ProgrammingLanguage::Perl

@@ -1264,24 +1264,6 @@ pub(crate) fn find_scala_type_node(node: Node<'_>) -> Option<Node<'_>> {
 // Helper functions
 // =============================================================================
 
-/// The first sibling after `node` that is not a grammar extra (a comment).
-fn next_syntax_sibling(node: Node<'_>) -> Option<Node<'_>> {
-    let mut sibling = node.next_sibling();
-    while let Some(next) = sibling.filter(Node::is_extra) {
-        sibling = next.next_sibling();
-    }
-    sibling
-}
-
-/// The first named sibling after `node` that is not a grammar extra.
-fn next_named_syntax_sibling(node: Node<'_>) -> Option<Node<'_>> {
-    let mut sibling = node.next_named_sibling();
-    while let Some(next) = sibling.filter(Node::is_extra) {
-        sibling = next.next_named_sibling();
-    }
-    sibling
-}
-
 /// Extracts Lua parameters: plain names, plus `...` as a variadic parameter.
 pub(crate) fn extract_lua_parameters(node: Node<'_>, source: &str) -> Vec<ParameterInfo> {
     let Some(params) = node.child_by_field_name("parameters") else {

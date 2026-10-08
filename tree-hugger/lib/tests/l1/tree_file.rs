@@ -3114,6 +3114,64 @@ fn java_qualified_annotations_and_services_are_referenced_symbols_not_imports() 
     }
 }
 
+/// Public diagnostics references retain every independently expected Java
+/// qualified-name read, including all module directive operand roles.
+#[test]
+fn java_import_context_inventory_keeps_public_referenced_symbols() {
+    for &(label, content, reads, expected_imports) in super::symbols_occurrences::JAVA_QUALIFIED_REFERENCE_MATRIX {
+        let dir = TempDir::new().unwrap();
+        let path = create_temp_file(&dir, "Matrix.java", content);
+        let file = TreeFile::new(&path).unwrap();
+        let imports = file.imported_symbols().unwrap();
+        let imported: Vec<(&str, usize, usize)> = imports.iter().map(|import| {
+            (import.name.as_str(), import.range.start_line, import.range.start_column)
+        }).collect();
+        let expected_imported: Vec<(&str, usize, usize)> = expected_imports.iter().map(|&(name, _, _, line, column)| {
+            (name, line as usize, column as usize)
+        }).collect();
+        assert_eq!(imported, expected_imported, "{label}: imports");
+        let references = file.referenced_symbols().unwrap();
+        let actual: Vec<(&str, usize, usize)> = references.iter().filter(|reference| {
+            reads.iter().any(|&(line, ..)| line as usize == reference.range.start_line)
+        }).map(|reference| {
+            (reference.name.as_str(), reference.range.start_line, reference.range.start_column)
+        }).collect();
+        let expected: Vec<(&str, usize, usize)> = reads.iter().map(|&(line, column, name, _, _)| {
+            (name, line as usize, column as usize)
+        }).collect();
+        assert_eq!(actual, expected, "{label}: public referenced_symbols");
+    }
+}
+
+/// `TreeFile::imported_symbols` reports each commented import of
+/// `symbols_occurrences::COMMENTED_IMPORT_MATRIX` (review rows `R8-F1.nn`)
+/// exactly: a comment is never the original target, never ends the
+/// source path, and never decides whether a path segment is imported.
+#[test]
+fn commented_imports_report_their_bound_names() {
+    super::symbols_occurrences::for_each_import_row(|row| {
+        let dir = TempDir::new().unwrap();
+        let path = create_temp_file(&dir, &format!("source.{}", row.extension), row.source);
+        let file = TreeFile::new(&path).unwrap();
+        let imports = file.imported_symbols().unwrap();
+        let actual: Vec<super::symbols_occurrences::ExpectedImport<'_>> = imports
+            .iter()
+            .map(|import| {
+                (
+                    import.name.as_str(),
+                    import.alias.as_deref(),
+                    import.original_name.as_deref(),
+                    import.source.as_deref(),
+                    u32::try_from(import.range.start_line).expect("line"),
+                    u32::try_from(import.range.start_column).expect("column"),
+                )
+            })
+            .collect();
+        let expected: Vec<super::symbols_occurrences::ExpectedImport<'_>> = row.imports.to_vec();
+        assert_eq!(actual, expected, "{}: imported_symbols", row.label);
+    });
+}
+
 /// `R7-F3.S1`: every C# `using` directive is an import, with its original
 /// name only when an alias names a type by name.
 #[test]
@@ -3415,4 +3473,15 @@ fn go_raw_string_import_paths_match_interpreted_ones() {
             ("n", None, None, Some("m/n"), 8, 2),
         ],
     );
+}
+
+
+#[test]
+fn unqualified_scala_renames_and_swift_operator_selectors_need_grammar_support() {
+    for (extension, source) in [("scala", "import C as D\n"), ("swift", "import func Foo.+\n")] {
+        let dir = TempDir::new().unwrap();
+        let path = create_temp_file(&dir, &format!("source.{extension}"), source);
+        let file = TreeFile::new(&path).unwrap();
+        assert!(!file.syntax_diagnostics().is_empty(), "{extension}: pinned grammar rejects {source}");
+    }
 }

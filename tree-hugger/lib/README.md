@@ -204,7 +204,7 @@ metadata and standalone symbols agree.
 
 ### Schema records
 
-`SymbolRecord` (schema 5.0) carries the same facts:
+`SymbolRecord` (schema 5.1) carries the same facts:
 
 - `visibility.level` holds the level; `modifiers` holds `Static` for member
   `static` and `StaticStorage` for storage/linkage `static`, `Async`, and the
@@ -274,7 +274,10 @@ metadata and standalone symbols agree.
   ```
 
   Rust, TypeScript and JavaScript resolve; other languages report occurrences
-  with `Limited` coverage. See [Scope-Aware References](../docs/references.md).
+  with `Limited` coverage. TypeScript type-only imports occupy the type
+  category, so a same-named local function keeps its self-calls and `typeof`
+  value reads; type annotations retain the imported binding without an ID.
+  See [Scope-Aware References](../docs/references.md).
 
 The `From<SymbolInfo>` / `From<SymbolRecord>` adapters preserve kind,
 visibility, both `static` flags, container kind and signature presence.
@@ -287,7 +290,7 @@ except `static` and `async`: the older model has no field for them.
 The library provides `FileSummary` and `PackageSummary` structs for JSON output. These types are
 used by the CLI but are also available to library consumers.
 
-Schema output (version 5.0) is exposed via `SymbolRecord` and `FileSymbolIndex`, including `schema_version`
+Schema output (version 5.1) is exposed via `SymbolRecord` and `FileSymbolIndex`, including `schema_version`
 and `completed_passes` metadata for staged analysis. A `SymbolQuery` result adds
 `completed_capabilities`, `selected_kinds` and `name_prefix()`, and `narrowed` answers a
 narrower query from it without parsing again (it re-decides the file-wide test
@@ -485,3 +488,8 @@ is never reported, and visibility is always unknown.
 
 The full list, including unresolved visibility cases, is in
 [Symbol Kinds, Visibility and `static`](../docs/symbol-kinds-and-visibility.md#current-limitations).
+
+Lexical reference identity follows the source language: Rust raw names share
+their plain name and use NFC; TypeScript/JavaScript identifier escapes share
+their decoded name without Unicode normalization. Reports retain written
+spelling and token spans. See [references](../docs/references.md).

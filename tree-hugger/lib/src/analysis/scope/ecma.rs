@@ -88,7 +88,7 @@ pub(crate) fn is_direct_eval(node: Node<'_>, language: ProgrammingLanguage, sour
     }
     node.child_by_field_name("function").is_some_and(|function| {
         let function = invoked_operand(function, language);
-        function.kind() == "identifier" && function.utf8_text(source.as_bytes()) == Ok("eval")
+        function.kind() == "identifier" && function.utf8_text(source.as_bytes()).is_ok_and(|name| crate::analysis::name_identity::equal(language, name, "eval"))
     })
 }
 
@@ -231,15 +231,20 @@ pub(super) fn binding_sites<'tree>(node: Node<'tree>, typed: bool, sites: &mut V
         "import_clause" => {
             let mut cursor = node.walk();
             for child in node.named_children(&mut cursor) {
-                import_names(child, &mut |name| {
-                    sites.push(BindingSite { name, rule: declared(ANY_CATEGORY, true), is_import: true, bare_pattern: None });
+                import_names(child, typed && node.parent().is_some_and(type_only_import), &mut |name, type_only| {
+                    let rule = if type_only { declared(TYPE, false) } else { declared(ANY_CATEGORY, true) };
+                    sites.push(BindingSite { name, rule, is_import: true, bare_pattern: None });
                 });
             }
         }
         // TypeScript `import q = require("m");` and `import R = N.S;`.
         "import_require_clause" | "import_alias" => {
-            if let Some(name) = node.named_child(0).filter(|name| name.kind() == "identifier") {
-                sites.push(BindingSite { name, rule: declared(ANY_CATEGORY, true), is_import: true, bare_pattern: None });
+            let mut cursor = node.walk();
+            let first = node.named_children(&mut cursor).find(|child| !child.is_extra());
+            if let Some(name) = first.filter(|name| name.kind() == "identifier") {
+                let type_only = typed && (type_only_import(node) || node.parent().is_some_and(type_only_import));
+                let rule = if type_only { declared(TYPE, false) } else { declared(ANY_CATEGORY, true) };
+                sites.push(BindingSite { name, rule, is_import: true, bare_pattern: None });
             }
         }
         _ => {}
@@ -253,15 +258,16 @@ pub(super) fn binding_sites<'tree>(node: Node<'tree>, typed: bool, sites: &mut V
 
 /// The local names one part of an `import` clause binds: a default import,
 /// `* as ns`, and each specifier's alias (else its name). The original name
-/// of an aliased specifier is never bound.
-fn import_names<'tree>(node: Node<'tree>, bind: &mut impl FnMut(Node<'tree>)) {
+/// of an aliased specifier is never bound. Each local retains its statement
+/// or specifier type-only modifier independently of neighboring imports.
+fn import_names<'tree>(node: Node<'tree>, type_only: bool, bind: &mut impl FnMut(Node<'tree>, bool)) {
     match node.kind() {
-        "identifier" => bind(node),
+        "identifier" => bind(node, type_only),
         "namespace_import" => {
             let mut cursor = node.walk();
             for child in node.named_children(&mut cursor) {
                 if child.kind() == "identifier" {
-                    bind(child);
+                    bind(child, type_only);
                 }
             }
         }
@@ -274,12 +280,19 @@ fn import_names<'tree>(node: Node<'tree>, bind: &mut impl FnMut(Node<'tree>)) {
                         .or_else(|| specifier.child_by_field_name("name"))
                     && local.kind() == "identifier"
                 {
-                    bind(local);
+                    bind(local, type_only || type_only_import(specifier));
                 }
             }
         }
         _ => {}
     }
+}
+
+/// Only the anonymous modifier token is evidence: a named identifier
+/// spelled `type` in `import { type as g }` is an ordinary exported name.
+fn type_only_import(node: Node<'_>) -> bool {
+    let mut cursor = node.walk();
+    node.children(&mut cursor).any(|child| !child.is_named() && child.kind() == "type")
 }
 
 /// The identifiers a binding pattern binds; default values and property

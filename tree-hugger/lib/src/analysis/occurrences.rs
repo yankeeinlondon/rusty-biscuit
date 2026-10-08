@@ -19,7 +19,7 @@ use super::scope::{
 use super::declaration_names::{declaration_names, declared_name_tokens, scala_import_path_start};
 use super::syntax_markers::{SyntaxMarkers, syntax_markers};
 use super::symbol_ref;
-use crate::file::extract::{is_definition_like_reference, text_span_for_node};
+use crate::file::extract::{is_definition_like_reference, next_named_syntax_sibling, text_span_for_node};
 use crate::file::tree_file::{ExtractedSymbol, ReferenceCapture};
 use crate::shared::{
     Confidence, CoverageState, ImportSymbol, LimitReason, Occurrence, OccurrenceKind, ProgrammingLanguage,
@@ -56,6 +56,7 @@ pub(crate) struct OccurrenceSyntax<'tree> {
 /// Where one import record's name was captured, in import order.
 struct ImportSite {
     name_start: usize,
+    span: TextSpan,
     /// The whole import statement's byte range.
     statement: Option<(usize, usize)>,
     name: String,
@@ -63,6 +64,7 @@ struct ImportSite {
 
 /// [`ReferenceEvidence`] plus, for each occurrence (same order), the index of
 /// the import it is bound to, which the summaries record as a dependency.
+/// The evidence already carries the selected import's span before projection.
 pub(crate) struct ResolvedOccurrences {
     pub(crate) evidence: ReferenceEvidence,
     pub(crate) bound_imports: Vec<Option<usize>>,
@@ -100,6 +102,7 @@ impl<'tree> OccurrenceSyntax<'tree> {
                 .iter()
                 .map(|import| ImportSite {
                     name_start: import.range.start_byte,
+                    span: super::text_span(&import.range),
                     statement: import.statement_range.as_ref().map(|range| (range.start_byte, range.end_byte)),
                     name: import.name.clone(),
                 })
@@ -113,7 +116,7 @@ impl<'tree> OccurrenceSyntax<'tree> {
     fn import_at(&self, name_start: usize, name: &str) -> Option<usize> {
         self.imports.iter().position(|site| site.name_start == name_start).or_else(|| {
             self.imports.iter().position(|site| {
-                site.name == name && site.statement.is_some_and(|(start, end)| start <= name_start && name_start < end)
+                super::name_identity::equal(self.language, &site.name, name) && site.statement.is_some_and(|(start, end)| start <= name_start && name_start < end)
             })
         })
     }
@@ -169,8 +172,9 @@ impl<'tree> OccurrenceSyntax<'tree> {
         let resolver = Resolver::new(&self, records, rules, &walk);
         let mut resolved = Vec::new();
         for capture in self.captures.iter().flatten() {
-            if let Some(occurrence) = resolver.occurrence(*capture, &mut regions) {
-                resolved.push(occurrence);
+            if let Some((mut occurrence, import)) = resolver.occurrence(*capture, &mut regions) {
+                occurrence.import_span = import.map(|idx| self.imports[idx].span.clone());
+                resolved.push((occurrence, import));
             }
         }
         resolved.sort_by(|(left, _), (right, _)| occurrence_order(left).cmp(&occurrence_order(right)));
@@ -319,7 +323,7 @@ impl<'tree> Walk<'tree> {
                 // a tagged ``eval`…` `` evaluates nothing.
                 Some(function)
                     if function.kind() == "identifier"
-                        && function.utf8_text(source.as_bytes()) == Ok("eval")
+                        && function.utf8_text(source.as_bytes()).is_ok_and(|name| super::name_identity::equal(language, name, "eval"))
                         && node.child_by_field_name("arguments").is_some_and(|arguments| arguments.kind() == "arguments") =>
                 {
                     self.reasons.push((node, LimitReason::IndirectDispatch));
@@ -463,7 +467,7 @@ struct Resolver<'a, 'tree> {
     /// What each bare pattern name that binds nothing proved to be.
     pattern_reads: PatternReads,
     /// Record indexes by name, in record order.
-    by_name: HashMap<&'a str, Vec<usize>>,
+    by_name: HashMap<String, Vec<usize>>,
 }
 
 impl<'a, 'tree> Resolver<'a, 'tree> {
@@ -473,9 +477,9 @@ impl<'a, 'tree> Resolver<'a, 'tree> {
         rules: Option<LanguageRules>,
         walk: &Walk<'tree>,
     ) -> Self {
-        let mut by_name: HashMap<&str, Vec<usize>> = HashMap::new();
+        let mut by_name: HashMap<String, Vec<usize>> = HashMap::new();
         for (idx, record) in records.iter().enumerate() {
-            by_name.entry(record.identity.name.as_str()).or_default().push(idx);
+            by_name.entry(super::name_identity::key(syntax.language, &record.identity.name).into_owned()).or_default().push(idx);
         }
         let mut pattern_reads = PatternReads::default();
         let scopes = rules.map(|rules| {
@@ -537,7 +541,7 @@ impl<'a, 'tree> Resolver<'a, 'tree> {
                 (resolution.confidence, resolution.id, resolution.candidates, import)
             }
             _ => {
-                let (confidence, id, candidates) = self.name_only(self.by_name.get(name).cloned().unwrap_or_default());
+                let (confidence, id, candidates) = self.name_only(self.by_name.get(super::name_identity::key(self.syntax.language, name).as_ref()).cloned().unwrap_or_default());
                 (confidence, id, candidates, None)
             }
         };
@@ -551,6 +555,7 @@ impl<'a, 'tree> Resolver<'a, 'tree> {
                 qualified_name: written_path(node, self.syntax.source, self.syntax.language),
                 source_span: None,
             },
+            import_span: None,
             candidates,
             span: text_span_for_node(node),
             kind,
@@ -758,7 +763,7 @@ impl<'a, 'tree> Resolver<'a, 'tree> {
     /// Records called `name` that pass `keep`, in record order.
     fn records_named(&self, name: &str, keep: impl Fn(usize) -> bool) -> Vec<usize> {
         self.by_name
-            .get(name)
+            .get(super::name_identity::key(self.syntax.language, name).as_ref())
             .map(|indexes| indexes.iter().copied().filter(|&idx| keep(idx)).collect())
             .unwrap_or_default()
     }
@@ -1681,7 +1686,7 @@ fn member_name<'tree>(access: Node<'tree>, language: ProgrammingLanguage) -> Opt
 /// a TypeScript instantiation expression (`f<T>` or `obj.m<T>` written
 /// apart from its call, as in `(f<T>)()`), and the generic types a
 /// construction names: Java `C<String>` and `a.b.C<>`, Scala `C[Int]`,
-/// C++ `C<int>`, Swift `C<Int>` (a one-segment `user_type`: in `N.C<Int>`
+/// C++ `C<int>`, Swift `C<Int>` (also with comments before the arguments; a one-segment `user_type`: in `N.C<Int>`
 /// the path step reaches the same node). Go `f[T]` is not one: the grammar
 /// writes it as an `index_expression`, the same node as `fs[0]`.
 ///
@@ -1706,7 +1711,7 @@ fn generic_operand<'tree>(instantiation: Node<'tree>, language: ProgrammingLangu
             let mut segments = instantiation.named_children(&mut cursor).filter(|child| child.kind() == "type_identifier");
             let only = segments.next().filter(|_| segments.next().is_none())?;
             let generic = first_operand(instantiation).is_some_and(|first| first.id() == only.id())
-                && only.next_named_sibling().is_some_and(|next| next.kind() == "type_arguments");
+                && next_named_syntax_sibling(only).is_some_and(|next| next.kind() == "type_arguments");
             return generic.then_some(only);
         }
         (ProgrammingLanguage::CSharp, "generic_name") | (ProgrammingLanguage::Cpp, "dependent_name") => {

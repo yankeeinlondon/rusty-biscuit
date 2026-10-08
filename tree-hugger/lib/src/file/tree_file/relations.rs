@@ -217,13 +217,13 @@ fn qualifier_categories(language: ProgrammingLanguage, value: bool) -> u8 {
 #[derive(Default)]
 struct ScopeFacts<'a> {
     /// Names imported there, with the name groups they are bound in.
-    imports: HashMap<&'a str, u8>,
+    imports: HashMap<Cow<'a, str>, u8>,
     /// Names a binding no record reports binds there (a Python module-level
     /// tuple target, a TS module-level destructured value, a Scala pattern
     /// `val`, a Rust item's generic parameter, a write a Python function
     /// makes under `global`), with the name groups of that binding: it hides
     /// only a lookup in those groups, and never resolves.
-    unrecorded: HashMap<&'a str, u8>,
+    unrecorded: HashMap<Cow<'a, str>, u8>,
     /// A wildcard import, C++ using-directive or Swift whole-module import.
     opaque: bool,
     /// An import whose bound names cannot be read.
@@ -233,22 +233,22 @@ struct ScopeFacts<'a> {
 impl<'a> ScopeFacts<'a> {
     /// Adds `other`'s bindings: the facts of several fragments of one owner.
     fn absorb(&mut self, other: &ScopeFacts<'a>) {
-        for (&name, &groups) in &other.imports {
-            *self.imports.entry(name).or_default() |= groups;
+        for (name, &groups) in &other.imports {
+            *self.imports.entry(name.clone()).or_default() |= groups;
         }
-        for (&name, &groups) in &other.unrecorded {
-            *self.unrecorded.entry(name).or_default() |= groups;
+        for (name, &groups) in &other.unrecorded {
+            *self.unrecorded.entry(name.clone()).or_default() |= groups;
         }
         self.opaque |= other.opaque;
         self.unreadable |= other.unreadable;
     }
 
-    fn imports_name(&self, name: &str, categories: u8) -> bool {
-        self.imports.get(name).is_some_and(|&groups| groups & categories != 0)
+    fn imports_name(&self, name: &str, categories: u8, language: ProgrammingLanguage) -> bool {
+        self.imports.get(crate::analysis::name_identity::key(language, name).as_ref()).is_some_and(|groups| groups & categories != 0)
     }
 
-    fn binds_unrecorded(&self, name: &str, categories: u8) -> bool {
-        self.unrecorded.get(name).is_some_and(|&groups| groups & categories != 0)
+    fn binds_unrecorded(&self, name: &str, categories: u8, language: ProgrammingLanguage) -> bool {
+        self.unrecorded.get(crate::analysis::name_identity::key(language, name).as_ref()).is_some_and(|groups| groups & categories != 0)
     }
 }
 
@@ -305,9 +305,9 @@ struct FileWalk<'a> {
     /// The same bindings of owners without a record (a Rust impl's generic
     /// parameters), by owning lexical scope and name: the name groups. They
     /// bind only for a lookup made inside that scope.
-    owned: HashMap<(usize, &'a str), u8>,
+    owned: HashMap<usize, HashMap<Cow<'a,str>, u8>>,
     /// The names in `owned`, so a lookup of any other name climbs nothing.
-    owned_names: HashSet<&'a str>,
+    owned_names: HashSet<Cow<'a,str>>,
     /// Python attribute write targets ([`lexical::Collected::qualified_writes`]).
     qualified_writes: Vec<Node<'a>>,
     /// Rust `impl` blocks in source order.
@@ -777,7 +777,9 @@ impl<'a> Declarations<'a> {
     ///   `example.q.ReviewBase`).
     fn binding_name(&self, idx: usize) -> Cow<'a, str> {
         let entry = &self.entries[idx];
-        let displayed = Cow::Borrowed(entry.qualified_name);
+        let displayed = if self.language == ProgrammingLanguage::Rust {
+            Cow::Owned(entry.qualified_name.split("::").map(|segment| crate::analysis::name_identity::key(self.language, segment).into_owned()).collect::<Vec<_>>().join("::"))
+        } else { crate::analysis::name_identity::key(self.language, entry.qualified_name) };
         let text = |node: Node<'_>| self.source.get(node.start_byte()..node.end_byte());
         match self.language {
             ProgrammingLanguage::Php
@@ -939,7 +941,7 @@ impl<'a> Declarations<'a> {
                 match import_binding(node, language, self.source) {
                     Some(ImportBinding::Names(names, categories)) => record(&mut walk, node, &|facts| {
                         for name in &names {
-                            *facts.imports.entry(*name).or_default() |= categories;
+                            *facts.imports.entry(crate::analysis::name_identity::key(language, name)).or_default() |= categories;
                         }
                     }),
                     Some(ImportBinding::Opaque) => record(&mut walk, node, &|facts| {
@@ -954,15 +956,15 @@ impl<'a> Declarations<'a> {
                 let Some(text) = self.source.get(binding.name.start_byte()..binding.name.end_byte()) else { continue };
                 if self.names_scope(binding.scope) {
                     let categories = binding.categories;
-                    record(&mut walk, binding.name, &|facts| *facts.unrecorded.entry(text).or_default() |= categories);
+                    record(&mut walk, binding.name, &|facts| *facts.unrecorded.entry(crate::analysis::name_identity::key(language, text)).or_default() |= categories);
                 } else {
-                    *walk.owned.entry((binding.scope_index, text)).or_default() |= binding.categories;
-                    walk.owned_names.insert(text);
+                    *walk.owned.entry(binding.scope_index).or_default().entry(crate::analysis::name_identity::key(language, text)).or_default() |= binding.categories;
+                    walk.owned_names.insert(crate::analysis::name_identity::key(language, text));
                 }
             }
             // A Python module is the root scope, `""`.
             for name in collected.global_writes {
-                *walk.named.entry(String::new()).or_default().unrecorded.entry(name).or_default() |= ALL;
+                *walk.named.entry(String::new()).or_default().unrecorded.entry(crate::analysis::name_identity::key(language, name)).or_default() |= ALL;
             }
             walk
         })
@@ -981,10 +983,12 @@ impl<'a> Declarations<'a> {
     /// given groups (a Rust impl's generic parameter).
     fn owner_binds(&self, first: &str, at: Node<'_>, categories: u8) -> bool {
         let walk = self.walk();
+        let key = crate::analysis::name_identity::key(self.language, first);
+        let first = key.as_ref();
         walk.owned_names.contains(first)
             && walk.lexical.scopes_from(at).any(|scope| {
                 count_shared_context_steps(1);
-                walk.owned.get(&(scope, first)).is_some_and(|&groups| groups & categories != 0)
+                walk.owned.get(&scope).and_then(|names| names.get(first)).is_some_and(|&groups| groups & categories != 0)
             })
     }
 
@@ -1387,8 +1391,8 @@ impl<'a> Declarations<'a> {
     /// (an [`Owner::Anchored`] lookup) for one owner group alone.
     fn owner_rebinds(&self, owner: FactsOf<'_>, segment: &str, categories: u8, writes: bool) -> bool {
         self.scope_facts(owner).is_some_and(|facts| {
-            facts.binds_unrecorded(segment, categories)
-                || (imports_bind_members(self.language) && facts.imports_name(segment, categories))
+            facts.binds_unrecorded(segment, categories, self.language)
+                || (imports_bind_members(self.language) && facts.imports_name(segment, categories, self.language))
                 || (globs_bind_members(self.language) && facts.opaque)
         }) || (writes
             && match owner {
@@ -1645,7 +1649,7 @@ impl<'a> Declarations<'a> {
             }
             let facts = self.scope_facts(anchor.map_or(FactsOf::Named(prefix), FactsOf::Owner));
             let opaque = facts.is_some_and(|facts| facts.opaque);
-            if facts.is_some_and(|facts| facts.imports_name(first, categories) || facts.binds_unrecorded(first, categories))
+            if facts.is_some_and(|facts| facts.imports_name(first, categories, self.language) || facts.binds_unrecorded(first, categories, self.language))
                 || (!local_before_wildcard(self.language) && opaque) {
                 return None;
             }
@@ -1694,7 +1698,7 @@ impl<'a> Declarations<'a> {
                 return false;
             }
             self.scope_facts(anchor.map_or(FactsOf::Named(prefix), FactsOf::Owner)).is_some_and(|facts| {
-                facts.imports_name(first, categories) || facts.binds_unrecorded(first, categories) || facts.unreadable
+                facts.imports_name(first, categories, self.language) || facts.binds_unrecorded(first, categories, self.language) || facts.unreadable
             }) || match anchor {
                 Some(owner) => !self.members(owner, first, categories, arity).is_empty(),
                 None => self.is_bound(&self.join(prefix, first), categories, arity),
@@ -1762,6 +1766,11 @@ impl<'a> Declarations<'a> {
         eligible: fn(SymbolKindV2) -> bool,
         writes: bool,
     ) -> Option<usize> {
+        let canonical;
+        let path = if matches!(self.language, ProgrammingLanguage::Rust | ProgrammingLanguage::TypeScript | ProgrammingLanguage::JavaScript) {
+            canonical = BasePath { segments: path.segments.iter().map(|name| crate::analysis::name_identity::key(self.language, name).into_owned()).collect(), ..path.clone() };
+            &canonical
+        } else { path };
         let (first, rest) = path.segments.split_first()?;
         let final_groups = final_categories(self.language, site.value);
         let qualifier_groups = qualifier_categories(self.language, site.value);
@@ -1906,7 +1915,7 @@ impl<'a> Declarations<'a> {
         if let Some(layer) = cached { return layer; }
         let names = declared_generic_names(entry.declaration, entry.name, self.language, self.source);
         count_shared_context_steps(names.len());
-        let layer = Rc::new(names.into_iter().collect());
+        let layer = Rc::new(names.into_iter().map(|name| crate::analysis::name_identity::key(self.language, &name).into_owned()).collect());
         self.generic_layers.borrow_mut().insert(entry.declaration.id(), Rc::clone(&layer));
         layer
     }
@@ -1981,7 +1990,7 @@ impl<'a> Declarations<'a> {
                     cached.unwrap_or_else(|| {
                         let names = impl_type_parameters(current, self.source);
                         count_shared_context_steps(names.len());
-                        let layer = Rc::new(names.into_iter().collect());
+                        let layer = Rc::new(names.into_iter().map(|name| crate::analysis::name_identity::key(self.language, &name).into_owned()).collect());
                         self.generic_layers.borrow_mut().insert(current.id(), Rc::clone(&layer));
                         layer
                     })

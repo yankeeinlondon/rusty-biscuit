@@ -22,6 +22,7 @@
 
 use tree_sitter::Node;
 
+use crate::file::extract::{next_syntax_sibling, prev_syntax_sibling};
 use crate::shared::ProgrammingLanguage;
 
 /// Pushes the name tokens `node` itself declares (its own fields and direct
@@ -411,25 +412,69 @@ pub(crate) fn swift_import_selector(import: Node<'_>) -> Option<&'static str> {
         .find_map(|child| SELECTORS.iter().copied().find(|selector| *selector == child.kind()))
 }
 
+/// The node kinds a Scala import path segment is written as: the flat
+/// children of an `import_declaration` between its `.` tokens, an ordinary
+/// or backticked name or a symbolic one (`+` in `import a.+.C` or
+/// `import a.b.+`).
+pub(crate) const SCALA_IMPORT_SEGMENT_KINDS: &[&str] = &["identifier", "operator_identifier"];
+
+/// Whether `node` is a segment of a Scala import path: a
+/// [`SCALA_IMPORT_SEGMENT_KINDS`] child of an `import_declaration`.
+pub(crate) fn is_scala_import_segment(node: Node<'_>) -> bool {
+    SCALA_IMPORT_SEGMENT_KINDS.contains(&node.kind())
+        && node.parent().is_some_and(|parent| parent.kind() == "import_declaration")
+}
+
 /// The first segment of the Scala import path `segment` belongs to
 /// (`a` for `b` or `C` in `import a.b.C`, `c` for `d` in `import a.b, c.d`),
 /// or `None` when `segment` is no import path segment. The pinned grammar
-/// writes every path as flat `identifier`/`.` children of the
+/// writes every path as flat segment/`.` children of the
 /// `import_declaration`, so a path runs back to the previous `,` or the
-/// `import` keyword.
+/// `import` keyword; a comment between segments is part of neither and
+/// never ends the path.
 pub(crate) fn scala_import_path_start(segment: Node<'_>) -> Option<Node<'_>> {
-    if segment.kind() != "identifier" || segment.parent()?.kind() != "import_declaration" {
+    if !is_scala_import_segment(segment) {
         return None;
     }
     let mut first = segment;
-    let mut current = segment.prev_sibling();
-    while let Some(previous) = current.filter(|previous| matches!(previous.kind(), "identifier" | ".")) {
-        if previous.kind() == "identifier" {
+    let mut current = prev_syntax_sibling(segment);
+    while let Some(previous) =
+        current.filter(|previous| previous.kind() == "." || SCALA_IMPORT_SEGMENT_KINDS.contains(&previous.kind()))
+    {
+        if previous.kind() != "." {
             first = previous;
         }
-        current = previous.prev_sibling();
+        current = prev_syntax_sibling(previous);
     }
     Some(first)
+}
+
+/// Whether the Scala import path segment `segment` is a name its import
+/// binds: the last segment of a `,`-separated expression (a segment
+/// followed by `.` and an unbraced rename, `b` in `a.b.C as D`, is a
+/// qualifier: the rename binds), or the last
+/// segment of a path that opens a wildcard (`a.b.*`, `a.b._`, `a.b.given`)
+/// or a selector group holding a wildcard or a `given` selector
+/// (`a.b.{_, given T}`). Every other segment is a qualifier. Comments
+/// between the segment and what follows it are skipped, so they never
+/// decide the binding.
+pub(crate) fn scala_import_binds(segment: Node<'_>) -> bool {
+    if !is_scala_import_segment(segment) {
+        return false;
+    }
+    let Some(next) = next_syntax_sibling(segment) else { return true };
+    match next.kind() {
+        "," => true,
+        "." => next_syntax_sibling(next).is_some_and(|opened| match opened.kind() {
+            "namespace_wildcard" => true,
+            "namespace_selectors" => {
+                let mut cursor = opened.walk();
+                opened.children(&mut cursor).any(|selector| matches!(selector.kind(), "namespace_wildcard" | "given"))
+            }
+            _ => false,
+        }),
+        _ => false,
+    }
 }
 
 /// Whether a bare name in this Swift pattern binds rather than matches an

@@ -40,7 +40,7 @@ pub(crate) const TYPE: u8 = 1;
 pub(crate) const VALUE: u8 = 2;
 /// A Rust macro name.
 pub(crate) const MACRO: u8 = 4;
-/// An import, whose category the file alone cannot tell.
+/// An import without a source modifier that restricts its name category.
 pub(crate) const ANY_CATEGORY: u8 = TYPE | VALUE | MACRO;
 
 /// Where a binding is placed.
@@ -267,7 +267,7 @@ pub(crate) struct ScopeTree<'tree> {
     bindings: Vec<Binding>,
     /// `(scope, name)` → binding indexes, in binding order, not position
     /// order: `visible_in` picks the latest `ordered` binding by name position.
-    table: HashMap<(usize, &'tree str), Vec<usize>>,
+    table: HashMap<usize, HashMap<String, Vec<usize>>>,
 }
 
 /// The outcome of a lookup.
@@ -395,6 +395,10 @@ impl<'tree> ScopeTree<'tree> {
         }
     }
 
+    fn name_key<'name>(&self, name: &'name str) -> std::borrow::Cow<'name, str> {
+        self.rules.map_or_else(|| std::borrow::Cow::Borrowed(name), |rules| super::name_identity::key(rules.language(), name))
+    }
+
     /// Places a binding of `name` (whose text is `text`).
     pub(crate) fn bind(&mut self, name: Node<'tree>, text: &'tree str, rule: BindingRule, target: BindingTarget) {
         let scope = self.placement(name, rule);
@@ -438,7 +442,8 @@ impl<'tree> ScopeTree<'tree> {
     ) {
         let idx = self.bindings.len();
         self.bindings.push(Binding { name_start, rule, target });
-        self.table.entry((scope, text)).or_default().push(idx);
+        let key = self.name_key(text).into_owned();
+        self.table.entry(scope).or_default().entry(key).or_default().push(idx);
     }
 
     /// The scope `node` itself is, if it is one.
@@ -486,6 +491,8 @@ impl<'tree> ScopeTree<'tree> {
     /// [`Self::lookup`] from `scope` at byte `position`, through the
     /// [`Boundary`] of every scope it leaves.
     pub(crate) fn lookup_from(&self, scope: usize, position: usize, name: &str, mut categories: u8) -> Lookup {
+        let key = self.name_key(name);
+        let name = key.as_ref();
         let mut scope = Some(scope);
         let mut items_only = false;
         while let Some(current) = scope {
@@ -515,13 +522,13 @@ impl<'tree> ScopeTree<'tree> {
     /// visible at byte `position` in the given categories, `None` when it
     /// binds no such name: among ordered ones (Rust `let`) the latest wins.
     pub(crate) fn visible_in(&self, scope: usize, position: usize, name: &str, categories: u8) -> Option<Vec<usize>> {
-        self.visible(scope, position, name, categories, false)
+        self.visible(scope, position, &self.name_key(name), categories, false)
     }
 
     /// [`Self::visible_in`], without [`BindingRule::local`] bindings when
     /// `items_only`.
     fn visible(&self, scope: usize, position: usize, name: &str, categories: u8, items_only: bool) -> Option<Vec<usize>> {
-        let bucket = self.table.get(&(scope, name))?;
+        let bucket = self.table.get(&scope)?.get(name)?;
         let visible = bucket.iter().copied().filter(|&idx| {
             let rule = self.bindings[idx].rule;
             rule.categories & categories != 0

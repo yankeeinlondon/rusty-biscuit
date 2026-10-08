@@ -36,11 +36,13 @@ impl SchemaVersion {
     pub const V4_3: Self = Self { major: 4, minor: 3 };
     /// Reference summaries and `semantics.is_recursive` are derived from
     /// scoped per-occurrence evidence, and a file index may carry
-    /// `occurrences` and `reference_coverage`.
+    /// `occurrences` and `reference_coverage`; no longer emitted.
     pub const V5_0: Self = Self { major: 5, minor: 0 };
+    /// Shape with an occurrence's selected import name span.
+    pub const V5_1: Self = Self { major: 5, minor: 1 };
     /// The shape records, file indexes, CLI envelopes and cache entries are
     /// written in, and the only one the cache serves.
-    pub const CURRENT: Self = Self::V5_0;
+    pub const CURRENT: Self = Self::V5_1;
 }
 
 /// 1-based text location.

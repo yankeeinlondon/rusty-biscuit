@@ -4,7 +4,7 @@
 
 Draft design for a major refactor, partly implemented. `SymbolRecord` and
 `FileSymbolIndex` ship in `lib/src/shared/schema_v2/` and serialize as schema
-**5.0** (the Rust module and type names keep their historical `v2`). Sections
+**5.1** (the Rust module and type names keep their historical `v2`). Sections
 below describe the implemented shape unless marked **planned**. Per-language
 extraction rules for kinds, visibility and `static` are in
 [Symbol Kinds, Visibility and `static`](./symbol-kinds-and-visibility.md).
@@ -1378,7 +1378,8 @@ Version history:
 | 4.1 | the required `metrics.lines` key inside a present `metrics` facet; no longer emitted |
 | 4.2 | `relations.unclassified_bases` and the optional `source_span` on a relation's `SymbolRef`; no longer emitted |
 | 4.3 | the required `metrics.cyclomatic` key inside a present `metrics` facet; no longer emitted |
-| 5.0 (current) | `relations.references`, `dependencies`, `referenced_by` and `semantics.is_recursive` are derived from [scoped reference occurrences](./references.md) instead of the first same-named declaration (a change of meaning, so a major bump); a file index may carry `occurrences` and `reference_coverage`. Emitted on records, file indexes, CLI envelopes and analyzer fingerprints |
+| 5.0 | `relations.references`, `dependencies`, `referenced_by` and `semantics.is_recursive` are derived from [scoped reference occurrences](./references.md) instead of the first same-named declaration (a change of meaning, so a major bump); a file index may carry `occurrences` and `reference_coverage`. Emitted on records, file indexes, CLI envelopes and analyzer fingerprints |
+| 5.1 (current) | Optional occurrence `import_span` preserves the particular lexical import binding for recursion and outgoing reports; schema 5.0 cache entries are recomputed. |
 
 The additive 4.x fields did not follow the minor-bump rule: records still
 said 4.0. `metrics.lines` and `metrics.cyclomatic` do follow it, so 4.1
@@ -1465,7 +1466,7 @@ converted to `SymbolInfo` and back therefore has none of these.
 2. Add adapters:
    1. `impl From<SymbolInfo> for SymbolRecord`.
    2. `impl TryFrom<SymbolRecord> for SymbolInfo` (best effort).
-3. Update CLI `--json` to emit the schema version (done; currently 5.0).
+3. Update CLI `--json` to emit the schema version (done; currently 5.1).
 4. The v1 API (`TreeFile::symbols()`, `SymbolInfo`) and both adapters are
    retained; removing v1 is a separate decision.
 

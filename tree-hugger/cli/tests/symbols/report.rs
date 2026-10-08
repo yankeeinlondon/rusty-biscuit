@@ -48,7 +48,7 @@ fn the_json_envelope_holds_only_selected_records_and_ends_with_errors() {
     let scratch = Scratch::new(MULTI_FIXTURES);
     let stdout = scratch.stdout(&["--json", "functions"]);
     assert!(
-        stdout.starts_with(r#"{"report_schema_version":1,"schema_version":{"major":5,"minor":0},"root_dir":"#),
+        stdout.starts_with(r#"{"report_schema_version":1,"schema_version":{"major":5,"minor":1},"root_dir":"#),
         "envelope head: {}",
         &stdout[..120.min(stdout.len())]
     );

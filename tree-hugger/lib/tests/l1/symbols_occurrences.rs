@@ -2245,7 +2245,7 @@ fn parameter_captures_declare_only_their_binding_name() {
 /// `(label, extension, source, the declaration tokens as (line, column,
 /// name), every occurrence of the checked names as (line, column, name,
 /// kind))`. The checked names are those of both lists; positions are one-based.
-type DeclarationRow = (
+pub(crate) type DeclarationRow = (
     &'static str,
     &'static str,
     &'static str,
@@ -2258,7 +2258,7 @@ type DeclarationRow = (
 /// initializers and later reads around it stay occurrences. Rows are review
 /// rows `R5-F2.nn` (defective and control) and their sweep siblings
 /// `R5-F2.Sn`.
-const DECLARATION_EXCLUSION_MATRIX: &[DeclarationRow] = &[
+pub(crate) const DECLARATION_EXCLUSION_MATRIX: &[DeclarationRow] = &[
     (
         "R5-F2.01 java class, interface and method type parameters",
         "java",
@@ -3496,6 +3496,76 @@ const MARKER_EXCLUSION_MATRIX: &[DeclarationRow] = &[
         &[(1, 1, "i")],
         &[(2, 9, "i", USAGE), (3, 7, "i", USAGE)],
     ),
+    (
+        "R7-F1.14.rs modifier roles exclude keywords and preserve genuine names",
+        "rs",
+        "pub struct S {}\npub fn f(x: &mut S) { use_value(x); }\n",
+        &[(1, 1, "pub"), (2, 1, "pub"), (2, 14, "mut")],
+        &[(2, 18, "S", USAGE), (2, 33, "x", USAGE)],
+    ),
+    (
+        "R7-F1.14.ts modifier roles exclude keywords and preserve genuine names",
+        "ts",
+        "class C { private static async f(x: C) { return x; } }\n",
+        &[(1, 11, "private"), (1, 19, "static"), (1, 26, "async")],
+        &[(1, 37, "C", USAGE), (1, 49, "x", USAGE)],
+    ),
+    (
+        "R7-F1.14.js modifier roles exclude keywords and preserve genuine names",
+        "js",
+        "class C { static async f(x) { await x; } }\n",
+        &[(1, 11, "static"), (1, 18, "async"), (1, 31, "await")],
+        &[(1, 37, "x", USAGE)],
+    ),
+    (
+        "R7-F1.14.py modifier roles exclude keywords and preserve genuine names",
+        "py",
+        "async def f(x):\n    await use(x)\nmatch = 1\nprint(match)\n",
+        &[(1, 1, "async"), (2, 5, "await")],
+        &[(2, 15, "x", USAGE), (4, 7, "match", USAGE)],
+    ),
+    (
+        "R7-F1.14.go modifier roles exclude keywords and preserve genuine names",
+        "go",
+        "package p\nfunc f(x any) { go g(x); defer g(x) }\n",
+        &[(2, 17, "go"), (2, 26, "defer")],
+        &[(2, 10, "any", USAGE), (2, 22, "x", USAGE), (2, 34, "x", USAGE)],
+    ),
+    (
+        "R7-F1.14.c modifier roles exclude keywords and preserve genuine names",
+        "c",
+        "struct S { int x; };\nstatic struct S a;\nextern struct S b;\n",
+        &[(2, 1, "static"), (3, 1, "extern")],
+        &[(2, 15, "S", USAGE), (3, 15, "S", USAGE)],
+    ),
+    (
+        "R7-F1.14.cpp modifier roles exclude keywords and preserve genuine names",
+        "cpp",
+        "struct S {};\nstatic S x;\nconstexpr int k=1;\nauto y=k;\n",
+        &[(2, 1, "static"), (3, 1, "constexpr"), (4, 1, "auto")],
+        &[(2, 8, "S", USAGE), (4, 8, "k", USAGE)],
+    ),
+    (
+        "R7-F1.14.cs modifier roles exclude keywords and preserve genuine names",
+        "cs",
+        "class G { readonly dynamic x; async void f() { var y=x; await h(); } }\n",
+        &[(1, 11, "readonly"), (1, 31, "async"), (1, 48, "var"), (1, 57, "await")],
+        &[(1, 20, "dynamic", USAGE), (1, 54, "x", USAGE)],
+    ),
+    (
+        "R7-F1.14.scala modifier roles exclude keywords and preserve genuine names",
+        "scala",
+        "object O { lazy val x = external; inline def f(using y: Int) = x }\n",
+        &[(1, 12, "lazy"), (1, 35, "inline"), (1, 48, "using")],
+        &[(1, 25, "external", USAGE), (1, 57, "Int", USAGE), (1, 64, "x", USAGE)],
+    ),
+    (
+        "R7-F1.14.pl modifier roles exclude keywords and preserve genuine names",
+        "pl",
+        "my $x = external();\nour $y = $x;\nstate $z = $x;\nlocal $w = $x;\n",
+        &[(1, 1, "my"), (2, 1, "our"), (3, 1, "state"), (4, 1, "local")],
+        &[(1, 9, "external", CALL), (2, 10, "$x", USAGE), (3, 12, "$x", USAGE), (4, 12, "$x", USAGE)],
+    ),
 ];
 
 #[test]
@@ -3845,6 +3915,77 @@ type InvocationRow = (
 /// receiver, a dereference, a sequence and a conditional are never the
 /// callee. Binding confidence may stay limited; only `kind` is checked.
 const INVOCATION_MATRIX: &[InvocationRow] = &[
+    (ProgrammingLanguage::TypeScript, "ts", "function f() {}\nfunction g() { (<any /* n */> /* b */ f /* a */)(); }\n", &[
+        (2, "f", 0, CALL),
+    ]),
+    (ProgrammingLanguage::Perl, "pl", "sub f {}\nf # before\n ();\ndefined # note\n &f;\nexists # note\n &f;\n", &[
+        (2, "f", 0, CALL),
+        (5, "f", 0, USAGE),
+        (7, "f", 0, USAGE),
+    ]),
+    (ProgrammingLanguage::Lua, "lua", "function f() end\nfunction g()\n ( -- before\n f -- after\n )()\nend\n", &[
+        (4, "f", 0, CALL),
+    ]),
+    (ProgrammingLanguage::Python, "py", "def f(): pass\ndef g():\n ( # before\n f # after\n )()\n", &[
+        (4, "f", 0, CALL),
+    ]),
+    (ProgrammingLanguage::Zsh, "zsh", "f() { :; }\nf # note\n", &[
+        (2, "f", 0, CALL),
+    ]),
+    (ProgrammingLanguage::Bash, "sh", "f() { :; }\nf # note\n", &[
+        (2, "f", 0, CALL),
+    ]),
+    (ProgrammingLanguage::Php, "php", "<?php\nfunction g() { (/* n */ $f /* n */)(); }\n", &[
+        (2, "f", 0, CALL),
+    ]),
+    (ProgrammingLanguage::C, "c", "void f() {}\nvoid g() { (/* n */ f /* n */)(); }\n", &[
+        (2, "f", 0, CALL),
+    ]),
+    (ProgrammingLanguage::Go, "go", "package p\nfunc g() { (f /* n */ [int])() }\n", &[
+        (2, "f", 0, USAGE),
+    ]),
+    (ProgrammingLanguage::Scala, "scala", "def f[T](): Unit = {}\ndef g(): Unit = { f /* n */ [Int]() }\n", &[
+        (2, "f", 0, CALL),
+        (2, "Int", 0, USAGE),
+    ]),
+    (ProgrammingLanguage::Cpp, "cpp", "template <typename T> void f() {}\nvoid g() { f /* n */ <int>(); }\n", &[
+        (2, "f", 0, CALL),
+    ]),
+    (ProgrammingLanguage::CSharp, "cs", "class G { void f<T>() {}\nvoid g() { f /* n */ <int>(); } }\n", &[
+        (2, "f", 0, CALL),
+    ]),
+    (ProgrammingLanguage::Java, "java", "class C<T> {}\nclass G { void g() { new C /* n */ <String>(); } }\n", &[
+        (2, "C", 0, CALL),
+        (2, "String", 0, USAGE),
+    ]),
+    (ProgrammingLanguage::JavaScript, "js", "function f() {}\nfunction g() { (/* n */ f /* n */)(); }\n", &[
+        (2, "f", 0, CALL),
+    ]),
+    (ProgrammingLanguage::TypeScript, "ts", "function f<T>() {}\nfunction g() { (f /* n */ <number>)(); }\n", &[
+        (2, "f", 0, CALL),
+    ]),
+    (ProgrammingLanguage::Rust, "rs", "fn f<T>() {}\nfn g() { f /* n */ :: /* n */ <i32>(); }\n", &[
+        (2, "f", 0, CALL),
+    ]),
+    (ProgrammingLanguage::Swift, "swift", "class C<T> {}\nfunc run() {\n _ = C /* n */ <Int>()\n _ = C/*n*/<Int>()\n _ = N.C /* n */ <Int>()\n _ = C<Int /* n */>()\n _ = -. /* n */ some.f()\n _ = -.some /* n */ .f()\n _ = !. /* n */ some.f()\n}\nfunc annotation(x: C /* n */ <Int>) {}\n", &[
+        (3, "C", 0, CALL),
+        (3, "Int", 0, USAGE),
+        (4, "C", 0, CALL),
+        (4, "Int", 0, USAGE),
+        (5, "N", 0, USAGE),
+        (5, "C", 0, CALL),
+        (5, "Int", 0, USAGE),
+        (6, "C", 0, CALL),
+        (6, "Int", 0, USAGE),
+        (7, "some", 0, USAGE),
+        (7, "f", 0, CALL),
+        (8, "some", 0, USAGE),
+        (8, "f", 0, CALL),
+        (9, "some", 0, USAGE),
+        (9, "f", 0, CALL),
+        (11, "C", 0, USAGE),
+        (11, "Int", 0, USAGE),
+    ]),
     (
         ProgrammingLanguage::Rust,
         "rs",
@@ -6274,7 +6415,7 @@ fn written_paths_keep_every_root_qualifier_and_receiver() {
 /// the row names is listed (all are Usages); lines it does not name (a
 /// `module`/`package` declaration name) are left to the declaration
 /// exclusions.
-type QualifiedImportRow = (
+pub(crate) type QualifiedImportRow = (
     &'static str,
     &'static str,
     &'static [(u32, u32, &'static str, Option<&'static str>, bool)],
@@ -6288,7 +6429,7 @@ type ImportEntry<'a> = (&'a str, Option<&'a str>, Option<&'a str>, u32, u32);
 /// directive operands, module and package names, type paths) are reads
 /// with their written paths, never imports; a genuine `import` reports only
 /// its final segment (review rows `R7-F3.nn`).
-const JAVA_QUALIFIED_REFERENCE_MATRIX: &[QualifiedImportRow] = &[
+pub(crate) const JAVA_QUALIFIED_REFERENCE_MATRIX: &[QualifiedImportRow] = &[
     (
         "R7-F3.01 marker annotation (with an unqualified control)",
         "class A {}\n@p.q.A class G {}\n@A class H {}\n",
@@ -6308,6 +6449,18 @@ const JAVA_QUALIFIED_REFERENCE_MATRIX: &[QualifiedImportRow] = &[
             (2, 4, "q", Some("p.q"), false),
             (2, 6, "A", Some("p.q.A"), true),
             (2, 8, "external", None, false),
+        ],
+        &[],
+    ),
+    (
+        "R7-F3.02 named annotation arguments",
+        "class A {}\n@p.q.A(value=external) class G {}\n",
+        &[
+            (2, 2, "p", None, false),
+            (2, 4, "q", Some("p.q"), false),
+            (2, 6, "A", Some("p.q.A"), true),
+            (2, 8, "value", None, false),
+            (2, 14, "external", None, false),
         ],
         &[],
     ),
@@ -6757,6 +6910,13 @@ fn assert_import_rows(rows: &[QualifiedImportRow], extension: &str) {
             .map(|occurrence| {
                 assert_eq!(occurrence.kind, USAGE, "{label}: {occurrence:#?}");
                 assert_uncertain(occurrence);
+                let actual_candidates: HashSet<&SymbolId> = occurrence.candidates.iter().filter_map(|candidate| candidate.id.as_ref()).collect();
+                let expected_candidates: HashSet<&SymbolId> = if occurrence.confidence == Confidence::NameOnly {
+                    file.index.symbols.iter().filter(|record| record.identity.name == occurrence.target.name).map(|record| &record.id).collect()
+                } else {
+                    HashSet::new()
+                };
+                assert_eq!(actual_candidates, expected_candidates, "{label}: candidate identities");
                 (
                     occurrence.span.start.line,
                     occurrence.span.start.column,
@@ -7029,4 +7189,1234 @@ fn rooted_rust_names_never_bind_a_lexical_local() {
         assert_eq!(candidates, [Some(function.clone())], "line {line}: the item, never the local");
     }
     assert_scoped_to(file.at(7, "f", 0), &local);
+}
+
+/// `(name, alias, original, source, line, column)` of one import record.
+pub(crate) type ExpectedImport<'a> = (&'a str, Option<&'a str>, Option<&'a str>, Option<&'a str>, u32, u32);
+
+/// `(line, column, name, written path, kind, confidence)` of one occurrence.
+pub(crate) type ExpectedRead<'a> = (u32, u32, &'a str, Option<&'a str>, OccurrenceKind, Confidence);
+
+/// `(callable, [(import name, original)], recursion)`.
+pub(crate) type ExpectedOwner = (&'static str, &'static [(&'static str, Option<&'static str>)], TriState);
+
+/// One source with independently expected import identities and reads.
+pub(crate) struct CommentedImportRow<'a> {
+    pub(crate) label: &'a str,
+    pub(crate) extension: &'a str,
+    pub(crate) source: &'a str,
+    /// The complete import list, in source order.
+    pub(crate) imports: &'a [ExpectedImport<'a>],
+    /// Every occurrence of the file, in source order: an imported token is
+    /// never one, every qualifier and body read is.
+    pub(crate) reads: &'a [ExpectedRead<'a>],
+    /// For a resolved language: the callable whose dependencies are exactly
+    /// `(import name, original)` and whose recursion is the given state.
+    pub(crate) owner: Option<ExpectedOwner>,
+}
+
+const SCOPED: Confidence = Confidence::Scoped;
+const NAME_ONLY: Confidence = Confidence::NameOnly;
+const UNRESOLVED: Confidence = Confidence::Unresolved;
+
+/// Comments in import syntax (review rows `R8-F1.nn`, siblings `.Sn`, clean
+/// controls `.08`–`.10`): a comment never becomes an import's original
+/// target, never ends its written path, never decides whether a path
+/// segment binds, and never turns an imported token into a read. A path
+/// written across a comment keeps it as source text; a TypeScript entity
+/// alias's original drops it, since its last segment decides recursion.
+pub(crate) const COMMENTED_IMPORT_MATRIX: &[CommentedImportRow] = &[
+    CommentedImportRow {
+        label: "R8-F2.07.ts string-named original",
+        extension: "ts",
+        source: "import { \"a-b\" as c } from \"m\";\nfunction run() { c(); }\n",
+        imports: &[("c", Some("c"), Some("\"a-b\""), Some("m"), 1, 19)],
+        reads: &[(2, 18, "c", None, CALL, SCOPED)],
+        owner: Some(("run", &[("c", Some("\"a-b\""))], TriState::No)),
+    },
+    CommentedImportRow {
+        label: "R8-F2.07.js string-named original",
+        extension: "js",
+        source: "import { \"a-b\" as c } from \"m\";\nfunction run() { c(); }\n",
+        imports: &[("c", Some("c"), Some("\"a-b\""), Some("m"), 1, 19)],
+        reads: &[(2, 18, "c", None, CALL, SCOPED)],
+        owner: Some(("run", &[("c", Some("\"a-b\""))], TriState::No)),
+    },
+    CommentedImportRow {
+        label: "R8-F1.01 TS entity alias, block comment before `=`",
+        extension: "ts",
+        source: "import D /* note */ = N.S;\nfunction S() { D(); }\n",
+        imports: &[("D", Some("D"), Some("N.S"), None, 1, 8)],
+        reads: &[(1, 23, "N", None, USAGE, UNRESOLVED), (2, 16, "D", None, CALL, SCOPED)],
+        owner: Some(("S", &[("D", Some("N.S"))], TriState::Unknown)),
+    },
+    CommentedImportRow {
+        label: "R8-F1.01 TS entity alias, line comment before `=`",
+        extension: "ts",
+        source: "import D // note\n  = N.S;\nfunction S() { D(); }\n",
+        imports: &[("D", Some("D"), Some("N.S"), None, 1, 8)],
+        reads: &[(2, 5, "N", None, USAGE, UNRESOLVED), (3, 16, "D", None, CALL, SCOPED)],
+        owner: Some(("S", &[("D", Some("N.S"))], TriState::Unknown)),
+    },
+    CommentedImportRow {
+        label: "R8-F1.01.export TS exported entity alias, comment before `=`",
+        extension: "ts",
+        source: "export import D /* note */ = N.S;\nfunction S() { D(); }\n",
+        imports: &[("D", Some("D"), Some("N.S"), None, 1, 15)],
+        reads: &[(1, 30, "N", None, USAGE, UNRESOLVED), (2, 16, "D", None, CALL, SCOPED)],
+        owner: Some(("S", &[("D", Some("N.S"))], TriState::Unknown)),
+    },
+    CommentedImportRow {
+        label: "R8-F1.02 TS entity alias, block comment after `=`",
+        extension: "ts",
+        source: "import D = /* note */ N.S;\nfunction S() { D(); }\n",
+        imports: &[("D", Some("D"), Some("N.S"), None, 1, 8)],
+        reads: &[(1, 23, "N", None, USAGE, UNRESOLVED), (2, 16, "D", None, CALL, SCOPED)],
+        owner: Some(("S", &[("D", Some("N.S"))], TriState::Unknown)),
+    },
+    CommentedImportRow {
+        label: "R8-F1.02 TS entity alias, line comment after `=`",
+        extension: "ts",
+        source: "import D = // note\n  N.S;\nfunction S() { D(); }\n",
+        imports: &[("D", Some("D"), Some("N.S"), None, 1, 8)],
+        reads: &[(2, 3, "N", None, USAGE, UNRESOLVED), (3, 16, "D", None, CALL, SCOPED)],
+        owner: Some(("S", &[("D", Some("N.S"))], TriState::Unknown)),
+    },
+    CommentedImportRow {
+        label: "R8-F1.S1 TS entity alias, comment before the bound name",
+        extension: "ts",
+        source: "import /* note */ D = N.S;\nfunction S() { D(); }\n",
+        imports: &[("D", Some("D"), Some("N.S"), None, 1, 19)],
+        reads: &[(1, 23, "N", None, USAGE, UNRESOLVED), (2, 16, "D", None, CALL, SCOPED)],
+        owner: Some(("S", &[("D", Some("N.S"))], TriState::Unknown)),
+    },
+    CommentedImportRow {
+        label: "R8-F1.S2 TS entity alias, comment inside the target path",
+        extension: "ts",
+        source: "import D = N. /* note */ S;\nimport E = N /* note */ .S;\nfunction S() { D(); E(); }\n",
+        imports: &[("D", Some("D"), Some("N.S"), None, 1, 8), ("E", Some("E"), Some("N.S"), None, 2, 8)],
+        reads: &[
+            (1, 12, "N", None, USAGE, UNRESOLVED),
+            (2, 12, "N", None, USAGE, UNRESOLVED),
+            (3, 16, "D", None, CALL, SCOPED),
+            (3, 21, "E", None, CALL, SCOPED),
+        ],
+        owner: Some(("S", &[("D", Some("N.S")), ("E", Some("N.S"))], TriState::Unknown)),
+    },
+    CommentedImportRow {
+        label: "R8-F1.09.ts clean TS import forms beside comments",
+        extension: "ts",
+        source: "import D = N.S; // trailing\nimport q = require(/* note */ \"m\");\nimport { a as b } from \"m\";\nimport def from \"m\";\n\
+                 import * as ns from \"m\";\nimport R = N;\nfunction g() { D(); q(); b(); def(); ns.x(); R(); }\n",
+        imports: &[
+            ("D", Some("D"), Some("N.S"), None, 1, 8),
+            ("q", None, None, Some("m"), 2, 8),
+            ("b", Some("b"), Some("a"), Some("m"), 3, 15),
+            ("def", None, None, Some("m"), 4, 8),
+            ("ns", Some("ns"), Some("*"), Some("m"), 5, 13),
+            ("R", Some("R"), Some("N"), None, 6, 8),
+        ],
+        reads: &[
+            (1, 12, "N", None, USAGE, UNRESOLVED),
+            (6, 12, "N", None, USAGE, UNRESOLVED),
+            (7, 16, "D", None, CALL, SCOPED),
+            (7, 21, "q", None, CALL, SCOPED),
+            (7, 26, "b", None, CALL, SCOPED),
+            (7, 31, "def", None, CALL, SCOPED),
+            (7, 38, "ns", None, USAGE, SCOPED),
+            (7, 41, "x", Some("ns.x"), CALL, UNRESOLVED),
+            (7, 46, "R", None, CALL, SCOPED),
+        ],
+        owner: Some((
+            "g",
+            &[("D", Some("N.S")), ("R", Some("N")), ("b", Some("a")), ("def", None), ("ns", Some("*")), ("q", None)],
+            TriState::Unknown,
+        )),
+    },
+    CommentedImportRow {
+        label: "R8-F1.09.ts named, default and namespace imports beside comments",
+        extension: "ts",
+        source: "import { c /* x */ as /* y */ d } from \"m\";\nimport /* a */ e from \"m\";\nimport * as /* b */ ns from \"m\";\n\
+                 function f() { d(); e(); ns.x(); }\n",
+        imports: &[
+            ("d", Some("d"), Some("c"), Some("m"), 1, 31),
+            ("e", None, None, Some("m"), 2, 16),
+            ("ns", Some("ns"), Some("*"), Some("m"), 3, 21),
+        ],
+        reads: &[
+            (4, 16, "d", None, CALL, SCOPED),
+            (4, 21, "e", None, CALL, SCOPED),
+            (4, 26, "ns", None, USAGE, SCOPED),
+            (4, 29, "x", Some("ns.x"), CALL, UNRESOLVED),
+        ],
+        owner: Some(("f", &[("d", Some("c")), ("e", None), ("ns", Some("*"))], TriState::Unknown)),
+    },
+    CommentedImportRow {
+        label: "R8-F1.09.js named, default and namespace imports beside comments",
+        extension: "js",
+        source: "import { c /* x */ as /* y */ d } from \"m\";\nimport /* a */ e from \"m\";\nimport * as /* b */ ns from \"m\";\n\
+                 function f() { d(); e(); ns.x(); }\n",
+        imports: &[
+            ("d", Some("d"), Some("c"), Some("m"), 1, 31),
+            ("e", None, None, Some("m"), 2, 16),
+            ("ns", Some("ns"), Some("*"), Some("m"), 3, 21),
+        ],
+        reads: &[
+            (4, 16, "d", None, CALL, SCOPED),
+            (4, 21, "e", None, CALL, SCOPED),
+            (4, 26, "ns", None, USAGE, SCOPED),
+            (4, 29, "x", Some("ns.x"), CALL, UNRESOLVED),
+        ],
+        owner: Some(("f", &[("d", Some("c")), ("e", None), ("ns", Some("*"))], TriState::Unknown)),
+    },
+    CommentedImportRow {
+        label: "R8-F1.03 Scala block comment between path segments",
+        extension: "scala",
+        source: "import a /* note */ .b.C\nobject U { def C() = 1; def f() = C() }\n",
+        imports: &[("C", None, None, Some("a /* note */ .b.C"), 1, 24)],
+        reads: &[
+            (1, 8, "a", None, USAGE, UNRESOLVED),
+            (1, 22, "b", Some("a /* note */ .b"), USAGE, UNRESOLVED),
+            (2, 35, "C", None, CALL, NAME_ONLY),
+        ],
+        owner: None,
+    },
+    CommentedImportRow {
+        label: "R8-F1.03 Scala line comment between path segments",
+        extension: "scala",
+        source: "import a // note\n  .b.C\nobject U { def C() = 1; def f() = C() }\n",
+        imports: &[("C", None, None, Some("a // note\n  .b.C"), 2, 6)],
+        reads: &[
+            (1, 8, "a", None, USAGE, UNRESOLVED),
+            (2, 4, "b", Some("a // note\n  .b"), USAGE, UNRESOLVED),
+            (3, 35, "C", None, CALL, NAME_ONLY),
+        ],
+        owner: None,
+    },
+    CommentedImportRow {
+        label: "R8-F1.03 Scala comment in a braced and an on-demand path",
+        extension: "scala",
+        source: "import a /* note */ .b.{C}\nimport a /* note */ .b._\nobject U { def b() = 1; def f() = (C, b()) }\n",
+        imports: &[
+            ("C", None, None, Some("a /* note */ .b.C"), 1, 25),
+            ("b", Some("b"), Some("*"), Some("a /* note */ .b"), 2, 22),
+        ],
+        reads: &[
+            (1, 8, "a", None, USAGE, UNRESOLVED),
+            (1, 22, "b", Some("a /* note */ .b"), USAGE, NAME_ONLY),
+            (2, 8, "a", None, USAGE, UNRESOLVED),
+            (3, 36, "C", None, USAGE, UNRESOLVED),
+            (3, 39, "b", None, CALL, NAME_ONLY),
+        ],
+        owner: None,
+    },
+    CommentedImportRow {
+        label: "R8-F1.04a Scala comment before a plain selector group",
+        extension: "scala",
+        source: "import a.b. /* note */ {C}\nimport x.y. // note\n  {E}\nobject U { val v = (C, E) }\n",
+        imports: &[("C", None, None, Some("a.b.C"), 1, 25), ("E", None, None, Some("x.y.E"), 3, 4)],
+        reads: &[
+            (1, 8, "a", None, USAGE, UNRESOLVED),
+            (1, 10, "b", Some("a.b"), USAGE, UNRESOLVED),
+            (2, 8, "x", None, USAGE, UNRESOLVED),
+            (2, 10, "y", Some("x.y"), USAGE, UNRESOLVED),
+            (4, 21, "C", None, USAGE, UNRESOLVED),
+            (4, 24, "E", None, USAGE, UNRESOLVED),
+        ],
+        owner: None,
+    },
+    CommentedImportRow {
+        label: "R8-F1.04b Scala comment before a renamed selector (`=>` and `as`)",
+        extension: "scala",
+        source: "import a.b. /* note */ {C => D}\nimport x.y. /* note */ {E as F}\nobject U { def f() = (D(), F()) }\n",
+        imports: &[("D", Some("D"), Some("C"), Some("a.b.C"), 1, 30), ("F", Some("F"), Some("E"), Some("x.y.E"), 2, 30)],
+        reads: &[
+            (1, 8, "a", None, USAGE, UNRESOLVED),
+            (1, 10, "b", Some("a.b"), USAGE, UNRESOLVED),
+            (1, 25, "C", None, USAGE, UNRESOLVED),
+            (2, 8, "x", None, USAGE, UNRESOLVED),
+            (2, 10, "y", Some("x.y"), USAGE, UNRESOLVED),
+            (2, 25, "E", None, USAGE, UNRESOLVED),
+            (3, 23, "D", None, CALL, UNRESOLVED),
+            (3, 28, "F", None, CALL, UNRESOLVED),
+        ],
+        owner: None,
+    },
+    CommentedImportRow {
+        label: "R8-F1.05.star Scala comment before a `*` wildcard (block and line)",
+        extension: "scala",
+        source: "import a.b. /* note */ *\nimport c.d. // note\n  *\nobject U { def b() = 1; def d() = 2; def f() = (b(), d()) }\n",
+        imports: &[("b", Some("b"), Some("*"), Some("a.b"), 1, 10), ("d", Some("d"), Some("*"), Some("c.d"), 2, 10)],
+        reads: &[
+            (1, 8, "a", None, USAGE, UNRESOLVED),
+            (2, 8, "c", None, USAGE, UNRESOLVED),
+            (4, 49, "b", None, CALL, NAME_ONLY),
+            (4, 54, "d", None, CALL, NAME_ONLY),
+        ],
+        owner: None,
+    },
+    CommentedImportRow {
+        label: "R8-F1.05.underscore Scala comment before a `_` wildcard",
+        extension: "scala",
+        source: "import a.b. /* note */ _\nobject U { def b() = 1; def f() = b() }\n",
+        imports: &[("b", Some("b"), Some("*"), Some("a.b"), 1, 10)],
+        reads: &[(1, 8, "a", None, USAGE, UNRESOLVED), (2, 35, "b", None, CALL, NAME_ONLY)],
+        owner: None,
+    },
+    CommentedImportRow {
+        label: "R8-F1.05.given Scala comment before a direct `given`",
+        extension: "scala",
+        source: "import a.b. /* note */ given\nobject U { def b() = 1; def f() = b() }\n",
+        imports: &[("b", Some("b"), Some("given"), Some("a.b"), 1, 10)],
+        reads: &[(1, 8, "a", None, USAGE, UNRESOLVED), (2, 35, "b", None, CALL, NAME_ONLY)],
+        owner: None,
+    },
+    CommentedImportRow {
+        label: "R8-F1.06.mixed Scala comment before `{_, given T}`",
+        extension: "scala",
+        source: "import a.b. /* note */ {_, given T}\nobject U { def b() = 1; def f() = b() }\n",
+        imports: &[("b", Some("b"), Some("*"), Some("a.b"), 1, 10)],
+        reads: &[
+            (1, 8, "a", None, USAGE, UNRESOLVED),
+            (1, 34, "T", None, USAGE, UNRESOLVED),
+            (2, 35, "b", None, CALL, NAME_ONLY),
+        ],
+        owner: None,
+    },
+    CommentedImportRow {
+        label: "R8-F1.06.given Scala comment before `{given T}`",
+        extension: "scala",
+        source: "import a.b. /* note */ {given T}\nobject U { def b() = 1; def f() = b() }\n",
+        imports: &[("b", Some("b"), Some("given"), Some("a.b"), 1, 10)],
+        reads: &[
+            (1, 8, "a", None, USAGE, UNRESOLVED),
+            (1, 31, "T", None, USAGE, UNRESOLVED),
+            (2, 35, "b", None, CALL, NAME_ONLY),
+        ],
+        owner: None,
+    },
+    CommentedImportRow {
+        label: "R8-F1.07.simple Scala comment before `,` after a one-segment path",
+        extension: "scala",
+        source: "import C /* note */, d.E\nobject U { def C() = 1; def f() = (C(), E) }\n",
+        imports: &[("C", None, None, Some("C"), 1, 8), ("E", None, None, Some("d.E"), 1, 24)],
+        reads: &[
+            (1, 22, "d", None, USAGE, UNRESOLVED),
+            (2, 36, "C", None, CALL, NAME_ONLY),
+            (2, 41, "E", None, USAGE, UNRESOLVED),
+        ],
+        owner: None,
+    },
+    CommentedImportRow {
+        label: "R8-F1.07.qualified Scala comment before `,` after a qualified path",
+        extension: "scala",
+        source: "import a.b.C /* note */, d.E\nobject U { def C() = 1; def f() = (C(), E) }\n",
+        imports: &[("C", None, None, Some("a.b.C"), 1, 12), ("E", None, None, Some("d.E"), 1, 28)],
+        reads: &[
+            (1, 8, "a", None, USAGE, UNRESOLVED),
+            (1, 10, "b", Some("a.b"), USAGE, UNRESOLVED),
+            (1, 26, "d", None, USAGE, UNRESOLVED),
+            (2, 36, "C", None, CALL, NAME_ONLY),
+            (2, 41, "E", None, USAGE, UNRESOLVED),
+        ],
+        owner: None,
+    },
+    CommentedImportRow {
+        label: "R8-F1.08 Scala comments the binding never depended on",
+        extension: "scala",
+        source: "import a.b.C /* end */\nimport a.b.* /* star */\nimport a.b.C, /* after comma */ d.E\n\
+                 import a.b.{C, /* in */ D}\nimport a.b.{C /* x */ => D}\nimport a.b.{C => /* y */ D}\nimport a.b.{C as /* z */ D}\n\
+                 object U { def f() = C() }\n",
+        imports: &[
+            ("C", None, None, Some("a.b.C"), 1, 12),
+            ("b", Some("b"), Some("*"), Some("a.b"), 2, 10),
+            ("C", None, None, Some("a.b.C"), 3, 12),
+            ("E", None, None, Some("d.E"), 3, 35),
+            ("C", None, None, Some("a.b.C"), 4, 13),
+            ("D", None, None, Some("a.b.D"), 4, 25),
+            ("D", Some("D"), Some("C"), Some("a.b.C"), 5, 26),
+            ("D", Some("D"), Some("C"), Some("a.b.C"), 6, 26),
+            ("D", Some("D"), Some("C"), Some("a.b.C"), 7, 26),
+        ],
+        reads: &[
+            (1, 8, "a", None, USAGE, UNRESOLVED),
+            (1, 10, "b", Some("a.b"), USAGE, UNRESOLVED),
+            (2, 8, "a", None, USAGE, UNRESOLVED),
+            (3, 8, "a", None, USAGE, UNRESOLVED),
+            (3, 10, "b", Some("a.b"), USAGE, UNRESOLVED),
+            (3, 33, "d", None, USAGE, UNRESOLVED),
+            (4, 8, "a", None, USAGE, UNRESOLVED),
+            (4, 10, "b", Some("a.b"), USAGE, UNRESOLVED),
+            (5, 8, "a", None, USAGE, UNRESOLVED),
+            (5, 10, "b", Some("a.b"), USAGE, UNRESOLVED),
+            (5, 13, "C", None, USAGE, UNRESOLVED),
+            (6, 8, "a", None, USAGE, UNRESOLVED),
+            (6, 10, "b", Some("a.b"), USAGE, UNRESOLVED),
+            (6, 13, "C", None, USAGE, UNRESOLVED),
+            (7, 8, "a", None, USAGE, UNRESOLVED),
+            (7, 10, "b", Some("a.b"), USAGE, UNRESOLVED),
+            (7, 13, "C", None, USAGE, UNRESOLVED),
+            (8, 22, "C", None, CALL, UNRESOLVED),
+        ],
+        owner: None,
+    },
+    CommentedImportRow {
+        label: "R8-F1.10.rs Rust use paths, lists, renames, globs and extern aliases with comments",
+        extension: "rs",
+        source: "use a /* c */ ::b::C;\nuse a::{/* c */ g::h, self as s};\nuse a::b::{c /* x */ as d};\nuse a::b::*;\n\
+                 extern crate y /* c */ as z;\nfn f() { C(); h(); d(); }\n",
+        imports: &[
+            ("C", None, None, Some("a /* c */ ::b"), 1, 20),
+            ("h", None, None, Some("a::g"), 2, 20),
+            ("s", Some("s"), Some("a"), None, 2, 31),
+            ("d", Some("d"), Some("c"), Some("a::b"), 3, 25),
+            ("b", Some("b"), Some("*"), Some("a::b"), 4, 8),
+            ("z", Some("z"), Some("y"), None, 5, 27),
+        ],
+        reads: &[(6, 10, "C", None, CALL, SCOPED), (6, 15, "h", None, CALL, SCOPED), (6, 20, "d", None, CALL, SCOPED)],
+        owner: Some(("f", &[("C", None), ("d", Some("c")), ("h", None)], TriState::No)),
+    },
+    CommentedImportRow {
+        label: "R8-F1.10.java Java qualified imports with comments",
+        extension: "java",
+        source: "import a /* c */ .b.C;\nimport a.b.D /* c */;\nclass X { C c; D d; }\n",
+        imports: &[("C", None, None, Some("a /* c */ .b"), 1, 21), ("D", None, None, Some("a.b"), 2, 12)],
+        reads: &[
+            (1, 8, "a", None, USAGE, UNRESOLVED),
+            (1, 19, "b", Some("a /* c */ .b"), USAGE, UNRESOLVED),
+            (2, 8, "a", None, USAGE, UNRESOLVED),
+            (2, 10, "b", Some("a.b"), USAGE, UNRESOLVED),
+            (3, 11, "C", None, USAGE, UNRESOLVED),
+            (3, 16, "D", None, USAGE, UNRESOLVED),
+        ],
+        owner: None,
+    },
+    CommentedImportRow {
+        label: "R8-F1.10.cs C# alias, static and global usings with comments",
+        extension: "cs",
+        source: "using D /* c */ = a /* d */ .b.C;\nusing static System.Math;\nglobal using a.b;\nclass X { D d; }\n",
+        imports: &[
+            ("D", Some("D"), Some("C"), Some("a /* d */ .b.C"), 1, 7),
+            ("Math", None, None, Some("System.Math"), 2, 21),
+            ("b", None, None, Some("a.b"), 3, 16),
+        ],
+        reads: &[
+            (1, 19, "a", None, USAGE, UNRESOLVED),
+            (1, 30, "b", Some("a /* d */ .b"), USAGE, UNRESOLVED),
+            (1, 32, "C", Some("a /* d */ .b.C"), USAGE, UNRESOLVED),
+            (2, 14, "System", None, USAGE, UNRESOLVED),
+            (3, 14, "a", None, USAGE, UNRESOLVED),
+            (4, 11, "D", None, USAGE, UNRESOLVED),
+        ],
+        owner: None,
+    },
+    CommentedImportRow {
+        label: "R8-F1.10.php PHP use paths, aliases and groups with comments",
+        extension: "php",
+        source: "<?php\nuse A /* c */ \\B;\nuse A\\B /* c */ as D;\nuse A\\{B /* c */, C};\nfunction f(D $d, B $b) {}\n",
+        imports: &[
+            ("B", None, None, Some("A /* c */ \\B"), 2, 16),
+            ("D", Some("D"), Some("B"), Some("A\\B"), 3, 20),
+            ("B", None, None, Some("A\\B"), 4, 8),
+            ("C", None, None, Some("A\\C"), 4, 19),
+        ],
+        reads: &[
+            (2, 5, "A", None, USAGE, UNRESOLVED),
+            (3, 5, "A", None, USAGE, UNRESOLVED),
+            (3, 7, "B", Some("A\\B"), USAGE, UNRESOLVED),
+            (4, 5, "A", None, USAGE, UNRESOLVED),
+            (5, 12, "D", None, USAGE, UNRESOLVED),
+            (5, 18, "B", None, USAGE, UNRESOLVED),
+        ],
+        owner: None,
+    },
+    CommentedImportRow {
+        label: "R8-F1.10.swift Swift selective and whole-module imports with comments",
+        extension: "swift",
+        source: "import struct Foo /* c */ .Bar\nimport Foundation\nlet x: Bar = Bar()\n",
+        imports: &[("Bar", None, None, Some("Foo /* c */ .Bar"), 1, 28), ("Foundation", None, None, Some("Foundation"), 2, 8)],
+        reads: &[(1, 15, "Foo", None, USAGE, UNRESOLVED), (3, 8, "Bar", None, USAGE, UNRESOLVED), (3, 14, "Bar", None, CALL, UNRESOLVED)],
+        owner: None,
+    },
+    CommentedImportRow {
+        label: "R8-F1.10.py Python parenthesized from-import with a line comment",
+        extension: "py",
+        source: "from m import (C,  # c\n    D as E)\nimport a.b\nfrom __future__ import annotations\nfrom n import *\nC(); E()\n",
+        imports: &[
+            ("C", None, None, Some("m"), 1, 16),
+            ("E", Some("E"), Some("D"), Some("m"), 2, 10),
+            ("a", None, None, Some("a.b"), 3, 8),
+            ("annotations", None, None, Some("__future__"), 4, 24),
+            ("n", Some("n"), Some("*"), Some("n"), 5, 6),
+        ],
+        reads: &[
+            (1, 6, "m", None, USAGE, UNRESOLVED),
+            (2, 5, "D", None, USAGE, UNRESOLVED),
+            (3, 10, "b", Some("a.b"), USAGE, UNRESOLVED),
+            (6, 1, "C", None, CALL, UNRESOLVED),
+            (6, 6, "E", None, CALL, UNRESOLVED),
+        ],
+        owner: None,
+    },
+    CommentedImportRow {
+        label: "R8-F1.10.go Go aliased, blank, dot and raw-string imports with comments",
+        extension: "go",
+        source: "package p\nimport (\n\tD /* c */ \"a/b\"\n\t_ \"a/c\"\n\t. \"a/d\"\n\tr `a/e`\n)\nfunc f() { D.F() }\n",
+        imports: &[
+            ("D", Some("D"), Some("b"), Some("a/b"), 3, 2),
+            ("_", Some("_"), Some("c"), Some("a/c"), 4, 2),
+            ("d", Some("d"), Some("*"), Some("a/d"), 5, 4),
+            ("r", Some("r"), Some("e"), Some("a/e"), 6, 2),
+        ],
+        reads: &[(8, 12, "D", None, USAGE, UNRESOLVED), (8, 14, "F", Some("D.F"), CALL, UNRESOLVED)],
+        owner: None,
+    },
+];
+
+/// Each prefix is the source slice the import reader carries verbatim;
+/// a selector/rename appends its original after that slice. This independently
+/// defines which comment positions belong to the expected source path.
+struct ScalaImportAlternative {
+    row: CommentedImportRow<'static>,
+    prefixes: &'static [(usize, usize)],
+}
+
+const SCALA_IMPORT_ALTERNATIVES: &[ScalaImportAlternative] = &[
+    ScalaImportAlternative {
+        row: CommentedImportRow {
+            label: "R8-F2.01.single",
+            extension: "scala",
+            source: "import a.b.C as D\ndef D() = 0\ndef run() = D()\n",
+            imports: &[("D", Some("D"), Some("C"), Some("a.b.C"), 1, 17)],
+            reads: &[(1, 8, "a", None, USAGE, UNRESOLVED), (1, 10, "b", Some("a.b"), USAGE, UNRESOLVED), (1, 12, "C", None, USAGE, UNRESOLVED), (3, 13, "D", None, CALL, NAME_ONLY)],
+            owner: None,
+        },
+        prefixes: &[(7, 10)],
+    },
+    ScalaImportAlternative {
+        row: CommentedImportRow {
+            label: "R8-F2.01.multiple",
+            extension: "scala",
+            source: "import a.b.C as D, x.y.E as F\ndef D() = 0\ndef run() = D()\n",
+            imports: &[("D", Some("D"), Some("C"), Some("a.b.C"), 1, 17), ("F", Some("F"), Some("E"), Some("x.y.E"), 1, 29)],
+            reads: &[(1, 8, "a", None, USAGE, UNRESOLVED), (1, 10, "b", Some("a.b"), USAGE, UNRESOLVED), (1, 12, "C", None, USAGE, UNRESOLVED), (1, 20, "x", None, USAGE, UNRESOLVED), (1, 22, "y", Some("x.y"), USAGE, UNRESOLVED), (1, 24, "E", None, USAGE, UNRESOLVED), (3, 13, "D", None, CALL, NAME_ONLY)],
+            owner: None,
+        },
+        prefixes: &[(7, 10), (19, 22)],
+    },
+    ScalaImportAlternative {
+        row: CommentedImportRow {
+            label: "R8-F2.01.nested",
+            extension: "scala",
+            source: "object U { import a.b.C as D\ndef D() = 0\ndef run() = D()\n}\n",
+            imports: &[("D", Some("D"), Some("C"), Some("a.b.C"), 1, 28)],
+            reads: &[(1, 19, "a", None, USAGE, UNRESOLVED), (1, 21, "b", Some("a.b"), USAGE, UNRESOLVED), (1, 23, "C", None, USAGE, UNRESOLVED), (3, 13, "D", None, CALL, NAME_ONLY)],
+            owner: None,
+        },
+        prefixes: &[(18, 21)],
+    },
+    ScalaImportAlternative {
+        row: CommentedImportRow {
+            label: "R8-F2.02.escaped",
+            extension: "scala",
+            source: "import a.b.C as `D`\ndef D() = 0\ndef run() = D()\n",
+            imports: &[("`D`", Some("`D`"), Some("C"), Some("a.b.C"), 1, 17)],
+            reads: &[(1, 8, "a", None, USAGE, UNRESOLVED), (1, 10, "b", Some("a.b"), USAGE, UNRESOLVED), (1, 12, "C", None, USAGE, UNRESOLVED), (3, 13, "D", None, CALL, NAME_ONLY)],
+            owner: None,
+        },
+        prefixes: &[(7, 10)],
+    },
+    ScalaImportAlternative {
+        row: CommentedImportRow {
+            label: "R8-F2.02.original",
+            extension: "scala",
+            source: "import a.b.++ as sum\ndef D() = 0\ndef run() = D()\n",
+            imports: &[("sum", Some("sum"), Some("++"), Some("a.b.++"), 1, 18)],
+            reads: &[(1, 8, "a", None, USAGE, UNRESOLVED), (1, 10, "b", Some("a.b"), USAGE, UNRESOLVED), (3, 13, "D", None, CALL, NAME_ONLY)],
+            owner: None,
+        },
+        prefixes: &[(7, 10)],
+    },
+    ScalaImportAlternative {
+        row: CommentedImportRow {
+            label: "R8-F2.03.direct",
+            extension: "scala",
+            source: "import a.b.+\ndef D() = 0\ndef run() = D()\n",
+            imports: &[("+", None, None, Some("a.b.+"), 1, 12)],
+            reads: &[(1, 8, "a", None, USAGE, UNRESOLVED), (1, 10, "b", Some("a.b"), USAGE, UNRESOLVED), (3, 13, "D", None, CALL, NAME_ONLY)],
+            owner: None,
+        },
+        prefixes: &[(7, 12)],
+    },
+    ScalaImportAlternative {
+        row: CommentedImportRow {
+            label: "R8-F2.03.multiple",
+            extension: "scala",
+            source: "import a.b.+, c.d.**\ndef D() = 0\ndef run() = D()\n",
+            imports: &[("+", None, None, Some("a.b.+"), 1, 12), ("**", None, None, Some("c.d.**"), 1, 19)],
+            reads: &[(1, 8, "a", None, USAGE, UNRESOLVED), (1, 10, "b", Some("a.b"), USAGE, UNRESOLVED), (1, 15, "c", None, USAGE, UNRESOLVED), (1, 17, "d", Some("c.d"), USAGE, UNRESOLVED), (3, 13, "D", None, CALL, NAME_ONLY)],
+            owner: None,
+        },
+        prefixes: &[(7, 12), (14, 20)],
+    },
+    ScalaImportAlternative {
+        row: CommentedImportRow {
+            label: "R8-F2.03.braced",
+            extension: "scala",
+            source: "import a.{+, ** as mul}\ndef D() = 0\ndef run() = D()\n",
+            imports: &[("+", None, None, Some("a.+"), 1, 11), ("mul", Some("mul"), Some("**"), Some("a.**"), 1, 20)],
+            reads: &[(1, 8, "a", None, USAGE, UNRESOLVED), (3, 13, "D", None, CALL, NAME_ONLY)],
+            owner: None,
+        },
+        prefixes: &[(7, 8), (7, 8)],
+    },
+    ScalaImportAlternative {
+        row: CommentedImportRow {
+            label: "R8-F2.04.arrow",
+            extension: "scala",
+            source: "import a.{C => ++}\ndef D() = 0\ndef run() = D()\n",
+            imports: &[("++", Some("++"), Some("C"), Some("a.C"), 1, 16)],
+            reads: &[(1, 8, "a", None, USAGE, UNRESOLVED), (1, 11, "C", None, USAGE, UNRESOLVED), (3, 13, "D", None, CALL, NAME_ONLY)],
+            owner: None,
+        },
+        prefixes: &[(7, 8)],
+    },
+    ScalaImportAlternative {
+        row: CommentedImportRow {
+            label: "R8-F2.04.as",
+            extension: "scala",
+            source: "import a.{C as ++}\ndef D() = 0\ndef run() = D()\n",
+            imports: &[("++", Some("++"), Some("C"), Some("a.C"), 1, 16)],
+            reads: &[(1, 8, "a", None, USAGE, UNRESOLVED), (1, 11, "C", None, USAGE, UNRESOLVED), (3, 13, "D", None, CALL, NAME_ONLY)],
+            owner: None,
+        },
+        prefixes: &[(7, 8)],
+    },
+    ScalaImportAlternative {
+        row: CommentedImportRow {
+            label: "R8-F2.04.as.mixed",
+            extension: "scala",
+            source: "import a.{C as D, ++ as sum, E as **}\ndef D() = 0\ndef run() = D()\n",
+            imports: &[("D", Some("D"), Some("C"), Some("a.C"), 1, 16), ("sum", Some("sum"), Some("++"), Some("a.++"), 1, 25), ("**", Some("**"), Some("E"), Some("a.E"), 1, 35)],
+            reads: &[(1, 8, "a", None, USAGE, UNRESOLVED), (1, 11, "C", None, USAGE, UNRESOLVED), (1, 30, "E", None, USAGE, UNRESOLVED), (3, 13, "D", None, CALL, NAME_ONLY)],
+            owner: None,
+        },
+        prefixes: &[(7, 8), (7, 8), (7, 8)],
+    },
+    ScalaImportAlternative {
+        row: CommentedImportRow {
+            label: "R8-F2.05.direct.root",
+            extension: "scala",
+            source: "import +.C\ndef D() = 0\ndef run() = D()\n",
+            imports: &[("C", None, None, Some("+.C"), 1, 10)],
+            reads: &[(3, 13, "D", None, CALL, NAME_ONLY)],
+            owner: None,
+        },
+        prefixes: &[(7, 10)],
+    },
+    ScalaImportAlternative {
+        row: CommentedImportRow {
+            label: "R8-F2.05.direct",
+            extension: "scala",
+            source: "import a.+.C\ndef D() = 0\ndef run() = D()\n",
+            imports: &[("C", None, None, Some("a.+.C"), 1, 12)],
+            reads: &[(1, 8, "a", None, USAGE, UNRESOLVED), (3, 13, "D", None, CALL, NAME_ONLY)],
+            owner: None,
+        },
+        prefixes: &[(7, 12)],
+    },
+    ScalaImportAlternative {
+        row: CommentedImportRow {
+            label: "R8-F2.05.braced",
+            extension: "scala",
+            source: "import a.+.{C}\ndef D() = 0\ndef run() = D()\n",
+            imports: &[("C", None, None, Some("a.+.C"), 1, 13)],
+            reads: &[(1, 8, "a", None, USAGE, UNRESOLVED), (3, 13, "D", None, CALL, NAME_ONLY)],
+            owner: None,
+        },
+        prefixes: &[(7, 10)],
+    },
+    ScalaImportAlternative {
+        row: CommentedImportRow {
+            label: "R8-F2.05.wildcard",
+            extension: "scala",
+            source: "import a.+.*\ndef D() = 0\ndef run() = D()\n",
+            imports: &[("+", Some("+"), Some("*"), Some("a.+"), 1, 10)],
+            reads: &[(1, 8, "a", None, USAGE, UNRESOLVED), (3, 13, "D", None, CALL, NAME_ONLY)],
+            owner: None,
+        },
+        prefixes: &[(7, 10)],
+    },
+    ScalaImportAlternative {
+        row: CommentedImportRow {
+            label: "R8-F2.06.hidden",
+            extension: "scala",
+            source: "import a.{C as _, ++ => sum}\ndef D() = 0\ndef run() = D()\n",
+            imports: &[("sum", Some("sum"), Some("++"), Some("a.++"), 1, 25)],
+            reads: &[(1, 8, "a", None, USAGE, UNRESOLVED), (1, 11, "C", None, USAGE, UNRESOLVED), (3, 13, "D", None, CALL, NAME_ONLY)],
+            owner: None,
+        },
+        prefixes: &[(7, 8)],
+    },
+    ScalaImportAlternative {
+        row: CommentedImportRow {
+            label: "R8-F2.06.backticks",
+            extension: "scala",
+            source: "import `a`.`b`.`C`\ndef D() = 0\ndef run() = D()\n",
+            imports: &[("`C`", None, None, Some("`a`.`b`.`C`"), 1, 16)],
+            reads: &[(1, 8, "`a`", None, USAGE, UNRESOLVED), (1, 12, "`b`", Some("`a`.`b`"), USAGE, UNRESOLVED), (3, 13, "D", None, CALL, NAME_ONLY)],
+            owner: None,
+        },
+        prefixes: &[(7, 18)],
+    },
+    ScalaImportAlternative {
+        row: CommentedImportRow {
+            label: "R8-F2.06.this",
+            extension: "scala",
+            source: "import this.C\ndef D() = 0\ndef run() = D()\n",
+            imports: &[("C", None, None, Some("this.C"), 1, 13)],
+            reads: &[(1, 8, "this", None, USAGE, UNRESOLVED), (3, 13, "D", None, CALL, NAME_ONLY)],
+            owner: None,
+        },
+        prefixes: &[(7, 13)],
+    },
+    ScalaImportAlternative {
+        row: CommentedImportRow {
+            label: "R8-F2.06.super",
+            extension: "scala",
+            source: "import super.C\ndef D() = 0\ndef run() = D()\n",
+            imports: &[("C", None, None, Some("super.C"), 1, 14)],
+            reads: &[(1, 8, "super", None, USAGE, UNRESOLVED), (3, 13, "D", None, CALL, NAME_ONLY)],
+            owner: None,
+        },
+        prefixes: &[(7, 14)],
+    },
+    ScalaImportAlternative {
+        row: CommentedImportRow {
+            label: "R8-F2.06.root",
+            extension: "scala",
+            source: "import _root_.a.C\ndef D() = 0\ndef run() = D()\n",
+            imports: &[("C", None, None, Some("_root_.a.C"), 1, 17)],
+            reads: &[(1, 8, "_root_", None, USAGE, UNRESOLVED), (1, 15, "a", Some("_root_.a"), USAGE, UNRESOLVED), (3, 13, "D", None, CALL, NAME_ONLY)],
+            owner: None,
+        },
+        prefixes: &[(7, 17)],
+    },
+    ScalaImportAlternative {
+        row: CommentedImportRow {
+            label: "R8-F2.06.given",
+            extension: "scala",
+            source: "import a.{_, given T}\ndef D() = 0\ndef run() = D()\n",
+            imports: &[("a", Some("a"), Some("*"), Some("a"), 1, 8)],
+            reads: &[(1, 20, "T", None, USAGE, UNRESOLVED), (3, 13, "D", None, CALL, NAME_ONLY)],
+            owner: None,
+        },
+        prefixes: &[(7, 8)],
+    },
+];
+
+/// Visit the controls and single-comment edits at import token boundaries.
+/// Expectations shift from the control's explicit byte positions, not from
+/// the extractor under test. Line comments before `as` terminate a Scala
+/// import (as does a line comment before a comma outside selectors), so
+/// those are not alternate spellings of an unbraced rename.
+pub(crate) fn for_each_import_row(mut check: impl FnMut(&CommentedImportRow<'_>)) {
+    for row in COMMENTED_IMPORT_MATRIX {
+        check(row);
+    }
+    for alternative in SCALA_IMPORT_ALTERNATIVES {
+        let base = &alternative.row;
+        check(base);
+        let header_end = base.source.find('\n').expect("header");
+        let header = &base.source[..header_end];
+        let mut offsets = Vec::new();
+        for (offset, ch) in header.char_indices() {
+            if offset > 0 && (ch.is_whitespace() || ".{},".contains(ch) || header.as_bytes()[offset - 1] == b'.') {
+                offsets.push(offset);
+            }
+        }
+        offsets.push(header.len());
+        offsets.sort_unstable();
+        offsets.dedup();
+        for offset in offsets {
+            // Never insert inside a backticked identifier or a symbolic token.
+            if header[..offset].bytes().filter(|byte| *byte == b'`').count() % 2 != 0 {
+                continue;
+            }
+            for comment in [" /* n */ ", " // n\n"] {
+                let import_start = header.find("import ").expect("import") + "import ".len();
+                if offset < import_start {
+                    continue;
+                }
+                let before = &header[import_start..offset];
+                if comment.contains('\n') && offset != header_end && !before.trim_end().ends_with('.')
+                    && before.bytes().filter(|ch| *ch == b'{').count()
+                        <= before.bytes().filter(|ch| *ch == b'}').count() {
+                    continue;
+                }
+                let source = format!("{}{}{}", &base.source[..offset], comment, &base.source[offset..]);
+                let label = format!("{}: comment at {offset}: {comment:?}", base.label);
+                let shifted = |byte: usize| byte + if byte >= offset { comment.len() } else { 0 };
+                let coordinates = |byte: usize| {
+                    let byte = shifted(byte);
+                    (source[..byte].bytes().filter(|ch| *ch == b'\n').count() as u32 + 1,
+                     (byte - source[..byte].rfind('\n').map_or(0, |line| line + 1)) as u32 + 1)
+                };
+                let sources: Vec<String> = base.imports.iter().zip(alternative.prefixes).map(|(import, &(start, end))| {
+                    let suffix = &import.3.expect("source")[end - start..];
+                    let prefix_end = end + if end > offset { comment.len() } else { 0 };
+                    format!("{}{suffix}", &source[shifted(start)..prefix_end])
+                }).collect();
+                let imports: Vec<ExpectedImport<'_>> = base.imports.iter().zip(&sources).map(|(import, path)| {
+                    let (line, column) = coordinates(byte_at(base.source, import.4, import.5));
+                    (import.0, import.1, import.2, Some(path.as_str()), line, column)
+                }).collect();
+                let paths: Vec<Option<String>> = base.reads.iter().map(|read| read.3.map(|path| {
+                    let end = byte_at(base.source, read.0, read.1) + read.2.len();
+                    let start = end - path.len();
+                    let end = end + if end > offset { comment.len() } else { 0 };
+                    source[shifted(start)..end].to_string()
+                })).collect();
+                let reads: Vec<ExpectedRead<'_>> = base.reads.iter().zip(&paths).map(|(read, path)| {
+                    let (line, column) = coordinates(byte_at(base.source, read.0, read.1));
+                    (line, column, read.2, path.as_deref(), read.4, read.5)
+                }).collect();
+                check(&CommentedImportRow {
+                    label: &label, extension: "scala", source: &source,
+                    imports: &imports, reads: &reads, owner: None,
+                });
+            }
+        }
+    }
+}
+
+/// One-based `(line, column)` → byte offset in `source`.
+fn byte_at(source: &str, line: u32, column: u32) -> usize {
+    let line_start: usize = source.split_inclusive('\n').take(line as usize - 1).map(str::len).sum();
+    line_start + column as usize - 1
+}
+
+/// Checks an import row against a complete index and its
+/// evidence: the exact imports (name, alias, original, source, position),
+/// every occurrence (an imported token is none), and for a resolved
+/// language the owner's dependencies and recursion, else the limited
+/// language's conservative evidence. Shared with the cache stages, whose
+/// narrowed results may omit candidates' and the owner's records
+/// (`every_kind` false): a candidate is then checked by name, and the
+/// owner only when its record is present.
+pub(crate) fn assert_commented_import_row(
+    row: &CommentedImportRow,
+    cell: &str,
+    index: &FileSymbolIndex,
+    evidence: &ReferenceEvidence,
+    every_kind: bool,
+) {
+    let imports: Vec<ExpectedImport<'_>> = index
+        .imports
+        .iter()
+        .map(|import| {
+            (
+                import.name.as_str(),
+                import.alias.as_deref(),
+                import.symbol.qualified_name.as_deref(),
+                import.source.as_deref(),
+                import.span.start.line,
+                import.span.start.column,
+            )
+        })
+        .collect();
+    assert_eq!(imports, row.imports, "{cell}: imports");
+    for import in &index.imports {
+        assert!(
+            !index.symbols.iter().any(|record| record.identity.name == import.name
+                && record.source.declaration_span.start_byte <= import.span.start_byte
+                && import.span.end_byte <= record.source.declaration_span.end_byte),
+            "{cell}: the import `{}` became a declaration record",
+            import.name
+        );
+        assert!(
+            !index.exports.iter().any(|export| export.name == import.name),
+            "{cell}: the import `{}` became an export",
+            import.name
+        );
+    }
+    let reads: Vec<ExpectedRead<'_>> = evidence
+        .occurrences
+        .iter()
+        .map(|occurrence| {
+            (
+                occurrence.span.start.line,
+                occurrence.span.start.column,
+                occurrence.target.name.as_str(),
+                occurrence.target.qualified_name.as_deref(),
+                occurrence.kind,
+                occurrence.confidence,
+            )
+        })
+        .collect();
+    assert_eq!(reads, row.reads, "{cell}: occurrences");
+    for occurrence in &evidence.occurrences {
+        if row.label.starts_with("R8-F2.") && row.extension == "scala" && occurrence.kind == CALL {
+            assert_eq!(occurrence.owner.as_ref().map(|owner| owner.name.as_str()), Some("run"), "{cell}: body-call owner");
+        }
+        assert_eq!(occurrence.target.id, None, "{cell}: no target ID: {occurrence:#?}");
+        assert_eq!(occurrence.candidates.is_empty(), occurrence.confidence != Confidence::NameOnly, "{cell}: {occurrence:#?}");
+        assert!(
+            occurrence.candidates.iter().all(|candidate| candidate.name == occurrence.target.name),
+            "{cell}: candidates of {occurrence:#?}"
+        );
+        if every_kind {
+            let expected: HashSet<&SymbolId> = if occurrence.confidence == Confidence::NameOnly {
+                index.symbols.iter().filter(|record| record.identity.name == occurrence.target.name).map(|record| &record.id).collect()
+            } else {
+                HashSet::new()
+            };
+            let candidates: HashSet<&SymbolId> = occurrence.candidates.iter().filter_map(|candidate| candidate.id.as_ref()).collect();
+            assert_eq!(candidates, expected, "{cell}: candidates of {occurrence:#?}");
+        }
+    }
+    match row.owner {
+        Some((owner, dependencies, recursion)) => {
+            let record = index.symbols.iter().find(|record| record.identity.name == owner);
+            let Some(record) = record else {
+                assert!(!every_kind, "{cell}: no `{owner}`");
+                return;
+            };
+            let mut observed: Vec<(&str, Option<&str>)> = record
+                .relations
+                .dependencies
+                .iter()
+                .map(|dependency| (dependency.name.as_str(), dependency.qualified_name.as_deref()))
+                .collect();
+            observed.sort_unstable();
+            assert_eq!(observed, dependencies, "{cell}: dependencies");
+            let mut references: Vec<(&str, Option<&str>)> = record
+                .relations
+                .references
+                .iter()
+                .filter(|reference| reference.id.is_none())
+                .map(|reference| (reference.name.as_str(), reference.qualified_name.as_deref()))
+                .collect();
+            references.sort_unstable();
+            assert_eq!(references, dependencies, "{cell}: import references");
+            if index.completed_passes.contains(&tree_hugger::AnalysisPass::Semantic) {
+                assert_eq!(record.semantics.is_recursive, Some(recursion), "{cell}: recursion of `{owner}`");
+            }
+        }
+        None => {
+            for coverage in &evidence.reference_coverage {
+                assert_eq!(coverage.state, CoverageState::Limited, "{cell}");
+                assert!(coverage.reasons.contains(&LimitReason::UnsupportedLanguage), "{cell}");
+            }
+            for record in &index.symbols {
+                assert!(record.relations.references.is_empty(), "{cell}: `{}` has edges", record.identity.name);
+                assert!(record.relations.dependencies.is_empty(), "{cell}: `{}` has dependencies", record.identity.name);
+                if record.semantics.is_recursive.is_some() {
+                    assert_eq!(record.semantics.is_recursive, Some(TriState::Unknown), "{cell}: `{}`", record.identity.name);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn comments_never_change_what_an_import_binds_or_reads() {
+    for_each_import_row(|row| {
+        let file = Analyzed::new(row.source, row.extension);
+        assert_commented_import_row(row, row.label, &file.index, &file.evidence, true);
+    });
+}
+
+/// The diagnostics reference reader (`TreeFile::referenced_symbols`) agrees:
+/// an imported token is never a reference, and every read the occurrences
+/// hold is one (but a TS/JS/Go/Rust member callee, which that reader never
+/// reports).
+#[test]
+fn commented_imports_are_never_referenced_symbols() {
+    for_each_import_row(|row| {
+        let mut file = tempfile::Builder::new().suffix(&format!(".{}", row.extension)).tempfile().expect("temp source");
+        file.write_all(row.source.as_bytes()).expect("write source");
+        let tree_file = TreeFile::new(file.path()).expect("parse");
+        assert!(tree_file.syntax_diagnostics().is_empty(), "{}: parses cleanly", row.label);
+        let referenced = tree_file.referenced_symbols().expect("references");
+        let references: HashSet<(usize, &str)> =
+            referenced.iter().map(|reference| (reference.range.start_byte, reference.name.as_str())).collect();
+        for &(name, _, _, _, line, column) in row.imports {
+            let start = byte_at(row.source, line, column);
+            assert!(!references.contains(&(start, name)), "{}: the imported `{name}` at {line}:{column} is a reference", row.label);
+        }
+        for &(line, column, name, path, ..) in row.reads {
+            // The diagnostics reader reports no invoked member name in
+            // the languages whose reference queries capture one only as a
+            // callee.
+            if path.is_some() && matches!(row.extension, "ts" | "js" | "go" | "rs") {
+                continue;
+            }
+            let start = byte_at(row.source, line, column);
+            assert!(references.contains(&(start, name)), "{}: the read `{name}` at {line}:{column} is no reference", row.label);
+        }
+    });
+}
+
+/// C, C++, Lua, Perl, Bash and Zsh have no import-definition capture, so no
+/// comment can be mistaken for an imported name there (review row
+/// `R8-F1.11`).
+#[test]
+fn languages_without_import_syntax_capture_no_imports() {
+    use tree_hugger::queries::{GrammarRef, QueryKind, query_for};
+    for language in ProgrammingLanguage::all() {
+        let grammar = language.tree_sitter_language();
+        let grammar_ref = GrammarRef { language, grammar: &grammar, id: language.query_name() };
+        let query = query_for(grammar_ref, QueryKind::Imports).expect("imports query compiles");
+        let captures_imports = query.capture_names().contains(&"local.definition.import");
+        let without = matches!(
+            language,
+            ProgrammingLanguage::C
+                | ProgrammingLanguage::Cpp
+                | ProgrammingLanguage::Lua
+                | ProgrammingLanguage::Perl
+                | ProgrammingLanguage::Bash
+                | ProgrammingLanguage::Zsh
+        );
+        assert_eq!(captures_imports, !without, "{language}: import-definition capture");
+    }
+}
+
+#[test]
+fn commented_swift_constructors_keep_conservative_evidence() {
+    let file = Analyzed::new("class C<T> {}\nfunc run() {\n _ = C /* n */ <Int>()\n _ = C/*n*/<Int>()\n _ = N.C /* n */ <Int>()\n _ = C<Int /* n */>()\n}\n", "swift");
+    let class = file.id("C", 1);
+    let run = file.record("run", 2);
+    for line in 3..=6 {
+        let call = file.at(line, "C", 0);
+        assert_eq!(call.kind, CALL);
+        assert_eq!(file.text(call), "C");
+        assert_eq!(call.confidence, Confidence::NameOnly);
+        assert_eq!(call.target.id, None);
+        assert_eq!(call.candidates.len(), 1);
+        assert_eq!(call.candidates[0].id.as_ref(), Some(class));
+        assert_eq!(call.owner.as_ref().and_then(|owner| owner.id.as_ref()), Some(&run.id));
+        assert_eq!(file.at(line, "Int", 0).kind, USAGE);
+    }
+    assert_eq!(file.at(5, "C", 0).target.qualified_name.as_deref(), Some("N.C"));
+    assert_eq!(run.semantics.is_recursive, Some(TriState::Unknown));
+    assert!(run.relations.references.is_empty());
+    assert!(file.evidence.reference_coverage.iter().all(|region| region.state == CoverageState::Limited && region.reasons.contains(&LimitReason::UnsupportedLanguage)));
+}
+
+#[test]
+fn commented_patterns_and_asserted_eval_keep_lookup_boundaries() {
+    for source in [
+        "fn f() {}\nfn g(x: Option<fn()>) { match x { /* arm */ Some(/* binder */ f) => f(), _ => () } }\n",
+        "fn f() {}\nfn g(x: Option<fn()>) { match x { Some(ref /* binder */ f) => f(), _ => () } }\n",
+    ] {
+        let file = Analyzed::new(source, "rs");
+        let call = file.all("f").into_iter().find(|occ| occ.kind == CALL).expect("body call");
+        assert_eq!(call.confidence, Confidence::Scoped);
+        assert_ne!(call.target.id.as_ref(), Some(file.id("f", 1)));
+        assert!(call.candidates.is_empty());
+    }
+    let file = Analyzed::new("function f() {}\nfunction g() { (<any /* n */> /* b */ eval /* a */)(s); f(); }\n", "ts");
+    assert_eq!(file.at(2, "eval", 0).kind, CALL);
+    assert_uncertain(file.at(2, "f", 0));
+    assert_eq!(file.at(2, "f", 0).target.id, None);
+}
+
+#[test]
+fn commented_swift_implicit_paths_preserve_written_qualifiers() {
+    for (expression, path) in [
+        ("-. /* n */ some.f()", ". /* n */ some.f"),
+        ("-.some /* n */ .f()", ".some /* n */ .f"),
+        ("!. /* n */ some.f()", ". /* n */ some.f"),
+    ] {
+        let file = Analyzed::new(&format!("func run() {{ _ = {expression} }}"), "swift");
+        let call = file.at(1, "f", 0);
+        assert_eq!(call.kind, CALL);
+        assert_eq!(call.target.qualified_name.as_deref(), Some(path));
+        assert_eq!(file.at(1, "some", 0).kind, USAGE);
+    }
+}
+
+#[test]
+fn commented_rust_generic_arguments_keep_name_and_primitive_roles() {
+    let file = Analyzed::new("fn f<T>() {}\nfn g() { f /* n */ :: /* n */ <i32>(); f /* n */ :: /* n */ <Named>(); }\n", "rs");
+    assert_eq!(file.at(2, "f", 0).kind, CALL);
+    assert_eq!(file.at(2, "f", 1).kind, CALL);
+    assert_eq!(file.at(2, "Named", 0).kind, USAGE);
+    assert!(file.all("i32").is_empty(), "primitive_type tokens are not identifier references");
+}
+
+
+pub(crate) const TYPE_ONLY_IMPORT_MATRIX: &[(&str, &str, &str, bool)] = &[
+    ("R9-F2.01", "import type { F } from './types';", "F", false),
+    ("R9-F2.02", "import type { F as Alias } from './types';", "Alias", false),
+    ("R9-F2.03", "import type Def from './types';", "Def", false),
+    ("R9-F2.04", "import { type F } from './types';", "F", false),
+    ("R9-F2.05", "import { type F as Alias } from './types';", "Alias", false),
+    ("R9-F2.06", "import { type F as Alias, G as g } from './types';", "Alias", true),
+    ("R9-F2.07.statement", "import /* a */ type /* b */ { F /* c */ as /* d */ Alias } from './types';", "Alias", false),
+    ("R9-F2.07.specifier", "import { /* a */ type /* b */ F /* c */ as /* d */ Alias } from './types';", "Alias", false),
+    ("R9-F2.07.default", "import /* a */ type /* b */ Def from './types';", "Def", false),
+    ("R9-F2.08", "import type { F } from './types';", "F", false),
+];
+
+pub(crate) fn type_only_import_source(import: &str, name: &str, mixed: bool) -> String {
+    let other = if mixed { " g();" } else { "" };
+    format!("{import}\nfunction {name}(): void {{ {name}();{other} }}\nlet value: {name};\ntype ValueType = typeof {name};\n")
+}
+
+pub(crate) fn check_type_only_import_index(index: &FileSymbolIndex, name: &str, mixed: bool, semantics: bool) {
+    assert_eq!(index.occurrences.iter().filter(|occ| occ.target.name == name).count(), 3, "call, annotation, and typeof only");
+    let call = index.occurrences.iter().find(|occ| occ.target.name == name && occ.kind == CALL).expect("local call");
+    let id = call.owner.as_ref().and_then(|owner| owner.id.as_ref()).expect("function owner ID");
+    assert_scoped_to(call, id);
+    let annotation = index.occurrences.iter().find(|occ| occ.target.name == name && occ.span.start.line == 3).expect("type read");
+    assert_eq!(annotation.kind, USAGE);
+    assert_eq!(annotation.confidence, Confidence::Scoped);
+    assert_eq!(annotation.target.id, None, "type annotation retains the external binding");
+    assert!(annotation.candidates.is_empty());
+    let value_query = index.occurrences.iter().find(|occ| occ.target.name == name && occ.span.start.line == 4).expect("typeof value read");
+    assert_scoped_to(value_query, id);
+    assert_eq!(value_query.kind, USAGE);
+    assert!(index.reference_coverage.iter().all(|region| region.state == CoverageState::Complete));
+    if let Some(record) = index.symbols.iter().find(|record| &record.id == id) {
+        assert_eq!(record.relations.references.iter().filter(|target| target.id.as_ref() == Some(id)).count(), 1);
+        assert_eq!(record.relations.referenced_by.iter().filter(|owner| owner.id.as_ref() == Some(id)).count(), 1);
+        assert_eq!(record.relations.dependencies.len(), usize::from(mixed));
+        if semantics { assert_eq!(record.semantics.is_recursive, Some(TriState::Yes)); }
+        if mixed {
+            assert_eq!(record.relations.dependencies[0].name, "g");
+            assert_eq!(record.relations.dependencies[0].qualified_name.as_deref(), Some("G"));
+            assert_eq!(record.relations.dependencies[0].id, None);
+        }
+    }
+    if mixed {
+        let call = index.occurrences.iter().find(|occ| occ.target.name == "g").expect("ordinary value import call");
+        assert_eq!(call.kind, CALL);
+        assert_eq!(call.confidence, Confidence::Scoped);
+        assert_eq!(call.target.id, None);
+    }
+}
+
+#[test]
+fn type_only_imports_preserve_local_values_and_external_type_reads() {
+    for &(label, import, name, mixed) in TYPE_ONLY_IMPORT_MATRIX {
+        let source = type_only_import_source(import, name, mixed);
+        let file = Analyzed::new(&source, "ts");
+        check_type_only_import_index(&file.index, name, mixed, true);
+        assert_eq!(file.index.imports.len(), if mixed { 2 } else { 1 }, "{label}");
+    }
+}
+
+#[test]
+fn type_only_namespace_require_and_ordinary_import_controls() {
+    for import in ["import type * as NS from './types';", "import type NS = require('./types');",
+        "import /* a */ type /* b */ * as /* c */ NS from './types';",
+        "import /* a */ type /* b */ NS = require('./types');"] {
+        let file = Analyzed::new(&format!("{import}\nlet value: NS.F;\nfunction run() {{}}\n"), "ts");
+        let namespace = file.at(2, "NS", 0);
+        assert_eq!(namespace.confidence, Confidence::Scoped);
+        assert_eq!(namespace.target.id, None);
+        assert_eq!(namespace.kind, USAGE);
+        assert_eq!(file.at(2, "F", 0).target.qualified_name.as_deref(), Some("NS.F"));
+        assert_ne!(file.at(2, "F", 0).confidence, Confidence::Scoped);
+        assert_eq!(file.record("run", 3).semantics.is_recursive, Some(TriState::No));
+    }
+    let file = Analyzed::new("import { type as g } from './types';\nfunction run() { g(); }\n", "ts");
+    assert_eq!(file.at(2, "g", 0).confidence, Confidence::Scoped);
+    assert_eq!(file.at(2, "g", 0).target.id, None);
+    assert_eq!(file.record("run", 2).relations.dependencies[0].name, "g");
+    assert_eq!(file.record("run", 2).relations.dependencies[0].qualified_name.as_deref(), Some("type"));
+    assert_eq!(file.record("run", 2).semantics.is_recursive, Some(TriState::No));
+    let file = Analyzed::new("import type { T } from './types';\nimport { G as g } from './types';\nfunction f(x: T) { f(x); g(); }\n", "ts");
+    assert_scoped_to(file.at(3, "f", 0), file.id("f", 3));
+    assert_eq!(file.at(3, "T", 0).confidence, Confidence::Scoped);
+    assert_eq!(file.at(3, "T", 0).target.id, None);
+    assert_eq!(file.record("f", 3).semantics.is_recursive, Some(TriState::Yes));
+    assert_eq!(file.record("f", 3).relations.dependencies.iter().map(|target| target.name.as_str()).collect::<Vec<_>>(), ["T", "g"]);
+    for import in ["import { F as g } from './types';", "import g from './types';", "import * as g from './types';"] {
+        let file = Analyzed::new(&format!("{import}\nfunction run() {{ g(); }}\n"), "js");
+        assert_eq!(file.at(2, "g", 0).confidence, Confidence::Scoped);
+        assert_eq!(file.at(2, "g", 0).target.id, None);
+        assert_eq!(file.record("run", 2).semantics.is_recursive, Some(TriState::No));
+    }
+}
+
+/// Selected import identities, including aliases in unrelated nested scopes
+/// and an unreported local binding that reuses an import's spelling.
+pub(crate) const IMPORT_PROVENANCE_MATRIX: &[(&str, &str, &str, &str, &str, bool)] = &[
+    ("R9-F4.01.rs", "aliases.rs", "mod other { pub fn g() {} pub fn f() {} }\nfn f() { use other::g as q; q(); }\nfn h() { use other::f as q; q(); }", "f", "q", false),
+    ("R9-F4.01.rs.renamed", "aliases.rs", "mod other { pub fn g() {} pub fn f() {} }\nfn f() { use other::g as q; q(); }\nfn h() { use other::f as r; r(); }", "f", "q", false),
+    ("R9-F4.02.ts", "aliases.ts", "namespace N { export function other() {} export function S() {} }\nimport D = N.other;\nfunction S() { D(); }\nnamespace M { import D = N.S; }", "S", "D", false),
+    ("R9-F4.02.ts.renamed", "aliases.ts", "namespace N { export function other() {} export function S() {} }\nimport D = N.other;\nfunction S() { D(); }\nnamespace M { import E = N.S; }", "S", "D", false),
+    ("R9-F4.03.ts", "shadow.ts", "import { G as D } from './types';\nfunction run(xs: (() => void)[]) { D(); for (const D of xs) { D(); } }", "run", "D", true),
+    ("R9-F4.03.js", "shadow.js", "import { G as D } from './types';\nfunction run(xs) { D(); for (const D of xs) { D(); } }", "run", "D", true),
+    ("R9-F4.03.rs", "shadow.rs", "use other::G as D;\nfn run(xs: Option<fn()>) { D(); match xs { Some(mut D) => D(), _ => () } }", "run", "D", true),
+    ("R9-F4.05.rs.self", "self.rs", "fn f() { use other::f as q; q(); }", "f", "q", false),
+    ("R9-F4.05.ts.self", "self.ts", "namespace N { export function S() {} }\nimport D = N.S;\nfunction S() { D(); }", "S", "D", false),
+    ("R9-F4.05.rs.raw", "raw_import.rs", "fn f() { use other::g as r#q; q(); }", "f", "q", false),
+    ("R9-F4.05.ts.escaped", "escaped_import.ts", r"import { G as \u0044 } from './types'; function run() { D(); }", "run", "D", false),
+    ("R9-F4.05.js.escaped", "escaped_import.js", r"import { G as \u0044 } from './types'; function run() { D(); }", "run", "D", false),
+    ("R9-F4.05.js.unique", "unique.js", "import { G as D } from './types';\nfunction run() { D(); }", "run", "D", false),
+];
+
+pub(crate) fn check_import_provenance(index: &FileSymbolIndex, label: &str, owner: &str, name: &str, shadow: bool, semantics: bool) {
+    let calls: Vec<_> = index.occurrences.iter().filter(|o| o.kind == OccurrenceKind::Call && o.target.name == name && o.owner.as_ref().is_some_and(|r| r.name == owner)).collect();
+    assert_eq!(calls.len(), if shadow { 2 } else { 1 }, "{label}: actual sites");
+    let call = calls[0];
+    let import = index.imports.iter().find(|i| Some(&i.span) == call.import_span.as_ref()).expect("selected import");
+    let expected_original = if label.contains(".self") { if owner == "f" { "f" } else { "N.S" } }
+        else if owner == "f" { "g" } else if owner == "S" { "N.other" } else { "G" };
+    assert_eq!(import.symbol.qualified_name.as_deref(), Some(expected_original), "{label}");
+    for call in &calls {
+        assert_eq!(call.confidence, Confidence::Scoped, "{label}");
+        assert!(call.target.id.is_none());
+        assert!(call.candidates.is_empty());
+        assert_eq!(call.owner, calls[0].owner, "same owner, distinct sites");
+    }
+    if shadow {
+        assert!(calls[1].import_span.is_none(), "{label}: local binding never an import");
+        assert_ne!(calls[0].span, calls[1].span);
+    }
+    if let Some(record) = index.symbols.iter().find(|r| Some(&r.id) == call.owner.as_ref().and_then(|r| r.id.as_ref())) {
+        assert_eq!(record.relations.dependencies.len(), 1, "{label}: local call adds no dependency");
+        assert_eq!(record.relations.dependencies[0].qualified_name.as_deref(), Some(expected_original));
+        assert_eq!(record.relations.references.iter().filter(|r| r.id.is_none()).collect::<Vec<_>>(), record.relations.dependencies.iter().collect::<Vec<_>>(), "only bound import forms an absent-ID edge");
+        if semantics {
+            assert_eq!(record.semantics.is_recursive, Some(if shadow || label.contains(".self") { TriState::Unknown } else { TriState::No }), "{label}: recursion from selected original");
+        }
+    }
+}
+
+#[test]
+fn selected_import_provenance_keeps_other_scopes_and_locals_independent() {
+    for &(label, file, source, owner, name, shadow) in IMPORT_PROVENANCE_MATRIX {
+        let dir = tempfile::TempDir::new().expect("temp");
+        let path = dir.path().join(file);
+        std::fs::write(&path, source).expect("source");
+        let index = TreeFile::new(&path).expect("tree").symbol_index_v2().expect("index");
+        check_import_provenance(&index, label, owner, name, shadow, true);
+    }
+}
+
+#[test]
+fn unsupported_language_occurrences_never_claim_selected_imports() {
+    for language in ProgrammingLanguage::all().into_iter().filter(|language| !matches!(language, ProgrammingLanguage::Rust | ProgrammingLanguage::TypeScript | ProgrammingLanguage::JavaScript)) {
+        let path = primary_fixture(language).expect("primary fixture");
+        let index = TreeFile::new(path).expect("tree").symbol_index_v2().expect("index");
+        assert!(!index.occurrences.is_empty(), "{language:?}: positive occurrence control");
+        for occurrence in &index.occurrences {
+            assert_ne!(occurrence.confidence, Confidence::Scoped, "{language:?}");
+            assert!(occurrence.import_span.is_none(), "{language:?}");
+            assert!(occurrence.target.id.is_none(), "{language:?}");
+        }
+        assert!(index.reference_coverage.iter().all(|r| r.state == CoverageState::Limited && r.reasons.contains(&LimitReason::UnsupportedLanguage)), "{language:?}");
+        for record in &index.symbols {
+            assert!(record.relations.references.is_empty());
+            assert!(record.relations.dependencies.is_empty());
+            if matches!(record.kind, SymbolKindV2::Function | SymbolKindV2::Method | SymbolKindV2::Constructor) {
+                assert_eq!(record.semantics.is_recursive, Some(TriState::Unknown), "{language:?}");
+            }
+        }
+    }
 }

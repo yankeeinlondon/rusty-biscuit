@@ -112,8 +112,11 @@
 ; `#has-ancestor?`, which let every qualified annotation, module name and
 ; module directive operand become an import).
 (import_declaration
-  (scoped_identifier
-    name: (identifier) @local.definition.import))
+  [
+    (scoped_identifier
+      name: (identifier) @local.definition.import)
+    (identifier) @local.definition.import
+  ])
 
 (field_declaration
   declarator: (variable_declarator

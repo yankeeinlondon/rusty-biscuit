@@ -579,7 +579,7 @@ fn incompatible_record_schema_versions_are_misses_never_served_or_widened() {
     let path = fixture(ProgrammingLanguage::Python);
     let narrow = SymbolQuery::new().kinds(FUNCTION_KINDS);
     let complete = SymbolQuery::complete_index();
-    let current = json!({ "major": 5, "minor": 0 });
+    let current = json!({ "major": 5, "minor": 1 });
     for version in [
         json!({ "major": 2, "minor": 0 }),
         json!({ "major": 3, "minor": 0 }),
@@ -587,7 +587,8 @@ fn incompatible_record_schema_versions_are_misses_never_served_or_widened() {
         json!({ "major": 4, "minor": 1 }),
         json!({ "major": 4, "minor": 2 }),
         json!({ "major": 4, "minor": 3 }),
-        json!({ "major": 5, "minor": 1 }),
+        json!({ "major": 5, "minor": 0 }),
+        json!({ "major": 5, "minor": 2 }),
         json!({ "major": 6, "minor": 0 }),
     ] {
         for (position, request) in [("first", &narrow), ("last", &narrow), ("first", &complete)] {
@@ -2716,6 +2717,7 @@ fn invocation_kinds_hold_through_narrow_widened_projected_and_warm_results() {
 /// implicit members, with their type arguments, qualifiers, receivers and
 /// arguments as usages.
 const CONSTRUCTED_KIND_SOURCES: &[KindRow] = &[
+    ("commented.swift", "class C<T> {}\nfunc run() {\n _ = C /* n */ <Int>()\n _ = C/*n*/<Int>()\n _ = N.C /* n */ <Int>()\n _ = C<Int /* n */>()\n}\nfunc annotation(x: C /* n */ <Int>) {}\n", &[(3, "C", OccurrenceKind::Call), (3, "Int", OccurrenceKind::Usage), (4, "C", OccurrenceKind::Call), (4, "Int", OccurrenceKind::Usage), (5, "C", OccurrenceKind::Call), (5, "N", OccurrenceKind::Usage), (5, "Int", OccurrenceKind::Usage), (6, "C", OccurrenceKind::Call), (6, "Int", OccurrenceKind::Usage), (8, "C", OccurrenceKind::Usage), (8, "Int", OccurrenceKind::Usage)]),
     (
         "construct.java",
         "class C<T> { C() {} }\nclass G {\n    void g(Object y) {\n        new C<String>();\n        new a.b.C<>();\n        outer.new C<String>(y);\n    }\n}\n",
@@ -2797,6 +2799,23 @@ fn constructed_and_implicit_member_kinds_hold_through_the_cache() {
             assert_eq!(lookup, expected_lookup, "{cell}");
             assert_eq!(served, uncached(&path, query), "{cell}: equals an uncached run");
             assert_invocation_kinds(&served, expected, &cell);
+            if name == "commented.swift" {
+                let index: tree_hugger::FileSymbolIndex = serde_json::from_value(served["index"].clone()).expect("index");
+                for occurrence in index.occurrences.iter().filter(|occ| (3..=6).contains(&occ.span.start.line) && occ.target.name == "C") {
+                    assert_eq!(occurrence.confidence, tree_hugger::Confidence::NameOnly, "{cell}");
+                    assert_eq!(occurrence.target.id, None, "{cell}");
+                    assert_eq!(occurrence.candidates.len(), 1, "{cell}");
+                    assert_eq!(occurrence.candidates[0].name, "C", "{cell}");
+                    assert_eq!(occurrence.owner.as_ref().map(|owner| owner.name.as_str()), Some("run"), "{cell}");
+                }
+                for record in index.symbols.iter().filter(|record| record.identity.name == "run") {
+                    assert!(record.relations.references.is_empty(), "{cell}");
+                    if matches!(step, "semantic widening" | "kind widening" | "complete warm") {
+                        assert_eq!(record.semantics.is_recursive, Some(tree_hugger::TriState::Unknown), "{cell}");
+                    }
+                }
+            }
+
         }
     }
 }
@@ -3273,6 +3292,18 @@ const MARKER_CACHE_SOURCES: &[DeclarationCacheRow] = &[
         &[(2, 5, "associativity"), (2, 20, "left"), (3, 5, "higherThan"), (6, 9, "left"), (6, 19, "higherThan")],
         &[(3, 17, "AdditionPrecedence", &[]), (7, 9, "left", &["left"]), (7, 15, "higherThan", &["higherThan"])],
     ),
+    (
+        "EveryInference.java",
+        "import static p.Tools.var;\nrecord P(int a) {}\nclass S {\n    void g(java.util.List<String> xs, Object o, int var) {\n        var v = id(xs);\n        final var w = id(v);\n        for (var y : xs) { use(y); }\n        try (var r = open(xs)) { use(r); }\n        java.util.function.Function<String, String> l = (var z) -> z;\n        if (o instanceof P(var a)) { use(a); }\n        for (var i = 0; i < var; i++) {}\n    }\n}\n",
+        &[(1, 23, "var"), (4, 53, "var"), (5, 9, "var"), (6, 15, "var"), (7, 14, "var"), (8, 14, "var"), (9, 58, "var"), (10, 28, "var"), (11, 14, "var")],
+        &[(11, 29, "var", &["var"])],
+    ),
+    (
+        "EveryPrecedence.swift",
+        "precedencegroup A {\n    associativity: left\n    assignment: true\n    higherThan: AdditionPrecedence\n    lowerThan: MultiplicationPrecedence\n}\nprecedencegroup B {\n    associativity: right\n}\nprecedencegroup C {\n    associativity: none\n}\ninfix operator +++ : TernaryPrecedence\nfunc g() {\n    let left = 1, right = 2, none = 3\n    let associativity = 4, assignment = 5, higherThan = 6, lowerThan = 7\n    use(left, right, none, associativity, assignment, higherThan, lowerThan)\n}\n",
+        &[(2, 5, "associativity"), (2, 20, "left"), (3, 5, "assignment"), (4, 5, "higherThan"), (5, 5, "lowerThan"), (8, 5, "associativity"), (8, 20, "right"), (11, 5, "associativity"), (11, 20, "none"), (15, 9, "left"), (15, 19, "right"), (15, 30, "none"), (16, 9, "associativity"), (16, 28, "assignment"), (16, 44, "higherThan"), (16, 60, "lowerThan")],
+        &[(4, 17, "AdditionPrecedence", &[]), (5, 16, "MultiplicationPrecedence", &[]), (13, 22, "TernaryPrecedence", &[]), (17, 9, "left", &["left"]), (17, 15, "right", &["right"]), (17, 22, "none", &["none"]), (17, 28, "associativity", &["associativity"]), (17, 43, "assignment", &["assignment"]), (17, 55, "higherThan", &["higherThan"]), (17, 67, "lowerThan", &["lowerThan"])],
+    ),
     // R7-F1.S2/.S3: availability platforms and `#if` operands are markers.
     (
         "availability.swift",
@@ -3438,7 +3469,8 @@ const QUALIFIED_IMPORT_CACHE_SOURCES: &[QualifiedImportCacheRow] = &[
     ),
 ];
 
-/// R7-F3.C4: Java qualified annotation and module-directive reads keep their
+/// R7-F3.C4: Every Java qualified-name inventory row and the sibling import
+/// readers keep their
 /// offsets and paths, and no phantom import appears, through a
 /// functions-only entry, its warm `Hit`, a record-only semantic widening, a
 /// kind widening, the complete warm `Hit` and a projected type-only result;
@@ -3449,9 +3481,16 @@ fn qualified_reads_and_imports_hold_through_the_cache() {
     let semantic = SymbolQuery::new().kinds(FUNCTION_KINDS).capabilities([Capability::Occurrences, Capability::Semantics]);
     let complete = SymbolQuery::complete_index();
     let projected = SymbolQuery::new().kinds(TYPE_KINDS).capabilities([Capability::Occurrences]);
-    for &(name, source, reads, imports) in QUALIFIED_IMPORT_CACHE_SOURCES {
+    let sources = QUALIFIED_IMPORT_CACHE_SOURCES.iter().map(|&(name, source, reads, imports)| {
+        (name, source, reads.to_vec(), imports.to_vec())
+    }).chain(super::symbols_occurrences::JAVA_QUALIFIED_REFERENCE_MATRIX.iter().map(|&(name, source, reads, imports)| {
+        let reads = reads.iter().map(|&(line, column, name, path, _)| (line, column, name, path)).collect();
+        let imports = imports.iter().map(|&(name, _, _, line, column)| (name, line, column)).collect();
+        (name, source, reads, imports)
+    }));
+    for (name, source, reads, imports) in sources {
         let dir = TempDir::new().expect("temp");
-        let path = dir.path().join(name);
+        let path = dir.path().join(if name.starts_with("R7-F3.") { "Matrix.java" } else { name });
         std::fs::write(&path, source).expect("write source");
         let cache = cache_in(&dir);
         let steps: [(&str, &SymbolQuery, CacheLookup); 6] = [
@@ -3484,6 +3523,28 @@ fn qualified_reads_and_imports_hold_through_the_cache() {
                 })
                 .collect();
             assert_eq!(actual, reads, "{cell}: reads");
+            if let Some(&(_, _, expected_reads, _)) = super::symbols_occurrences::JAVA_QUALIFIED_REFERENCE_MATRIX.iter().find(|&&(label, ..)| label == name) {
+                for (&(line, column, target, _, name_only), occurrence) in expected_reads.iter().zip(occurrences.iter().filter(|occurrence| lines.contains(&occurrence.span.start.line))) {
+                    assert_eq!(occurrence.kind, OccurrenceKind::Usage, "{cell}: {line}:{column}");
+                    assert_eq!(occurrence.target.id, None, "{cell}: no invented target ID");
+                    assert_eq!(occurrence.confidence, if name_only { tree_hugger::Confidence::NameOnly } else { tree_hugger::Confidence::Unresolved }, "{cell}: confidence");
+                    let candidates: Vec<&str> = occurrence.candidates.iter().map(|candidate| candidate.name.as_str()).collect();
+                    assert_eq!(candidates, if name_only { vec![target] } else { vec![] }, "{cell}: candidate names");
+                }
+                for coverage in served["index"]["reference_coverage"].as_array().expect("coverage") {
+                    assert_eq!(coverage["state"], "Limited", "{cell}: coverage");
+                    assert!(coverage["reasons"].as_array().expect("reasons").iter().any(|reason| reason == "unsupported_language"), "{cell}: reason");
+                }
+                for record in served["index"]["symbols"].as_array().expect("symbols") {
+                    for relation in ["references", "referenced_by", "dependencies"] {
+                        assert!(record["relations"][relation].is_null() || record["relations"][relation].as_array().is_some_and(Vec::is_empty), "{cell}: no established {relation}");
+                    }
+                    if !record["semantics"]["is_recursive"].is_null() {
+                        assert_eq!(record["semantics"]["is_recursive"], "Unknown", "{cell}: recursion");
+                    }
+                }
+            }
+
 
             let served_imports = served["index"]["imports"].as_array().expect("imports");
             let actual_imports: Vec<(&str, u64, u64)> = served_imports
@@ -3501,6 +3562,50 @@ fn qualified_reads_and_imports_hold_through_the_cache() {
             assert_eq!(actual_imports, expected_imports, "{cell}: imports");
         }
     }
+}
+
+/// Import comments and grammar alternatives (`symbols_occurrences::for_each_import_row`,
+/// review rows `R8-F1.nn`, `R8-F2.nn`) hold through a functions-only entry, its warm
+/// `Hit`, a record-only semantic widening, a kind widening, the complete
+/// warm `Hit` and a projected type-only result: each stage carries the
+/// row's own expected imports (original and source included), every read
+/// and no imported token, and for TS/JS/Rust the owner's dependencies and
+/// recursion; each also equals an uncached run.
+#[test]
+fn commented_imports_hold_through_the_cache() {
+    let narrow = SymbolQuery::new().kinds(FUNCTION_KINDS).capabilities([Capability::Occurrences]);
+    let semantic = SymbolQuery::new().kinds(FUNCTION_KINDS).capabilities([Capability::Occurrences, Capability::Semantics]);
+    let complete = SymbolQuery::complete_index();
+    let projected = SymbolQuery::new().kinds(TYPE_KINDS).capabilities([Capability::Occurrences]);
+    super::symbols_occurrences::for_each_import_row(|row| {
+        let dir = TempDir::new().expect("temp");
+        let path = dir.path().join(format!("source.{}", row.extension));
+        std::fs::write(&path, row.source).expect("write source");
+        let cache = cache_in(&dir);
+        let steps: [(&str, &SymbolQuery, CacheLookup, bool); 6] = [
+            ("narrow cold", &narrow, CacheLookup::Miss(CacheMiss::Absent), false),
+            ("narrow warm", &narrow, CacheLookup::Hit, false),
+            ("semantic widening", &semantic, CacheLookup::WidenedCapabilities { parsed: false }, false),
+            ("kind widening", &complete, CacheLookup::WidenedKinds, true),
+            ("complete warm", &complete, CacheLookup::Hit, true),
+            ("projected", &projected, CacheLookup::Hit, false),
+        ];
+        for (step, query, expected_lookup, every_kind) in steps {
+            let cell = format!("{}: {step}", row.label);
+            let (lookup, served, work) = cached(&cache, read(&path), query);
+            assert_eq!(lookup, expected_lookup, "{cell}");
+            if !matches!(lookup, CacheLookup::Miss(_) | CacheLookup::WidenedKinds) {
+                assert_eq!(work.parser_constructions, 0, "{cell}: served without a parse");
+            }
+            assert_eq!(served, uncached(&path, query), "{cell}: equals an uncached run");
+            let index: tree_hugger::FileSymbolIndex = serde_json::from_value(served["index"].clone()).expect("index");
+            let evidence = tree_hugger::ReferenceEvidence {
+                occurrences: index.occurrences.clone(),
+                reference_coverage: index.reference_coverage.clone(),
+            };
+            super::symbols_occurrences::assert_commented_import_row(row, &cell, &index, &evidence, every_kind);
+        }
+    });
 }
 
 /// Runs each source through a functions-only entry, its warm `Hit`, a
@@ -3555,6 +3660,315 @@ fn assert_exclusions_hold_through_the_cache(sources: &[DeclarationCacheRow]) {
                 );
             }
             assert_eq!(actual, expected, "{cell}: reads");
+        }
+    }
+}
+
+/// Every declaration-exclusion shape, including earlier sibling controls,
+/// keeps its independently expected reads through persistence and projection.
+#[test]
+fn every_declaration_exclusion_shape_holds_through_six_cache_stages() {
+    let narrow = SymbolQuery::new().kinds(FUNCTION_KINDS).capabilities([Capability::Occurrences]);
+    let semantic = SymbolQuery::new().kinds(FUNCTION_KINDS).capabilities([Capability::Occurrences, Capability::Semantics]);
+    let complete = SymbolQuery::complete_index();
+    let projected = SymbolQuery::new().kinds(TYPE_KINDS).capabilities([Capability::Occurrences]);
+    for &(label, extension, source, declarations, reads) in crate::symbols_occurrences::DECLARATION_EXCLUSION_MATRIX {
+        let dir = TempDir::new().expect("temp");
+        let path = dir.path().join(format!("source.{extension}"));
+        std::fs::write(&path, source).expect("write source");
+        let cache = cache_in(&dir);
+        let names: BTreeSet<&str> = declarations.iter().map(|&(_, _, name)| name)
+            .chain(reads.iter().map(|&(_, _, name, _)| name)).collect();
+        let steps = [
+            ("narrow cold", &narrow, CacheLookup::Miss(CacheMiss::Absent)),
+            ("narrow warm", &narrow, CacheLookup::Hit),
+            ("semantic widening", &semantic, CacheLookup::WidenedCapabilities { parsed: false }),
+            ("kind widening", &complete, CacheLookup::WidenedKinds),
+            ("complete warm", &complete, CacheLookup::Hit),
+            ("projected", &projected, CacheLookup::Hit),
+        ];
+        for (stage, query, expected_lookup) in steps {
+            let (lookup, served, work) = cached(&cache, read(&path), query);
+            assert_eq!(lookup, expected_lookup, "{label}: {stage}");
+            if matches!(lookup, CacheLookup::Hit | CacheLookup::WidenedCapabilities { parsed: false }) {
+                assert_eq!(work.parser_constructions, 0, "{label}: {stage}");
+            }
+            assert_eq!(served, uncached(&path, query), "{label}: {stage}");
+            let occurrences: Vec<Occurrence> = serde_json::from_value(served["index"].get("occurrences").cloned().unwrap_or_else(|| json!([])))
+                .unwrap_or_else(|_| panic!("{label}: {stage}: occurrences"));
+            let actual: Vec<_> = occurrences.iter().filter(|occurrence| names.contains(occurrence.target.name.as_str()))
+                .map(|occurrence| (occurrence.span.start.line, occurrence.span.start.column,
+                    occurrence.target.name.as_str(), occurrence.kind)).collect();
+            assert_eq!(actual, reads, "{label}: {stage}: exact reads and excluded declarations");
+            if label.starts_with("R7-F2.12a typescript dotted namespace;") {
+                let usage = occurrences.iter().find(|occurrence| occurrence.target.name == "A").expect("type read");
+                assert_eq!(usage.confidence, tree_hugger::Confidence::Scoped, "{label}: {stage}");
+                assert!(usage.target.id.is_some(), "{label}: {stage}: class identity survives omitted kinds");
+            }
+            if label.starts_with("R7-F2.12b") {
+                for record in served["index"]["symbols"].as_array().expect("symbols") {
+                    assert!(record["relations"]["references"].as_array().is_none_or(Vec::is_empty), "{label}: {stage}");
+                    assert!(record["relations"]["referenced_by"].as_array().is_none_or(Vec::is_empty), "{label}: {stage}");
+                }
+            }
+        }
+    }
+}
+
+
+#[test]
+fn type_only_imports_preserve_categories_through_six_cache_stages() {
+    use crate::symbols_occurrences::{TYPE_ONLY_IMPORT_MATRIX, check_type_only_import_index, type_only_import_source};
+    let narrow = SymbolQuery::new().kinds(FUNCTION_KINDS).capabilities([Capability::Occurrences]);
+    let semantic = SymbolQuery::new().kinds(FUNCTION_KINDS).capabilities([Capability::Occurrences, Capability::Semantics]);
+    let complete = SymbolQuery::complete_index();
+    let projected = SymbolQuery::new().kinds(TYPE_KINDS).capabilities([Capability::Occurrences]);
+    for &(label, import, name, mixed) in TYPE_ONLY_IMPORT_MATRIX {
+        let dir = TempDir::new().expect("temp");
+        let path = dir.path().join("imports.ts");
+        std::fs::write(&path, type_only_import_source(import, name, mixed)).expect("source");
+        let cache = cache_in(&dir);
+        for (stage, query, expected, semantics) in [
+            ("narrow cold", &narrow, CacheLookup::Miss(CacheMiss::Absent), false),
+            ("narrow warm", &narrow, CacheLookup::Hit, false),
+            ("semantic widening", &semantic, CacheLookup::WidenedCapabilities { parsed: false }, true),
+            ("kind widening", &complete, CacheLookup::WidenedKinds, true),
+            ("complete warm", &complete, CacheLookup::Hit, true),
+            ("projected", &projected, CacheLookup::Hit, false),
+        ] {
+            let (lookup, served, counters) = cached(&cache, read(&path), query);
+            assert_eq!(lookup, expected, "{label}: {stage}");
+            assert_eq!(served, uncached(&path, query), "{label}: {stage}");
+            if matches!(lookup, CacheLookup::Hit | CacheLookup::WidenedCapabilities { parsed: false }) {
+                assert_eq!(counters.parser_constructions, 0, "{label}: {stage}");
+            }
+            let index = serde_json::from_value(served["index"].clone()).expect("index");
+            check_type_only_import_index(&index, name, mixed, semantics);
+        }
+    }
+}
+
+
+#[test]
+fn type_only_import_controls_hold_through_six_cache_stages() {
+    use tree_hugger::{Confidence, CoverageState, FileSymbolIndex, TriState};
+    let narrow = SymbolQuery::new().kinds(FUNCTION_KINDS).capabilities([Capability::Occurrences]);
+    let semantic = SymbolQuery::new().kinds(FUNCTION_KINDS).capabilities([Capability::Semantics]);
+    let complete = SymbolQuery::complete_index();
+    let projected = SymbolQuery::new().kinds(TYPE_KINDS).capabilities([Capability::Occurrences]);
+    let sources = [
+        ("R9-F2.09.namespace", "import type * as NS from './types';\nlet value: NS.F;\nfunction run() {}\n", "NS"),
+        ("R9-F2.09.require", "import type NS = require('./types');\nlet value: NS.F;\nfunction run() {}\n", "NS"),
+        ("R9-F2.09.namespace.comments", "import /* a */ type /* b */ * as /* c */ NS from './types';\nlet value: NS.F;\nfunction run() {}\n", "NS"),
+        ("R9-F2.09.require.comments", "import /* a */ type /* b */ NS = require('./types');\nlet value: NS.F;\nfunction run() {}\n", "NS"),
+        ("R9-F2.10", "import { type as g } from './types';\nfunction run() { g(); }\n", "g"),
+        ("R9-F2.11", "import type { T } from './types';\nimport { G as g } from './types';\nfunction f(x: T) { f(x); g(); }\n", "T"),
+    ];
+    for &(label, source, imported) in &sources {
+        let dir = TempDir::new().expect("temp");
+        let path = dir.path().join("controls.ts");
+        std::fs::write(&path, source).expect("source");
+        let cache = cache_in(&dir);
+        for (stage, query, expected, semantics) in [
+            ("narrow cold", &narrow, CacheLookup::Miss(CacheMiss::Absent), false),
+            ("narrow warm", &narrow, CacheLookup::Hit, false),
+            ("semantic widening", &semantic, CacheLookup::WidenedCapabilities { parsed: false }, true),
+            ("kind widening", &complete, CacheLookup::WidenedKinds, true),
+            ("complete warm", &complete, CacheLookup::Hit, true),
+            ("projected", &projected, CacheLookup::Hit, false),
+        ] {
+            let (lookup, served, counters) = cached(&cache, read(&path), query);
+            assert_eq!(lookup, expected, "{label}: {stage}");
+            assert_eq!(served, uncached(&path, query), "{label}: {stage}");
+            if matches!(lookup, CacheLookup::Hit | CacheLookup::WidenedCapabilities { parsed: false }) {
+                assert_eq!(counters.parser_constructions, 0, "{label}: {stage}");
+            }
+            let index: FileSymbolIndex = serde_json::from_value(served["index"].clone()).expect("index");
+            let import = index.occurrences.iter().find(|occ| occ.target.name == imported).expect("import read");
+            assert_eq!(import.confidence, Confidence::Scoped, "{label}: {stage}");
+            assert_eq!(import.target.id, None);
+            assert!(import.candidates.is_empty());
+            assert!(index.reference_coverage.iter().all(|region| region.state == CoverageState::Complete));
+            if imported == "NS" {
+                assert_eq!(index.occurrences.len(), 2, "namespace and terminal type reads only");
+                assert_eq!(import.kind, OccurrenceKind::Usage);
+                let terminal = index.occurrences.iter().find(|occ| occ.target.name == "F").expect("terminal type read");
+                assert_eq!(terminal.kind, OccurrenceKind::Usage);
+                assert_eq!(terminal.confidence, Confidence::Unresolved);
+                assert_eq!(terminal.target.qualified_name.as_deref(), Some("NS.F"));
+                assert_eq!(terminal.target.id, None);
+            } else if imported == "g" {
+                assert_eq!(index.occurrences.len(), 1, "ordinary exported type is a call");
+                assert_eq!(import.kind, OccurrenceKind::Call);
+                assert_eq!(index.imports[0].symbol.qualified_name.as_deref(), Some("type"));
+            } else {
+                assert_eq!(import.kind, OccurrenceKind::Usage);
+                let call = index.occurrences.iter().find(|occ| occ.target.name == "f").expect("self-call");
+                let owner = call.owner.as_ref().and_then(|owner| owner.id.as_ref()).expect("f ID");
+                assert_eq!(call.kind, OccurrenceKind::Call);
+                assert_eq!(call.confidence, Confidence::Scoped);
+                assert_eq!(call.target.id.as_ref(), Some(owner));
+                let g = index.occurrences.iter().find(|occ| occ.target.name == "g").expect("ordinary import");
+                assert_eq!(g.kind, OccurrenceKind::Call);
+                assert_eq!(g.confidence, Confidence::Scoped);
+                assert_eq!(g.target.id, None);
+            }
+            if let Some(function) = index.symbols.iter().find(|record| record.kind == SymbolKindV2::Function) {
+                if semantics { assert_eq!(function.semantics.is_recursive, Some(if imported == "T" { TriState::Yes } else { TriState::No })); }
+                let expected = if imported == "NS" { vec![] } else if imported == "g" { vec!["g"] } else { vec!["T", "g"] };
+                assert_eq!(function.relations.dependencies.iter().map(|target| target.name.as_str()).collect::<Vec<_>>(), expected);
+            }
+        }
+    }
+}
+
+/// An unrelated encoded binding cannot excuse a lost ID on a retained target.
+#[test]
+fn encoded_binding_sources_preserve_lost_id_rejection() {
+    for (file, source) in [
+        ("raw.rs", "fn g(){} fn f(){g();} fn r#other(){}"),
+        ("escaped.ts", r"function g(){} function f(){g();} function \u006fther(){}"),
+        ("raw_ownerless.rs", "const fn r#f() {} const X: () = f();"),
+        ("escaped_ownerless.ts", r"function \u0066(){} const X = f();"),
+    ] {
+        let dir = TempDir::new().expect("temp");
+        let path = dir.path().join(file);
+        std::fs::write(&path, source).expect("source");
+        let cache = cache_in(&dir);
+        let query = SymbolQuery::new().capabilities([Capability::Occurrences]);
+        let (lookup, control, _) = cached(&cache, read(&path), &query);
+        assert_eq!(lookup, CacheLookup::Miss(CacheMiss::Absent));
+        let entry_path = only_entry(&dir);
+        let mut entry = read_entry(&entry_path);
+        let call = entry["occurrences"].as_array_mut().expect("occurrences").iter_mut()
+            .find(|o| o["target"]["name"] == "g" || o["target"]["name"] == "f").expect("retained target call");
+        let expected_id = call["target"]["id"].clone();
+        assert!(expected_id.is_string());
+        call["target"]["id"] = Value::Null;
+        for record in entry["records"].as_array_mut().expect("records") {
+            record["relations"]["references"] = json!([]);
+            record["relations"]["referenced_by"] = json!([]);
+        }
+        write_entry(&entry_path, &entry);
+        let (lookup, repaired, _) = cached(&cache, read(&path), &query);
+        assert_eq!(lookup, CacheLookup::Miss(CacheMiss::Inconsistent("a scoped occurrence with no target ID and no binding of its name")), "{file}");
+        assert_eq!(repaired, control);
+        assert_eq!(repaired["index"]["occurrences"][0]["target"]["id"], expected_id);
+    }
+}
+
+#[test]
+fn selected_import_provenance_holds_through_six_cache_stages() {
+    use crate::symbols_occurrences::{IMPORT_PROVENANCE_MATRIX, check_import_provenance};
+    let narrow = SymbolQuery::new().kinds(FUNCTION_KINDS).capabilities([Capability::Occurrences]);
+    let semantic = SymbolQuery::new().kinds(FUNCTION_KINDS).capabilities([Capability::Occurrences, Capability::Semantics]);
+    let complete = SymbolQuery::complete_index();
+    let projected = SymbolQuery::new().kinds(TYPE_KINDS).capabilities([Capability::Occurrences]);
+    for &(label, file, source, owner, name, shadow) in IMPORT_PROVENANCE_MATRIX {
+        let dir = TempDir::new().expect("temp");
+        let path = dir.path().join(file);
+        std::fs::write(&path, source).expect("source");
+        let cache = cache_in(&dir);
+        for (stage, query, expected, semantics) in [
+            ("narrow cold", &narrow, CacheLookup::Miss(CacheMiss::Absent), false),
+            ("narrow warm", &narrow, CacheLookup::Hit, false),
+            ("semantic widening", &semantic, CacheLookup::WidenedCapabilities { parsed: false }, true),
+            ("kind widening", &complete, CacheLookup::WidenedKinds, true),
+            ("complete warm", &complete, CacheLookup::Hit, true),
+            ("projected", &projected, CacheLookup::Hit, false),
+        ] {
+            let (lookup, served, counters) = cached(&cache, read(&path), query);
+            assert_eq!(lookup, expected, "{label}: {stage}");
+            assert_eq!(served, uncached(&path, query), "{label}: {stage}");
+            if matches!(lookup, CacheLookup::Hit | CacheLookup::WidenedCapabilities { parsed: false }) {
+                assert_eq!(counters.parser_constructions, 0, "{label}: {stage}");
+            }
+            let index = serde_json::from_value(served["index"].clone()).expect("index");
+            check_import_provenance(&index, label, owner, name, shadow, semantics);
+        }
+    }
+}
+
+#[test]
+fn stored_selected_import_provenance_matrix_recomputes_public_evidence() {
+    use crate::symbols_occurrences::{IMPORT_PROVENANCE_MATRIX, check_import_provenance};
+    let query = SymbolQuery::new().kinds(FUNCTION_KINDS).capabilities([Capability::Occurrences]);
+    let fields = ["import_span", "import_start_byte", "import_span/start", "import_span/end", "import_span/start_byte", "import_span/end_byte", "import_span/start/line", "import_span/start/column", "import_span/end/line", "import_span/end/column"];
+    for &(label, file, source, owner, name, shadow) in IMPORT_PROVENANCE_MATRIX {
+        let dir = TempDir::new().expect("temp");
+        let path = dir.path().join(file);
+        std::fs::write(&path, source).expect("source");
+        let cache = cache_in(&dir);
+        let (_, expected, _) = cached(&cache, read(&path), &query);
+        let entry_path = only_entry(&dir);
+        let written = read_entry(&entry_path);
+        let occurrences = written["occurrences"].as_array().expect("occurrences");
+        let at = occurrences.iter().position(|o| o["target"]["name"] == name && o["owner"]["name"] == owner && o["kind"] == "Call").expect("import call");
+        assert!(occurrences[at]["import_span"].is_object(), "load-bearing positive control");
+        let local = occurrences.iter().position(|o| o["target"]["name"] == name && o["owner"]["name"] == owner && o["kind"] == "Call" && o["import_span"].is_null());
+        for at in std::iter::once(at).chain(local) {
+        for field in fields {
+            if field.starts_with("import_span/") && occurrences[at]["import_span"].is_null() { continue; }
+            let pointer = format!("/occurrences/{at}/{field}");
+            let (parent_pointer, key) = pointer.rsplit_once('/').expect("field");
+            for shape in ["control", "absent", "null", "wrong type", "empty object", "empty list", "empty string", "zero", "out-of-source number", "duplicate key", "invalid content"] {
+                let mut edited = written.clone();
+                let value = edited.pointer(&pointer).expect("field").clone();
+                let mut bytes = None;
+                match shape {
+                    "control" => {}
+                    "absent" => { edited.pointer_mut(parent_pointer).expect("parent").as_object_mut().expect("object").remove(key); }
+                    "null" => *edited.pointer_mut(&pointer).expect("field") = Value::Null,
+                    "wrong type" => *edited.pointer_mut(&pointer).expect("field") = json!(true),
+                    "empty object" => *edited.pointer_mut(&pointer).expect("field") = json!({}),
+                    "empty list" => *edited.pointer_mut(&pointer).expect("field") = json!([]),
+                    "empty string" => *edited.pointer_mut(&pointer).expect("field") = json!(""),
+                    "zero" => *edited.pointer_mut(&pointer).expect("field") = json!(0),
+                    "out-of-source number" => *edited.pointer_mut(&pointer).expect("field") = json!(999999999),
+                    "duplicate key" => {
+                        let parent = serde_json::to_string(edited.pointer(parent_pointer).expect("parent")).expect("parent JSON");
+                        let duplicate = format!("{{\"{key}\":{},{}", serde_json::to_string(&value).expect("value JSON"), &parent[1..]);
+                        let occurrence_json = serde_json::to_string(&edited["occurrences"][at]).expect("occurrence JSON");
+                        let duplicate_occurrence = occurrence_json.replacen(&parent, &duplicate, 1);
+                        bytes = Some(serde_json::to_string(&edited).expect("JSON").replacen(&occurrence_json, &duplicate_occurrence, 1));
+                    }
+                    "invalid content" => bytes = Some(format!("{} garbage", serde_json::to_string(&edited).expect("JSON"))),
+                    _ => unreachable!(),
+                }
+                if let Some(bytes) = bytes { std::fs::write(&entry_path, bytes).expect("write malformed JSON"); }
+                else { write_entry(&entry_path, &edited); }
+                let (lookup, served, _) = cached(&cache, read(&path), &query);
+                if shape == "control" || shape == "zero" && value == json!(0) || shape == "null" && value.is_null() {
+                    assert_eq!(lookup, CacheLookup::Hit, "{label} {field} {shape}");
+                } else { assert!(matches!(lookup, CacheLookup::Miss(_)), "{label} {field} {shape}: {lookup:?}"); }
+                assert_eq!(served, expected, "{label} {field} {shape}: recomputed control");
+                let index = serde_json::from_value(served["index"].clone()).expect("index");
+                check_import_provenance(&index, label, owner, name, shadow, false);
+            }
+        }
+        }
+        if label == "R9-F4.01.rs" || label == "R9-F4.02.ts" {
+            let mut edited = written.clone();
+            let other_import = edited["imports"].as_array().expect("imports").iter()
+                .find(|i| i["symbol"]["qualified_name"] == if owner == "f" { "f" } else { "N.S" }).expect("other scope import")["span"].clone();
+            edited["occurrences"][at]["import_span"] = other_import.clone();
+            edited["occurrences"][at]["import_start_byte"] = other_import["start_byte"].clone();
+            write_entry(&entry_path, &edited);
+            let (lookup, served, _) = cached(&cache, read(&path), &query);
+            assert!(matches!(lookup, CacheLookup::Miss(_)), "{label}: other scope cannot supply the original");
+            assert_eq!(served, expected);
+        }
+        if shadow {
+            let local = local.expect("local call");
+            assert!(occurrences[local]["import_span"].is_null());
+            for field in ["import_span", "import_start_byte"] {
+                let mut edited = written.clone();
+                edited["occurrences"][local][field] = occurrences[at][field].clone();
+                write_entry(&entry_path, &edited);
+                let (lookup, served, _) = cached(&cache, read(&path), &query);
+                assert!(matches!(lookup, CacheLookup::Miss(_)), "{label}: invented {field}");
+                assert_eq!(served, expected);
+            }
         }
     }
 }

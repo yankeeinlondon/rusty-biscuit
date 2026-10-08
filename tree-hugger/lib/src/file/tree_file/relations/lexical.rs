@@ -419,7 +419,7 @@ impl<'a> Lexical<'a> {
             {
                 let names = declared_generic_names(entry.declaration, entry.name, self.language, source);
                 if !names.is_empty() {
-                    self.generic_names.entry(own).or_default().extend(names);
+                    self.generic_names.entry(own).or_default().extend(names.into_iter().map(|name| crate::analysis::name_identity::key(self.language, &name).into_owned()));
                 }
             }
             if placed.contains(&range) {
@@ -626,7 +626,7 @@ impl<'a> Lexical<'a> {
                     return Local::Global;
                 }
                 if !self.nonlocals.contains(&(scope, first)) {
-                    if self.generic_names.get(&scope).is_some_and(|names| names.contains(first)) {
+                    if self.generic_names.get(&scope).is_some_and(|names| names.contains(crate::analysis::name_identity::key(self.language, first).as_ref())) {
                         return Local::Unresolved;
                     }
                     if let Some(found) = self.tree.visible_in(scope, position, first, categories) {
@@ -663,7 +663,7 @@ impl<'a> Lexical<'a> {
         let mut scope = self.start(at);
         while self.is_lexical(scope) {
             count_shared_context_steps(1);
-            if self.generic_names.get(&scope).is_some_and(|names| names.contains(first))
+            if self.generic_names.get(&scope).is_some_and(|names| names.contains(crate::analysis::name_identity::key(self.language, first).as_ref()))
                 || self.globals.contains(&(scope, first))
                 || self.tree.visible_in(scope, position, first, categories).is_some()
                 || self.tree.has_glob(scope)

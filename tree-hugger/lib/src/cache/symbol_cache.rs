@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use tree_sitter::Language;
 
 use super::stored_evidence::{
-    ReadOccurrences, StoredEvidence, nullable, read_coverage, read_occurrences, validate_evidence, write_coverage, write_occurrences,
+    ReadOccurrences, StoredEvidence, import_inventory, nullable, read_coverage, read_imports, read_occurrences, validate_evidence, validate_imports, write_coverage, write_imports, write_occurrences,
 };
 use super::{CacheError, PassFingerprint, PersistentCache, canonical_digest};
 use crate::analysis::coverage::{add_record_passes, project, record_passes_suffice};
@@ -473,6 +473,7 @@ impl SymbolCache {
                 diagnostics_fingerprint: has_diagnostics.then_some(diagnostics_fingerprint),
                 records: &index.symbols,
                 imports: &index.imports,
+                import_inventory: import_inventory(&index.imports),
                 exports: &index.exports,
                 diagnostics: &index.diagnostics,
                 occurrences: &index.occurrences,
@@ -515,7 +516,9 @@ struct WrittenEntry<'a> {
     completed_capabilities: &'a BTreeSet<Capability>,
     diagnostics_fingerprint: Option<&'a str>,
     records: &'a [SymbolRecord],
+    #[serde(serialize_with = "write_imports")]
     imports: &'a [ImportRecord],
+    import_inventory: String,
     exports: &'a [ExportRecord],
     diagnostics: &'a [Diagnostic],
     /// Every key written, `null` and empty lists included
@@ -556,7 +559,9 @@ struct StoredEntry {
     #[serde(deserialize_with = "nullable")]
     diagnostics_fingerprint: Option<String>,
     records: Vec<SymbolRecord>,
+    #[serde(deserialize_with = "read_imports")]
     imports: Vec<ImportRecord>,
+    import_inventory: String,
     exports: Vec<ExportRecord>,
     diagnostics: Vec<Diagnostic>,
     /// Required (an empty list is a file with none), in the strict form
@@ -627,6 +632,7 @@ impl StoredEntry {
         {
             return Err(CacheMiss::Inconsistent("a record without metrics under the metrics capability"));
         }
+        validate_imports(source.source(), self.language, &self.imports, &self.import_inventory).map_err(CacheMiss::Inconsistent)?;
         validate_evidence(&StoredEvidence {
             source: source.source(),
             language: self.language,
@@ -634,6 +640,7 @@ impl StoredEntry {
             covered_kinds: self.covered_kinds.0.as_ref(),
             occurrences: &self.occurrences.occurrences,
             path_starts: &self.occurrences.path_starts,
+            import_starts: &self.occurrences.import_starts,
             coverage: &self.reference_coverage,
             records: &self.records,
             imports: &self.imports,

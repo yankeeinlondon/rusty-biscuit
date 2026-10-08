@@ -386,7 +386,7 @@ fn the_json_envelope_is_versioned_and_ends_with_errors() {
     let scratch = scratch();
     let stdout = scratch.stdout(&["--json", "refs", "parse", "app.ts"]);
     assert!(
-        stdout.starts_with(r#"{"report_schema_version":1,"schema_version":{"major":5,"minor":0},"root_dir":"#),
+        stdout.starts_with(r#"{"report_schema_version":1,"schema_version":{"major":5,"minor":1},"root_dir":"#),
         "{}",
         &stdout[..120.min(stdout.len())]
     );
@@ -1381,7 +1381,7 @@ fn constructed_types_and_implicit_members_are_callees_and_callers() {
         ),
         (
             "construct.swift",
-            "class C<T> {\n    static func f() -> C<T> { fatalError() }\n}\nfunc g(x: Int) {\n    _ = C<Int>()\n    _ = N.C<Int>()\n    let _: C<Int> = .f()\n    let _: C<Int> = .f\n    let _: E = .some(x)\n}\n",
+            "class C<T> {\n    static func f() -> C<T> { fatalError() }\n}\nfunc g(x: Int) {\n    _ = C /* n */ <Int>()\n    _ = N.C /* n */ <Int>()\n    let _: C<Int> = .f()\n    let _: C<Int> = .f\n    let _: E = .some(x)\n}\n",
         ),
         (
             "construct.cpp",
@@ -1745,9 +1745,10 @@ fn swift_selective_imports_are_listed_by_their_bound_name() {
 /// real reads as suggestions, never the Lua attribute, Java's inferred-type
 /// `var` (also beside a static import of a member named `var`, which is no
 /// legacy type), PHP's class-relative `static`, a Swift precedence
-/// group's associativity value, a named-argument label (`R7-F1.S5`) or a
+/// group's directive and associativity value (all seven spellings), a named-argument label (`R7-F1.S5`) or a
 /// built-in Swift attribute name (`R7-F1.S6`), cold and on a verified warm
-/// hit, in JSON and text.
+/// hit, in JSON and text. Caller filters preserve the real static-method
+/// `var()` Call and reject every marker Usage.
 #[test]
 fn contextual_syntax_markers_are_never_suggestions() {
     let scratch = Scratch::new(&[
@@ -1759,6 +1760,8 @@ fn contextual_syntax_markers_are_never_suggestions() {
         ),
         ("StaticImport.java", "import static p.Tools.var;\nrecord G() {\n    void g() { var x = 1; int var = 2; use(var); }\n}\n"),
         ("precedence.swift", "precedencegroup A {\n    associativity: left\n}\nfunc g() {\n    let left = 1\n    use(left)\n}\n"),
+        ("StaticMethod.java", "import static p.Methods.var;\nclass G {\n    void var() {}\n    void g() { var x = var(); }\n}\n"),
+        ("EveryPrecedence.swift", "precedencegroup A {\n    associativity: left\n    assignment: true\n    higherThan: AdditionPrecedence\n    lowerThan: MultiplicationPrecedence\n}\nprecedencegroup B {\n    associativity: right\n}\nprecedencegroup C {\n    associativity: none\n}\ninfix operator +++ : TernaryPrecedence\nfunc g() {\n    let left = 1, right = 2, none = 3\n    let associativity = 4, assignment = 5, higherThan = 6, lowerThan = 7\n    use(left, right, none, associativity, assignment, higherThan, lowerThan)\n}\n"),
         ("keywords.py", "x = 1\nf(x=x)\n"),
         ("labels.swift", "func g() {\n    let x = 1\n    _ = f(x: x)\n}\n"),
         ("attributes.swift", "@objc func h() {}\nfunc g() {\n    let objc = 1\n    use(objc)\n}\n"),
@@ -1771,6 +1774,14 @@ fn contextual_syntax_markers_are_never_suggestions() {
         ("relative.php", "static", vec![row("Call", "$this->static", "5:34", "NameOnly")], vec!["4:19", "4:39"]),
         ("StaticImport.java", "var", vec![row("Usage", "var", "3:44", "NameOnly")], vec!["3:16"]),
         ("precedence.swift", "left", vec![row("Usage", "left", "6:9", "NameOnly")], vec!["2:20"]),
+        ("StaticMethod.java", "var", vec![row("Call", "var", "4:24", "NameOnly")], vec!["4:16"]),
+        ("EveryPrecedence.swift", "left", vec![row("Usage", "left", "17:9", "NameOnly")], vec!["2:20"]),
+        ("EveryPrecedence.swift", "right", vec![row("Usage", "right", "17:15", "NameOnly")], vec!["8:20"]),
+        ("EveryPrecedence.swift", "none", vec![row("Usage", "none", "17:22", "NameOnly")], vec!["11:20"]),
+        ("EveryPrecedence.swift", "associativity", vec![row("Usage", "associativity", "17:28", "NameOnly")], vec!["2:5", "8:5", "11:5"]),
+        ("EveryPrecedence.swift", "assignment", vec![row("Usage", "assignment", "17:43", "NameOnly")], vec!["3:5"]),
+        ("EveryPrecedence.swift", "higherThan", vec![row("Usage", "higherThan", "17:55", "NameOnly")], vec!["4:5"]),
+        ("EveryPrecedence.swift", "lowerThan", vec![row("Usage", "lowerThan", "17:67", "NameOnly")], vec!["5:5"]),
         ("keywords.py", "x", vec![row("Usage", "x", "2:5", "NameOnly")], vec!["2:3"]),
         ("labels.swift", "x", vec![row("Usage", "x", "3:14", "NameOnly")], vec!["3:11"]),
         ("attributes.swift", "objc", vec![row("Usage", "objc", "4:9", "NameOnly")], vec!["1:2"]),
@@ -1801,6 +1812,10 @@ fn contextual_syntax_markers_are_never_suggestions() {
         for marker in markers {
             assert!(!text.contains(&format!(" {marker} ")), "{file} `{name}`: marker {marker} listed in {text}");
         }
+        let callers = refs_json(&scratch, &["--id", id.as_str(), "--callers", file]);
+        let expected_calls: Vec<_> = suggestions.iter().filter(|(kind, _, _, _)| *kind == "Call").cloned().collect();
+        assert_eq!(rows(&callers, "name_only_suggestions"), expected_calls, "{file} `{name}` callers: {callers}");
+        assert_eq!(rows(&callers, "occurrences"), Vec::new(), "{file} `{name}` callers: {callers}");
     }
 }
 
@@ -1812,8 +1827,9 @@ fn contextual_syntax_markers_are_never_suggestions() {
 #[test]
 fn qualified_java_annotations_and_services_are_suggestions_not_imports() {
     let scratch = Scratch::new(&[
-        ("G.java", "class A {}\n@p.q.A class G {}\n@A class H {}\n"),
+        ("G.java", "class A {}\n@p.q.A class G {}\n@A class H {}\n@p.q.r.A(value=external) class I {}\n"),
         ("module-info.java", "module m {\n    uses a.b.C;\n    provides a.b.C with d.e.D;\n}\nclass C {}\n"),
+        ("operands.java", "module m {\n    requires a.b.C;\n    exports p.q.C to x.y.C, z.w.C;\n    opens r.s.C to t.u.C;\n    uses a.b.c.C;\n    provides a.b.c.C with d.e.f.C, g.h.i.C;\n}\nclass C {}\n"),
         ("K.java", "import a.b.Z;\n@p.q.A class K {}\n"),
     ]);
     // `(file, name, the suggestions)`.
@@ -1821,12 +1837,28 @@ fn qualified_java_annotations_and_services_are_suggestions_not_imports() {
         (
             "G.java",
             "A",
-            vec![row("Usage", "p.q.A", "2:6", "NameOnly"), row("Usage", "A", "3:2", "NameOnly")],
+            vec![row("Usage", "p.q.A", "2:6", "NameOnly"), row("Usage", "A", "3:2", "NameOnly"), row("Usage", "p.q.r.A", "4:8", "NameOnly")],
         ),
         (
             "module-info.java",
             "C",
             vec![row("Usage", "a.b.C", "2:14", "NameOnly"), row("Usage", "a.b.C", "3:18", "NameOnly")],
+        ),
+        (
+            "operands.java",
+            "C",
+            vec![
+                row("Usage", "a.b.C", "2:18", "NameOnly"),
+                row("Usage", "p.q.C", "3:17", "NameOnly"),
+                row("Usage", "x.y.C", "3:26", "NameOnly"),
+                row("Usage", "z.w.C", "3:33", "NameOnly"),
+                row("Usage", "r.s.C", "4:15", "NameOnly"),
+                row("Usage", "t.u.C", "4:24", "NameOnly"),
+                row("Usage", "a.b.c.C", "5:16", "NameOnly"),
+                row("Usage", "a.b.c.C", "6:20", "NameOnly"),
+                row("Usage", "d.e.f.C", "6:33", "NameOnly"),
+                row("Usage", "g.h.i.C", "6:42", "NameOnly"),
+            ],
         ),
     ];
     for (file, name, suggestions) in &expected {
@@ -1851,11 +1883,14 @@ fn qualified_java_annotations_and_services_are_suggestions_not_imports() {
             let listed = format!("{kind} {written} {at} —");
             assert!(text.contains(&listed), "{file} `{name}`: `{listed}` in {text}");
         }
-        let callers = refs_json(&scratch, &["--id", id.as_str(), "--callers", file]);
-        assert_eq!(rows(&callers, "name_only_suggestions"), Vec::new(), "{file}: {callers}");
+        for direction in ["--callers", "--callees"] {
+            let calls = refs_json(&scratch, &["--id", id.as_str(), direction, file]);
+            assert_eq!(rows(&calls, "name_only_suggestions"), Vec::new(), "{file} {direction}: {calls}");
+            assert_eq!(rows(&calls, "occurrences"), Vec::new(), "{file} {direction}: {calls}");
+        }
     }
 
-    let imports = json_of(&scratch.stdout(&["--json", "imports", "G.java", "module-info.java", "K.java"]));
+    let imports = json_of(&scratch.stdout(&["--json", "imports", "G.java", "module-info.java", "operands.java", "K.java"]));
     let listed: Vec<(String, String)> = imports["files"]
         .as_array()
         .expect("files")
@@ -1875,7 +1910,7 @@ fn qualified_java_annotations_and_services_are_suggestions_not_imports() {
         })
         .collect();
     assert_eq!(listed, [("K.java".to_string(), "Z".to_string())], "{imports}");
-    let plain = scratch.stdout(&["--plain", "imports", "G.java", "module-info.java", "K.java"]);
+    let plain = scratch.stdout(&["--plain", "imports", "G.java", "module-info.java", "operands.java", "K.java"]);
     assert_eq!(plain.matches("import ").count(), 1, "{plain}");
 }
 
@@ -2212,5 +2247,616 @@ fn go_raw_string_imports_are_listed_by_imports() {
     let plain = scratch.stdout(&["--plain", "imports", "r.go"]);
     for line in ["- import \"c/d\" [2:8]\n", "- import x \"e/f\" [3:8]\n", "- import \"m/n\" [4:8]\n"] {
         assert!(plain.contains(line), "`{line}` in {plain}");
+    }
+}
+
+#[test]
+fn every_swift_selective_import_selector_excludes_only_its_bound_token() {
+    for (selector, column) in [("typealias", 22), ("class", 18), ("enum", 17), ("protocol", 21),
+        ("struct", 19), ("func", 17), ("var", 16), ("let", 16)] {
+        let source = format!("import {selector} Foo.Bar\nstruct Bar {{}}\nlet z = Bar\n");
+        let scratch = Scratch::new(&[("selector.swift", &source)]);
+        let id = declaration_id(&refs_json(&scratch, &["Bar", "selector.swift", "--no-cache"]));
+        let args = ["--verbose", "--json", "refs", "--id", id.as_str(), "selector.swift"];
+        for stats in ["0 hits, 0 partial hits, 1 misses; parsed 1 files", "1 hits, 0 partial hits, 0 misses; parsed 0 files"] {
+            let output = scratch.hug(&args);
+            assert!(stderr_of(&output).contains(stats), "{selector}: {}", stderr_of(&output));
+            let json = json_of(&stdout_of(output, &args));
+            assert_eq!(rows(&json, "occurrences"), Vec::new(), "{selector}: {json}");
+            assert_eq!(rows(&json, "name_only_suggestions"), [row("Usage", "Bar", "3:9", "NameOnly")], "{selector}: {json}");
+        }
+        let text = scratch.stdout(&["--plain", "refs", "--id", id.as_str(), "selector.swift"]);
+        assert!(text.contains("Usage Bar 3:9 —"), "{selector}: {text}");
+        assert!(!text.contains(&format!(" 1:{column}")), "{selector}: {text}");
+        let imports = json_of(&scratch.stdout(&["--json", "imports", "selector.swift"]));
+        let listed = imports["files"][0]["imports"].as_array().expect("imports");
+        assert_eq!(listed.len(), 1, "{selector}: {imports}");
+        assert_eq!(listed[0]["name"], "Bar", "{selector}: {imports}");
+        assert_eq!(listed[0]["source"], "Foo.Bar", "{selector}: {imports}");
+        let callers = refs_json(&scratch, &["--id", id.as_str(), "selector.swift", "--callers"]);
+        assert_eq!(rows(&callers, "name_only_suggestions"), Vec::new(), "{selector}: {callers}");
+    }
+}
+
+/// `(name, alias, original, source, line:column)` of a listed import.
+type CommentedImport<T> = (T, Option<T>, Option<T>, Option<T>, T);
+
+/// Comments in import syntax (review rows `R8-F1.nn`) never change what an
+/// import binds, cold and on a verified warm hit: `hug imports` keeps the
+/// TS entity alias's original `N.S` and the Scala imports a comment sits
+/// beside; `--json-full` keeps `S`'s dependency `N.S` and its `Unknown`
+/// recursion; the ID-selected Scala reports list only the genuine body
+/// call as a suggestion, never the imported token, in JSON and text, and
+/// both call directions keep their calls.
+#[test]
+fn commented_imports_keep_their_bindings_in_every_report() {
+    let files = [
+        ("alias.ts", "import D /* note */ = N.S;\nfunction S() { D(); }\n"),
+        ("wild.scala", "import a.b. /* note */ _\nobject U { def b() = 1; def f() = b() }\n"),
+        ("comma.scala", "import C /* note */, d.E\nobject W { def C() = 1; def g() = C() }\n"),
+    ];
+    let scratch = Scratch::new(&files);
+    let expected_imports: [(&str, Vec<CommentedImport<&str>>); 3] = [
+        ("alias.ts", vec![("D", Some("D"), Some("N.S"), None, "1:8")]),
+        ("wild.scala", vec![("b", Some("b"), Some("*"), Some("a.b"), "1:10")]),
+        ("comma.scala", vec![("C", None, None, Some("C"), "1:8"), ("E", None, None, Some("d.E"), "1:24")]),
+    ];
+    for pass in ["cold", "warm"] {
+        if pass == "cold" {
+            for entry in crate::cache_entries(scratch.temp.path()) {
+                std::fs::remove_file(entry).expect("remove an entry");
+            }
+        }
+        for (file, entries) in &expected_imports {
+            let json = json_of(&scratch.stdout(&["--json", "imports", file]));
+            let listed: Vec<CommentedImport<String>> = json["files"][0]["imports"]
+                .as_array()
+                .expect("imports")
+                .iter()
+                .map(|import| {
+                    (
+                        import["name"].as_str().expect("name").to_string(),
+                        import["alias"].as_str().map(str::to_string),
+                        import["original_name"].as_str().map(str::to_string),
+                        import["source"].as_str().map(str::to_string),
+                        format!("{}:{}", import["range"]["start_line"], import["range"]["start_column"]),
+                    )
+                })
+                .collect();
+            let entries: Vec<CommentedImport<String>> = entries
+                .iter()
+                .map(|&(name, alias, original, source, at)| {
+                    (name.into(), alias.map(Into::into), original.map(Into::into), source.map(Into::into), at.into())
+                })
+                .collect();
+            assert_eq!(listed, entries, "{pass} {file}: {json}");
+        }
+
+        let full = json_of(&scratch.stdout(&["--json-full", "symbols", "alias.ts"]));
+        let s = full["indexes"][0]["symbols"]
+            .as_array()
+            .expect("symbols")
+            .iter()
+            .find(|record| record["identity"]["name"] == "S")
+            .expect("S")
+            .clone();
+        assert_eq!(s["semantics"]["is_recursive"], "Unknown", "{pass}: never a false `No`");
+        let dependency = serde_json::json!([{ "name": "D", "qualified_name": "N.S" }]);
+        assert_eq!(s["relations"]["dependencies"], dependency, "{pass}");
+        assert_eq!(s["relations"]["references"], dependency, "{pass}");
+
+        let alias_id = declaration_id(&refs_json(&scratch, &["S", "alias.ts"]));
+        let callees = refs_json(&scratch, &["--id", alias_id.as_str(), "--callees", "alias.ts"]);
+        assert_eq!(rows(&callees, "occurrences"), [row("Call", "D", "2:16", "Scoped")], "{pass}: {callees}");
+        assert_eq!(callees["files"][0]["occurrences"][0]["absent_id"], "import", "{pass}");
+        assert_eq!(callees["declaration"]["relations"]["dependencies"], dependency, "{pass}");
+
+        // `(file, method, its genuine body call)`.
+        for (file, method, call) in [("wild.scala", "b", "2:35"), ("comma.scala", "C", "2:35")] {
+            let id = declaration_id(&refs_json(&scratch, &[method, file]));
+            let args = ["--verbose", "--json", "refs", "--id", id.as_str(), file];
+            if pass == "cold" {
+                for entry in crate::cache_entries(scratch.temp.path()) {
+                    std::fs::remove_file(entry).expect("remove an entry");
+                }
+            }
+            let output = scratch.hug(&args);
+            let stderr = stderr_of(&output);
+            let counts = if pass == "cold" { "0 hits, 0 partial hits, 1 misses; parsed 1 files" } else { "1 hits, 0 partial hits, 0 misses; parsed 0 files" };
+            assert!(stderr.contains(counts), "{pass} {file}: {stderr}");
+            let report = json_of(&stdout_of(output, &args));
+            assert_eq!(rows(&report, "name_only_suggestions"), [row("Call", method, call, "NameOnly")], "{pass} {file}: {report}");
+            assert_eq!(rows(&report, "occurrences"), Vec::new(), "{pass} {file}: {report}");
+            let callers = refs_json(&scratch, &["--id", id.as_str(), "--callers", file]);
+            assert_eq!(rows(&callers, "name_only_suggestions"), [row("Call", method, call, "NameOnly")], "{pass} {file}: {callers}");
+            let callees = refs_json(&scratch, &["--id", id.as_str(), "--callees", file]);
+            assert_eq!(rows(&callees, "occurrences"), Vec::new(), "{pass} {file}: {callees}");
+            let text = scratch.stdout(&["--plain", "refs", "--id", id.as_str(), file]);
+            assert!(text.contains(&format!("Call {method} {call} —")), "{pass} {file}: {text}");
+            assert!(!text.contains(" 1:"), "{pass} {file}: no row at the import: {text}");
+        }
+    }
+}
+
+/// Every parseable Scala import name alternative reaches both cold and warm
+/// public reports; symbolic spellings remain import facts, not declarations.
+#[test]
+fn scala_import_name_alternatives_reach_json_and_text() {
+    let source = "import a.b.C as D, x.y.E as F\nimport a.b.C as `D`\nimport a.b.++ as sum\nimport a.b.+, c.d.**\nimport a.{+, ** as mul}\nimport a.{C => ++}\nimport a.{C as D, ++ as sum, E as **}\nimport +.C\nimport a.+.C\nimport a.+.{C}\nimport a.+.*\nimport a.{C as _}\nimport this.C\nimport super.C\nimport _root_.a.C\nobject U { import a. /* n */ +. /* n */ C as /* n */ D; def f() = D() }\n";
+    let expected = [
+        ("D", Some("D"), Some("C"), "a.b.C"), ("F", Some("F"), Some("E"), "x.y.E"),
+        ("`D`", Some("`D`"), Some("C"), "a.b.C"), ("sum", Some("sum"), Some("++"), "a.b.++"),
+        ("+", None, None, "a.b.+"), ("**", None, None, "c.d.**"),
+        ("+", None, None, "a.+"), ("mul", Some("mul"), Some("**"), "a.**"),
+        ("++", Some("++"), Some("C"), "a.C"), ("D", Some("D"), Some("C"), "a.C"),
+        ("sum", Some("sum"), Some("++"), "a.++"), ("**", Some("**"), Some("E"), "a.E"),
+        ("C", None, None, "+.C"), ("C", None, None, "a.+.C"),
+        ("C", None, None, "a.+.C"), ("+", Some("+"), Some("*"), "a.+"),
+        ("C", None, None, "this.C"), ("C", None, None, "super.C"),
+        ("C", None, None, "_root_.a.C"), ("D", Some("D"), Some("C"), "a. /* n */ +.C"),
+    ];
+    let scratch = Scratch::new(&[("alternatives.scala", source)]);
+    for pass in ["cold", "warm"] {
+        let args = ["--verbose", "--json", "imports", "alternatives.scala"];
+        let output = scratch.hug(&args);
+        let stderr = stderr_of(&output);
+        let counts = if pass == "cold" { "0 hits, 0 partial hits, 1 misses; parsed 1 files" }
+            else { "1 hits, 0 partial hits, 0 misses; parsed 0 files" };
+        assert!(stderr.contains(counts), "{pass}: {stderr}");
+        let json = json_of(&stdout_of(output, &args));
+        let imports = json["files"][0]["imports"].as_array().expect("imports");
+        let facts: Vec<_> = imports.iter().map(|import| (
+            import["name"].as_str().expect("name"), import["alias"].as_str(),
+            import["original_name"].as_str(), import["source"].as_str().expect("source"),
+        )).collect();
+        assert_eq!(facts, expected, "{pass}: {json}");
+        let text = scratch.stdout(&["--plain", "imports", "alternatives.scala"]);
+        for &(name, alias, original, path) in &expected {
+            let clause = if original == Some("*") { format!("{path}.*") }
+                else if alias.is_some() { format!("{path} as {name}") }
+                else { path.to_string() };
+            assert!(text.contains(&clause), "{pass}: missing {clause}: {text}");
+        }
+        let full = json_of(&scratch.stdout(&["--json-full", "symbols", "alternatives.scala"]));
+        let index = &full["indexes"][0];
+        let index_facts: Vec<_> = index["imports"].as_array().expect("index imports").iter().map(|import| (
+            import["name"].as_str().expect("name"), import["alias"].as_str(),
+            import["symbol"]["qualified_name"].as_str(), import["source"].as_str().expect("source"),
+        )).collect();
+        assert_eq!(index_facts, expected, "{pass}: full index import identities");
+        for symbol in index["symbols"].as_array().expect("symbols") {
+            assert!(symbol["relations"]["references"].is_null() || symbol["relations"]["references"] == serde_json::json!([]), "{pass}: no reference summaries");
+            assert!(symbol["relations"]["dependencies"].is_null() || symbol["relations"]["dependencies"] == serde_json::json!([]), "{pass}: no dependency summaries");
+            if symbol["semantics"]["is_recursive"].is_string() {
+                assert_eq!(symbol["semantics"]["is_recursive"], "Unknown", "{pass}");
+            }
+        }
+    }
+}
+
+#[test]
+fn commented_swift_generic_calls_survive_id_selected_reports() {
+    for direction in ["--all", "--callers", "--callees"] {
+        for json in [true, false] {
+            let scratch = Scratch::new(&[("generic.swift", "class C<T> {}\nfunc run() {\n _ = C /* n */ <Int>()\n _ = C/*n*/<Int>()\n}\n")]);
+            let selected = if direction == "--callees" { "generic.swift#run" } else { "generic.swift#C" };
+            let discovered = refs_json(&scratch, &[selected, "generic.swift"]);
+            let id = declaration_id(&discovered);
+            for entry in crate::cache_entries(scratch.temp.path()) { std::fs::remove_file(entry).expect("clear discovery cache"); }
+            for warm in [false, true] {
+                let mut args = vec!["--verbose"];
+                if json { args.push("--json"); }
+                args.extend(["refs", "--id", &id]);
+                if direction != "--all" { args.push(direction); }
+                args.push("generic.swift");
+                let output = scratch.hug(&args);
+                let stderr = stderr_of(&output);
+                let cache_line = if warm { "cache: 1 hits, 0 partial hits, 0 misses; parsed 0 files" } else { "cache: 0 hits, 0 partial hits, 1 misses; parsed 1 files" };
+                assert!(stderr.contains(cache_line), "{stderr}");
+                let stdout = stdout_of(output, &args);
+                if json {
+                    let report = json_of(&stdout);
+                    let key = if direction == "--callees" { "occurrences" } else { "name_only_suggestions" };
+                    assert_eq!(rows(&report, key), vec![row("Call", "C", "3:6", "NameOnly"), row("Call", "C", "4:6", "NameOnly")], "{direction} warm={warm}");
+                    if direction != "--callees" { assert!(rows(&report, "occurrences").is_empty()); }
+                } else {
+                    for at in ["3:6", "4:6"] { assert!(stdout.contains(&format!("Call C {at}")), "{stdout}"); }
+                    assert!(!stdout.contains("Usage C"), "{stdout}");
+                }
+            }
+        }
+    }
+}
+
+const TYPE_ONLY_CLI_MATRIX: &[(&str, &str, &str, bool)] = &[
+    ("R9-F2.01", "import type { F } from './types';", "F", false),
+    ("R9-F2.02", "import type { F as Alias } from './types';", "Alias", false),
+    ("R9-F2.03", "import type Def from './types';", "Def", false),
+    ("R9-F2.04", "import { type F } from './types';", "F", false),
+    ("R9-F2.05", "import { type F as Alias } from './types';", "Alias", false),
+    ("R9-F2.06", "import { type F as Alias, G as g } from './types';", "Alias", true),
+    ("R9-F2.07.statement", "import /* a */ type /* b */ { F /* c */ as /* d */ Alias } from './types';", "Alias", false),
+    ("R9-F2.07.specifier", "import { /* a */ type /* b */ F /* c */ as /* d */ Alias } from './types';", "Alias", false),
+    ("R9-F2.07.default", "import /* a */ type /* b */ Def from './types';", "Def", false),
+    ("R9-F2.08", "import type { F } from './types';", "F", false),
+];
+
+#[test]
+fn type_only_imports_preserve_id_selected_callers_callees_and_text() {
+    for &(label, import, name, mixed) in TYPE_ONLY_CLI_MATRIX {
+        let extra = if mixed { " g();" } else { "" };
+        let source = format!("{import}\nfunction {name}(): void {{ {name}();{extra} }}\nlet value: {name};\ntype ValueType = typeof {name};\n");
+        let scratch = Scratch::new(&[("imports.ts", &source)]);
+        let discovered = refs_json(&scratch, &[name, "imports.ts"]);
+        let id = declaration_id(&discovered);
+        for direction in ["all", "--callers", "--callees"] {
+            for entry in crate::cache_entries(scratch.temp.path()) { std::fs::remove_file(entry).expect("clear discovery cache"); }
+            for warm in [false, true] {
+                let mut args = vec!["--verbose", "--json", "refs", "--id", id.as_str()];
+                if direction != "all" { args.push(direction); }
+                args.push("imports.ts");
+                let output = scratch.hug(&args);
+                let stderr = stderr_of(&output);
+                let counts = if warm { "1 hits, 0 partial hits, 0 misses; parsed 0 files" }
+                    else { "0 hits, 0 partial hits, 1 misses; parsed 1 files" };
+                assert!(stderr.contains(counts), "{label} {direction} warm={warm}: {stderr}");
+                let json = json_of(&stdout_of(output, &args));
+                let occurrences = json["files"][0]["occurrences"].as_array().expect("rows");
+                assert_eq!(occurrences.len(), if direction == "all" || (direction == "--callees" && mixed) { 2 } else { 1 }, "{label} {direction}: {json}");
+                assert!(rows(&json, "name_only_suggestions").is_empty(), "{label}: no suggestions for proved calls");
+                let call = occurrences.iter().find(|occ| occ["kind"] == "Call" && occ["target"]["name"] == name).expect("self-call");
+                assert_eq!(call["confidence"], "Scoped");
+                assert_eq!(call["target"]["id"], id);
+                assert_eq!(call["owner"]["id"], id);
+                if direction == "all" {
+                    let usage = occurrences.iter().find(|occ| occ["kind"] == "Usage").expect("typeof read");
+                    assert_eq!(usage["span"]["start"]["line"], 4);
+                    assert_eq!(usage["target"]["id"], id);
+                }
+                let mut text_args = vec!["--plain", "refs", "--id", id.as_str()];
+                if direction != "all" { text_args.push(direction); }
+                text_args.push("imports.ts");
+                let text = scratch.stdout(&text_args);
+                assert!(text.contains(&format!("Call {name} 2:")), "{label}: {text}");
+                assert!(text.contains(BOUNDARY), "{label}: {text}");
+                assert!(!text.contains("name_only"), "{label}: {text}");
+                assert!(!text.contains(&format!("Usage {name} 3:")), "{label}: type annotation does not target the function");
+            }
+        }
+    }
+}
+
+
+#[test]
+fn type_only_import_callers_text_has_cold_and_warm_evidence() {
+    for &(_, import, name, mixed) in TYPE_ONLY_CLI_MATRIX.iter().filter(|row| row.0 == "R9-F2.06" || row.0.starts_with("R9-F2.07")) {
+        let extra = if mixed { " g();" } else { "" };
+        let source = format!("{import}\nfunction {name}(): void {{ {name}();{extra} }}\nlet value: {name};\n");
+        let scratch = Scratch::new(&[("imports.ts", &source)]);
+        let id = declaration_id(&refs_json(&scratch, &[name, "imports.ts"]));
+        for direction in ["--callers", "--callees"] {
+            for entry in crate::cache_entries(scratch.temp.path()) { std::fs::remove_file(entry).expect("clear cache"); }
+            for warm in [false, true] {
+                let args = ["--verbose", "--plain", "refs", "--id", id.as_str(), direction, "imports.ts"];
+                let output = scratch.hug(&args);
+                let stderr = stderr_of(&output);
+                let counts = if warm { "1 hits, 0 partial hits, 0 misses; parsed 0 files" } else { "0 hits, 0 partial hits, 1 misses; parsed 1 files" };
+                assert!(stderr.contains(counts), "{stderr}");
+                let text = stdout_of(output, &args);
+                assert!(text.contains(&format!("Call {name} 2:")), "{text}");
+                assert!(text.contains(BOUNDARY), "{text}");
+                assert!(!text.contains("name_only"), "{text}");
+            }
+        }
+    }
+}
+
+#[test]
+fn semantic_name_id_reports_preserve_written_calls_and_shadowing() {
+    for (file, declaration, source, target, self_call) in [
+        ("raw.rs", "r#f", "fn r#f(){f();}", "f", true),
+        ("raw_call.rs", "f", "fn f(){r#f();}", "r#f", true),
+        ("escaped.ts", r"\u0066", r"function \u0066(){f();}", "f", true),
+        ("escaped_call.js", "f", r"function f(){\u0066();}", r"\u0066", true),
+        ("shadow.rs", "f", "fn f(x:fn()){let r#f=x;f();}", "f", false),
+        ("shadow.ts", "f", r"function f(x){let \u0066=x;f();}", "f", false),
+    ] {
+        let scratch = Scratch::new(&[(file, source)]);
+        let listing = json_of(&scratch.stdout(&["--json-full", "symbols", file]));
+        let id = listing["indexes"][0]["symbols"].as_array().expect("records").iter()
+            .find(|symbol| symbol["identity"]["name"] == declaration && symbol["kind"] == "Function")
+            .expect("declared function")["id"].as_str().expect("ID").to_string();
+        for direction in ["all", "--callers", "--callees"] {
+            for entry in crate::cache_entries(scratch.temp.path()) {
+                std::fs::remove_file(entry).expect("clear discovery cache");
+            }
+            for warm in [false, true] {
+                let mut args = vec!["--verbose", "--json", "refs", "--id", id.as_str()];
+                if direction != "all" { args.push(direction); }
+                args.push(file);
+                let output = scratch.hug(&args);
+                let counts = if warm { "1 hits, 0 partial hits, 0 misses; parsed 0 files" }
+                    else { "0 hits, 0 partial hits, 1 misses; parsed 1 files" };
+                assert!(stderr_of(&output).contains(counts), "{file} {direction} warm={warm}");
+                let report = json_of(&stdout_of(output, &args));
+                let occurrences = report["files"][0]["occurrences"].as_array().expect("occurrences");
+                assert_eq!(occurrences.len(), usize::from(self_call || direction == "--callees"), "{file} {direction}: {report}");
+                if let Some(call) = occurrences.first() {
+                    assert_eq!(call["kind"], "Call");
+                    assert_eq!(call["target"]["name"], target);
+                    assert_eq!(call["confidence"], "Scoped");
+                    assert_eq!(call["owner"]["id"], id);
+                    if self_call { assert_eq!(call["target"]["id"], id); }
+                    else { assert_ne!(call["target"]["id"], id); }
+                }
+                let mut text_args = vec!["--plain", "refs", "--id", id.as_str()];
+                if direction != "all" { text_args.push(direction); }
+                text_args.push(file);
+                let text = scratch.stdout(&text_args);
+                assert!(text.contains(BOUNDARY));
+                if self_call || direction == "--callees" { assert!(text.contains(&format!("Call {target} ")), "{file}: {text}"); }
+            }
+        }
+    }
+}
+
+#[test]
+fn outgoing_import_and_local_provenance_keeps_cold_warm_reports_distinct() {
+    for (file, source) in [
+        ("shadow.ts", "import { G as D } from './types';\nfunction run(xs: (() => void)[]) { D(); for (const D of xs) { D(); } }"),
+        ("shadow.js", "import { G as D } from './types';\nfunction run(xs) { D(); for (const D of xs) { D(); } }"),
+        ("shadow.rs", "use other::G as D;\nfn run(xs: Option<fn()>) { D(); match xs { Some(mut D) => D(), _ => () } }"),
+    ] {
+        let scratch = Scratch::new(&[(file, source)]);
+        let id = declaration_id(&refs_json(&scratch, &["run", file]));
+        for direction in ["all", "--callers", "--callees"] {
+            for json in [false, true] {
+                for entry in crate::cache_entries(scratch.temp.path()) { std::fs::remove_file(entry).expect("clear cache"); }
+                for warm in [false, true] {
+                    let mut args = vec!["--verbose", if json { "--json" } else { "--plain" }, "refs", "--id", id.as_str()];
+                    if direction != "all" { args.push(direction); }
+                    args.push(file);
+                    let output = scratch.hug(&args);
+                    let counts = if warm { "1 hits, 0 partial hits, 0 misses; parsed 0 files" }
+                        else { "0 hits, 0 partial hits, 1 misses; parsed 1 files" };
+                    assert!(stderr_of(&output).contains(counts), "{file} {direction} warm={warm}");
+                    let text = stdout_of(output, &args);
+                    if json {
+                        let report = json_of(&text);
+                        let calls = report["files"][0]["occurrences"].as_array().expect("calls");
+                        assert!(report["files"][0]["suggestions"].as_array().is_none_or(Vec::is_empty));
+                        assert_eq!(calls.len(), if direction == "--callees" { 2 } else { 0 }, "{file}: {report}");
+                        if direction == "--callees" {
+                            assert_eq!(calls[0]["absent_id"], "import");
+                            assert_eq!(calls[1]["absent_id"], "binding_without_record");
+                            for call in calls {
+                                assert_eq!(call["target"]["name"], "D");
+                                assert!(call["target"]["id"].is_null());
+                                assert_eq!(call["owner"]["id"], id);
+                                assert_eq!(call["confidence"], "Scoped");
+                                assert_eq!(call["kind"], "Call");
+                            }
+                            assert_ne!(calls[0]["span"], calls[1]["span"]);
+                        }
+                    } else {
+                        assert!(text.contains(BOUNDARY));
+                        if direction == "--callees" {
+                            assert_eq!(text.matches("outside this file").count(), 1, "{file}: {text}");
+                            assert!(text.contains("binding that is not a declaration record"), "{file}: {text}");
+                            assert_eq!(text.matches("Call D ").count(), 2, "{file}: {text}");
+                        } else { assert!(!text.contains("Call D "), "{file}: {text}"); }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn check_corrupted_import_consumers(file: &str, source: &str) {
+    let scratch = Scratch::new(&[(file, source)]);
+    let full = json_of(&scratch.stdout(&["--json-full", "symbols", file]));
+    let function = full["indexes"][0]["symbols"].as_array().expect("symbols").iter()
+        .find(|symbol| symbol["identity"]["name"] == "f").expect("function");
+    let id = function["id"].as_str().expect("ID");
+    assert_eq!(function["semantics"]["is_recursive"], "Unknown");
+    let entry = crate::cache_upgrade::only_entry(scratch.temp.path());
+    let written = crate::cache_upgrade::read_json(&entry);
+    for edit in ["deleted imports", "lost original", "changed module"] {
+        let mut changed = written.clone();
+        match edit {
+            "deleted imports" => changed["imports"] = serde_json::json!([]),
+            "lost original" => changed["imports"][0]["symbol"]["qualified_name"] = Value::Null,
+            "changed module" => changed["imports"][0]["source"] = Value::String("corrupt-origin".into()),
+            _ => unreachable!(),
+        }
+        for report in ["imports JSON", "imports text", "full index", "refs JSON", "refs text"] {
+            std::fs::write(&entry, serde_json::to_vec(&changed).expect("JSON")).expect("restore and edit");
+            let args = match report {
+                "imports JSON" => vec!["--verbose", "--json", "imports", file],
+                "imports text" => vec!["--verbose", "--plain", "imports", file],
+                "full index" => vec!["--verbose", "--json-full", "symbols", file],
+                "refs JSON" => vec!["--verbose", "--json", "refs", "--id", id, "--callees", file],
+                "refs text" => vec!["--verbose", "--plain", "refs", "--id", id, "--callees", file],
+                _ => unreachable!(),
+            };
+            let mut cold_text = None;
+            for warm in [false, true] {
+                let output = scratch.hug(&args);
+                let counts = if warm { "1 hits, 0 partial hits, 0 misses; parsed 0 files" }
+                    else { "0 hits, 0 partial hits, 1 misses; parsed 1 files" };
+                assert!(stderr_of(&output).contains(counts), "{file} {edit} {report}: {}", stderr_of(&output));
+                let text = stdout_of(output, &args);
+                assert!(!text.contains("corrupt-origin"), "{file} {edit} {report}: {text}");
+                match report {
+                    "imports JSON" | "full index" => {
+                        let json = json_of(&text);
+                        let index = if report == "full index" { &json["indexes"][0] } else { &json["files"][0] };
+                        let imports = index["imports"].as_array().expect("imports");
+                        assert_eq!(imports.len(), 1);
+                        assert_eq!(imports[0]["name"], "D");
+                        assert_eq!(imports[0]["alias"], "D");
+                        assert_eq!(imports[0]["source"], if file.ends_with(".rs") { "a" } else { "m" });
+                        if report == "full index" {
+                            assert_eq!(imports[0]["symbol"]["qualified_name"], "f");
+                            let function = index["symbols"].as_array().expect("symbols").iter()
+                                .find(|symbol| symbol["id"] == id).expect("same function ID");
+                            assert_eq!(function["semantics"]["is_recursive"], "Unknown");
+                            let dependencies = function["relations"]["dependencies"].as_array().expect("dependencies");
+                            assert_eq!(dependencies.len(), 1);
+                            assert_eq!(dependencies[0]["name"], "D");
+                            assert_eq!(dependencies[0]["qualified_name"], "f");
+                        }
+                    }
+                    "refs JSON" => {
+                        let json = json_of(&text);
+                        let calls = json["files"][0]["occurrences"].as_array().expect("calls");
+                        assert_eq!(calls.len(), 1);
+                        assert_eq!(calls[0]["kind"], "Call");
+                        assert_eq!(calls[0]["target"]["name"], "D");
+                        assert!(calls[0]["target"]["id"].is_null());
+                        assert_eq!(calls[0]["owner"]["id"], id);
+                        assert_eq!(calls[0]["absent_id"], "import");
+                    }
+                    "refs text" => { assert!(text.contains("Call D ")); assert!(text.contains("outside this file")); }
+                    "imports text" => { assert!(text.contains("D")); }
+                    _ => unreachable!(),
+                }
+                if let Some(cold) = &cold_text { assert_eq!(&text, cold); }
+                else { cold_text = Some(text); }
+            }
+        }
+    }
+}
+
+#[test]
+fn corrupted_import_consumers_rs() {
+    check_corrupted_import_consumers("imports.rs", "use a::f as D; fn f(){D();}");
+}
+
+#[test]
+fn corrupted_import_consumers_ts() {
+    check_corrupted_import_consumers("imports.ts", "import { f as D } from 'm'; function f(){D();}");
+}
+
+#[test]
+fn corrupted_import_consumers_js() {
+    check_corrupted_import_consumers("imports.js", "import { f as D } from 'm'; function f(){D();}");
+}
+
+type InventoryCliCase = (&'static str, &'static str, &'static [&'static str], &'static [&'static str]);
+const INVENTORY_CLI_CASES: &[InventoryCliCase] = &[
+        ("group.ts", "import {f as D,g as E} from 'a'; function f(){D();E();}", &["D", "E"], &["a", "a"]),
+        ("mixed.js", "import D,* as E from 'a'; function f(){D();}", &["D", "E"], &["a", "a"]),
+        ("later.php", "<?php use A\\F as D,B\\G as E; function f(){}", &["D", "E"], &["A\\F", "B\\G"]),
+        ("shallow.java", "import p.C; class W { void f(){} }", &["C"], &["p"]),
+        ("static.java", "import static C.f; class W { void f(){} }", &["f"], &["C"]),
+    ];
+
+fn check_producer_import_inventory_consumers(case: InventoryCliCase, edit: &str) {
+        let (file, source, names, modules) = case;
+        let scratch = Scratch::new(&[(file, source)]);
+        let full = json_of(&scratch.stdout(&["--json-full", "symbols", file]));
+        let imports = full["indexes"][0]["imports"].as_array().expect("imports");
+        assert_eq!(imports.iter().map(|i| i["name"].as_str().expect("name")).collect::<Vec<_>>(), names);
+        assert_eq!(imports.iter().map(|i| i["source"].as_str().expect("module")).collect::<Vec<_>>(), modules);
+        let id = full["indexes"][0]["symbols"].as_array().expect("symbols").iter()
+            .find(|s| s["identity"]["name"] == "f").expect("function")["id"].as_str().expect("ID");
+        let entry = crate::cache_upgrade::only_entry(scratch.temp.path());
+        let saved = crate::cache_upgrade::read_json(&entry);
+        let point = |byte: usize| { let before = &source[..byte]; serde_json::json!({"line":before.matches('\n').count()+1,"column":byte-before.rfind('\n').map_or(0, |at| at+1)+1}) };
+            let mut changed = saved.clone();
+            match edit {
+                "member" => { changed["imports"].as_array_mut().expect("imports").pop(); }
+                "source" => changed["imports"][names.len()-1]["source"] = Value::Null,
+                "boundary" => { changed["imports"][0]["statement_span"]["end_byte"] = serde_json::json!(source.len()); changed["imports"][0]["statement_span"]["end"] = point(source.len()); }
+                "role" => {
+                    let start = source.rfind("f(").expect("function"); let span = serde_json::json!({"start_byte":start,"end_byte":start+1,"start":point(start),"end":point(start+1)});
+                    changed["imports"].as_array_mut().expect("imports").push(serde_json::json!({"name":"f","alias":null,"source":null,"span":span,"statement_span":span,"symbol":{"name":"f","qualified_name":null,"id":null,"source_span":null}}));
+                }
+                _ => unreachable!(),
+            }
+            let mut reports = vec![vec!["--json", "imports", file], vec!["--plain", "imports", file], vec!["--json-full", "symbols", file]];
+            for format in ["--json", "--plain"] {
+                reports.push(vec![format, "refs", "--id", id, file]);
+                reports.push(vec![format, "refs", "--id", id, "--callers", file]);
+                reports.push(vec![format, "refs", "--id", id, "--callees", file]);
+            }
+            for report in reports {
+                let mut uncached = report.clone(); uncached.insert(2, "--no-cache");
+                let expected = scratch.stdout(&uncached);
+                std::fs::write(&entry, serde_json::to_vec(&changed).expect("JSON")).expect("edit");
+                let mut args = vec!["--verbose"]; args.extend_from_slice(&report);
+                for warm in [false, true] {
+                    let output = scratch.hug(&args);
+                    let counts = if warm { "1 hits, 0 partial hits, 0 misses; parsed 0 files" }
+                        else { "0 hits, 0 partial hits, 1 misses; parsed 1 files" };
+                    assert!(stderr_of(&output).contains(counts), "{file} {edit} {report:?}: {}", stderr_of(&output));
+                    assert_eq!(stdout_of(output, &args), expected, "{file} {edit} {report:?}");
+                }
+            }
+}
+
+macro_rules! inventory_cli_tests {
+    ($($name:ident => ($case:expr, $edit:literal)),+ $(,)?) => { $(
+        #[test]
+        fn $name() { check_producer_import_inventory_consumers(INVENTORY_CLI_CASES[$case], $edit); }
+    )+ };
+}
+inventory_cli_tests! {
+    producer_import_inventory_group_member => (0, "member"),
+    producer_import_inventory_group_source => (0, "source"),
+    producer_import_inventory_group_boundary => (0, "boundary"),
+    producer_import_inventory_group_role => (0, "role"),
+    producer_import_inventory_mixed_member => (1, "member"),
+    producer_import_inventory_mixed_source => (1, "source"),
+    producer_import_inventory_mixed_boundary => (1, "boundary"),
+    producer_import_inventory_mixed_role => (1, "role"),
+    producer_import_inventory_php_member => (2, "member"),
+    producer_import_inventory_php_source => (2, "source"),
+    producer_import_inventory_php_boundary => (2, "boundary"),
+    producer_import_inventory_php_role => (2, "role"),
+    producer_import_inventory_java_member => (3, "member"),
+    producer_import_inventory_java_source => (3, "source"),
+    producer_import_inventory_java_boundary => (3, "boundary"),
+    producer_import_inventory_java_role => (3, "role"),
+    producer_import_inventory_java_static_member => (4, "member"),
+    producer_import_inventory_java_static_source => (4, "source"),
+    producer_import_inventory_java_static_boundary => (4, "boundary"),
+    producer_import_inventory_java_static_role => (4, "role"),
+}
+
+#[test]
+fn java_single_segment_on_demand_imports_are_reported_without_token_suggestions() {
+    for prefix in ["import p.*;", "import static p.*;", "import p /*c*/ . /*d*/ *;", "import static p /*c*/ . /*d*/ *;"] {
+        let source = format!("{prefix}\nclass p {{ void f() {{ p x; }} }}"); let scratch = Scratch::new(&[("single.java", &source)]);
+        let discovery = refs_json(&scratch, &["p", "single.java", "--no-cache"]); let id = declaration_id(&discovery);
+        for format in ["--json", "--plain"] {
+            for entry in crate::cache_entries(scratch.temp.path()) { std::fs::remove_file(entry).expect("clear cache"); }
+            let args = ["--verbose", format, "imports", "single.java"];
+            for warm in [false, true] {
+                let output = scratch.hug(&args); let stderr = stderr_of(&output); let text = stdout_of(output, &args);
+                let counts = if warm { "1 hits, 0 partial hits, 0 misses; parsed 0 files" } else { "0 hits, 0 partial hits, 1 misses; parsed 1 files" };
+                assert!(stderr.contains(counts), "{stderr}");
+                if format == "--json" { let json = json_of(&text); let imports = json["files"][0]["imports"].as_array().expect("imports"); assert_eq!(imports.len(), 1); assert_eq!(imports[0]["name"], "p"); assert_eq!(imports[0]["alias"], "p"); assert_eq!(imports[0]["source"], "p"); assert_eq!(imports[0]["original_name"], "*"); }
+                else { assert!(text.contains("p")); }
+            }
+        }
+        for direction in [None, Some("--callers"), Some("--callees")] {
+            for format in ["--json", "--plain"] {
+                for entry in crate::cache_entries(scratch.temp.path()) { std::fs::remove_file(entry).expect("clear cache"); }
+                let mut args = vec!["--verbose", format, "refs", "--id", id.as_str()]; if let Some(direction) = direction { args.push(direction); } args.push("single.java");
+                for warm in [false, true] {
+                    let output = scratch.hug(&args); let stderr = stderr_of(&output); let text = stdout_of(output, &args);
+                    let counts = if warm { "1 hits, 0 partial hits, 0 misses; parsed 0 files" } else { "0 hits, 0 partial hits, 1 misses; parsed 1 files" };
+                assert!(stderr.contains(counts), "{stderr}");
+                    if format == "--json" {
+                        let json = json_of(&text); assert!(rows(&json, "occurrences").is_empty());
+                        let body_column = "class p { void f() { ".len() + 1;
+                        let expected = if direction.is_none() { vec![row("Usage", "p", &format!("2:{body_column}"), "NameOnly")] } else { vec![] };
+                        assert_eq!(rows(&json, "name_only_suggestions"), expected, "{prefix}: {json}");
+                    } else { assert!(!text.contains("1:"), "import token is not a suggestion: {text}"); }
+                }
+            }
+        }
     }
 }

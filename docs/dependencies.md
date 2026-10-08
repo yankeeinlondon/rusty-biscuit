@@ -2,6 +2,11 @@
 
 ## Recent Dependency Notes
 
+- `tree-hugger` adds a direct `unicode-normalization = "0.1"` edge for Rust
+  identifier NFC comparison. It was already present in the workspace graph;
+  this adds no new package. JS/TS identity decodes Unicode escapes without
+  normalization. See `tree-hugger/docs/dependencies.md`.
+
 - `biscuit-test-harness` adds a Linux-only `x11rb = "0.13.2"` edge with
   `default-features = false` and only the `xtest` feature (2026-09-28). The
   crate is pure Rust and was already in the graph through `clipboard-rs`, so

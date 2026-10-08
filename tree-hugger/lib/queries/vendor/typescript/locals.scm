@@ -4,9 +4,11 @@
 (import_require_clause
   (identifier) @local.definition.import)
 
+; The name before `=` (no `.` anchor: a comment may precede it), never a
+; plain-identifier target after it (`import R = N;`).
 (import_alias
-  .
-  (identifier) @local.definition.import)
+  (identifier) @local.definition.import
+  "=")
 
 (required_parameter
   (identifier) @local.definition)

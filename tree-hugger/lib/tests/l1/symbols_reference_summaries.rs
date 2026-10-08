@@ -137,6 +137,21 @@ const RECURSION_MATRIX: &[RecursionRow] = &[
         "use crate::other as again;\nfn f() { again(); }\n",
         &[("f", No)],
     ),
+    // A comment anywhere in a TS entity alias never hides the original's
+    // last segment (review rows `R8-F1.01`/`.02`/`.S1`/`.S2`).
+    (
+        "a commented TS entity alias may name the function itself",
+        "ts",
+        "import A /* c */ = N.S;\nimport B = /* c */ N.T;\nimport /* c */ C = N.U;\nimport D = N. /* c */ V;\n\
+         function S() { A(); }\nfunction T() { B(); }\nfunction U() { C(); }\nfunction V() { D(); }\n",
+        &[("S", Unknown), ("T", Unknown), ("U", Unknown), ("V", Unknown)],
+    ),
+    (
+        "a commented TS entity alias of another name is not the function",
+        "ts",
+        "import A /* c */ = N.R;\nfunction S() { A(); }\n",
+        &[("S", No)],
+    ),
     // `::f` is the crate root's `f` (2015) or the crate `f` (2018): the
     // file-local rules prove neither, so a rooted self-call is uncertain,
     // never `No` (rustc warns that the 2015 form recurses).
@@ -977,5 +992,29 @@ fn boundary_crossing_names_make_no_summary_edges() {
             f.relations.references.iter().all(|reference| reference.id.as_ref() != Some(&f.id)),
             "{extension}: no proven self-reference"
         );
+    }
+}
+
+
+#[test]
+fn type_only_imports_restore_summaries_in_complete_narrowed_and_references_queries() {
+    use crate::symbols_occurrences::{TYPE_ONLY_IMPORT_MATRIX, check_type_only_import_index, type_only_import_source};
+    for &(_, import, name, mixed) in TYPE_ONLY_IMPORT_MATRIX {
+        let source = type_only_import_source(import, name, mixed);
+        let (_file, tree_file) = parse(&source, "ts");
+        for query in [
+            SymbolQuery::complete_index(),
+            SymbolQuery::new().kinds([SymbolKindV2::Function]).capabilities([Capability::Semantics]),
+            SymbolQuery::new().kinds([SymbolKindV2::TypeAlias]).capabilities([Capability::Occurrences]),
+        ] {
+            let result = tree_file.query(&query).expect("query");
+            check_type_only_import_index(&result.index, name, mixed, true);
+        }
+        let refs = tree_file.query(&SymbolQuery::new().kinds([SymbolKindV2::Function]).capabilities([Capability::References])).expect("references");
+        let function = record(&refs.index, name);
+        assert_eq!(names(&function.relations.references), if mixed { vec![(name, true), ("g", false)] } else { vec![(name, true)] });
+        assert_eq!(names(&function.relations.referenced_by), [(name, true)]);
+        assert_eq!(function.relations.dependencies.len(), usize::from(mixed));
+        assert!(refs.index.occurrences.is_empty(), "References consumes shared facts without returning occurrences");
     }
 }

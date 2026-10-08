@@ -345,7 +345,7 @@ the other side handles it. A converted record is never `is_exported` (export
 comes from declaration syntax, set by `symbol_records()` and the bind pass),
 and a function-like kind always converts back with `Some(signature)`.
 Records, file indexes and analyzer fingerprints carry `SchemaVersion::CURRENT`
-(5.0):
+(5.1):
 no timestamps in `provenance`, the container in `identity.container_name`
 (formerly `module_path`).
 
@@ -648,7 +648,7 @@ pub enum TreeHuggerError {
 
 The declaration commands (`functions`, `types`, `symbols`, `classes`) do not
 use these types: their `--json` report is a CLI-local envelope
-(`cli/src/report.rs`) of schema 5.0 `SymbolRecord`s, described in
+(`cli/src/report.rs`) of schema 5.1 `SymbolRecord`s, described in
 `tree-hugger/docs/symbol-reports.md`. `PackageSummary` remains the shape of
 `hug imports --json` and `hug lint --json` and of library callers:
 

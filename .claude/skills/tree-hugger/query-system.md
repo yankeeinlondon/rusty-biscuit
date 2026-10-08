@@ -65,6 +65,15 @@ children all bind (Rust `let_condition`). `drop_non_declarations`'
 no second line of defense. `symbols_occurrences::PARAMETER_CAPTURE_MATRIX`
 holds one row per site (declarations and the reads they must keep).
 
+**An anchor does not step over comments.** `.` skips anonymous nodes only;
+a comment is a named extra, so `(import_alias . (identifier))` or
+`(identifier) . ","` stops matching when a comment sits in between, and the
+token silently becomes a read. Use field names, an unanchored order
+(`(import_alias (identifier) @… "=")`), or capture broadly and decide in
+Rust with the extra-skipping helpers in `extract/navigation.rs` (Scala
+imports: `scala_import_binds`). `symbols_occurrences::COMMENTED_IMPORT_MATRIX`
+holds the import rows.
+
 ### Capture to SymbolKind Mapping
 
 | Capture | SymbolKind |

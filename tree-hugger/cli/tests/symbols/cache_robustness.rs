@@ -655,7 +655,7 @@ fn columns() -> Vec<Column> {
             control: None,
             empty: None,
             public: |out| record(out, METHOD)["schema_version"].clone(),
-            outcomes: [S(json!({ "major": 5, "minor": 0 })), R, R, R, R, R, R, R, R],
+            outcomes: [S(json!({ "major": 5, "minor": 1 })), R, R, R, R, R, R, R, R],
         },
         // Entry-level fields: none has a default. An empty record list is
         // servable only where no stored evidence names a record (a file with
@@ -672,8 +672,9 @@ fn columns() -> Vec<Column> {
         // inputs.
         entry_column("file", None, [S(json!(true)), R, R, R, R, R, R, R, R]),
         entry_column("language", None, [S(json!(true)), R, R, R, R, R, R, R, R]),
-        // An empty list is a file with none of them; elements are records.
-        entry_column("imports", None, [S(json!(true)), R, R, R, R, R, S(json!(true)), R, R]),
+        // This populated fixture cannot discard its source imports.
+        entry_column("import_inventory", None, [S(json!(true)), R, R, R, R, R, R, R, R]),
+        entry_column("imports", None, [S(json!(true)), R, R, R, R, R, R, R, R]),
         entry_column("exports", None, [S(json!(true)), R, R, R, R, R, S(json!(true)), R, R]),
         entry_column("diagnostics", None, [S(json!(true)), R, R, R, R, R, S(json!(true)), R, R]),
     ]
@@ -726,6 +727,7 @@ fn entry_column(name: &'static str, empty: Option<Value>, outcomes: [Outcome; 9]
             "file" => &["file"],
             "language" => &["language"],
             "imports" => &["imports"],
+            "import_inventory" => &["import_inventory"],
             "exports" => &["exports"],
             "diagnostics" => &["diagnostics"],
             other => panic!("no entry column {other}"),
@@ -833,7 +835,7 @@ fn edited_entry(base: &Value, column: &Column, shape: Shape, value: &Value) -> S
             _ => parent[key] = Value::Array(vec![json!(123); elements.len().max(1)]),
         },
         Shape::IncompatibleMajor => parent[key] = json!({ "major": 3, "minor": 0 }),
-        Shape::IncompatibleMinor => parent[key] = json!({ "major": 5, "minor": 1 }),
+        Shape::IncompatibleMinor => parent[key] = json!({ "major": 5, "minor": 2 }),
         Shape::Empty => {
             parent[key] = match (&column.empty, value) {
                 (Some(empty), _) => empty.clone(),

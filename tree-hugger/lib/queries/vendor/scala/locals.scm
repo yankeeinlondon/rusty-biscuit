@@ -90,29 +90,31 @@
         (identifier) @local.definition.var))))
 
 ; Imports: only the name each import binds. A path's final segment (before
-; `,` or at the end), a selector, a rename's alias, and, for an on-demand
-; import (`a.b.*`, `a.b._`, `a.given`, `a.{_, given T}`), the final segment
-; of the path it opens; qualifiers and a rename's original are reads.
+; `,` or at the end), a selector, a rename's alias (braced, or Scala 3's
+; unbraced `a.b.C as D`), and, for an on-demand import (`a.b.*`, `a.b._`,
+; `a.given`, `a.{_, given T}`), the final segment of the path it opens;
+; qualifiers and a rename's original are reads. A segment, selector or
+; alias is an `identifier` (backticked included) or an `operator_identifier`
+; (`a.b.+`, `a.{C as ++}`); a `wildcard` alias (`C as _`) hides a name and
+; binds nothing.
+; Which flat path segment binds depends on what follows it, and a comment
+; may sit in between, which a `.` anchor cannot step over; so every segment
+; is captured here and `TreeFile::imported_symbols` keeps only the binding
+; ones (`declaration_names::scala_import_binds`).
 (import_declaration
-  (identifier) @local.definition.import .)
+  [(identifier) (operator_identifier)] @local.definition.import)
 
 (import_declaration
-  (identifier) @local.definition.import . ",")
-
-(import_declaration
-  (identifier) @local.definition.import . (namespace_wildcard))
-
-(import_declaration
-  (identifier) @local.definition.import .
-  (namespace_selectors [(namespace_wildcard) "given"]))
+  (as_renamed_identifier
+    alias: [(identifier) (operator_identifier)] @local.definition.import))
 
 (namespace_selectors
-  (identifier) @local.definition.import)
+  [(identifier) (operator_identifier)] @local.definition.import)
 
 (namespace_selectors
   (arrow_renamed_identifier
-    alias: (identifier) @local.definition.import))
+    alias: [(identifier) (operator_identifier)] @local.definition.import))
 
 (namespace_selectors
   (as_renamed_identifier
-    alias: (identifier) @local.definition.import))
+    alias: [(identifier) (operator_identifier)] @local.definition.import))

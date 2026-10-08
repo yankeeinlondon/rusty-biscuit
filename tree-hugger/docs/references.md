@@ -181,6 +181,10 @@ f(...$args);     // f is the Call: unpacking calls
 | Perl | `f()`, `f 1`, `f`, `&f()`, `&f`, `Pkg::f()`, `goto &f`, `$x->m()`, `Pkg->m()`, a code reference `$cb->()`, `$cb->(1)`, `&$cb()`, `&{$cb}(1)` | | `\&f`, `\&$cb`, `defined &f`, `exists &$cb`: they name the sub without calling it; `$cb` in `$cb->m()` is the receiver |
 | Bash, Zsh | a command's name (`f`, `X=1 f arg`, `$(f)`, `$cmd arg`) | | an argument (`echo f`), the variable a command name expands (`cmd` in `$cmd`) |
 
+Comments between the constructed name and type arguments do not change the call:
+`C /* note */ <Int>()` is a Swift constructor call; `x: C /* note */ <Int>`
+is a type usage.
+
 A generic type is a call only where a construction holds it: in
 `new C<String>()` (Java), `new C[Int]` (Scala), `C<Int>()` (Swift) or
 `new C<int>` (C++) the constructed name is the `Call`, and its type
@@ -402,7 +406,7 @@ result that looks complete.
 | Calls through values | Calling a `const` bound to a function or class expression calls that function. Calling any other variable or parameter is a call through a value. | Limited (`indirect_dispatch`) for calls through a value |
 | Loop and catch bindings | `for (let …)`, `for…of`/`for…in` and `catch (e)` bind in their statement. | Resolved |
 | Export clauses | A local export reads its binding: `k` in `export { k }`, `export { k as j }` and `export = k` is `Scoped` to `k`. The exported name (`j`, `default` in `export { k as default }`) names the module's export and is no occurrence, and nothing in a re-export from another module is one either (`export { k as j } from "m"`, `export * as ns from "m"`, `export { default } from "m"`, TypeScript `export type { T } from "m"`), since those names are the other module's exports, never a local `k`. TypeScript `export as namespace X` declares a global name (no occurrence); `export import A = N.S` binds `A` like `import A = N.S` and reads `N`. Export records and their re-export flags are unchanged. | Resolved |
-| Name categories (TypeScript) | `interface` and `type` are types only; `class`, `enum` and `namespace` are both; `function`, `var`, `let` and `const` are values. | Resolved |
+| Name categories (TypeScript) | `interface` and `type` are types only; `class`, `enum` and `namespace` are both; `function`, `var`, `let` and `const` are values. Type-only imports (`import type { F }` or `import { type F }`) bind only the type category: a local `function F() { F(); }` remains a proved self-call while `let x: F` uses the import. `typeof F` queries the value category even inside a type expression. | Resolved |
 | Imports and aliases | `import { a as b }` binds `b`; `import * as ns` binds `ns`; a default import `import d from "m"` binds `d`; TypeScript `import q = require("m")` binds `q` and `import R = N.S` binds `R` (`N` is read). The original name is kept in the import record, never bound and never an import of its own. | Resolved |
 | Members | Class and interface members are not lexical names. `this.f()` and `obj.f()` are `NameOnly`. | Limited (`indirect_dispatch`) |
 | Class field initializers and static blocks | References resolve lexically, but the owner is absent and the region limited. | Limited (`ownership_unknown`) |
@@ -510,7 +514,7 @@ as `alias` and `*` as `original_name`.
 | Rust | `a` ← `use a;`; `h` ← `use a::{g::h};` (`source` `a::g`); `f` ← `e as f` (original `e`); `a` ← the `self` in `use a::{self};`; `z` ← `extern crate y as z;` (original `y`); on demand: `b` ← `use a::b::*;` (`source` `a::b`) | none: nothing inside a `use` is an occurrence |
 | TypeScript, JavaScript | `d` ← `import d from "m"`; `b` ← `{ a as b }` (original `a`); `ns` ← `* as ns` (original `*`); TypeScript `q` ← `import q = require("m")`, `R` ← `import R = N.S` (original `N.S`) | `N` in `import R = N.S` |
 | Python | `a` ← `import a.b` (`source` `a.b`: only `a` is bound); `c` ← `import a.b as c` (original `a.b`); `y` ← `from m import x as y` (original `x`); `annotations` ← `from __future__ import annotations` (`source` `__future__`); on demand: `b` ← `from a.b import *`, `.` ← `from . import *` | every other module path segment (`b` written `a.b` in `import a.b`, `a` and `b` in `from a.b import c`) and an aliased original (`x`) |
-| Scala | `C` ← `import a.b.C` (`source` `a.b.C`); `b` and `d` ← `import a.b, c.d`; `D` ← `import a.{D}` (`source` `a.D`); `F` ← `E => F` or `E as F` (original `E`); on demand: `b` ← `import a.b.*` or `a.b._`, `a` ← `import a.given` or a selector wildcard `a.{_, given T}` (original `given` when it opens only given instances) | qualifiers (`b` written `a.b`), a rename's original, a hidden selector (`x` in `x => _`), a `given` selector's type |
+| Scala | `C` ← `import a.b.C` (`source` `a.b.C`); `b` and `d` ← `import a.b, c.d`; `D` ← `import a.{D}` (`source` `a.D`); `F` ← `E => F` or `E as F` (original `E`), including unbraced `import a.E as F` (`source` `a.E`); symbolic names and qualifiers work too (`import a.+`, `import a.+.C`, `import a.{C as ++}`); backticks stay as written; a hidden alias (`C as _`) binds nothing; on demand: `b` ← `import a.b.*` or `a.b._`, `a` ← `import a.given` or a selector wildcard `a.{_, given T}` (original `given` when it opens only given instances) | qualifiers (`b` written `a.b`), a rename's original, a hidden selector (`x` in `x => _`), a `given` selector's type |
 | PHP | `A` ← `use A;`; `B` ← `use A\B;` (`source` `A\B`); `C` ← `use A\B as C;` (original `B`); `B` and `D` ← `use A\{B, C as D};` (`source` `A\B`, `A\C`); `use function` and `use const` alike | qualifiers and an aliased original |
 | Go | `fmt` ← `import "fmt"` or the raw-string `` import `fmt` `` (`source` the path without quotes); `f` ← `import f "a/fmt"` (original `fmt`); `_` ← `import _ "a/fmt"` (a blank import binds nothing); on demand: `fmt` ← `import . "a/fmt"` | none (the path is a string) |
 | Java, C#, Swift | below | below |
@@ -520,11 +524,31 @@ as `alias` and `*` as `original_name`.
 import a.b.C              // `C` is the import; `a` and `b` (written `a.b`) are usages
 import a.{D => E, F}      // `E` and `F` are imports; `D` is a usage
 import a.b.*              // an on-demand import named `b`; `a` is a usage
+import a.*                // an on-demand import named `a`; no qualifier read
+import static a.*         // the same on-demand record convention
 ```
 
 ```python
 import a.b         # `a` is the import (source `a.b`); `b` is a usage written `a.b`
 from c import *    # an on-demand import named `c`
+```
+
+Within a supported import form, comments do not change its bound names. A comment is never an
+import's name or original, it never ends a path early, and in Scala it never
+decides whether a path segment is the bound name or a qualifier. A `source`
+or written path that spans a comment keeps it as written; a TypeScript
+entity alias's original is the target without its comments, because its
+last segment is what [direct recursion](#direct-recursion) compares.
+
+```typescript
+import D /* note */ = N.S;  // `D`, original `N.S`
+import E = N. /* note */ S; // `E`, original `N.S`
+```
+
+```scala
+import a /* note */ .b.C   // `C`, source `a /* note */ .b.C`; `b` written `a /* note */ .b`
+import a.b. /* note */ *   // an on-demand import named `b`, source `a.b`
+import C /* note */, d.E   // `C` and `E` are both imports
 ```
 
 #### Declaration names in the other languages
@@ -889,7 +913,7 @@ fn walk(w: &W) { w.walk(); }
 
 A file index may also carry `occurrences` and `reference_coverage` (only
 under `Capability::Occurrences`). The `--json` envelopes report
-`schema_version` `{"major":5,"minor":0}`.
+`schema_version` `{"major":5,"minor":1}`.
 
 Nothing has to be migrated by hand. The persistent cache serves an entry
 only when it and every record in it are exactly 5.0, so an entry written by
@@ -991,7 +1015,7 @@ coverage: limited (indirect_dispatch)
 
 | `absent_id` | Text | Meaning |
 |---|---|---|
-| `import` | Scoped to an import | Bound to one of the owner's imports (its `relations.dependencies`): it names something outside the file. |
+| `import` | Scoped to an import | Bound to the particular import identified by the occurrence's `import_span`: it names something outside the file. A local binding that reuses its name is not an import. |
 | `binding_without_record` | Scoped to a binding that is not a declaration record | Bound to a local such as a `for…of` or `catch` binding that has no record. |
 | `name_only` | NameOnly, candidates: … | The candidates are suggestions, not a target. |
 | `unresolved` | Unresolved | No supported binding and no same-named declaration in the file. |
@@ -1010,7 +1034,7 @@ empty one.
 `files`, and `errors` comes last:
 
 ```json
-{"report_schema_version":1,"schema_version":{"major":5,"minor":0},
+{"report_schema_version":1,"schema_version":{"major":5,"minor":1},
  "root_dir":"/work/repo",
  "boundary":"References are resolved within one file: …",
  "selector":{"name":"parse"},"direction":"references",
@@ -1039,3 +1063,44 @@ empty one.
 - A file that cannot be analyzed is listed in `errors` and makes the exit
   status 1. `--json-full`, `--jsonl`, `--format`, `--count`, `--stats` and
   the declaration selectors (`--kind`, `--name`, …) are rejected.
+
+## Identifier identity and written names
+
+Reference lookup compares Rust raw identifiers without `r#` and normalizes
+Rust identifiers to NFC: `fn r#f() { f(); }` is a self-call. TypeScript and
+JavaScript decode identifier Unicode escapes: `function \u0066() { f(); }`
+is also a self-call. ECMAScript does not normalize literal Unicode names;
+composed and decomposed spellings remain distinct. These rules apply to local
+bindings, patterns, generic parameters, overload candidates and import aliases.
+
+Public names, spans and written qualifiers retain their source spelling.
+String-named imported exports decode string escapes as one name: `"\u0053"`
+names `S`, while `"A.S"` is a single export name containing a dot. A call
+through a file-local import still has no external declaration ID and remains
+unknown for recursion when its original identity could name the callable.
+TypeScript ambient functions and overload signatures retain their own
+declaration IDs; multiple declarations of one identity stay uncertain.
+
+### Selected import provenance
+
+An occurrence's optional `import_span` identifies the name span of the exact
+`ImportRecord` selected by lexical lookup. It is present only for a Scoped
+import binding with no target ID. Local bindings, declaration IDs, NameOnly
+suggestions and Unresolved names carry no import span. The span remains the
+written import token, including raw Rust or escaped JavaScript spellings.
+
+```rust
+fn f() { use other::g as q; q(); }
+fn h() { use other::f as q; q(); }
+```
+
+The call in `f` selects its own import of `g`. The import of `f` in `h` does
+not make `f` potentially recursive. A loop or pattern binding named `q` has no
+import span, even if its owner also calls an import named `q`.
+
+Recursion and outgoing reports read this occurrence evidence; dependency-name
+membership cannot identify a call's binding. Persisted entries require the
+nullable import span and a redundant start offset, validate their agreement
+with the selected import and dependency summaries, and keep them through
+record-only widening and projections. Schema 5.1 adds this field; entries in
+schema 5.0 are recomputed.

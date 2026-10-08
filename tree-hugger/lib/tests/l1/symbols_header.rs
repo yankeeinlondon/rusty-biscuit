@@ -704,6 +704,11 @@ fn less_common_declarations_report_their_keyword() {
             .filter(|record| record.identity.name == *name && record.identity.container_name.as_deref() == *container)
             .collect();
         match found.as_slice() {
+            [signature, implementation] if *name == "over"
+                && signature.identity.keyword.as_deref() == Some(*keyword)
+                && implementation.identity.keyword.as_deref() == Some(*keyword)
+                && signature.source.body_span.is_none()
+                && implementation.source.body_span.is_some() => {}
             [record] if record.identity.keyword.as_deref() == Some(*keyword) => {}
             [record] => failures.push(format!(".{extension} `{name}`: keyword {:?}, expected {keyword:?}", record.identity.keyword)),
             _ => failures.push(format!(

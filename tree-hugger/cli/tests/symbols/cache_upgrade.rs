@@ -316,8 +316,10 @@ struct StaleRevision {
 /// derived from, so the reader refuses that payload under any key: revision
 /// 5's `is_recursive: No` beside the `Limited` region every Python callable
 /// has, and revision 21's callable with no `body_span` beside the coverage
-/// region only a callable with a body owns.
-const CONTENT_REJECTED: &[&str] = &["5", "21"];
+/// region only a callable with a body owns, and revision 46's comment
+/// in place of the source import original, and revision 48's lost grouped
+/// binding without a complete producer-inventory witness.
+const CONTENT_REJECTED: &[&str] = &["5", "21", "46", "48"];
 
 /// How an earlier revision's entry key is formed.
 enum OldKey {
@@ -385,8 +387,8 @@ fn record_named<'a>(snapshot: &'a mut Value, name: &str) -> &'a mut Value {
 }
 
 /// Seeds `case`'s pre-repair snapshot under its revision's key and asserts it
-/// is not served, while the same payload under the current key is (so the
-/// miss is due to the key) and the entry run 1 writes is served on run 2.
+/// is not served. A current-key control distinguishes revision invalidation
+/// from independent content rejection; the rewritten entry is served on run 2.
 fn assert_stale_revision_is_not_served(case: &StaleRevision) {
     let args = ["--json-full", "symbols", case.file];
     let label = format!("revision {} `{}`", case.revision, case.file);
@@ -2119,6 +2121,8 @@ fn entry_from_extractor_revision_forty_five_is_not_served_after_the_syntax_marke
                     "owner_span": root,
                     "target": { "id": null, "name": name, "qualified_name": null },
                     "path_start_byte": null,
+                    "import_span": null,
+                    "import_start_byte": null,
                     "candidates": [],
                     "span": {
                         "start": { "line": 2, "column": column },
@@ -2132,6 +2136,75 @@ fn entry_from_extractor_revision_forty_five_is_not_served_after_the_syntax_marke
             }
             occurrences.sort_by_key(|occurrence| occurrence["span"]["start_byte"].as_u64());
             assert_eq!(markers(snapshot), 2);
+        },
+    });
+}
+
+/// Revision 46 read a TypeScript entity alias's original as the alias's
+/// second named child, so `import D /* note */ = N.S` had the original
+/// `/* note */`, the dependency of `S` named the comment and `S`'s
+/// recursion was a false `No`; revision 47 reads the entity after `=`
+/// without comments (`N.S`, recursion `Unknown`).
+#[test]
+fn entry_from_extractor_revision_forty_six_is_not_served_after_the_commented_import_repair() {
+    assert_stale_revision_is_not_served(&StaleRevision {
+        revision: "46",
+        key: OldKey::Computed,
+        file: "alias.ts",
+        language: "typescript",
+        source: "import D /* note */ = N.S;\nfunction S() { D(); }\nfunction Sentinel() {}\n".to_string(),
+        sentinel: "Sentinel",
+        probe: |out| out["indexes"][0]["imports"][0]["symbol"]["qualified_name"].clone(),
+        repaired: Value::from("N.S"),
+        stale: Value::from("/* note */"),
+        revert: |snapshot| {
+            let original = &mut snapshot["imports"][0]["symbol"]["qualified_name"];
+            assert_eq!(*original, "N.S");
+            *original = Value::from("/* note */");
+            let record = snapshot["records"]
+                .as_array_mut()
+                .expect("entry records")
+                .iter_mut()
+                .find(|record| record["identity"]["name"] == "S")
+                .expect("S");
+            for relation in ["references", "dependencies"] {
+                record["relations"][relation][0]["qualified_name"] = Value::from("/* note */");
+            }
+            assert_eq!(record["semantics"]["is_recursive"], "Unknown");
+            record["semantics"]["is_recursive"] = Value::from("No");
+        },
+    });
+}
+
+/// Commented generic construction must not reuse a pre-repair Usage.
+#[test]
+fn entry_from_extractor_revision_forty_seven_is_not_served_after_the_generic_comment_repair() {
+    assert_stale_revision_is_not_served(&StaleRevision {
+        revision: "47", key: OldKey::Computed, file: "generic.swift", language: "swift",
+        source: "class C<T> {}\nfunc run() { _ = C /* note */ <Int>() }\nfunc Sentinel() {}\n".to_string(),
+        sentinel: "Sentinel",
+        probe: |out| out["indexes"][0]["occurrences"].as_array().expect("occurrences").iter().find(|occ| occ["target"]["name"] == "C").expect("C")["kind"].clone(),
+        repaired: Value::from("Call"), stale: Value::from("Usage"),
+        revert: |snapshot| {
+            let occurrence = snapshot["occurrences"].as_array_mut().expect("occurrences").iter_mut().find(|occ| occ["target"]["name"] == "C").expect("C");
+            assert_eq!(occurrence["kind"], "Call");
+            occurrence["kind"] = Value::from("Usage");
+        },
+    });
+}
+
+#[test]
+fn entry_from_extractor_revision_forty_eight_is_not_served_after_import_inventory_repair() {
+    assert_stale_revision_is_not_served(&StaleRevision {
+        revision: "48", key: OldKey::Computed, file: "group.ts", language: "typescript",
+        source: "import {f as D,g as E} from 'a'; function Sentinel() {}".to_string(),
+        sentinel: "Sentinel",
+        probe: |out| Value::from(out["indexes"][0]["imports"].as_array().expect("imports").len()),
+        repaired: Value::from(2), stale: Value::from(1),
+        revert: |snapshot| {
+            assert_eq!(snapshot["imports"].as_array().expect("imports").len(), 2);
+            snapshot["imports"].as_array_mut().expect("imports").pop();
+            snapshot.as_object_mut().expect("entry").remove("import_inventory");
         },
     });
 }

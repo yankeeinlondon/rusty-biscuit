@@ -14,6 +14,11 @@
 //! token trees, a leading `::` and JS spread all put punctuation before
 //! unqualified names), so this redundant fact is what makes a single edit of
 //! either field detectable.
+//!
+//! The selected `import_span` similarly repeats its start as
+//! `import_start_byte`: null exactly for non-import bindings. The reader
+//! verifies the span against imports and reconstructs dependency summaries
+//! from these particular selections, without repeating lexical analysis.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
@@ -41,6 +46,10 @@ struct StoredOccurrence {
     /// Where `target.qualified_name` starts; `null` iff it is `null`.
     #[serde(deserialize_with = "nullable")]
     path_start_byte: Option<u32>,
+    #[serde(deserialize_with = "nullable")]
+    import_span: Option<StoredSpan>,
+    #[serde(deserialize_with = "nullable")]
+    import_start_byte: Option<u32>,
     candidates: Vec<StoredRef>,
     span: StoredSpan,
     kind: OccurrenceKind,
@@ -84,6 +93,74 @@ struct StoredPoint {
     column: u32,
 }
 
+/// Import facts use the same strict geometry reader as occurrences. Nullable
+/// metadata accepts genuinely absent/null controls; producer and source
+/// inventory checks reject loss of meaningful facts before any capability is served.
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StoredImport {
+    name: String,
+    alias: Option<String>,
+    source: Option<String>,
+    span: StoredSpan,
+    statement_span: Option<StoredSpan>,
+    symbol: StoredImportRef,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StoredImportRef {
+    id: Option<SymbolId>,
+    name: String,
+    qualified_name: Option<String>,
+    source_span: Option<StoredSpan>,
+}
+
+pub(super) fn write_imports<S: Serializer>(imports: &&[ImportRecord], serializer: S) -> Result<S::Ok, S::Error> {
+    serializer.collect_seq(imports.iter().map(StoredImport::from))
+}
+
+/// A compact witness of the complete grammar-produced import inventory. All
+/// nullable metadata and geometry are included, before query projection.
+/// This detects edits to stored facts without lexing source a second time;
+/// it is a consistency witness, not authentication of an untrusted writer.
+pub(super) fn import_inventory(imports: &[ImportRecord]) -> String {
+    let canonical: Vec<_> = imports.iter().map(StoredImport::from).collect();
+    biscuit_hash::blake3_hash(&serde_json::to_string(&canonical).expect("import records serialize"))
+}
+
+pub(super) fn read_imports<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<ImportRecord>, D::Error> {
+    Ok(Vec::<StoredImport>::deserialize(deserializer)?.into_iter().map(ImportRecord::from).collect())
+}
+
+impl From<&ImportRecord> for StoredImport {
+    fn from(import: &ImportRecord) -> Self {
+        Self {
+            name: import.name.clone(), alias: import.alias.clone(), source: import.source.clone(),
+            span: StoredSpan::from(&import.span),
+            statement_span: import.statement_span.as_ref().map(StoredSpan::from),
+            symbol: StoredImportRef {
+                id: import.symbol.id.clone(), name: import.symbol.name.clone(),
+                qualified_name: import.symbol.qualified_name.clone(),
+                source_span: import.symbol.source_span.as_ref().map(StoredSpan::from),
+            },
+        }
+    }
+}
+
+impl From<StoredImport> for ImportRecord {
+    fn from(import: StoredImport) -> Self {
+        Self {
+            name: import.name, alias: import.alias, source: import.source,
+            span: TextSpan::from(import.span), statement_span: import.statement_span.map(TextSpan::from),
+            symbol: SymbolRef {
+                id: import.symbol.id, name: import.symbol.name, qualified_name: import.symbol.qualified_name,
+                source_span: import.symbol.source_span.map(TextSpan::from),
+            },
+        }
+    }
+}
+
 /// A value or `null`; unlike a plain `Option` field, an absent key is an
 /// error rather than `None`.
 pub(super) fn nullable<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
@@ -106,12 +183,14 @@ pub(super) fn write_occurrences<S: Serializer>(
 pub(super) struct ReadOccurrences {
     pub(super) occurrences: Vec<Occurrence>,
     pub(super) path_starts: Vec<Option<u32>>,
+    pub(super) import_starts: Vec<Option<u32>>,
 }
 
 pub(super) fn read_occurrences<'de, D: Deserializer<'de>>(deserializer: D) -> Result<ReadOccurrences, D::Error> {
     let stored = Vec::<StoredOccurrence>::deserialize(deserializer)?;
     let path_starts = stored.iter().map(|occurrence| occurrence.path_start_byte).collect();
-    Ok(ReadOccurrences { occurrences: stored.into_iter().map(Occurrence::from).collect(), path_starts })
+    let import_starts = stored.iter().map(|occurrence| occurrence.import_start_byte).collect();
+    Ok(ReadOccurrences { occurrences: stored.into_iter().map(Occurrence::from).collect(), path_starts, import_starts })
 }
 
 pub(super) fn write_coverage<S: Serializer>(
@@ -141,6 +220,8 @@ impl From<&Occurrence> for StoredOccurrence {
                 .qualified_name
                 .as_ref()
                 .map(|path| occurrence.span.end_byte.saturating_sub(u32::try_from(path.len()).unwrap_or(u32::MAX))),
+            import_span: occurrence.import_span.as_ref().map(StoredSpan::from),
+            import_start_byte: occurrence.import_span.as_ref().map(|span| span.start_byte),
             candidates: occurrence.candidates.iter().map(StoredRef::from).collect(),
             span: StoredSpan::from(&occurrence.span),
             kind: occurrence.kind,
@@ -155,6 +236,7 @@ impl From<StoredOccurrence> for Occurrence {
             owner: stored.owner.map(SymbolRef::from),
             owner_span: TextSpan::from(stored.owner_span),
             target: SymbolRef::from(stored.target),
+            import_span: stored.import_span.map(TextSpan::from),
             candidates: stored.candidates.into_iter().map(SymbolRef::from).collect(),
             span: TextSpan::from(stored.span),
             kind: stored.kind,
@@ -229,6 +311,49 @@ impl From<StoredSpan> for TextSpan {
     }
 }
 
+/// All import producers use external, source-less symbol references and
+/// unique name captures in source order. These invariants do not depend on
+/// retaining occurrences or the kind of any selected declaration.
+pub(super) fn validate_imports(source: &str, language: ProgrammingLanguage, imports: &[ImportRecord], inventory: &str) -> Result<(), &'static str> {
+    use ProgrammingLanguage as L;
+    if matches!(language, L::C | L::Cpp | L::Lua | L::Perl | L::Bash | L::Zsh) && !imports.is_empty() {
+        return Err("imports in a language whose import query has no captures");
+    }
+    if inventory != import_inventory(imports) {
+        return Err("imports disagree with their complete producer inventory");
+    }
+    let lines = LineStarts::new(source);
+    let mut previous = None;
+    for import in imports {
+        let position = (import.span.start_byte, import.span.end_byte);
+        if previous.is_some_and(|last| last >= position) {
+            return Err("imports are duplicated or out of capture order");
+        }
+        previous = Some(position);
+        if !lines.is_region(&import.span) || import.span.start_byte == import.span.end_byte {
+            return Err("an import name span disagrees with the source");
+        }
+        let written = &source[import.span.start_byte as usize..import.span.end_byte as usize];
+        let expected_name = if language == L::Go && (written.starts_with('"') || written.starts_with('`')) {
+            crate::file::tree_file::go_import_path(written).rsplit('/').next().unwrap_or(written)
+        } else { written };
+        if import.name != expected_name || import.symbol.name != import.name
+            || import.symbol.id.is_some() || import.symbol.source_span.is_some()
+            || import.alias.as_ref().is_some_and(|alias| alias != &import.name)
+        {
+            return Err("an import identity disagrees with its producer or name token");
+        }
+        if let Some(statement) = &import.statement_span
+            && (!lines.is_region(statement) || statement.start_byte > import.span.start_byte
+                || statement.end_byte < import.span.end_byte || statement.start_byte == statement.end_byte
+            )
+        {
+            return Err("an import statement span disagrees with the source");
+        }
+    }
+    Ok(())
+}
+
 /// What a read entry stores that its reference evidence must agree with.
 pub(super) struct StoredEvidence<'a> {
     pub(super) source: &'a str,
@@ -241,6 +366,7 @@ pub(super) struct StoredEvidence<'a> {
     pub(super) occurrences: &'a [Occurrence],
     /// Each occurrence's stored `path_start_byte`, in the same order.
     pub(super) path_starts: &'a [Option<u32>],
+    pub(super) import_starts: &'a [Option<u32>],
     pub(super) coverage: &'a [ReferenceCoverage],
     pub(super) records: &'a [SymbolRecord],
     pub(super) imports: &'a [ImportRecord],
@@ -255,10 +381,12 @@ pub(super) struct StoredEvidence<'a> {
 /// could have: a kind-narrowed entry keeps evidence that names records it
 /// does not retain (an owner is always a callable, so an owner ID is exempt
 /// only when a callable kind is omitted). What cannot be told apart without
-/// a parse (a list emptied while nothing derived from it remains, an
-/// anonymous region added or removed, a written path and its stored start
+/// a parse (an occurrence/region list emptied while nothing derived from it
+/// remains, an anonymous region added or removed, a written path and its stored start
 /// both set to `null` together, the order of omitted candidates) is beyond
-/// these checks.
+/// these checks. Imports are checked separately against retained provenance
+/// and the complete producer-inventory witness, including source roles,
+/// nullable metadata, and exact statement boundaries.
 pub(super) fn validate_evidence(stored: &StoredEvidence<'_>) -> Result<(), &'static str> {
     let StoredEvidence {
         source,
@@ -267,10 +395,15 @@ pub(super) fn validate_evidence(stored: &StoredEvidence<'_>) -> Result<(), &'sta
         covered_kinds,
         occurrences,
         path_starts,
+        import_starts,
         coverage,
         records,
         imports,
     } = *stored;
+    if occurrences.len() != path_starts.len() || occurrences.len() != import_starts.len() {
+        return Err("occurrence provenance lists are not aligned");
+    }
+    let imports_by_span: HashMap<_, _> = imports.iter().map(|import| ((import.span.start_byte, import.span.end_byte), import)).collect();
     let all_kinds = covered_kinds.is_none();
     // Whether a record of one of `kinds` may be absent from the records.
     let omits = |kinds: &[SymbolKindV2]| covered_kinds.is_some_and(|covered| kinds.iter().any(|kind| !covered.contains(kind)));
@@ -380,6 +513,8 @@ pub(super) fn validate_evidence(stored: &StoredEvidence<'_>) -> Result<(), &'sta
     // What each owner's summaries were derived from.
     let mut scoped_by_owner: ScopedByOwner<'_> = HashMap::new();
     let mut unbound = Vec::new();
+    let mut expected_dependencies: HashMap<&SymbolId, Vec<SymbolRef>> = HashMap::new();
+    let mut seen_dependencies: HashMap<&SymbolId, HashSet<(&str, Option<&str>)>> = HashMap::new();
     for (position, occurrence) in occurrences.iter().enumerate() {
         let (start, end) = (occurrence.span.start_byte as usize, occurrence.span.end_byte as usize);
         if start >= end
@@ -410,6 +545,17 @@ pub(super) fn validate_evidence(stored: &StoredEvidence<'_>) -> Result<(), &'sta
             (Some(path), Some(path_start)) if path_start as usize == end - path.len() => {}
             _ => return Err("an occurrence whose written path disagrees with its stored start"),
         }
+        if occurrence.import_span.as_ref().map(|span| span.start_byte) != import_starts.get(position).copied().flatten() {
+            return Err("an occurrence whose selected import disagrees with its stored start");
+        }
+        if let Some(span) = &occurrence.import_span
+            && (occurrence.confidence != Confidence::Scoped || occurrence.target.id.is_some()
+                || !lines.is_region(span)
+                || !imports_by_span.get(&(span.start_byte, span.end_byte)).is_some_and(|import| &import.span == span
+                    && crate::analysis::name_identity::equal(language, import.alias.as_deref().unwrap_or(&import.name), name)))
+        {
+                return Err("an occurrence whose selected import contradicts its binding");
+        }
         // Candidates are in declaration order (name position, then ID). An
         // omitted record's position is unknown, so only the retained ones
         // are compared.
@@ -433,7 +579,7 @@ pub(super) fn validate_evidence(stored: &StoredEvidence<'_>) -> Result<(), &'sta
                     && occurrence.candidates.is_empty()
                     // A target repeats only its record's name.
                     && match retained(&occurrence.target) {
-                        Some(record) => record.identity.name == name,
+                        Some(record) => crate::analysis::name_identity::equal(language, &record.identity.name, name),
                         None => occurrence.target.id.is_none() || omits_any,
                     }
             }
@@ -442,7 +588,7 @@ pub(super) fn validate_evidence(stored: &StoredEvidence<'_>) -> Result<(), &'sta
                 occurrence.target.id.is_none()
                     && !occurrence.candidates.is_empty()
                     && occurrence.candidates.iter().all(|candidate| {
-                        candidate.name == name
+                        crate::analysis::name_identity::equal(language, &candidate.name, name)
                             && candidate.id.as_ref().is_some_and(|id| ids.insert(id))
                             && names_its_record(candidate, omits_any)
                     })
@@ -474,6 +620,16 @@ pub(super) fn validate_evidence(stored: &StoredEvidence<'_>) -> Result<(), &'sta
             let owner = occurrence.owner.as_ref().and_then(|owner| owner.id.as_ref());
             if let Some(owner) = owner {
                 scoped_by_owner.entry(owner).or_default().push((position, occurrence.target.id.as_ref(), name));
+                if let Some(import) = occurrence.import_span.as_ref().and_then(|span| imports_by_span.get(&(span.start_byte, span.end_byte)))
+                    && seen_dependencies.entry(owner).or_default().insert((&import.name, import.symbol.qualified_name.as_deref()))
+                {
+                        expected_dependencies.entry(owner).or_default().push(SymbolRef {
+                            source_span: None,
+                            id: None,
+                            name: import.name.clone(),
+                            qualified_name: import.symbol.qualified_name.clone(),
+                        });
+                }
             }
             match &occurrence.target.id {
                 Some(target) => {
@@ -492,7 +648,7 @@ pub(super) fn validate_evidence(stored: &StoredEvidence<'_>) -> Result<(), &'sta
     }
     innermost_owners(occurrences, coverage)?;
     if !unbound.is_empty() {
-        unbound_names_have_a_binding(source, &unbound, occurrences, records)?;
+        unbound_names_have_a_binding(source, &unbound, occurrences, records, language)?;
     }
 
     // The records' summaries are derived from the occurrences, so each edge
@@ -501,7 +657,7 @@ pub(super) fn validate_evidence(stored: &StoredEvidence<'_>) -> Result<(), &'sta
     let made = |owner: &SymbolId, target: Option<&SymbolId>, name: &str| {
         [OccurrenceKind::Call, OccurrenceKind::Usage]
             .iter()
-            .any(|&kind| scoped.contains(&(owner, target, name, kind)))
+            .any(|&kind| scoped.iter().any(|&(found_owner, found_target, found_name, found_kind)| found_owner == owner && found_target == target && found_kind == kind && crate::analysis::name_identity::equal(language, found_name, name)))
     };
     let made_to = |owner: &SymbolId, target: &SymbolRecord| made(owner, Some(&target.id), &target.identity.name);
     for record in records {
@@ -541,7 +697,11 @@ pub(super) fn validate_evidence(stored: &StoredEvidence<'_>) -> Result<(), &'sta
                 return Err("a referenced-by edge with no scoped occurrence");
             }
         }
-        summaries_in_first_occurrence_order(record, &scoped_by_owner)?;
+        summaries_in_first_occurrence_order(record, &scoped_by_owner, language)?;
+        if relations.dependencies.as_slice() != expected_dependencies.get(&record.id).map_or(&[][..], Vec::as_slice) {
+            return Err("dependency summaries disagree with the selected imports");
+        }
+
     }
     for &(owner, target, _, _) in &scoped {
         let (Some(owner), Some(target)) = (by_id.get(owner), target) else { continue };
@@ -583,6 +743,7 @@ type ScopedByOwner<'a> = HashMap<&'a SymbolId, Vec<(usize, Option<&'a SymbolId>,
 fn summaries_in_first_occurrence_order(
     record: &SymbolRecord,
     scoped_by_owner: &ScopedByOwner<'_>,
+    language: ProgrammingLanguage,
 ) -> Result<(), &'static str> {
     let relations = &record.relations;
     for list in [&relations.references, &relations.dependencies, &relations.referenced_by] {
@@ -610,7 +771,7 @@ fn summaries_in_first_occurrence_order(
                     .filter(after),
                 None => own
                     .iter()
-                    .filter(|(_, target, name)| target.is_none() && *name == reference.name)
+                    .filter(|(_, target, name)| target.is_none() && crate::analysis::name_identity::equal(language, name, &reference.name))
                     .find(after),
             };
             next.map(|&(position, _, _)| last = Some(position)).is_some()
@@ -693,14 +854,15 @@ fn innermost_owners(occurrences: &[Occurrence], coverage: &[ReferenceCoverage]) 
 /// Identifiers are read as maximal runs of ASCII letters, digits, `_` and
 /// `$`, each run also as its `$`-free pieces (`$` is part of a TS/JS
 /// identifier but starts a Rust macro metavariable); a name outside that
-/// alphabet is not checked. Any other character ends a run, so an
-/// identifier is only ever read as more spellings, never fewer, and the
-/// rule never rejects evidence a fresh analysis could produce.
+/// alphabet is not checked. Raw Rust and escaped ECMA tokens additionally
+/// supply canonical witnesses, excluding the entire declaration or occurrence
+/// token (including its ASCII tail). This check does not require a parse.
 fn unbound_names_have_a_binding(
     source: &str,
     unbound: &[&Occurrence],
     occurrences: &[Occurrence],
     records: &[SymbolRecord],
+    language: ProgrammingLanguage,
 ) -> Result<(), &'static str> {
     let is_identifier_byte = |byte: u8| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'$';
     let checked: HashSet<&str> = unbound
@@ -727,7 +889,7 @@ fn unbound_names_have_a_binding(
         }
         let end = (start..bytes.len()).find(|&at| !is_identifier_byte(bytes[at])).unwrap_or(bytes.len());
         for (from, to) in identifier_readings(start, &bytes[start..end]) {
-            if !taken.contains(&(from as u32, to as u32))
+            if !taken.iter().any(|&(start, end)| start <= from as u32 && to as u32 <= end)
                 && let Some(text) = source.get(from..to)
                 && checked.contains(text)
             {
@@ -736,7 +898,39 @@ fn unbound_names_have_a_binding(
         }
         start = end;
     }
-    if checked.iter().all(|name| written.contains(name)) {
+    // Encoded tokens must be excluded as a whole: the ASCII tail of a raw
+    // identifier or Unicode escape is not a second binding witness.
+    let mut encoded = HashSet::new();
+    let mut at = 0;
+    while at < source.len() {
+        let start = at;
+        let raw = language == ProgrammingLanguage::Rust && source[at..].starts_with("r#");
+        if raw { at += 2; }
+        let mut escaped = false;
+        while at < source.len() {
+            let rest = &source[at..];
+            if matches!(language, ProgrammingLanguage::TypeScript | ProgrammingLanguage::JavaScript) && rest.starts_with("\\u") {
+                escaped = true;
+                at += 2;
+                if source[at..].starts_with('{') {
+                    let Some(end) = source[at..].find('}') else { break };
+                    at += end + 1;
+                } else {
+                    let mut count = 0;
+                    while at < source.len() && count < 4 && source.as_bytes()[at].is_ascii_hexdigit() { at += 1; count += 1; }
+                }
+            } else {
+                let ch = rest.chars().next().expect("character");
+                if ch.is_alphanumeric() || matches!(ch, '_' | '$') { at += ch.len_utf8(); } else { break; }
+            }
+        }
+        if at == start { at += source[at..].chars().next().expect("character").len_utf8(); continue; }
+        if (raw || escaped) && !taken.contains(&(start as u32, at as u32)) {
+            let key = crate::analysis::name_identity::key(language, &source[start..at]).into_owned();
+            if checked.contains(key.as_str()) { encoded.insert(key); }
+        }
+    }
+    if checked.iter().all(|name| written.contains(name) || encoded.contains(*name)) {
         Ok(())
     } else {
         Err("a scoped occurrence with no target ID and no binding of its name")

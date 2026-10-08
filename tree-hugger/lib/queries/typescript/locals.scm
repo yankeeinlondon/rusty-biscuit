@@ -78,3 +78,7 @@
     (identifier)
     (nested_identifier)
   ] @local.definition.namespace) @local.definition.namespace.context
+
+; Overloads and ambient functions bind callable names even without a body.
+(function_signature
+  name: (identifier) @local.definition.function) @local.definition.function.context
