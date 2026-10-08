@@ -78,7 +78,37 @@ annotated tags and, against an unborn `HEAD`, compares the base with the empty
 tree — `Reference("HEAD")` on unborn is an error, keeping explicit `HEAD`
 distinct from omission. See "Changed Paths" in
 [architecture.md](architecture.md) and
-[sniff-library-architecture.md](../../sniff/docs/sniff-library-architecture.md).
+[sniff-library-architecture.md](../../../sniff/docs/sniff-library-architecture.md).
+
+The returned paths include deletions; callers map them onto `repo_root()`,
+check current existence, and match native filesystem identities before
+reading source. A staged deletion recreated on disk is still a candidate.
+File-type replacements count as modifications; rich/path status, fast dirty
+checks, and detailed counts share `status::classify_worktree_status`. Preserve
+the fast dirty reader's early stop when changing that classification.
+Do not use `file_changes()` here: it enriches status with line counts and
+lossy display paths. Preserve native paths through matching, and reject
+conflicts anywhere rather than narrowing conflict checks to a package.
+Tree-hugger's `--changed` is a consumer with optional features disabled.
+All live index boundaries use `open::guard_index_read` / `read_index` to contain
+upstream decoder panics: cache sizing skips failures, while `status_iter` and
+rich `StatusContext::new` propagate typed Git errors. Committed diff caches also
+read the live index for attributes: use guarded `open::tree_diff_cache` for
+commit files, history, structured commits, and tip comparisons. Keep absent/valid empty
+indexes valid and metadata-only consumers independent of readable index state.
+`changed_paths_tests::index_reads` covers every shared consumer; CLI
+`changed::index_corruption` partitions the full prefix/report matrix by shape.
+
+`filesystem::repo::{PackageNameSource, PackageOwnershipLookup}` support callers
+that need declared identity and repeated file ownership. Check `name_source ==
+Manifest`; a nonempty `name` alone may be a relative-path fallback. Legacy
+serialized packages default to `PathFallback` (omitted on serialization).
+Build the borrowing lookup once per `RepoInfo`, then call `package_for_path`
+with absolute native paths. Deepest component boundary wins before checking
+name usability, duplicate aliases use catalog order, and paths outside the root
+return `None`. Root packages have an empty `relative` string. Use the structure
+API with root-package fallback for standalone projects; do not add another
+manifest reader. JSON duplicate names preserve existing last-wins behavior.
 
 `SniffConfig` remains a compatibility surface, but new code should use request
 plans.

@@ -185,14 +185,140 @@ pub(super) fn go_mod_dependencies_from_content(content: &str) -> Option<Vec<Depe
     if deps.is_empty() { None } else { Some(deps) }
 }
 
-/// Extracts the module name from go.mod content (`module` directive).
+/// Read a unique module directive from a lexically well-formed go.mod.
+///
+/// This bounded reader recognizes directives and balanced blocks, but does not
+/// validate dependency versions or resolve modules. Quoted tokens are decoded
+/// before returning the declared identity; malformed documents have no name.
 pub(super) fn go_module_name_from_content(content: &str) -> Option<String> {
-    content.lines().find_map(|line| {
-        let trimmed = line.trim();
-        trimmed
-            .strip_prefix("module ")
-            .map(|value| value.trim().to_string())
-    })
+    let mut module = None;
+    let mut block = false;
+    for line in content.lines() {
+        let tokens = go_manifest_tokens(line)?;
+        if tokens.is_empty() {
+            continue;
+        }
+        if block {
+            if tokens == [")"] {
+                block = false;
+            } else if tokens.iter().any(|token| token == "(" || token == ")") {
+                return None;
+            }
+            continue;
+        }
+        let directive = tokens[0].as_str();
+        if !matches!(directive, "module" | "go" | "toolchain" | "require" | "exclude" | "replace" | "retract" | "tool" | "godebug" | "ignore") {
+            return None;
+        }
+        if tokens.len() == 2 && tokens[1] == "(" {
+            if matches!(directive, "module" | "go" | "toolchain") {
+                return None;
+            }
+            block = true;
+            continue;
+        }
+        if tokens.len() < 2 || tokens.iter().any(|token| token == "(" || token == ")") {
+            return None;
+        }
+        if matches!(directive, "module" | "go" | "toolchain") && tokens.len() != 2 {
+            return None;
+        }
+        if directive == "module" {
+            let name = &tokens[1];
+            if module.is_some() || name.is_empty() || name.chars().any(|c| c.is_whitespace() || c.is_control() || matches!(c, '[' | ']' | '{' | '}' | '"' | '`' | '\\')) {
+                return None;
+            }
+            module = Some(name.clone());
+        }
+    }
+    if block { None } else { module }
+}
+
+fn go_manifest_tokens(line: &str) -> Option<Vec<String>> {
+    let mut tokens = Vec::new();
+    let mut chars = line.char_indices().peekable();
+    while let Some((start, ch)) = chars.next() {
+        if ch.is_whitespace() {
+            continue;
+        }
+        if ch == '/' && chars.peek().is_some_and(|(_, next)| *next == '/') {
+            break;
+        }
+        if ch == '"' || ch == '`' {
+            let mut end = None;
+            while let Some((index, next)) = chars.next() {
+                if next == ch {
+                    end = Some(index);
+                    break;
+                }
+                if ch == '"' && next == '\\' {
+                    chars.next()?;
+                }
+            }
+            let end = end?;
+            let value = if ch == '`' {
+                line[start + 1..end].to_string()
+            } else {
+                go_quoted_token(&line[start + 1..end])?
+            };
+            tokens.push(value);
+            if chars.peek().is_some_and(|(_, next)| !next.is_whitespace() && *next != '/') {
+                return None;
+            }
+        } else {
+            let mut end = line.len();
+            while let Some((index, next)) = chars.peek() {
+                if next.is_whitespace() || *next == '/' && line[*index..].starts_with("//") {
+                    end = *index;
+                    break;
+                }
+                if *next == '"' || *next == '`' {
+                    return None;
+                }
+                chars.next();
+            }
+            tokens.push(line[start..end].to_string());
+        }
+    }
+    Some(tokens)
+}
+
+fn go_quoted_token(value: &str) -> Option<String> {
+    let mut bytes = Vec::new();
+    let mut chars = value.chars();
+    while let Some(ch) = chars.next() {
+        if ch != '\\' {
+            let mut encoded = [0; 4];
+            bytes.extend_from_slice(ch.encode_utf8(&mut encoded).as_bytes());
+            continue;
+        }
+        let escape = chars.next()?;
+        match escape {
+            'a' => bytes.push(7), 'b' => bytes.push(8), 'f' => bytes.push(12),
+            'n' => bytes.push(10), 'r' => bytes.push(13), 't' => bytes.push(9),
+            'v' => bytes.push(11), '\\' => bytes.push(b'\\'), '"' => bytes.push(b'"'),
+            'x' | 'u' | 'U' => {
+                let digits = match escape { 'x' => 2, 'u' => 4, _ => 8 };
+                let mut code = 0_u32;
+                for _ in 0..digits {
+                    code = code.checked_mul(16)?.checked_add(chars.next()?.to_digit(16)?)?;
+                }
+                if escape == 'x' {
+                    bytes.push(u8::try_from(code).ok()?);
+                } else {
+                    let mut encoded = [0; 4];
+                    bytes.extend_from_slice(char::from_u32(code)?.encode_utf8(&mut encoded).as_bytes());
+                }
+            }
+            '0'..='7' => {
+                let mut code = escape.to_digit(8)?;
+                for _ in 0..2 { code = code * 8 + chars.next()?.to_digit(8)?; }
+                bytes.push(u8::try_from(code).ok()?);
+            }
+            _ => return None,
+        }
+    }
+    String::from_utf8(bytes).ok()
 }
 
 #[cfg(test)]

@@ -55,7 +55,7 @@ use super::seed::{PackageSeed, merge_seeds, normalized_key};
 use super::standard::{MonorepoLayer, MonorepoStandard, PackageProvenance, resolve_acting_binary};
 pub(crate) use super::topology::DetectorOutcome;
 use super::topology::{build_detected_standards, build_monorepo_layers, layers_imply_monorepo};
-use super::types::{Package, PackageEcosystem, PackageFiles, PackageScanResult, RepoInfo};
+use super::types::{Package, PackageEcosystem, PackageFiles, PackageNameSource, PackageScanResult, RepoInfo};
 use super::uv::detect_uv_workspace;
 
 /// Borrowed, request-scoped evidence from one shared observation walk.
@@ -209,8 +209,10 @@ fn synthesize_root_package_repo_with_store(
         && let Some(name) = manifests
             .raw_text(&composer_json)
             .and_then(|content| composer_package_name(&content))
+            .filter(|name| !name.trim().is_empty())
     {
         package.name = name;
+        package.name_source = PackageNameSource::Manifest;
     }
     let standalone_lockfiles = observe_standalone_lockfiles(
         root,
@@ -1182,8 +1184,12 @@ fn package_relative_path(package_relative: &str, path: &Path) -> PathBuf {
 // Package name resolution
 // ============================================================================
 
-/// Determines the native package name based on manifests present in the package.
-fn resolve_package_name(ctx: &mut PackageBuildContext<'_>, path: &Path, root: &Path) -> String {
+/// Read declared identity without confusing a fallback label with a manifest name.
+fn resolve_package_name(
+    ctx: &mut PackageBuildContext<'_>,
+    path: &Path,
+    root: &Path,
+) -> (String, PackageNameSource) {
     let cargo_toml = path.join("Cargo.toml");
     if probe_exists(&cargo_toml)
         && let Some(name) = ctx
@@ -1191,8 +1197,9 @@ fn resolve_package_name(ctx: &mut PackageBuildContext<'_>, path: &Path, root: &P
             .cargo(&cargo_toml)
             .as_deref()
             .and_then(cargo_package_name)
+            .filter(|name| !name.trim().is_empty())
     {
-        return name;
+        return (name, PackageNameSource::Manifest);
     }
 
     let package_json = path.join("package.json");
@@ -1202,8 +1209,9 @@ fn resolve_package_name(ctx: &mut PackageBuildContext<'_>, path: &Path, root: &P
             .npm(&package_json)
             .as_deref()
             .and_then(npm_package_name)
+            .filter(|name| !name.trim().is_empty())
     {
-        return name;
+        return (name, PackageNameSource::Manifest);
     }
 
     let pyproject_toml = path.join("pyproject.toml");
@@ -1213,8 +1221,9 @@ fn resolve_package_name(ctx: &mut PackageBuildContext<'_>, path: &Path, root: &P
             .pyproject(&pyproject_toml)
             .as_deref()
             .and_then(pyproject_package_name)
+            .filter(|name| !name.trim().is_empty())
     {
-        return name;
+        return (name, PackageNameSource::Manifest);
     }
 
     let go_mod = path.join("go.mod");
@@ -1224,12 +1233,12 @@ fn resolve_package_name(ctx: &mut PackageBuildContext<'_>, path: &Path, root: &P
             .go_mod(&go_mod)
             .as_deref()
             .and_then(|content| go_module_name_from_content(content))
+            .filter(|name| !name.trim().is_empty())
     {
-        return name;
+        return (name, PackageNameSource::Manifest);
     }
 
-    // Fallback: relative path from root
-    make_relative_path(path, root)
+    (make_relative_path(path, root), PackageNameSource::PathFallback)
 }
 
 /// Determines the package version based on manifests present in the package.
@@ -1808,7 +1817,7 @@ fn create_package_with_request(
     } else {
         Vec::new()
     };
-    let name = resolve_package_name(&mut ctx, path, root);
+    let (name, name_source) = resolve_package_name(&mut ctx, path, root);
     let version = resolve_package_version(&mut ctx, path, root);
 
     let cargo_toml = path.join("Cargo.toml");
@@ -1917,6 +1926,7 @@ fn create_package_with_request(
         relative,
         package_area,
         name,
+        name_source,
         ecosystem,
         standard,
         provenance,
@@ -1956,6 +1966,7 @@ mod tests {
     fn make_test_package(name: &str, deps: Vec<DependencyEntry>) -> Package {
         Package {
             name: name.to_string(),
+            name_source: PackageNameSource::Manifest,
             path: PathBuf::from(name),
             relative: name.to_string(),
             package_area: String::new(),

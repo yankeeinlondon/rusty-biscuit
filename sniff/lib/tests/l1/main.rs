@@ -31,6 +31,7 @@ mod network_primitives;
 mod open_pull_requests;
 #[cfg(feature = "remote")]
 mod pr_for_branch;
+mod package_identity;
 mod program_installable;
 mod program_serialization;
 mod recent_commits;
