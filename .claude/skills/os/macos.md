@@ -222,6 +222,15 @@ focus-stealing tests could run, and they do not run on CI at all. Details in
   `scripts/kache-host.sh probe-passthrough`). Measured 2026-09-23; details in
   the `kache` skill's `installation.md`.
 
+- **Concurrent tree-hugger corpus checks and Clippy can exhaust L1 budgets.** On 2026-10-07, the default-worker full suite ran beside sniff tests and Clippy; two unchanged CLI cache-robustness corpus tests exceeded 30 seconds. The same pair passed in isolation at two workers in 6.6 and 7.0 seconds. Finish competing compiles and verify the full suite with bounded workers before changing test timeouts or treating the result as a Git-index defect.
+- **Concurrent Sniff host probes can exceed the L1 timeout.** On 2026-10-07,
+  a default-concurrency `just test` timed out four unchanged CoreAudio/audio
+  hardware tests at 30 s while network-interface probes approached 29 s.
+  `just test detect_audio_devices_on_macos --test-threads 1` passed in 9.875 s;
+  `just test --test-threads 4` then passed all 3,154 L1 tests. Suspect host-probe
+  contention when these unrelated probes slow together; verify with bounded
+  workers before changing timeout policy or treating the result as a Git defect.
+
 ## Diagnosing a slow host
 
 - Pair load average with idle CPU: `sysctl -n vm.loadavg` and `top -l 1 -n 0
@@ -289,3 +298,11 @@ When walking shared-cache dependencies, `dyld_info -linked_dylibs` marks
 `/usr/lib/libobjc-env.dylib` this way; treating it as a required library falsely
 rejects valid programs. Traverse required dependencies and preserve the weak
 import distinction.
+
+### Non-UTF-8 filename fixtures
+
+APFS on this macOS host rejects invalid UTF-8 directory names with error 92,
+`Illegal byte sequence`. Gate tests requiring actual byte-named files to an OS
+whose filesystem supports them. Native-path lookup tests can instead build a
+catalog of nonexistent paths under a canonicalized temporary root; this proves
+byte identity without asking APFS to create an unsupported filename.
