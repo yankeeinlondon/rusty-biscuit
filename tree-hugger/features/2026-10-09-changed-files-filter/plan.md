@@ -4,7 +4,7 @@ feature: changed-files-filter
 spec: spec.md
 total_phases: 5
 created: 2026-10-05
-phase: 4
+phase: 5
 agent: claude/sonnet
 yolo: true
 packages: [sniff, tree-hugger-cli]
@@ -48,6 +48,56 @@ docs_updated_during_phase_4:
   - tree-hugger/features/2026-10-09-changed-files-filter/spec.md
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4: []
+source_files_during_phase_5:
+  - tree-hugger/cli/src/main.rs
+  - tree-hugger/cli/tests/changed/parser.rs
+docs_updated_during_phase_5:
+  - docs/dependencies.md
+  - sniff/docs/dependencies.md
+  - tree-hugger/cli/README.md
+  - tree-hugger/docs/dependencies.md
+  - tree-hugger/docs/symbol-reports.md
+  - tree-hugger/features/2026-10-09-changed-files-filter/plan.md
+  - tree-hugger/features/2026-10-09-changed-files-filter/implementation-log.md
+  - tree-hugger/features/2026-10-09-changed-files-filter/spec.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .claude/skills/tree-hugger/SKILL.md
+  - .claude/skills/sniff/SKILL.md
+source_code:
+  - sniff/lib/src/error.rs
+  - sniff/lib/src/filesystem/mod.rs
+  - sniff/lib/src/filesystem/git/mod.rs
+  - sniff/lib/src/filesystem/git/status.rs
+  - sniff/lib/src/filesystem/git/discovery.rs
+  - sniff/lib/src/filesystem/git/types.rs
+  - sniff/lib/src/filesystem/git/changed_paths_tests.rs
+  - tree-hugger/cli/src/changed.rs
+  - tree-hugger/cli/src/main.rs
+  - tree-hugger/cli/Cargo.toml
+  - tree-hugger/cli/tests/changed/main.rs
+  - tree-hugger/cli/tests/changed/parser.rs
+  - tree-hugger/cli/tests/changed/selection.rs
+  - tree-hugger/cli/tests/changed/failure.rs
+  - tree-hugger/cli/tests/changed/empty.rs
+  - tree-hugger/cli/tests/changed/cache.rs
+  - tree-hugger/cli/tests/changed/paths.rs
+  - Cargo.lock
+documentation:
+  - sniff/docs/sniff-library-architecture.md
+  - .claude/skills/sniff/SKILL.md
+  - .claude/skills/os/macos.md
+  - .claude/skills/tree-hugger/SKILL.md
+  - tree-hugger/features/2026-10-09-changed-files-filter/plan.md
+  - tree-hugger/features/2026-10-09-changed-files-filter/implementation-log.md
+  - tree-hugger/features/2026-10-09-changed-files-filter/spec.md
+  - docs/dependencies.md
+  - sniff/docs/dependencies.md
+  - tree-hugger/cli/README.md
+  - tree-hugger/docs/dependencies.md
+  - tree-hugger/docs/symbol-reports.md
+completed_phase: 5
+implemented: true
 ---
 
 # Plan: `--changed` File Selection for Symbol Reports
@@ -282,7 +332,7 @@ runs byte-identical (golden fixtures unchanged).
 
 ### Wave 2 (sequential)
 
-- [ ] **Full runs** — `just test` and `just lint` in `tree-hugger` and `sniff`;
+- [x] **Full runs** — `just test` and `just lint` in `tree-hugger` and `sniff`;
   `just test-l2` in `tree-hugger` only if L2 files changed; confirm existing
   golden fixtures untouched.
 - [x] **OS review** — apply the `os` skill checklist to `#[cfg]` and path
@@ -295,25 +345,25 @@ runs byte-identical (golden fixtures unchanged).
 
 ### Wave 1 (parallel; disjoint files)
 
-- [ ] **tree-hugger docs** — CLI README and `tree-hugger/docs/symbol-reports.md`:
+- [x] **tree-hugger docs** — CLI README and `tree-hugger/docs/symbol-reports.md`:
   examples for default `HEAD`, `=main` local-tip comparison, selector
   intersection, empty success, and the prelude policy. Written for a reader
   new to the repo, with a Mermaid diagram of the changed-set → intersection
   flow. Do not link to or name this feature.
-- [ ] **Skills** — `.claude/skills/tree-hugger/SKILL.md` and
+- [x] **Skills** — `.claude/skills/tree-hugger/SKILL.md` and
   `.claude/skills/sniff/` guidance for the flag and the path-only method.
-- [ ] **Dependencies** — `docs/dependencies.md` and applicable per-area
+- [x] **Dependencies** — `docs/dependencies.md` and applicable per-area
   `dependencies.md` pages for the new sniff dependency.
-- [ ] **Help text** — final wording of `--changed` help, including the equals
+- [x] **Help text** — final wording of `--changed` help, including the equals
   form and prelude conflict.
 
 ### Wave 2 (sequential)
 
-- [ ] **Comment and drift pass** — review `///` and `//` comments on every
+- [x] **Comment and drift pass** — review `///` and `//` comments on every
   touched symbol; fix drift (code is authoritative) and report any found.
-- [ ] **Spec departures** — if the implementation departs from the spec, record
+- [x] **Spec departures** — if the implementation departs from the spec, record
   it in `implementation-log.md` and correct the docs; leave `spec.md` as is.
-- [ ] **Final verification** — rerun `just test` and `just lint` in both areas;
+- [x] **Final verification** — rerun `just test` and `just lint` in both areas;
   set the spec's `implemented`/`implemented_by` per the lifecycle; stop at
   "implementation complete, ready for review" (never move to `_completed`,
   never run `just complete`, never commit unless asked).

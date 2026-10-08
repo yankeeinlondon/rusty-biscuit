@@ -44,6 +44,56 @@ docs_updated_during_phase_4:
   - tree-hugger/features/2026-10-09-changed-files-filter/spec.md
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4: []
+source_files_during_phase_5:
+  - tree-hugger/cli/src/main.rs
+  - tree-hugger/cli/tests/changed/parser.rs
+docs_updated_during_phase_5:
+  - docs/dependencies.md
+  - sniff/docs/dependencies.md
+  - tree-hugger/cli/README.md
+  - tree-hugger/docs/dependencies.md
+  - tree-hugger/docs/symbol-reports.md
+  - tree-hugger/features/2026-10-09-changed-files-filter/plan.md
+  - tree-hugger/features/2026-10-09-changed-files-filter/implementation-log.md
+  - tree-hugger/features/2026-10-09-changed-files-filter/spec.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .claude/skills/tree-hugger/SKILL.md
+  - .claude/skills/sniff/SKILL.md
+source_code:
+  - sniff/lib/src/error.rs
+  - sniff/lib/src/filesystem/mod.rs
+  - sniff/lib/src/filesystem/git/mod.rs
+  - sniff/lib/src/filesystem/git/status.rs
+  - sniff/lib/src/filesystem/git/discovery.rs
+  - sniff/lib/src/filesystem/git/types.rs
+  - sniff/lib/src/filesystem/git/changed_paths_tests.rs
+  - tree-hugger/cli/src/changed.rs
+  - tree-hugger/cli/src/main.rs
+  - tree-hugger/cli/Cargo.toml
+  - tree-hugger/cli/tests/changed/main.rs
+  - tree-hugger/cli/tests/changed/parser.rs
+  - tree-hugger/cli/tests/changed/selection.rs
+  - tree-hugger/cli/tests/changed/failure.rs
+  - tree-hugger/cli/tests/changed/empty.rs
+  - tree-hugger/cli/tests/changed/cache.rs
+  - tree-hugger/cli/tests/changed/paths.rs
+  - Cargo.lock
+documentation:
+  - sniff/docs/sniff-library-architecture.md
+  - .claude/skills/sniff/SKILL.md
+  - .claude/skills/os/macos.md
+  - .claude/skills/tree-hugger/SKILL.md
+  - tree-hugger/features/2026-10-09-changed-files-filter/plan.md
+  - tree-hugger/features/2026-10-09-changed-files-filter/implementation-log.md
+  - tree-hugger/features/2026-10-09-changed-files-filter/spec.md
+  - docs/dependencies.md
+  - sniff/docs/dependencies.md
+  - tree-hugger/cli/README.md
+  - tree-hugger/docs/dependencies.md
+  - tree-hugger/docs/symbol-reports.md
+completed_phase: 5
+implemented: true
 ---
 
 # Implementation Log for 2026-10-09-changed-files-filter (5 phases)
@@ -682,3 +732,160 @@ and representation listed in the initial mapping.
 | Native paths, ordering, spaces, Unicode, byte names, case aliases | `paths::spaced_and_non_ascii_paths_are_reported_once`; `paths::non_utf8_paths_are_selected_where_the_filesystem_allows_them`; `paths::case_insensitive_spelling_differences_resolve_to_one_identity` |
 | Syntax and command surface | `parser::the_bare_flag_and_the_equals_form_both_run`; `parser::a_token_after_the_bare_flag_stays_a_positional_filter`; `parser::an_empty_value_is_an_argument_error`; `parser::a_repeated_flag_is_an_argument_error`; `parser::the_flag_conflicts_with_prelude`; `parser::only_the_declaration_commands_accept_the_flag`; `parser::all_four_declaration_commands_accept_the_flag`; `parser::json_full_combines_with_the_flag` |
 | One focused status observation, no optional rich work | `sniff::filesystem::git::changed_paths_tests::changed_paths_performs_one_status_walk_and_no_diff_work` (Phase 2 evidence; unchanged, not rerun this phase) |
+
+### Completion record
+
+| Verification | Final result |
+| --- | --- |
+| `just test --test changed` (latest source) | 47/47 passed |
+| `just test --test-threads 4` (full tree-hugger area, latest source) | **1844/1844 passed**, 0 failed, 0 timed out, 0 nextest skips; 426.192 seconds |
+| `just lint` (latest source) | Passed, both tree-hugger and tree-hugger-cli |
+| `just check-tier-coverage tree-hugger` | Passed, 0 stranded tests |
+| `git diff --check` | Passed |
+
+The three initial timeout cases passed in the full rerun at 22.752 seconds,
+25.210 seconds, and 10.708 seconds respectively. No remaining pre-existing
+failure blocks this phase. The non-UTF-8 worktree scenario remains
+inapplicable on macOS, as explicitly documented above; nextest counts that
+conditional return as passed rather than skipped. No L2, sniff-area, or
+cross-OS gates were run in this phase, for the reasons recorded above.
+
+All eight Phase 4 checklist tasks are complete. Phase 5 is intentionally
+left open. Implementation complete for Phase 4, ready for review; no human
+ruling is needed before Phase 5. No formatting, staging, or commits were
+performed by this session.
+
+Final scope calculator after source, checklist, and frontmatter edits: {"packages": [], "change_class": "documentation"}; both required area gates ran.
+
+## Phase 5
+
+### Scope and requirement-to-test mapping
+
+Phase 5 closes documentation and help wording; selection, parsing, cache,
+and persistence behavior remain as implemented in Phases 2–4. Before any
+implementation edit, help wording is mapped to the new L1 CLI test
+`parser::declaration_help_explains_changed_selection`: normal
+`hug <command> --help` and `-h` invocations for all four declaration commands
+assert equals-form syntax, current on-disk reporting, direct tip comparison,
+and the prelude conflict in long help, plus availability in short help.
+The existing `changed` target declares this file via `mod parser`; no
+tier marker or additional feature is required.
+
+Documentation examples map to existing public CLI tests: bare/equals forms
+and prelude conflict (`parser`), divergent tips and selector intersection
+(`selection`), empty representations and zero work (`empty`), warm-cache
+sharing (`cache`), and Git failures without success output (`failure`).
+No file-format/configuration reader, parser artifact, or persistence behavior
+changes: robustness matrices, passive parser corpus tests, and new round
+trips are not applicable. Existing cache tests retain repeated reads.
+
+The initial working tree has three staged lifecycle documents from earlier
+work; their contents and index entries are preserved. No formatting, staging,
+committing, or lifecycle directory move is authorized. The explicit user
+scope limits Phase 5 gates to tree-hugger, overriding the plan's older
+request to rerun sniff gates. An initial command used the area directory
+with root-relative edit paths and failed before any writes; its filtered
+run selected zero tests and is not verification evidence.
+
+### Documentation, skills, and drift review
+
+Updated CLI README and Symbol Reports with examples for bare HEAD, local
+`=main` tip comparison, file intersection, full JSON and empty count. The
+topic page explains all selection/error rules for a new reader and includes
+a Mermaid union → intersection → analysis/report flow. No topic page links
+to or names the feature snapshot. Dependency notes at root and in both areas
+record the production sniff edge with optional features disabled and the
+dev-only git2/libgit2-sys fixture constraints. The sniff Git API topic page
+already documents the full method contract from Phase 2 and was verified
+against its current implementation; no rewrite was needed.
+
+Expanded tree-hugger skill guidance for invocation, selection order, native
+identities, errors, empty success, cache invariants and test routing. Expanded
+sniff skill guidance for deleted/recreated candidates and native matching.
+Both catalogs (.claude and .opencode) share content. Fixed a drifted sniff
+skill link: its old relative path did not reach the Git API topic page.
+
+Reviewed ChangedArgs docs, request conversion and changed-set resolution
+comments, main's intersection/empty path, sniff ChangedBase/changed_paths
+rustdoc and the dependency comments. The implemented contracts match; the
+public help omitted the existing prelude conflict. Added the test first:
+`just test declaration_help_explains_changed_selection` ran one test and
+failed specifically on the missing conflict sentence. Added that sentence
+to clap's doc-derived long help without changing flag semantics. No behavior
+departures from the spec; the only verification scope departure is honoring
+the user's tree-hugger-only gates. Existing OS evidence remains as recorded
+in Phase 4; Phase 5 adds only help text and platform-neutral CLI assertions.
+
+The empty-output drift check confirmed text modes show `(no symbols)`
+(there are zero declaration records, not zero output bytes), while JSON
+Lines emits no bytes. README/topic/skill wording now states the observable
+marker; the existing empty-mode tests pin this behavior. Code remains
+authoritative and no renderer change was made.
+
+`just test --test changed`: **48/48 passed**, including the formerly failing
+help regression; zero skipped tests in that invocation. The non-UTF-8 path
+test's macOS conditional return is still the Phase 4 platform limitation,
+not new path evidence. `just lint`: **passed** for tree-hugger and
+tree-hugger-cli, including all targets with warnings denied.
+`just check-tier-coverage tree-hugger`: **passed**, zero stranded tests.
+Full area L1 is running via `just test -j 4`, preserving the proven Phase 4
+concurrency without changing any timeout or retry policy.
+
+Scope command after documentation and lifecycle metadata edits:
+
+```sh
+git status --porcelain --untracked-files=all | awk '{print $NF}' \
+  | xargs python3 scripts/ci/affected_scope.py
+```
+
+Returned `packages: [tree-hugger-cli, test-toolkit]`,
+`source_packages: [tree-hugger-cli]`, `change_class: package`. The toolkit
+cell reads shipped skills as suite inputs; no toolkit code was edited.
+No gate skip is claimed; required tree-hugger gates ran. Other package
+gates are excluded by the user's explicit tree-hugger-only scope.
+
+Final aggregate ledgers union all per-phase source and documentation lists,
+normalizing prior .opencode skill aliases to tracked .claude paths. The
+root Cargo.lock dependency update is included: it was committed with the
+CLI feature but omitted from earlier per-phase frontmatter. Independent
+reference-report changes sharing that earlier commit are outside this
+feature ledger. Every aggregate entry exists in the working tree.
+
+### Final verification and completion
+
+| Requirement | Concrete public-result test | Phase 5 result |
+| --- | --- | --- |
+| Long help explains equals syntax, current source, direct tips and prelude conflict; short help advertises the flag on all four commands | `changed::parser::declaration_help_explains_changed_selection` (new) | Failed before the help edit; passed after, and in full L1 |
+| Default HEAD and local reference examples | `parser::the_bare_flag_and_the_equals_form_both_run`, `selection::a_supplied_branch_tip_compares_tips_not_the_merge_base` | Passed in targeted and full L1 |
+| File intersection and selection precedence | `selection::selectors_intersect_the_changed_set`, `selection::tracked_ignored_files_and_combined_selectors_keep_existing_precedence` | Passed in targeted and full L1 |
+| Empty success and zero analysis/cache work | `empty::deleted_only_changes_render_the_empty_report_in_every_mode` and excluded/unsupported/out-of-selection variants | Passed in targeted and full L1 |
+| Prelude and malformed argument errors; Git failures produce no report | `parser::the_flag_conflicts_with_prelude`, empty/repeated parser tests, all `failure` tests | Passed in targeted and full L1 |
+| Selection-independent cache and repeated reads | `cache::an_ordinary_scan_then_a_changed_scan_hits_the_same_entry`, `cache::a_changed_scan_then_an_ordinary_scan_hits_the_same_entry` | Passed in targeted and full L1 |
+
+- `just test --test changed`: **48 passed, 0 skipped**.
+- `just test -j 4` in tree-hugger: **1845 passed, 0 skipped**, 355.727s;
+  all area L1 library/CLI tests, including the new help regression, ran.
+- `just lint` in tree-hugger: **passed**, both packages and all targets,
+  warnings denied. The shared lint recipe does not run cargo fmt.
+- `just check-tier-coverage tree-hugger`: **passed**, zero stranded tests.
+- `git diff --check`: **passed**; no formatter was run.
+
+No unresolved or pre-existing failure affected these final gates. The
+initial zero-test invocation was a working-directory mistake and is not
+counted; the deliberate one-test red run established the help regression.
+No L2 files, styled rendering, path comparison or OS-specific implementation
+changed, so L2 and cross-OS gates were not rerun. The Unix non-UTF-8 fixture
+cannot be created on macOS and retains its existing conditional return;
+Linux/WSL path evidence follows the previously recorded runs and CI schedule.
+Sniff and test-toolkit gates were not rerun under the user's explicit area
+scope; sniff's unchanged API retains its earlier evidence. No CI cells were
+added, and no test timeout or retry policy was changed.
+
+All Phase 5 tasks are checked. Plan/log record Phase 5 file lists, aggregate
+source/documentation ledgers, `completed_phase: 5` and `implemented: true`.
+Spec records `implemented: true`, `implemented_by: codex/gpt-6.1-sol`,
+`human_review: false` and a review handoff. No human ruling is needed.
+Implementation complete, ready for review. The feature stays in place; no
+formatting, staging or commits were performed.
+
+Final scope calculator after all edits and completion flags: `{"packages": ["tree-hugger-cli", "test-toolkit"], "source_packages": ["tree-hugger-cli"], "change_class": "package"}`. Both required area gates passed; none were skipped.
