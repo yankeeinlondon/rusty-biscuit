@@ -82,6 +82,7 @@ hold the rest:
   PowerShell given Git Bash's extra variables or its `PATH` order. So the
   trigger is an MSYS ancestor, not an environment value. Reproduce a Windows
   failure from the PowerShell tool before diagnosing it. Found 2026-10-08.
+- **A `.cmd` shim costs ~17 ms of `cmd.exe` per launch, and a fixture that  spawns git dozens of times pays it every time.** Measured 2026-10-09: 20  `git rev-parse` calls took 567 ms direct and 919 ms through a `git.cmd`.  `pr_flow_rehearsal` installs `claudine-fake-relay` as `git.exe` with  `"forward": true` instead. Likewise, one `git config` spawn is ~50 ms:  write a fixture repository's config straight into `.git/config`.
 - **A Cygwin install on the machine `PATH` takes over `just` recipes.** On the
   `B:` dev host `C:\cygwin64\bin` is a machine entry, which Windows places ahead
   of every user entry, so `bash`, `env`, `mktemp`, and `python3` resolve to
@@ -188,6 +189,17 @@ hold the rest:
   stderr) and is fixed by `process_group(0)` plus a negative-PID `SIGKILL`.
   Measured on build-win-native, 2026-09-24
   (`worktree/fixes/2026-09-24-ux-improvements/spike-s2.md`).
+- **A named pipe's name outlives the dropped server handle for a moment.**
+  Closing the last instance cancels the pending `ConnectNamedPipe` in the
+  kernel asynchronously, so a client opening the name right after
+  `ServerHandle::shutdown()` returned could still succeed, then fail mid-RPC
+  with `Unknown`, `Cancelled` or `Unavailable` ("transport error"). Unix
+  unlinks the socket synchronously and never shows it. Under load (40 parallel
+  copies) `steering::tests::with_daemon::a_restarted_daemon_gets_a_fresh_registration_and_nothing_is_replayed`
+  failed 39 of 40 times with `Unknown` instead of `Unavailable`, yet passed
+  alone. The pipe cleanup's `wait_released` now polls the name until it
+  resolves `NotFound` (bounded 2 s). To reproduce a test that is flaky on one
+  OS, run its binary 40 times in parallel (`--exact`), not nextest once.
 
 ## Current-directory locks
 

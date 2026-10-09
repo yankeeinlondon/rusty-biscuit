@@ -192,7 +192,14 @@ Compare against that, never against `to_string_lossy()`.
     `FileReference::new("docs/*.md")` is a `NoMatch` on every OS. Found
     2026-10-02 on `build-win-native`
     (`glob_reference::literal::a_literal_miss_that_looks_like_a_glob_hints_at_glob_references`).
-
+17. **Test expectations built from raw `fs::canonicalize` fail against
+    production output that is already simplified** (left `C:\…`, right
+    `\\?\C:\…`): build the expected value with
+    `biscuit_file::canonicalize_simplified`. Likewise a fixture path `"/repo/x.md"`
+    is rootless on Windows and renders as `file:///B:/repo/x.md` (current
+    drive); use `C:/repo/x.md` and expect `file:///C:/repo/x.md` there.
+    Found 2026-10-09 in Darkmatter `resolves_repo_root_reference`,
+    `meta_schema_reference_graph`, and the two `file://` diagnostic tests.
 
 ## Worktree include links and junctions
 
