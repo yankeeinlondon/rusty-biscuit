@@ -2,6 +2,8 @@
 use std::path::Path;
 use crate::{Repo, MAIN_BRANCH, commit_index, files_and_names, json_of};
 
+/// Symlinks `alias` to `target`. On Windows a target spelled with `/` does
+/// not resolve, so callers join relative targets name by name.
 fn link(target: &Path, alias: &Path) {
     #[cfg(unix)]
     std::os::unix::fs::symlink(target, alias).unwrap();
@@ -144,7 +146,7 @@ fn nested_candidate_alias_cannot_return_changed_identity_to_outer_checkout() {
     let repo = Repo::committed(&[("clean.rs", "fn clean() {}\nstruct Clean;\n")]);
     let inner = repo.dir.path().join("inner");
     std::fs::create_dir(&inner).unwrap();
-    link(Path::new("../clean.rs"), &inner.join("alias.rs"));
+    link(&Path::new("..").join("clean.rs"), &inner.join("alias.rs"));
     repo.stage("inner/alias.rs");
     commit_index(repo.dir.path(), "tracked alias", MAIN_BRANCH);
     crate::git_init(&inner);
@@ -155,12 +157,12 @@ fn nested_candidate_alias_cannot_return_changed_identity_to_outer_checkout() {
     assert!(changed.contains(&Path::new("inner").join("alias.rs")), "tracked alias must supply changed evidence");
     assert_rejected(&repo, "--changed", "clean.rs");
     std::fs::create_dir(inner.join("subdir")).unwrap();
-    link(Path::new("../../clean.rs"), &inner.join("subdir").join("back.rs"));
+    link(&Path::new("..").join("..").join("clean.rs"), &inner.join("subdir").join("back.rs"));
     #[cfg(unix)]
     std::os::unix::fs::symlink(Path::new("inner/subdir"), repo.dir.path().join("bridge")).unwrap();
     #[cfg(windows)]
-    std::os::windows::fs::symlink_dir(Path::new("inner/subdir"), repo.dir.path().join("bridge")).unwrap();
-    link(Path::new("bridge/back.rs"), &repo.dir.path().join("alias.rs"));
+    std::os::windows::fs::symlink_dir(Path::new("inner").join("subdir"), repo.dir.path().join("bridge")).unwrap();
+    link(&Path::new("bridge").join("back.rs"), &repo.dir.path().join("alias.rs"));
     assert_rejected(&repo, "--changed", "alias.rs");
     assert_rejected(&repo, "--changed", "clean.rs");
 }
@@ -176,7 +178,7 @@ fn external_directory_alias_cannot_return_changed_identity_to_active_checkout() 
     std::os::unix::fs::symlink(&subdir, repo.dir.path().join("bridge")).unwrap();
     #[cfg(windows)]
     std::os::windows::fs::symlink_dir(&subdir, repo.dir.path().join("bridge")).unwrap();
-    link(Path::new("bridge/back.rs"), &repo.dir.path().join("alias.rs"));
+    link(&Path::new("bridge").join("back.rs"), &repo.dir.path().join("alias.rs"));
     // The final identity is local, but changed evidence crosses the foreign
     // directory before returning; neither selector may inherit eligibility.
     assert_eq!(tree_hugger::file_identity(&repo.dir.path().join("alias.rs")), tree_hugger::file_identity(&repo.dir.path().join("clean.rs")));
