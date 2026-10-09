@@ -100,8 +100,10 @@ hold the rest:
 - **Three ways a bash script loses data on Windows** (found 2026-10-09 making
   `scripts/ci/test_ci_local.py` pass there):
   - Native `jq.exe` ends `-r` lines with CRLF, so a name read back keeps a
-    `\r` and matches nothing. `jq --binary` keeps LF; `just ci-local` wraps
-    `jq` that way when `OS=Windows_NT`.
+    `\r` and matches nothing. `jq --binary` keeps LF; `just ci-local` and the
+    pre-push hook wrap `jq` that way when `OS=Windows_NT`. In the hook it
+    surfaced as "branch main does not exist on origin": the PR base read back
+    from `gh pr list` was `main\r`. Cygwin's `jq` writes LF, which hid it.
   - `subprocess.run([bash, "-c", script])` passes the script on the command
     line, where MSYS and Cygwin bash re-split it at nested quotes and run only
     the first fragment, exiting 0. Write the script to a file and run
