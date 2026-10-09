@@ -166,14 +166,14 @@ impl TtsExecutor for SapiProvider {
                     provider: "SAPI".to_string(),
                     source,
                 })?;
-            return if output.status.success() {
+            if output.status.success() {
                 Ok(())
             } else {
                 Err(TtsError::ProcessFailed {
                     provider: "SAPI".to_string(),
                     stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
                 })
-            };
+            }
         }
         #[cfg(not(target_os = "windows"))]
         {
@@ -222,10 +222,10 @@ impl TtsExecutor for SapiProvider {
     ) -> Result<playa::detached::SpoolJob, TtsError> {
         #[cfg(target_os = "windows")]
         {
-            return crate::playa_bridge::command_job(
+            crate::playa_bridge::command_job(
                 "powershell.exe",
                 Self::command_args(text, config),
-            );
+            )
         }
         #[cfg(not(target_os = "windows"))]
         {
