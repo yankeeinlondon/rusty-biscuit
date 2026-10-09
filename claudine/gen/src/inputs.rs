@@ -377,7 +377,7 @@ pub fn area_resolution_context(
     build_resolution_context(&snapshot.at_request_dir(area)).map_err(|source| {
         GenError::ResolutionContext {
             area: area.to_path_buf(),
-            source,
+            source: Box::new(source),
         }
     })
 }
