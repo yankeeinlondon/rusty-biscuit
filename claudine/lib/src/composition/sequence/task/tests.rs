@@ -283,11 +283,18 @@ fn write_yaml(dir: &Path, name: &str, value: &Value) {
     fs::write(dir.join(name), serde_json::to_string_pretty(value).unwrap()).unwrap();
 }
 
-/// `path` as a diagnostic names it: canonical, then portable. Sequence
-/// resolution canonicalizes document paths, which re-spells the Windows
-/// runner's 8.3 `RUNNER~1` temp directory and macOS's `/var` symlink.
-fn reported_source(path: &Path) -> String {
-    biscuit_file::to_portable_string(&biscuit_file::canonicalize_simplified(path).unwrap())
+/// `path` in the portable spelling `message` names it by. An external task
+/// document is canonicalized, which re-spells the Windows runner's 8.3
+/// `RUNNER~1` temp directory and macOS's `/var` symlink; the sequence's own
+/// document keeps the spelling it was opened with. Either names the same file.
+fn reported_source(path: &Path, message: &str) -> String {
+    let raw = biscuit_file::to_portable_string(path);
+    let canonical =
+        biscuit_file::to_portable_string(&biscuit_file::canonicalize_simplified(path).unwrap());
+    [raw, canonical]
+        .into_iter()
+        .find(|spelling| message.contains(spelling.as_str()))
+        .unwrap_or_else(|| panic!("{message}\nnames neither spelling of {}", path.display()))
 }
 
 /// A sequence document whose single step is the task under test.
@@ -2920,7 +2927,7 @@ mod task_stack_diagnostics {
         let info = &outcome.error.as_ref().expect("the stack failure is reported").info;
         let snapshot = info.snapshot.as_ref().expect("stack failures are typed");
         let err_value = info.to_value();
-        let source = reported_source(expected_source);
+        let source = reported_source(expected_source, &snapshot.message);
 
         // `info.property` is the executor's own finding, so only a runtime
         // failure has one; a parse failure's path lives in the typed snapshot
@@ -3901,7 +3908,7 @@ mod serial_groups {
         let info = &outcome.error.as_ref().expect("group failure is reported").info;
         let snapshot = info.snapshot.as_ref().expect("set failures are typed");
         let err_value = info.to_value();
-        let source = reported_source(expected_source);
+        let source = reported_source(expected_source, &snapshot.message);
 
         assert_eq!(info.property.as_deref(), Some(expected_property));
         assert_eq!(snapshot.detail["property"], json!(expected_property));
