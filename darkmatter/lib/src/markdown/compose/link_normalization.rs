@@ -834,7 +834,7 @@ mod tests {
     fn env_options(root: &Path) -> ComposeRequest {
         let env = HashMap::from([(
             "PROJECT_ROOT".to_string(),
-            env_value(&root),
+            env_value(root),
         )]);
         detached_options(root, env).derive(|options| options.with_portable_env(["PROJECT_ROOT"]))
     }

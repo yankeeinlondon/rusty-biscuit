@@ -804,6 +804,7 @@ fn schema_detect_infers_references_in_the_document_context() {
     // The workspace spelling and the canonical one differ where the temp
     // directory is a symlink (macOS `/var` for `/private/var`); a link to the
     // source repository gives every Unix host a second spelling.
+    #[cfg_attr(not(unix), allow(unused_mut))]
     let mut spellings = vec![("workspace spelling", document.clone()), ("canonical spelling", canonical)];
     #[cfg(unix)]
     {
