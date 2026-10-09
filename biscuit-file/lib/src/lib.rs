@@ -145,8 +145,8 @@ pub use self::toml_impl::{Toml, TomlError, TomlSource};
 pub use self::yaml::{
     EditAudit, EditRejection, EditSetOutcome, RejectedEdit, Yaml, YamlAnalysis, YamlCertainty,
     YamlDiagnostic, YamlDiagnosticCode, YamlError, YamlLocation, YamlParseFailure,
-    YamlParseOutcome, YamlPathSegment, YamlRepair, YamlSource, YamlValueLocation, analyze_yaml,
-    apply_edit_set, locate_yaml_key, locate_yaml_value,
+    YamlParseOutcome, YamlPathSegment, YamlRepair, YamlSource, YamlValueLocation,
+    YamlValueProperties, analyze_yaml, apply_edit_set, locate_yaml_key, locate_yaml_value,
 };
 
 #[cfg(feature = "yaml")]

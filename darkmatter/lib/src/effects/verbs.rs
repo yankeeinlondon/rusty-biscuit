@@ -5,7 +5,7 @@ use crate::effects::error::EffectError;
 use crate::effects::fs_write::{append_guarded, atomic_write_guarded, ensure_within};
 use crate::markdown::FrontmatterMap;
 use crate::markdown::Markdown;
-use crate::markdown::hash::MdHashOptions;
+use crate::markdown::hash::{Change, MdHashOptions};
 use biscuit_file::file_reference::fetch::{FetchPolicy, HostPattern};
 use serde_json::Value;
 use std::path::PathBuf;
@@ -38,16 +38,16 @@ impl EffectEngine {
     /// Serializes, optionally re-hashes, and atomically writes the document.
     fn save(&self, raw_path: &str, md: &Markdown) -> Result<(), EffectError> {
         let path = self.resolve(raw_path)?;
-        let serialized = if self.auto_rehash() && md.frontmatter().as_map().contains_key("hash") {
-            let opts = MdHashOptions::default();
-            let decision = md
-                .plan_hash_save(None, &opts)
-                .map_err(|e| EffectError::Markdown(e.to_string()))?;
-            let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-            md.apply_hash_save(&decision, &opts, &today)
-                .unwrap_or_else(|| md.as_string())
+        let opts = MdHashOptions::default();
+        let serialized = md.as_string();
+        let has_hash = md.frontmatter().as_map().contains_key(&opts.property);
+        let serialized = if self.auto_rehash() && has_hash {
+            md.stamp_baseline(&serialized, &opts, chrono::Utc::now(), Change::Known)
+                .map_err(|e| EffectError::Markdown(e.to_string()))?
+                .text
+                .unwrap_or(serialized)
         } else {
-            md.as_string()
+            serialized
         };
         atomic_write_guarded(self.mutation_root(), &path, serialized.as_bytes())
     }
@@ -413,7 +413,12 @@ mod tests {
     fn set_frontmatter_writes_and_rehashes() {
         let dir = tempfile::TempDir::new().unwrap();
         let file = dir.path().join("d.md");
-        std::fs::write(&file, "---\ntitle: T\nhash: stale\n---\nBody\n").unwrap();
+        let stale = "1111111111111111-2222222222222222";
+        std::fs::write(
+            &file,
+            format!("---\ntitle: T\nhash: {stale}\nlast_updated: 2020-01-01\n---\nBody\n"),
+        )
+        .unwrap();
         let eng = EffectEngine::builder().mutation_root(dir.path()).build();
 
         let prior = eng
@@ -424,8 +429,25 @@ mod tests {
         let written = std::fs::read_to_string(&file).unwrap();
         assert!(written.contains("status: in-progress"));
         assert!(written.contains("title: T"));
-        // hash was recomputed (no longer the literal "stale").
-        assert!(!written.contains("hash: stale"));
+        assert!(!written.contains(stale), "hash was not recomputed:\n{written}");
+        assert!(
+            !written.contains("last_updated: 2020-01-01"),
+            "last_updated was not renewed:\n{written}"
+        );
+    }
+
+    #[test]
+    fn set_frontmatter_reports_a_malformed_stored_hash() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("d.md");
+        std::fs::write(&file, "---\ntitle: T\nhash: stale\n---\nBody\n").unwrap();
+        let eng = EffectEngine::builder().mutation_root(dir.path()).build();
+
+        let error = eng
+            .set_frontmatter("d.md", "status", json!("in-progress"))
+            .unwrap_err();
+
+        assert!(matches!(error, crate::effects::EffectError::Markdown(_)), "{error:?}");
     }
 
     #[test]

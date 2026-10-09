@@ -56,8 +56,8 @@ mod types;
 pub use analyze::{
     EditAudit, EditRejection, EditSetOutcome, RejectedEdit, YamlAnalysis, YamlCertainty,
     YamlDiagnostic, YamlDiagnosticCode, YamlParseFailure, YamlParseOutcome, YamlPathSegment,
-    YamlRepair, YamlValueLocation, analyze_parse_count, analyze_yaml, apply_edit_set,
-    locate_yaml_key, locate_yaml_value, reset_analyze_parse_count,
+    YamlRepair, YamlValueLocation, YamlValueProperties, analyze_parse_count, analyze_yaml,
+    apply_edit_set, locate_yaml_key, locate_yaml_value, reset_analyze_parse_count,
 };
 pub use location::YamlLocation;
 pub use types::{

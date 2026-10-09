@@ -57,13 +57,13 @@ fn accepts_the_agents_body_and_stamps_a_coherent_hash() {
     let agent_wrote = AUTHORED_DOCUMENT.replace("Old body\n", "Agent body\n");
     let (file, plan) = agent_run(&dir, AUTHORED_DOCUMENT, &agent_wrote);
 
-    let artifact = written(reconcile_inline_artifact(&plan, "2026-09-06").unwrap());
+    let artifact = written(reconcile_inline_artifact(&plan, "2026-09-06T12:00:00Z".parse().unwrap()).unwrap());
 
     let on_disk = std::fs::read_to_string(&file).unwrap();
     assert_eq!(on_disk, artifact.text);
     let markdown: Markdown = on_disk.clone().into();
     let options = inline_hash_options();
-    let stored = parse_inline_stored_hash(&markdown, &options)
+    let stored = markdown.stored_hash(&options)
         .unwrap()
         .unwrap();
     let StoredHashValue::Flat(hash_value) = &stored.value else {
@@ -96,6 +96,20 @@ fn accepts_the_agents_body_and_stamps_a_coherent_hash() {
 }
 
 #[test]
+fn stamps_the_utc_date_when_the_local_date_is_ahead() {
+    let dir = TempDir::new().unwrap();
+    let agent_wrote = AUTHORED_DOCUMENT.replace("Old body\n", "Agent body\n");
+    let (file, plan) = agent_run(&dir, AUTHORED_DOCUMENT, &agent_wrote);
+    // 23:30 UTC on the 6th is already the 7th at UTC+10.
+    let evening_utc: chrono::DateTime<chrono::Utc> = "2026-09-06T23:30:00Z".parse().unwrap();
+
+    written(reconcile_inline_artifact(&plan, evening_utc).unwrap());
+
+    let on_disk = std::fs::read_to_string(&file).unwrap();
+    assert!(on_disk.contains("last_updated: '2026-09-06'"), "{on_disk}");
+}
+
+#[test]
 fn restores_every_owned_property_the_agent_touched_and_warns_once_each() {
     let dir = TempDir::new().unwrap();
     let agent_wrote = concat!(
@@ -107,7 +121,7 @@ fn restores_every_owned_property_the_agent_touched_and_warns_once_each() {
     );
     let (file, plan) = agent_run(&dir, AUTHORED_DOCUMENT, agent_wrote);
 
-    let artifact = written(reconcile_inline_artifact(&plan, "2026-09-06").unwrap());
+    let artifact = written(reconcile_inline_artifact(&plan, "2026-09-06T12:00:00Z".parse().unwrap()).unwrap());
 
     // `hash` was deleted by the agent, so it is restored too, then re-stamped.
     assert_eq!(
@@ -134,7 +148,7 @@ fn owned_restoration_is_silent_when_the_agent_leaves_them_alone() {
         "---\nprompt: test\nlast_updated: '2026-01-01'\n---\nAgent body\n",
     );
 
-    let artifact = written(reconcile_inline_artifact(&plan, "2026-09-06").unwrap());
+    let artifact = written(reconcile_inline_artifact(&plan, "2026-09-06T12:00:00Z".parse().unwrap()).unwrap());
 
     assert!(artifact.restored_properties.is_empty());
 }
@@ -163,7 +177,7 @@ fn reports_the_agents_semantic_delta_excluding_owned_properties() {
     );
     let (_file, plan) = agent_run(&dir, original, agent_wrote);
 
-    let artifact = written(reconcile_inline_artifact(&plan, "2026-09-06").unwrap());
+    let artifact = written(reconcile_inline_artifact(&plan, "2026-09-06T12:00:00Z".parse().unwrap()).unwrap());
 
     assert_eq!(
         artifact.frontmatter_delta.entries,
@@ -195,7 +209,7 @@ fn value_preserving_reformatting_is_not_a_semantic_change() {
         "---\nprompt: test\ntitle: \"First\\nSecond\"\n---\nAgent body\n",
     );
 
-    let artifact = written(reconcile_inline_artifact(&plan, "2026-09-06").unwrap());
+    let artifact = written(reconcile_inline_artifact(&plan, "2026-09-06T12:00:00Z".parse().unwrap()).unwrap());
 
     assert!(
         artifact.frontmatter_delta.is_empty(),
@@ -214,14 +228,14 @@ fn cleans_the_agents_body_and_hashes_the_cleaned_text() {
         "---\nprompt: test\nlast_updated: '2026-01-01'\n---\n# Title\nNo blank line\n",
     );
 
-    let artifact = written(reconcile_inline_artifact(&plan, "2026-09-06").unwrap());
+    let artifact = written(reconcile_inline_artifact(&plan, "2026-09-06T12:00:00Z".parse().unwrap()).unwrap());
 
     assert!(artifact.body_cleaned);
     let on_disk = std::fs::read_to_string(&file).unwrap();
     assert!(on_disk.contains("# Title\n\nNo blank line"));
     let markdown: Markdown = on_disk.into();
     let options = inline_hash_options();
-    let stored = parse_inline_stored_hash(&markdown, &options)
+    let stored = markdown.stored_hash(&options)
         .unwrap()
         .unwrap();
     let comparison = markdown.compare_hash(&stored, &options).unwrap();
@@ -240,7 +254,7 @@ fn preserves_crlf_and_the_authored_last_updated_quote_style() {
         let plan = plan(&file, &original);
         std::fs::write(&file, original.replace("Old body", "Agent body")).unwrap();
 
-        written(reconcile_inline_artifact(&plan, "2026-09-06").unwrap());
+        written(reconcile_inline_artifact(&plan, "2026-09-06T12:00:00Z".parse().unwrap()).unwrap());
 
         let on_disk = std::fs::read_to_string(&file).unwrap();
         assert!(on_disk.contains("prompt: |-\r\n  Keep\r\n"));
@@ -255,7 +269,7 @@ fn refuses_an_untouched_document_without_writing() {
     let dir = TempDir::new().unwrap();
     let (file, plan) = agent_run(&dir, AUTHORED_DOCUMENT, AUTHORED_DOCUMENT);
 
-    let outcome = reconcile_inline_artifact(&plan, "2026-09-06").unwrap();
+    let outcome = reconcile_inline_artifact(&plan, "2026-09-06T12:00:00Z".parse().unwrap()).unwrap();
 
     assert!(matches!(
         outcome,
@@ -270,7 +284,7 @@ fn refuses_a_whitespace_only_body_change() {
     let original = "---\nprompt: test\n---\nOld body\n";
     let (file, plan) = agent_run(&dir, original, "---\nprompt: test\n---\n\n  Old body  \n\n\n");
 
-    let outcome = reconcile_inline_artifact(&plan, "2026-09-06").unwrap();
+    let outcome = reconcile_inline_artifact(&plan, "2026-09-06T12:00:00Z".parse().unwrap()).unwrap();
 
     assert!(matches!(
         outcome,
@@ -285,7 +299,7 @@ fn refuses_an_empty_body_even_when_frontmatter_changed() {
     let original = "---\nprompt: test\n---\nOld body\n";
     let (file, plan) = agent_run(&dir, original, "---\nprompt: test\nresearched_by: x\n---\n   \n");
 
-    let outcome = reconcile_inline_artifact(&plan, "2026-09-06").unwrap();
+    let outcome = reconcile_inline_artifact(&plan, "2026-09-06T12:00:00Z".parse().unwrap()).unwrap();
 
     assert!(matches!(
         outcome,
@@ -304,7 +318,7 @@ fn refuses_a_baseline_that_was_never_cleanup_stable() {
     let original = "---\nprompt: test\n---\n# Title\nNo blank line\n";
     let (_file, plan) = agent_run(&dir, original, original);
 
-    let outcome = reconcile_inline_artifact(&plan, "2026-09-06").unwrap();
+    let outcome = reconcile_inline_artifact(&plan, "2026-09-06T12:00:00Z".parse().unwrap()).unwrap();
 
     assert!(matches!(
         outcome,
@@ -321,7 +335,7 @@ fn reports_a_malformed_stored_hash_without_mutating_the_document() {
     let agent_wrote = "---\nprompt: test\nhash: not-a-hash\n---\nAgent body\n";
     let (file, plan) = agent_run(&dir, original, agent_wrote);
 
-    let error = reconcile_inline_artifact(&plan, "2026-09-06").unwrap_err();
+    let error = reconcile_inline_artifact(&plan, "2026-09-06T12:00:00Z".parse().unwrap()).unwrap_err();
 
     assert!(matches!(error, CompositionError::InlineHashMalformed(_)));
     assert_eq!(std::fs::read_to_string(&file).unwrap(), agent_wrote);
@@ -334,7 +348,7 @@ fn reports_a_duplicate_owned_key_without_mutating_the_document() {
     let agent_wrote = "---\nprompt: one\nprompt: two\n---\nAgent body\n";
     let (file, plan) = agent_run(&dir, original, agent_wrote);
 
-    let error = reconcile_inline_artifact(&plan, "2026-09-06").unwrap_err();
+    let error = reconcile_inline_artifact(&plan, "2026-09-06T12:00:00Z".parse().unwrap()).unwrap_err();
 
     // The agent wrote the second `prompt` line, so the refusal names it.
     let CompositionError::InlineAgentFrontmatterRejected { rejection, .. } = &error else {
@@ -351,7 +365,7 @@ fn reports_a_document_the_agent_deleted() {
     let file = dir.path().join("doc.md");
     let plan = plan(&file, "---\nprompt: test\n---\nOld body\n");
 
-    let error = reconcile_inline_artifact(&plan, "2026-09-06").unwrap_err();
+    let error = reconcile_inline_artifact(&plan, "2026-09-06T12:00:00Z".parse().unwrap()).unwrap_err();
 
     assert!(
         matches!(error, CompositionError::InlineArtifactUnreadable { .. }),
@@ -367,13 +381,13 @@ fn read_write_read_is_stable_and_the_second_pass_refuses() {
     let agent_wrote = AUTHORED_DOCUMENT.replace("Old body\n", "Agent body\n");
     let (file, guard) = agent_run(&dir, AUTHORED_DOCUMENT, &agent_wrote);
 
-    written(reconcile_inline_artifact(&guard, "2026-09-06").unwrap());
+    written(reconcile_inline_artifact(&guard, "2026-09-06T12:00:00Z".parse().unwrap()).unwrap());
     let first = std::fs::read_to_string(&file).unwrap();
 
     // The written artifact becomes the next run's baseline; an agent that
     // changes nothing is refused, and the bytes do not move.
     let second_guard = plan(&file, &first);
-    let outcome = reconcile_inline_artifact(&second_guard, "2026-09-07").unwrap();
+    let outcome = reconcile_inline_artifact(&second_guard, "2026-09-07T12:00:00Z".parse().unwrap()).unwrap();
     assert!(matches!(
         outcome,
         InlineReconciliation::Rejected(BodyRejection::Unchanged)
@@ -389,7 +403,7 @@ fn repeated_reconciliation_of_identical_inputs_is_byte_deterministic() {
     let agent_wrote = "---\nprompt: test\nlast_updated: '2026-01-01'\n---\nAgent body\n";
     let run = || {
         std::fs::write(&file, agent_wrote).unwrap();
-        written(reconcile_inline_artifact(&plan(&file, original), "2026-09-06").unwrap());
+        written(reconcile_inline_artifact(&plan(&file, original), "2026-09-06T12:00:00Z".parse().unwrap()).unwrap());
         std::fs::read_to_string(&file).unwrap()
     };
     assert_eq!(run(), run());
@@ -473,7 +487,7 @@ fn carried_body_change_evidence_accepts_a_metadata_only_candidate() {
 
     assert!(
         matches!(
-            reconcile_inline_artifact(&plan, "2026-09-06").unwrap(),
+            reconcile_inline_artifact(&plan, "2026-09-06T12:00:00Z".parse().unwrap()).unwrap(),
             InlineReconciliation::Rejected(BodyRejection::Unchanged)
         ),
         "without evidence an unchanged body is refused"
@@ -485,7 +499,7 @@ fn carried_body_change_evidence_accepts_a_metadata_only_candidate() {
     );
 
     let artifact = written(
-        reconcile_inline_artifact_with_evidence(&plan, "2026-09-06", true).unwrap(),
+        reconcile_inline_artifact_with_evidence(&plan, "2026-09-06T12:00:00Z".parse().unwrap(), true).unwrap(),
     );
 
     assert!(artifact.text.contains("researched_by: goose"), "{}", artifact.text);
@@ -505,7 +519,7 @@ fn carried_evidence_still_refuses_an_empty_body() {
     );
 
     assert!(matches!(
-        reconcile_inline_artifact_with_evidence(&plan, "2026-09-06", true).unwrap(),
+        reconcile_inline_artifact_with_evidence(&plan, "2026-09-06T12:00:00Z".parse().unwrap(), true).unwrap(),
         InlineReconciliation::Rejected(BodyRejection::Empty)
     ));
 }
@@ -536,7 +550,7 @@ fn agent_values_are_repaired_encoded_hashed_and_reported_decoded() {
     );
     let (file, plan) = agent_run(&dir, original, agent_wrote);
 
-    let artifact = written(reconcile_inline_artifact(&plan, "2026-09-06").unwrap());
+    let artifact = written(reconcile_inline_artifact(&plan, "2026-09-06T12:00:00Z".parse().unwrap()).unwrap());
 
     let on_disk = std::fs::read_to_string(&file).unwrap();
     assert_eq!(on_disk, artifact.text);
@@ -573,7 +587,7 @@ fn agent_values_are_repaired_encoded_hashed_and_reported_decoded() {
 
     let markdown: Markdown = on_disk.into();
     let options = inline_hash_options();
-    let stored = parse_inline_stored_hash(&markdown, &options).unwrap().unwrap();
+    let stored = markdown.stored_hash(&options).unwrap().unwrap();
     let comparison = markdown.compare_hash(&stored, &options).unwrap();
     assert!(!comparison.frontmatter_changed && !comparison.body_changed);
 }
@@ -586,12 +600,12 @@ fn stored_tokens_survive_a_second_run_byte_for_byte() {
     let original = "---\nprompt: write it\n---\nOld body\n";
     let first = "---\nprompt: write it\nsummary: fixed {{…}} parsing\n---\nFirst body\n";
     let (file, plan) = agent_run(&dir, original, first);
-    let first_text = written(reconcile_inline_artifact(&plan, "2026-09-06").unwrap()).text;
+    let first_text = written(reconcile_inline_artifact(&plan, "2026-09-06T12:00:00Z".parse().unwrap()).unwrap()).text;
     let token_line = first_text.lines().find(|line| line.starts_with("summary:")).unwrap().to_string();
 
     let second = first_text.replace("First body", "Second body");
     let (_, plan) = agent_run(&dir, &first_text, &second);
-    let artifact = written(reconcile_inline_artifact(&plan, "2026-09-07").unwrap());
+    let artifact = written(reconcile_inline_artifact(&plan, "2026-09-07T12:00:00Z".parse().unwrap()).unwrap());
 
     assert!(artifact.text.contains(&format!("{token_line}\n")), "{}", artifact.text);
     assert!(artifact.frontmatter_delta.is_empty(), "{:?}", artifact.frontmatter_delta);
@@ -610,7 +624,7 @@ fn an_unrepairable_edit_is_refused_without_writing() {
         ("---\r\nprompt: write it\r\ntitle: t\r\nmeta:\r\n  a: b: c\r\n---\r\nNew body\r\n", 5),
     ] {
         let (file, plan) = agent_run(&dir, original, agent_wrote);
-        let error = reconcile_inline_artifact(&plan, "2026-09-06").unwrap_err();
+        let error = reconcile_inline_artifact(&plan, "2026-09-06T12:00:00Z".parse().unwrap()).unwrap_err();
         let CompositionError::InlineAgentFrontmatterRejected { rejection, .. } = &error else {
             panic!("expected an agent-attributed rejection, got {error:?}");
         };
@@ -641,7 +655,7 @@ fn a_hash_stamp_that_would_repoint_an_alias_is_refused_without_writing() {
     let agent_wrote = original.replace("Old body\n", "Agent body\n");
     let (file, plan) = agent_run(&dir, original, &agent_wrote);
 
-    let error = reconcile_inline_artifact(&plan, "2026-09-06").unwrap_err();
+    let error = reconcile_inline_artifact(&plan, "2026-09-06T12:00:00Z".parse().unwrap()).unwrap_err();
 
     let CompositionError::InlineHashMalformed(MarkdownError::FrontmatterTextEdit { reason }) =
         &error
@@ -676,7 +690,7 @@ fn an_owned_restoration_that_would_repoint_an_alias_is_refused_without_writing()
     );
     let (file, plan) = agent_run(&dir, original, agent_wrote);
 
-    let error = reconcile_inline_artifact(&plan, "2026-09-06").unwrap_err();
+    let error = reconcile_inline_artifact(&plan, "2026-09-06T12:00:00Z".parse().unwrap()).unwrap_err();
 
     let CompositionError::InlineArtifactEditFailed(MarkdownError::FrontmatterTextEdit { reason }) =
         &error
@@ -713,7 +727,7 @@ fn stamps_a_date_above_an_indented_comment_and_keeps_every_byte() {
             let agent_wrote = document(authored, stale, "Agent body", newline);
             let (file, plan) = agent_run(&dir, &original, &agent_wrote);
 
-            let artifact = written(reconcile_inline_artifact(&plan, "2026-09-06").unwrap());
+            let artifact = written(reconcile_inline_artifact(&plan, "2026-09-06T12:00:00Z".parse().unwrap()).unwrap());
 
             let on_disk = std::fs::read_to_string(&file).unwrap();
             assert_eq!(on_disk, artifact.text);
@@ -758,7 +772,7 @@ fn stamps_a_date_after_a_quote_inside_a_plain_value_and_keeps_its_comment() {
             let agent_wrote = document(authored, stale, "Agent body", newline);
             let (file, plan) = agent_run(&dir, &original, &agent_wrote);
 
-            let artifact = written(reconcile_inline_artifact(&plan, "2026-09-06").unwrap());
+            let artifact = written(reconcile_inline_artifact(&plan, "2026-09-06T12:00:00Z".parse().unwrap()).unwrap());
 
             let on_disk = std::fs::read_to_string(&file).unwrap();
             assert_eq!(on_disk, artifact.text);
@@ -832,7 +846,7 @@ fn assert_quoted_flow_targets_persist_exactly(rows: &[(&str, &str)]) {
             let (file, plan) = agent_run(&dir, &original, &agent_wrote);
 
             let artifact = written(
-                reconcile_inline_artifact(&plan, "2026-09-06")
+                reconcile_inline_artifact(&plan, "2026-09-06T12:00:00Z".parse().unwrap())
                     .unwrap_or_else(|error| panic!("{authored:?} {newline:?}: {error}")),
             );
 
@@ -872,7 +886,7 @@ fn assert_quoted_flow_targets_persist_exactly(rows: &[(&str, &str)]) {
 
             let markdown: Markdown = on_disk.into();
             let options = inline_hash_options();
-            let stored = parse_inline_stored_hash(&markdown, &options).unwrap().unwrap();
+            let stored = markdown.stored_hash(&options).unwrap().unwrap();
             let comparison = markdown.compare_hash(&stored, &options).unwrap();
             assert!(!comparison.frontmatter_changed && !comparison.body_changed, "{authored:?}");
         }
@@ -941,7 +955,7 @@ fn encodes_a_quoted_flow_target_beside_a_plain_scalar_holding_a_quote() {
             let (file, plan) = agent_run(&dir, &original, &agent_wrote);
 
             let artifact = written(
-                reconcile_inline_artifact(&plan, "2026-09-06")
+                reconcile_inline_artifact(&plan, "2026-09-06T12:00:00Z".parse().unwrap())
                     .unwrap_or_else(|error| panic!("{authored:?} {newline:?}: {error}")),
             );
 
@@ -969,7 +983,7 @@ fn encodes_a_quoted_flow_target_beside_a_plain_scalar_holding_a_quote() {
 
             let markdown: Markdown = on_disk.into();
             let options = inline_hash_options();
-            let stored = parse_inline_stored_hash(&markdown, &options).unwrap().unwrap();
+            let stored = markdown.stored_hash(&options).unwrap().unwrap();
             let comparison = markdown.compare_hash(&stored, &options).unwrap();
             assert!(!comparison.frontmatter_changed && !comparison.body_changed, "{authored:?}");
         }

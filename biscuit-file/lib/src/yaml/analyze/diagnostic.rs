@@ -72,6 +72,9 @@ pub enum YamlDiagnosticCode {
     /// A plain scalar begins with a reserved YAML indicator character.
     #[serde(rename = "yaml.reserved-indicator")]
     ReservedIndicator,
+    /// A line's indentation contains a tab, which YAML forbids.
+    #[serde(rename = "yaml.tab-indentation")]
+    TabIndentation,
     /// A mapping key is defined more than once.
     #[serde(rename = "yaml.duplicate-key")]
     DuplicateKey,
@@ -125,7 +128,7 @@ pub enum YamlDiagnosticCode {
 
 impl YamlDiagnosticCode {
     /// All diagnostic codes, in declaration order.
-    pub const ALL: [Self; 23] = [
+    pub const ALL: [Self; 24] = [
         Self::Parse,
         Self::Bom,
         Self::LineEnding,
@@ -133,6 +136,7 @@ impl YamlDiagnosticCode {
         Self::FinalNewline,
         Self::Whitespace,
         Self::ReservedIndicator,
+        Self::TabIndentation,
         Self::DuplicateKey,
         Self::AnchorUndeclared,
         Self::AnchorForward,
@@ -162,6 +166,7 @@ impl YamlDiagnosticCode {
             Self::FinalNewline => "yaml.final-newline",
             Self::Whitespace => "yaml.whitespace",
             Self::ReservedIndicator => "yaml.reserved-indicator",
+            Self::TabIndentation => "yaml.tab-indentation",
             Self::DuplicateKey => "yaml.duplicate-key",
             Self::AnchorUndeclared => "yaml.anchor-undeclared",
             Self::AnchorForward => "yaml.anchor-forward",

@@ -20,7 +20,9 @@ pub use analysis::{YamlAnalysis, YamlParseFailure, YamlParseOutcome};
 pub use diagnostic::{YamlCertainty, YamlDiagnostic, YamlDiagnosticCode, YamlRepair};
 pub use edit_set::{EditAudit, EditRejection, EditSetOutcome, RejectedEdit, apply_edit_set};
 pub use engine::{analyze_parse_count, analyze_yaml, reset_analyze_parse_count};
-pub use locate::{YamlPathSegment, YamlValueLocation, locate_yaml_key, locate_yaml_value};
+pub use locate::{
+    YamlPathSegment, YamlValueLocation, YamlValueProperties, locate_yaml_key, locate_yaml_value,
+};
 
 #[cfg(test)]
 mod tests;

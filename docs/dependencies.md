@@ -12,6 +12,14 @@
   `darkmatter`, so the lockfile gains one edge and no package. Its tests parse
   the output of `renderable::markdown::code_span` with a real CommonMark
   parser to prove every value round-trips as one code span.
+- `content-policy` (library) and `content-policy-cli` join the workspace
+  (2026-09-29). No crate is new to the graph. The
+  library takes `biscuit-file` with `default-features = false` and only `yaml`,
+  so a policy check never builds Biscuit File's PDF crates, and its
+  off-by-default `file-adapter` feature adds only `biscuit-file/file-reference`.
+  `just deps-check` in `content-policy/` fails the lint when either feature set
+  reaches a PDF crate or a Darkmatter crate. See
+  `content-policy/docs/dependencies.md`.
 - `biscuit-test-harness` adds a Linux-only `x11rb = "0.13.2"` edge with
   `default-features = false` and only the `xtest` feature (2026-09-28). The
   crate is pure Rust and was already in the graph through `clipboard-rs`, so
@@ -337,6 +345,8 @@ This is a Rust workspace with the following modules:
 - `biscuit-file/cli/Cargo.toml` - File utilities CLI (`bf`)
 - `biscuit-hash/lib/Cargo.toml` - Hashing library (xxHash, BLAKE3, Argon2id)
 - `biscuit-hash/cli/Cargo.toml` - Hashing CLI (`bh`)
+- `content-policy/lib/Cargo.toml` - Content policy evaluation and renewal for Markdown frontmatter (serde, serde_json, chrono, biscuit-hash, biscuit-file with only `yaml`)
+- `content-policy/cli/Cargo.toml` - Content policy CLI (`policy`) (clap, clap_complete, biscuit-terminal, chrono)
 - `biscuit-icon/lib/Cargo.toml` - Curated offline domain icons + on-demand Iconify lookup (renderable, biscuit-terminal, rusqlite bundled, reqwest, strum)
 - `biscuit-icon/cli/Cargo.toml` - Icon CLI (`icon`) (clap, clap_complete unstable-dynamic, color-eyre)
 - `biscuit-speaks/lib/Cargo.toml` - Cross-platform TTS library (native-first Playa feature, xxHash audio cache, detached preparation)
@@ -413,6 +423,18 @@ This is a Rust workspace with the following modules:
     _CLI tool for hashing files and strings._
 
     _Tags: workspace, cli, hashing_
+
+- [content-policy](./content-policy/lib) _v0.1.0_
+
+    _Declares, evaluates, and renews content policies carried in Markdown frontmatter. Its dependency graph has no PDF crate and no path to Darkmatter; see [`content-policy/docs/dependencies.md`](./content-policy/docs/dependencies.md)._
+
+    _Tags: workspace, library, markdown, policy_
+
+- [content-policy-cli](./content-policy/cli) _v0.1.0_
+
+    _CLI (`policy`) for checking and renewing a document's content policy._
+
+    _Tags: workspace, cli, markdown, policy_
 
 - [biscuit-speaks](./biscuit-speaks) _v0.1.0_
 

@@ -210,6 +210,35 @@ patched `source` plus an `audit` of accepted and rejected edits. Report-only
 diagnostics never contribute edits. When nothing applies, the returned source
 is byte-identical to `YamlAnalysis::source()`.
 
+When the source does not parse, the analyzer tries these recoveries in order
+and emits the first whose proof passes:
+
+1. `yaml.bom`: remove a leading byte-order mark, when the rest parses.
+2. `yaml.tab-indentation`: replace each tab in a line's leading whitespace
+   with two spaces (spaces in that prefix stay). One diagnostic is emitted per
+   tab-indented line, and all of them apply together. The rewrite is the same
+   one Darkmatter applies when it reads tab-indented frontmatter, so a repaired
+   document holds the record Darkmatter already read. With no original value
+   to compare, the proof requires the repaired text to parse to the value of
+   that tab-normalized text.
+3. `yaml.reserved-indicator`: quote a plain scalar that starts with a reserved
+   indicator such as `@`.
+
+Tabs past a block scalar's own indentation are content in YAML, but the tab
+repair still rewrites them, because Darkmatter does:
+
+```rust
+use biscuit_file::analyze_yaml;
+
+let analysis = analyze_yaml("prompt: |-\n\tLine one\n\t\tLine two\n");
+assert_eq!(
+    analysis.apply().source,
+    "prompt: |-\n  Line one\n    Line two\n" // reads as "Line one\n  Line two"
+);
+```
+
+A document that already parses never gets a tab repair.
+
 ### `Pdf`
 
 Extract text, Markdown, or table-of-contents from PDFs.

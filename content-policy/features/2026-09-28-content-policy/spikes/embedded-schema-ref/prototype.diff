@@ -1,0 +1,227 @@
+diff --git a/darkmatter/dmls/src/overlay/schema.rs b/darkmatter/dmls/src/overlay/schema.rs
+index 5e7dfad80..f9ce7e90c 100644
+--- a/darkmatter/dmls/src/overlay/schema.rs
++++ b/darkmatter/dmls/src/overlay/schema.rs
+@@ -1097,6 +1097,25 @@ mod tests {
+         assert!(report.valid, "unexpected problems: {:?}", report.problems);
+     }
+ 
++    #[test]
++    fn spike_s1_content_policy_typing_applies_without_schema() {
++        let bundle = assemble(
++            Path::new("/w/doc.md"),
++            "---\ntitle: Hello\ncontent_policy:\n  - rule: TimeSensitive\n    action: explode\n  - action: refresh\n---\n\nbody\n",
++            &DmlsConfig::default(),
++            &[PathBuf::from("/w")],
++            None,
++        )
++        .expect("assembles")
++        .expect("has frontmatter");
++        let report = bundle.effective.validate(&bundle.frontmatter_json);
++        eprintln!("SPIKE problems: {:#?}", report.problems);
++        assert!(!report.valid);
++        let shape = effective_shape(&super::super::SchemaOutcome::Ready(Some(Arc::new(bundle))));
++        let def = shape.properties.get("content_policy").expect("content_policy in completion shape");
++        eprintln!("SPIKE completion shape: {def:?}");
++    }
++
+     #[test]
+     fn test_no_frontmatter_yields_none() {
+         let bundle = assemble(
+diff --git a/darkmatter/docs/schemas/darkmatter.yaml b/darkmatter/docs/schemas/darkmatter.yaml
+index fe5401f2f..973840399 100644
+--- a/darkmatter/docs/schemas/darkmatter.yaml
++++ b/darkmatter/docs/schemas/darkmatter.yaml
+@@ -9,6 +9,7 @@ $schema:
+     tags: "string[] -> Freeform document tags."
+     draft: "boolish -> Author-controlled draft marker. Darkmatter does not use this for compose control but commonly ignores it during hash workflows."
+     last_updated: "date -> Managed content-change date in YYYY-MM-DD form. Hash save and downstream tools may update it when content changes."
++    content_policy: "policy[]@../../../content-policy/schemas/content-policy.yaml"
+     metadata: "object -> Arbitrary author metadata. Darkmatter preserves it and leaves interpretation to downstream tools."
+ 
+     hash:
+diff --git a/darkmatter/lib/src/markdown/schemas/mod.rs b/darkmatter/lib/src/markdown/schemas/mod.rs
+index a80063669..20cc1ee5f 100644
+--- a/darkmatter/lib/src/markdown/schemas/mod.rs
++++ b/darkmatter/lib/src/markdown/schemas/mod.rs
+@@ -147,7 +147,15 @@ fn darkmatter_base_schema_ref() -> &'static SimplifiedSchema {
+         let schema_value = frontmatter
+             .get("$schema")
+             .expect("baseline file must have a `$schema` key");
+-        parse_yaml_schema(schema_value).expect("baseline schema must parse")
++        let schema = parse_yaml_schema(schema_value).expect("baseline schema must parse");
++        // SPIKE S1: resolve the baseline's `Name@file` imports against
++        // schema files compiled into the binary, never the filesystem.
++        static EMBEDDED: &[resolve::EmbeddedSchemaFile] = &[resolve::EmbeddedSchemaFile {
++            path: "content-policy/schemas/content-policy.yaml",
++            text: include_str!("../../../../../content-policy/schemas/content-policy.yaml"),
++        }];
++        resolve::expand_embedded_imports(schema, Path::new("darkmatter/docs/schemas"), EMBEDDED)
++            .expect("baseline imports must resolve from embedded schemas")
+     })
+ }
+ 
+@@ -2919,6 +2927,28 @@ mod claudine_compat_tests {
+ /// with trigger schemas: precedence (baseline → triggers → document),
+ /// shadowing-before-matching, non-mergeable payload rejection, envelope/payload
+ /// cycle detection, origin attribution, and complete dependency collection.
++#[cfg(test)]
++mod spike_s1 {
++    #[test]
++    fn spike_s1_disk_resolution_matches_embedded() {
++        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
++            .join("../docs/schemas/darkmatter.yaml")
++            .canonicalize()
++            .unwrap();
++        let resolved = super::resolve::resolve_yaml_schema(
++            &serde_yaml_ng::Value::String(path.to_string_lossy().into_owned()),
++            path.parent().unwrap(),
++        )
++        .expect("disk resolution");
++        eprintln!("SPIKE imports: {:?}", resolved.imports);
++        let disk = resolved.json_schema;
++        let embedded = super::darkmatter_base_json_schema();
++        eprintln!("SPIKE disk content_policy: {}", disk["properties"]["content_policy"]);
++        eprintln!("SPIKE embedded content_policy: {}", embedded["properties"]["content_policy"]);
++        assert_eq!(disk["properties"], embedded["properties"]);
++    }
++}
++
+ #[cfg(test)]
+ mod phase4_trigger_assembly {
+     use super::*;
+diff --git a/darkmatter/lib/src/markdown/schemas/resolve.rs b/darkmatter/lib/src/markdown/schemas/resolve.rs
+index 50e24b3eb..0577fe018 100644
+--- a/darkmatter/lib/src/markdown/schemas/resolve.rs
++++ b/darkmatter/lib/src/markdown/schemas/resolve.rs
+@@ -948,6 +948,63 @@ struct ImportEngine {
+     file_resolution_context: Option<biscuit_file::FileResolutionContext>,
+     /// Parsed named-type namespaces keyed by canonical file path.
+     namespace_cache: HashMap<PathBuf, CachedNamespace>,
++    /// SPIKE S1: compile-time embedded schema files, keyed by virtual
++    /// repo-relative path. Consulted before the filesystem.
++    embedded: &'static [EmbeddedSchemaFile],
++}
++
++/// SPIKE S1: a schema file compiled into the binary.
++pub(crate) struct EmbeddedSchemaFile {
++    /// Virtual repo-relative path, e.g. `content-policy/schemas/content-policy.yaml`.
++    pub path: &'static str,
++    pub text: &'static str,
++}
++
++/// SPIKE S1: lexically joins `reference` onto `base` (no filesystem access).
++/// Returns `None` when `..` climbs above the virtual root.
++fn lexical_join(base: &Path, reference: &str) -> Option<PathBuf> {
++    let mut out: Vec<std::ffi::OsString> = Vec::new();
++    for component in base.join(reference).components() {
++        match component {
++            Component::CurDir => {}
++            Component::ParentDir => {
++                out.pop()?;
++            }
++            Component::Normal(part) => out.push(part.to_os_string()),
++            _ => return None,
++        }
++    }
++    Some(out.iter().collect())
++}
++
++/// SPIKE S1: expands `Name@file` imports in an embedded schema whose virtual
++/// location is `base_dir`, resolving targets only from `embedded`.
++pub(crate) fn expand_embedded_imports(
++    schema: SimplifiedSchema,
++    base_dir: &Path,
++    embedded: &'static [EmbeddedSchemaFile],
++) -> Result<SimplifiedSchema, SchemaError> {
++    if !schema_has_imports(&schema) {
++        return Ok(schema);
++    }
++    let named_types = match &schema {
++        SimplifiedSchema::Single(shape) => shape.properties.clone(),
++        SimplifiedSchema::Union(_) => IndexMap::new(),
++    };
++    let current = Namespace {
++        key: NamespaceKey::Root,
++        base_dir: base_dir.to_path_buf(),
++        named_types,
++    };
++    let mut engine = ImportEngine {
++        stack: Vec::new(),
++        dependencies: BTreeSet::new(),
++        schema_roots: Vec::new(),
++        file_resolution_context: None,
++        namespace_cache: HashMap::new(),
++        embedded,
++    };
++    engine.expand_schema(schema, &current)
+ }
+ 
+ struct CachedNamespace {
+@@ -989,6 +1046,7 @@ fn expand_document_imports(
+         schema_roots: schema_roots.to_vec(),
+         file_resolution_context: request_context.cloned(),
+         namespace_cache: HashMap::new(),
++        embedded: &[],
+     };
+     let expanded = engine.expand_schema(schema, &current)?;
+     Ok((expanded, engine.dependencies.into_iter().collect()))
+@@ -1185,6 +1243,43 @@ impl ImportEngine {
+                 named_types: current.named_types.clone(),
+             });
+         }
++        // SPIKE S1: embedded files win over the filesystem.
++        if !self.embedded.is_empty() {
++            let virtual_path = lexical_join(&current.base_dir, trimmed);
++            if let Some(file) = virtual_path
++                .as_ref()
++                .and_then(|p| self.embedded.iter().find(|f| Path::new(f.path) == p))
++            {
++                let path = PathBuf::from(file.path);
++                if let Some(cached) = self.namespace_cache.get(&path) {
++                    return Ok(Namespace {
++                        key: NamespaceKey::File(path),
++                        base_dir: cached.base_dir.clone(),
++                        named_types: cached.named_types.clone(),
++                    });
++                }
++                let named_types = named_types_from_text(file.text, &path)?;
++                let base_dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
++                self.namespace_cache.insert(
++                    path.clone(),
++                    CachedNamespace {
++                        base_dir: base_dir.clone(),
++                        named_types: named_types.clone(),
++                    },
++                );
++                return Ok(Namespace {
++                    key: NamespaceKey::File(path),
++                    base_dir,
++                    named_types,
++                });
++            }
++            return Err(SchemaError::Unresolved {
++                reference: reference.to_string(),
++                source: biscuit_file::FileReferenceError::InvalidSyntax(format!(
++                    "`{trimmed}` is not an embedded schema file"
++                )),
++            });
++        }
+         let file_ref =
+             FileReference::new(trimmed).map_err(|source| SchemaError::Unresolved {
+                 reference: reference.to_string(),
+@@ -1301,6 +1396,14 @@ fn load_named_types(path: &Path) -> Result<IndexMap<String, PropertyDef>, Schema
+     let text = std::str::from_utf8(&bytes).map_err(|_| SchemaError::AmbiguousReferenced {
+         path: path.to_path_buf(),
+     })?;
++    named_types_from_text(text, path)
++}
++
++/// SPIKE S1: the parse half of [`load_named_types`], shared with embedded files.
++fn named_types_from_text(
++    text: &str,
++    path: &Path,
++) -> Result<IndexMap<String, PropertyDef>, SchemaError> {
+     let Some(document) = parse_standalone_schema_document(text, path)? else {
+         return Err(SchemaError::AmbiguousReferenced {
+             path: path.to_path_buf(),

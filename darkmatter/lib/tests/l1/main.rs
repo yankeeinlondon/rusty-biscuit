@@ -42,6 +42,7 @@ mod clean_counters;
 mod code_link;
 mod compose_phase6;
 mod compose_reuse_phase5;
+mod content_policy_editor_schema;
 mod cutover_reference;
 mod debug_test;
 #[cfg(windows)]
@@ -120,6 +121,7 @@ mod suggest_constraint_phase1;
 mod suggest_constraint_phase2;
 mod suggest_constraint_phase3;
 mod suggest_constraint_phase4;
+mod tab_indentation_repair_parity;
 mod ternary_integration;
 mod test_layout;
 mod transcluded_shell_failure;

@@ -776,6 +776,29 @@ flowchart LR
 Trusting an external document and letting relative references leave a tree
 (`allow_external_relative()`) are separate decisions.
 
+Resolution checks containment itself only for `&` and `^`. A caller that
+confines *other* kinds to a directory, such as a tool that lets a document
+watch files only inside its repository, checks each unprobed candidate with
+`FileReference::validate_contained_candidate(candidate, boundary)`:
+
+```rust,no_run
+use std::path::Path;
+use biscuit_file::FileReference;
+
+let reference = FileReference::new("../../elsewhere.rs")?;
+let candidate = Path::new("/work/repo/docs/../../elsewhere.rs");
+// Err(FileReferenceError::BoundaryEscape { .. }): `/work/elsewhere.rs` is outside.
+assert!(reference.validate_contained_candidate(candidate, Path::new("/work/repo")).is_err());
+# Ok::<(), biscuit_file::FileReferenceError>(())
+```
+
+The candidate must be inside the boundary lexically (after `.`/`..`
+collapse) and, following symlinks, from the deepest ancestor whose target
+exists. So `docs/link.md -> /etc/passwd` escapes even though its spelling is
+inside, a missing file is judged by the directory that would hold it, and a
+broken symlink reads as missing rather than as an I/O error. A boundary that
+does not exist is `Io`.
+
 ### Context method summary
 
 | Method | Purpose |
@@ -844,6 +867,7 @@ process CWD or `cwd` respectively.
 | `candidate_plan(ctx)` | Build the complete ordered plan, no filesystem probes |
 | `candidate_plan_with_order(ctx, order)` | Build the unprobed plan using an explicit `CandidatePlanOrder` |
 | `validate_repository_candidate(candidate, repository_root)` | Apply the shared `&`/`^` containment check |
+| `validate_contained_candidate(candidate, boundary)` | Check any kind's candidate against a caller-chosen boundary, lexically and through symlinks |
 | `complete_partial(token, cwd)` | Expand an ambient completion token |
 | `complete_partial_in_context(token, ctx)` | Expand a completion token from the same roots as execution |
 | `resolve_relative(base)` | Resolve ambiently, return a lexical relative path |
@@ -963,6 +987,7 @@ The complete `FileReferenceError` vocabulary:
 | `MissingHomeContext` | A home reference has no home directory in the explicit context |
 | `OutsideRepository { sigil, reference_cwd }` | `&` or `^` was used without a repository containing the reference `cwd` |
 | `RepositoryEscape { .. }` | A repository sigil's lexical or resolved target escapes the repository |
+| `BoundaryEscape { reference, boundary, escaped_candidate }` | `validate_contained_candidate()` found the candidate outside the caller's boundary |
 | `RepositoryRootNotContainingSource { repository_root, source_path }` | The request `cwd` or a normal derived `cwd` is outside the repository tree |
 | `CwdOutsideBaseDir { base_dir, cwd }` | The request `cwd` or a normal derived `cwd` is outside a non-repository boundary tree |
 | `RelativeContextDirectory { anchor, path }` | A context directory or tree anchor (`ContextAnchor`: request directory, working directory, base directory, repository/package/package-area root, home) is relative |
