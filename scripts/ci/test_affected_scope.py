@@ -5601,9 +5601,11 @@ class CompanionRunnerTests(unittest.TestCase):
         # path: the registry's own recipe for a real suite, run as CI runs it.
         entry = affected_scope.SUITE_REGISTRY["test_runner_loss.py"]
         counts_out = self.root / "counts.json"
+        # POSIX `shlex` treats a Windows path's backslashes as escapes, so the
+        # path is spelled with forward slashes, which Windows also accepts.
         command = shlex.split(entry["recipe"]) + shlex.split(
             entry["counts_args"].replace(
-                affected_scope.COUNTS_OUT_PLACEHOLDER, str(counts_out)
+                affected_scope.COUNTS_OUT_PLACEHOLDER, counts_out.as_posix()
             )
         )
         # The recipe's own interpreter spelling, resolved to the one running
