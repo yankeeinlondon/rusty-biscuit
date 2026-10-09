@@ -10,12 +10,13 @@
 //! prompts, schemas and templates, user docs, READMEs, and the
 //! `.claude/skills` tree. Directories named `target`, `node_modules`,
 //! `features`, or `fixes` are skipped at any depth, as is every dot-directory
-//! other than `.claude` (`.git`, `.gitnexus`, ...); symlinks are never
-//! followed. Skipping `features/` and `fixes/` excludes planning documents —
-//! specs, plans, reviews, logs, decisions, and their `_completed` and
-//! `_unscheduled` lifecycle directories — which are neither code, shipped
-//! prompts, user docs, nor skills; every in-flight spec the migration list
-//! names lives there.
+//! other than `.claude` (`.git`, `.gitnexus`, ...), and the repository's
+//! internal prompt folders (`INTERNAL_PROMPTS`), which are tools CI never
+//! tests; symlinks are never followed. Skipping `features/` and `fixes/`
+//! excludes planning documents — specs, plans, reviews, logs, decisions, and
+//! their `_completed` and `_unscheduled` lifecycle directories — which are
+//! neither code, shipped prompts, user docs, nor skills; every in-flight spec
+//! the migration list names lives there.
 //!
 //! Each occurrence of either literal counts once, so a line naming both
 //! spellings counts twice. The scan must equal `ALLOWLIST` exactly: a file
@@ -31,6 +32,9 @@ use std::path::{Path, PathBuf};
 const NEEDLES: [&str; 2] = ["current.ctx.", "current.env."];
 const EXTENSIONS: [&str; 6] = ["rs", "md", "toml", "yaml", "yml", "json"];
 const SKIPPED_DIRS: [&str; 4] = ["target", "node_modules", "features", "fixes"];
+/// Workspace-relative internal prompt folders. A prompt may be a draft, and
+/// editing one must never fail the normal suite.
+const INTERNAL_PROMPTS: [&str; 3] = ["prompts", "darkmatter/prompts", "claudine/prompts"];
 
 /// Workspace-relative `/`-separated path, expected occurrence count.
 const ALLOWLIST: &[(&str, usize)] = &[
@@ -61,7 +65,7 @@ const ALLOWLIST: &[(&str, usize)] = &[
     ("darkmatter/lib/src/markdown/compose/tests/lazy_roots.rs", 2),
     // This guard: the module doc, `NEEDLES`, the annotations above, and the
     // scope fixture below.
-    ("darkmatter/lib/tests/l1/current_root_migration_guard.rs", 16),
+    ("darkmatter/lib/tests/l1/current_root_migration_guard.rs", 18),
 ];
 
 fn workspace_root() -> PathBuf {
@@ -80,6 +84,12 @@ fn workspace_root() -> PathBuf {
 
 fn is_skipped_dir(name: &str) -> bool {
     SKIPPED_DIRS.contains(&name) || (name.starts_with('.') && name != ".claude")
+}
+
+fn is_internal_prompts(root: &Path, dir: &Path) -> bool {
+    dir.strip_prefix(root).is_ok_and(|relative| {
+        INTERNAL_PROMPTS.iter().any(|prompts| relative == Path::new(prompts))
+    })
 }
 
 fn has_scanned_extension(path: &Path) -> bool {
@@ -102,7 +112,7 @@ fn scan(root: &Path) -> BTreeMap<String, Vec<usize>> {
             let name = name.to_string_lossy();
             let kind = entry.file_type().expect("file type");
             if kind.is_dir() {
-                if !is_skipped_dir(&name) {
+                if !is_skipped_dir(&name) && !is_internal_prompts(root, &path) {
                     pending.push((path, under_prompts || name == "prompts"));
                 }
             } else if kind.is_file() && (under_prompts || has_scanned_extension(&path)) {
@@ -171,7 +181,9 @@ fn the_scan_counts_occurrences_and_honors_the_scope_rule() {
         std::fs::write(path, text).unwrap();
     };
     write("src/a.rs", "let x = \"{{ current.ctx.a }} {{ current.env.B }}\";\n\n// current.ctx.c\n");
-    write("prompts/format.tmpl", "{{ current.env.HOME }}\n");
+    write("pkg/prompts/format.tmpl", "{{ current.env.HOME }}\n");
+    write("prompts/draft.md", "current.ctx.ignored: internal prompt\n");
+    write("claudine/prompts/draft.md", "current.env.ignored: internal prompt\n");
     write(".claude/skills/topic/SKILL.md", "no `current.ctx.x` nesting\n");
     write("notes.txt", "current.ctx.ignored: extension out of scope\n");
     write("features/2026-01-01-x/spec.md", "current.ctx.ignored: planning document\n");
@@ -186,7 +198,7 @@ fn the_scan_counts_occurrences_and_honors_the_scope_rule() {
         found,
         BTreeMap::from([
             (".claude/skills/topic/SKILL.md".to_string(), vec![1]),
-            ("prompts/format.tmpl".to_string(), vec![1]),
+            ("pkg/prompts/format.tmpl".to_string(), vec![1]),
             ("src/a.rs".to_string(), vec![1, 1, 3]),
         ]),
     );

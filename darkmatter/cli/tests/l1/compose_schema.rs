@@ -33,16 +33,11 @@ fn repository_root(process: &CliProcessFixture) -> PathBuf {
     let root = process.cwd().to_path_buf();
     fs::create_dir_all(root.join(".git")).unwrap();
     fs::create_dir_all(root.join("prompts")).unwrap();
-    fs::copy(
-        checkout.join("prompts/plan.md"),
-        root.join("prompts/plan.md"),
-    )
-    .unwrap();
-    fs::copy(
-        checkout.join("prompts/_input-robustness.md"),
-        root.join("prompts/_input-robustness.md"),
-    )
-    .unwrap();
+    // Frozen copies, intentionally not kept in step with `prompts/`.
+    let frozen = checkout.join("darkmatter/cli/tests/fixtures/frozen_prompts/prompts");
+    for prompt in ["plan.md", "_input-robustness.md"] {
+        fs::copy(frozen.join(prompt), root.join("prompts").join(prompt)).unwrap();
+    }
     let route = "darkmatter/cli/tests/fixtures/shipped_plan_route";
     fs::create_dir_all(root.join(route)).unwrap();
     fs::copy(
