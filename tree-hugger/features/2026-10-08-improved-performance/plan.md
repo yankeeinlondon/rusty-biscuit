@@ -7,7 +7,6 @@ created: 2026-10-08
 phase: 1
 agent: claude/opus
 yolo: false
-implemented: false
 packages:
   - tree-hugger
   - tree-hugger-cli
@@ -126,8 +125,111 @@ skills_files_updated_during_phase_5:
 source_files_during_phase_6:
   - tree-hugger/lib/src/scanner.rs
   - tree-hugger/lib/src/file/source_file.rs
+  - tree-hugger/lib/src/god_files/analysis.rs
+  - tree-hugger/lib/tests/l1/file_identity.rs
   - tree-hugger/cli/src/changed.rs
-source_files_during_phase_7: []
+  - tree-hugger/cli/src/main.rs
+  - tree-hugger/cli/src/scan.rs
+  - tree-hugger/cli/tests/symbols/filters.rs
+  - tree-hugger/cli/tests/symbols/spelling.rs
+  - tree-hugger/cli/tests/changed/ownership.rs
+docs_updated_during_phase_6:
+  - tree-hugger/docs/symbol-reports.md
+  - tree-hugger/docs/cache-design.md
+  - tree-hugger/features/2026-10-08-improved-performance/plan.md
+  - tree-hugger/features/2026-10-08-improved-performance/implementation-log.md
+  - tree-hugger/features/2026-10-08-improved-performance/spec.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+  - .claude/skills/tree-hugger/SKILL.md
+source_files_during_phase_7:
+  - tree-hugger/lib/src/analysis/occurrences.rs
+  - tree-hugger/lib/tests/l1/symbols_occurrences.rs
+docs_updated_during_phase_7:
+  - tree-hugger/features/2026-10-08-improved-performance/plan.md
+  - tree-hugger/features/2026-10-08-improved-performance/implementation-log.md
+  - tree-hugger/features/2026-10-08-improved-performance/spec.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+  - .claude/skills/tree-hugger/SKILL.md
+source_code:
+  - tree-hugger/lib/src/cache/stored_evidence.rs
+  - tree-hugger/lib/src/cache/symbol_cache.rs
+  - tree-hugger/lib/src/file/tree_file.rs
+  - tree-hugger/lib/src/file/tree_file/definitions.rs
+  - tree-hugger/lib/src/analysis/mod.rs
+  - tree-hugger/lib/src/analysis/occurrences.rs
+  - tree-hugger/lib/src/file/extract/declaration.rs
+  - tree-hugger/lib/src/file/extract/qualified_name.rs
+  - tree-hugger/lib/src/dead_code.rs
+  - tree-hugger/lib/src/rule_registry.rs
+  - tree-hugger/lib/src/ignore_directives.rs
+  - tree-hugger/lib/tests/l1/symbols_cache.rs
+  - tree-hugger/cli/src/main.rs
+  - tree-hugger/cli/src/declarations.rs
+  - tree-hugger/cli/tests/symbols/report.rs
+  - tree-hugger/lib/src/analysis/declaration_names.rs
+  - tree-hugger/lib/src/analysis/scope/ecma.rs
+  - tree-hugger/lib/src/analysis/scope/mod.rs
+  - tree-hugger/lib/src/analysis/scope/rust.rs
+  - tree-hugger/lib/src/analysis/syntax_markers.rs
+  - tree-hugger/lib/src/file/extract/attributes.rs
+  - tree-hugger/lib/src/file/extract/classify.rs
+  - tree-hugger/lib/src/file/extract/doc_comments.rs
+  - tree-hugger/lib/src/file/extract/flags.rs
+  - tree-hugger/lib/src/file/extract/generics.rs
+  - tree-hugger/lib/src/file/extract/header/keyword.rs
+  - tree-hugger/lib/src/file/extract/modifiers.rs
+  - tree-hugger/lib/src/file/extract/navigation.rs
+  - tree-hugger/lib/src/file/extract/relations.rs
+  - tree-hugger/lib/src/file/extract/rust_impl.rs
+  - tree-hugger/lib/src/file/extract/scope.rs
+  - tree-hugger/lib/src/file/extract/signatures.rs
+  - tree-hugger/lib/src/file/extract/static_flags/cpp.rs
+  - tree-hugger/lib/src/file/extract/static_flags/php.rs
+  - tree-hugger/lib/src/file/extract/static_flags/python.rs
+  - tree-hugger/lib/src/file/extract/static_flags/rust.rs
+  - tree-hugger/lib/src/file/extract/static_flags/scala.rs
+  - tree-hugger/lib/src/file/extract/visibility/c.rs
+  - tree-hugger/lib/src/file/extract/visibility/cpp.rs
+  - tree-hugger/lib/src/file/extract/visibility/csharp.rs
+  - tree-hugger/lib/src/file/extract/visibility/ecma.rs
+  - tree-hugger/lib/src/file/extract/visibility/java.rs
+  - tree-hugger/lib/src/file/extract/visibility/lua.rs
+  - tree-hugger/lib/src/file/extract/visibility/rust.rs
+  - tree-hugger/lib/src/file/extract/visibility/swift.rs
+  - tree-hugger/lib/src/file/mod.rs
+  - tree-hugger/lib/src/file/parents.rs
+  - tree-hugger/lib/src/file/tree_file/relations.rs
+  - tree-hugger/lib/src/file/tree_file/relations/lexical.rs
+  - tree-hugger/lib/src/shared/schema_v2/mod.rs
+  - tree-hugger/cli/src/scan.rs
+  - tree-hugger/cli/src/render.rs
+  - tree-hugger/cli/src/refs.rs
+  - tree-hugger/cli/src/stats.rs
+  - tree-hugger/cli/src/report.rs
+  - tree-hugger/cli/src/prelude.rs
+  - tree-hugger/cli/tests/symbols/refs.rs
+  - tree-hugger/lib/src/god_files/analysis.rs
+  - tree-hugger/lib/src/file/source_file.rs
+  - tree-hugger/lib/src/scanner.rs
+  - tree-hugger/lib/tests/l1/file_identity.rs
+  - tree-hugger/cli/src/changed.rs
+  - tree-hugger/cli/tests/symbols/filters.rs
+  - tree-hugger/cli/tests/symbols/spelling.rs
+  - tree-hugger/cli/tests/changed/ownership.rs
+  - tree-hugger/lib/tests/l1/symbols_occurrences.rs
+documentation:
+  - tree-hugger/features/2026-10-08-improved-performance/plan.md
+  - tree-hugger/features/2026-10-08-improved-performance/spec.md
+  - tree-hugger/features/2026-10-08-improved-performance/implementation-log.md
+  - tree-hugger/docs/symbol-reports.md
+  - tree-hugger/cli/README.md
+  - .claude/skills/tree-hugger/SKILL.md
+  - tree-hugger/docs/references.md
+  - tree-hugger/docs/cache-design.md
+completed_phase: 7
+implemented: true
 ---
 
 # Plan: Tree Hugger Performance
@@ -156,13 +258,13 @@ Path identity is split out so that only that small PR pays for
 
 Success looks like:
 
-- [ ] Every phase follows the spec's
+- [x] Every phase follows the spec's
   [Evidence budget](./spec.md#evidence-budget-builds-and-ci-cycles):
   - while iterating, compare `hug` output and run targeted tests;
   - run the full `just test` + `just lint` once per PR;
   - run `just test-l2` only in Phase 5 (rendered output) and in any Phase 7
     change that touches the terminal.
-- [ ] Every PR before Phase 7 leaves public output byte-identical. The proof
+- [x] Every PR before Phase 7 leaves public output byte-identical. The proof
   is the [output diff protocol](#output-diff-protocol), run from the same
   absolute root.
 - [x] The implementation log records every spike result: command, switch
@@ -170,9 +272,12 @@ Success looks like:
   the time and work counts.
 - [ ] Phase 3 ends with the author's rulings on the spec's Open Questions.
   Phase 7 implements only what was approved.
-- [ ] Docs, the skill and dependency catalogs are updated in the PR that
+  - **Not met:** no ruling has been recorded (the spec's `human_review` is
+    still open). Phase 7 built only the ungated O4 free part and deferred
+    every ruling-gated item (implementation log, Phase 7).
+- [x] Docs, the skill and dependency catalogs are updated in the PR that
   changes the behavior they describe.
-- [ ] The feature directory is left active for author review. The agent
+- [x] The feature directory is left active for author review. The agent
   never moves it to `_completed`.
 
 ### Output diff protocol
@@ -667,21 +772,27 @@ log entry. Stop for review.
 Load the `os` skill first. This phase alters how native path spellings are
 reached, though never the spellings themselves.
 
-- [ ] **C8.** Add a crate-private identity-preserving `SourceFile`
+- [x] **C8.** Add a crate-private identity-preserving `SourceFile`
   constructor used only for `collect_files` output. Public constructors
   still canonicalize.
-- [ ] **L13.** Add an identity-only membership check for scanner output in
+- [x] **L13.** Add an identity-only membership check for scanner output in
   `changed.rs:60`. The ownership checks are unchanged.
-- [ ] **L3.** Add a conservative literal-positional fast path, with fallback
+- [x] **L3.** Add a conservative literal-positional fast path, with fallback
   to the walker whenever equivalence is uncertain (spec L3 rules). Pin it
   with focused cases in the filter and spelling suites: anchored literal,
   bare name, ignored parent, fixture, hidden file, symlink, multiple
   patterns, no match. Each case compares the fast path with the walker.
-- [ ] **Verify:** `just test filters spelling changed cache_lookup`, the
+- [x] **Verify:** `just test filters spelling changed cache_lookup`, the
   protocol, then `just test` and `just lint`. Push with the `ci:all-os`
   label, once.
-- [ ] **Timing sample:** single-file in-repo latency against Phase 1's
+  - Done locally: protocol byte-identical, `just test` 2063 passed,
+    `just lint` clean, and the targeted suites green on Linux, native
+    Windows and WSL2 rigs. The push with `ci:all-os` belongs to the
+    separate commit step. The Windows run found two pre-existing
+    `changed/ownership.rs` failures (`/` in symlink targets), fixed here.
+- [x] **Timing sample:** single-file in-repo latency against Phase 1's
   70–103 ms.
+  - 66.9 → 9.2 ms (implementation log).
 
 **Checkpoint 6:** PR 4 is green on every OS. Stop for review.
 
@@ -693,25 +804,39 @@ Only the rulings Phase 3 recorded as approved. Each group is its own small
 PR. Each needs the docs, the `cache_robustness` cells and the projection
 tests the spec lists for it.
 
-- [ ] **C5** *(if approved, Flags only)*: cache-enabled misses also compute
+- [x] **C5** *(if approved, Flags only)*: cache-enabled misses also compute
   Flags; `--no-cache` stays selective; projection back to the requested
   capabilities. Update `docs/cache-design.md`'s outcome examples.
-- [ ] **C4** *(if approved, compact private JSON)*: a private stored form
+  - **Deferred.** No author ruling is recorded (the spec's `human_review_items` are still open), so nothing was built; deferred in the log.
+- [x] **C4** *(if approved, compact private JSON)*: a private stored form
   with exact public reconstruction. Old entries are rejected cleanly as a
   private format change, not a public schema bump. The `cache_robustness`
   and `cache_upgrade` tooling moves to the new form. **P15** follows as a
   private range, if approved.
-- [ ] **P5** *(if approved)*: kind-and-scope pair coverage.
-- [ ] **O4** *(free part always; contract part only if approved)*.
-- [ ] **L5** *(per the batch-metadata ruling)*: batched oxlint.
-- [ ] **L6** *(if approved)*: a deterministic unstyled constructor in
+  - **Deferred.** No author ruling is recorded (the spec's `human_review_items` are still open), so nothing was built; deferred in the log.
+- [x] **P5** *(if approved)*: kind-and-scope pair coverage.
+  - **Deferred.** No author ruling is recorded (the spec's `human_review_items` are still open), so nothing was built; deferred in the log.
+- [x] **O4** *(free part always; contract part only if approved)*.
+  - Free part done: `Resolver::new` stable-sorts each `by_name` bucket
+    once, the rule-less path passes the bucket as a slice (no clone, no
+    per-occurrence sort), and `name_only` keeps the first-wins dedup.
+    Output byte-identical (protocol, Python corpus added).
+  - Contract part **deferred**: no author ruling recorded.
+- [x] **L5** *(per the batch-metadata ruling)*: batched oxlint.
+  - **Deferred.** No author ruling is recorded (the spec's `human_review_items` are still open), so nothing was built; deferred in the log. oxlint is also not installed on the dev host, so the batching could not be measured.
+- [x] **L6** *(if approved)*: a deterministic unstyled constructor in
   biscuit-terminal.
-- [ ] **C9** *(if approved)*: `hug cache clear`.
-- [ ] **B1/B2** *(if approved)*: a scoped profile or build invocation, and a
+  - **Deferred.** No author ruling is recorded (the spec's `human_review_items` are still open), so nothing was built; deferred in the log.
+- [x] **C9** *(if approved)*: `hug cache clear`.
+  - **Deferred.** No author ruling is recorded (the spec's `human_review_items` are still open), so nothing was built; deferred in the log.
+- [x] **B1/B2** *(if approved)*: a scoped profile or build invocation, and a
   mimalloc dependency in the CLI only, with the dependency catalogs
   updated.
-- [ ] **C3** *(only if the author overrules the recommendation to keep full
+  - **Deferred.** No author ruling is recorded (the spec's `human_review_items` are still open), so nothing was built; deferred in the log.
+- [x] **C3** *(only if the author overrules the recommendation to keep full
   validation)*.
+  - **Not built.** The author has not overruled the recommendation, so full
+    validation stays.
 
 Verification per PR: targeted tests for the touched area, the protocol
 (where output is meant to stay identical), then the full `just test` and

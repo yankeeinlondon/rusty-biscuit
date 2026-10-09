@@ -118,6 +118,114 @@ docs_updated_during_phase_5:
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
   - .claude/skills/tree-hugger/SKILL.md
+source_files_during_phase_6:
+  - tree-hugger/lib/src/scanner.rs
+  - tree-hugger/lib/src/file/source_file.rs
+  - tree-hugger/lib/src/god_files/analysis.rs
+  - tree-hugger/lib/tests/l1/file_identity.rs
+  - tree-hugger/cli/src/changed.rs
+  - tree-hugger/cli/src/main.rs
+  - tree-hugger/cli/src/scan.rs
+  - tree-hugger/cli/tests/symbols/filters.rs
+  - tree-hugger/cli/tests/symbols/spelling.rs
+  - tree-hugger/cli/tests/changed/ownership.rs
+docs_updated_during_phase_6:
+  - tree-hugger/docs/symbol-reports.md
+  - tree-hugger/docs/cache-design.md
+  - tree-hugger/features/2026-10-08-improved-performance/plan.md
+  - tree-hugger/features/2026-10-08-improved-performance/implementation-log.md
+  - tree-hugger/features/2026-10-08-improved-performance/spec.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+  - .claude/skills/tree-hugger/SKILL.md
+source_files_during_phase_7:
+  - tree-hugger/lib/src/analysis/occurrences.rs
+  - tree-hugger/lib/tests/l1/symbols_occurrences.rs
+docs_updated_during_phase_7:
+  - tree-hugger/features/2026-10-08-improved-performance/plan.md
+  - tree-hugger/features/2026-10-08-improved-performance/implementation-log.md
+  - tree-hugger/features/2026-10-08-improved-performance/spec.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+  - .claude/skills/tree-hugger/SKILL.md
+source_code:
+  - tree-hugger/lib/src/cache/stored_evidence.rs
+  - tree-hugger/lib/src/cache/symbol_cache.rs
+  - tree-hugger/lib/src/file/tree_file.rs
+  - tree-hugger/lib/src/file/tree_file/definitions.rs
+  - tree-hugger/lib/src/analysis/mod.rs
+  - tree-hugger/lib/src/analysis/occurrences.rs
+  - tree-hugger/lib/src/file/extract/declaration.rs
+  - tree-hugger/lib/src/file/extract/qualified_name.rs
+  - tree-hugger/lib/src/dead_code.rs
+  - tree-hugger/lib/src/rule_registry.rs
+  - tree-hugger/lib/src/ignore_directives.rs
+  - tree-hugger/lib/tests/l1/symbols_cache.rs
+  - tree-hugger/cli/src/main.rs
+  - tree-hugger/cli/src/declarations.rs
+  - tree-hugger/cli/tests/symbols/report.rs
+  - tree-hugger/lib/src/analysis/declaration_names.rs
+  - tree-hugger/lib/src/analysis/scope/ecma.rs
+  - tree-hugger/lib/src/analysis/scope/mod.rs
+  - tree-hugger/lib/src/analysis/scope/rust.rs
+  - tree-hugger/lib/src/analysis/syntax_markers.rs
+  - tree-hugger/lib/src/file/extract/attributes.rs
+  - tree-hugger/lib/src/file/extract/classify.rs
+  - tree-hugger/lib/src/file/extract/doc_comments.rs
+  - tree-hugger/lib/src/file/extract/flags.rs
+  - tree-hugger/lib/src/file/extract/generics.rs
+  - tree-hugger/lib/src/file/extract/header/keyword.rs
+  - tree-hugger/lib/src/file/extract/modifiers.rs
+  - tree-hugger/lib/src/file/extract/navigation.rs
+  - tree-hugger/lib/src/file/extract/relations.rs
+  - tree-hugger/lib/src/file/extract/rust_impl.rs
+  - tree-hugger/lib/src/file/extract/scope.rs
+  - tree-hugger/lib/src/file/extract/signatures.rs
+  - tree-hugger/lib/src/file/extract/static_flags/cpp.rs
+  - tree-hugger/lib/src/file/extract/static_flags/php.rs
+  - tree-hugger/lib/src/file/extract/static_flags/python.rs
+  - tree-hugger/lib/src/file/extract/static_flags/rust.rs
+  - tree-hugger/lib/src/file/extract/static_flags/scala.rs
+  - tree-hugger/lib/src/file/extract/visibility/c.rs
+  - tree-hugger/lib/src/file/extract/visibility/cpp.rs
+  - tree-hugger/lib/src/file/extract/visibility/csharp.rs
+  - tree-hugger/lib/src/file/extract/visibility/ecma.rs
+  - tree-hugger/lib/src/file/extract/visibility/java.rs
+  - tree-hugger/lib/src/file/extract/visibility/lua.rs
+  - tree-hugger/lib/src/file/extract/visibility/rust.rs
+  - tree-hugger/lib/src/file/extract/visibility/swift.rs
+  - tree-hugger/lib/src/file/mod.rs
+  - tree-hugger/lib/src/file/parents.rs
+  - tree-hugger/lib/src/file/tree_file/relations.rs
+  - tree-hugger/lib/src/file/tree_file/relations/lexical.rs
+  - tree-hugger/lib/src/shared/schema_v2/mod.rs
+  - tree-hugger/cli/src/scan.rs
+  - tree-hugger/cli/src/render.rs
+  - tree-hugger/cli/src/refs.rs
+  - tree-hugger/cli/src/stats.rs
+  - tree-hugger/cli/src/report.rs
+  - tree-hugger/cli/src/prelude.rs
+  - tree-hugger/cli/tests/symbols/refs.rs
+  - tree-hugger/lib/src/god_files/analysis.rs
+  - tree-hugger/lib/src/file/source_file.rs
+  - tree-hugger/lib/src/scanner.rs
+  - tree-hugger/lib/tests/l1/file_identity.rs
+  - tree-hugger/cli/src/changed.rs
+  - tree-hugger/cli/tests/symbols/filters.rs
+  - tree-hugger/cli/tests/symbols/spelling.rs
+  - tree-hugger/cli/tests/changed/ownership.rs
+  - tree-hugger/lib/tests/l1/symbols_occurrences.rs
+documentation:
+  - tree-hugger/features/2026-10-08-improved-performance/plan.md
+  - tree-hugger/features/2026-10-08-improved-performance/spec.md
+  - tree-hugger/features/2026-10-08-improved-performance/implementation-log.md
+  - tree-hugger/docs/symbol-reports.md
+  - tree-hugger/cli/README.md
+  - .claude/skills/tree-hugger/SKILL.md
+  - tree-hugger/docs/references.md
+  - tree-hugger/docs/cache-design.md
+completed_phase: 7
+implemented: true
 ---
 
 # Implementation Log for 2026-10-08-improved-performance (7 phases)
@@ -1663,3 +1771,424 @@ them).
   byte-identical output (protocol), green `just test`, `just test-l2` and
   `just lint`, and this log entry.
 - Stop for review.
+
+## Phase 6
+
+Native path identity (C8, L13, L3). Base revision `610ce33a7` (Phase 5
+committed). The `os` skill's `windows-paths.md` was loaded first; nothing in
+this phase changes how an identity is spelled, only how often it is
+computed and which directories the walk opens.
+
+### C8: one `realpath` per scanned file (`lib/src/file/source_file.rs`)
+
+- `SourceFile::from_read` now resolves the identity and hands it to a new
+  crate-private `SourceFile::from_identity(path, supplied, language,
+  source)`, which holds the rest of the old body (language detection,
+  hash). Errors still name `supplied`.
+- New public `SourceFile::read_identified(identity, language)`: reads the
+  file and keeps `identity` verbatim as `path()`.
+- **Departure from the plan:** the plan asked for a *crate-private*
+  constructor, but the scanner's main consumer, `Analyzer::read`, lives in
+  the `tree-hugger-cli` crate. So `read_identified` is public, with the
+  contract in its docs (only for paths that are already their own
+  `file_identity`; anything else becomes the file's path, key and IDs).
+  `from_identity` stays crate-private and is what god-files uses for its
+  candidates (already identities). Public `read`/`read_with_language`
+  still canonicalize. No schema or record change.
+- A `debug_assert` that the path equals its identity was considered and
+  dropped: it does I/O, and CLI unit tests (`export_write_tests`,
+  `declarations::grouping_tests`) analyze raw temp-dir spellings (macOS
+  `/var/…`), which `Analyzer` now keeps verbatim. Production callers are
+  all identities: scanner output (`declarations`, `lint`/`imports`,
+  `refs`) and `prelude.rs` (which calls `file_identity` first).
+
+### L13: identity-only `--changed` membership (`cli/src/changed.rs`, `main.rs`)
+
+`ChangedFiles::contains(file)` (which ran `file_identity` on every scanned
+file, serially) is replaced by `contains_identity(identity)`, a plain set
+lookup; its only caller was the scanner intersection in `main.rs`, so the
+arbitrary-spelling form was removed rather than kept unused. Ownership
+checks, nested-checkout rejection and conflict errors are untouched.
+
+### L3: literal positional paths (`lib/src/scanner.rs`)
+
+Rather than re-implementing the walker's rules for one path (the spec warns
+`matched_path_or_any_parents` is not a substitute), the fast path **keeps
+the `ignore` walker and prunes it**:
+
+- `literal_targets(&glob_inputs)` returns the root-relative paths when
+  *every* walked pattern is literal and anchored: contains `/`; no
+  `* ? [ ] { } \ :`; not starting with `!`, `#` or `/`; no leading or
+  trailing whitespace; no empty, `.` or `..` component. Otherwise (and for
+  no patterns) `None`. These rules come from `ignore` 0.4.25's
+  `GitignoreBuilder::add_line` (comments, negation, `/` anchoring,
+  dir-only trailing slash, whitespace trimming, `**/` prefix for slashless
+  patterns, `backslash_escape(true)`).
+- With targets, `WalkBuilder::filter_entry` keeps an entry only when its
+  root-relative path is a component-wise prefix of a target. `filter_entry`
+  runs after `ignore`'s own checks, and walk roots are never filtered, so
+  every entry the walk reaches is still decided by the same overrides,
+  ignore stack, hidden and symlink rules; pruning siblings never changes a
+  kept directory's ignore stack. A literal pattern's whitelist can only
+  match its own path, so the full walk could only have selected targets.
+- **One behavior difference (error path only):** an unreadable directory
+  elsewhere in the package is never opened, so it no longer fails the
+  scan (the full walk returns its `walkdir` error). Selected files,
+  records and exit codes for readable trees are unchanged. Recorded in
+  `docs/symbol-reports.md`.
+- Bare names (`lib.rs`), globs and any mix with a glob still walk the
+  whole tree, as before.
+
+### Output diff protocol
+
+Base `/tmp/th-p6/base/hug` (Phase 5's `hug-new`, the committed code but
+the clippy-only borrow fix), new `/tmp/th-p6/new/hug` (profiling build of
+this phase). Both binaries are named `hug` so usage errors compare equal.
+Scripts (scratch): `/tmp/th-p6/bin/protocol6.sh`, `protocol2.sh`.
+
+- **Main rows**, from the repository root, cold (`--no-cache`), warm ×2,
+  after a wide run; `--json-full symbols`, `--json symbols`, `symbols
+  --plain`, `classes --plain`, `imports`, `--json lint`, `symbols --count`,
+  `--json functions`; corpora: `tree-hugger/**` (glob, full walk), the 16
+  `multi/**` fixtures by `--file`, `openai/types.rs` and
+  `filesystem/mod.rs` (literal, fast path), three literals together, a
+  literal plus a glob, a literal fixture (`lib/tests/fixtures/sample.rs`), a
+  literal under ignored `target/`, a missing literal, a bare name
+  (`scanner.rs`), `--changed` and `--changed <literal>` (the working tree
+  had this phase's edits), `refs` (JSON and text) on `openai/types.rs`,
+  and `god-files --plain` / `--json god-files`. **1,206 files, 1,205
+  identical.** The one difference is `elapsed_time_ms` (1 vs 0) in the
+  wide-state `--json lint` over `tree-hugger/**`, timing metadata the
+  protocol excludes. The ignored and missing literals exit 1
+  (`NoSourceFiles`) in both arms; the fixture `lint`/`refs` rows are the
+  known `--file` usage error (exit 2) in both.
+- **Fixture rows** (`protocol2.sh`, from the `multi/` directory, cold and
+  warm ×2): `refs` one-file, JSON, multi-file, `--callees`, ambiguous
+  `new`, `--plain lint`, `--json lint`, `--plain imports`, `./rust.rs`
+  (a `.` component, so the walk; nothing selected in both). **81 of 81
+  identical.**
+
+### Timing sample
+
+`hyperfine -N`, profiling builds, 16 threads, warm shared cache, from the
+repository root, 2026-10-09 00:08–00:09, load 9–13.
+
+| Command | Base | New | Change |
+|---|---|---|---|
+| `symbols --count tree-hugger/lib/src/lib.rs` (`-w 2 -r 15`) | 66.9 ± 4.8 ms (sys 49.1 ms) | **9.2 ± 0.6 ms** (sys 4.4 ms) | 7.2× (L3, C8); Phase 1: 70.6 ms in-repo, 7.5 ms outside |
+| `symbols --count --changed` (`-w 1 -r 8`) | 252.1 ± 3.8 ms | **204.9 ± 5.3 ms** | 1.23× (L13, C8) |
+| `symbols --count --changed tree-hugger/lib/src/scanner.rs` | 144.4 ± 7.7 ms | **82.2 ± 1.4 ms** | 1.76× (L3 + L13) |
+
+Phase 1's 70–103 ms single-file in-repo latency is now within 2 ms of the
+outside-the-repository figure.
+
+### Gates
+
+- Targeted while iterating: `just test filters spelling changed
+  cache_lookup export_write grouping file_identity god_files cli::` (192
+  passed), then the plan's `just test filters spelling changed cache_lookup
+  file_identity god_files` (161 passed).
+- Negative control: with `literal_targets` forced to `None`,
+  `filters::a_literal_positional_path_does_not_open_unrelated_directories`
+  fails (the walk hits the locked directory) and the equivalence test still
+  passes, so the narrowness test detects the fast path; restored after.
+- `just lint` first failed on one clippy `cloned_ref_to_slice_refs` in the
+  new `file_identity.rs` test (`[identity.clone()]`); fixed with
+  `std::slice::from_ref`. Then clean (exit 0).
+- `just test` (after the last code edit): **2063 passed, 0 failed** (16
+  slow), 104 s.
+- `just check-tier-coverage tree-hugger`: listed, 0 stranded.
+- `just test-l2` not run: no rendering changed (the plan's Phase 6 verify
+  list does not include it).
+- No pre-existing or skipped failures.
+
+### Requirement-to-test mapping
+
+| Change | Tests |
+|---|---|
+| L3 selects exactly what the walker selects: anchored literal, `.gitignore`d file re-included, ignored parent, nested `.ignore` file and directory, fixture, hidden directory, several patterns, one missing among several, no match (`NoSourceFiles`, exit 1), non-source file, directory named like a source file, case mismatch, `--exclude-files` literal and glob, file symlink and symlinked directory (Unix) | `filters::literal_positional_paths_select_what_the_walker_selects` (new; each literal compared byte-for-byte, exit code and stderr, with the same pattern bracketed, plus the expected file list) |
+| L3 bare name still matches at any depth; literal plus glob selects the union | same test (`lib.rs` ≡ `**/lib.rs`; `src/lib.rs other/*.rs`) |
+| L3 opens only the directories on the way | `filters::a_literal_positional_path_does_not_open_unrelated_directories` (new, Unix; fails with the fast path disabled) |
+| L3 + C8 identity: literal and walked selections share one cache entry and report | `spelling::literal_and_glob_selections_share_one_identity` (new; macOS `/var` alias root) |
+| L3 fixture re-inclusion from the repository root | existing `cli.rs` tests naming `tree-hugger/lib/tests/fixtures/sample.*` positionally (now on the fast path) |
+| C8 `read_identified` = `read` for scanner output (path, language, hash, cache key, records, IDs) under the alias and canonical root, literal and glob; forced language; missing file and unsupported language errors name the path; a non-identity spelling is kept verbatim while `read` resolves it | `file_identity::scanner_output_reads_identified_as_read_does` (new, lib L1) |
+| C8 every spelling still one identity through the CLI | existing `spelling::*`, `prelude::prelude_reuse_holds_for_every_spelling_of_an_explicit_file`, lib `file_identity::*` |
+| C8 god-files candidates | existing `god_files` lib tests (56), `file_identity::god_files_paths_are_relative_to_any_spelling_of_the_root`; protocol god-files rows |
+| L13 membership by identity, ownership unchanged | existing `changed` suite (`selection`, `paths`, `ownership`, `cache`, `empty`, …; every scratch root is the macOS `/var` alias), `changed::tests::an_empty_changed_set_contains_nothing`; protocol `--changed` rows |
+
+Every new test is L1: the CLI tests are in `cli/tests/symbols/{filters,
+spelling}.rs` (the `symbols` target), the lib test in
+`lib/tests/l1/file_identity.rs` (the `l1` target). No path segment starts
+with a tier marker. The Input Robustness Matrix does not apply: no parser,
+manifest or configuration reader changed (the positional pattern grammar is
+`ignore`'s, unchanged; `literal_targets` only decides when pruning is
+safe, and its equivalence is what the new tests compare).
+
+### OS considerations
+
+- `literal_targets` rejects `\` and `:`, so a native Windows separator or a
+  drive-qualified pattern always takes the full walk. Targets are built
+  from `/`-split components and compared component-wise
+  (`Path::starts_with`), so the walker's native `\` entries match.
+- Comparison is case-sensitive, as `ignore`'s overrides are
+  (`case_insensitive(false)`), so `SRC/lib.rs` selects nothing on macOS and
+  Windows in both paths (tested).
+- `read_identified` keeps the scanner's spelling, which is
+  `canonicalize_simplified` output (no `\\?\`, long names), exactly what
+  the second `file_identity` call returned before.
+- Rigs, `filters spelling changed cache_lookup` on `tree-hugger-cli` and
+  `file_identity god_files` on `tree-hugger`:
+  - Linux (`just cross-check tree-hugger-cli --os linux …`, `build-linux`):
+    **67 passed**.
+  - Native Windows (`./scripts/cross-check.sh … --os windows`,
+    `build-win-native`): the first attempt never ran (the host's own
+    `git fetch` from `github.com:22` timed out); the second ran 66 CLI tests,
+    **64 passed, 2 failed** (below); after the fix, **66 passed**, with PASS
+    lines for `filters::literal_positional_paths_select_what_the_walker_selects`
+    and `spelling::literal_and_glob_selections_share_one_identity`. The lib
+    run: **60 passed**, including
+    `file_identity::scanner_output_reads_identified_as_read_does`.
+  - WSL2 (`build-win`): **67 passed**.
+  - The two Unix-only tests (`symlink`, `chmod 000`) are `cfg(unix)` /
+    `cfg!(unix)`; the Windows leg runs the rest of each case table.
+
+### Pre-existing Windows failures fixed (`cli/tests/changed/ownership.rs`)
+
+Two `--changed` ownership tests from `cd0173e4b` (on this branch, not yet on
+`main`, so never run by Windows CI) failed on native Windows before reaching
+any Phase 6 code:
+
+- `external_directory_alias_cannot_return_changed_identity_to_active_checkout`
+  failed its setup assertion `file_identity(alias.rs) ==
+  file_identity(clean.rs)` (left `…\alias.rs`), before `hug` ran.
+- `nested_candidate_alias_cannot_return_changed_identity_to_outer_checkout`
+  failed in `changed::resolve` → `checkout_path` (unchanged) with
+  `os error 123` on `alias.rs`.
+
+Cause: symlink targets spelled with `/` (`"bridge/back.rs"`,
+`"../clean.rs"`, `"inner/subdir"`) do not resolve on Windows, the `os`
+skill's `windows-paths.md` item 10 trap. Fix (test-only): those targets are
+joined name by name (`Path::new("bridge").join("back.rs")`), identical bytes
+on Unix. The other `inner/../clean.rs` spellings in the file already passed
+on Windows and were left alone. Not a Phase 6 behavior change; fixed here
+because this phase's pull request is the `ci:all-os` one.
+
+### Docs and skill
+
+- `docs/symbol-reports.md`: how a positional file filter is matched
+  (relative `.gitignore`-style pattern, re-includes ignored/fixture files
+  but not files under an ignored directory, never a symlink, bare names at
+  any depth), the literal-path fast path and its one error-path
+  difference.
+- `docs/cache-design.md#file-identity`: scanner output is read with
+  `SourceFile::read_identified`, and `--changed` membership is by identity.
+- `.claude/skills/tree-hugger/SKILL.md`: the scanner identity and
+  literal-path bullet, `read_identified` in the API block,
+  `contains_identity` in the `--changed` paragraph.
+- No README or dependency change (no crate added; `ignore` was already a
+  dependency).
+
+### Scope calculator
+
+Run from the repository root after every Phase 6 edit (plan, log and spec
+frontmatter included):
+
+```sh
+git status --porcelain --untracked-files=all | awk '{print $NF}' \
+  | xargs python3 scripts/ci/affected_scope.py
+```
+
+`"packages": ["tree-hugger", "tree-hugger-cli", "test-toolkit"]`,
+`"change_class": "package"`, so the gates were required and were run.
+`test-toolkit` was not edited; the calculator lists it as a reader of these
+files (as in Phases 4 and 5). Its gates were not run here (its own area; CI
+runs them).
+
+### Checkpoint 6
+
+- PR 4's changes are in the working tree (uncommitted, per instructions):
+  byte-identical output (protocol), green `just test` and `just lint`, the
+  targeted suites green on every OS rig, and this log entry. The
+  `ci:all-os` push is the commit step's.
+- Stop for review.
+
+## Phase 7
+
+Approved policy changes. Base revision `610ce33a7` plus Phase 6's
+uncommitted working tree.
+
+### Rulings check: none recorded
+
+Phase 7 implements only the Open Questions the author approved. Before any
+edit, the spec's frontmatter, its Open Questions section, this log, the
+plan and the feature directory's git history were searched for a recorded
+ruling. **None exists:** `human_review` is still `true` with the questions
+unanswered, and Phase 6's `message_to_agent` says to stop on every
+ruling-gated item if none are recorded. So:
+
+| Item | Gate | Outcome |
+|---|---|---|
+| **O4, free part** | none ("free part always") | **Built** (below) |
+| O4, contract part | ruling | Deferred: no ruling |
+| C5 (Flags on cache-enabled misses) | ruling | Deferred: no ruling |
+| C4 / P15 (compact private cache form) | ruling | Deferred: no ruling |
+| P5 (scope-dependent metadata) | ruling | Deferred: no ruling |
+| L5 (batched oxlint metadata) | ruling | Deferred: no ruling; oxlint is also not installed on the dev host |
+| L6 (unstyled terminal constructor) | ruling | Deferred: no ruling |
+| C9 (`hug cache clear`) | ruling | Deferred: no ruling |
+| B1 / B2 (build profile, mimalloc) | ruling | Deferred: no ruling (the spec recommends deferring anyway) |
+| C3 (narrow validation) | only if the author overrules "keep full validation" | Not built: not overruled |
+
+Each deferred item becomes a small follow-up once the author answers the
+matching `human_review_items` entry on the spec.
+
+### O4 free part: candidates sorted once (`lib/src/analysis/occurrences.rs`)
+
+Before: every `NameOnly` resolution in a language without binding rules
+cloned the whole same-named bucket (`by_name.get(..).cloned()`), and every
+call of `name_only` stable-sorted its list by `(name_span.start, id)`, then
+removed adjacent duplicate IDs (first wins). In a Python class with M
+methods, each of the M `self` uses re-sorted the M-long bucket.
+
+Now:
+- `Resolver::new` stable-sorts each `by_name` bucket once with
+  `Resolver::candidate_key` (the same key).
+- `records_named` filters a sorted bucket. A stable sort followed by a filter
+  gives the same order as a filter followed by the sort, so every filtered
+  caller (member calls, `item_records`, Rust paths) is already in candidate
+  order.
+- The rule-less path passes the bucket to `name_only` as a slice: no clone.
+- `name_only(&[usize])` no longer sorts. It keeps the first of adjacent
+  equal IDs while building the `SymbolRef`s, as `Vec::dedup_by` did. The
+  dedup deliberately stays per call: running it once in `new` and filtering
+  afterwards could drop the kept copy and change which duplicate survives.
+- The one input not drawn from a bucket, `Lookup::Found` with several
+  bindings (in lookup order), sorts its own list before `uncertain`.
+- `uncertain` takes `&[usize]`; the eight callers pass references.
+
+No public change: the order (`docs/references.md`: "in declaration order")
+and the dedup rule are the same, and no counter changes.
+
+**Negative controls.** I removed each sort in turn (the bucket sort and the
+`Lookup::Found` sort), and neither the new test nor
+`occurrences_and_coverage_are_in_canonical_order` failed. I then added a
+temporary `eprintln!` probe that reported any bucket or binding list arriving
+out of candidate order. I ran it over every `symbols/**` fixture,
+`tree-hugger/lib/src/**`, `scripts/**` and `tools/**`, plus constructed
+JS/TS/Python/C++/Go/Rust cases (redeclared `var`s, hoisted functions,
+overloads, decorators, out-of-line C++ members, Go methods before their
+type). It reported **none**: records come in declaration order, and scope
+buckets in placement order, which follows source order. Both sorts are kept
+as defensive guarantees, because the old code sorted unconditionally and a
+sort over an already-sorted list is one linear pass. The probe was removed
+(the file was restored from a copy taken before the probe and checked with
+`grep -c O4PROBE` = 0).
+
+### Output diff protocol
+
+Base `/tmp/th-p7/base/hug` (Phase 6's profiling build), new
+`/tmp/th-p7/new/hug` (profiling build of this phase, after the last code
+edit). Scripts (scratch): `/tmp/th-p7/bin/protocol7.sh` (Phase 6's rows plus
+a `py` corpus, `scripts/**/*.py`, with `refs --json main` and
+`refs --plain run`) and `/tmp/th-p7/bin/protocol2.sh` (Phase 6's fixture
+rows plus `--json-full symbols nested/python.py` and
+`refs --json grow nested/python.py`).
+
+- **Main rows:** **1,326 files, 1,325 identical.** The one difference is
+  `elapsed_time_ms` (0 vs 1) in the warm `--json lint` over
+  `tree-hugger/**`, timing metadata the protocol excludes, as in Phase 6.
+  The Python corpus's cold `--json-full symbols` alone is 388 MB with 33,168
+  non-empty candidate lists (including `scripts/ci/test_affected_scope.py`,
+  O4's 222 MB file), byte-identical in all four states. Exit codes match
+  (the ambiguous `refs main` and the missing/ignored literals exit 1; the
+  fixture `lint`/`refs` rows are the known `--file` usage error, exit 2).
+- **Fixture rows:** **99 of 99 identical.**
+
+### Timing sample
+
+`hyperfine -N -w 1 -r 10`, profiling builds, `refs --json --no-cache
+seed_build_inputs scripts/ci/test_affected_scope.py` (resolves every
+occurrence of the 377 KB file), 2026-10-09 00:41, **load 120** (not a
+quiet host; this is a sample, not a scaling spike):
+
+| Base | New | Change |
+|---|---|---|
+| 325.7 ± 4.2 ms (user 267.5) | 322.7 ± 4.3 ms (user 267.2) | 1.01 ± 0.02×: no measurable change |
+
+That matches the spec's "low–medium" expectation for the free part. Most of
+the remaining cost is building each occurrence's public `SymbolRef` list,
+which is the contract part (deferred).
+
+### Gates
+
+- Targeted: `just test name_only_candidates_are_in_declaration_order_and_distinct
+  occurrences_and_coverage_are_in_canonical_order`: 2 passed.
+- `just lint`: exit 0, no warnings.
+- `just test` (after the last code edit): **2064 passed, 0 failed** (39
+  slow), 163 s. Some tests were slow because the protocol was running on the
+  same host.
+- `just test-l2` not run: no terminal or rendering change.
+- No skipped or pre-existing failures.
+
+### Requirement-to-test mapping
+
+| Change | Tests |
+|---|---|
+| O4: candidates still in name-position-then-ID order and distinct, for every language fixture | `symbols_occurrences::name_only_candidates_are_in_declaration_order_and_distinct` (new; compares each candidate's record `name_span.start`, then ID, through `reference_evidence` and `symbol_index_v2`) |
+| O4: rule-less bucket path (no clone, no per-call sort): every `self` in a Python class lists each method's `self` in declaration order | same test, Python case |
+| O4: filtered bucket path (`records_named`): `x.m()` lists both in-file `m` methods in declaration order | same test, Rust case |
+| O4: unsorted input path (`Lookup::Found`, several bindings): a body `var` redeclaring a parameter lists the parameter, then the `var` | same test, JS case |
+| O4: distinct candidates (first-wins dedup) | existing `occurrences_and_coverage_are_in_canonical_order`; the new test's strict `<` |
+| O4: cache reader still accepts the order it writes | existing `symbols_cache` (`CANDIDATE_ORDER` cells), part of `just test` |
+| O4: byte-identical public output | protocol (both scripts, Python corpus included) |
+
+The new test sits in `lib/tests/l1/symbols_occurrences.rs`, already
+declared by the `l1` target; no path segment starts with a tier marker. The
+Input Robustness Matrix does not apply: no parser, manifest or configuration
+reader changed.
+
+### OS considerations
+
+Nothing OS-specific changed: an in-memory sort and a slice borrow in the
+resolver, with no paths, I/O or `cfg`. No rig cross-check was run; CI covers
+the other OSes.
+
+### Docs and skill
+
+- `.claude/skills/tree-hugger/SKILL.md`: the cache-validation bullet now
+  names `Resolver::candidate_key` as the source of candidate order (sorted
+  once per bucket in `Resolver::new`; `name_only` keeps the first of
+  adjacent equal IDs).
+- `docs/references.md` unchanged: it states the contract ("in declaration
+  order"), which still holds.
+- No README or dependency change.
+
+### Scope calculator
+
+Run from the repository root after every Phase 7 edit (plan, log and spec
+frontmatter included):
+
+```sh
+git status --porcelain --untracked-files=all | awk '{print $NF}' \
+  | xargs python3 scripts/ci/affected_scope.py
+```
+
+`"packages": ["tree-hugger", "tree-hugger-cli", "test-toolkit"]`,
+`"change_class": "package"` (exit 0), so the gates were required and were
+run. The working tree still holds Phase 6's uncommitted changes as well.
+`test-toolkit` was not edited; the calculator lists it as a reader of these
+files, as in Phases 4–6, and its gates were not run here.
+
+### Checkpoint 7
+
+- The O4 free part is in the working tree (uncommitted, per instructions):
+  byte-identical output (protocol), green `just test` and `just lint`, and
+  this log entry.
+- Every other Phase 7 item is explicitly deferred above, because no author
+  ruling is recorded. The spec's `human_review_items` carry the questions,
+  with a lead item that explains the deferral.
+- The plan is marked `implemented: true` and `completed_phase: 7`. The
+  feature directory stays active for author review.
+- Scratch: `/tmp/th-p7/` (`base/hug`, `new/hug`, `bin/protocol7.sh`,
+  `bin/protocol2.sh`, `protocol2/`, `protocol7.log`, `scope.json`; the 388 MB
+  protocol outputs and scratch caches were deleted).

@@ -7,7 +7,8 @@ reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-08
 review_iterations: 0
-implemented: false
+implemented: true
+implemented_by: "claude/opus"
 $schema:
   status: |-
     enum(
@@ -34,6 +35,31 @@ packages:
   - tree-hugger-cli
 human_review: true
 human_review_items:
+  - |-
+    **The plan is finished, but most of its last step is waiting on you.**
+
+    *Why now:* the last phase (Phase 7) was meant to build only the policy
+    changes you approve in the questions below. No answers had been
+    recorded when it ran, so it built only the one item that needed no
+    answer: an internal speed-up for "maybe this symbol" suggestions (O4's
+    free part, with no visible output change). Every other item was
+    deferred, and the implementation log records each deferral. Wherever a
+    question below says "Phase 7", read "the follow-up change made once you
+    answer".
+
+    - **Answer the questions below, then schedule one small follow-up per
+      approved item (recommended).** Pro: each change is small, reviewed on
+      its own, and built exactly as you chose. Con: one more round trip.
+    - **Close this feature as is and file the open questions as separate
+      unscheduled specs.** Pro: this pull request lands sooner, and nothing
+      waits on decisions. Con: the measurements here go stale if the
+      follow-ups wait long.
+    - **Reject the deferral and have the recommended options built without
+      a ruling.** Pro: fastest. Con: it overrides the plan's rule that
+      policy changes need your approval; not recommended.
+
+    *Recommendation:* the first option. The questions are already sized
+    with measured numbers, and each answer maps to one small change.
   - |-
     **Should a cache miss also compute the "flags" facts? (C5)**
 
@@ -131,8 +157,9 @@ human_review_items:
   - |-
     **How should "maybe this symbol" reference candidates be shown? (O4)**
 
-    *Why now:* only the contract part of O4 needs you; Phase 7 does the free
-    part either way.
+    *Why now:* only the contract part of O4 needs you. The free part
+    (sorting each list once instead of per use) is done, with no output
+    change and no measurable time change: building the lists is the cost.
 
     When a reference cannot be proved, `hug` lists every same-named
     declaration as a candidate. In Python every `self` use lists every method
@@ -171,21 +198,29 @@ human_review_items:
     *Recommendation:* one record per batch. Separately: should oxlint be
     installed on this machine so the batching can be measured?
   - |-
-    **Should a plain file path argument stay a pattern? (L3)**
+    **Should a plain file path argument stay a pattern? (L3)** *(Phase 6
+    built the recommended option; confirm it or ask for the alternative.)*
 
-    *Why now:* Phase 6 implements the fast path; this decides its rules.
+    *Why now:* nothing in Phase 7 depends on it, but if you prefer the
+    alternative it should be its own change, not folded into Phase 7.
 
-    `hug symbols some/file.rs` takes **71 ms inside the repo against 7.5 ms**
-    outside it, because the whole tree is walked to match the path.
+    `hug symbols some/file.rs` used to take **67–71 ms inside the repo
+    against 7.5 ms** outside it, because the whole tree was walked to match
+    the path. Phase 6 now walks only the directories on the way to a literal
+    path: **9.2 ms**, with exactly the same files selected (ignored files,
+    fixtures, hidden files and symlinks behave as before; tests compare it
+    with the full walk). One difference: an unreadable folder elsewhere in
+    the package no longer makes the command fail, because it is never
+    opened.
 
-    - **Keep pattern meaning, add a careful fast path (recommended).** Pro:
-      no behavior change. Con: odd cases (ignored files, symlinks) still
-      walk.
+    - **Keep pattern meaning with the fast path (built; recommended).**
+      Pro: no change to which files are picked. Con: patterns with wildcards
+      or odd spellings still walk the whole tree.
     - **Treat an existing file path as an explicit selection.** Pro:
       simpler and always fast. Con: changes which files are picked (ignored
       files, fixtures, symlinks); needs new docs and tests.
 
-    *Recommendation:* keep pattern meaning with the fast path.
+    *Recommendation:* keep what Phase 6 built.
   - |-
     **How broad should the terminal-detection change be? (L6)**
 
@@ -239,38 +274,29 @@ human_review_items:
     *Recommendation:* defer, then re-measure mimalloc after C4. Drop LTO
     either way.
 message_to_agent: |-
-  Phase 5 (output pipeline and command-level work) is implemented,
-  uncommitted; details are in implementation-log.md under "## Phase 5".
-  just test (2059 passed), just test-l2 and just lint are green; the output
-  diff protocol is byte-identical apart from the clap usage error naming
-  the binary.
-  - scan::in_file_order is now a sliding window on scoped std threads
-    (rayon::current_num_threads() of them). deliver takes a third argument,
-    scan::Flush; call flush.apply(out) (or JsonReport::flush) after writing,
-    because the window advances only past a delivery that flushed. A
-    closed pipe therefore stops within one window (4 x threads files).
-    chunk_size/flush_at_chunk_end no longer exist.
-  - Worker threads are fresh per in_file_order call, so per-thread state
-    (the parents index) is installed per run_query as before; nothing else
-    is thread-local.
-  - Analyzer::read + Analyzer::analyze_source analyze one SourceFile
-    snapshot more than once (refs phase 2, prelude). L13 (Phase 6) touches
-    changed.rs, which still calls collect_files and in_file_order the same
-    way.
-  - lib: SourceFile::from_read(supplied, language, source) is the
-    crate-private half of read_with_language (file_identity + language +
-    hash). Phase 6's C8 identity-preserving constructor should sit beside
-    it, not duplicate it.
-  - Departures recorded in the log: refs --verbose totals count both phases
-    on multi-file scans; text lint hides clean files from files.len() > 1
-    even when others fail; adapter warnings now precede their first file;
-    is_test_file memo not built (measured <1%).
-  - The author's Open Question rulings are still pending (human_review);
-    Phase 6 does not depend on them.
-  - Scratch artifacts: /tmp/th-p5 (hug-base, hug-new, bin/protocol*.sh).
-  - `just cross-check <pkg> --os windows <name filters>` works for a
-    filtered run; an -E '...' expression with parentheses does not survive
-    just's argument splitting.
+  Phase 7 is complete and implemented: true is set, but only the ungated
+  O4 free part was built. No author ruling had been recorded, so every
+  ruling-gated item (C5, C4/P15, P5, the O4 contract part, L5, L6, C9,
+  B1/B2) is deferred, and C3 is not built (not overruled). Details are in
+  implementation-log.md under "## Phase 7".
+  - O4 free part, lib/src/analysis/occurrences.rs: Resolver::new
+    stable-sorts each by_name bucket once (Resolver::candidate_key); the
+    rule-less path passes the bucket as a slice (no clone); name_only takes
+    &[usize] in candidate order and keeps first-wins dedup per call; the
+    Lookup::Found multi-binding path sorts its own list. uncertain takes
+    &[usize].
+  - Output is byte-identical: 1,325 of 1,326 protocol files (the other
+    differs only in elapsed_time_ms), with a Python corpus (388 MB
+    --json-full) added, and fixture rows 99 of 99. Timing showed no
+    measurable change (1.01x, host load 120).
+  - Removing either sort did not fail any test; a probe found no input
+    that arrives out of order. The sorts are kept as defensive guarantees,
+    as the old per-call sort was.
+  - New test: symbols_occurrences::name_only_candidates_are_in_declaration_order_and_distinct.
+  - Gates: just test 2064 passed; just lint clean; no test-l2 (no terminal
+    change); no cross-OS run (nothing OS-specific).
+  - A reviewer should confirm with the author before building any
+    deferred item; the spec's human_review_items list the questions.
 ---
 
 # Tree Hugger performance review
