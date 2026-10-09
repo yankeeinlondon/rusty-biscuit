@@ -390,7 +390,7 @@ fn test_hash_save_stamps_a_date_above_an_indented_comment_byte_for_byte() {
             let source = document(authored, STALE, newline);
             std::fs::write(&file, &source).unwrap();
 
-            let before = chrono::Local::now().format("%Y-%m-%d").to_string();
+            let before = chrono::Utc::now().format("%Y-%m-%d").to_string();
             fixture
                 .command()
                 .arg("hash")
@@ -398,7 +398,7 @@ fn test_hash_save_stamps_a_date_above_an_indented_comment_byte_for_byte() {
                 .arg(&file)
                 .assert()
                 .success();
-            let after = chrono::Local::now().format("%Y-%m-%d").to_string();
+            let after = chrono::Utc::now().format("%Y-%m-%d").to_string();
 
             let written = std::fs::read_to_string(&file).unwrap();
             let hash = written
@@ -451,7 +451,7 @@ fn test_hash_save_keeps_the_comment_after_a_quote_inside_a_plain_date() {
                 let file = dir.path().join("doc.md");
                 std::fs::write(&file, document(date_lines, authored, STALE, newline)).unwrap();
 
-                let before = chrono::Local::now().format("%Y-%m-%d").to_string();
+                let before = chrono::Utc::now().format("%Y-%m-%d").to_string();
                 fixture
                     .command()
                     .arg("hash")
@@ -459,7 +459,7 @@ fn test_hash_save_keeps_the_comment_after_a_quote_inside_a_plain_date() {
                     .arg(&file)
                     .assert()
                     .success();
-                let after = chrono::Local::now().format("%Y-%m-%d").to_string();
+                let after = chrono::Utc::now().format("%Y-%m-%d").to_string();
 
                 let written = std::fs::read_to_string(&file).unwrap();
                 let hash = written
@@ -511,9 +511,9 @@ fn test_hash_save_reads_a_content_colon_as_part_of_a_plain_key() {
         let file = dir.path().join("doc.md");
         std::fs::write(&file, document("2020-01-01", STALE, newline)).unwrap();
 
-        let before = chrono::Local::now().format("%Y-%m-%d").to_string();
+        let before = chrono::Utc::now().format("%Y-%m-%d").to_string();
         fixture.command().arg("hash").arg("--save").arg(&file).assert().success();
-        let after = chrono::Local::now().format("%Y-%m-%d").to_string();
+        let after = chrono::Utc::now().format("%Y-%m-%d").to_string();
 
         let written = std::fs::read_to_string(&file).unwrap();
         let hash = written
