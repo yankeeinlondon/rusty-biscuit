@@ -73,6 +73,20 @@ hold the rest:
   interpreter's directory to a process-scoped `PATH` (confirm a successful
   `--version`; do not assume the install directory, e.g. Python313). A PASS
   alone is not evidence: read the captured output for the planner's own lines.
+- **Run Windows tests from PowerShell, not from Git Bash.** An agent's Bash
+  tool on Windows is Git Bash (MSYS). Under it, every `pr_flow_rehearsal` route
+  whose stage runs a local-transport `git push` failed: git exited
+  `0xC0000005` (`STATUS_ACCESS_VIOLATION`) with empty stderr, and the unmodified
+  code failed the same way. The same tests pass from PowerShell. They still
+  fail from a `powershell.exe` launched *by* Git Bash, and they still pass from
+  PowerShell given Git Bash's extra variables or its `PATH` order. So the
+  trigger is an MSYS ancestor, not an environment value. Reproduce a Windows
+  failure from the PowerShell tool before diagnosing it. Found 2026-10-08.
+- **A `cmd /C` line cannot start a command with `@1>&2`.** `for /L %i in
+  (…) do @1>&2 echo x` runs a command named `1`, which fails. Write
+  `@(1>&2 echo x)`. The group also avoids the trailing space that
+  `echo x 1>&2` puts on each line. Found 2026-10-08 in claudine's
+  `semantic_stderr_buffer_is_drained_before_run_closes`.
 - **A `.cmd`/`.bat` cannot receive an argument containing a newline** ("batch
   file arguments are invalid"). A fake provider that receives a multi-line
   prompt must be a compiled `.exe`; see the rustc-built fixture in claudine's
@@ -254,6 +268,24 @@ because overlapping host-network detections fail-fast the test process
   `drop()` of a `Copy` return value, a deleted function). It proves
   signatures, not runtime behavior.
 
+- **Clippy can be red only on Windows.** `PathBuf`/`OsString` is 32 bytes on
+  Windows and 24 on Unix, so an error enum holding several paths (or an error
+  that does, like `biscuit_file::GlobReferenceError`) can cross
+  `result_large_err`'s 128-byte limit on Windows alone. One such variant failed
+  every `Result` in Darkmatter that carried the enum (190 errors at 136 bytes).
+  Fix it by sharing the large cause (`Arc`/`Box`) in that variant, not by
+  raising the limit. If the error is classified by downcasting its `source()`
+  chain, the downcast has to name the wrapper type. The workspace
+  `clippy.toml` threshold (136) was measured on Unix. `claudine::CompositionError`
+  is 144 bytes on Windows, with ten variants over the limit, so the claudine
+  library allows the lint under `cfg(windows)` instead of changing a public
+  error shape; Linux lint runs still enforce the threshold. Lints that depend
+  on `cfg` code also show up only here, and only once the crates beneath them
+  compile: `dead_code` and `unused_mut` on items only `#[cfg(unix)]` code uses,
+  and `needless_return` on a `return` inside a `#[cfg(windows)]` block that
+  becomes the function's tail once its `#[cfg(not(windows))]` sibling is
+  compiled out.
+
 A cross-compile is compile evidence. Behavioral evidence comes from
 `just cross-check <pkg> --os windows` or the `windows-latest` CI leg.
 
@@ -342,3 +374,28 @@ which processes hold it.
 - **Restart Manager (`RmGetList`) is a worse wrapper for the same question.**
   It has no directory or long-path support, it is slower per path, and a
   missing path returns success with an empty list.
+
+## COM lifetime and cpal
+
+Found 2026-10-08 on the `B:` dev host: `playa effect drop-4` exited with an
+access violation (`0xC0000005`, reported by Git Bash as `Segmentation fault`)
+at the end of every `just install`.
+
+- **cpal's WASAPI host caches one process-global `IMMDeviceEnumerator` but
+  initializes COM per thread.** Its thread-local guard calls `CoUninitialize`
+  when its thread exits. If that was the last COM apartment in the process,
+  COM unloads `MMDevApi.dll`, and the next cpal call on any other thread calls
+  through a vtable in unmapped memory. Any code that gives each cpal call its
+  own short-lived thread (a timeout worker, for example) hits this on the
+  *second* call. playa pins COM with `CoIncrementMTAUsage` before spawning
+  those workers (`pin_com_for_process` in `playa/lib/src/native_audio.rs`).
+- **Diagnose with `cdbX64.exe`.** It ships with the WinDbg Store app at
+  `%LOCALAPPDATA%\Microsoft\WindowsApps\cdbX64.exe`. Put commands in a file
+  passed with `-cf`, because quoting `-c` through PowerShell silently produced
+  no output. Use `bu combase!CoInitializeEx` / `CoCreateInstance` /
+  `CoUninitialize` with `~.; kc 8; gc` actions, and finish with `lm u` to see
+  which DLLs were unloaded.
+- **A host with no sound hardware still lists one `SWD\MMDEVAPI` audio
+  endpoint**, while `Get-CimInstance Win32_SoundDevice` is empty. cpal then
+  reports no output device, and playa reports that error directly instead
+  of falling back to host players.
