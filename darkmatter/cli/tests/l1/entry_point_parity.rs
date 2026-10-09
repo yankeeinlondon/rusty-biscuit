@@ -392,23 +392,55 @@ fn run(cli: &CliProcessFixture, fixture: &ParityFixture, row: &Row) -> (Expected
     }
 }
 
-#[test]
-fn md_entry_points_agree_on_every_reference() {
-    // The coupling CI's test-input index reads (see the module docs of the
-    // shared file); the `#[path]` include alone is not counted.
-    let _ = include_str!("../../../lib/tests/common/entry_point_parity/mod.rs");
+/// One `md` spawn costs far more than a library call, so the matrix is split
+/// across tests nextest runs in parallel. A `match()` validation row spawns
+/// `md` once per candidate, so those rows get a part of their own; the light
+/// rows share the rest.
+const HEAVY_PART: usize = 0;
+const LIGHT_PARTS: usize = 21;
 
-    let cli = CliProcessFixture::named("entry_point_parity");
+fn is_heavy(row: &Row) -> bool {
+    matches!(row, Row::GlobDocument(GlobDocumentCell { consumer: GlobConsumer::MatchValidation, .. }))
+}
+
+/// Every owned entry point has a row, so the parts together run each one.
+#[test]
+fn every_md_entry_point_runs_a_matrix_row() {
+    let _ = include_str!("../../../lib/tests/common/entry_point_parity/mod.rs");
+    let rows = rows_for(Owner::DarkmatterCli);
+    for entry in EntryPoint::ALL.into_iter().filter(|entry| entry.owner() == Owner::DarkmatterCli) {
+        assert!(rows.iter().any(|row| row.entry() == entry), "{entry:?} has no darkmatter-cli matrix row");
+    }
+}
+
+/// Runs one part of the matrix; the union of all parts is every row. Each
+/// part has its own fixture, so a mutating route cannot disturb another
+/// part's reads.
+fn run_matrix_part(part: usize) {
+    let cli = CliProcessFixture::named(&format!("entry_point_parity_{part:02}"));
     let fixture = ParityFixture::create(cli.workspace_path());
     fixture.write_route_files();
     std::fs::write(delta_control(&fixture), "# CONTROL\n").unwrap();
-    // A mutating route's cells run one at a time after the others, each on a
-    // restored fixture, so no cell reads a file another is changing.
+    let mut light = 0;
+    let mine: Vec<Row> = rows_for(Owner::DarkmatterCli)
+        .into_iter()
+        .filter(|row| {
+            let slot = if is_heavy(row) {
+                HEAVY_PART
+            } else {
+                light += 1;
+                HEAVY_PART + 1 + (light - 1) % LIGHT_PARTS
+            };
+            slot == part
+        })
+        .collect();
+    // A mutating route's cells run after the others, each on a restored
+    // fixture, so no cell reads a file another is changing.
     let mutates = |row: &Row| matches!(row.entry(), EntryPoint::MdArgument(route) if route.mutates());
-    let (serial, rows): (Vec<Row>, Vec<Row>) = rows_for(Owner::DarkmatterCli).into_iter().partition(mutates);
+    let (serial, rows): (Vec<Row>, Vec<Row>) = mine.into_iter().partition(mutates);
 
-    // Documents are written before the spawns run concurrently, so two
-    // threads never write one file.
+    // Every document is written before the spawns, as a cell's glob listing
+    // sees the whole directory.
     for row in &rows {
         match row {
             Row::Document(cell) => {
@@ -428,26 +460,13 @@ fn md_entry_points_agree_on_every_reference() {
             Row::GlobValue(_) => {}
         }
     }
-    const THREADS: usize = 8;
-    let chunk = rows.len().div_ceil(THREADS);
-    let results: Vec<(Row, Expected, Observed)> = std::thread::scope(|scope| {
-        let handles: Vec<_> = rows
-            .chunks(chunk)
-            .map(|rows| {
-                let (cli, fixture) = (&cli, &fixture);
-                scope.spawn(move || {
-                    rows.iter()
-                        .map(|row| {
-                            let (expected, observed) = run(cli, fixture, row);
-                            (*row, expected, observed)
-                        })
-                        .collect::<Vec<_>>()
-                })
-            })
-            .collect();
-        handles.into_iter().flat_map(|handle| handle.join().unwrap()).collect()
-    });
-    let mut results = results;
+    let mut results: Vec<(Row, Expected, Observed)> = rows
+        .iter()
+        .map(|row| {
+            let (expected, observed) = run(&cli, &fixture, row);
+            (*row, expected, observed)
+        })
+        .collect();
     for row in &serial {
         fixture.write_route_files();
         let (expected, observed) = run(&cli, &fixture, row);
@@ -458,8 +477,185 @@ fn md_entry_points_agree_on_every_reference() {
     for (row, expected, observed) in &results {
         report.record(&fixture, row, expected, observed);
     }
-    report.assert_parity();
+    report.assert_cells_agree();
 }
+
+#[test]
+fn md_entry_points_agree_on_every_reference_part_00() {
+    // The coupling CI's test-input index reads (see the module docs of the
+    // shared file); the `#[path]` include alone is not counted.
+    let _ = include_str!("../../../lib/tests/common/entry_point_parity/mod.rs");
+    run_matrix_part(0);
+}
+
+#[test]
+fn md_entry_points_agree_on_every_reference_part_01() {
+    // The coupling CI's test-input index reads (see the module docs of the
+    // shared file); the `#[path]` include alone is not counted.
+    let _ = include_str!("../../../lib/tests/common/entry_point_parity/mod.rs");
+    run_matrix_part(1);
+}
+
+#[test]
+fn md_entry_points_agree_on_every_reference_part_02() {
+    // The coupling CI's test-input index reads (see the module docs of the
+    // shared file); the `#[path]` include alone is not counted.
+    let _ = include_str!("../../../lib/tests/common/entry_point_parity/mod.rs");
+    run_matrix_part(2);
+}
+
+#[test]
+fn md_entry_points_agree_on_every_reference_part_03() {
+    // The coupling CI's test-input index reads (see the module docs of the
+    // shared file); the `#[path]` include alone is not counted.
+    let _ = include_str!("../../../lib/tests/common/entry_point_parity/mod.rs");
+    run_matrix_part(3);
+}
+
+#[test]
+fn md_entry_points_agree_on_every_reference_part_04() {
+    // The coupling CI's test-input index reads (see the module docs of the
+    // shared file); the `#[path]` include alone is not counted.
+    let _ = include_str!("../../../lib/tests/common/entry_point_parity/mod.rs");
+    run_matrix_part(4);
+}
+
+#[test]
+fn md_entry_points_agree_on_every_reference_part_05() {
+    // The coupling CI's test-input index reads (see the module docs of the
+    // shared file); the `#[path]` include alone is not counted.
+    let _ = include_str!("../../../lib/tests/common/entry_point_parity/mod.rs");
+    run_matrix_part(5);
+}
+
+#[test]
+fn md_entry_points_agree_on_every_reference_part_06() {
+    // The coupling CI's test-input index reads (see the module docs of the
+    // shared file); the `#[path]` include alone is not counted.
+    let _ = include_str!("../../../lib/tests/common/entry_point_parity/mod.rs");
+    run_matrix_part(6);
+}
+
+#[test]
+fn md_entry_points_agree_on_every_reference_part_07() {
+    // The coupling CI's test-input index reads (see the module docs of the
+    // shared file); the `#[path]` include alone is not counted.
+    let _ = include_str!("../../../lib/tests/common/entry_point_parity/mod.rs");
+    run_matrix_part(7);
+}
+
+#[test]
+fn md_entry_points_agree_on_every_reference_part_08() {
+    // The coupling CI's test-input index reads (see the module docs of the
+    // shared file); the `#[path]` include alone is not counted.
+    let _ = include_str!("../../../lib/tests/common/entry_point_parity/mod.rs");
+    run_matrix_part(8);
+}
+
+#[test]
+fn md_entry_points_agree_on_every_reference_part_09() {
+    // The coupling CI's test-input index reads (see the module docs of the
+    // shared file); the `#[path]` include alone is not counted.
+    let _ = include_str!("../../../lib/tests/common/entry_point_parity/mod.rs");
+    run_matrix_part(9);
+}
+
+#[test]
+fn md_entry_points_agree_on_every_reference_part_10() {
+    // The coupling CI's test-input index reads (see the module docs of the
+    // shared file); the `#[path]` include alone is not counted.
+    let _ = include_str!("../../../lib/tests/common/entry_point_parity/mod.rs");
+    run_matrix_part(10);
+}
+
+#[test]
+fn md_entry_points_agree_on_every_reference_part_11() {
+    // The coupling CI's test-input index reads (see the module docs of the
+    // shared file); the `#[path]` include alone is not counted.
+    let _ = include_str!("../../../lib/tests/common/entry_point_parity/mod.rs");
+    run_matrix_part(11);
+}
+
+#[test]
+fn md_entry_points_agree_on_every_reference_part_12() {
+    // The coupling CI's test-input index reads (see the module docs of the
+    // shared file); the `#[path]` include alone is not counted.
+    let _ = include_str!("../../../lib/tests/common/entry_point_parity/mod.rs");
+    run_matrix_part(12);
+}
+
+#[test]
+fn md_entry_points_agree_on_every_reference_part_13() {
+    // The coupling CI's test-input index reads (see the module docs of the
+    // shared file); the `#[path]` include alone is not counted.
+    let _ = include_str!("../../../lib/tests/common/entry_point_parity/mod.rs");
+    run_matrix_part(13);
+}
+
+#[test]
+fn md_entry_points_agree_on_every_reference_part_14() {
+    // The coupling CI's test-input index reads (see the module docs of the
+    // shared file); the `#[path]` include alone is not counted.
+    let _ = include_str!("../../../lib/tests/common/entry_point_parity/mod.rs");
+    run_matrix_part(14);
+}
+
+#[test]
+fn md_entry_points_agree_on_every_reference_part_15() {
+    // The coupling CI's test-input index reads (see the module docs of the
+    // shared file); the `#[path]` include alone is not counted.
+    let _ = include_str!("../../../lib/tests/common/entry_point_parity/mod.rs");
+    run_matrix_part(15);
+}
+
+#[test]
+fn md_entry_points_agree_on_every_reference_part_16() {
+    // The coupling CI's test-input index reads (see the module docs of the
+    // shared file); the `#[path]` include alone is not counted.
+    let _ = include_str!("../../../lib/tests/common/entry_point_parity/mod.rs");
+    run_matrix_part(16);
+}
+
+#[test]
+fn md_entry_points_agree_on_every_reference_part_17() {
+    // The coupling CI's test-input index reads (see the module docs of the
+    // shared file); the `#[path]` include alone is not counted.
+    let _ = include_str!("../../../lib/tests/common/entry_point_parity/mod.rs");
+    run_matrix_part(17);
+}
+
+#[test]
+fn md_entry_points_agree_on_every_reference_part_18() {
+    // The coupling CI's test-input index reads (see the module docs of the
+    // shared file); the `#[path]` include alone is not counted.
+    let _ = include_str!("../../../lib/tests/common/entry_point_parity/mod.rs");
+    run_matrix_part(18);
+}
+
+#[test]
+fn md_entry_points_agree_on_every_reference_part_19() {
+    // The coupling CI's test-input index reads (see the module docs of the
+    // shared file); the `#[path]` include alone is not counted.
+    let _ = include_str!("../../../lib/tests/common/entry_point_parity/mod.rs");
+    run_matrix_part(19);
+}
+
+#[test]
+fn md_entry_points_agree_on_every_reference_part_20() {
+    // The coupling CI's test-input index reads (see the module docs of the
+    // shared file); the `#[path]` include alone is not counted.
+    let _ = include_str!("../../../lib/tests/common/entry_point_parity/mod.rs");
+    run_matrix_part(20);
+}
+
+#[test]
+fn md_entry_points_agree_on_every_reference_part_21() {
+    // The coupling CI's test-input index reads (see the module docs of the
+    // shared file); the `#[path]` include alone is not counted.
+    let _ = include_str!("../../../lib/tests/common/entry_point_parity/mod.rs");
+    run_matrix_part(21);
+}
+
 
 /// `md <args>` launched from the cross-repository fixture's launch
 /// repository.

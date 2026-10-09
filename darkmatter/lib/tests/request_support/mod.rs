@@ -2,7 +2,7 @@
 //!
 //! `request` keeps the request directory the pipeline chose before requests
 //! were prepared explicitly (a file source's directory, else the context's
-//! anchor, else the process directory), takes home from the process, and the
+//! anchor, else a per-process temp directory), takes home from the process, and the
 //! environment from the options' own context: empty unless the test put
 //! values there, so no test sees the process environment by accident. A test
 //! whose subject is the request directory builds its own [`RequestSnapshot`].
@@ -16,6 +16,18 @@ use darkmatter::markdown::compose::{
 
 pub fn request(options: ComposeOptions) -> ComposeRequest {
     let dir = request_dir(&options);
+    request_at(&dir, options)
+}
+
+/// Like [`request`], but a source-less request is anchored at the process
+/// directory, for tests whose subject is the ambient capture of a fixture they
+/// entered with `set_current_dir`.
+pub fn process_dir_request(options: ComposeOptions) -> ComposeRequest {
+    let dir = match options.source() {
+        ComposeSource::File(_) => request_dir(&options),
+        _ if options.context().anchor().is_absolute() => options.context().anchor().to_path_buf(),
+        _ => std::env::current_dir().expect("process directory"),
+    };
     request_at(&dir, options)
 }
 
@@ -38,7 +50,12 @@ pub fn context_at(dir: &Path) -> FileResolutionContext {
     build_resolution_context(&snapshot).expect("test context")
 }
 
+/// A source-less, anchor-less request is anchored in a per-process temp
+/// directory, not the process directory: that is inside this monorepo, and
+/// preparing a request there runs repository discovery over all of it.
 fn request_dir(options: &ComposeOptions) -> PathBuf {
+    static SCRATCH: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+    let scratch = &SCRATCH;
     let process = || std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     match options.source() {
         ComposeSource::File(path) => {
@@ -46,7 +63,7 @@ fn request_dir(options: &ComposeOptions) -> PathBuf {
             absolute.parent().map(Path::to_path_buf).unwrap_or_else(process)
         }
         _ if options.context().anchor().is_absolute() => options.context().anchor().to_path_buf(),
-        _ => process(),
+        _ => scratch.get_or_init(|| tempfile::tempdir().expect("scratch request dir")).path().to_path_buf(),
     }
 }
 

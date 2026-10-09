@@ -108,6 +108,10 @@ fn scan(root: &Path) -> BTreeMap<String, Vec<usize>> {
             } else if kind.is_file() && (under_prompts || has_scanned_extension(&path)) {
                 let text = std::fs::read(&path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
                 let text = String::from_utf8_lossy(&text);
+                // Almost every file has no occurrence; skip the per-line pass for them.
+                if !NEEDLES.iter().any(|needle| text.contains(needle)) {
+                    continue;
+                }
                 let lines: Vec<usize> = text
                     .lines()
                     .enumerate()

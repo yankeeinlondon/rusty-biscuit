@@ -36,7 +36,7 @@ const MAX_REFERENCE_DEPTH: usize = 32;
 fn write(dir: &Path, name: &str, body: &str) -> PathBuf {
     let path = dir.join(name);
     std::fs::write(&path, body).expect("write schema fixture");
-    path.canonicalize().expect("canonicalize schema fixture")
+    biscuit_file::canonicalize_simplified(&path).expect("canonicalize schema fixture")
 }
 
 fn reference(target: &str) -> serde_yaml_ng::Value {
