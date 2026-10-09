@@ -71,12 +71,16 @@ with a path in the message. Processes and the environment are in
    so a Windows test that seeds a cache file writes to the real per-user
    path, keyed by its temporary repository, and deletes what it seeded
    (`worktree/cli/tests/perf_support`'s `pr_store`, 2026-09-25).
-3. **GitHub's Windows runner has an 8.3 short-name TEMP (`RUNNER~1`); no
-   developer machine does.** Short-versus-long spelling bugs reproduce only
-   on CI. `current_dir()` reports the spelling it was given; `canonicalize`
-   re-spells to long names. Model "what the child reports": the
-   `launched_spelling` test helper canonicalizes on Unix (for the macOS
-   `/var` symlink) and keeps the raw path on Windows.
+3. **GitHub's Windows runner has an 8.3 short-name TEMP (`RUNNER~1`); a
+   developer machine usually does not.** `current_dir()` reports the spelling
+   it was given; `canonicalize` re-spells to long names. Model "what the child
+   reports": the `launched_spelling` test helper canonicalizes on Unix (for
+   the macOS `/var` symlink) and keeps the raw path on Windows. A test that
+   mixes a canonical path with a fixture's raw one passes locally and fails on
+   CI. To reproduce locally, create a long-named directory under TEMP, read its
+   short name (`for %I in ("<dir>") do @echo %~sI` in `cmd`), and run the test
+   from PowerShell with `$env:TEMP` and `$env:TMP` set to that short spelling
+   (2026-10-09, darkmatter `link_normalization`).
 4. **`Path::join("a/b")` keeps the literal `/`.** A native-spelling needle
    built from it has mixed separators and matches nothing. Re-join through
    `.components().collect::<PathBuf>()` to normalize. A context's
