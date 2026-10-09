@@ -50,8 +50,9 @@ hug imports --json "tests/fixtures/**/*.js"
 For exports, use TSV for eight fixed columns, Markdown for a literal list,
 Prose for styled markup with local source links, or ctags for navigation.
 See [Text exports](../docs/symbol-reports.md#text-exports) for escaping and
-option combinations. Markdown and Prose currently emit flat lists; grouped,
-nested and static/instance section layouts are planned.
+option combinations. Markdown and Prose keep the listing's layout: package
+sections, `--group-by-file`/`--group-by-module` groups, `--tree` nesting
+and the `classes` method and field sections.
 
 ### Selectors
 
@@ -150,9 +151,13 @@ single-file lint still prints `(no diagnostics)` as explicit confirmation.
 
 `--format ctags` writes an unsorted format-2 tags file with numeric line
 addresses. Duplicate names and overloads are retained; paths are relative to
-the scan root. Kind names and container fields use recorded Hug metadata, and
-records with unsupported control characters are skipped with a warning and a
-failing exit status. See [Tags output](../docs/symbol-reports.md#tags-output)
+the scan root. Kind names and container fields use recorded Hug metadata.
+Values are written byte for byte, backslashes included. Records Neovim would
+not read back as written (control characters, `!_` pseudo-tag names, file
+names it would expand, and paths whose route from the scan root holds a name
+that is not valid Unicode, such as a Linux `bad\xff.java`) are skipped with a
+warning and a failing exit status; a scan root with such a name, or a file
+really named with `�`, is tagged normally. See [Tags output](../docs/symbol-reports.md#tags-output)
 for the supported subset.
 
 ### Pretty Output (default)
