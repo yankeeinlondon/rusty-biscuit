@@ -97,6 +97,18 @@ hold the rest:
   process-scoped `PATH` that drops every `cygwin` entry and prepends
   `C:\Program Files\Git\usr\bin` and the real Python directory. Found
   2026-10-08 while pushing from that host.
+- **Three ways a bash script loses data on Windows** (found 2026-10-09 making
+  `scripts/ci/test_ci_local.py` pass there):
+  - Native `jq.exe` ends `-r` lines with CRLF, so a name read back keeps a
+    `\r` and matches nothing. `jq --binary` keeps LF; `just ci-local` wraps
+    `jq` that way when `OS=Windows_NT`.
+  - `subprocess.run([bash, "-c", script])` passes the script on the command
+    line, where MSYS and Cygwin bash re-split it at nested quotes and run only
+    the first fragment, exiting 0. Write the script to a file and run
+    `bash <file>`, as GitHub does.
+  - A recipe that interpolates `{{ args }}` into bash eats a Windows path's
+    backslashes (`C:UserskenAppData…`). Pass paths with forward slashes
+    (`Path.as_posix()`).
 - **A `cmd /C` line cannot start a command with `@1>&2`.** `for /L %i in
   (…) do @1>&2 echo x` runs a command named `1`, which fails. Write
   `@(1>&2 echo x)`. The group also avoids the trailing space that

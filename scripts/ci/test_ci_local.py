@@ -1173,7 +1173,9 @@ class PlanSurfaceTests(unittest.TestCase):
             environment.pop("BISCUIT_CI_PLAN_IN", None)
             command = [JUST, "--justfile", str(root / "justfile"), "ci-local", "--all", "--plan"]
             if capture is not None:
-                command += ["--plan-out", str(root / "written-plan.json")]
+                # Forward slashes: the recipe re-reads its arguments through
+                # bash, which would eat a Windows path's backslashes.
+                command += ["--plan-out", (root / "written-plan.json").as_posix()]
             result = subprocess.run(
                 command,
                 cwd=root,
@@ -1517,8 +1519,10 @@ class PlanFedRunTests(unittest.TestCase):
             if through_env:
                 environment["BISCUIT_CI_PLAN_IN"] = str(root / "plan.json")
             else:
-                command += ["--plan-in", str(root / "plan.json")]
-            command += ["--plan-out", str(root / "written-plan.json")]
+                # Forward slashes: the recipe re-reads its arguments through
+                # bash, which would eat a Windows path's backslashes.
+                command += ["--plan-in", (root / "plan.json").as_posix()]
+            command += ["--plan-out", (root / "written-plan.json").as_posix()]
             result = subprocess.run(
                 command, cwd=root, env=environment, capture_output=True, text=True, timeout=60
             )
@@ -1928,9 +1932,15 @@ class WorkflowScopeStepTests(unittest.TestCase):
             # One shell per step, as GitHub runs them; a failing step ends
             # the job unless it is `continue-on-error` (the notes fetch is,
             # and fails here because the fixture has no `origin`).
-            for step in self.steps:
+            for index, step in enumerate(self.steps):
+                # From a file, as GitHub runs a step: on Windows a `-c`
+                # argument goes through the command line, where MSYS and
+                # Cygwin re-split the script at its nested quotes and bash
+                # runs only the first fragment.
+                script = root / f"step-{index}.sh"
+                script.write_text(step.script, encoding="utf-8", newline="\n")
                 result = subprocess.run(
-                    [STEP_BASH, "-c", step.script],
+                    [STEP_BASH, script.as_posix()],
                     cwd=root,
                     env=environment,
                     capture_output=True,

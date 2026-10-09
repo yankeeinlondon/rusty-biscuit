@@ -115,6 +115,11 @@
 ci-local *args="":
     #!/usr/bin/env bash
     set -euo pipefail
+    # A native Windows `jq.exe` ends lines with CRLF, and every name read back
+    # from it would keep a trailing `\r`; `--binary` keeps LF.
+    if [[ "${OS:-}" == "Windows_NT" ]]; then
+        jq() { command jq --binary "$@"; }
+    fi
 
     base="${CI_LOCAL_BASE:-origin/main}"
     run_lint=1

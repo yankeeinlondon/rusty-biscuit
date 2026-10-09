@@ -1804,7 +1804,9 @@ class ShippedRecipeEndToEndTests(unittest.TestCase):
                 "L1",
                 "completion-probe",
                 "--manifest-path",
-                str(self.root / "Cargo.toml"),
+                # Forward slashes: the recipe re-reads its arguments through
+                # bash, which would eat a Windows path's backslashes.
+                (self.root / "Cargo.toml").as_posix(),
             ],
             capture_output=True,
             text=True,

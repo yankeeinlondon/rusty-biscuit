@@ -71,6 +71,9 @@ fn clear_readonly(path: &Path) {
             clear_readonly(&child);
         } else if let Ok(metadata) = fs::symlink_metadata(&child) {
             let mut permissions = metadata.permissions();
+            // Windows-only: clearing the read-only attribute grants no Unix
+            // world-write, which is what this lint guards against.
+            #[allow(clippy::permissions_set_readonly_false)]
             permissions.set_readonly(false);
             let _ = fs::set_permissions(&child, permissions);
         }
