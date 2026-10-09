@@ -10,7 +10,7 @@ use rayon::prelude::*;
 use tree_sitter::Node;
 
 use crate::analysis::counters::count_shared_context_steps;
-use crate::file::source_file::file_identity;
+use crate::file::source_file::{SourceFile, file_identity};
 use crate::file::tree_file::TreeFile;
 use crate::scanner::collect_files;
 use crate::shared::{ProgrammingLanguage, SymbolKind, SymbolKindV2, SymbolRecord};
@@ -98,7 +98,12 @@ fn discover_candidates(root: &Path) -> Vec<PathBuf> {
             if !language.is_programming_language() {
                 return None;
             }
-            let physical_lines = count_physical_lines(&path).ok()?;
+            // A file has at most one physical line per byte, so a smaller
+            // file is rejected without reading it.
+            if fs::metadata(&path).is_ok_and(|metadata| metadata.len() < MODERATE_MIN_SLOC as u64) {
+                return None;
+            }
+            let physical_lines = count_physical_lines(&fs::read(&path).ok()?);
             if physical_lines >= MODERATE_MIN_SLOC {
                 Some((path, physical_lines))
             } else {
@@ -112,43 +117,48 @@ fn discover_candidates(root: &Path) -> Vec<PathBuf> {
     with_lines.into_iter().map(|(path, _)| path).collect()
 }
 
-/// Count physical lines (newlines) in a file without parsing.
-fn count_physical_lines(path: &Path) -> std::io::Result<usize> {
-    let bytes = fs::read(path)?;
+/// Count physical lines (newlines) in a file's bytes without parsing.
+fn count_physical_lines(bytes: &[u8]) -> usize {
     // Count newline characters; if the file does not end with a newline,
     // the last line is still counted by adding 1 when there is content.
-    let newline_count = memchr::memchr_iter(b'\n', &bytes).count();
+    let newline_count = memchr::memchr_iter(b'\n', bytes).count();
     if bytes.is_empty() {
-        Ok(0)
+        0
     } else if bytes.last() == Some(&b'\n') {
-        Ok(newline_count)
+        newline_count
     } else {
-        Ok(newline_count + 1)
+        newline_count + 1
     }
 }
 
 /// Analyze a single candidate file, returning `None` if it drops below the
 /// moderate threshold.
 fn analyze_single_file(path: &Path, root: &Path) -> Option<GodAnalysis> {
-    let physical_lines = count_physical_lines(path).ok()?;
+    // One read: the line count and the parse see the same bytes.
+    let bytes = fs::read(path).ok()?;
+    let physical_lines = count_physical_lines(&bytes);
     let language = ProgrammingLanguage::from_path(path)?;
+    let parsed = String::from_utf8(bytes)
+        .ok()
+        .and_then(|text| SourceFile::from_read(path, None, text).ok())
+        .map(SourceFile::parse);
 
-    let (effective_sloc, parsed_data) = match TreeFile::new(path) {
-        Ok(tree_file) => {
-            let source = tree_file.source().to_string();
-            let metrics = compute_sloc_metrics(&source, Some(&tree_file));
+    let (effective_sloc, parsed_data) = match parsed {
+        Some(Ok(tree_file)) => {
+            let source = tree_file.source();
+            let metrics = compute_sloc_metrics(source, Some(&tree_file));
             let comment_ranges = tree_file.comment_ranges().unwrap_or_default();
             let records = tree_file.symbol_records().unwrap_or_default();
             let imports = tree_file.imported_symbols().unwrap_or_default();
 
-            let blocks_data = compute_symbol_blocks(&source, &records, &comment_ranges);
+            let blocks_data = compute_symbol_blocks(source, &records, &comment_ranges);
             let top_level = collect_top_level(&records);
             let top_level_symbol_count = top_level.len();
             let kind_histogram = build_kind_histogram(&top_level);
             let max_nesting_depth = compute_max_nesting_depth(&tree_file);
             let import_fan_out = imports.len();
-            let todo_fixme_count = count_todo_fixme(&source, &comment_ranges);
-            let comment_density = compute_comment_density(physical_lines, &source, &comment_ranges);
+            let todo_fixme_count = count_todo_fixme(source, &comment_ranges);
+            let comment_density = compute_comment_density(physical_lines, source, &comment_ranges);
 
             let signals = SignalBundle {
                 effective_sloc: metrics.effective_sloc,
@@ -174,8 +184,8 @@ fn analyze_single_file(path: &Path, root: &Path) -> Option<GodAnalysis> {
                 }),
             )
         }
-        Err(_) => {
-            // Unparseable fallback: band using physical lines.
+        Some(Err(_)) | None => {
+            // Unreadable as source or unparseable: band using physical lines.
             (physical_lines, None)
         }
     };
@@ -1213,18 +1223,45 @@ mod tests {
 
     #[test]
     fn physical_line_counter_counts_correctly() {
+        assert_eq!(count_physical_lines(b"a\nb\nc"), 3);
+        assert_eq!(count_physical_lines(b"a\nb\nc\n"), 3);
+        assert_eq!(count_physical_lines(b""), 0);
+        assert_eq!(count_physical_lines(b"single"), 1);
+        assert_eq!(count_physical_lines(b"a\r\nb\r\nc"), 3, "CRLF ends a line at its LF");
+        assert_eq!(count_physical_lines(b"a\r\nb\r\n"), 2);
+        assert_eq!(count_physical_lines(b"\n\n"), 2);
+    }
+
+    /// The size pre-reject only skips files that cannot reach the line
+    /// threshold: 400 bytes of newlines are 400 lines and still a candidate,
+    /// 399 bytes are not.
+    #[test]
+    fn candidate_discovery_size_screen_keeps_the_line_threshold() {
         let dir = TempDir::new().unwrap();
-        let path = temp_file(&dir, "count.rs", "a\nb\nc");
-        assert_eq!(count_physical_lines(&path).unwrap(), 3);
+        temp_file(&dir, "exact.rs", &"\n".repeat(MODERATE_MIN_SLOC));
+        temp_file(&dir, "short.rs", &"\n".repeat(MODERATE_MIN_SLOC - 1));
+        temp_file(&dir, "crlf.rs", &"x\r\n".repeat(MODERATE_MIN_SLOC));
+        let names: Vec<String> = GodFiles::new(dir.path())
+            .candidates()
+            .iter()
+            .map(|path| path.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, ["crlf.rs", "exact.rs"]);
+    }
 
-        let path2 = temp_file(&dir, "count2.rs", "a\nb\nc\n");
-        assert_eq!(count_physical_lines(&path2).unwrap(), 3);
-
-        let path3 = temp_file(&dir, "count3.rs", "");
-        assert_eq!(count_physical_lines(&path3).unwrap(), 0);
-
-        let path4 = temp_file(&dir, "count4.rs", "single");
-        assert_eq!(count_physical_lines(&path4).unwrap(), 1);
+    /// A candidate that is not UTF-8 is still reported from its one read,
+    /// banded by the physical lines of those bytes.
+    #[test]
+    fn analysis_bands_a_non_utf8_candidate_by_its_physical_lines() {
+        let dir = TempDir::new().unwrap();
+        let mut bytes = "let x = 1;\n".repeat(MODERATE_MIN_SLOC + 50).into_bytes();
+        bytes.extend_from_slice(b"\xff\xfe\n");
+        std::fs::write(dir.path().join("bytes.rs"), &bytes).unwrap();
+        let god_files = GodFiles::new(dir.path());
+        let analysis = god_files.analysis();
+        assert_eq!(analysis.len(), 1);
+        assert_eq!(analysis[0].effective_sloc, MODERATE_MIN_SLOC + 51);
+        assert!(analysis[0].note.as_deref().is_some_and(|note| note.contains("banded by physical line count")));
     }
 
     // ========================================================================

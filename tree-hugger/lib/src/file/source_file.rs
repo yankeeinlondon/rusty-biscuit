@@ -68,11 +68,21 @@ impl SourceFile {
         language: Option<ProgrammingLanguage>,
     ) -> Result<Self, TreeHuggerError> {
         let supplied = path.as_ref();
-        let forced_language = language.is_some();
         let source = std::fs::read_to_string(supplied).map_err(|source| TreeHuggerError::Io {
             path: supplied.to_path_buf(),
             source,
         })?;
+        Self::from_read(supplied, language, source)
+    }
+
+    /// The file [`read_with_language`](Self::read_with_language) builds from
+    /// `source`, text the caller already read from `supplied`.
+    pub(crate) fn from_read(
+        supplied: &Path,
+        language: Option<ProgrammingLanguage>,
+        source: String,
+    ) -> Result<Self, TreeHuggerError> {
+        let forced_language = language.is_some();
         // Resolved after the read so a missing file keeps its I/O error; the
         // bytes already read are the ones hashed and parsed.
         let path = file_identity(supplied);
