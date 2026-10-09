@@ -1471,7 +1471,7 @@ pub(crate) fn validate_boundary_containment(
     if !normalize_components(candidate).starts_with(normalize_components(boundary)) {
         return Err(escape());
     }
-    let canonical_boundary = dunce::canonicalize(boundary).map_err(|source| {
+    let canonical_boundary = crate::canonicalize_simplified(boundary).map_err(|source| {
         FileReferenceError::Io {
             path: boundary.to_path_buf(),
             source,
@@ -1480,7 +1480,7 @@ pub(crate) fn validate_boundary_containment(
     let normalized = normalize_components(candidate);
     let mut current = Some(normalized.as_path());
     while let Some(path) = current {
-        match dunce::canonicalize(path) {
+        match crate::canonicalize_simplified(path) {
             Ok(canonical) if canonical.starts_with(&canonical_boundary) => return Ok(()),
             Ok(_) => return Err(escape()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
