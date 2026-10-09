@@ -181,6 +181,12 @@ fn run_git(git: &Path, repo: &Path, args: &[&str]) -> String {
     String::from_utf8_lossy(&output.stdout).trim().to_string()
 }
 
+fn append_text(path: &Path, text: &str) {
+    use std::io::Write;
+    let mut file = std::fs::OpenOptions::new().append(true).open(path).expect("open file to append");
+    file.write_all(text.as_bytes()).expect("append text");
+}
+
 fn append_line(path: &Path, line: &str) {
     use std::io::Write;
     let mut file = std::fs::OpenOptions::new()
@@ -249,19 +255,20 @@ impl Rehearsal {
         let git_in = |dir: &Path, args: &[&str]| run_git(&git, dir, args);
 
         git_in(fixture.workspace_path(), &["init", "-q", "--bare", &portable(&bare)]);
-        git_in(&repo, &["init", "-q"]);
-        git_in(&repo, &["symbolic-ref", "HEAD", "refs/heads/main"]);
-        for (key, value) in [
-            ("user.email", "rehearsal@example.com"),
-            ("user.name", "Rehearsal"),
-            ("commit.gpgsign", "false"),
-            ("core.autocrlf", "false"),
-        ] {
-            git_in(&repo, &["config", key, value]);
-        }
+        git_in(&repo, &["init", "-q", "-b", "main"]);
+        // Written straight into the repository config: one `git config` spawn
+        // each costs ~50 ms on Windows, and they were half of this setup.
         let origin = "https://github.com/example/pr-rehearsal.git";
-        git_in(&repo, &["remote", "add", "origin", origin]);
-        git_in(&repo, &["config", &format!("url.{}.insteadOf", portable(&bare)), origin]);
+        append_text(
+            &repo.join(".git/config"),
+            &format!(
+                "[user]\n\temail = rehearsal@example.com\n\tname = Rehearsal\n\
+                 [commit]\n\tgpgsign = false\n[core]\n\tautocrlf = false\n\
+                 [remote \"origin\"]\n\turl = {origin}\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n\
+                 [url \"{}\"]\n\tinsteadOf = {origin}\n",
+                portable(&bare)
+            ),
+        );
 
         let repository = workspace_root();
         stage_shipped_prompts(&repository, &repo.join("prompts"), PROMPTS);
@@ -306,12 +313,16 @@ impl Rehearsal {
         // on Windows), resolved from `PATH` like any other program.
         #[cfg(unix)]
         write_stub(bin, "sh", "exec /bin/sh \"$@\"", "");
-        write_stub(
-            bin,
-            "git",
-            &format!("exec '{git}' \"$@\""),
-            &format!("\"{git}\" %*\r\nexit /b %ERRORLEVEL%"),
-        );
+        #[cfg(unix)]
+        write_stub(bin, "git", &format!("exec '{git}' \"$@\""), "");
+        // The relay, not a `.cmd`: the flow spawns git dozens of times, and
+        // `cmd.exe` is ~17 ms of each.
+        #[cfg(windows)]
+        {
+            std::fs::copy(biscuit_test_harness::bin_exe!("claudine-fake-relay"), bin.join("git.exe"))
+                .expect("install the git relay");
+            write(&bin.join("git.relay.json"), &serde_json::json!({ "program": git, "args": [], "forward": true }).to_string());
+        }
         if with_just {
             write_stub(bin, "just", "echo 'plan: nothing to run'", "echo plan: nothing to run\r\nexit /b 0");
         } else {

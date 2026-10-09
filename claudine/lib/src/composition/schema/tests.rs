@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::composition::CompositionMode;
-use crate::composition::resolve::resolve_composition_source;
+use crate::composition::resolve::{resolve_composition_source, resolve_composition_source_in_context};
 use std::fs;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
@@ -26,11 +26,44 @@ fn shipped_implement_plan() -> PathBuf {
         .join("prompts/_implement/implement-plan.md")
 }
 
+fn copy_tree(from: &Path, to: &Path) {
+    fs::create_dir_all(to).unwrap();
+    for entry in fs::read_dir(from).unwrap() {
+        let entry = entry.unwrap();
+        let target = to.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            copy_tree(&entry.path(), &target);
+        } else {
+            fs::copy(entry.path(), &target).unwrap();
+        }
+    }
+}
+
+/// Prepares the shipped `implement-plan` prompt from a byte-for-byte copy of
+/// the shipped `prompts/` tree inside a fresh git repository.
+///
+/// The prompt resolves its `::file ../_*.md` transclusions relative to its own
+/// directory and reads `ctx.*` from its repository, so it needs a repository
+/// around `prompts/`, not this checkout: capturing the monorepo's dirty-file
+/// list and topology cost seconds and decided nothing the test asserts.
 fn prepare_shipped_implement_plan(
     plan: &Path,
     commit_message: Option<&str>,
 ) -> PreparedComposition {
-    let source = resolve_composition_source(shipped_implement_plan().to_str().unwrap(), &crate::test_support::snapshot()).unwrap();
+    let shipped = shipped_implement_plan();
+    let shipped_prompts = shipped.ancestors().nth(2).expect("prompts/ is two levels above the prompt");
+    let repo = TempDir::new().unwrap();
+    copy_tree(shipped_prompts, &repo.path().join("prompts"));
+    let status = std::process::Command::new("git")
+        .args(["init", "--quiet"])
+        .current_dir(repo.path())
+        .status()
+        .expect("git must be available for repository-context tests");
+    assert!(status.success(), "git init failed for {}", repo.path().display());
+
+    let prompt = repo.path().join("prompts/_implement/implement-plan.md");
+    let context = crate::test_support::context_for(&prompt);
+    let source = resolve_composition_source_in_context(prompt.to_str().unwrap(), &context).unwrap();
     let mut overrides = serde_json::json!({
         "plan": plan,
     });
@@ -43,7 +76,6 @@ fn prepare_shipped_implement_plan(
 
     // The caller names the source's repository, as a canonical route derives
     // it from the source context.
-    let context = crate::test_support::context_for(&source.resolved_path);
     prepare_direct_with_schema(
         &source,
         PrepareOptions {

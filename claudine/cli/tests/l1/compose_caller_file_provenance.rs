@@ -913,119 +913,135 @@ fn inline_compose_proxy_uses_the_caller_origin_and_closes_over_the_target() {
 }
 
 #[cfg(feature = "test-fixtures")]
-#[test]
-fn direct_and_proxy_file_failures_keep_equivalent_caller_diagnostics() {
-    for (case, schema, expression, raw) in [
-        ("malformed", "file(eager; required)", "", "@//invalid"),
-        (
-            "eager-missing",
-            "file(eager; required)",
-            "",
-            "cases/missing/spec.md",
-        ),
-        (
-            "lazy-read-missing",
-            "file(required)",
-            "value: \"{{ frontmatter(spec, 'value') }}\"\n",
-            "cases/missing/spec.md",
-        ),
+fn assert_direct_and_proxy_file_failure_agree(case: &str, schema: &str, expression: &str, raw: &str) {
+    let fixture = CliProcessFixture::named(&format!("caller-file-{case}"));
+    fixture.initialize_repository();
+    fixture.seed_user_config();
+    install_goose(&fixture);
+
+    let target = fixture.cwd().join("prompts/target.md");
+    write(
+        &target,
+        &format!("---\n$schema:\n  spec: '{schema}'\n{expression}---\nTarget.\n"),
+    );
+    let router = fixture.cwd().join("prompts/router.md");
+    write(
+        &router,
+        "---\ninitialize:\n  stack:\n    - action: {proxy: './target.md'}\n---\nRouter.\n",
+    );
+    let setter = format!("spec={raw}");
+
+    let (direct, direct_diagnostic) =
+        run_compose_failure(&fixture, fixture.cwd(), &target, &[&setter]);
+    let (proxied, proxied_diagnostic) =
+        run_compose_failure(&fixture, fixture.cwd(), &router, &[&setter]);
+    let diagnostic_headline = if case == "lazy-read-missing" {
+        "invalid file path"
+    } else {
+        "schema validation"
+    };
+
+    for (route, output) in [("direct", &direct), ("proxy", &proxied)] {
+        assert!(
+            output.contains(diagnostic_headline),
+            "{case} {route} lost the expected typed diagnostic: {output}"
+        );
+        assert!(
+            output.contains(raw),
+            "{case} {route} diagnostic lost the raw caller spelling; stderr:\n{output}"
+        );
+        assert!(
+            output.contains("target.md"),
+            "{case} {route} diagnostic must retain the target error locus: {output}"
+        );
+    }
+    assert_eq!(
+        direct_diagnostic["code"], proxied_diagnostic["code"],
+        "{case} changed diagnostic code across proxy: direct={direct_diagnostic} proxy={proxied_diagnostic}"
+    );
+    assert_eq!(
+        direct_diagnostic["code"],
+        serde_json::json!("composition.invalid_file_reference"),
+        "{case} lost its typed file-reference identity: {direct_diagnostic}"
+    );
+    for (route, diagnostic) in [
+        ("direct", &direct_diagnostic),
+        ("proxy", &proxied_diagnostic),
     ] {
-        let fixture = CliProcessFixture::named(&format!("caller-file-{case}"));
-        fixture.initialize_repository();
-        fixture.seed_user_config();
-        install_goose(&fixture);
-
-        let target = fixture.cwd().join("prompts/target.md");
-        write(
-            &target,
-            &format!("---\n$schema:\n  spec: '{schema}'\n{expression}---\nTarget.\n"),
+        assert_eq!(diagnostic["detail"]["reference"], raw, "{case} {route}");
+        assert_eq!(diagnostic["detail"]["property"], "spec", "{case} {route}");
+        assert!(
+            diagnostic["detail"]["base_dir"].as_str().is_some(),
+            "{case} {route} lost the caller base: {diagnostic}"
         );
-        let router = fixture.cwd().join("prompts/router.md");
-        write(
-            &router,
-            "---\ninitialize:\n  stack:\n    - action: {proxy: './target.md'}\n---\nRouter.\n",
+    }
+    assert_eq!(
+        direct_diagnostic["detail"]["base_dir"], proxied_diagnostic["detail"]["base_dir"],
+        "{case} changed caller base across proxy"
+    );
+    assert_eq!(
+        direct_diagnostic["detail"]["repository_root"],
+        proxied_diagnostic["detail"]["repository_root"],
+        "{case} changed caller origin across proxy"
+    );
+    assert_eq!(
+        direct_diagnostic["detail"]["candidates"], proxied_diagnostic["detail"]["candidates"],
+        "{case} changed selected candidate evidence across proxy"
+    );
+    if case == "malformed" {
+        assert!(direct_diagnostic["detail"]["candidates"].is_null());
+    } else {
+        let expected_candidate =
+            std::path::Path::new(direct_diagnostic["detail"]["base_dir"].as_str().unwrap())
+                .join(raw);
+        assert_eq!(
+            direct_diagnostic["detail"]["candidates"][0]["path"],
+            biscuit_file::to_portable_string(&expected_candidate),
+            "{case} retained the wrong selected candidate: {direct_diagnostic}"
         );
-        let setter = format!("spec={raw}");
-
-        let (direct, direct_diagnostic) =
-            run_compose_failure(&fixture, fixture.cwd(), &target, &[&setter]);
-        let (proxied, proxied_diagnostic) =
-            run_compose_failure(&fixture, fixture.cwd(), &router, &[&setter]);
-        let diagnostic_headline = if case == "lazy-read-missing" {
-            "invalid file path"
-        } else {
-            "schema validation"
-        };
-
-        for (route, output) in [("direct", &direct), ("proxy", &proxied)] {
+    }
+    if case == "lazy-read-missing" {
+        let projected = fixture.cwd().join(raw).to_string_lossy().into_owned();
+        for output in [&direct, &proxied] {
             assert!(
-                output.contains(diagnostic_headline),
-                "{case} {route} lost the expected typed diagnostic: {output}"
+                !output.contains(&format!("invalid file path: {projected}")),
+                "lazy diagnostic exposed only the projected candidate instead of caller evidence: {output}"
             );
-            assert!(
-                output.contains(raw),
-                "{case} {route} diagnostic lost the raw caller spelling; stderr:\n{output}"
-            );
-            assert!(
-                output.contains("target.md"),
-                "{case} {route} diagnostic must retain the target error locus: {output}"
-            );
-        }
-        assert_eq!(
-            direct_diagnostic["code"], proxied_diagnostic["code"],
-            "{case} changed diagnostic code across proxy: direct={direct_diagnostic} proxy={proxied_diagnostic}"
-        );
-        assert_eq!(
-            direct_diagnostic["code"],
-            serde_json::json!("composition.invalid_file_reference"),
-            "{case} lost its typed file-reference identity: {direct_diagnostic}"
-        );
-        for (route, diagnostic) in [
-            ("direct", &direct_diagnostic),
-            ("proxy", &proxied_diagnostic),
-        ] {
-            assert_eq!(diagnostic["detail"]["reference"], raw, "{case} {route}");
-            assert_eq!(diagnostic["detail"]["property"], "spec", "{case} {route}");
-            assert!(
-                diagnostic["detail"]["base_dir"].as_str().is_some(),
-                "{case} {route} lost the caller base: {diagnostic}"
-            );
-        }
-        assert_eq!(
-            direct_diagnostic["detail"]["base_dir"], proxied_diagnostic["detail"]["base_dir"],
-            "{case} changed caller base across proxy"
-        );
-        assert_eq!(
-            direct_diagnostic["detail"]["repository_root"],
-            proxied_diagnostic["detail"]["repository_root"],
-            "{case} changed caller origin across proxy"
-        );
-        assert_eq!(
-            direct_diagnostic["detail"]["candidates"], proxied_diagnostic["detail"]["candidates"],
-            "{case} changed selected candidate evidence across proxy"
-        );
-        if case == "malformed" {
-            assert!(direct_diagnostic["detail"]["candidates"].is_null());
-        } else {
-            let expected_candidate =
-                std::path::Path::new(direct_diagnostic["detail"]["base_dir"].as_str().unwrap())
-                    .join(raw);
-            assert_eq!(
-                direct_diagnostic["detail"]["candidates"][0]["path"],
-                biscuit_file::to_portable_string(&expected_candidate),
-                "{case} retained the wrong selected candidate: {direct_diagnostic}"
-            );
-        }
-        if case == "lazy-read-missing" {
-            let projected = fixture.cwd().join(raw).to_string_lossy().into_owned();
-            for output in [&direct, &proxied] {
-                assert!(
-                    !output.contains(&format!("invalid file path: {projected}")),
-                    "lazy diagnostic exposed only the projected candidate instead of caller evidence: {output}"
-                );
-            }
         }
     }
+}
+
+#[cfg(feature = "test-fixtures")]
+#[test]
+fn direct_and_proxy_file_failures_keep_equivalent_caller_diagnostics_malformed() {
+    assert_direct_and_proxy_file_failure_agree(
+        "malformed",
+        "file(eager; required)",
+        "",
+        "@//invalid",
+    );
+}
+
+#[cfg(feature = "test-fixtures")]
+#[test]
+fn direct_and_proxy_file_failures_keep_equivalent_caller_diagnostics_eager_missing() {
+    assert_direct_and_proxy_file_failure_agree(
+        "eager-missing",
+        "file(eager; required)",
+        "",
+        "cases/missing/spec.md",
+    );
+}
+
+#[cfg(feature = "test-fixtures")]
+#[test]
+fn direct_and_proxy_file_failures_keep_equivalent_caller_diagnostics_lazy_read_missing() {
+    assert_direct_and_proxy_file_failure_agree(
+        "lazy-read-missing",
+        "file(required)",
+        "value: \"{{ frontmatter(spec, 'value') }}\"\n",
+        "cases/missing/spec.md",
+    );
 }
 
 #[cfg(feature = "test-fixtures")]

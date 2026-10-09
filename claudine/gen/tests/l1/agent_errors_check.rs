@@ -214,30 +214,46 @@ fn workspace_archived_seed_survives_graduation_and_detects_identity_changes() {
     );
 }
 
-#[test]
-fn all_archived_seeds_match_their_post_graduation_research_rows() {
+/// One `#[test]` per provider so nextest runs the parse- and schema-resolve-heavy
+/// research loads in parallel instead of serially inside one test.
+fn assert_archived_seed_matches_research(slug: &str) {
     let area = real_area();
-    for slug in [
-        "antigravity",
-        "claude",
-        "codex",
-        "gemini",
-        "kilo",
-        "kimi",
-        "opencode",
-        "pi",
-        "qwen",
-    ] {
-        let seed = read_seed(&area, slug)
-            .unwrap_or_else(|error| panic!("{slug}: archived seed must parse: {error}"))
-            .unwrap_or_else(|| panic!("{slug}: archived seed must exist"));
-        let research = read_research(&area, slug, &context_at(&area))
-            .unwrap_or_else(|error| panic!("{slug}: research must parse: {error}"));
-        let report = evaluate_agent_errors(slug, Some(&seed), &research);
-        assert!(report.is_clean(), "{slug}: archived seed drifted: {:?}", report.findings);
-    }
+    let seed = read_seed(&area, slug)
+        .unwrap_or_else(|error| panic!("{slug}: archived seed must parse: {error}"))
+        .unwrap_or_else(|| panic!("{slug}: archived seed must exist"));
+    let research = read_research(&area, slug, &context_at(&area))
+        .unwrap_or_else(|error| panic!("{slug}: research must parse: {error}"));
+    let report = evaluate_agent_errors(slug, Some(&seed), &research);
+    assert!(report.is_clean(), "{slug}: archived seed drifted: {:?}", report.findings);
+}
+
+macro_rules! archived_seed_tests {
+    ($($name:ident => $slug:literal),+ $(,)?) => {
+        $(
+            #[test]
+            fn $name() {
+                assert_archived_seed_matches_research($slug);
+            }
+        )+
+    };
+}
+
+archived_seed_tests! {
+    archived_seed_matches_research_antigravity => "antigravity",
+    archived_seed_matches_research_claude => "claude",
+    archived_seed_matches_research_codex => "codex",
+    archived_seed_matches_research_gemini => "gemini",
+    archived_seed_matches_research_kilo => "kilo",
+    archived_seed_matches_research_kimi => "kimi",
+    archived_seed_matches_research_opencode => "opencode",
+    archived_seed_matches_research_pi => "pi",
+    archived_seed_matches_research_qwen => "qwen",
+}
+
+#[test]
+fn parserless_goose_has_no_archived_seed() {
     assert!(
-        read_seed(&area, "goose").expect("missing seed is valid").is_none(),
+        read_seed(&real_area(), "goose").expect("missing seed is valid").is_none(),
         "parser-less Goose must not gain a fabricated Phase-A seed"
     );
 }

@@ -283,6 +283,13 @@ fn write_yaml(dir: &Path, name: &str, value: &Value) {
     fs::write(dir.join(name), serde_json::to_string_pretty(value).unwrap()).unwrap();
 }
 
+/// `path` as a diagnostic names it: canonical, then portable. Sequence
+/// resolution canonicalizes document paths, which re-spells the Windows
+/// runner's 8.3 `RUNNER~1` temp directory and macOS's `/var` symlink.
+fn reported_source(path: &Path) -> String {
+    biscuit_file::to_portable_string(&biscuit_file::canonicalize_simplified(path).unwrap())
+}
+
 /// A sequence document whose single step is the task under test.
 fn one_step_source(dir: &Path, step: Value) -> String {
     write_source(
@@ -2913,7 +2920,7 @@ mod task_stack_diagnostics {
         let info = &outcome.error.as_ref().expect("the stack failure is reported").info;
         let snapshot = info.snapshot.as_ref().expect("stack failures are typed");
         let err_value = info.to_value();
-        let source = biscuit_file::to_portable_string(expected_source);
+        let source = reported_source(expected_source);
 
         // `info.property` is the executor's own finding, so only a runtime
         // failure has one; a parse failure's path lives in the typed snapshot
@@ -3894,7 +3901,7 @@ mod serial_groups {
         let info = &outcome.error.as_ref().expect("group failure is reported").info;
         let snapshot = info.snapshot.as_ref().expect("set failures are typed");
         let err_value = info.to_value();
-        let source = biscuit_file::to_portable_string(expected_source);
+        let source = reported_source(expected_source);
 
         assert_eq!(info.property.as_deref(), Some(expected_property));
         assert_eq!(snapshot.detail["property"], json!(expected_property));

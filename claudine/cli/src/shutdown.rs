@@ -74,8 +74,21 @@ pub(crate) fn exit_before_runtime(code: i32) -> ! {
     std::process::exit(code)
 }
 
+/// The total drain budget; `CLAUDINE_TEST_DRAIN_BUDGET_MS` shortens it in
+/// `test-fixtures` builds so a test need not wait out the real 10 s.
+fn drain_budget() -> std::time::Duration {
+    #[cfg(feature = "test-fixtures")]
+    if let Some(millis) = std::env::var("CLAUDINE_TEST_DRAIN_BUDGET_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+    {
+        return std::time::Duration::from_millis(millis);
+    }
+    DELIVERY_DRAIN_BUDGET
+}
+
 fn effective_deadline(now: Instant, command_deadline: Option<Instant>) -> Instant {
-    let budget = now + DELIVERY_DRAIN_BUDGET;
+    let budget = now + drain_budget();
     command_deadline.map_or(budget, |deadline| deadline.min(budget))
 }
 

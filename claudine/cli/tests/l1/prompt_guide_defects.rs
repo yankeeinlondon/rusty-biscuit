@@ -125,16 +125,43 @@ fn control_renders_every_warning_and_no_notice() {
     assert_eq!(composed.warnings(), all_ids(), "{}", composed.body);
 }
 
+/// One test per finding id, so nextest runs the composes in parallel.
+fn assert_listed_id_hides_only_its_warning(id: &'static str) {
+    let spec = replace_once(&control_spec(), "fixed: []\n", &format!("fixed:\n    - {id}\n"));
+    let composed = with_spec(&format!("guide-fixed-{id}"), ACTIVE, &spec);
+    let mut expected = all_ids();
+    expected.remove(id);
+    assert!(!composed.notice(), "{id}:\n{}", composed.body);
+    assert_eq!(composed.warnings(), expected, "{id}:\n{}", composed.body);
+}
+
+macro_rules! listed_id_tests {
+    ($($test:ident => $id:literal),* $(,)?) => {
+        $(#[test]
+        fn $test() {
+            assert_listed_id_hides_only_its_warning($id);
+        })*
+    };
+}
+
+listed_id_tests! {
+    listed_f1_hides_exactly_its_own_warning => "F1",
+    listed_f2_hides_exactly_its_own_warning => "F2",
+    listed_f3_hides_exactly_its_own_warning => "F3",
+    listed_f4_hides_exactly_its_own_warning => "F4",
+    listed_f5_hides_exactly_its_own_warning => "F5",
+    listed_f6_hides_exactly_its_own_warning => "F6",
+    listed_f7_hides_exactly_its_own_warning => "F7",
+    listed_f8_hides_exactly_its_own_warning => "F8",
+    listed_d1_hides_exactly_its_own_warning => "D1",
+    listed_d2_hides_exactly_its_own_warning => "D2",
+}
+
+/// The `listed_*` tests above name every finding id; a new one must be added.
 #[test]
-fn each_listed_id_hides_exactly_its_own_warning() {
-    for (id, _) in WARNINGS {
-        let spec = replace_once(&control_spec(), "fixed: []\n", &format!("fixed:\n    - {id}\n"));
-        let composed = with_spec(&format!("guide-fixed-{id}"), ACTIVE, &spec);
-        let mut expected = all_ids();
-        expected.remove(id);
-        assert!(!composed.notice(), "{id}:\n{}", composed.body);
-        assert_eq!(composed.warnings(), expected, "{id}:\n{}", composed.body);
-    }
+fn every_warning_id_has_a_listed_test() {
+    let ids: Vec<&str> = WARNINGS.iter().map(|(id, _)| *id).collect();
+    assert_eq!(ids, ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "D1", "D2"]);
 }
 
 #[test]
@@ -185,30 +212,38 @@ fn a_missing_or_ambiguous_spec_is_reported() {
 
 /// The R10 input robustness matrix: every shape of `fixed:` and `status:`,
 /// one edit from the control, each rendering a notice and every warning.
-#[test]
-fn every_malformed_field_renders_a_notice_and_every_warning() {
-    let control = control_spec();
-    let cells: [(&str, String, &str); 14] = [
-        ("fixed absent", replace_once(&control, "fixed: []\n", ""), "`fixed` is missing"),
-        ("fixed null", replace_once(&control, "fixed: []\n", "fixed:\n"), "`fixed` is null"),
-        ("fixed whole-field type", replace_once(&control, "fixed: []\n", "fixed: F1\n"), "`fixed` is not a list"),
-        ("fixed one element", replace_once(&control, "fixed: []\n", "fixed: [F1, 3]\n"), "holds an entry that is not one of the finding ids"),
-        ("fixed every element", replace_once(&control, "fixed: []\n", "fixed: [3]\n"), "holds an entry that is not one of the finding ids"),
-        ("fixed repeated id", replace_once(&control, "fixed: []\n", "fixed: [F1, F1]\n"), "or holds one twice"),
-        ("fixed duplicate key", replace_once(&control, "fixed: []\n", "fixed: []\nfixed: [F1]\n"), "its frontmatter could not be read"),
-        ("fixed invalid YAML", replace_once(&control, "fixed: []\n", "fixed: [F1\n"), "its frontmatter could not be read"),
-        ("status absent", replace_once(&control, "status: finalized-spec\n", ""), "`status` is missing"),
-        ("status null", replace_once(&control, "status: finalized-spec\n", "status:\n"), "`status` is null"),
-        ("status whole-field type", replace_once(&control, "status: finalized-spec\n", "status: 3\n"), "`status` is not a non-empty string"),
-        ("status empty", replace_once(&control, "status: finalized-spec\n", "status: \"\"\n"), "`status` is not a non-empty string"),
-        ("status duplicate key", replace_once(&control, "status: finalized-spec\n", "status: finalized-spec\nstatus: completed\n"), "its frontmatter could not be read"),
-        // An opening fence that never closes leaves no frontmatter at all.
-        ("unterminated frontmatter", control.replacen("\n---\n", "\n", 1), "`status` is missing"),
-    ];
-    for (case, spec, detail) in cells {
-        let composed = with_spec(&format!("guide-{}", case.replace(' ', "-")), ACTIVE, &spec);
-        assert_notice_and_every_warning(case, &composed, detail);
-    }
+/// One test per cell, so nextest runs the composes in parallel.
+fn assert_malformed_cell(case: &str, edit: impl FnOnce(&str) -> String, detail: &str) {
+    let spec = edit(&control_spec());
+    let composed = with_spec(&format!("guide-{}", case.replace(' ', "-")), ACTIVE, &spec);
+    assert_notice_and_every_warning(case, &composed, detail);
+}
+
+macro_rules! malformed_cell_tests {
+    ($($test:ident: $case:literal, |$c:ident| $edit:expr, $detail:literal;)*) => {
+        $(#[test]
+        fn $test() {
+            assert_malformed_cell($case, |$c| $edit, $detail);
+        })*
+    };
+}
+
+malformed_cell_tests! {
+    malformed_fixed_absent: "fixed absent", |c| replace_once(c, "fixed: []\n", ""), "`fixed` is missing";
+    malformed_fixed_null: "fixed null", |c| replace_once(c, "fixed: []\n", "fixed:\n"), "`fixed` is null";
+    malformed_fixed_whole_field_type: "fixed whole-field type", |c| replace_once(c, "fixed: []\n", "fixed: F1\n"), "`fixed` is not a list";
+    malformed_fixed_one_element: "fixed one element", |c| replace_once(c, "fixed: []\n", "fixed: [F1, 3]\n"), "holds an entry that is not one of the finding ids";
+    malformed_fixed_every_element: "fixed every element", |c| replace_once(c, "fixed: []\n", "fixed: [3]\n"), "holds an entry that is not one of the finding ids";
+    malformed_fixed_repeated_id: "fixed repeated id", |c| replace_once(c, "fixed: []\n", "fixed: [F1, F1]\n"), "or holds one twice";
+    malformed_fixed_duplicate_key: "fixed duplicate key", |c| replace_once(c, "fixed: []\n", "fixed: []\nfixed: [F1]\n"), "its frontmatter could not be read";
+    malformed_fixed_invalid_yaml: "fixed invalid YAML", |c| replace_once(c, "fixed: []\n", "fixed: [F1\n"), "its frontmatter could not be read";
+    malformed_status_absent: "status absent", |c| replace_once(c, "status: finalized-spec\n", ""), "`status` is missing";
+    malformed_status_null: "status null", |c| replace_once(c, "status: finalized-spec\n", "status:\n"), "`status` is null";
+    malformed_status_whole_field_type: "status whole-field type", |c| replace_once(c, "status: finalized-spec\n", "status: 3\n"), "`status` is not a non-empty string";
+    malformed_status_empty: "status empty", |c| replace_once(c, "status: finalized-spec\n", "status: \"\"\n"), "`status` is not a non-empty string";
+    malformed_status_duplicate_key: "status duplicate key", |c| replace_once(c, "status: finalized-spec\n", "status: finalized-spec\nstatus: completed\n"), "its frontmatter could not be read";
+    // An opening fence that never closes leaves no frontmatter at all.
+    malformed_unterminated_frontmatter: "unterminated frontmatter", |c| c.replacen("\n---\n", "\n", 1), "`status` is missing";
 }
 
 /// R12: the guide's `{{{ … }}}` literals reach the agent as `{{ … }}` without

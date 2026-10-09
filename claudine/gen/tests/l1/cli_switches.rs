@@ -8,8 +8,6 @@
 //! to that fixture and asserts the generated `cli_switches` value, which is
 //! the value `data.rs` and `catalog.json` are emitted from.
 
-use std::sync::Mutex;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 use claudine_gen::{GenError, Generation};
 use darkmatter::markdown::compose::RequestSnapshot;
@@ -34,11 +32,15 @@ fn generate_with(document: &str) -> Result<Generation, GenError> {
     fixture.generate()
 }
 
-fn generate_cell(cell: &Cell) -> Result<Generation, GenError> {
-    let fixture = Fixture::for_slug("codex").with_real_overrides();
+/// Generates one cell in `fixture`, a workspace reused by every cell of a
+/// part: only the research document and the frozen contract change per cell.
+fn generate_cell(fixture: &Fixture, cell: &Cell) -> Result<Generation, GenError> {
     fixture.write(DOC, &edited(cell.from, &cell.to));
+    let legacy = fixture.path(LEGACY_CONTRACT);
     if cell.legacy_contract {
         fixture.write(LEGACY_CONTRACT, include_str!("../fixtures/agent-cli-r1/_schema.r1.yaml"));
+    } else if legacy.exists() {
+        std::fs::remove_file(legacy).unwrap();
     }
     fixture.generate()
 }
@@ -177,10 +179,9 @@ const GAP_TEXT: &str = "The CLI prints no help without a login; run codex --help
 /// trailing content on the field's line; a shape that cannot occur for a
 /// field (an element of a scalar) has no cell. Shapes whose outcome depends on another field (removing the only
 /// short alias, a second root path) get a refusing cell and a valid control.
-#[test]
-fn every_matrix_cell_has_its_defined_outcome() {
+fn matrix_cells() -> Vec<Cell> {
     use Expect::*;
-    let cells = [
+    vec![
         // schema_revision: absent means revision 1, which needs its frozen
         // contract; with it, that contract judges the document (a revision-2
         // body fails it). The legacy positive control is
@@ -350,39 +351,122 @@ fn every_matrix_cell_has_its_defined_outcome() {
         cell("command trailing content", "        command: [exec]\n", "        command: [exec]: x\n", Unparsable),
         cell("description trailing content", OSS_DESCRIPTION, "    description: \"Use a local open-source model provider.\": x\n", Unparsable),
         cell("gap trailing content", REMOTE_GAP, format!("{REMOTE_GAP}: x"), Unparsable),
-    ];
-
-    run_matrix(&cells, |cell| cell.name.to_string(), judge);
+    ]
 }
 
-/// Judges every cell across threads, since each generates a whole provider,
-/// and fails listing every cell whose outcome differed.
-fn run_matrix<C: Sync>(
+/// The matrix runs as separate tests over disjoint cells, so each stays well
+/// inside the L1 time budget.
+const MATRIX_PARTS: usize = 16;
+
+fn run_matrix_part(part: usize) {
+    let cells = matrix_cells();
+    let mine: Vec<&Cell> = cells.iter().skip(part).step_by(MATRIX_PARTS).collect();
+    let fixture = Fixture::for_slug("codex").with_real_overrides();
+    run_matrix(&mine, |cell| cell.name.to_string(), |cell| judge(&fixture, cell));
+}
+
+mod every_matrix_cell_has_its_defined_outcome {
+    use super::*;
+
+    #[test]
+    fn part_00() {
+        run_matrix_part(0);
+    }
+
+    #[test]
+    fn part_01() {
+        run_matrix_part(1);
+    }
+
+    #[test]
+    fn part_02() {
+        run_matrix_part(2);
+    }
+
+    #[test]
+    fn part_03() {
+        run_matrix_part(3);
+    }
+
+    #[test]
+    fn part_04() {
+        run_matrix_part(4);
+    }
+
+    #[test]
+    fn part_05() {
+        run_matrix_part(5);
+    }
+
+    #[test]
+    fn part_06() {
+        run_matrix_part(6);
+    }
+
+    #[test]
+    fn part_07() {
+        run_matrix_part(7);
+    }
+
+    #[test]
+    fn part_08() {
+        run_matrix_part(8);
+    }
+
+    #[test]
+    fn part_09() {
+        run_matrix_part(9);
+    }
+
+    #[test]
+    fn part_10() {
+        run_matrix_part(10);
+    }
+
+    #[test]
+    fn part_11() {
+        run_matrix_part(11);
+    }
+
+    #[test]
+    fn part_12() {
+        run_matrix_part(12);
+    }
+
+    #[test]
+    fn part_13() {
+        run_matrix_part(13);
+    }
+
+    #[test]
+    fn part_14() {
+        run_matrix_part(14);
+    }
+
+    #[test]
+    fn part_15() {
+        run_matrix_part(15);
+    }
+}
+
+/// Judges each cell in turn and fails listing every cell whose outcome
+/// differed. Sequential on purpose: the matrix is split into many tests, and
+/// the test runner supplies the parallelism across them.
+fn run_matrix<C>(
     cells: &[C],
-    name: impl Fn(&C) -> String + Sync,
-    judge: impl Fn(&C) -> Result<(), String> + Sync,
+    name: impl Fn(&C) -> String,
+    judge: impl Fn(&C) -> Result<(), String>,
 ) {
-    let next = AtomicUsize::new(0);
-    let failures = Mutex::new(Vec::new());
-    let workers = std::thread::available_parallelism().map_or(4, |n| n.get());
-    std::thread::scope(|scope| {
-        for _ in 0..workers {
-            scope.spawn(|| {
-                while let Some(cell) = cells.get(next.fetch_add(1, Ordering::Relaxed)) {
-                    if let Err(message) = judge(cell) {
-                        failures.lock().unwrap().push(format!("{}: {message}", name(cell)));
-                    }
-                }
-            });
-        }
-    });
-    let mut failures = failures.into_inner().unwrap();
+    let mut failures: Vec<String> = cells
+        .iter()
+        .filter_map(|cell| judge(cell).err().map(|message| format!("{}: {message}", name(cell))))
+        .collect();
     failures.sort();
     assert!(failures.is_empty(), "matrix cells failed:\n{}", failures.join("\n"));
 }
 
-fn judge(cell: &Cell) -> Result<(), String> {
-    let outcome = generate_cell(cell);
+fn judge(fixture: &Fixture, cell: &Cell) -> Result<(), String> {
+    let outcome = generate_cell(fixture, cell);
     match (&cell.expect, &outcome) {
         (Expect::Rejected, Err(_)) => Ok(()),
         (Expect::RejectedByGenerator(needle), Err(GenError::CliSwitchInvalid { message, .. }))
@@ -790,12 +874,11 @@ fn row(column: &'static str, shape: Shape, edit: fn(&mut OverrideDoc), want: Wan
 /// override and generates Codex through the pipeline `claudine-gen
 /// validate` runs; the `outer` column holds the controls, the outer
 /// discriminators, extra members, and canonical ordering.
-#[test]
-fn every_override_matrix_cell_has_its_defined_outcome() {
+fn override_cells() -> Vec<OverrideCell> {
     use Gate::*;
     use Shape::*;
     use Want::*;
-    let cells = [
+    vec![
         // outer: controls
         row("outer", Also("control: the research projection"), |_| {}, Accept),
         row("outer", Also("control: a whole-provider gap"), |d| d.whole(WHOLE_GAP), Accept),
@@ -960,31 +1043,131 @@ fn every_override_matrix_cell_has_its_defined_outcome() {
         row("gap", Trailing, |d| d.trail(REMOTE, "gap"), Reject(Loader)),
         row("gap", Also("absent on a known record"), |d| d.remove(CONFIG, "gap"), Reject(Rule("canonical form"))),
         row("gap", Also("text on a known record"), |d| d.set(CONFIG, "gap", r#""Nothing is unknown.""#), Reject(Rule("nothing is unknown"))),
-    ];
-    check_override_grid(&cells);
+    ]
+}
+
+/// The override matrix runs as separate tests over disjoint cells, so each
+/// stays well inside the L1 time budget; part 0 also checks the grid and
+/// the fixed records the edits name.
+const OVERRIDE_PARTS: usize = 16;
+
+fn run_override_part(part: usize) {
+    let cells = override_cells();
+    if part == 0 {
+        check_override_grid(&cells);
+    }
 
     let base = OverrideDoc::from_catalog(cli_switches(&generate_with(FIXTURE).unwrap()));
-    // The fixed records the edits name, so a fixture change fails here first.
-    let flags: Vec<String> = match &base.value {
-        OverrideValue::Records(records) => records
-            .iter()
-            .map(|record| match record {
-                OverrideRecord::Fields(fields) => fields[0].1.clone(),
-                OverrideRecord::Raw(raw) => raw.clone(),
-            })
-            .collect(),
-        _ => unreachable!(),
-    };
-    assert_eq!(flags, [CONFIG, IMAGE, JSON_FLAG, MODEL, OSS, REMOTE].map(|f| Value::from(f).to_string()));
+    if part == 0 {
+        // The fixed records the edits name, so a fixture change fails here first.
+        let flags: Vec<String> = match &base.value {
+            OverrideValue::Records(records) => records
+                .iter()
+                .map(|record| match record {
+                    OverrideRecord::Fields(fields) => fields[0].1.clone(),
+                    OverrideRecord::Raw(raw) => raw.clone(),
+                })
+                .collect(),
+            _ => unreachable!(),
+        };
+        assert_eq!(flags, [CONFIG, IMAGE, JSON_FLAG, MODEL, OSS, REMOTE].map(|f| Value::from(f).to_string()));
+    }
 
+    let fixture = Fixture::for_slug("codex").with_real_overrides();
+    let pristine = std::fs::read_to_string(fixture.path("docs/providers/overrides/codex.yaml")).unwrap();
+    let mine: Vec<&OverrideCell> = cells.iter().skip(part).step_by(OVERRIDE_PARTS).collect();
     run_matrix(
-        &cells,
+        &mine,
         |cell| match cell.shape {
             Shape::Also(text) => format!("{} / {text}", cell.column),
             shape => format!("{} / {shape:?}", cell.column),
         },
-        |cell| judge_override(&base, cell),
+        |cell| judge_override(&fixture, &pristine, &base, cell),
     );
+}
+
+mod every_override_matrix_cell_has_its_defined_outcome {
+    use super::*;
+
+    #[test]
+    fn part_00() {
+        run_override_part(0);
+    }
+
+    #[test]
+    fn part_01() {
+        run_override_part(1);
+    }
+
+    #[test]
+    fn part_02() {
+        run_override_part(2);
+    }
+
+    #[test]
+    fn part_03() {
+        run_override_part(3);
+    }
+
+    #[test]
+    fn part_04() {
+        run_override_part(4);
+    }
+
+    #[test]
+    fn part_05() {
+        run_override_part(5);
+    }
+
+    #[test]
+    fn part_06() {
+        run_override_part(6);
+    }
+
+    #[test]
+    fn part_07() {
+        run_override_part(7);
+    }
+
+    #[test]
+    fn part_08() {
+        run_override_part(8);
+    }
+
+    #[test]
+    fn part_09() {
+        run_override_part(9);
+    }
+
+    #[test]
+    fn part_10() {
+        run_override_part(10);
+    }
+
+    #[test]
+    fn part_11() {
+        run_override_part(11);
+    }
+
+    #[test]
+    fn part_12() {
+        run_override_part(12);
+    }
+
+    #[test]
+    fn part_13() {
+        run_override_part(13);
+    }
+
+    #[test]
+    fn part_14() {
+        run_override_part(14);
+    }
+
+    #[test]
+    fn part_15() {
+        run_override_part(15);
+    }
 }
 
 /// Every `R` and `A` of [`OVERRIDE_OUTCOMES`] has exactly one cell that
@@ -1019,13 +1202,12 @@ fn check_override_grid(cells: &[OverrideCell]) {
     assert!(problems.is_empty(), "override grid:\n{}", problems.join("\n"));
 }
 
-fn judge_override(base: &OverrideDoc, cell: &OverrideCell) -> Result<(), String> {
+fn judge_override(fixture: &Fixture, pristine: &str, base: &OverrideDoc, cell: &OverrideCell) -> Result<(), String> {
     let mut doc = base.clone();
     (cell.edit)(&mut doc);
-    let fixture = Fixture::for_slug("codex").with_real_overrides();
     fixture.write(DOC, FIXTURE);
     let overrides = fixture.path("docs/providers/overrides/codex.yaml");
-    let mut text = std::fs::read_to_string(&overrides).unwrap();
+    let mut text = pristine.to_string();
     text.push_str(&doc.render());
     std::fs::write(&overrides, text).unwrap();
     let outcome = fixture.generate();

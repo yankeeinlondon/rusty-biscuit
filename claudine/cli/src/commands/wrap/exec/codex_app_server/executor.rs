@@ -111,7 +111,7 @@ fn message_outcome(
     (outcome, sent.err().map(|failure| render_chain(&context, &failure)))
 }
 
-async fn deliver(
+pub(super) async fn deliver(
     inner: &Inner,
     request: SteeringRequest,
     mechanism: &'static str,

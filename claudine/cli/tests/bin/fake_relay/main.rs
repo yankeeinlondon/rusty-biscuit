@@ -10,6 +10,11 @@
 //! program's stdout, and appends its stderr to `stderr`. It exits 1 when the
 //! program fails, and otherwise prints each of `stdout` on its own line.
 //! Its own arguments are ignored.
+//!
+//! With `"forward": true` it is a transparent stand-in for `program`
+//! instead: its own arguments follow `args`, all three standard streams are
+//! inherited, and it exits with the program's code. That skips the `cmd.exe`
+//! a `.cmd` shim costs on every launch.
 
 use std::fs;
 use std::io::Write as _;
@@ -19,14 +24,26 @@ use std::process::{Command, Stdio};
 struct Relay {
     program: String,
     args: Vec<String>,
+    #[serde(default)]
     stderr: String,
+    #[serde(default)]
     stdout: Vec<String>,
+    #[serde(default)]
+    forward: bool,
 }
 
 fn main() {
     let config = std::env::current_exe().expect("own path").with_extension("relay.json");
     let relay: Relay = serde_json::from_str(&fs::read_to_string(&config).expect("read relay config"))
         .expect("parse relay config");
+    if relay.forward {
+        let status = Command::new(&relay.program)
+            .args(&relay.args)
+            .args(std::env::args_os().skip(1))
+            .status()
+            .expect("run forwarded program");
+        std::process::exit(status.code().unwrap_or(1));
+    }
     let log = fs::OpenOptions::new()
         .create(true)
         .append(true)
