@@ -71,8 +71,9 @@ pub struct ReferenceCoverage { pub owner: Option<SymbolRef>, pub span: TextSpan,
 ```
 
 The same lists sit on `FileSymbolIndex::{occurrences, reference_coverage}`
-under `Capability::Occurrences` (empty = not computed). Contract and
-language table: `tree-hugger/docs/references.md`.
+under `Capability::Occurrences` (empty = not computed). Contract:
+`tree-hugger/docs/references.md`; language tables:
+`tree-hugger/docs/references/language-support.md`.
 
 #### Staged Analysis (schema v2 records)
 
@@ -109,7 +110,7 @@ and a symlink is its target. Detection reads the identity; `Io` and
 `scanner::collect_selected_files` (plus caller-resolved explicit files, listed
 whatever `.gitignore`/fixture exclusions say, still subject to
 `excluded_files`; with no inputs only they are listed) return identities, and `hug` canonicalizes its working directory so roots
-match (Windows 8.3 short names). `tree-hugger/docs/cache-design.md#file-identity`.
+match (Windows 8.3 short names). `tree-hugger/docs/cache-design/entry-format.md#file-identity`.
 
 ```rust
 let source = SourceFile::read("src/lib.rs")?;          // or read_with_language(path, Some(lang))
@@ -364,10 +365,10 @@ whitespace trimmed; keeps `pub(...)`, setter-only modifiers, annotations),
 `type_info.constraints` (the declaration's own written parameter list,
 `extract/generics.rs`; a list whose positions overflow `u16` is
 `TreeHuggerError::TooManyGenericParameters`; see
-`tree-hugger/docs/symbol-schema-design.md#generic-parameters`), `attributes`
+`tree-hugger/docs/symbol-records/generic-parameters.md`), `attributes`
 and the written `modifiers` (`Const`, `Unsafe`, `Readonly`, `Mut`,
 `Custom("abstract" | "final" | "override" | "virtual" | "sealed" |
-"mutating")`; see `symbol-schema-design.md#attributes-and-modifiers`) and,
+"mutating")`; see `tree-hugger/docs/symbol-records/fields.md#modifiers`) and,
 `relations.extends`/`relations.implements` (each base the declaration writes,
 as written, `id` and in-file `qualified_name` only when the path names exactly
 one eligible same-file declaration; a Rust trait impl adds its trait as written

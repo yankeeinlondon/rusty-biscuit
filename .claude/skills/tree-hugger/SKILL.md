@@ -29,13 +29,17 @@ Swift, Scala, PHP, Perl, Bash, Zsh, Lua.
 User-facing behavior is documented in `tree-hugger/docs/`; the skill files
 describe implementation. When they disagree, the code wins and both get fixed.
 
+- [Tree Hugger Overview](../../../tree-hugger/docs/overview.md): the entry page and map of every doc
 - [Using the `hug` CLI](../../../tree-hugger/docs/cli.md): **the canonical CLI usage document**: every command, option, output format and exit status. `cli/README.md` is only an overview that links here
 - [Symbol Reports](../../../tree-hugger/docs/symbol-reports.md): the declaration commands end to end, JSON envelopes, `--json-full`, `--sort`, `--changed`, `--stats`, exit status
 - [Symbol Kinds, Visibility and `static`](../../../tree-hugger/docs/symbol-kinds-and-visibility.md): per-language kinds, containers, visibility, grammar limits
 - [Declared Type Relations](../../../tree-hugger/docs/type-relations.md): `extends`/`implements`/`unclassified_bases` per language
 - [Scope-Aware References](../../../tree-hugger/docs/references.md): occurrences, confidence, coverage reasons, recursion, `hug refs`
 - [Cyclomatic Complexity](../../../tree-hugger/docs/cyclomatic-complexity.md): counting rules, when the value is `null`
-- [Cache Design](../../../tree-hugger/docs/cache-design.md): entry format and the robustness tables
+- [Cache Design](../../../tree-hugger/docs/cache-design.md): how the cache is used, with detail pages for the entry format and damaged-entry tables
+- [Using the Library](../../../tree-hugger/docs/library.md): the Rust API guide (canonical; `lib/README.md` is only an overview)
+- [Symbol Records](../../../tree-hugger/docs/symbol-records.md): the record format, field by field
+- [Tree-sitter Queries](../../../tree-hugger/docs/queries.md) and [Testing](../../../tree-hugger/docs/testing.md)
 
 ## CLI at a glance (`hug`)
 

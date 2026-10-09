@@ -140,7 +140,7 @@ command or flag updates `docs/cli.md`, not the README.
   at it); update it with any change to kind sets, envelope, order or
   `--verbose`.
 - **`hug refs`** (`cli/src/refs.rs`, wired early in `main::run_refs`; user
-  contract `tree-hugger/docs/references.md#hug-refs`): the first positional is
+  contract `tree-hugger/docs/references/hug-refs.md`): the first positional is
   the name (`NamePattern::exact`, matched with `SymbolQuery::matches`, so smart
   case and `file#`/qualified names behave as in the selectors), the rest are
   file filters; `--id` compares `record.id` exactly. It is two-phase: every file
@@ -292,7 +292,7 @@ Changed flags/references never enter cache keys. The L1 tests in the
 selection, errors, empty output, public help and repeated warm cache hits;
 use `just test --test changed`. User-facing details and the flow diagram
 live in [Symbol
-Reports](../../../tree-hugger/docs/symbol-reports.md#changed-files).
+Reports](../../../tree-hugger/docs/symbol-reports/changed-files.md).
 
 ## Package identity for reports
 
@@ -336,7 +336,7 @@ These remain L1 in the declared symbols target, not terminal tests.
 
 User-facing package stats guidance lives in the
 [`hug` CLI guide](../../../tree-hugger/docs/cli.md#package-stats) and
-[Symbol Reports](../../../tree-hugger/docs/symbol-reports.md#--stats).
+[Symbol Reports](../../../tree-hugger/docs/symbol-reports/package-stats.md).
 The topic's flow distinguishes file-level group initialization (including
 failed/zero-match files) from declaration-level counting. The
 [release

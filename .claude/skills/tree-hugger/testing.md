@@ -46,7 +46,7 @@ When modifying queries or symbol extraction:
    shapes of the entry fields and record columns (including nested generics,
    relation targets and attribute/modifier members) are served or
    recomputed (its `WrongType` cell writes `"123"` for a numeric field) (tables
-   in `docs/cache-design.md`); a schema change that adds a default or makes a
+   in `docs/cache-design/robustness.md`); a schema change that adds a default or makes a
    field optional must update that row. The cache tests probe through
    `hug --json-full` (the complete index), since `--json` reports only the
    command's records. `Scratch` pins `RAYON_NUM_THREADS=2` so concurrent

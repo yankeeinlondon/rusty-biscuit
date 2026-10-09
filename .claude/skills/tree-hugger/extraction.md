@@ -102,7 +102,7 @@ pins both.
   `refs::go_raw_string_imports_are_listed_by_imports`). C/C++
   `struct`/`union`/`class` names are records only with a body or written alone
   (the same rule as `declaration_names::c_type_specifier`); elaborated uses are
-  reads. User contract `docs/references.md#what-an-import-binds`; rows
+  reads. User contract `docs/references/language-support.md#what-an-import-binds`; rows
   `SCALA_IMPORT_MATRIX`/`SCALA_IMPORT_ALTERNATIVES` (unbraced renames and
   operator names/qualifiers, `for_each_import_row` crosses independently stated
   controls with comments)/`PYTHON_IMPORT_MATRIX`/`PHP_USE_MATRIX`
@@ -407,7 +407,7 @@ pins both.
   one owner its prefix reaches (a function sharing the spelling is no owner),
   never below a prefix with two owners, and `InlineNames::members` reads a scope
   without inline descendants by exact name; displayed names and IDs never
-  change; `docs/type-relations.md#where-a-declaration-is-bound`), and `resolve`
+  change; `docs/type-relations/name-lookup.md#where-a-declaration-is-bound`), and `resolve`
   decides the **first segment** before the rest, from a `Site` (the
   declaration/impl/extension node and the base's byte): first
   `relations/lexical.rs::Lexical::lookup` climbs the syntax scopes inside
@@ -810,7 +810,7 @@ pins reports.
 - **Go**: embedded fields and fields of anonymous struct types are not reported;
   grouped `X, Y int` fields share one span, so `hug` orders them by record ID
 - **Scala**: `private enum E { … }` does not parse (grammar limit G1 in
-  `docs/symbol-kinds-and-visibility.md#grammar-limits`)
+  `docs/symbol-kinds-and-visibility/limitations.md#grammar-limits`)
 - **Python / JavaScript**: instance attributes assigned only through `self.x` /
   `this.x` are not reported (the catch-all assignment patterns were removed);
   class-body declarations are
@@ -819,7 +819,7 @@ pins reports.
   ambiguous owners cannot attach conformance to a local record
   (`docs/type-relations.md#c-swift-and-scala`)
 - **Declaration-fact grammar limits** (pinned by `*_grammar_limits_*` tests,
-  table in `docs/symbol-kinds-and-visibility.md#grammar-limits`): Python PEP 696
+  table in `docs/symbol-kinds-and-visibility/limitations.md#grammar-limits`): Python PEP 696
   type-parameter defaults and TS `in`/`out` variance do not parse; a C++
   concept-constrained parameter (`template <std::integral T>`) reads as `Const`;
   a TS/JS decorator is only a path or a call of one
