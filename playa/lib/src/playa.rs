@@ -197,7 +197,9 @@ impl Playa {
     /// decoding via rodio/symphonia first. Any native failure raised before
     /// audio reaches the device (unsupported format, decode or file error,
     /// device-open failure or timeout, or a breaker tripped earlier in this
-    /// process) falls back to a host player in the same call. A device that
+    /// process) falls back to a host player in the same call. Finding no
+    /// output device at all returns [`PlaybackError::AudioSubsystem`], since a
+    /// host player could not play either. A device that
     /// stops making progress after audio was submitted returns
     /// [`PlaybackError::AudioSubsystem`] instead of replaying through a host
     /// player. A device-open timeout or stall also disables native playback
@@ -794,7 +796,9 @@ mod tests {
         #[test]
         fn stream_open_failure_falls_back_to_host_without_tripping_the_breaker() {
             let fixture = HostFixture::new(|| {
-                Err(NativePlaybackError::Stream(rodio::DeviceSinkError::NoDevice))
+                Err(NativePlaybackError::Stream(
+                    rodio::DeviceSinkError::UnsupportedSampleFormat,
+                ))
             });
 
             let report = play(&fixture).expect("stream failure must reach the host route");
@@ -810,7 +814,9 @@ mod tests {
         #[tokio::test]
         async fn stream_open_failure_falls_back_to_host_async() {
             let fixture = HostFixture::new(|| {
-                Err(NativePlaybackError::Stream(rodio::DeviceSinkError::NoDevice))
+                Err(NativePlaybackError::Stream(
+                    rodio::DeviceSinkError::UnsupportedSampleFormat,
+                ))
             });
 
             let report = play_async(&fixture)
@@ -818,6 +824,21 @@ mod tests {
                 .expect("stream failure must reach the host route");
             assert_eq!(report.route, PlaybackRoute::Host(AudioPlayer::Mpv));
             assert!(native_audio_available(), "a stream error is not a breaker trip");
+        }
+
+        #[test]
+        fn no_output_device_is_fatal_and_never_reaches_host() {
+            let fixture = HostFixture::new(|| {
+                Err(NativePlaybackError::Stream(rodio::DeviceSinkError::NoDevice))
+            });
+
+            let error = play(&fixture).expect_err("no output device must not fall back");
+            assert!(
+                matches!(error, PlaybackError::AudioSubsystem { .. }),
+                "unexpected error: {error:?}"
+            );
+            assert!(native_audio_available(), "a missing device is not a breaker trip");
+            assert_eq!(fixture.seam_calls(), 1);
         }
 
         #[test]
