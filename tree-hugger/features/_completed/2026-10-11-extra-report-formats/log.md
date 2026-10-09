@@ -2,6 +2,7 @@
 feature: 2026-10-11-extra-report-formats
 review: review-1.md
 implementation_1: "2026-10-08T15:21:07-07:00"
+implementation_2: "2026-10-08T17:30:59-07:00"
 deferred_perf_measurement: false
 ---
 
@@ -259,33 +260,34 @@ deferred_perf_measurement: false
 
 | ID | Finding or required instance/consumer and expected result | Disposition | Verification evidence or blocker |
 |----|-----------------------------------------------------------|-------------|----------------------------------|
-| R2-F1 | Tags silently change filenames that are not valid Unicode | pending | |
-| R2-F1.P1 | Declaration filename contains byte `FF`: reject, warn, exit 1, keep valid entries | pending | |
-| R2-F1.P2 | Parent directory contains byte `FF`: same unsupported-entry behavior | pending | |
-| R2-F1.P3 | Outside-root declaration filename contains byte `FF`: validate native relative route | pending | |
-| R2-F1.P4 | Lossy replacement filename exists with different source: never point at it | pending | |
-| R2-F1.P5 | Valid symlink resolving to non-UTF-8 target: validate recorded native route | pending | |
-| R2-F1.P6 | Windows filename with unpaired U+D800: reject, warn, exit 1 | pending | |
-| R2-F1.P7 | Windows parent directory with unpaired U+D800: reject | pending | |
-| R2-F1.C1 | Non-UTF-8 bytes only in scan root: keep `Example.java` tags | pending | |
-| R2-F1.C2 | Actual filename containing valid U+FFFD: accept | pending | |
-| R2-F1.C3 | Names/containers: exact values, current unsupported policies unchanged | pending | |
-| R2-F1.C4 | TSV and Markdown labels keep display projection | pending | |
-| R2-F1.C5 | Prose href keeps native URL boundary | pending | |
-| R2-F1.C6 | Synthetic/pathless tags omitted before path checks | pending | |
-| R2-F1.C7 | Unpaired surrogate only in Windows scan root: keep relative tags | pending | |
-| R2-F1.D1 | Native discovery/read/query keep native paths | pending | |
-| R2-F1.D2 | `functions` export: skip/warn/status through CLI | pending | |
-| R2-F1.D3 | `types` export: same | pending | |
-| R2-F1.D4 | `symbols` export: default and broader scope, independent names | pending | |
-| R2-F1.D5 | `classes` container projection keeps native validation | pending | |
-| R2-F1.D6 | `classes` displayed members: static/instance filtering keeps safe records, rejects unsupported | pending | |
-| R2-F1.D7 | Flattening/sorting/ID dedup: carry representability, no order change | pending | |
-| R2-F1.D8 | Unsupported decision before lossy conversion; header-only and mixed reports exact | pending | |
-| R2-F1.D9 | Neovim navigation never sees unsupported entries; controls retained | pending | |
-| R2-F1.DOC1 | CLI README, `docs/symbol-reports.md`, tree-hugger skill describe the filename boundary | pending | |
-| N1 | Nonblocking: permanent all-export write-failure/stop-work probes and backtick corpus | pending | |
-| N2 | Nonblocking: accepted skip policy for Neovim-expanded paths unchanged | pending | |
+| R2-F1 | Tags silently change filenames that are not valid Unicode | fixed | every child row below is fixed or clean; full `just test` 2026/2026, `just lint` clean |
+| R2-F1.P1 | Declaration filename contains byte `FF`: reject, warn, exit 1, keep valid entries | fixed | `cli/tests/symbols/export_ctags_paths.rs` `linux::a_file_name_that_is_not_utf8_is_skipped_and_other_files_are_kept`, `linux::a_report_whose_every_entry_is_unrepresentable_is_header_only`; Linux rig 8/8 |
+| R2-F1.P2 | Parent directory contains byte `FF`: same unsupported-entry behavior | fixed | `linux::a_directory_name_that_is_not_utf8_is_skipped`; Linux rig pass |
+| R2-F1.P3 | Outside-root declaration filename contains byte `FF`: validate native relative route | fixed | `linux::an_outside_root_route_that_is_not_utf8_is_skipped` (reached through a valid in-root link to `../bad\xff.java`, since `hug` arguments are UTF-8); Linux rig pass |
+| R2-F1.P4 | Lossy replacement filename exists with different source: never point at it | fixed | `linux::an_existing_replacement_spelling_never_receives_another_files_tags`: the decoy is tagged only with its own `Decoy` entries, canonical identities compared |
+| R2-F1.P5 | Valid symlink resolving to non-UTF-8 target: validate recorded native route | fixed | `linux::a_link_to_a_file_name_that_is_not_utf8_is_skipped`; Linux rig pass |
+| R2-F1.P6 | Windows filename with unpaired U+D800: reject, warn, exit 1 | fixed | `windows::a_file_name_with_an_unpaired_surrogate_is_skipped_and_other_files_are_kept` (mixed and header-only); native Windows rig pass (subagent cross-check 21/21) |
+| R2-F1.P7 | Windows parent directory with unpaired U+D800: reject | fixed | `windows::a_directory_name_with_an_unpaired_surrogate_is_skipped`; native Windows rig pass |
+| R2-F1.C1 | Non-UTF-8 bytes only in scan root: keep `Example.java` tags | clean | `linux::a_scan_root_that_is_not_utf8_keeps_its_valid_routes`: exact accepted tags, exit 0, tags navigate |
+| R2-F1.C2 | Actual filename containing valid U+FFFD: accept | clean | `a_real_replacement_character_file_name_is_tagged` (all OSes, macOS run) plus lib `the_lossless_projection_agrees_with_the_display_projection_on_unicode_names` |
+| R2-F1.C3 | Names/containers: exact values, current unsupported policies unchanged | clean | name/container checks in `ctags::write_tag` unchanged; existing ctags unit and `export_ctags` byte tests pass |
+| R2-F1.C4 | TSV and Markdown labels keep display projection | clean | TSV/Markdown/JSON still use `selected_records` → `trim_record` display projection; their goldens unchanged and passing |
+| R2-F1.C5 | Prose href keeps native URL boundary | clean | Prose href path untouched; `export_prose_markdown` passes |
+| R2-F1.C6 | Synthetic/pathless tags omitted before path checks | clean | `ctags::write_record` returns before path projection for synthetic/pathless records; prelude regression and `export::tests::ctags_flattening_can_drop_synthetic_records_while_tsv_keeps_them` pass |
+| R2-F1.C7 | Unpaired surrogate only in Windows scan root: keep relative tags | clean | `windows::a_scan_root_with_an_unpaired_surrogate_keeps_its_valid_routes`; native Windows rig pass |
+| R2-F1.D1 | Native discovery/read/query keep native paths | clean | native `source.file_path` kept until the writers (`native_selected_records`) |
+| R2-F1.D2 | `functions` export: skip/warn/status through CLI | fixed | every case table runs `functions` with exact stdout/stderr/exit |
+| R2-F1.D3 | `types` export: same | fixed | same tables run `types` |
+| R2-F1.D4 | `symbols` export: default and broader scope, independent names | fixed | same tables run `symbols` and `symbols --all-scopes` with independently written entries |
+| R2-F1.D5 | `classes` container projection keeps native validation | fixed | same tables run `classes`; containers decided from native paths |
+| R2-F1.D6 | `classes` displayed members: static/instance filtering keeps safe records, rejects unsupported | fixed | same tables run `classes --static-only` and `--instance-only` |
+| R2-F1.D7 | Flattening/sorting/ID dedup: carry representability, no order change | clean | `export::flatten_selected` unchanged (order never reads paths); `export_order` and `export::tests` pass |
+| R2-F1.D8 | Unsupported decision before lossy conversion; header-only and mixed reports exact | fixed | new `ctags::Unsupported::UnrepresentablePath` decided from `lossless_portable_relative` before any lossy text; exact mixed and header-only assertions, exit 1 |
+| R2-F1.D9 | Neovim navigation never sees unsupported entries; controls retained | fixed | `assert_tags_navigate` in every test joins each tag path onto the scan root and compares canonical identity with the declaring file |
+| R2-F1.DOC1 | CLI README, `docs/symbol-reports.md`, tree-hugger skill describe the filename boundary | fixed | `cli/README.md`, `docs/symbol-reports.md`, `.claude/skills/tree-hugger/SKILL.md` and `api-reference.md` describe the boundary; `.claude/skills/os/windows-paths.md` records the surrogate-directory fact |
+| R2-F1.X1 | Discovered sibling: `--format table` OSC 8 Location link built from the trimmed lossy path | fixed | table now displays the projected path but links the native record path (`render.rs`); `reports::table_location_links_resolve_against_the_scan_root` passes |
+| N1 | Nonblocking: permanent all-export write-failure/stop-work probes and backtick corpus | deferred | explicitly nonblocking in review-2; the existing write-error/pipe tests already cover the behavior; next edit of those tests should add the all-export probes |
+| N2 | Nonblocking: accepted skip policy for Neovim-expanded paths unchanged | clean | accepted Neovim-expansion skip policy unchanged; `reader_expands` untouched |
 
 ### Progress
 
@@ -302,3 +304,29 @@ deferred_perf_measurement: false
         - verified: `just test ctags` 15/15 then full `just test` 2026/2026 passed on macOS (a first full run under host load average ~140 from other sessions had 4 `cache_robustness`/`cache_lookup` 30 s timeouts in tests that never reach ctags or the table; `symbol_commands_run_no_diagnostics` passed alone and the full rerun at normal load passed with no timeouts); `just lint` clean; `just check-tier-coverage tree-hugger-cli` 0 stranded; doctest for `lossless_portable_relative` passed
         - verified cross-OS: `just cross-check tree-hugger-cli --os linux export_ctags ctags:: export:: table_location_links export_controls` 31/31 passed (all seven Linux `export_ctags_paths` tests); same filter `--os windows` 21/21 passed (all three Windows tests); `just cross-check tree-hugger --os linux naming::` 7/7 and `--os windows naming::` 7/7 passed
         - os skill: added to `windows-paths.md` that a surrogate-named directory works as a child process cwd including `hug`'s Git discovery
+- work completed for 'R2-F1 — Tags silently change filenames that are not valid Unicode' at 18:15:48
+        - orchestrator reconciliation: inspected the `naming.rs`, `ctags.rs` and `declarations.rs` diffs and the new test file (exact stdout/stderr/exit assertions); reran the Linux path tests on the rig (8/8 passed) and the full local suite
+
+### Completion Report
+
+- **outcome: complete**, elapsed 2026-10-08T17:30:59-07:00 → 18:16 (about 45 minutes)
+- parent findings: total 1 = fixed 1 + already fixed 0 + blocked 0 + deferred 0 + unresolved 0
+        - instance rows: 26 required child rows (P1–P7, C1–C7, D1–D9, DOC1, discovered X1): 14 fixed, 12 clean, 0 open
+        - nonblocking recommendations, counted separately: N1 deferred (nonblocking per review), N2 clean
+- verified repairs:
+        - `tree_hugger::lossless_portable_relative` (lib `file/naming.rs`) shares one projection with `portable_relative` and returns `None` when any emitted route name (or emitted absolute fallback) is not valid Unicode; scan-root spelling is never checked, and a real U+FFFD name is kept
+        - `ctags::write_record` now takes the native record and the scan root, decides the tag path itself and refuses an unrepresentable route as `Unsupported::UnrepresentablePath` through the existing `ctags_unsupported` warning and exit 1; `declarations::native_selected_records` feeds ctags, while TSV/Markdown/JSON keep the trimmed display projection
+        - discovered sibling R2-F1.X1: the `--format table` Location link now targets the native path instead of the lossy projected text
+- open finding/child IDs: none (N1 is an explicitly nonblocking recommendation, deferred to the next edit of the write-error tests)
+- performance measurement: none required; `deferred_perf_measurement` stays `false`
+- changed files (this iteration):
+        - code: `tree-hugger/lib/src/file/naming.rs`, `tree-hugger/lib/src/file/mod.rs`, `tree-hugger/lib/src/lib.rs`, `tree-hugger/cli/src/ctags.rs`, `tree-hugger/cli/src/declarations.rs`, `tree-hugger/cli/src/render.rs`
+        - tests: `tree-hugger/cli/tests/symbols/export_ctags_paths.rs` (new), `tree-hugger/cli/tests/symbols/main.rs`
+        - docs: `tree-hugger/cli/README.md`, `tree-hugger/docs/symbol-reports.md`, `.claude/skills/tree-hugger/SKILL.md`, `.claude/skills/tree-hugger/api-reference.md`, `.claude/skills/os/windows-paths.md`
+- final verification:
+        - `just lint` (tree-hugger): clean for both packages — all rows
+        - `just test --test-threads 4 --no-fail-fast` (macOS): 2026/2026 passed — all rows; a preceding fail-fast run timed out one unrelated lib test (`symbols_query::declaration_facts_of_narrow_queries_equal_the_complete_index::shared_rows_4`) at host load average 173 and passed on the rerun
+        - `just check-tier-coverage tree-hugger-cli`: 0 stranded — new test registration
+        - `just cross-check tree-hugger-cli --os linux export_ctags_paths` (orchestrator): 8/8 passed — P1–P5, C1, C2
+        - subagent: `just cross-check tree-hugger-cli --os linux|windows` with ctags/export/table filters 31/31 and 21/21; `just cross-check tree-hugger --os linux|windows naming::` 7/7 each — P6, P7, C7 and the lib projection
+        - full Linux, Windows and WSL2 suites were not run locally; CI covers them
