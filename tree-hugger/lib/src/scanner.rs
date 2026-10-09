@@ -117,11 +117,18 @@ pub fn collect_selected_files(
         }
 
         let overrides = overrides.build()?;
-        let walker = WalkBuilder::new(root)
-            .standard_filters(true)
-            .hidden(false)
-            .overrides(overrides)
-            .build();
+        let mut builder = WalkBuilder::new(root);
+        builder.standard_filters(true).hidden(false).overrides(overrides);
+        // The walker still decides every entry it reaches; literal targets
+        // only stop it entering directories no target lies under.
+        if let Some(targets) = literal_targets(&glob_inputs) {
+            let root = root.to_path_buf();
+            builder.filter_entry(move |entry| match entry.path().strip_prefix(&root) {
+                Ok(relative) => targets.iter().any(|target| target.starts_with(relative)),
+                Err(_) => true,
+            });
+        }
+        let walker = builder.build();
 
         for entry in walker {
             let entry = entry.map_err(TreeHuggerError::Ignore)?;
@@ -158,4 +165,29 @@ pub fn collect_selected_files(
     }
 
     Ok(files)
+}
+
+/// The root-relative paths `patterns` can whitelist, when every pattern is a
+/// literal one: such a pattern matches exactly the one path it spells, so no
+/// file the walker would select lies outside these paths.
+///
+/// `None` (walk everything) for no patterns, and for any pattern whose
+/// override meaning is wider or uncertain: glob syntax or escapes, negation,
+/// comments, anchoring, trailing slashes or whitespace, `.`/`..`/empty
+/// components, a drive colon, and a bare name (which matches at any depth).
+fn literal_targets(patterns: &[String]) -> Option<Vec<PathBuf>> {
+    if patterns.is_empty() {
+        return None;
+    }
+    patterns
+        .iter()
+        .map(|pattern| {
+            let literal = pattern.contains('/')
+                && !pattern.contains(['*', '?', '[', ']', '{', '}', '\\', ':'])
+                && !pattern.starts_with(['!', '#', '/'])
+                && pattern.trim() == pattern
+                && pattern.split('/').all(|part| !matches!(part, "" | "." | ".."));
+            literal.then(|| pattern.split('/').collect())
+        })
+        .collect()
 }

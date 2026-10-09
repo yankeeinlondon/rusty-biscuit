@@ -2,7 +2,8 @@
 //! container, test, docs, deprecation and signature-shape filters,
 //! smart-case and exact name matching, `--file`/`--name` against positional
 //! classification, `classes` containers versus members, `imports --name`,
-//! `--json-full` rejections, and selectors staying out of the cache.
+//! `--json-full` rejections, selectors staying out of the cache, and literal
+//! positional paths selecting what the full walk selects.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -1077,5 +1078,142 @@ fn qualified_selectors_distinguish_scala_block_packages() {
             .chain(["--file", "scala.scala", "--exact", "--count", "--no-cache"])
             .collect();
         assert_eq!(scratch.stdout(&args).trim(), "1", "hug {}", args.join(" "));
+    }
+}
+
+/// A positional pattern made a glob that matches the same path, so the scan
+/// takes the full walk: the last character becomes a one-character class.
+fn walked(pattern: &str) -> String {
+    let last = pattern.chars().last().expect("non-empty pattern");
+    format!("{}[{last}]", &pattern[..pattern.len() - last.len_utf8()])
+}
+
+/// The tree a literal positional path is resolved in: ignored files and
+/// parents, nested `.ignore` files, a fixture, a hidden directory, a same
+/// name at two depths, a directory named like a source file, and (on Unix)
+/// file and directory symlinks.
+fn selection_scratch() -> Scratch {
+    let scratch = Scratch::new(&[
+        ("src/lib.rs", "pub fn src_lib() {}\n"),
+        ("src/ignored.rs", "pub fn src_ignored() {}\n"),
+        ("src/dir.rs/inner.rs", "pub fn dir_inner() {}\n"),
+        ("other/lib.rs", "pub fn other_lib() {}\n"),
+        ("vendor/v.rs", "pub fn vendored() {}\n"),
+        ("fixtures/f.rs", "pub fn fixture() {}\n"),
+        (".hidden/h.rs", "pub fn hidden() {}\n"),
+        ("deep/.ignore", "skip.rs\nsub/\n"),
+        ("deep/skip.rs", "pub fn deep_skip() {}\n"),
+        ("deep/sub/s.rs", "pub fn deep_sub() {}\n"),
+        ("docs/notes.md", "# Notes\n"),
+        (".gitignore", "vendor/\nignored.rs\n"),
+    ]);
+    #[cfg(unix)]
+    {
+        let root = scratch.repo.path();
+        std::os::unix::fs::symlink("lib.rs", root.join("src/link.rs")).expect("file symlink");
+        std::os::unix::fs::symlink("src", root.join("linked")).expect("directory symlink");
+    }
+    scratch
+}
+
+/// The exit code, the stdout and, on failure, the stderr of `hug --json
+/// functions` over `patterns` plus `extra`.
+fn selection(scratch: &Scratch, patterns: &[String], extra: &[&str]) -> (Option<i32>, String, String) {
+    let mut args = vec!["--json", "functions"];
+    args.extend(patterns.iter().map(String::as_str));
+    args.extend_from_slice(extra);
+    let output = scratch.hug(&args);
+    let stderr = if output.status.success() { String::new() } else { String::from_utf8_lossy(&output.stderr).into_owned() };
+    (output.status.code(), String::from_utf8(output.stdout).expect("utf-8 stdout"), stderr)
+}
+
+/// The root-relative files a successful `--json` selection reports.
+fn selected_files(stdout: &str) -> Vec<String> {
+    json_of(stdout)["files"]
+        .as_array()
+        .expect("files")
+        .iter()
+        .map(|file| file["file"].as_str().expect("file").replace('\\', "/"))
+        .collect()
+}
+
+/// Literal positional paths skip the directories no pattern names, but
+/// select exactly what the full walk selects: ignore rules, fixtures,
+/// hidden files, symlinks, exclusions and several patterns behave the same,
+/// and a path that selects nothing still fails with `NoSourceFiles`.
+#[test]
+fn literal_positional_paths_select_what_the_walker_selects() {
+    let scratch = selection_scratch();
+    let mut cases: Vec<(&[&str], &[&str], &[&str])> = vec![
+        (&["src/lib.rs"], &[], &["src/lib.rs"]),
+        // A `.gitignore`d file named outright is selected; a file below an
+        // ignored or nested-`.ignore`d directory is never reached.
+        (&["src/ignored.rs"], &[], &["src/ignored.rs"]),
+        (&["vendor/v.rs"], &[], &[]),
+        (&["deep/skip.rs"], &[], &["deep/skip.rs"]),
+        (&["deep/sub/s.rs"], &[], &[]),
+        (&["fixtures/f.rs"], &[], &["fixtures/f.rs"]),
+        (&[".hidden/h.rs"], &[], &[".hidden/h.rs"]),
+        (&["src/lib.rs", "fixtures/f.rs", "other/lib.rs"], &[], &["fixtures/f.rs", "other/lib.rs", "src/lib.rs"]),
+        (&["src/lib.rs", "src/missing.rs"], &[], &["src/lib.rs"]),
+        (&["src/missing.rs"], &[], &[]),
+        (&["docs/notes.md"], &[], &[]),
+        // A directory pattern selects none of its files.
+        (&["src/dir.rs"], &[], &[]),
+        (&["SRC/lib.rs"], &[], &[]),
+        (&["src/lib.rs"], &["--exclude-files", "src/lib.rs"], &[]),
+        (&["src/lib.rs", "fixtures/f.rs"], &["--exclude-files", "**/fixtures/**"], &["src/lib.rs"]),
+    ];
+    if cfg!(unix) {
+        // The walk lists neither a symlink nor a file below a symlinked
+        // directory.
+        cases.push((&["src/link.rs"], &[], &[]));
+        cases.push((&["linked/lib.rs"], &[], &[]));
+    }
+
+    for (patterns, extra, expected) in cases {
+        let literal: Vec<String> = patterns.iter().map(|pattern| pattern.to_string()).collect();
+        let glob: Vec<String> = patterns.iter().map(|pattern| walked(pattern)).collect();
+        let fast = selection(&scratch, &literal, extra);
+        assert_eq!(fast, selection(&scratch, &glob, extra), "{patterns:?} {extra:?} against {glob:?}");
+        if expected.is_empty() {
+            assert_eq!(fast.0, Some(1), "{patterns:?} {extra:?}: {}", fast.2);
+            assert!(fast.2.contains("NoSourceFiles"), "{patterns:?} {extra:?}: {}", fast.2);
+        } else {
+            assert_eq!(fast.0, Some(0), "{patterns:?} {extra:?}: {}", fast.2);
+            assert_eq!(selected_files(&fast.1), expected, "{patterns:?} {extra:?}");
+        }
+    }
+
+    // A bare name still matches at any depth, as `**/` does, and a mix of
+    // a literal and a glob selects the union.
+    let bare = selection(&scratch, &["lib.rs".to_string()], &[]);
+    assert_eq!(bare, selection(&scratch, &["**/lib.rs".to_string()], &[]));
+    assert_eq!(selected_files(&bare.1), ["other/lib.rs", "src/lib.rs"]);
+    let mixed = selection(&scratch, &["src/lib.rs".to_string(), "other/*.rs".to_string()], &[]);
+    assert_eq!(selected_files(&mixed.1), ["other/lib.rs", "src/lib.rs"]);
+}
+
+/// A literal positional path opens only the directories on its way: an
+/// unreadable directory elsewhere fails the full walk but not the literal
+/// selection.
+#[cfg(unix)]
+#[test]
+fn a_literal_positional_path_does_not_open_unrelated_directories() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let scratch = Scratch::new(&[("src/lib.rs", "pub fn src_lib() {}\n"), ("locked/x.rs", "pub fn locked() {}\n")]);
+    let locked = scratch.repo.path().join("locked");
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).expect("lock");
+    let fast = selection(&scratch, &["src/lib.rs".to_string()], &[]);
+    let walked = selection(&scratch, &[walked("src/lib.rs")], &[]);
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).expect("unlock");
+
+    assert_eq!(fast.0, Some(0), "{}", fast.2);
+    assert_eq!(selected_files(&fast.1), ["src/lib.rs"]);
+    // A superuser reads the locked directory anyway; the walk then succeeds
+    // and there is no failure to compare against.
+    if walked.0 != Some(0) {
+        assert!(walked.2.contains("ermission denied"), "{}", walked.2);
     }
 }

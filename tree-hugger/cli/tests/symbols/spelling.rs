@@ -107,3 +107,25 @@ fn a_file_named_under_several_spellings_is_listed_once() {
         assert_eq!(files, ["src/alpha.rs"], "hug {json_args:?}: one root-relative entry");
     }
 }
+
+/// A literal positional path (which walks only toward the file) and a glob
+/// matching the same file (the full walk) reach one identity: one cache
+/// entry, hit by the second, and the same report. The temporary root is an
+/// alias on macOS (`/var`), so the walk's own spelling is not the identity.
+#[test]
+fn literal_and_glob_selections_share_one_identity() {
+    let scratch = package();
+    let mut reports = Vec::new();
+    for (run, input) in ["src/alpha.rs", "src/alpha.r[s]", "src/*.rs"].into_iter().enumerate() {
+        let line = stats_line(&scratch, &["--verbose", "--json", "functions", input]);
+        let expected = if run == 0 {
+            "cache: 0 hits, 0 partial hits, 1 misses; parsed 1 files"
+        } else {
+            "cache: 1 hits, 0 partial hits, 0 misses; parsed 0 files"
+        };
+        assert!(line.starts_with(expected), "{input}: {line}");
+        assert_eq!(cache_entries(scratch.temp.path()).len(), 1, "{input}: one entry");
+        reports.push(scratch.stdout(&["--json", "functions", input]));
+    }
+    assert!(reports.windows(2).all(|pair| pair[0] == pair[1]), "one report: {reports:#?}");
+}

@@ -664,6 +664,27 @@ name values; the two lists intersect.
   src/` reports that no source files were found. Write it as a glob instead,
   `hug functions 'src/**'`.
 
+A positional file filter is a `.gitignore`-style pattern relative to the
+package root, matched while walking the package (with `--language`, a
+positional path naming an existing file is instead taken as given, like
+`--file`). Naming a file this way
+re-includes it when `.gitignore` or a fixture rule would skip it, but not
+when a directory above it is ignored, and a symlink is never selected:
+
+```bash
+hug functions src/lib.rs          # src/lib.rs only, even if .gitignore lists it
+hug functions vendor/x.rs         # nothing when vendor/ is ignored
+hug functions lib.rs              # every lib.rs at any depth, as '**/lib.rs'
+```
+
+A literal path with a `/` and no glob characters (`src/lib.rs`, not
+`src/*.rs`, `lib.rs` or `/src/lib.rs`) can match only itself, so `hug`
+opens only the directories on the way to it instead of walking the whole
+package. The rules above are applied exactly as in the full walk; the one
+difference is that an unreadable directory elsewhere in the package no
+longer fails the scan, because it is never opened. Several literal paths
+are looked up together; one glob among them walks the whole package.
+
 ### `imports`
 
 `imports` lists one entry per name an import binds (what each language's
