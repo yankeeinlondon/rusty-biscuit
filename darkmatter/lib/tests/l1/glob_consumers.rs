@@ -291,10 +291,8 @@ fn relative_globs_stay_inside_the_repository() {
         assert!(
             matches!(
                 &error,
-                MarkdownError::FileLinks(FileLinksError::GlobReference {
-                    source: GlobReferenceError::RelativeTreeEscape { .. },
-                    ..
-                })
+                MarkdownError::FileLinks(FileLinksError::GlobReference { source, .. })
+                    if matches!(**source, GlobReferenceError::RelativeTreeEscape { .. })
             ),
             "::file-links {pattern}: {error:?}"
         );
