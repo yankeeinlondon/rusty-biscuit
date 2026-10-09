@@ -1118,7 +1118,8 @@ fn shared_build() -> PathBuf {
     let mut identity = fs::read(&binary).expect("reading the shipped binary");
     fixture_source_bytes(&fixture_workspace(), &mut identity);
     let key = format!("{:016x}", biscuit_hash::xx_hash_bytes(&identity));
-    let parent = binary.parent().expect("the binary has a directory").join("ci-build-archive-fixture");
+    let binary_dir = binary.parent().expect("the binary has a directory");
+    let parent = fixture_parent(binary_dir);
     fs::create_dir_all(&parent).expect("creating the shared fixture directory");
     let root = parent.join(&key);
     let lock = fs::File::create(parent.join(format!("{key}.lock"))).expect("creating the fixture lock");
@@ -1138,6 +1139,23 @@ fn shared_build() -> PathBuf {
         }
     }
     root
+}
+
+/// Where the shared fixture builds live: beside the shipped binary.
+#[cfg(not(windows))]
+fn fixture_parent(binary_dir: &Path) -> PathBuf {
+    binary_dir.join("ci-build-archive-fixture")
+}
+
+/// On Windows, a short directory under TEMP instead. Beside the binary of an
+/// extracted nextest archive, the fixture's own `target\…\deps\rustc*\` files
+/// passed 260 characters and `link.exe` failed with LNK1104. The name hashes
+/// the binary's directory, so two checkouts never share or prune each other's
+/// fixtures.
+#[cfg(windows)]
+fn fixture_parent(binary_dir: &Path) -> PathBuf {
+    let owner = biscuit_hash::xx_hash_bytes(binary_dir.as_os_str().as_encoded_bytes());
+    std::env::temp_dir().join(format!("cbaf-{:08x}", owner as u32))
 }
 
 /// Appends every fixture file's path and bytes, in a stable order.

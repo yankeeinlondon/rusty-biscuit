@@ -81,6 +81,15 @@ with a path in the message. Processes and the environment are in
    short name (`for %I in ("<dir>") do @echo %~sI` in `cmd`), and run the test
    from PowerShell with `$env:TEMP` and `$env:TMP` set to that short spelling
    (2026-10-09, darkmatter `link_normalization`).
+3a. **`windows-latest` fails at 260 characters where a dev host may not.**
+   `link.exe` on the runner failed with `LNK1104: cannot open file` on a
+   266-character path. The `B:` dev host has `LongPathsEnabled=1` and linked a
+   301-character path fine, so the failure cannot be reproduced there. It came
+   from a test building a fixture crate beside its binary inside an extracted
+   nextest archive (`%TEMP%\nextest-archive-…\target\…`), which nests a second
+   `target\…\deps\rustc*\`. Keep nested builds under a short `%TEMP%` directory
+   and count the deepest path against 260 (`repo-deps` `ci-build` archive
+   tests, 2026-10-09).
 4. **`Path::join("a/b")` keeps the literal `/`.** A native-spelling needle
    built from it has mixed separators and matches nothing. Re-join through
    `.components().collect::<PathBuf>()` to normalize. A context's
