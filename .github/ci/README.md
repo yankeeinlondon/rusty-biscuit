@@ -212,7 +212,9 @@ policy artifact **without running the planner**, and on any miss —
 `scope-base-mismatch`, `scope-malformed` — it calculates scope exactly as
 before and names the code in the summary's `scope source` row. The job
 materializes the pinned Rust toolchain (`rustup show`) only on that miss,
-immediately before the selection run that reads `cargo metadata`; a hit is
+immediately before the selection run that reads `cargo metadata --no-deps
+--offline` (workspace members only: no registry or git download, so it needs
+the pinned toolchain and the prebuilt helper but no dependency cache); a hit is
 Python and jq end to end and sets up no toolchain (R9). Whichever way the
 scope was sourced, the summary's `validation environments`, `reused passing
 cells`, and `cells retained (evidence incomplete or rejected)` rows report
@@ -357,7 +359,10 @@ map (keyed by `ubuntu-latest`/`macos-latest`/`windows-latest`) and must not
 grow a `wsl2-ubuntu` key.
 
 Cargo metadata — not this file — remains the source of truth for package
-membership.
+membership. The scope job reads it with `--no-deps --offline` and derives the
+member-to-member dependency edges itself (`member_dependency_graph` in
+`scripts/ci/affected_scope.py`); nothing in planning reads Cargo's `resolve`
+section. See `docs/topics/ci-cd.md`, "How the planner reads the workspace".
 
 ## `environments.json`
 
@@ -858,6 +863,25 @@ extracted. A rejection is a stable infrastructure verdict and stops the cell;
 nothing compiles a replacement. The tier then runs the canonical recipe in
 archive mode (`--archive-file`, `--workspace-remap`), and its status records the
 planned key, producer, and realized digest it executed.
+
+**The verifier is also the planner's key helper.** After verification succeeds,
+`_ci_build_verify` reports the shipped verifier (`<build>/tools/ci-build[.exe]`)
+as its `key_helper` output, and the `gate` step exports it as
+`BISCUIT_CI_BUILD_BIN` before the canonical recipe runs (a missing value stops
+the cell). Planner-running tests, which ask `scripts/ci/build_key.py` for build
+keys, then execute that binary instead of falling back to `cargo run --bin
+ci-build` and paying a cold compile in a checkout that has no `ci-build`. The
+helper runs without compiler-wrapper mode (`BISCUIT_CI_BUILD_WRAP` removed,
+`RUSTC_WRAPPER` empty). The `expected` step gets no binding. A
+`requires-toolchain` suite that runs the planner avoids the helper build but
+keeps its own deliberate Cargo calls. `just cross-check` binds the same
+variable in its archive mode on Unix and Windows hosts.
+
+```sh
+# gate step, archive branch (after verification, before the test recipe)
+: "${ARCHIVE_KEY_HELPER:?verification did not report the ci-build key helper}"
+export BISCUIT_CI_BUILD_BIN="$ARCHIVE_KEY_HELPER"
+```
 
 **One Linux build, two environments.** `wsl2-ubuntu` downloads the same
 artifact, checksum, and realized digest as native Linux and keeps its own JUnit

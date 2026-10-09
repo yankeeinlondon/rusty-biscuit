@@ -7,6 +7,7 @@
 //! `features/2026-07-02-provider-metadata/design/render-components.md`.
 
 mod assistant_stream;
+pub mod console;
 mod event_renderer;
 mod final_message;
 mod incomplete_subagents;

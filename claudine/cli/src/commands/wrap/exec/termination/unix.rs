@@ -8,7 +8,7 @@
 
 use std::process::Child;
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::mpsc::{Receiver, TryRecvError};
 use std::time::{Duration, Instant};
 
@@ -20,27 +20,26 @@ use super::reasons::{
     CompletionTermination, WatchdogTermination, early_termination_process_outcome,
     watchdog_request_to_early_termination,
 };
-use super::{INTERRUPT_FEEDBACK_FIRST, INTERRUPT_FEEDBACK_REPEAT, POST_SIGKILL_REAP_TIMEOUT};
+use super::super::super::output_worker::Stream;
+use super::{POST_SIGKILL_REAP_TIMEOUT, interrupt_feedback};
 
-/// Emit the Q14 visible-feedback line to stderr (fd 2) without allocating.
+/// Submit the Q14 feedback line for every press the SIGINT handler counted
+/// since `announced`.
 ///
-/// `count` is the just-incremented press counter (1-indexed). The first
-/// press tells the user a second press will escalate; subsequent presses
-/// acknowledge that escalation is underway. The write is best-effort — a
-/// short write or a closed stderr must never panic the signal handler.
-unsafe fn emit_interrupt_feedback(count: u8) {
-    let msg = if count == 1 {
-        INTERRUPT_FEEDBACK_FIRST
-    } else {
-        INTERRUPT_FEEDBACK_REPEAT
-    };
-    // SAFETY: `write(2, …)` is async-signal-safe (POSIX.1-2008) and the
-    // buffer is a static `'static` slice — no dangling pointer. Return
-    // value is intentionally ignored: the handler must not fail.
-    unsafe {
-        let _ = libc::write(2, msg.as_ptr() as *const libc::c_void, msg.len());
+/// The handler only counts: a `write(2)` to a terminal that stopped reading
+/// would hold the handler, and whichever thread it interrupted, for good. The
+/// wait loop calls this between polls, and the line is a diagnostic
+/// ([`crate::terminal_gate::write`]), queued during a wrapped run.
+fn announce_presses(interrupt_count: &AtomicU8, announced: &mut u8) {
+    let count = interrupt_count.load(Ordering::SeqCst);
+    while *announced < count {
+        *announced += 1;
+        crate::terminal_gate::write(Stream::Stderr, interrupt_feedback(*announced));
     }
 }
+
+/// How often a wait loop checks the child and shows pending press feedback.
+const FEEDBACK_POLL: Duration = Duration::from_millis(75);
 
 /// Resolve the next escalation signal from the press count and interactivity.
 ///
@@ -80,7 +79,7 @@ pub(crate) fn wait_with_signal_handling(
     child: &mut Child,
     child_in_own_pgroup: bool,
 ) -> Result<(i32, claudine::harness::ProcessTermination)> {
-    use std::sync::atomic::{AtomicBool, AtomicU8};
+    use std::sync::atomic::AtomicBool;
 
     // This loop installs a child-targeting SIGINT handler, so the
     // compose-scoped Ctrl+C guard must defer to it while it runs.
@@ -100,7 +99,6 @@ pub(crate) fn wait_with_signal_handling(
                 return;
             }
             let count = counter.fetch_add(1, Ordering::SeqCst) + 1;
-            emit_interrupt_feedback(count);
             if !child_in_own_pgroup {
                 // Child shares our process group; the terminal already
                 // delivered SIGINT to it. Just track the count so the
@@ -121,11 +119,21 @@ pub(crate) fn wait_with_signal_handling(
         })
     }?;
 
-    let status = child.wait()?;
+    // Polled rather than a blocking `wait` so this thread can show the
+    // feedback for each press the handler counted.
+    let mut announced = 0;
+    let status = loop {
+        announce_presses(&interrupt_count, &mut announced);
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        std::thread::sleep(FEEDBACK_POLL);
+    };
     // Set the exit flag BEFORE the `_guard` drops so a SIGINT that arrives
     // in the narrow window between `wait` returning and the guard being
     // dropped still sees an exited child and refuses to signal the PID.
     child_exited.store(true, Ordering::SeqCst);
+    announce_presses(&interrupt_count, &mut announced);
     let code = exit_code_from_status(status);
     let was_interrupted = interrupt_count.load(Ordering::SeqCst) > 0;
     let termination = if was_interrupted {
@@ -198,7 +206,7 @@ pub(crate) fn wait_with_signal_early_termination_and_completion(
     claudine::harness::ProcessTermination,
     Option<EarlyTermination>,
 )> {
-    use std::sync::atomic::{AtomicBool, AtomicU8};
+    use std::sync::atomic::AtomicBool;
 
     // While this loop runs, the child-targeted SIGINT→SIGTERM→SIGKILL ladder
     // below owns escalation, so the compose-scoped Ctrl+C guard must defer to
@@ -218,12 +226,10 @@ pub(crate) fn wait_with_signal_early_termination_and_completion(
             if exited.load(Ordering::SeqCst) {
                 return;
             }
+            // Q14 — every counted press gets visible feedback from the poll
+            // loop below, even when the child shares our process group
+            // (interactive TUI passthrough).
             let count = counter.fetch_add(1, Ordering::SeqCst) + 1;
-            // Q14 — visible feedback per press. Always emit, even when the
-            // child shares our process group (interactive TUI passthrough):
-            // the user pressed Ctrl-C and deserves acknowledgement that the
-            // press registered.
-            emit_interrupt_feedback(count);
             if !child_in_own_pgroup {
                 // Child shares our process group; the terminal already
                 // delivered SIGINT to it. We've recorded the count for
@@ -241,14 +247,17 @@ pub(crate) fn wait_with_signal_early_termination_and_completion(
     let mut watchdog_rx = watchdog_rx;
     let mut completion_rx = completion_rx;
     let mut completion_requested = false;
-    let poll_interval = Duration::from_millis(75);
+    let poll_interval = FEEDBACK_POLL;
     let grace_period = kill_grace;
+    let mut announced = 0;
 
     loop {
+        announce_presses(&interrupt_count, &mut announced);
         if let Some(status) = child.try_wait()? {
             // Mark the PID as reaped before the grace window's signal guard
             // can drop so we never signal a recycled PID.
             child_exited.store(true, Ordering::SeqCst);
+            announce_presses(&interrupt_count, &mut announced);
             let code = if completion_requested {
                 0
             } else {

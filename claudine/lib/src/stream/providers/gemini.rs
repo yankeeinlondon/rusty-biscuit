@@ -398,23 +398,29 @@ impl<S: SemanticEventSink> SemanticStreamParser for GeminiSemanticStreamParser<S
 
     fn finish(mut self: Box<Self>, exit_code: i32) -> StreamExecutionSummary {
         self.flush_pending_text("gemini_finish");
+        self.snapshot(exit_code)
+    }
+
+    /// Text still held back for a list boundary counts as answer text, as it
+    /// would once `finish` flushed it.
+    fn snapshot(&self, exit_code: i32) -> StreamExecutionSummary {
         super::common::finish_summary(
             Provider::Gemini,
             StreamExecutionSummary {
-                session_id: self.session_id,
-                model: self.model,
-                assistant_text: self.assistant_text,
-                provider_status: self.provider_status,
+                session_id: self.session_id.clone(),
+                model: self.model.clone(),
+                assistant_text: format!("{}{}", self.assistant_text, self.pending_text),
+                provider_status: self.provider_status.clone(),
                 exit_code,
                 is_error: self.is_error,
-                error_kind: self.error_kind,
-                error_message: self.error_message,
+                error_kind: self.error_kind.clone(),
+                error_message: self.error_message.clone(),
                 duration_ms: self.duration_ms,
                 num_turns: self.num_turns,
-                token_usage: self.token_usage,
+                token_usage: self.token_usage.clone(),
                 cost_usd: self.cost_usd,
                 tool_calls: (self.tool_calls > 0).then_some(self.tool_calls),
-                raw_summary: self.raw_summary,
+                raw_summary: self.raw_summary.clone(),
                 ..Default::default()
             },
         )

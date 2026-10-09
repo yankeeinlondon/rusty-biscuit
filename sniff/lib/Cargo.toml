@@ -85,6 +85,10 @@ windows = { version = "0.62", features = [
     "Win32_System_IO",
     "Win32_System_JobObjects",
     "Win32_Security_Authorization",
+    # File identity (`FILE_ID_INFO`) for `filesystem::query` root and tree matching.
+    "Win32_Storage_FileSystem",
+    # Process and loaded-module listing for the `filesystem::query` backend.
+    "Win32_System_ProcessStatus",
     "Win32_System_Threading",
 ] }
 winreg = "0.55"

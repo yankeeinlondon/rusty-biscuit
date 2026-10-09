@@ -34,6 +34,11 @@ name = "claudine-fake-codex"
 path = "tests/bin/fake_codex/main.rs"
 required-features = ["test-fixtures"]
 
+[[bin]]
+name = "claudine-fake-completion"
+path = "tests/bin/fake_completion/main.rs"
+required-features = ["test-fixtures"]
+
 [features]
 # Keep the bundled DuckDB build out of the ordinary local test graph. CI and
 # the explicit daemon-test recipe enable this feature on every supported OS.
@@ -72,6 +77,7 @@ darkmatter = { path = "../../darkmatter/lib" }
 darkmatter-cli = { path = "../../darkmatter/cli" }
 color-eyre = "0.6"
 indexmap = "2"
+base64 = "0.22"
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 thiserror = "2.0"

@@ -98,6 +98,28 @@ the binary from the ambient CWD is both a cost (the 35-member workspace walk,
 root `system-prompt.md`, the developer's `$HOME`, the host's real provider
 binaries). See the `rust-testing` skill's `spawning-binaries.md`.
 
+Structured stdout cleanup now carries `ProcessResult.completion_observation`:
+separate bounded 256 KiB answer/raw prefixes, coherent atomic reader/settlement
+operations, and separate output-worker queue/active-delivery observations.
+`RunScope::freeze` closes publication and moves buffers before projection;
+late readers cannot mutate the frozen copy or dispatch into another run.
+Claude output and Codex agent messages publish original text through
+`SemanticEventSink::on_response_text` before their Reasoning callbacks; sink
+wrappers must forward this nonblocking observation without treating it as a
+verdict. The `test-fixtures` build alone supports fixed completion-stall
+scenario directories and the compiled fake completion provider. Stdout
+settlement selects `claudine_completion_delayed` for native exit 0
+without a verdict, `exit_failure` for native failure, and `interrupted` for
+exit 130; reader timeouts remain subordinate warnings. Published answer/session
+data survives a native failure. Typed completion-delay diagnostics and populated
+lifecycle transport remain planned: the frozen execution observation is not
+yet a populated session diagnostic or author-visible `err.detail`. Do not
+publish a runnable retained-response recovery example until that transport
+and its sequence policy tests land. Direct structured wrappers project semantic
+failure/native exit 0 to caller exit 1 while retaining native evidence.
+The diagnostic field contract still awaits the author's CPU ruling. See
+[Timeouts](topics/timeouts.md#completion-observations-and-retained-prefixes).
+
 The **local control plane** is platform-native and per stable OS user: a Unix-domain socket on macOS/Linux/WSL, a Windows named pipe on native Windows, qualified by the effective UID or process-token SID from `sniff::os::current_user_id()` — never a username. One portable `spawn_local_server` binds it to a transport-neutral daemon built exactly once. Read `claudine/docs/rendezvous/local-ipc.md` before changing endpoint, daemon-boot, or connector behavior; see [architecture.md](architecture.md) → Rendezvous Package-Area Family for the crate roles, the local-IPC rules, and the `SessionLogManager` module boundary.
 
 **Where to look next:**
@@ -182,7 +204,7 @@ of a topic doc.
 - [Composition](topics/composition.md) — `compose`, `inline-compose`, `sequence`, lifecycle stacks, provider selection
 - [Lifecycle](topics/flow-control/lifecycle.md) — the seven events, notification fields, action forms, `err`/`timing`/`current` globals, validation errors
 - [Flow Control](topics/flow-control/flow-control.md) and [Flow Control Reference](topics/flow-control/flow-control-reference.md) — the `stop`/`skip`/`error`/`retry`/`resume`/`proxy`/`defer` directives, per-event runtime limits, retry/resume re-entry, `proxy` handoffs and the `with:` overlay
-- [Timeouts](topics/timeouts.md) — the two timeout rules, four env vars, precedence, termination path, exit reasons, and the three runaway content guards
+- [Timeouts](topics/timeouts.md) — the two timeout rules, four env vars, precedence, termination path, the post-exit stream-reader wait (`stream_reader_timeout`), the single output worker that keeps a blocked terminal from stalling the parser or the wrapper (`wrap/output_worker.rs`; run output is a queued frame, and once a run creates the worker every diagnostic — `crate::log`, signal notices, `--perf`, tracing, the panic hook, the library's `render::console` lines — is one too, through `crate::terminal_gate::write`; signal handlers never write the terminal), exit reasons, and the three runaway content guards
 - [Signal Handling](topics/signal-handling.md) — user Ctrl+C vs wrapper-driven SIGTERM/SIGKILL, the unified wait loop, termination labels (`Aborted`/`Interrupted`/`TimedOut`), non-interactive ladder, Windows parity
 - [System Prompt](topics/system-prompt.md) — launch-context discovery, `--append`/`--replace`, Darkmatter preparation, per-provider delivery
 - [MCP Catalog](topics/mcp-catalog.md) and [MCP Mode](topics/mcp-mode.md)

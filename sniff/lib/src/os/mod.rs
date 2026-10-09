@@ -52,6 +52,8 @@ pub use time::{
     NtpStatus, TimeInfo, detect_ntp_status, detect_timezone, detect_timezone_with_options,
 };
 pub use user::{StableUserId, current_user_id};
+#[cfg(windows)]
+pub(crate) use user::process_user_sid;
 pub use working_processes::{WorkingProcess, processes_working_in};
 
 // ============================================================================

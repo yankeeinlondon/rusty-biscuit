@@ -76,6 +76,7 @@ sniff runtime     # Native, WSL 1, or WSL 2 runtime
 sniff hardware    # Hardware information (CPU, GPU, memory, storage)
 sniff network     # Network information (interfaces, local IPs, WAN IP)
 sniff filesystem  # Filesystem information (git, languages, monorepo)
+sniff filesystem query <path>  # Processes using a file or directory tree
 ```
 
 **Discovery Tools:**
