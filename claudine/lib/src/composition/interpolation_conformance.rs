@@ -304,7 +304,7 @@ fn every_engine_agrees_on_missing_properties_and_escapes() {
         let lookup = super::sequence::expr::SourceExpressionLookup::new(
             &case.frontmatter,
             crate::test_support::process_context(),
-            std::path::Path::new("doc.md"),
+            std::path::Path::new("sequence.md"),
         );
         let source = super::sequence::expr::render_interpolated(raw, &lookup)
             .unwrap_or_else(|error| panic!("sequence source failed for `{}`: {error}", case.name));

@@ -23,6 +23,10 @@ and runtime path; it does not cross into native Windows detectors.
 - `current_user_id()` returns the effective Unix UID or Windows process-token
   SID without subprocess, registry, environment-variable, or network fallback.
   It is on-demand and absent from normal host inventory and caches.
+- `os::processes_working_in(dir)` lists processes whose current directory is
+  `dir` or below (one `sysinfo` refresh of cwd only; caller and its ancestors
+  excluded; matched on both the given and canonical spelling). Open files are
+  not visible, and a hidden cwd (another user's) is skipped. On-demand too.
 
 Read [architecture.md](architecture.md) before changing request costs, shared
 walks, Git/worktree behavior, subprocess policy, or remote snapshots.

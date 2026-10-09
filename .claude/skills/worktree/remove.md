@@ -97,9 +97,17 @@ code touches the network.
 - Git runs through `git::git_from(base, dir, ..)` (`git -C`, cwd = base). `run`
   calls `set_current_dir(base)` right after resolving the target, so neither
   `wt` nor a git child holds the worktree on Windows.
-- On Windows `remove::remove_worktree` runs `check_not_in_use` (rename to a
-  sibling and back) first. A held directory is `WorktreeError::DirectoryInUse`
-  (exit 4).
+- `remove::remove_worktree` first runs `check_no_processes`
+  (`sniff::os::processes_working_in`: processes whose current directory is in
+  the worktree, the caller and its ancestors excluded) on every OS, then on
+  Windows `check_not_in_use` (rename to a sibling and back, which also catches
+  open files). Either is `WorktreeError::DirectoryInUse { path, processes }`
+  (`processes` empty for the probe), exit 4, with no override flag. `run` also
+  checks before the report so nothing is asked and then refused.
+- On macOS and Linux git deletes under a writer's feet; its recursive delete
+  stops at the first failure yet has already unregistered the worktree.
+  `finish_unregistered` retries `remove_dir_all` three times, else
+  `WorktreeError::FolderNotFullyRemoved` (exit 1, branch and origin untouched).
 
 ## Concurrent writers during removal
 

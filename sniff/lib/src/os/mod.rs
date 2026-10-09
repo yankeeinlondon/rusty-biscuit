@@ -30,6 +30,7 @@ mod package_manager;
 mod runtime;
 mod time;
 mod user;
+mod working_processes;
 #[cfg(any(target_os = "windows", test))]
 mod windows_timezone_map;
 
@@ -53,6 +54,7 @@ pub use time::{
 pub use user::{StableUserId, current_user_id};
 #[cfg(windows)]
 pub(crate) use user::process_user_sid;
+pub use working_processes::{WorkingProcess, processes_working_in};
 
 // ============================================================================
 // OS Type Detection

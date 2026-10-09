@@ -12,6 +12,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use claudine_gen::{GenError, Generation};
+use darkmatter::markdown::compose::RequestSnapshot;
 use serde_json::{Value, json};
 
 use crate::pipeline::Fixture;
@@ -513,8 +514,7 @@ fn every_compiled_provider_has_switches_or_a_gap() {
         .parent()
         .expect("gen crate lives under the claudine package area")
         .to_path_buf();
-    let snapshot = darkmatter::markdown::compose::RequestSnapshot::new(&area);
-    for generation in claudine_gen::generate_all(&area, &snapshot).unwrap() {
+    for generation in claudine_gen::generate_all(&area, &RequestSnapshot::new(&area)).unwrap() {
         let catalog = cli_switches(&generation);
         let researched = catalog["researched"].as_array().is_some_and(|records| !records.is_empty());
         let gap = catalog["unknown"]["gap"].as_str().is_some_and(|gap| !gap.trim().is_empty());

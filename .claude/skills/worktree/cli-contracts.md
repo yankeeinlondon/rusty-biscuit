@@ -40,7 +40,7 @@ Load before touching `cli/src/shell_integration.rs`, `cli/src/env.rs`,
 | 0 | done, or `Cancelled` |
 | 1 | failure |
 | 2 | clap usage error (clap owns it) |
-| 3 | `WorktreeError::RefusedToLoseWork` |
+| 3 | `WorktreeError::RefusedToLoseWork`, `WorktreeError::NotARealDirectory` |
 | 4 | `WorktreeError::BlockedByEnvironment`, `WorktreeError::DirectoryInUse` |
 
 - Exit 3 and 4 promise **nothing removed**, not "nothing changed". `wt remove`
@@ -50,8 +50,9 @@ Load before touching `cli/src/shell_integration.rs`, `cli/src/env.rs`,
   refusal or cancellation after a successful repair says the restored link was
   left in place. Never print "nothing was changed" on those paths.
 - Mapping lives in `cli/src/exit.rs`.
-- The exit-3 and exit-4 variants carry Prose markup that `main.rs` prints as-is.
-  Other errors are escaped with `Prose::escape_text`.
+- `RefusedToLoseWork` and `BlockedByEnvironment` carry Prose markup that
+  `main.rs` prints as-is. Other errors (including `DirectoryInUse`, whose
+  message names the processes) are escaped with `Prose::escape_text`.
 - `env::is_interactive()` means stdin **and** stderr are terminals and `CI` is
   unset or empty. Stdout is never consulted.
 
