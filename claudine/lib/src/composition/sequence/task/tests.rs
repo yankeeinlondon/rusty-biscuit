@@ -2469,7 +2469,8 @@ mod side_effect_tasks {
         let snapshot = info.snapshot.as_ref().expect("set failures are typed");
         assert_eq!(snapshot.code, "composition.lifecycle_invalid");
         assert_eq!(snapshot.detail["property"], json!(expected));
-        assert!(snapshot.message.contains(&source), "{}", snapshot.message);
+        let portable_source = biscuit_file::to_portable_string(Path::new(&source));
+        assert!(snapshot.message.contains(&portable_source), "{}", snapshot.message);
         let err_value = info.to_value();
         assert_eq!(err_value["detail"]["property"], snapshot.detail["property"]);
         assert_eq!(err_value["code"], json!(snapshot.code));
@@ -2477,7 +2478,7 @@ mod side_effect_tasks {
         let restored = crate::diagnostics::RestoredDiagnostic::new((**snapshot).clone());
         let rendered = strip_escape_codes(restored.report_block_error_optimistic(Some(200)));
         assert!(rendered.contains(expected), "{rendered}");
-        assert!(rendered.contains(&source), "{rendered}");
+        assert!(rendered.contains(&portable_source), "{rendered}");
     }
 
     #[test]
