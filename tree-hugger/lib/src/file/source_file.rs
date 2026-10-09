@@ -219,9 +219,45 @@ impl SourceFile {
         self.parse()?.query(query)
     }
 
-    /// As [`query`](Self::query), but unfinished: in-file qualified names and
-    /// no predicate applied, as the cache stores it.
-    pub(crate) fn analyze(self, query: &SymbolQuery) -> Result<SymbolQueryResult, TreeHuggerError> {
-        crate::analysis::run_query(&self.parse()?, query)
+    /// As [`query`](Self::query), and gives back the source, for a caller
+    /// that decides from the result whether to keep these exact bytes. The
+    /// text is moved through the parse, never copied.
+    ///
+    /// ## Errors
+    ///
+    /// As [`query`](Self::query); the source is dropped with the error.
+    pub fn query_retaining(self, query: &SymbolQuery) -> Result<(SymbolQueryResult, SourceFile), TreeHuggerError> {
+        self.run_retaining(|file| file.query(query))
+    }
+
+    /// As [`query_retaining`](Self::query_retaining), but unfinished: in-file
+    /// qualified names and no predicate applied, as the cache stores it.
+    pub(crate) fn analyze_retaining(
+        self,
+        query: &SymbolQuery,
+    ) -> Result<(SymbolQueryResult, SourceFile), TreeHuggerError> {
+        self.run_retaining(|file| crate::analysis::run_query(file, query))
+    }
+
+    fn run_retaining(
+        self,
+        run: impl FnOnce(&TreeFile) -> Result<SymbolQueryResult, TreeHuggerError>,
+    ) -> Result<(SymbolQueryResult, SourceFile), TreeHuggerError> {
+        let (language, forced_language, experimental_semantics) =
+            (self.language, self.forced_language, self.experimental_semantics);
+        let file = self.parse()?;
+        let result = run(&file)?;
+        let (path, hash, source) = file.into_source();
+        Ok((
+            result,
+            SourceFile {
+                path,
+                language,
+                forced_language,
+                hash,
+                source,
+                experimental_semantics,
+            },
+        ))
     }
 }

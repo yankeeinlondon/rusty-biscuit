@@ -3999,3 +3999,51 @@ fn stored_selected_import_provenance_matrix_recomputes_public_evidence() {
         }
     }
 }
+
+/// The identity a retaining query must give back unchanged.
+fn source_identity(source: &SourceFile) -> (PathBuf, String, String, ProgrammingLanguage, Option<ProgrammingLanguage>, bool) {
+    (
+        source.path().to_path_buf(),
+        source.hash().to_string(),
+        source.source().to_string(),
+        source.language(),
+        source.forced_language(),
+        source.uses_experimental_semantics(),
+    )
+}
+
+#[test]
+fn retaining_queries_give_back_the_source_they_analyzed_on_every_lookup() {
+    let dir = TempDir::new().expect("temp dir");
+    let path = dir.path().join("lib.rs");
+    std::fs::write(&path, "pub fn probe() -> u32 { helper() }\nfn helper() -> u32 { 1 }\npub struct W;\n")
+        .expect("write source");
+    let cache = cache_in(&dir);
+    let functions = SymbolQuery::new().kinds(FUNCTION_KINDS);
+    let every_kind = SymbolQuery::new();
+    let occurrences = SymbolQuery::new().capabilities([Capability::Occurrences]);
+    type ExpectedLookup = fn(&CacheLookup) -> bool;
+    let steps: [(&SymbolQuery, ExpectedLookup); 4] = [
+        (&functions, |lookup| matches!(lookup, CacheLookup::Miss(_))),
+        (&functions, |lookup| matches!(lookup, CacheLookup::Hit)),
+        (&every_kind, |lookup| matches!(lookup, CacheLookup::WidenedKinds)),
+        (&occurrences, |lookup| matches!(lookup, CacheLookup::WidenedCapabilities { parsed: true })),
+    ];
+
+    for (query, expected_lookup) in steps {
+        let source = read(&path);
+        let identity = source_identity(&source);
+        let (outcome, back) = cache.query_retaining(source, query).expect("retaining cached query");
+        assert!(expected_lookup(&outcome.lookup), "unexpected lookup {:?}", outcome.lookup);
+        assert_eq!(as_value(&outcome.result), uncached(&path, query));
+        assert_eq!(source_identity(&back), identity);
+    }
+
+    let forced = SourceFile::read_with_language(&path, Some(ProgrammingLanguage::Rust))
+        .expect("read source")
+        .experimental_semantics(true);
+    let identity = source_identity(&forced);
+    let (result, back) = forced.query_retaining(&occurrences).expect("retaining uncached query");
+    assert_eq!(as_value(&result), uncached(&path, &occurrences));
+    assert_eq!(source_identity(&back), identity);
+}

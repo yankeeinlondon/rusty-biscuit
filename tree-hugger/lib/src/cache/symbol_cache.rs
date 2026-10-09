@@ -323,16 +323,31 @@ impl SymbolCache {
         source: SourceFile,
         query: &SymbolQuery,
     ) -> Result<CachedQueryResult, TreeHuggerError> {
+        self.query_retaining(source, query).map(|(result, _)| result)
+    }
+
+    /// As [`query`](Self::query), and gives back `source`, for a caller that
+    /// decides from the result whether to keep these exact bytes. The text is
+    /// moved through any parse, never copied.
+    ///
+    /// ## Errors
+    ///
+    /// As [`query`](Self::query); the source is dropped with the error.
+    pub fn query_retaining(
+        &self,
+        source: SourceFile,
+        query: &SymbolQuery,
+    ) -> Result<(CachedQueryResult, SourceFile), TreeHuggerError> {
         let fingerprints = self.fingerprints(&source)?;
         let key = entry_key(&source, &fingerprints.records);
         let diagnostics_fingerprint =
             fingerprints.diagnostics[usize::from(source.uses_experimental_semantics())].as_str();
         let entry_file = entry_file(source.path());
 
-        let (lookup, coverage, index) = match self.read(&key, &source, &fingerprints.records) {
+        let (lookup, coverage, index, source) = match self.read(&key, &source, &fingerprints.records) {
             Err(miss) => {
-                let index = source.analyze(query)?.index;
-                (CacheLookup::Miss(miss), query.clone(), index)
+                let (analyzed, source) = source.analyze_retaining(query)?;
+                (CacheLookup::Miss(miss), query.clone(), analyzed.index, source)
             }
             Ok(stored) => {
                 let (mut coverage, stored_diagnostics_fingerprint, mut index) =
@@ -348,14 +363,15 @@ impl SymbolCache {
                 let missing = coverage.capabilities_missing_for(query);
                 if !coverage.selects_all_of(query) {
                     let wider = coverage.union(query);
-                    let index = source.analyze(&wider)?.index;
-                    (CacheLookup::WidenedKinds, wider, index)
+                    let (analyzed, source) = source.analyze_retaining(&wider)?;
+                    (CacheLookup::WidenedKinds, wider, analyzed.index, source)
                 } else if missing.is_empty() {
-                    return Ok(CachedQueryResult {
+                    let hit = CachedQueryResult {
                         result: project(index, query).finish(query),
                         lookup: CacheLookup::Hit,
                         write_error: None,
-                    });
+                    };
+                    return Ok((hit, source));
                 } else if record_passes_suffice(
                     &missing,
                     coverage.capability_set(),
@@ -364,11 +380,12 @@ impl SymbolCache {
                 ) {
                     add_record_passes(&mut index, coverage.capability_set(), &missing);
                     let lookup = CacheLookup::WidenedCapabilities { parsed: false };
-                    (lookup, coverage.union(query), index)
+                    (lookup, coverage.union(query), index, source)
                 } else {
                     let wider = coverage.union(query);
-                    let index = source.analyze(&wider)?.index;
-                    (CacheLookup::WidenedCapabilities { parsed: true }, wider, index)
+                    let (analyzed, source) = source.analyze_retaining(&wider)?;
+                    let lookup = CacheLookup::WidenedCapabilities { parsed: true };
+                    (lookup, wider, analyzed.index, source)
                 }
             }
         };
@@ -383,11 +400,12 @@ impl SymbolCache {
                 &index,
             )
             .err();
-        Ok(CachedQueryResult {
+        let result = CachedQueryResult {
             result: project(index, query).finish(query),
             lookup,
             write_error,
-        })
+        };
+        Ok((result, source))
     }
 
     fn fingerprints(&self, source: &SourceFile) -> Result<Arc<Fingerprints>, TreeHuggerError> {

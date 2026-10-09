@@ -106,6 +106,12 @@ impl TreeFile {
         &self.source
     }
 
+    /// Gives back the path, hash and text the file was parsed from, so
+    /// [`SourceFile`] can be rebuilt without copying the text.
+    pub(crate) fn into_source(self) -> (PathBuf, String, String) {
+        (self.file, self.hash, self.source)
+    }
+
     /// Runs `f` with this file's parent index installed
     /// ([`crate::file::parents`]), so every parent lookup inside it is one
     /// map read.
