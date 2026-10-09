@@ -259,7 +259,7 @@ the page source.
 
 ### The canonical recipe set
 
-Every area in the curated list exposes the same twelve recipes. When a recipe
+Every area in the curated list exposes the same thirteen recipes. When a recipe
 does not apply to an area it is still present, as a one-line no-op that
 explains why, so root-level orchestration can iterate every area without
 special cases.
@@ -268,6 +268,7 @@ special cases.
 | --- | --- |
 | `sanity` | Fast Level 1 subset, library and binary crates only. About fifteen seconds. |
 | `test` | Full Level 1 suite for the area. Slow-tagged tests excluded locally. |
+| `slow-tests` | Runs `test`'s selection and lists every test Nextest marks `SLOW`. A local diagnostic; not part of `all`. |
 | `test-l2` | Real-terminal tests. |
 | `test-l3` | OS keyboard and mouse tests. Needs `RUN_LEVEL3=1`. |
 | `test-browser` | Headless browser tests. |
@@ -286,7 +287,7 @@ an explicit opt-in: a quiet CPU, a nightly toolchain, window focus, or a
 device.
 
 `just check-canonical` from the root verifies that every curated area exposes
-all twelve recipes and names any that are missing. CI runs the same check. A
+all thirteen recipes and names any that are missing. CI runs the same check. A
 new area must pass it before it joins the curated list.
 
 ### Root-level commands

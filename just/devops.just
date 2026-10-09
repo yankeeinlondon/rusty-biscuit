@@ -2001,10 +2001,11 @@ _check_tier_coverage *args="":
 #
 # Each package-area justfile exposes the canonical 13-recipe set
 # (sanity, test, slow-tests, test-l2, test-l3, test-browser, test-real, lint,
-# bench, coverage, doctest, fuzz, all) and delegates the per-package boilerplate to
-# the shared `_*` recipes below. Tier filter expressions are documented in
-# `.config/nextest.toml`. Recipes that don't apply to a package are explicit
-# no-ops with an explanatory comment in the package's own justfile.
+# bench, coverage, doctest, fuzz, all) and delegates the per-package
+# boilerplate to the shared `_*` recipes below. Tier filter expressions are
+# documented in `.config/nextest.toml`. Recipes that don't apply to a package
+# are explicit no-ops with an explanatory comment in the package's own
+# justfile.
 # ---------------------------------------------------------------------------
 
 # Sanity tier: fast-confidence subset (≤15s). Lib + bin tests only, with every
