@@ -6,7 +6,7 @@ status: draft-spec
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-08
-review_iterations: 0
+review_iterations: 2
 implemented: true
 implemented_by: "claude/opus"
 $schema:
@@ -297,6 +297,7 @@ message_to_agent: |-
     change); no cross-OS run (nothing OS-specific).
   - A reviewer should confirm with the author before building any
     deferred item; the spec's human_review_items list the questions.
+completed: true
 ---
 
 # Tree Hugger performance review
