@@ -74,6 +74,7 @@ pub(crate) fn run_kimi_wire_session(
         command.creation_flags(CREATE_NEW_PROCESS_GROUP);
     }
 
+    let interrupts = super::super::termination::ChildInterrupts::install(true)?;
     let mut child = command.spawn()?;
     let captured_pid = child.id();
     *child_spawned = true;
@@ -283,7 +284,7 @@ pub(crate) fn run_kimi_wire_session(
     let kill_grace = super::super::timeouts::TimeoutConfig::resolve(None, None).kill_grace;
     let (exit_code, termination, early_termination) = match super::super::termination::wait_with_signal_early_termination_and_completion(
         &mut child,
-        true,
+        interrupts,
         early_rx,
         None,
         Some(completion_rx),

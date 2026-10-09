@@ -14,7 +14,7 @@ use claudine::stream::logs::EarlyTermination;
 use color_eyre::eyre::Result;
 use tracing::Span;
 
-use super::super::termination::wait_with_signal_and_early_termination;
+use super::super::termination::{ChildInterrupts, wait_with_signal_and_early_termination};
 use super::super::super::output_worker::Drained;
 use super::super::super::run_scope::RunScope;
 use super::super::super::stream_io::StreamOutput;
@@ -144,6 +144,7 @@ pub(super) fn run_child_on(
         setup::isolate_into_process_group(&mut command);
     }
 
+    let interrupts = ChildInterrupts::install(isolate_process_group)?;
     let spawned_at = Instant::now();
     let mut child = command.spawn()?;
     let captured_pid = child.id();
@@ -223,7 +224,7 @@ pub(super) fn run_child_on(
         let (timeout_ticker, watchdog_rx) = setup::wall_clock_timeout_ticker(timeout, spawned_at);
         let (code, termination, _early) = wait_with_signal_and_early_termination(
             &mut child,
-            isolate_process_group,
+            interrupts,
             early_rx,
             watchdog_rx,
             kill_grace,
