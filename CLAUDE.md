@@ -34,6 +34,11 @@
   WSL2, and `lint`/`check` run on Linux only. Windows and WSL2 failures are
   found after merge and fixed forward. The `ci:all-os` label opts a pull
   request back into every environment.
+  **Planned correction:** move native Windows to scoped nightlies alongside
+  WSL2, leaving Linux/macOS on ordinary PRs and main pushes. The live table
+  above still applies until implementation. Resumable workspace rig seeding is
+  required; evidence must be published and verified per cell before it
+  suppresses nightly work. Risk-directed pre-push use remains optional.
 - **Compile coverage is per target kind.** L1 covers `lib`, `bin`, and `test`; a
   `check` cell exists where `example` or `bench` targets are declared, and on
   `ubuntu-latest` for a package with unchanged direct reverse dependencies,

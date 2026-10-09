@@ -41,8 +41,9 @@ local and hosted runs. Its package policy is deliberately narrow:
   plan's `deferred_environments`. Policy as of 2026-09-18: a pull request
   proves `ubuntu-latest` and `macos-latest` (the latter normally from the
   hook's local evidence); a push to `main` adds `windows-latest`; the nightly
-  `schedule` (`0 8 * * *`, its own concurrency group) plans the full
-  workspace for `ubuntu-latest`, `windows-latest`, and `wsl2-ubuntu`;
+  `schedule` (`0 8 * * *`, its own concurrency group) plans WSL2 over changes
+  since the last successful ancestor nightly, with Linux joining only as a
+  demanded archive producer. No qualifying baseline means full scope;
   `workflow_dispatch` plans everything. The `ci:all-os` label plans every
   environment for a pull request and takes effect on the next push; such a
   run never takes the hook's scope receipt, which is planned for the
@@ -54,6 +55,15 @@ local and hosted runs. Its package policy is deliberately narrow:
   plans `push` for `main` and `pull_request` for every other branch, and
   `scope-verify --event` refuses a receipt planned for another event
   (`scope-event-mismatch`). Without `--event`, every environment is planned.
+- **Planned cadence correction:** move native Windows from ordinary pushes
+  to scoped nightlies alongside WSL2; PRs and pushes retain Linux/macOS.
+  Preserve explicit manual/all-OS opt-ins. The live table above still governs
+  until implementation. Required resumable workspace rig seeding will need
+  native Windows receipt publication and scheduled evidence consumption;
+  neither is currently wired through `cross-check` and the nightly. See the
+  planned policy in `docs/topics/ci-cd.md`. Risk-directed pre-push use of that
+  infrastructure remains optional. Do not describe a nightly as a
+  fixed 24-hour diff or treat old WSL2-only nightlies as Windows proof.
 - A package owning changed source receives lint, L1, and its declared higher
   tiers — and `check` when it declares `example` or `bench` targets or has
   unchanged direct reverse dependents. The L1 build already compiles the

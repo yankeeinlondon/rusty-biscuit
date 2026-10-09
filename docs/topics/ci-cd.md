@@ -203,6 +203,31 @@ workspace. A push to `main` whose pull request
 validation is reused plans only the environments the push adds. The `ci:all-os` label plans every
 environment for a pull request from its next push.
 
+**Planned cadence correction:** ordinary PRs and pushes to `main` will cover
+Linux and macOS; native Windows will move to the scoped nightly alongside
+WSL2. Nightly scope will remain the changes since the last successful qualifying
+ancestor run, rather than a fixed 24-hour window. With no qualifying baseline,
+the current implementation falls back to full scope; failed runs do not advance
+that baseline. A required resumable workspace seeding command will gather
+Windows and WSL2 evidence on configured rigs and let the bootstrap nightly
+execute only unproven cells. Scheduled evidence consumption and Windows
+cross-check receipt publication are not yet implemented. An optional
+Windows-risk workflow will reuse this infrastructure before pushing. Explicit
+manual and all-OS opt-ins will remain available.
+
+**Planned partial-run recovery:** failed or canceled nightlies will leave the
+last successful baseline unchanged and retain independently published proof
+from completed cells. Retries will verify and reuse qualifying rig or hosted
+cell evidence, executing only unproven cells. A newer qualifying failure will
+prevent an older pass from hiding that cell's failure.
+
+**Planned release evidence policy:** native Windows and WSL2 passes are not
+required for ordinary merges to `main`. A release will require qualifying
+passing evidence for its release scope on macOS, Linux, native Windows, and
+WSL2. Defining that scope, aggregating its evidence, enforcing the release
+gate, and handling capability gaps are deferred release-process work; this
+policy is not yet implemented by the cadence correction.
+
 `ci.yml` defines **exactly eight top-level jobs**, and a contract test pins the set: `validation`
 (does successful PR validation cover this tree?), `scope` (source the plan), `preflight`
 (bootstrap prerequisites per selected OS — no test suite), `build` (the native build owners),
