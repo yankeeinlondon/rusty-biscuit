@@ -564,7 +564,7 @@ fn a_keyword_inside_a_comment_never_becomes_the_keyword() {
 }
 
 /// The declarations of the `declaration_text` / `signature_text` / `keyword`
-/// comparison table in `docs/symbol-schema-design.md`, as complete sources
+/// comparison table in `docs/symbol-records/fields.md`, as complete sources
 /// (the table elides initializers and bodies with `…`).
 #[test]
 fn the_documented_comparison_rows_hold() {

@@ -1,6 +1,6 @@
 //! The deprecation and test flags (`Capability::Flags`): syntax and
-//! file-name heuristics, documented in `docs/symbol-kinds-and-visibility.md`
-//! ("Deprecation and test flags").
+//! file-name heuristics, documented in
+//! `docs/symbol-kinds-and-visibility/documentation-flags-and-metrics.md#deprecation-and-test-flags`.
 
 use std::collections::HashMap;
 use std::path::Path;

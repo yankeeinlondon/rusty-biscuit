@@ -19,7 +19,7 @@ use crate::shared::ProgrammingLanguage;
 /// A symlink and its target therefore share one identity. A path that cannot
 /// be resolved (it does not exist, or a component is unreadable) falls back
 /// to its absolute spelling against the working directory, unresolved.
-/// `docs/cache-design.md#file-identity` records the policy.
+/// `docs/cache-design/entry-format.md#file-identity` records the policy.
 pub fn file_identity(path: &Path) -> PathBuf {
     canonicalize_simplified(path)
         .or_else(|_| std::path::absolute(path))

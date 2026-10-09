@@ -18,7 +18,7 @@
 //! The pattern readers are shared with the relation tree's Python and
 //! Scala binding sites (`file/tree_file/relations/lexical.rs`).
 //!
-//! User contract: `tree-hugger/docs/references.md#declaration-names-in-the-other-languages`.
+//! User contract: `tree-hugger/docs/references/language-support.md#declaration-names-in-the-other-languages`.
 
 use tree_sitter::Node;
 

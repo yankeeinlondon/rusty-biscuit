@@ -3,7 +3,7 @@
 //!
 //! `*` is the only wildcard. Name patterns use smart case; type globs are
 //! case-sensitive and whole-string. The user-facing rules are in
-//! `docs/symbol-reports.md`.
+//! `docs/symbol-reports/selectors.md`.
 
 use crate::shared::ProgrammingLanguage;
 

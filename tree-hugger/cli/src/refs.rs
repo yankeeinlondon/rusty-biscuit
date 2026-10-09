@@ -12,7 +12,7 @@
 //! Resolution is file-local, so only the selected declaration's own file can
 //! hold an occurrence bound to it, and only its own body owns its calls. The
 //! report is therefore read from that one file; a same-named call in another
-//! file is never attached. User contract: `tree-hugger/docs/references.md`.
+//! file is never attached. User contract: `tree-hugger/docs/references/hug-refs.md`.
 
 use std::collections::HashMap;
 use std::io::{self, BufWriter, Write};

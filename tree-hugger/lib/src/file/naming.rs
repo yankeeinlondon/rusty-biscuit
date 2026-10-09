@@ -2,8 +2,8 @@
 //! lookup: a naming-context module path, or the file's portable path plus
 //! `#`. Neither enters a stored record, a cache key or a symbol ID.
 //!
-//! `docs/symbol-kinds-and-visibility.md#qualified-names` is the user-facing
-//! description.
+//! The user-facing description is
+//! `docs/symbol-kinds-and-visibility/scope-and-qualified-names.md#qualified-names`.
 
 use std::borrow::Cow;
 use std::path::{Component, Path, PathBuf};

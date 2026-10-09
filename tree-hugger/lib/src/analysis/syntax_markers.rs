@@ -16,7 +16,7 @@
 //! The same spelling anywhere else (a Java variable named `var`, a PHP
 //! method named `static`, a Lua local named `const`) stays an occurrence.
 //!
-//! User contract: `tree-hugger/docs/references.md#syntax-markers-in-the-other-languages`.
+//! User contract: `tree-hugger/docs/references/language-support.md#syntax-markers-in-the-other-languages`.
 
 use tree_sitter::Node;
 

@@ -11,7 +11,7 @@
 //! default empty collections, an empty declaration text); no entry-level
 //! field has a default. A `schema_version`, on the entry or on a record, is
 //! served only when it is exactly the current version. See
-//! `docs/cache-design.md`.
+//! `docs/cache-design/robustness.md`.
 
 use std::path::Path;
 
