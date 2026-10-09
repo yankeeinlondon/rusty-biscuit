@@ -247,6 +247,8 @@ Built-in rules are registered in `RuleRegistry` with metadata:
 - Rule id, version, title, category, default severity, confidence
 - Language support, default enablement, examples, caveats
 - `requires_experimental_semantics` gates low-confidence semantic rules
+- `RuleRegistry::builtin()` is the shared, process-wide registry (a `LazyLock`; the registry has no mutators). Use it instead of `RuleRegistry::new()` in per-diagnostic or per-file code.
+- The CLI applies `apply_lint_policy` once per diagnostic list (native in `summarize_file`, external in `add_external_lint_diagnostics`); rendering does not re-apply it. It is idempotent, pinned by `lint_policy_applied_twice_equals_once`.
 
 Default-off pattern rules are silent unless opted in with `--warn <rule>` or `--deny <rule>` (the registry's `enabled_by_default` flag is enforced by the CLI policy layer, `apply_lint_policy`):
 - Debug artifacts: `console-log`, `print-call`, `fmt-println`.

@@ -492,6 +492,10 @@ Options:
 - `--experimental-semantics` - Enable experimental semantic diagnostics
 - `--list-rules` - Print registered rule metadata and exit
 
+`lint` exits `1` when an error-severity diagnostic remains or a file could not
+be analyzed. Like the declaration commands, it ends quietly with `0` when its reader closes
+early (`hug lint 'src/**' | head`); `imports` does the same.
+
 `hug refs --id` matches equivalent Rust raw/NFC and TypeScript/JavaScript
 escaped identifier spellings while displaying the token as written. Imported
 string export names decode as one name; file-local resolution still supplies

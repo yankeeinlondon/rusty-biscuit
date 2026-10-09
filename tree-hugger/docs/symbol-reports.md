@@ -1412,6 +1412,18 @@ Lines and the JSON reports are flushed after every batch, so the run stops befor
 the batch added nothing but the JSON envelope. The status is then `0` for a
 closed pipe (even if a file had failed) and `1` for any other write error.
 
+`imports` and `lint` write their report once every file is analyzed, but
+treat stdout the same way: `hug imports | head -1` ends quietly with `0`,
+and any other write failure prints `error: cannot write output` and exits
+`1`. When the whole report is written, `lint` exits `1` if an error-severity
+diagnostic remains after `--deny`/`--warn`/`--allow`/`--strict`, and both
+exit `1` if a file failed:
+
+```sh
+hug lint 'src/**' --deny unwrap-call; echo $?   # 1 when any .unwrap() remains
+hug lint 'src/**' --deny unwrap-call | head -1   # 0: the reader closed early
+```
+
 ## `--verbose`
 
 By default a run prints nothing on stderr except failed files. Cache

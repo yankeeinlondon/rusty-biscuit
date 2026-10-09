@@ -627,6 +627,28 @@ fn a_closed_stdout_ends_the_run_quietly() {
     }
 }
 
+/// `imports` and `lint` end quietly and successfully when stdout is a pipe
+/// whose reader has gone (`hug imports | head -1`), in text and JSON alike;
+/// they used to panic on the first write.
+#[test]
+fn imports_and_lint_end_quietly_on_a_closed_pipe() {
+    let scratch = Scratch::new(MULTI_FIXTURES);
+    for args in [
+        &["imports", "--no-cache"][..],
+        &["--plain", "imports", "--no-cache"],
+        &["--json", "imports", "--no-cache"],
+        &["lint", "--no-cache"],
+        &["--plain", "lint", "--no-cache", "--deny", "all"],
+        &["lint", "--json", "--no-cache"],
+    ] {
+        let output = hug_into_closed_pipe(&scratch, args);
+        let stderr = stderr_of(&output);
+        assert!(!stderr.contains("panicked"), "hug {args:?} panicked: {stderr}");
+        assert!(!stderr.contains("cannot write output"), "hug {args:?}: {stderr}");
+        assert_eq!(output.status.code(), Some(0), "hug {args:?}: {stderr}");
+    }
+}
+
 /// The module copied to build trees that span many chunks.
 const PYTHON_MODULE: &str = include_str!("../../../lib/tests/fixtures/symbols/multi/nested/python.py");
 

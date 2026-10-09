@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 use std::ffi::OsStr;
-use std::io::IsTerminal;
+use std::io::{self, IsTerminal, Write};
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 
@@ -1181,7 +1181,11 @@ fn main() -> Result<(), TreeHuggerError> {
         },
     );
 
-    match output_format {
+    // One buffered writer for the whole report. A closed pipe (`| head`)
+    // ends the command quietly with status 0, as the declaration commands
+    // do; any other write failure is reported (`declarations::write_status`).
+    let mut out = io::BufWriter::new(io::stdout().lock());
+    let written = match output_format {
         OutputFormat::Json => {
             let package_language = language
                 .or_else(|| summaries.first().map(|summary| summary.language))
@@ -1201,7 +1205,7 @@ fn main() -> Result<(), TreeHuggerError> {
                     path: PathBuf::from("<stdout>"),
                     source: std::io::Error::other(source),
                 })?;
-            println!("{json}");
+            writeln!(out, "{json}").and_then(|()| out.flush())
         }
         OutputFormat::Pretty | OutputFormat::Plain => {
             render_adapter_warnings(&adapter_metadata, &output_config);
@@ -1209,26 +1213,32 @@ fn main() -> Result<(), TreeHuggerError> {
             // target still shows `(no diagnostics)` as confirmation.
             let suppress_clean_lint =
                 matches!(command_kind, CommandKind::Lint { .. }) && summaries.len() > 1;
-            let mut rendered_any = false;
-            for summary in &summaries {
-                rendered_any |= render_summary(
-                    summary,
-                    &command_kind,
-                    &output_config,
-                    display_root.as_deref(),
-                    suppress_clean_lint,
-                );
-            }
-            if suppress_clean_lint && !rendered_any {
-                let msg = format!("No lint diagnostics in {} files.", summaries.len());
-                if output_config.use_colors {
-                    println!("{}", msg.green());
-                } else {
-                    println!("{msg}");
+            let mut render = || -> io::Result<()> {
+                let mut rendered_any = false;
+                for summary in &summaries {
+                    rendered_any |= render_summary(
+                        &mut out,
+                        summary,
+                        &command_kind,
+                        &output_config,
+                        display_root.as_deref(),
+                        suppress_clean_lint,
+                    )?;
                 }
-            }
+                if suppress_clean_lint && !rendered_any {
+                    let msg = format!("No lint diagnostics in {} files.", summaries.len());
+                    if output_config.use_colors {
+                        writeln!(out, "{}", msg.green())?;
+                    } else {
+                        writeln!(out, "{msg}")?;
+                    }
+                }
+                out.flush()
+            };
+            render()
         }
-    }
+    };
+    drop(out);
     if cli.verbose {
         eprintln!("{}", stats.summary());
     }
@@ -1250,8 +1260,9 @@ fn main() -> Result<(), TreeHuggerError> {
         })
         .sum();
     let lint_failed = matches!(command_kind, CommandKind::Lint { .. }) && error_count > 0;
-    if lint_failed || failed_files > 0 {
-        std::process::exit(1);
+    let status = declarations::write_status(written, !lint_failed && failed_files == 0, &mut stderr);
+    if status != 0 {
+        std::process::exit(status);
     }
 
     Ok(())
@@ -1539,10 +1550,9 @@ fn summarize_file(index: &FileSymbolIndex, command: &CommandKind) -> FileSummary
             experimental_semantics,
             ..
         } => {
-            let registry = RuleRegistry::new();
             summary.lint = apply_lint_policy(
                 &summary.lint,
-                &registry,
+                RuleRegistry::builtin(),
                 deny,
                 warn,
                 allow,
@@ -1597,7 +1607,6 @@ fn add_external_lint_diagnostics(
         return Ok(());
     }
 
-    let registry = RuleRegistry::new();
     let external_lint = result
         .diagnostics
         .into_iter()
@@ -1605,7 +1614,7 @@ fn add_external_lint_diagnostics(
         .collect::<Vec<_>>();
     let external_lint = apply_lint_policy(
         &external_lint,
-        &registry,
+        RuleRegistry::builtin(),
         &options.deny,
         &options.warn,
         &options.allow,
@@ -1714,7 +1723,12 @@ fn diagnostics_from_index(index: &FileSymbolIndex) -> (Vec<LintDiagnostic>, Vec<
 }
 
 /// Prints the `path (Language)` file header, with an optional hyperlink.
-fn print_file_header(summary: &FileSummary, config: &OutputConfig, display_root: Option<&Path>) {
+fn print_file_header(
+    out: &mut dyn Write,
+    summary: &FileSummary,
+    config: &OutputConfig,
+    display_root: Option<&Path>,
+) -> io::Result<()> {
     let file_display = display_path(&summary.file, display_root);
     let header = if config.use_hyperlinks {
         hyperlink(&summary.file, 1, &file_display)
@@ -1723,14 +1737,16 @@ fn print_file_header(summary: &FileSummary, config: &OutputConfig, display_root:
     };
 
     if config.use_colors {
-        println!(
+        writeln!(
+            out,
             "{} ({})",
             header.bold(),
             summary.language.to_string().dimmed()
-        );
+        )?;
     } else {
-        println!("{} ({})", header, summary.language);
+        writeln!(out, "{} ({})", header, summary.language)?;
     }
+    Ok(())
 }
 
 /// Renders one file's results, returning whether anything was printed.
@@ -1739,58 +1755,49 @@ fn print_file_header(summary: &FileSummary, config: &OutputConfig, display_root:
 /// visible diagnostics is skipped entirely — header included — so real findings
 /// are not buried under a `(no diagnostics)` line per clean file. A single-file
 /// lint still prints `(no diagnostics)` as explicit confirmation.
+///
+/// A lint summary already carries the lint policy ([`summarize_file`] and
+/// [`add_external_lint_diagnostics`] applied it), and applying it again
+/// changes nothing (`lint_policy_applied_twice_equals_once`).
 fn render_summary(
+    out: &mut dyn Write,
     summary: &FileSummary,
     command: &CommandKind,
     config: &OutputConfig,
     display_root: Option<&Path>,
     suppress_clean_lint: bool,
-) -> bool {
+) -> io::Result<bool> {
     if let CommandKind::Lint {
         lint_only,
         syntax_only,
-        deny,
-        warn,
-        allow,
-        strict,
-        experimental_semantics,
         ..
     } = command
     {
-        let registry = RuleRegistry::new();
-        let filtered = apply_lint_policy(
-            &summary.lint,
-            &registry,
-            deny,
-            warn,
-            allow,
-            *strict,
-            *experimental_semantics,
-        );
         let has_visible =
-            (!*syntax_only && !filtered.is_empty()) || (!*lint_only && !summary.syntax.is_empty());
+            (!*syntax_only && !summary.lint.is_empty()) || (!*lint_only && !summary.syntax.is_empty());
         if suppress_clean_lint && !has_visible {
-            return false;
+            return Ok(false);
         }
 
-        print_file_header(summary, config, display_root);
+        print_file_header(out, summary, config, display_root)?;
         render_diagnostics_filtered(
-            &filtered,
+            out,
+            &summary.lint,
             &summary.syntax,
             &summary.file,
             config,
             *lint_only,
             *syntax_only,
-        );
-        println!();
-        return true;
+        )?;
+        writeln!(out)?;
+        return Ok(true);
     }
 
-    print_file_header(summary, config, display_root);
-    render_imports(&summary.imports, config);
+    print_file_header(out, summary, config, display_root)?;
+    render_imports(out, &summary.imports, config)?;
 
-    println!();
-    true
+    writeln!(out)?;
+    Ok(true)
 }
 
 fn render_rule_list(format: OutputFormat) -> Result<(), TreeHuggerError> {
@@ -1828,7 +1835,7 @@ fn render_rule_list(format: OutputFormat) -> Result<(), TreeHuggerError> {
 }
 
 fn rule_list_items() -> Vec<RuleListItem> {
-    let registry = RuleRegistry::new();
+    let registry = RuleRegistry::builtin();
     let mut ids = registry.rule_ids().cloned().collect::<Vec<_>>();
     ids.sort();
 
@@ -1866,52 +1873,62 @@ fn style_for_severity(severity: DiagnosticSeverity) -> Style {
 }
 
 /// Renders the source context with underline marker.
-fn render_source_context(context: &SourceContext, line_number: usize, config: &OutputConfig) {
+fn render_source_context(
+    out: &mut dyn Write,
+    context: &SourceContext,
+    line_number: usize,
+    config: &OutputConfig,
+) -> io::Result<()> {
     let line_num_width = line_number.to_string().len().max(4);
 
     if config.use_colors {
         // Empty gutter line
-        println!("{:>width$} {}", "", "|".blue(), width = line_num_width);
+        writeln!(out, "{:>width$} {}", "", "|".blue(), width = line_num_width)?;
 
         // Source line
-        println!(
+        writeln!(
+            out,
             "{:>width$} {} {}",
             line_number.to_string().blue(),
             "|".blue(),
             context.line_text,
             width = line_num_width
-        );
+        )?;
 
         // Underline line
         let padding = " ".repeat(context.underline_column);
         let underline = "^".repeat(context.underline_length.max(1));
-        println!(
+        writeln!(
+            out,
             "{:>width$} {} {}{}",
             "",
             "|".blue(),
             padding,
             underline.yellow(),
             width = line_num_width
-        );
+        )?;
     } else {
         // Plain text version
-        println!("{:>width$} |", "", width = line_num_width);
-        println!(
+        writeln!(out, "{:>width$} |", "", width = line_num_width)?;
+        writeln!(
+            out,
             "{:>width$} | {}",
             line_number,
             context.line_text,
             width = line_num_width
-        );
+        )?;
         let padding = " ".repeat(context.underline_column);
         let underline = "^".repeat(context.underline_length.max(1));
-        println!(
+        writeln!(
+            out,
             "{:>width$} | {}{}",
             "",
             padding,
             underline,
             width = line_num_width
-        );
+        )?;
     }
+    Ok(())
 }
 
 /// Applies CLI policy to lint diagnostics.
@@ -1993,13 +2010,14 @@ fn apply_lint_policy(
 /// When `syntax_only` is true, shows only Syntax diagnostics.
 /// When both are false, shows all diagnostics.
 fn render_diagnostics_filtered(
+    out: &mut dyn Write,
     lint: &[LintDiagnostic],
     syntax: &[SyntaxDiagnostic],
     file: &Path,
     config: &OutputConfig,
     lint_only: bool,
     syntax_only: bool,
-) {
+) -> io::Result<()> {
     // Convert to unified diagnostics
     let mut diagnostics: Vec<Diagnostic> = Vec::new();
 
@@ -2024,20 +2042,26 @@ fn render_diagnostics_filtered(
             "(no diagnostics)"
         };
         if config.use_colors {
-            println!("  {}", label.dimmed());
+            writeln!(out, "  {}", label.dimmed())?;
         } else {
-            println!("  {}", label);
+            writeln!(out, "  {}", label)?;
         }
-        return;
+        return Ok(());
     }
 
     for diagnostic in &diagnostics {
-        render_unified_diagnostic(diagnostic, file, config);
+        render_unified_diagnostic(out, diagnostic, file, config)?;
     }
+    Ok(())
 }
 
 /// Renders a single unified diagnostic with kind indicator.
-fn render_unified_diagnostic(diagnostic: &Diagnostic, file: &Path, config: &OutputConfig) {
+fn render_unified_diagnostic(
+    out: &mut dyn Write,
+    diagnostic: &Diagnostic,
+    file: &Path,
+    config: &OutputConfig,
+) -> io::Result<()> {
     let severity_label = match diagnostic.severity {
         DiagnosticSeverity::Error => "error",
         DiagnosticSeverity::Warning => "warning",
@@ -2077,38 +2101,41 @@ fn render_unified_diagnostic(diagnostic: &Diagnostic, file: &Path, config: &Outp
             DiagnosticKind::Semantic => Style::new().magenta(),
             DiagnosticKind::Syntax => Style::new().red(),
         };
-        println!(
+        writeln!(
+            out,
             "{} {}{}: {}",
             kind_label.style(kind_style),
             severity_label.style(severity_style),
             rule_display.dimmed(),
             diagnostic.message
-        );
-        println!("  {} {}", "-->".blue(), location_display);
+        )?;
+        writeln!(out, "  {} {}", "-->".blue(), location_display)?;
     } else {
-        println!(
+        writeln!(
+            out,
             "{} {}{}: {}",
             kind_label, severity_label, rule_display, diagnostic.message
-        );
-        println!("  --> {}", location_display);
+        )?;
+        writeln!(out, "  --> {}", location_display)?;
     }
 
     // Render source context if available
     if let Some(context) = &diagnostic.context {
-        render_source_context(context, diagnostic.range.start_line, config);
+        render_source_context(out, context, diagnostic.range.start_line, config)?;
     }
 
-    println!();
+    writeln!(out)?;
+    Ok(())
 }
 
-fn render_imports(imports: &[ImportSymbol], config: &OutputConfig) {
+fn render_imports(out: &mut dyn Write, imports: &[ImportSymbol], config: &OutputConfig) -> io::Result<()> {
     if imports.is_empty() {
         if config.use_colors {
-            println!("  {}", "(no imports)".dimmed());
+            writeln!(out, "  {}", "(no imports)".dimmed())?;
         } else {
-            println!("  (no imports)");
+            writeln!(out, "  (no imports)")?;
         }
-        return;
+        return Ok(());
     }
 
     let groups = group_imports(imports);
@@ -2123,15 +2150,17 @@ fn render_imports(imports: &[ImportSymbol], config: &OutputConfig) {
         let import_display = format_import_group_display(&group);
 
         if config.use_colors {
-            println!(
+            writeln!(
+                out,
                 "  - {} {}",
                 import_display.cyan(),
                 location_display.dimmed()
-            );
+            )?;
         } else {
-            println!("  - {} {}", import_display, location_display);
+            writeln!(out, "  - {} {}", import_display, location_display)?;
         }
     }
+    Ok(())
 }
 
 // ============================================================================
@@ -2410,6 +2439,74 @@ fn format_refactor_hint(hint: &RefactorHint) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tree_hugger::{DiagnosticCategory, DiagnosticConfidence, DiagnosticMetadata, DiagnosticSource};
+
+    /// `apply_lint_policy` over its own output changes nothing, for every
+    /// built-in rule, an alias, and unknown native and external rules, with
+    /// and without metadata, under every `--deny`/`--warn`/`--allow`
+    /// selector shape, `--strict` and `--experimental-semantics`: applying
+    /// it once per file is applying it as often as before.
+    #[test]
+    fn lint_policy_applied_twice_equals_once() {
+        let registry = RuleRegistry::builtin();
+        let range = CodeRange { start_line: 1, start_column: 1, end_line: 1, end_column: 2, start_byte: 0, end_byte: 1 };
+        let diagnostic = |rule: &str, metadata: Option<DiagnosticMetadata>| LintDiagnostic {
+            message: format!("{rule} fired"),
+            range: range.clone(),
+            severity: DiagnosticSeverity::Warning,
+            rule: Some(rule.to_string()),
+            context: None,
+            metadata,
+        };
+        let external = DiagnosticMetadata {
+            category: DiagnosticCategory::Style,
+            confidence: DiagnosticConfidence::High,
+            source: DiagnosticSource::ExternalTool,
+            default_severity: DiagnosticSeverity::Info,
+            effective_severity: DiagnosticSeverity::Info,
+            is_enabled_by_default: true,
+            requires_experimental_semantics: false,
+        };
+        let mut rules: Vec<String> = registry.rule_ids().cloned().collect();
+        rules.sort();
+        rules.extend(["unreachable-code".to_string(), "no-such-rule".to_string(), "oxlint/no-debugger".to_string()]);
+        let mut lint = Vec::new();
+        for rule in &rules {
+            lint.push(diagnostic(rule, None));
+            lint.push(diagnostic(rule, Some(tree_hugger::rule_registry::diagnostic_metadata_from_rule(rule, registry, &[], &[], &[], false, true))));
+            lint.push(diagnostic(rule, Some(external.clone())));
+        }
+        let mut categories = vec![RuleSelector::All];
+        for category in ["correctness", "suspicious", "style", "performance", "pedantic", "restriction", "experimental"] {
+            categories.push(RuleSelector::parse(&format!("category:{category}")).expect("category"));
+        }
+        let mut shapes: Vec<Vec<RuleSelector>> = vec![Vec::new()];
+        shapes.extend(categories.into_iter().map(|selector| vec![selector]));
+        shapes.extend(rules.iter().map(|rule| vec![RuleSelector::Rule(rule.clone())]));
+        let mut checked = 0usize;
+        for (index, shape) in shapes.iter().enumerate() {
+            // Each shape as every flag, beside a rotating other shape.
+            let other = &shapes[(index * 7 + 3) % shapes.len()];
+            for (deny, warn, allow) in [
+                (shape, &Vec::new(), &Vec::new()),
+                (&Vec::new(), shape, &Vec::new()),
+                (&Vec::new(), &Vec::new(), shape),
+                (shape, other, &Vec::new()),
+                (other, shape, other),
+            ] {
+                for strict in [false, true] {
+                    for experimental in [false, true] {
+                        let once = apply_lint_policy(&lint, registry, deny, warn, allow, strict, experimental);
+                        let twice = apply_lint_policy(&once, registry, deny, warn, allow, strict, experimental);
+                        assert_eq!(format!("{twice:?}"), format!("{once:?}"), "deny {deny:?} warn {warn:?} allow {allow:?} strict {strict} experimental {experimental}");
+                        checked += once.len();
+                    }
+                }
+            }
+        }
+        assert!(checked > 10_000, "{checked} policy results compared");
+    }
+
 
     #[test]
     fn display_path_relativizes_beneath_the_root() {

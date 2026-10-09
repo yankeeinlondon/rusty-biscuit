@@ -298,7 +298,7 @@ pub(crate) fn run(scan: DeclarationScan, analyzer: &Analyzer) -> Result<i32, Tre
     Ok(write_status(written, errors.is_empty(), &mut stderr))
 }
 
-fn write_status(written: io::Result<()>, no_file_errors: bool, stderr: &mut dyn Write) -> i32 {
+pub(crate) fn write_status(written: io::Result<()>, no_file_errors: bool, stderr: &mut dyn Write) -> i32 {
     match written {
         Ok(()) => i32::from(!no_file_errors),
         Err(error) if error.kind() == io::ErrorKind::BrokenPipe => 0,
