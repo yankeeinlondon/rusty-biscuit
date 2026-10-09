@@ -94,6 +94,9 @@ pub(crate) struct ExtractedSymbol<'tree> {
     /// The Swift extension whose body declares this symbol: its owner, as
     /// the relation resolver decides it, is the symbol's container.
     pub(crate) container_extension: Option<Node<'tree>>,
+    /// [`is_exported_definition`] of the finished symbol, decided once here
+    /// for every reader of exports and records.
+    pub(crate) is_exported: bool,
 }
 
 /// One definition capture, before any metadata is read from it.
@@ -131,6 +134,19 @@ struct FileFacts<'tree> {
     visibility: VisibilityMemo<'tree>,
 }
 
+/// What one run of the definition (locals) query found.
+pub(crate) struct Definitions<'tree> {
+    /// One symbol per declared name and span, in source order.
+    pub(crate) symbols: Vec<ExtractedSymbol<'tree>>,
+    /// The `@local.definition.import` captures in match order (repeats
+    /// included), which [`TreeFile::imports_from_nodes`] reads exactly as
+    /// [`TreeFile::imported_symbols`] reads its own run of the same query.
+    pub(crate) import_nodes: Vec<Node<'tree>>,
+    /// The `@local.scope` captures in match order (repeats included); empty
+    /// unless asked for by [`TreeFile::definitions_with_scopes`].
+    pub(crate) scopes: Vec<Node<'tree>>,
+}
+
 struct PendingSymbol<'tree> {
     extracted: ExtractedSymbol<'tree>,
     container: Option<ContainerRef<'tree>>,
@@ -143,20 +159,17 @@ impl TreeFile {
     pub(crate) fn definitions(
         &self,
         selection: &MetadataSelection,
-    ) -> Result<Vec<ExtractedSymbol<'_>>, TreeHuggerError> {
-        self.capture_definitions(selection, None)
+    ) -> Result<Definitions<'_>, TreeHuggerError> {
+        self.capture_definitions(selection, false)
     }
 
-    /// [`Self::definitions`], also returning the query's `@local.scope`
-    /// nodes in match order (repeats included), which only reference
-    /// resolution reads.
+    /// [`Self::definitions`], also keeping the query's `@local.scope` nodes,
+    /// which only reference resolution reads.
     pub(crate) fn definitions_with_scopes(
         &self,
         selection: &MetadataSelection,
-    ) -> Result<(Vec<ExtractedSymbol<'_>>, Vec<Node<'_>>), TreeHuggerError> {
-        let mut scopes = Vec::new();
-        let definitions = self.capture_definitions(selection, Some(&mut scopes))?;
-        Ok((definitions, scopes))
+    ) -> Result<Definitions<'_>, TreeHuggerError> {
+        self.capture_definitions(selection, true)
     }
 
     /// Drops the captures that declare nothing, decided exactly as
@@ -189,14 +202,16 @@ impl TreeFile {
     fn capture_definitions<'tree>(
         &'tree self,
         selection: &MetadataSelection,
-        mut scopes: Option<&mut Vec<Node<'tree>>>,
-    ) -> Result<Vec<ExtractedSymbol<'tree>>, TreeHuggerError> {
+        keep_scopes: bool,
+    ) -> Result<Definitions<'tree>, TreeHuggerError> {
         count_definition_capture();
         let query = query_for(self.grammar_ref(), QueryKind::Locals)?;
         let mut cursor = QueryCursor::new();
         let root = self.tree.root_node();
         let capture_names = query.capture_names();
         let mut groups: HashMap<(usize, usize, String), CaptureGroup<'_>> = HashMap::new();
+        let mut import_nodes = Vec::new();
+        let mut scopes = Vec::new();
         // Rust pattern names are decided by lookup through these scopes.
         let mut local_scopes: Vec<Node<'tree>> = Vec::new();
         let is_ecma_module = matches!(
@@ -225,10 +240,11 @@ impl TreeFile {
                     .unwrap_or_default();
 
                 if capture_name == "local.definition.import" {
+                    import_nodes.push(capture.node);
                     continue;
                 }
                 if capture_name == "local.scope" {
-                    if let Some(scopes) = scopes.as_deref_mut() {
+                    if keep_scopes {
                         scopes.push(capture.node);
                     }
                     if self.language == ProgrammingLanguage::Rust {
@@ -355,12 +371,13 @@ impl TreeFile {
             })
             .collect();
 
-        Ok(pending
+        let symbols = pending
             .into_iter()
             .zip(container_kinds)
             .map(|(entry, container_kind)| {
                 let mut extracted = entry.extracted;
                 extracted.symbol.container_kind = container_kind;
+                extracted.is_exported = is_exported_definition(&extracted.symbol, extracted.anchor, root);
                 match entry.container.map(|container| container.lookup) {
                     Some(ContainerLookup::SameFileType { impl_item }) => extracted.container_impl = impl_item,
                     Some(ContainerLookup::Node { node, .. })
@@ -373,7 +390,8 @@ impl TreeFile {
                 }
                 extracted
             })
-            .collect())
+            .collect();
+        Ok(Definitions { symbols, import_nodes, scopes })
     }
 
     /// Builds the symbol for a group's winner; metadata only when
@@ -434,6 +452,8 @@ impl TreeFile {
                 // Read from `container` once every symbol is known.
                 container_impl: None,
                 container_extension: None,
+                // Decided once the symbol is finished.
+                is_exported: false,
             },
             container,
         }
@@ -902,6 +922,47 @@ impl<'a> KindAgreement<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The imports read from the definition run's captures are exactly the
+    /// imports of `imported_symbols`' own run of the query, in every shipped
+    /// fixture and in grouped and repeated captures.
+    #[test]
+    fn imports_from_the_definition_run_equal_imported_symbols() {
+        fn same_imports(tree_file: &TreeFile) -> usize {
+            let definitions = tree_file.definitions(&MetadataSelection::ALL).expect("definitions");
+            let from_definitions = tree_file.imports_from_nodes(&definitions.import_nodes);
+            let own_run = tree_file.imported_symbols().expect("imports");
+            assert_eq!(format!("{from_definitions:?}"), format!("{own_run:?}"), "{}", tree_file.file.display());
+            from_definitions.len()
+        }
+
+        let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+        let mut pending = vec![fixtures];
+        let (mut files, mut imports) = (0, 0);
+        while let Some(path) = pending.pop() {
+            if path.is_dir() {
+                pending.extend(std::fs::read_dir(&path).expect("fixture dir").map(|entry| entry.expect("entry").path()));
+            } else if let Ok(tree_file) = TreeFile::new(&path) {
+                files += 1;
+                imports += same_imports(&tree_file);
+            }
+        }
+        assert!(files > 50 && imports > 50, "{files} fixtures, {imports} imports");
+
+        let dir = tempfile::TempDir::new().expect("temp");
+        for (file, source) in [
+            ("grouped.rs", "use a::{self, *};\nuse b::{c as d, e};\n"),
+            ("grouped.scala", "import a.{_, given}\nimport b.{C => D}\n"),
+            ("aliased.go", "package p\nimport (\n\tf \"fmt\"\n\t\"os/exec\"\n)\n"),
+            ("selective.swift", "import struct Foundation.Date\nimport UIKit\n"),
+            ("mixed.ts", "import x, { y as z, w } from \"m\";\nimport * as ns from \"n\";\nexport { y } from \"m\";\n"),
+            ("grouped.py", "from a import (b, c as d)\nimport e.f as g\n"),
+        ] {
+            let path = dir.path().join(file);
+            std::fs::write(&path, source).expect("source");
+            assert!(same_imports(&TreeFile::new(&path).expect("parse")) > 0, "{file}");
+        }
+    }
 
     fn variant(name: &str, discriminant: Option<&str>, doc: Option<&str>) -> VariantInfo {
         let mut variant = VariantInfo::unit(name);

@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use tree_sitter::{Node, QueryCursor, StreamingIterator};
 
@@ -24,7 +25,7 @@ use crate::shared::{
 mod definitions;
 mod relations;
 
-pub(crate) use definitions::{ExtractedSymbol, MetadataSelection, RecordFacts};
+pub(crate) use definitions::{Definitions, ExtractedSymbol, MetadataSelection, RecordFacts};
 
 /// Represents a parsed source file backed by tree-sitter.
 #[derive(Debug, Clone)]
@@ -43,6 +44,9 @@ pub struct TreeFile {
     grammar_id: &'static str,
     /// Whether to enable experimental semantic rules.
     pub experimental_semantics: bool,
+    /// [`line_starts`] of `source`, built by the first diagnostic that
+    /// needs a line's text.
+    line_starts: OnceLock<Vec<usize>>,
 }
 
 impl TreeFile {
@@ -90,6 +94,7 @@ impl TreeFile {
             grammar,
             grammar_id,
             experimental_semantics: false,
+            line_starts: OnceLock::new(),
         }
     }
 
@@ -151,7 +156,7 @@ impl TreeFile {
     fn diagnostic_metadata(&self, rule_id: &str) -> crate::shared::DiagnosticMetadata {
         diagnostic_metadata_from_rule(
             rule_id,
-            &RuleRegistry::new(),
+            RuleRegistry::builtin(),
             &[],
             &[],
             &[],
@@ -172,61 +177,67 @@ impl TreeFile {
         let mut cursor = QueryCursor::new();
         let root = self.tree.root_node();
         let capture_names = query.capture_names();
-        let mut imports = Vec::new();
+        let mut nodes = Vec::new();
 
         let mut matches = cursor.matches(query.as_ref(), root, self.source.as_bytes());
         matches.advance();
 
         while let Some(query_match) = matches.get() {
-            for capture in query_match.captures {
-                let capture_name = capture_names
-                    .get(capture.index as usize)
-                    .copied()
-                    .unwrap_or_default();
+            nodes.extend(
+                query_match
+                    .captures
+                    .iter()
+                    .filter(|capture| {
+                        capture_names.get(capture.index as usize).copied() == Some("local.definition.import")
+                    })
+                    .map(|capture| capture.node),
+            );
+            matches.advance();
+        }
+        Ok(self.imports_from_nodes(&nodes))
+    }
 
-                if capture_name != "local.definition.import" {
-                    continue;
-                }
+    /// The imports of the `@local.definition.import` captures `nodes`, given
+    /// in match order. The imports query is the locals query's text, so
+    /// [`Definitions::import_nodes`] are the nodes [`Self::imported_symbols`]
+    /// reads, in the same order.
+    pub(crate) fn imports_from_nodes(&self, nodes: &[Node<'_>]) -> Vec<ImportSymbol> {
+        let mut imports = Vec::new();
+        for &node in nodes {
+            // A Go path captured beside its alias.
+            if self.should_skip_import(node, self.language) {
+                continue;
+            }
+            let node = swift_selective_import_name(node, self.language).unwrap_or(node);
 
-                let node = capture.node;
+            let mut name = node
+                .utf8_text(self.source.as_bytes())
+                .map(str::to_string)
+                .unwrap_or_default();
 
-                // A Go path captured beside its alias.
-                if self.should_skip_import(node, self.language) {
-                    continue;
-                }
-                let node = swift_selective_import_name(node, self.language).unwrap_or(node);
-
-                let mut name = node
-                    .utf8_text(self.source.as_bytes())
-                    .map(str::to_string)
-                    .unwrap_or_default();
-
-                // A captured Go import path names its package by its last segment.
-                if self.language == ProgrammingLanguage::Go && matches!(node.kind(), "interpreted_string_literal" | "raw_string_literal") {
-                    let path = go_import_path(&name);
-                    name = path.rsplit('/').next().unwrap_or(path).to_string();
-                }
-
-                // Extract import metadata by traversing the AST
-                let (source, original_name, alias) =
-                    self.extract_import_metadata(node, &name, self.language);
-                let statement_range = self.import_statement_range(node, self.language);
-                let is_reexport = self.import_is_reexport(node, self.language);
-
-                imports.push(ImportSymbol {
-                    name,
-                    original_name,
-                    alias,
-                    range: range_for_node(node),
-                    statement_range,
-                    language: self.language,
-                    file: self.file.clone(),
-                    source,
-                    is_reexport,
-                });
+            // A captured Go import path names its package by its last segment.
+            if self.language == ProgrammingLanguage::Go && matches!(node.kind(), "interpreted_string_literal" | "raw_string_literal") {
+                let path = go_import_path(&name);
+                name = path.rsplit('/').next().unwrap_or(path).to_string();
             }
 
-            matches.advance();
+            // Extract import metadata by traversing the AST
+            let (source, original_name, alias) =
+                self.extract_import_metadata(node, &name, self.language);
+            let statement_range = self.import_statement_range(node, self.language);
+            let is_reexport = self.import_is_reexport(node, self.language);
+
+            imports.push(ImportSymbol {
+                name,
+                original_name,
+                alias,
+                range: range_for_node(node),
+                statement_range,
+                language: self.language,
+                file: self.file.clone(),
+                source,
+                is_reexport,
+            });
         }
 
         // Two patterns may capture one token (a Rust `use a::{self, *}`, a
@@ -234,7 +245,7 @@ impl TreeFile {
         // so position is restored here.
         imports.sort_by_key(|import| (import.range.start_byte, import.range.end_byte));
         imports.dedup_by_key(|import| (import.range.start_byte, import.range.end_byte));
-        Ok(imports)
+        imports
     }
 
     /// Provides the list of symbol references in this file.
@@ -249,8 +260,8 @@ impl TreeFile {
     /// Returns an error if query compilation fails.
     pub fn referenced_symbols(&self) -> Result<Vec<ReferencedSymbol>, TreeHuggerError> {
         let definitions = self.definitions(&MetadataSelection::ALL)?;
-        let imports = self.imported_symbols()?;
-        self.references_from(&definitions, &imports)
+        let imports = self.imports_from_nodes(&definitions.import_nodes);
+        self.references_from(&definitions.symbols, &imports)
     }
 
     /// The identifier usages of this file that are not one of `definitions`'
@@ -1036,12 +1047,11 @@ impl TreeFile {
     /// ## Errors
     /// Returns an error if query compilation fails.
     pub fn exported_symbols(&self) -> Result<Vec<SymbolInfo>, TreeHuggerError> {
-        let root = self.tree.root_node();
-
         Ok(self
             .definitions(&MetadataSelection::ALL)?
+            .symbols
             .into_iter()
-            .filter(|extracted| is_exported_definition(&extracted.symbol, extracted.anchor, root))
+            .filter(|extracted| extracted.is_exported)
             .map(|extracted| extracted.symbol)
             .collect())
     }
@@ -1051,10 +1061,9 @@ impl TreeFile {
         &self,
         definitions: &'a [ExtractedSymbol<'_>],
     ) -> impl Iterator<Item = &'a SymbolInfo> {
-        let root = self.tree.root_node();
         definitions
             .iter()
-            .filter(move |extracted| is_exported_definition(&extracted.symbol, extracted.anchor, root))
+            .filter(|extracted| extracted.is_exported)
             .map(|extracted| &extracted.symbol)
     }
 
@@ -1077,12 +1086,11 @@ impl TreeFile {
     /// ## Errors
     /// Returns an error if query compilation fails.
     pub fn local_symbols(&self) -> Result<Vec<SymbolInfo>, TreeHuggerError> {
-        let root = self.tree.root_node();
-
         Ok(self
             .definitions(&MetadataSelection::ALL)?
+            .symbols
             .into_iter()
-            .filter(|extracted| !is_exported_definition(&extracted.symbol, extracted.anchor, root))
+            .filter(|extracted| !extracted.is_exported)
             .map(|extracted| extracted.symbol)
             .collect())
     }
@@ -1114,9 +1122,9 @@ impl TreeFile {
         let mut diagnostics = Vec::new();
         diagnostics.extend(self.run_pattern_diagnostics().unwrap_or_default());
         let semantic = self.definitions(&MetadataSelection::ALL).and_then(|definitions| {
-            let imports = self.imported_symbols()?;
-            let references = self.references_from(&definitions, &imports)?;
-            Ok(self.run_semantic_diagnostics(&definitions, &imports, &references))
+            let imports = self.imports_from_nodes(&definitions.import_nodes);
+            let references = self.references_from(&definitions.symbols, &imports)?;
+            Ok(self.run_semantic_diagnostics(&definitions.symbols, &imports, &references))
         });
         diagnostics.extend(semantic.unwrap_or_default());
         self.apply_ignore_directives(diagnostics)
@@ -1134,9 +1142,9 @@ impl TreeFile {
     /// analyzer failed to run.
     pub fn try_lint_diagnostics(&self) -> Result<Vec<LintDiagnostic>, TreeHuggerError> {
         let definitions = self.definitions(&MetadataSelection::ALL)?;
-        let imports = self.imported_symbols()?;
-        let references = self.references_from(&definitions, &imports)?;
-        self.lint_diagnostics_from(&definitions, &imports, &references)
+        let imports = self.imports_from_nodes(&definitions.import_nodes);
+        let references = self.references_from(&definitions.symbols, &imports)?;
+        self.lint_diagnostics_from(&definitions.symbols, &imports, &references)
     }
 
     /// Lint diagnostics from already extracted definitions, imports and
@@ -1155,7 +1163,11 @@ impl TreeFile {
 
     /// Removes diagnostics suppressed by in-source ignore directives.
     fn apply_ignore_directives(&self, mut diagnostics: Vec<LintDiagnostic>) -> Vec<LintDiagnostic> {
-        use crate::ignore_directives::IgnoreDirectives;
+        use crate::ignore_directives::{IGNORE_LINE_PREFIX, IgnoreDirectives};
+
+        if diagnostics.is_empty() || memchr::memmem::find(self.source.as_bytes(), IGNORE_LINE_PREFIX.as_bytes()).is_none() {
+            return diagnostics;
+        }
 
         // Parse ignore directives using tree-sitter (avoids false positives from strings)
         let ignores =
@@ -1306,12 +1318,8 @@ impl TreeFile {
         while let Some(node) = stack.pop() {
             if is_block_like_dead_code_container(node.kind()) {
                 let mut saw_terminal = false;
-                let child_count = node.named_child_count();
-                for index in 0..child_count {
-                    let Some(child) = node.named_child(index as u32) else {
-                        continue;
-                    };
-
+                let mut cursor = node.walk();
+                for child in node.named_children(&mut cursor) {
                     if saw_terminal {
                         let range = range_for_node(child);
                         if seen_dead.insert((range.start_byte, range.end_byte)) {
@@ -1609,12 +1617,8 @@ impl TreeFile {
         let underline_column = range.start_column.saturating_sub(1);
 
         // Get the line containing the range start
-        let line_text = self
-            .source
-            .lines()
-            .nth(line_index)
-            .unwrap_or("")
-            .to_string();
+        let starts = self.line_starts.get_or_init(|| line_starts(&self.source));
+        let line_text = nth_line(&self.source, starts, line_index).unwrap_or("").to_string();
 
         // Calculate underline length (handle multi-line by capping to end of first line)
         let underline_length = if range.start_line == range.end_line {
@@ -1716,9 +1720,9 @@ impl TreeFile {
     /// analyzer failed to run.
     pub fn try_diagnostics(&self) -> Result<Vec<Diagnostic>, TreeHuggerError> {
         let definitions = self.definitions(&MetadataSelection::ALL)?;
-        let imports = self.imported_symbols()?;
-        let references = self.references_from(&definitions, &imports)?;
-        self.diagnostics_from(&definitions, &imports, &references)
+        let imports = self.imports_from_nodes(&definitions.import_nodes);
+        let references = self.references_from(&definitions.symbols, &imports)?;
+        self.diagnostics_from(&definitions.symbols, &imports, &references)
     }
 
     /// Lint and syntax diagnostics from already extracted definitions,
@@ -1770,6 +1774,7 @@ impl TreeFile {
     pub fn symbols(&self) -> Result<Vec<SymbolInfo>, TreeHuggerError> {
         Ok(self
             .definitions(&MetadataSelection::ALL)?
+            .symbols
             .into_iter()
             .map(|extracted| extracted.symbol)
             .collect())
@@ -1784,7 +1789,7 @@ impl TreeFile {
     /// Returns an error if symbol extraction or query compilation fails.
     pub fn symbol_records(&self) -> Result<Vec<SymbolRecord>, TreeHuggerError> {
         let selection = MetadataSelection::ALL;
-        self.records_from(self.definitions(&selection)?, &selection, RecordFacts::default())
+        self.records_from(self.definitions(&selection)?.symbols, &selection, RecordFacts::default())
     }
 
     /// Converts definitions to parse-pass records, in the same order.
@@ -1819,6 +1824,7 @@ impl TreeFile {
             name,
             container_impl,
             container_extension,
+            is_exported,
         } in definitions
         {
             let wanted = selection.wants(symbol.kind);
@@ -1867,7 +1873,6 @@ impl TreeFile {
             });
             let name_span = text_span_from_code_range(&symbol.range);
             let name_bytes = symbol.range.start_byte..symbol.range.end_byte;
-            let is_exported = is_exported_definition(&symbol, anchor, root);
             let mut record: SymbolRecord = symbol.into();
 
             // Same-named declarations of one kind and qualified name (C++
@@ -2086,6 +2091,27 @@ pub(crate) fn go_import_path(literal: &str) -> &str {
         .unwrap_or(literal)
 }
 
+/// The byte offset where each `\n`-separated line of `source` starts, the
+/// first at 0. A source ending in `\n` also gets its length, the start of
+/// a line [`nth_line`] does not count.
+fn line_starts(source: &str) -> Vec<usize> {
+    std::iter::once(0).chain(memchr::memchr_iter(b'\n', source.as_bytes()).map(|newline| newline + 1)).collect()
+}
+
+/// `source.lines().nth(index)`, from `starts` ([`line_starts`] of `source`)
+/// instead of a scan from the start. As there, a line ended by `\n` loses
+/// one `\r` before it, and an unterminated last line keeps its `\r`.
+fn nth_line<'a>(source: &'a str, starts: &[usize], index: usize) -> Option<&'a str> {
+    let start = *starts.get(index)?;
+    match starts.get(index + 1) {
+        Some(&next) => {
+            let line = &source[start..next - 1];
+            Some(line.strip_suffix('\r').unwrap_or(line))
+        }
+        None => (start < source.len()).then(|| &source[start..]),
+    }
+}
+
 /// The `original_name` of a Scala on-demand import: `given` when it opens
 /// only given instances, else `*` (`*` and Scala 2's `_` alike).
 fn scala_wildcard(written: &str) -> &'static str {
@@ -2112,4 +2138,24 @@ pub(crate) fn definition_ranges(
         })
         .chain(imports.iter().map(|import| (import.range.start_byte, import.range.end_byte)))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every line, and the first indexes past the end, read as `lines()`
+    /// reads them.
+    #[test]
+    fn nth_line_agrees_with_lines() {
+        for source in [
+            "", "\n", "\n\n", "a", "a\n", "a\nb", "a\nb\n", "a\r\nb\r\n", "a\r\nb", "a\r", "a\r\r\n", "\r\n",
+            "\r", "a\rb\nc", "é\r\nü\n\n  x  ", "\n\nlast",
+        ] {
+            let starts = line_starts(source);
+            for index in 0..source.len() + 3 {
+                assert_eq!(nth_line(source, &starts, index), source.lines().nth(index), "{source:?} line {index}");
+            }
+        }
+    }
 }

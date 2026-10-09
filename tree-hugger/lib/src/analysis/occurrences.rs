@@ -531,9 +531,10 @@ impl<'a, 'tree> Resolver<'a, 'tree> {
             OccurrenceKind::Usage
         };
         let region = regions.around(node);
+        let path = written_path(node, self.syntax.source, self.syntax.language);
         let (confidence, id, candidates, import) = match (&self.scopes, self.rules) {
             (Some(scopes), Some(rules)) => {
-                let resolution = self.resolve_supported(node, name, capture.is_member, scopes, rules);
+                let resolution = self.resolve_supported(node, name, path.as_deref(), capture.is_member, scopes, rules);
                 if kind == OccurrenceKind::Call && resolution.indirect {
                     regions.limit(region, LimitReason::IndirectDispatch);
                 }
@@ -552,7 +553,7 @@ impl<'a, 'tree> Resolver<'a, 'tree> {
             target: SymbolRef {
                 id,
                 name: name.to_string(),
-                qualified_name: written_path(node, self.syntax.source, self.syntax.language),
+                qualified_name: path,
                 source_span: None,
             },
             import_span: None,
@@ -598,10 +599,13 @@ impl<'a, 'tree> Resolver<'a, 'tree> {
         }
     }
 
+    /// Resolves `node`, written as `name` and, when qualified, as `path`
+    /// ([`written_path`]).
     fn resolve_supported(
         &self,
         node: Node<'tree>,
         name: &str,
+        path: Option<&str>,
         is_member: bool,
         scopes: &ScopeTree<'tree>,
         rules: LanguageRules,
@@ -631,7 +635,7 @@ impl<'a, 'tree> Resolver<'a, 'tree> {
             // A bare pattern name that may bind or read a constant.
             return self.uncertain(self.item_records(name), false);
         }
-        if written_path(node, self.syntax.source, self.syntax.language).is_some() {
+        if path.is_some() {
             // A qualified name whose qualifier no rule establishes, or a
             // rooted one (`::f`), which lexical lookup must never reach: the
             // root names no local, whatever shadows it.
@@ -1804,7 +1808,8 @@ mod tests {
         arrange: impl FnOnce(&mut Vec<tree_sitter::Node<'_>>, &mut Vec<crate::file::tree_file::ReferenceCapture<'_>>),
     ) -> ReferenceEvidence {
         let selection = MetadataSelection::for_kinds(Some(Vec::new()));
-        let (definitions, mut scopes) = tree_file.definitions_with_scopes(&selection).expect("definitions");
+        let crate::file::tree_file::Definitions { symbols: definitions, mut scopes, .. } =
+            tree_file.definitions_with_scopes(&selection).expect("definitions");
         let imports = tree_file.imported_symbols().expect("imports");
         let mut captures = tree_file.reference_captures().expect("captures").expect("a reference query");
         arrange(&mut scopes, &mut captures);

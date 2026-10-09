@@ -11,7 +11,7 @@ use crate::analysis::counters::{count_occurrence_resolution, count_shared_contex
 use crate::analysis::occurrences::OccurrenceSyntax;
 use crate::error::TreeHuggerError;
 use crate::file::query::{Capability, SymbolQuery, SymbolQueryResult};
-use crate::file::tree_file::{MetadataSelection, RecordFacts, TreeFile};
+use crate::file::tree_file::{Definitions, MetadataSelection, RecordFacts, TreeFile};
 use crate::shared::{
     AnalysisPass, CommentAttachment, Confidence, CoverageState, DocsFacet, ExportRecord,
     FileSymbolIndex, ImportRecord, ImportSymbol, Occurrence, OccurrenceKind, ParsedDocs, ProgrammingLanguage,
@@ -89,12 +89,14 @@ pub(crate) fn run_query(
     let plan = PassPlan::for_query(query);
     let selection = MetadataSelection::for_kinds(query.selected_kinds());
 
-    let (definitions, scope_nodes) = if plan.bind {
+    let Definitions { symbols: definitions, import_nodes, scopes: scope_nodes } = if plan.bind {
         tree_file.definitions_with_scopes(&selection)?
     } else {
-        (tree_file.definitions(&selection)?, Vec::new())
+        tree_file.definitions(&selection)?
     };
-    let imports = tree_file.imported_symbols()?;
+    // The definition run captured the imports too: `imported_symbols` would
+    // run the same query text again.
+    let imports = tree_file.imports_from_nodes(&import_nodes);
     let captures = if plan.bind || plan.diagnostics {
         tree_file.reference_captures()?
     } else {

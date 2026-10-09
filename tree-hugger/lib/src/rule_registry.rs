@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fmt;
+use std::sync::LazyLock;
 
 use crate::shared::{
     DiagnosticCategory, DiagnosticConfidence, DiagnosticMetadata, DiagnosticSeverity,
@@ -79,6 +80,13 @@ impl RuleRegistry {
         };
         registry.register_builtin_rules();
         registry
+    }
+
+    /// The registry [`Self::new`] builds, built once per process and shared.
+    /// A registry has no mutators, so every caller sees the built-in rules.
+    pub fn builtin() -> &'static Self {
+        static BUILTIN: LazyLock<RuleRegistry> = LazyLock::new(RuleRegistry::new);
+        &BUILTIN
     }
 
     /// Looks up rule metadata by ID.
@@ -772,6 +780,23 @@ mod tests {
         let registry = RuleRegistry::new();
         assert!(registry.has_rule("unwrap-call"));
         assert!(registry.has_rule("undefined-symbol"));
+    }
+
+    /// The shared registry is one instance holding what `new` builds,
+    /// aliases included.
+    #[test]
+    fn builtin_is_one_shared_new_registry() {
+        let (builtin, fresh) = (RuleRegistry::builtin(), RuleRegistry::new());
+        assert!(std::ptr::eq(builtin, RuleRegistry::builtin()));
+        let ids = |registry: &RuleRegistry| {
+            let mut ids: Vec<String> = registry.rule_ids().cloned().collect();
+            ids.sort();
+            ids
+        };
+        assert_eq!(ids(builtin), ids(&fresh));
+        for id in ids(&fresh).iter().map(String::as_str).chain(["unreachable-code", "no-such-rule"]) {
+            assert_eq!(format!("{:?}", builtin.get_or_default(id)), format!("{:?}", fresh.get_or_default(id)), "{id}");
+        }
     }
 
     #[test]
