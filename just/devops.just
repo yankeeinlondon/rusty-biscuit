@@ -320,6 +320,17 @@ _test_threads:
         echo "$(( cores > 2 ? cores - 2 : 1 ))"
     fi
 
+# Worker budget for parallel self-spawn L2: `_test_threads`, capped at 4.
+# Every worker drives a real terminal, and WezTerm serves all of them through
+# one mux server; at 14 workers its CLI calls (spawn, capture) timed out while
+# 4 stayed green. CI runners have four or fewer cores, so the cap binds only
+# on larger hosts.
+_test_l2_threads:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    threads="$(just _test_threads)"
+    echo "$(( threads < 4 ? threads : 4 ))"
+
 # Build the package
 _build package pkg_name *args="": _storage_preflight
     #!/usr/bin/env bash
@@ -2159,13 +2170,15 @@ _sanity pkg *args="": _storage_preflight
 # dominated by self-isolating tests (each spawns its OWN tmux session /
 # PTY — e.g. claudine) pays a steep serial tax for no isolation benefit.
 #
-# Setting `BISCUIT_L2_THREADS` to a value other than `1` switches this
-# recipe into parallel self-spawn mode: it skips the broker entirely and
-# exports NO `BISCUIT_SHARED_*` var, so EVERY `shared_or_spawn()` call
-# takes its fallback branch and spawns an OWNED, `Drop`-cleaned pane of
-# its own. With no shared resource, nextest runs at `-j N` safely. The
-# default (`1`, or unset) preserves the shared-pane serial path verbatim
-# for every other package area.
+# Parallel self-spawn mode is the default: the recipe skips the broker
+# entirely and exports NO `BISCUIT_SHARED_*` var, so EVERY
+# `shared_or_spawn()` call takes its fallback branch and spawns an OWNED,
+# `Drop`-cleaned pane of its own. With no shared resource, nextest runs at
+# `-j N` (`_test_l2_threads`) safely. A package whose L2 tests cannot run
+# concurrently declares the `l2-serial` runner tool with an
+# `l2-serial-reason`, and gets the shared-pane serial path above.
+# `BISCUIT_L2_THREADS` overrides both: `1` forces serial, any other value
+# sets the worker count.
 _test_l2 pkg *args="": _storage_preflight
     #!/usr/bin/env bash
     set -euo pipefail
@@ -2260,7 +2273,21 @@ _test_l2 pkg *args="": _storage_preflight
     # Parallel self-spawn mode: no shared pane, no broker, `-j N`. Every
     # test self-isolates via `shared_or_spawn()`'s owned fallback, so
     # there is nothing to contend for. See the recipe comment above.
-    l2_threads="${BISCUIT_L2_THREADS:-1}"
+    # Archive mode has no Cargo to read metadata with; its callers (the CI
+    # workflow) always export BISCUIT_L2_THREADS.
+    l2_threads="${BISCUIT_L2_THREADS:-}"
+    if [[ -z "${l2_threads}" ]]; then
+        l2_threads=1
+        if (( archive_mode == 0 )); then
+            package_meta="$(cargo metadata --no-deps --format-version 1)"
+            serial="$(jq -r --arg p '{{ pkg }}' '.packages[] | select(.name == $p) | .metadata.ci.tests["runner-tools"] // [] | index("l2-serial") != null' <<< "${package_meta}")"
+            if [[ "${serial}" != "true" ]]; then
+                # Not NEXTEST_TEST_THREADS: this recipe exported the uncapped
+                # L1 budget into it above.
+                l2_threads="$(just _test_l2_threads)"
+            fi
+        fi
+    fi
     if [[ "${l2_threads}" != "1" ]]; then
         echo -e "  {{ dim }}parallel self-spawn mode: -j ${l2_threads}, no shared pane{{ reset }}"
         echo

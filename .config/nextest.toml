@@ -24,6 +24,10 @@ claudine-l1 = { max-threads = 4 }
 # full network detections overlap, so CI runs them one process at a time. Local
 # Windows development retains Nextest's normal scheduler.
 sniff-windows-l1 = { max-threads = 1 }
+# Apple Terminal has no background mode: each L2 test opens a visible window on
+# the developer's desktop. Parallel L2 runs them one at a time so at most one
+# window is open, while the rest of the tier keeps its parallel workers.
+apple-terminal-l2 = { max-threads = 1 }
 
 [profile.default]
 # Direct local nextest invocations also leave capacity for other host work.
@@ -141,6 +145,10 @@ slow-timeout = { period = "30s", terminate-after = 3 }
 [[profile.default.overrides]]
 filter = 'test(=level2_render_tree_style::level2_render_tree_style_in_wezterm)'
 slow-timeout = { period = "30s", terminate-after = 3 }
+
+[[profile.default.overrides]]
+filter = 'test(/(^|::)level2_apple_terminal_/)'
+test-group = 'apple-terminal-l2'
 
 # Browser-tier tests spawn real headless Chrome, whose multi-process teardown
 # (helper + crashpad processes that inherit the test's stdout) is the slowest

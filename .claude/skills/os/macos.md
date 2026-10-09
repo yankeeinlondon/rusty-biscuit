@@ -271,6 +271,15 @@ Measured 2026-10-05 on macOS 27.2 (arm64) for Sniff's path-usage query:
   (`BISCUIT_HARNESS_OWNER_PID`, see the `biscuit-test-harness` skill); the
   send error now carries tmux's own message and the live session list. If
   it recurs, read that list before blaming the test.
+- **WezTerm L2 tests time out at `attach/spawn WezTerm` or `initial capture`
+  with `command timed out after 10s`/`15s`, different tests each run.** Too
+  many parallel L2 workers for the single `wezterm-mux-server`, which also
+  serves the developer's own WezTerm windows. On 2026-10-08, claudine-cli's
+  L2 at 14 workers (`logical_cores - 2` on this 16-core Mac) failed three
+  then four different WezTerm tests in consecutive runs; at 4 workers all
+  281 passed. `_test_l2_threads` now caps parallel L2 at four. If it recurs,
+  check `ps` for another worktree's `just ci-local` or `test-l2` before
+  blaming the test.
 - **Terminal detection forks `defaults`.** On an iTerm2 host,
   `biscuit_terminal::Terminal::default()` spawns `defaults read
   com.googlecode.iterm2 New Bookmarks` up to three times (font name, size,
