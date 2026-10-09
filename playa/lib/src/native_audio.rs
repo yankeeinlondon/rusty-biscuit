@@ -86,6 +86,33 @@ pub(crate) fn remaining_until(deadline: Instant) -> Duration {
     deadline.saturating_duration_since(Instant::now())
 }
 
+/// Keeps COM loaded for the rest of the process; call before spawning any
+/// worker thread that touches cpal.
+///
+/// cpal's WASAPI host caches one process-global `IMMDeviceEnumerator` but
+/// initializes COM through a thread-local guard that calls `CoUninitialize`
+/// when its thread exits. Native device calls here each run on a short-lived
+/// worker, so when the first worker exits COM unloads `MMDevApi.dll` and the
+/// next worker calls through a dangling vtable (an access violation). An MTA
+/// usage reference keeps COM, and that DLL, alive across workers.
+pub(crate) fn pin_com_for_process() {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::System::Com::{CO_MTA_USAGE_COOKIE, CoIncrementMTAUsage};
+
+        static PIN: std::sync::Once = std::sync::Once::new();
+        PIN.call_once(|| {
+            // The cookie is deliberately never passed to `CoDecrementMTAUsage`.
+            let mut cookie: CO_MTA_USAGE_COOKIE = std::ptr::null_mut();
+            // SAFETY: `cookie` is a valid out-pointer for the duration of the call.
+            let hr = unsafe { CoIncrementMTAUsage(&mut cookie) };
+            if hr < 0 {
+                tracing::warn!("playa: CoIncrementMTAUsage failed (HRESULT {hr:#010x})");
+            }
+        });
+    }
+}
+
 /// Runs a potentially blocking native-device operation behind a timeout.
 pub(crate) fn run_with_timeout<T, E, F, TimeoutFn>(
     timeout: Duration,
@@ -98,6 +125,7 @@ where
     F: FnOnce() -> Result<T, E> + Send + 'static,
     TimeoutFn: FnOnce(Duration) -> E,
 {
+    pin_com_for_process();
     let (tx, rx) = mpsc::channel();
 
     std::thread::spawn(move || {
