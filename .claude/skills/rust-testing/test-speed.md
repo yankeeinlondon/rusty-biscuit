@@ -21,7 +21,7 @@ test alone and inside its full package run. A large gap between the two means
 the test competes for a shared resource, usually CPU or process spawns.
 
 ```sh
-cargo nextest run -p claudine-cli -F claudine-cli/test-fixtures -E 'test(/^prompt_guide_defects::/)'
+cargo nextest run -p claudine-cli -F claudine-cli/test-fixtures -E 'test(/^compose_caller_file_provenance::/)'
 ```
 
 ## Causes Found in This Repository

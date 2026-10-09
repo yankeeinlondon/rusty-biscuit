@@ -151,10 +151,12 @@ pub(crate) mod drain_interrupt;
 pub(crate) mod fs_capability;
 pub(crate) mod host_tools;
 pub(crate) mod incomplete_subagents;
+pub(crate) mod lifecycle_set_corpus;
 #[cfg(unix)]
 pub(crate) mod launch_recorder;
 pub(crate) mod owned_value_options;
 pub(crate) mod prompt_staging;
+pub(crate) mod provenance;
 #[cfg(unix)]
 pub(crate) mod pty;
 pub(crate) mod review_router;

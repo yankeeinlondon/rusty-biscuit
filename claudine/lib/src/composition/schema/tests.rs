@@ -2,9 +2,13 @@
 
 use super::*;
 use crate::composition::CompositionMode;
-use crate::composition::resolve::{resolve_composition_source, resolve_composition_source_in_context};
+use crate::composition::resolve::resolve_composition_source;
+#[cfg(feature = "prompt-tests")]
+use crate::composition::resolve::resolve_composition_source_in_context;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+#[cfg(feature = "prompt-tests")]
+use std::path::Path;
 use tempfile::TempDir;
 
 fn make_source(dir: &TempDir, document: &str) -> ResolvedCompositionSource {
@@ -18,6 +22,10 @@ fn make_source(dir: &TempDir, document: &str) -> ResolvedCompositionSource {
     crate::composition::resolve_fixture_source(file.to_str().unwrap()).unwrap()
 }
 
+// These helpers and the two `shipped_implement_plan_*` tests read the live
+// `prompts/` tree, so they compile only with the opt-in `prompt-tests` feature
+// (`just test-prompts`); CI never runs them.
+#[cfg(feature = "prompt-tests")]
 fn shipped_implement_plan() -> PathBuf {
     biscuit_test_harness::manifest_dir!()
         .ancestors()
@@ -26,6 +34,7 @@ fn shipped_implement_plan() -> PathBuf {
         .join("prompts/_implement/implement-plan.md")
 }
 
+#[cfg(feature = "prompt-tests")]
 fn copy_tree(from: &Path, to: &Path) {
     fs::create_dir_all(to).unwrap();
     for entry in fs::read_dir(from).unwrap() {
@@ -46,6 +55,7 @@ fn copy_tree(from: &Path, to: &Path) {
 /// directory and reads `ctx.*` from its repository, so it needs a repository
 /// around `prompts/`, not this checkout: capturing the monorepo's dirty-file
 /// list and topology cost seconds and decided nothing the test asserts.
+#[cfg(feature = "prompt-tests")]
 fn prepare_shipped_implement_plan(
     plan: &Path,
     commit_message: Option<&str>,
@@ -87,6 +97,7 @@ fn prepare_shipped_implement_plan(
     .expect("the shipped implement-plan prompt should prepare")
 }
 
+#[cfg(feature = "prompt-tests")]
 fn success_shell_commands(prepared: &PreparedComposition) -> Vec<String> {
     crate::composition::lifecycle::collect_lifecycle_shell_commands_for(
         &prepared.lifecycle,
@@ -152,6 +163,7 @@ fn no_schema_passes_through_unchanged() {
     assert!(prepared.prompt.contains("body"));
 }
 
+#[cfg(feature = "prompt-tests")]
 #[test]
 fn shipped_implement_plan_prepares_with_unset_optional_commit_message() {
     let dir = TempDir::new().unwrap();
@@ -186,6 +198,7 @@ fn shipped_implement_plan_prepares_with_unset_optional_commit_message() {
     );
 }
 
+#[cfg(feature = "prompt-tests")]
 #[test]
 fn shipped_implement_plan_preserves_supplied_commit_message_in_preflight_command() {
     let dir = TempDir::new().unwrap();

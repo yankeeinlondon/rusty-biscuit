@@ -2,85 +2,12 @@
 
 use crate::common;
 
-use common::prompt_staging::{stage_shipped_prompts, workspace_root};
+use common::provenance::{install_goose, run_compose};
 use common::{CliProcessFixture, strip_ansi, write};
 // Consumed only inside the `#[cfg(unix)]` statements below; ungated, the
 // Windows check (`just check-windows`) reports it unused.
 #[cfg(unix)]
 use common::write_executable;
-
-/// A Goose stub that records its delivered prompt and, when
-/// `CLAUDINE_INLINE_TARGET` names a document, edits that document's body the
-/// way a file-aware inline agent does.
-fn install_goose(fixture: &CliProcessFixture) {
-    #[cfg(unix)]
-    write_executable(
-        &fixture.bin_dir().join("goose"),
-        &format!(
-            "#!/bin/sh\n\
-             printf '%s\\n' \"$*\" > \"$HOME/provider-prompt\"\n\
-             if [ -n \"$CLAUDINE_INLINE_TARGET\" ]; then\n\
-             CLAUDINE_DOC=\"$CLAUDINE_INLINE_TARGET\"\n\
-             CLAUDINE_ADD=''\n\
-             CLAUDINE_BODY='provider reached\n'\n\
-             {rewrite}\
-             fi\n\
-             printf 'provider reached\\n'\n",
-            rewrite = common::INLINE_BODY_REWRITE
-        ),
-    );
-    // A `.cmd` stub cannot receive the multi-line shipped prompts: Rust refuses
-    // to spawn a batch file whose arguments contain newlines. Compile a tiny
-    // native provider instead, mirroring `inline_compose_hash.rs`.
-    #[cfg(windows)]
-    {
-        let source = fixture.bin_dir().join("goose-fixture.rs");
-        write(
-            &source,
-            r##"fn main() {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    let home = std::env::var("USERPROFILE")
-        .or_else(|_| std::env::var("HOME"))
-        .expect("a home directory for the provider prompt");
-    std::fs::write(
-        std::path::Path::new(&home).join("provider-prompt"),
-        format!("{}\n", args.join(" ")),
-    )
-    .expect("write provider prompt");
-    if let Ok(target) = std::env::var("CLAUDINE_INLINE_TARGET") {
-        let current = std::fs::read_to_string(&target).expect("read the inline target");
-        let mut delimiters = 0;
-        let mut head = String::new();
-        for line in current.split_inclusive('\n') {
-            if delimiters >= 2 {
-                break;
-            }
-            if line.trim_end_matches(['\r', '\n']) == "---" {
-                delimiters += 1;
-            }
-            head.push_str(line);
-        }
-        std::fs::write(&target, format!("{head}provider reached\n"))
-            .expect("write the inline target");
-    }
-    println!("provider reached");
-}
-"##,
-        );
-        let output = std::process::Command::new("rustc")
-            .arg("--edition=2024")
-            .arg(&source)
-            .arg("-o")
-            .arg(fixture.bin_dir().join("goose.exe"))
-            .output()
-            .expect("rustc must build the Windows provider fixture");
-        assert!(
-            output.status.success(),
-            "provider fixture compilation failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-}
 
 #[cfg(unix)]
 fn install_retrying_goose(fixture: &CliProcessFixture) {
@@ -112,27 +39,6 @@ case " $* " in
 esac
 "#,
     );
-}
-
-fn run_compose(
-    fixture: &CliProcessFixture,
-    cwd: &std::path::Path,
-    document: &std::path::Path,
-    setters: &[&str],
-) -> String {
-    // Escape: caller-relative references must resolve from this fixture directory.
-    let mut command = fixture.command_builder().ambient_context(cwd).build();
-    let audio_spool = fixture.cwd().join("provenance-audio-spool");
-    // Shipped templates retain their lifecycle actions; provenance tests must not play them.
-    command
-        .env("PLAYA_DRY_RUN", "1")
-        .env("PLAYA_SPOOL_DIR", &audio_spool)
-        .env("PATHEXT", ".COM;.EXE;.BAT;.CMD")
-        .args(["compose", "--goose", document.to_str().unwrap()]);
-    command.args(setters);
-    let assertion = command.assert().success();
-    assert!(!audio_spool.exists(), "provenance tests must not publish audio");
-    strip_ansi(&String::from_utf8_lossy(&assertion.get_output().stderr))
 }
 
 // `CLAUDINE_TEST_DIAGNOSTIC_SNAPSHOT` is compiled into the binary only by
@@ -258,122 +164,6 @@ fn a_proxy_target_derives_sibling_paths_from_the_callers_package_relative_file()
     assert!(
         present_design_prompt.contains("**Design:** @packages/example/fixes/case/design.md"),
         "the target must derive a present design beside the caller's spec; prompt:\n{present_design_prompt}"
-    );
-}
-
-#[test]
-fn shipped_implement_router_prefers_an_unimplemented_review_over_the_completed_plan() {
-    let fixture = CliProcessFixture::named("implement-router-unimplemented-review");
-    fixture.initialize_repository();
-    fixture.seed_user_config();
-    install_goose(&fixture);
-
-    let package = fixture.cwd().join("packages/example");
-    let case = package.join("fixes/case");
-    write(
-        &case.join("spec.md"),
-        "---\nstatus: draft\n---\nSpecification.\n",
-    );
-    write(
-        &case.join("plan.md"),
-        "---\ntotal_phases: 5\nphase: 5\n---\n# Plan\n",
-    );
-    write(
-        &case.join("review-1.md"),
-        "---\nready: false\nimplemented: false\n---\n# Review 1\n\nA finding to implement.\n",
-    );
-
-    let router = fixture.cwd().join("prompts/implement.md");
-    let repository = workspace_root();
-    stage_shipped_prompts(
-        &repository,
-        &fixture.cwd().join("prompts"),
-        &[
-            "prompts/implement.md",
-            "prompts/_implement/implement-suggestions.md",
-            "prompts/_implement/implement-plan.md",
-        ],
-    );
-    write(
-        &fixture.cwd().join("prompts/_implement/implement-plan.md"),
-        include_str!("../fixtures/shipped_implement_route/_implement/implement-plan.md"),
-    );
-
-    let stderr = run_compose(&fixture, &package, &router, &["spec=fixes/case/spec.md"]);
-
-    assert!(
-        stderr.contains("Implement Review Suggestions"),
-        "an existing unimplemented review must outrank the already-executed plan; stderr:\n{stderr}"
-    );
-    // The stderr panel previews only the first 20 rendered rows, and the
-    // route's leading rule block fills most of them, so the review path is
-    // asserted on the prompt the provider received rather than the preview.
-    let provider_prompt =
-        std::fs::read_to_string(fixture.home().join("provider-prompt")).unwrap();
-    assert!(
-        provider_prompt.contains("review-1.md"),
-        "the routed prompt must name the unimplemented review; prompt:\n{provider_prompt}"
-    );
-    assert!(
-        !stderr.contains("Implement Phase 5 of 5"),
-        "the router must not resume the original plan once a review exists; stderr:\n{stderr}"
-    );
-}
-
-/// An archived case — an implemented spec whose reviews are all implemented —
-/// matches no route. The router must reach its own routing error rather than
-/// raising on the `review` guard, which is an optional input nobody supplied.
-#[test]
-fn shipped_implement_router_refuses_an_archived_case_through_its_own_error() {
-    let fixture = CliProcessFixture::named("implement-router-archived-case");
-    fixture.initialize_repository();
-    fixture.seed_user_config();
-    install_goose(&fixture);
-
-    let package = fixture.cwd().join("packages/example");
-    let case = package.join("fixes/case");
-    write(
-        &case.join("spec.md"),
-        "---\nimplemented: true\nreview_iterations: 4\n---\nCase.\n",
-    );
-    write(
-        &case.join("review-4.md"),
-        "---\nimplemented: true\n---\n# Review 4\n",
-    );
-
-    let router = fixture.cwd().join("prompts/implement.md");
-    write(&router, include_str!("../../../../prompts/implement.md"));
-
-    // Not `run_compose_failure`: an authored `error:` action is a routing
-    // decision, not a typed diagnostic facet, so it writes no snapshot.
-    // Escape: caller-relative references must resolve from this fixture directory.
-    let mut command = fixture.command_builder().ambient_context(&package).build();
-    let audio_spool = fixture.cwd().join("provenance-audio-spool");
-    let assertion = command
-        .env("PLAYA_DRY_RUN", "1")
-        .env("PLAYA_SPOOL_DIR", &audio_spool)
-        .env("PATHEXT", ".COM;.EXE;.BAT;.CMD")
-        .args(["compose", "--goose", router.to_str().unwrap()])
-        .args(["spec=fixes/case/spec.md"])
-        .assert()
-        .failure();
-    assert!(
-        !audio_spool.exists(),
-        "provenance tests must not publish audio"
-    );
-    let stderr = strip_ansi(&String::from_utf8_lossy(&assertion.get_output().stderr));
-
-    assert!(
-        stderr.contains("Unable to route the implementation to an appropriate prompt"),
-        "an archived case must fail through the router's own error; stderr:\n{stderr}"
-    );
-    assert!(
-        !stderr.contains("references undefined variable"),
-        "an unsupplied optional input must not crash a routing guard; stderr:\n{stderr}"
-    );
-    assert!(
-        !fixture.home().join("provider-prompt").exists(),
-        "an unroutable case must not launch a provider"
     );
 }
 
@@ -1172,8 +962,10 @@ fn shipped_review_router_non_tty_partial_fails_before_initialize() {
         &package.join("fixes/2026-09-10-local-affected-scope/spec.md"),
         "---\nreviewed: true\n---\nSpecification.\n",
     );
+    // A frozen copy of the review router, intentionally not kept in step with
+    // `prompts/review.md`.
     let router = fixture.cwd().join("prompts/review.md");
-    write(&router, include_str!("../../../../prompts/review.md"));
+    write(&router, include_str!("../fixtures/frozen_prompts/prompts/review.md"));
 
     // The fixture package is the caller's launch origin, separate from the router.
     let mut command = fixture.command_builder().ambient_context(&package).build();
@@ -1211,7 +1003,7 @@ fn proxy_target_partial_is_resolved_before_the_target_initialize() {
     );
     write(
         &fixture.cwd().join("prompts/review.md"),
-        include_str!("../../../../prompts/review.md"),
+        include_str!("../fixtures/frozen_prompts/prompts/review.md"),
     );
     let entry = fixture.cwd().join("prompts/entry.md");
     write(
@@ -1248,7 +1040,7 @@ fn shipped_review_router_literal_does_not_collect_absent_route_inputs() {
         "---\nreviewed: true\nmarker: caller-spec\n---\nSpecification.\n",
     );
     let router = fixture.cwd().join("prompts/review.md");
-    write(&router, include_str!("../../../../prompts/review.md"));
+    write(&router, include_str!("../fixtures/frozen_prompts/prompts/review.md"));
     write(
         &fixture.cwd().join("prompts/_reviews/feature-review.md"),
         "---\n$schema:\n  spec: file(required;eager;match(**/*spec*.md))\nselected: \"{{ frontmatter(spec, 'marker') }}\"\n---\nSELECTED={{ selected }}\n",
@@ -1275,7 +1067,7 @@ fn shipped_review_router_reaches_the_review_route_past_the_absent_spec_guard() {
         "---\nimplemented: true\nmarker: caller-review\n---\n# Review 1\n",
     );
     let router = fixture.cwd().join("prompts/review.md");
-    write(&router, include_str!("../../../../prompts/review.md"));
+    write(&router, include_str!("../fixtures/frozen_prompts/prompts/review.md"));
     write(
         &fixture.cwd().join("prompts/_reviews/suggestion-review.md"),
         "---\n$schema:\n  review: file(required;eager;match(**/*review*.md))\nselected: \"{{ frontmatter(review, 'marker') }}\"\n---\nSELECTED={{ selected }}\n",

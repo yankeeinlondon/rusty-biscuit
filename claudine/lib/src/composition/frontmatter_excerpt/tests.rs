@@ -249,7 +249,9 @@ fn capture_line_appendix_highlights_fence_line() {
 // A mid-file key (`settings.target`, line 10) far from both block ends.
 const MID_DOC: &str = "---\nagent: codex\nsettings:\n  a: 1\n  b: 2\n  c: 3\n  d: 4\n  e: 5\n  f: 6\n  target: x\n  g: 7\n  h: 8\n  i: 9\n  j: 10\n  k: 11\ntail: 1\n---\nbody\n";
 
-const CLARIFY: &str = include_str!("../../../../../prompts/clarify.md");
+// A frozen copy of `prompts/clarify.md`, intentionally not kept in step with the
+// live prompt.
+const CLARIFY: &str = include_str!("../../../tests/fixtures/frozen_prompts/prompts/clarify.md");
 
 fn plain_term() -> Terminal {
     Terminal::builder()

@@ -52,6 +52,9 @@ required-features = ["test-fixtures"]
 daemon-tests = ["dep:rendezvous-daemon"]
 terminal-tests = []
 real-tests = []
+# Opt-in tests of the repository's internal `prompts/`; run by
+# `just test-prompts`, never by CI.
+prompt-tests = []
 # Test-only fixture binaries and process-level seams (the library's included):
 # never part of a default build or `cargo install`.
 test-fixtures = ["claudine/test-fixtures"]
@@ -189,6 +192,11 @@ required-features = ["terminal-tests"]
 name = "real"
 path = "tests/real/main.rs"
 required-features = ["real-tests"]
+
+[[test]]
+name = "prompts"
+path = "tests/prompts/main.rs"
+required-features = ["prompt-tests"]
 
 # CI policy: claudine-cli owns the area's L2 (PTY/tmux) tier tests. Its tests
 # need inert AI-provider CLI stubs for provider discovery, and the darkmatter

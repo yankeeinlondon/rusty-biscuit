@@ -24,6 +24,9 @@ harness = false
 # only through `claudine-cli`'s own `test-fixtures` feature, whose L1 tests
 # drive them from outside the process.
 test-fixtures = []
+# Opt-in tests of the repository's internal `prompts/`; run by
+# `just test-prompts`, never by CI.
+prompt-tests = []
 
 [dependencies]
 # Internal

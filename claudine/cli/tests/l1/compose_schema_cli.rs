@@ -1172,19 +1172,16 @@ fn compose_eager_spec_setter_anchors_before_plan_expression_from_root_and_area()
         .expect("claudine CLI crate should live two levels below the repository root")
         .to_path_buf();
 
-    // The subject is a *shipped* prompt's plan expression, so the real
-    // `prompts/plan.md` is the artifact under test — but the two launch
-    // directories it is exercised from must be repositories this test owns, not
-    // the rusty-biscuit checkout. Both files are copied at their checkout-
-    // relative paths, so every relative reference in them resolves identically.
+    // The subject is a shipped prompt's plan expression, so a frozen copy of
+    // `prompts/plan.md` (intentionally not kept in step with the live prompt)
+    // is the artifact under test — but the two launch directories it is
+    // exercised from must be repositories this test owns, not the rusty-biscuit
+    // checkout. Both files are copied at their checkout-relative paths, so every
+    // relative reference in them resolves identically.
     let fixture = CliProcessFixture::named("compose-schema-cli");
     fixture.initialize_repository();
     let root = fixture.cwd().to_path_buf();
-    common::prompt_staging::stage_shipped_prompts(
-        &common::prompt_staging::workspace_root(),
-        &root.join("prompts"),
-        &["prompts/plan.md"],
-    );
+    common::prompt_staging::stage_frozen_prompts(&root.join("prompts"), &["plan.md"]);
     let relative = "claudine/cli/tests/fixtures/shipped_plan_route/spec.md";
     common::write(
         &root.join(relative),

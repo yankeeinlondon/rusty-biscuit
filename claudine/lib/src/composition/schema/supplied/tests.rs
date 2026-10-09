@@ -106,7 +106,12 @@ fn supplied_file_failure_matches_existing_partial_diagnostic() {
 fn supplied_files_select_shipped_review_router_union_arm() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("review.md");
-    std::fs::write(&path, include_str!("../../../../../../prompts/review.md")).unwrap();
+    // A frozen copy, intentionally not kept in step with `prompts/review.md`.
+    std::fs::write(
+        &path,
+        include_str!("../../../../tests/fixtures/frozen_prompts/prompts/review.md"),
+    )
+    .unwrap();
     let source = resolve_composition_source(path.to_str().unwrap(), &crate::test_support::snapshot_at(dir.path())).unwrap();
     let context = FileResolutionContext::new(dir.path());
     let records = CallerInputLayers::from_caller_overrides(
@@ -252,7 +257,8 @@ fn templated_sibling_does_not_select_conflicting_or_string_only_arms() {
 #[test]
 fn supplied_files_select_shipped_clarify_spec_arm() {
     let pending = pending_for(
-        include_str!("../../../../../../prompts/clarify.md"),
+        // A frozen copy, intentionally not kept in step with `prompts/clarify.md`.
+        include_str!("../../../../tests/fixtures/frozen_prompts/prompts/clarify.md"),
         json!({"spec": "fix"}),
     );
     assert_eq!(pending.len(), 1, "{pending:?}");
