@@ -39,6 +39,13 @@ name = "claudine-fake-completion"
 path = "tests/bin/fake_completion/main.rs"
 required-features = ["test-fixtures"]
 
+# Test-only Windows `claude` for `tests/l1/pr_flow_rehearsal.rs`, which relays
+# to the test binary's helper mode; gated like the others.
+[[bin]]
+name = "claudine-fake-relay"
+path = "tests/bin/fake_relay/main.rs"
+required-features = ["test-fixtures"]
+
 [features]
 # Keep the bundled DuckDB build out of the ordinary local test graph. CI and
 # the explicit daemon-test recipe enable this feature on every supported OS.

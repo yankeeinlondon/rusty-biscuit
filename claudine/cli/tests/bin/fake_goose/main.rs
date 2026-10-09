@@ -19,7 +19,7 @@ use std::{env, fs, thread, time::Duration};
 
 fn main() {
     // Marker mode, for callers that only need to count launches
-    // (`wrap_compose_validation`). It shares this binary because the reason a
+    // (`wrap_compose_validation`, `loop_gate_ambient`). It shares this binary because the reason a
     // compiled fixture exists at all is the same one: Rust refuses to pass
     // arguments it cannot safely escape to a `.bat`/`.cmd` file, so a batch
     // shim carrying Claudine's prompt fails with "batch file arguments are

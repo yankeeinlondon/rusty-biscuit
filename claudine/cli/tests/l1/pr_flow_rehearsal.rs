@@ -328,6 +328,7 @@ impl Rehearsal {
         let log = portable(&self.fixture.workspace_path().join("stub.log"));
         let init = r#"{"type":"system","subtype":"init","session_id":"rehearsal","model":"stub"}"#;
         let result = r#"{"type":"result","subtype":"success","result":"done","session_id":"rehearsal","is_error":false}"#;
+        #[cfg(unix)]
         write_stub(
             bin,
             "claude",
@@ -336,14 +337,23 @@ impl Rehearsal {
                  printf '%s\\n' '{init}'\n\
                  printf '%s\\n' '{result}'"
             ),
-            &format!(
-                "\"{exe}\" --exact {module}::stub_entrypoint --nocapture \"{HELPER_ARG}{scenario}\" >NUL 2>>\"{log}\"\r\n\
-                 if errorlevel 1 exit /b 1\r\n\
-                 echo {init}\r\n\
-                 echo {result}\r\n\
-                 exit /b 0"
-            ),
+            "",
         );
+        // A built relay rather than a `.cmd`: the interactive triage stage
+        // carries its prompt in argv, and Rust refuses to pass a multi-line
+        // argument to a batch file.
+        #[cfg(windows)]
+        {
+            std::fs::copy(biscuit_test_harness::bin_exe!("claudine-fake-relay"), bin.join("claude.exe"))
+                .expect("install the relay provider");
+            let relay = serde_json::json!({
+                "program": exe,
+                "args": ["--exact", format!("{module}::stub_entrypoint"), "--nocapture", format!("{HELPER_ARG}{scenario}")],
+                "stderr": log,
+                "stdout": [init, result],
+            });
+            write(&bin.join("claude.relay.json"), &relay.to_string());
+        }
     }
 
     fn make_dirty(&self) {
