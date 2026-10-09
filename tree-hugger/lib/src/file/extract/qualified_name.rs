@@ -57,11 +57,21 @@ pub(crate) fn qualified_names(
             }
         }
     }
+    // One climb per file, so the prefix walks stop at the root by ID rather
+    // than asking every node for its parent's parent.
+    let root_id = symbols.first().map_or(0, |symbol| {
+        let mut root = symbol.anchor;
+        while let Some(parent) = root.parent() {
+            root = parent;
+        }
+        root.id()
+    });
     let builder = Builder {
         symbols,
         owners,
         language,
         source,
+        root_id,
         file_namespaces: OnceCell::new(),
     };
     let mut memo: Vec<Option<QualifiedName>> = vec![None; symbols.len()];
@@ -128,6 +138,8 @@ struct Builder<'a, 'tree> {
     owners: HashMap<usize, usize>,
     language: ProgrammingLanguage,
     source: &'a str,
+    /// The ID of the symbols' tree root.
+    root_id: usize,
     /// The file-level namespace in force at each child of the root, by node
     /// id; built on first use (see [`file_namespace_index`]).
     file_namespaces: OnceCell<HashMap<usize, Option<Rc<str>>>>,
@@ -194,7 +206,7 @@ impl<'tree> Builder<'_, 'tree> {
     fn prefix(&self, index: usize, from: Node<'tree>) -> Prefix<'tree> {
         let mut child = from;
         while let Some(node) = child.parent()
-            && node.parent().is_some()
+            && node.id() != self.root_id
         {
             match self.owners.get(&node.id()) {
                 Some(&owner) if owner != index => return Prefix::Symbol(owner),

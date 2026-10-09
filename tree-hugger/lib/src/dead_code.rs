@@ -308,11 +308,8 @@ pub fn find_dead_code_after<'tree>(
             // Found the block. 'current' is now the direct child of the block
             // (e.g., expression_statement that contains the terminal macro_invocation)
             let mut found_statement = false;
-            let named_child_count = parent.named_child_count();
-            for index in 0..named_child_count {
-                let Some(child) = parent.named_child(index as u32) else {
-                    continue;
-                };
+            let mut cursor = parent.walk();
+            for child in parent.named_children(&mut cursor) {
                 if child.id() == current.id() {
                     found_statement = true;
                     continue;

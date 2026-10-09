@@ -131,9 +131,13 @@ fn is_declaration_kind(kind: &str) -> bool {
 /// Python's root is a `module` node, a boundary as every root is; a
 /// TypeScript `module A {}` is a declaration, so `module` is not listed.
 fn is_scope_boundary(node: Node<'_>) -> bool {
-    let kind = node.kind();
-    node.parent().is_none()
-        || is_block_like_dead_code_container(kind)
+    is_scope_boundary_kind(node.kind()) || node.parent().is_none()
+}
+
+/// [`is_scope_boundary`] by kind alone; the root is a boundary whatever its
+/// kind.
+fn is_scope_boundary_kind(kind: &str) -> bool {
+    is_block_like_dead_code_container(kind)
         || matches!(
             kind,
             "program"
@@ -160,18 +164,25 @@ fn is_scope_boundary(node: Node<'_>) -> bool {
 /// statement. When none is found before a body or block, the name's parent is
 /// used, and the name itself when the parent is such a boundary.
 pub(crate) fn resolve_declaration_node(name: Node<'_>) -> Node<'_> {
-    let mut current = name.parent();
+    let name_parent = name.parent();
+    let mut current = name_parent;
     while let Some(node) = current {
-        if is_scope_boundary(node) {
+        let kind = node.kind();
+        if is_scope_boundary_kind(kind) {
             break;
         }
-        if is_declaration_kind(node.kind()) {
+        // The root is a boundary too; its parent is the next step otherwise.
+        let parent = node.parent();
+        if parent.is_none() {
+            break;
+        }
+        if is_declaration_kind(kind) {
             return climb_declaration_wrapper(node);
         }
-        current = node.parent();
+        current = parent;
     }
 
-    name.parent()
+    name_parent
         .filter(|parent| !is_scope_boundary(*parent))
         .unwrap_or(name)
 }
