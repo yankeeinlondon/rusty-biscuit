@@ -1031,6 +1031,28 @@ _test_local_all specs *args="": _storage_preflight
             --skip level2_ --skip level3_ --skip browser_ --skip real_ --skip slow_ --skip perf_
     fi
 
+# Report every test Nextest marks SLOW for this package area.
+#
+# Runs the area's own `test` recipe, so selection stays exactly what the area
+# gates on — the packages, feature flags, and `_tier_filter L1` expression are
+# not restated here and cannot drift from `test`. Nextest prints each test past
+# the configured `slow-timeout.period` (`.config/nextest.toml`) and repeats the
+# list in its final summary; `--no-fail-fast` keeps that list complete when a
+# test fails. The status flags are Nextest-only, so there is deliberately no
+# `cargo test` fallback: a fallback would have no slow report to print.
+_slow_tests *args="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    read -r -a nextest_bin <<< "${BISCUIT_NEXTEST_BIN:-cargo nextest}"
+    if ! "${nextest_bin[@]}" --version >/dev/null 2>&1; then
+        echo "slow-tests: cargo-nextest is required, but '${nextest_bin[*]} --version' failed." >&2
+        exit 1
+    fi
+    echo
+    echo -e "🐌 {{ bold }}Slow tests{{ reset }} — this area's tests past the configured slow-timeout"
+    echo
+    just test --no-fail-fast --status-level slow --final-status-level slow {{ args }}
+
 # Sanity tier across several packages, continuing past failures. See `_run_all`.
 _sanity_all specs *args="":
     @just _run_all _sanity "{{ specs }}" {{ args }}
@@ -1977,9 +1999,9 @@ _check_tier_coverage *args="":
 # ---------------------------------------------------------------------------
 # Canonical lifecycle recipes (testing-best-practices spec, Phase 2).
 #
-# Each package-area justfile exposes the canonical 12-recipe set
-# (sanity, test, test-l2, test-l3, test-browser, test-real, lint, bench,
-# coverage, doctest, fuzz, all) and delegates the per-package boilerplate to
+# Each package-area justfile exposes the canonical 13-recipe set
+# (sanity, test, slow-tests, test-l2, test-l3, test-browser, test-real, lint,
+# bench, coverage, doctest, fuzz, all) and delegates the per-package boilerplate to
 # the shared `_*` recipes below. Tier filter expressions are documented in
 # `.config/nextest.toml`. Recipes that don't apply to a package are explicit
 # no-ops with an explanatory comment in the package's own justfile.
@@ -2608,7 +2630,7 @@ _all pkg:
 _check_canonical:
     #!/usr/bin/env bash
     set -euo pipefail
-    required=(sanity test test-l2 test-l3 test-browser test-real lint bench coverage doctest fuzz all)
+    required=(sanity test slow-tests test-l2 test-l3 test-browser test-real lint bench coverage doctest fuzz all)
     summary="$(just --summary 2>/dev/null | tr ' ' '\n')"
     missing=()
     for r in "${required[@]}"; do

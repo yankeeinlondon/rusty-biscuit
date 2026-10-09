@@ -45,6 +45,10 @@ sanity:
 test *args="":
     @just _test_all "biscuit-clipboard biscuit-clipboard-service biscuit-clipboard-cli" {{args}}
 
+# List every test Nextest marks SLOW (see the shared `_slow_tests`).
+slow-tests *args="":
+    @just _slow_tests {{ args }}
+
 # not applicable: biscuit-clipboard has no real-terminal (Level-2) tests
 test-l2:
     @echo "test-l2: not applicable for biscuit-clipboard"

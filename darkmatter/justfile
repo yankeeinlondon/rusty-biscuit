@@ -87,6 +87,10 @@ test *args="":
     echo
     exit "${exit_code}"
 
+# List every test Nextest marks SLOW (see the shared `_slow_tests`).
+slow-tests *args="":
+    @just _slow_tests {{ args }}
+
 # Level-2 (real-terminal) render-tree tests for both crates.
 #
 # By default, missing harnesses (WezTerm / tmux) cause the suite to skip

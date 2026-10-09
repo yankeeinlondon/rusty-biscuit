@@ -66,6 +66,10 @@ test *args="":
     @just _test_all "biscuit-file --features fetch; biscuit-file-cli" {{args}}
     @just test-minimal {{args}}
 
+# List every test Nextest marks SLOW (see the shared `_slow_tests`).
+slow-tests *args="":
+    @just _slow_tests {{ args }}
+
 # Proves the path→text boundary is genuinely unfeatured.
 #
 # `to_portable_string` / `try_portable_string` are documented as available

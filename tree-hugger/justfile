@@ -38,6 +38,10 @@ sanity:
 test *args="":
     @just _test_all "tree-hugger tree-hugger-cli" {{args}}
 
+# List every test Nextest marks SLOW (see the shared `_slow_tests`).
+slow-tests *args="":
+    @just _slow_tests {{ args }}
+
 # real-terminal (Level-2) tests for the `hug god-files` styled report.
 test-l2 *args="":
     @just _test_l2 tree-hugger-cli --features terminal-tests {{args}}

@@ -49,6 +49,10 @@ sanity:
 test *args="":
     @just _test_all "{{LIBRARY}} {{CLI}}" {{args}}
 
+# List every test Nextest marks SLOW (see the shared `_slow_tests`).
+slow-tests *args="":
+    @just _slow_tests {{ args }}
+
 # Level-2 (real-terminal) tests for the CLI. Library has no L2 tests.
 #
 # By default, missing harnesses (WezTerm / Kitty / tmux) cause individual

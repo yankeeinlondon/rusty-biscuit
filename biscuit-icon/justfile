@@ -44,6 +44,10 @@ sanity:
 test *args="":
     @just _test_all "biscuit-icon --features image; biscuit-icon-cli --features image" {{ args }}
 
+# List every test Nextest marks SLOW (see the shared `_slow_tests`).
+slow-tests *args="":
+    @just _slow_tests {{ args }}
+
 test-l2 *args="":
     @just _test_l2 biscuit-icon-cli --features image,terminal-tests {{ args }}
 

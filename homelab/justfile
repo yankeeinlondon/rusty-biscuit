@@ -75,6 +75,10 @@ test *args="":
     just test-frontend || exit_code=1
     exit "${exit_code}"
 
+# List every test Nextest marks SLOW (see the shared `_slow_tests`).
+slow-tests *args="":
+    @just _slow_tests {{ args }}
+
 # not applicable: homelab has no real-terminal (Level-2) tests
 test-l2:
     @echo "test-l2: not applicable for homelab"

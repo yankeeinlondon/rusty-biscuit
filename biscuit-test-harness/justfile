@@ -57,6 +57,10 @@ sanity:
 test *args="":
     @just _test {{ LIBRARY }} {{ args }}
 
+# List every test Nextest marks SLOW (see the shared `_slow_tests`).
+slow-tests *args="":
+    @just _slow_tests {{ args }}
+
 # Level-2 tests for the library. Most of this crate's own coverage is
 # in-process, but the harness's contract with the *host shell* is only
 # observable in a real pane, so those cases live here. The consumer areas still

@@ -50,6 +50,10 @@ sanity:
 test *args="":
     @just _test_all "{{ CORE }} {{ DAEMON }} {{ CLIENT }}" {{ args }}
 
+# List every test Nextest marks SLOW (see the shared `_slow_tests`).
+slow-tests *args="":
+    @just _slow_tests {{ args }}
+
 # Level-2 (real-terminal) tests are not applicable to rendezvous.
 test-l2 *args="":
     @echo "test-l2: not applicable for rendezvous"

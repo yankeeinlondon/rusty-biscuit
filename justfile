@@ -353,7 +353,7 @@ fuzz *args="":
 all *args="":
     @just _orchestrate all {{ args }}
 
-# validate that every curated package area defines the canonical 12-recipe set
+# validate that every curated package area defines the canonical 13-recipe set
 #
 # Parses each area's `justfile` directly with grep rather than spawning a
 # nested `just --summary` per area. The nested form is prone to hangs on
@@ -366,7 +366,7 @@ check-canonical *args="":
     set -euo pipefail
     failed_areas=()
     passed_areas=()
-    required=(sanity test test-l2 test-l3 test-browser test-real lint bench coverage doctest fuzz all)
+    required=(sanity test slow-tests test-l2 test-l3 test-browser test-real lint bench coverage doctest fuzz all)
 
     if [[ -z "{{ args }}" ]]; then
         target_areas=({{ areas }})
