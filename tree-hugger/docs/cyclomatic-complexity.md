@@ -60,8 +60,8 @@ language without counting rules is not re-analyzed on every run.
 The value is **1 plus one for each decision point** in the callable's own
 body. The body is the same text as the record's `source.body_span` and
 `metrics.lines` (see
-[Body lines](./symbol-kinds-and-visibility.md#body-lines)): a block, or an
-expression body such as `(k) => k ? 1 : 2`.
+[Body lines](./symbol-kinds-and-visibility/documentation-flags-and-metrics.md#body-lines)):
+a block, or an expression body such as `(k) => k ? 1 : 2`.
 
 ```mermaid
 flowchart TD
@@ -283,10 +283,21 @@ The value describes the code as written. It is a syntax measurement:
   inside a nested class (`x = a ? 1 : 2`) is not counted in the enclosing
   function or in any method.
 
-## Changes to the rules
+## When the rules change
 
-A change to a counting rule changes the reported numbers for existing code.
-The library's extractor revision is raised with every such change, so cached
-results computed under the old rules are discarded and recomputed rather
-than mixed with new ones. The record schema version only changes when the
-shape of a record changes (schema 4.3 added the `cyclomatic` key).
+A change to a counting rule changes the reported numbers for unchanged code.
+Every such change raises the library's extractor revision, which is part of
+the [cache fingerprint](./cache-design/entry-format.md#the-fingerprint), so
+cached values computed under the old rules are recomputed rather than mixed
+with new ones. The record schema version does not change with a counting
+rule; it changes only when the shape of a record does. The `cyclomatic` key
+exists in records of schema 4.3 and later.
+
+## Related pages
+
+- [Documentation, Flags and Metrics](./symbol-kinds-and-visibility/documentation-flags-and-metrics.md):
+  the other metrics on a record, and how the body is measured.
+- [Symbol Reports](./symbol-reports.md): the commands and JSON reports that
+  carry `metrics`.
+- [Tree Hugger's Persistent Symbol Cache](./cache-design.md): how cached
+  values stay in step with the rules.
