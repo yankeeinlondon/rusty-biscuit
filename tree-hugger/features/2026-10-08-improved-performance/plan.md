@@ -51,16 +51,55 @@ docs_updated_during_phase_3:
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
 source_files_during_phase_4:
+  - tree-hugger/lib/src/analysis/declaration_names.rs
+  - tree-hugger/lib/src/analysis/mod.rs
+  - tree-hugger/lib/src/analysis/occurrences.rs
+  - tree-hugger/lib/src/analysis/scope/ecma.rs
+  - tree-hugger/lib/src/analysis/scope/mod.rs
+  - tree-hugger/lib/src/analysis/scope/rust.rs
+  - tree-hugger/lib/src/analysis/syntax_markers.rs
+  - tree-hugger/lib/src/dead_code.rs
+  - tree-hugger/lib/src/file/extract/attributes.rs
+  - tree-hugger/lib/src/file/extract/classify.rs
+  - tree-hugger/lib/src/file/extract/declaration.rs
+  - tree-hugger/lib/src/file/extract/doc_comments.rs
+  - tree-hugger/lib/src/file/extract/flags.rs
+  - tree-hugger/lib/src/file/extract/generics.rs
+  - tree-hugger/lib/src/file/extract/header/keyword.rs
+  - tree-hugger/lib/src/file/extract/modifiers.rs
+  - tree-hugger/lib/src/file/extract/navigation.rs
+  - tree-hugger/lib/src/file/extract/qualified_name.rs
+  - tree-hugger/lib/src/file/extract/relations.rs
+  - tree-hugger/lib/src/file/extract/rust_impl.rs
+  - tree-hugger/lib/src/file/extract/scope.rs
+  - tree-hugger/lib/src/file/extract/signatures.rs
+  - tree-hugger/lib/src/file/extract/static_flags/cpp.rs
+  - tree-hugger/lib/src/file/extract/static_flags/php.rs
+  - tree-hugger/lib/src/file/extract/static_flags/python.rs
+  - tree-hugger/lib/src/file/extract/static_flags/rust.rs
+  - tree-hugger/lib/src/file/extract/static_flags/scala.rs
+  - tree-hugger/lib/src/file/extract/visibility/c.rs
+  - tree-hugger/lib/src/file/extract/visibility/cpp.rs
+  - tree-hugger/lib/src/file/extract/visibility/csharp.rs
+  - tree-hugger/lib/src/file/extract/visibility/ecma.rs
+  - tree-hugger/lib/src/file/extract/visibility/java.rs
+  - tree-hugger/lib/src/file/extract/visibility/lua.rs
+  - tree-hugger/lib/src/file/extract/visibility/rust.rs
+  - tree-hugger/lib/src/file/extract/visibility/swift.rs
+  - tree-hugger/lib/src/file/mod.rs
+  - tree-hugger/lib/src/file/parents.rs
   - tree-hugger/lib/src/file/tree_file.rs
   - tree-hugger/lib/src/file/tree_file/definitions.rs
   - tree-hugger/lib/src/file/tree_file/relations.rs
   - tree-hugger/lib/src/file/tree_file/relations/lexical.rs
-  - tree-hugger/lib/src/analysis/occurrences.rs
-  - tree-hugger/lib/src/analysis/scope/mod.rs
-  - tree-hugger/lib/src/analysis/scope/ecma.rs
-  - tree-hugger/lib/src/analysis/syntax_markers.rs
-  - tree-hugger/lib/src/file/extract/
   - tree-hugger/lib/src/shared/schema_v2/mod.rs
+docs_updated_during_phase_4:
+  - tree-hugger/features/2026-10-08-improved-performance/plan.md
+  - tree-hugger/features/2026-10-08-improved-performance/implementation-log.md
+  - tree-hugger/features/2026-10-08-improved-performance/spec.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/tree-hugger/SKILL.md
 source_files_during_phase_5:
   - tree-hugger/cli/src/scan.rs
   - tree-hugger/cli/src/render.rs
@@ -70,8 +109,20 @@ source_files_during_phase_5:
   - tree-hugger/cli/src/report.rs
   - tree-hugger/cli/src/prelude.rs
   - tree-hugger/cli/src/main.rs
+  - tree-hugger/cli/tests/symbols/refs.rs
+  - tree-hugger/cli/tests/symbols/report.rs
   - tree-hugger/lib/src/god_files/analysis.rs
-  - tree-hugger/lib/src/file/extract/flags.rs
+  - tree-hugger/lib/src/file/source_file.rs
+docs_updated_during_phase_5:
+  - tree-hugger/docs/references.md
+  - tree-hugger/docs/symbol-reports.md
+  - tree-hugger/cli/README.md
+  - tree-hugger/features/2026-10-08-improved-performance/plan.md
+  - tree-hugger/features/2026-10-08-improved-performance/implementation-log.md
+  - tree-hugger/features/2026-10-08-improved-performance/spec.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .claude/skills/tree-hugger/SKILL.md
 source_files_during_phase_6:
   - tree-hugger/lib/src/scanner.rs
   - tree-hugger/lib/src/file/source_file.rs
@@ -470,7 +521,7 @@ their spike showed a gain.
 
 ### Wave 1
 
-- [ ] **P1.** Implement the parent lookup that won in Phase 3: (b), the
+- [x] **P1.** Implement the parent lookup that won in Phase 3: (b), the
   lazy memo, or (c), the full index from one cursor pass. Owned by the
   per-file facts (`FileFacts` / the occurrence `Walk`); indexes never
   outlive their tree.
@@ -480,33 +531,47 @@ their spike showed a gain.
   - Pin the index with a test asserting `index.parent(n) == n.parent()` for
     every node of every `symbols/` fixture, including anonymous, aliased
     and missing nodes.
-- [ ] **O2.** Do `ScopeTree::with_rules`' parents and depth with one
+  - Done as (c). The index is installed per thread for the duration of
+    `run_query` (`file/parents.rs`), not threaded through signatures;
+    see the implementation log.
+- [x] **O2.** Do `ScopeTree::with_rules`' parents and depth with one
   span-sorted stack sweep (as `smallest_enclosing` does), and move
   `scope_around` and `Regions::around` onto the P1 index.
+  - Done through the P1 index instead of a span sweep, which cannot prove
+    ancestry for zero-width or equal-range nodes (implementation log).
 
 ### Wave 2 (parallel, after Wave 1)
 
-- [ ] **O1.** Excluded-context and `export_statement` lookups use a
+- [x] **O1.** Excluded-context and `export_statement` lookups use a
   nesting-aware index recorded during `Walk::run`. That index keeps node
   identity, never bare byte intervals, per the spec's O1 risk notes.
-- [ ] **O3.** Handle `with_statement` in `visit_ecma`. Swift
+- [x] **O3.** Handle `with_statement` in `visit_ecma`. Swift
   `swift_element_labels` uses the cursor.
-- [ ] **P3.** Share the impl/self-type decisions and the `Lexical` build
+- [x] **P3.** Share the impl/self-type decisions and the `Lexical` build
   between `rust_impl_owners` and `link_relations`. Also skip
   `Declarations` in `link_relations` when nothing can resolve (P14).
-- [ ] **P2** *(conditional)*:
+  - The `Lexical` walk is shared; the self-type decisions are not (the
+    linker needs its own lookup site for the trait). P14's early return is
+    done.
+- [x] **P2** *(conditional)*:
   - Above ~80% skip rate: the prefilter.
   - Otherwise: share the walk between definitions and bind (P2(a)).
-- [ ] **P6, P7, P10, P14 remainder, O6, O8.** Small byte-identical cleanups
+  - Done as P2(a): Phase 3 measured a 27% skip rate.
+- [x] **P6, P7, P10, P14 remainder, O6, O8.** Small byte-identical cleanups
   per the spec. P7 keeps IDs pinned with an equality test against the
   current `stable_symbol_key`/`symbol_id_from_stable_key`.
-- [ ] **P8** *(conditional)*: memoize comment/attribute runs only if the
+  - Done: P6, P7, P10, part of P14 and O8. Not done, with reasons in the
+    log: O6 and the rest of P14/O8.
+- [x] **P8** *(conditional)*: memoize comment/attribute runs only if the
   `prev_sibling` share is still visible after P1.
-- [ ] **P12, O7** *(conditional, on the References profile)*.
+  - Not done: Phase 3 measured the sibling share at 1.3% after `p1b`.
+- [x] **P12, O7** *(conditional, on the References profile)*.
+  - Not done: the Phase 3 References profile showed no hashing or
+    `rust_impl_type` frames at a visible share.
 
 ### Wave 3
 
-- [ ] **Verify:**
+- [x] **Verify:**
   - targeted tests: `just test symbols_occurrences symbols_relations
     symbols_owner_identity symbols_shared_context symbols_relation_work
     symbols_query symbols_cache symbols_flags symbols_metrics
@@ -517,10 +582,10 @@ their spike showed a gain.
   `symbols_shared_context` and `symbols_relation_work` assert linear
   `shared_context_steps`. Where the work count changes on purpose, update
   those expectations, and record each change in the log.
-- [ ] **Docs:** the tree-hugger skill's architecture bullets (the parent
+- [x] **Docs:** the tree-hugger skill's architecture bullets (the parent
   index, the shared Rust facts). Topic docs are unchanged, since there is no
   behavior change.
-- [ ] **Timing sample** against Phase 2's numbers.
+- [x] **Timing sample** against Phase 2's numbers.
 
 **Checkpoint 4:** PR 2 has a byte-identical diff and green tests. The cold
 monorepo `symbols --count` is logged. Stop for review.
@@ -531,7 +596,7 @@ monorepo `symbols --count` is logged. Stop for review.
 
 ### Wave 1 (parallel)
 
-- [ ] **L1.**
+- [x] **L1.**
   - For the default single-file listing unit, render on the workers into
     `Vec<u8>` in `work`. Capture terminal capabilities and width once on
     the main thread; workers never probe the TTY.
@@ -539,42 +604,58 @@ monorepo `symbols --count` is logged. Stop for review.
   - Stop the per-line `Terminal` clone in `Renderer::term_at`.
   - The biscuit-terminal literal-row fast path is a separate item: only if
     a narrow API that preserves escaping and width can be added (spec L1).
-- [ ] **L4.** Make `hug refs` two-phase:
+  - Done for the terminal and Prose layouts; Markdown keeps the delivery
+    path (its layout carries blank-line state between units). The
+    biscuit-terminal fast path was not added: warm `--plain` already fell
+    2.35 → 0.72 s (implementation log).
+- [x] **L4.** Make `hug refs` two-phase:
   - phase 1: every kind and scope, no Occurrences;
   - decide ambiguity before writing anything;
   - phase 2: Occurrences on the one matching `SourceFile` snapshot.
 
   Add no text prefilter.
-- [ ] **L7, L14, L15.** Add the run-scoped package-root memo and move JSON
+  - Done. A scan of exactly one file asks for Occurrences in phase 1 and
+    reuses that result, so its cost and `--verbose` totals are unchanged.
+- [x] **L7, L14, L15.** Add the run-scoped package-root memo and move JSON
   trimming and sorting into `work`. Key stats by enum. Use the run-scoped
   `is_test_file` manifest memo, which never enters records or cache
   entries. Consume reused prelude results instead of cloning them.
-- [ ] **L11, streaming half.** Render `lint`/`imports` text per file in the
+  - Done, except the `is_test_file` memo and the root-identity precompute:
+    both are now worker-side costs measured below 1% (implementation log).
+    JSON entries and lines are also serialized on the worker.
+- [x] **L11, streaming half.** Render `lint`/`imports` text per file in the
   delivery closure, deciding clean-file suppression from `files.len() > 1`.
   Adapter warnings keep their position.
-- [ ] **L12.** `god-files`: one read per candidate, a metadata-size
+  - An unavailable adapter is warned once, right before the first file it
+    affected, after flushing earlier output.
+- [x] **L12.** `god-files`: one read per candidate, a metadata-size
   pre-reject, and a borrowed source.
 
 ### Wave 2 (conditional on Phase 1's L2 verdict and Phase 3's numbers)
 
-- [ ] **L2.** The sliding window, with the cancellation, error and flush
+- [x] **L2.** The sliding window, with the cancellation, error and flush
   rules from the spec. New tests cover one worker, a slow head, empty
   input, a failed write and a closed pipe.
-- [ ] **P11.** Padding or thread-local counters, per Phase 3's result,
+  - The window advances only past a delivery that flushed, so a failed
+    write still stops within one window (`scan::tests`; the closed-pipe
+    bounds in `symbols/report.rs` are unchanged).
+- [x] **P11.** Padding or thread-local counters, per Phase 3's result,
   preserving the `work_counters()` contract (spec P11 risk).
+  - Dropped, as Phase 3 decided: `p11-nocount` changed nothing at any
+    thread count. The atomics stay.
 
 ### Wave 3
 
-- [ ] **Verify:**
+- [x] **Verify:**
   - targeted tests: `just test golden export reports outline refs
     filters report grouping changed`;
   - the output diff protocol;
   - `just test-l2` (L1 changes rendering);
   - then `just test` and `just lint`.
-- [ ] **Docs:** `docs/symbol-reports.md`, if broken-pipe or streaming bounds
+- [x] **Docs:** `docs/symbol-reports.md`, if broken-pipe or streaming bounds
   changed wording ("chunk" becomes "window"); `docs/references.md` for the
   two-phase `refs` (`--verbose` totals); the CLI README; the skill.
-- [ ] **Timing sample:** warm `--plain`, `refs`, `imports | head`.
+- [x] **Timing sample:** warm `--plain`, `refs`, `imports | head`.
 
 **Checkpoint 5:** PR 3 has a byte-identical diff, green L1 and L2, and a
 log entry. Stop for review.

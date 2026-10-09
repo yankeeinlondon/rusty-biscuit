@@ -239,48 +239,38 @@ human_review_items:
     *Recommendation:* defer, then re-measure mimalloc after C4. Drop LTO
     either way.
 message_to_agent: |-
-  Phase 3 (spikes) is done; details are in implementation-log.md under
-  "## Phase 3". No repository code changed. The spike code is saved as
-  /tmp/th-p3/spike.patch (applies to 350cec8a2, includes Phase 2's working
-  tree; may not survive a reboot). The worktrees were removed.
-  - The author's rulings on the Open Questions are pending (human_review).
-    Phase 4 does not depend on them; Phase 7 does.
-  - P1: implement (c), the full parent index from one TreeCursor pass, not
-    (b). The lazy memo (spike `p1b`) is exact (20 M lookups asserted equal
-    to Node::parent()) and cuts cold CPU 25%. But
-    schematic/definitions/src/openai/mod.rs (401 KB, generated) takes 536 s
-    for `--json-full symbols --no-cache`, all in Regions::around's parent
-    climbs, and the memo cannot fix it: each unseen node still pays one root
-    descent. Use that file as the P1/O2 acceptance check: time it before and
-    after, and pin it with a work-count test, not a timing assertion. It
-    also makes a monorepo `refs --no-cache` take 7-8 min on one thread.
-  - Spike `p1b` routed all 201 tree-sitter .parent() calls in lib/src
-    through the memo, not just the named callers; the gain is spread across
-    them.
-  - P2: do (a), share the walk. The prefilter skips only 27% of Rust files
-    and gives no wall gain.
-  - P3: do it. One Lexical::build per Rust file (5,713 -> 4,113 builds);
-    -10% wall on Rust. Lexical::build reads only the entries' node ids and
-    kinds, so a key of (name, declaration, anchor) node ids plus kind is an
-    exact reuse check (0 mismatches over the monorepo).
-  - P8, P12, O7: the profile does not support them (sibling navigation is
-    1.3% of Rust after p1b). O1's export climb (is_ecma_export_name, 11-17%
-    of TS) and O2's Regions::around/scope_around stay ~95% navigation with
-    the memo; do O1/O2 as planned. O3 is still worth it (Walk::run is 13-16%
-    of TS).
-  - Phase 5: do L2 (the window gave -17 to -23% wall at 4-16 threads, cold
-    and warm; identical output). Drop P11 (no effect at any thread count).
-    The spike window does not handle a panicking head job; Phase 5 must.
-  - Combined (p1b + p3-share + window): cold monorepo `symbols --count`
-    5.92 s -> 2.95 s, CPU 33.5 s -> 22.4 s.
-  - The working tree also holds Phase 2's uncommitted changes and unrelated
-    edits (CLAUDE.md, .claude/skills/os, features/2026-10-08-windows-to-nightly),
-    so the scope calculator reports packages and the gates must run.
-  - Use bash, not zsh, for `cmd 2>&1 >/dev/null | grep`: zsh's MULTIOS also
-    sends stdout down the pipe.
-  Every change must preserve public behavior unless the author approves a
-  change described in Open Questions. Spikes are quick samples on one host,
-  not benchmark gates.
+  Phase 5 (output pipeline and command-level work) is implemented,
+  uncommitted; details are in implementation-log.md under "## Phase 5".
+  just test (2059 passed), just test-l2 and just lint are green; the output
+  diff protocol is byte-identical apart from the clap usage error naming
+  the binary.
+  - scan::in_file_order is now a sliding window on scoped std threads
+    (rayon::current_num_threads() of them). deliver takes a third argument,
+    scan::Flush; call flush.apply(out) (or JsonReport::flush) after writing,
+    because the window advances only past a delivery that flushed. A
+    closed pipe therefore stops within one window (4 x threads files).
+    chunk_size/flush_at_chunk_end no longer exist.
+  - Worker threads are fresh per in_file_order call, so per-thread state
+    (the parents index) is installed per run_query as before; nothing else
+    is thread-local.
+  - Analyzer::read + Analyzer::analyze_source analyze one SourceFile
+    snapshot more than once (refs phase 2, prelude). L13 (Phase 6) touches
+    changed.rs, which still calls collect_files and in_file_order the same
+    way.
+  - lib: SourceFile::from_read(supplied, language, source) is the
+    crate-private half of read_with_language (file_identity + language +
+    hash). Phase 6's C8 identity-preserving constructor should sit beside
+    it, not duplicate it.
+  - Departures recorded in the log: refs --verbose totals count both phases
+    on multi-file scans; text lint hides clean files from files.len() > 1
+    even when others fail; adapter warnings now precede their first file;
+    is_test_file memo not built (measured <1%).
+  - The author's Open Question rulings are still pending (human_review);
+    Phase 6 does not depend on them.
+  - Scratch artifacts: /tmp/th-p5 (hug-base, hug-new, bin/protocol*.sh).
+  - `just cross-check <pkg> --os windows <name filters>` works for a
+    filtered run; an -E '...' expression with parentheses does not survive
+    just's argument splitting.
 ---
 
 # Tree Hugger performance review
