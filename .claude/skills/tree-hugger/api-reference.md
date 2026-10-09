@@ -180,7 +180,9 @@ literal); qualified when it holds `#` or the language's separator, then it
 matches the displayed `qualified_name` (anchored at the file prefix). A
 qualified `in_container` pattern matches the record's qualified name minus
 its own name. `portable_relative` (`file/naming.rs`) is the one path
-projection, shared by the prefix and the CLI.
+projection, shared by the prefix and the CLI; it replaces names that are
+not valid Unicode, and `lossless_portable_relative` gives the same text or
+`None` when it did (the ctags writer's navigation check).
 
 | Capability | Implies | Work |
 |---|---|---|
