@@ -32,16 +32,33 @@ area: tree-hugger
 packages:
   - tree-hugger
   - tree-hugger-cli
-human_review: true
+human_review: false
 message_to_agent: |-
-  This spec is a performance review, not yet a plan. Every finding carries
-  a measured or estimated impact and a spike recommendation. Findings marked
-  "decision" change a documented contract (output, cache policy or cache
-  format) and need the author's call before a plan is written. Every change
-  must preserve public behavior unless the author approves a change described
-  in Open Questions. Compare the affected command and query before and after;
-  a complete-index comparison alone cannot prove narrow-query or rendering
-  equivalence. Spikes are quick samples on one host, not benchmark gates.
+  Phase 1 (baseline and no-build spikes) is done; numbers are in
+  implementation-log.md under "## Phase 1". Revision 03c5d835c, load average
+  6-14 on 16 cores, so absolute times are 2-4x lower than this spec's (which
+  was measured at load 40-56). Use the Phase 1 rows, not the spec's table, as
+  the before-numbers for Phases 2-6.
+  - C1 reproduces: openai/types.rs --json-full warm hit 1.25 s vs --no-cache
+    0.81 s. Phase 2's C1 target is "warm below 0.81 s".
+  - C5 reproduces: first --json after a --count cache 9.4 s vs 1.7 s second.
+  - L3 reproduces: single file 70.6 ms in-repo vs 7.5 ms outside, --version
+    6.1 ms. A positional absolute path to a file outside the cwd currently
+    fails with NoSourceFiles; keep that unless the author rules otherwise.
+  - L2 symptom reproduces at low load: darkmatter cold 6.05x at 16 threads
+    (2.69x at 4); user CPU grows only 12%, so threads wait rather than
+    contend. L2 and P11 stay in scope.
+  - O4: test_affected_scope.py (377 KB) gives 222 MB of --json-full and a
+    223 MB cache entry; 95% is candidate lists, 89% of them on `self`.
+  - L5: oxlint is not installed here; with it absent, discovery costs about
+    32 us per JS/TS file (PATH walk). Phase 3's oxlint-batch arm needs oxlint
+    installed (the author's call, plan rule 3).
+  - L6: the terminal is WezTerm, not iTerm2. A pseudo-TTY shows the 2 x 1 s
+    OSC 10/11 timeout (2.12 s vs 69 ms); the real-terminal sample is deferred
+    to the author because agent sessions have no TTY.
+  Every change must preserve public behavior unless the author approves a
+  change described in Open Questions. Spikes are quick samples on one host,
+  not benchmark gates.
 ---
 
 # Tree Hugger performance review

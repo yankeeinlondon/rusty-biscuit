@@ -12,8 +12,12 @@ packages:
   - tree-hugger
   - tree-hugger-cli
 source_files_during_phase_1: []
+docs_updated_during_phase_1:
+  - tree-hugger/features/2026-10-08-improved-performance/plan.md
+  - tree-hugger/features/2026-10-08-improved-performance/spec.md
 docs_created_during_phase_1:
   - tree-hugger/features/2026-10-08-improved-performance/implementation-log.md
+skills_files_updated_during_phase_1: []
 source_files_during_phase_2:
   - tree-hugger/lib/src/cache/stored_evidence.rs
   - tree-hugger/lib/src/file/tree_file.rs
@@ -159,10 +163,10 @@ phase changes code.
 
 ### Tasks
 
-- [ ] **Create `implementation-log.md`** with a results table: date,
+- [x] **Create `implementation-log.md`** with a results table: date,
   revision, finding, arm, command, threads, cache state, load average, wall
   time, user time, counts.
-- [ ] **Baseline record.** For each, record the load average and warm or
+- [x] **Baseline record.** For each, record the load average and warm or
   cold state:
   - cold (empty `TMPDIR`) and warm `hug symbols --count` over the monorepo;
   - warm `--plain`;
@@ -172,23 +176,26 @@ phase changes code.
     repo root and from outside it.
 
   These are the comparison points for Phases 2–6.
-- [ ] **O4 candidate sizing.**
+- [x] **O4 candidate sizing.**
   1. Run `--json-full symbols` on `scripts/ci/test_affected_scope.py` and on
      a generated Python class with 300 methods that use `self` (write it to
      the scratchpad).
   2. With a short `python3 -I` script, count occurrences, the sum of
      `candidates.len()`, and the output bytes.
-- [ ] **L5 cost.**
+- [x] **L5 cost.**
   - If oxlint is available: count spawns for `hug lint 'some-ts-dir/**'`
     (`sudo execsnoop`, or `fs_usage`), plus wall time.
   - Otherwise: `sample` a `hug lint` run over a JS/TS-heavy glob and record
     the time spent in `OxlintAdapter` discovery.
-- [ ] **L6 TTY sample.** In the author's real terminal (not a forged
+- [x] **L6 TTY sample.** In the author's real terminal (not a forged
   `TERM_PROGRAM`), run `hyperfine -N` on `hug symbols <file>` against
   `hug symbols --count <file>` with a warm cache; the difference is renderer
   plus terminal detection. Also record the `defaults` spawns under iTerm2,
   if that is the terminal in use.
-- [ ] **L2 symptom check, only under rule 2's load condition.** Warm and cold
+  - Done as far as an agent can (pseudo-TTY and piped runs). The terminal
+    is WezTerm, not iTerm2; the real-terminal sample is deferred to the
+    author (see the implementation log).
+- [x] **L2 symptom check, only under rule 2's load condition.** Warm and cold
   `darkmatter/` `hug symbols --count` with `RAYON_NUM_THREADS=1,4,8,16`
   (`hyperfine -w 1 -r 3`).
   - Speed-up under 8× at 16 threads with low load means the symptom
