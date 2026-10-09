@@ -12,9 +12,10 @@
 //! <area>/docs/research/<topic>/<slug>.md      (+ sibling _schema.yaml)
 //! ```
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 
 use darkmatter::markdown::Markdown;
 use biscuit_file::FileResolutionContext;
@@ -374,12 +375,33 @@ pub fn area_resolution_context(
     area: &Path,
     snapshot: &RequestSnapshot,
 ) -> Result<FileResolutionContext, GenError> {
-    build_resolution_context(&snapshot.at_request_dir(area)).map_err(|source| {
+    // WHY: building a context discovers the repository and its package
+    // scopes, a git walk of a few hundred milliseconds that every load of
+    // every provider repeated for the same area. The key is the area plus
+    // everything the build reads from the snapshot, so a different home,
+    // environment, or `@` root never reuses a context. Failures are not
+    // cached.
+    let mut env: Vec<_> = snapshot.env().iter().collect();
+    env.sort();
+    let key = format!("{area:?}|{:?}|{env:?}|{:?}", snapshot.home(), snapshot.magic_roots());
+    if let Some(hit) = context_cache().lock().ok().and_then(|cache| cache.get(&key).cloned()) {
+        return Ok(hit);
+    }
+    let context = build_resolution_context(&snapshot.at_request_dir(area)).map_err(|source| {
         GenError::ResolutionContext {
             area: area.to_path_buf(),
             source: Box::new(source),
         }
-    })
+    })?;
+    if let Ok(mut cache) = context_cache().lock() {
+        cache.insert(key, context.clone());
+    }
+    Ok(context)
+}
+
+fn context_cache() -> &'static Mutex<HashMap<String, FileResolutionContext>> {
+    static CACHE: OnceLock<Mutex<HashMap<String, FileResolutionContext>>> = OnceLock::new();
+    CACHE.get_or_init(Default::default)
 }
 
 /// Parses a YAML file into a `serde_json::Value`.
