@@ -3,7 +3,9 @@ spec: /Volumes/coding/wt/rusty-biscuit/feat-symbols/tree-hugger/features/2026-10
 plan: tree-hugger/features/2026-10-08-improved-performance/plan.md
 implemented_by: claude/opus
 started_phase: 1
-packages: []
+packages:
+  - tree-hugger
+  - tree-hugger-cli
 source_files_during_phase_1: []
 docs_updated_during_phase_1:
   - tree-hugger/features/2026-10-08-improved-performance/plan.md
@@ -11,6 +13,38 @@ docs_updated_during_phase_1:
 docs_created_during_phase_1:
   - tree-hugger/features/2026-10-08-improved-performance/implementation-log.md
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - tree-hugger/lib/src/cache/stored_evidence.rs
+  - tree-hugger/lib/src/cache/symbol_cache.rs
+  - tree-hugger/lib/src/file/tree_file.rs
+  - tree-hugger/lib/src/file/tree_file/definitions.rs
+  - tree-hugger/lib/src/analysis/mod.rs
+  - tree-hugger/lib/src/analysis/occurrences.rs
+  - tree-hugger/lib/src/file/extract/declaration.rs
+  - tree-hugger/lib/src/file/extract/qualified_name.rs
+  - tree-hugger/lib/src/dead_code.rs
+  - tree-hugger/lib/src/rule_registry.rs
+  - tree-hugger/lib/src/ignore_directives.rs
+  - tree-hugger/lib/tests/l1/symbols_cache.rs
+  - tree-hugger/cli/src/main.rs
+  - tree-hugger/cli/src/declarations.rs
+  - tree-hugger/cli/tests/symbols/report.rs
+docs_updated_during_phase_2:
+  - tree-hugger/docs/symbol-reports.md
+  - tree-hugger/cli/README.md
+  - tree-hugger/features/2026-10-08-improved-performance/plan.md
+  - tree-hugger/features/2026-10-08-improved-performance/implementation-log.md
+  - tree-hugger/features/2026-10-08-improved-performance/spec.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+  - .claude/skills/tree-hugger/SKILL.md
+source_files_during_phase_3: []
+docs_updated_during_phase_3:
+  - tree-hugger/features/2026-10-08-improved-performance/plan.md
+  - tree-hugger/features/2026-10-08-improved-performance/implementation-log.md
+  - tree-hugger/features/2026-10-08-improved-performance/spec.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
 ---
 
 # Implementation Log for 2026-10-08-improved-performance (7 phases)
@@ -213,3 +247,710 @@ behavior; its deliverable is the measurements above.
   empty list, so the plan keeps its scope. This log's `packages` is `[]`.
 - Scratch artifacts (fixtures, JSON outputs, the helper scripts) are under
   `/tmp/th-p1/` and are not part of the repository.
+
+## Phase 2
+
+Byte-identical fixes with evidence in hand. The four Wave 1 groups were done
+in sequence by one agent (they share one `target/` directory, so parallel
+builds would only queue). The base binary for the output diff protocol is
+`target/profiling/hug` at `350cec8a2` (no tree-hugger source change since
+`03c5d835c`), saved as `/tmp/th-p2/hug-base` before any edit.
+
+### 2A: cache validation (`stored_evidence.rs`, `symbol_cache.rs`)
+
+- **C1.** `unbound_names_have_a_binding` now tests `checked.contains(text)`
+  first and asks a `Covering` cursor over the start-sorted, deduplicated
+  `taken` spans. **Departure from the plan's wording:** the plan said
+  "merged" spans; merging overlapping spans would accept a reading that
+  crosses two spans and is inside neither, which the old
+  `taken.iter().any(..)` refused. The cursor instead keeps the furthest end
+  among spans starting at or before the reading, which is exactly the old
+  predicate (readings arrive with non-decreasing starts).
+  `identifier_readings` returns an iterator. The encoded-token pass runs only
+  when `memchr::memmem` finds `r#` (Rust) or `\u` (TS/JS); no other language
+  can produce an encoded witness, so the skip is exact. Its exact-span test
+  is now a `binary_search` on the sorted spans.
+- **C2.** `scoped` is keyed by `(owner, target, name_identity::key, kind)`,
+  so `made` is two set lookups (`equal` is defined as key equality). The
+  per-record `dependencies.contains` / `references.contains` use a `RefList`
+  map keyed by `(id, name, qualified_name)` and confirm with full
+  `SymbolRef` equality (the source span is not hashable). The per-owner
+  scoped list became `OwnScoped`: the first position per target ID, and the
+  ascending positions of no-ID occurrences by name key, so
+  `summaries_in_first_occurrence_order` uses a map lookup and a
+  `partition_point` instead of linear `find`s. The greedy earliest-first
+  choice is unchanged.
+- **C7.** `StoredEntry::validate` builds one `LineStarts` and passes it to
+  `validate_imports` and (inside `StoredEvidence`) `validate_evidence`.
+  `import_inventory` and `write_imports` serialize a borrowed
+  `StoredImportView` with the stored form's field names and order;
+  `StoredImport` is now deserialize-only. Hashing stays on
+  `biscuit_hash::blake3_hash`.
+- **Tests added:**
+  - `cache::stored_evidence::tests::import_inventory_digest_is_pinned`:
+    digests of a two-import list (every optional field both set and unset)
+    and of the empty list, captured from the **old** code before the change.
+  - `cache::stored_evidence::tests::covering_agrees_with_a_scan_of_every_span`:
+    the cursor against the old linear predicate for every range over
+    overlapping, touching, nested and empty spans.
+  - `symbols_cache::encoded_binding_witnesses_keep_unbound_uses_served`
+    (lib L1): a TS `\u0078` import, a JS `\u{79}` import and a Rust
+    `r#match_` import each witness an unbound `Scoped` use, and the warm
+    read is a `Hit` served equal to the miss. Mutation check: changing the
+    TS/JS probe to a string that never matches makes this test fail.
+    The refusal side was already pinned by
+    `encoded_binding_sources_preserve_lost_id_rejection`.
+- **Targeted run:** `just test cache_robustness symbols_cache
+  stored_evidence cache_upgrade symbols_cache_imports cache_lexical`:
+  400 passed.
+
+### 2B: query pipeline and native diagnostics
+
+- **P4.** `capture_definitions` keeps its `local.definition.import`
+  captures in match order and returns them in a new `Definitions` struct
+  (`symbols`, `import_nodes`, `scopes`) from both `definitions()` and
+  `definitions_with_scopes()`; the tuple is gone. `imported_symbols()` now
+  collects its own captures and calls `imports_from_nodes`, which holds the
+  old body (sort and dedup by `(start_byte, end_byte)` unchanged). The
+  imports query is the locals query's text (`resolve_query_text` falls
+  through to `resolve_locals_query` for `Imports`), so both runs see the
+  same nodes in the same match order, and the stable sort keeps the same
+  survivor among equal spans. `run_query` reads `import_nodes`; so do the
+  public `referenced_symbols`, `lint_diagnostics`, `try_lint_diagnostics`
+  and `try_diagnostics`, which also ran the query twice. `QueryKind::Imports`,
+  `RECORD_QUERIES` and the counters are unchanged. The `occurrences.rs`
+  test helper keeps calling `imported_symbols()` as an independent oracle.
+- **P9.** `ExtractedSymbol::is_exported` is computed at the end of
+  `capture_definitions`, on the finished symbol (`is_exported_definition`
+  reads only `kind`, `language` and the anchor; nothing mutates a symbol's
+  kind after extraction). `exports_from`, `exported_symbols`,
+  `local_symbols` and `records_from` read the field.
+- **L8 (library).** `RuleRegistry::builtin() -> &'static RuleRegistry`
+  (a `LazyLock`); `diagnostic_metadata` uses it. `new()` and
+  `get_or_default` are unchanged. The registry has no public mutators, so
+  sharing it is safe.
+- **L9.** `build_source_context_from_range` reads the line through a lazy
+  `OnceLock<Vec<usize>>` line index on `TreeFile` (`line_starts` +
+  `nth_line`). **Correction to the plan's wording:** `str::lines()` drops
+  a `\r` only from a line that ended in `\n`; an unterminated last line
+  keeps its `\r` (`"a\r".lines()` is `["a\r"]`). `nth_line` copies that
+  rule exactly rather than always dropping one `\r`. Both
+  `named_child(index)` loops (`dead_code_ranges`, `find_dead_code_after`)
+  iterate `named_children(&mut cursor)`; tree-sitter's `named_children`
+  yields the same nodes as `named_child(0..named_child_count())`.
+- **L10.** `apply_ignore_directives` returns early when there are no
+  diagnostics or `memmem` finds no `tree-hugger-ignore` in the source.
+  `IGNORE_LINE_PREFIX` is now `pub(crate)` and documents that every
+  directive starts with it. No work counter is attached to the parse.
+- **Tests added:**
+  - `file::tree_file::definitions::tests::imports_from_the_definition_run_equal_imported_symbols`:
+    every parseable file under `lib/tests/fixtures/` (asserting more than 50
+    files and 50 imports), plus inline grouped and repeated captures (Rust
+    `use a::{self, *}`, Scala `{_, given}`, a Go alias, Swift selective
+    imports, TS default/named/namespace/re-export, Python grouped `from`):
+    the imports from the definition run equal `imported_symbols()`.
+  - `file::tree_file::tests::nth_line_agrees_with_lines`: LF, CRLF, a bare
+    `\r`, a trailing unterminated `\r`, `\r\r\n`, no final newline, the
+    empty file, multibyte text, and every index up to past the end.
+  - `rule_registry::tests::builtin_is_one_shared_new_registry`: one
+    instance; the same rule IDs and `get_or_default` (an alias and an
+    unknown rule included) as `new()`.
+  - L10 and the `named_children` change are pinned by the existing
+    `lint_diagnostics` directive tests (line, file, bare and in-string) and
+    the `dead_code` suite.
+- **Targeted run:** `just test tree_file lint_diagnostics symbols_query
+  symbols_cache symbols_coverage ignore_directives dead_code` plus the new
+  tests: 385 passed.
+
+### 2C: occurrences and declaration climbs
+
+- **O5.** `resolve` computes `written_path` once and passes it to
+  `resolve_supported` as `path: Option<&str>`; the occurrence's
+  `qualified_name` takes the same value.
+- **P1(a).**
+  - `is_scope_boundary` tests the kind first (`is_scope_boundary_kind`)
+    and `parent().is_none()` last.
+  - `resolve_declaration_node` asks each step for its parent once (and
+    only when the kind is not a boundary), and reuses the name's parent at
+    the end. The order of the boundary and declaration tests is unchanged.
+  - `Builder::prefix` stops at the root by ID. `qualified_names` finds the
+    root with one climb from the first symbol's anchor rather than taking a
+    new `root` parameter, so its three callers (one in `definitions.rs`,
+    two in `classify.rs`) are untouched.
+  - The `fill_metadata` scope reuse stays deferred to Phase 4, as the plan
+    says.
+- **Tests:** no new test; these are pure refactors of pure functions. They
+  are pinned by `just test symbols_occurrences symbols_qualified_names
+  symbols_scope symbols_relations symbols_owner_identity` (151 passed) and
+  by the output diff protocol (`--json-full`, `refs`) in Wave 2.
+
+### 2D: CLI lint and output correctness (`cli/src/main.rs`)
+
+- **L8 (CLI).** The four `RuleRegistry::new()` sites (`summarize_file`,
+  `add_external_lint_diagnostics`, `render_summary`, `rule_list_items`) use
+  `RuleRegistry::builtin()`.
+- **Second policy pass removed.** First proved idempotent by
+  `tests::lint_policy_applied_twice_equals_once` (bin unit test, written and
+  passing **before** the pass was removed): every built-in rule, the
+  `unreachable-code` alias, an unknown native rule and an unknown
+  `oxlint/…` rule, each with no metadata, native metadata and external-tool
+  metadata, under `--deny`/`--warn`/`--allow` shapes (none, `all`, every
+  category, every rule ID, and mixed pairs), × `--strict` × 
+  `--experimental-semantics`; more than 10,000 policy results compared.
+  `render_summary` now renders `summary.lint` as summarized (the JSON
+  output already used exactly that list).
+- **L11 (correctness half).** `imports`/`lint` text and JSON go through one
+  `BufWriter<StdoutLock>`; `print_file_header`, `render_summary`,
+  `render_diagnostics_filtered`, `render_unified_diagnostic`,
+  `render_source_context` and `render_imports` take `&mut dyn Write` and
+  return `io::Result`. The writer is flushed (and dropped) before the
+  `--verbose` stats line, so stdout/stderr order is unchanged; adapter
+  warnings still go to stderr before any report bytes.
+  `declarations::write_status` is now `pub(crate)` and decides the exit:
+  a closed pipe gives 0, any other write failure prints
+  `error: cannot write output: …` and gives 1, otherwise lint errors or
+  failed files give 1 as before. Note the consequence, inherited from the
+  declaration commands: a lint run with error findings whose reader closes
+  early now exits 0 (it used to panic with 101).
+- **Tests added:** `report::imports_and_lint_end_quietly_on_a_closed_pipe`
+  (CLI L1): `imports` (default, `--plain`, `--json`) and `lint` (default,
+  `--plain --deny all`, `--json`) into a pipe whose reader closed before
+  `hug` started: no panic, no write-error message, exit 0. The
+  `write_status` mapping itself is already pinned by
+  `declarations::tests` (broken pipe, "disk full", success).
+- **Reproduction:** with the reader gone before the first write,
+  `hug-base imports 'tree-hugger/lib/src/**'` and `hug-base --json lint …`
+  exit 101 with a `panicked at …/stdio.rs` message; the new binary exits 0
+  with nothing on stderr.
+
+### Wave 2: docs, verification and timing
+
+#### Docs
+
+- `docs/symbol-reports.md` ("Failed files and exit status"): `imports` and
+  `lint` now treat stdout like the declaration commands: a closed pipe
+  exits `0`, another write failure prints `error: cannot write output` and
+  exits `1`, with an example.
+- `cli/README.md` (Lint Command): `lint`'s exit status and the quiet
+  closed-pipe exit for `lint` and `imports`.
+- `.claude/skills/tree-hugger/SKILL.md` (Rule Registry): one line on
+  `RuleRegistry::builtin()`, and one on the CLI applying lint policy once.
+- `docs/cache-design.md`: unchanged. It has no notes on the validation
+  algorithms C1/C2/C7 replaced, and its robustness tables still hold.
+
+#### Gates
+
+- `just test` (tree-hugger area), first run: **2 timeouts**,
+  `cache_robustness::every_kind_evidence_identities_name_retained_declarations_in_every_language`
+  and `…retained_geometry_written_paths_and_candidate_order_are_checked_in_every_language`
+  (30 s nextest limit), at 1710/2034 when fail-fast stopped the run. That
+  run overlapped the output diff protocol on a host at load ~31. Alone,
+  the two took 5.8 s and 6.6 s. **Second run, nothing else running: 2034
+  passed, 0 failed** (163 slow), exit 0.
+- `just lint`, first run: one clippy `type_complexity` error on `RefList`'s
+  map type. Fixed with a `RefIdentity` type alias. Second run: exit 0.
+  `just test stored_evidence symbols_cache` re-run after the alias: 133
+  passed.
+- Scope calculator (run from the repository root after all edits):
+
+  ```sh
+  git status --porcelain --untracked-files=all | awk '{print $NF}' \
+    | xargs python3 scripts/ci/affected_scope.py
+  ```
+
+  `"packages": ["tree-hugger", "tree-hugger-cli", "test-toolkit"]`,
+  `"change_class": "package"`, so both gates were required and were run.
+  `test-toolkit` was not edited. The calculator includes it as a package
+  that reads these files; its gates were not run here (they belong to its
+  own area, and CI will run them).
+
+#### Output diff protocol
+
+Base: `hug-base` (see the top of this phase). New: `target/profiling/hug`
+after every Phase 2 code edit. Both ran from the repository root
+(`/Volumes/coding/wt/rusty-biscuit/feat-symbols`), one fixed scratch
+`TMPDIR` per arm, `NO_COLOR=1`. Scripts: `/tmp/th-p2/bin/protocol.sh`
+and `/tmp/th-p2/bin/protocol2.sh` (scratch, not in the repo).
+
+- **Corpora:** `tree-hugger/**`; the 16 files of
+  `lib/tests/fixtures/symbols/multi/**` (passed with `--file`); the two p99
+  files.
+- **Commands:** `--json-full symbols`, `--json symbols`,
+  `symbols --plain`, `classes --plain`, `imports`, `--json lint`, and `refs`
+  (Rust `resolve_declaration_node` over `tree-hugger/`).
+- **States:** cold (`--no-cache`), warm twice, then once more after a wide
+  `--json-full symbols` run.
+- **Result: 336 output/stderr/exit-code files compared; 331 identical, and
+  all 5 differences are benign:**
+  - `th.lint.cold.out`: `adapter_metadata[].elapsed_time_ms` (wall-clock
+    time) differs. With that field masked, the 100 MB output is
+    byte-identical.
+  - `fix.lint.{cold,warm1,warm2,wide}.err`: `lint` takes no `--file`, so
+    both binaries printed a usage error that names the binary (`hug-base`
+    vs `hug`). This row tested nothing, so it was replaced (next point).
+- **Supplementary rows** (`protocol2.sh`, run from inside the fixture
+  directory because `lint` and `refs` take no `--file` and ordinary scans
+  skip `fixtures/`; the base binary copied to `/tmp/th-p2/base/hug` so
+  usage text matches): `--json lint`, `lint --plain`, `imports --plain`,
+  `refs build_widget rust.rs`, `refs buildPanel typescript.ts`,
+  `refs --json Panel typescript.ts`, `refs --plain --callers main
+  nested/go.go`, in all four states. **84 files compared, 84 identical,**
+  every exit code 0.
+- **`hug imports 'tree-hugger/**' | head -1`** (under bash, reading
+  `PIPESTATUS`): base exits **101** with `panicked at …/stdio.rs`; new
+  exits **0** with an empty stderr.
+
+#### Timing sample
+
+Same host, both arms back to back (so they share the load), revision
+`350cec8a2` + Phase 2's working tree, profiling build, rayon default (16
+threads), 2026-10-08 20:20. The 1-minute load average was 17–21 during
+these rows. A burst outside this session had pushed it to ~140 a few
+minutes earlier. The Phase 1 rows were taken at 6–14, so compare
+base with new here, not with Phase 1.
+
+| Command | Cache | Base wall / user | New wall / user | Note |
+|---|---|---|---|---|
+| monorepo `symbols --count` | cold | 6.95 s / 38.26 s | **6.19 s / 33.27 s** | −13% CPU (P4, P9, P1(a)); 4,311 misses both |
+| monorepo `symbols --count` | warm ×2 | 0.50 / 0.49 s | 0.64 / 0.55 s | noise at this load; 4,311 hits both |
+| monorepo `symbols --plain` | warm | 2.32 s | 2.37 s | L1 is Phase 5 |
+| monorepo `--json symbols`, first after `--count` | partial | 8.55 s / 43.81 s | **7.72 s / 39.50 s** | C5 is Phase 7 |
+| monorepo `--json symbols`, second | warm | 1.04 s | 1.06 s | |
+| `openai/types.rs --json-full` | `--no-cache` | 0.81 s | 0.74 s | |
+| same | miss | 0.83 s | 0.75 s | |
+| same | **warm hit** | **1.25 / 1.28 s** | **0.16 / 0.17 s** | **C1/C2: 7.8× faster, now well below `--no-cache`** |
+| `openai/types.rs symbols --count` over the wide entry | hit | 1.26 s | **0.12 s** | 10.5× |
+| `filesystem/mod.rs --json-full` | `--no-cache` | 1.27 s | 1.13 s | |
+| same | warm hit | 0.36 / 0.38 s | **0.11 / 0.10 s** | 3.4× |
+| `filesystem/mod.rs symbols --count` over the wide entry | hit | 0.35 s | 0.09 s | |
+| `symbols --count tree-hugger/lib/src/lib.rs` (hyperfine `-w 2 -r 15`) | hit | 67.6 ± 3.5 ms | 69.2 ± 3.6 ms | unchanged; L3 is Phase 6 |
+
+`--verbose` showed `1 hits, 0 partial hits, 0 misses; parsed 0 files` on
+every warm p99 row in both arms, so the speed-up is validation, not a
+re-parse.
+
+**Checkpoint 2:** met. Output is byte-identical (only the adapter's
+wall-clock field differs), the full test and lint gates are green, a warm
+wide-entry hit on `openai/types.rs` is faster than `--no-cache`, the
+cold-scan change is logged, and `imports | head` exits 0. Stop for review
+before pushing.
+
+#### Requirement-to-test mapping
+
+| Change | Test(s) |
+|---|---|
+| C1 cursor | `stored_evidence::tests::covering_agrees_with_a_scan_of_every_span` (new); `cache_robustness`, `symbols_cache` (existing) |
+| C1 encoded-token guard | `symbols_cache::encoded_binding_witnesses_keep_unbound_uses_served` (new, mutation-checked); `encoded_binding_sources_preserve_lost_id_rejection` (existing) |
+| C1 iterator readings | `stored_evidence::tests::a_dollar_run_is_also_read_as_its_pieces` (adapted) |
+| C2 | `cache_robustness::summary_and_evidence_list_edits_are_recomputed_in_every_resolving_language`, `reference_evidence_is_served_only_when_consistent`, `symbols_cache` (existing, every refusal still produced) |
+| C7 digest | `stored_evidence::tests::import_inventory_digest_is_pinned` (new, digests from the old code) |
+| C7 single `LineStarts` | `stored_evidence::tests::points_are_one_based_lines_and_byte_columns`, `symbols_cache_imports` (existing) |
+| P4 | `definitions::tests::imports_from_the_definition_run_equal_imported_symbols` (new); output diff protocol |
+| P9 | `symbols_query`, `symbols_coverage` (existing); output diff protocol (`is_exported` in every `--json` record) |
+| L8 registry | `rule_registry::tests::builtin_is_one_shared_new_registry` (new) |
+| L8 single policy pass | `tests::lint_policy_applied_twice_equals_once` (new, bin); output diff protocol (`lint` text) |
+| L9 line index | `tree_file::tests::nth_line_agrees_with_lines` (new) |
+| L9 `named_children` | `dead_code`, `lint_diagnostics` (existing) |
+| L10 | `lint_diagnostics` directive tests (existing: line, file, bare, in-string) |
+| O5, P1(a) | `symbols_occurrences`, `symbols_qualified_names`, `symbols_scope`, `symbols_relations`, `symbols_owner_identity` (existing); output diff protocol |
+| L11 | `report::imports_and_lint_end_quietly_on_a_closed_pipe` (new, CLI); `declarations::tests` for `write_status` (existing) |
+
+All new tests are compiled by declared targets: the lib unit tests and the
+`hug` bin unit tests (`just test` runs both), `lib/tests/l1/symbols_cache.rs`
+(the `l1` binary), and `cli/tests/symbols/report.rs` (the `symbols`
+binary). None carries a tier marker, so all run in L1. The fixture walk
+joins `tests/fixtures` onto `CARGO_MANIFEST_DIR`.
+
+#### OS considerations
+
+Nothing here is OS-specific: no path or `#[cfg]` code changed. The
+closed-pipe test reuses the existing `hug_into_closed_pipe` helper, which
+already runs on every OS in CI. Line indexing follows `str::lines()`, so
+CRLF sources behave as before (pinned by `nth_line_agrees_with_lines`). No
+cross-OS rig run was needed.
+
+## Phase 3
+
+One spike session: every arm behind a `HUG_SPIKE` switch in one build, then
+the measurements, then a rulings summary for the author. **No repository
+code changed.** The spike code never touched this working tree.
+
+### Setup
+
+- **Spike tree.** A detached worktree at `/tmp/th-p3/spike`: `HEAD`
+  (`350cec8a2`) plus Phase 2's working tree, applied as a patch, plus the
+  arms below. It has its own target directory (`/tmp/th-p3/target-spike`),
+  so the main `target/` was not evicted. The spike is saved as
+  `/tmp/th-p3/spike.patch` and the worktrees are removed (Checkpoint 3).
+  Nothing was committed and no branch was created.
+- **Binaries.** All are `profiling` builds of the same Phase 2 code.
+  - `hug-spike`: the spike build (one build; a first attempt stopped on
+    two compile errors, fixed in place).
+  - `target/profiling/hug`: Phase 2's binary, the "no spike code" control.
+  - `hug-b12`: fat LTO + `codegen-units = 1` + mimalloc (4 m 38 s).
+  - `hug-b2`: mimalloc only, built to isolate B2 (see B1 + B2); 23 s,
+    because the compiler cache already held its dependencies.
+- **Host.** macOS, 16 cores (12P + 4E). Every timing row records the
+  1-minute load average. Most rows ran at 7–14. Outside activity pushed some
+  rows to 15–19, and those are marked; noisy rows were repeated interleaved.
+- **Timing.** `hyperfine -N` through `/tmp/th-p3/bin/t.sh` (`-w 1 -r 3`
+  unless stated). Profiles use `/usr/bin/sample` at 1 ms, through
+  `/tmp/th-p3/bin/prof.sh`. They are parsed by `/tmp/th-p3/bin/callers.py`,
+  which reports inclusive samples per caller and the topmost
+  parent-navigation frames (`ts_node_parent`, `ts_node_child_with_descendant`,
+  `ts_node_*_sibling`, the spike memo) beneath each. All runs are from the
+  repository root unless stated, dated 2026-10-08, revision `350cec8a2` +
+  Phase 2's working tree.
+
+### The arms
+
+| Switch | What it does | Output |
+|---|---|---|
+| `p1b` | A per-thread memo behind `spike::parent(node)`. A miss descends from the root once (mirroring `ts_node_parent`) and records the parent of every node on the path. Cleared before every parse and keyed by tree. **Departure from the plan:** every tree-sitter `.parent()` in the library (201 call sites in 37 files) goes through it, not only the seven named callers, so the arm measures (b)'s ceiling. | identical |
+| `p1b-check` | Adds `assert_eq!(memo, node.parent())` on every lookup. A runtime assert, because `debug_assert` is compiled out of a `profiling` build. | — |
+| `p2-prefilter` | Skips `rust_pattern_non_bindings` unless the file has a glob `use` (line scan of `use` statements), a `const` generic, or a bare pattern name equal to a `const`/`static`/type/import capture or `None`/`Self`. Counts skipped and run walks. | identical |
+| `p3-share` | Stashes `impl_self_types`' `Lexical::build` result (it reads only the entries' node IDs and kinds) and hands it to `link_relations` when the entries' `(name, declaration, anchor, kind)` key matches. Counts builds, reuses and key mismatches. | identical |
+| `p5-gate` | No `records_from` metadata for `Local` records. | knowingly different |
+| `p11-nocount` | `count_shared_context_steps` returns at once. | identical |
+| `window` | `in_file_order` as a sliding reorder window (W = 4 × threads, scoped worker threads, delivery on the calling thread). The spike version does not handle a panicking head job, which Phase 5 must. | identical |
+| `flags-on-miss` | A cache-enabled miss analyzes the request plus Flags and stores that coverage. | identical |
+
+### Correctness of the byte-identical arms
+
+- **`p1b-check`:** no mismatch over:
+  - the monorepo `--json symbols --no-cache` (20,425,057 checked lookups);
+  - `--json-full` over `tree-hugger/**` (3,857,028) and `darkmatter/**`
+    (16,355,288);
+  - `--json lint` over both;
+  - monorepo `refs`;
+  - the three large files.
+
+  Over the monorepo `--json` run, 92% of lookups were memo hits and 0.76 M
+  were root descents.
+- **Output equivalence** (`/tmp/th-p3/bin/equiv.sh`, `NO_COLOR=1`, every
+  output hashed). Seven commands, each with `--no-cache`:
+  - monorepo `--json symbols` and `symbols --plain`;
+  - `--json-full symbols` over `tree-hugger/**`, `darkmatter/**`, and the two
+    p99 files;
+  - monorepo `refs resolve_declaration_node`;
+  - `--json lint 'tree-hugger/**'`, with `elapsed_time_ms` masked.
+
+  Eight configurations: Phase 2's binary, the spike with no switch, `p1b`,
+  `p2-prefilter`, `p3-share`, `window`, `p11-nocount`, and all five
+  together. **Each command gave exactly one hash across all eight.**
+
+### Results table
+
+| Finding | Command | Arm | Threads | Cache | Load | Wall | User | Counts / notes |
+|---|---|---|---|---|---|---|---|---|
+| P1 | `darkmatter/` `symbols --count` | none / `p1b` | 16 | `--no-cache` | 7.6 / 10.3 | 1.668 / **1.141 s** | 9.22 / 6.76 s | −32% wall |
+| P1 | `tree-hugger/` `symbols --count` | none / `p1b` | 16 | `--no-cache` | 10.0 / 9.4 | 0.650 / **0.518 s** | 2.80 / 2.19 s | −20% |
+| P1 | monorepo `symbols --count` | none / `p1b` | 16 | `--no-cache` | 9.4 / 8.9 | 5.892 / **4.244 s** | 33.45 / 24.94 s | −28% wall, −25% CPU (r = 2) |
+| P1 / O2 | `--json-full symbols schematic/definitions/src/openai/mod.rs` (`/usr/bin/time`, one run each) | none / `p1b` | 16 | `--no-cache` | 9–17 | **535.75 / 570.15 s** | – / 553.00 s | the pathological file; one busy thread |
+| P2 | monorepo `symbols --count --language rust` | none / `p2-prefilter` | 16 | `--no-cache` | 9.3 / 9.0 | 5.571 / 5.666 s | 32.48 / 31.86 s | skips 1,004 of 3,660 walks (27%); no wall gain |
+| P3 | same | none / `p3-share` | 16 | `--no-cache` | 9.3 / 9.1 | 5.571 / **5.001 s** | 32.48 / 28.89 s | `Lexical::build` 5,713 → 4,113 (1,600 reused, 0 key mismatches); −10% wall, −11% CPU |
+| P2 + P3 | same | `p2-prefilter,p3-share` | 16 | `--no-cache` | 13.2 | 4.915 s | 28.66 s | |
+| P1–P3 | same | `p1b` / `p1b,p2-prefilter,p3-share` | 16 | `--no-cache` | 11.7 / 12.9 | 4.144 / **3.697 s** | 25.12 / 22.55 s | −34% against none |
+| P5 | monorepo `symbols --count` | none / `p5-gate`, round 1 | 16 | `--no-cache` | 16.8 / 16.1 | 6.805 / 6.367 s | 38.09 / 35.33 s | loaded host; interleaved |
+| P5 | same | `p1b` / `p1b,p5-gate`, round 1 | 16 | `--no-cache` | 11.6 / 13.4 | 4.683 / 4.453 s | 27.80 / 26.18 s | −6% CPU |
+| P5 | same | none / `p5-gate`, round 2 | 16 | `--no-cache` | 14.4 / 14.1 | 6.555 / 6.418 s | 36.85 / 35.64 s | −3% CPU |
+| P5 | same | `p1b` / `p1b,p5-gate`, round 2 | 16 | `--no-cache` | 16.8 / 16.8 | 4.909 / 4.680 s | 28.96 / 27.08 s | −6% CPU |
+| L2 / P11 | `darkmatter/` `symbols --count` | none / `window` / `p11-nocount` / both | 1 | `--no-cache` | 6.9–10.0 | 8.258 / 8.208 / 8.301 / 8.249 s | 8.03–8.09 s | |
+| L2 / P11 | same | same | 4 | `--no-cache` | 6.2–8.0 | 3.414 / **2.771** / 3.363 / 2.754 s | 8.28–8.34 s | |
+| L2 / P11 | same | same | 8 | `--no-cache` | 8.0–8.6 | 2.137 / **1.698** / 2.159 / 1.682 s | 8.43–8.46 s | |
+| L2 / P11 | same | same | 16 | `--no-cache` | 8.2–8.3 | 1.577 / **1.245** / 1.589 / 1.260 s | 9.14–9.17 s | speed-up 5.2× → 6.6× |
+| L2 | `darkmatter/` `symbols --count` (`-w 2 -r 5`) | none / `window` / `window,p11-nocount` | 1 | warm | 8.1–8.2 | 0.529 / 0.509 / 0.514 s | 0.39–0.40 s | |
+| L2 | same | same | 4 | warm | 8.3 | 0.273 / 0.229 / 0.224 s | 0.43 s | |
+| L2 | same | same | 8 | warm | 8.1–8.3 | 0.214 / 0.176 / 0.170 s | 0.45–0.46 s | |
+| L2 | same | same | 16 | warm | 8.1 | 0.192 / **0.159** / 0.157 s | 0.51–0.53 s | −17% |
+| L2 | monorepo `symbols --count` | none / `window` | 16 | `--no-cache` | 9.1 / 8.2 | 5.922 / **4.579 s** | 33.47 / 33.56 s | −23% wall, same CPU |
+| all | same | `p1b,p3-share,window` | 16 | `--no-cache` | 13.0 | **2.951 s** | 22.36 s | **−50% wall, −33% CPU** |
+| all | same | `p1b,p2-prefilter,p3-share,window` | 16 | `--no-cache` | 17.3 | 2.919 s | 21.89 s | |
+| C3 | `symbols --count` over `tree-hugger/**`, `darkmatter/**` and the two p99 files (1,160 files) (`-w 2 -r 10`) | Phase 2 binary | 16 | warm, narrow entries | 16.5 / 15.2 | 0.268 / 0.269 s | 0.66 s | 1,160 hits; cache 314 MB |
+| C3 | same | same | 16 | warm, entries widened by `--json-full` | 16.1 / 14.2 | **0.557 / 0.565 s** | 2.18 s | 1,160 hits; cache 934 MB; **2.1× wall, 3.3× CPU** |
+| C3 | `symbols --count openai/types.rs` | same | 16 | warm narrow / wide | 13.7 | 0.100 / 0.129 s | 0.04 / 0.07 s | |
+| C5 | monorepo `symbols --count`, empty cache each run | none / `flags-on-miss`, round 1 | 16 | cold miss | 13.4 / 15.3 | 6.137 / **6.930 s** | 33.92 / 37.77 s | identical output; **+13% wall, +11% CPU** |
+| C5 | same, round 2 | same | 16 | cold miss | 13.9 / 16.8 | 6.129 / 6.960 s | 33.83 / 37.77 s | |
+| C5 | monorepo `--json symbols` right after a `symbols --count` | none / `flags-on-miss` | 16 | listing's entries | 18.7 / 12.9 | 7.811 / **1.076 s** | 40.17 / 2.29 s | 4,311 partial hits (re-parse) → 4,311 hits, 0 parsed; cache 759 MB in both |
+| B1 + B2 | monorepo `symbols --count` | profiling / LTO + mimalloc, two rounds | 16 | `--no-cache` | 9.7–13.1 | 6.190, 5.884 / 5.892, 5.878 s | 34.52, 33.17 / 33.14, 33.39 s | no clear change |
+| B1 + B2 | monorepo `symbols --count` (`-w 2 -r 10`) | same | 16 | warm | 10.2–14.5 | 0.528, 0.503 / 0.497, 0.481 s | 1.74, 1.73 / 1.54, 1.55 s | −4–6% wall, −11% CPU |
+| B1 + B2 | monorepo `symbols --plain` (`-r 5`) | same | 16 | warm | 10.0–14.9 | 2.351, 2.335 / **1.965, 1.984 s** | 3.45, 3.43 / 2.94, 2.94 s | **−15%** |
+| B1 vs B2 | monorepo `symbols --plain`, fastest run | profiling / mimalloc only / LTO + mimalloc | 16 | warm | 12–18 (noisy) | 2.620, 2.582 / 2.239, 2.156 / 2.469, 2.141 s | 3.94–4.40 / 3.32–3.66 / 3.67–4.80 s | the allocator gives the gain; LTO adds none measurable |
+
+### P1: parent lookups
+
+- The memo is exact (above) and cuts cold CPU by 25% over the monorepo,
+  27% on `darkmatter/` and 22% on `tree-hugger/`, measured on the
+  `p1b` arm. That is close to the spec's 25–35% estimate.
+- **Re-sample (O-findings profile, below):** with `p1b`, parent navigation
+  under `run_query` falls from 76–80% to 60–74% on Rust and TS. Inclusive
+  `run_query` samples fall 53% (Rust `--json-full`), 35% (Rust `refs`), 24%
+  (TS `--json-full`), 32% (TS `refs`) and 29–30% (Python).
+- `fill_metadata`'s per-candidate scope still runs once per candidate (it
+  goes through the memo too). It remains for Phase 4, as planned.
+- **Decisive for Phase 4's (b) vs (c) choice: a pathological file.**
+  `schematic/definitions/src/openai/mod.rs` (401 KB, generated; one
+  function builds `Vec::from([...])` of 265 large `Endpoint` literals full of
+  `vec![...]` token trees) takes **535.75 s** for `--json-full symbols
+  --no-cache`. Every other file of the 12 largest takes 0.56–1.41 s. It is
+  also why a monorepo `refs --no-cache` takes 7–8 minutes on one busy
+  thread. Sampled:
+  - **Without `p1b`:** the busy thread is 100% parent navigation inside
+    `Regions::around` (99.8%), all in `ts_node_child_iterator_next` and
+    `ts_node_child_with_descendant`.
+  - **With `p1b`:** **570.15 s** (553.00 s user), no better. The memo
+    still pays one root descent per node it has not seen, and in this tree
+    each descent is the whole cost. Only the split shifts, to
+    `Regions::around` 40% and `scope_around` 20% of the busy samples.
+
+  A lazy memo (P1(b)) cannot fix this; a full parent index from one
+  `TreeCursor` pass (P1(c)), which is linear in nodes, can. O2's stack sweep
+  for `Regions::around`/`scope_around` addresses the same climbs.
+  **Recommendation for Phase 4: (c), the full index.** Make this file the
+  P1/O2 acceptance check: time it before and after, and add a work-count
+  assertion rather than a timing assertion.
+
+### P2: the Rust pattern walk
+
+- 3,660 of the monorepo's 4,113 Rust files run the walk. The prefilter skips
+  1,004 of them, **a 27% skip rate**, far below the plan's ~80% bar.
+- No wall gain and −2% CPU, because the files that are skipped are the
+  cheap ones. In the Rust `--json-full` profile,
+  `rust_pattern_non_bindings` is 2.8% of samples (2.7% with `p1b`).
+- **Phase 4: take P2(a), sharing the walk between definitions and bind,
+  not the prefilter.**
+
+### P3: one `Lexical` build per Rust file
+
+- `Lexical::build` runs drop from 5,713 to 4,113: one per Rust file. The
+  1,600 files with impl members each reused the first build, with 0 key
+  mismatches. The plan expected the count "to halve on Rust"; it falls by
+  28% because only 1,600 of 4,113 files had a second build.
+- −10% wall and −11% CPU on cold Rust. With `p1b` and P2, −34% over none.
+- The spike shared only the `Lexical::build` result (keyed by node IDs);
+  `Declarations::new` still runs twice. Phase 4's P3 should carry the
+  decisions as planned.
+
+### P5: the gain bound
+
+- The metadata block for `Local` records costs **3–7% of cold CPU** (−6%
+  with `p1b` in both rounds, −3% and −7% without). The spec estimated
+  10–15%. This supports the spec's recommendation to keep scope-independent
+  metadata.
+
+### O-findings: references profile
+
+Workloads:
+- 100 copies of `tree-hugger/lib/src/file/tree_file.rs` (Rust);
+- 300 copies of `tools/test-audit/tests/aggregate.test.ts` (the largest TS
+  file in the repository, 30 KB, nested `describe`/`it`; no larger
+  TS/TSX file exists);
+- 4 copies of `scripts/ci/test_affected_scope.py` (Python).
+
+Each ran `--json-full symbols --no-cache` and `refs <decl>`, with and
+without `p1b`. Profiles are in `/tmp/th-p3/prof/`.
+
+| Workload | `run_query` samples, off → `p1b` | Navigation share of `run_query` | `OccurrenceSyntax::resolve` | O1: `is_ecma_export_name` | O2: `Regions::around` | O2: `scope_around` | `Walk::run` |
+|---|---|---|---|---|---|---|---|
+| Rust `--json-full` | 17,797 → 8,323 | 76% → 60% | 9,214 → 4,187 (87% → 83% navigation) | – | 2,255 → 1,416 (99%) | 1,796 → 891 (99%) | 610 → 336 (1% / 0%) |
+| Rust `refs` | 13,723 → 8,922 | 77% → 70% | 8,569 → 6,325 | – | 2,036 → 2,118 | 1,492 → 1,141 | 486 → 497 |
+| TS `--json-full` | 30,181 → 22,876 | 78% → 68% | 21,069 → 15,667 | **6,113 → 5,945 (96–98%)** | 2,115 → 2,583 | 1,716 → 1,747 | 6,067 → 3,011 (81% → 46%) |
+| TS `refs` | 26,641 → 18,122 | 80% → 74% | 22,409 → 15,781 | 3,911 → 3,203 (95–97%) | 2,373 → 2,219 | 2,020 → 1,799 | 5,736 → 3,590 (81% → 68%) |
+| Python `--json-full` | 1,463 → 1,046 | 48% → 36% | 1,080 → 823 | – | 152 → 173 | 22 → 16 | 30 → 32 |
+| Python `refs` | 1,253 → 872 | 52% → 44% | 1,056 → 831 | – | 147 → 146 | 19 → 15 | 28 → 26 |
+
+- **O1, export climb:** `is_ecma_export_name` is 11–17% of TS analysis and
+  95–98% navigation, and `p1b` does not reduce it. It needs O1's
+  nesting-aware index.
+- **O1, excluded-context climb:** it is inlined into
+  `OccurrenceSyntax::occurrence` (the `ancestors(..).any(is_excluded_context)`
+  test), so the profile does not attribute it separately. Its cost is
+  inside `OccurrenceSyntax::resolve`'s navigation, which stays at 79–87%
+  with `p1b`. To separate it, Phase 4 can mark that closure
+  `#[inline(never)]` in a scratch build.
+- **O2:** `Regions::around` and `scope_around` stay 93–100% navigation with
+  `p1b`. A memoized climb is still one lookup per level, and the
+  pathological file above is all `Regions::around`.
+- **O3:** `Walk::run` is 13–16% of TS analysis, 81% of it navigation.
+  `p1b` halves its navigation, so O3's cursor-based walk is still worth
+  doing.
+- **P8:** after `p1b`, sibling navigation at the top of the stack is 105
+  samples of 8,323 on Rust (1.3%) and negligible on TS and Python. P8's
+  condition, that the `prev_sibling` share is still visible, is **not met**.
+- **P12/O7:** no hashing or `rust_impl_type` frames show at a visible share
+  in these profiles, so these conditional items are not supported.
+- `work_counters()`: the spike changes no counter, so `reference_captures`,
+  `occurrence_resolutions` and `definition_captures` stay at 1.
+
+### C3: narrow hits over wide entries
+
+After C1/C2, a narrow warm `--count` over entries widened by `--json-full`
+costs **2.1× the wall time and 3.3× the CPU** of the same `--count` over
+narrow entries (1,160 files: 0.557 s against 0.268 s). On the single
+largest file the gap is small (0.129 s against 0.100 s), because C1/C2
+removed the quadratic part. The remaining cost is decoding and validating
+evidence the narrow query discards. The spec still recommends keeping full
+validation; the gap is now for the author to weigh (rulings below).
+
+### C5: Flags on every cache-enabled miss
+
+- **Cost:** a cold monorepo `symbols --count` with cache writes is **+13%
+  wall and +11% CPU** (6.13 → 6.95 s; 33.9 → 37.8 s user, two rounds), with
+  identical output. The cache size after the listing is unchanged (759 MB),
+  because the flag fields already serialize.
+- **Benefit:** the `--json symbols` that follows drops from **7.81 s to
+  1.08 s**. That is 4,311 hits with nothing parsed, against 4,311 partial
+  hits that re-parse every file.
+
+### C4: decode bench
+
+A `cache_decode` criterion group in the spike's `lib/benches/tree_file.rs`
+reads real entries through a hidden `cache::spike_decode_stored_entry` hook
+(exactly `serde_json::from_slice::<StoredEntry>`). Command:
+`TH_C4_SAMPLE=/tmp/th-p3/c4/sample cargo bench -p tree-hugger --bench
+tree_file -- cache_decode`.
+
+- **Entries:** p50, p90, p99 and max of the monorepo's `--json` cache
+  (4,311 entries, 786.7 MB), plus p90 and max of a `--json-full` cache
+  (346 entries).
+- **The stripped form** is made by `/tmp/th-p3/c4/bin/strip.py`. It drops
+  the per-record `schema_version`, `language`, `identity.stable_key`,
+  `source.file_path` and `provenance`, keeping provenance once per entry,
+  and turns every span into `[start_byte, end_byte, line, col, line, col]`.
+- **Size:** the stripped monorepo cache is **500.0 MB against 786.7 MB
+  (0.636×)**. Per entry the ratio is 0.61–0.88.
+- The stripped form cannot be decoded into the typed records without a
+  mirror DTO, so its typed decode is estimated. The estimate scales the
+  typed full decode by the measured untyped ratio (`serde_json::Value`,
+  which allocates like a typed decode); the pure-parse ratio (`IgnoredAny`)
+  is the cross-check. Reconstruction is timed directly: re-adding the file
+  path and formatting the stable key per record.
+
+| Entry | Records | Typed decode, current | `Value` stripped / full | `IgnoredAny` stripped / full | Estimated typed stripped | Reconstruction |
+|---|---|---|---|---|---|---|
+| mono p50 | 6 | 92.6 µs | 0.78 | 0.69 | ~72 µs | 1.0 µs |
+| mono p90 | 248 | 582.8 µs | 0.61 | 0.64 | ~354 µs | 64.7 µs |
+| mono p99 | 736 | 2.391 ms | 0.55 | 0.65 | ~1.33 ms | 216.5 µs |
+| mono max (`openai/types.rs`) | 7,732 | 35.80 ms | 0.65 | 0.67 | ~23.4 ms | 1.26 ms |
+| wide p90 | 288 | 2.067 ms | 0.58 | 0.66 | ~1.21 ms | 44.4 µs |
+| wide max (`openai/types.rs`) | 7,732 | 39.77 ms | 0.70 | 0.71 | ~27.9 ms | 1.26 ms |
+
+**Decode-time ratio:** with reconstruction included, about **1.3–1.5×
+faster decode** (p99: 2.39 ms → ~1.55 ms), plus 36% less disk and write
+volume. That is below the spec's 2–4×, which counted on lazy facet decode
+(C4(c)) as well; that was not prototyped. The bench ran while the
+equivalence checks used 4 of 16 cores. The ratios are within-run
+comparisons on the same entries, so they are not affected.
+
+### L2 and P11
+
+- The window recovers **17–23% of wall time** at 4–16 threads, cold and
+  warm, with unchanged CPU. That is the barrier idle the spec predicted.
+  Monorepo cold is 5.92 → 4.58 s.
+- `p11-nocount` changes nothing at any thread count. The counters are not a
+  contention cost.
+- **Phase 5: do L2. Drop P11** (keep the atomics).
+- Even with the window, 16 threads reach 6.6× the 1-thread time on
+  `darkmatter/` (8.21 / 1.245 s). The 4 efficiency cores account for part
+  of that. In the monorepo, the pathological file above dominates any
+  workload that includes it.
+
+### B1 and B2
+
+- The combined build changes cold `--count` by 0–5% (not clearly above
+  noise) and warm `--count` by −4–6% wall and −11% CPU. Warm `--plain` is
+  **−15%** (2.34 → 1.97 s).
+- That gain was clearly above noise, so the two were isolated with a
+  mimalloc-only build. Mimalloc alone gives the same `--plain` gain (fastest
+  runs 2.58–2.62 s → 2.16–2.24 s); LTO adds nothing measurable on top.
+  These rows ran at load 12–18, so they compare fastest runs.
+- The LTO build takes about the same time on this host (4 m 38 s), but
+  `codegen-units = 1` will lengthen incremental release builds.
+
+### Rulings summary (for the author)
+
+Each Open Question with this phase's numbers and the spec's
+recommendation. **The author's rulings are not recorded yet:** this is a
+non-interactive session, so the questions are raised in the spec's
+`human_review_items`. Phase 7 implements only what the author approves.
+
+| Question | Numbers | Spec's recommendation |
+|---|---|---|
+| **C5** — which capabilities a miss computes | Flags on every cache-enabled miss: +13% wall / +11% CPU on a cold listing; the next `--json` 7.81 → 1.08 s; no size change | Flags only, for cache-enabled misses; `--no-cache` stays selective |
+| **C3 / C6** — may narrow requests skip evidence validation | After C1/C2, a narrow hit over wide entries is 2.1× wall and 3.3× CPU of a narrow-only hit (0.557 vs 0.268 s, 1,160 files); single large file 0.129 vs 0.100 s | Keep full validation; no checksum substitute |
+| **C4 / P15** — private storage form | Compact private JSON: 0.636× bytes, ~1.3–1.5× faster decode including reconstruction; `declaration_text` is 4% of cache size (spec) | Compact private JSON with exact public reconstruction; P15 as a private range only if approved |
+| **P5** — scope-dependent metadata | Gain bound 3–7% of cold CPU | Keep scope-independent metadata |
+| **O4** — uncertain candidates | Phase 1: `self` gives 89% of candidates; `--json-full` is 588× the source; one cache entry 223 MB | Preserve public lists; share lookup and storage internally |
+| **L5** — batched linter metadata | oxlint not installed: 32 µs per file of discovery, serial; spawn counts not measurable here | One metadata record per actual batch |
+| **L3** — literal positional paths | Phase 1: 70.6 ms in-repo vs 7.5 ms outside | Conservative fast path; keep positional semantics |
+| **L6** — terminal discovery | Pseudo-TTY worst case 2.1 s (unanswered OSC queries); the real WezTerm sample is still the author's | Deterministic unstyled constructor only |
+| **C9** — obsolete cache entries | Monorepo `--count` + `--json` cache 759 MB; a `--json-full` cache for 1,160 files is 934 MB | Explicit `hug cache clear` |
+| **B1 / B2** — release profile, allocator | LTO adds nothing measurable; mimalloc gives −15% on warm `--plain` and −11% CPU on warm `--count`, nothing cold | Defer until the algorithm fixes land |
+
+**Plan decisions this phase settles** (not Open Questions; the plan made
+them conditional on these numbers):
+- **P1:** (c), the full index, not (b). See the pathological file.
+- **P2:** (a), sharing the walk, not the prefilter (27% skip rate).
+- **P3:** do it.
+- **P8:** not done (the sibling share is 1.3%).
+- **P12, O7:** not supported by the profile.
+- **L2:** do it in Phase 5.
+- **P11:** drop.
+
+### Checkpoint 3
+
+- Every spike row is logged above.
+- The rulings are **not** recorded: they await the author (`human_review`
+  on the spec).
+- No CI run happened.
+- The spike worktrees are removed; the spike survives only as
+  `/tmp/th-p3/spike.patch` (plus `/tmp/th-p3/b12.patch`), for reference.
+
+### Gates
+
+- Scope calculator, run from the repository root after every Phase 3 edit:
+
+  ```sh
+  git status --porcelain --untracked-files=all | awk '{print $NF}' \
+    | xargs python3 scripts/ci/affected_scope.py
+  ```
+
+  `"packages": ["tree-hugger", "tree-hugger-cli", "test-toolkit"]`,
+  `"change_class": "package"` (exit 0). Phase 3 itself changed only this
+  feature's three Markdown files. The packages come from Phase 2's source
+  changes, which are still uncommitted in this working tree, so the gates
+  were required and were run. The tree also holds edits outside this
+  feature (`CLAUDE.md`, `.claude/skills/os/SKILL.md`,
+  `.claude/skills/rust-devops/ci-cd.md`, `docs/topics/ci-cd.md`,
+  `features/2026-10-08-windows-to-nightly/`), which this phase did not touch.
+- `just test` (in `tree-hugger/`, nothing else running): **2034 passed, 0
+  failed** (204 slow), exit 0, 263 s.
+- `just lint`: exit 0, no warnings.
+- `test-toolkit`'s gates were not run here; this phase changed nothing it
+  reads.
+
+### Requirement-to-test mapping
+
+Phase 3 changes no behavior in the repository. Every arm lived in the
+removed spike worktree, so no test was added, changed or removed. The
+spike's own correctness evidence was the `p1b-check` runtime assert and
+the eight-configuration output equivalence above. A grep of `tree-hugger/`
+for `spike::`, `HUG_SPIKE`, `SpikeParent` and `.sparent()` finds nothing.
+
+### OS considerations
+
+Nothing to cross-check. No code changed, and the measurements are one-host
+samples by design (spec: "Spikes are quick samples on one host"). B2's
+supported-target build evidence (Windows, WSL2) is needed only if the
+author adopts mimalloc in Phase 7.
+
+### Scratch artifacts
+
+These are kept under `/tmp/th-p3/` and are not in the repository:
+- `spike.patch`, `b12.patch`, `hug-spike`;
+- `bin/` (the `equiv.sh`, `t.sh`, `prof.sh` and `callers.py` helpers);
+- `prof/` (the `sample` profiles);
+- `c4/sample/` with `c4/bin/strip.py`;
+- `timing-*.txt`, `equiv-*.txt` and `c4-bench.txt`.
+
+The scratch caches and the three target directories were deleted.

@@ -20,6 +20,7 @@ docs_created_during_phase_1:
 skills_files_updated_during_phase_1: []
 source_files_during_phase_2:
   - tree-hugger/lib/src/cache/stored_evidence.rs
+  - tree-hugger/lib/src/cache/symbol_cache.rs
   - tree-hugger/lib/src/file/tree_file.rs
   - tree-hugger/lib/src/file/tree_file/definitions.rs
   - tree-hugger/lib/src/analysis/mod.rs
@@ -28,8 +29,27 @@ source_files_during_phase_2:
   - tree-hugger/lib/src/file/extract/qualified_name.rs
   - tree-hugger/lib/src/dead_code.rs
   - tree-hugger/lib/src/rule_registry.rs
+  - tree-hugger/lib/src/ignore_directives.rs
+  - tree-hugger/lib/tests/l1/symbols_cache.rs
   - tree-hugger/cli/src/main.rs
+  - tree-hugger/cli/src/declarations.rs
+  - tree-hugger/cli/tests/symbols/report.rs
+docs_updated_during_phase_2:
+  - tree-hugger/docs/symbol-reports.md
+  - tree-hugger/cli/README.md
+  - tree-hugger/features/2026-10-08-improved-performance/plan.md
+  - tree-hugger/features/2026-10-08-improved-performance/implementation-log.md
+  - tree-hugger/features/2026-10-08-improved-performance/spec.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+  - .claude/skills/tree-hugger/SKILL.md
 source_files_during_phase_3: []
+docs_updated_during_phase_3:
+  - tree-hugger/features/2026-10-08-improved-performance/plan.md
+  - tree-hugger/features/2026-10-08-improved-performance/implementation-log.md
+  - tree-hugger/features/2026-10-08-improved-performance/spec.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
 source_files_during_phase_4:
   - tree-hugger/lib/src/file/tree_file.rs
   - tree-hugger/lib/src/file/tree_file/definitions.rs
@@ -94,7 +114,7 @@ Success looks like:
 - [ ] Every PR before Phase 7 leaves public output byte-identical. The proof
   is the [output diff protocol](#output-diff-protocol), run from the same
   absolute root.
-- [ ] The implementation log records every spike result: command, switch
+- [x] The implementation log records every spike result: command, switch
   arm, build profile, revision, worker count, cache state, load average, and
   the time and work counts.
 - [ ] Phase 3 ends with the author's rulings on the spec's Open Questions.
@@ -218,7 +238,7 @@ can run in parallel.
 
 #### 2A — Cache validation (`lib/src/cache/stored_evidence.rs`)
 
-- [ ] **C1.** In `unbound_names_have_a_binding` (the `taken` loop at
+- [x] **C1.** In `unbound_names_have_a_binding` (the `taken` loop at
   `:876-900`, verified):
   - test `checked.contains(text)` before any span test;
   - replace `taken.iter().any(..)` with a start-sorted, merged `Vec<(u32,
@@ -228,13 +248,13 @@ can run in parallel.
     the bytes it looks for (`r#` for Rust, `\u` for ECMA).
 
   The accept and refuse results must stay identical.
-- [ ] **C2.** Replace the `made` closure (`:657-663`, verified: two linear
+- [x] **C2.** Replace the `made` closure (`:657-663`, verified: two linear
   scans of `scoped` per edge) with a `HashSet` keyed by
   `(owner, target, name_identity::key(language, name), kind)`, built once.
   Fix the per-record `contains` at `:674`/`:686` and the per-edge `find` in
   `summaries_in_first_occurrence_order` (`:768-776`) the same way, keeping
   first-occurrence order.
-- [ ] **C7.**
+- [x] **C7.**
   - Build `LineStarts` once in `StoredEntry::validate` and pass it to both
     checks (`:325`, `:433`).
   - In `import_inventory` (`:127-130`, verified to hash through
@@ -249,7 +269,7 @@ can run in parallel.
 
 #### 2B — Query pipeline and native diagnostics (`file/tree_file.rs`, `file/tree_file/definitions.rs`, `analysis/mod.rs`, `dead_code.rs`, `rule_registry.rs`)
 
-- [ ] **P4.**
+- [x] **P4.**
   - In `capture_definitions` (`definitions.rs:194` onward), keep the
     `local.definition.import` capture nodes it already sees and skips
     (`:236`).
@@ -265,16 +285,16 @@ can run in parallel.
   - No counter changes: `imported_symbols` increments no counter (verified),
     and `definition_captures` stays at 1. `QueryKind::Imports` and
     `RECORD_QUERIES` stay, so the fingerprint is unchanged.
-- [ ] **P9.** Add `is_exported: bool` to `ExtractedSymbol`
+- [x] **P9.** Add `is_exported: bool` to `ExtractedSymbol`
   (`definitions.rs:81`), computed once where definitions are materialized.
   Read it in `exports_from` (`tree_file.rs:1057`), `records_from`
   (`:1870`), `exported_symbols` (`:1044`) and `local_symbols` (`:1085`).
   `is_exported_definition` (`classify.rs:1138`) stays the one decision.
-- [ ] **L8, library part.** Add `RuleRegistry::builtin() -> &'static Self`
+- [x] **L8, library part.** Add `RuleRegistry::builtin() -> &'static Self`
   backed by a `LazyLock`. `diagnostic_metadata` (`tree_file.rs:151-160`)
   uses it instead of `RuleRegistry::new()` per diagnostic. `new()` and
   `get_or_default` keep their signatures.
-- [ ] **L9.**
+- [x] **L9.**
   - `build_source_context_from_range` (`tree_file.rs:1606-1631`, verified
     `lines().nth`): use a line-start index built once per diagnostics run
     (`OnceLock<Vec<usize>>` on `TreeFile`, split on `\n` only), keyed by
@@ -282,7 +302,7 @@ can run in parallel.
     exactly `str::lines()`. A line past the end gives `""`, as today.
   - `dead_code.rs:313` and `tree_file.rs:1311`: replace the
     `named_child(index)` loops with `named_children(&mut cursor)`.
-- [ ] **L10.** In `apply_ignore_directives` (`tree_file.rs:1157`), return
+- [x] **L10.** In `apply_ignore_directives` (`tree_file.rs:1157`), return
   early when `diagnostics.is_empty()`, or when the source does not contain
   `"tree-hugger-ignore"`. Both prefixes (`ignore_directives.rs:21,24`) are
   case-sensitive `strip_prefix` matches that contain that literal, so the
@@ -296,10 +316,10 @@ can run in parallel.
 
 #### 2C — Occurrences and declaration climbs (`analysis/occurrences.rs`, `extract/declaration.rs`, `extract/qualified_name.rs`)
 
-- [ ] **O5.** Compute `written_path` once per occurrence (verified at
+- [x] **O5.** Compute `written_path` once per occurrence (verified at
   `occurrences.rs:555` and `:634`) and pass `Option<&str>` into
   `resolve_supported`.
-- [ ] **P1(a).**
+- [x] **P1(a).**
   - `is_scope_boundary` (`declaration.rs:133`): move `node.parent().is_none()`
     to the end of the `||` chain. The function is pure, so reordering keeps
     the result.
@@ -318,13 +338,13 @@ can run in parallel.
 
 #### 2D — CLI lint and output correctness (`cli/src/main.rs`)
 
-- [ ] **L8, CLI part.** Replace `RuleRegistry::new()` at `main.rs:1542`,
+- [x] **L8, CLI part.** Replace `RuleRegistry::new()` at `main.rs:1542`,
   `:1600`, `:1760` and `:1831` with `RuleRegistry::builtin()`. Before
   removing the second `apply_lint_policy` pass (`render_summary`), prove it
   idempotent with a unit test (apply once vs twice over every rule ×
   `--deny`/`--warn`/`--allow`/`--strict`). If it is not idempotent, keep
   both passes and record that in the log.
-- [ ] **L11, correctness half.** Route the `imports` and `lint` text and
+- [x] **L11, correctness half.** Route the `imports` and `lint` text and
   JSON output through one `BufWriter<StdoutLock>` passed as `&mut dyn Write`
   to `print_file_header` (`:1717`), `render_summary` (`:1742`) and
   `render_imports` (`:2104`), plus the `run` sites (`:1148-1233`). Map
@@ -338,15 +358,15 @@ can run in parallel.
 
 ### Wave 2 (after Wave 1)
 
-- [ ] **Docs.**
+- [x] **Docs.**
   - `docs/cache-design.md`: performance notes only if they mention the old
     algorithms. The robustness tables are unchanged.
   - `docs/symbol-reports.md` / the CLI README: the `imports`/`lint` closed
     pipe now exits 0.
   - The tree-hugger skill: one line on `RuleRegistry::builtin()`.
-- [ ] **Full verification, once:** `just test` and `just lint` in
+- [x] **Full verification, once:** `just test` and `just lint` in
   `tree-hugger/`, and the whole output diff protocol against `hug-base`.
-- [ ] **Timing sample:** re-run Phase 1's baseline commands and log them
+- [x] **Timing sample:** re-run Phase 1's baseline commands and log them
   next to the baseline.
 
 **Checkpoint 2:** PR 1 is ready, with a byte-identical output diff and green
@@ -367,33 +387,33 @@ code that answers its question.
 
 ### Wave 1: build the spike binary (one `profiling` build)
 
-- [ ] `p1b`: a lazy per-file parent memo behind one helper
+- [x] `p1b`: a lazy per-file parent memo behind one helper
   (`ancestors_of`). It is used by the top callers in the spec's parent
   table: `scope_around`, `Lexical::build`, `is_exported_definition`,
   `Builder::prefix`, `symbol_scope`, `find_symbol_container`,
   `refine_symbol_kind`. Under the arm, `debug_assert_eq!` against
   `Node::parent()`.
-- [ ] `p2-prefilter`: skip `rust_pattern_non_bindings` when the file has no
+- [x] `p2-prefilter`: skip `rust_pattern_non_bindings` when the file has no
   glob `use`, and no bare captured name equals a const, static, unit struct,
   const generic or import name, or `None`/`Self`. Add a `--verbose` counter
   of skipped and run walks.
-- [ ] `p3-share`: carry `impl_self_types`' map and `walk().impls` from
+- [x] `p3-share`: carry `impl_self_types`' map and `walk().impls` from
   `rust_impl_owners` into `link_relations`. Add a temporary `Lexical::build`
   counter.
-- [ ] `p5-gate`: skip the `records_from` metadata block for `Local` records.
+- [x] `p5-gate`: skip the `records_from` metadata block for `Local` records.
   This is for measurement only; its output is knowingly different.
-- [ ] `p11-nocount`: `count_shared_context_steps` becomes a no-op.
-- [ ] `window`: the sliding-window `in_file_order`, with W = `4 × threads`.
-- [ ] `flags-on-miss`: add Flags to every cache-enabled miss.
+- [x] `p11-nocount`: `count_shared_context_steps` becomes a no-op.
+- [x] `window`: the sliding-window `in_file_order`, with W = `4 × threads`.
+- [x] `flags-on-miss`: add Flags to every cache-enabled miss.
 
 ### Wave 2: background builds (start while Wave 3 runs)
 
-- [ ] **B1 + B2 combined:**
+- [x] **B1 + B2 combined:**
   `CARGO_PROFILE_PROFILING_LTO=fat CARGO_PROFILE_PROFILING_CODEGEN_UNITS=1`
   plus a `mimalloc` `#[global_allocator]` in the CLI binary (spike branch
   only), built into a separate `--target-dir` so it doesn't evict the main
   build.
-- [ ] **C4 decode bench:** add a `cache_decode` criterion group to
+- [x] **C4 decode bench:** add a `cache_decode` criterion group to
   `lib/benches/tree_file.rs`. It times `serde_json::from_slice::<StoredEntry>`
   on real `--json-full` entries copied from the scratch cache, against a
   stripped stored form: no per-record `file_path`, provenance once per
@@ -406,34 +426,36 @@ Log every arm against the no-switch run of the same binary. Use
 `hyperfine -w 1 -r 3` on `darkmatter/` or `tree-hugger/`, plus one
 whole-monorepo confirmation of each promising arm.
 
-- [ ] P1: `p1b` on vs off, cold `symbols --count`. Re-sample and record the
+- [x] P1: `p1b` on vs off, cold `symbols --count`. Re-sample and record the
   `ts_node_parent` share. Note that `fill_metadata`'s per-candidate scope
   remains, for Phase 4.
-- [ ] P2: skip rate over the monorepo's Rust files, and cold time on vs off.
-- [ ] P3: `Lexical::build` count (expected to halve on Rust), and cold Rust
+- [x] P2: skip rate over the monorepo's Rust files, and cold time on vs off.
+- [x] P3: `Lexical::build` count (expected to halve on Rust), and cold Rust
   time on vs off.
-- [ ] P5: the gain bound from `p5-gate` on cold default `symbols --count`.
-- [ ] O-findings: a References profile with `sample` on `--json-full` and
+- [x] P5: the gain bound from `p5-gate` on cold default `symbols --count`.
+- [x] O-findings: a References profile with `sample` on `--json-full` and
   `refs` for the three files the spec names, with and without `p1b`.
   Record O1's export and excluded-context climbs separately.
-- [ ] C3: after Phase 2, a narrow warm `--count` over entries widened by
+- [x] C3: after Phase 2, a narrow warm `--count` over entries widened by
   `--json-full`, against narrow-only entries.
-- [ ] C5: the cold miss cost of the same `--json` query with
+- [x] C5: the cold miss cost of the same `--json` query with
   `flags-on-miss` on vs off, so that output and serialization are identical.
   Then a listing followed by `--json` on vs off.
-- [ ] L2 / P11 (only if Phase 1 said "reproduced"): `window`, `p11-nocount`
+- [x] L2 / P11 (only if Phase 1 said "reproduced"): `window`, `p11-nocount`
   and both together, each with a `RAYON_NUM_THREADS` sweep.
-- [ ] B1 + B2: cold and warm `--count` and warm `--plain`. Isolate the two
+- [x] B1 + B2: cold and warm `--count` and warm `--plain`. Isolate the two
   only if the combined gain is clearly above noise.
-- [ ] C4: decode-time ratio and reconstruction cost.
+- [x] C4: decode-time ratio and reconstruction cost.
 
 ### Wave 4: rulings
 
-- [ ] Write a one-page summary in the implementation log. For each Open
+- [x] Write a one-page summary in the implementation log. For each Open
   Question, give the numbers and the spec's recommendation.
 - [ ] **The author rules** on C5, C3/C6, C4/P15, P5, O4, L5, L3, L6, C9 and
   B1/B2. Record the rulings in the log. The spec stays as decided; any
   departure is recorded in the log and the docs.
+  - Open: awaits the author. The questions, with options and a
+    recommendation each, are in the spec's `human_review_items`.
 
 **Checkpoint 3:** every spike row is logged and every ruling recorded.
 The spike branch is deleted, or kept local for reference. No CI run has

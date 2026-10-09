@@ -32,30 +32,252 @@ area: tree-hugger
 packages:
   - tree-hugger
   - tree-hugger-cli
-human_review: false
+human_review: true
+human_review_items:
+  - |-
+    **Should a cache miss also compute the "flags" facts? (C5)**
+
+    *Why now:* Phase 7 builds only the cache policy you approve. Phase 3
+    measured both sides, so this can be settled now.
+
+    The flags (is it a test, is it deprecated) are what `--json` output adds
+    to a plain listing. Today a listing stores no flags, so the next `--json`
+    re-reads every file. Measured on the whole monorepo: the `--json` after a
+    listing takes **7.8 s, and 1.1 s** if the listing had stored flags. The
+    price is that every first-time (cold) listing gets **13% slower**
+    (6.1 s to 7.0 s). The cache does not grow.
+
+    - **Flags only, on cache-enabled runs (recommended).** Pro: removes the
+      measured re-read in the common "list, then `--json`" workflow. Con:
+      every cold listing costs 13% more, even if `--json` never follows.
+      `--no-cache` runs stay as they are.
+    - **Flags, every kind and containment.** Pro: more later commands hit
+      the cache directly. Con: more cold work and bigger entries; not
+      measured.
+    - **Keep today's policy.** Pro: the cheapest cold run. Con: keeps the
+      7.8 s re-read.
+
+    *Recommendation:* flags only. One 13% cold cost buys a 7× faster
+    follow-up, and the cache stays the same size.
+  - |-
+    **May a narrow command skip checking the parts of a cache entry it does
+    not use? (C3, C6)**
+
+    *Why now:* this decides whether Phase 7 changes how the cache rejects
+    damaged entries.
+
+    Once a file has been analyzed in full (`--json-full`, `refs`), its cache
+    entry carries the reference evidence. A later plain listing still decodes
+    and checks all of it before discarding it. After Phase 2's fixes that
+    costs **2.1× the wall time** of reading a listing-only entry (0.56 s
+    against 0.27 s over 1,160 files). It is no longer slow on single huge
+    files (0.13 s against 0.10 s).
+
+    - **Keep full checking (recommended by the spec).** Pro: a damaged entry
+      is always refused, whatever the command, exactly as the docs say
+      today. Con: keeps the 2× cost on narrow commands after a wide one.
+    - **Check only what the command will use.** Pro: removes most of that
+      cost. Con: a damaged entry may be served to one command and refused by
+      another; the documented robustness tables and their tests change.
+    - **Replace checking with a checksum.** Pro: fast. Con: does not catch
+      bugs in the writer and does not prove who wrote the entry. Not
+      recommended.
+
+    *Recommendation:* keep full checking. 0.3 s on a 1,160-file run is not
+    worth weakening the corruption guarantee; revisit if C4's smaller entries
+    do not shrink the gap.
+  - |-
+    **Should the private cache files use a more compact form? (C4, P15)**
+
+    *Why now:* Phase 7 needs to know whether to change the private cache
+    format (old entries would simply be re-made once).
+
+    The cache stores each symbol with repeated data: the file path,
+    provenance and a long key in every record, and positions as nested
+    objects. A compact private form, rebuilt exactly into today's public
+    output, measured **36% smaller on disk** (787 MB to 500 MB for the
+    monorepo) and about **1.3–1.5× faster to read**. The spec's 2–4× estimate
+    also counted on a lazy-reading step that was not prototyped.
+
+    - **Compact private JSON, same public output (recommended).** Pro:
+      smaller and faster with no visible change. Con: the cache robustness
+      tests must be moved to the new form; one-time cache rebuild.
+    - **A binary private format.** Pro: possibly faster still. Con: its
+      corruption checks must be re-built; speed not measured.
+    - **Change public fields too (P15: shorter declaration text).** Pro: less
+      memory everywhere. Con: changes what the library and `--json-full`
+      return. Declaration text is only 4% of the cache.
+
+    *Recommendation:* compact private JSON, and leave the public output
+    alone (no P15 public change).
+  - |-
+    **Should the cache record which scopes (item, member, local) carry full
+    details? (P5)**
+
+    *Why now:* it would add a new cache dimension in Phase 7.
+
+    Most listings hide local variables, but their full details are still
+    computed. Phase 3 measured the most this could save: **3–7% of a cold
+    run**, well below the spec's 10–15% estimate.
+
+    - **Keep today's behavior (recommended).** Pro: no new cache dimension.
+      Con: keeps the 3–7%.
+    - **Track scopes in the cache.** Pro: saves that 3–7%. Con: more
+      complex coverage rules and tests, and a risk of serving incomplete
+      entries if done wrong.
+
+    *Recommendation:* keep today's behavior; the gain does not justify the
+    complexity.
+  - |-
+    **How should "maybe this symbol" reference candidates be shown? (O4)**
+
+    *Why now:* only the contract part of O4 needs you; Phase 7 does the free
+    part either way.
+
+    When a reference cannot be proved, `hug` lists every same-named
+    declaration as a candidate. In Python every `self` use lists every method
+    of the file: one 377 KB test file produces **222 MB** of `--json-full`
+    output and a 223 MB cache entry (Phase 1). 89% of those candidates come
+    from `self`.
+
+    - **Keep the public lists; share storage internally (spec's
+      recommendation).** Pro: no public change and no lost suggestions. Con:
+      the 222 MB output remains.
+    - **Cap or filter the candidate lists.** Pro: bounded output. Con:
+      changes `refs` results; a missing candidate could be mistaken for "not
+      a reference" unless truncation is clearly marked.
+    - **Publish one candidate table and point to it.** Pro: removes the
+      repetition from output and cache. Con: a public format change that
+      consumers must adopt.
+
+    *Recommendation:* the spec's (keep public lists, share internally) for
+    now. If the 222 MB output is a real problem for you, the candidate table
+    is the clean fix and should get its own spec.
+  - |-
+    **How should a batched external linter run be reported? (L5)**
+
+    *Why now:* Phase 7's oxlint batching changes the `lint --json` metadata.
+
+    `oxlint` is not installed on this machine, so the expensive part (two
+    process launches per JS/TS file) could not be measured; only the lookup
+    cost was (32 µs per file). Batching runs one oxlint for many files.
+
+    - **One metadata record per real batch (recommended).** Pro: truthful
+      timings and status. Con: the JSON array gets fewer, different
+      entries.
+    - **Keep one record per file.** Pro: same array shape. Con: the same
+      duration repeated per file looks like separate runs.
+
+    *Recommendation:* one record per batch. Separately: should oxlint be
+    installed on this machine so the batching can be measured?
+  - |-
+    **Should a plain file path argument stay a pattern? (L3)**
+
+    *Why now:* Phase 6 implements the fast path; this decides its rules.
+
+    `hug symbols some/file.rs` takes **71 ms inside the repo against 7.5 ms**
+    outside it, because the whole tree is walked to match the path.
+
+    - **Keep pattern meaning, add a careful fast path (recommended).** Pro:
+      no behavior change. Con: odd cases (ignored files, symlinks) still
+      walk.
+    - **Treat an existing file path as an explicit selection.** Pro:
+      simpler and always fast. Con: changes which files are picked (ignored
+      files, fixtures, symlinks); needs new docs and tests.
+
+    *Recommendation:* keep pattern meaning with the fast path.
+  - |-
+    **How broad should the terminal-detection change be? (L6)**
+
+    *Why now:* Phase 7 would add a small API to the shared terminal library.
+
+    In a terminal that does not answer color queries, an uncolored listing
+    can wait **2.1 s** on detection it does not need. Still missing: your
+    timing in WezTerm (Phase 1 left the command in the log).
+
+    - **A small "no styling, no probing" constructor (recommended).** Pro:
+      no change for other programs that use the library. Con: one more
+      constructor to maintain.
+    - **Redesign detection to be lazy.** Pro: could help every caller.
+      Con: a separate design; public fields may depend on eager values.
+
+    *Recommendation:* the small constructor.
+  - |-
+    **How should old cache files be removed? (C9)**
+
+    *Why now:* Phase 7 adds one of these.
+
+    The monorepo's cache is about 760 MB after a listing and a `--json` run,
+    and wide entries add more (934 MB for 1,160 files).
+
+    - **An explicit `hug cache clear` command (recommended).** Pro:
+      predictable and safe. Con: space is not reclaimed automatically.
+    - **Automatic removal by age or size.** Pro: no user action. Con: needs
+      limits and timing rules nobody has chosen yet, and can slow ordinary
+      runs.
+
+    *Recommendation:* the explicit command.
+  - |-
+    **Should hug change its build settings or memory allocator? (B1, B2)**
+
+    *Why now:* Phase 7 would add a dependency and a build setting.
+
+    Measured on this machine: link-time optimization (B1) made **no
+    measurable difference**. The mimalloc allocator (B2) made warm colored
+    listings **15% faster** and warm counts 11% cheaper in CPU, with no
+    effect on cold runs.
+
+    - **Defer both until the algorithm fixes land (spec's
+      recommendation).** Pro: no new dependency now; the gain may shrink
+      once C4 cuts allocations. Con: delays a free 15% on warm listings.
+    - **Adopt mimalloc only, in the `hug` binary.** Pro: measured gain, small
+      change. Con: a new native dependency that must build on Windows and
+      WSL2; dependency docs to update.
+    - **Adopt both.** Con: LTO lengthens release builds for no measured
+      gain.
+
+    *Recommendation:* defer, then re-measure mimalloc after C4. Drop LTO
+    either way.
 message_to_agent: |-
-  Phase 1 (baseline and no-build spikes) is done; numbers are in
-  implementation-log.md under "## Phase 1". Revision 03c5d835c, load average
-  6-14 on 16 cores, so absolute times are 2-4x lower than this spec's (which
-  was measured at load 40-56). Use the Phase 1 rows, not the spec's table, as
-  the before-numbers for Phases 2-6.
-  - C1 reproduces: openai/types.rs --json-full warm hit 1.25 s vs --no-cache
-    0.81 s. Phase 2's C1 target is "warm below 0.81 s".
-  - C5 reproduces: first --json after a --count cache 9.4 s vs 1.7 s second.
-  - L3 reproduces: single file 70.6 ms in-repo vs 7.5 ms outside, --version
-    6.1 ms. A positional absolute path to a file outside the cwd currently
-    fails with NoSourceFiles; keep that unless the author rules otherwise.
-  - L2 symptom reproduces at low load: darkmatter cold 6.05x at 16 threads
-    (2.69x at 4); user CPU grows only 12%, so threads wait rather than
-    contend. L2 and P11 stay in scope.
-  - O4: test_affected_scope.py (377 KB) gives 222 MB of --json-full and a
-    223 MB cache entry; 95% is candidate lists, 89% of them on `self`.
-  - L5: oxlint is not installed here; with it absent, discovery costs about
-    32 us per JS/TS file (PATH walk). Phase 3's oxlint-batch arm needs oxlint
-    installed (the author's call, plan rule 3).
-  - L6: the terminal is WezTerm, not iTerm2. A pseudo-TTY shows the 2 x 1 s
-    OSC 10/11 timeout (2.12 s vs 69 ms); the real-terminal sample is deferred
-    to the author because agent sessions have no TTY.
+  Phase 3 (spikes) is done; details are in implementation-log.md under
+  "## Phase 3". No repository code changed. The spike code is saved as
+  /tmp/th-p3/spike.patch (applies to 350cec8a2, includes Phase 2's working
+  tree; may not survive a reboot). The worktrees were removed.
+  - The author's rulings on the Open Questions are pending (human_review).
+    Phase 4 does not depend on them; Phase 7 does.
+  - P1: implement (c), the full parent index from one TreeCursor pass, not
+    (b). The lazy memo (spike `p1b`) is exact (20 M lookups asserted equal
+    to Node::parent()) and cuts cold CPU 25%. But
+    schematic/definitions/src/openai/mod.rs (401 KB, generated) takes 536 s
+    for `--json-full symbols --no-cache`, all in Regions::around's parent
+    climbs, and the memo cannot fix it: each unseen node still pays one root
+    descent. Use that file as the P1/O2 acceptance check: time it before and
+    after, and pin it with a work-count test, not a timing assertion. It
+    also makes a monorepo `refs --no-cache` take 7-8 min on one thread.
+  - Spike `p1b` routed all 201 tree-sitter .parent() calls in lib/src
+    through the memo, not just the named callers; the gain is spread across
+    them.
+  - P2: do (a), share the walk. The prefilter skips only 27% of Rust files
+    and gives no wall gain.
+  - P3: do it. One Lexical::build per Rust file (5,713 -> 4,113 builds);
+    -10% wall on Rust. Lexical::build reads only the entries' node ids and
+    kinds, so a key of (name, declaration, anchor) node ids plus kind is an
+    exact reuse check (0 mismatches over the monorepo).
+  - P8, P12, O7: the profile does not support them (sibling navigation is
+    1.3% of Rust after p1b). O1's export climb (is_ecma_export_name, 11-17%
+    of TS) and O2's Regions::around/scope_around stay ~95% navigation with
+    the memo; do O1/O2 as planned. O3 is still worth it (Walk::run is 13-16%
+    of TS).
+  - Phase 5: do L2 (the window gave -17 to -23% wall at 4-16 threads, cold
+    and warm; identical output). Drop P11 (no effect at any thread count).
+    The spike window does not handle a panicking head job; Phase 5 must.
+  - Combined (p1b + p3-share + window): cold monorepo `symbols --count`
+    5.92 s -> 2.95 s, CPU 33.5 s -> 22.4 s.
+  - The working tree also holds Phase 2's uncommitted changes and unrelated
+    edits (CLAUDE.md, .claude/skills/os, features/2026-10-08-windows-to-nightly),
+    so the scope calculator reports packages and the gates must run.
+  - Use bash, not zsh, for `cmd 2>&1 >/dev/null | grep`: zsh's MULTIOS also
+    sends stdout down the pipe.
   Every change must preserve public behavior unless the author approves a
   change described in Open Questions. Spikes are quick samples on one host,
   not benchmark gates.
