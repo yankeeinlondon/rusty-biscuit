@@ -89,11 +89,21 @@ human_review_items:
         dispatched to implement Phase 4 (the test phase) and stopped at the
         same gate. Phase 4 is tests for behavior Phases 2–3 are specified to
         introduce (the baseline `content_policy` entry, the embedded schema
-        table, and the CLI's `--no-baseline-schema` selection rules); none of
-        it exists, so the tests would all fail and the phase's own
+        table, and the CLI's `--no-baseline-schema` selection rules); none
+        of it exists, so the tests would all fail and the phase's own
         "all tests passing" completion requirement cannot be met. Four
         consecutive runs have now stopped at this gate with zero
         implementation — the decision above is the only way forward.
+
+        **Update (2026-10-05, fifth and sixth runs):** a fifth run (Phase 5,
+        test triage and documentation drift) and a sixth run (Phase 6) both
+        stopped the same way. Phase 5's docs/README/skill updates would have
+        described behavior that does not exist. Phase 6 was **skipped per its
+        own condition**: it runs only if you confirm the "required `rule`"
+        open question below (the Phase 1 ruling deferred it, and no
+        confirmation exists), and the prerequisite gate still fails
+        underneath it. Six runs, zero implementation — the sequencing
+        decision above is the only way forward.
     - |-
         Secondary decision (only if you pick option 2 above): if the feature
         is reshaped to avoid union list items, the spec's acceptance criteria
@@ -125,21 +135,30 @@ message_to_agent: >-
     no-baseline-schema flag) and started nothing: Phase 5 is test triage and
     documentation drift for that same Phase 2+3 behavior, and writing its
     docs/README/catalog/skill updates now would make the docs tree describe
-    behavior that does not exist. Do NOT start Phases 2-6 until the
-    prerequisite lands and the probe shape passes (name[](min(1)) loads,
-    validates, survives merge_baseline, visible in the typed view); run the
-    phases in order — Phase 2, then Phase 3, then Phase 4, then Phase 5. Read
-    implementation-log.md first: it holds the baseline
-    accessor/caller table, the import-resolver seam map (R2/R3 injection
-    points: mod.rs baseline entry has no import expansion today;
+    behavior that does not exist. A phase-6 run on 2026-10-05 SKIPPED the
+    phase per its own condition: Phase 6 is optional and runs only on the
+    author's explicit confirmation of the required-`rule` open question
+    (ruling R1 deferred it; no confirmation exists), and even with
+    confirmation the gate still fails (no union-reference resolver support)
+    and Phases 2-5 never ran, so its resolver, shipped-schema, test, and doc
+    tasks have no foundation. Do NOT start Phases 2-6 until the prerequisite
+    lands and the probe shape passes (name[](min(1)) loads, validates,
+    survives merge_baseline, visible in the typed view); run the phases in
+    order — Phase 2, then Phase 3, then Phase 4, then Phase 5. Phase 6
+    additionally requires the author to confirm the recommended
+    required-`rule` option before it starts; otherwise skip it and keep the
+    documented limitation. Read implementation-log.md first: it holds the
+    baseline accessor/caller table, the import-resolver seam map (R2/R3
+    injection points: mod.rs baseline entry has no import expansion today;
     ImportEngine::resolve_namespace is the @file-to-disk seam;
     NamespaceKey::File(canonical_path) is the definition identity; skip
     dependencies insertion for embedded namespaces), the content-policy
     constraint confirmation (add with default-features = false; deps-check
-    guards the no-reverse-dependency rule; darkmatter/docs/dependencies.md has
-    no entry yet), and rulings R1-R8 (R6 is the Phase 3 design note: validate
-    reads the env from request.snapshot().env() with one shared parse of the
-    disable values, shared with compose's env_disables_baseline_schema).
+    guards the no-reverse-dependency rule; darkmatter/docs/dependencies.md
+    has no entry yet), and rulings R1-R8 (R6 is the Phase 3 design note:
+    validate reads the env from request.snapshot().env() with one shared
+    parse of the disable values, shared with compose's
+    env_disables_baseline_schema).
 ---
 
 # Compile Content Policy's Schema into the Base Schema

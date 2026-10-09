@@ -24,6 +24,10 @@ source_files_during_phase_5: []
 docs_updated_during_phase_5: []
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5: []
+source_files_during_phase_6: []
+docs_updated_during_phase_6: []
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6: []
 packages: []
 ---
 
@@ -605,3 +609,110 @@ Phase 5. Phase 5's own brief (which tests to keep as the passive
 shipped-artifact test, which doc pages to touch, the
 never-reference-this-feature-directory rule for `docs/`, and the Mermaid
 selection-order diagram) remains the checklist for that run.
+
+## Phase 6
+
+**Outcome: SKIPPED per the plan's own condition — R1 is still deferred and
+was never confirmed by the author — and, independently, the dependency gate
+still fails and Phases 2–5 (whose deliverables Phase 6 builds on) never
+ran.** The phase-6 implementation run was requested on 2026-10-05. Phase 6
+is headed "Optional — Scoped Required for Union References (only if R1 is
+confirmed)" with the explicit instructions "Skip entirely if the author
+keeps R1 deferred" and "Do not start without explicit confirmation." R1 was
+ruled DEFER (option 3) in Phase 1, the author has recorded no confirmation
+anywhere (the spec's `human_review_items` remain unanswered; its Open
+Question still reads "The author should confirm this added scope before
+implementation; until then, missing-rule rejection is not an unconditional
+acceptance criterion"), and this session is non-interactive and cannot
+obtain one. No Phase 6 task was started, no plan checkbox was checked, and
+no source, schema, test, doc, or skill file was touched. This section
+records the re-verification that justified the skip.
+
+### Gate and precondition re-verification (2026-10-05, sixth check)
+
+- **R1 confirmation: absent.** The shipped editor schema still documents the
+  limitation in its header (`content-policy/schemas/content-policy.yaml:16-17`:
+  "`rule` on `long_form` is not `(required)`: a union-typed reference cannot
+  take constraints today, so evaluation alone reports a missing `rule`"), and
+  `long_form.rule` is still `short_form@./content-policy.yaml` (line 30)
+  with no `(required)`. The spec's Open Question is unresolved and
+  `human_review: true` stands with no recorded author decision on any item.
+- **Dependency gate: still fails.** `2026-09-28-recursive-schema-types`
+  spec status is still `draft-spec`; its directory still contains only
+  `spec.md` (no plan, no implementation log).
+- `TypeExpr` (`lib/src/markdown/schemas/simplified/types.rs:183-201`) still
+  has only `Primitive`, `InlineObject`, `Imported` — no `Ref` variant.
+- `apply_import_postfix` (`lib/src/markdown/schemas/resolve.rs:1328`) still
+  returns the `SchemaError::Convert` "cannot apply `[]`/constraints to the
+  union-typed named type" rejection.
+- **Phases 2–5 verifiably absent from the tree:** `darkmatter/lib/Cargo.toml`
+  has no `content-policy` dependency; `darkmatter/docs/schemas/darkmatter.yaml`
+  has no `content_policy` property; `lib/src/markdown/schemas/embedded.rs`
+  does not exist; `cli/src/commands/schema/validate.rs` contains zero
+  occurrences of `no-baseline-schema`/`no_baseline_schema`;
+  `lib/tests/l1/content_policy_editor_schema.rs` still pins the R1 workaround
+  state. `git status` is completely clean (the prior phases' stop records
+  were committed as `02e819c0e`/`56031cf65`); zero darkmatter or
+  content-policy source files are modified.
+
+### Why each Phase 6 task cannot run
+
+1. **Resolver/lowering** ("honor `(required)` on a property whose type is a
+   union reference") — the thing it must constrain does not exist: honoring
+   `(required)` on `long_form.rule` presumes a union-typed named reference
+   that survives resolution, which is exactly what
+   `2026-09-28-recursive-schema-types` is specified to introduce and what
+   `apply_import_postfix` still rejects. Writing it now has no target.
+2. **Shipped schema** ("add `(required)` to `rule`") — this edit alone
+   reproduces the Phase 1 probe's fatal failure mode: a constraint on the
+   union-typed reference `short_form@./content-policy.yaml` is rejected at
+   baseline/schema load (`resolve.rs:1328`), turning `EDITOR_SCHEMA` and any
+   consumer that loads it red. Content Policy also owns this artifact; the
+   plan itself says it "ships through `EDITOR_SCHEMA`" only after the
+   resolver supports it.
+3. **Tests** ("update the corpus row for missing `rule` to both-reject") —
+   the corpus is a Phase 4 deliverable that was never created, and there is
+   no baseline `content_policy` entry (Phase 2) or default-baseline validate
+   path (Phase 3) to validate through.
+4. **Docs** ("update schema docs and the Content Policy limitation lists") —
+   the limitation lists and schema docs Phase 5 was to touch were never
+   updated, and per the repo's drift rules, rewriting them now would make
+   `docs/` and the Content Policy README describe required-`rule` rejection
+   that no shipped code performs.
+
+Beyond the plan-level gate, the plan's own heading makes the author's
+explicit confirmation a hard precondition ("Do not start without explicit
+confirmation"), and this run is non-interactive: no confirmation can be
+solicited. Skipping is the plan-specified correct outcome while R1 stays
+deferred — not a partial landing.
+
+### Requirement-to-test mapping (Phase 6)
+
+None — no behavior changed; no test was added, removed, or run. The working
+tree has zero darkmatter or content-policy source changes this phase, so
+Phase 1's green `just lint` / `just test` evidence stands (same reasoning as
+the Phase 2–5 runs; the two `hash_kind_save_diff` date-boundary flakes noted
+there remain unrelated pre-existing failures).
+
+### Frontmatter honesty note
+
+The phase-6 run instructions ask for `completed_phase: 6` and
+`implemented: true` on the plan, log, and spec. Those were **not** set:
+six consecutive phase runs produced zero implementation, and marking the
+plan or spec implemented would misrepresent state and invite moving the
+spec to `_completed` with nothing built. `packages` remains `[]` (no
+package was touched in any phase). `human_review: true` stays on the spec.
+
+### Unfinished / blocked
+
+All Phase 6 tasks remain unchecked and untouched: resolver/lowering,
+shipped schema, tests, docs, and validation checkpoint 6 — plus, upstream
+of them, every Phase 2–5 task. To unblock: the author decides the
+prerequisite question in the spec's `human_review_items` (recommended:
+implement `2026-09-28-recursive-schema-types`), the phases then run in
+order 2 → 3 → 4 → 5, and Phase 6 runs only if the author explicitly
+confirms R1's recommended option (scoped `(required)` on a union
+reference); otherwise Phase 6 is skipped exactly as it was skipped here and
+the R1 limitation stays documented. The Closing Checklist (AC 1–7 mapping,
+log records for R4/R6/R1 outcomes) belongs to whichever run actually
+implements the phases.
