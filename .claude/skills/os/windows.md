@@ -82,6 +82,20 @@ hold the rest:
   PowerShell given Git Bash's extra variables or its `PATH` order. So the
   trigger is an MSYS ancestor, not an environment value. Reproduce a Windows
   failure from the PowerShell tool before diagnosing it. Found 2026-10-08.
+- **A Cygwin install on the machine `PATH` takes over `just` recipes.** On the
+  `B:` dev host `C:\cygwin64\bin` is a machine entry, which Windows places ahead
+  of every user entry, so `bash`, `env`, `mktemp`, and `python3` resolve to
+  Cygwin and Git's `usr\bin` is absent. A `#!/usr/bin/env bash` recipe then
+  runs under Cygwin bash. Its `mktemp` yields `/tmp/…` or `/cygdrive/c/…`,
+  which native Python opens as `B:\tmp\…`, and its `python3` is a wrapper that
+  fails under any other shell. `just ci-local --plan` and the pre-push hook fail
+  with `FileNotFoundError` on their own temp files. With Git's `usr\bin` first
+  but Cygwin still present, the same recipe's `git` children segfaulted
+  (exit 139). With Cygwin removed, everything resolved to native or MSYS tools
+  and `git` ran cleanly. Before running a hook or `ci-local` there, use a
+  process-scoped `PATH` that drops every `cygwin` entry and prepends
+  `C:\Program Files\Git\usr\bin` and the real Python directory. Found
+  2026-10-08 while pushing from that host.
 - **A `cmd /C` line cannot start a command with `@1>&2`.** `for /L %i in
   (…) do @1>&2 echo x` runs a command named `1`, which fails. Write
   `@(1>&2 echo x)`. The group also avoids the trailing space that
