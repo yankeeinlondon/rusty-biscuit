@@ -113,16 +113,12 @@ comma list is rejected. A `wsl` leg that fails with `ssh: connect to host ...
 port 22: Operation timed out` while the Windows host answers means the guest
 is stopped, not unreachable: `ssh $BUILD_WIN 'wsl.exe -l -v'` shows `Stopped`,
 and `ssh $BUILD_WIN 'wsl.exe -d Ubuntu-26.04 -e true'` boots it with sshd up
-within seconds (2026-09-26). The linux leg's archive build also hit the stale
-read-only kache links described below in a *different* standing clone
-(`<host>--fix-sniff`, 372 files); clearing only the read-only multiply-linked
-files (`find target/release -type f ! -perm -u+w -links +1 -delete`) fixed it
-without a cold rebuild. Same failure and fix in `<host>--feat-reusable-path` on
-2026-09-30 (373 files, first seen as `libav_scenechange-*.rmeta is not
-writeable`), so clear them in any standing clone before reading the leg as red.
-Again in `<host>--fix-magic-globs` on 2026-10-02 (`libbiscuit_file-*.rmeta`);
-a session that may not SSH to the host can take the native path instead by
-passing a build flag (`--features <a feature the package declares>`).
+within seconds (2026-09-26).
+
+A Linux archive build that reports an output as "not writeable" needs an
+artifact and wrapper check, not a feature flag. See **Compiler cache on the
+hosts** below. A build flag switches to different coverage without repairing
+the release target or preventing another cache restore.
 
 In archive mode a Cargo target selector (`--test l1`, `--lib`) reaches the
 consumer's `cargo nextest run --archive-file` and is rejected with a usage
@@ -258,36 +254,39 @@ Delete `~/scratch/<name>` afterward; its `target/` is not swept.
 
 ## Compiler cache on the hosts
 
-The standing `cross-check` clones are **never** built through kache, because CI never is.
-Do not export `RUSTC_WRAPPER` in a session that touches them: in hardlink mode (build-linux is
-ZFS without a working clone path; the WSL guest is ext4) a restored artifact is a read-only link
-into the store, and the next unwrapped rebuild fails with "output file ... is not writeable"
-(2026-09-09, 89 such files). Ruling per platform: `docs/kache-strategy.md`.
-On 2026-09-25 the `fix-wt-ux` standing clone on `build-linux` still carried such links:
-archive mode failed while compiling the release `ci-build` tool
-(`target/release/deps/librenderable-*.rmeta is not writeable`). Passing a build flag
-(`--features image`, `--all-features`) takes the native path, which builds only the debug
-profile, and that ran green. The links were still there on 2026-09-26 (same error, same
-workaround), and remain until someone clears that clone's `target/release`. Still there on
-2026-09-27 (`libthiserror-*.rmeta` and eight more); `worktree-cli --features terminal-tests`
-took the native path green. The `feat-schema-enhancement` clone on `build-linux` showed the
-same failure on 2026-09-27, and the same workaround applies, so check any standing clone for
-these links, not only `fix-wt-ux`. Same again in `fix-wt-skill` on 2026-10-04: for a
-library-only package, any declared feature takes the native path too
-(`just cross-check worktree --os linux --features count-git` ran green). The native path runs the whole suite, `perf_` tests
-included, which the archive (CI) L1 drops, so it can fail on a stale `perf_` expectation that
-the local `just test` never ran: run `just test-perf` for the package too before reading such
-a failure as Linux-specific.
+The standing `cross-check` clones must never build through kache, matching CI.
+The Unix remote prelude explicitly exports `RUSTC_WRAPPER=""` and
+`RUSTC_WORKSPACE_WRAPPER=""` before either native or archive builds. Unsetting
+the variables is insufficient: host config or a Cargo shim can reactivate a
+wrapper. This also applies to private scratch checkouts on non-qualifying hosts.
 
-`unset RUSTC_WRAPPER` does **not** keep kache out; only an explicitly empty
-`RUSTC_WRAPPER=""` does (measured 2026-09-21):
+**Linux repair verified 2026-10-06.** The host still had a root-owned
+`/usr/local/bin/cargo` shim that automatically enabled kache 0.12.0 for cold
+builds, even though Cargo config declared no wrapper. Stats showed 508 hits in
+24 hours; the store-to-checkout `cp --reflink=always` probe failed with
+"operation not permitted" on ZFS. The `fix-file-association` standing clone
+had 492 read-only release artifacts; sampled files, including
+`libbiscuit_file-*.rmeta`, shared device/inode identities with store blobs.
+This was active policy drift, not merely historical target permissions.
 
-- `build-linux` has a `/usr/local/bin/cargo` shim ahead of the rustup proxy on
-  `PATH`. It turns kache on for any compile-ish subcommand whose `target/` does
-  not exist yet, which is every fresh private `~/scratch` clone, and leaves an
-  already-set `RUSTC_WRAPPER` (even empty) alone. A capture into a new clone
-  followed by a rebuild after a patch failed with the hardlink error above.
-  Export `RUSTC_WRAPPER=""` (or `KACHE_AUTO=0`) before the first cargo command.
+The automatic shim was backed up beside itself as
+`cargo.kache-auto-backup-20261006T180334Z` and replaced with a symlink to the
+host's rustup Cargo proxy. The 492 proven cache-linked artifacts in that
+checkout were atomically replaced with independent, owner-writable copies,
+preserving artifact contents and leaving store blobs unchanged. A follow-up
+scan of 15 target trees under `~/coding`, `~/ci-verification`, and `~/scratch`
+found 2,372 more cache-linked artifacts in six standing clones. Those were
+replaced under each clone's lock with independent writable copies; every copy
+was compared byte-for-byte before replacement, and cache blob modes, sizes,
+and modification times were verified unchanged. The final scan found zero
+remaining cache links across those 15 target trees. The repaired checkout built the release
+`ci-build` tool successfully, and a fresh scratch build invoked rustc directly
+with incremental compilation enabled. Before repairing another clone, acquire its
+`.cross-check.lock`, verify the links against the store by device/inode, then
+unlink generated artifacts or replace them with independent writable copies.
+**Never chmod a shared artifact:** it also changes the cache blob. Do not use
+a package feature to bypass archive coverage as a permissions remedy.
+
 - The macOS dev host sets `rustc-wrapper = "kache"` in `~/.cargo/config.toml`
   and puts kache `cc`/`gcc`/`clang` shims (`~/.local/lib/kache/shims`) on
   `PATH`. A "kache off" timing needs `RUSTC_WRAPPER=""` and those shims removed

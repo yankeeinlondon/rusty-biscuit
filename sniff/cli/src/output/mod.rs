@@ -34,6 +34,8 @@ pub struct TextOutput {
     pub stderr: String,
 }
 
+pub use filesystem::query::{UNWRAPPED_WIDTH, View as PathUsageView, render_path_usage};
+pub(crate) use filesystem::query::neutralize as neutralize_control_text;
 pub use filesystem::{
     PathListFormat, render_docs_output, render_git_section, render_hash_section, render_path_list,
 };
@@ -249,6 +251,10 @@ pub fn emit_stderr(text: &str, plain: bool) {
 /// This is the central render function that delegates to per-section renderers.
 /// The caller is responsible for emitting the result (via `emit_text`).
 ///
+/// `link_root` is the root the filtered verbose `files` list paths are
+/// relative to; the command layer resolves it before rendering (and reports
+/// a failure there), so this stays `None` for every other filter.
+///
 /// Some `RepoAction` variants trigger side effects (e.g., `std::process::exit`)
 /// and cannot be rendered to a string — these are handled inline.
 #[allow(clippy::too_many_arguments)]
@@ -259,6 +265,7 @@ pub fn render_text(
     history_count: usize,
     docs_filter: &DocsFilter,
     files_filter: &FilesFilter,
+    link_root: Option<&std::path::Path>,
     repo_action: Option<&RepoAction>,
     base_dir: Option<&std::path::Path>,
     latest_versions_requested: bool,
@@ -635,7 +642,7 @@ pub fn render_text(
             if let Some(ref filesystem) = result.filesystem
                 && let Some(ref files) = filesystem.files
             {
-                out.push_str(&render_files_section(files, verbose, files_filter));
+                out.push_str(&render_files_section(files, verbose, files_filter, link_root));
             }
         }
         OutputFilter::Docs => {

@@ -18,9 +18,9 @@ pub(super) fn execute_report(handler: Option<&ReportHandler>, meta: &EventMeta, 
     // Route report output to stderr on blocking events to avoid corrupting
     // the machine-facing provider response payload on stdout.
     if blocking {
-        eprintln!("{output}");
+        crate::render::console::write_stderr_line(&output);
     } else {
-        println!("{output}");
+        crate::render::console::write_stdout_line(&output);
     }
 }
 

@@ -320,6 +320,15 @@ tree, defeating the early termination the cap exists for. Ordering is always sor
 result (`truncated == false`) is fully deterministic for an unchanged tree. Tests for truncated runs
 assert the cap, the flags, ordering, and path validity — never exact selected-path equality.
 
+The focused `sniff files` command requests structure-only membership and Git identity,
+with docs and formatting disabled. Its inventory walk starts at the owning package or
+base directory, so unrelated repository files cannot consume its classification budget.
+The association filter retains percentages of all files scanned in that scope; verbosity
+does not change acquisition — a filtered verbose report only renders the matching paths
+the captured observation already holds. A capped text report discloses the partial
+sample, even if the selected association has no matches. See
+[file association reports](cli/files.md).
+
 ### Git Status Layers
 
 Git status collection has four code paths selected by the request (`GitRepo::detect_with_request`):

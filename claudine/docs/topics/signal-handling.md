@@ -80,14 +80,14 @@ The handler itself runs in the signal-handling context, so it is restricted
 to async-signal-safe operations:
 
 - Sets the process-scoped [`USER_INTERRUPTED`] flag (atomic store, allocation-free).
-- On the **first** SIGINT only, writes a pre-rendered notice to stderr via
-  `libc::write(2)` (the only async-signal-safe way to print). The notice
-  has a leading `\n` so it lands at column 1 (off the terminal's echoed
-  `^C`) and renders the prompt path as an OSC8 hyperlink whose visible
-  text is the user's CLI argument verbatim.
+- On the **first** SIGINT only, has a pre-rendered notice shown on stderr
+  (through the relay thread described below). The notice has a leading `\n`
+  so it lands at column 1 (off the terminal's echoed `^C`) and renders the
+  prompt path as an OSC8 hyperlink whose visible text is the user's CLI
+  argument verbatim.
 - On a **second-or-later** SIGINT that lands while **no child wait loop is
-  active**, force-exits the wrapper with `libc::_exit(130)` (after a static
-  async-signal-safe notice). This is the teeth the flag alone lacks: the
+  active**, force-exits the wrapper with `_exit(130)` after a static notice.
+  This is the teeth the flag alone lacks: the
   interrupt flag only short-circuits at the *next explicit checkpoint*, so a
   synchronous call wedged on a network send or a hung TTS subprocess —
   notably in the prep phase or *between loop iterations*, where no agent
@@ -104,9 +104,17 @@ to async-signal-safe operations:
   `LifecycleRunGuard::run_event_stack`); the press arms a 500 ms deadline
   (`TERMINAL_LIFECYCLE_EXIT_GRACE`), and a run that finishes inside it exits
   normally. On Unix the signal handler cannot wait, so it writes one byte to a
-  process-lifetime self-pipe and a watcher thread sleeps out the grace before
+  process-lifetime self-pipe and a relay thread sleeps out the grace before
   `_exit(130)`; on Windows the console-handler thread waits itself. Later
   presses do not extend the deadline.
+- **The Unix compose handler never writes to the terminal.** For every rung it
+  only counts the press and writes one byte to the relay's non-blocking
+  self-pipe. The relay thread shows the notice, and for an exit rung gives it
+  up to 250 ms to reach the terminal before `_exit(130)`. A handler that wrote
+  to a terminal that had stopped reading would block forever, in whichever
+  thread the signal interrupted, and an exit rung would never exit. In the
+  rare case that the relay could not be started, an exit rung exits
+  immediately without its notice.
 - The **post-exit process-group teardown** (`kill_process_group`, Unix) raises
   the same counter. After the agent exits, a descendant that inherited its
   stdout/stderr (an OpenCode server, a subagent) can outlive it; the teardown
@@ -188,6 +196,31 @@ that path. Each OS proves the ladder with a real interrupt from its terminal
 layer: the tmux and kitty rows on macOS, and the ConPTY row on Windows. The
 Linux L3 row is kept as an extra end-to-end check. It is not a bar that every
 OS must meet.
+
+### Terminal output at exit
+
+Terminal writes go through one output worker (see
+[Timeouts](timeouts.md#a-terminal-that-stops-accepting-output)), so the process
+cannot exit until that worker has had a chance to write what a run queued.
+`shutdown::finish` waits for it after the message drain, for the time left on
+the run's post-exit clock, or 10 s when no run set one:
+
+- A terminal that keeps up drains at once and the exit code is unchanged.
+- A terminal that has stopped accepting output cannot be interrupted from
+  outside. When the wait ends, delivery is disabled and the process exits
+  without flushing stdout, because the stuck thread may hold its lock. That
+  costs unwritten output, never the exit code.
+- The wait installs no interrupt handler of its own. Ctrl+C keeps its current
+  meaning: after `compose` or `inline-compose` the held guard still applies;
+  otherwise the default disposition ends the process (`130`), abandoning any
+  frames still queued.
+- A termination the wrapper sends (SIGTERM, then SIGKILL after the grace
+  period) targets the child's process group, never the output worker, so a
+  killed run still has its trailer and summary queued and bounded the same way.
+- A structured run writes its `session_end` record after the trailer's own
+  bounded wait, so a terminal that stops accepting the trailer is recorded as
+  `output_incomplete.stalled` on that record. The record still precedes
+  lifecycle completion and the exit wait above.
 
 ### Process-scoped flag
 
@@ -380,15 +413,38 @@ forwarded signal) should make immediate progress toward killing a
 runaway. The `interactive` flag derives from the same
 `effective_non_interactive` value the harness already computes.
 
-**Visible feedback (Q14).** Each counted press emits a one-line stderr
+**Visible feedback (Q14).** Each counted press shows a one-line stderr
 acknowledgement (`⚠ interrupt received — press again to escalate`, then
 `⚠ interrupt received — escalating`) so the user can see the press
-registered even while a runaway is flooding stderr. The write is a single
-async-signal-safe `libc::write(2)` of a static byte string — no
-allocation, no formatting — so it obeys the
-[signal-safety rules](#signal-safety-rules-for-new-code). It is emitted
-even when the child shares the wrapper's process group, because the user
-still deserves acknowledgement.
+registered even while a runaway is flooding stderr. It is shown even when the
+child shares the wrapper's process group, because the user still deserves
+acknowledgement.
+
+The signal handler does not write the line. It counts the press and sends the
+signal, and the wait loop, which polls the child every 75 ms, shows a line for
+each press counted since its last poll. So the line can appear up to 75 ms
+after the press, while the signal reaches the child at once:
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Handler as SIGINT handler
+    participant Loop as wait loop (every 75 ms)
+    participant Worker as output worker
+    User->>Handler: Ctrl+C
+    Handler->>Handler: count the press, signal the child group
+    Loop->>Loop: count is ahead of what was shown
+    Loop->>Worker: queue "⚠ interrupt received …"
+    Worker->>User: written when the terminal accepts it
+```
+
+The Windows console handler runs on a thread of its own rather than in signal
+context, so it queues the same line itself before applying the press.
+
+Every interrupt notice (this feedback line, the compose notices above) is a
+diagnostic: during a wrapped run it is queued on the output worker rather than
+written (see [Timeouts](timeouts.md)), so a terminal that stopped accepting
+output cannot hold the code that shows it.
 
 The handler does **not** re-signal the child when `child_in_own_pgroup`
 is `false` (interactive TUI children share the wrapper's process group,
@@ -602,7 +658,9 @@ passed to `signal_hook::low_level::register`), the following are the only
 allowed operations:
 
 - Atomic loads / stores on `AtomicBool`, `AtomicU8`, etc. (lock-free).
-- `libc::write(2)` to a known file descriptor with a pre-allocated buffer.
+- `libc::write(2)` of a pre-allocated buffer to a **non-blocking** descriptor
+  Claudine owns, such as a self-pipe. Never to stdout or stderr: a terminal
+  that stopped reading blocks the write, and the interrupted thread, forever.
 - `libc::kill` to send a signal to a known PID/PGID.
 - Reading from `Arc<T>` clones whose `T` is `Sync` and lock-free.
 

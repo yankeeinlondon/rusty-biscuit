@@ -13,6 +13,7 @@ fn outcome(termination: ProcessTermination) -> AttemptOutcome {
         guard_context: None,
         error_message: None,
         timeout_secs: None,
+        output_status: OutputStatus::default(),
     }
 }
 

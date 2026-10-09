@@ -489,6 +489,13 @@ class CrossCheckShipTests(CrossCheckHarness):
                     "--archive-file \"$archive_file\" --workspace-remap \"$src\"", remote
                 )
                 self.assertIn("BISCUIT_NEXTEST_BIN='cargo-nextest nextest'", remote)
+                # The planner's key helper is the verifier the archive carried,
+                # bound after it was verified and before any test runs.
+                binding = 'export BISCUIT_CI_BUILD_BIN="$consume/build/tools/ci-build"'
+                self.assertEqual(1, remote.count(binding), remote)
+                self.assertLess(verify, remote.index(binding))
+                self.assertLess(remote.index(binding), test)
+                self.assertNotIn("BISCUIT_CI_BUILD_BIN=\"\\$", remote)
                 # The markers the receipt is assembled from.
                 for marker in (
                     "cross-check-tree:",
@@ -557,6 +564,11 @@ class CrossCheckShipTests(CrossCheckHarness):
         verify = remote.index("just _ci_build_verify")
         test = remote.index("just _test ")
         self.assertLess(verify, test)
+        # The same binding, spelled the way native Windows spells the file.
+        binding = '$env:BISCUIT_CI_BUILD_BIN = "$consume\\build\\tools\\ci-build.exe"'
+        self.assertEqual(1, remote.count(binding), remote)
+        self.assertLess(verify, remote.index(binding))
+        self.assertLess(remote.index(binding), test)
         # Every path handed to a `just` recipe goes through `_native_path`: a
         # backslash in a recipe's `*args` is eaten by bash before nextest sees it.
         self.assertIn("just _native_path $src", remote)
@@ -608,6 +620,10 @@ class CrossCheckShipTests(CrossCheckHarness):
         )
         self.assertNotIn("ci-build produce", run["remote"])
         self.assertEqual("", run["plan"], "a native run ships no plan")
+        # No archive, so no verified verifier to bind.
+        self.assertNotIn("BISCUIT_CI_BUILD_BIN", run["remote"])
+        windows = self.ship("windows", "--all-features")
+        self.assertNotIn("BISCUIT_CI_BUILD_BIN", windows["remote"])
 
     def test_the_native_windows_path_reports_its_exit_code_the_same_way(self) -> None:
         # The escape hatch shares the wrapper, so it shares the hazard.

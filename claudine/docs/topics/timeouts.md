@@ -419,8 +419,407 @@ synthesised `session_end` JSONL event with the corresponding
 | Wall-clock breach | `timeout` |
 | Stream-silence breach | `step_timeout` |
 
+Durations in these messages always carry a unit: `59s`, `2m`, `59m59s`,
+`1h0m`. A bare number never appears.
+
 A double-fire guard ensures only the **first** breach wins, even if both
 rules would expire on the same tick.
+
+## Waiting for the stream readers after the agent exits
+
+A structured run reads the agent's stdout and stderr on two reader threads.
+The stdout reader parses each line and renders assistant text; the rendered
+frames are queued for the terminal rather than written by the reader (see
+[A terminal that stops accepting output](#a-terminal-that-stops-accepting-output)).
+When the agent exits, Claudine stops its process group and then
+waits for both readers to finish, because the run's summary (result, cost,
+`error_kind`) comes from the stdout parser.
+
+This wait is an **internal cleanup budget**, not a third timeout rule. The two
+rules above (`timeout`, `step_timeout`) bound the agent while it runs; the
+bounds here apply only after it has exited, cannot be configured, and never
+turn a run's outcome into a timeout by themselves. Everything after the exit
+shares one clock:
+
+```mermaid
+sequenceDiagram
+    participant W as wrapper (main thread)
+    participant R as stream readers
+    participant O as output worker
+    W->>W: agent exits; stop its process group
+    Note over W: shared clock starts here
+    W->>R: join stdout and stderr readers (5 s / 120 s bounds)
+    R-->>W: parser summary, or a timeout / panic outcome
+    W->>O: queue warnings, trailer, summary
+    W->>O: drain until the shared clock runs out
+    W->>W: freeze the summary, publish one session_end
+```
+
+That wait has two bounds, chosen by what the reader is doing:
+
+| Reader state | Bound | Why |
+|---|---|---|
+| Blocked reading its pipe for at least 250 ms, before EOF | 5 s | Another process can inherit the pipe and hold it open forever. More waiting would not help. |
+| Handling a line it already read, or past EOF | 120 s | The reader is making progress. Usually it is writing a large final message to a terminal that is slow to accept it. |
+
+```mermaid
+stateDiagram-v2
+    [*] --> Waiting: pull next line
+    Waiting --> Processing: line read
+    Processing --> Waiting: pull next line
+    Waiting --> EOF: pipe closed
+    Waiting --> TimedOut: 5 s after exit, blocked 250 ms
+    Processing --> TimedOut: 120 s after exit
+    EOF --> TimedOut: 120 s after exit
+    EOF --> Joined: final render done
+```
+
+Both bounds count from the same instant, just after the process-group
+teardown. A reader that finishes a slow line and then blocks on a pipe that
+is still open times out 250 ms later if 5 s have already passed. The 250 ms
+settle exists because a reader moving between two buffered lines is briefly
+in a read too, and must not be mistaken for one blocked on a held pipe.
+
+The bounds are constants, not configuration. The 120 s bound allows more
+cleanup time than the old 5 s join while keeping the wait finite. Historical
+event timestamps show delayed processing but do not measure the exact
+post-exit stall duration. The join alone does not keep a blocked terminal
+from hanging the wrapper, though: the
+trailer and warnings that follow it are written too, and that is what the
+output worker below bounds.
+
+### Outcomes
+
+| Outcome | Summary | Shown on stderr |
+|---|---|---|
+| Reader finished | The parser's real summary | Nothing |
+| Reader panicked | `error_kind: parse_failure`, message `Stream parser thread panicked: <panic message>` | The run's error |
+| Timed out after parsing every line (stuck in its final render) | The parser's real summary; the agent's exit code is kept | A warning that the output may be incomplete |
+| Timed out with lines still unparsed | Preserve any established provider failure; otherwise native exit 0 selects `error_kind: claudine_completion_delayed` | A subordinate warning naming the observed pipe wait or unfinished cleanup |
+
+A reader timeout never makes a run succeed or hides why it failed. For a
+reader that stalled while still holding its parser, what the provider had
+already reported decides the outcome:
+
+| The run | Reported |
+|---|---|
+| Exit 0 and a completed result | Success, exit 0, with a warning that output may be incomplete |
+| Exit 0, result says it failed | The provider's error, exit 0 kept, plus the warning |
+| Exit 0 and no result yet | `claudine_completion_delayed`; no result is invented |
+| Nonzero exit or interrupted | The exit code is kept; with no result read, `exit_failure` (or `interrupted` for exit 130). A published answer and session are retained |
+| Provider timeout, rate limit, or other early termination | That cause; it is applied after the reader is settled |
+
+A reader that really panicked stays `parse_failure`, unless the provider timed the run out first.
+
+A stderr reader that panics or times out shows a warning and contributes no
+captured stderr. It does not change the summary.
+
+The captured and inherited spawn paths use the same two bounds, the same
+shared clock, and the same wording. Their warning is queued for stderr on the
+output worker described below, so it shows with tracing off and is never
+written by the thread that settles the run. Their readers are tracked the same
+way:
+
+- **Captured:** the capture buffer is shared with the reader thread, so a
+  reader that panicked or was abandoned still yields what it had collected.
+  The result is marked incomplete. The captured response and any stderr the
+  failure report will not show are queued too, and the attempt waits for them
+  at most 120 s before its lifecycle continues. A `compose` attempt reports
+  both on its outcome's `output_status`: `partial_capture` with the reader's
+  warning, and `delivery_incomplete` when the terminal had not taken the
+  response by the end of that wait or refused part of it with a write error.
+- **Inherited:** forwarded lines are queued on the output worker, so a
+  terminal that stops accepting them cannot hold the forwarder or the
+  wrapper. A forwarder still reading at the cutoff (a descendant holding the
+  pipe) has its later lines refused. Output the terminal did not take,
+  including a line it refused with a write error, is a
+  warning, never a provider failure: the child's exit code and termination
+  stand. A `compose` attempt carries the warning on its outcome's
+  `output_status` as `delivery_incomplete`, beside the provider's own exit
+  code and failure classification. An interactive run with both streams
+  inherited forwards nothing, so none of this applies to it.
+
+For example, if the agent exits 0 while the terminal takes 30 s to accept
+its last screen of Markdown, the reader is handling output rather than
+waiting on its pipe, so the 120 s bound applies. The run finishes with the agent's own result and exit code.
+
+### A terminal that stops accepting output
+
+A terminal that stops reading blocks a write in the kernel, and nothing can
+interrupt that write from outside. If the stdout reader made it from inside
+the stream parser's callback, the parser would stall holding the only copy of
+the run's result, and every later write (warnings, trailer, summary) would
+queue behind the same lock.
+
+So no thread that parses or settles a run writes to the terminal. Every
+terminal write is a whole frame queued on one **output worker** thread, and
+queueing never blocks:
+
+```mermaid
+flowchart LR
+    R[readers: rendered stdout, provider stderr, forwarded lines] -- frames --> Q[(bounded queue)]
+    M[main thread: warnings, captured response, trailer, summary] -- frames --> Q
+    Q --> W[output worker] --> T[terminal]
+    M -- drain until the shared clock --> W
+```
+
+- **Order and bytes are unchanged** for a terminal that keeps up.
+- **The wait is bounded.** After the readers are joined, the wrapper waits for
+  the worker until the same 120 s clock the readers were joined against, and
+  again after the trailer. If the worker is still writing when the clock
+  runs out, delivery is *disabled*: the worker is abandoned, queued frames are
+  discarded, and later frames are refused immediately. Nothing starts a
+  second writer, and the process exits without flushing a stdout the stuck
+  thread may hold.
+- **A write error is lost output.** A terminal that refuses a frame with an
+  error, such as a closed pipe, returns at once rather than stalling, so the
+  queue empties and the wait ends normally. The worker counts each refused
+  frame in `failed_writes` and keeps writing later frames, since a closed
+  stdout says nothing about stderr. Every consumer treats that count like
+  any other loss: an inherited run gets the forwarding warning, a captured
+  attempt reports `delivery_incomplete`, and a structured run reports it on
+  its attempt and its `session_end` record. The agent's exit code, result,
+  and verdict are unchanged. For example, a successful `claudine compose`
+  whose stdout is a pipe nobody reads any more still exits 0, and its record
+  has `output_incomplete.failed_writes` of at least 1.
+- **The loss is recorded, not shown.** A terminal that stopped listening
+  cannot show a warning about it, so a structured run writes its one
+  `session_end` record only after the final answer and the trailer are queued
+  and the final wait has ended. A stall that starts on the trailer is
+  therefore on the record. When the run lost output or a reader did not
+  finish, the record carries an `output_incomplete` object, omitted
+  otherwise:
+
+  ```json
+  "output_incomplete": {
+    "dropped_frames": 0,
+    "rejected_frames": 0,
+    "failed_writes": 0,
+    "stalled": true,
+    "reader_warnings": [
+      "Claudine stopped waiting for the agent's output 120s after the agent exited: it was still being processed, most likely because the terminal was not accepting output. The run's result is kept; its output may be incomplete"
+    ]
+  }
+  ```
+
+  `reader_warnings` holds each reader warning in full (a timeout's cause, a
+  stderr reader's panic message) and is empty when every reader finished.
+  The record is written before lifecycle completion, and the lifecycle's own
+  actions keep their own deadlines.
+- **One worker serves the process.** A `compose` loop runs many iterations in
+  one process. A terminal found stalled in one iteration stays disabled for
+  the rest.
+- **Diagnostics are frames too.** Once a wrapped run has created the
+  process's output worker, every line Claudine writes on its own behalf is
+  queued on that worker instead of written by the thread that produced it:
+  Claudine's status, warning, and error lines, the budget warnings, the
+  Ctrl+C notices, the `--perf` report, `--debug` and `RUST_LOG` tracing, the
+  report of a panic, and the library's lifecycle-action, report, and
+  messaging lines. A terminal that stopped reading therefore stalls only the
+  worker, from the very first frame, not only after a drain has noticed. For
+  example, a reader that panics while the worker is stuck still unwinds at
+  once, and the run reports `parse_failure` with the panic message instead of
+  a reader timeout. Frames keep the order they were queued in, so a terminal
+  that keeps up shows the same bytes in the same order. Commands that are not
+  wrapped runs, and anything a wrapped command writes before its first run,
+  write directly as before.
+- **Direct writers go quiet after a stall.** An abandoned worker is stuck
+  inside a write that still holds the process's stdout or stderr lock. When
+  delivery is disabled the worker also closes a process-wide terminal gate,
+  and a diagnostic that would otherwise be written directly is skipped and
+  counted in `rejected_frames`.
+- **Memory is bounded.** The queue holds at most 4096 frames and 8 MiB. Beyond
+  that, whole presentation frames are dropped and counted. Provider bytes,
+  semantic events, and the result are never queued here, so they are never
+  dropped.
+- **A reader past its cutoff is silent.** Once the wrapper settles the
+  summary, a reader still running has its output and lifecycle events
+  discarded, so it cannot write into the next iteration or emit events for a
+  finished run. This covers both readers of a structured run (the provider's
+  stderr passthrough included) and both forwarders of an inherited run.
+  Structured runs wait for both stdout and stderr under the shared reader
+  deadline before freezing publication. For example, an OpenCode model error
+  written to stderr still reaches the caller when stdout reaches EOF first.
+- **A stalled reader still leaves its result.** Parsing a line and acting
+  on it are two steps. The reader first lets the provider's parser handle the
+  whole line, holding back the events it produces. Once the provider has
+  reported a result or a terminal error, the reader then publishes the
+  parser's own finalized summary: the answer, session id, usage, and the
+  provider's verdict, such as Claude's unfinished sub-agents. Only after that
+  does it render the held events, log them, and run their lifecycle hooks.
+  A reader that stalls anywhere, including in a hook or logging callback for
+  the completion event itself, has therefore already left the complete
+  outcome. If the reader is still holding its parser at the cutoff (for
+  example, a hook is still running, or a tool the agent started keeps the
+  output pipe open after the result), the run reports that summary as normal
+  finalization would:
+
+  ```mermaid
+  sequenceDiagram
+      participant R as Reader
+      participant P as Provider parser
+      participant S as Sink (render, log, hooks)
+      participant W as Wrapper
+      R->>P: feed the result line
+      P-->>R: events, held back
+      R->>W: publish the parser's summary
+      R->>S: deliver the held events
+      Note over S: a hook blocks here
+      W->>W: cutoff: report the published summary
+  ```
+
+  | At the cutoff the reader had… | Child exit | Run reports |
+  | --- | --- | --- |
+  | parsed the result line | 0 | the full summary, success or the provider's failure |
+  | parsed a line reporting a failure | nonzero | the provider's failure, with the real exit code |
+  | not parsed a result, but a stderr bridge reported a terminal error | any | that provider error |
+  | published nothing | 0 | `claudine_completion_delayed` |
+  | published nothing | nonzero | `exit_failure` (or `interrupted` for exit 130) |
+
+  For example, a Claude run whose `result` line reads as success while a
+  sub-agent was stopped reports `incomplete_subagents` with the answer, even
+  when the `turn_complete` hook never returns. Rows with a published result show
+  the incomplete-output warning beside the result. A child that exits nonzero
+  after a successful-looking result is never reported as a success. No result
+  is built from lines the parser never handled, and a run is never reported
+  as successful without the parser's summary.
+
+Rendering a large final message was also slowed by font detection: each
+Markdown block rebuilt the detected terminal options, and on iTerm2 each build
+ran a `defaults read` subprocess. The detected font is now cached for the
+process.
+
+### What the stall looked like
+
+When the agent has exited but its output stream is still being drained, the
+wrapper's reader thread can stall inside the terminal write itself: it
+renders each stream line and writes the rendered frame to the terminal from
+inside the stream parser's callback, holding the parser while it does so. A
+terminal that stops accepting output (observed locally by applying XOFF flow
+control to a WezTerm pane on macOS) blocks the reader in the kernel write, with
+the result line still unread. Before the output worker existed, the bounded
+reader join (120 s for a reader caught processing) capped that wait, but the
+main thread then wrote warnings, the trailer, and the summary through the same
+output lock the abandoned reader held, so a permanently blocked terminal could
+still hang the wrapper after the join. Separately, rendering a large final
+message was slowed because each Markdown block rebuilt the detected terminal
+options, and font detection could spawn a subprocess per block on the reader
+thread. The blocked operation in the original incident remains unestablished:
+XOFF was a controlled stand-in, one macOS host was measured, and no WezTerm
+defect is claimed. Linux and Windows terminals were not sampled.
+
+An answer appearing before an error did not mean the provider had failed.
+The old join returned the same fallback for a reader timeout and a real panic.
+That fallback marked the run as an error with "Stream parser thread panicked",
+even when the child exited 0. The harness then returned 1 to the caller, so a
+shell chain could stop after displaying the answer. A Codex answer could also
+be recovered from its last-message file without clearing that false failure.
+Reader timeouts now have their own classification, and a parsed successful
+result survives delayed output delivery; a visible answer alone does not
+replace the provider's completion verdict.
+
+The original eleven recorded panic-message incidents include nine Claude runs
+and two Codex runs. In the October 6 Claude incident, the provider's native
+transcript recorded its final answer at 08:21:29.979 UTC and completed its
+stop hook at 08:21:30.172. Claudine logged the false failure at
+08:22:26.640994, that same answer at 08:22:26.641015, and the result at
+08:22:26.641202. The answer therefore existed about 56.7 s before Claudine
+logged it. Semantic logging followed rendering callbacks, so those timestamps
+establish delayed processing without identifying the blocked operation.
+
+A computation-only replay using six incident answers in reconstructed Claude
+assistant/result envelopes measured 0.046–0.095 ms for JSON decoding, provider
+parsing, and summary construction, and 1.24–3.18 ms for Markdown rendering
+into a string. These are warmed means from an unoptimized development build
+on one macOS host using the current implementation. The replay excluded
+terminal writes, hooks, logging, actual signal matching, and accumulated
+session state, and did not deliberately saturate the CPU. It therefore does
+not establish the historical cause, but does not support ordinary final-answer
+JSON decoding alone as an explanation for a delay of tens of seconds.
+
+### Completion observations and retained prefixes
+
+Structured stdout runs retain separate 256 KiB prefixes of the identified
+answer and exact raw stdout bytes before parsing or callbacks. These diagnostic
+prefixes do not limit normal parser answers. An empty identified answer is
+`""`; an unidentified answer is null. Clipped or partial answers are incomplete.
+Valid UTF-8 raw bytes serialize as a string; invalid UTF-8 uses
+`{ "encoding": "base64", "data": "…" }` with standard padded base64.
+Raw truncation reports omitted observed bytes, never unread pipe data.
+
+The retained fields describe independent facts:
+
+| Field | Unavailable | Available but incomplete | Complete |
+|---|---|---|---|
+| `response_text` / `response_complete` | Both null until an answer is identified | Original answer prefix with `false`, including clipped UTF-8 text | Identified answer with `true`; an empty answer is `""` |
+| `raw_output` / `raw_output_complete` | Both null before bytes or EOF are observed | Exact byte prefix with `false`; invalid UTF-8 is base64 | EOF observed and no bytes omitted |
+| `raw_output_truncated` | `false` | `true` only when observed bytes exceed the inline limit | `false` |
+| `raw_output_path` | Null when capture is disabled or unavailable | Existing opt-in capture file; its presence does not prove completeness | Capture envelopes still omit original delimiters |
+
+A Codex last-message file can identify answer text, but cannot establish a
+provider verdict. An answer may therefore be complete while the transaction
+remains unconfirmed. A complete raw stream also does not imply success: the
+provider's verdict and native exit determine the outcome.
+
+At reader cutoff, retained data and operation observations freeze. Late reader
+activity cannot change that snapshot or submit events to a finished run.
+Reader and settlement operations use coherent atomic tag/time pairs with
+monotonic microsecond offsets. The output worker records active delivery
+separately from queued frames and counters; a queued frame cannot replace the
+operation of a blocked write. A delivery started before the current run is
+marked explicitly. The shared cleanup clock and its budget are unchanged.
+
+Opt-in `CLAUDINE_RAW_STREAM_DIR` capture files retain their envelope format
+and persist until their owner deletes them. An existing path can be retained
+without acquiring the reader's buffered writer. Because the envelope omits
+original delimiters, even a successful flush does not prove byte-complete raw
+coverage. Frozen flags stay conservative if a detached reader later writes.
+
+Reader warnings report waiting for pipe data or unfinished cleanup. They do
+not infer which process holds a pipe or why processing has stalled. Populated
+lifecycle diagnostics remain planned below; the frozen observations are
+currently carried by the execution result. They are not yet persisted as a
+populated diagnostic in the session record or exposed through `err.detail`.
+Stdout settlement now selects
+`claudine_completion_delayed` only for native exit 0 without a published
+verdict or stronger failure. `stream_reader_timeout` remains a subordinate
+reader identity, never the primary stdout summary error.
+
+The direct structured wrapper returns caller exit 1 when the settled summary
+is failed but the provider exited 0. Native exit evidence remains 0 in the
+summary and session record. Confirmed success with unfinished presentation
+still returns 0, so a shell chain such as `claudine claude review && echo next`
+continues only after a successful outcome. Populated diagnostic transport
+remains planned.
+
+### Planned: delayed Claudine completion
+
+**Partially implemented:** settlement reports internal kind
+`claudine_completion_delayed` when the cleanup deadline expires without a
+confirmed provider completion verdict and native exit is 0. The typed
+`ClaudineCompletionDelayed` diagnostic remains planned, with diagnostic code
+`timeout.claudine_completion_delayed`. For example, an agent can exit 0 and
+leave nonempty answer text while its completion record remains unprocessed;
+that condition will carry the available answer instead of claiming a panic.
+
+A parsed successful completion plus native exit 0 returns success when only
+presentation is unfinished. A genuine provider failure, nonzero exit,
+interruption, or actual reader panic retains its primary outcome. Answer
+prose mentioning an error does not itself establish failure.
+
+The planned diagnostic will expose available answer text and retained raw
+provider output separately, with completeness/truncation flags, the native
+exit code, cleanup timing, and the last observed Claudine operation. Raw output
+may be JSONL; unread bytes cannot be presented as a complete response. Whether
+to include CPU information in the diagnostic contract remains undecided; no
+CPU utilization is sampled. CPU information cannot select the deadline or
+establish the cause. The existing 120 s processing budget is unchanged.
+
+Authors will handle this condition through the existing failure/finalize
+diagnostic interface. Printing a retained answer will not convert an
+unconfirmed transaction into success; recovery and `fail_fast` will retain
+their existing rules. See the [planned lifecycle example](flow-control/lifecycle.md#planned-delayed-completion-diagnostic).
+This planned behavior does not change terminal delivery after abandonment.
 
 ## Subagent diagnostics in error reports
 

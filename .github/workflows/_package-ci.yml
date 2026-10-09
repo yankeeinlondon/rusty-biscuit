@@ -86,6 +86,10 @@ on:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  # CI's Python prints non-ASCII (`completion.py`'s check mark). On a Windows
+  # runner a piped stdout is cp1252 without UTF-8 mode, so the print raised
+  # UnicodeEncodeError and failed every Windows cell whose tests all passed.
+  PYTHONUTF8: "1"
   # The repository tracks no rustc wrapper; cleared explicitly so a stray
   # environment value cannot silently intercept a package's builds.
   #
@@ -754,6 +758,9 @@ jobs:
           # native program: nextest's remap, insta's workspace root, and the
           # JUnit staging root. `_ci_build_verify` computes it once.
           ARCHIVE_WORKSPACE: ${{ steps.verified.outputs.workspace }}
+          # The verified `ci-build` the archive carries, in the host's own
+          # spelling; the planner's key helper in this checkout.
+          ARCHIVE_KEY_HELPER: ${{ steps.verified.outputs.key_helper }}
           GATE: ${{ matrix.gate }}
           RECIPE: ${{ steps.cell.outputs.recipe }}
           RUNNER_TOOLS: ${{ steps.cell.outputs.runner_tools }}
@@ -811,11 +818,16 @@ jobs:
             # standalone binary, and the workspace and target directory the
             # JUnit staging would otherwise ask `cargo metadata` for. A
             # consumer's `cargo metadata` would succeed on a hosted runner and
-            # fail in the toolchain-free guest — one spelling for both.
+            # fail in the toolchain-free guest — one spelling for both. The
+            # planner's key helper is the same kind of unintended build: the
+            # verified `ci-build` is already here, so a planner test must not
+            # `cargo run` a cold one.
             export BISCUIT_NEXTEST_BIN='cargo-nextest nextest'
             export BISCUIT_JUNIT_WORKSPACE_ROOT="$ARCHIVE_WORKSPACE"
             export BISCUIT_JUNIT_TARGET_DIR="$ARCHIVE_WORKSPACE/target"
             export INSTA_WORKSPACE_ROOT="$ARCHIVE_WORKSPACE"
+            : "${ARCHIVE_KEY_HELPER:?verification did not report the ci-build key helper}"
+            export BISCUIT_CI_BUILD_BIN="$ARCHIVE_KEY_HELPER"
           fi
           started="$(date +%s)"
           status=0

@@ -121,6 +121,39 @@ pub struct AttemptOutcome {
     /// to the trip is populated; the remaining fields stay `None`. `None`
     /// for non-guard terminations.
     pub guard_context: Option<GuardContext>,
+    /// What Claudine could not collect or present of the attempt's output.
+    ///
+    /// Never a provider failure: [`classify_failure`] does not read it, and
+    /// `exit_code`, `termination`, and `error_kind` stay the provider's.
+    ///
+    /// [`classify_failure`]: crate::harness::classify_failure
+    pub output_status: OutputStatus,
+}
+
+/// Whether an attempt's output was collected and presented in full.
+///
+/// Kept apart from the provider's outcome so a consumer can tell a partial
+/// capture or a terminal that stopped accepting output from a provider
+/// failure. The default is complete output.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct OutputStatus {
+    /// `final_response` and `stderr_text` hold only what the capture readers
+    /// had collected when one of them panicked or outlived its bound.
+    pub partial_capture: bool,
+    /// Some of the agent's output never reached the terminal: a forwarder
+    /// could not write it, or the terminal stopped accepting the response or
+    /// trailer.
+    pub delivery_incomplete: bool,
+    /// One diagnostic per reader or delivery problem, in the order found: a
+    /// reader timeout's cause, a reader's panic message, or a delivery loss.
+    pub warnings: Vec<String>,
+}
+
+impl OutputStatus {
+    /// True when nothing was lost.
+    pub fn is_complete(&self) -> bool {
+        !self.partial_capture && !self.delivery_incomplete && self.warnings.is_empty()
+    }
 }
 
 /// Structured detail for a content-guard trip, threaded from the stream

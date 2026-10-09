@@ -35,9 +35,17 @@ pub(crate) fn init_tracing(debug_level: Option<DebugLevel>) {
             tracing_subscriber::fmt::layer()
                 .with_span_events(span_events)
                 .event_format(RelativePathEventFormat::new(source_base_dir))
-                .with_writer(std::io::stderr),
+                .with_writer(diagnostic_stderr),
         )
         .init();
+}
+
+/// The tracing writer: each formatted event is one diagnostic on stderr,
+/// queued on the output worker during a wrapped run
+/// ([`crate::terminal_gate::write`]), so a warning never waits on a terminal
+/// that stopped reading.
+fn diagnostic_stderr() -> crate::terminal_gate::DiagnosticWriter {
+    crate::terminal_gate::DiagnosticWriter(crate::commands::wrap::output_worker::Stream::Stderr)
 }
 
 pub(crate) fn build_env_filter(

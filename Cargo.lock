@@ -2246,6 +2246,7 @@ version = "0.1.0"
 dependencies = [
  "ansi-to-tui",
  "assert_cmd",
+ "base64 0.22.1",
  "biscuit-file",
  "biscuit-hash",
  "biscuit-speaks",
@@ -16838,6 +16839,7 @@ dependencies = [
  "dirs",
  "fs4",
  "getrandom 0.4.2",
+ "gix",
  "reflink-copy",
  "serde",
  "serde_json",

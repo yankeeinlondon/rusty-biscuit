@@ -1483,6 +1483,27 @@ diagnostic line per active subagent per silence window.
 See [`topics/timeouts.md`](timeouts.md) for the full env-var table,
 precedence chain, termination path, and worked examples.
 
+### Output that did not arrive in full
+
+Each attempt's outcome (`claudine::harness::AttemptOutcome`) carries an
+`output_status` beside the provider's result. Lifecycle stacks do not see it
+yet. It says what Claudine could not collect or show, and it never
+changes the exit code, `error_kind`, or whether the attempt counts as a
+failure:
+
+| Field | Set when | Example |
+|---|---|---|
+| `partial_capture` | A capture reader panicked or outlived its bound, so the response and stderr hold only what it had collected | A tool the agent started keeps stdout open after the agent exits |
+| `delivery_incomplete` | Some output never reached the terminal: a forwarder could not write, the terminal stopped accepting the response or trailer, or it refused a write with an error | The terminal is under XOFF flow control when the trailer is queued, or stdout is a pipe whose reader has exited |
+| `warnings` | One message per problem, in the order found | `Claudine could not forward the agent's stdout to the terminal: terminal went away` |
+
+An attempt whose provider exited 0 with `delivery_incomplete` set still
+succeeds. An attempt whose provider exited 3 is still that provider's
+failure, with the forwarding problem reported beside it rather than as its
+cause. A structured attempt also writes the same reader warnings and delivery
+loss to its `session_end` record; see
+[A terminal that stops accepting output](timeouts.md#a-terminal-that-stops-accepting-output).
+
 ### Recovery
 
 Recovery is expressed through the lifecycle stacks, not a separate handler DSL. `failure` and `blocked` are its natural homes, but recovery is **not limited to them** — flow control is universal, so a `success` stack can `resume` an agent that finished cleanly without producing what it promised, and a `finalize` stack can `retry` an error the terminal event downgraded. The available recovery actions are:
@@ -1493,6 +1514,17 @@ Recovery is expressed through the lifecycle stacks, not a separate handler DSL. 
 - **`defer`** — re-run this prompt later as a fresh scheduled run. **Not implemented**: it surfaces a typed `LifecycleDeferNotImplemented` until its rendezvous backend lands.
 
 See [Flow Control](flow-control/flow-control.md) for the full recovery-action reference and the [migration table](#migrating-from-the-retired-harness-dsl) for the mapping from the removed `handle_*` keys.
+
+**Planned completion-delay handling:** a provider may have finished its work
+while Claudine still lacks a confirmed completion verdict. The internal
+`claudine_completion_delayed` outcome exists, but its populated lifecycle
+diagnostic is not yet available. The planned
+[lifecycle contract](flow-control/lifecycle.md#planned-delayed-completion-diagnostic)
+lets a handler inspect retained response data before choosing recovery.
+`retry` repeats the provider transaction, including side effects that may
+already have happened. Printing an answer will not make the failed step
+successful. To run later sequence steps while retaining a failed step, use
+`fail_fast: false`; the sequence still exits with failure.
 
 ### Shell Policy
 
@@ -1530,6 +1562,18 @@ Execution has two phases:
 A root `prompt` property selects inline closure behavior for the final active target. Step/task `prompt` values are file references; the two meanings occur at different levels. External YAML uses `sequence:` directly or kinded `task`/`group` documents. The retired external `kind: sequence` plus `list:` form is not accepted.
 
 See [Sequences](flow-control/sequences.md) for the complete authoring and execution contract.
+
+### Agent output inside a sequence task
+
+A sequence task frames the agent's streamed output with a bar gutter on the left. The Markdown renderer is told about that gutter up front: it wraps prose, code blocks, and tables to the terminal width minus the gutter, so no rendered line overflows once the bar is prepended. The same narrowed width applies to the agent's final message, which is rendered separately after the stream ends (Codex's answer file is one) and carries the same gutter; both paths use the terminal they were given rather than re-detecting the host's width.
+
+Text that streams in a few words at a time is held until its line is complete and then rendered, rather than shown word by word. A fragment shown raw would never be folded, and the terminal's own wrap would put its continuation at column 0, outside the gutter. The task's frames hold an incomplete line anyway, so nothing appears later than it otherwise would. A single code line wider than the narrowed width is not folded, so it can still run past the pane edge.
+
+```
+terminal 80 columns, gutter 2      rendered Markdown wraps at 78
+terminal narrower than the gutter  width saturates at 1 column, never 0
+output is not a terminal           plain text, no inset applied
+```
 
 ## Architecture
 

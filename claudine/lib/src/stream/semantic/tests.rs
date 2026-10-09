@@ -389,3 +389,24 @@ fn observed_sink_exposes_shared_flag() {
     let observed_flag = sink.stdout_event_seen();
     assert!(Arc::ptr_eq(&flag, &observed_flag));
 }
+
+#[test]
+fn sink_wrappers_forward_answer_observation_without_publishing_an_event() {
+    struct AnswerSink(Arc<Mutex<String>>);
+    impl SemanticEventSink for AnswerSink {
+        fn on_response_text(&mut self, text: &str) { self.0.lock().unwrap().push_str(text); }
+        fn on_semantic_event(&mut self, _event: SemanticEvent) { panic!("text observation is not an event"); }
+    }
+    let answer = Arc::new(Mutex::new(String::new()));
+    let seen = Arc::new(AtomicBool::new(false));
+    let bridge = crate::stream::logs::opencode::bridge::OpenCodeLogBridge::new(
+        NullSemanticSink, seen.clone(), None, None);
+    let progress = bridge.stalled_generation_progress();
+    let shared = SharedSemanticSink::new(AnswerSink(answer.clone()));
+    let observed = ObservedSemanticSink::new(shared, seen.clone());
+    let stalled = StalledProgressObserverSink::new(observed, progress);
+    let mut sink: Box<dyn SemanticEventSink> = Box::new(stalled);
+    sink.on_response_text("original");
+    assert_eq!(*answer.lock().unwrap(), "original");
+    assert!(!seen.load(Ordering::Acquire));
+}

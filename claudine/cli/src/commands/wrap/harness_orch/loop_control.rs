@@ -2083,7 +2083,7 @@ fn classify_attempt_phase(
         // Surface the interrupt to the user before we let the guard
         // close: without this the wrapper would silently return 130
         // and the operator has no feedback that Claudine noticed.
-        eprintln!("{}", crate::output::format_user_interrupt_status());
+        crate::log::message(&crate::output::format_user_interrupt_status());
         // An interrupted agent may have left half a document behind, so the
         // baseline goes back before any terminal event observes the file.
         rollback_inline_document(inline.as_mut(), term);

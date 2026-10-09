@@ -142,7 +142,7 @@ fn temp_repo_named_with_linked_feature() -> (tempfile::TempDir, PathBuf) {
 
 #[test]
 #[serial_test::serial]
-fn list_worktrees_resolves_default_branch_once() {
+fn list_worktrees_resolves_default_branch_without_git() {
     let repo = temp_repo();
     let _guard = DirGuard::enter(repo.path());
 
@@ -153,10 +153,7 @@ fn list_worktrees_resolves_default_branch_once() {
     let symbolic_ref_count = recorder::count_matching(&calls, |args| {
         args.first().map(String::as_str) == Some("symbolic-ref")
     });
-    assert_eq!(
-        symbolic_ref_count, 1,
-        "expected exactly one symbolic-ref call, got {calls:?}"
-    );
+    assert_eq!(symbolic_ref_count, 0, "read in-process, got {calls:?}");
     assert!(!list.default_branch.is_empty());
 }
 
@@ -611,12 +608,6 @@ mod gather {
         matches!(head(answers), HeadEnd::Finished(attempt) if attempt.outcome == Some(Outcome::InSync))
     }
 
-    /// The origin lookup before the launch and the recheck after the wait:
-    /// the foreground makes no other git call, no `ls-remote` or fetch.
-    fn origin_lookups() -> Vec<Vec<String>> {
-        vec![["remote", "get-url", "origin"].map(String::from).to_vec(); 2]
-    }
-
     #[test]
     #[serial_test::serial]
     fn every_listing_with_an_origin_launches_once_and_waits_for_both_halves() {
@@ -627,7 +618,10 @@ mod gather {
         let answers = fixture.gather();
         let git_calls = recorder::finish_recording();
 
-        assert_eq!(git_calls, origin_lookups());
+        // The origin lookups before the launch and after the wait are read
+        // in-process: the foreground starts no git process, no `ls-remote`
+        // or fetch.
+        assert_eq!(git_calls, Vec::<Vec<String>>::new());
         assert_eq!(launches(), [fixture.main().to_path_buf()], "a fresh answer still launches the worker");
         assert!(in_sync(&answers), "the head outcome was waited for");
         assert_eq!(prs(&answers), &PrEnd::Published, "and the receipt");

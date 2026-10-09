@@ -908,3 +908,26 @@ fn an_exec_run_keeps_its_own_exit_code() {
     parser.feed_line(r#"{"type":"turn.failed","error":{"message":"boom"}}"#);
     assert_eq!(parser.finish(0).exit_code, 0, "exec reports its own exit code; only app-server runs are rewritten");
 }
+
+#[test]
+fn original_answer_is_observed_before_its_reasoning_callback() {
+    struct AnswerObserver { answer: String, observed_reasoning: Arc<Mutex<bool>> }
+    impl SemanticEventSink for AnswerObserver {
+        fn on_response_text(&mut self, text: &str) { self.answer.push_str(text); }
+        fn on_semantic_event(&mut self, event: SemanticEvent) {
+            if let SemanticEvent::Reasoning { text, .. } = event {
+                assert_eq!(self.answer, "original answer");
+                assert_eq!(text, "original answer\n");
+                *self.observed_reasoning.lock().unwrap() = true;
+            }
+        }
+    }
+    let observed = Arc::new(Mutex::new(false));
+    let mut parser = CodexSemanticStreamParser::new(AnswerObserver { answer: String::new(), observed_reasoning: observed.clone() }, None);
+    parser.feed_line(r#"{"type":"item.completed","item":{"id":"a1","type":"agent_message","text":"original answer"}}"#);
+    assert!(*observed.lock().unwrap());
+    let summary = Box::new(parser).finish(0);
+    assert_eq!(summary.assistant_text, "original answer");
+    assert!(summary.provider_status.is_none());
+    assert!(summary.raw_summary.is_none(), "answer observation cannot invent a verdict record");
+}

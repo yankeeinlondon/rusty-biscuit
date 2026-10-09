@@ -27,6 +27,8 @@ use std::sync::{Mutex, OnceLock};
 use claudine::messaging::{DELIVERY_DRAIN_BUDGET, drain_deliveries, has_pending_deliveries};
 use tokio::time::Instant;
 
+use crate::commands::wrap::output_worker::Drained;
+use crate::commands::wrap::stream_io::StreamOutput;
 use crate::commands::compose::interrupt::{UserInterruptGuard, install_drain_interrupt_guard};
 
 /// The latest moment the drain may run to, when a command set one.
@@ -84,8 +86,20 @@ fn holds_interrupt_guard() -> bool {
         .is_some()
 }
 
+/// How long the exit waits for queued terminal output when no run set a clock.
+const OUTPUT_DRAIN_BUDGET: std::time::Duration = std::time::Duration::from_secs(10);
+
 fn flush_streams() {
     use std::io::Write;
+    // Terminal output is written by one worker thread. Let it finish what a
+    // run queued before the process exits. A terminal that stopped accepting
+    // output leaves that thread holding the stdout lock, and flushing here
+    // would wait on it forever.
+    if let Some(output) = StreamOutput::shared_if_created()
+        && output.drain_final(OUTPUT_DRAIN_BUDGET) == Drained::Disabled
+    {
+        return;
+    }
     let _ = std::io::stdout().flush();
     let _ = std::io::stderr().flush();
 }

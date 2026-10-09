@@ -812,6 +812,7 @@ fn provider_failure_message_precedence_survives_the_constructor() {
         guard_context: None,
         error_message: Some("provider said no".to_string()),
         timeout_secs: None,
+        output_status: crate::harness::OutputStatus::default(),
     };
     let expected = crate::harness::failure_message(&outcome, 3);
     // The cascade prefers `error_message` over stderr, and keeps `(attempt 3)`.

@@ -65,6 +65,30 @@ Use module-level APIs when a caller needs one bounded fact, such as
 `GitRepo::discover`, `current_user_id`, or a focused provider query. Do not use
 full host detection as a convenience wrapper around one fact.
 
+`sniff::filesystem::query::query_path_usage` is the focused "which processes
+use this path" query: one shared budget that stops scheduling work (never a
+return-time guarantee), one tree walk per query, identity-first matching,
+and library-owned `outcome`/coverage. OS backends implement the crate-private
+`UsageBackend` trait in `filesystem/query/backend.rs`; tests drive the query
+through a fake backend in `filesystem/query/tests.rs`. The Linux/WSL2 backend
+(`filesystem/query/linux.rs`) reads a configurable proc root: its tests build a
+synthetic `/proc` from symlinks (`stat`/`readlink` treat them like magic links)
+so the `fdinfo` matrix runs on every Unix host, while live controlled children
+(`linux_tests::live`) run on Linux only. The macOS backend
+(`filesystem/query/macos.rs`) is generic over a small `Source` trait of
+`libproc` calls: a scripted source runs its classification tests on every
+Unix host, and only `macos::ffi` and `macos_tests::live` are macOS-only.
+The Windows backend (`filesystem/query/win32.rs`, module `win32` so it does not
+shadow the `windows` crate) reports `loaded_modules` only: modules are
+path-only observations, so its scripted-`Source` tests run on every host,
+and only `win32::ffi`, `win32_tests::spellings`, and `win32_tests::live` are
+Windows-only. It keeps each process handle from enumeration through
+enrichment (closing it early when nothing is in scope) and reads `details`
+through it, never by PID. `open_handles` is `unsupported` on Windows: reading
+another process's handle identity can hang (see the `os` skill).
+Every backend shares the per-mechanism `Tally` in `backend.rs`. Contract:
+`sniff/docs/topics/filesystem-query.md`.
+
 `SniffConfig` remains a compatibility surface, but new code should use request
 plans.
 

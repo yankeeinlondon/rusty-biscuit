@@ -16,7 +16,7 @@ fn emit_status(markup: &str, state: StatusState, term: &Terminal) {
         .state(state)
         .theme(StatusTheme::Circular)
         .render(term);
-    eprintln!("{rendered}");
+    crate::render::console::write_stderr_line(&rendered);
 }
 
 /// Escape user-controlled text (file references, file names, shell commands,
@@ -161,7 +161,7 @@ pub fn report_prompt_property(has_prompt: bool, is_non_empty: bool, term: &Termi
 /// Its first line is the status line; any further line (such as a `hint:`
 /// row) follows on a row of its own.
 pub fn report_unhandled_failure(message: &str, term: &Terminal) {
-    eprintln!("{}", unhandled_failure_text(message, term));
+    crate::render::console::write_stderr_line(&unhandled_failure_text(message, term));
 }
 
 fn unhandled_failure_text(message: &str, term: &Terminal) -> String {

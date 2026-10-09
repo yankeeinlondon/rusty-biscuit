@@ -43,6 +43,11 @@ In addition to the two actions above, Claudine provides two _services_ which are
 
 ### Agentic Execution Wrapping
 
+Structured provider wrappers preserve confirmed success during delayed output
+cleanup. A failed semantic outcome returns caller exit 1 even if the provider
+exited 0, so shell chains continue only on success. Native exit evidence stays
+separate; see [completion observations](docs/topics/timeouts.md#completion-observations-and-retained-prefixes).
+
 All of the features described above can be had by configuring Claudine once and then largely ignoring Claudine after that. Claudine, however, is vein and really doesn't like being ignored. This is where _wrapped execution_ comes in.
 
 Wrapped execution takes the form of you starting your CLI Agent _with_ claudine:

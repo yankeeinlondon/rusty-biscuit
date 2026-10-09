@@ -85,9 +85,15 @@ fn marker_path(tag: &str) -> PathBuf {
 /// soon as the kill lands instead of a fixed margin past a write time the
 /// descendant never reached. A survivor still fails, and fails naming the pid
 /// that outlived its command.
+///
+/// The command's process group is watched the same way, because the
+/// descendant is only the member the fixture chose to publish: a process the
+/// command shell forked itself, such as a trailing `sleep`, can outlive the
+/// reap too.
 #[cfg(unix)]
 struct BackgroundedDescendant {
     pid_path: PathBuf,
+    group_path: PathBuf,
 }
 
 #[cfg(unix)]
@@ -101,6 +107,7 @@ impl BackgroundedDescendant {
     fn new(tag: &str) -> Self {
         Self {
             pid_path: marker_path(&format!("{tag}-pid")),
+            group_path: marker_path(&format!("{tag}-pgid")),
         }
     }
 
@@ -119,24 +126,59 @@ impl BackgroundedDescendant {
     /// — so the test failed at its own deadline rather than on the behavior.
     /// Making publication a precondition of the command completing also
     /// removes the vacuous case where nothing was ever backgrounded. `exit 90`
-    /// bounds the wait at ~10 s so a broken fixture fails loudly instead of
-    /// hanging.
+    /// bounds the wait at ~60 s so a broken fixture fails loudly instead of
+    /// hanging. The budget is deliberately long: every iteration forks
+    /// `/bin/sleep`, so the loop's wall-clock cost and the descendant's
+    /// publication delay stretch together under load — a short attempt budget
+    /// can give up on a descendant that was merely starved, failing the test
+    /// on fixture timing rather than on the behavior under test.
+    ///
+    /// The command shell first records its own pid, which is the group id:
+    /// the runner makes it the leader of a new group.
     fn background(&self, body: &str) -> String {
         format!(
-            "/bin/sh -c 'echo $$ > \"{pid}\"; {body}' & \
+            "echo $$ > \"{group}\"; \
+             /bin/sh -c 'echo $$ > \"{pid}\"; {body}' & \
              attempts=0; while [ ! -s \"{pid}\" ]; do \
-             attempts=$((attempts + 1)); [ $attempts -lt 1000 ] || exit 90; \
+             attempts=$((attempts + 1)); [ $attempts -lt 6000 ] || exit 90; \
              sleep 0.01; done;",
             pid = self.pid_path.display(),
+            group = self.group_path.display(),
         )
     }
 
-    /// Block until the recorded process is gone, then drop the pid file.
+    /// A body that performs `action` only when the descendant outlived the
+    /// command shell — the survivor tell every reap contract asserts never
+    /// fires.
+    ///
+    /// Gated on the parent's death, not on a fuse. The first form was
+    /// `sleep 1; <action>`: the descendant acted one second after it started
+    /// and the test asserted the reap landed first. Under full-suite load the
+    /// kill chain — the command shell noticing the pid file, its first stdout
+    /// byte, the capture thread reading it, the 20 ms wait poll, the group
+    /// SIGKILL — once took ~30 s, so the marker landed ahead of a *working*
+    /// reap and the test reported a leak that never happened. The reap kills
+    /// the descendant and its parent in one broadcast, so a reaped descendant
+    /// never observes the death at any load; a genuine survivor sees the
+    /// parent go (a zombie still answers `kill -0`, so the observation waits
+    /// for the epilogue's `child.wait`) and acts within one poll interval.
+    /// The trailing `sleep 30` keeps a survivor alive past `REAP_DEADLINE` so
+    /// `assert_reaped`'s pid watch reports it by pid — it exits on its own,
+    /// so a failed run leaves nothing behind. `action` must not contain
+    /// single quotes: the body is interpolated into a single-quoted
+    /// `/bin/sh -c '…'` string by [`Self::background`].
+    fn survivor_action(action: &str) -> String {
+        format!("while kill -0 $PPID 2>/dev/null; do sleep 0.1; done; {action}; sleep 30")
+    }
+
+    /// Block until the recorded process and every member of the command's
+    /// process group are gone, then drop the pid files.
     ///
     /// ## Panics
     ///
-    /// Panics if the pid was never published, or if the process is still alive
-    /// at [`Self::REAP_DEADLINE`].
+    /// Panics if the pid was never published, or if the process or a group
+    /// member is still alive at [`Self::REAP_DEADLINE`]. A surviving group is
+    /// killed first, so a failed run leaves nothing behind.
     fn assert_reaped(&self) {
         let stop = Instant::now() + Self::REAP_DEADLINE;
         let pid = loop {
@@ -164,6 +206,29 @@ impl BackgroundedDescendant {
              more than {:?}",
             Self::REAP_DEADLINE,
         );
+
+        let group: i32 = fs::read_to_string(&self.group_path)
+            .expect("the command shell records its group before backgrounding")
+            .trim()
+            .parse()
+            .expect("the recorded group id is a number");
+        let _ = fs::remove_file(&self.group_path);
+        while group_has_live_member(group) && Instant::now() < stop {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let survived = group_has_live_member(group);
+        if survived {
+            // SAFETY: `kill(2)` on the group this test's command led.
+            unsafe {
+                libc::kill(-group, libc::SIGKILL);
+            }
+        }
+        assert!(
+            !survived,
+            "a member of the command's process group {group} outlived its \
+             command by more than {:?}",
+            Self::REAP_DEADLINE,
+        );
     }
 }
 
@@ -175,6 +240,15 @@ impl BackgroundedDescendant {
 #[cfg(unix)]
 fn process_is_alive(pid: i32) -> bool {
     unsafe { libc::kill(pid, 0) == 0 }
+}
+
+/// Whether process group `pgid` still has a member that can be signalled.
+///
+/// Like [`process_is_alive`] it counts a zombie on Linux; macOS answers
+/// `EPERM` for a group of zombies, which reads as empty.
+#[cfg(unix)]
+fn group_has_live_member(pgid: i32) -> bool {
+    unsafe { libc::kill(-pgid, 0) == 0 }
 }
 
 // -- fixtures ---------------------------------------------------------------
@@ -1634,7 +1708,10 @@ mod shell_tasks {
             .run(
                 &format!(
                     "{} echo done",
-                    descendant.background(&format!("sleep 1; echo late > \"{}\"", marker.display())),
+                    descendant.background(&BackgroundedDescendant::survivor_action(&format!(
+                        "echo late > \"{}\"",
+                        marker.display()
+                    ))),
                 ),
                 Duration::from_secs(30),
                 None,
@@ -1698,7 +1775,10 @@ mod shell_tasks {
         let result = SystemTaskShell::failing_wait().run(
             &format!(
                 "{} echo started; sleep 300",
-                descendant.background(&format!("sleep 1; echo late > \"{}\"", marker.display())),
+                descendant.background(&BackgroundedDescendant::survivor_action(&format!(
+                    "echo late > \"{}\"",
+                    marker.display()
+                ))),
             ),
             Duration::from_secs(300),
             None,
@@ -1990,7 +2070,7 @@ mod shell_streaming {
             .run(
                 &format!(
                     "{} printf 'now\\n'",
-                    descendant.background("sleep 1; printf 'late\\n'"),
+                    descendant.background(&BackgroundedDescendant::survivor_action("printf late")),
                 ),
                 Duration::from_secs(30),
                 None,
@@ -2045,7 +2125,7 @@ mod shell_streaming {
         let result = SystemTaskShell::failing_wait().run(
             &format!(
                 "{} printf 'buffered\\n'; sleep 300",
-                descendant.background("sleep 1; printf 'late\\n'"),
+                descendant.background(&BackgroundedDescendant::survivor_action("printf late")),
             ),
             Duration::from_secs(300),
             None,
