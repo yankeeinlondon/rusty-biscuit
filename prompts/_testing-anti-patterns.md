@@ -76,6 +76,11 @@ test that takes 2 s alone can take 8 s there. Check new and changed tests agains
 - **Sharing a mutable fixture across tests that run in parallel.** A route that edits fixture files
   can disturb another test's reads. *Instead:* give each test its own fixture, or run the mutating
   cases last on a restored copy within one test.
+- **Testing the internal `prompts/` folder in the normal suite.** The root, `darkmatter/`, and
+  `claudine/` `prompts/` folders are tools that may hold drafts, so a test that reads one live
+  fails the normal suite on a prompt edit. *Instead:* put a test of the prompt itself in the
+  package's opt-in `prompts` binary (`prompt-tests`, run by `just test-prompts`). Give a behavior
+  test that only needs a prompt as input a frozen copy under `tests/fixtures/frozen_prompts/`.
 
 ### Patterns that silently lose coverage
 
