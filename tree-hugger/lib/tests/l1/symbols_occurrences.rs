@@ -990,6 +990,64 @@ fn occurrences_and_coverage_are_in_canonical_order() {
     }
 }
 
+/// Candidates are listed by their record's name start (then ID), each once,
+/// whichever way they were gathered: every same-named record (a language
+/// without binding rules), a filtered subset (method calls), or several
+/// visible bindings in lookup order.
+#[test]
+fn name_only_candidates_are_in_declaration_order_and_distinct() {
+    fn assert_candidate_order(index: &FileSymbolIndex, evidence: &ReferenceEvidence, context: &str) {
+        let key = |id: &SymbolId| {
+            let record = index.symbols.iter().find(|record| &record.id == id).expect("candidate is a record");
+            (record.source.name_span.as_ref().map_or(0, |span| span.start_byte), record.id.0.clone())
+        };
+        for occurrence in &evidence.occurrences {
+            let keys: Vec<_> = occurrence.candidates.iter().map(|candidate| key(candidate.id.as_ref().expect("candidate ID"))).collect();
+            assert!(keys.windows(2).all(|pair| pair[0] < pair[1]), "{context}: {occurrence:#?}");
+        }
+    }
+
+    for language in ProgrammingLanguage::all() {
+        let path = primary_fixture(language).expect("fixture");
+        let tree_file = TreeFile::new(&path).expect("parse");
+        let evidence = tree_file.reference_evidence().expect("evidence");
+        let index = tree_file.symbol_index_v2().expect("index");
+        assert_candidate_order(&index, &evidence, language.name());
+    }
+
+    // Every same-named record: each `self` lists every method's `self`.
+    let python = Analyzed::new(
+        "class Big:\n    def c(self):\n        return self\n    def a(self):\n        return self\n    def b(self):\n        return self\n",
+        "py",
+    );
+    let selves = [python.named("self", 2), python.named("self", 4), python.named("self", 6)];
+    let uses = python.all("self");
+    assert_eq!(uses.len(), 3, "{uses:#?}");
+    for occurrence in uses {
+        assert_eq!(occurrence.confidence, Confidence::NameOnly);
+        let ids: Vec<_> = occurrence.candidates.iter().map(|candidate| candidate.id.as_ref().expect("ID")).collect();
+        assert_eq!(ids, selves, "declaration order");
+    }
+    assert_candidate_order(&python.index, &python.evidence, "python");
+
+    // A filtered subset: `x.m()` lists the in-file `m` methods.
+    let rust = Analyzed::new(
+        "struct B;\nimpl B { fn m(&self) {} }\nstruct A;\nimpl A { fn m(&self) {} }\nfn g(x: A) { x.m(); }\n",
+        "rs",
+    );
+    let call = rust.at(5, "m", 0);
+    assert_eq!(call.confidence, Confidence::NameOnly);
+    let ids: Vec<_> = call.candidates.iter().map(|candidate| candidate.id.as_ref().expect("ID")).collect();
+    assert_eq!(ids, [rust.named("m", 2), rust.named("m", 4)], "declaration order");
+
+    // Several visible bindings: a body `var` that redeclares a parameter.
+    let js = Analyzed::new("function g(f) {\n  var f = 1;\n  f;\n}\n", "js");
+    let read = js.at(3, "f", 0);
+    assert_eq!(read.confidence, Confidence::NameOnly);
+    let ids: Vec<_> = read.candidates.iter().map(|candidate| candidate.id.as_ref().expect("ID")).collect();
+    assert_eq!(ids, [js.named("f", 1), js.named("f", 2)], "declaration order");
+}
+
 #[test]
 fn defaults_belong_to_the_function_and_decorators_to_the_enclosing_scope() {
     let source = "\

@@ -534,7 +534,8 @@ struct Resolver<'a, 'tree> {
     excluded_names: HashSet<(usize, usize)>,
     /// What each bare pattern name that binds nothing proved to be.
     pattern_reads: PatternReads,
-    /// Record indexes by name, in record order.
+    /// Record indexes by name, in candidate order ([`Self::candidate_key`]).
+    /// The sort is stable, so any filtered subset is in candidate order too.
     by_name: HashMap<String, Vec<usize>>,
 }
 
@@ -549,6 +550,9 @@ impl<'a, 'tree> Resolver<'a, 'tree> {
         let mut by_name: HashMap<String, Vec<usize>> = HashMap::new();
         for (idx, record) in records.iter().enumerate() {
             by_name.entry(super::name_identity::key(syntax.language, &record.identity.name).into_owned()).or_default().push(idx);
+        }
+        for indexes in by_name.values_mut() {
+            indexes.sort_by(|&left, &right| Self::candidate_key(records, left).cmp(&Self::candidate_key(records, right)));
         }
         let mut pattern_reads = PatternReads::default();
         let scopes = rules.map(|rules| {
@@ -618,7 +622,8 @@ impl<'a, 'tree> Resolver<'a, 'tree> {
                 (resolution.confidence, resolution.id, resolution.candidates, import)
             }
             _ => {
-                let (confidence, id, candidates) = self.name_only(self.by_name.get(super::name_identity::key(self.syntax.language, name).as_ref()).cloned().unwrap_or_default());
+                let bucket = self.by_name.get(super::name_identity::key(self.syntax.language, name).as_ref());
+                let (confidence, id, candidates) = self.name_only(bucket.map_or(&[], Vec::as_slice));
                 (confidence, id, candidates, None)
             }
         };
@@ -641,10 +646,10 @@ impl<'a, 'tree> Resolver<'a, 'tree> {
         Some((occurrence, import))
     }
 
-    /// An uncertain resolution over `candidates` (record indexes): `indirect`
-    /// when the caller says so or when calling any candidate would invoke a
-    /// value it holds ([`holds_a_value`]).
-    fn uncertain(&self, candidates: Vec<usize>, indirect: bool) -> Resolution {
+    /// An uncertain resolution over `candidates` (record indexes, in
+    /// candidate order): `indirect` when the caller says so or when calling
+    /// any candidate would invoke a value it holds ([`holds_a_value`]).
+    fn uncertain(&self, candidates: &[usize], indirect: bool) -> Resolution {
         let indirect = indirect
             || candidates
                 .iter()
@@ -653,26 +658,27 @@ impl<'a, 'tree> Resolver<'a, 'tree> {
         Resolution { confidence, id, candidates, indirect, import: None }
     }
 
-    /// `NameOnly` over `candidates` (record indexes), `Unresolved` when there
-    /// are none.
-    fn name_only(&self, mut candidates: Vec<usize>) -> (Confidence, Option<SymbolId>, Vec<SymbolRef>) {
-        candidates.sort_by(|&left, &right| {
-            let key = |idx: usize| {
-                let record = &self.records[idx];
-                (record.source.name_span.as_ref().map_or(0, |span| span.start_byte), &record.id.0)
-            };
-            key(left).cmp(&key(right))
-        });
-        candidates.dedup_by(|left, right| self.records[*left].id == self.records[*right].id);
-        if candidates.is_empty() {
-            (Confidence::Unresolved, None, Vec::new())
-        } else {
-            (
-                Confidence::NameOnly,
-                None,
-                candidates.into_iter().map(|idx| symbol_ref(&self.records[idx])).collect(),
-            )
+    /// The order candidates are listed in: by name start, then ID.
+    fn candidate_key(records: &[SymbolRecord], idx: usize) -> (u32, &str) {
+        let record = &records[idx];
+        (record.source.name_span.as_ref().map_or(0, |span| span.start_byte), &record.id.0)
+    }
+
+    /// `NameOnly` over `candidates` (record indexes, in candidate order),
+    /// `Unresolved` when there are none. Of adjacent candidates with one ID,
+    /// the first is kept.
+    fn name_only(&self, candidates: &[usize]) -> (Confidence, Option<SymbolId>, Vec<SymbolRef>) {
+        let mut refs: Vec<SymbolRef> = Vec::new();
+        let mut last: Option<&SymbolId> = None;
+        for &idx in candidates {
+            let id = &self.records[idx].id;
+            if last != Some(id) {
+                refs.push(symbol_ref(&self.records[idx]));
+                last = Some(id);
+            }
         }
+        let confidence = if refs.is_empty() { Confidence::Unresolved } else { Confidence::NameOnly };
+        (confidence, None, refs)
     }
 
     /// Resolves `node`, written as `name` and, when qualified, as `path`
@@ -696,7 +702,7 @@ impl<'a, 'tree> Resolver<'a, 'tree> {
                         || (rules != LanguageRules::Rust
                             && matches!(record.kind, SymbolKindV2::Field | SymbolKindV2::Property)))
             });
-            return self.uncertain(members, true);
+            return self.uncertain(&members, true);
         }
         if rules == LanguageRules::Rust
             && let Some(path) = node
@@ -709,13 +715,13 @@ impl<'a, 'tree> Resolver<'a, 'tree> {
         }
         if self.pattern_reads.unknown.contains(&(node.start_byte(), node.end_byte())) {
             // A bare pattern name that may bind or read a constant.
-            return self.uncertain(self.item_records(name), false);
+            return self.uncertain(&self.item_records(name), false);
         }
         if path.is_some() {
             // A qualified name whose qualifier no rule establishes, or a
             // rooted one (`::f`), which lexical lookup must never reach: the
             // root names no local, whatever shadows it.
-            return self.uncertain(self.item_records(name), false);
+            return self.uncertain(&self.item_records(name), false);
         }
 
         match scopes.lookup(node, name, rules.reference_category(node)) {
@@ -724,7 +730,7 @@ impl<'a, 'tree> Resolver<'a, 'tree> {
             {
                 // Either the bare pattern's own binding (whatever value it
                 // holds) or the constant an import or glob supplies.
-                self.uncertain(self.item_records(name), true)
+                self.uncertain(&self.item_records(name), true)
             }
             Lookup::Found(bindings) if bindings.len() == 1 => {
                 let binding = scopes.binding(bindings[0]);
@@ -740,16 +746,20 @@ impl<'a, 'tree> Resolver<'a, 'tree> {
                 }
             }
             Lookup::Found(bindings) => {
-                let records = bindings
+                let mut records: Vec<usize> = bindings
                     .iter()
                     .filter_map(|&idx| match scopes.binding(idx).target {
                         BindingTarget::Record(record) => Some(record),
                         _ => None,
                     })
                     .collect();
-                self.uncertain(records, false)
+                // Bindings come in lookup order, not candidate order.
+                records.sort_by(|&left, &right| {
+                    Self::candidate_key(self.records, left).cmp(&Self::candidate_key(self.records, right))
+                });
+                self.uncertain(&records, false)
             }
-            Lookup::Glob | Lookup::NotFound => self.uncertain(self.item_records(name), false),
+            Lookup::Glob | Lookup::NotFound => self.uncertain(&self.item_records(name), false),
         }
     }
 
@@ -791,7 +801,7 @@ impl<'a, 'tree> Resolver<'a, 'tree> {
         } else {
             members
         };
-        self.uncertain(candidates, false)
+        self.uncertain(&candidates, false)
     }
 
     /// The record of the one in-file type `path` establishes.
@@ -840,7 +850,7 @@ impl<'a, 'tree> Resolver<'a, 'tree> {
             && ancestors(member.declaration).any(|ancestor| ancestor.id() == owner_node.id())
     }
 
-    /// Records called `name` that pass `keep`, in record order.
+    /// Records called `name` that pass `keep`, in candidate order.
     fn records_named(&self, name: &str, keep: impl Fn(usize) -> bool) -> Vec<usize> {
         self.by_name
             .get(super::name_identity::key(self.syntax.language, name).as_ref())
