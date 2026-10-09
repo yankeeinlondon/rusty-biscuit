@@ -126,8 +126,6 @@ Your task is to implement phase {{phase}} of the plan found in '@{{area}}/{{plan
 > **NOTE:** this plan is based on the specification file: {{spec}}
 ::end-block
 
-::file ../_test-tiers.md
-
 ::file "../_headless-orchestration.md"
 
 ## Logging
