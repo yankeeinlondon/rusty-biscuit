@@ -2,7 +2,7 @@
 pub(crate) mod extract;
 /// The one record filter behind `SymbolQuery`'s predicates.
 pub(crate) mod filter;
-/// Qualified-name prefixes (`NamingContext`, `portable_relative`).
+/// Qualified-name prefixes (`NamingContext`, `portable_relative`, `lossless_portable_relative`).
 pub mod naming;
 /// Name and type-text patterns (`NamePattern`, `glob_match`).
 pub mod pattern;

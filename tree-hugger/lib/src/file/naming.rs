@@ -139,7 +139,44 @@ impl Naming {
 /// name is kept as spelled). A relative `path` is taken from the working directory, and a
 /// path with no relative route from `root` (another Windows drive or share)
 /// keeps its absolute spelling, `/`-separated.
+///
+/// A name that is not valid Unicode (Linux bytes, a Windows unpaired
+/// surrogate) is replaced lossily, so the text may name another file; use
+/// [`lossless_portable_relative`] where the text must lead back to `path`.
 pub fn portable_relative(path: &Path, root: &Path) -> String {
+    project(path, root).text
+}
+
+/// [`portable_relative`]'s text, or `None` when that text lost part of the
+/// spelling it was projected from: a name on the emitted route (or, without
+/// a route, in the emitted absolute path) is not valid Unicode.
+///
+/// Only what is emitted is checked, so a scan root whose own spelling is not
+/// valid Unicode still gives the route of a file below it, and a name that
+/// really contains U+FFFD is kept.
+///
+/// ## Examples
+///
+/// ```
+/// use tree_hugger::lossless_portable_relative;
+///
+/// let root = std::env::current_dir().unwrap().join("repo");
+/// let route = lossless_portable_relative(&root.join("src").join("lib.rs"), &root);
+/// assert_eq!(route.as_deref(), Some("src/lib.rs"));
+/// ```
+pub fn lossless_portable_relative(path: &Path, root: &Path) -> Option<String> {
+    let projected = project(path, root);
+    projected.lossless.then_some(projected.text)
+}
+
+/// The one projection both public functions share, so they never choose
+/// different routes.
+struct Projection {
+    text: String,
+    lossless: bool,
+}
+
+fn project(path: &Path, root: &Path) -> Projection {
     let absolute = if path.is_absolute() {
         path.to_path_buf()
     } else {
@@ -162,7 +199,10 @@ pub fn portable_relative(path: &Path, root: &Path) -> String {
         Some(route) => route_text(&route),
         // Resolution turns a share into a verbatim `\\?\UNC\...` path; keep
         // the spelling the file was named by instead.
-        None => try_portable_string(&resolved).unwrap_or_else(|| to_portable_string(&absolute)),
+        None => match try_portable_string(&resolved) {
+            Some(text) => Projection { text, lossless: resolved.to_str().is_some() },
+            None => Projection { text: to_portable_string(&absolute), lossless: absolute.to_str().is_some() },
+        },
     }
 }
 
@@ -179,10 +219,15 @@ fn resolve_directory(path: &Path) -> PathBuf {
 
 /// `route` `/`-separated. A literal `..` name, possible only under a Windows
 /// `\\?\` prefix, would read as a hop; canonical paths never contain one.
-fn route_text(route: &RelativeRoute) -> String {
+fn route_text(route: &RelativeRoute) -> Projection {
+    let mut lossless = true;
     let hops = std::iter::repeat_n(Cow::Borrowed(".."), route.parent_hops());
-    let names = route.forward().iter().map(|name| name.to_string_lossy());
-    hops.chain(names).collect::<Vec<_>>().join("/")
+    let names = route.forward().iter().map(|name| {
+        lossless &= name.to_str().is_some();
+        name.to_string_lossy()
+    });
+    let text = hops.chain(names).collect::<Vec<_>>().join("/");
+    Projection { text, lossless }
 }
 
 #[cfg(test)]
@@ -234,6 +279,85 @@ mod tests {
             portable_relative(&base.join("vendor/x.rs"), &alias.join("repo")),
             "../vendor/x.rs",
             "a symlinked root resolves too"
+        );
+    }
+
+    /// The lossless projection is the same route whenever nothing was lost,
+    /// including a name that really contains U+FFFD.
+    #[test]
+    fn the_lossless_projection_agrees_with_the_display_projection_on_unicode_names() {
+        let (_dir, base) = layout();
+        let root = base.join("repo");
+        for path in [
+            root.join("src").join("lib.rs"),
+            base.join("vendor").join("x.rs"),
+            root.join("..").join("vendor").join("x.rs"),
+            root.join("src").join("bad\u{FFFD}.java"),
+            root.join("caf\u{e9}").join("\u{1F980}.rs"),
+        ] {
+            let shown = portable_relative(&path, &root);
+            assert_eq!(lossless_portable_relative(&path, &root), Some(shown), "{}", path.display());
+        }
+        assert_eq!(
+            lossless_portable_relative(&root.join("src").join("bad\u{FFFD}.java"), &root).as_deref(),
+            Some("src/bad\u{FFFD}.java")
+        );
+    }
+
+    /// Linux names are bytes: `FF` is no UTF-8 text, so every route through
+    /// it is refused, while a root holding it still routes the file below.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_names_that_are_not_utf8_have_no_lossless_route() {
+        use std::ffi::OsString;
+        use std::os::unix::ffi::OsStringExt;
+        let (_dir, base) = layout();
+        let invalid = || OsString::from_vec(b"bad\xff".to_vec());
+        let root = base.join("repo");
+        let mut file_name = invalid();
+        file_name.push(".java");
+        std::fs::create_dir_all(root.join(invalid())).expect("invalid directory");
+        let invalid_root = base.join(invalid());
+        std::fs::create_dir_all(&invalid_root).expect("invalid root");
+        let outside = base.join("vendor").join(&file_name);
+        for (path, shown) in [
+            (root.join(&file_name), "bad\u{FFFD}.java"),
+            (root.join(invalid()).join("Example.java"), "bad\u{FFFD}/Example.java"),
+            (outside, "../vendor/bad\u{FFFD}.java"),
+        ] {
+            assert_eq!(portable_relative(&path, &root), shown);
+            assert_eq!(lossless_portable_relative(&path, &root), None, "{shown}");
+        }
+        assert_eq!(
+            lossless_portable_relative(&invalid_root.join("Example.java"), &invalid_root).as_deref(),
+            Some("Example.java"),
+            "only the emitted route is checked"
+        );
+    }
+
+    /// Windows names are UTF-16: an unpaired surrogate has no UTF-8 form.
+    #[cfg(windows)]
+    #[test]
+    fn windows_names_with_an_unpaired_surrogate_have_no_lossless_route() {
+        use std::ffi::OsString;
+        use std::os::windows::ffi::OsStringExt;
+        let (_dir, base) = layout();
+        let invalid = || OsString::from_wide(&[u16::from(b'b'), 0xD800]);
+        let root = base.join("repo");
+        let mut file_name = invalid();
+        file_name.push(".java");
+        for (path, shown) in [
+            (root.join(&file_name), "b\u{FFFD}.java"),
+            (root.join(invalid()).join("Example.java"), "b\u{FFFD}/Example.java"),
+        ] {
+            assert_eq!(portable_relative(&path, &root), shown);
+            assert_eq!(lossless_portable_relative(&path, &root), None, "{shown}");
+        }
+        let invalid_root = base.join(invalid());
+        assert_eq!(
+            lossless_portable_relative(&invalid_root.join("Example.java"), &invalid_root).as_deref(),
+            Some("Example.java"),
+            "only the emitted route is checked"
         );
     }
 
