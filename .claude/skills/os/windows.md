@@ -92,9 +92,12 @@ hold the rest:
   prompt must be a compiled `.exe`; see the rustc-built fixture in claudine's
   `inline_compose_hash.rs`. This is not only a test concern: Claudine delivers
   the composed prompt as one `-t` argument, so a real npm-installed
-  `goose.cmd`/`claude.cmd` on a user's `PATH` fails the same way. The
-  `wrap_compose_validation` stub was still a `.cmd` until 2026-09-22, and the
-  first native-Windows run of `claudine-cli` is what found it.
+  `opencode.cmd` on a user's `PATH` failed `just commit` the same way.
+  `claudine::child_environment::command` now starts an npm `cmd-shim`'s
+  target directly (`claudine/lib/src/npm_shim.rs`); a batch file in any other
+  shape still fails. The `wrap_compose_validation` stub was still a `.cmd`
+  until 2026-09-22, and the first native-Windows run of `claudine-cli` is
+  what found it.
 - **An SSH session's processes are already inside a Job Object**, and that Job
   forbids nesting, so `AssignProcessToJobObject` returns
   `ERROR_ACCESS_DENIED` (`Access is denied. (0x80070005)`, the `windows`

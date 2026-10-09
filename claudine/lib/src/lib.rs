@@ -23,6 +23,7 @@ pub mod linking;
 pub mod mcp;
 pub mod messaging;
 pub mod model_catalog;
+mod npm_shim;
 pub mod opencode_config;
 mod path_semantics;
 pub mod permissions;
