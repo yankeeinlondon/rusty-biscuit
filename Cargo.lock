@@ -14480,6 +14480,7 @@ dependencies = [
  "predicates",
  "pulldown-cmark",
  "rayon",
+ "renderable",
  "serde",
  "serde_json",
  "serial_test",

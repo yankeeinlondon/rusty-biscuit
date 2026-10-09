@@ -9,6 +9,13 @@
 //! Source-derived text always goes through [`literal`], so a control
 //! sequence or markup in a name, signature or comment is shown, never acted
 //! on.
+//!
+//! The listing, outline and `classes` routines write to a [`Layout`], not to
+//! bytes: [`TerminalLayout`] renders each line for the terminal, while the
+//! `--format prose` and `--format markdown` exports (`prose.rs`,
+//! `markdown.rs`) write the same markup unrendered or as CommonMark. All three
+//! therefore share buffering, grouping, ordering, outline ownership and class
+//! sections.
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
@@ -29,6 +36,7 @@ use tree_hugger::{
 use crate::classes::ClassSummary;
 use crate::order::{SortOrder, compare, kind_rank, portable_path_cmp};
 use crate::output::SignatureMode;
+use crate::report::portable_relative;
 use crate::{color_forced, display_path, file_url};
 
 /// A width no rendered line reaches, so unwrapped output never wraps.
@@ -40,6 +48,96 @@ const MIN_WRAP_WIDTH: u32 = 20;
 /// Entries of a type's field or variant list shown by `--signatures short`
 /// before the rest is summarized as `… +N`.
 const SHORT_LIST_ENTRIES: usize = 4;
+
+/// The line a report with no declaration shows.
+pub(crate) const NO_SYMBOLS: &str = "<dim>(no symbols)</dim>";
+
+/// Where a declaration listing is written. The listing routines decide
+/// content, order and nesting; a layout decides only presentation. Every
+/// `markup` argument is Prose markup whose generated tags close within each
+/// line; lines after the first are the item's doc lines.
+pub(crate) trait Layout {
+    /// A heading: `level` 1 is a package section, 2 a module or file group
+    /// or a file's outline or class header, 3 a file inside a module group.
+    fn heading(&mut self, level: u8, indent: usize, markup: &str) -> io::Result<()>;
+    /// One outline row: a declaration, an `[in …]` context or a class
+    /// section title.
+    fn row(&mut self, row: Row<'_>) -> io::Result<()>;
+    /// Declarations as bullets at `indent`, nested `depth` levels deep.
+    fn list(&mut self, indent: usize, depth: usize, items: &[String]) -> io::Result<()>;
+    /// A line that is neither heading nor declaration: `(no symbols)`.
+    fn note(&mut self, indent: usize, markup: &str) -> io::Result<()>;
+    fn blank(&mut self) -> io::Result<()>;
+    /// The writer underneath, flushed at chunk ends.
+    fn writer(&mut self) -> &mut dyn Write;
+}
+
+/// One row of an outline or `classes` report.
+pub(crate) struct Row<'a> {
+    /// Nesting below the file's top-level rows.
+    pub(crate) depth: usize,
+    /// Terminal indent of the first line.
+    pub(crate) indent: usize,
+    /// Terminal indent of wrapped continuation lines, beyond `indent`.
+    pub(crate) hanging: u32,
+    pub(crate) markup: &'a str,
+    /// Terminal indent of each doc line on its own line; `None` keeps the
+    /// doc lines inside the row's wrapped text, flush with its first line.
+    pub(crate) doc_indent: Option<usize>,
+}
+
+/// [`Layout`] for the terminal: each line rendered as the renderer's
+/// terminal allows.
+pub(crate) struct TerminalLayout<'r, 'w> {
+    renderer: &'r Renderer,
+    out: &'w mut dyn Write,
+}
+
+impl<'r, 'w> TerminalLayout<'r, 'w> {
+    pub(crate) fn new(renderer: &'r Renderer, out: &'w mut dyn Write) -> Self {
+        Self { renderer, out }
+    }
+}
+
+impl Layout for TerminalLayout<'_, '_> {
+    fn heading(&mut self, _level: u8, indent: usize, markup: &str) -> io::Result<()> {
+        self.renderer.line(self.out, indent, markup)
+    }
+
+    fn row(&mut self, row: Row<'_>) -> io::Result<()> {
+        let Some(doc_indent) = row.doc_indent else {
+            return self.renderer.hanging_line(self.out, row.indent, row.hanging, row.markup);
+        };
+        let mut lines = row.markup.split('\n');
+        self.renderer.hanging_line(self.out, row.indent, row.hanging, lines.next().unwrap_or_default())?;
+        for doc in lines {
+            self.renderer.line(self.out, doc_indent, doc)?;
+        }
+        Ok(())
+    }
+
+    fn list(&mut self, indent: usize, _depth: usize, items: &[String]) -> io::Result<()> {
+        let mut list = UnorderedList::empty();
+        for item in items {
+            // The list gives each item its hanging indent and wraps it at the
+            // renderer's width (never, when that width is unbounded).
+            list.add(Prose::new(item.as_str()).with_word_wrap(WordWrap::None));
+        }
+        self.renderer.list(self.out, indent, &list)
+    }
+
+    fn note(&mut self, indent: usize, markup: &str) -> io::Result<()> {
+        self.renderer.line(self.out, indent, markup)
+    }
+
+    fn blank(&mut self) -> io::Result<()> {
+        writeln!(self.out)
+    }
+
+    fn writer(&mut self) -> &mut dyn Write {
+        self.out
+    }
+}
 
 /// One file's selected records, ready to render.
 pub(crate) struct FileListing {
@@ -68,7 +166,8 @@ pub(crate) struct RenderOptions {
     pub(crate) signatures: SignatureMode,
 }
 
-/// Renders records as terminal text.
+/// Builds the Prose markup of declarations and renders it as terminal
+/// text; the exports write the same markup through their own [`Layout`].
 pub(crate) struct Renderer {
     term: Terminal,
     styled: bool,
@@ -118,6 +217,26 @@ impl Renderer {
         }
     }
 
+    /// A renderer for the Prose and Markdown exports: its markup always
+    /// carries styles and source-location links, independent of the
+    /// terminal running `hug`; each export's [`Layout`] keeps or drops them.
+    pub(crate) fn for_export(show_comments: bool, signatures: SignatureMode, display_root: Option<PathBuf>) -> Self {
+        let mut term = Terminal::builder()
+            .is_tty(false)
+            .color_depth(ColorDepth::None)
+            .osc_link_support(true)
+            .build();
+        term.fixed_width = Some(NO_WRAP_WIDTH);
+        Self {
+            term,
+            styled: true,
+            show_comments,
+            width: None,
+            signatures,
+            display_root,
+        }
+    }
+
     /// The terminal content indented by `indent` columns is laid out on.
     fn term_at(&self, indent: usize) -> Cow<'_, Terminal> {
         match self.width {
@@ -143,7 +262,7 @@ impl Renderer {
     /// One package's listing, or one unit of it (see [`ListingStream`]).
     fn package_listing(
         &self,
-        out: &mut dyn Write,
+        out: &mut dyn Layout,
         files: &[&FileListing],
         options: ListingOptions,
     ) -> io::Result<()> {
@@ -156,7 +275,7 @@ impl Renderer {
             })
             .collect();
         if listed.is_empty() {
-            return self.line(out, 0, "<dim>(no symbols)</dim>");
+            return out.note(0, NO_SYMBOLS);
         }
         listed.sort_by(|left, right| {
             compare(
@@ -170,26 +289,26 @@ impl Renderer {
         match (options.group_by_module, options.group_by_file) {
             (true, true) => {
                 for (module, listed) in grouped(listed, |item| module_key(&item.path)) {
-                    self.line(out, 0, &format!("<b>{}</b>", literal(module_title(&module))))?;
+                    out.heading(2, 0, &format!("<b>{}</b>", literal(module_title(&module))))?;
                     for (file, listed) in grouped(listed, |item| item.path.clone()) {
-                        self.line(out, 2, &format!("<underline>{}</underline>", literal(&file)))?;
+                        out.heading(3, 2, &format!("<underline>{}</underline>", literal(&file)))?;
                         self.symbol_list(out, &listed, false)?;
                     }
-                    writeln!(out)?;
+                    out.blank()?;
                 }
             }
             (true, false) => {
                 for (module, listed) in grouped(listed, |item| module_key(&item.path)) {
-                    self.line(out, 0, &format!("<b>{}</b>", literal(module_title(&module))))?;
+                    out.heading(2, 0, &format!("<b>{}</b>", literal(module_title(&module))))?;
                     self.symbol_list(out, &listed, true)?;
-                    writeln!(out)?;
+                    out.blank()?;
                 }
             }
             (false, true) => {
                 for (file, listed) in grouped(listed, |item| item.path.clone()) {
-                    self.line(out, 0, &format!("<b>{}</b>", literal(&file)))?;
+                    out.heading(2, 0, &format!("<b>{}</b>", literal(&file)))?;
                     self.symbol_list(out, &listed, false)?;
-                    writeln!(out)?;
+                    out.blank()?;
                 }
             }
             (false, false) => self.symbol_list(out, &listed, true)?,
@@ -200,41 +319,40 @@ impl Renderer {
     /// One bullet per record: the declaration in the signature mode (see
     /// [`Self::declaration`]) and location (`path:line:col`, or `[line:col]` inside a
     /// file group).
-    fn symbol_list(&self, out: &mut dyn Write, listed: &[&Listed<'_>], include_file: bool) -> io::Result<()> {
-        let mut list = UnorderedList::empty();
-        for item in listed {
-            let record = item.record;
-            let start = &record.source.declaration_span.start;
-            let location = if include_file {
-                format!("{}:{}:{}", item.path, start.line, start.column)
-            } else {
-                format!("[{}:{}]", start.line, start.column)
-            };
-            let markup = format!(
-                "{} <dim>{}</dim>{}",
-                self.declaration(record, true),
-                self.link(&record.source.file_path, start.line, &literal(&location)),
-                self.doc_lines(record.docs.raw_doc.as_deref()),
-            );
-            // The list gives each item its hanging indent and wraps it at the
-            // renderer's width (never, when that width is unbounded).
-            list.add(Prose::new(markup).with_word_wrap(WordWrap::None));
-        }
-        self.list(out, 2, &list)
+    fn symbol_list(&self, out: &mut dyn Layout, listed: &[&Listed<'_>], include_file: bool) -> io::Result<()> {
+        let items: Vec<String> = listed
+            .iter()
+            .map(|item| {
+                let record = item.record;
+                let start = &record.source.declaration_span.start;
+                let location = if include_file {
+                    format!("{}:{}:{}", item.path, start.line, start.column)
+                } else {
+                    format!("[{}:{}]", start.line, start.column)
+                };
+                format!(
+                    "{} <dim>{}</dim>{}",
+                    self.declaration(record, true),
+                    self.link(&record.source.file_path, start.line, &literal(&location)),
+                    self.doc_lines(record.docs.raw_doc.as_deref()),
+                )
+            })
+            .collect();
+        out.list(2, 0, &items)
     }
 
     /// The `classes` report of one file: the file header, then each
     /// container with its static and instance methods and fields.
     pub(crate) fn classes(
         &self,
-        out: &mut dyn Write,
+        out: &mut dyn Layout,
         file: &Path,
         language: ProgrammingLanguage,
         summaries: &[ClassSummary],
     ) -> io::Result<()> {
         let header = literal(&self.display(file));
-        self.line(
-            out,
+        out.heading(
+            2,
             0,
             &format!(
                 "<b>{}</b> (<dim>{}</dim>)",
@@ -246,34 +364,34 @@ impl Renderer {
             let class = &summary.container;
             let start = &class.source.declaration_span.start;
             let location = format!("[{}:{}]", start.line, start.column);
-            self.line(
-                out,
-                2,
-                &format!(
-                    "<magenta>{}</magenta> <b>{}</b> <dim>{}</dim>",
-                    SymbolKind::from(class.kind),
-                    literal(&class.identity.name),
-                    self.link(&class.source.file_path, start.line, &location),
-                ),
-            )?;
-            if let Some(doc) = self.trimmed_doc(class.docs.raw_doc.as_deref()) {
-                for line in doc {
-                    self.line(out, 4, &format!("<dim>{}</dim>", literal(line)))?;
-                }
-            }
+            let markup = format!(
+                "<magenta>{}</magenta> <b>{}</b> <dim>{}</dim>{}",
+                SymbolKind::from(class.kind),
+                literal(&class.identity.name),
+                self.link(&class.source.file_path, start.line, &location),
+                self.doc_lines(class.docs.raw_doc.as_deref()),
+            );
+            out.row(Row {
+                depth: 0,
+                indent: 2,
+                hanging: 2,
+                markup: &markup,
+                doc_indent: Some(4),
+            })?;
             self.method_section(out, "Static Methods", &summary.static_methods)?;
             self.method_section(out, "Instance Methods", &summary.instance_methods)?;
             self.field_section(out, "Static Fields", &summary.static_fields, language)?;
             self.field_section(out, "Instance Fields", &summary.instance_fields, language)?;
         }
-        writeln!(out)
+        out.blank()
     }
 
     /// `--format table`: one row per record, in the given order, with the
     /// Location, Kind, Visibility, Name and (unless `--signatures none`)
-    /// Signature columns. Only the Signature column wraps. The records'
-    /// `file_path`s are relative to `scan_root` (`trim_record`), which is
-    /// what the Location link resolves them against.
+    /// Signature columns. Only the Signature column wraps. The records are
+    /// native (not `trim_record`ed): Location shows each path relative to
+    /// `scan_root` and links the native path, so a name that is not valid
+    /// Unicode never links to its replacement spelling.
     pub(crate) fn table(&self, out: &mut dyn Write, records: &[&SymbolRecord], scan_root: &Path) -> io::Result<()> {
         if records.is_empty() {
             return Ok(());
@@ -293,8 +411,9 @@ impl Renderer {
             .iter()
             .map(|record| {
                 let line = record.source.declaration_span.start.line;
-                let location = format!("{}:{line}", self.display(&record.source.file_path));
-                let linked = self.link(&scan_root.join(&record.source.file_path), line, &literal(&location));
+                let relative = portable_relative(&record.source.file_path, scan_root);
+                let location = format!("{}:{line}", self.display(Path::new(&relative)));
+                let linked = self.link(&record.source.file_path, line, &literal(&location));
                 let location: TableCellContent = if linked.starts_with("<a ") {
                     Prose::new(linked).into()
                 } else {
@@ -330,13 +449,13 @@ impl Renderer {
 
     /// The `--group-by-module` heading of `--tree`: the directory of the
     /// file listed next.
-    pub(crate) fn module_heading(&self, out: &mut dyn Write, file: &Path) -> io::Result<()> {
-        self.line(out, 0, &format!("<b>{}</b>", literal(module_title(&self.module_of(file)))))
+    pub(crate) fn module_heading(&self, out: &mut dyn Layout, file: &Path) -> io::Result<()> {
+        out.heading(2, 0, &format!("<b>{}</b>", literal(module_title(&self.module_of(file)))))
     }
 
     /// The line a report with no declaration prints.
     pub(crate) fn no_symbols(&self, out: &mut dyn Write) -> io::Result<()> {
-        self.line(out, 0, "<dim>(no symbols)</dim>")
+        self.line(out, 0, NO_SYMBOLS)
     }
 
     /// `--tree`: one file's outline. Each record is nested under the
@@ -349,14 +468,17 @@ impl Renderer {
     /// (`[in other::W]` for `impl other::W`, never the local `W`).
     /// A type row ends with its declared bases ([`Self::declared_bases`]).
     /// `name_prefix` is the prefix the records' qualified names carry.
-    /// Siblings are ordered by `sort`. Returns whether anything was written.
+    /// Siblings are ordered by `sort`. `in_module` says the file heading sits
+    /// under a `--group-by-module` heading. Returns whether anything was
+    /// written.
     pub(crate) fn outline(
         &self,
-        out: &mut dyn Write,
+        out: &mut dyn Layout,
         file: &Path,
         records: &[SymbolRecord],
         name_prefix: &str,
         sort: SortOrder,
+        in_module: bool,
     ) -> io::Result<bool> {
         if records.is_empty() {
             return Ok(false);
@@ -364,27 +486,34 @@ impl Renderer {
         let display = self.display(file);
         let outline = Outline::new(records, name_prefix, &display, sort);
         let header = self.link(file, 1, &literal(&display));
-        self.line(out, 0, &format!("<b>{header}</b>"))?;
+        out.heading(if in_module { 3 } else { 2 }, 0, &format!("<b>{header}</b>"))?;
         let mut written = vec![false; records.len()];
         for root in &outline.roots {
             match root {
                 Root::Record(position) => self.outline_node(out, &outline, *position, 1, &mut written)?,
                 Root::Context { kind, name, members } => {
                     let kind = kind.map(|kind| format!("{} ", SymbolKind::from(kind))).unwrap_or_default();
-                    self.line(out, 2, &format!("<dim>[in {}{}]</dim>", literal(&kind), literal(name)))?;
+                    out.row(Row {
+                        depth: 0,
+                        indent: 2,
+                        hanging: 2,
+                        markup: &format!("<dim>[in {}{}]</dim>", literal(&kind), literal(name)),
+                        doc_indent: None,
+                    })?;
                     for member in members {
                         self.outline_node(out, &outline, *member, 2, &mut written)?;
                     }
                 }
             }
         }
-        writeln!(out)?;
+        out.blank()?;
         Ok(true)
     }
 
+    /// One outline row and its members; top-level rows are at `depth` 1.
     fn outline_node(
         &self,
-        out: &mut dyn Write,
+        out: &mut dyn Layout,
         outline: &Outline<'_>,
         position: usize,
         depth: usize,
@@ -403,7 +532,13 @@ impl Renderer {
             self.link(&record.source.file_path, start.line, &literal(&location)),
             self.doc_lines(record.docs.raw_doc.as_deref()),
         );
-        self.hanging_line(out, 2 * depth, 4, &markup)?;
+        out.row(Row {
+            depth: depth - 1,
+            indent: 2 * depth,
+            hanging: 4,
+            markup: &markup,
+            doc_indent: None,
+        })?;
         for child in &outline.children[position] {
             self.outline_node(out, outline, *child, depth + 1, written)?;
         }
@@ -441,38 +576,48 @@ impl Renderer {
         }
     }
 
-    fn method_section(&self, out: &mut dyn Write, title: &str, methods: &[SymbolRecord]) -> io::Result<()> {
+    /// A class section's title row, `Static Methods (2)`, above its items.
+    fn section_title(&self, out: &mut dyn Layout, title: &str, len: usize) -> io::Result<()> {
+        out.row(Row {
+            depth: 1,
+            indent: 4,
+            hanging: 2,
+            markup: &format!("<yellow>{title}</yellow> ({len})"),
+            doc_indent: None,
+        })
+    }
+
+    fn method_section(&self, out: &mut dyn Layout, title: &str, methods: &[SymbolRecord]) -> io::Result<()> {
         if methods.is_empty() {
             return Ok(());
         }
-        self.line(out, 4, &format!("<yellow>{title}</yellow> ({})", methods.len()))?;
-        let mut list = UnorderedList::empty();
-        for method in methods {
-            let start = &method.source.declaration_span.start;
-            let location = format!("[{}:{}]", start.line, start.column);
-            let visibility = match visibility(method) {
-                Some(visibility) => format!("<i>{visibility}</i> "),
-                None => String::new(),
-            };
-            let text = match shown(method, self.signatures, true) {
-                Shown::Header(header) => literal(&header),
-                Shown::Named(named) => format!("{visibility}{}", literal(&named)),
-            };
-            let markup = format!(
-                "<green>{text}</green> <dim>{}</dim>{}",
-                self.link(&method.source.file_path, start.line, &location),
-                self.doc_lines(method.docs.raw_doc.as_deref()),
-            );
-            // The list gives each item its hanging indent and wraps it at the
-            // renderer's width (never, when that width is unbounded).
-            list.add(Prose::new(markup).with_word_wrap(WordWrap::None));
-        }
-        self.list(out, 6, &list)
+        self.section_title(out, title, methods.len())?;
+        let items: Vec<String> = methods
+            .iter()
+            .map(|method| {
+                let start = &method.source.declaration_span.start;
+                let location = format!("[{}:{}]", start.line, start.column);
+                let visibility = match visibility(method) {
+                    Some(visibility) => format!("<i>{visibility}</i> "),
+                    None => String::new(),
+                };
+                let text = match shown(method, self.signatures, true) {
+                    Shown::Header(header) => literal(&header),
+                    Shown::Named(named) => format!("{visibility}{}", literal(&named)),
+                };
+                format!(
+                    "<green>{text}</green> <dim>{}</dim>{}",
+                    self.link(&method.source.file_path, start.line, &location),
+                    self.doc_lines(method.docs.raw_doc.as_deref()),
+                )
+            })
+            .collect();
+        out.list(6, 2, &items)
     }
 
     fn field_section(
         &self,
-        out: &mut dyn Write,
+        out: &mut dyn Layout,
         title: &str,
         fields: &[FieldData],
         language: ProgrammingLanguage,
@@ -480,23 +625,22 @@ impl Renderer {
         if fields.is_empty() {
             return Ok(());
         }
-        self.line(out, 4, &format!("<yellow>{title}</yellow> ({})", fields.len()))?;
-        let mut list = UnorderedList::empty();
-        for field in fields {
-            let visibility = match field.visibility.and_then(Option::<Visibility>::from) {
-                Some(visibility) => format!("<i>{visibility}</i> "),
-                None => String::new(),
-            };
-            let markup = format!(
-                "{visibility}<cyan>{}</cyan>{}",
-                literal(&format_field(&field.name, field.type_text.as_deref(), language)),
-                self.doc_lines(field.docs.as_deref()),
-            );
-            // The list gives each item its hanging indent and wraps it at the
-            // renderer's width (never, when that width is unbounded).
-            list.add(Prose::new(markup).with_word_wrap(WordWrap::None));
-        }
-        self.list(out, 6, &list)
+        self.section_title(out, title, fields.len())?;
+        let items: Vec<String> = fields
+            .iter()
+            .map(|field| {
+                let visibility = match field.visibility.and_then(Option::<Visibility>::from) {
+                    Some(visibility) => format!("<i>{visibility}</i> "),
+                    None => String::new(),
+                };
+                format!(
+                    "{visibility}<cyan>{}</cyan>{}",
+                    literal(&format_field(&field.name, field.type_text.as_deref(), language)),
+                    self.doc_lines(field.docs.as_deref()),
+                )
+            })
+            .collect();
+        out.list(6, 2, &items)
     }
 
     /// `path` as listed: relative to the display root, `/`-separated.
@@ -703,7 +847,7 @@ impl<'r> ListingStream<'r> {
     }
 
     /// Adds the next file's listing, writing whatever it completes.
-    pub(crate) fn push(&mut self, out: &mut dyn Write, package_root: &Path, listing: FileListing) -> io::Result<()> {
+    pub(crate) fn push(&mut self, out: &mut dyn Layout, package_root: &Path, listing: FileListing) -> io::Result<()> {
         if self.current.as_ref().is_none_or(|open| open.root != package_root) {
             self.close_package(out)?;
             self.open_package(out, package_root.to_path_buf())?;
@@ -732,16 +876,16 @@ impl<'r> ListingStream<'r> {
 
     /// Writes the last unit and the `(no symbols)` footer of a flat listing
     /// that had no declarations.
-    pub(crate) fn finish(mut self, out: &mut dyn Write) -> io::Result<()> {
+    pub(crate) fn finish(mut self, out: &mut dyn Layout) -> io::Result<()> {
         self.close_package(out)?;
         if self.sections || self.wrote_any {
             Ok(())
         } else {
-            self.no_symbols(out)
+            out.note(0, NO_SYMBOLS)
         }
     }
 
-    fn open_package(&mut self, out: &mut dyn Write, root: PathBuf) -> io::Result<()> {
+    fn open_package(&mut self, out: &mut dyn Layout, root: PathBuf) -> io::Result<()> {
         if self.sections {
             self.section_heading(out, &root)?;
         }
@@ -754,7 +898,7 @@ impl<'r> ListingStream<'r> {
         Ok(())
     }
 
-    fn close_package(&mut self, out: &mut dyn Write) -> io::Result<()> {
+    fn close_package(&mut self, out: &mut dyn Layout) -> io::Result<()> {
         self.flush_unit(out)?;
         let Some(open) = self.current.take() else {
             return Ok(());
@@ -768,7 +912,7 @@ impl<'r> ListingStream<'r> {
     }
 
     /// Renders the current unit; a unit without declarations writes nothing.
-    fn flush_unit(&mut self, out: &mut dyn Write) -> io::Result<()> {
+    fn flush_unit(&mut self, out: &mut dyn Layout) -> io::Result<()> {
         let Some(open) = self.current.as_mut() else {
             return Ok(());
         };
@@ -780,22 +924,18 @@ impl<'r> ListingStream<'r> {
         Ok(())
     }
 
-    fn section_heading(&self, out: &mut dyn Write, root: &Path) -> io::Result<()> {
-        writeln!(out)?;
+    fn section_heading(&self, out: &mut dyn Layout, root: &Path) -> io::Result<()> {
+        out.blank()?;
         let heading = literal(&self.renderer.display(root));
-        self.renderer.line(out, 0, &format!("<blue><b>{heading}</b></blue>"))?;
-        writeln!(out)
+        out.heading(1, 0, &format!("<blue><b>{heading}</b></blue>"))?;
+        out.blank()
     }
 
-    fn section_end(&self, out: &mut dyn Write, has_symbols: bool) -> io::Result<()> {
+    fn section_end(&self, out: &mut dyn Layout, has_symbols: bool) -> io::Result<()> {
         if !has_symbols {
-            self.no_symbols(out)?;
+            out.note(0, NO_SYMBOLS)?;
         }
-        writeln!(out)
-    }
-
-    fn no_symbols(&self, out: &mut dyn Write) -> io::Result<()> {
-        self.renderer.no_symbols(out)
+        out.blank()
     }
 }
 

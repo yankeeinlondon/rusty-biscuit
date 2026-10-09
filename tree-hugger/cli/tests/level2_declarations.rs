@@ -1097,37 +1097,255 @@ fn level2_declarations_in_kitty() {
 }
 
 
+/// Sources of the tags reader fixture, relative to its scan root. A path
+/// starting with `../` sits outside the root and is selected with an absolute
+/// `--file`, so its tag carries a `../` route.
+const READER_SOURCES: &[(&str, &str)] = &[
+    ("one.rs", "pub fn duplicate() {}\n"),
+    ("two.rs", "// second file\npub fn duplicate() {}\n"),
+    ("dir with space/λ.rs", "pub struct Ω;\nimpl Ω {\n    pub fn inside() {}\n}\n"),
+    ("../outside.rs", "// outside the scan root\npub fn outside_fn() {}\n"),
+    ("bank.php", "<?php\nnamespace Outer\\Inner;\nclass Account {\n    public function deposit() {}\n}\n"),
+    (" lead.rs", "// leading space\npub fn leading_space() {}\n"),
+    ("pct%.rs", "pub fn percent() {}\n"),
+    ("cost$.rs", "// dollar before the extension\npub fn dollar() {}\n"),
+    ("hash#.rs", "pub fn hash() {}\n"),
+];
+
+/// A backslash is an ordinary file-name character only on Unix.
+#[cfg(unix)]
+const UNIX_READER_SOURCES: &[(&str, &str)] = &[("back\\slash.rs", "// literal backslash\npub fn backslash() {}\n")];
+#[cfg(not(unix))]
+const UNIX_READER_SOURCES: &[(&str, &str)] = &[];
+
+/// One reader expectation: `taglist()` finds exactly `matches` entries named
+/// `name`, and the `nth` of them (1-based, file order) has `kind`, `class`
+/// (`None` = no container field) and line `line`; `:{nth}tag! {name}` then
+/// opens `file` (relative to the scan root) with the cursor on `line`.
+#[derive(Clone, Copy)]
+struct ReaderCase {
+    name: &'static str,
+    matches: usize,
+    nth: usize,
+    file: &'static str,
+    line: u32,
+    kind: &'static str,
+    class: Option<&'static str>,
+}
+
+const READER_CASES: &[ReaderCase] = &[
+    ReaderCase { name: "duplicate", matches: 2, nth: 1, file: "one.rs", line: 1, kind: "function", class: None },
+    ReaderCase { name: "duplicate", matches: 2, nth: 2, file: "two.rs", line: 2, kind: "function", class: None },
+    ReaderCase { name: "Ω", matches: 1, nth: 1, file: "dir with space/λ.rs", line: 1, kind: "type", class: None },
+    ReaderCase { name: "inside", matches: 1, nth: 1, file: "dir with space/λ.rs", line: 3, kind: "method", class: Some("Ω") },
+    ReaderCase { name: "outside_fn", matches: 1, nth: 1, file: "../outside.rs", line: 2, kind: "function", class: None },
+    // Neovim compares the whole field, so these are exact: 11 and 19 bytes.
+    ReaderCase { name: "Outer\\Inner", matches: 1, nth: 1, file: "bank.php", line: 2, kind: "namespace", class: None },
+    ReaderCase { name: "deposit", matches: 1, nth: 1, file: "bank.php", line: 4, kind: "method", class: Some("Outer\\Inner\\Account") },
+    ReaderCase { name: "leading_space", matches: 1, nth: 1, file: " lead.rs", line: 2, kind: "function", class: None },
+    ReaderCase { name: "percent", matches: 1, nth: 1, file: "pct%.rs", line: 1, kind: "function", class: None },
+    ReaderCase { name: "dollar", matches: 1, nth: 1, file: "cost$.rs", line: 2, kind: "function", class: None },
+    ReaderCase { name: "hash", matches: 1, nth: 1, file: "hash#.rs", line: 1, kind: "function", class: None },
+];
+
+#[cfg(unix)]
+const UNIX_READER_CASES: &[ReaderCase] =
+    &[ReaderCase { name: "backslash", matches: 1, nth: 1, file: "back\\slash.rs", line: 2, kind: "function", class: None }];
+#[cfg(not(unix))]
+const UNIX_READER_CASES: &[ReaderCase] = &[];
+
+/// Sources whose tags the writer must skip, because Neovim would expand the
+/// file name (or drop the pseudo-tag name) and so open another file or lose
+/// the entry. Each must leave a warning and exit 1 rather than a tag line.
+const SKIPPED_READER_SOURCES: &[(&str, &str, &str)] = &[
+    ("a$HOME.rs", "pub fn env_name() {}\n", "file name Neovim would expand"),
+    ("a[b].rs", "pub fn bracket() {}\n", "file name Neovim would expand"),
+    ("~home.rs", "pub fn tilde() {}\n", "file name Neovim would expand"),
+    ("pseudo.sh", "!_TAG_X() { :; }\n", "pseudo-tag name starting with !_"),
+];
+
+/// Checks every case in `cases` (defined before this text). Any failed
+/// `assert` or Vim error (such as E429 for a missing file) raises, the
+/// caller's `pcall` turns it into `cquit 1`, and the completion line is
+/// printed only after the last case.
+const READER_LUA: &str = r#"
+vim.fn.chdir(root)
+vim.o.tags = vim.fn.escape(root .. '/tags', ' ,\\')
+local function same_file(actual, expected)
+  if vim.fn.has('win32') == 1 then
+    return actual:lower() == expected:lower()
+  end
+  return actual == expected
+end
+for index, case in ipairs(cases) do
+  local where = ('case %d (%s #%d)'):format(index, case.name, case.nth)
+  local entries = vim.fn.taglist('\\V\\^' .. vim.fn.escape(case.name, '\\') .. '\\$')
+  assert(#entries == case.matches, ('%s: %d taglist entries, expected %d'):format(where, #entries, case.matches))
+  local entry = entries[case.nth]
+  assert(entry.cmd == tostring(case.line), ('%s: address %s, expected %d'):format(where, entry.cmd, case.line))
+  assert(entry.kind == case.kind, ('%s: kind %s, expected %s'):format(where, tostring(entry.kind), case.kind))
+  assert(entry.class == case.class, ('%s: class %s, expected %s'):format(where, tostring(entry.class), tostring(case.class)))
+  vim.cmd('silent! %bwipeout!')
+  vim.cmd({ cmd = 'tag', args = { case.name }, range = { case.nth }, bang = true, mods = { silent = true } })
+  local opened = vim.fs.normalize(vim.fn.resolve(vim.fn.expand('%:p')))
+  assert(same_file(opened, case.file), ('%s: opened %s, expected %s'):format(where, opened, case.file))
+  assert(vim.fn.line('.') == case.line, ('%s: cursor line %d, expected %d'):format(where, vim.fn.line('.'), case.line))
+end
+io.stdout:write(('tags reader verified %d cases\n'):format(#cases))
+"#;
+
+/// `value` as a Lua string literal; Lua strings are bytes, so UTF-8 passes
+/// through unchanged.
+fn lua_string(value: &str) -> String {
+    let mut literal = String::from("\"");
+    for ch in value.chars() {
+        match ch {
+            '\\' => literal.push_str("\\\\"),
+            '"' => literal.push_str("\\\""),
+            control if control.is_control() => {
+                for byte in control.to_string().bytes() {
+                    literal.push_str(&format!("\\{byte:03}"));
+                }
+            }
+            other => literal.push(other),
+        }
+    }
+    literal.push('"');
+    literal
+}
+
+/// The canonical path the reader should open, `/`-separated and without a
+/// Windows verbatim prefix (macOS temp dirs canonicalize `/var` to
+/// `/private/var`, which Neovim's `resolve()` also does). On Unix a `\` is a
+/// file-name character that the portable spelling would make a separator.
+fn reader_path(path: &Path) -> String {
+    let canonical = std::fs::canonicalize(path).expect("canonical reader fixture path");
+    if cfg!(unix) {
+        return canonical.to_string_lossy().into_owned();
+    }
+    let portable = biscuit_file::to_portable_string(&canonical);
+    portable.strip_prefix("//?/").map(str::to_owned).unwrap_or(portable)
+}
+
+/// Runs the reader over `cases` in headless Neovim with no config, no
+/// shada and no window. Lua assertion failures do not change Neovim's exit
+/// status by themselves (E5108, exit 0), so the script runs under `pcall`
+/// and a failure exits through `cquit 1`.
+fn run_tags_reader(root: &Path, scratch: &Path, cases: &[ReaderCase]) -> std::process::Output {
+    let rows: Vec<String> = cases
+        .iter()
+        .map(|case| {
+            format!(
+                "{{ name = {}, matches = {}, nth = {}, file = {}, line = {}, kind = {}, class = {} }}",
+                lua_string(case.name),
+                case.matches,
+                case.nth,
+                lua_string(&reader_path(&root.join(case.file))),
+                case.line,
+                lua_string(case.kind),
+                case.class.map_or_else(|| "nil".to_string(), lua_string),
+            )
+        })
+        .collect();
+    let script = format!(
+        "local root = {}\nlocal cases = {{\n  {}\n}}\n{READER_LUA}",
+        lua_string(&reader_path(root)),
+        rows.join(",\n  "),
+    );
+    let script_path = scratch.join("tags-reader.lua");
+    std::fs::write(&script_path, script).expect("write reader script");
+    let run = format!(
+        "lua local ok, err = pcall(dofile, {}); if not ok then io.stderr:write(tostring(err) .. '\\n'); vim.cmd('cquit 1') end",
+        lua_string(&biscuit_file::to_portable_string(&script_path)),
+    );
+    std::process::Command::new("nvim")
+        .args(["--headless", "-u", "NONE", "-i", "NONE", "-n", "-c", &run, "-c", "qa!"])
+        .current_dir(root)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("run headless nvim")
+}
+
 #[test]
 #[serial(level2_terminal)]
 fn level2_ctags_reader_resolves_duplicates_and_numeric_lines_headlessly() {
     let available = std::process::Command::new("nvim").arg("--version").output().is_ok();
     require_level!(Level::L2, available, "Neovim");
     let fixture = Fixture::empty();
-    std::fs::write(fixture.repo.path().join("one.rs"), "pub fn duplicate() {}\n").unwrap();
-    std::fs::write(fixture.repo.path().join("two.rs"), "pub fn duplicate() {}\n").unwrap();
-    let spaced = fixture.repo.path().join("dir with space/λ.rs");
-    std::fs::create_dir_all(spaced.parent().unwrap()).unwrap();
-    std::fs::write(&spaced, "pub struct Ω;\nimpl Ω { pub fn inside() {} }\n").unwrap();
-    let config = fixture.home.path().join(".config");
-    let tags = std::process::Command::new(hug())
-        .args(["symbols", "--format", "ctags"])
-        .current_dir(fixture.repo.path())
+    let root = fixture.repo.path().join("root");
+    let mut args = vec!["symbols".to_string(), "--format".into(), "ctags".into(), "--file".into(), "**/*.rs".into()];
+    args.extend(["--file".to_string(), "*.php".into()]);
+    for (relative, source) in READER_SOURCES.iter().chain(UNIX_READER_SOURCES) {
+        let path = root.join(relative);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, source).unwrap();
+        if let Some(outside) = relative.strip_prefix("../") {
+            args.push("--file".into());
+            args.push(root.parent().unwrap().join(outside).to_string_lossy().into_owned());
+        }
+    }
+    let tags = run_hug_tags(&fixture, &root, &args);
+    assert!(tags.status.success(), "{}", String::from_utf8_lossy(&tags.stderr));
+    let tags_text = String::from_utf8(tags.stdout).expect("UTF-8 tags");
+    // Saved at the scan root, where its root-relative paths resolve.
+    std::fs::write(root.join("tags"), &tags_text).unwrap();
+
+    let cases: Vec<ReaderCase> = READER_CASES.iter().chain(UNIX_READER_CASES).copied().collect();
+    let reader = run_tags_reader(&root, fixture.temp.path(), &cases);
+    let stdout = String::from_utf8_lossy(&reader.stdout);
+    assert!(
+        reader.status.success() && stdout.contains(&format!("tags reader verified {} cases", cases.len())),
+        "reader failed ({:?})\nstdout: {stdout}\nstderr: {}\ntags:\n{tags_text}",
+        reader.status,
+        String::from_utf8_lossy(&reader.stderr),
+    );
+
+    // The harness itself: a wrong expectation, in the metadata or in the
+    // navigation, must fail the reader.
+    for (wrong, message) in [
+        (ReaderCase { line: 1, ..READER_CASES[1] }, "address 2, expected 1"),
+        (ReaderCase { file: "one.rs", ..READER_CASES[1] }, "opened "),
+    ] {
+        let failed = run_tags_reader(&root, fixture.temp.path(), &[wrong]);
+        let stderr = String::from_utf8_lossy(&failed.stderr);
+        assert!(!failed.status.success(), "a wrong expectation passed the reader: {stderr}");
+        assert!(stderr.contains(message), "expected `{message}` in the reader failure: {stderr}");
+        assert!(!String::from_utf8_lossy(&failed.stdout).contains("tags reader verified"));
+    }
+
+    let skipped_root = fixture.repo.path().join("skipped");
+    for (relative, source, _) in SKIPPED_READER_SOURCES {
+        let path = skipped_root.join(relative);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, source).unwrap();
+    }
+    let skipped = run_hug_tags(&fixture, &skipped_root, &["symbols".into(), "--format".into(), "ctags".into()]);
+    let skipped_tags = String::from_utf8(skipped.stdout).expect("UTF-8 tags");
+    let warnings = String::from_utf8_lossy(&skipped.stderr);
+    assert_eq!(skipped.status.code(), Some(1), "{warnings}");
+    assert_eq!(skipped_tags, ctags_header(), "a skipped entry reached the tags file");
+    for (relative, _, reason) in SKIPPED_READER_SOURCES {
+        let warning = format!("warning: ctags skipped {reason} in {relative} at line 1");
+        assert!(warnings.lines().any(|line| line == warning), "missing `{warning}` in:\n{warnings}");
+    }
+}
+
+fn ctags_header() -> &'static str {
+    "!_TAG_FILE_FORMAT\t2\t/extended format/\n!_TAG_FILE_SORTED\t0\t/0=unsorted/\n"
+}
+
+/// Runs `hug` in `root` with the fixture's isolated home, config and temp.
+fn run_hug_tags(fixture: &Fixture, root: &Path, args: &[String]) -> std::process::Output {
+    std::process::Command::new(hug())
+        .args(args)
+        .current_dir(root)
         .env("HOME", fixture.home.path())
         .env("USERPROFILE", fixture.home.path())
-        .env("XDG_CONFIG_HOME", config)
+        .env("XDG_CONFIG_HOME", fixture.home.path().join(".config"))
         .env("TMPDIR", fixture.temp.path())
         .env("TMP", fixture.temp.path())
         .env("TEMP", fixture.temp.path())
         .env("NO_COLOR", "1")
-        .output().unwrap();
-    assert!(tags.status.success(), "{}", String::from_utf8_lossy(&tags.stderr));
-    let tags_path = fixture.temp.path().join("tags");
-    std::fs::write(&tags_path, tags.stdout).unwrap();
-    let set_tags = format!("set tags={}", tags_path.display().to_string().replace(' ', "\\ "));
-    let reader = std::process::Command::new("nvim")
-        .args(["--headless", "-u", "NONE", "-i", "NONE", "-c", &set_tags,
-            "-c", "lua local d=vim.fn.taglist('duplicate'); assert(#d == 2); assert(d[1].cmd == '1'); assert(d[2].cmd == '1'); local m=vim.fn.taglist('inside'); assert(#m == 1); assert(m[1].cmd == '2'); assert(m[1].class == 'Ω'); assert(m[1].filename == 'dir with space/λ.rs'); local u=vim.fn.taglist('Ω'); assert(#u == 1); assert(u[1].cmd == '1')",
-            "-c", "qa!"])
-        .output().unwrap();
-    assert!(reader.status.success(), "{}", String::from_utf8_lossy(&reader.stderr));
+        .output()
+        .unwrap()
 }

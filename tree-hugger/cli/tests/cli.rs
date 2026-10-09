@@ -1842,6 +1842,30 @@ fn test_god_files_plain_output() {
     assert!(stdout.contains("the big.py file is 1000 lines of code"));
 }
 
+// Windows rejects ESC and angle brackets in file names.
+#[cfg(unix)]
+#[test]
+fn test_god_files_plain_output_keeps_escapes_and_markup_in_paths_literal() {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(dir.path().join("big\x1b[31m<i>.py"), "x = 1\n".repeat(1000)).unwrap();
+
+    let output = hug_cmd()
+        .current_dir(dir.path())
+        .args(["god-files", "--plain"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let stdout = String::from_utf8_lossy(&output);
+    assert!(!stdout.contains('\x1b'), "{stdout}");
+    assert!(
+        stdout.contains("the big\\u{1b}[31m<i>.py file is 1000 lines of code"),
+        "{stdout}"
+    );
+}
+
 #[test]
 fn test_god_files_high_risk_suppresses_moderate_section() {
     let dir = tempfile::TempDir::new().unwrap();

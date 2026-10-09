@@ -50,7 +50,7 @@ use classes::{ClassSelection, MemberFilter};
 use declarations::{DeclarationScan, Declarations, ReportFormat};
 use import_format::*;
 use order::SortOrder;
-use output::{ExportFormat, GivenOutput, OutputMode, ReportArgs, SignatureMode, StatsOutput};
+use output::{GivenOutput, OutputMode, ReportArgs, SignatureMode, StatsOutput};
 use render::{ListingOptions, RenderOptions, color_tag_for_kind};
 use scan::{Analyzer, CacheStats, in_file_order};
 use scanner::*;
@@ -1014,7 +1014,7 @@ fn main() -> Result<(), TreeHuggerError> {
     let changed_request = cli.command.changed();
     let changed_set = changed_request.as_ref().map(|request| {
         changed::resolve(request, &root_dir).unwrap_or_else(|message| {
-            eprintln!("error: {message}");
+            eprintln!("error: {}", render::neutralized(&message));
             std::process::exit(1);
         })
     });
@@ -1094,10 +1094,7 @@ fn main() -> Result<(), TreeHuggerError> {
                 signatures,
                 plain,
                 comments,
-                containment: format == ExportFormat::Ctags
-                    || (matches!(format, ExportFormat::Markdown | ExportFormat::Prose)
-                        && (cli.command.report_args().is_some_and(|args| args.tree)
-                            || matches!(command_kind, CommandKind::Classes { .. }))),
+                tree: cli.command.report_args().is_some_and(|args| args.tree),
             },
         };
         let status = declarations::run(
@@ -1148,7 +1145,7 @@ fn main() -> Result<(), TreeHuggerError> {
             let analyzed = match analyzed {
                 Ok(analyzed) => analyzed,
                 Err(error) => {
-                    eprintln!("error: {error}");
+                    eprintln!("error: {}", render::neutralized(&error.to_string()));
                     failed_files += 1;
                     return ControlFlow::Continue(());
                 }
@@ -1172,7 +1169,7 @@ fn main() -> Result<(), TreeHuggerError> {
                 &analysis_options,
                 &mut adapter_metadata,
             ) {
-                eprintln!("error: {error}");
+                eprintln!("error: {}", render::neutralized(&error.to_string()));
                 failed_files += 1;
                 return ControlFlow::Continue(());
             }
@@ -2255,7 +2252,7 @@ fn render_god_analysis(term: &Terminal, plain: bool, analysis: &GodAnalysis) {
         RiskBand::Moderate => "yellow",
     };
 
-    let rel = Prose::escape_text(&to_portable_string(&analysis.relative_path));
+    let rel = render::literal(&to_portable_string(&analysis.relative_path));
     let label = match file_url(Path::new(analysis.file.raw())).filter(|_| term.osc_link_support) {
         Some(url) => format!("<a href={}>{rel}</a>", Prose::quoted_attr(&url)),
         None => rel,
@@ -2277,7 +2274,7 @@ fn render_god_analysis(term: &Terminal, plain: bool, analysis: &GodAnalysis) {
             term,
             plain,
             2,
-            &format!("- <dim>note: {}</dim>", Prose::escape_text(note)),
+            &format!("- <dim>note: {}</dim>", render::literal(note)),
         );
     }
 
@@ -2335,14 +2332,14 @@ fn render_symbol_block(term: &Terminal, plain: bool, block: &SymbolBlock) {
         Some(tag) => format!("<{tag}>{kind}</{tag}>"),
         None => kind,
     };
-    let name = Prose::escape_text(&block.name);
+    let name = render::literal(&block.name);
 
     let members = match &block.many_members {
         Some(callout) => format!("  ({} members)", callout.member_count),
         None => String::new(),
     };
     let doc = match &block.doc_summary {
-        Some(summary) => format!(" <dim>— {}</dim>", Prose::escape_text(summary)),
+        Some(summary) => format!(" <dim>— {}</dim>", render::literal(summary)),
         None => String::new(),
     };
 
@@ -2365,7 +2362,7 @@ fn render_symbol_block(term: &Terminal, plain: bool, block: &SymbolBlock) {
                 Some(tag) => format!("<{tag}>{m_kind}</{tag}>"),
                 None => m_kind,
             };
-            let m_name = Prose::escape_text(&member.name);
+            let m_name = render::literal(&member.name);
             prose_line(
                 term,
                 plain,
@@ -2386,7 +2383,7 @@ fn format_refactor_hint(hint: &RefactorHint) -> String {
         RefactorHint::DominatedBySingleSymbol { name, share } => {
             format!(
                 "likely refactor: `{}` holds {:.0}% of the code — split by responsibility",
-                Prose::escape_text(name),
+                render::literal(name),
                 share * 100.0
             )
         }

@@ -208,3 +208,55 @@ fn selectors_apply_to_prelude_exports() {
     assert_eq!(names(&["--json", "symbols", "--prelude", "--exclude-symbols", "Ghost"]), ["ElevatedEnum", "VerboseType"]);
     assert_eq!(names(&["--json", "symbols", "--prelude", "--kind", "function"]), Vec::<String>::new());
 }
+
+/// A one-line prelude re-exporting a type declared on line 2 of another
+/// file: every export locates the alias at its declaration, never at the
+/// prelude it is analyzed and keyed with.
+fn cross_file_package() -> Scratch {
+    Scratch::new(&[
+        ("Cargo.toml", "[package]\nname = \"cross-file\"\nversion = \"0.0.0\"\nedition = \"2021\"\n"),
+        ("src/lib.rs", "pub mod alpha;\npub mod prelude;\n"),
+        ("src/alpha.rs", "\npub struct Original;\n"),
+        ("src/prelude.rs", "pub use crate::alpha::Original as Alias;\n"),
+    ])
+}
+
+/// Stdout of `hug` run from `dir` (relative to the repository), so the
+/// working directory differs from the package-root scan root.
+fn stdout_from(scratch: &Scratch, dir: &str, args: &[&str]) -> String {
+    let output = scratch.process(args).current_dir(scratch.repo.path().join(dir)).output().expect("run hug");
+    stdout_of(output, args)
+}
+
+#[test]
+fn prelude_exports_locate_cross_file_aliases_at_their_declaration_in_every_format() {
+    let scratch = cross_file_package();
+    let declared = file_identity(&scratch.repo.path().join("src/alpha.rs"));
+    let url = url::Url::from_file_path(&declared).expect("native file URL");
+
+    let tsv = scratch.stdout(&["symbols", "--prelude", "--format", "tsv"]);
+    let rows: Vec<Vec<&str>> = tsv.lines().skip(1).map(|line| line.split('\t').collect()).collect();
+    assert_eq!(rows.len(), 1, "{tsv}");
+    assert_eq!(&rows[0][..5], ["src/alpha.rs", "2", "1", "type", "Alias"], "{tsv}");
+    assert!(rows[0][5].starts_with("src/prelude.rs#"), "the qualified-name prefix stays the prelude's: {tsv}");
+
+    let prose = scratch.stdout(&["symbols", "--prelude", "--format", "prose"]);
+    assert!(
+        prose.contains(&format!("<a href=\"{url}#L2\">src/alpha.rs:2:1</a>")),
+        "label and link both name the declaration ({url}#L2):\n{prose}"
+    );
+    assert!(!prose.contains("prelude.rs#L"), "{prose}");
+
+    let markdown = scratch.stdout(&["symbols", "--prelude", "--format", "markdown"]);
+    assert_eq!(markdown.trim_end(), "- struct **Alias** src/alpha.rs:2:1", "{markdown}");
+
+    let tags = scratch.stdout(&["symbols", "--prelude", "--format", "ctags"]);
+    assert!(tags.lines().all(|line| line.starts_with("!_TAG_")), "a synthetic alias has no tag:\n{tags}");
+
+    // Records are projected once, against the scan root, wherever `hug` runs.
+    let nested = stdout_from(&scratch, "src", &["symbols", "--prelude", "--format", "tsv"]);
+    assert_eq!(nested, tsv, "running from src/ changes no TSV path");
+    let tags = stdout_from(&scratch, "src", &["symbols", "--format", "ctags"]);
+    let tag = tags.lines().find(|line| line.starts_with("Original\t")).unwrap_or_else(|| panic!("{tags}"));
+    assert_eq!(tag, "Original\tsrc/alpha.rs\t2;\"\tkind:type", "{tags}");
+}

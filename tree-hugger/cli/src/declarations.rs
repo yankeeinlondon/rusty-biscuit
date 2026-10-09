@@ -20,7 +20,12 @@ use crate::classes::{self, ClassSelection, ClassSummary};
 use crate::order::{compare, portable_path_cmp, sort_file_records};
 use crate::prelude::{PreludeFilter, resolve_prelude_symbols};
 use crate::output::{ExportFormat, View};
-use crate::render::{FileListing, ListingOptions, ListingStream, RenderOptions, Renderer, listing_order};
+use crate::markdown::MarkdownLayout;
+use crate::prose::ProseLayout;
+use crate::render::{
+    FileListing, Layout, ListingOptions, ListingStream, NO_SYMBOLS, RenderOptions, Renderer, TerminalLayout,
+    listing_order, neutralized,
+};
 use crate::report::{
     Entries, FileEntry, JsonLine, JsonReport, REPORT_SCHEMA_VERSION, ReportError, portable_relative,
     relativize_index, trim_record,
@@ -104,22 +109,26 @@ pub(crate) enum ReportFormat {
     /// `--stats`: as terminal tables written with the options, or as JSON
     /// (`None`).
     Stats(Option<RenderOptions>),
-    /// A terminal-independent declaration export.
-    Export { format: ExportFormat, signatures: crate::output::SignatureMode, plain: bool, comments: bool, containment: bool },
+    /// A terminal-independent declaration export; `tree` is `--tree`
+    /// (Markdown and Prose only).
+    Export { format: ExportFormat, signatures: crate::output::SignatureMode, plain: bool, comments: bool, tree: bool },
 }
 
 impl ReportFormat {
     /// The capabilities this format shows beyond the declarations: records
     /// written as JSON always carry computed `is_test` and `is_deprecated`
     /// (so a `false` there means "not set", never "not computed"), `--stats`
-    /// needs `has_docs`, and `--tree` nests by containment.
+    /// needs `has_docs`, and `--tree` nests by containment, which ctags
+    /// also reads for its container fields.
     fn capabilities(self) -> Vec<Capability> {
         match self {
             Self::Json | Self::JsonFull | Self::JsonLines => vec![Capability::Flags],
             Self::Stats(_) => vec![Capability::Metrics],
             Self::Terminal { view: View::Tree, .. } => vec![Capability::Containment],
-            Self::Export { containment: true, .. } => vec![Capability::Containment],
-            Self::Terminal { .. } | Self::Export { containment: false, .. } | Self::Count => Vec::new(),
+            Self::Export { tree: true, .. } | Self::Export { format: ExportFormat::Ctags, .. } => {
+                vec![Capability::Containment]
+            }
+            Self::Terminal { .. } | Self::Export { .. } | Self::Count => Vec::new(),
         }
     }
 }
@@ -164,7 +173,7 @@ pub(crate) fn run(scan: DeclarationScan, analyzer: &Analyzer) -> Result<i32, Tre
     let catalog = match Catalog::capture(scan.format, &scan.scan_root) {
         Ok(catalog) => catalog,
         Err(message) => {
-            let _ = writeln!(io::stderr(), "error: {message}");
+            let _ = writeln!(io::stderr(), "error: {}", neutralized(&message));
             return Ok(1);
         }
     };
@@ -257,9 +266,27 @@ pub(crate) fn run(scan: DeclarationScan, analyzer: &Analyzer) -> Result<i32, Tre
         ReportFormat::Terminal { render, view } => {
             let renderer = Renderer::new(render, Some(scan.git_root.clone()));
             match view {
-                View::List => write_terminal(&scan, &renderer, &files, work, &mut sink),
+                View::List => write_listing(&scan, &renderer, &files, work, &mut sink, Presentation::Terminal),
                 View::Table => write_table(&scan, &renderer, &files, work, &mut sink),
-                View::Tree => write_tree(&scan, &renderer, &files, work, &mut sink),
+                View::Tree => write_tree(&scan, &renderer, &files, work, &mut sink, Presentation::Terminal),
+            }
+        }
+        ReportFormat::Export {
+            format: format @ (ExportFormat::Prose | ExportFormat::Markdown),
+            signatures,
+            plain,
+            comments,
+            tree,
+        } => {
+            let renderer = Renderer::for_export(comments, signatures, Some(scan.git_root.clone()));
+            let presentation = match format {
+                ExportFormat::Prose => Presentation::Prose { plain },
+                _ => Presentation::Markdown,
+            };
+            if tree {
+                write_tree(&scan, &renderer, &files, work, &mut sink, presentation)
+            } else {
+                write_listing(&scan, &renderer, &files, work, &mut sink, presentation)
             }
         }
         format @ ReportFormat::Export { .. } => write_export(&scan, &files, work, format, &mut sink),
@@ -282,7 +309,8 @@ fn write_status(written: io::Result<()>, no_file_errors: bool, stderr: &mut dyn 
     }
 }
 
-/// Settles each completed export file before advancing to the next chunk.
+/// The TSV and ctags exports: one file's flattened records at a time,
+/// settled before advancing to the next chunk.
 fn write_export(
     scan: &DeclarationScan,
     files: &[PathBuf],
@@ -292,7 +320,6 @@ fn write_export(
 ) -> io::Result<()> {
     let chunk = chunk_size();
     let mut delivered = 0;
-    let mut wrote_any = false;
     let is_tsv = matches!(format, ReportFormat::Export { format: ExportFormat::Tsv, .. });
     let is_ctags = matches!(format, ReportFormat::Export { format: ExportFormat::Ctags, .. });
     if is_tsv {
@@ -301,47 +328,38 @@ fn write_export(
     if is_ctags {
         sink.out.write_all(crate::ctags::HEADER.as_bytes())?;
     }
-    let flow = in_file_order(files, work, |file, outcome| {
+    let flow = in_file_order(files, work, |_, outcome| {
         delivered += 1;
         if let Some((display, prepared)) = sink.settle(outcome, scan.verbose) {
-            let selected = selected_records(scan, &display, prepared);
-            let ReportFormat::Export { format, signatures, plain, comments, .. } = format else { unreachable!() };
+            let ReportFormat::Export { format, signatures, .. } = format else { unreachable!() };
+            // Tags decide each path from the native record (see
+            // `ctags::write_record`); TSV shows the projected one.
+            let selected = if format == ExportFormat::Ctags {
+                native_selected_records(scan, &display, prepared)
+            } else {
+                selected_records(scan, &display, prepared)
+            };
             let rows = crate::export::flatten_selected(
                 &selected.records,
                 selected.members.as_deref(),
                 scan.listing.sort,
                 format != ExportFormat::Ctags,
             );
-            wrote_any |= !rows.is_empty();
             if format == ExportFormat::Tsv
-                && let Err(error) = crate::tsv::write_rows(&mut *sink.out, &display, &rows, signatures)
+                && let Err(error) = crate::tsv::write_rows(&mut *sink.out, &rows, signatures)
             {
                 return as_flow(Err(error));
             }
             if format == ExportFormat::Ctags {
                 for record in &rows {
                     match crate::ctags::write_record(&mut *sink.out, record, &scan.scan_root) {
-                        Ok(Some((path, line))) => {
-                            let message = format!("ctags skipped unsupported control character in {path} at line {line}");
-                            let _ = writeln!(sink.stderr, "warning: {message}");
-                            sink.errors.push(ReportError { file: path, kind: "ctags_unsupported", message });
+                        Ok(Some((path, line, reason))) => {
+                            sink.errors.push(skipped_tag(path, line, reason, &mut *sink.stderr));
                         }
                         Ok(None) => {}
                         Err(error) => return as_flow(Err(error)),
                     }
                 }
-            }
-            if matches!(format, ExportFormat::Prose | ExportFormat::Markdown) {
-                let renderer = Renderer::new(
-                    RenderOptions { styled: !plain, show_comments: comments, width: None, signatures },
-                    Some(scan.git_root.clone()),
-                );
-                let result = match format {
-                    ExportFormat::Prose => crate::prose::write_file(&mut *sink.out, &renderer, &rows, file, plain),
-                    ExportFormat::Markdown => crate::markdown::write_file(&mut *sink.out, &renderer, &rows, signatures, comments),
-                    _ => unreachable!(),
-                };
-                if let Err(error) = result { return as_flow(Err(error)); }
             }
         }
         as_flow(flush_at_chunk_end(&mut *sink.out, delivered, chunk, files.len()))
@@ -349,10 +367,16 @@ fn write_export(
     if let ControlFlow::Break(error) = flow {
         return Err(error);
     }
-    if !wrote_any && matches!(format, ReportFormat::Export { format: ExportFormat::Markdown | ExportFormat::Prose, .. }) {
-        writeln!(sink.out, "(no symbols)")?;
-    }
     sink.out.flush()
+}
+
+/// Warns on `stderr` that the tag declared at `path`:`line` was skipped.
+/// The path may itself hold the controls ctags rejected, so the warning
+/// shows them as visible escapes and stays one line.
+fn skipped_tag(path: String, line: usize, reason: crate::ctags::Unsupported, stderr: &mut dyn Write) -> ReportError {
+    let message = format!("ctags skipped {} in {path} at line {line}", reason.describe());
+    let _ = writeln!(stderr, "warning: {}", neutralized(&message));
+    ReportError { file: path, kind: "ctags_unsupported", message }
 }
 
 /// Where a writer puts its output, failures and cache counts.
@@ -384,7 +408,7 @@ fn settle(
     match outcome.prepared {
         Ok(prepared) => Some((outcome.display, prepared)),
         Err(error) => {
-            let _ = writeln!(stderr, "error: {error}");
+            let _ = writeln!(stderr, "error: {}", neutralized(&error.to_string()));
             errors.push(ReportError::new(outcome.display, &error));
             None
         }
@@ -471,6 +495,18 @@ impl SelectedRecords {
 }
 
 fn selected_records(scan: &DeclarationScan, display: &str, prepared: Prepared) -> SelectedRecords {
+    let mut selected = native_selected_records(scan, display, prepared);
+    for record in selected.records.iter_mut().chain(selected.members.iter_mut().flatten().flatten()) {
+        trim_record(record, &scan.scan_root);
+    }
+    selected
+}
+
+/// [`selected_records`] before `trim_record`: the same records in the same
+/// order, still carrying their native paths. For a writer whose output must
+/// lead back to the declaration file, which the display projection cannot
+/// promise for a name that is not valid Unicode.
+fn native_selected_records(scan: &DeclarationScan, display: &str, prepared: Prepared) -> SelectedRecords {
     let Prepared { result, classes } = prepared;
     let index = result.index;
     let (records, members) = match classes {
@@ -481,11 +517,7 @@ fn selected_records(scan: &DeclarationScan, display: &str, prepared: Prepared) -
             let mut containers = Vec::with_capacity(summaries.len());
             let mut members = Vec::with_capacity(summaries.len());
             for summary in summaries {
-                let mut displayed = summary.displayed_members();
-                for record in &mut displayed {
-                    trim_record(record, &scan.scan_root);
-                }
-                members.push(displayed);
+                members.push(summary.displayed_members());
                 containers.push(summary.container);
             }
             (containers, Some(members))
@@ -496,10 +528,6 @@ fn selected_records(scan: &DeclarationScan, display: &str, prepared: Prepared) -
             (records, None)
         }
     };
-    let mut records = records;
-    for record in &mut records {
-        trim_record(record, &scan.scan_root);
-    }
     SelectedRecords {
         language: index.language,
         completed_passes: index.completed_passes,
@@ -614,30 +642,60 @@ fn write_tally(
     }
 }
 
-/// Writes the terminal report as results arrive, flushing after each chunk,
-/// so a closed or failing stdout stops the scan before the next chunk.
-fn write_terminal(
+/// How a listing, outline or `classes` report is presented.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Presentation {
+    Terminal,
+    /// `--format prose`; `plain` is global `--plain`.
+    Prose { plain: bool },
+    Markdown,
+}
+
+impl Presentation {
+    fn layout<'a>(self, renderer: &'a Renderer, out: &'a mut dyn Write) -> Box<dyn Layout + 'a> {
+        match self {
+            Self::Terminal => Box::new(TerminalLayout::new(renderer, out)),
+            Self::Prose { plain } => Box::new(ProseLayout::new(out, plain)),
+            Self::Markdown => Box::new(MarkdownLayout::new(out)),
+        }
+    }
+}
+
+/// Writes the listing (or the `classes` report) as results arrive, flushing
+/// after each chunk, so a closed or failing stdout stops the scan before the
+/// next chunk.
+fn write_listing(
     scan: &DeclarationScan,
     renderer: &Renderer,
     files: &[PathBuf],
     work: impl Fn(&Path) -> FileOutcome + Sync,
     sink: &mut Sink<'_>,
+    presentation: Presentation,
 ) -> io::Result<()> {
     let chunk = chunk_size();
     let mut delivered = 0;
+    let Sink { out, errors, stats, stderr } = sink;
+    let mut layout = presentation.layout(renderer, &mut **out);
     if matches!(scan.command, Declarations::Classes { .. }) {
+        let mut wrote_any = false;
         let flow = in_file_order(files, work, |file, outcome| {
             delivered += 1;
             let mut written = Ok(());
-            if let Some((_, prepared)) = sink.settle(outcome, scan.verbose) {
-                written = write_classes(scan, renderer, &mut *sink.out, file, prepared);
+            if let Some((_, prepared)) = settle(outcome, errors, stats, scan.verbose, &mut **stderr) {
+                written = write_classes(scan, renderer, &mut *layout, file, prepared)
+                    .map(|wrote| wrote_any |= wrote);
             }
-            as_flow(written.and_then(|()| flush_at_chunk_end(&mut *sink.out, delivered, chunk, files.len())))
+            as_flow(written.and_then(|()| flush_at_chunk_end(layout.writer(), delivered, chunk, files.len())))
         });
         if let ControlFlow::Break(error) = flow {
             return Err(error);
         }
-        return sink.out.flush();
+        // The terminal and Prose `classes` reports of an empty selection are
+        // empty; a Markdown document says so.
+        if !wrote_any && presentation == Presentation::Markdown {
+            layout.note(0, NO_SYMBOLS)?;
+        }
+        return layout.writer().flush();
     }
 
     // Files are analyzed in listing order (package, directory, path), which
@@ -650,21 +708,21 @@ fn write_terminal(
         let package_root = &package_roots[delivered];
         delivered += 1;
         let mut written = Ok(());
-        if let Some((_, prepared)) = sink.settle(outcome, scan.verbose) {
+        if let Some((_, prepared)) = settle(outcome, errors, stats, scan.verbose, &mut **stderr) {
             let index = prepared.result.index;
             let listing = FileListing {
                 file: index.file,
                 records: index.symbols,
             };
-            written = stream.push(&mut *sink.out, package_root, listing);
+            written = stream.push(&mut *layout, package_root, listing);
         }
-        as_flow(written.and_then(|()| flush_at_chunk_end(&mut *sink.out, delivered, chunk, ordered.len())))
+        as_flow(written.and_then(|()| flush_at_chunk_end(layout.writer(), delivered, chunk, ordered.len())))
     });
     if let ControlFlow::Break(error) = flow {
         return Err(error);
     }
-    stream.finish(&mut *sink.out)?;
-    sink.out.flush()
+    stream.finish(&mut *layout)?;
+    layout.writer().flush()
 }
 
 /// `--format table`: one table per file with a selection, files in path
@@ -684,7 +742,9 @@ fn write_table(
         delivered += 1;
         let mut written = Ok(());
         if let Some((display, prepared)) = sink.settle(outcome, scan.verbose) {
-            let selected = selected_records(scan, &display, prepared);
+            // The Location link must reach the declaration file itself, so
+            // the table projects each displayed path from the native record.
+            let selected = native_selected_records(scan, &display, prepared);
             let mut rows: Vec<&SymbolRecord> = Vec::new();
             for (position, record) in selected.records.iter().enumerate() {
                 rows.push(record);
@@ -714,46 +774,51 @@ fn write_tree(
     files: &[PathBuf],
     work: impl Fn(&Path) -> FileOutcome + Sync,
     sink: &mut Sink<'_>,
+    presentation: Presentation,
 ) -> io::Result<()> {
     let chunk = chunk_size();
     let mut delivered = 0;
     let mut wrote_any = false;
     let mut module: Option<String> = None;
+    let Sink { out, errors, stats, stderr } = sink;
+    let mut layout = presentation.layout(renderer, &mut **out);
     let flow = in_file_order(files, work, |file, outcome| {
         delivered += 1;
         let mut written = Ok(());
-        if let Some((_, prepared)) = sink.settle(outcome, scan.verbose) {
+        if let Some((_, prepared)) = settle(outcome, errors, stats, scan.verbose, &mut **stderr) {
             let name_prefix = prepared.result.name_prefix().to_string();
             let records = prepared.result.index.symbols;
             if scan.listing.group_by_module && !records.is_empty() {
                 let directory = renderer.module_of(file);
                 if module.as_ref() != Some(&directory) {
-                    written = renderer.module_heading(&mut *sink.out, file);
+                    written = renderer.module_heading(&mut *layout, file);
                     module = Some(directory);
                 }
             }
             written = written.and_then(|()| {
                 let wrote = renderer.outline(
-                    &mut *sink.out,
+                    &mut *layout,
                     file,
                     &records,
                     &name_prefix,
                     scan.listing.sort,
+                    scan.listing.group_by_module,
                 )?;
                 wrote_any |= wrote;
                 Ok(())
             });
         }
-        as_flow(written.and_then(|()| flush_at_chunk_end(&mut *sink.out, delivered, chunk, files.len())))
+        as_flow(written.and_then(|()| flush_at_chunk_end(layout.writer(), delivered, chunk, files.len())))
     });
     if let ControlFlow::Break(error) = flow {
         return Err(error);
     }
     if !wrote_any {
-        renderer.no_symbols(&mut *sink.out)?;
+        layout.note(0, NO_SYMBOLS)?;
     }
-    sink.out.flush()
+    layout.writer().flush()
 }
+
 
 fn as_flow(result: io::Result<()>) -> ControlFlow<io::Error> {
     match result {
@@ -763,15 +828,16 @@ fn as_flow(result: io::Result<()>) -> ControlFlow<io::Error> {
 }
 
 /// Writes one file's `classes` report; a file without containers has none.
+/// Returns whether anything was written.
 fn write_classes(
     scan: &DeclarationScan,
     renderer: &Renderer,
-    out: &mut dyn Write,
+    out: &mut dyn Layout,
     file: &Path,
     prepared: Prepared,
-) -> io::Result<()> {
+) -> io::Result<bool> {
     let Some(mut summaries) = prepared.classes.filter(|summaries| !summaries.is_empty()) else {
-        return Ok(());
+        return Ok(false);
     };
     let display = renderer.display(file);
     summaries.sort_by(|left, right| {
@@ -781,7 +847,8 @@ fn write_classes(
             (&display, &right.container),
         )
     });
-    renderer.classes(out, file, prepared.result.index.language, &summaries)
+    renderer.classes(out, file, prepared.result.index.language, &summaries)?;
+    Ok(true)
 }
 
 /// Applies `--prelude` to one file's result, whose records already passed
@@ -887,15 +954,13 @@ mod export_write_tests {
             for format in [ExportFormat::Tsv, ExportFormat::Markdown, ExportFormat::Prose, ExportFormat::Ctags] {
                 for tree in [false, true] {
                     if tree && matches!(format, ExportFormat::Tsv | ExportFormat::Ctags) { continue; }
-                    let containment = format == ExportFormat::Ctags || tree
-                        || (matches!(format, ExportFormat::Markdown | ExportFormat::Prose)
-                            && matches!(command, Declarations::Classes(_)));
+                    let containment = format == ExportFormat::Ctags || tree;
                     let query = command.query(ReportFormat::Export {
                         format,
                         signatures: crate::output::SignatureMode::Short,
                         plain: false,
                         comments: false,
-                        containment,
+                        tree,
                     }, &selection);
                     let expected_containment = containment || matches!(command, Declarations::Classes(_));
                     assert_eq!(query.required_capabilities(), if expected_containment {
@@ -914,6 +979,25 @@ mod export_write_tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn skipped_tag_warning_shows_path_controls_as_one_visible_line() {
+        let mut stderr = Vec::new();
+        let error = skipped_tag(
+            "a\n\n        b\u{9b}31m\u{1b}[0m\r.java".to_string(),
+            3,
+            crate::ctags::Unsupported::Control,
+            &mut stderr,
+        );
+        let stderr = String::from_utf8(stderr).expect("utf-8");
+        assert_eq!(
+            stderr,
+            "warning: ctags skipped unsupported control character in \
+             a\\u{a}\\u{a}        b\\u{9b}31m\\u{1b}[0m\\u{d}.java at line 3\n"
+        );
+        assert_eq!(error.kind, "ctags_unsupported");
+        assert_eq!(error.file, "a\n\n        b\u{9b}31m\u{1b}[0m\r.java");
     }
 
     #[test]
@@ -941,14 +1025,14 @@ mod export_write_tests {
             signatures: crate::output::SignatureMode::Short,
             plain: false,
             comments: false,
-            containment: false,
+            tree: false,
         };
         let owned = ReportFormat::Export {
             format: ExportFormat::Ctags,
             signatures: crate::output::SignatureMode::Short,
             plain: false,
             comments: false,
-            containment: true,
+            tree: false,
         };
         assert!(flat.capabilities().is_empty());
         assert_eq!(owned.capabilities(), [Capability::Containment]);

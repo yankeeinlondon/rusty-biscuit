@@ -13,6 +13,8 @@ use tree_hugger::{
     WorkCounters, work_counters,
 };
 
+use crate::render::neutralized;
+
 /// Reads and analyzes one file, through the persistent cache when enabled.
 ///
 /// Shared by every worker: each call reads, hashes and (when needed) parses
@@ -160,12 +162,12 @@ impl CacheStats {
                     CacheLookup::Miss(miss) => {
                         self.misses += 1;
                         if verbose && *miss != CacheMiss::Absent {
-                            let _ = writeln!(err, "cache: {display}: {miss}");
+                            let _ = writeln!(err, "{}", neutralized(&format!("cache: {display}: {miss}")));
                         }
                     }
                 }
                 if verbose && let Some(error) = write_error {
-                    let _ = writeln!(err, "cache: {display}: write failed: {error}");
+                    let _ = writeln!(err, "{}", neutralized(&format!("cache: {display}: write failed: {error}")));
                 }
             }
         }

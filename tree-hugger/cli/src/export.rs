@@ -7,41 +7,27 @@ use tree_hugger::SymbolRecord;
 use crate::order::SortOrder;
 use crate::render::neutralized;
 
-/// Returns every selected record, including displayed class members.
+/// Returns every selected record of one file, including displayed class
+/// members, in one `--sort` order.
+///
+/// Class containers and their members are gathered first and sorted once
+/// as a single sequence: a flat export has no container sections, so a
+/// member sorts among every other record of the file. A member reached
+/// through several containers is returned once.
 pub(crate) fn flatten_selected<'a>(
     records: &'a [SymbolRecord],
     members: Option<&'a [Vec<SymbolRecord>]>,
     sort: SortOrder,
     include_synthetic: bool,
 ) -> Vec<&'a SymbolRecord> {
-    let Some(members) = members else {
-        let mut ordered: Vec<_> = records
-            .iter()
-            .filter(|record| include_synthetic || !record.visibility.is_synthetic)
-            .collect();
-        ordered.sort_by(|left, right| crate::order::compare(sort, ("", left), ("", right)));
-        return ordered;
-    };
     let mut emitted = HashSet::new();
-    let mut flattened = Vec::new();
-    let mut positions: Vec<_> = (0..records.len()).collect();
-    positions.sort_by(|left, right| {
-        crate::order::compare(sort, ("", &records[*left]), ("", &records[*right]))
-    });
-    for position in positions {
-        let container = &records[position];
-        let owned_members = &members[position];
-        if (include_synthetic || !container.visibility.is_synthetic) && emitted.insert(container.id.clone()) {
-            flattened.push(container);
-        }
-        let mut ordered = owned_members.iter().collect::<Vec<_>>();
-        ordered.sort_by(|left, right| crate::order::compare(sort, ("", left), ("", right)));
-        for member in ordered {
-            if (include_synthetic || !member.visibility.is_synthetic) && emitted.insert(member.id.clone()) {
-                flattened.push(member);
-            }
-        }
-    }
+    let mut flattened: Vec<&SymbolRecord> = records
+        .iter()
+        .chain(members.into_iter().flatten().flatten())
+        .filter(|record| include_synthetic || !record.visibility.is_synthetic)
+        .filter(|record| emitted.insert(&record.id))
+        .collect();
+    flattened.sort_by(|left, right| crate::order::compare(sort, ("", left), ("", right)));
     flattened
 }
 
@@ -87,7 +73,7 @@ mod tests {
     }
 
     #[test]
-    fn class_flattening_deduplicates_members_omits_summary_fields_and_sorts() {
+    fn class_flattening_deduplicates_members_omits_summary_fields_and_sorts_the_whole_file() {
         let (_dir, records, mut members) = records();
         let has_summary_field = records.iter().any(|record| match &record.kind_data {
             SymbolKindData::Type(data) => !data.fields.is_empty(),
@@ -99,7 +85,11 @@ mod tests {
 
         let flattened = flatten_selected(&records, Some(&members), SortOrder::Name, true);
         let names: Vec<_> = flattened.iter().map(|record| record.identity.name.as_str()).collect();
-        assert_eq!(names, ["Alpha", "beta", "shared", "Zebra"]);
+        // One case-sensitive name order over containers and members alike.
+        assert_eq!(names, ["Alpha", "Zebra", "beta", "shared"]);
+        let by_kind = flatten_selected(&records, Some(&members), SortOrder::Kind, true);
+        let names: Vec<_> = by_kind.iter().map(|record| record.identity.name.as_str()).collect();
+        assert_eq!(names, ["Zebra", "Alpha", "shared", "beta"]);
         assert_eq!(flattened.iter().filter(|record| record.identity.name == "shared").count(), 1);
         assert!(!flattened.iter().any(|record| record.kind == SymbolKindV2::Field));
     }

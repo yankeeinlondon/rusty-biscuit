@@ -2,6 +2,12 @@
 
 ## Recent Dependency Notes
 
+- `tree-hugger-cli` adds a direct local `renderable` edge for the render-tree
+  node types of biscuit-terminal's `Prose::to_render_nodes`, which its
+  Markdown and plain Prose exports read. biscuit-terminal already depends on
+  `renderable`, so this adds no new package. See
+  [tree-hugger dependencies](../tree-hugger/docs/dependencies.md).
+
 - `tree-hugger-cli` adds a local `sniff` edge with `default-features = false`
   for path-only Git changed-file selection. It requests no `network`,
   `remote`, or `metrics` feature and reuses sniff's pinned gix backend without

@@ -8,16 +8,19 @@ use crate::output::SignatureMode;
 
 pub(crate) const HEADER: &str = "file\tline\tcolumn\tkind\tname\tqualified_name\tvisibility\tsignature\n";
 
+/// Writes one row per record. Each `file` cell is the record's own
+/// `source.file_path`, which callers have already made scan-root-relative
+/// (`report::trim_record`): a prelude alias is analyzed with the prelude
+/// file but declared at its target.
 pub(crate) fn write_rows(
     out: &mut dyn Write,
-    file: &str,
     records: &[&SymbolRecord],
     signatures: SignatureMode,
 ) -> io::Result<()> {
     for record in records {
         let span = &record.source.declaration_span.start;
         let cells = [
-            file.to_owned(),
+            record.source.file_path.to_string_lossy().into_owned(),
             span.line.to_string(),
             span.column.to_string(),
             kind_name(record.kind).to_owned(),

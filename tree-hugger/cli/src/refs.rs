@@ -198,7 +198,7 @@ pub(crate) fn run(scan: RefsScan, analyzer: &Analyzer) -> Result<i32, TreeHugger
                     }
                 }
                 Err(error) => {
-                    let _ = writeln!(stderr, "error: {error}");
+                    let _ = writeln!(stderr, "error: {}", neutralized(&error.to_string()));
                     errors.push(ReportError::new(display, &error));
                 }
             }
@@ -256,7 +256,7 @@ fn ambiguity_message(selector: &Selector, matches: &[Match], git_root: &Path) ->
         let start = &found.record.source.declaration_span.start;
         message.push_str(&format!(
             "  {}:{}:{}  {} {}  {}\n",
-            crate::display_path(&found.record.source.file_path, Some(git_root)),
+            neutralized(&crate::display_path(&found.record.source.file_path, Some(git_root))),
             start.line,
             start.column,
             label(&found.record),

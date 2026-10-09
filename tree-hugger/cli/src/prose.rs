@@ -1,44 +1,110 @@
+//! `--format prose`: the declaration listing as unrendered biscuit-terminal
+//! Prose markup, laid out exactly as the plain listing (indentation, bullets,
+//! doc continuation lines), so rendering it without styles or wrapping gives
+//! the `--format plain` text.
+
 use std::io::{self, Write};
 
 use biscuit_terminal::prelude::Prose;
-use tree_hugger::SymbolRecord;
+use renderable::tree::{NodeKind, RenderNode};
 
-use crate::render::{Renderer, literal};
-use crate::file_url;
+use crate::render::{Layout, Row, literal};
 
-/// Writes the shared Prose markup for one selected file.
-pub(crate) fn write_file(out: &mut dyn Write, renderer: &Renderer, records: &[&SymbolRecord], file: &std::path::Path, plain: bool) -> io::Result<()> {
-    if records.is_empty() { return Ok(()); }
-    for record in records {
-        let start = &record.source.declaration_span.start;
-        let loc = format!("{}:{}:{}", renderer.display(&record.source.file_path), start.line, start.column);
-        let text = literal(&loc);
-        let location = if plain { text } else if let Some(url) = file_url(file) {
-            format!("<a href={}>{text}</a>", Prose::quoted_attr(&format!("{url}#L{}", start.line)))
-        } else { text };
-        let declaration = renderer.declaration(record, true);
-        let declaration = if plain { strip_generated_tags(&declaration) } else { declaration };
-        let docs = renderer.doc_lines(record.docs.raw_doc.as_deref());
-        let docs = if plain { strip_generated_tags(&docs) } else { docs };
-        if plain {
-            writeln!(out, "- {} {}{}", declaration, location, docs)?;
-        } else {
-            writeln!(out, "- {} <dim>{}</dim>{}", declaration, location, docs)?;
-        }
-    }
-    Ok(())
+/// The bullet a biscuit-terminal `UnorderedList` puts before each item; its
+/// continuation lines are indented by the bullet's width.
+const BULLET: &str = "- ";
+
+/// [`Layout`] writing Prose markup. With `plain` (global `--plain`), the
+/// generated style and link nodes are dropped while the text keeps its
+/// literal escaping, so the output stays valid Prose.
+pub(crate) struct ProseLayout<'w> {
+    out: &'w mut dyn Write,
+    plain: bool,
 }
 
-fn strip_generated_tags(markup: &str) -> String {
-    let mut result = String::with_capacity(markup.len());
-    let mut inside = false;
-    for ch in markup.chars() {
-        match ch {
-            '<' => inside = true,
-            '>' if inside => inside = false,
-            _ if !inside => result.push(ch),
-            _ => {}
+impl<'w> ProseLayout<'w> {
+    pub(crate) fn new(out: &'w mut dyn Write, plain: bool) -> Self {
+        Self { out, plain }
+    }
+
+    fn line(&mut self, indent: usize, markup: &str) -> io::Result<()> {
+        let markup = if self.plain { unstyled(markup) } else { markup.to_string() };
+        writeln!(self.out, "{:indent$}{markup}", "")
+    }
+}
+
+impl Layout for ProseLayout<'_> {
+    fn heading(&mut self, _level: u8, indent: usize, markup: &str) -> io::Result<()> {
+        self.line(indent, markup)
+    }
+
+    fn row(&mut self, row: Row<'_>) -> io::Result<()> {
+        let mut lines = row.markup.split('\n');
+        self.line(row.indent, lines.next().unwrap_or_default())?;
+        for doc in lines {
+            self.line(row.doc_indent.unwrap_or(row.indent), doc)?;
+        }
+        Ok(())
+    }
+
+    fn list(&mut self, indent: usize, _depth: usize, items: &[String]) -> io::Result<()> {
+        for item in items {
+            let mut lines = item.split('\n');
+            let first = lines.next().unwrap_or_default();
+            let first = if self.plain { unstyled(first) } else { first.to_string() };
+            writeln!(self.out, "{:indent$}{BULLET}{first}", "")?;
+            for doc in lines {
+                self.line(indent + BULLET.len(), doc)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn note(&mut self, indent: usize, markup: &str) -> io::Result<()> {
+        self.line(indent, markup)
+    }
+
+    fn blank(&mut self) -> io::Result<()> {
+        writeln!(self.out)
+    }
+
+    fn writer(&mut self) -> &mut dyn Write {
+        self.out
+    }
+}
+
+/// One line of generated markup without its style and link tags: the parsed
+/// text, escaped again as literal Prose. The text is never scanned for tags,
+/// so escaped source text such as `Vec\<i32\>` survives.
+fn unstyled(markup: &str) -> String {
+    fn text(nodes: &[RenderNode], into: &mut String) {
+        for node in nodes {
+            match &node.kind {
+                NodeKind::Text { value } | NodeKind::InlineCode { value } | NodeKind::Code { value, .. } => {
+                    into.push_str(value);
+                }
+                _ => text(node.children(), into),
+            }
         }
     }
-    result
+    let mut collected = String::new();
+    text(&Prose::new(markup).to_render_nodes(), &mut collected);
+    literal(&collected)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unstyled_markup_keeps_escaped_source_text() {
+        let markup = format!(
+            "<i>public</i> <green>function</green> <b>{}</b> <dim><a href=\"file:///a.rs#L1\">a.rs:1:1</a></dim>",
+            literal("sample(x: Vec<i32>) <img> **b** `c` [x](u) \\n")
+        );
+        assert_eq!(
+            unstyled(&markup),
+            literal("public function sample(x: Vec<i32>) <img> **b** `c` [x](u) \\n a.rs:1:1")
+        );
+    }
 }
