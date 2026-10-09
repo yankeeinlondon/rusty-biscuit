@@ -122,6 +122,11 @@ let result = SourceFile::read("src/lib.rs")?.query(&query)?;
 // a requested kind or capability):
 let cached = SymbolCache::new(PersistentCache::default_cache("project", true))
     .query(SourceFile::read("src/lib.rs")?, &query)?;   // cached.result, cached.lookup, cached.write_error
+// Both also come in a `_retaining` form that gives the SourceFile back
+// (its text moved through any parse, never copied), for a caller that keeps
+// the exact bytes only when the result calls for them (`hug refs`):
+let (result, source) = SourceFile::read("src/lib.rs")?.query_retaining(&query)?;
+let (cached, source) = cache.query_retaining(source, &query)?;
 ```
 
 ### SymbolQuery and Capability
@@ -168,7 +173,7 @@ Predicates push down only what they read (`file/filter.rs::RecordFilter`,
 Constructor, test/deprecation predicates add `Flags`, `undocumented` and
 `min_params` add `Metrics`; the effective kinds/capabilities are what the
 planner and cache see, whatever the builder order. `run_query`,
-`coverage::project` and `SourceFile::analyze` return **unfinished** results
+`coverage::project` and `SourceFile::analyze_retaining` return **unfinished** results
 (in-file names, no predicate); `SymbolQueryResult::finish` (called by
 `TreeFile::query`, `SymbolCache::query` and `narrowed`) applies the prefix
 once, then the predicates. The cache stores only unfinished indexes, so an

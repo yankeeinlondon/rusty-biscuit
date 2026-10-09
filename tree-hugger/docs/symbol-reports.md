@@ -1429,13 +1429,19 @@ output to the good files.
 Files are analyzed in parallel inside a sliding window of four files per
 worker thread: a file starts only while it is within that window of the last
 output that was flushed. Output is flushed at least once per window, whenever
-the next file's result is not ready yet, and at the end.
+the next file's result is not ready yet, and at the end. A file that failed
+(unreadable, unparsable, or, for `lint`, an external linter that failed on
+it) takes its turn like any other: the flush due at that point still writes
+the earlier files' output.
 
 A failed write to stdout, a closed pipe included, stops the run: no file
 beyond the window is started, and work already started finishes but is not
-written. That holds for the terminal listing, tables, outlines, JSON Lines,
-the JSON reports (even when a window added nothing but the JSON envelope) and
-the text `imports` and `lint` reports. The status is then `0` for a closed
+written, and no external linter runs on a later file. That holds for the
+terminal listing, tables, outlines, JSON Lines, the JSON reports (even when a
+window added nothing but the JSON envelope) and the text `imports` and `lint`
+reports, whether the files in the window succeeded or failed. `--count`,
+`--stats`, `hug refs` and the `--json` form of `imports` and `lint` write
+only after the whole scan, so they finish it first. The status is then `0` for a closed
 pipe (even if a file had failed) and `1` for any other write error.
 
 Text `imports` and `lint` are written file by file as the scan goes. A

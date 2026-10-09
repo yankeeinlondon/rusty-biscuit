@@ -971,6 +971,11 @@ flowchart TD
     B -->|more than one| X[Error on stderr listing each location and ID, nothing on stdout, exit 1]
 ```
 
+Selecting costs memory per matching file, not per match: a file declaring
+forty same-named methods is kept once, its exact bytes (or, in a one-file
+scan, its analysis), and each match adds only what the ambiguity error lists.
+A file without a match keeps nothing.
+
 A scan of a single file has nothing to choose between, so it asks for that
 file's occurrences straight away and analyzes it once. Each analysis is one
 lookup in `--verbose`'s cache counts: a cold `hug refs parse 'src/**'` over
