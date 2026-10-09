@@ -13,7 +13,7 @@ use biscuit_terminal::prelude::{
     ColumnType, Prose, WordWrap, Table, TableCellContent, TableColumn, Terminal, TerminalRenderable,
 };
 use serde::Serialize;
-use tree_hugger::{SymbolKind, SymbolRecord, Visibility, VisibilityLevel};
+use tree_hugger::{ProgrammingLanguage, SymbolKind, SymbolKindV2, SymbolRecord, Visibility, VisibilityLevel};
 
 use crate::grouping::{Group, PackageIdentity};
 use crate::render::{literal, table_terminal};
@@ -27,13 +27,41 @@ use crate::report::{REPORT_SCHEMA_VERSION, ReportError};
 /// which measures declarations.
 #[derive(Debug, Default)]
 pub(crate) struct Stats {
-    by_kind: BTreeMap<String, u64>,
-    by_visibility: BTreeMap<String, u64>,
-    by_language: BTreeMap<String, u64>,
+    by_kind: Counts<SymbolKindV2>,
+    by_visibility: Counts<VisibilityLevel>,
+    by_language: Counts<ProgrammingLanguage>,
     doc_coverage: DocCoverage,
     synthetic_exports: u64,
-    /// Display names of the keys above, for the terminal tables.
-    labels: BTreeMap<String, String>,
+}
+
+/// Counts by value, in first-seen order; [`Self::keyed`] orders them by
+/// their serialized spelling, as the reports do.
+#[derive(Debug)]
+struct Counts<K>(Vec<(K, u64)>);
+
+impl<K> Default for Counts<K> {
+    fn default() -> Self {
+        Self(Vec::new())
+    }
+}
+
+impl<K: Copy + PartialEq + Serialize> Counts<K> {
+    fn add(&mut self, key: K) {
+        match self.0.iter_mut().find(|(counted, _)| *counted == key) {
+            Some((_, count)) => *count += 1,
+            None => self.0.push((key, 1)),
+        }
+    }
+
+    /// The counts keyed by serialized spelling (`Function`, `Public`,
+    /// `Rust`), each with its display label.
+    fn keyed(&self, label: impl Fn(K) -> String) -> BTreeMap<String, (String, u64)> {
+        self.0.iter().map(|&(key, count)| (serde_key(&key), (label(key), count))).collect()
+    }
+
+    fn json(&self) -> BTreeMap<String, u64> {
+        self.0.iter().map(|&(key, count)| (serde_key(&key), count)).collect()
+    }
 }
 
 /// `documented` over `total` (records whose `has_docs` is known); a record
@@ -56,23 +84,9 @@ impl Stats {
     /// Counts one selected record. `record.metrics` must have been computed
     /// (the stats query requests `Capability::Metrics`).
     pub(crate) fn add(&mut self, record: &SymbolRecord) {
-        let kind = serde_key(&record.kind);
-        self.labels
-            .entry(kind.clone())
-            .or_insert_with(|| SymbolKind::from(record.kind).to_string());
-        *self.by_kind.entry(kind).or_default() += 1;
-
-        let level = serde_key(&record.visibility.level);
-        self.labels
-            .entry(level.clone())
-            .or_insert_with(|| visibility_label(record.visibility.level));
-        *self.by_visibility.entry(level).or_default() += 1;
-
-        let language = serde_key(&record.language);
-        self.labels
-            .entry(language.clone())
-            .or_insert_with(|| record.language.to_string());
-        *self.by_language.entry(language).or_default() += 1;
+        self.by_kind.add(record.kind);
+        self.by_visibility.add(record.visibility.level);
+        self.by_language.add(record.language);
 
         if record.visibility.is_synthetic {
             self.synthetic_exports += 1;
@@ -87,11 +101,11 @@ impl Stats {
         }
     }
 
-    fn as_json(&self) -> StatsJson<'_> {
+    fn as_json(&self) -> StatsJson {
         StatsJson {
-            by_kind: &self.by_kind,
-            by_visibility: &self.by_visibility,
-            by_language: &self.by_language,
+            by_kind: self.by_kind.json(),
+            by_visibility: self.by_visibility.json(),
+            by_language: self.by_language.json(),
             doc_coverage: CoverageJson {
                 documented: self.doc_coverage.documented,
                 total: self.doc_coverage.total,
@@ -141,16 +155,13 @@ impl Stats {
     /// for it keeps its natural width (see [`table_terminal`]).
     pub(crate) fn write_terminal(&self, out: &mut dyn Write, term: &Terminal, plain: bool) -> io::Result<()> {
         for (title, counts) in [
-            ("Kind", &self.by_kind),
-            ("Visibility", &self.by_visibility),
-            ("Language", &self.by_language),
+            ("Kind", self.by_kind.keyed(|kind| SymbolKind::from(kind).to_string())),
+            ("Visibility", self.by_visibility.keyed(visibility_label)),
+            ("Language", self.by_language.keyed(|language| language.to_string())),
         ] {
             let rows: Vec<Vec<TableCellContent>> = counts
-                .iter()
-                .map(|(key, count)| {
-                    let label = self.labels.get(key).cloned().unwrap_or_else(|| key.clone());
-                    vec![label.into(), (*count as i64).into()]
-                })
+                .into_values()
+                .map(|(label, count)| vec![label.into(), (count as i64).into()])
                 .collect();
             let table = Table::new()
                 .with_columns(vec![
@@ -183,7 +194,7 @@ struct Envelope<'a> {
     report_schema_version: u32,
     root_dir: &'a str,
     package_root_dir: &'a str,
-    stats: StatsJson<'a>,
+    stats: StatsJson,
     groups: Vec<GroupJson<'a>>,
     errors: &'a [ReportError],
 }
@@ -191,14 +202,14 @@ struct Envelope<'a> {
 #[derive(Serialize)]
 struct GroupJson<'a> {
     package: Option<&'a PackageIdentity>,
-    stats: StatsJson<'a>,
+    stats: StatsJson,
 }
 
 #[derive(Serialize)]
-struct StatsJson<'a> {
-    by_kind: &'a BTreeMap<String, u64>,
-    by_visibility: &'a BTreeMap<String, u64>,
-    by_language: &'a BTreeMap<String, u64>,
+struct StatsJson {
+    by_kind: BTreeMap<String, u64>,
+    by_visibility: BTreeMap<String, u64>,
+    by_language: BTreeMap<String, u64>,
     doc_coverage: CoverageJson,
     synthetic_exports: u64,
 }
@@ -357,6 +368,42 @@ mod tests {
         assert_eq!(value["groups"][0]["stats"], value["stats"]);
         assert_eq!(value["groups"][0]["package"]["path"], groups[0].package.as_ref().unwrap().path);
         assert!(value["groups"][0]["stats"]["doc_coverage"]["ratio"].is_null());
+    }
+
+    /// Counted by value, the maps keep the serialized spelling as their keys
+    /// and its order, and the tables label each row for display.
+    #[test]
+    fn counts_are_keyed_and_ordered_by_their_serialized_spelling() {
+        let mut stats = Stats::default();
+        for (kind, language) in [
+            (tree_hugger::SymbolKind::Variable, ProgrammingLanguage::Rust),
+            (tree_hugger::SymbolKind::Function, ProgrammingLanguage::Cpp),
+            (tree_hugger::SymbolKind::Class, ProgrammingLanguage::CSharp),
+            (tree_hugger::SymbolKind::Function, ProgrammingLanguage::Cpp),
+        ] {
+            stats.add(&record(kind, language, None));
+        }
+        let mut public = record(tree_hugger::SymbolKind::Function, ProgrammingLanguage::Rust, None);
+        public.visibility.level = VisibilityLevel::Public;
+        stats.add(&public);
+
+        let raw = text(&stats);
+        assert!(
+            raw.contains(
+                "\"by_kind\":{\"Class\":1,\"Function\":3,\"Variable\":1},\
+                 \"by_visibility\":{\"Public\":1,\"Unknown\":4},\
+                 \"by_language\":{\"CSharp\":1,\"Cpp\":2,\"Rust\":2}"
+            ),
+            "{raw}"
+        );
+
+        let mut out = Vec::new();
+        stats.write_terminal(&mut out, &Terminal::new(), true).expect("write");
+        let table = String::from_utf8(out).expect("utf-8");
+        let position = |label: &str| table.find(label).unwrap_or_else(|| panic!("{label}: {table}"));
+        assert!(position("class") < position("function") && position("function") < position("variable"), "{table}");
+        assert!(position("C#") < position("C++") && position("C++") < position("Rust"), "{table}");
+        assert!(position("public") < position("unknown"), "{table}");
     }
 
     #[test]

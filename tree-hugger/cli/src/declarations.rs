@@ -10,6 +10,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::io::{self, BufWriter, Write};
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, PoisonError};
 
 use tree_hugger::{
     AnalysisPass, Capability, ProgrammingLanguage, SchemaVersion, SymbolKindV2, SymbolQuery,
@@ -28,9 +29,9 @@ use crate::render::{
 };
 use crate::report::{
     Entries, FileEntry, JsonLine, JsonReport, REPORT_SCHEMA_VERSION, ReportError, portable_relative,
-    relativize_index, trim_record,
+    relativize_index, serialized, trim_record,
 };
-use crate::scan::{Analyzed, Analyzer, CacheStats, CacheUse, chunk_size, flush_at_chunk_end, in_file_order};
+use crate::scan::{Analyzed, Analyzer, CacheStats, CacheUse, in_file_order};
 use crate::selection::Selection;
 use crate::stats::Stats;
 use crate::grouping::{Catalog, Group, Grouping};
@@ -158,12 +159,22 @@ struct Prepared {
     classes: Option<Vec<ClassSummary>>,
 }
 
-/// One file's outcome, as the scan delivers it in file order.
-struct FileOutcome {
+/// One file's outcome, as the scan delivers it in file order. A writer may
+/// [`map`](Self::map) the prepared records into its own per-file form on the
+/// worker, so delivery only writes.
+struct FileOutcome<P = Prepared> {
     /// Portable scan-root-relative path.
     display: String,
     cache: Option<CacheUse>,
-    prepared: Result<Prepared, TreeHuggerError>,
+    prepared: Result<P, TreeHuggerError>,
+}
+
+impl<P> FileOutcome<P> {
+    fn map<Q>(self, f: impl FnOnce(&str, P) -> Q) -> FileOutcome<Q> {
+        let Self { display, cache, prepared } = self;
+        let prepared = prepared.map(|prepared| f(&display, prepared));
+        FileOutcome { display, cache, prepared }
+    }
 }
 
 /// Runs `scan` and returns the process exit status: `0`, or `1` when a file
@@ -221,12 +232,15 @@ pub(crate) fn run(scan: DeclarationScan, analyzer: &Analyzer) -> Result<i32, Tre
     let mut files: Vec<PathBuf> = keyed.into_iter().map(|(_, file)| file).collect();
     files.dedup();
 
+    // Each scanned file is listed once, so its reused analysis is taken, not
+    // copied: the prelude filter above was its last other reader.
+    let reusable = Mutex::new(reusable);
     let work = |file: &Path| -> FileOutcome {
         let display = portable_relative(file, &scan.scan_root);
-        let analyzed = match reusable.get(file) {
+        let reused = reusable.lock().unwrap_or_else(PoisonError::into_inner).remove(file);
+        let analyzed = match reused {
             Some(analyzed) => analyzed
                 .result
-                .clone()
                 .narrowed(&query)
                 .map(|result| Analyzed {
                     result,
@@ -310,7 +324,7 @@ pub(crate) fn write_status(written: io::Result<()>, no_file_errors: bool, stderr
 }
 
 /// The TSV and ctags exports: one file's flattened records at a time,
-/// settled before advancing to the next chunk.
+/// settled in file order.
 fn write_export(
     scan: &DeclarationScan,
     files: &[PathBuf],
@@ -318,8 +332,6 @@ fn write_export(
     format: ReportFormat,
     sink: &mut Sink<'_>,
 ) -> io::Result<()> {
-    let chunk = chunk_size();
-    let mut delivered = 0;
     let is_tsv = matches!(format, ReportFormat::Export { format: ExportFormat::Tsv, .. });
     let is_ctags = matches!(format, ReportFormat::Export { format: ExportFormat::Ctags, .. });
     if is_tsv {
@@ -328,8 +340,7 @@ fn write_export(
     if is_ctags {
         sink.out.write_all(crate::ctags::HEADER.as_bytes())?;
     }
-    let flow = in_file_order(files, work, |_, outcome| {
-        delivered += 1;
+    let flow = in_file_order(files, work, |_, outcome, flush| {
         if let Some((display, prepared)) = sink.settle(outcome, scan.verbose) {
             let ReportFormat::Export { format, signatures, .. } = format else { unreachable!() };
             // Tags decide each path from the native record (see
@@ -362,7 +373,7 @@ fn write_export(
                 }
             }
         }
-        as_flow(flush_at_chunk_end(&mut *sink.out, delivered, chunk, files.len()))
+        as_flow(flush.apply(&mut *sink.out))
     });
     if let ControlFlow::Break(error) = flow {
         return Err(error);
@@ -388,20 +399,20 @@ struct Sink<'a> {
 }
 
 impl Sink<'_> {
-    fn settle(&mut self, outcome: FileOutcome, verbose: bool) -> Option<(String, Prepared)> {
+    fn settle<P>(&mut self, outcome: FileOutcome<P>, verbose: bool) -> Option<(String, P)> {
         settle(outcome, self.errors, self.stats, verbose, self.stderr)
     }
 }
 
 /// Records `outcome`'s cache use and, for a failed file, reports the error
 /// on stderr and in `errors`. Returns the prepared records of a good file.
-fn settle(
-    outcome: FileOutcome,
+fn settle<P>(
+    outcome: FileOutcome<P>,
     errors: &mut Vec<ReportError>,
     stats: &mut CacheStats,
     verbose: bool,
     stderr: &mut dyn Write,
-) -> Option<(String, Prepared)> {
+) -> Option<(String, P)> {
     if let Some(cache) = &outcome.cache {
         stats.record(&outcome.display, cache, verbose, stderr);
     }
@@ -432,34 +443,38 @@ fn write_json(
     } = sink;
     let mut report = JsonReport::begin(&mut **out, &root_dir, entries)?;
 
-    let chunk = chunk_size();
-    let mut delivered = 0;
-    let flow = in_file_order(files, work, |_, outcome| {
-        delivered += 1;
-        let Some((display, prepared)) = settle(outcome, errors, stats, scan.verbose, &mut **stderr) else {
-            return as_flow(report.flush_at_chunk_end(delivered, chunk, files.len()));
-        };
-        let written = if full {
-            let mut index = prepared.result.index;
-            relativize_index(&mut index, &scan.scan_root);
-            sort_file_records(&mut index.symbols, &display, scan.listing.sort);
-            report.entry(&index)
-        } else {
-            let selected = selected_records(scan, &display, prepared);
-            if selected.records.is_empty() {
-                Ok(())
-            } else {
-                report.entry(&FileEntry {
-                    file: &display,
-                    language: selected.language,
-                    completed_passes: &selected.completed_passes,
-                    completed_capabilities: &selected.completed_capabilities,
-                    symbols: &selected.records,
-                    members: selected.members_by_id().as_ref(),
-                })
+    // Each entry is projected, ordered and serialized on its worker; `None`
+    // is a file with no selected record, which has no `--json` entry.
+    let work = |file: &Path| {
+        work(file).map(|display, prepared| -> io::Result<Option<Vec<u8>>> {
+            if full {
+                let mut index = prepared.result.index;
+                relativize_index(&mut index, &scan.scan_root);
+                sort_file_records(&mut index.symbols, display, scan.listing.sort);
+                return serialized(&index).map(Some);
             }
+            let selected = selected_records(scan, display, prepared);
+            if selected.records.is_empty() {
+                return Ok(None);
+            }
+            serialized(&FileEntry {
+                file: display,
+                language: selected.language,
+                completed_passes: &selected.completed_passes,
+                completed_capabilities: &selected.completed_capabilities,
+                symbols: &selected.records,
+                members: selected.members_by_id().as_ref(),
+            })
+            .map(Some)
+        })
+    };
+    let flow = in_file_order(files, work, |_, outcome, flush| {
+        let written = match settle(outcome, errors, stats, scan.verbose, &mut **stderr) {
+            Some((_, Ok(Some(entry)))) => report.entry(&entry),
+            Some((_, Err(error))) => Err(error),
+            Some((_, Ok(None))) | None => Ok(()),
         };
-        as_flow(written.and_then(|()| report.flush_at_chunk_end(delivered, chunk, files.len())))
+        as_flow(written.and_then(|()| report.flush(flush)))
     });
     if let ControlFlow::Break(error) = flow {
         return Err(error);
@@ -538,40 +553,42 @@ fn native_selected_records(scan: &DeclarationScan, display: &str, prepared: Prep
 }
 
 /// Writes one JSON Lines envelope per selected record, files in path order
-/// and records in `--sort` order within each file, flushing after each
-/// chunk. A failed file is reported on stderr only: a line stream has no
-/// trailing `errors`.
+/// and records in `--sort` order within each file, flushing as
+/// [`in_file_order`] asks. A failed file is reported on stderr only: a line
+/// stream has no trailing `errors`.
 fn write_json_lines(
     scan: &DeclarationScan,
     files: &[PathBuf],
     work: impl Fn(&Path) -> FileOutcome + Sync,
     sink: &mut Sink<'_>,
 ) -> io::Result<()> {
-    let chunk = chunk_size();
-    let mut delivered = 0;
-    let flow = in_file_order(files, work, |_, outcome| {
-        delivered += 1;
-        let mut written = Ok(());
-        if let Some((display, prepared)) = sink.settle(outcome, scan.verbose) {
-            let selected = selected_records(scan, &display, prepared);
+    // Each file's lines are projected, ordered and serialized on its worker.
+    let work = |file: &Path| {
+        work(file).map(|display, prepared| -> io::Result<Vec<u8>> {
+            let selected = selected_records(scan, display, prepared);
+            let mut lines = Vec::new();
             for (position, record) in selected.records.iter().enumerate() {
                 let line = JsonLine {
                     report_schema_version: REPORT_SCHEMA_VERSION,
                     schema_version: SchemaVersion::CURRENT,
-                    file: &display,
+                    file: display,
                     language: selected.language,
                     completed_passes: &selected.completed_passes,
                     completed_capabilities: &selected.completed_capabilities,
                     record,
                     members: selected.members.as_ref().map(|members| members[position].as_slice()),
                 };
-                written = line.write(&mut *sink.out);
-                if written.is_err() {
-                    break;
-                }
+                line.write(&mut lines)?;
             }
-        }
-        as_flow(written.and_then(|()| flush_at_chunk_end(&mut *sink.out, delivered, chunk, files.len())))
+            Ok(lines)
+        })
+    };
+    let flow = in_file_order(files, work, |_, outcome, flush| {
+        let written = match sink.settle(outcome, scan.verbose) {
+            Some((_, lines)) => lines.and_then(|lines| sink.out.write_all(&lines)),
+            None => Ok(()),
+        };
+        as_flow(written.and_then(|()| flush.apply(&mut *sink.out)))
     });
     if let ControlFlow::Break(error) = flow {
         return Err(error);
@@ -595,7 +612,7 @@ fn tally(
     let mut count: u64 = 0;
     let mut stats = Stats::default();
     let mut grouping = catalog.map(Grouping::new);
-    let _ = in_file_order::<_, ()>(files, work, |file, outcome| {
+    let _ = in_file_order::<_, ()>(files, work, |file, outcome, _| {
         let group = grouping.as_mut().map(|grouping| grouping.select_file(file));
         if let Some((_, prepared)) = sink.settle(outcome, scan.verbose) {
             let records = prepared.classes.iter().flatten().map(|summary| &summary.container)
@@ -662,8 +679,8 @@ impl Presentation {
 }
 
 /// Writes the listing (or the `classes` report) as results arrive, flushing
-/// after each chunk, so a closed or failing stdout stops the scan before the
-/// next chunk.
+/// as [`in_file_order`] asks, so a closed or failing stdout stops the scan
+/// within one window.
 fn write_listing(
     scan: &DeclarationScan,
     renderer: &Renderer,
@@ -672,20 +689,17 @@ fn write_listing(
     sink: &mut Sink<'_>,
     presentation: Presentation,
 ) -> io::Result<()> {
-    let chunk = chunk_size();
-    let mut delivered = 0;
     let Sink { out, errors, stats, stderr } = sink;
     let mut layout = presentation.layout(renderer, &mut **out);
     if matches!(scan.command, Declarations::Classes { .. }) {
         let mut wrote_any = false;
-        let flow = in_file_order(files, work, |file, outcome| {
-            delivered += 1;
-            let mut written = Ok(());
+        let flow = in_file_order(files, work, |file, outcome, flush| {
+                let mut written = Ok(());
             if let Some((_, prepared)) = settle(outcome, errors, stats, scan.verbose, &mut **stderr) {
                 written = write_classes(scan, renderer, &mut *layout, file, prepared)
                     .map(|wrote| wrote_any |= wrote);
             }
-            as_flow(written.and_then(|()| flush_at_chunk_end(layout.writer(), delivered, chunk, files.len())))
+            as_flow(written.and_then(|()| flush.apply(layout.writer())))
         });
         if let ControlFlow::Break(error) = flow {
             return Err(error);
@@ -704,19 +718,33 @@ fn write_listing(
     let (package_roots, ordered): (Vec<PathBuf>, Vec<PathBuf>) = ordered.into_iter().unzip();
     let per_package = scan.prelude;
     let mut stream = ListingStream::new(renderer, scan.listing, packages, per_package);
-    let flow = in_file_order(&ordered, work, |_, outcome| {
+    // A unit of one file is rendered on the worker that analyzed it, unless
+    // the layout carries state from one unit to the next (Markdown's blank
+    // lines between blocks).
+    let on_workers = stream.units_are_files() && presentation != Presentation::Markdown;
+    let work = |file: &Path| {
+        work(file).map(|_, prepared| {
+            let index = prepared.result.index;
+            let listing = FileListing::new(index.file, index.symbols);
+            if !on_workers || listing.records.is_empty() {
+                return listing;
+            }
+            let mut bytes = Vec::new();
+            renderer
+                .package_listing(&mut *presentation.layout(renderer, &mut bytes), &[&listing], scan.listing)
+                .expect("rendering into memory cannot fail");
+            FileListing::rendered(listing.file, bytes)
+        })
+    };
+    let mut delivered = 0;
+    let flow = in_file_order(&ordered, work, |_, outcome, flush| {
         let package_root = &package_roots[delivered];
         delivered += 1;
         let mut written = Ok(());
-        if let Some((_, prepared)) = settle(outcome, errors, stats, scan.verbose, &mut **stderr) {
-            let index = prepared.result.index;
-            let listing = FileListing {
-                file: index.file,
-                records: index.symbols,
-            };
+        if let Some((_, listing)) = settle(outcome, errors, stats, scan.verbose, &mut **stderr) {
             written = stream.push(&mut *layout, package_root, listing);
         }
-        as_flow(written.and_then(|()| flush_at_chunk_end(layout.writer(), delivered, chunk, ordered.len())))
+        as_flow(written.and_then(|()| flush.apply(layout.writer())))
     });
     if let ControlFlow::Break(error) = flow {
         return Err(error);
@@ -735,11 +763,8 @@ fn write_table(
     work: impl Fn(&Path) -> FileOutcome + Sync,
     sink: &mut Sink<'_>,
 ) -> io::Result<()> {
-    let chunk = chunk_size();
-    let mut delivered = 0;
     let mut wrote_any = false;
-    let flow = in_file_order(files, work, |_, outcome| {
-        delivered += 1;
+    let flow = in_file_order(files, work, |_, outcome, flush| {
         let mut written = Ok(());
         if let Some((display, prepared)) = sink.settle(outcome, scan.verbose) {
             // The Location link must reach the declaration file itself, so
@@ -755,7 +780,7 @@ fn write_table(
             wrote_any |= !rows.is_empty();
             written = renderer.table(&mut *sink.out, &rows, &scan.scan_root);
         }
-        as_flow(written.and_then(|()| flush_at_chunk_end(&mut *sink.out, delivered, chunk, files.len())))
+        as_flow(written.and_then(|()| flush.apply(&mut *sink.out)))
     });
     if let ControlFlow::Break(error) = flow {
         return Err(error);
@@ -776,14 +801,11 @@ fn write_tree(
     sink: &mut Sink<'_>,
     presentation: Presentation,
 ) -> io::Result<()> {
-    let chunk = chunk_size();
-    let mut delivered = 0;
     let mut wrote_any = false;
     let mut module: Option<String> = None;
     let Sink { out, errors, stats, stderr } = sink;
     let mut layout = presentation.layout(renderer, &mut **out);
-    let flow = in_file_order(files, work, |file, outcome| {
-        delivered += 1;
+    let flow = in_file_order(files, work, |file, outcome, flush| {
         let mut written = Ok(());
         if let Some((_, prepared)) = settle(outcome, errors, stats, scan.verbose, &mut **stderr) {
             let name_prefix = prepared.result.name_prefix().to_string();
@@ -808,7 +830,7 @@ fn write_tree(
                 Ok(())
             });
         }
-        as_flow(written.and_then(|()| flush_at_chunk_end(layout.writer(), delivered, chunk, files.len())))
+        as_flow(written.and_then(|()| flush.apply(layout.writer())))
     });
     if let ControlFlow::Break(error) = flow {
         return Err(error);

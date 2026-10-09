@@ -938,3 +938,88 @@ fn json_records_carry_computed_test_and_deprecation_flags() {
     .collect();
     assert_eq!(flags, expected);
 }
+
+/// A Rust file with one `unwrap-call` diagnostic under `--warn unwrap-call`.
+const UNWRAPPING_RS: &str = "fn f() { let x: Option<u8> = None; x.unwrap(); }\n";
+
+/// Text `imports` and `lint` are written file by file, so a failing stdout
+/// stops the scan within one window, as the declaration listings do.
+#[test]
+fn imports_and_lint_text_stop_at_a_failing_stdout() {
+    let modules = python_copies(1, &[]);
+    let args = ["--plain", "imports", "--no-cache", "--verbose"];
+    assert_stopped_early(&args, &hug_into_closed_pipe(&modules, &args), CHUNK);
+
+    let names: Vec<String> = (0..COPIES).map(|index| format!("u{index:03}.rs")).collect();
+    let files: Vec<(&str, &str)> = names.iter().map(|name| (name.as_str(), UNWRAPPING_RS)).collect();
+    let unwrapping = Scratch::new(&files);
+    let args = ["--plain", "lint", "--no-cache", "--verbose", "--warn", "unwrap-call"];
+    assert_stopped_early(&args, &hug_into_closed_pipe(&unwrapping, &args), CHUNK);
+}
+
+/// Text lint hides clean files whenever more than one file is selected,
+/// decided before any is analyzed: a failed file still counts as selected,
+/// and the closing line counts the files that were linted.
+#[test]
+fn lint_text_hides_clean_files_by_the_selected_file_count() {
+    let scratch = Scratch::new(&[("clean.rs", "fn g() {}\n"), ("other.rs", "fn h() {}\n"), ("unwrap.rs", UNWRAPPING_RS)]);
+    std::fs::write(scratch.repo.path().join("bad.rs"), NOT_UTF8).expect("write bad file");
+    let lint = |files: &[&str]| {
+        let mut args = vec!["--plain", "lint", "--no-cache", "--warn", "unwrap-call"];
+        args.extend_from_slice(files);
+        let output = scratch.hug(&args);
+        let stderr = stderr_of(&output);
+        (output.status.code(), String::from_utf8(output.stdout).expect("utf-8"), stderr)
+    };
+
+    let (status, stdout, _) = lint(&["clean.rs"]);
+    assert_eq!((status, stdout.as_str()), (Some(0), "clean.rs (Rust)\n  (no diagnostics)\n\n"));
+
+    let (status, stdout, _) = lint(&["clean.rs", "other.rs"]);
+    assert_eq!((status, stdout.as_str()), (Some(0), "No lint diagnostics in 2 files.\n"));
+
+    let (status, stdout, stderr) = lint(&["bad.rs", "clean.rs"]);
+    assert_eq!(status, Some(1), "{stderr}");
+    assert_eq!(stdout, "No lint diagnostics in 1 files.\n", "two files were selected");
+    assert!(stderr.contains("bad.rs"), "{stderr}");
+
+    let (status, stdout, _) = lint(&["clean.rs", "unwrap.rs"]);
+    assert_eq!(status, Some(0));
+    assert!(stdout.starts_with("unwrap.rs (Rust)\n"), "{stdout}");
+    assert!(stdout.contains("[unwrap-call]"), "{stdout}");
+    assert!(!stdout.contains("clean.rs") && !stdout.contains("No lint diagnostics"), "{stdout}");
+}
+
+/// An unavailable external adapter is warned about once, on stderr, right
+/// before the report of the first file it was asked to lint: earlier files'
+/// output is already written.
+#[test]
+fn an_unavailable_adapter_is_warned_once_before_its_first_file() {
+    let scratch = Scratch::new(&[
+        ("a.rs", UNWRAPPING_RS),
+        ("b.ts", "export function h() { debugger; }\n"),
+        ("c.ts", "export function k() { debugger; }\n"),
+    ]);
+    // No `oxlint` on an empty `PATH` and no `node_modules` in the scratch.
+    let empty = tempfile::tempdir().expect("empty PATH directory");
+    let (mut reader, writer) = std::io::pipe().expect("create a pipe");
+    let mut child = {
+        let mut command = scratch.process(&["--plain", "lint", "--no-cache", "--warn", "unwrap-call"]);
+        command
+            .env("PATH", empty.path())
+            .stdin(Stdio::null())
+            .stderr(writer.try_clone().expect("clone the pipe"))
+            .stdout(writer);
+        command.spawn().expect("spawn hug")
+    };
+    let mut combined = String::new();
+    reader.read_to_string(&mut combined).expect("read the combined output");
+    assert_eq!(child.wait().expect("wait for hug").code(), Some(0), "{combined}");
+
+    let warning = "warning: external lint adapter 'oxlint' is unavailable; native diagnostics were used";
+    assert_eq!(combined.matches(warning).count(), 1, "{combined}");
+    let at = |text: &str| combined.find(text).unwrap_or_else(|| panic!("{text}: {combined}"));
+    assert!(at("a.rs (Rust)") < at(warning), "{combined}");
+    assert!(at(warning) < at("b.ts (TypeScript)"), "{combined}");
+    assert!(at("b.ts (TypeScript)") < at("c.ts (TypeScript)"), "{combined}");
+}

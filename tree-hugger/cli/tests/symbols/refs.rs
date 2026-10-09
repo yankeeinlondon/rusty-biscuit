@@ -2860,3 +2860,96 @@ fn java_single_segment_on_demand_imports_are_reported_without_token_suggestions(
         }
     }
 }
+
+/// `refs` over several files reads every file's declarations but analyzes
+/// occurrences only in the declaring file, from the same bytes: the report
+/// equals the one-file scan's, cold and warm, and no other file's cache
+/// entry gains reference evidence.
+#[test]
+fn a_multi_file_scan_analyzes_evidence_only_in_the_declaring_file() {
+    let scratch = scratch();
+    let single = scratch.hug(&["--json", "refs", "parse", "app.ts"]);
+    let single = stdout_of(single, &[]);
+    for entry in crate::cache_entries(scratch.temp.path()) {
+        std::fs::remove_file(entry).expect("clear cache");
+    }
+
+    for (warm, counts) in [
+        (false, "cache: 0 hits, 1 partial hits, 3 misses; parsed 4 files"),
+        (true, "cache: 4 hits, 0 partial hits, 0 misses; parsed 0 files"),
+    ] {
+        let output = scratch.hug(&["--json", "--verbose", "refs", "parse"]);
+        assert_eq!(output.status.code(), Some(0), "warm={warm}: {}", stderr_of(&output));
+        assert!(stderr_of(&output).contains(counts), "warm={warm}: {}", stderr_of(&output));
+        assert_eq!(stdout_of(output, &[]), single, "warm={warm}: the declaring file's report");
+    }
+
+    let mut evidence: Vec<(String, bool)> = crate::cache_entries(scratch.temp.path())
+        .iter()
+        .map(|entry| {
+            let entry = crate::cache_upgrade::read_json(entry);
+            let file = entry["file"].as_str().expect("entry file").replace('\\', "/");
+            let name = file.rsplit('/').next().expect("file name").to_string();
+            let occurrences = entry["completed_capabilities"]
+                .as_array()
+                .expect("capabilities")
+                .contains(&Value::from("occurrences"));
+            (name, occurrences)
+        })
+        .collect();
+    evidence.sort();
+    assert_eq!(
+        evidence,
+        [("app.ts".to_string(), true), ("other.ts".to_string(), false), ("tools.rs".to_string(), false)]
+    );
+
+    // Without the cache the declaring file is parsed once per phase.
+    let output = scratch.hug(&["--json", "--verbose", "refs", "--no-cache", "parse"]);
+    assert!(stderr_of(&output).contains("cache: disabled; parsed 4 files"), "{}", stderr_of(&output));
+    assert_eq!(stdout_of(output, &[]), single);
+}
+
+/// No evidence phase runs when the selector is ambiguous or matches
+/// nothing: the ambiguity error and the empty report are decided from the
+/// declarations alone, before anything is written.
+#[test]
+fn ambiguous_and_missing_selectors_run_no_evidence_phase() {
+    let scratch = Scratch::new(&[
+        ("a.ts", "export function twin() {}\ntwin();\n"),
+        ("b.ts", "export function twin() {}\n"),
+        ("c.rs", "fn other() {}\n"),
+    ]);
+    let ambiguous = scratch.hug(&["--verbose", "refs", "--no-cache", "twin"]);
+    assert_eq!(ambiguous.status.code(), Some(1));
+    let stderr = stderr_of(&ambiguous);
+    assert!(stderr.contains("cache: disabled; parsed 3 files"), "{stderr}");
+    assert!(stderr.contains("`twin` names 2 declarations"), "{stderr}");
+    assert!(ambiguous.stdout.is_empty(), "nothing is written for an ambiguous selector");
+
+    let missing = scratch.hug(&["--json", "--verbose", "refs", "--no-cache", "absent"]);
+    assert_eq!(missing.status.code(), Some(0));
+    assert!(stderr_of(&missing).contains("cache: disabled; parsed 3 files"), "{}", stderr_of(&missing));
+    let report = json_of(&stdout_of(missing, &[]));
+    assert!(report["declaration"].is_null(), "{report}");
+    assert_eq!(report["files"], serde_json::json!([]));
+}
+
+/// A file that cannot be read fails the run (exit 1, `errors`) while the
+/// declaration in another file is still reported with its evidence.
+#[test]
+fn a_failed_file_beside_the_declaring_file_keeps_the_report() {
+    let scratch = Scratch::new(&[("a.ts", "export function solo() {}\nsolo();\n")]);
+    std::fs::write(scratch.repo.path().join("bad.ts"), b"\xff\xfe not utf-8").expect("write bad file");
+    let output = scratch.hug(&["--json", "--verbose", "refs", "solo"]);
+    assert_eq!(output.status.code(), Some(1), "{}", stderr_of(&output));
+    let stderr = stderr_of(&output);
+    assert!(stderr.contains("bad.ts"), "{stderr}");
+    assert!(stderr.contains("cache: 0 hits, 1 partial hits, 1 misses; parsed 2 files"), "{stderr}");
+    let report = json_of(&String::from_utf8(output.stdout).expect("utf-8"));
+    assert_eq!(report["declaration"]["identity"]["name"], "solo");
+    assert_eq!(report["files"][0]["file"], "a.ts");
+    assert_eq!(rows(&report, "occurrences").len(), 1, "{report}");
+    let errors = report["errors"].as_array().expect("errors");
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0]["file"], "bad.ts");
+}

@@ -56,11 +56,20 @@ pub(crate) fn resolve_prelude_symbols(
         // Keyed by identity so the scan finds the analysis under whatever
         // spelling it lists the file.
         let candidate = file_identity(&candidate);
-        let source = std::fs::read_to_string(&candidate).map_err(|source| TreeHuggerError::Io {
-            path: candidate.clone(),
-            source,
-        })?;
-        let prelude = analyzed_file(&candidate, analyzer, query, analyzed)?;
+        // The export lines are read from the bytes the analysis read.
+        let source = match analyzed.get(&candidate) {
+            Some(_) => std::fs::read_to_string(&candidate).map_err(|source| TreeHuggerError::Io {
+                path: candidate.clone(),
+                source,
+            })?,
+            None => {
+                let file = analyzer.read(&candidate)?;
+                let source = file.source().to_string();
+                analyzed.insert(candidate.clone(), analyzer.analyze_source(file, query)?);
+                source
+            }
+        };
+        let prelude = &analyzed[&candidate];
         let language = prelude.result.index.language;
         let exports: Vec<ImportRecord> = prelude
             .result

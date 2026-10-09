@@ -83,6 +83,12 @@ impl JsonLine<'_> {
     }
 }
 
+/// `entry` as compact JSON, the bytes [`JsonReport::entry`] appends; a
+/// serialization failure is the write error it becomes.
+pub(crate) fn serialized<T: Serialize>(entry: &T) -> io::Result<Vec<u8>> {
+    Ok(serde_json::to_vec(entry)?)
+}
+
 /// A file that could not be analyzed.
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct ReportError {
@@ -185,21 +191,20 @@ impl<W: Write> JsonReport<W> {
         Ok(Self { out, entries: 0 })
     }
 
-    /// Appends one entry.
-    pub(crate) fn entry<T: Serialize>(&mut self, entry: &T) -> io::Result<()> {
+    /// Appends one entry, already serialized (see [`serialized`]).
+    pub(crate) fn entry(&mut self, entry: &[u8]) -> io::Result<()> {
         if self.entries > 0 {
             self.out.write_all(b",")?;
         }
-        serde_json::to_writer(&mut self.out, entry)?;
+        self.out.write_all(entry)?;
         self.entries += 1;
         Ok(())
     }
 
-    /// Flushes once the last file of a scan chunk has been delivered, so a
-    /// failed write stops the scan before the next chunk; see
-    /// [`crate::scan::flush_at_chunk_end`].
-    pub(crate) fn flush_at_chunk_end(&mut self, delivered: usize, chunk: usize, total: usize) -> io::Result<()> {
-        crate::scan::flush_at_chunk_end(&mut self.out, delivered, chunk, total)
+    /// Flushes when the scan asks, so a failed write stops the scan within
+    /// one window; see [`crate::scan::in_file_order`].
+    pub(crate) fn flush(&mut self, flush: crate::scan::Flush) -> io::Result<()> {
+        flush.apply(&mut self.out)
     }
 
     /// Closes the entries array, writes `errors` and flushes.

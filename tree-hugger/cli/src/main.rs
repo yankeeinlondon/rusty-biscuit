@@ -728,14 +728,14 @@ impl AnalysisOptions {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct JsonOutput {
+#[derive(Debug, Serialize)]
+struct JsonOutput<'a> {
     schema_version: SchemaVersion,
     root_dir: PathBuf,
     language: ProgrammingLanguage,
-    files: Vec<FileSummary>,
-    symbol_indexes: Vec<tree_hugger::FileSymbolIndex>,
-    adapter_metadata: Vec<AdapterMetadata>,
+    files: &'a [FileSummary],
+    symbol_indexes: &'a [tree_hugger::FileSymbolIndex],
+    adapter_metadata: &'a [AdapterMetadata],
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1135,13 +1135,28 @@ fn main() -> Result<(), TreeHuggerError> {
     let mut stats = CacheStats::new(analyzer.uses_cache());
     let mut stderr = std::io::stderr();
     let mut failed_files = 0usize;
+    let mut error_count = 0usize;
+    let json = matches!(output_format, OutputFormat::Json);
+    // `--json` collects the whole envelope; text is written file by file.
     let mut summaries = Vec::new();
     let mut symbol_indexes = Vec::new();
     let mut adapter_metadata = Vec::new();
-    let _ = in_file_order::<_, ()>(
+    // Multi-file lint scans hide clean files; a single explicit target still
+    // shows `(no diagnostics)` as confirmation. Decided before any file is
+    // analyzed, so text streams.
+    let suppress_clean_lint = matches!(command_kind, CommandKind::Lint { .. }) && files.len() > 1;
+    let mut summarized = 0usize;
+    let mut rendered_any = false;
+    let mut warned = HashSet::new();
+
+    // One buffered writer for the whole report. A closed pipe (`| head`)
+    // ends the command quietly with status 0, as the declaration commands
+    // do; any other write failure is reported (`declarations::write_status`).
+    let mut out = io::BufWriter::new(io::stdout().lock());
+    let flow = in_file_order(
         &files,
         |file| analyzer.analyze(file, &query),
-        |file, analyzed| {
+        |file, analyzed, flush| {
             let analyzed = match analyzed {
                 Ok(analyzed) => analyzed,
                 Err(error) => {
@@ -1162,6 +1177,7 @@ fn main() -> Result<(), TreeHuggerError> {
                 index.imports.retain(|import| import_selection.matches(import, language));
             }
             let mut summary = summarize_file(&index, &command_kind);
+            let adapters_before = adapter_metadata.len();
             if let Err(error) = add_external_lint_diagnostics(
                 &mut summary,
                 &command_kind,
@@ -1173,20 +1189,44 @@ fn main() -> Result<(), TreeHuggerError> {
                 failed_files += 1;
                 return ControlFlow::Continue(());
             }
-            if matches!(output_format, OutputFormat::Json) {
+            error_count += summary.lint.iter().filter(|d| d.severity == DiagnosticSeverity::Error).count()
+                + summary.syntax.iter().filter(|d| d.severity == DiagnosticSeverity::Error).count();
+            summarized += 1;
+            if json {
                 symbol_indexes.push(index);
+                summaries.push(summary);
+                return ControlFlow::Continue(());
             }
-            summaries.push(summary);
-            ControlFlow::Continue(())
+            let written = (|| -> io::Result<()> {
+                // An adapter's unavailability is warned once, before the
+                // first file it affected, with that file's earlier output
+                // already flushed.
+                for metadata in adapter_metadata.drain(adapters_before..) {
+                    if !metadata.tool_available && warned.insert(metadata.tool_name.clone()) {
+                        out.flush()?;
+                        render_adapter_warning(&metadata.tool_name, &output_config);
+                    }
+                }
+                rendered_any |= render_summary(
+                    &mut out,
+                    &summary,
+                    &command_kind,
+                    &output_config,
+                    display_root.as_deref(),
+                    suppress_clean_lint,
+                )?;
+                flush.apply(&mut out)
+            })();
+            match written {
+                Ok(()) => ControlFlow::Continue(()),
+                Err(error) => ControlFlow::Break(error),
+            }
         },
     );
 
-    // One buffered writer for the whole report. A closed pipe (`| head`)
-    // ends the command quietly with status 0, as the declaration commands
-    // do; any other write failure is reported (`declarations::write_status`).
-    let mut out = io::BufWriter::new(io::stdout().lock());
-    let written = match output_format {
-        OutputFormat::Json => {
+    let written = match flow {
+        ControlFlow::Break(error) => Err(error),
+        ControlFlow::Continue(()) if json => {
             let package_language = language
                 .or_else(|| summaries.first().map(|summary| summary.language))
                 .unwrap_or(ProgrammingLanguage::Rust);
@@ -1195,9 +1235,9 @@ fn main() -> Result<(), TreeHuggerError> {
                 schema_version: SchemaVersion::CURRENT,
                 root_dir,
                 language: package_language,
-                files: summaries.clone(),
-                symbol_indexes,
-                adapter_metadata: adapter_metadata.clone(),
+                files: &summaries,
+                symbol_indexes: &symbol_indexes,
+                adapter_metadata: &adapter_metadata,
             };
 
             let json =
@@ -1207,36 +1247,17 @@ fn main() -> Result<(), TreeHuggerError> {
                 })?;
             writeln!(out, "{json}").and_then(|()| out.flush())
         }
-        OutputFormat::Pretty | OutputFormat::Plain => {
-            render_adapter_warnings(&adapter_metadata, &output_config);
-            // Multi-file lint scans hide clean files; a single explicit
-            // target still shows `(no diagnostics)` as confirmation.
-            let suppress_clean_lint =
-                matches!(command_kind, CommandKind::Lint { .. }) && summaries.len() > 1;
-            let mut render = || -> io::Result<()> {
-                let mut rendered_any = false;
-                for summary in &summaries {
-                    rendered_any |= render_summary(
-                        &mut out,
-                        summary,
-                        &command_kind,
-                        &output_config,
-                        display_root.as_deref(),
-                        suppress_clean_lint,
-                    )?;
+        ControlFlow::Continue(()) => (|| -> io::Result<()> {
+            if suppress_clean_lint && !rendered_any {
+                let msg = format!("No lint diagnostics in {summarized} files.");
+                if output_config.use_colors {
+                    writeln!(out, "{}", msg.green())?;
+                } else {
+                    writeln!(out, "{msg}")?;
                 }
-                if suppress_clean_lint && !rendered_any {
-                    let msg = format!("No lint diagnostics in {} files.", summaries.len());
-                    if output_config.use_colors {
-                        writeln!(out, "{}", msg.green())?;
-                    } else {
-                        writeln!(out, "{msg}")?;
-                    }
-                }
-                out.flush()
-            };
-            render()
-        }
+            }
+            out.flush()
+        })(),
     };
     drop(out);
     if cli.verbose {
@@ -1244,21 +1265,6 @@ fn main() -> Result<(), TreeHuggerError> {
     }
 
     // Exit with non-zero if lint found errors or a file could not be analyzed
-    let error_count: usize = summaries
-        .iter()
-        .map(|summary| {
-            summary
-                .lint
-                .iter()
-                .filter(|d| d.severity == DiagnosticSeverity::Error)
-                .count()
-                + summary
-                    .syntax
-                    .iter()
-                    .filter(|d| d.severity == DiagnosticSeverity::Error)
-                    .count()
-        })
-        .sum();
     let lint_failed = matches!(command_kind, CommandKind::Lint { .. }) && error_count > 0;
     let status = declarations::write_status(written, !lint_failed && failed_files == 0, &mut stderr);
     if status != 0 {
@@ -1625,24 +1631,15 @@ fn add_external_lint_diagnostics(
     Ok(())
 }
 
-fn render_adapter_warnings(metadata: &[AdapterMetadata], config: &OutputConfig) {
-    let mut warned = HashSet::new();
-    for item in metadata.iter().filter(|item| !item.tool_available) {
-        if !warned.insert(item.tool_name.clone()) {
-            continue;
-        }
-        if config.use_colors {
-            eprintln!(
-                "{} external lint adapter '{}' is unavailable; native diagnostics were used",
-                "warning:".yellow(),
-                item.tool_name
-            );
-        } else {
-            eprintln!(
-                "warning: external lint adapter '{}' is unavailable; native diagnostics were used",
-                item.tool_name
-            );
-        }
+/// Warns that the external lint adapter `tool` is unavailable.
+fn render_adapter_warning(tool: &str, config: &OutputConfig) {
+    if config.use_colors {
+        eprintln!(
+            "{} external lint adapter '{tool}' is unavailable; native diagnostics were used",
+            "warning:".yellow(),
+        );
+    } else {
+        eprintln!("warning: external lint adapter '{tool}' is unavailable; native diagnostics were used");
     }
 }
 

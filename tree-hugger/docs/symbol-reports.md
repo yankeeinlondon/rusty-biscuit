@@ -724,11 +724,10 @@ flowchart LR
   The cache is described in [Cache Design](./cache-design.md).
 - `--json-full` replaces the command's query with the complete index: every
   kind and every pass, diagnostics included.
-- Files are analyzed in parallel, in batches of four times the worker count.
-  Results are always delivered in a fixed file order (see
-  [Streaming](#streaming)), so the output never depends on the number of
-  workers or on which file finished first, and each batch is written before
-  the next one starts.
+- Files are analyzed in parallel, at most four per worker thread ahead of
+  the output already written. Results are always delivered in a fixed file
+  order (see [Streaming](#streaming)), so the output never depends on the
+  number of workers or on which file finished first.
 
 ## Terminal output
 
@@ -1063,10 +1062,10 @@ outside doc coverage. With `--stats --json`, see
 
 ### Streaming
 
-The terminal listing is written as files are analyzed: after each batch of
-files, everything that batch completed is on stdout. `hug symbols | head`
-therefore stops after a batch or two, and a large repository starts printing
-at once instead of after the whole scan. A run holds only the part of the
+The terminal listing is written as files are analyzed, in file order, and
+flushed at least once per window of four files per worker thread.
+`hug symbols | head` therefore stops after a window or two, and a large
+repository starts printing at once instead of after the whole scan. A run holds only the part of the
 listing that later files can still change:
 
 | Layout | Held until written |
@@ -1406,18 +1405,32 @@ with an envelope (`--json`, `--json-full`, `--stats --json`) also list it in
 `errors`, while `--jsonl`, `--count` and the terminal formats keep their
 output to the good files.
 
-A failed write to stdout, a closed pipe included, stops the run: no further
-batch of files is analyzed. The terminal listing, tables, outlines, JSON
-Lines and the JSON reports are flushed after every batch, so the run stops before the next batch, even when
-the batch added nothing but the JSON envelope. The status is then `0` for a
-closed pipe (even if a file had failed) and `1` for any other write error.
+Files are analyzed in parallel inside a sliding window of four files per
+worker thread: a file starts only while it is within that window of the last
+output that was flushed. Output is flushed at least once per window, whenever
+the next file's result is not ready yet, and at the end.
 
-`imports` and `lint` write their report once every file is analyzed, but
-treat stdout the same way: `hug imports | head -1` ends quietly with `0`,
-and any other write failure prints `error: cannot write output` and exits
-`1`. When the whole report is written, `lint` exits `1` if an error-severity
-diagnostic remains after `--deny`/`--warn`/`--allow`/`--strict`, and both
-exit `1` if a file failed:
+A failed write to stdout, a closed pipe included, stops the run: no file
+beyond the window is started, and work already started finishes but is not
+written. That holds for the terminal listing, tables, outlines, JSON Lines,
+the JSON reports (even when a window added nothing but the JSON envelope) and
+the text `imports` and `lint` reports. The status is then `0` for a closed
+pipe (even if a file had failed) and `1` for any other write error.
+
+Text `imports` and `lint` are written file by file as the scan goes. A
+multi-file `lint` hides files without diagnostics and ends with `No lint
+diagnostics in N files.` when every linted file was clean; that is decided
+from the number of selected files, so `hug lint bad.rs good.rs` hides
+`good.rs` even when `bad.rs` cannot be read, and `N` counts the files that
+were linted. An unavailable external adapter (`oxlint`) is warned about once
+on stderr, just before the report of the first file it was asked to lint.
+`--json` writes its one envelope after the last file.
+
+`imports` and `lint` treat stdout like the declaration commands:
+`hug imports | head -1` ends quietly with `0`, and any other write failure
+prints `error: cannot write output` and exits `1`. When the whole report is
+written, `lint` exits `1` if an error-severity diagnostic remains after
+`--deny`/`--warn`/`--allow`/`--strict`, and both exit `1` if a file failed:
 
 ```sh
 hug lint 'src/**' --deny unwrap-call; echo $?   # 1 when any .unwrap() remains

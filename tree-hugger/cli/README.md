@@ -144,6 +144,9 @@ the exclusion. Normal test code (`tests/*.rs`) is still scanned.
 For `lint`, a multi-file scan only prints files that have diagnostics; if every
 file is clean it prints a single `No lint diagnostics in N files.` line. A
 single-file lint still prints `(no diagnostics)` as explicit confirmation.
+"Multi-file" counts the selected files, so a run whose other files failed to
+read still hides a clean file. Text `lint` and `imports` print each file as it
+is analyzed, so `hug imports | head` stops the scan early.
 
 ## Output Format
 
@@ -181,7 +184,7 @@ for types, variables, fields and constants (`struct`, `let`, `const`, `my`,
 `local`, ...), read from the record, and the kind otherwise.
 
 The listing is printed as files are analyzed, so `hug symbols | head` stops
-the scan after a batch or two. Flat `--sort name` and `--sort kind` listings
+the scan after a window or two (four files per worker thread). Flat `--sort name` and `--sort kind` listings
 are the exception, as is `--prelude`: each package is printed once it is fully
 analyzed. When the scanned files span two or more packages, the listing has
 one section per package (`(no symbols)` for a package without declarations);
@@ -454,6 +457,8 @@ hug refs --id <ID> --callees 'src/**'                     # calls its body makes
   established local self-call; an `F` type annotation still names the import.
 - Text and `--json` only; `--exclude-files`, `--language` and `--no-cache`
   work as for the other commands.
+- Only the declaring file's occurrences are analyzed: the other files are
+  read for their declarations alone, so their cache entries stay small.
 
 The full contract is in [`docs/references.md`](../docs/references.md#hug-refs).
 

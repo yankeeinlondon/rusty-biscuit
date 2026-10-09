@@ -959,15 +959,30 @@ the default test-data exclusions, `--exclude-files`, `--language` and
 | `--id 3f…` | The record with that ID, compared case-sensitively (IDs come from any `--json` report). |
 
 The selector is checked across every scanned file before anything is
-printed:
+printed. Only the declarations of most files are needed for that, so the
+occurrences are analyzed for one file only, the one that declares the match:
 
 ```mermaid
 flowchart TD
-    A[Analyze every scanned file] --> B{How many declarations match?}
+    A[Read every scanned file's declarations, every kind and scope] --> B{How many declarations match?}
     B -->|none| E[Empty report, exit 0]
-    B -->|one| R[Report from that declaration's file]
+    B -->|one| O[Analyze that file's occurrences, from the same bytes]
+    O --> R[Report from that declaration's file]
     B -->|more than one| X[Error on stderr listing each location and ID, nothing on stdout, exit 1]
 ```
+
+A scan of a single file has nothing to choose between, so it asks for that
+file's occurrences straight away and analyzes it once. Each analysis is one
+lookup in `--verbose`'s cache counts: a cold `hug refs parse 'src/**'` over
+three files, with `parse` declared in one, reports
+
+```text
+cache: 0 hits, 1 partial hits, 3 misses; parsed 4 files, 4 definition captures, 0 diagnostics runs
+```
+
+(three declaration lookups, then the declaring file's entry widened to its
+occurrences), and the same run warm reports `4 hits` and `parsed 0 files`.
+The other files' cache entries keep only their declarations.
 
 ```text
 $ hug refs shared

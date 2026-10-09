@@ -49,6 +49,10 @@ const MIN_WRAP_WIDTH: u32 = 20;
 /// before the rest is summarized as `… +N`.
 const SHORT_LIST_ENTRIES: usize = 4;
 
+/// Indents [`Renderer`] keeps a laid-out terminal for; the listings never
+/// go deeper.
+const INDENTS: usize = 16;
+
 /// The line a report with no declaration shows.
 pub(crate) const NO_SYMBOLS: &str = "<dim>(no symbols)</dim>";
 
@@ -144,6 +148,27 @@ pub(crate) struct FileListing {
     /// The file as analyzed.
     pub(crate) file: PathBuf,
     pub(crate) records: Vec<SymbolRecord>,
+    /// The file's unit as [`ListingStream`] writes it, rendered ahead (on
+    /// the worker that analyzed the file); `records` is then empty.
+    rendered: Option<Vec<u8>>,
+}
+
+impl FileListing {
+    pub(crate) fn new(file: PathBuf, records: Vec<SymbolRecord>) -> Self {
+        Self { file, records, rendered: None }
+    }
+
+    /// A file whose unit was rendered ahead into `bytes`, for a stream whose
+    /// units are files ([`ListingStream::units_are_files`]) by a layout that
+    /// carries no state from one unit to the next, so the bytes equal what
+    /// the stream would write. Only a file with records has one.
+    pub(crate) fn rendered(file: PathBuf, bytes: Vec<u8>) -> Self {
+        Self { file, records: Vec::new(), rendered: Some(bytes) }
+    }
+
+    fn has_symbols(&self) -> bool {
+        self.rendered.is_some() || !self.records.is_empty()
+    }
 }
 
 /// Ordering and grouping of a declaration listing.
@@ -170,6 +195,9 @@ pub(crate) struct RenderOptions {
 /// text; the exports write the same markup through their own [`Layout`].
 pub(crate) struct Renderer {
     term: Terminal,
+    /// `term` laid out at each indent up to [`INDENTS`] when wrapping, so
+    /// [`Self::term_at`] does not copy the terminal per line.
+    indented: Vec<Terminal>,
     styled: bool,
     show_comments: bool,
     width: Option<u32>,
@@ -207,8 +235,13 @@ impl Renderer {
             Terminal::new()
         };
         term.fixed_width = Some(width.unwrap_or(NO_WRAP_WIDTH));
+        let indented = match width {
+            Some(width) => (0..=INDENTS).map(|indent| wrapped_at(&term, width, indent)).collect(),
+            None => Vec::new(),
+        };
         Self {
             term,
+            indented,
             styled,
             show_comments,
             width,
@@ -229,6 +262,7 @@ impl Renderer {
         term.fixed_width = Some(NO_WRAP_WIDTH);
         Self {
             term,
+            indented: Vec::new(),
             styled: true,
             show_comments,
             width: None,
@@ -239,14 +273,10 @@ impl Renderer {
 
     /// The terminal content indented by `indent` columns is laid out on.
     fn term_at(&self, indent: usize) -> Cow<'_, Terminal> {
-        match self.width {
-            Some(width) => {
-                let mut term = self.term.clone();
-                let indent = u32::try_from(indent).unwrap_or(u32::MAX);
-                term.fixed_width = Some(width.saturating_sub(indent).max(MIN_WRAP_WIDTH));
-                Cow::Owned(term)
-            }
-            None => Cow::Borrowed(&self.term),
+        match (self.width, self.indented.get(indent)) {
+            (Some(_), Some(term)) => Cow::Borrowed(term),
+            (Some(width), None) => Cow::Owned(wrapped_at(&self.term, width, indent)),
+            (None, _) => Cow::Borrowed(&self.term),
         }
     }
 
@@ -260,7 +290,7 @@ impl Renderer {
     }
 
     /// One package's listing, or one unit of it (see [`ListingStream`]).
-    fn package_listing(
+    pub(crate) fn package_listing(
         &self,
         out: &mut dyn Layout,
         files: &[&FileListing],
@@ -740,6 +770,15 @@ impl Renderer {
     }
 }
 
+/// `term` wrapping at `width` less `indent` columns, but never narrower than
+/// [`MIN_WRAP_WIDTH`].
+fn wrapped_at(term: &Terminal, width: u32, indent: usize) -> Terminal {
+    let mut term = term.clone();
+    let indent = u32::try_from(indent).unwrap_or(u32::MAX);
+    term.fixed_width = Some(width.saturating_sub(indent).max(MIN_WRAP_WIDTH));
+    term
+}
+
 /// The `functions`, `types` and `symbols` listing, written as files arrive:
 /// one flat list (or file and directory groups), split into package sections
 /// when the scan's files span more than one package.
@@ -748,7 +787,9 @@ impl Renderer {
 /// current unit, and a unit is rendered as soon as a file of another unit
 /// arrives, so only the current unit is held:
 ///
-/// - `--sort file` without groups, or `--group-by-file` alone: one file
+/// - `--sort file` without groups, or `--group-by-file` alone: one file,
+///   written on arrival (and possibly rendered ahead, see
+///   [`FileListing::rendered`])
 /// - `--group-by-module`: one directory
 /// - `--sort name|kind` without groups, or `--prelude`: one package (a
 ///   prelude file lists records declared in other files)
@@ -798,6 +839,9 @@ pub(crate) fn listing_order(
     git_root: &Path,
     options: ListingOptions,
 ) -> (Vec<(PathBuf, PathBuf)>, usize) {
+    // Package discovery reads manifests, so it is asked once per directory
+    // for this run only.
+    let mut roots: HashMap<&Path, PathBuf> = HashMap::new();
     let mut keyed: Vec<(PathBuf, String, String, PathBuf)> = files
         .iter()
         .map(|file| {
@@ -808,7 +852,8 @@ pub(crate) fn listing_order(
             } else {
                 String::new()
             };
-            (find_package_root(start, git_root), module, display, file.clone())
+            let root = roots.entry(start).or_insert_with(|| find_package_root(start, git_root)).clone();
+            (root, module, display, file.clone())
         })
         .collect();
     keyed.sort_by(|left, right| {
@@ -846,6 +891,12 @@ impl<'r> ListingStream<'r> {
         }
     }
 
+    /// Whether each unit is one file, so a unit is complete when its file
+    /// arrives.
+    pub(crate) fn units_are_files(&self) -> bool {
+        !self.per_package && !self.options.group_by_module
+    }
+
     /// Adds the next file's listing, writing whatever it completes.
     pub(crate) fn push(&mut self, out: &mut dyn Layout, package_root: &Path, listing: FileListing) -> io::Result<()> {
         if self.current.as_ref().is_none_or(|open| open.root != package_root) {
@@ -869,8 +920,13 @@ impl<'r> ListingStream<'r> {
             unreachable!("a package was opened above");
         };
         open.unit = unit;
-        open.has_symbols |= !listing.records.is_empty();
+        open.has_symbols |= listing.has_symbols();
         open.pending.push(listing);
+        if self.units_are_files() {
+            // Written now, not when the next file arrives, so a flush right
+            // after this delivery reaches the output.
+            self.flush_unit(out)?;
+        }
         Ok(())
     }
 
@@ -916,7 +972,9 @@ impl<'r> ListingStream<'r> {
         let Some(open) = self.current.as_mut() else {
             return Ok(());
         };
-        if open.pending.iter().any(|listing| !listing.records.is_empty()) {
+        if let [FileListing { rendered: Some(bytes), .. }] = open.pending.as_slice() {
+            out.writer().write_all(bytes)?;
+        } else if open.pending.iter().any(FileListing::has_symbols) {
             let listings: Vec<&FileListing> = open.pending.iter().collect();
             self.renderer.package_listing(out, &listings, self.options)?;
         }
