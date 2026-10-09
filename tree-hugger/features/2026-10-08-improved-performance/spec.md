@@ -328,11 +328,12 @@ Correctness verification follows the affected behavior:
   helper: ordinary scans omit fixture directories. Do not mistake an empty
   fixture scan for equivalence evidence.
 - Use existing tests first; add focused regressions for new failure modes.
-  Run `just test` and `just lint` in tree-hugger for implementation changes;
-  use `just test-l2` for affected real-terminal behavior with the repository's
-  Test Toolkit. Required portability remains macOS, Linux, native Windows and
-  WSL2. Functional portability checks are separate from performance spikes;
-  this draft adds no CI matrix cells or timing thresholds.
+  Run tests at the scale [Evidence budget](#evidence-budget-builds-and-ci-cycles)
+  sets out: targeted filters while iterating, then the full `just test` and
+  `just lint` once per batch. Use `just test-l2` only when a batch changes
+  real-terminal output. Required portability remains macOS, Linux, native
+  Windows and WSL2. Functional portability checks are separate from
+  performance spikes; this draft adds no CI matrix cells or timing thresholds.
 - Update affected READMEs, topic docs, skills and dependency catalogs with the
   implementation. A stored-format change must reject old entries cleanly;
   public record changes follow record-schema and extractor-revision rules.
@@ -341,6 +342,92 @@ Correctness verification follows the affected behavior:
 Each finding is complete when its stated repeated work is removed, affected
 results and failures retain their contracts, and any unresolved performance
 choice has one recorded sample. Estimated speedups are hypotheses, not gates.
+
+## Evidence budget: builds and CI cycles
+
+The two costs to manage:
+- **Builds.** A `profiling` build of `hug` takes about 5 minutes here, and
+  a full LTO build takes longer.
+- **CI.** Recent `ci.yml` runs took 48–131 minutes, and every pull request
+  pays one.
+
+The rules below **keep every spike in this spec**, so we lose no visibility.
+They make spikes share builds and scale verification to risk, so neither
+cost multiplies per finding.
+
+### Spikes: many arms, few builds
+
+- **One spike branch, one build.** Put every spike arm that is a code path
+  behind a runtime toggle, read once into a static: for example
+  `HUG_SPIKE=p1b,p2-prefilter,p3-share,p5-gate,p11-nocount,window,oxlint-batch,flags-on-miss`.
+  An A/B comparison is then two runs of the same binary, not two builds.
+  Temporary counters (P2's skip rate, P3's `Lexical::build` count) ride in
+  the same build and print under `--verbose`.
+- **Spikes that need no build at all** use the existing `target/profiling/hug`:
+  - L2's symptom check: a thread sweep without heavy contention;
+  - L5's spawn count;
+  - L6's TTY sample;
+  - O4's candidate sizing;
+  - C3/C5's cache-state comparisons where no toggle is required;
+  - every re-profile.
+- **Spikes that need their own build** are scheduled together, after the
+  toggle spikes:
+  - B1 + B2 go in one combined build (LTO + mimalloc). Isolate the two only
+    if the combined gain is clearly above run-to-run noise.
+  - C4's decode bench is one `cargo bench` build. It can also carry any
+    criterion cases another spike wants.
+
+  Run long builds in the background while measuring the toggle arms.
+- **Workloads sized for repetition.** Iterate on `darkmatter/` (1.6–7.7 s
+  cold) or `tree-hugger/`, with `hyperfine -w 1 -r 3`. Confirm each
+  promising arm once over the whole monorepo (23 s cold). Single-file arms
+  use the measured p99 files.
+- **Spikes never run in CI.** Do not open a pull request from the spike
+  branch. Record each result (command, arm, counts, time) in the
+  implementation log. Remove the toggles when the chosen arm is implemented.
+
+### Proof: proportional to risk, cheapest strong evidence first
+
+- **Output diff before test runs.** Comparing `hug` output from the same
+  absolute root, using the release binary before and after (with the
+  [corpus and commands above](#proportional-measurement-and-verification)),
+  needs no test build and catches most regressions. Use it as the
+  iteration-time equivalence check.
+- **Targeted tests while iterating.** Run only the matrices and tests each
+  finding names, for example `just test -E 'test(/symbols_cache::|cache_robustness::/)'`
+  for C1/C2, or `symbols_occurrences` for O-findings. Do not run the full
+  suite per edit.
+- **Full suite once per batch.** Run `just test` and `just lint` once before
+  pushing a batch, not once per finding. Run `just test-l2` only for a batch
+  that changes real-terminal output (L1, L6).
+- **Add tests only for new failure modes.** Where an existing matrix
+  already pins a behavior (`PATTERN_IDENTITY_MATRIX`, `cache_robustness`,
+  the filter suites), it is the proof. Add focused cases for genuinely new
+  behavior (L2's cancellation paths, L3's fast-path fallback, L11's closed
+  pipe), not parallel matrices restating the old ones.
+
+### CI: few pull requests, no extra cells
+
+- **Batch findings into a small number of pull requests**, along the
+  [recommended order](#recommended-order):
+  1. byte-identical algorithmic fixes;
+  2. navigation and Rust sharing;
+  3. rendering and pipeline;
+  4. each approved policy change.
+
+  One pull request per finding would multiply the CI wall time for no
+  added evidence.
+- **Rely on pre-push evidence reuse.** A passing local L1 on macOS satisfies
+  that environment's cells. Do not re-trigger runs to "double-check" a
+  green result.
+- **Use the standard environment schedule.** Windows and WSL2 failures are
+  found on `main` and the nightly run and fixed forward, so `ci:all-os` is
+  not needed by default. The exception is a change to native path identity
+  (C8, the L3 fast path, L13): it alters cache keys and IDs on Windows, and
+  justifies `ci:all-os` once, on that pull request.
+- **Add nothing CI runs.** Add no timing assertions, no benchmark runs in
+  CI and no new test targets. `lib/` already declares a `[[bench]]` target,
+  so new criterion groups add no new cell.
 
 ## Library pipeline: parse, query, records (P)
 
@@ -525,8 +612,8 @@ choice has one recorded sample. Estimated speedups are hypotheses, not gates.
     coverage stays separate from post-cache predicates and naming prefixes.
 - **Decision:** yes. It adds a cache coverage axis.
 - **Spike:** **Yes.**
-  1. Temporarily gate the `records_from` metadata block on `scope != Local`
-     with no cache (`--no-cache`), to bound the gain.
+  1. Gate the `records_from` metadata block on `scope != Local` under the
+     `p5-gate` spike toggle, with no cache (`--no-cache`), to bound the gain.
   2. `hyperfine 'hug symbols --no-cache --count'` with and without the gate.
   3. Record the gain and the added coverage complexity for the author; the
      prototype deliberately omits metadata and is not an equivalence test.
@@ -650,9 +737,10 @@ choice has one recorded sample. Estimated speedups are hypotheses, not gates.
   boundary handling and cleanup on errors/panics, without double counting;
   document whether concurrent snapshots can see pending work. Prefer padding
   if it addresses the measured cost while preserving the current contract.
-- **Spike:** **Yes, cheap.** Stub `count_shared_context_steps` to a no-op
-  in a scratch build, then run `hyperfine` with `RAYON_NUM_THREADS=1,4,8,16
-  hug symbols --no-cache --count`. If the 16-thread time improves
+- **Spike:** **Yes, cheap.** Make `count_shared_context_steps` a no-op
+  under the `p11-nocount` spike toggle (no separate build), then run
+  `hyperfine` with `RAYON_NUM_THREADS=1,4,8,16 hug symbols --no-cache
+  --count`. If the 16-thread time improves
   noticeably, do the thread-local version.
 
 ### P12. Index-based keys and a fast hasher in the bind pass
@@ -1244,7 +1332,8 @@ No spike for either:
      spread between each chunk's longest job and its other jobs. The old
      formula divided a duration by a count and was not an idle fraction;
      actual worker idle time also depends on job scheduling.
-  2. Prototype the window.
+  2. Prototype the window behind the `window` spike toggle, in the shared
+     spike build.
   3. Run `hyperfine` with `RAYON_NUM_THREADS=1,4,8,16` on cold and warm
      `hug symbols --count`.
   4. Combine with P11's no-op-counter build to separate the two causes.
@@ -1561,9 +1650,11 @@ No spike for either; fix and pin with tests:
   tree-sitter bindings).
 - **Expected impact:** Low–medium, estimated 5–15% CPU. Longer release
   builds.
-- **Spike:** **Yes, cheap.** Build with
+- **Spike:** **Yes**, in one combined build with B2 (see
+  [Evidence budget](#evidence-budget-builds-and-ci-cycles)): build with
   `CARGO_PROFILE_PROFILING_LTO=fat CARGO_PROFILE_PROFILING_CODEGEN_UNITS=1`
-  and `hyperfine` cold and warm `hug symbols --count` against the baseline.
+  plus the B2 allocator, in the background, and `hyperfine` cold and warm
+  `hug symbols --count` against the baseline.
   Check the release tooling (`rust-devops` skill) before changing a
   workspace profile. Cargo profile settings apply across a workspace build;
   a setting described as "for hug" must be scoped to its build invocation or
@@ -1579,9 +1670,9 @@ No spike for either; fix and pin with tests:
   Update the root and area dependency catalogs if adopted.
 - **Expected impact:** Medium for warm runs, estimated 10–20%. Smaller once
   C4 reduces allocations.
-- **Spike:** **Yes, cheap.** Add a two-line `#[global_allocator]` and run
-  one quick before/after sample on this host using the existing count/listing
-  workloads. Portability uses normal compile and functional checks, not
+- **Spike:** **Yes**, in the combined B1 + B2 build. Add a two-line
+  `#[global_allocator]` and take one quick before/after sample on this
+  host, using the existing count/listing workloads. Portability uses normal compile and functional checks, not
   additional OS performance spikes. Revisit after storage changes reduce
   allocations, because the remaining benefit may be smaller.
 
