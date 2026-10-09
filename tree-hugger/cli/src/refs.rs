@@ -23,7 +23,7 @@ use serde::Serialize;
 use tree_hugger::{
     Capability, Confidence, CoverageState, FileSymbolIndex, LimitReason, NamePattern, Occurrence, OccurrenceKind,
     ProgrammingLanguage, ReferenceCoverage, SchemaVersion, SourceFile, SymbolId, SymbolQuery, SymbolRecord,
-    SymbolRef, TextSpan, TreeHuggerError,
+    SymbolRef, TextPoint, TextSpan, TreeHuggerError,
 };
 
 use crate::order::portable_path_cmp;
@@ -140,15 +140,46 @@ pub(crate) struct RefsReport {
     pub(crate) evidence: Option<FileEvidence>,
 }
 
-/// A declaration the selector matched in the first phase.
+/// A declaration the selector matched in the first phase, as the ambiguity
+/// error lists it. It names its file's retained state by position, so any
+/// number of matches in one file share that file's one state.
 struct Candidate {
-    display: String,
-    record: SymbolRecord,
-    file: Phased,
+    /// Position of its file in [`Selection::files`].
+    file: usize,
+    listed: Listed,
 }
 
-/// What the first phase kept of a matching file.
-#[derive(Clone)]
+/// What the ambiguity error shows of one matched declaration.
+struct Listed {
+    start: TextPoint,
+    label: String,
+    qualified_name: String,
+    id: SymbolId,
+}
+
+impl Listed {
+    fn of(record: &SymbolRecord) -> Self {
+        Self {
+            start: record.source.declaration_span.start,
+            label: label(record),
+            qualified_name: record.identity.qualified_name.clone(),
+            id: record.id.clone(),
+        }
+    }
+}
+
+/// A file holding at least one match, retained once.
+struct MatchedFile {
+    display: String,
+    /// The native path its records carry.
+    path: PathBuf,
+    /// Its first match, the reported record when it is the only match.
+    first: SymbolRecord,
+    state: Phased,
+}
+
+/// What the first phase kept of a matching file. Not `Clone`: one state per
+/// file is moved into the evidence phase, never copied per match.
 enum Phased {
     /// The bytes its declarations were read from, for the evidence phase.
     Read(SourceFile),
@@ -158,6 +189,103 @@ enum Phased {
         index: FileSymbolIndex,
         completed_capabilities: Vec<Capability>,
     },
+}
+
+/// The first phase's matches: every matched declaration in scan order, and
+/// one retained state per file holding any of them.
+#[derive(Default)]
+struct Selection {
+    files: Vec<MatchedFile>,
+    candidates: Vec<Candidate>,
+}
+
+impl Selection {
+    fn add(&mut self, file: MatchedFile, listed: Vec<Listed>) {
+        let position = self.files.len();
+        self.files.push(file);
+        self.candidates
+            .extend(listed.into_iter().map(|listed| Candidate { file: position, listed }));
+    }
+
+    /// The one matched declaration's file, or `None` when nothing matched.
+    /// Call only once ambiguity is ruled out.
+    fn into_unique(mut self) -> Option<MatchedFile> {
+        debug_assert!(self.candidates.len() <= 1 && self.files.len() == self.candidates.len());
+        self.files.pop()
+    }
+}
+
+/// The first phase: every file's declarations (and, for a scan of one file,
+/// its evidence), keeping a file only when the selector matched one of its
+/// records. Failed files are reported to `stderr` and collected in `errors`.
+fn select(
+    scan: &RefsScan,
+    paths: &[PathBuf],
+    analyzer: &Analyzer,
+    declarations: &SymbolQuery,
+    stats: &mut CacheStats,
+    stderr: &mut dyn Write,
+    errors: &mut Vec<ReportError>,
+) -> Selection {
+    let name_filter = match &scan.selector {
+        Selector::Name(name) => Some(SymbolQuery::new().name(NamePattern::exact(name))),
+        Selector::Id(_) => None,
+    };
+    let selects = |record: &SymbolRecord| match (&scan.selector, &name_filter) {
+        (_, Some(filter)) => filter.matches(record),
+        (Selector::Id(id), None) => record.id.0 == *id,
+        (Selector::Name(_), None) => unreachable!("a name selector has a filter"),
+    };
+    let one_file = paths.len() == 1;
+    let mut selection = Selection::default();
+    let _ = in_file_order::<_, ()>(
+        paths,
+        |file| {
+            let (analyzed, source) = analyzer.analyze_retaining(analyzer.read(file)?, declarations)?;
+            let result = analyzed.result;
+            let mut found = result.index.symbols.iter().filter(|record| selects(record));
+            let Some(first) = found.next() else {
+                return Ok::<_, TreeHuggerError>((analyzed.cache, None));
+            };
+            let listed: Vec<Listed> = std::iter::once(first).chain(found).map(Listed::of).collect();
+            let first = first.clone();
+            // A scan of one file already holds its evidence; any other
+            // matching file keeps the exact bytes it was read from.
+            let state = if one_file {
+                Phased::Analyzed {
+                    index: result.index,
+                    completed_capabilities: result.completed_capabilities,
+                }
+            } else {
+                Phased::Read(source)
+            };
+            let matched = MatchedFile {
+                display: portable_relative(file, &scan.scan_root),
+                path: first.source.file_path.clone(),
+                first,
+                state,
+            };
+            Ok((analyzed.cache, Some((matched, listed))))
+        },
+        // Nothing is written until every file is delivered.
+        |file, analyzed, flush| {
+            let display = portable_relative(file, &scan.scan_root);
+            match analyzed {
+                Ok((cache, matched)) => {
+                    stats.record(&display, &cache, scan.verbose, &mut *stderr);
+                    if let Some((matched, listed)) = matched {
+                        selection.add(matched, listed);
+                    }
+                }
+                Err(error) => {
+                    let _ = writeln!(stderr, "error: {}", neutralized(&error.to_string()));
+                    errors.push(ReportError::new(display, &error));
+                }
+            }
+            ControlFlow::Continue(flush.nothing_written())
+        },
+    );
+    selection
 }
 
 /// The selected declaration with its file's evidence analysis.
@@ -175,15 +303,6 @@ pub(crate) fn run(scan: RefsScan, analyzer: &Analyzer) -> Result<i32, TreeHugger
     let evidence = SymbolQuery::new()
         .capabilities([Capability::Occurrences])
         .scan_root(&scan.scan_root);
-    let name_filter = match &scan.selector {
-        Selector::Name(name) => Some(SymbolQuery::new().name(NamePattern::exact(name))),
-        Selector::Id(_) => None,
-    };
-    let selects = |record: &SymbolRecord| match (&scan.selector, &name_filter) {
-        (_, Some(filter)) => filter.matches(record),
-        (Selector::Id(id), None) => record.id.0 == *id,
-        (Selector::Name(_), None) => unreachable!("a name selector has a filter"),
-    };
 
     let mut files: Vec<(String, PathBuf)> = scan
         .files
@@ -193,70 +312,28 @@ pub(crate) fn run(scan: RefsScan, analyzer: &Analyzer) -> Result<i32, TreeHugger
     files.sort_by(|(left, _), (right, _)| portable_path_cmp(left, right));
     files.dedup_by(|left, right| left.1 == right.1);
     let paths: Vec<PathBuf> = files.iter().map(|(_, file)| file.clone()).collect();
-    let one_file = paths.len() == 1;
-    let declarations = if one_file { evidence.clone() } else { SymbolQuery::new().scan_root(&scan.scan_root) };
+    let declarations =
+        if paths.len() == 1 { evidence.clone() } else { SymbolQuery::new().scan_root(&scan.scan_root) };
 
     let mut stats = CacheStats::new(analyzer.uses_cache());
     let mut stderr = io::stderr();
     let mut errors: Vec<ReportError> = Vec::new();
-    let mut candidates: Vec<Candidate> = Vec::new();
-    // Phase one: declarations only (unless the scan is one file). A file is
-    // kept only when the selector matched one of its records.
-    let _ = in_file_order::<_, ()>(
-        &paths,
-        |file| {
-            let source = analyzer.read(file)?;
-            let snapshot = (!one_file).then(|| source.clone());
-            let analyzed = analyzer.analyze_source(source, &declarations)?;
-            let result = analyzed.result;
-            let found: Vec<SymbolRecord> =
-                result.index.symbols.iter().filter(|record| selects(record)).cloned().collect();
-            let kept = match snapshot {
-                _ if found.is_empty() => None,
-                Some(source) => Some(Phased::Read(source)),
-                None => Some(Phased::Analyzed {
-                    index: result.index,
-                    completed_capabilities: result.completed_capabilities,
-                }),
-            };
-            Ok::<_, TreeHuggerError>((analyzed.cache, found, kept))
-        },
-        |file, analyzed, _| {
-            let display = portable_relative(file, &scan.scan_root);
-            match analyzed {
-                Ok((cache, found, kept)) => {
-                    stats.record(&display, &cache, scan.verbose, &mut stderr);
-                    if let Some(kept) = kept {
-                        for record in found {
-                            candidates.push(Candidate {
-                                display: display.clone(),
-                                record,
-                                file: kept.clone(),
-                            });
-                        }
-                    }
-                }
-                Err(error) => {
-                    let _ = writeln!(stderr, "error: {}", neutralized(&error.to_string()));
-                    errors.push(ReportError::new(display, &error));
-                }
-            }
-            ControlFlow::Continue(())
-        },
-    );
+    let selection = select(&scan, &paths, analyzer, &declarations, &mut stats, &mut stderr, &mut errors);
 
-    if candidates.len() > 1 {
+    if selection.candidates.len() > 1 {
         if scan.verbose {
             let _ = writeln!(stderr, "{}", stats.summary());
         }
-        let _ = write!(stderr, "{}", ambiguity_message(&scan.selector, &candidates, &scan.git_root));
+        let _ = write!(stderr, "{}", ambiguity_message(&scan.selector, &selection, &scan.git_root));
         return Ok(1);
     }
     // Phase two: the evidence of the one declaring file, from the bytes
     // phase one selected the declaration in.
-    let found = candidates.pop().and_then(|candidate| {
-        let Candidate { display, record, file } = candidate;
-        let (index, completed_capabilities) = match file {
+    let found = selection.into_unique().and_then(|matched| {
+        let MatchedFile {
+            display, first, state, ..
+        } = matched;
+        let (index, completed_capabilities) = match state {
             Phased::Analyzed { index, completed_capabilities } => (index, completed_capabilities),
             Phased::Read(source) => match analyzer.analyze_source(source, &evidence) {
                 Ok(analyzed) => {
@@ -272,7 +349,7 @@ pub(crate) fn run(scan: RefsScan, analyzer: &Analyzer) -> Result<i32, TreeHugger
         };
         // The same bytes give the same IDs; the evidence analysis's own
         // record is the one reported.
-        let record = index.symbols.iter().find(|symbol| symbol.id == record.id).cloned().unwrap_or(record);
+        let record = index.symbols.iter().find(|symbol| symbol.id == first.id).cloned().unwrap_or(first);
         Some(Match {
             display,
             record,
@@ -314,25 +391,25 @@ pub(crate) fn run(scan: RefsScan, analyzer: &Analyzer) -> Result<i32, TreeHugger
 
 /// The error for a selector matching several declarations: each one's
 /// location, qualified name, kind and ID, in scan order.
-fn ambiguity_message(selector: &Selector, matches: &[Candidate], git_root: &Path) -> String {
+fn ambiguity_message(selector: &Selector, selection: &Selection, git_root: &Path) -> String {
     let given = match selector {
         Selector::Name(name) => format!("`{name}`"),
         Selector::Id(id) => format!("ID `{id}`"),
     };
     let mut message = format!(
         "error: {given} names {} declarations; select one with `--id` or a file-prefixed qualified name:\n",
-        matches.len()
+        selection.candidates.len()
     );
-    for found in matches {
-        let start = &found.record.source.declaration_span.start;
+    for Candidate { file, listed } in &selection.candidates {
+        let path = &selection.files[*file].path;
         message.push_str(&format!(
             "  {}:{}:{}  {} {}  {}\n",
-            neutralized(&crate::display_path(&found.record.source.file_path, Some(git_root))),
-            start.line,
-            start.column,
-            label(&found.record),
-            neutralized(&found.record.identity.qualified_name),
-            found.record.id.0,
+            neutralized(&crate::display_path(path, Some(git_root))),
+            listed.start.line,
+            listed.start.column,
+            listed.label,
+            neutralized(&listed.qualified_name),
+            listed.id.0,
         ));
     }
     message
@@ -676,5 +753,101 @@ fn reason_code(reason: LimitReason) -> &'static str {
         LimitReason::OwnershipUnknown => "ownership_unknown",
         LimitReason::ParseError => "parse_error",
         LimitReason::EmptyReferenceQuery => "empty_reference_query",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `count` classes, each declaring a method `probe`.
+    fn probes(count: usize) -> String {
+        (0..count)
+            .map(|class| format!("class C{class}:\n    def probe(self):\n        return self.value\n\n"))
+            .collect()
+    }
+
+    fn scan_of(root: &Path, selector: Selector, names: &[&str]) -> RefsScan {
+        RefsScan {
+            selector,
+            direction: Direction::References,
+            files: names.iter().map(|name| tree_hugger::file_identity(&root.join(name))).collect(),
+            scan_root: tree_hugger::file_identity(root),
+            git_root: tree_hugger::file_identity(root),
+            format: RefsFormat::Json,
+            verbose: false,
+        }
+    }
+
+    fn select_in(scan: &RefsScan) -> (Selection, Vec<ReportError>) {
+        let analyzer = Analyzer::new(None, None, false);
+        let declarations = SymbolQuery::new().scan_root(&scan.scan_root);
+        let mut stats = CacheStats::new(false);
+        let mut errors = Vec::new();
+        let selection = select(scan, &scan.files, &analyzer, &declarations, &mut stats, &mut io::sink(), &mut errors);
+        (selection, errors)
+    }
+
+    #[test]
+    fn many_same_named_matches_in_one_file_share_its_one_analysis() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        std::fs::write(dir.path().join("sample.py"), probes(40)).expect("write sample");
+        let scan = scan_of(dir.path(), Selector::Name("probe".into()), &["sample.py"]);
+
+        let (selection, errors) = select_in(&scan);
+
+        assert!(errors.is_empty());
+        assert_eq!(selection.candidates.len(), 40);
+        assert_eq!(selection.files.len(), 1, "one retained state for one matching file");
+        assert!(selection.candidates.iter().all(|candidate| candidate.file == 0));
+        assert!(matches!(selection.files[0].state, Phased::Analyzed { .. }));
+        let lines: Vec<u32> = selection.candidates.iter().map(|candidate| candidate.listed.start.line).collect();
+        assert_eq!(lines, (0..40).map(|class| class * 4 + 2).collect::<Vec<_>>(), "scan order");
+    }
+
+    #[test]
+    fn only_matching_files_retain_one_byte_snapshot_each() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let source = probes(40);
+        std::fs::write(dir.path().join("a.py"), &source).expect("write a");
+        std::fs::write(dir.path().join("b.py"), &source).expect("write b");
+        std::fs::write(dir.path().join("other.py"), "def unrelated():\n    return 1\n").expect("write other");
+        let scan = scan_of(dir.path(), Selector::Name("probe".into()), &["a.py", "b.py", "other.py"]);
+
+        let (selection, errors) = select_in(&scan);
+
+        assert!(errors.is_empty());
+        assert_eq!(selection.candidates.len(), 80);
+        assert_eq!(selection.files.len(), 2, "one retained state per matching file, none for other.py");
+        let displays: Vec<&str> = selection.files.iter().map(|file| file.display.as_str()).collect();
+        assert_eq!(displays, ["a.py", "b.py"]);
+        for (position, file) in selection.files.iter().enumerate() {
+            let Phased::Read(snapshot) = &file.state else {
+                panic!("a multi-file scan keeps the bytes it read");
+            };
+            assert_eq!(snapshot.source(), source);
+            let in_file = selection.candidates.iter().filter(|candidate| candidate.file == position).count();
+            assert_eq!(in_file, 40);
+        }
+    }
+
+    #[test]
+    fn an_id_selects_exactly_one_retained_file() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let source = probes(40);
+        std::fs::write(dir.path().join("a.py"), &source).expect("write a");
+        std::fs::write(dir.path().join("b.py"), &source).expect("write b");
+        let by_name = scan_of(dir.path(), Selector::Name("probe".into()), &["a.py", "b.py"]);
+        let (named, _) = select_in(&by_name);
+        let wanted = named.candidates[57].listed.id.clone();
+        let by_id = scan_of(dir.path(), Selector::Id(wanted.0.clone()), &["a.py", "b.py"]);
+
+        let (selection, errors) = select_in(&by_id);
+
+        assert!(errors.is_empty());
+        assert_eq!(selection.candidates.len(), 1);
+        let matched = selection.into_unique().expect("one match");
+        assert_eq!(matched.display, "b.py");
+        assert_eq!(matched.first.id, wanted);
     }
 }

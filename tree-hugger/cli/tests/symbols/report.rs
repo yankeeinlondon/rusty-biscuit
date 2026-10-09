@@ -957,6 +957,118 @@ fn imports_and_lint_text_stop_at_a_failing_stdout() {
     assert_stopped_early(&args, &hug_into_closed_pipe(&unwrapping, &args), CHUNK);
 }
 
+/// Failed files beside a slow, successful first file: the head's report
+/// sits buffered while every later file fails. Each failed delivery must
+/// still flush, or the scan runs past a closed stdout to the last file.
+const FAILED_SIBLINGS: usize = 120;
+
+/// `a.rs`, slow to analyze and with imports and an `unwrap-call` to report,
+/// followed by `extra`.
+fn slow_head_then(extra: &[(&str, &str)]) -> Scratch {
+    let mut head = format!("use std::fmt;\nuse std::io;\n{UNWRAPPING_RS}{}\nfn slow() {{\n", crate::RUST_FIXTURE);
+    head.push_str(&"    let x = 1;\n".repeat(500));
+    head.push_str("}\n");
+    let mut files = vec![("Cargo.toml", "[package]\nname = \"mixed\"\nversion = \"0.0.0\"\n"), ("a.rs", head.as_str())];
+    files.extend_from_slice(extra);
+    Scratch::new(&files)
+}
+
+/// The `error:` lines on stderr: one per delivered failed file.
+fn error_lines(output: &Output) -> usize {
+    stderr_of(output).lines().filter(|line| line.starts_with("error:")).count()
+}
+
+/// Asserts a quiet, successful exit that delivered fewer than one window of
+/// failed files: at most one window is started before the first flush that
+/// must fail, and the head is one of them.
+fn assert_failures_stopped_early(args: &[&str], output: &Output) {
+    let stderr = stderr_of(output);
+    assert!(!stderr.contains("panicked"), "hug {args:?} panicked: {stderr}");
+    assert_eq!(output.status.code(), Some(0), "hug {args:?}: {stderr}");
+    let errors = error_lines(output);
+    assert!(errors < CHUNK, "hug {args:?} delivered {errors} failed files (fewer than {CHUNK} expected): {stderr}");
+}
+
+/// Text `imports` and `lint`, and every streamed declaration report, flush
+/// after a failed file as after a good one, so a closed stdout stops the
+/// scan within one window of failures.
+#[test]
+fn failed_files_still_stop_imports_and_lint_at_a_failing_stdout() {
+    let scratch = slow_head_then(&[]);
+    for index in 0..FAILED_SIBLINGS {
+        let mut bytes = crate::RUST_FIXTURE.as_bytes().to_vec();
+        bytes.push(0xff);
+        std::fs::write(scratch.repo.path().join(format!("b{index:03}.rs")), bytes).expect("write a non-UTF-8 file");
+    }
+    // Control: with a reader, every failure is reported.
+    let open = scratch.hug(&["--plain", "imports", "--no-cache"]);
+    assert_eq!(error_lines(&open), FAILED_SIBLINGS, "{}", stderr_of(&open));
+    for args in [
+        &["imports", "--no-cache", "--verbose"][..],
+        &["--plain", "imports", "--no-cache", "--verbose"],
+        &["lint", "--no-cache", "--verbose", "--warn", "unwrap-call"],
+        &["--plain", "lint", "--no-cache", "--verbose", "--warn", "unwrap-call"],
+        // Every streamed declaration report settles failures the same way.
+        &["--plain", "functions", "--no-cache", "--verbose"],
+        &["--plain", "classes", "--no-cache", "--verbose"],
+        &["--json", "functions", "--no-cache", "--verbose"],
+        &["--json-full", "functions", "--no-cache", "--verbose"],
+        &["functions", "--jsonl", "--no-cache", "--verbose"],
+        &["--plain", "functions", "--format", "table", "--no-cache", "--verbose"],
+        &["--plain", "functions", "--tree", "--no-cache", "--verbose"],
+        &["functions", "--format", "tsv", "--no-cache", "--verbose"],
+        &["functions", "--format", "ctags", "--no-cache", "--verbose"],
+        &["functions", "--format", "markdown", "--no-cache", "--verbose"],
+        &["functions", "--format", "prose", "--no-cache", "--verbose"],
+    ] {
+        assert_failures_stopped_early(args, &hug_into_closed_pipe(&scratch, args));
+    }
+}
+
+/// An external adapter that fails on every later file does not keep being
+/// run after stdout has closed: the adapter error path flushes too.
+/// Unix only: the stub is a shell script found as
+/// `node_modules/.bin/oxlint`, which Windows would not execute.
+#[cfg(unix)]
+#[test]
+fn adapter_failures_still_stop_lint_at_a_failing_stdout() {
+    use std::os::unix::fs::PermissionsExt;
+
+    const TYPESCRIPT: &str = "export function h(): number { return 1; }\n";
+    let names: Vec<String> = (0..FAILED_SIBLINGS).map(|index| format!("t{index:03}.ts")).collect();
+    let typescript: Vec<(&str, &str)> = names.iter().map(|name| (name.as_str(), TYPESCRIPT)).collect();
+    let scratch = slow_head_then(&typescript);
+    let log = scratch.repo.path().join("oxlint-runs.log");
+    let stub = scratch.repo.path().join("node_modules/.bin/oxlint");
+    std::fs::create_dir_all(stub.parent().expect("bin directory")).expect("create node_modules/.bin");
+    std::fs::write(
+        &stub,
+        format!(
+            "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo \"Version: 1.0.0\"; exit 0; fi\necho run >> '{}'\necho invalid-json\n",
+            log.display()
+        ),
+    )
+    .expect("write the oxlint stub");
+    std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).expect("make the stub executable");
+    let runs = || std::fs::read_to_string(&log).map_or(0, |text| text.lines().count());
+
+    // Control: with a reader, the stub runs and fails for every TS file.
+    let open = scratch.hug(&["--plain", "lint", "--no-cache"]);
+    assert_eq!(error_lines(&open), FAILED_SIBLINGS, "{}", stderr_of(&open));
+    assert_eq!(runs(), FAILED_SIBLINGS);
+    std::fs::remove_file(&log).expect("reset the run log");
+
+    for args in [
+        &["lint", "--no-cache", "--verbose", "--warn", "unwrap-call"][..],
+        &["--plain", "lint", "--no-cache", "--verbose", "--warn", "unwrap-call"],
+    ] {
+        assert_failures_stopped_early(args, &hug_into_closed_pipe(&scratch, args));
+        let started = runs();
+        assert!(started < CHUNK, "hug {args:?} ran the adapter {started} times");
+        let _ = std::fs::remove_file(&log);
+    }
+}
+
 /// Text lint hides clean files whenever more than one file is selected,
 /// decided before any is analyzed: a failed file still counts as selected,
 /// and the closing line counts the files that were linted.

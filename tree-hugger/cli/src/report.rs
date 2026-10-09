@@ -203,7 +203,7 @@ impl<W: Write> JsonReport<W> {
 
     /// Flushes when the scan asks, so a failed write stops the scan within
     /// one window; see [`crate::scan::in_file_order`].
-    pub(crate) fn flush(&mut self, flush: crate::scan::Flush) -> io::Result<()> {
+    pub(crate) fn flush(&mut self, flush: crate::scan::Flush) -> io::Result<crate::scan::Flushed> {
         flush.apply(&mut self.out)
     }
 

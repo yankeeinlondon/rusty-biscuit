@@ -1158,68 +1158,77 @@ fn main() -> Result<(), TreeHuggerError> {
         &files,
         |file| analyzer.analyze(file, &query),
         |file, analyzed, flush| {
-            let analyzed = match analyzed {
-                Ok(analyzed) => analyzed,
-                Err(error) => {
+            // A failed file reports on stderr and still reaches the flush
+            // below: the window advances only past a delivery that flushed.
+            let settled = 'settle: {
+                let analyzed = match analyzed {
+                    Ok(analyzed) => analyzed,
+                    Err(error) => {
+                        eprintln!("error: {}", render::neutralized(&error.to_string()));
+                        failed_files += 1;
+                        break 'settle None;
+                    }
+                };
+                stats.record(
+                    &display_path(file, display_root.as_deref()),
+                    &analyzed.cache,
+                    cli.verbose,
+                    &mut stderr,
+                );
+                let mut index = analyzed.result.index;
+                if !import_selection.is_empty() {
+                    let language = index.language;
+                    index.imports.retain(|import| import_selection.matches(import, language));
+                }
+                let mut summary = summarize_file(&index, &command_kind);
+                let adapters_before = adapter_metadata.len();
+                if let Err(error) = add_external_lint_diagnostics(
+                    &mut summary,
+                    &command_kind,
+                    &pkg_root,
+                    &analysis_options,
+                    &mut adapter_metadata,
+                ) {
                     eprintln!("error: {}", render::neutralized(&error.to_string()));
                     failed_files += 1;
-                    return ControlFlow::Continue(());
+                    break 'settle None;
                 }
+                error_count += summary.lint.iter().filter(|d| d.severity == DiagnosticSeverity::Error).count()
+                    + summary.syntax.iter().filter(|d| d.severity == DiagnosticSeverity::Error).count();
+                summarized += 1;
+                Some((index, summary, adapters_before))
             };
-            stats.record(
-                &display_path(file, display_root.as_deref()),
-                &analyzed.cache,
-                cli.verbose,
-                &mut stderr,
-            );
-            let mut index = analyzed.result.index;
-            if !import_selection.is_empty() {
-                let language = index.language;
-                index.imports.retain(|import| import_selection.matches(import, language));
-            }
-            let mut summary = summarize_file(&index, &command_kind);
-            let adapters_before = adapter_metadata.len();
-            if let Err(error) = add_external_lint_diagnostics(
-                &mut summary,
-                &command_kind,
-                &pkg_root,
-                &analysis_options,
-                &mut adapter_metadata,
-            ) {
-                eprintln!("error: {}", render::neutralized(&error.to_string()));
-                failed_files += 1;
-                return ControlFlow::Continue(());
-            }
-            error_count += summary.lint.iter().filter(|d| d.severity == DiagnosticSeverity::Error).count()
-                + summary.syntax.iter().filter(|d| d.severity == DiagnosticSeverity::Error).count();
-            summarized += 1;
-            if json {
-                symbol_indexes.push(index);
-                summaries.push(summary);
-                return ControlFlow::Continue(());
-            }
-            let written = (|| -> io::Result<()> {
-                // An adapter's unavailability is warned once, before the
-                // first file it affected, with that file's earlier output
-                // already flushed.
-                for metadata in adapter_metadata.drain(adapters_before..) {
-                    if !metadata.tool_available && warned.insert(metadata.tool_name.clone()) {
-                        out.flush()?;
-                        render_adapter_warning(&metadata.tool_name, &output_config);
+            let written = (|| -> io::Result<scan::Flushed> {
+                match settled {
+                    Some((index, summary, _)) if json => {
+                        symbol_indexes.push(index);
+                        summaries.push(summary);
                     }
+                    Some((_, summary, adapters_before)) => {
+                        // An adapter's unavailability is warned once, before
+                        // the first file it affected, with that file's
+                        // earlier output already flushed.
+                        for metadata in adapter_metadata.drain(adapters_before..) {
+                            if !metadata.tool_available && warned.insert(metadata.tool_name.clone()) {
+                                out.flush()?;
+                                render_adapter_warning(&metadata.tool_name, &output_config);
+                            }
+                        }
+                        rendered_any |= render_summary(
+                            &mut out,
+                            &summary,
+                            &command_kind,
+                            &output_config,
+                            display_root.as_deref(),
+                            suppress_clean_lint,
+                        )?;
+                    }
+                    None => {}
                 }
-                rendered_any |= render_summary(
-                    &mut out,
-                    &summary,
-                    &command_kind,
-                    &output_config,
-                    display_root.as_deref(),
-                    suppress_clean_lint,
-                )?;
                 flush.apply(&mut out)
             })();
             match written {
-                Ok(()) => ControlFlow::Continue(()),
+                Ok(flushed) => ControlFlow::Continue(flushed),
                 Err(error) => ControlFlow::Break(error),
             }
         },

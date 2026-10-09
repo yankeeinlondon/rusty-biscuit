@@ -31,7 +31,7 @@ use crate::report::{
     Entries, FileEntry, JsonLine, JsonReport, REPORT_SCHEMA_VERSION, ReportError, portable_relative,
     relativize_index, serialized, trim_record,
 };
-use crate::scan::{Analyzed, Analyzer, CacheStats, CacheUse, in_file_order};
+use crate::scan::{Analyzed, Analyzer, CacheStats, CacheUse, Flushed, in_file_order};
 use crate::selection::Selection;
 use crate::stats::Stats;
 use crate::grouping::{Catalog, Group, Grouping};
@@ -612,7 +612,8 @@ fn tally(
     let mut count: u64 = 0;
     let mut stats = Stats::default();
     let mut grouping = catalog.map(Grouping::new);
-    let _ = in_file_order::<_, ()>(files, work, |file, outcome, _| {
+    // Counted before anything is written, so no flush is due.
+    let _ = in_file_order::<_, ()>(files, work, |file, outcome, flush| {
         let group = grouping.as_mut().map(|grouping| grouping.select_file(file));
         if let Some((_, prepared)) = sink.settle(outcome, scan.verbose) {
             let records = prepared.classes.iter().flatten().map(|summary| &summary.container)
@@ -626,7 +627,7 @@ fn tally(
                 }
             }
         }
-        ControlFlow::Continue(())
+        ControlFlow::Continue(flush.nothing_written())
     });
     Tally { count, stats, groups: grouping.map_or_else(Vec::new, Grouping::finish) }
 }
@@ -842,9 +843,9 @@ fn write_tree(
 }
 
 
-fn as_flow(result: io::Result<()>) -> ControlFlow<io::Error> {
+fn as_flow(result: io::Result<Flushed>) -> ControlFlow<io::Error, Flushed> {
     match result {
-        Ok(()) => ControlFlow::Continue(()),
+        Ok(flushed) => ControlFlow::Continue(flushed),
         Err(error) => ControlFlow::Break(error),
     }
 }

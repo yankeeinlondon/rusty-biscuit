@@ -284,6 +284,80 @@ fn a_name_declared_in_two_files_is_an_error_listing_both() {
     assert_eq!(narrowed["files"][0]["file"], "one.ts");
 }
 
+/// `count` classes, each declaring a method `probe`.
+fn probes(count: usize) -> String {
+    (0..count)
+        .map(|class| format!("class C{class}:\n    def probe(self):\n        return self.value\n\n"))
+        .collect()
+}
+
+/// Forty same-named methods in one file are one ambiguity of exactly forty
+/// declarations, in source order, in a scan of that file and in a scan of
+/// several files, for every direction and format, warm or cold; an ID still
+/// selects exactly one of them, and an absent name is an empty report.
+#[test]
+fn many_same_named_methods_in_one_file_stay_one_exact_ambiguity() {
+    let scratch = Scratch::new(&[
+        ("sample.py", &probes(40)),
+        ("other.py", "def unrelated():\n    return 1\n"),
+    ]);
+    let one_file = ["sample.py"];
+    let every_file: [&str; 0] = [];
+    let mut ids: Vec<String> = Vec::new();
+    for files in [&one_file[..], &every_file[..]] {
+        for direction in [None, Some("--callers"), Some("--callees")] {
+            for format in [None, Some("--json")] {
+                for cache in [Some("--no-cache"), None, None] {
+                    let mut args: Vec<&str> = format.into_iter().collect();
+                    args.push("refs");
+                    args.extend(direction);
+                    args.extend(cache);
+                    args.push("probe");
+                    args.extend(files.iter().copied());
+                    let output = scratch.hug(&args);
+                    assert_eq!(output.status.code(), Some(1), "{args:?}");
+                    assert!(output.stdout.is_empty(), "{args:?}: {}", String::from_utf8_lossy(&output.stdout));
+                    let stderr = stderr_of(&output);
+                    assert!(stderr.contains("`probe` names 40 declarations"), "{args:?}: {stderr}");
+                    let listed: Vec<&str> = stderr.lines().skip(1).collect();
+                    assert_eq!(listed.len(), 40, "{stderr}");
+                    for (class, line) in listed.iter().enumerate() {
+                        assert!(line.contains(&format!("sample.py:{}:5  method sample.py#C{class}.probe  ", class * 4 + 2)), "{line}");
+                    }
+                    let found: Vec<String> =
+                        listed.iter().filter_map(|line| line.split_whitespace().last()).map(String::from).collect();
+                    if ids.is_empty() {
+                        ids = found;
+                    } else {
+                        assert_eq!(found, ids, "the same IDs in the same order: {args:?}");
+                    }
+                }
+            }
+        }
+    }
+
+    let chosen = &ids[17];
+    for files in [&one_file[..], &every_file[..]] {
+        let mut args = vec!["--id", chosen.as_str()];
+        args.extend(files.iter().copied());
+        let report = refs_json(&scratch, &args);
+        assert_eq!(declaration_id(&report), *chosen);
+        assert_eq!(report["declaration"]["identity"]["qualified_name"], "sample.py#C17.probe");
+        assert_eq!(report["declaration"]["source"]["declaration_span"]["start"]["line"], 17 * 4 + 2);
+        assert_eq!(report["files"][0]["file"], "sample.py");
+        let mut callees = vec!["--callees"];
+        callees.extend(args.iter().copied());
+        assert_eq!(declaration_id(&refs_json(&scratch, &callees)), *chosen);
+
+        let mut absent = vec!["absent"];
+        absent.extend(files.iter().copied());
+        let empty = refs_json(&scratch, &absent);
+        assert!(empty["declaration"].is_null());
+        assert_eq!(empty["files"], serde_json::json!([]));
+        assert_eq!(empty["errors"], serde_json::json!([]));
+    }
+}
+
 /// Names are exact under smart case: never a substring, an all-lowercase
 /// name ignores case, any uppercase letter makes it case-sensitive. IDs are
 /// case-sensitive. Locals are selectable.

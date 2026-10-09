@@ -86,21 +86,37 @@ impl Analyzer {
 
     /// [`analyze`](Self::analyze) over a source already [`read`](Self::read).
     pub(crate) fn analyze_source(&self, source: SourceFile, query: &SymbolQuery) -> Result<Analyzed, TreeHuggerError> {
+        self.analyze_retaining(source, query).map(|(analyzed, _)| analyzed)
+    }
+
+    /// [`analyze_source`](Self::analyze_source), giving `source` back
+    /// unchanged (its text moved, never copied), for a caller that keeps the
+    /// exact bytes only when the result calls for them.
+    pub(crate) fn analyze_retaining(
+        &self,
+        source: SourceFile,
+        query: &SymbolQuery,
+    ) -> Result<(Analyzed, SourceFile), TreeHuggerError> {
         match &self.cache {
             Some(cache) => {
-                let cached = cache.query(source, query)?;
-                Ok(Analyzed {
+                let (cached, source) = cache.query_retaining(source, query)?;
+                let analyzed = Analyzed {
                     result: cached.result,
                     cache: CacheUse::Consulted {
                         lookup: cached.lookup,
                         write_error: cached.write_error,
                     },
-                })
+                };
+                Ok((analyzed, source))
             }
-            None => Ok(Analyzed {
-                result: source.query(query)?,
-                cache: CacheUse::Disabled,
-            }),
+            None => {
+                let (result, source) = source.query_retaining(query)?;
+                let analyzed = Analyzed {
+                    result,
+                    cache: CacheUse::Disabled,
+                };
+                Ok((analyzed, source))
+            }
         }
     }
 }
@@ -109,16 +125,21 @@ impl Analyzer {
 /// `deliver` in file order, stopping early when `deliver` breaks.
 ///
 /// A sliding window bounds the work: a file is started only while it is
-/// fewer than [`window_size`] files past the last delivery `deliver` was told
-/// to flush, so at most one window of results is held and a failed write
-/// (seen at a flush) leaves at most one window of started work. [`Flush`]
-/// asks for a flush every window, before waiting for a result that has not
-/// arrived, and after the last file. A panicking `work` is propagated when
-/// its file is next to be delivered; no worker outlives the call.
+/// fewer than [`window_size`] files past the last delivery that flushed, so
+/// at most one window of results is held and a failed write (seen at a
+/// flush) leaves at most one window of started work. [`Flush`] asks for a
+/// flush every window, before waiting for a result that has not arrived, and
+/// after the last file. A delivery continues only by returning the
+/// [`Flushed`] its `Flush` was consumed into, so every continuing path,
+/// failed files included, has honored the request before the window moves.
+/// A panicking `work` is propagated when its file is next to be delivered.
+/// No worker outlives the call on any exit, unwinding included: a panic in
+/// `deliver` (or in starting a worker) stops the window before the scope
+/// joins its workers, so the panic propagates instead of hanging.
 pub(crate) fn in_file_order<T: Send, B>(
     files: &[PathBuf],
     work: impl Fn(&Path) -> T + Sync,
-    mut deliver: impl FnMut(&Path, T, Flush) -> ControlFlow<B>,
+    mut deliver: impl FnMut(&Path, T, Flush) -> ControlFlow<B, Flushed>,
 ) -> ControlFlow<B> {
     if files.is_empty() {
         return ControlFlow::Continue(());
@@ -134,6 +155,10 @@ pub(crate) fn in_file_order<T: Send, B>(
     };
     let (sender, receiver) = mpsc::channel::<(usize, thread::Result<T>)>();
     thread::scope(|scope| {
+        // Dropped before the scope joins its workers, on return and on
+        // unwind alike: a worker waiting in `admit` would otherwise never
+        // wake, and the join would hang the unwinding thread.
+        let _stop = StopOnDrop(&window);
         for _ in 0..workers {
             let sender = sender.clone();
             let (next, window, work) = (&next, &window, &work);
@@ -183,7 +208,6 @@ pub(crate) fn in_file_order<T: Send, B>(
                 window.advance(head);
             }
         }
-        window.stop();
         drop(receiver);
         if let Some(payload) = panicked {
             panic::resume_unwind(payload);
@@ -192,17 +216,33 @@ pub(crate) fn in_file_order<T: Send, B>(
     })
 }
 
-/// Whether a delivery should flush its output, from [`in_file_order`]. The
-/// window advances past a delivery only after one told to flush returns.
-#[derive(Debug, Clone, Copy)]
+/// Whether a delivery should flush its output, from [`in_file_order`].
+/// Neither `Clone` nor `Copy`: a delivery consumes it into the [`Flushed`]
+/// it must return to continue.
+#[derive(Debug)]
 pub(crate) struct Flush(bool);
 
 impl Flush {
     /// Flushes `out` when asked to.
-    pub(crate) fn apply(self, out: &mut dyn Write) -> io::Result<()> {
-        if self.0 { out.flush() } else { Ok(()) }
+    pub(crate) fn apply(self, out: &mut dyn Write) -> io::Result<Flushed> {
+        if self.0 {
+            out.flush()?;
+        }
+        Ok(Flushed(()))
+    }
+
+    /// For a scan that writes nothing until every file is delivered (counts,
+    /// statistics, `refs`): there is no output to flush, so a closed stdout
+    /// cannot be noticed during the scan and the window advances freely.
+    pub(crate) fn nothing_written(self) -> Flushed {
+        Flushed(())
     }
 }
+
+/// Proof that a delivery honored its [`Flush`]; only `Flush` makes one.
+#[derive(Debug, PartialEq, Eq)]
+#[must_use]
+pub(crate) struct Flushed(());
 
 /// Files [`in_file_order`] may start beyond the last flushed delivery: four
 /// per worker thread.
@@ -238,6 +278,15 @@ impl Window {
         let _guard = self.flushed.lock().unwrap_or_else(PoisonError::into_inner);
         self.stopped.store(true, Ordering::Release);
         self.advanced.notify_all();
+    }
+}
+
+/// Stops a [`Window`] when dropped.
+struct StopOnDrop<'a>(&'a Window);
+
+impl Drop for StopOnDrop<'_> {
+    fn drop(&mut self) {
+        self.0.stop();
     }
 }
 
@@ -352,7 +401,7 @@ mod tests {
                         assert_eq!(index_of(file), result);
                         delivered.push(result);
                         flushes.push(flush.0);
-                        ControlFlow::Continue(())
+                        ControlFlow::Continue(flush.nothing_written())
                     },
                 );
                 assert_eq!(flow, ControlFlow::Continue(()));
@@ -374,7 +423,9 @@ mod tests {
 
     #[test]
     fn an_empty_input_delivers_nothing() {
-        let flow = in_file_order::<(), ()>(&[], |_| panic!("no work"), |_, _, _| panic!("no delivery"));
+        let flow = in_file_order::<(), ()>(&[], |_| panic!("no work"), |_, _, _| -> ControlFlow<(), Flushed> {
+            panic!("no delivery")
+        });
         assert_eq!(flow, ControlFlow::Continue(()));
     }
 
@@ -395,11 +446,11 @@ mod tests {
                             thread::sleep(Duration::from_millis(150));
                         }
                     },
-                    |file, (), _| {
+                    |file, (), flush| {
                         if index_of(file) == 0 {
                             started_at_head = Some(started.load(Ordering::SeqCst));
                         }
-                        ControlFlow::Continue(())
+                        ControlFlow::Continue(flush.nothing_written())
                     },
                 );
                 started_at_head.expect("the head was delivered")
@@ -423,7 +474,7 @@ mod tests {
                         started.fetch_add(1, Ordering::SeqCst);
                         thread::sleep(Duration::from_micros(300));
                     },
-                    |_, (), flush| if flush.0 { ControlFlow::Break("broken pipe") } else { ControlFlow::Continue(()) },
+                    |_, (), flush| if flush.0 { ControlFlow::Break("broken pipe") } else { ControlFlow::Continue(flush.nothing_written()) },
                 )
             });
             assert_eq!(flow, ControlFlow::Break("broken pipe"));
@@ -432,6 +483,125 @@ mod tests {
             thread::sleep(Duration::from_millis(20));
             assert_eq!(started.load(Ordering::SeqCst), after_return, "no work runs after the call returns");
         }
+    }
+
+    /// A flush reaches the writer only when asked, and its failure is the
+    /// delivery's to return.
+    #[test]
+    fn a_flush_reaches_the_writer_only_when_asked() {
+        struct ClosedPipe {
+            flushes: usize,
+        }
+        impl Write for ClosedPipe {
+            fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+                Ok(buf.len())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                self.flushes += 1;
+                Err(io::ErrorKind::BrokenPipe.into())
+            }
+        }
+        let mut out = ClosedPipe { flushes: 0 };
+        assert_eq!(Flush(false).apply(&mut out).expect("no flush asked"), Flushed(()));
+        assert_eq!(out.flushes, 0);
+        let error = Flush(true).apply(&mut out).expect_err("the flush fails");
+        assert_eq!((error.kind(), out.flushes), (io::ErrorKind::BrokenPipe, 1));
+    }
+
+    /// Runs `scenario` on its own thread and returns its outcome, failing
+    /// the test if it has not finished within `deadline`. A regression that
+    /// leaves workers waiting hangs that thread, not the test: the test
+    /// fails at the deadline and the stuck thread ends with the process.
+    fn within_deadline<R: Send + 'static>(
+        deadline: Duration,
+        scenario: impl FnOnce() -> R + Send + 'static,
+    ) -> R {
+        let (sender, receiver) = mpsc::channel();
+        thread::spawn(move || {
+            let _ = sender.send(scenario());
+        });
+        receiver
+            .recv_timeout(deadline)
+            .unwrap_or_else(|error| panic!("the scan did not return within {deadline:?}: {error}"))
+    }
+
+    /// The panic a delivery raises at delivery `panicking` (zero-based),
+    /// with how many deliveries completed before it and how many jobs were
+    /// started when the call returned and a moment later.
+    fn delivery_panic(
+        threads: usize,
+        panicking: usize,
+        deliver: fn(Flush) -> ControlFlow<(), Flushed>,
+    ) -> (String, usize, usize, usize) {
+        within_deadline(Duration::from_secs(10), move || {
+            let files = files(200);
+            let started = AtomicUsize::new(0);
+            let mut delivered = 0;
+            let outcome = panic::catch_unwind(AssertUnwindSafe(|| {
+                with_threads(threads, || {
+                    in_file_order::<_, ()>(
+                        &files,
+                        |_| {
+                            started.fetch_add(1, Ordering::SeqCst);
+                        },
+                        |file, (), flush| {
+                            if index_of(file) == panicking {
+                                return deliver(flush);
+                            }
+                            delivered += 1;
+                            ControlFlow::Continue(flush.nothing_written())
+                        },
+                    )
+                })
+            }));
+            let after_return = started.load(Ordering::SeqCst);
+            thread::sleep(Duration::from_millis(20));
+            let payload = outcome.expect_err("the delivery panic propagates");
+            let message = payload
+                .downcast_ref::<String>()
+                .cloned()
+                .or_else(|| payload.downcast_ref::<&str>().map(|text| text.to_string()))
+                .unwrap_or_default();
+            (message, delivered, after_return, started.load(Ordering::SeqCst))
+        })
+    }
+
+    /// A delivery that panics, first or mid-stream, stops the window, wakes
+    /// and joins every worker, and propagates its own panic promptly; no
+    /// work runs after the call unwinds.
+    #[test]
+    fn a_panicking_delivery_is_propagated_without_waiting_on_workers() {
+        for threads in [1, 2, 8] {
+            for panicking in [0, 37] {
+                let (message, delivered, after_return, later) =
+                    delivery_panic(threads, panicking, |_| panic!("delivery panic"));
+                assert_eq!(message, "delivery panic", "{threads} threads, delivery {panicking}");
+                assert_eq!(delivered, panicking, "{threads} threads: deliveries before the panic");
+                assert!(after_return < 200, "{threads} threads: the window held admission");
+                assert_eq!(later, after_return, "{threads} threads: no work runs after the call unwinds");
+            }
+        }
+    }
+
+    /// A writer that unwinds inside a delivery (here, its flush) is handled
+    /// the same way as a panic in the delivery itself.
+    #[test]
+    fn a_writer_panicking_inside_a_delivery_is_propagated() {
+        struct PanickingWriter;
+        impl Write for PanickingWriter {
+            fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+                Ok(buf.len())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                panic!("writer panic")
+            }
+        }
+        let (message, delivered, after_return, later) = delivery_panic(2, 5, |_| {
+            let _ = Flush(true).apply(&mut PanickingWriter);
+            unreachable!("the flush panics")
+        });
+        assert_eq!((message.as_str(), delivered), ("writer panic", 5));
+        assert_eq!(later, after_return, "no work runs after the call unwinds");
     }
 
     /// A panicking job is propagated when its file is next, after every
@@ -449,9 +619,9 @@ mod tests {
                             assert_ne!(index_of(file), panicking, "job {panicking} fails");
                             index_of(file)
                         },
-                        |_, result, _| {
+                        |_, result, flush| {
                             delivered.push(result);
-                            ControlFlow::Continue(())
+                            ControlFlow::Continue(flush.nothing_written())
                         },
                     )
                 })
