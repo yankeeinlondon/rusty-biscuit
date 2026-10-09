@@ -43,6 +43,7 @@
 
 mod bitbucket;
 pub mod blocking;
+mod check_status;
 mod focused;
 mod gitea;
 mod github;

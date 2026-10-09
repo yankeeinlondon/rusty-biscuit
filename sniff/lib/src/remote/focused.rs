@@ -11,7 +11,8 @@ use serde_json::Value;
 use crate::SniffError;
 use crate::filesystem::git::{ApiFlavor, ResolvedRemote};
 
-use super::blocking::PrState;
+use super::blocking::{PrCheckStatus, PrState};
+use super::check_status::{BATCH_SIZE, batch_query, batch_variables, read_batch};
 use super::provider_url::{ReferenceKind, parse_provider_url};
 use super::types::{at_or_after, at_or_before, optional_timestamp_order, timestamp_order};
 use super::web_link::trusted_web_link;
@@ -102,6 +103,13 @@ struct JsonPage {
     value: Value,
     /// `Some(has rel="next")` when the response carried a `Link` header,
     /// `None` when it carried none.
+    link_next: Option<bool>,
+}
+
+/// The body of one successful response, not yet parsed.
+struct RawPage {
+    body: Vec<u8>,
+    status: u16,
     link_next: Option<bool>,
 }
 
@@ -510,6 +518,79 @@ impl FocusedProviderClient {
         Ok(open)
     }
 
+    /// The check status of each of `records`, in order, from batched GitHub
+    /// GraphQL lookups of each PR's latest source commit.
+    ///
+    /// Optional enrichment, so it never fails: every PR whose status cannot be
+    /// established is [`PrCheckStatus::Unknown`]. That covers another
+    /// provider, no token selected, an empty list, a PR without a REST head
+    /// SHA, a latest commit that is not that SHA, and any failure of a batch.
+    /// A request-wide failure (transport, HTTP error, deadline, malformed or
+    /// rate-limited answer) leaves every later batch unattempted; statuses
+    /// from earlier batches are kept.
+    ///
+    /// Sends at most `ceil(records / 100)` requests, each recorded in the
+    /// sent log and bounded by the client's shared deadline.
+    pub(crate) async fn check_statuses(&self, records: &[PullRequestInfo]) -> Vec<PrCheckStatus> {
+        let mut statuses = vec![PrCheckStatus::Unknown; records.len()];
+        if self.remote.api_flavor != ApiFlavor::GitHub || self.credential().0.is_none() {
+            return statuses;
+        }
+        let (Some(owner), Some(name)) = (&self.remote.namespace, &self.remote.repository) else {
+            return statuses;
+        };
+        let Ok(endpoint) = self.graphql_endpoint() else {
+            return statuses;
+        };
+        let lookups: Vec<(usize, u64, &str)> = records
+            .iter()
+            .enumerate()
+            .filter_map(|(index, record)| {
+                let head = record.source_head_sha.as_deref()?;
+                Some((index, record.number, head))
+            })
+            .collect();
+        for batch in lookups.chunks(BATCH_SIZE) {
+            let numbers: Vec<u64> = batch.iter().map(|(_, number, _)| *number).collect();
+            let heads: Vec<&str> = batch.iter().map(|(_, _, head)| *head).collect();
+            let body = serde_json::json!({
+                "query": batch_query(batch.len()),
+                "variables": batch_variables(owner, name, &numbers),
+            });
+            let Ok(Some(raw)) = self
+                .send(endpoint.clone(), Some(&body), NotFound::Error)
+                .await
+            else {
+                break;
+            };
+            let Ok(answers) = read_batch(&raw.body, &heads) else {
+                break;
+            };
+            for ((index, _, _), answer) in batch.iter().zip(answers) {
+                statuses[*index] = answer;
+            }
+        }
+        statuses
+    }
+
+    /// The GraphQL endpoint beside this client's REST base: GitHub.com's
+    /// `api.github.com/graphql`, a self-hosted server's `/api/graphql` for its
+    /// `/api/v3/` REST base. It always shares the REST base's host, so a
+    /// self-hosted token cannot reach github.com.
+    fn graphql_endpoint(&self) -> Result<url::Url, SniffError> {
+        let relative = if self.api_base.path().ends_with("/api/v3/") {
+            "../graphql"
+        } else {
+            "graphql"
+        };
+        self.api_base
+            .join(relative)
+            .map_err(|error| SniffError::RemoteUnreachable {
+                url: self.api_base.to_string(),
+                message: error.to_string(),
+            })
+    }
+
     /// The head commit of `branch` in this client's repository, exactly as the
     /// provider sent it.
     ///
@@ -859,6 +940,29 @@ impl FocusedProviderClient {
         endpoint
             .query_pairs_mut()
             .extend_pairs(params.iter().map(|(k, v)| (k, v)));
+        let Some(raw) = self.send(endpoint.clone(), None, not_found).await? else {
+            return Ok(None);
+        };
+        let value = serde_json::from_slice(&raw.body).map_err(|error| SniffError::RemoteApi {
+            provider: provider_name(self.remote.api_flavor),
+            status: raw.status,
+            message: format!("malformed JSON response: {error}"),
+        })?;
+        Ok(Some(JsonPage {
+            value,
+            link_next: raw.link_next,
+        }))
+    }
+
+    /// Sends one request to `endpoint` (a GET, or a POST of `body`) under this
+    /// client's host policy, deadline, credential selection, and evidence log,
+    /// and returns the raw body of a 2xx answer.
+    async fn send(
+        &self,
+        endpoint: url::Url,
+        body: Option<&Value>,
+        not_found: NotFound,
+    ) -> Result<Option<RawPage>, SniffError> {
         let remote_host = self.remote.host.as_deref().unwrap_or_default();
         if !self.policy.is_allowed(remote_host) {
             return Err(SniffError::RemotePolicyDenied {
@@ -902,9 +1006,11 @@ impl FocusedProviderClient {
             }
         }
         let token = credential.map(|(_, token)| token);
-        let mut request = client
-            .get(endpoint.clone())
-            .header(reqwest::header::USER_AGENT, "sniff/focused-provider");
+        let mut request = match body {
+            Some(body) => client.post(endpoint.clone()).json(body),
+            None => client.get(endpoint.clone()),
+        }
+        .header(reqwest::header::USER_AGENT, "sniff/focused-provider");
         if let Some(token) = token.as_ref() {
             request = crate::credentials::authenticate_provider_request(
                 request,
@@ -920,17 +1026,17 @@ impl FocusedProviderClient {
         match status {
             200..=299 => {
                 let link_next = link_has_next(response.headers());
-                match response.json().await {
-                    Ok(value) => Ok(Some(JsonPage { value, link_next })),
-                    // A body cut off by the timeout is a transport failure,
-                    // not a malformed provider answer.
-                    Err(error) if error.is_timeout() => Err(transport(&endpoint, error)),
-                    Err(error) => Err(SniffError::RemoteApi {
-                        provider: provider_name(self.remote.api_flavor),
-                        status,
-                        message: format!("malformed JSON response: {error}"),
-                    }),
-                }
+                // A body cut off by the timeout is a transport failure, not a
+                // malformed provider answer.
+                let body = response
+                    .bytes()
+                    .await
+                    .map_err(|error| transport(&endpoint, error))?;
+                Ok(Some(RawPage {
+                    body: body.to_vec(),
+                    status,
+                    link_next,
+                }))
             }
             404 if not_found == NotFound::Absent => Ok(None),
             404 => Err(SniffError::RemoteApi {
@@ -2398,5 +2504,38 @@ mod tests {
                 .unwrap()
                 .at_least((14, 0, 1))
         );
+    }
+}
+
+#[cfg(test)]
+mod graphql_endpoint_tests {
+    use super::*;
+
+    fn endpoint(host: &str) -> String {
+        let remote = ResolvedRemote {
+            name: "origin".to_string(),
+            fetch_url: format!("https://{host}/acme/project.git"),
+            push_url: format!("https://{host}/acme/project.git"),
+            host: Some(host.to_string()),
+            namespace: Some("acme".to_string()),
+            repository: Some("project".to_string()),
+            api_flavor: ApiFlavor::GitHub,
+            endpoint: Some(crate::filesystem::git::RemoteEndpoint {
+                scheme: "https".to_string(),
+                host: host.to_string(),
+                port: None,
+            }),
+        };
+        FocusedProviderClient::new(remote, FetchPolicy::deny_all().allow_host(host))
+            .unwrap()
+            .graphql_endpoint()
+            .unwrap()
+            .to_string()
+    }
+
+    #[test]
+    fn github_dot_com_uses_its_api_host_and_a_self_hosted_server_its_own() {
+        assert_eq!(endpoint("github.com"), "https://api.github.com/graphql");
+        assert_eq!(endpoint("ghe.example"), "https://ghe.example/api/graphql");
     }
 }

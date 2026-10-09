@@ -74,6 +74,30 @@ pub struct PrSummary {
     pub source_repo: Option<String>,
     pub source_branch: Option<String>,
     pub target_branch: Option<String>,
+    /// Check status of the PR's latest source commit.
+    ///
+    /// [`PrCheckStatus::Unknown`] unless the lookup asked for statuses
+    /// ([`open_pull_requests_with_status`]) and the provider could supply one.
+    pub status: PrCheckStatus,
+}
+
+/// What a PR's reported checks say about its latest source commit.
+///
+/// This is the state of reported check runs and commit statuses only. It is
+/// not merge readiness: branch protection, reviews, and conflicts are not
+/// inspected.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum PrCheckStatus {
+    /// At least one reported check needs attention (failed, timed out, was
+    /// canceled, and the like).
+    Failing,
+    /// No reported failure, and at least one check is queued or running.
+    Running,
+    /// At least one check reported, and every result is acceptable.
+    Passed,
+    /// No checks reported, or usable status evidence was unavailable.
+    #[default]
+    Unknown,
 }
 
 /// Every open PR against a repository, and the credentials the lookup's
@@ -299,17 +323,70 @@ pub fn open_pull_requests_with(
     client: &FocusedProviderClient,
     deadline: Duration,
 ) -> Result<OpenPullRequests, PrUnavailable> {
+    open_pull_requests_inner(client, deadline, false)
+}
+
+/// [`open_pull_requests`] that also fills in [`PrSummary::status`].
+///
+/// For GitHub with a token selected and at least one PR, adds
+/// `ceil(PRs / 100)` batched GraphQL requests after the REST list. Statuses
+/// are optional: no token, another provider, an empty list, or any enrichment
+/// failure leaves [`PrCheckStatus::Unknown`] and never fails or shortens the
+/// list. Enrichment shares `deadline` with the list pages, so the complete
+/// list is returned with unresolved statuses unknown when time runs out.
+/// Each GraphQL request is counted in [`OpenPullRequests::credentials`].
+///
+/// Must not be called from inside a Tokio runtime (see the module docs).
+///
+/// ## Errors
+///
+/// As for [`open_pull_requests`]; enrichment adds none.
+pub fn open_pull_requests_with_status(
+    remote_url: &str,
+    deadline: Duration,
+) -> Result<OpenPullRequests, PrUnavailable> {
+    let client = client_for_url(remote_url)?;
+    open_pull_requests_with_status_with(&client, deadline)
+}
+
+/// [`open_pull_requests_with_status`] through an already-built client, whose
+/// API base, fetch policy, and credential scope are used as they are.
+///
+/// Must not be called from inside a Tokio runtime (see the module docs).
+///
+/// ## Errors
+///
+/// As for [`open_pull_requests_with_status`].
+pub fn open_pull_requests_with_status_with(
+    client: &FocusedProviderClient,
+    deadline: Duration,
+) -> Result<OpenPullRequests, PrUnavailable> {
+    open_pull_requests_inner(client, deadline, true)
+}
+
+fn open_pull_requests_inner(
+    client: &FocusedProviderClient,
+    deadline: Duration,
+    with_status: bool,
+) -> Result<OpenPullRequests, PrUnavailable> {
     let (records, credentials) = run_with_deadline(client, deadline, |client| async move {
-        client.open_pull_requests().await
+        let records = client.open_pull_requests().await?;
+        let statuses = if with_status {
+            client.check_statuses(&records).await
+        } else {
+            vec![PrCheckStatus::Unknown; records.len()]
+        };
+        Ok(records.into_iter().zip(statuses).collect::<Vec<_>>())
     })?;
     let pull_requests = records
         .into_iter()
-        .map(|record| PrSummary {
+        .map(|(record, status)| PrSummary {
             number: record.number,
             html_url: Some(record.html_url).filter(|url| !url.is_empty()),
             source_repo: record.source_repo,
             source_branch: record.source_branch,
             target_branch: record.target_branch,
+            status,
         })
         .collect();
     Ok(OpenPullRequests {
