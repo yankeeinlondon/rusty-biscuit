@@ -63,8 +63,8 @@ spell yours in one of them or the file's next edit will not run your test:
   documents walked later), in a file that reads through a root somewhere.
 
 Two near misses are not reads: a join onto one top-level directory
-(`repo_root().join("prompts")` is too coarse; name the file), and a root call
-followed by a comma (`stage(&repo_root(), "prompts/x.md")` leaves the file
+(`repo_root().join("docs")` is too coarse; name the file), and a root call
+followed by a comma (`stage(&repo_root(), "docs/x.md")` leaves the file
 unanchored; bind `let root = repo_root();` first). A Markdown document's
 `::file` targets need no spelling of their own: a test that reads the document
 is scheduled when a file it transcludes changes.
@@ -79,6 +79,13 @@ it. A shared `tests/common` module is a helper in every binary that includes
 it, so spell the path in the one binary that needs it (the kache suites'
 `repo_inputs()`). A read in a target whose `required-features` the
 package's CI `features` leave off schedules nothing.
+
+The internal prompt folders (`prompts/`, `darkmatter/prompts/`,
+`claudine/prompts/`) are never test inputs: CI never tests them, and a change
+there schedules nothing. A test of a prompt itself goes in the package's opt-in
+`prompts` binary (`required-features = ["prompt-tests"]`, run by
+`just test-prompts`); a behavior test that only needs a prompt as input reads
+a frozen copy under `tests/fixtures/frozen_prompts/`.
 
 Another package's **source** (a script your tests execute) is not scanned
 unless your package lists it in `[package.metadata.ci.tests] source-inputs`;
