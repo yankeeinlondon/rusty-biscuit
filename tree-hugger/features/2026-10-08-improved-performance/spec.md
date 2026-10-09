@@ -3,7 +3,10 @@ kind: feature
 name: improved-performance
 date: 2026-10-08
 status: draft-spec
-reviewed: false
+reviewed: true
+reviewed_by: codex/gpt-6.1-sol
+reviewed_on: 2026-10-08
+review_iterations: 0
 implemented: false
 $schema:
   status: |-
@@ -35,15 +38,17 @@ message_to_agent: |-
   a measured or estimated impact and a spike recommendation. Findings marked
   "decision" change a documented contract (output, cache policy or cache
   format) and need the author's call before a plan is written. Every change
-  must keep output byte-identical unless its finding says otherwise; prove
-  that by diffing `hug --json-full symbols` over the spike corpus before and
-  after.
+  must preserve public behavior unless the author approves a change described
+  in Open Questions. Compare the affected command and query before and after;
+  a complete-index comparison alone cannot prove narrow-query or rendering
+  equivalence. Spikes are quick samples on one host, not benchmark gates.
 ---
 
 # Tree Hugger performance review
 
-Functionally, Tree Hugger is in good shape after the recent specs. Its
-performance is not:
+The measurements below identify costs in large scans, repeated commands,
+and single-file use. They were taken on a busy host, so they establish
+optimization opportunities rather than promised speedups:
 - a cold scan of this monorepo takes **23 s**;
 - a warm `hug symbols --plain` takes **6–9 s**;
 - `hug symbols lib.rs` on one cached file takes **70–100 ms**;
@@ -81,9 +86,10 @@ from code and not measured.
 > `cargo-nextest`, `sniff` test binaries, a local LLM server). Read the
 > numbers as follows:
 >
-> - **Robust:** profile *shares* inside one process, such as "36% of
->   samples in `Node::parent`" and "69% in JSON decode". Contention slows
->   every function roughly alike.
+> - **Useful for locating work:** profile *shares* inside one process, such
+>   as "36% of samples in `Node::parent`" and "69% in JSON decode". These
+>   are inclusive samples, not exact CPU attribution or guaranteed savings;
+>   scheduling, I/O and overlapping callers can affect them.
 > - **Fairly robust:** like-for-like A/B pairs run back to back:
 >   - warm vs `--no-cache` on one file;
 >   - in-repo vs outside-repo invocation;
@@ -94,10 +100,12 @@ from code and not measured.
 >   single-thread wait). On a contended machine, poor scaling is expected
 >   whatever the code does.
 >
-> Every spike re-measures its baseline on a quiet host (load average below
-> ~2), or on the Linux build host, before it compares anything. L2, P11 and
-> the single-thread open observation must not be prioritized until their
-> symptom is reproduced on a quiet host.
+> Use one available host with less competing work for a quick before/after
+> sample when a design question remains unanswered. Do not add a second host
+> or a mandatory load threshold. The sliding-window pipeline, shared work
+> counters and single-thread waiting observation depend on scaling behavior;
+> do not prioritize those until their symptom is reproduced without heavy
+> contention. No timings in this review are CI pass/fail requirements.
 
 ## Baseline measurements
 
@@ -205,7 +213,7 @@ author's call.
 | [P1](#p1-make-parent-lookups-o1) | Per-file parent index / cursor-carried parents | **H** (36% of cold) | measured | M–L | yes |
 | [P2](#p2-avoid-the-rust-pattern-walk-on-the-declarations-only-path) | Skip or share the Rust pattern walk | **H** for Rust (13%) | measured | M | yes |
 | [P3](#p3-build-rust-declarations-and-lexical-once-per-file) | Build Rust `Declarations` + `Lexical` once | **M–H** for Rust | measured | M | yes |
-| [P4](#p4-run-the-locals-query-once-per-file) | Run the locals query once (imports from the same run) | M (6%) | measured | S | yes, cheap |
+| [P4](#p4-run-the-locals-query-once-per-file) | Run the locals query once (imports from the same run) | M (6%) | measured | S | no; evidence supplied |
 | [P5](#p5-scope-aware-metadata-selection) | No full metadata for scopes the query discards | **H** for default `symbols` | measured share | L, decision | yes |
 | [P6](#p6-no-full-metadata-for-kinds-added-only-by-widening) | No full metadata for kinds added only by widening | M for `types`/`classes` | estimated | S | no |
 | [P7](#p7-build-each-records-key-and-id-once) | Build each record's key/ID once; static provenance strings | L–M | estimated | S | cheap |
@@ -225,19 +233,19 @@ author's call.
 | [O6](#o6-cheaper-is_call_target-and-qualified_parent) | Cheaper `is_call_target` / `qualified_parent` | L | estimated | S | no |
 | [O7](#o7-memoize-rust_impl_type-and-enum-variant-owners) | Memoize `rust_impl_type` and variant owners | L–M for Rust | estimated | S | if profiled |
 | [O8](#o8-allocation-and-hashing-in-scope-tables-and-import-lookup) | Allocation/hashing in scope tables and `import_at` | L–M | estimated | S | no |
-| [C1](#c1-remove-the-quadratic-scan-in-unbound_names_have_a_binding) | Remove the quadratic scan in `unbound_names_have_a_binding` | **H** (warm slower than cold) | **measured** | S | yes |
-| [C2](#c2-remove-the-quadratic-made-closure) | Remove the quadratic `made` closure | H on wide entries | estimated | S | with C1 |
+| [C1](#c1-remove-the-quadratic-scan-in-unbound_names_have_a_binding) | Remove the quadratic scan in `unbound_names_have_a_binding` | **H** (warm slower than cold) | **measured** | S | no; evidence supplied |
+| [C2](#c2-remove-the-quadratic-made-closure) | Remove the quadratic `made` closure | H on wide entries | estimated | S | no |
 | [C3](#c3-validate-evidence-only-when-it-will-be-served) | Validate evidence only when it will be served | M–H | measured (narrow over wide) | M, decision | after C1/C2 |
 | [C4](#c4-shrink-and-speed-up-the-stored-entry) | Shrink and speed up the stored entry | **H** for warm (69% decode) | measured | L, decision | yes |
 | [C5](#c5-compute-cheap-capabilities-on-every-miss) | Compute cheap capabilities (Flags) on every miss | **H** for mixed commands (29.8 s → ~4 s) | measured | S–M, decision | yes |
-| [C6](#c6-written-checksum-instead-of-re-derived-validation) | Written checksum instead of re-derived validation | H, but policy | estimated | M, decision | after C1–C3 |
+| [C6](#c6-retain-consistency-validation-checksum-is-not-a-replacement) | Retain consistency validation; no checksum replacement | contract preservation | review decision | — | no |
 | [C7](#c7-small-validation-costs) | Stream `import_inventory`; one `LineStarts` | L | estimated | S | no |
 | [C8](#c8-canonicalize-each-file-once) | Canonicalize each file once | L (1.6%) | measured | S | no |
 | [C9](#c9-collect-stale-cache-entries) | Collect stale cache entries | disk only | measured size | S | no |
-| [L1](#l1-render-on-the-workers-not-the-delivery-thread) | Render on the workers, not the delivery thread | **H** for listings (~3–4 s warm) | measured | M | yes |
+| [L1](#l1-render-on-the-workers-not-the-delivery-thread) | Render on the workers, not the delivery thread | **H** for listings (~3–4 s warm) | measured | M | no; evidence supplied |
 | [L2](#l2-replace-the-per-chunk-barrier-with-a-sliding-window) | Sliding window instead of per-chunk barrier | M–H if reproduced | measured under load, unconfirmed | M | yes, quiet host first |
-| [L3](#l3-a-literal-file-argument-must-not-walk-the-whole-tree) | A literal file argument must not walk the whole tree | **H** for single-file use (70 ms → ~8 ms) | measured | S–M | yes |
-| [L4](#l4-hug-refs-run-occurrences-only-on-the-declaring-file) | `hug refs`: Occurrences only on the declaring file | **H** for `refs` | estimated | M | yes |
+| [L3](#l3-a-literal-file-argument-must-not-walk-the-whole-tree) | A literal file argument must not walk the whole tree | **H** for positional single-file use | measured | S–M | no; evidence supplied |
+| [L4](#l4-hug-refs-run-occurrences-only-on-the-declaring-file) | `hug refs`: Occurrences only on the declaring file | **H** for `refs` | estimated | M | no; unnecessary work established |
 | [L5](#l5-batch-oxlint-and-resolve-it-once) | Batch oxlint; resolve the tool once | **H** for JS/TS lint | estimated | M, decision | yes |
 | [L6](#l6-no-terminal-detection-for-unstyled-output) | No terminal detection for unstyled output | M latency on TTY/iTerm2 | estimated | S | yes |
 | [L7](#l7-memoize-package-roots-in-listing_order) | Memoize package roots in `listing_order` | L (~0.12 s) | measured | S | no |
@@ -247,57 +255,92 @@ author's call.
 | [L11](#l11-stream-imports-and-lint-output) | Stream `imports`/`lint` output (fixes a broken-pipe panic) | M | estimated | S | small |
 | [L12](#l12-god-files-read-once-parse-once) | `god-files`: read once, parse once | M for repeated runs | estimated | S | maybe |
 | [L13](#l13---changed-without-re-canonicalizing-every-scanned-file) | `--changed` without re-canonicalizing every scanned file | M for `--changed` | estimated | S | cheap |
-| [L14](#l14-move-json-projection-off-the-delivery-thread-and-memoize-is_test_file) | JSON projection off the delivery thread; memoize `is_test_file` | L–M | estimated | S | with L1/L2 |
+| [L14](#l14-move-json-projection-off-the-delivery-thread-and-memoize-is_test_file) | JSON projection off the delivery thread; memoize `is_test_file` | L–M | estimated | S | no separate experiment |
 | [L15](#l15-do-not-deep-clone-reused-prelude-results) | Do not deep-clone reused prelude results | L–M with `--prelude` | estimated | S | no |
 | [B1](#b1-release-profile-for-hug) | Release profile: LTO + 1 codegen unit for `hug` | L–M | estimated | S | yes, cheap |
 | [B2](#b2-a-faster-global-allocator) | A faster global allocator (mimalloc) | M for warm decode | estimated | S | yes, cheap |
 
 ---
 
-## Shared spike infrastructure (do this first)
+## Review decisions and compatibility boundaries
 
-The existing bench (`lib/benches/tree_file.rs`) only parses 100-item
-generated inputs. It never calls `TreeFile::query`, `symbol_records` or the
-cache, so it cannot show any finding below. Before or with the first spike:
+This remains a draft review, not authorization to implement every finding.
+The recommendations in [Open Questions](#open-questions) need the author's
+choice before becoming an implementation plan. Existing behavior is the
+baseline until that choice is recorded.
 
-1. **Add a `query_scaling` criterion group.**
-   - Generate Rust, TypeScript, Python and C sources at N ∈ {200, 1000, 5000}
-     top-level items: doc comments, one large `impl`/class, nested closures or
-     callbacks (depth 30–60), a wide `match`/`switch`.
-   - Bench `SymbolQuery::new()`, `.capabilities([References])`,
-     `.capabilities([Flags])` and `SymbolQuery::complete_index()`.
-   - Time per item that grows with N is the signature of P1/O1/O2.
-   - Run with `cargo bench -p tree-hugger --bench tree_file -- query_scaling
-     --save-baseline before`, then `--baseline before`.
-2. **Add a `cache_hit` criterion group.** It writes a real entry (complete
-   index) for a large file, then times:
-   - `SymbolCache::query` on a `Hit`;
-   - `serde_json::from_slice::<StoredEntry>` alone;
-   - `SourceFile::query` cold.
+- **Public results:** keep IDs, spans, declaration text, candidate order,
+  selectors, report order and exit status unchanged. The tree-hugger library's
+  [SymbolQueryResult](../../lib/src/file/query.rs) represents the requested
+  analysis; the cache may store more work, but must project it back to exactly
+  that result, including reported capabilities and passes.
+- **Cache integrity:** the strict refusal rules in
+  [Cache Design](../../docs/cache-design.md) remain in force. Faster validation
+  must accept and reject the same entries unless the author explicitly changes
+  that policy. Preserve import provenance, coverage geometry, list ordering,
+  semantic cross-checks, and concurrent atomic replacement. A cache failure
+  continues to cause recomputation rather than an analysis failure.
+- **Identity:** keep native paths for filesystem access, cache keys and IDs.
+  Display paths are lossy and must never become inputs. Use `biscuit-file`'s
+  `FileReference` for user file references and sniff for repository/package
+  discovery. Reuse existing identity helpers; joining a canonical root to a
+  relative path is not proof that the resulting spelling is canonical.
+- **Shared libraries:** changes to biscuit-terminal or biscuit-hash must keep
+  their existing public APIs and behavior. Use biscuit-terminal's
+  `TerminalRenderable` components for output and biscuit-hash for hashing;
+  extend their APIs narrowly if a required capability is missing. A broad
+  terminal-discovery redesign or new hashing dependency is a separate author
+  decision, not an incidental tree-hugger optimization.
+- **Delivery:** bounded output pipelines retain deterministic order, flush
+  promptly, treat a closed stdout pipe as success, and report other write
+  errors. `--verbose` remains truthful about actual work. Tests and terminal
+  captures must not bring a terminal or browser window into focus.
 
-   Use the p90/p99 corpus files: `schematic/definitions/src/openai/types.rs`
-   and `biscuit-terminal/lib/src/components/filesystem/mod.rs`.
-3. **Fix a monorepo-level timing protocol.** Use a fixed `TMPDIR` per arm,
-   with `hyperfine -w 2` over:
-   - `hug symbols --count` cold (`--no-cache`) and warm;
-   - `hug symbols --plain > /dev/null` warm;
-   - `hug --json symbols > /dev/null` warm;
-   - `hug refs SymbolCache`;
-   - `hug lint`.
+## Proportional measurement and verification
 
-   Plus a `RAYON_NUM_THREADS` sweep of 1/4/8/16. Record `--verbose` to prove
-   hit/parse counts.
-4. **Profiling.** Run `cargo install samply` (the dev host lacks it), then
-   `samply record target/profiling/hug …`. macOS `sample <pid> <secs>` also
-   works; aggregate by inclusive count per symbol.
-5. **Equivalence gate for every spike.** Run `hug --json-full symbols` with
-   a cold cache over a fixed corpus (`tree-hugger/`, `lib/tests/fixtures/`,
-   the p99 files) and `diff` before against after: output must be
-   byte-identical unless the finding says otherwise. Also run `just test` in
-   `tree-hugger/`, which carries the cache-robustness, projection and
-   work-counter invariants.
+The existing figures already establish the repeated locals query, quadratic
+cache validation, listing rendering cost and directory-walk overhead. Those
+findings need implementation verification, not another discovery spike.
+There is no mandatory shared benchmark suite or profiling-tool installation.
 
----
+For an unresolved performance choice, use the finding's existing workload
+and one quick before/after sample on one host. Record the build profile,
+command, source revision, worker count and cache preparation so the result is
+interpretable. An empty-cache run includes writes; `--no-cache` includes neither
+reads nor writes. Keep those cases distinct. Use an isolated system temporary
+directory (`TMPDIR` on macOS; the applicable `TMP`/`TEMP` on Windows) and
+`--verbose` to establish hits, widening and parse counts. Existing macOS
+`sample` output is sufficient; installing `samply` is optional.
+
+Correctness verification follows the affected behavior:
+
+- Compare the same command and options at the same absolute corpus root before
+  and after. IDs include file identity, so separate checkout paths are not a
+  byte-equivalence comparison. Complete-index JSON checks record semantics;
+  narrow queries check filtering and cache projection; listing/export goldens
+  check text, ordering, wrapping and links. Exclude elapsed-time metadata and
+  intentional work-count changes from byte comparisons, and check their
+  meaning separately.
+- Pin cache changes against existing corruption, widening, projection and
+  concurrent-writer tests. Compare cold, warm and wide-entry-to-narrow-request
+  results. Never regenerate a golden to conceal unintended drift.
+- Explicitly select fixture files or copy them with the existing `Scratch`
+  helper: ordinary scans omit fixture directories. Do not mistake an empty
+  fixture scan for equivalence evidence.
+- Use existing tests first; add focused regressions for new failure modes.
+  Run `just test` and `just lint` in tree-hugger for implementation changes;
+  use `just test-l2` for affected real-terminal behavior with the repository's
+  Test Toolkit. Required portability remains macOS, Linux, native Windows and
+  WSL2. Functional portability checks are separate from performance spikes;
+  this draft adds no CI matrix cells or timing thresholds.
+- Update affected READMEs, topic docs, skills and dependency catalogs with the
+  implementation. A stored-format change must reject old entries cleanly;
+  public record changes follow record-schema and extractor-revision rules.
+  Do not bump public record schemas merely to change private storage.
+
+Each finding is complete when its stated repeated work is removed, affected
+results and failures retain their contracts, and any unresolved performance
+choice has one recorded sample. Estimated speedups are hypotheses, not gates.
 
 ## Library pipeline: parse, query, records (P)
 
@@ -341,12 +384,15 @@ cache, so it cannot show any finding below. Before or with the first spike:
 - **How:**
   1. Land (a).
   2. Implement (b) behind one helper (`ancestors_of(facts, node)`).
-  3. Run `query_scaling` before and after; growth per item at N=5000 should
-     flatten.
+  3. Use a quick before/after sample on an existing wide or deep file;
+     record time and parent-lookup counts. A reusable benchmark is optional.
   4. Re-profile `hug symbols --no-cache --count` over the monorepo and read
      the `ts_node_parent` share.
   5. Compare wall/user time with `hyperfine`.
-  6. Gate on the equivalence diff.
+  6. Verify the affected queries and fixtures as described above. Keep node
+     IDs scoped to the owning tree; indexes must not outlive it or survive
+     reparsing. Include anonymous nodes, aliases and missing nodes. A map
+     lookup can be constant time; a full ancestor climb is still depth-bound.
 
 ### P2. Avoid the Rust pattern walk on the declarations-only path
 
@@ -378,13 +424,15 @@ cache, so it cannot show any finding below. Before or with the first spike:
   - (a) has lifetime friction, since `Walk<'tree>` crosses the
     definitions/records boundary.
 - **Spike:** **Yes.** Measure (b)'s skip rate over the monorepo first: how
-  many Rust files hit the prefilter. If it is above ~80%, (b) is worth its
-  proof.
+  many Rust files hit the prefilter. Keep it only if the sample supports
+  the added complexity and the existing pattern tests establish correctness.
 - **How:**
   1. Add a temporary counter for "pattern walk skipped".
   2. Run `hug symbols --no-cache --count --language rust` over the monorepo.
   3. Diff `--json-full` with and without the prefilter.
-  4. Use a `hyperfine` A/B, and `query_scaling/rust` for (a).
+  4. Use one quick A/B sample for the remaining choice. Do not infer pattern
+     meaning from a source substring search: raw names, imports, shadowing,
+     macros and unknown pattern contexts must retain their current treatment.
 
 ### P3. Build Rust `Declarations` and `Lexical` once per file
 
@@ -409,8 +457,8 @@ cache, so it cannot show any finding below. Before or with the first spike:
   or carry only the decisions. Output is identical when the same entries
   and decisions are reused.
 - **Spike:** **Yes, cheap.** Add a temporary `Lexical::build` counter (or
-  watch `shared_context_steps` double per Rust file), remove the second build
-  and A/B `query_scaling/rust` plus `hyperfine 'hug symbols --no-cache
+  inspect `shared_context_steps`), remove the second build
+  and take one A/B sample with `hyperfine 'hug symbols --no-cache
   --count --language rust'`.
 
 ### P4. Run the locals query once per file
@@ -435,9 +483,11 @@ cache, so it cannot show any finding below. Before or with the first spike:
     existing cache entries stay valid.
   - Keep `QueryKind::Imports` for provenance and drift tests, and
     `definition_captures` at 1.
-- **Spike:** **Yes, cheap.** `query_scaling` (declarations only) plus
-  `hyperfine 'hug symbols --no-cache --count'`. Expect
-  `ts_query_cursor__advance` to drop by about a third.
+- **Spike:** No. The profile already identifies the repeated query. Verify
+  that one capture run supplies the identical imports, exports, definitions
+  and diagnostics, including grouped imports and duplicate captures. Keep
+  public direct-call APIs working and fingerprints unchanged when query text
+  is unchanged; work counters must count executions rather than captures.
 
 ### P5. Scope-aware metadata selection
 
@@ -464,16 +514,21 @@ cache, so it cannot show any finding below. Before or with the first spike:
 - **Risk:**
   - Cache shape and policy: a new coverage dimension next to
     `covered_kinds`.
-  - Needs an `EXTRACTOR_REVISION` bump, `docs/cache-design.md` updates, new
+  - Needs private cache-format invalidation, `docs/cache-design.md` updates, new
     `cache_robustness` cells and new projection tests.
   - It must never serve an entry without local metadata to an
-    `--all-scopes` query.
+    `--all-scopes` query. Coverage must describe kind-and-scope combinations,
+    not independent unions: Functions/Item plus Variables/Local does not
+    cover Functions/Local. IDs, binding facts, member completion and exports
+    still need their required information from unselected scopes. Scope
+    coverage stays separate from post-cache predicates and naming prefixes.
 - **Decision:** yes. It adds a cache coverage axis.
 - **Spike:** **Yes.**
   1. Temporarily gate the `records_from` metadata block on `scope != Local`
      with no cache (`--no-cache`), to bound the gain.
   2. `hyperfine 'hug symbols --no-cache --count'` with and without the gate.
-  3. Proceed with the cache design only if the gain is above ~10%.
+  3. Record the gain and the added coverage complexity for the author; the
+     prototype deliberately omits metadata and is not an equivalence test.
 
 ### P6. No full metadata for kinds added only by widening
 
@@ -485,12 +540,16 @@ cache, so it cannot show any finding below. Before or with the first spike:
   modifiers, Flags walks and metrics, then `retain(query.selects)` drops them
   before caching (`analysis/mod.rs:163`).
 
-  Track the originally selected kinds, and use that for `wanted` in
-  `records_from`.
+  Track originally selected kinds separately from kinds needed to complete
+  selected types. Retain access, static flags, documentation and enum-variant
+  data required by completion; omit only facets no retained result reads.
+  `classes` explicitly selects members, so its displayed members still need
+  full requested metadata.
 - **Expected impact:** Medium for `hug types` / `hug classes` and their
   `--json`, where fields are often most records. Estimated; byte-identical.
-- **Risk:** Very low. Nothing downstream reads those facets from unselected
-  records, and they never reach the cache.
+- **Risk:** Member data contributes to retained type records, exports and
+  relations before unselected records are dropped. Verify those consumers
+  before reducing metadata; record omission alone does not prove safety.
 - **Spike:** No. Just do it, and check with the fixture/snapshot tests and
   `hyperfine 'hug types --no-cache --json'`.
 
@@ -508,7 +567,9 @@ cache, so it cannot show any finding below. Before or with the first spike:
   Changes:
   - an internal constructor that takes the final key;
   - normalize the path once per file;
-  - `LazyLock<String>` for the constant provenance strings.
+  - share immutable provenance construction within the run. A `LazyLock`
+    avoids constructing the template repeatedly, but public owned `String`
+    fields still allocate when cloned; do not claim it removes those copies.
 - **Expected impact:** Low–medium, estimated 1–3 µs per record. Over the
   monorepo's 462k records, that is ~0.5–1.5 s of cold CPU.
 - **Risk:** IDs must stay byte-identical. Pin this with an equality test
@@ -575,15 +636,19 @@ cache, so it cannot show any finding below. Before or with the first spike:
   share one cache line. `count_shared_context_steps` is called at 40+ hot
   sites, including inside `partition_point` comparators
   (`relations/inline.rs:70-71`). Accumulate in thread-local `Cell<u64>`s and
-  flush at the end of `run_query`, or at minimum pad each counter to its own
-  line.
+  flush at analysis boundaries, or first consider padding the hot atomics
+  without changing snapshot semantics. Static placement suggests contention;
+  the draft has not proved that all counters occupy one physical cache line.
 - **Expected impact:** Low–medium, estimated. It shows only as poor
   scaling across threads. The observed 2.7–4.7× on 16 cores was measured
   on a heavily loaded host (see the measurement caveat and
   [L2](#l2-replace-the-per-chunk-barrier-with-a-sliding-window)), so
   first confirm that scaling is still poor on a quiet host.
-- **Risk:** Tests read `work_counters()` deltas after analysis returns, so
-  a flush at the end of the pass keeps totals exact.
+- **Risk:** Public direct APIs also increment counters outside `run_query`.
+  A query-only flush loses those counts. A thread-local design needs nested
+  boundary handling and cleanup on errors/panics, without double counting;
+  document whether concurrent snapshots can see pending work. Prefer padding
+  if it addresses the measured cost while preserving the current contract.
 - **Spike:** **Yes, cheap.** Stub `count_shared_context_steps` to a no-op
   in a scratch build, then run `hyperfine` with `RAYON_NUM_THREADS=1,4,8,16
   hug symbols --no-cache --count`. If the 16-thread time improves
@@ -597,14 +662,17 @@ cache, so it cannot show any finding below. Before or with the first spike:
     and `semantic_facets` (`:444-459`) hash 64-character hex `SymbolId`
     strings with SipHash.
   - Carry record indices from the resolver instead, and key by `usize`.
-  - Where string keys remain, use `FxHashMap` (`rustc-hash`; add it to
-    `docs/dependencies.md`).
+  - Prefer integer indices. For remaining keys, use an appropriate existing
+    biscuit-hash facility before adding another hashing crate. Keep hash-map
+    iteration out of report order and preserve full-key equality; a digest
+    alone is not a deduplication key. Consider collision behavior for
+    user-controlled source names.
 - **Expected impact:** Medium for `refs`, `--json-full` and bind +
   diagnostics. Estimated 0.3–1 µs per occurrence; no effect on listings.
 - **Risk:** Order must not change. Only the dedup key type changes, and map
   iteration order is never observed.
 - **Spike:** Yes, but after P1/O1/O2, which dominate the same benchmark:
-  `query_scaling` with References.
+  one existing References workload. No new scaling suite is required.
 
 ### P13. Reuse `Parser` and `QueryCursor` per thread; single compile per query
 
@@ -617,8 +685,12 @@ cache, so it cannot show any finding below. Before or with the first spike:
     the same query. Use a per-key `OnceLock`.
 - **Expected impact:** Low, estimated tens of µs per file plus a few ms at
   start-up.
-- **Risk:** The `parser_constructions` counter is asserted in tests; count
-  parses instead.
+- **Risk:** `parser_constructions` publicly counts constructions, so do not
+  silently redefine it as parse count. Add a separately named parse counter
+  if needed and update verbose reporting. Reused parsers/cursors must reset
+  language, query ranges, limits and cancellation state between calls. Direct
+  library calls may nest on a thread: avoid a `RefCell` borrow panic by falling
+  back to a fresh object when the reusable one is already in use.
 - **Spike:** Optional: `hyperfine` over many small files.
 
 ### P14. Small algorithmic cleanups in extraction and relations
@@ -658,8 +730,11 @@ All byte-identical, low impact, no spike:
   - or cut it with the `signature_text` rules.
 - **Expected impact:** Low–medium, measured size: 33 MB of the 786 MB cache
   (4%), plus the allocation on every cold record.
-- **Risk:** Changes public output for `--json-full` and the library. Needs
-  an `EXTRACTOR_REVISION` bump and a docs update.
+- **Risk:** Cutting text changes public output for `--json-full` and library
+  callers and needs schema/revision review and docs updates. Storing a private
+  source range and reconstructing the existing text does not change that
+  contract; validate bounds, UTF-8 boundaries and exact trimming. A raw
+  declaration span is not necessarily the range of the trimmed text.
 - **Decision:** yes (public field semantics).
 - **Spike:** Maybe, only if [C4](#c4-shrink-and-speed-up-the-stored-entry)
   keeps the field in the stored form.
@@ -693,7 +768,10 @@ profile above, so the sizes are estimated. The spike is the
   - `is_excluded_context` is per language (Python `import_statement` is not
     excluded).
   - The export check needs the **nearest** `export_statement` and then
-    inspects its `source` field.
+    inspects its `source` field. A single predecessor search over overlapping
+    byte intervals does not prove ancestry or find the nearest owner. Keep
+    node/parent identity or use a nesting-aware index; byte-equal siblings and
+    zero-width nodes must not inherit each other's context.
 - **Spike:** **Yes.** See [below](#spike-for-the-o-findings).
 
 ### O2. Parent index for scope and region lookups
@@ -820,8 +898,8 @@ All small, byte-identical, no spike:
 2. The decision metric is the inclusive share of `ts_node_parent` /
    `ts_node_child_with_descendant` / `ts_node__prev_sibling` under
    `OccurrenceSyntax::resolve`, `Walk::run` and `ScopeTree::with_rules`.
-3. Add a `reference_evidence` criterion case with depth-30/60 nesting;
-   super-linear growth when depth doubles is the O(d²) signature.
+3. A reusable reference-evidence benchmark is optional. Use the existing
+   workload to decide whether parent navigation remains worth changing.
 4. Keep `work_counters()` `reference_captures`/`occurrence_resolutions`/
    `definition_captures` at 1.
 
@@ -855,14 +933,12 @@ All small, byte-identical, no spike:
     which is the whole point of the cache.
 - **Risk:** Very low: same predicate, different data structure. The
   accept/refuse sets are pinned by `cache_robustness` and `symbols_cache`.
-- **Spike:** **Yes**, and it is the cheapest large win in this spec.
-- **How:**
-  1. Use the `cache_hit` criterion group on `types.rs` and
-     `filesystem/mod.rs` (`--json-full` entries).
-  2. A/B the hit time, plus `hyperfine 'hug --json-full symbols <file>'`
-     warm vs `--no-cache`.
-  3. Success means the hit is several times faster than the cold run on
-     both files.
+- **Spike:** No. The supplied timings and profile already answer whether
+  this quadratic scan matters. Verify the same refusal/acceptance behavior
+  with existing cache tests and take an optional quick before/after sample
+  on the already measured entry; no speed ratio is a correctness gate.
+
+
 
 ### C2. Remove the quadratic `made` closure
 
@@ -881,8 +957,8 @@ All small, byte-identical, no spike:
   files; stacks with C1.
 - **Risk:** Very low. Key by `name_identity::key`, which is what `equal`
   compares.
-- **Spike:** Same bench as C1. Split the time with a span around
-  `validate_evidence`.
+- **Spike:** No. Verify exact normalized-name matching, first-occurrence
+  summary order and corruption refusals alongside the preceding cache fix.
 
 ### C3. Validate evidence only when it will be served
 
@@ -894,8 +970,9 @@ All small, byte-identical, no spike:
   wide `types.rs` entry (above).
 
   When the query does not need Occurrences/References/Semantics:
-  - read the evidence fields as `IgnoredAny`/`RawValue` (still valid JSON,
-    no trailing content);
+  - potentially read evidence lazily while retaining the required strict
+    checks; `IgnoredAny`/`RawValue` alone does not reject unknown nested
+    fields, duplicate keys or invalid nested types;
   - skip evidence validation, but keep every record-level check.
 
   A widening rewrite must decode and validate before carrying evidence
@@ -904,9 +981,11 @@ All small, byte-identical, no spike:
   widening run. It removes evidence decode plus validation (the remainder
   after C1/C2 is mostly decode).
 - **Risk:**
-  - Policy. A wide entry serving a narrow request would get the same
-    assurance as a narrow entry gets today: `validate_evidence` already
-    returns early when there are no occurrences.
+  - Policy. An entry with no computed evidence differs from a wide entry
+    with discarded evidence. Skipping the latter's validation loses checks
+    on stored relationships and corruption even if occurrences are absent
+    from the final report. Record-level checks alone do not establish the
+    existing assurance.
   - But `docs/cache-design.md`'s tables say "miss" for any malformed field
     regardless of the request, so cells change from M to H for narrow
     requests.
@@ -919,7 +998,8 @@ All small, byte-identical, no spike:
      scratch `TMPDIR`.
   2. Time `hug symbols --count` warm against a `TMPDIR` holding only narrow
      entries.
-  3. If the gap is still above ~20%, pursue this.
+  3. Report the remaining gap for the author. Do not weaken validation on
+     the basis of a timing threshold; Open Questions recommends retaining it.
 
 ### C4. Shrink and speed up the stored entry
 
@@ -967,8 +1047,11 @@ All small, byte-identical, no spike:
 - **Spike:** **Yes.**
   1. Bench `serde_json::from_slice::<StoredEntry>` vs a stripped stored
      form (a), on the p90/p99 entries and on all entries of the monorepo.
-  2. Then `rmp-serde` with the same structs, to price (b).
-  3. Pursue whichever gives above 2× on warm `hug symbols --count`.
+  2. Start with compact JSON; binary storage is a separate author choice,
+     not a required second prototype.
+  3. Report decode time and reconstruction cost together. Preserve IDs,
+     public record shapes and corruption refusals. Do not adopt a format
+     solely because its raw decoder is faster.
 
 ### C5. Compute cheap capabilities on every miss
 
@@ -991,30 +1074,32 @@ All small, byte-identical, no spike:
 - **Decision:** yes (cache policy). Which capabilities are "cheap enough"
   to always compute.
 - **Spike:** **Yes.**
-  1. Measure the cold cost of `hug symbols --no-cache --count` vs
-     `hug --json symbols --no-cache` (Flags on vs off) over the monorepo.
-  2. If Flags adds under ~10% to a miss, make it unconditional.
-  3. Repeat for Containment (`classes`, `--tree`).
+  1. The existing timings already establish mixed-command reparsing. If
+     needed, take a quick sample of the same query with Flags off/on and
+     identical output suppression; count vs JSON confounds flags with
+     serialization and different selected records.
+  2. Recommend Flags only for cache-enabled misses, subject to the author's
+     choice. Keep `--no-cache` selective and project the stored superset
+     back to the requested passes and capabilities.
+  3. Do not extend the policy to all kinds or Containment without a separate
+     decision. File-wide test detection still runs after lookup, never in
+     the stored entry, so manifest changes remain visible.
 
-### C6. Written checksum instead of re-derived validation
+### C6. Retain consistency validation; checksum is not a replacement
 
-- **Change:**
-  - Write `blake3(entry bytes)` (or a keyed MAC with a per-user key outside
-    the cache dir) as a trailer.
-  - On read, check it and skip `validate_imports`, `validate_evidence` and
-    the semantic recompute.
-  - A middle ground: always check the checksum, and fully validate only in
-    debug/test builds or on a verification read after a write.
-- **Expected impact:** High in principle (validation becomes one BLAKE3
-  pass at GB/s), but small once C1/C2 make validation roughly linear.
-- **Risk:**
-  - Policy-level. A checksum proves "these bytes were written by this
-    tool", not "the entry is consistent", so a writer bug would be served.
-    Catching that is what today's reader is designed for.
-  - Every `cache_robustness` refusal reason collapses into one checksum
-    miss.
-- **Decision:** yes.
-- **Spike:** Not until C1–C3 are measured.
+- **Reader's note:** The earlier proposal treated a checksum as proof that
+  the tool wrote an entry. An unkeyed checksum only detects changes when
+  the checksum was not changed with them. A keyed authenticator can establish
+  possession of a key, but neither mechanism proves that the writer produced
+  internally consistent records. This matters because current cache readers
+  intentionally reject inconsistent, well-formed entries.
+- **Decision:** retain the documented validation contract while removing
+  repeated work. Do not add per-user secrets, trailers or production-only
+  validation bypasses in this feature. See Open Questions if the author wants
+  to change that policy after the algorithmic fixes.
+- **Expected impact:** no independent speedup promised. The quadratic fixes
+  address the measured validation cost directly.
+- **Spike:** No. The provided profile supports fixing those algorithms first.
 
 ### C7. Small validation costs
 
@@ -1022,9 +1107,11 @@ No spike for either:
 
 - `import_inventory` (`stored_evidence.rs:127-130`) clones every import
   into `StoredImport` and serializes to a `String` before BLAKE3, on every
-  read and write. Stream `serde_json::to_writer` into a `blake3::Hasher`
-  through a borrowed view. The bytes are identical; pin the digest with a
-  unit test.
+  read and write. Serialize a borrowed view and route hashing through
+  biscuit-hash. Its current reader API is not a serialization sink; if a
+  streaming sink is needed, add a narrow API there instead of introducing
+  direct BLAKE3 use here. Preserve byte order and digest, including optional
+  fields, and propagate serialization errors rather than hashing a prefix.
 - `LineStarts::new` is built twice per validated read (`:325`, `:433`).
   Build it once in `StoredEntry::validate`.
 
@@ -1034,9 +1121,12 @@ No spike for either:
   - `collect_files` maps every walked file through `file_identity`
     (`scanner.rs:150`), and `SourceFile::read_with_language` calls it again
     (`source_file.rs:76-78`): two `realpath` calls per file per run.
-  - Add a trusted-identity constructor for scanner output.
-  - For walked non-symlink entries, `canonical_root.join(relative)` is
-    already canonical.
+  - Add a crate-private identity-preserving path through source loading,
+    only for values already produced by `file_identity`. Keep ordinary
+    public constructors canonicalizing arbitrary callers' paths.
+  - Do not replace `file_identity` with `canonical_root.join(relative)`;
+    root canonicalization alone does not settle descendant spelling,
+    directory aliases, Windows junctions or case normalization.
 - **Expected impact:** Low, measured: `file_identity` is 1.6% of cold
   analysis and visible on warm runs.
 - **Risk:** Identity spelling feeds cache keys and IDs.
@@ -1052,8 +1142,11 @@ No spike for either:
   schema; this review's own isolated cache reached 786 MB after two
   commands.
 
-  Add a size/age sweep (oldest first beyond N MB, run occasionally after a
-  scan), or a `hug cache clear` command.
+  Prefer an explicit `hug cache clear` command over an automatic size/age
+  sweep; the choice and cache namespace belong in Open Questions. Deletion
+  must stay inside the selected cache namespace, avoid following symlinks,
+  and tolerate concurrent readers/writers. No recursive deletion inferred
+  from a source path and no cleanup pause on every scan.
 - **Expected impact:** Disk and page cache only. Lookups are direct paths.
 - **Spike:** No.
 
@@ -1077,9 +1170,12 @@ No spike for either:
   (name/kind sort, `--prelude`, module grouping) keep today's path.
 
   Separately, make the per-row path cheaper:
-  - skip `preprocess_markdown` for rows built only from `render::literal`
-    text, which carries no Markdown;
-  - skip the regex when there is no `\x1b` (`memchr`);
+  - consider a biscuit-terminal literal/structured-text path for rows that
+    contain no authored Markdown. Escaped strings from `render::literal`
+    are not automatically safe to send through a different parser; preserve
+    escaping, Unicode width, styles and OSC 8 links;
+  - skip escape stripping only when none of the forms its matcher handles
+    can occur, including C1 sequences; absence of ESC alone is not proof;
   - stop cloning the `Terminal` per line in `Renderer::term_at`.
 - **Expected impact:** **High for listings, measured.** Warm
   `hug symbols --plain` takes 6.3–8.7 s against 2.4 s for `--count`; the
@@ -1089,12 +1185,17 @@ No spike for either:
 - **Risk:**
   - Byte-identical output; section and "no symbols" decisions stay in
     `ListingStream`.
-  - Memory per window becomes rendered text instead of records, about the
-    same size.
-- **Spike:** **Yes, with L2.** Prototype worker-side rendering for the
-  default unit. Then `hyperfine 'hug symbols --plain > /dev/null'` warm,
-  with a `RAYON_NUM_THREADS` sweep, and byte-compare the output with the
-  `symbols.plain` golden and over the monorepo.
+  - Rendered text can be larger than records, and sorting/grouping may
+    retain both. Bound the number of outstanding file units and document
+    that a single large file can still exceed the typical memory budget.
+  - Capture terminal capabilities and width on the main thread once; workers
+    render through the existing components without probing the TTY. If the
+    renderer is not `Sync`, use immutable configuration or worker-local
+    instances rather than locking the entire rendering operation.
+- **Spike:** No separate discovery spike: the profile already locates the
+  rendering cost. Verify worker rendering with existing plain/export goldens
+  and affected styled-terminal tests. A quick sample of the existing warm
+  listing can confirm the gain independently of a pipeline redesign.
 
 ### L2. Replace the per-chunk barrier with a sliding window
 
@@ -1108,10 +1209,22 @@ No spike for either:
   with a bounded reorder window:
   - workers take indices from an atomic counter and send `(idx, T)`;
   - the main thread delivers from a `BTreeMap` as the head arrives;
-  - workers wait while `idx ≥ delivered + W`;
-  - `Break` sets a stop flag.
+  - admit an index only while `idx < delivered + W`, with `W` initially
+    equal to today's `4 × threads` bound;
+  - `Break` sets a stop flag and wakes waiting producers.
 
-  `flush_at_chunk_end` becomes "every W deliveries or when waiting".
+  A stop flag alone is insufficient. Bound both pending jobs and results;
+  waits and sends must observe cancellation or receiver closure. The delivery
+  loop must not share the sole worker needed to produce its head result.
+  A failed/panicking head job must become an error or propagated panic, never
+  a missing index that blocks forever. Wake and join scoped workers on all
+  exits; no background analysis survives the command. Already-started work
+  may finish, but no later window is admitted after a break.
+
+  `flush_at_chunk_end` becomes "every W deliveries or before waiting for an
+  unavailable head result", plus a final flush. A flush error follows the
+  same cancellation path. Preserve the declared bounded-work behavior for
+  closed pipes; test one worker, a slow head, empty inputs and failed writes.
 - **Expected impact:** **Medium–high if the symptom survives on a quiet
   host; currently unconfirmed.**
   - Cold monorepo scan used ~2.7× of 16 cores (63 s CPU in 23 s).
@@ -1128,7 +1241,9 @@ No spike for either:
     and tests that count work after EPIPE.
 - **Spike:** **Yes.**
   1. Log per-file analysis durations in a scratch build, and compute the
-     idle share per chunk = Σ(max − each) / (chunk × threads).
+     spread between each chunk's longest job and its other jobs. The old
+     formula divided a duration by a count and was not an idle fraction;
+     actual worker idle time also depends on job scheduling.
   2. Prototype the window.
   3. Run `hyperfine` with `RAYON_NUM_THREADS=1,4,8,16` on cold and warm
      `hug symbols --count`.
@@ -1136,33 +1251,36 @@ No spike for either:
 
 ### L3. A literal file argument must not walk the whole tree
 
-- **Change:** A positional input such as `src/lib.rs` is an ignore-override
-  glob (`scanner.rs:105-147`), so naming one file walks **the entire tree
-  under the root**, with `.gitignore` evaluation for every directory.
-  - Measured: a cached single file takes **70–103 ms in the repo, against
-    8 ms from outside it**; `hug --version` takes 6 ms.
-  - Add a fast path for an input that has no glob metacharacters and
-    contains a `/` (anchored, so it can match at most one path): test that
-    one path against the same override + gitignore + default-exclusion
-    matchers (`ignore::gitignore::Gitignore::matched_path_or_any_parents`)
-    without walking.
-  - A bare `lib.rs` matches at any depth by gitignore rules, so it keeps the
-    walk.
-- **Expected impact:** **High for single-file use**: editor integrations,
-  pre-commit hooks, agents calling `hug` per file. Roughly 10× per
-  invocation. Nothing for whole-repo scans.
-- **Risk:**
-  - Must reproduce the walker's decisions exactly: an override whitelist vs
-    an ignored parent directory, hidden files, fixture re-inclusion by an
-    explicit path, symlinks.
-  - Write the equivalence as a property test: fast path vs walk over the
-    fixture tree for every input form in `cli/tests/symbols/filters.rs`.
-- **Spike:** **Yes.**
-  1. `hyperfine -N 'hug symbols --count tree-hugger/lib/src/lib.rs'` from
-     the repo root, before and after.
-  2. Run the filter suite plus a generated matrix of (ignored dir,
-     fixture dir, hidden, symlink) × (anchored path, bare name) comparing
-     selected files.
+- **Current behavior:** tree-hugger's shared
+  [collect_selected_files](../../lib/src/scanner.rs) walks ordinary positional
+  patterns such as `src/lib.rs`. However, resolved `--file` references already
+  avoid the walk, as do existing positional files under a forced `--language`.
+  These explicit files bypass ignores and extension detection while still
+  honoring exclusions. Ordinary positional patterns have different semantics;
+  this optimization must not merge the two routes.
+- **Change:** recognize only literal positional patterns whose current override
+  semantics identify at most one root-relative path. Use the same discovery
+  rules without traversing unrelated directories. A slash alone is not enough
+  to prove this: escaping, negation, glob syntax, absolute paths, `..`, native
+  separators and multiple ordered patterns all matter. Fall back to the
+  existing walker whenever equivalence is uncertain. Bare `lib.rs` continues
+  to match at any depth; a directory argument still selects no files.
+- **Expected impact:** high for the measured positional single-file case
+  (70–103 ms in the repo versus 8 ms outside it). No benefit is promised for
+  already explicit files or whole-tree scans.
+- **Risk:** reproduce ancestor ignore precedence, nested ignore files, global
+  and repository excludes, fixture overrides, extension filtering and explicit
+  exclusions. The current walker includes hidden files (`hidden(false)`) and
+  excludes symlink entries; resolved explicit files can follow symlinks. Keep
+  those differences and native identity/deduplication. A single
+  `Gitignore::matched_path_or_any_parents` call is not a substitute for all
+  `WalkBuilder` rules.
+- **Decision:** preserve existing positional semantics; do not make positional
+  paths behave like `--file`. Open Questions offers that alternative only as
+  an intentional public change.
+- **Spike:** No. The measurements already establish the walk cost. Verify
+  selection against the existing walker with focused cases in the filter and
+  spelling suites, including multiple patterns and no-match results.
 
 ### L4. `hug refs`: run Occurrences only on the declaring file
 
@@ -1174,20 +1292,26 @@ No spike for either:
      the cache after any listing.
   2. Phase 2: Occurrences only on the one matching file.
 
-  Optionally prefilter phase 1 with `memchr::memmem` for the name's last
-  segment. That prefilter must respect smart case and per-language
-  `name_identity` keys, and cannot be used for `--id`.
+  Phase 1 must include every kind and scope, including locals: a default
+  listing's filtered records are insufficient. Drop the optional raw-text
+  prefilter from this feature; escaped/raw identifiers, normalization and
+  smart case make a byte search an unsafe negative test. Matching continues
+  through the existing library selector, including file-qualified names.
 - **Expected impact:** **High for `refs`.** The Occurrences pass and its
   cache payload drop from N files to 1, cold and warm. Today a `refs` run
   also widens every entry it touches, making later warm listings pay
   evidence decode (C3).
-- **Risk:** IDs from both phases must agree (both come from stable keys).
-  The JSON `completed_capabilities` must come from phase 2.
-- **Spike:** **Yes.**
-  1. `hyperfine 'hug refs SymbolCache'` (cold and warm) against
-     `hug symbols --count`.
-  2. Check entry sizes in the cache dir before and after a `refs` run, to
-     show the widening side effect.
+- **Risk:** decide ambiguity over all phase-1 matches before writing stdout.
+  Preserve no-match output, file errors, partial-result exit status and
+  deterministic ambiguity messages. For one match, reuse its `SourceFile`
+  snapshot in phase 2 so the selected ID and evidence describe the same
+  bytes; do not combine phase-1 records with a later read of changed content.
+  The JSON capabilities come from phase 2; verbose totals include both
+  phases accurately. Move the chosen index rather than cloning it per match.
+- **Spike:** No. File-local evidence already establishes the unnecessary
+  work. Verify zero occurrence analysis in nonmatching files, one declaring
+  file resolution, and unchanged reference reports for cold/warm, ambiguous,
+  local, missing and failed-file cases.
 
 ### L5. Batch oxlint and resolve it once
 
@@ -1196,19 +1320,29 @@ No spike for either:
   closure:
   - a new `OxlintAdapter`;
   - a `PATH` walk;
-  - `self.clone()`, which loses the cached version, so `oxlint --version`
-    is spawned every time;
+  - a clone made inside `run()` whose newly detected version is not retained
+    by the original adapter, so `oxlint --version` is spawned every time;
   - two config discoveries;
   - one `oxlint` spawn;
   - one `AdapterMetadata` pushed per file.
 
-  Change to: resolve tool and version once, then one `run()` over all JS/TS
-  files, in batches of a few hundred, mapped back by file.
+  Change to: retain tool/version discovery for one invocation, then batch
+  files sharing effective tool path, project root, language and configuration.
+  Keep the current project-root/config semantics; do not introduce per-package
+  configuration changes incidentally. Bound batches by command-line byte
+  length as well as file count for native Windows. Match returned filenames
+  to native selected-file identities, including files with no diagnostics;
+  reject unexpected paths instead of attaching them to an arbitrary file.
+  Bound temporary diagnostic storage and define when each batch becomes ready
+  for ordered streaming. External diagnostics remain outside the native cache.
 - **Expected impact:** **High for JS/TS lint**, estimated. Two process
   spawns per file at 10–50 ms each, serial: about 20–100 s per 1,000 TS
   files, while all rayon workers sit blocked.
 - **Risk:** `adapter_metadata` in `--json` changes from one entry per file
-  to one per run or batch.
+  to one per run or batch. Preserve rule IDs, severity policy, ignore handling,
+  missing-tool warnings and native fallback. Distinguish a normal findings
+  exit from process/JSON failure; never discard native results because an
+  adapter batch fails. Update docs and adapter tests for any approved shape.
 - **Decision:** yes, on that output shape.
 - **Spike:** **Yes.** On a TS-heavy package with oxlint installed, run
   `hyperfine 'hug lint --plain > /dev/null'`, count spawns (`execsnoop` /
@@ -1225,20 +1359,26 @@ No spike for either:
   - OSC 10/11 queries with up to a 1 s timeout on a TTY;
   - `find_git_root`, terminfo, image support.
 
-  `hug` uses only color depth, OSC 8, italics, underline, width and
-  `color_mode`. Changes:
-  - in `hug`, build unstyled/export terminals without detection;
-  - in biscuit-terminal, make `build()` detect only fields the builder did
-    not set, and make fonts/nerd-font/image support lazy.
+  Start with a narrowly defined biscuit-terminal constructor for deterministic
+  unstyled/export rendering, consumed by tree-hugger-cli's
+  [Renderer](../../cli/src/render.rs). Do not change the default builder's
+  detection contract in this feature. Explicitly provide every capability
+  that the relevant components read, including Unicode/glyph behavior and
+  width. Unstyled output disables OSC 8; Markdown/Prose exports deliberately
+  retain source links and need their current export configuration. Broader
+  lazy font/image discovery is a separate design choice in Open Questions.
 - **Expected impact:** Medium latency per invocation on a TTY, especially
   iTerm2 (estimated 100–300 ms) and terminals that never answer OSC
   queries (up to 1 s). Not visible in this review's non-TTY measurements.
 - **Risk:** Styled output must keep exactly the capabilities detected
   today.
 - **Spike:** **Yes, cheap.**
-  1. `hyperfine -N` under a pseudo-TTY (`script -q /dev/null hug symbols
-     <file>`) with `TERM_PROGRAM=iTerm.app` and `WezTerm`, before and after.
-  2. Count spawns with `execsnoop`.
+  Use one quick sample on the current macOS host because the draft names
+  iTerm2-specific subprocess cost. A pseudo-TTY with a forged terminal name
+  cannot answer OSC queries like the real terminal; it measures timeout
+  behavior only. Use the existing no-focus terminal harness for actual
+  styled behavior, and component tests for deterministic unstyled/export
+  output. No second OS or terminal performance sweep is required.
 
 ### L7. Memoize package roots in `listing_order`
 
@@ -1250,7 +1390,10 @@ No spike for either:
 - **Expected impact:** Low, measured: ~0.12 s on the monorepo's warm
   listing. Smaller than the review estimated, but serial and before the
   first byte.
-- **Risk:** None. It is a pure function within one run.
+- **Risk:** Package discovery reads manifests and is not a pure function.
+  Share a run-scoped snapshot/memo, keep deepest-package boundaries and
+  existing fallback behavior, and discard it between runs. Do not substitute
+  display names for native directory keys or silently change package grouping.
 - **Spike:** No.
 
 ### L8. One static rule registry; apply lint policy once
@@ -1264,10 +1407,14 @@ No spike for either:
   - `apply_lint_policy` runs twice per file (`summarize_file`, then
     `render_summary`).
 
-  Changes: `static LazyLock<RuleRegistry>`, `Cow` from `get_or_default`,
-  and one policy application.
+  Changes: share the built-in immutable registry and apply policy once after
+  native and external diagnostics are combined. Preserve public return types:
+  introduce an internal borrowing lookup rather than silently changing
+  `get_or_default` to return `Cow`. Direct library diagnostics still receive
+  metadata; CLI policy must not leak into persistent native entries.
 - **Expected impact:** Medium for cold lint on files with many diagnostics
-  (estimated 2–4 ms per 200 diagnostics), zero on warm hits.
+  (estimated 2–4 ms per 200 diagnostics). Registry construction during native
+  analysis disappears on warm hits, but CLI policy/lookup costs can remain.
 - **Risk:** Verify the double policy application is idempotent before
   removing the second pass.
 - **Spike:** Cheap: profile `hug lint --no-cache` on a file with many
@@ -1314,8 +1461,11 @@ No spike for either; fix and pin with tests:
 - **Risk:** The "No lint diagnostics in N files." message and the adapter
   warnings must keep their position. Lint's clean-file suppression must
   decide from `files.len() > 1` up front.
-- **Spike:** Small: `hug imports | head -1` (watch for the panic) and
-  `strace -c -e trace=write`.
+- **Spike:** No. Closed-pipe handling is a correctness requirement. Reuse
+  the existing pipe-test pattern and pin other write failures, all-clean
+  multi-file lint, single clean files, partial file errors and adapter-warning
+  placement. Coordinate batching with streaming: buffering one adapter batch
+  is allowed; buffering the entire report is not needed for text output.
 
 ### L12. `god-files`: read once, parse once
 
@@ -1326,9 +1476,17 @@ No spike for either; fix and pin with tests:
   - It runs three separate queries.
   - It never uses the `SymbolCache`.
 
-  Changes: pass line counts forward, borrow the source, skip any file whose
-  metadata length is under 400 bytes, and optionally get `symbol_records`
-  through the cache.
+  Changes: reject files smaller than the existing minimum physical-line
+  threshold using metadata as a conservative lower bound, then read candidates
+  once and count/parse from those same bytes. Pass counts and source together,
+  borrowing rather than copying; passing an old line count into a later read
+  can produce inconsistent metrics if the file changes. Keep final-line and
+  CRLF counting and the unparseable-source fallback.
+
+  Do not promise a zero-parse cache hit for this command: comment ranges and
+  maximum nesting still need the tree, and the symbol cache does not store
+  the complete god-file analysis. First remove duplicate reads/query work;
+  broader caching needs its own coverage and invalidation design.
 - **Expected impact:** Medium for repeated runs.
 - **Spike:** Maybe: `hyperfine 'hug god-files --plain'` plus a profile, to
   see whether parsing dominates.
@@ -1341,9 +1499,13 @@ No spike for either; fix and pin with tests:
   match the small changed set against the walker's matchers instead of
   walking (with the same care as L3).
 - **Expected impact:** Medium for `--changed`.
-- **Risk:** Safe, because `scanner.rs:150` guarantees identity form.
-- **Spike:** Cheap: `hyperfine 'hug symbols --changed --count'` at the repo
-  root.
+- **Risk:** Add an identity-only internal membership method for scanner
+  output; preserve `contains` for arbitrary spellings if other callers need
+  it. The changed-set ownership checks, nested-checkout rejection, conflict
+  errors and ordinary scanner intersection remain unchanged. Direct candidate
+  scanning is deferred, not implied by this lookup optimization.
+- **Spike:** No. Verify the existing changed-file and spelling suites; a
+  quick timing sample is optional.
 
 ### L14. Move JSON projection off the delivery thread; memoize `is_test_file`
 
@@ -1360,9 +1522,17 @@ No spike for either; fix and pin with tests:
     every ancestor of every Rust file, twice on the narrowed path
     (`query.rs:503`, `:594`), even on warm hits. Memoize nearest
     package-manifest root per directory within one scan, never
-    process-wide, since the doc says the answer can change between runs.
+    process-wide, since the doc says the answer can change between calls.
+    Keep fresh detection for ordinary library calls. A CLI scan may explicitly
+    use a run-scoped manifest snapshot, but must not place its answer in cached
+    records or carry it into a later run. Reused filtered results still need
+    the existing check for a changed test-file decision.
+- **Risk:** Keep native records until native-path writers (ctags, OSC 8 links)
+  finish; moving projection must not turn display paths back into filenames.
+  Enum-keyed stats must serialize the same key spellings and ordering.
 - **Expected impact:** Low–medium for warm `--json`/`--jsonl`/`--stats`.
-- **Spike:** With L1/L2.
+- **Spike:** No separate experiment; verify affected JSON/export/statistics
+  and manifest-change tests with the worker-rendering change.
 
 ### L15. Do not deep-clone reused prelude results
 
@@ -1372,6 +1542,10 @@ No spike for either; fix and pin with tests:
   target modules are resolved serially, and the prelude file is read twice
   (`prelude.rs:46-120`, `:223-266`).
 - **Expected impact:** Low–medium with `--prelude`.
+- **Risk:** Consume a reused entry only after its last consumer, including
+  synthetic export creation. Prelude reuse holds unfinished in-file records;
+  query projection must still undo earlier prefixes, selectors and file-wide
+  test flags. Keep reuse counts and one analysis per native file identity.
 - **Spike:** No.
 
 ---
@@ -1391,19 +1565,25 @@ No spike for either; fix and pin with tests:
   `CARGO_PROFILE_PROFILING_LTO=fat CARGO_PROFILE_PROFILING_CODEGEN_UNITS=1`
   and `hyperfine` cold and warm `hug symbols --count` against the baseline.
   Check the release tooling (`rust-devops` skill) before changing a
-  workspace profile.
+  workspace profile. Cargo profile settings apply across a workspace build;
+  a setting described as "for hug" must be scoped to its build invocation or
+  an explicitly approved profile, rather than silently changing every release.
 
 ### B2. A faster global allocator
 
 - **Change:** Warm decode creates millions of small `String`s, and
   `malloc`/`free` are visible in the warm profile. Try `mimalloc` as `hug`'s
-  `#[global_allocator]`. It works on macOS, Linux and Windows; add it to
-  `docs/dependencies.md`.
+  `#[global_allocator]` in the CLI binary only, subject to author approval
+  of the dependency. Preserve library callers' allocator choices and verify
+  supported-target compilation/behavior, including native Windows and WSL2.
+  Update the root and area dependency catalogs if adopted.
 - **Expected impact:** Medium for warm runs, estimated 10–20%. Smaller once
   C4 reduces allocations.
 - **Spike:** **Yes, cheap.** Add a two-line `#[global_allocator]` and run
-  `hyperfine` warm and cold `hug symbols --count` and `--plain`. Repeat on
-  Windows and Linux before adopting it.
+  one quick before/after sample on this host using the existing count/listing
+  workloads. Portability uses normal compile and functional checks, not
+  additional OS performance spikes. Revisit after storage changes reduce
+  allocations, because the remaining benefit may be smaller.
 
 ---
 
@@ -1411,40 +1591,172 @@ No spike for either; fix and pin with tests:
 
 ```mermaid
 flowchart TD
-    I["0. Spike infrastructure<br/>query_scaling + cache_hit benches,<br/>timing protocol, equivalence diff"] --> Q
-    Q["1. Quick, byte-identical wins<br/>C1, C2, P4, P6, P9, O5, L8, L9, L10, C7, L7"] --> N
-    N["2. Navigation<br/>P1 (parent index) + O1/O2/O3"] --> R
-    R["3. Rust duplicate work<br/>P2, P3"] --> X
-    X["4. Pipeline<br/>L1 + L2 (+ P11 to separate causes)"] --> D
-    D["5. Decisions, then build<br/>C5, C3, C4, P5, L3, L4, L5, O4"]
-    B["B1 / B2 (independent, any time)"] -.-> X
+    A["Confirm affected contracts and existing tests"] --> B["Remove measured duplicate and quadratic work"]
+    B --> C["Share parent and Rust declaration facts"]
+    C --> D["Move independent rendering onto workers"]
+    D --> E["Sample remaining scheduling costs on one host"]
+    E --> F["Author chooses cache and public-output policies"]
+    F --> G["Implement approved choices and update current docs"]
 ```
 
-1. **Infrastructure:** without the scaling and cache-hit benches, no
-   finding here can be verified.
-2. **Quick wins.** C1 alone fixes the "warm is slower than cold" case.
-3. **P1, the parent index:** the largest measured cost; it also makes
-   P2/P3/O2 cheaper, so re-measure them afterward.
-4. **P2/P3:** Rust is most of this monorepo, and they account for about 20%
-   of cold analysis between them.
-5. **L1/L2:** turns per-file savings into wall-clock savings. Today the
-   warm path barely uses the cores.
-6. **Decision-gated changes:** C5 (the 25 s mixed-command case) and C4 (the
-   decode-bound warm path) have the largest measured payoff of the group.
+1. Remove quadratic cache validation and repeated locals queries first;
+   the supplied evidence already supports them. Include focused metadata,
+   diagnostics and memoization fixes where their consumers are understood.
+2. Share parent navigation and Rust declaration facts next. Their inclusive
+   profile shares overlap, so do not add the estimated savings together.
+3. Move per-file rendering independently of scheduling changes. Only prototype
+   a sliding window or different counters if the remaining scheduling symptom
+   appears without heavy contention.
+4. Resolve policy choices below before planning cache coverage/storage changes,
+   candidate changes or adapter output changes. Build/allocator experiments are
+   optional and should not delay the measured algorithmic wins.
 
-## Decisions needed from the author
+## Open Questions
 
-| Finding | Question |
-|---|---|
-| C5 | Which capabilities does every miss compute (Flags? every kind? Containment)? |
-| C3 | May a wide entry serve a narrow request with record-level validation only? |
-| C4 | Can the stored entry diverge from the public record shape (and, later, leave JSON)? |
-| C6 | Checksum/MAC instead of re-derived validation, or keep re-derivation? |
-| P5 | Add a scope-coverage axis to the cache entry? |
-| P15 | Keep `declaration_text` as stored text, or a range / a cut form? |
-| O4 | Keep "every same-named declaration" as NameOnly candidates? |
-| L5 | One `adapter_metadata` per oxlint run/batch instead of per file? |
-| L3 | Is anchored literal-path equivalence with the walker an acceptable contract to pin? |
+These are author decisions, not implied approvals. Finding IDs are locators in
+[Summary of findings](#summary-of-findings); each question below names the
+behavior being decided. Recommendations preserve existing contracts unless a
+specific public change is justified.
+
+### Which capabilities should cache misses compute in advance? (C5)
+
+The cache in tree-hugger can compute Flags while the tree is already available,
+avoiding a later parse when a listing is followed by JSON output.
+
+- **Flags only — recommended.** Pros: targets the measured mixed-command
+  reparsing while preserving selective kinds. Cons: adds Flags work and stored
+  data to misses that never need them. Recommend a quick same-query sample to
+  check that cost; always project the result to the caller's requested work.
+- **Flags, every kind and Containment.** Pros: more later commands hit directly.
+  Cons: adds unrelated cold work and larger entries, undermining selectivity.
+- **Requested capabilities only.** Pros: lowest miss cost, existing policy.
+  Cons: retains the measured second-command parse. Keep this if Flags cost
+  outweighs the intended mixed-command benefit.
+
+### May narrow requests skip validation of stored evidence? (C3, C6)
+
+[SymbolCache](../../lib/src/cache/symbol_cache.rs) in tree-hugger rejects damaged
+entries before serving them. Faster narrow requests must not silently weaken
+that guarantee.
+
+- **Keep validation and optimize its algorithms — recommended.** Pros:
+  preserves documented corruption refusal and avoids secret/key management.
+  Cons: wide entries still require some evidence work. The existing profile
+  already identifies quadratic work to remove first.
+- **Validate only projected fields.** Pros: may reduce narrow-hit cost further.
+  Cons: changes corruption refusal, including nested shape checks and stored
+  edge/geometry consistency; requires an explicit request-dependent contract,
+  full validation before reuse/rewrite, and updated robustness tables.
+- **Authenticate or checksum entries instead of consistency validation.** Pros:
+  quick byte checking. Cons: unkeyed checksums do not authenticate writers,
+  keyed checks add key lifecycle costs, and neither catches writer bugs. Do not
+  choose this solely to address the measured quadratic scans.
+
+### Should private cache storage differ from public records? (C4, P15)
+
+Public declaration text is the declaration up to its body, or all text when
+there is no body. Shortening initializers would change library and complete
+JSON results, whereas reconstructing exact text from private ranges need not.
+
+- **Compact private JSON, exact public reconstruction — recommended.** Pros:
+  removes repeated paths/provenance and can store exact text ranges without
+  changing public output. Cons: adds reconstruction and bounds validation;
+  requires private format versioning and revised corruption tests. Start here
+  because the measured decode/size costs already justify addressing redundancy.
+- **Private binary format.** Pros: may reduce size/decode further. Cons: needs
+  verified Serde representation support, strict duplicate/trailing-content
+  checks and adapted corruption tooling; speed is not yet established.
+- **Change public fields to ranges or shortened text.** Pros: reduces public
+  allocation too. Cons: breaks record semantics and source-independent callers;
+  needs explicit schema/API documentation and consumer changes. The measured
+  declaration-text payload is only 4% of cache size, so this is not the first
+  recommendation.
+
+### Should metadata coverage also depend on scope? (P5)
+
+Most default symbol listings omit locals, but local identity and binding facts
+can still be needed to resolve the retained declarations.
+
+- **Keep scope-independent stored metadata for now — recommended.** Pros:
+  avoids a new coverage dimension while simpler measured fixes land. Cons:
+  retains local metadata cost. Prefer this until a small prototype shows that
+  the remaining cost warrants the complexity.
+- **Coverage over kind-and-scope pairs.** Pros: can skip full local metadata
+  while widening later requests correctly. Cons: changes storage, union and
+  projection logic; independent kind/scope sets overclaim coverage. Preserve
+  light identities and completion/binding facts even for omitted metadata.
+
+### How should uncertain reference candidates be represented? (O4)
+
+The reference contract lists all same-named declarations in declaration order;
+these candidates are suggestions, not proven bindings.
+
+- **Preserve public lists; share lookup/storage internally — recommended.**
+  Pros: reduces repeated sorting and private duplication without losing useful
+  candidates. Cons: full public JSON still has its inherent size. Recommend
+  this because scope filtering could imply precision unsupported by the language.
+- **Cap or scope-filter candidate lists.** Pros: bounds public size. Cons:
+  loses suggestions and changes `refs`; needs explicit truncation/coverage
+  semantics so an absent candidate is not mistaken for an absent reference.
+- **Expose a candidate table with references to it.** Pros: removes output
+  duplication. Cons: changes the public schema and burdens consumers with a
+  lookup; needs a clearly documented replacement shape.
+
+### How should batched external-linter metadata be reported? (L5)
+
+One external invocation serves several files, so its duration and exit status
+cannot truthfully describe independent per-file invocations.
+
+- **One metadata record per actual batch — recommended.** Pros: truthful
+  process-level reporting and fewer records. Cons: intentional JSON shape/count
+  change; document which files each batch covers and retain deterministic order.
+- **Retain per-file records.** Pros: keeps the current array cardinality. Cons:
+  repeated duration/status can be misread as separate runs; define shared-run
+  attribution rather than inventing per-file timings.
+
+### Should positional literal paths become explicit selectors? (L3)
+
+A positional path currently obeys scanner pattern rules; a resolved `--file`
+reference already provides direct file selection with different ignore rules.
+
+- **Preserve positional semantics with a conservative fast path — recommended.**
+  Pros: addresses measured traversal cost without changing selection. Cons:
+  uncertain patterns keep walking. Falling back is preferable to silently
+  including ignored or symlinked files.
+- **Make existing literal positional files explicit.** Pros: simpler and matches
+  the direct `--file` route. Cons: intentionally changes ignores, fixtures,
+  extension handling, symlinks and multi-pattern selection; requires docs and
+  acceptance tests for the new behavior.
+
+### How broad should terminal-discovery changes be? (L6)
+
+- **Deterministic unstyled/export constructor only — recommended.** Pros:
+  bypasses irrelevant probing while preserving default builder behavior for
+  other packages. Cons: adds a small shared API and explicit capability defaults.
+- **Redesign builder detection and make fields lazy.** Pros: could benefit more
+  callers. Cons: public fields and consumers may depend on eager values;
+  requires a separate biscuit-terminal design and broader functional review.
+
+### How should obsolete cache entries be removed? (C9)
+
+- **Explicit cache-clear command — recommended.** Pros: user-controlled,
+  predictable scan latency and no eviction races during ordinary commands.
+  Cons: does not reclaim space automatically. Define the namespace and report
+  partial deletion errors before implementation.
+- **Automatic bounded age/size eviction.** Pros: controls disk growth without
+  user action. Cons: needs retention defaults, frequency, coordination and
+  deletion safeguards; can add scan latency. Those policy defaults remain
+  undecided and should not be guessed in a performance fix.
+
+### Should hug change its release profile or allocator? (B1, B2)
+
+- **Defer until allocation and algorithm fixes land — recommended.** Pros:
+  avoids workspace-wide build cost and a new dependency before the remaining
+  benefit is known. Cons: delays potential additional CPU savings.
+- **Adopt after the existing one-host samples.** Pros: relatively small CLI
+  implementation. Cons: needs supported-target functional evidence, explicit
+  build scoping, dependency docs and acceptance of release-build costs. If
+  the author wants OS-specific timing, schedule that separately.
 
 ## Open observations
 
@@ -1459,7 +1771,9 @@ flowchart TD
   (`package/tree_package.rs:152-163`) tests `.git` with `is_dir()`, but in
   a linked worktree `.git` is a file. In worktrees, the display root,
   terminal anchors and package-section split may therefore differ from the
-  main checkout. Track it as a fix.
+  main checkout. Track separately; a repair must use sniff repository discovery
+  rather than adding another `.git` heuristic. This is not an incidental
+  output change authorized by the package-root memoization finding.
 - **Possible bug (correctness, not performance).** `hug imports` / `hug
   lint` panic on a closed pipe (L11). Track it as a fix.
 
@@ -1467,7 +1781,8 @@ flowchart TD
 
 - The pass fingerprint is computed once per `(language, grammar)` per
   process.
-- The source is read and hashed once per file.
+- The declaration-analysis path reads and hashes source once per file;
+  the god-file and prelude paths have the exceptions identified above.
 - A warm `Hit` neither re-parses nor rewrites the entry.
 - Cache reads use `fs::read` + `from_slice`, not an unbuffered reader;
   writes are compact JSON without fsync, sharded 256 ways.
