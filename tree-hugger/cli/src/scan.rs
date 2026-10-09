@@ -67,7 +67,8 @@ impl Analyzer {
         self.cache.is_some()
     }
 
-    /// Runs `query` over `file`. The file is read and hashed once; it is
+    /// Runs `query` over `file`, a file identity (see [`read`](Self::read)).
+    /// The file is read and hashed once; it is
     /// parsed only when the cache cannot answer. A cache that cannot be read
     /// or written never fails the analysis.
     pub(crate) fn analyze(&self, file: &Path, query: &SymbolQuery) -> Result<Analyzed, TreeHuggerError> {
@@ -76,8 +77,11 @@ impl Analyzer {
 
     /// Reads `file` as [`analyze`](Self::analyze) does, for a caller that
     /// analyzes the same bytes more than once.
+    ///
+    /// `file` must be a [`file_identity`](tree_hugger::file_identity), as
+    /// scanner output is: it is used verbatim, not resolved again.
     pub(crate) fn read(&self, file: &Path) -> Result<SourceFile, TreeHuggerError> {
-        Ok(SourceFile::read_with_language(file, self.language)?.experimental_semantics(self.experimental_semantics))
+        Ok(SourceFile::read_identified(file, self.language)?.experimental_semantics(self.experimental_semantics))
     }
 
     /// [`analyze`](Self::analyze) over a source already [`read`](Self::read).

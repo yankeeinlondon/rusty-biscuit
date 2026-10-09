@@ -1035,7 +1035,8 @@ fn main() -> Result<(), TreeHuggerError> {
     // scanner's `NoSourceFiles` — is an empty report, not an error; every
     // other scanner error propagates. The intersection keeps the scanner's
     // order and drops files outside the changed set (or outside the
-    // repository) without a second discovery.
+    // repository) without a second discovery: both sides are already file
+    // identities, so membership resolves no path.
     let selected = collect_selected_files(
         &pkg_root,
         &file_filters,
@@ -1046,7 +1047,7 @@ fn main() -> Result<(), TreeHuggerError> {
     let files = match (&changed_set, selected) {
         (Some(changed), Ok(files)) => files
             .into_iter()
-            .filter(|file| changed.contains(file))
+            .filter(|file| changed.contains_identity(file))
             .collect(),
         (Some(_), Err(TreeHuggerError::NoSourceFiles { .. })) => Vec::new(),
         (_, result) => result?,

@@ -54,10 +54,12 @@ pub(crate) struct ChangedFiles {
 }
 
 impl ChangedFiles {
-    /// Whether `file` — in any spelling — is a changed file. Deleted paths
-    /// were dropped while resolving, so an absent path never matches.
-    pub(crate) fn contains(&self, file: &Path) -> bool {
-        self.identities.contains(&file_identity(file))
+    /// Whether `identity`, a [`file_identity`] such as every scanned file
+    /// is, is a changed file. Other spellings of a changed file do not
+    /// match. Deleted paths were dropped while resolving, so an absent path
+    /// never matches.
+    pub(crate) fn contains_identity(&self, identity: &Path) -> bool {
+        self.identities.contains(identity)
     }
 }
 
@@ -240,7 +242,7 @@ mod tests {
         let changed = ChangedFiles {
             identities: HashSet::new(),
         };
-        assert!(!changed.contains(Path::new("src/lib.rs")));
+        assert!(!changed.contains_identity(Path::new("src/lib.rs")));
     }
 
     /// Every typed sniff failure keeps the request's spelling in the
