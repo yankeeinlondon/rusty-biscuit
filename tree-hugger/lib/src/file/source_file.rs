@@ -75,6 +75,28 @@ impl SourceFile {
         Self::from_read(supplied, language, source)
     }
 
+    /// As [`read_with_language`](Self::read_with_language), for a path that
+    /// is already its own [`file_identity`], such as every path
+    /// [`collect_files`](crate::scanner::collect_files) returns. It becomes
+    /// [`path`](Self::path) verbatim, without resolving it a second time.
+    ///
+    /// Any other spelling would key records, IDs and cache entries under
+    /// that spelling; give arbitrary paths to `read_with_language`.
+    ///
+    /// ## Errors
+    ///
+    /// As [`read_with_language`](Self::read_with_language).
+    pub fn read_identified(
+        identity: &Path,
+        language: Option<ProgrammingLanguage>,
+    ) -> Result<Self, TreeHuggerError> {
+        let source = std::fs::read_to_string(identity).map_err(|source| TreeHuggerError::Io {
+            path: identity.to_path_buf(),
+            source,
+        })?;
+        Self::from_identity(identity.to_path_buf(), identity, language, source)
+    }
+
     /// The file [`read_with_language`](Self::read_with_language) builds from
     /// `source`, text the caller already read from `supplied`.
     pub(crate) fn from_read(
@@ -82,10 +104,20 @@ impl SourceFile {
         language: Option<ProgrammingLanguage>,
         source: String,
     ) -> Result<Self, TreeHuggerError> {
-        let forced_language = language.is_some();
         // Resolved after the read so a missing file keeps its I/O error; the
         // bytes already read are the ones hashed and parsed.
-        let path = file_identity(supplied);
+        Self::from_identity(file_identity(supplied), supplied, language, source)
+    }
+
+    /// The file whose identity `path` is, from `source` already read through
+    /// `supplied`; errors name `supplied`.
+    pub(crate) fn from_identity(
+        path: PathBuf,
+        supplied: &Path,
+        language: Option<ProgrammingLanguage>,
+        source: String,
+    ) -> Result<Self, TreeHuggerError> {
+        let forced_language = language.is_some();
         let language = match language {
             Some(language) => language,
             None => ProgrammingLanguage::from_path(&path).ok_or_else(|| {

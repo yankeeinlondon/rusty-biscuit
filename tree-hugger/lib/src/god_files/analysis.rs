@@ -131,8 +131,8 @@ fn count_physical_lines(bytes: &[u8]) -> usize {
     }
 }
 
-/// Analyze a single candidate file, returning `None` if it drops below the
-/// moderate threshold.
+/// Analyze a single candidate file (already a file identity), returning
+/// `None` if it drops below the moderate threshold.
 fn analyze_single_file(path: &Path, root: &Path) -> Option<GodAnalysis> {
     // One read: the line count and the parse see the same bytes.
     let bytes = fs::read(path).ok()?;
@@ -140,7 +140,7 @@ fn analyze_single_file(path: &Path, root: &Path) -> Option<GodAnalysis> {
     let language = ProgrammingLanguage::from_path(path)?;
     let parsed = String::from_utf8(bytes)
         .ok()
-        .and_then(|text| SourceFile::from_read(path, None, text).ok())
+        .and_then(|text| SourceFile::from_identity(path.to_path_buf(), path, None, text).ok())
         .map(SourceFile::parse);
 
     let (effective_sloc, parsed_data) = match parsed {

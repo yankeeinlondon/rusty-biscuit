@@ -148,6 +148,15 @@ Errors still use the name you gave: a missing or unreadable file is
 and an undetectable language names it as well. The file's bytes are read
 once, through that spelling; resolving the identity reads no file contents.
 
+Every path the scanner (`collect_files`) returns is already an identity, so
+`hug` reads scanned files with `SourceFile::read_identified`, which keeps
+the path it is given instead of resolving it a second time. That
+constructor is only for identities: any other spelling would become the
+file's path, key and IDs. Library callers with arbitrary paths use
+`SourceFile::read` or `read_with_language`. Likewise, `--changed` compares
+scanned files with its changed set by identity, without resolving them
+again.
+
 **IDs follow the identity.** A record's stable key and ID are built from the
 path as analyzed, which is the identity, and the declaration's in-file
 qualified name, so one file in one checkout has the same IDs whichever

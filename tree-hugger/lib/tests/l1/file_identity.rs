@@ -175,6 +175,64 @@ fn the_scanner_lists_each_file_once_under_its_identity() {
     assert_eq!(files, [file_identity(&file)]);
 }
 
+/// Scanner output is already an identity, so `read_identified` analyzes it
+/// exactly as `read` does, whether the walk reached the file by a literal
+/// path or a glob and however the root is spelled. A spelling that is not
+/// an identity is kept verbatim (the caller's contract), and errors name
+/// the path given.
+#[test]
+fn scanner_output_reads_identified_as_read_does() {
+    let (dir, file) = tree();
+    let cache = SymbolCache::new(PersistentCache::open(dir.path().join("cache"), true));
+    let identity = file_identity(&file);
+    let roots = [dir.path().to_path_buf(), file_identity(dir.path())];
+    for root in &roots {
+        for input in ["src/alpha.rs", "src/*.rs"] {
+            let label = format!("{input} under {}", root.display());
+            let files = collect_files(root, &[input.to_string()], &[], None).expect("collect");
+            assert_eq!(files, std::slice::from_ref(&identity), "{label}");
+            let identified = SourceFile::read_identified(&files[0], None).expect("read_identified");
+            let read = SourceFile::read(&file).expect("read");
+            assert_eq!(identified.path(), read.path(), "{label}: path");
+            assert_eq!(identified.language(), read.language(), "{label}: language");
+            assert_eq!(identified.forced_language(), None, "{label}: detected language");
+            assert_eq!(identified.hash(), read.hash(), "{label}: hash");
+            assert_eq!(cache.key(&identified).expect("key"), cache.key(&read).expect("key"), "{label}: cache key");
+            assert_eq!(
+                serde_json::to_value(identified.query(&SymbolQuery::new()).expect("query").index).expect("index"),
+                serde_json::to_value(read.query(&SymbolQuery::new()).expect("query").index).expect("index"),
+                "{label}: records and IDs"
+            );
+        }
+    }
+
+    let forced = SourceFile::read_identified(&identity, Some(ProgrammingLanguage::Rust)).expect("forced");
+    assert_eq!(forced.forced_language(), Some(ProgrammingLanguage::Rust));
+
+    let missing = identity.with_file_name("missing.rs");
+    match SourceFile::read_identified(&missing, None) {
+        Err(TreeHuggerError::Io { path, source }) => {
+            assert_eq!(path, missing);
+            assert_eq!(source.kind(), std::io::ErrorKind::NotFound);
+        }
+        other => panic!("expected an I/O error, got {other:?}"),
+    }
+    let unsupported = identity.with_file_name("notes.unknown");
+    std::fs::write(&unsupported, "text").expect("write");
+    match SourceFile::read_identified(&unsupported, None) {
+        Err(TreeHuggerError::UnsupportedLanguage { path }) => assert_eq!(path, unsupported),
+        other => panic!("expected UnsupportedLanguage, got {other:?}"),
+    }
+
+    #[cfg(unix)]
+    {
+        let link = file_identity(dir.path()).join("alpha_link.rs");
+        std::os::unix::fs::symlink(&file, &link).expect("symlink");
+        assert_eq!(SourceFile::read_identified(&link, None).expect("read").path(), link, "used verbatim");
+        assert_eq!(SourceFile::read(&link).expect("read").path(), identity, "read resolves it");
+    }
+}
+
 /// God-files reports a candidate relative to its root under any spelling of
 /// the root.
 #[test]
