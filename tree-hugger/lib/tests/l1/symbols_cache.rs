@@ -3822,6 +3822,33 @@ fn type_only_import_controls_hold_through_six_cache_stages() {
     }
 }
 
+/// An import whose only spelling is an encoded token (a TS/JS Unicode
+/// escape, a Rust raw identifier) still witnesses its unbound uses, so the
+/// warm read is a hit, served as computed.
+#[test]
+fn encoded_binding_witnesses_keep_unbound_uses_served() {
+    for (file, source, name) in [
+        ("escaped.ts", "import { \\u0078 } from \"m\";\nfunction f(){ return x; }\n", "x"),
+        ("escaped_braced.js", "import { \\u{79} } from \"m\";\nfunction f(){ return y; }\n", "y"),
+        ("raw.rs", "use m::r#match_;\nfn f() { match_(); }\n", "match_"),
+    ] {
+        let dir = TempDir::new().expect("temp");
+        let path = dir.path().join(file);
+        std::fs::write(&path, source).expect("source");
+        let cache = cache_in(&dir);
+        let query = SymbolQuery::new().capabilities([Capability::Occurrences]);
+        let (lookup, control, _) = cached(&cache, read(&path), &query);
+        assert_eq!(lookup, CacheLookup::Miss(CacheMiss::Absent), "{file}");
+        let unbound = control["index"]["occurrences"].as_array().expect("occurrences").iter()
+            .find(|occurrence| occurrence["target"]["name"] == name).expect("a use of the local binding");
+        assert_eq!(unbound["confidence"], "Scoped", "{file}");
+        assert!(unbound["target"]["id"].is_null(), "{file}");
+        let (lookup, served, _) = cached(&cache, read(&path), &query);
+        assert_eq!(lookup, CacheLookup::Hit, "{file}");
+        assert_eq!(served, control, "{file}");
+    }
+}
+
 /// An unrelated encoded binding cannot excuse a lost ID on a retained target.
 #[test]
 fn encoded_binding_sources_preserve_lost_id_rejection() {

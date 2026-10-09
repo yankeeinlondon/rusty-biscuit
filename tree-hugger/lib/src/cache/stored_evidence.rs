@@ -20,6 +20,7 @@
 //! verifies the span against imports and reconstructs dependency summaries
 //! from these particular selections, without repeating lexical analysis.
 
+use std::borrow::Cow;
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 use serde::de::Deserializer;
@@ -96,7 +97,7 @@ struct StoredPoint {
 /// Import facts use the same strict geometry reader as occurrences. Nullable
 /// metadata accepts genuinely absent/null controls; producer and source
 /// inventory checks reject loss of meaningful facts before any capability is served.
-#[derive(Serialize, Deserialize)]
+#[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct StoredImport {
     name: String,
@@ -107,7 +108,7 @@ struct StoredImport {
     symbol: StoredImportRef,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct StoredImportRef {
     id: Option<SymbolId>,
@@ -116,8 +117,29 @@ struct StoredImportRef {
     source_span: Option<StoredSpan>,
 }
 
+/// The written form of a [`StoredImport`], borrowed from its record. Its
+/// fields and their order are the stored form's, so the entry's bytes and
+/// the import inventory's digest do not depend on which one serialized it.
+#[derive(Serialize)]
+struct StoredImportView<'a> {
+    name: &'a str,
+    alias: Option<&'a str>,
+    source: Option<&'a str>,
+    span: StoredSpan,
+    statement_span: Option<StoredSpan>,
+    symbol: StoredImportRefView<'a>,
+}
+
+#[derive(Serialize)]
+struct StoredImportRefView<'a> {
+    id: Option<&'a SymbolId>,
+    name: &'a str,
+    qualified_name: Option<&'a str>,
+    source_span: Option<StoredSpan>,
+}
+
 pub(super) fn write_imports<S: Serializer>(imports: &&[ImportRecord], serializer: S) -> Result<S::Ok, S::Error> {
-    serializer.collect_seq(imports.iter().map(StoredImport::from))
+    serializer.collect_seq(imports.iter().map(StoredImportView::from))
 }
 
 /// A compact witness of the complete grammar-produced import inventory. All
@@ -125,7 +147,7 @@ pub(super) fn write_imports<S: Serializer>(imports: &&[ImportRecord], serializer
 /// This detects edits to stored facts without lexing source a second time;
 /// it is a consistency witness, not authentication of an untrusted writer.
 pub(super) fn import_inventory(imports: &[ImportRecord]) -> String {
-    let canonical: Vec<_> = imports.iter().map(StoredImport::from).collect();
+    let canonical: Vec<_> = imports.iter().map(StoredImportView::from).collect();
     biscuit_hash::blake3_hash(&serde_json::to_string(&canonical).expect("import records serialize"))
 }
 
@@ -133,15 +155,15 @@ pub(super) fn read_imports<'de, D: Deserializer<'de>>(deserializer: D) -> Result
     Ok(Vec::<StoredImport>::deserialize(deserializer)?.into_iter().map(ImportRecord::from).collect())
 }
 
-impl From<&ImportRecord> for StoredImport {
-    fn from(import: &ImportRecord) -> Self {
+impl<'a> From<&'a ImportRecord> for StoredImportView<'a> {
+    fn from(import: &'a ImportRecord) -> Self {
         Self {
-            name: import.name.clone(), alias: import.alias.clone(), source: import.source.clone(),
+            name: &import.name, alias: import.alias.as_deref(), source: import.source.as_deref(),
             span: StoredSpan::from(&import.span),
             statement_span: import.statement_span.as_ref().map(StoredSpan::from),
-            symbol: StoredImportRef {
-                id: import.symbol.id.clone(), name: import.symbol.name.clone(),
-                qualified_name: import.symbol.qualified_name.clone(),
+            symbol: StoredImportRefView {
+                id: import.symbol.id.as_ref(), name: &import.symbol.name,
+                qualified_name: import.symbol.qualified_name.as_deref(),
                 source_span: import.symbol.source_span.as_ref().map(StoredSpan::from),
             },
         }
@@ -314,7 +336,13 @@ impl From<StoredSpan> for TextSpan {
 /// All import producers use external, source-less symbol references and
 /// unique name captures in source order. These invariants do not depend on
 /// retaining occurrences or the kind of any selected declaration.
-pub(super) fn validate_imports(source: &str, language: ProgrammingLanguage, imports: &[ImportRecord], inventory: &str) -> Result<(), &'static str> {
+pub(super) fn validate_imports(
+    lines: &LineStarts<'_>,
+    language: ProgrammingLanguage,
+    imports: &[ImportRecord],
+    inventory: &str,
+) -> Result<(), &'static str> {
+    let source = lines.source;
     use ProgrammingLanguage as L;
     if matches!(language, L::C | L::Cpp | L::Lua | L::Perl | L::Bash | L::Zsh) && !imports.is_empty() {
         return Err("imports in a language whose import query has no captures");
@@ -322,7 +350,6 @@ pub(super) fn validate_imports(source: &str, language: ProgrammingLanguage, impo
     if inventory != import_inventory(imports) {
         return Err("imports disagree with their complete producer inventory");
     }
-    let lines = LineStarts::new(source);
     let mut previous = None;
     for import in imports {
         let position = (import.span.start_byte, import.span.end_byte);
@@ -356,7 +383,8 @@ pub(super) fn validate_imports(source: &str, language: ProgrammingLanguage, impo
 
 /// What a read entry stores that its reference evidence must agree with.
 pub(super) struct StoredEvidence<'a> {
-    pub(super) source: &'a str,
+    /// The entry's source, with its line starts.
+    pub(super) lines: &'a LineStarts<'a>,
     pub(super) language: ProgrammingLanguage,
     pub(super) capabilities: &'a BTreeSet<Capability>,
     /// The kinds the entry covers (`None`: every kind). Its records are
@@ -389,7 +417,7 @@ pub(super) struct StoredEvidence<'a> {
 /// nullable metadata, and exact statement boundaries.
 pub(super) fn validate_evidence(stored: &StoredEvidence<'_>) -> Result<(), &'static str> {
     let StoredEvidence {
-        source,
+        lines,
         language,
         capabilities,
         covered_kinds,
@@ -400,6 +428,7 @@ pub(super) fn validate_evidence(stored: &StoredEvidence<'_>) -> Result<(), &'sta
         records,
         imports,
     } = *stored;
+    let source = lines.source;
     if occurrences.len() != path_starts.len() || occurrences.len() != import_starts.len() {
         return Err("occurrence provenance lists are not aligned");
     }
@@ -430,7 +459,6 @@ pub(super) fn validate_evidence(stored: &StoredEvidence<'_>) -> Result<(), &'sta
     // Only Rust and TS/JS resolve names; every other language's evidence is
     // name-only and all of its regions are limited by that.
     let resolves = LanguageRules::for_language(language).is_some();
-    let lines = LineStarts::new(source);
     // A reference to a stored record repeats its name and qualified name.
     let by_id: HashMap<&SymbolId, &SymbolRecord> = records.iter().map(|record| (&record.id, record)).collect();
     let retained = |reference: &SymbolRef| reference.id.as_ref().and_then(|id| by_id.get(id)).copied();
@@ -619,7 +647,17 @@ pub(super) fn validate_evidence(stored: &StoredEvidence<'_>) -> Result<(), &'sta
         if occurrence.confidence == Confidence::Scoped {
             let owner = occurrence.owner.as_ref().and_then(|owner| owner.id.as_ref());
             if let Some(owner) = owner {
-                scoped_by_owner.entry(owner).or_default().push((position, occurrence.target.id.as_ref(), name));
+                let own = scoped_by_owner.entry(owner).or_default();
+                match &occurrence.target.id {
+                    Some(target) => {
+                        own.first_by_target.entry(target).or_insert(position);
+                    }
+                    None => own
+                        .unbound_by_name
+                        .entry(crate::analysis::name_identity::key(language, name))
+                        .or_default()
+                        .push(position),
+                }
                 if let Some(import) = occurrence.import_span.as_ref().and_then(|span| imports_by_span.get(&(span.start_byte, span.end_byte)))
                     && seen_dependencies.entry(owner).or_default().insert((&import.name, import.symbol.qualified_name.as_deref()))
                 {
@@ -634,12 +672,12 @@ pub(super) fn validate_evidence(stored: &StoredEvidence<'_>) -> Result<(), &'sta
             match &occurrence.target.id {
                 Some(target) => {
                     if let Some(owner) = owner {
-                        scoped.insert((owner, Some(target), name, occurrence.kind));
+                        scoped.insert((owner, Some(target), crate::analysis::name_identity::key(language, name), occurrence.kind));
                     }
                 }
                 None => {
                     if let Some(owner) = owner {
-                        scoped.insert((owner, None, name, occurrence.kind));
+                        scoped.insert((owner, None, crate::analysis::name_identity::key(language, name), occurrence.kind));
                     }
                     unbound.push(occurrence);
                 }
@@ -654,10 +692,13 @@ pub(super) fn validate_evidence(stored: &StoredEvidence<'_>) -> Result<(), &'sta
     // The records' summaries are derived from the occurrences, so each edge
     // needs the occurrence that made it, and each occurrence the edges it
     // makes between retained records.
+    // `scoped` is keyed by name key, which is what `name_identity::equal`
+    // compares.
     let made = |owner: &SymbolId, target: Option<&SymbolId>, name: &str| {
+        let name = crate::analysis::name_identity::key(language, name);
         [OccurrenceKind::Call, OccurrenceKind::Usage]
-            .iter()
-            .any(|&kind| scoped.iter().any(|&(found_owner, found_target, found_name, found_kind)| found_owner == owner && found_target == target && found_kind == kind && crate::analysis::name_identity::equal(language, found_name, name)))
+            .into_iter()
+            .any(|kind| scoped.contains(&(owner, target, name.clone(), kind)))
     };
     let made_to = |owner: &SymbolId, target: &SymbolRecord| made(owner, Some(&target.id), &target.identity.name);
     for record in records {
@@ -670,8 +711,9 @@ pub(super) fn validate_evidence(stored: &StoredEvidence<'_>) -> Result<(), &'sta
         {
             return Err("a reference summary that does not name its record");
         }
+        let (dependencies, references) = (RefList::new(&relations.dependencies), RefList::new(&relations.references));
         for reference in &relations.references {
-            let is_dependency = relations.dependencies.contains(reference);
+            let is_dependency = dependencies.contains(reference);
             let found = match &reference.id {
                 Some(target) if !is_dependency => made(&record.id, Some(target), &reference.name),
                 None if is_dependency => true,
@@ -683,7 +725,7 @@ pub(super) fn validate_evidence(stored: &StoredEvidence<'_>) -> Result<(), &'sta
         }
         for dependency in &relations.dependencies {
             if dependency.id.is_some()
-                || !relations.references.contains(dependency)
+                || !references.contains(dependency)
                 || !made(&record.id, None, &dependency.name)
             {
                 return Err("a dependency with no scoped occurrence of an import");
@@ -725,9 +767,42 @@ pub(super) fn validate_evidence(stored: &StoredEvidence<'_>) -> Result<(), &'sta
     Ok(())
 }
 
-/// Each owner's `Scoped` occurrences, in order: (position in the
-/// occurrences, target ID, written name).
-type ScopedByOwner<'a> = HashMap<&'a SymbolId, Vec<(usize, Option<&'a SymbolId>, &'a str)>>;
+/// Each owner's `Scoped` occurrences, by their position in the
+/// occurrences.
+type ScopedByOwner<'a> = HashMap<&'a SymbolId, OwnScoped<'a>>;
+
+#[derive(Default)]
+struct OwnScoped<'a> {
+    /// The first occurrence of each target ID.
+    first_by_target: HashMap<&'a SymbolId, usize>,
+    /// Every occurrence with no target ID, ascending, by name key.
+    unbound_by_name: HashMap<Cow<'a, str>, Vec<usize>>,
+}
+
+/// The fields [`SymbolRef`] equality compares, without the unhashable
+/// source span.
+type RefIdentity<'a> = (Option<&'a SymbolId>, &'a str, Option<&'a str>);
+
+/// A summary list, for membership tests by [`SymbolRef`] equality.
+struct RefList<'a>(HashMap<RefIdentity<'a>, Vec<&'a SymbolRef>>);
+
+impl<'a> RefList<'a> {
+    fn new(list: &'a [SymbolRef]) -> Self {
+        let mut by_identity: HashMap<_, Vec<_>> = HashMap::new();
+        for reference in list {
+            by_identity.entry(Self::identity(reference)).or_default().push(reference);
+        }
+        Self(by_identity)
+    }
+
+    fn contains(&self, reference: &SymbolRef) -> bool {
+        self.0.get(&Self::identity(reference)).is_some_and(|found| found.contains(&reference))
+    }
+
+    fn identity(reference: &SymbolRef) -> RefIdentity<'_> {
+        (reference.id.as_ref(), &reference.name, reference.qualified_name.as_deref())
+    }
+}
 
 /// A record's summaries list each edge once (an ID once; an import, which
 /// has none, once per name and qualified name) in the order of the first
@@ -757,24 +832,21 @@ fn summaries_in_first_occurrence_order(
             return Err("a reference summary that repeats an edge");
         }
     }
-    let empty = Vec::new();
+    let empty = OwnScoped::default();
     let own = scoped_by_owner.get(&record.id).unwrap_or(&empty);
     let in_order = |list: &[SymbolRef]| {
         let mut last: Option<usize> = None;
         list.iter().all(|reference| {
-            let after = |&&(position, _, _): &&(usize, Option<&SymbolId>, &str)| last.is_none_or(|last| position > last);
+            let after = |position: &usize| last.is_none_or(|last| *position > last);
             let next = match &reference.id {
                 // The first occurrence of the target, which must follow.
-                Some(id) => own
-                    .iter()
-                    .find(|(_, target, _)| *target == Some(id))
-                    .filter(after),
+                Some(id) => own.first_by_target.get(id).copied().filter(after),
                 None => own
-                    .iter()
-                    .filter(|(_, target, name)| target.is_none() && crate::analysis::name_identity::equal(language, name, &reference.name))
-                    .find(after),
+                    .unbound_by_name
+                    .get(&crate::analysis::name_identity::key(language, &reference.name))
+                    .and_then(|positions| positions.get(positions.partition_point(|position| !after(position))).copied()),
             };
-            next.map(|&(position, _, _)| last = Some(position)).is_some()
+            next.map(|position| last = Some(position)).is_some()
         })
     };
     if !in_order(&relations.references) || !in_order(&relations.dependencies) {
@@ -787,8 +859,7 @@ fn summaries_in_first_occurrence_order(
             .id
             .as_ref()
             .and_then(|owner| scoped_by_owner.get(owner))
-            .and_then(|list| list.iter().find(|(_, target, _)| *target == Some(&record.id)))
-            .map(|&(position, _, _)| position);
+            .and_then(|own| own.first_by_target.get(&record.id).copied());
         match first {
             Some(position) if last.is_none_or(|last| position > last) => last = Some(position),
             _ => return Err("a reference summary out of first-occurrence order"),
@@ -873,12 +944,15 @@ fn unbound_names_have_a_binding(
     if checked.is_empty() {
         return Ok(());
     }
-    let taken: HashSet<(u32, u32)> = occurrences
+    let mut taken: Vec<(u32, u32)> = occurrences
         .iter()
         .map(|occurrence| &occurrence.span)
         .chain(records.iter().filter_map(|record| record.source.name_span.as_ref()))
         .map(|span| (span.start_byte, span.end_byte))
         .collect();
+    taken.sort_unstable();
+    taken.dedup();
+    let mut covering = Covering { spans: &taken, next: 0, furthest_end: None };
     let mut written: HashSet<&str> = HashSet::new();
     let bytes = source.as_bytes();
     let mut start = 0;
@@ -889,9 +963,9 @@ fn unbound_names_have_a_binding(
         }
         let end = (start..bytes.len()).find(|&at| !is_identifier_byte(bytes[at])).unwrap_or(bytes.len());
         for (from, to) in identifier_readings(start, &bytes[start..end]) {
-            if !taken.iter().any(|&(start, end)| start <= from as u32 && to as u32 <= end)
-                && let Some(text) = source.get(from..to)
+            if let Some(text) = source.get(from..to)
                 && checked.contains(text)
+                && !covering.covers(from as u32, to as u32)
             {
                 written.insert(text);
             }
@@ -899,9 +973,20 @@ fn unbound_names_have_a_binding(
         start = end;
     }
     // Encoded tokens must be excluded as a whole: the ASCII tail of a raw
-    // identifier or Unicode escape is not a second binding witness.
+    // identifier or Unicode escape is not a second binding witness. Only a
+    // raw Rust (`r#`) or escaped TS/JS (`\u`) token can be one, so a source
+    // with neither has none.
     let mut encoded = HashSet::new();
-    let mut at = 0;
+    let encoding = match language {
+        ProgrammingLanguage::Rust => Some("r#"),
+        ProgrammingLanguage::TypeScript | ProgrammingLanguage::JavaScript => Some("\\u"),
+        _ => None,
+    };
+    let mut at = if encoding.is_some_and(|marker| memchr::memmem::find(bytes, marker.as_bytes()).is_some()) {
+        0
+    } else {
+        source.len()
+    };
     while at < source.len() {
         let start = at;
         let raw = language == ProgrammingLanguage::Rust && source[at..].starts_with("r#");
@@ -925,7 +1010,7 @@ fn unbound_names_have_a_binding(
             }
         }
         if at == start { at += source[at..].chars().next().expect("character").len_utf8(); continue; }
-        if (raw || escaped) && !taken.contains(&(start as u32, at as u32)) {
+        if (raw || escaped) && taken.binary_search(&(start as u32, at as u32)).is_err() {
             let key = crate::analysis::name_identity::key(language, &source[start..at]).into_owned();
             if checked.contains(key.as_str()) { encoded.insert(key); }
         }
@@ -938,17 +1023,41 @@ fn unbound_names_have_a_binding(
 }
 
 /// The byte ranges one run of identifier bytes starting at `start` can be
-/// read as: the whole run and each `$`-free piece of it.
-fn identifier_readings(start: usize, run: &[u8]) -> Vec<(usize, usize)> {
-    let mut readings = vec![(start, start + run.len())];
+/// read as: the whole run and each `$`-free piece of it, in that order, so
+/// their starts never decrease.
+fn identifier_readings(start: usize, run: &[u8]) -> impl Iterator<Item = (usize, usize)> + '_ {
     let mut offset = start;
-    for piece in run.split(|&byte| byte == b'$') {
-        if !piece.is_empty() && piece.len() != run.len() {
-            readings.push((offset, offset + piece.len()));
-        }
+    let pieces = run.split(|&byte| byte == b'$').filter_map(move |piece| {
+        let reading = (offset, offset + piece.len());
         offset += piece.len() + 1;
+        (!piece.is_empty() && piece.len() != run.len()).then_some(reading)
+    });
+    std::iter::once((start, start + run.len())).chain(pieces)
+}
+
+/// Whether some span of a start-sorted list contains a range, for ranges
+/// asked in order of non-decreasing start.
+///
+/// A span contains `from..to` exactly when it starts at or before `from` and
+/// ends at or after `to`, so the furthest end among the spans starting at or
+/// before `from` decides. Spans are not merged: a range across two
+/// overlapping spans is in neither.
+struct Covering<'a> {
+    spans: &'a [(u32, u32)],
+    next: usize,
+    furthest_end: Option<u32>,
+}
+
+impl Covering<'_> {
+    fn covers(&mut self, from: u32, to: u32) -> bool {
+        while let Some(&(start, end)) = self.spans.get(self.next)
+            && start <= from
+        {
+            self.furthest_end = self.furthest_end.max(Some(end));
+            self.next += 1;
+        }
+        self.furthest_end.is_some_and(|end| to <= end)
     }
-    readings
 }
 
 /// A region's identity: its owner's ID (a named owner must have one) and
@@ -966,13 +1075,13 @@ fn region_key<'a>(
 
 /// Byte offsets of each line's first byte, to check that a span's points
 /// are the one-based line and byte column of its offsets.
-struct LineStarts<'a> {
+pub(super) struct LineStarts<'a> {
     source: &'a str,
     starts: Vec<usize>,
 }
 
 impl<'a> LineStarts<'a> {
-    fn new(source: &'a str) -> Self {
+    pub(super) fn new(source: &'a str) -> Self {
         let starts = std::iter::once(0)
             .chain(source.match_indices('\n').map(|(newline, _)| newline + 1))
             .collect();
@@ -1018,9 +1127,68 @@ mod tests {
 
     #[test]
     fn a_dollar_run_is_also_read_as_its_pieces() {
-        assert_eq!(identifier_readings(3, b"f"), [(3, 4)]);
-        assert_eq!(identifier_readings(0, b"$f"), [(0, 2), (1, 2)]);
-        assert_eq!(identifier_readings(10, b"a$$bc$"), [(10, 16), (10, 11), (13, 15)]);
+        let readings = |start, run| identifier_readings(start, run).collect::<Vec<_>>();
+        assert_eq!(readings(3, b"f"), [(3, 4)]);
+        assert_eq!(readings(0, b"$f"), [(0, 2), (1, 2)]);
+        assert_eq!(readings(10, b"a$$bc$"), [(10, 16), (10, 11), (13, 15)]);
+    }
+
+    /// The cursor answers exactly what a scan of every span answers,
+    /// including for ranges across two overlapping or touching spans.
+    #[test]
+    fn covering_agrees_with_a_scan_of_every_span() {
+        let mut taken = vec![(2, 5), (4, 9), (9, 12), (20, 20), (20, 26), (22, 24), (30, 31)];
+        taken.sort_unstable();
+        let mut covering = Covering { spans: &taken, next: 0, furthest_end: None };
+        for from in 0..34 {
+            for to in from..34 {
+                let scanned = taken.iter().any(|&(start, end)| start <= from && to <= end);
+                assert_eq!(covering.covers(from, to), scanned, "{from}..{to}");
+            }
+        }
+        assert!(!Covering { spans: &[], next: 0, furthest_end: None }.covers(0, 0));
+    }
+
+    /// The inventory is persisted in every cache entry, so its digest must
+    /// not move when the way it is computed does.
+    #[test]
+    fn import_inventory_digest_is_pinned() {
+        let span = |start: u32, end: u32| TextSpan {
+            start: TextPoint { line: 1, column: start + 1 },
+            end: TextPoint { line: 1, column: end + 1 },
+            start_byte: start,
+            end_byte: end,
+        };
+        let imports = [
+            ImportRecord {
+                name: "HashMap".into(),
+                alias: None,
+                source: Some("std::collections".into()),
+                span: span(22, 29),
+                statement_span: Some(span(0, 30)),
+                symbol: SymbolRef {
+                    id: None,
+                    name: "HashMap".into(),
+                    qualified_name: Some("std::collections::HashMap".into()),
+                    source_span: None,
+                },
+            },
+            ImportRecord {
+                name: "io".into(),
+                alias: Some("io".into()),
+                source: None,
+                span: span(35, 37),
+                statement_span: None,
+                symbol: SymbolRef {
+                    id: Some(SymbolId("ab".repeat(32))),
+                    name: "io".into(),
+                    qualified_name: None,
+                    source_span: Some(span(35, 37)),
+                },
+            },
+        ];
+        assert_eq!(import_inventory(&imports), "2e17ca531591bdeff902137eff802af4b44ebabe9b45ea534ac6b3fc5356a6bc");
+        assert_eq!(import_inventory(&[]), "d53d18c23212ea7b6300594bb89bce60218f6eff2b9d628b8cc42d3e79bbd5ab");
     }
 
     #[test]

@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use tree_sitter::Language;
 
 use super::stored_evidence::{
-    ReadOccurrences, StoredEvidence, import_inventory, nullable, read_coverage, read_imports, read_occurrences, validate_evidence, validate_imports, write_coverage, write_imports, write_occurrences,
+    LineStarts, ReadOccurrences, StoredEvidence, import_inventory, nullable, read_coverage, read_imports, read_occurrences, validate_evidence, validate_imports, write_coverage, write_imports, write_occurrences,
 };
 use super::{CacheError, PassFingerprint, PersistentCache, canonical_digest};
 use crate::analysis::coverage::{add_record_passes, project, record_passes_suffice};
@@ -632,9 +632,10 @@ impl StoredEntry {
         {
             return Err(CacheMiss::Inconsistent("a record without metrics under the metrics capability"));
         }
-        validate_imports(source.source(), self.language, &self.imports, &self.import_inventory).map_err(CacheMiss::Inconsistent)?;
+        let lines = LineStarts::new(source.source());
+        validate_imports(&lines, self.language, &self.imports, &self.import_inventory).map_err(CacheMiss::Inconsistent)?;
         validate_evidence(&StoredEvidence {
-            source: source.source(),
+            lines: &lines,
             language: self.language,
             capabilities,
             covered_kinds: self.covered_kinds.0.as_ref(),
