@@ -243,7 +243,7 @@ author's call.
 | [C8](#c8-canonicalize-each-file-once) | Canonicalize each file once | L (1.6%) | measured | S | no |
 | [C9](#c9-collect-stale-cache-entries) | Collect stale cache entries | disk only | measured size | S | no |
 | [L1](#l1-render-on-the-workers-not-the-delivery-thread) | Render on the workers, not the delivery thread | **H** for listings (~3–4 s warm) | measured | M | no; evidence supplied |
-| [L2](#l2-replace-the-per-chunk-barrier-with-a-sliding-window) | Sliding window instead of per-chunk barrier | M–H if reproduced | measured under load, unconfirmed | M | yes, quiet host first |
+| [L2](#l2-replace-the-per-chunk-barrier-with-a-sliding-window) | Sliding window instead of per-chunk barrier | M–H if reproduced | measured under load, unconfirmed | M | yes, once reproduced without heavy contention |
 | [L3](#l3-a-literal-file-argument-must-not-walk-the-whole-tree) | A literal file argument must not walk the whole tree | **H** for positional single-file use | measured | S–M | no; evidence supplied |
 | [L4](#l4-hug-refs-run-occurrences-only-on-the-declaring-file) | `hug refs`: Occurrences only on the declaring file | **H** for `refs` | estimated | M | no; unnecessary work established |
 | [L5](#l5-batch-oxlint-and-resolve-it-once) | Batch oxlint; resolve the tool once | **H** for JS/TS lint | estimated | M, decision | yes |
@@ -252,9 +252,9 @@ author's call.
 | [L8](#l8-one-static-rule-registry-apply-lint-policy-once) | One static rule registry; apply lint policy once | M for cold lint | estimated | S | cheap |
 | [L9](#l9-remove-quadratic-scans-in-diagnostics) | Remove quadratic scans in diagnostics (`lines().nth`, `named_child(i)`) | M on pathological files | estimated | S | no |
 | [L10](#l10-skip-the-ignore-directive-query-when-it-cannot-match) | Skip the ignore-directive query when it cannot match | L–M | estimated | S | no |
-| [L11](#l11-stream-imports-and-lint-output) | Stream `imports`/`lint` output (fixes a broken-pipe panic) | M | estimated | S | small |
+| [L11](#l11-stream-imports-and-lint-output) | Stream `imports`/`lint` output (fixes a broken-pipe panic) | M | correctness + estimated | S | no |
 | [L12](#l12-god-files-read-once-parse-once) | `god-files`: read once, parse once | M for repeated runs | estimated | S | maybe |
-| [L13](#l13---changed-without-re-canonicalizing-every-scanned-file) | `--changed` without re-canonicalizing every scanned file | M for `--changed` | estimated | S | cheap |
+| [L13](#l13---changed-without-re-canonicalizing-every-scanned-file) | `--changed` without re-canonicalizing every scanned file | M for `--changed` | estimated | S | no |
 | [L14](#l14-move-json-projection-off-the-delivery-thread-and-memoize-is_test_file) | JSON projection off the delivery thread; memoize `is_test_file` | L–M | estimated | S | no separate experiment |
 | [L15](#l15-do-not-deep-clone-reused-prelude-results) | Do not deep-clone reused prelude results | L–M with `--prelude` | estimated | S | no |
 | [B1](#b1-release-profile-for-hug) | Release profile: LTO + 1 codegen unit for `hug` | L–M | estimated | S | yes, cheap |
@@ -378,7 +378,8 @@ choice has one recorded sample. Estimated speedups are hypotheses, not gates.
   `Node::parent()`, including hidden and aliased nodes. Check that during the
   spike with `debug_assert_eq!(index.parent(n), n.parent())`. The cost of (c)
   is a wide but mechanical signature change. No `EXTRACTOR_REVISION` bump is
-  needed.
+  needed for exactly equivalent extraction; a discovered semantic repair
+  must be separated and invalidate affected records.
 - **Spike:** **Yes.** It is the largest measured cost, and (b) vs (c) is a
   design choice the numbers should settle.
 - **How:**
@@ -643,7 +644,7 @@ choice has one recorded sample. Estimated speedups are hypotheses, not gates.
   scaling across threads. The observed 2.7–4.7× on 16 cores was measured
   on a heavily loaded host (see the measurement caveat and
   [L2](#l2-replace-the-per-chunk-barrier-with-a-sliding-window)), so
-  first confirm that scaling is still poor on a quiet host.
+  first confirm that scaling is still poor without heavy contention.
 - **Risk:** Public direct APIs also increment counters outside `run_query`.
   A query-only flush loses those counts. A thread-local design needs nested
   boundary handling and cleanup on errors/panics, without double counting;
@@ -938,8 +939,6 @@ All small, byte-identical, no spike:
   with existing cache tests and take an optional quick before/after sample
   on the already measured entry; no speed ratio is a correctness gate.
 
-
-
 ### C2. Remove the quadratic `made` closure
 
 - **Change:** `stored_evidence.rs:657-663`. For every `references` /
@@ -1225,16 +1224,17 @@ No spike for either:
   unavailable head result", plus a final flush. A flush error follows the
   same cancellation path. Preserve the declared bounded-work behavior for
   closed pipes; test one worker, a slow head, empty inputs and failed writes.
-- **Expected impact:** **Medium–high if the symptom survives on a quiet
-  host; currently unconfirmed.**
+- **Expected impact:** **Medium–high if the symptom survives without heavy
+  contention; currently unconfirmed.**
   - Cold monorepo scan used ~2.7× of 16 cores (63 s CPU in 23 s).
   - `darkmatter/` cold scaled 7.74 → 1.63 s (4.7×) from 1 to 16 threads.
   - Both figures were taken at load average ~40–56, which alone explains
     poor scaling (see the measurement caveat).
   - The code-level argument holds regardless: stragglers block each chunk,
     and delivery (L1) never overlaps analysis.
-  - Estimate 1.5–2× on cold monorepo wall time if a quiet-host sweep still
-    shows the barrier as the main limiter; P11 is the other candidate.
+  - Estimate 1.5–2× on cold monorepo wall time if a sweep without heavy
+    contention still shows the barrier as the main limiter; P11 is the
+    other candidate.
 - **Risk:**
   - Output stays identical, since delivery order is index order.
   - The broken-pipe bound moves from "chunk" to "window"; review the docs
@@ -1507,7 +1507,7 @@ No spike for either; fix and pin with tests:
 - **Spike:** No. Verify the existing changed-file and spelling suites; a
   quick timing sample is optional.
 
-### L14. Move JSON projection off the delivery thread; memoize `is_test_file`
+### L14. Move JSON projection off the delivery thread and memoize `is_test_file`
 
 - **Change:**
   - `write_json` (`declarations.rs:410-480`): `trim_record`,
@@ -1763,7 +1763,7 @@ reference already provides direct file selection with different ignore rules.
 - **Single-thread warm runs wait.** At `RAYON_NUM_THREADS=1`, a warm
   `--count` took 8.86 s of wall time for 3.7 s of CPU. The host was at
   load average ~40–56 at the time, so the likeliest explanation is that
-  the process was waiting for a core. Re-measure on a quiet host before
+  the process was waiting for a core. Re-measure without heavy contention before
   treating this as a finding. If it reproduces, the hypotheses are a
   per-chunk hand-off between the main thread and the single worker (L2),
   or file-open latency (`__open` shows in the profile).
