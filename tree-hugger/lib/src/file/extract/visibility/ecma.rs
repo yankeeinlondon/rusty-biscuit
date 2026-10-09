@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use super::*;
+use crate::file::parents::IndexedParent as _;
 
 /// Extracts the `public` / `protected` / `private` keyword of a TypeScript
 /// class member; `None` when it has none.
@@ -26,7 +27,7 @@ pub(super) fn extract_ecma_visibility(
     declaration: Node<'_>,
     ctx: &DeclarationContext<'_, '_>,
 ) -> Option<Visibility> {
-    let parent = declaration.parent()?;
+    let parent = declaration.indexed_parent()?;
     match parent.kind() {
         "class_body" => {
             if let Some(level) = extract_ts_visibility(declaration, ctx.source) {
@@ -43,19 +44,19 @@ pub(super) fn extract_ecma_visibility(
             })
         }
         "interface_body" => Some(Visibility::Public),
-        "enum_body" => extract_ecma_visibility(parent.parent()?, ctx),
+        "enum_body" => extract_ecma_visibility(parent.indexed_parent()?, ctx),
         _ => top_level_visibility(declaration, ctx.is_ecma_module),
     }
 }
 
 fn top_level_visibility(declaration: Node<'_>, is_module: bool) -> Option<Visibility> {
     let mut current = declaration;
-    while let Some(parent) = current.parent() {
+    while let Some(parent) = current.indexed_parent() {
         match parent.kind() {
             "program" => return is_module.then_some(Visibility::ModulePrivate),
             "export_statement" => {
                 return parent
-                    .parent()
+                    .indexed_parent()
                     .is_some_and(|grandparent| grandparent.kind() == "program")
                     .then_some(Visibility::Public);
             }

@@ -1,4 +1,5 @@
 use super::*;
+use crate::file::parents::IndexedParent as _;
 
 /// Checks if a Scala member belongs to an `object` (standalone or companion):
 /// its nearest owning type is an `object_definition`. A member of a class,
@@ -8,8 +9,8 @@ use super::*;
 /// methods belong to the type around it.
 pub(crate) fn extract_scala_is_static(node: Node<'_>) -> bool {
     member_slot(node)
-        .parent()
+        .indexed_parent()
         .filter(|body| body.kind() == "template_body")
-        .and_then(|body| body.parent())
+        .and_then(|body| body.indexed_parent())
         .is_some_and(|owner| owner.kind() == "object_definition")
 }

@@ -1,4 +1,5 @@
 use super::*;
+use crate::file::parents::IndexedParent as _;
 
 /// Extracts the `public` / `protected` / `private` keyword from a Java
 /// declaration's `modifiers`; `None` when it has none.
@@ -34,12 +35,12 @@ pub(super) fn extract_java_declaration_visibility(
     // An enum constructor with no access keyword is private (JLS 8.9.2).
     if declaration.kind() == "constructor_declaration"
         && declaration
-            .parent()
+            .indexed_parent()
             .is_some_and(|parent| parent.kind() == "enum_body_declarations")
     {
         return Some(Visibility::Private);
     }
-    let in_interface_body = declaration.parent().is_some_and(|parent| {
+    let in_interface_body = declaration.indexed_parent().is_some_and(|parent| {
         matches!(parent.kind(), "interface_body" | "annotation_type_body")
     });
     Some(if in_interface_body {

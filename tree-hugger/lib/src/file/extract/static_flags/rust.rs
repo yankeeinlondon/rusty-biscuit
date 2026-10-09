@@ -1,13 +1,14 @@
 use super::*;
+use crate::file::parents::IndexedParent as _;
 
 /// Checks if a Rust item is a static member: declared directly in an `impl`
 /// or trait body, and either an associated `const` (always used through the
 /// type) or a function with no `self` receiver.
 pub(crate) fn extract_rust_is_static(node: Node<'_>) -> bool {
     let is_associated = node
-        .parent()
+        .indexed_parent()
         .filter(|list| list.kind() == "declaration_list")
-        .and_then(|list| list.parent())
+        .and_then(|list| list.indexed_parent())
         .is_some_and(|parent| matches!(parent.kind(), "impl_item" | "trait_item"));
     if !is_associated {
         return false;

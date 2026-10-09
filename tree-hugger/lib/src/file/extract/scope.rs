@@ -3,6 +3,7 @@
 //! of every fixture declaration's scope (`2026-10-03-symbol-filters-and-reports`).
 
 use super::*;
+use crate::file::parents::IndexedParent as _;
 use crate::shared::SymbolScope;
 
 /// The scope of the declaration `name` belongs to.
@@ -35,7 +36,7 @@ pub(crate) fn symbol_scope(
         return SymbolScope::Member;
     }
 
-    let mut current = member_slot(declaration).parent();
+    let mut current = member_slot(declaration).indexed_parent();
     while let Some(node) = current {
         let node_kind = node.kind();
         if is_function_node_kind(node_kind) || is_local_scope_kind(node_kind, language) {
@@ -46,7 +47,7 @@ pub(crate) fn symbol_scope(
         if is_scope_owner_kind(node_kind) || is_unnamed_type_owner(node) {
             return SymbolScope::Member;
         }
-        current = node.parent();
+        current = node.indexed_parent();
     }
     SymbolScope::Item
 }
@@ -78,7 +79,7 @@ fn is_type_parameter_kind(kind: &str) -> bool {
 /// For a Lua name written on its table (`M:m`, `M.f`, `M.x`), the table
 /// expression and whether the name is a method (`:`).
 pub(crate) fn lua_table_of_name(name: Node<'_>) -> Option<(Node<'_>, bool)> {
-    let parent = name.parent()?;
+    let parent = name.indexed_parent()?;
     let is_method = match parent.kind() {
         "method_index_expression" => true,
         "dot_index_expression" => false,

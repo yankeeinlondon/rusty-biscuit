@@ -5,6 +5,7 @@
 
 use tree_sitter::Node;
 
+use crate::file::parents::IndexedParent as _;
 use crate::shared::ProgrammingLanguage;
 
 /// Rust macros that never return (unconditionally terminate execution).
@@ -285,7 +286,7 @@ pub fn find_dead_code_after<'tree>(
     let mut current = terminal;
 
     loop {
-        let parent = match current.parent() {
+        let parent = match current.indexed_parent() {
             Some(p) => p,
             None => return dead_nodes,
         };

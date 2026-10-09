@@ -23,6 +23,7 @@
 use tree_sitter::Node;
 
 use super::{ANY_CATEGORY, BindingRule, BindingSite, Boundary, MACRO, Placement, Refutability, TYPE, VALUE};
+use crate::file::parents::IndexedParent as _;
 
 /// Scopes the vendored locals query lacks: an inline `mod` body, a trait,
 /// the declarations whose generic parameters would otherwise leak into the
@@ -30,7 +31,7 @@ use super::{ANY_CATEGORY, BindingRule, BindingSite, Boundary, MACRO, Placement, 
 /// capture the locals around them.
 pub(super) fn extra_scope(node: Node<'_>) -> bool {
     match node.kind() {
-        "declaration_list" => node.parent().is_some_and(|parent| parent.kind() == "mod_item"),
+        "declaration_list" => node.indexed_parent().is_some_and(|parent| parent.kind() == "mod_item"),
         "trait_item" | "type_item" | "union_item" | "function_signature_item" | "const_item" | "static_item" => true,
         _ => false,
     }
@@ -76,7 +77,7 @@ const fn local(categories: u8) -> BindingRule {
 /// a match guard), whose scope ends with the body anyway.
 fn conditional_end(condition: Node<'_>) -> Option<usize> {
     let mut node = condition;
-    while let Some(parent) = node.parent() {
+    while let Some(parent) = node.indexed_parent() {
         match parent.kind() {
             "let_chain" => node = parent,
             "if_expression" => {
@@ -96,10 +97,10 @@ fn conditional_end(condition: Node<'_>) -> Option<usize> {
 
 /// An `impl` or `trait` member: reached only through a path or a receiver.
 fn is_associated(node: Node<'_>) -> bool {
-    node.parent().is_some_and(|list| {
+    node.indexed_parent().is_some_and(|list| {
         list.kind() == "declaration_list"
             && list
-                .parent()
+                .indexed_parent()
                 .is_some_and(|owner| matches!(owner.kind(), "impl_item" | "trait_item"))
     })
 }
@@ -342,7 +343,7 @@ pub(super) fn reference_category(node: Node<'_>) -> u8 {
     if node.kind() == "type_identifier" {
         return TYPE;
     }
-    let Some(parent) = node.parent() else { return VALUE };
+    let Some(parent) = node.indexed_parent() else { return VALUE };
     let is_field = |field: &str| parent.child_by_field_name(field).is_some_and(|child| child.id() == node.id());
     match parent.kind() {
         "macro_invocation" if is_field("macro") => MACRO,

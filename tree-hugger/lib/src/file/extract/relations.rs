@@ -18,6 +18,7 @@
 use std::collections::HashSet;
 
 use super::*;
+use crate::file::parents::IndexedParent as _;
 use crate::analysis::counters::count_shared_context_steps;
 
 /// A base type as written in a declaration's header.
@@ -82,7 +83,7 @@ pub(crate) struct DeclaredBases {
 /// `class_specifier`), which is where every supported grammar writes its
 /// base list.
 pub(crate) fn declared_bases(name: Node<'_>, language: ProgrammingLanguage, source: &str) -> DeclaredBases {
-    let Some(owner) = name.parent() else {
+    let Some(owner) = name.indexed_parent() else {
         return DeclaredBases::default();
     };
     let mut bases = DeclaredBases::default();

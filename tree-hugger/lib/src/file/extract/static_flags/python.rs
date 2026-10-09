@@ -1,4 +1,5 @@
 use super::*;
+use crate::file::parents::IndexedParent as _;
 
 /// Checks if a Python member is static: a method declared directly in a class
 /// body and decorated with `@staticmethod` or `@classmethod`, or a class
@@ -49,9 +50,9 @@ fn is_static_decorator(decorator: Node<'_>, source: &str) -> bool {
 /// Whether `slot` is a statement of a class body (not of a function or a
 /// nested block).
 fn is_in_class_body(slot: Node<'_>) -> bool {
-    slot.parent()
+    slot.indexed_parent()
         .filter(|block| block.kind() == "block")
-        .and_then(|block| block.parent())
+        .and_then(|block| block.indexed_parent())
         .is_some_and(|owner| owner.kind() == "class_definition")
 }
 
@@ -61,11 +62,11 @@ fn is_in_class_body(slot: Node<'_>) -> bool {
 /// (PEP 526, dataclass semantics).
 pub(crate) fn is_python_class_attribute(assignment: Node<'_>, source: &str) -> bool {
     let in_class_body = assignment
-        .parent()
+        .indexed_parent()
         .filter(|statement| statement.kind() == "expression_statement")
-        .and_then(|statement| statement.parent())
+        .and_then(|statement| statement.indexed_parent())
         .filter(|block| block.kind() == "block")
-        .and_then(|block| block.parent())
+        .and_then(|block| block.indexed_parent())
         .is_some_and(|owner| owner.kind() == "class_definition");
     if !in_class_body {
         return false;

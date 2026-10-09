@@ -3,6 +3,7 @@
 //! to it, and its declaration text.
 
 use super::*;
+use crate::file::parents::IndexedParent as _;
 use crate::shared::SymbolScope;
 
 /// What visibility and static readers know about a declaration besides its node.
@@ -131,7 +132,7 @@ fn is_declaration_kind(kind: &str) -> bool {
 /// Python's root is a `module` node, a boundary as every root is; a
 /// TypeScript `module A {}` is a declaration, so `module` is not listed.
 fn is_scope_boundary(node: Node<'_>) -> bool {
-    is_scope_boundary_kind(node.kind()) || node.parent().is_none()
+    is_scope_boundary_kind(node.kind()) || node.indexed_parent().is_none()
 }
 
 /// [`is_scope_boundary`] by kind alone; the root is a boundary whatever its
@@ -164,7 +165,7 @@ fn is_scope_boundary_kind(kind: &str) -> bool {
 /// statement. When none is found before a body or block, the name's parent is
 /// used, and the name itself when the parent is such a boundary.
 pub(crate) fn resolve_declaration_node(name: Node<'_>) -> Node<'_> {
-    let name_parent = name.parent();
+    let name_parent = name.indexed_parent();
     let mut current = name_parent;
     while let Some(node) = current {
         let kind = node.kind();
@@ -172,7 +173,7 @@ pub(crate) fn resolve_declaration_node(name: Node<'_>) -> Node<'_> {
             break;
         }
         // The root is a boundary too; its parent is the next step otherwise.
-        let parent = node.parent();
+        let parent = node.indexed_parent();
         if parent.is_none() {
             break;
         }
@@ -198,7 +199,7 @@ pub(crate) fn declaration_for_context(context: Node<'_>) -> Node<'_> {
     }
 
     let mut current = context;
-    while let Some(parent) = current.parent() {
+    while let Some(parent) = current.indexed_parent() {
         match parent.kind() {
             kind if kind.ends_with("_declarator") => current = parent,
             "function_definition"
@@ -226,8 +227,8 @@ pub(crate) fn context_for_name<'tree>(
     if language == ProgrammingLanguage::Go
         && is_grouped_go_type_declaration(context)
         && let Some(spec) = name
-            .parent()
-            .filter(|spec| matches!(spec.kind(), "type_spec" | "type_alias") && spec.parent() == Some(context))
+            .indexed_parent()
+            .filter(|spec| matches!(spec.kind(), "type_spec" | "type_alias") && spec.indexed_parent() == Some(context))
     {
         return spec;
     }
@@ -247,7 +248,7 @@ fn climb_declaration_wrapper(node: Node<'_>) -> Node<'_> {
     if node.kind() == "assignment" {
         let mut outermost = node;
         while let Some(parent) = outermost
-            .parent()
+            .indexed_parent()
             .filter(|parent| parent.kind() == "assignment")
         {
             outermost = parent;
@@ -255,7 +256,7 @@ fn climb_declaration_wrapper(node: Node<'_>) -> Node<'_> {
         return outermost;
     }
     if node.kind() == "variable_declaration"
-        && let Some(parent) = node.parent()
+        && let Some(parent) = node.indexed_parent()
         && matches!(
             parent.kind(),
             "field_declaration" | "event_field_declaration" | "local_declaration_statement"

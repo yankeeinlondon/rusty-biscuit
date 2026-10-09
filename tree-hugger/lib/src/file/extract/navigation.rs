@@ -1,27 +1,28 @@
 //! Generic tree-sitter node navigation helpers carved out of `tree_file.rs`.
 
 use super::*;
+use crate::file::parents::IndexedParent as _;
 
 /// Finds an ancestor node with the given kind by walking up the parent chain.
 pub(crate) fn find_ancestor_by_kind<'a>(node: Node<'a>, kind: &str) -> Option<Node<'a>> {
-    let mut current = node.parent();
+    let mut current = node.indexed_parent();
     while let Some(parent) = current {
         if parent.kind() == kind {
             return Some(parent);
         }
-        current = parent.parent();
+        current = parent.indexed_parent();
     }
     None
 }
 
 /// Finds the closest ancestor matching any of the provided kinds.
 pub(crate) fn find_ancestor_by_kinds<'a>(node: Node<'a>, kinds: &[&str]) -> Option<Node<'a>> {
-    let mut current = node.parent();
+    let mut current = node.indexed_parent();
     while let Some(parent) = current {
         if kinds.iter().any(|kind| parent.kind() == *kind) {
             return Some(parent);
         }
-        current = parent.parent();
+        current = parent.indexed_parent();
     }
     None
 }

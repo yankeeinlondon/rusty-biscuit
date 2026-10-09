@@ -26,6 +26,7 @@ use std::collections::HashMap;
 
 use tree_sitter::Node;
 
+use crate::file::parents::parent;
 use crate::shared::ProgrammingLanguage;
 
 mod ecma;
@@ -179,6 +180,16 @@ impl LanguageRules {
         match self {
             Self::Rust => rust::extra_scope(node),
             Self::Ecma { .. } => ecma::extra_scope(node),
+        }
+    }
+
+    /// The extra scope `node` opens below itself: a TS/JS `with` statement's
+    /// body. Read from the statement, so a walk never asks a node for its
+    /// parent.
+    pub(crate) fn extra_child_scope<'tree>(self, node: Node<'tree>) -> Option<Node<'tree>> {
+        match self {
+            Self::Rust => None,
+            Self::Ecma { .. } => ecma::with_body(node),
         }
     }
 
@@ -482,6 +493,16 @@ impl<'tree> ScopeTree<'tree> {
         &self.bindings[idx]
     }
 
+    /// The number of bindings placed: the index the next one gets.
+    pub(crate) fn binding_count(&self) -> usize {
+        self.bindings.len()
+    }
+
+    /// Replaces what binding `idx` binds to; where it is placed is unchanged.
+    pub(crate) fn set_target(&mut self, idx: usize, target: BindingTarget) {
+        self.bindings[idx].target = target;
+    }
+
     /// Looks `name` up in the given categories from the reference `node`,
     /// innermost scope first.
     pub(crate) fn lookup(&self, node: Node<'_>, name: &str, categories: u8) -> Lookup {
@@ -536,8 +557,18 @@ impl<'tree> ScopeTree<'tree> {
                 && rule.visible_until.is_none_or(|until| position < until)
                 && !(items_only && rule.local)
         });
-        let (ordered, free): (Vec<usize>, Vec<usize>) = visible.partition(|&idx| self.bindings[idx].rule.ordered);
-        if let Some(&latest) = ordered.iter().max_by_key(|&&idx| self.bindings[idx].name_start) {
+        // The latest ordered binding by name position (the last of equals),
+        // else every unordered one.
+        let mut latest: Option<usize> = None;
+        let mut free = Vec::new();
+        for idx in visible {
+            if !self.bindings[idx].rule.ordered {
+                free.push(idx);
+            } else if latest.is_none_or(|best| self.bindings[idx].name_start >= self.bindings[best].name_start) {
+                latest = Some(idx);
+            }
+        }
+        if let Some(latest) = latest {
             return Some(vec![latest]);
         }
         (!free.is_empty()).then_some(free)
@@ -546,5 +577,5 @@ impl<'tree> ScopeTree<'tree> {
 
 /// `node`'s ancestors, nearest first.
 pub(crate) fn ancestors(node: Node<'_>) -> impl Iterator<Item = Node<'_>> {
-    std::iter::successors(node.parent(), Node::parent)
+    std::iter::successors(parent(node), |node| parent(*node))
 }

@@ -7,6 +7,7 @@ use std::path::Path;
 
 use super::attributes::{SyntacticAttribute, rust_attribute};
 use super::*;
+use crate::file::parents::IndexedParent as _;
 use crate::analysis::counters::count_shared_context_steps;
 
 /// Whether a declaration carries its language's deprecation marker: one of
@@ -109,7 +110,7 @@ pub(crate) fn is_in_rust_cfg_test(
                 return true;
             }
         }
-        current = node.parent();
+        current = node.indexed_parent();
     }
     false
 }

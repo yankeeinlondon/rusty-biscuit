@@ -1,5 +1,6 @@
 use super::c::{has_linkage, is_namespace_scope, linkage_visibility};
 use super::*;
+use crate::file::parents::IndexedParent as _;
 
 /// C++ visibility.
 ///
@@ -18,8 +19,8 @@ pub(super) fn extract_cpp_visibility(
         // A member of an anonymous union or struct is a member of the
         // enclosing type, in the section that holds the anonymous member.
         if let Some(anonymous) = member
-            .parent()
-            .and_then(|list| list.parent())
+            .indexed_parent()
+            .and_then(|list| list.indexed_parent())
             .and_then(anonymous_member_declaration)
         {
             return extract_cpp_visibility(anonymous, ctx);
@@ -71,7 +72,7 @@ fn section_before(
 fn class_member(declaration: Node<'_>) -> Option<Node<'_>> {
     let mut member = declaration;
     loop {
-        let parent = member.parent()?;
+        let parent = member.indexed_parent()?;
         match parent.kind() {
             "field_declaration_list" => return Some(member),
             "field_declaration" => member = parent,
@@ -99,7 +100,7 @@ fn member_access(
             "preproc_else" | "preproc_elif" | "preproc_elifdef"
         );
         if !replaces_siblings
-            && let Some(parent) = level.parent()
+            && let Some(parent) = level.indexed_parent()
             && let Some(section) = section_before(level, parent, ctx)
         {
             return section;
@@ -107,10 +108,10 @@ fn member_access(
         if level == member {
             break;
         }
-        level = level.parent()?;
+        level = level.indexed_parent()?;
     }
 
-    match member.parent()?.parent()?.kind() {
+    match member.indexed_parent()?.indexed_parent()?.kind() {
         "class_specifier" => Some(Visibility::Private),
         "struct_specifier" | "union_specifier" => Some(Visibility::Public),
         _ => None,

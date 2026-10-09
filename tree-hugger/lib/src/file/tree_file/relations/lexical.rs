@@ -32,6 +32,7 @@ use std::collections::{HashMap, HashSet};
 
 use tree_sitter::Node;
 
+use crate::file::parents::IndexedParent as _;
 use crate::analysis::counters::count_shared_context_steps;
 use crate::analysis::declaration_names::{python_captures, python_targets, scala_pattern_names};
 use crate::analysis::scope::{
@@ -114,6 +115,7 @@ pub(super) struct Lexical<'a> {
 }
 
 /// What the relation walk collected outside lexical scopes.
+#[derive(Clone)]
 pub(super) struct Collected<'a> {
     /// Import statements in named scopes.
     pub(super) imports: Vec<Node<'a>>,
@@ -136,6 +138,7 @@ pub(super) struct Collected<'a> {
 }
 
 /// A binding no record reports, placed in a scope that is not lexical.
+#[derive(Clone)]
 pub(super) struct Unrecorded<'a> {
     pub(super) name: Node<'a>,
     /// The syntax scope the binding belongs to: the file root, a named
@@ -180,7 +183,7 @@ impl<'a> Lexical<'a> {
     /// Walks the file once: scopes, binding sites, imports, Rust impls and
     /// Swift extensions; then places every binding of a lexical scope.
     pub(super) fn build(
-        entries: &[Declared<'a>],
+        entries: &[Declared<'_>],
         root: Node<'a>,
         language: ProgrammingLanguage,
         source: &'a str,
@@ -226,7 +229,7 @@ impl<'a> Lexical<'a> {
                 sites.extend(shared.drain(..).filter(|site| !site.is_import).map(|mut site| {
                     // A type parameter never resolves, in a type or a value
                     // position alike.
-                    let parent = site.name.parent().map(|parent| parent.kind());
+                    let parent = site.name.indexed_parent().map(|parent| parent.kind());
                     if parent == Some("type_parameter") && language != ProgrammingLanguage::Rust {
                         site.rule.categories = ALL;
                     }
@@ -304,7 +307,7 @@ impl<'a> Lexical<'a> {
 
     fn place(
         &mut self,
-        entries: &[Declared<'a>],
+        entries: &[Declared<'_>],
         source: &'a str,
         imports: Vec<(Node<'a>, ImportBinding<'a>)>,
         sites: Vec<Site<'a>>,
@@ -464,7 +467,7 @@ impl<'a> Lexical<'a> {
     /// Marks every declaration inside a redirected one as redirected too:
     /// its displayed name runs through an owner that does not have it as a
     /// member. One sort of the redirected ranges, then one lookup per entry.
-    fn redirect_descendants(&mut self, entries: &[Declared<'a>]) {
+    fn redirect_descendants(&mut self, entries: &[Declared<'_>]) {
         let mut ranges: Vec<(usize, usize)> = self
             .placements
             .iter()
@@ -682,7 +685,7 @@ impl<'a> Lexical<'a> {
 fn is_generic_parameter(entry: &Declared<'_>) -> bool {
     const LISTS: &[&str] = &["template_parameter_list", "type_parameters", "type_parameter_list"];
     LISTS.contains(&entry.declaration.kind())
-        || entry.declaration.parent().is_some_and(|parent| LISTS.contains(&parent.kind()))
+        || entry.declaration.indexed_parent().is_some_and(|parent| LISTS.contains(&parent.kind()))
 }
 
 /// The name groups a declaration of `kind` binds in `language`: a type
@@ -743,7 +746,7 @@ pub(super) fn opens_lexical_region(language: ProgrammingLanguage, node: Node<'_>
 /// scope a base can be written in.
 fn scope_role(language: ProgrammingLanguage, node: Node<'_>) -> Option<(Role, bool)> {
     let kind = node.kind();
-    let parent = || node.parent().map(|parent| parent.kind()).unwrap_or_default();
+    let parent = || node.indexed_parent().map(|parent| parent.kind()).unwrap_or_default();
     let body = Role::Body { barrier: false };
     let opens = |kinds: &[&str]| kinds.contains(&kind);
     let found = match language {
@@ -758,7 +761,7 @@ fn scope_role(language: ProgrammingLanguage, node: Node<'_>) -> Option<(Role, bo
             "class_body" => (body, false),
             // A namespace body is a named scope.
             "statement_block" if matches!(parent(), "internal_module" | "module") => return None,
-            _ if node.parent().is_some_and(|parent| {
+            _ if node.indexed_parent().is_some_and(|parent| {
                 parent.kind() == "with_statement"
                     && parent.child_by_field_name("body").is_some_and(|body| body.id() == node.id())
             }) =>
@@ -857,7 +860,7 @@ fn body_barrier(language: ProgrammingLanguage, body: Node<'_>, source: &str) -> 
     ) {
         return false;
     }
-    let Some(owner) = body.parent() else { return false };
+    let Some(owner) = body.indexed_parent() else { return false };
     if let Some(name) = owner.child_by_field_name("name") {
         let bases = declared_bases(name, language, source);
         return !(bases.extends.is_empty() && bases.implements.is_empty() && bases.unclassified.is_empty());
@@ -902,7 +905,7 @@ fn python_sites<'a>(node: Node<'a>, source: &str, sites: &mut Vec<Site<'a>>, wri
                 let hint = ancestors(node).find(|ancestor| {
                     matches!(ancestor.kind(), "function_definition" | "lambda" | "module")
                         || (ancestor.kind() == "block"
-                            && ancestor.parent().is_some_and(|parent| parent.kind() == "class_definition"))
+                            && ancestor.indexed_parent().is_some_and(|parent| parent.kind() == "class_definition"))
                 });
                 bind(name, hint, None);
             }

@@ -4,6 +4,8 @@ pub(crate) mod extract;
 pub(crate) mod filter;
 /// Qualified-name prefixes (`NamingContext`, `portable_relative`, `lossless_portable_relative`).
 pub mod naming;
+/// Every node's parent from one cursor pass, installed per analysis.
+pub(crate) mod parents;
 /// Name and type-text patterns (`NamePattern`, `glob_match`).
 pub mod pattern;
 /// Selective symbol queries (`SymbolQuery`, `Capability`).

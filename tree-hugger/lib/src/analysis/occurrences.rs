@@ -19,6 +19,7 @@ use super::scope::{
 use super::declaration_names::{declaration_names, declared_name_tokens, scala_import_path_start};
 use super::syntax_markers::{SyntaxMarkers, syntax_markers};
 use super::symbol_ref;
+use crate::file::parents::IndexedParent as _;
 use crate::file::extract::{is_definition_like_reference, next_named_syntax_sibling, text_span_for_node};
 use crate::file::tree_file::{ExtractedSymbol, ReferenceCapture};
 use crate::shared::{
@@ -51,11 +52,26 @@ pub(crate) struct OccurrenceSyntax<'tree> {
     /// Definition and import name spans, never occurrences.
     excluded: HashSet<(usize, usize)>,
     imports: Vec<ImportSite>,
+    /// The first import whose name starts at each byte.
+    import_by_start: HashMap<usize, usize>,
+    /// The definition pass's Rust pattern placement, finished by
+    /// [`Self::resolve`] instead of walking again.
+    patterns: Option<RustPatterns<'tree>>,
+}
+
+/// A Rust file's walk, scope tree and placed binding sites, as
+/// [`rust_pattern_non_bindings`] left them for the definition pass. The
+/// placement decides exactly what the bind pass's would: only the targets
+/// of the sites differ (no record exists yet), and no decision reads them
+/// ([`bare_pattern_meaning`]). [`OccurrenceSyntax::resolve`] sets them.
+pub(crate) struct RustPatterns<'tree> {
+    walk: Walk<'tree>,
+    tree: ScopeTree<'tree>,
+    placed: PlacedSites,
 }
 
 /// Where one import record's name was captured, in import order.
 struct ImportSite {
-    name_start: usize,
     span: TextSpan,
     /// The whole import statement's byte range.
     statement: Option<(usize, usize)>,
@@ -101,20 +117,28 @@ impl<'tree> OccurrenceSyntax<'tree> {
             imports: imports
                 .iter()
                 .map(|import| ImportSite {
-                    name_start: import.range.start_byte,
                     span: super::text_span(&import.range),
                     statement: import.statement_range.as_ref().map(|range| (range.start_byte, range.end_byte)),
                     name: import.name.clone(),
                 })
                 .collect(),
+            import_by_start: imports.iter().enumerate().rev().map(|(idx, import)| (import.range.start_byte, idx)).collect(),
+            patterns: None,
         }
+    }
+
+    /// Has [`Self::resolve`] finish the definition pass's Rust pattern
+    /// placement of the same file instead of walking it again.
+    pub(crate) fn with_rust_patterns(mut self, patterns: Option<RustPatterns<'tree>>) -> Self {
+        self.patterns = patterns.filter(|_| self.language == ProgrammingLanguage::Rust);
+        self
     }
 
     /// The import (index into the `imports` given to [`Self::new`]) whose
     /// binding name starts at `name_start`: the import whose name node it
     /// is, else the import of that name whose statement holds it.
     fn import_at(&self, name_start: usize, name: &str) -> Option<usize> {
-        self.imports.iter().position(|site| site.name_start == name_start).or_else(|| {
+        self.import_by_start.get(&name_start).copied().or_else(|| {
             self.imports.iter().position(|site| {
                 super::name_identity::equal(self.language, &site.name, name) && site.statement.is_some_and(|(start, end)| start <= name_start && name_start < end)
             })
@@ -123,10 +147,13 @@ impl<'tree> OccurrenceSyntax<'tree> {
 
     /// Resolves every captured reference against `records` (one per
     /// definition, in the same order).
-    pub(crate) fn resolve(self, records: &[SymbolRecord]) -> ResolvedOccurrences {
+    pub(crate) fn resolve(mut self, records: &[SymbolRecord]) -> ResolvedOccurrences {
         debug_assert_eq!(records.len(), self.definitions.len());
         let rules = LanguageRules::for_language(self.language);
-        let walk = Walk::run(self.root, self.language, rules, self.source);
+        let (walk, placed) = match self.patterns.take() {
+            Some(RustPatterns { walk, tree, placed }) => (walk, Some((tree, placed))),
+            None => (Walk::run(self.root, self.language, rules, self.source), None),
+        };
         let mut regions = Regions::new(self.root, whole_file_span(self.source));
 
         // A named callable owns a region exactly when it has a body
@@ -169,7 +196,7 @@ impl<'tree> OccurrenceSyntax<'tree> {
             regions.limit_all(LimitReason::EmptyReferenceQuery);
         }
 
-        let resolver = Resolver::new(&self, records, rules, &walk);
+        let resolver = Resolver::new(&self, records, rules, &walk, placed);
         let mut resolved = Vec::new();
         for capture in self.captures.iter().flatten() {
             if let Some((mut occurrence, import)) = resolver.occurrence(*capture, &mut regions) {
@@ -239,6 +266,21 @@ struct Walk<'tree> {
     /// Contextual syntax markers of a language without rules
     /// ([`syntax_markers`]); never occurrences.
     markers: SyntaxMarkers<'tree>,
+    /// The nodes below an excluded context ([`is_excluded_context`]), by id.
+    in_excluded_context: HashSet<usize>,
+    /// The TS/JS tokens that name a module export
+    /// ([`is_ecma_export_name`]), by id.
+    export_names: HashSet<usize>,
+}
+
+/// What [`Walk::run`] knows of the nodes on its path.
+struct WalkFrame<'tree> {
+    node: Node<'tree>,
+    /// The node or one of its ancestors is an excluded context.
+    excluding: bool,
+    /// The nearest `export_statement` at or above the node, and whether it
+    /// re-exports from a `source`.
+    export: Option<(Node<'tree>, bool)>,
 }
 
 impl<'tree> Walk<'tree> {
@@ -246,9 +288,22 @@ impl<'tree> Walk<'tree> {
     fn run(root: Node<'tree>, language: ProgrammingLanguage, rules: Option<LanguageRules>, source: &str) -> Self {
         let mut walk = Self::default();
         let language_anonymous = anonymous_callable_kinds(language);
+        let ecma = matches!(language, ProgrammingLanguage::TypeScript | ProgrammingLanguage::JavaScript);
+        let mut path: Vec<WalkFrame<'tree>> = Vec::new();
         let mut cursor = root.walk();
         loop {
             let node = cursor.node();
+            let above = path.last();
+            if above.is_some_and(|frame| frame.excluding) {
+                walk.in_excluded_context.insert(node.id());
+            }
+            if ecma
+                && let Some(frame) = above
+                && let Some((statement, from_source)) = frame.export
+                && names_module_export(node, frame.node, statement, from_source)
+            {
+                walk.export_names.insert(node.id());
+            }
             if node.is_error() || node.is_missing() {
                 walk.errors.push(node);
             }
@@ -265,12 +320,23 @@ impl<'tree> Walk<'tree> {
                 }
             }
             if cursor.goto_first_child() {
+                let frame = WalkFrame {
+                    node,
+                    excluding: above.is_some_and(|frame| frame.excluding) || is_excluded_context(node.kind(), language),
+                    export: if ecma && node.kind() == "export_statement" {
+                        Some((node, node.child_by_field_name("source").is_some()))
+                    } else {
+                        above.and_then(|frame| frame.export)
+                    },
+                };
+                path.push(frame);
                 continue;
             }
             while !cursor.goto_next_sibling() {
                 if !cursor.goto_parent() {
                     return walk;
                 }
+                path.pop();
             }
         }
     }
@@ -279,6 +345,7 @@ impl<'tree> Walk<'tree> {
         if rules.extra_scope(node) {
             self.extra_scopes.push(node);
         }
+        self.extra_scopes.extend(rules.extra_child_scope(node));
         rules.binding_sites(node, &mut self.sites);
         if rules.is_glob_import(node) {
             self.globs.push(node);
@@ -458,6 +525,7 @@ impl Regions {
 /// Resolves captures against the scope tree and records.
 struct Resolver<'a, 'tree> {
     syntax: &'a OccurrenceSyntax<'tree>,
+    walk: &'a Walk<'tree>,
     records: &'a [SymbolRecord],
     rules: Option<LanguageRules>,
     scopes: Option<ScopeTree<'tree>>,
@@ -475,7 +543,8 @@ impl<'a, 'tree> Resolver<'a, 'tree> {
         syntax: &'a OccurrenceSyntax<'tree>,
         records: &'a [SymbolRecord],
         rules: Option<LanguageRules>,
-        walk: &Walk<'tree>,
+        walk: &'a Walk<'tree>,
+        placed: Option<(ScopeTree<'tree>, PlacedSites)>,
     ) -> Self {
         let mut by_name: HashMap<String, Vec<usize>> = HashMap::new();
         for (idx, record) in records.iter().enumerate() {
@@ -483,8 +552,15 @@ impl<'a, 'tree> Resolver<'a, 'tree> {
         }
         let mut pattern_reads = PatternReads::default();
         let scopes = rules.map(|rules| {
-            let mut tree = scope_tree(rules, syntax.root, &syntax.scope_nodes, walk);
-            pattern_reads = bind_all(&mut tree, syntax, rules, walk);
+            let (mut tree, placed) = match placed {
+                Some(placed) => placed,
+                None => {
+                    let mut tree = scope_tree(rules, syntax.root, &syntax.scope_nodes, walk);
+                    let placed = place_sites(&mut tree, walk, syntax.source, |_| BindingTarget::Unreported);
+                    (tree, placed)
+                }
+            };
+            pattern_reads = bind_all(&mut tree, syntax, rules, walk, placed);
             tree
         });
         let excluded_names = walk
@@ -496,7 +572,7 @@ impl<'a, 'tree> Resolver<'a, 'tree> {
             .map(|name| (name.start_byte(), name.end_byte()))
             .filter(|range| !pattern_reads.contains(range))
             .collect();
-        Self { syntax, records, rules, scopes, excluded_names, pattern_reads, by_name }
+        Self { syntax, walk, records, rules, scopes, excluded_names, pattern_reads, by_name }
     }
 
     fn text(&self, node: Node<'_>) -> &'tree str {
@@ -517,8 +593,8 @@ impl<'a, 'tree> Resolver<'a, 'tree> {
             // others add the declaration-name sites to the older syntactic
             // filter.
             || (self.rules.is_none() && is_definition_like_reference(node, self.syntax.language))
-            || ancestors(node).any(|ancestor| is_excluded_context(ancestor.kind(), self.syntax.language))
-            || is_ecma_export_name(node, self.syntax.language)
+            || self.walk.in_excluded_context.contains(&node.id())
+            || self.walk.export_names.contains(&node.id())
             || (self.rules == Some(LanguageRules::Rust) && name == "Self")
             || is_wildcard(name, self.syntax.language)
         {
@@ -624,7 +700,7 @@ impl<'a, 'tree> Resolver<'a, 'tree> {
         }
         if rules == LanguageRules::Rust
             && let Some(path) = node
-                .parent()
+                .indexed_parent()
                 .filter(|parent| parent.kind() == "scoped_identifier")
                 .filter(|parent| parent.child_by_field_name("name").is_some_and(|own| own.id() == node.id()))
                 .and_then(|parent| parent.child_by_field_name("path"))
@@ -858,14 +934,15 @@ fn scope_tree<'tree>(
     tree
 }
 
-/// Places every binding: the walk's binding sites ([`place_sites`]), then
-/// each record the walk did not find (a capture-only declaration), by its
-/// kind.
+/// Finishes the binding of the walk's sites ([`place_sites`]): each site
+/// binding a record's name targets that record. Then places each record the
+/// walk did not find (a capture-only declaration), by its kind.
 fn bind_all<'tree>(
     tree: &mut ScopeTree<'tree>,
     syntax: &OccurrenceSyntax<'tree>,
     rules: LanguageRules,
     walk: &Walk<'tree>,
+    placed: PlacedSites,
 ) -> PatternReads {
     let records_by_name: HashMap<(usize, usize), usize> = syntax
         .definitions
@@ -874,9 +951,12 @@ fn bind_all<'tree>(
         .map(|(idx, definition)| ((definition.name.start_byte(), definition.name.end_byte()), idx))
         .collect();
     let range = |node: Node<'_>| (node.start_byte(), node.end_byte());
-    let reads = place_sites(tree, walk, syntax.source, |range| {
-        records_by_name.get(&range).map_or(BindingTarget::Unreported, |&idx| BindingTarget::Record(idx))
-    });
+    for (binding, name_range) in placed.targeted {
+        if let Some(&idx) = records_by_name.get(&name_range) {
+            tree.set_target(binding, BindingTarget::Record(idx));
+        }
+    }
+    let reads = placed.reads;
     let mut placed: HashSet<(usize, usize)> = walk.sites.iter().map(|site| range(site.name)).collect();
     for (idx, definition) in syntax.definitions.iter().enumerate() {
         if definition.scope == SymbolScope::Member || !placed.insert(range(definition.name)) {
@@ -888,11 +968,20 @@ fn bind_all<'tree>(
     reads
 }
 
+/// What [`place_sites`] decided.
+struct PlacedSites {
+    reads: PatternReads,
+    /// The bindings whose target `place_sites` asked for, each with its name
+    /// span: binding index, span.
+    targeted: Vec<(usize, (usize, usize))>,
+}
+
 /// Places the walk's binding sites: the established ones first, then the
 /// bare pattern names, each decided by looking its name up where it is
 /// written ([`bare_pattern_meaning`]), outer patterns first, so a nested
 /// pattern sees the outer pattern's binding. `target` names what a binding
-/// at a name span is. Declaration extraction runs the same placement
+/// at a name span is; no decision here reads it, so [`bind_all`] may set
+/// the targets afterwards. Declaration extraction runs the same placement
 /// ([`rust_pattern_non_bindings`]), so a record and an occurrence never
 /// disagree about a pattern name.
 fn place_sites<'tree>(
@@ -900,17 +989,23 @@ fn place_sites<'tree>(
     walk: &Walk<'tree>,
     source: &'tree str,
     target: impl Fn((usize, usize)) -> BindingTarget,
-) -> PatternReads {
+) -> PlacedSites {
     let text = |node: Node<'_>| source.get(node.start_byte()..node.end_byte()).unwrap_or_default();
     let range = |node: Node<'_>| (node.start_byte(), node.end_byte());
     let (bare, established): (Vec<&BindingSite<'tree>>, Vec<&BindingSite<'tree>>) =
         walk.sites.iter().partition(|site| site.bare_pattern.is_some());
     let mut placed: HashSet<(usize, usize)> = bare.iter().map(|site| range(site.name)).collect();
+    let mut targeted = Vec::new();
     for site in established {
         if !placed.insert(range(site.name)) {
             continue;
         }
-        let bound = if site.is_import { BindingTarget::Import } else { target(range(site.name)) };
+        let bound = if site.is_import {
+            BindingTarget::Import
+        } else {
+            targeted.push((tree.binding_count(), range(site.name)));
+            target(range(site.name))
+        };
         tree.bind(site.name, text(site.name), site.rule, bound);
     }
     let mut reads = PatternReads::default();
@@ -922,7 +1017,10 @@ fn place_sites<'tree>(
         }
         let name = text(site.name);
         match bare_pattern_meaning(tree, *site, name) {
-            PatternMeaning::Binds => tree.bind(site.name, name, site.rule, target(name_range)),
+            PatternMeaning::Binds => {
+                targeted.push((tree.binding_count(), name_range));
+                tree.bind(site.name, name, site.rule, target(name_range));
+            }
             PatternMeaning::Reads => {
                 reads.references.insert(name_range);
             }
@@ -932,7 +1030,7 @@ fn place_sites<'tree>(
             }
         }
     }
-    reads
+    PlacedSites { reads, targeted }
 }
 
 /// The name spans of the Rust pattern names that declare nothing: a bare
@@ -940,17 +1038,20 @@ fn place_sites<'tree>(
 /// or whose identity the file cannot establish in a refutable pattern
 /// ([`bare_pattern_meaning`]). The locals query captures some of them
 /// (`C` in `Some(C)`), and declaration extraction drops those captures.
-/// `scope_nodes` are the locals query's `@local.scope` captures.
+/// `scope_nodes` are the locals query's `@local.scope` captures. Also
+/// returns the placement, which the bind pass of the same file finishes
+/// ([`RustPatterns`]).
 pub(crate) fn rust_pattern_non_bindings<'tree>(
     root: Node<'tree>,
     source: &'tree str,
     scope_nodes: &[Node<'tree>],
-) -> HashSet<(usize, usize)> {
+) -> (HashSet<(usize, usize)>, RustPatterns<'tree>) {
     let rules = LanguageRules::Rust;
     let walk = Walk::run(root, ProgrammingLanguage::Rust, Some(rules), source);
     let mut tree = scope_tree(rules, root, scope_nodes, &walk);
-    let reads = place_sites(&mut tree, &walk, source, |_| BindingTarget::Unreported);
-    reads.references.into_iter().chain(reads.unknown).collect()
+    let placed = place_sites(&mut tree, &walk, source, |_| BindingTarget::Unreported);
+    let non_bindings = placed.reads.references.iter().chain(&placed.reads.unknown).copied().collect();
+    (non_bindings, RustPatterns { walk, tree, placed })
 }
 
 /// rustc's reading of an identifier pattern written without `mut`, `ref`
@@ -993,7 +1094,7 @@ fn bare_pattern_meaning(tree: &ScopeTree<'_>, site: BindingSite<'_>, name: &str)
 /// `b = a`), which is a reference. Declaration extraction drops these
 /// captures, so no record and no binding exists for them.
 pub(crate) fn is_false_capture(rules: LanguageRules, name: Node<'_>) -> bool {
-    let Some(parent) = name.parent() else { return false };
+    let Some(parent) = name.indexed_parent() else { return false };
     let field = match (rules, parent.kind()) {
         (LanguageRules::Rust, "tuple_struct_pattern" | "struct_pattern") => "type",
         (LanguageRules::Ecma { .. }, "required_parameter" | "optional_parameter") => "value",
@@ -1072,10 +1173,18 @@ pub(crate) fn is_ecma_export_name(node: Node<'_>, language: ProgrammingLanguage)
     let Some(statement) = ancestors(node).find(|ancestor| ancestor.kind() == "export_statement") else {
         return false;
     };
-    if statement.child_by_field_name("source").is_some() {
+    let Some(parent) = node.indexed_parent() else { return false };
+    names_module_export(node, parent, statement, statement.child_by_field_name("source").is_some())
+}
+
+/// [`is_ecma_export_name`] for `node`, whose parent is `parent` and whose
+/// nearest `export_statement` ancestor is `statement` (`from_source` when
+/// it has a `source`). [`Walk::run`] decides it for every node from its
+/// path; the occurrence and lint readers decide it the same way.
+fn names_module_export(node: Node<'_>, parent: Node<'_>, statement: Node<'_>, from_source: bool) -> bool {
+    if from_source {
         return true;
     }
-    let Some(parent) = node.parent() else { return false };
     if parent.kind() == "export_specifier" {
         return parent.child_by_field_name("alias").is_some_and(|alias| alias.id() == node.id());
     }
@@ -1156,7 +1265,7 @@ const SEGMENTED_KINDS: &[&str] = &[
 /// `new` (`outer.new C()`, [`construction_receiver`]) and whose type is
 /// `node`.
 fn qualified_parent(node: Node<'_>) -> Option<Node<'_>> {
-    let parent = node.parent()?;
+    let parent = node.indexed_parent()?;
     let holds_name = || parent.child_by_field_name("name").is_some_and(|name| name.id() == node.id());
     match parent.kind() {
         "object_creation_expression" => parent
@@ -1169,16 +1278,16 @@ fn qualified_parent(node: Node<'_>) -> Option<Node<'_>> {
         "navigation_suffix" => parent
             .child_by_field_name("suffix")
             .filter(|suffix| suffix.id() == node.id())
-            .and(parent.parent())
+            .and(parent.indexed_parent())
             .filter(|navigation| navigation.kind() == "navigation_expression"),
         // PHP holds a static property's name in a `variable_name`
         // (`X::$f`).
-        "variable_name" => parent.parent().filter(|access| {
+        "variable_name" => parent.indexed_parent().filter(|access| {
             access.kind() == "scoped_property_access_expression"
                 && access.child_by_field_name("name").is_some_and(|name| name.id() == parent.id())
         }),
         "member_binding_expression" if holds_name() => parent
-            .parent()
+            .indexed_parent()
             .filter(|access| access.kind() == "conditional_access_expression")
             .filter(|access| access.child_by_field_name("condition").is_some_and(|condition| condition.id() != parent.id())),
         kind if QUALIFYING_KINDS.contains(&kind) => {
@@ -1270,8 +1379,8 @@ fn written_path(node: Node<'_>, source: &str, language: ProgrammingLanguage) -> 
 /// `\A\B\f()`) starts: at the root `\` when one is written, else at the
 /// first segment, for every segment after it.
 fn php_namespace_segment_start(node: Node<'_>) -> Option<usize> {
-    let namespace = node.parent().filter(|parent| parent.kind() == "namespace_name")?;
-    let rooted = namespace.parent().filter(|path| path.kind() == "qualified_name").filter(|path| {
+    let namespace = node.indexed_parent().filter(|parent| parent.kind() == "namespace_name")?;
+    let rooted = namespace.indexed_parent().filter(|path| path.kind() == "qualified_name").filter(|path| {
         let mut cursor = path.walk();
         path.children(&mut cursor)
             .take_while(|child| child.end_byte() <= namespace.start_byte())
@@ -1376,7 +1485,7 @@ fn swift_chain_start(navigation: Node<'_>) -> Option<usize> {
 /// The generic form `node` is the name of, for the written path: every
 /// [`generic_instantiation`], types included (`C` in `r4::C<int> v`).
 fn path_wrapper<'tree>(node: Node<'tree>, language: ProgrammingLanguage) -> Option<Node<'tree>> {
-    let parent = node.parent()?;
+    let parent = node.indexed_parent()?;
     generic_instantiation(node, parent, language)
 }
 
@@ -1387,9 +1496,9 @@ fn right_nested_scope<'tree>(node: Node<'tree>, language: ProgrammingLanguage) -
     if language != ProgrammingLanguage::Cpp {
         return None;
     }
-    let path = node.parent().filter(|parent| parent.kind() == "qualified_identifier")?;
+    let path = node.indexed_parent().filter(|parent| parent.kind() == "qualified_identifier")?;
     path.child_by_field_name("scope").filter(|scope| scope.id() == node.id())?;
-    path.parent()
+    path.indexed_parent()
         .filter(|outer| outer.kind() == "qualified_identifier")
         .and_then(|outer| outer.child_by_field_name("name"))
         .filter(|name| name.id() == path.id())
@@ -1420,7 +1529,7 @@ fn is_call_target(node: Node<'_>, language: ProgrammingLanguage, source: &str) -
         while let Some(wrapper) = transparent_wrapper(target, language) {
             target = wrapper;
         }
-        let Some(parent) = target.parent() else { return false };
+        let Some(parent) = target.indexed_parent() else { return false };
         let holds = |field: &str| parent.child_by_field_name(field).is_some_and(|child| child.id() == target.id());
         let is_first = || first_operand(parent).is_some_and(|first| first.id() == target.id());
         let invoked = match parent.kind() {
@@ -1497,7 +1606,7 @@ fn implied_operand<'tree>(node: Node<'tree>, parent: Node<'tree>, language: Prog
         (ProgrammingLanguage::Swift, "prefix_expression") => {
             holds("target")
                 && parent.child_by_field_name("operation").is_some_and(|operation| {
-                    operation.kind() == "." || parent.parent().is_some_and(|call| call.kind() == "call_expression")
+                    operation.kind() == "." || parent.indexed_parent().is_some_and(|call| call.kind() == "call_expression")
                 })
         }
         (ProgrammingLanguage::Scala, "compound_type") => holds("base"),
@@ -1527,7 +1636,7 @@ fn is_swift_subscript(call: Node<'_>) -> bool {
 /// callee of `$cb()` and `new $C()`, where its value is invoked.
 fn php_variable<'tree>(node: Node<'tree>, language: ProgrammingLanguage) -> Option<Node<'tree>> {
     (language == ProgrammingLanguage::Php)
-        .then(|| node.parent())
+        .then(|| node.indexed_parent())
         .flatten()
         .filter(|parent| parent.kind() == "variable_name")
 }
@@ -1565,7 +1674,7 @@ fn first_operand(node: Node<'_>) -> Option<Node<'_>> {
 /// Casts, dereferences (`(*f)()`), sequences (`(a, f)()`) and conditionals
 /// (`(c ? f : g)()`) compute a different value and are never wrappers.
 fn transparent_wrapper<'tree>(node: Node<'tree>, language: ProgrammingLanguage) -> Option<Node<'tree>> {
-    let parent = node.parent()?;
+    let parent = node.indexed_parent()?;
     wrapper_operand(parent, language).filter(|operand| operand.id() == node.id()).map(|_| parent)
 }
 
@@ -1739,9 +1848,9 @@ fn is_shell_command_name(node: Node<'_>) -> bool {
     let name = if node.kind() == "command_name" {
         Some(node)
     } else {
-        node.parent().filter(|parent| parent.kind() == "command_name")
+        node.indexed_parent().filter(|parent| parent.kind() == "command_name")
     };
-    name.and_then(|name| name.parent().map(|command| (name, command)))
+    name.and_then(|name| name.indexed_parent().map(|command| (name, command)))
         .is_some_and(|(name, command)| {
             command.kind() == "command" && command.child_by_field_name("name").is_some_and(|held| held.id() == name.id())
         })
@@ -1755,7 +1864,7 @@ fn is_shell_command_name(node: Node<'_>) -> bool {
 /// `defined &f` / `exists &f`, and the receiver of a named method
 /// (`$cb` in `$cb->m()`) name the sub or value without calling it.
 fn is_perl_invocation(node: Node<'_>, source: &str) -> bool {
-    let Some(parent) = node.parent() else { return false };
+    let Some(parent) = node.indexed_parent() else { return false };
     let holds = |field: &str| parent.child_by_field_name(field).is_some_and(|held| held.id() == node.id());
     match parent.kind() {
         // `$cb->(…)` is a `method_invocation` with no method name.
@@ -1774,7 +1883,7 @@ fn is_perl_invocation(node: Node<'_>, source: &str) -> bool {
 /// Whether the bareword or variable call `call` only names its sub:
 /// `\&f`, or `&f` as the argument of `defined` or `exists`.
 fn is_perl_sub_name_only(call: Node<'_>, source: &str) -> bool {
-    let Some(parent) = call.parent() else { return false };
+    let Some(parent) = call.indexed_parent() else { return false };
     if parent.kind() == "to_reference" {
         return true;
     }
@@ -1782,7 +1891,7 @@ fn is_perl_sub_name_only(call: Node<'_>, source: &str) -> bool {
     ampersand
         && parent.kind() == "arguments"
         && parent
-            .parent()
+            .indexed_parent()
             .filter(|outer| outer.kind() == "call_expression_with_spaced_args")
             .and_then(|outer| outer.named_child(0))
             .and_then(|callee| callee.child_by_field_name("function_name"))
@@ -1802,14 +1911,28 @@ mod tests {
     use crate::shared::ReferenceEvidence;
 
     /// `tree_file`'s evidence with its scope captures and reference
-    /// captures in the order `arrange` leaves them.
+    /// captures in the order `arrange` leaves them, walking the file again
+    /// for the bind pass.
     fn evidence_with(
         tree_file: &TreeFile,
         arrange: impl FnOnce(&mut Vec<tree_sitter::Node<'_>>, &mut Vec<crate::file::tree_file::ReferenceCapture<'_>>),
     ) -> ReferenceEvidence {
+        evidence_from(tree_file, false, arrange)
+    }
+
+    /// [`evidence_with`], finishing the definition pass's Rust pattern
+    /// placement when `share_patterns`.
+    fn evidence_from(
+        tree_file: &TreeFile,
+        share_patterns: bool,
+        arrange: impl FnOnce(&mut Vec<tree_sitter::Node<'_>>, &mut Vec<crate::file::tree_file::ReferenceCapture<'_>>),
+    ) -> ReferenceEvidence {
         let selection = MetadataSelection::for_kinds(Some(Vec::new()));
-        let crate::file::tree_file::Definitions { symbols: definitions, mut scopes, .. } =
+        let crate::file::tree_file::Definitions { symbols: definitions, mut scopes, rust_patterns, .. } =
             tree_file.definitions_with_scopes(&selection).expect("definitions");
+        if share_patterns {
+            assert!(rust_patterns.is_some(), "{}: no pattern placement to share", tree_file.file.display());
+        }
         let imports = tree_file.imported_symbols().expect("imports");
         let mut captures = tree_file.reference_captures().expect("captures").expect("a reference query");
         arrange(&mut scopes, &mut captures);
@@ -1821,11 +1944,45 @@ mod tests {
             scopes,
             &imports,
             Some(captures),
-        );
+        )
+        .with_rust_patterns(rust_patterns.filter(|_| share_patterns));
         let records = tree_file
-            .records_from(definitions, &selection, RecordFacts::default())
+            .records_from(definitions, &selection, RecordFacts::default(), None)
             .expect("records");
         syntax.resolve(&records).evidence
+    }
+
+    /// The bind pass finishing the definition pass's pattern placement
+    /// reports what a second walk reports: the same occurrences, targets
+    /// (records, unknowns, imports) and coverage.
+    #[test]
+    fn shared_pattern_placement_gives_the_walked_evidence() {
+        let dir = TempDir::new().expect("tempdir");
+        for (name, source) in [
+            (
+                "patterns.rs",
+                "use m::Imported;\nuse g::*;\nconst C: u8 = 1;\nstruct Unit;\n\
+                 fn f<const N: usize>(v: Option<u8>, (a, b): (u8, u8)) -> u8 {\n\
+                 \x20   let x = a + b;\n\
+                 \x20   match v { Some(C) => C, Some(Imported) => x, Some(y) => y + x, None => N as u8 }\n\
+                 }\n\
+                 fn h(u: Unit) { let Unit = u; if let Some(z) = Some(1) { let _ = z; } for (i, j) in [(1, 2)] { let _ = i + j; } }\n\
+                 mod inner { fn k(q: u8) -> u8 { match q { Glob => q, w => w } } }\n",
+            ),
+            ("closures.rs", "fn f() { let add = |p: u8, q: u8| p + q; let r = add(1, 2); let s = r; let _ = s; }\n"),
+        ] {
+            let path = dir.path().join(name);
+            fs::write(&path, source).expect("write source");
+            let tree_file = TreeFile::new(&path).expect("parse");
+            let walked = evidence_from(&tree_file, false, |_, _| {});
+            let shared = evidence_from(&tree_file, true, |_, _| {});
+            assert!(walked.occurrences.iter().any(|occurrence| occurrence.target.id.is_some()), "{name}");
+            assert_eq!(
+                serde_json::to_string(&shared).expect("json"),
+                serde_json::to_string(&walked).expect("json"),
+                "{name}"
+            );
+        }
     }
 
     #[test]

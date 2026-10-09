@@ -1,4 +1,5 @@
 use super::*;
+use crate::file::parents::IndexedParent as _;
 
 /// Rust visibility.
 ///
@@ -68,19 +69,19 @@ fn modifier_level(declaration: Node<'_>, source: &str) -> Option<Visibility> {
 
 fn variant_of_field(field: Node<'_>) -> Option<Node<'_>> {
     field
-        .parent()
+        .indexed_parent()
         .filter(|list| list.kind() == "field_declaration_list")?
-        .parent()
+        .indexed_parent()
         .filter(|parent| parent.kind() == "enum_variant")
 }
 
 fn enclosing_enum_level(declaration: Node<'_>, source: &str) -> Option<Visibility> {
-    let mut current = declaration.parent();
+    let mut current = declaration.indexed_parent();
     while let Some(node) = current {
         if node.kind() == "enum_item" {
             return Some(item_level(node, source));
         }
-        current = node.parent();
+        current = node.indexed_parent();
     }
     None
 }
@@ -88,9 +89,9 @@ fn enclosing_enum_level(declaration: Node<'_>, source: &str) -> Option<Visibilit
 /// The `trait_item` whose body directly declares `declaration`, if any.
 fn trait_of_member(declaration: Node<'_>) -> Option<Node<'_>> {
     declaration
-        .parent()
+        .indexed_parent()
         .filter(|list| list.kind() == "declaration_list")?
-        .parent()
+        .indexed_parent()
         .filter(|parent| parent.kind() == "trait_item")
 }
 

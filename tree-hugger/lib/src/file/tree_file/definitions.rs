@@ -3,11 +3,13 @@
 //! winning capture of each selected kind.
 
 use std::cell::OnceCell;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, VecDeque};
 
 use tree_sitter::{Node, QueryCursor, StreamingIterator};
 
 use super::TreeFile;
+use super::relations::LexicalWalk;
+use crate::analysis::occurrences::RustPatterns;
 use crate::analysis::counters::{count_definition_capture, count_shared_context_steps};
 use crate::analysis::{owner_path, qualifying_prefixes, segment_suffixes};
 use crate::error::TreeHuggerError;
@@ -16,16 +18,19 @@ use crate::queries::{QueryKind, query_for};
 use crate::shared::{SymbolKindV2, SymbolScope};
 
 /// The kinds whose declarations get metadata (visibility, `static` flags,
-/// signature, type metadata, doc comment and the record's header texts).
-/// Declarations of other kinds get none of it.
+/// signature, type metadata and doc comment), and, of those, the kinds asked
+/// for, whose records also get header texts and the record facets
+/// ([`Self::selects`]). Declarations of other kinds get none of it.
 #[derive(Debug, Clone)]
 pub(crate) struct MetadataSelection {
     /// `None` selects every kind.
     kinds: Option<BTreeSet<SymbolKindV2>>,
+    /// The kinds asked for, before widening; `None` selects every kind.
+    selected: Option<BTreeSet<SymbolKindV2>>,
 }
 
 impl MetadataSelection {
-    pub(crate) const ALL: Self = Self { kinds: None };
+    pub(crate) const ALL: Self = Self { kinds: None, selected: None };
 
     /// Selects `kinds` (`None`: every kind), widened by the members whose
     /// access, `static` flags and doc comments a selected type's field list
@@ -35,7 +40,8 @@ impl MetadataSelection {
         let Some(kinds) = kinds else {
             return Self::ALL;
         };
-        let mut kinds: BTreeSet<SymbolKindV2> = kinds.into_iter().collect();
+        let selected: BTreeSet<SymbolKindV2> = kinds.into_iter().collect();
+        let mut kinds = selected.clone();
         if kinds
             .iter()
             .any(|kind| completes_field_list(SymbolKind::from(*kind)))
@@ -52,11 +58,22 @@ impl MetadataSelection {
         {
             kinds.insert(SymbolKindV2::EnumVariant);
         }
-        Self { kinds: Some(kinds) }
+        Self { kinds: Some(kinds), selected: Some(selected) }
     }
 
     pub(crate) fn wants(&self, kind: SymbolKind) -> bool {
         self.kinds
+            .as_ref()
+            .is_none_or(|kinds| kinds.contains(&SymbolKindV2::from(kind)))
+    }
+
+    /// Whether `kind` was asked for, not only added by widening. A member
+    /// added by widening is read only for what completes its owner's lists
+    /// (access, `static` flags, doc comment) and is dropped before the
+    /// result is returned, so its record gets no header texts, attributes,
+    /// modifiers, flags or metrics.
+    pub(crate) fn selects(&self, kind: SymbolKind) -> bool {
+        self.selected
             .as_ref()
             .is_none_or(|kinds| kinds.contains(&SymbolKindV2::from(kind)))
     }
@@ -123,6 +140,18 @@ struct CaptureGroup<'tree> {
     later: Vec<Candidate<'tree>>,
 }
 
+/// What a capture of the definition query is, by its capture name.
+#[derive(Clone, Copy)]
+enum CaptureRole {
+    /// `@local.definition.import`.
+    Import,
+    /// `@local.scope`.
+    Scope,
+    /// A declaration name of this base kind.
+    Definition(SymbolKind),
+    Ignored,
+}
+
 /// Facts about the file that its declarations share, each derived once per
 /// file (lazily, where only some declarations need it) instead of re-read
 /// from the tree for every declaration.
@@ -145,6 +174,12 @@ pub(crate) struct Definitions<'tree> {
     /// The `@local.scope` captures in match order (repeats included); empty
     /// unless asked for by [`TreeFile::definitions_with_scopes`].
     pub(crate) scopes: Vec<Node<'tree>>,
+    /// A Rust file's relation walk, built to decide impl members' containers;
+    /// [`TreeFile::records_from`] hands it to the relation linker.
+    pub(crate) rust_walk: Option<LexicalWalk<'tree>>,
+    /// A Rust file's pattern placement ([`RustPatterns`]); kept only with
+    /// `scopes`, for reference resolution.
+    pub(crate) rust_patterns: Option<RustPatterns<'tree>>,
 }
 
 struct PendingSymbol<'tree> {
@@ -180,23 +215,24 @@ impl TreeFile {
     /// or whose identity is unknown in a refutable pattern (an import or
     /// glob may supply a constant: no declaration is proved, so none is
     /// reported). The Rust walk runs only when a variable or parameter was
-    /// captured.
+    /// captured; its placement is returned for the bind pass to finish.
     fn drop_non_declarations<'tree>(
         &'tree self,
         groups: &mut Vec<((usize, usize, String), CaptureGroup<'tree>)>,
         local_scopes: &[Node<'tree>],
-    ) {
+    ) -> Option<RustPatterns<'tree>> {
         use crate::analysis::occurrences::{is_false_capture, rust_pattern_non_bindings};
-        let Some(rules) = crate::analysis::scope::LanguageRules::for_language(self.language) else { return };
+        let rules = crate::analysis::scope::LanguageRules::for_language(self.language)?;
         groups.retain(|(_, group)| !is_false_capture(rules, group.winner.name));
         let pattern_capture = |group: &CaptureGroup<'_>| matches!(group.winner.kind, SymbolKind::Variable | SymbolKind::Parameter);
         if self.language != ProgrammingLanguage::Rust || !groups.iter().any(|(_, group)| pattern_capture(group)) {
-            return;
+            return None;
         }
-        let non_bindings = rust_pattern_non_bindings(self.tree.root_node(), &self.source, local_scopes);
+        let (non_bindings, patterns) = rust_pattern_non_bindings(self.tree.root_node(), &self.source, local_scopes);
         if !non_bindings.is_empty() {
             groups.retain(|((start, end, _), _)| !non_bindings.contains(&(*start, *end)));
         }
+        Some(patterns)
     }
 
     fn capture_definitions<'tree>(
@@ -209,7 +245,18 @@ impl TreeFile {
         let mut cursor = QueryCursor::new();
         let root = self.tree.root_node();
         let capture_names = query.capture_names();
-        let mut groups: HashMap<(usize, usize, String), CaptureGroup<'_>> = HashMap::new();
+        // Each capture's role, decided once per capture name.
+        let is_context: Vec<bool> = capture_names.iter().map(|name| name.ends_with(".context")).collect();
+        let roles: Vec<CaptureRole> = capture_names
+            .iter()
+            .map(|&name| match name {
+                "local.definition.import" => CaptureRole::Import,
+                "local.scope" => CaptureRole::Scope,
+                _ => symbol_kind_from_capture(name).map_or(CaptureRole::Ignored, CaptureRole::Definition),
+            })
+            .collect();
+        // Keyed by the name's span, which decides its text.
+        let mut groups: HashMap<(usize, usize), (String, CaptureGroup<'_>)> = HashMap::new();
         let mut import_nodes = Vec::new();
         let mut scopes = Vec::new();
         // Rust pattern names are decided by lookup through these scopes.
@@ -226,35 +273,26 @@ impl TreeFile {
             let context_capture = query_match
                 .captures
                 .iter()
-                .find(|capture| {
-                    capture_names
-                        .get(capture.index as usize)
-                        .is_some_and(|name| name.ends_with(".context"))
-                })
+                .find(|capture| is_context.get(capture.index as usize).copied().unwrap_or(false))
                 .map(|capture| capture.node);
 
             for capture in query_match.captures {
-                let capture_name = capture_names
-                    .get(capture.index as usize)
-                    .copied()
-                    .unwrap_or_default();
-
-                if capture_name == "local.definition.import" {
-                    import_nodes.push(capture.node);
-                    continue;
-                }
-                if capture_name == "local.scope" {
-                    if keep_scopes {
-                        scopes.push(capture.node);
+                let base_kind = match roles.get(capture.index as usize).copied().unwrap_or(CaptureRole::Ignored) {
+                    CaptureRole::Import => {
+                        import_nodes.push(capture.node);
+                        continue;
                     }
-                    if self.language == ProgrammingLanguage::Rust {
-                        local_scopes.push(capture.node);
+                    CaptureRole::Scope => {
+                        if keep_scopes {
+                            scopes.push(capture.node);
+                        }
+                        if self.language == ProgrammingLanguage::Rust {
+                            local_scopes.push(capture.node);
+                        }
+                        continue;
                     }
-                    continue;
-                }
-
-                let Some(base_kind) = symbol_kind_from_capture(capture_name) else {
-                    continue;
+                    CaptureRole::Definition(base_kind) => base_kind,
+                    CaptureRole::Ignored => continue,
                 };
                 let context_capture = context_capture
                     .map(|context| context_for_name(context, capture.node, self.language));
@@ -272,11 +310,6 @@ impl TreeFile {
                 let context = context_capture.or_else(|| {
                     implied_c_function_context(self.language, kind, capture.node, declaration)
                 });
-                let name = capture
-                    .node
-                    .utf8_text(self.source.as_bytes())
-                    .map(str::to_string)
-                    .unwrap_or_default();
                 let candidate = Candidate {
                     name: capture.node,
                     kind,
@@ -285,8 +318,8 @@ impl TreeFile {
                     priority: symbol_kind_priority(kind),
                 };
 
-                let key = (capture.node.start_byte(), capture.node.end_byte(), name);
-                match groups.get_mut(&key) {
+                let key = (capture.node.start_byte(), capture.node.end_byte());
+                match groups.get_mut(&key).map(|(_, group)| group) {
                     Some(group) if candidate.priority > group.winner.priority => {
                         *group = CaptureGroup {
                             winner: candidate,
@@ -298,12 +331,20 @@ impl TreeFile {
                     }
                     Some(_) => {}
                     None => {
+                        let name = capture
+                            .node
+                            .utf8_text(self.source.as_bytes())
+                            .map(str::to_string)
+                            .unwrap_or_default();
                         groups.insert(
                             key,
-                            CaptureGroup {
-                                winner: candidate,
-                                later: Vec::new(),
-                            },
+                            (
+                                name,
+                                CaptureGroup {
+                                    winner: candidate,
+                                    later: Vec::new(),
+                                },
+                            ),
                         );
                     }
                 }
@@ -313,9 +354,10 @@ impl TreeFile {
         }
 
         let mut groups: Vec<((usize, usize, String), CaptureGroup<'_>)> =
-            groups.into_iter().collect();
+            groups.into_iter().map(|((start, end), (name, group))| ((start, end, name), group)).collect();
         groups.sort_by_key(|((start, end, _), _)| (*start, *end));
-        self.drop_non_declarations(&mut groups, &local_scopes);
+        // Kept only for the bind pass, which reads the same scopes.
+        let rust_patterns = self.drop_non_declarations(&mut groups, &local_scopes).filter(|_| keep_scopes);
 
         let facts = FileFacts {
             root,
@@ -356,7 +398,7 @@ impl TreeFile {
             }
         }
         let owner_kinds = OwnerKinds::default();
-        let impl_owners = rust_impl_owners(&pending, root, &self.source);
+        let (impl_owners, rust_walk) = rust_impl_owners(&pending, root, &self.source);
         let container_kinds: Vec<Option<SymbolKind>> = pending
             .iter()
             .map(|entry| {
@@ -391,7 +433,7 @@ impl TreeFile {
                 extracted
             })
             .collect();
-        Ok(Definitions { symbols, import_nodes, scopes })
+        Ok(Definitions { symbols, import_nodes, scopes, rust_walk, rust_patterns })
     }
 
     /// Builds the symbol for a group's winner; metadata only when
@@ -469,7 +511,7 @@ impl TreeFile {
         group: &CaptureGroup<'tree>,
         facts: &FileFacts<'tree>,
     ) {
-        let flags = |candidate: &Candidate<'tree>| {
+        let flags = |candidate: &Candidate<'tree>, scope: SymbolScope| {
             let context = DeclarationContext {
                 language: self.language,
                 source: &self.source,
@@ -477,7 +519,7 @@ impl TreeFile {
                 root: facts.root,
                 is_ecma_module: facts.is_ecma_module,
                 kind: candidate.kind,
-                scope: symbol_scope(candidate.declaration, candidate.name, candidate.kind, self.language),
+                scope,
                 memo: &facts.visibility,
             };
             (
@@ -521,13 +563,16 @@ impl TreeFile {
             None => None,
         };
 
-        let (mut visibility, mut is_static, mut is_static_storage) = flags(&group.winner);
+        // `symbol.scope` is the winner's own scope; a later candidate's is
+        // read from its own declaration.
+        let (mut visibility, mut is_static, mut is_static_storage) = flags(&group.winner, scope);
         let mut function_signature = signature(&group.winner, is_static);
         let mut metadata = type_metadata(&group.winner);
         let mut doc = doc_comment(&group.winner);
         for later in &group.later {
             if function_signature.is_none() {
-                (visibility, is_static, is_static_storage) = flags(later);
+                let later_scope = symbol_scope(later.declaration, later.name, later.kind, self.language);
+                (visibility, is_static, is_static_storage) = flags(later, later_scope);
                 function_signature = signature(later, is_static);
             }
             if metadata.is_none() {
@@ -634,10 +679,11 @@ fn align_field_metadata(pending: &mut [PendingSymbol<'_>], selection: &MetadataS
         let metadata = symbol.type_metadata.get_or_insert_with(TypeMetadata::new);
 
         let mut paired = vec![false; own.len()];
+        let mut unpaired = unpaired_by_name(own.iter().map(|member| member.name.as_str()));
         let mut positioned: Vec<(usize, FieldInfo)> = Vec::new();
         let mut last_start = 0;
         for mut field in metadata.fields.drain(..) {
-            if let Some(index) = (0..own.len()).find(|&index| !paired[index] && own[index].name == field.name) {
+            if let Some(index) = unpaired.get_mut(field.name.as_str()).and_then(VecDeque::pop_front) {
                 paired[index] = true;
                 field.visibility = own[index].visibility;
                 field.is_static = own[index].is_static;
@@ -663,6 +709,17 @@ fn align_field_metadata(pending: &mut [PendingSymbol<'_>], selection: &MetadataS
         positioned.sort_by_key(|(start, _)| *start);
         metadata.fields = positioned.into_iter().map(|(_, field)| field).collect();
     }
+}
+
+/// The indexes of `names` by name, in order: popping a name's front gives
+/// its first member not yet paired, so the k-th listed entry of a name pairs
+/// with the k-th member of that name.
+fn unpaired_by_name<'n>(names: impl Iterator<Item = &'n str>) -> HashMap<&'n str, VecDeque<usize>> {
+    let mut by_name: HashMap<&str, VecDeque<usize>> = HashMap::new();
+    for (index, name) in names.enumerate() {
+        by_name.entry(name).or_default().push_back(index);
+    }
+    by_name
 }
 
 /// Whether a kind's type metadata lists variants that
@@ -738,11 +795,11 @@ fn align_variant_metadata(pending: &mut [PendingSymbol<'_>], selection: &Metadat
 fn reconcile_variants(listed: Vec<VariantInfo>, mut standalone: Vec<(usize, VariantInfo)>) -> Vec<VariantInfo> {
     standalone.sort_by_key(|(start, _)| *start);
     let mut paired = vec![false; standalone.len()];
+    let mut unpaired = unpaired_by_name(standalone.iter().map(|(_, variant)| variant.name.as_str()));
     let mut positioned: Vec<(usize, VariantInfo)> = Vec::new();
     let mut last_start = 0;
     for mut variant in listed {
-        if let Some(index) =
-            (0..standalone.len()).find(|&index| !paired[index] && standalone[index].1.name == variant.name)
+        if let Some(index) = unpaired.get_mut(variant.name.as_str()).and_then(VecDeque::pop_front)
         {
             paired[index] = true;
             let (start, own) = &standalone[index];
@@ -761,16 +818,20 @@ fn reconcile_variants(listed: Vec<VariantInfo>, mut standalone: Vec<(usize, Vari
 
 /// For each Rust `impl` of the file (by node id), the index in `pending` of
 /// the declaration its self type resolves to, by the relation resolver's
-/// decision (`relations::impl_self_types`); empty when no symbol sits in an
-/// impl.
-fn rust_impl_owners(pending: &[PendingSymbol<'_>], root: Node<'_>, source: &str) -> HashMap<usize, Option<usize>> {
+/// decision (`relations::impl_self_types`), and the walk that decision
+/// built; empty, with no walk, when no symbol sits in an impl.
+fn rust_impl_owners<'tree>(
+    pending: &[PendingSymbol<'tree>],
+    root: Node<'tree>,
+    source: &'tree str,
+) -> (HashMap<usize, Option<usize>>, Option<LexicalWalk<'tree>>) {
     let in_impl = |entry: &PendingSymbol<'_>| {
         entry.container.as_ref().is_some_and(|container| {
             matches!(container.lookup, ContainerLookup::SameFileType { impl_item: Some(_) })
         })
     };
     if !pending.iter().any(in_impl) {
-        return HashMap::new();
+        return (HashMap::new(), None);
     }
     let entries = pending
         .iter()
@@ -782,7 +843,8 @@ fn rust_impl_owners(pending: &[PendingSymbol<'_>], root: Node<'_>, source: &str)
             name: entry.extracted.name,
         })
         .collect();
-    super::relations::impl_self_types(entries, root, source)
+    let (owners, walk) = super::relations::impl_self_types(entries, root, source);
+    (owners, Some(walk))
 }
 
 /// The container's kind is the kind extracted for the container's own

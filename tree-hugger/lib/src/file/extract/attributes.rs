@@ -7,6 +7,7 @@
 //! imports never resolved and macros never expanded.
 
 use super::*;
+use crate::file::parents::IndexedParent as _;
 use crate::shared::Attribute;
 
 /// One attribute as written: `#[tokio::test]` is `tokio::test` with no
@@ -107,7 +108,7 @@ pub(crate) fn declaration_attributes(
         }
         ProgrammingLanguage::Python => {
             if let Some(decorated) = declaration
-                .parent()
+                .indexed_parent()
                 .filter(|parent| parent.kind() == "decorated_definition")
             {
                 for decorator in children_of_kind(decorated, "decorator") {
@@ -207,7 +208,7 @@ pub(crate) fn modifier_host(declaration: Node<'_>, language: ProgrammingLanguage
             ProgrammingLanguage::CSharp => matches!(host.kind(), "variable_declarator" | "variable_declaration"),
             _ => false,
         };
-        match host.parent() {
+        match host.indexed_parent() {
             Some(parent) if climbs => host = parent,
             _ => return host,
         }
@@ -221,7 +222,7 @@ pub(crate) fn modifier_host(declaration: Node<'_>, language: ProgrammingLanguage
 /// parameter's, never its function's.
 fn ecma_decorators(declaration: Node<'_>) -> Vec<Node<'_>> {
     let mut decorators = Vec::new();
-    if let Some(parent) = declaration.parent() {
+    if let Some(parent) = declaration.indexed_parent() {
         match parent.kind() {
             "export_statement" => decorators.extend(children_of_kind(parent, "decorator")),
             "class_body" => {

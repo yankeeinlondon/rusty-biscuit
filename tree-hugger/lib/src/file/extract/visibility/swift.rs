@@ -1,4 +1,5 @@
 use super::*;
+use crate::file::parents::IndexedParent as _;
 
 /// Reads a Swift declaration's access keyword: `open` and `public` are Public,
 /// `package` Package, `internal` Internal, `fileprivate` ModulePrivate and
@@ -73,10 +74,10 @@ fn member_default(container: Node<'_>, source: &str) -> Visibility {
 /// The type, extension or protocol whose body directly declares
 /// `declaration`.
 fn enclosing_type(declaration: Node<'_>) -> Option<Node<'_>> {
-    let body = declaration.parent()?;
+    let body = declaration.indexed_parent()?;
     if !matches!(body.kind(), "class_body" | "enum_class_body" | "protocol_body") {
         return None;
     }
-    body.parent()
+    body.indexed_parent()
         .filter(|owner| matches!(owner.kind(), "class_declaration" | "protocol_declaration"))
 }

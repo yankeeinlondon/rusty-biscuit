@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use super::*;
+use crate::file::parents::IndexedParent as _;
 use crate::analysis::counters::count_shared_context_steps;
 
 /// One extracted symbol, as the name builder sees it.
@@ -61,7 +62,7 @@ pub(crate) fn qualified_names(
     // than asking every node for its parent's parent.
     let root_id = symbols.first().map_or(0, |symbol| {
         let mut root = symbol.anchor;
-        while let Some(parent) = root.parent() {
+        while let Some(parent) = root.indexed_parent() {
             root = parent;
         }
         root.id()
@@ -205,7 +206,7 @@ impl<'tree> Builder<'_, 'tree> {
     /// symbol itself.
     fn prefix(&self, index: usize, from: Node<'tree>) -> Prefix<'tree> {
         let mut child = from;
-        while let Some(node) = child.parent()
+        while let Some(node) = child.indexed_parent()
             && node.id() != self.root_id
         {
             match self.owners.get(&node.id()) {
@@ -259,7 +260,7 @@ impl<'tree> Builder<'_, 'tree> {
         if !has_file_level_namespaces(self.language) {
             return None;
         }
-        let Some(root) = top.parent() else {
+        let Some(root) = top.indexed_parent() else {
             // The root has no siblings: only its own statement could apply.
             return file_level_namespace(top, self.language, self.source);
         };
@@ -321,22 +322,22 @@ fn rust_impl_prefix<'tree>(impl_item: Node<'tree>, source: &str) -> Option<Prefi
     {
         match first.as_str() {
             "crate" => {
-                while let Some(parent) = node.parent() {
+                while let Some(parent) = node.indexed_parent() {
                     node = parent;
                 }
             }
             "super" => {
-                let mut ancestor = node.parent();
+                let mut ancestor = node.indexed_parent();
                 while let Some(candidate) = ancestor
                     && candidate.kind() != "mod_item"
                 {
-                    ancestor = candidate.parent();
+                    ancestor = candidate.indexed_parent();
                 }
                 node = match ancestor {
                     Some(module) => module,
                     None => {
                         let mut root = node;
-                        while let Some(parent) = root.parent() {
+                        while let Some(parent) = root.indexed_parent() {
                             root = parent;
                         }
                         root

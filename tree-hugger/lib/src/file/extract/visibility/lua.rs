@@ -1,4 +1,5 @@
 use super::*;
+use crate::file::parents::IndexedParent as _;
 
 /// Lua visibility: a chunk-level `local` is ModulePrivate, a `local` in a
 /// nested block is Unknown, and a global binding is Public. Table fields
@@ -7,7 +8,7 @@ pub(super) fn extract_lua_visibility(
     declaration: Node<'_>,
     ctx: &DeclarationContext<'_, '_>,
 ) -> Option<Visibility> {
-    if ctx.name.parent().is_some_and(|parent| {
+    if ctx.name.indexed_parent().is_some_and(|parent| {
         matches!(
             parent.kind(),
             "dot_index_expression" | "method_index_expression"
@@ -18,7 +19,7 @@ pub(super) fn extract_lua_visibility(
 
     let (statement, is_local) = match declaration.kind() {
         "function_declaration" => (declaration, find_child_by_kind(declaration, "local").is_some()),
-        "assignment_statement" => match declaration.parent() {
+        "assignment_statement" => match declaration.indexed_parent() {
             Some(parent) if parent.kind() == "variable_declaration" => (parent, true),
             _ => (declaration, false),
         },
@@ -29,7 +30,7 @@ pub(super) fn extract_lua_visibility(
         return Some(Visibility::Public);
     }
     statement
-        .parent()
+        .indexed_parent()
         .is_some_and(|parent| parent.kind() == "chunk")
         .then_some(Visibility::ModulePrivate)
 }

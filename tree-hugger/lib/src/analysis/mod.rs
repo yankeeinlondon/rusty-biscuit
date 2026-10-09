@@ -86,10 +86,18 @@ pub(crate) fn run_query(
     tree_file: &TreeFile,
     query: &SymbolQuery,
 ) -> Result<SymbolQueryResult, TreeHuggerError> {
+    tree_file.with_parent_index(|| run_indexed(tree_file, query))
+}
+
+/// [`run_query`] with the file's parent index installed.
+fn run_indexed(
+    tree_file: &TreeFile,
+    query: &SymbolQuery,
+) -> Result<SymbolQueryResult, TreeHuggerError> {
     let plan = PassPlan::for_query(query);
     let selection = MetadataSelection::for_kinds(query.selected_kinds());
 
-    let Definitions { symbols: definitions, import_nodes, scopes: scope_nodes } = if plan.bind {
+    let Definitions { symbols: definitions, import_nodes, scopes: scope_nodes, rust_walk, rust_patterns } = if plan.bind {
         tree_file.definitions_with_scopes(&selection)?
     } else {
         tree_file.definitions(&selection)?
@@ -122,6 +130,7 @@ pub(crate) fn run_query(
             &imports,
             captures,
         )
+        .with_rust_patterns(rust_patterns)
     });
     let exports = tree_file
         .exports_from(&definitions)
@@ -132,7 +141,7 @@ pub(crate) fn run_query(
         metrics: query.requires(Capability::Metrics),
         containment: plan.containment,
     };
-    let symbols = tree_file.records_from(definitions, &selection, facts)?;
+    let symbols = tree_file.records_from(definitions, &selection, facts, rust_walk)?;
 
     let mut index = FileSymbolIndex {
         schema_version: crate::shared::SchemaVersion::CURRENT,
@@ -548,7 +557,7 @@ fn may_call_itself(symbol: &SymbolRecord, call: &Occurrence, imports: &HashMap<(
 /// `ParsedDocs`.
 fn docs_pass(index: &mut FileSymbolIndex) {
     for symbol in &mut index.symbols {
-        symbol.docs = parse_docs_facet(symbol.docs.clone());
+        symbol.docs = parse_docs_facet(std::mem::take(&mut symbol.docs));
         symbol.provenance.parse_pass = AnalysisPass::Docs.as_str().to_string();
     }
 }

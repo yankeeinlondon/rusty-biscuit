@@ -4,6 +4,7 @@ use std::sync::OnceLock;
 
 use tree_sitter::{Node, QueryCursor, StreamingIterator};
 
+use crate::file::parents::IndexedParent as _;
 use crate::analysis::counters::{count_diagnostics_run, count_reference_capture};
 use crate::analysis::declaration_names::{
     declared_name_tokens, is_scala_import_segment, scala_import_binds, scala_import_path_start, swift_import_selector,
@@ -19,13 +20,15 @@ use crate::shared::{
     AnalysisPass, Attribute, CodeBlock, CodeRange, Diagnostic, DiagnosticSeverity, FileSymbolIndex,
     ImportSymbol, LintDiagnostic, ProgrammingLanguage, ReferenceEvidence, ReferencedSymbol, SourceContext, SymbolInfo,
     SymbolKind, SymbolKindData, SymbolKindV2, SymbolRecord, SyntaxDiagnostic,
-    normalize_modifiers, stable_symbol_key, symbol_id_from_stable_key,
+    normalize_modifiers,
 };
+use crate::shared::schema_v2::{record_qualified_name, stable_key_path, stable_key_with_path};
 
 mod definitions;
 mod relations;
 
 pub(crate) use definitions::{Definitions, ExtractedSymbol, MetadataSelection, RecordFacts};
+pub(crate) use relations::LexicalWalk;
 
 /// Represents a parsed source file backed by tree-sitter.
 #[derive(Debug, Clone)]
@@ -101,6 +104,13 @@ impl TreeFile {
     /// Returns the source text of the parsed file.
     pub fn source(&self) -> &str {
         &self.source
+    }
+
+    /// Runs `f` with this file's parent index installed
+    /// ([`crate::file::parents`]), so every parent lookup inside it is one
+    /// map read.
+    pub(crate) fn with_parent_index<R>(&self, f: impl FnOnce() -> R) -> R {
+        crate::file::parents::with_parent_index(&self.tree, f)
     }
 
     /// Returns the root node of the parsed syntax tree.
@@ -388,7 +398,7 @@ impl TreeFile {
     /// Returns (is_qualified, qualifier) where qualifier is the prefix
     /// (e.g., `foo` in `foo.bar` or `module` in `module::symbol`).
     fn detect_qualified_reference(&self, node: Node) -> (bool, Option<String>) {
-        let parent = match node.parent() {
+        let parent = match node.indexed_parent() {
             Some(p) => p,
             None => return (false, None),
         };
@@ -598,7 +608,7 @@ impl TreeFile {
                 .map(|s| s.trim_matches('"').trim_matches('\'').to_string());
         }
 
-        let parent = node.parent();
+        let parent = node.indexed_parent();
         let text = |node: Node| node.utf8_text(self.source.as_bytes()).ok().map(str::to_string);
         // TypeScript `import q = require("m");` names its module beside the
         // binding; `import R = N.S;` aliases an entity path, kept as the
@@ -678,7 +688,7 @@ impl TreeFile {
             "future_import_statement" => Some("__future__".to_string()),
             _ => None,
         };
-        let parent = node.parent();
+        let parent = node.indexed_parent();
         if let Some(aliased) = parent.filter(|parent| parent.kind() == "aliased_import") {
             let target = aliased.child_by_field_name("name").and_then(text);
             return match statement.kind() {
@@ -713,7 +723,7 @@ impl TreeFile {
         name: &str,
     ) -> (Option<String>, Option<String>, Option<String>) {
         let text = |node: Node| node.utf8_text(self.source.as_bytes()).ok().map(str::to_string);
-        let parent = node.parent();
+        let parent = node.indexed_parent();
         if let Some(declaration) = parent.filter(|parent| parent.kind() == "extern_crate_declaration") {
             let original = declaration
                 .child_by_field_name("alias")
@@ -745,9 +755,9 @@ impl TreeFile {
         match path.kind() {
             "scoped_identifier" => path.child_by_field_name("name"),
             "self" => {
-                let entry = path.parent().filter(|parent| parent.kind() == "use_as_clause").unwrap_or(path);
-                let list = entry.parent().filter(|parent| parent.kind() == "use_list")?;
-                let owner = list.parent().filter(|parent| parent.kind() == "scoped_use_list")?;
+                let entry = path.indexed_parent().filter(|parent| parent.kind() == "use_as_clause").unwrap_or(path);
+                let list = entry.indexed_parent().filter(|parent| parent.kind() == "use_list")?;
+                let owner = list.indexed_parent().filter(|parent| parent.kind() == "scoped_use_list")?;
                 owner.child_by_field_name("path").and_then(|path| self.rust_use_segment(path))
             }
             _ => Some(path),
@@ -761,7 +771,7 @@ impl TreeFile {
         let text = |node: Node| node.utf8_text(self.source.as_bytes()).ok();
         let mut parts = Vec::new();
         let mut current = segment;
-        while let Some(parent) = current.parent() {
+        while let Some(parent) = current.indexed_parent() {
             match parent.kind() {
                 "scoped_identifier"
                     if parent.child_by_field_name("name").is_some_and(|name| name.id() == current.id()) =>
@@ -769,7 +779,7 @@ impl TreeFile {
                     parts.extend(parent.child_by_field_name("path").and_then(text));
                 }
                 "use_list" => {
-                    if let Some(owner) = parent.parent().filter(|owner| owner.kind() == "scoped_use_list") {
+                    if let Some(owner) = parent.indexed_parent().filter(|owner| owner.kind() == "scoped_use_list") {
                         parts.extend(owner.child_by_field_name("path").and_then(text));
                         current = owner;
                         continue;
@@ -921,9 +931,9 @@ impl TreeFile {
             matches!(child.kind(), "name" | "qualified_name") && Some(child.id()) != alias_node.map(|alias| alias.id())
         });
         let prefix = clause
-            .parent()
+            .indexed_parent()
             .filter(|parent| parent.kind() == "namespace_use_group")
-            .and_then(|group| group.parent())
+            .and_then(|group| group.indexed_parent())
             .and_then(|declaration| find_child_by_kind(declaration, "namespace_name"))
             .and_then(text);
         let source = path.and_then(text).map(|path| match prefix {
@@ -959,7 +969,7 @@ impl TreeFile {
         name: &str,
     ) -> (Option<String>, Option<String>, Option<String>) {
         let text = |node: Node| node.utf8_text(self.source.as_bytes()).ok().map(str::to_string);
-        let Some(parent) = node.parent() else {
+        let Some(parent) = node.indexed_parent() else {
             return (None, None, None);
         };
         let selector_source = |selectors: Node, selected: &str| {
@@ -969,7 +979,7 @@ impl TreeFile {
         match parent.kind() {
             "arrow_renamed_identifier" | "as_renamed_identifier" => {
                 let original = parent.child_by_field_name("name").and_then(text);
-                let source = parent.parent().zip(original.as_deref()).and_then(|(context, original)| {
+                let source = parent.indexed_parent().zip(original.as_deref()).and_then(|(context, original)| {
                     if context.kind() == "namespace_selectors" {
                         selector_source(context, original)
                     } else {
@@ -1789,7 +1799,8 @@ impl TreeFile {
     /// Returns an error if symbol extraction or query compilation fails.
     pub fn symbol_records(&self) -> Result<Vec<SymbolRecord>, TreeHuggerError> {
         let selection = MetadataSelection::ALL;
-        self.records_from(self.definitions(&selection)?.symbols, &selection, RecordFacts::default())
+        let definitions = self.definitions(&selection)?;
+        self.records_from(definitions.symbols, &selection, RecordFacts::default(), definitions.rust_walk)
     }
 
     /// Converts definitions to parse-pass records, in the same order.
@@ -1797,21 +1808,27 @@ impl TreeFile {
     /// Every definition yields a record with its identity, ID, spans and
     /// container; the header texts, keyword, type-alias target, generic
     /// parameters, attributes, written modifiers, declared bases and the
-    /// `facts` asked for are filled only for kinds `selection` wants. Base
-    /// targets resolve against every record, wanted or not.
+    /// `facts` asked for are filled only for kinds `selection` selects
+    /// ([`MetadataSelection::selects`]). Base
+    /// targets resolve against every record, wanted or not. `rust_walk` is
+    /// [`Definitions::rust_walk`] of the same run, reused by the relation
+    /// linker.
     ///
     /// ## Errors
     ///
     /// [`TreeHuggerError::TooManyGenericParameters`] when a selected
     /// declaration's generic parameter positions do not fit in `u16`.
-    pub(crate) fn records_from(
-        &self,
-        definitions: Vec<ExtractedSymbol<'_>>,
+    pub(crate) fn records_from<'tree>(
+        &'tree self,
+        definitions: Vec<ExtractedSymbol<'tree>>,
         selection: &MetadataSelection,
         facts: RecordFacts,
+        rust_walk: Option<LexicalWalk<'tree>>,
     ) -> Result<Vec<SymbolRecord>, TreeHuggerError> {
         let root = self.tree.root_node();
         let mut ordinals: HashMap<(SymbolKindV2, String), u32> = HashMap::new();
+        // Every definition's `file` is this file.
+        let key_path = stable_key_path(&self.file);
         let mut records = Vec::new();
         let mut relation_inputs = Vec::new();
         // Inner `#![cfg(test)]` state per file root and module body, shared
@@ -1827,7 +1844,7 @@ impl TreeFile {
             is_exported,
         } in definitions
         {
-            let wanted = selection.wants(symbol.kind);
+            let wanted = selection.selects(symbol.kind);
             // `metrics.lines` and `metrics.cyclomatic` measure this body, so
             // they never disagree with the stored span.
             let callable = symbol
@@ -1873,14 +1890,16 @@ impl TreeFile {
             });
             let name_span = text_span_from_code_range(&symbol.range);
             let name_bytes = symbol.range.start_byte..symbol.range.end_byte;
-            let mut record: SymbolRecord = symbol.into();
 
             // Same-named declarations of one kind and qualified name (C++
             // overloads, repeated locals) are told apart by their order.
-            let ordinal_key = (record.kind, record.identity.qualified_name.clone());
-            let ordinal_slot = ordinals.entry(ordinal_key).or_insert(0);
+            let kind = SymbolKindV2::from(symbol.kind);
+            let qualified_name = record_qualified_name(&symbol);
+            let ordinal_slot = ordinals.entry((kind, qualified_name.to_string())).or_insert(0);
             let sibling_ordinal = *ordinal_slot;
             *ordinal_slot += 1;
+            let stable_key = stable_key_with_path(symbol.language, &key_path, kind, qualified_name, sibling_ordinal);
+            let mut record = SymbolRecord::with_stable_key(symbol, stable_key);
 
             record.source.declaration_span = text_span_for_node(anchor);
             record.source.name_span = Some(name_span);
@@ -1891,14 +1910,6 @@ impl TreeFile {
                 record.visibility.is_deprecated = is_deprecated;
             }
             record.metrics = metrics;
-            record.identity.stable_key = stable_symbol_key(
-                record.language,
-                &record.source.file_path,
-                record.kind,
-                &record.identity.qualified_name,
-                sibling_ordinal,
-            );
-            record.id = symbol_id_from_stable_key(&record.identity.stable_key);
 
             if wanted {
                 record.source.declaration_text = declaration_text(declaration, &self.source);
@@ -1947,6 +1958,7 @@ impl TreeFile {
             self.language,
             &self.source,
             facts.containment,
+            rust_walk,
         );
 
         Ok(records)
@@ -2051,7 +2063,7 @@ fn swift_selective_import_name(path: Node<'_>, language: ProgrammingLanguage) ->
     if language != ProgrammingLanguage::Swift || path.kind() != "identifier" {
         return None;
     }
-    path.parent().and_then(swift_import_selector)?;
+    path.indexed_parent().and_then(swift_import_selector)?;
     let mut cursor = path.walk();
     path.named_children(&mut cursor).filter(|segment| segment.kind() == "simple_identifier").last()
 }
@@ -2060,7 +2072,7 @@ fn swift_selective_import_name(path: Node<'_>, language: ProgrammingLanguage) ->
 /// path's last segment in `use a::b::*;` or `use a::{*};`, never in a list
 /// that also holds `self` (`use a::{self, *};` imports `a` itself).
 fn is_rust_glob_path(node: Node<'_>) -> bool {
-    let path = match node.parent() {
+    let path = match node.indexed_parent() {
         Some(parent)
             if parent.kind() == "scoped_identifier"
                 && parent.child_by_field_name("name").is_some_and(|name| name.id() == node.id()) =>
@@ -2069,7 +2081,7 @@ fn is_rust_glob_path(node: Node<'_>) -> bool {
         }
         _ => node,
     };
-    let Some(parent) = path.parent() else { return false };
+    let Some(parent) = path.indexed_parent() else { return false };
     match parent.kind() {
         "use_wildcard" => true,
         "scoped_use_list" => {
@@ -2157,5 +2169,155 @@ mod tests {
                 assert_eq!(nth_line(source, &starts, index), source.lines().nth(index), "{source:?} line {index}");
             }
         }
+    }
+
+    fn parsed(dir: &tempfile::TempDir, name: &str, source: &str) -> TreeFile {
+        let path = dir.path().join(name);
+        std::fs::write(&path, source).expect("source");
+        TreeFile::new(&path).expect("parse")
+    }
+
+    /// Records built with the given walk, and the shared-context steps the
+    /// definition and record passes took.
+    fn records_and_steps(tree_file: &TreeFile, reuse_walk: bool) -> (Vec<SymbolRecord>, u64) {
+        let selection = MetadataSelection::for_kinds(None);
+        let facts = RecordFacts { containment: true, ..RecordFacts::default() };
+        let before = crate::analysis::counters::work_counters();
+        let definitions = tree_file.definitions(&selection).expect("definitions");
+        let walk = if reuse_walk { definitions.rust_walk } else { None };
+        let records = tree_file.records_from(definitions.symbols, &selection, facts, walk).expect("records");
+        (records, crate::analysis::counters::work_counters().since(before).shared_context_steps)
+    }
+
+    /// A Rust file with impl members walks its relation scopes once: the
+    /// relation linker reuses the walk the definition pass built for the
+    /// members' containers, with the same records as a linker that walks
+    /// again.
+    #[test]
+    fn rust_relation_linker_reuses_the_definition_walk() {
+        let dir = tempfile::TempDir::new().expect("temp");
+        let tree_file = parsed(
+            &dir,
+            "owners.rs",
+            "trait T { fn t(&self); }\nstruct S { f: u8 }\nimpl S { fn new() -> Self { S { f: 0 } } }\n\
+             impl T for S { fn t(&self) { let x = 1; } }\nmod m { pub struct U; impl U { fn u() {} } }\n",
+        );
+        assert!(tree_file.definitions(&MetadataSelection::for_kinds(None)).expect("definitions").rust_walk.is_some());
+        let (reused, reused_steps) = records_and_steps(&tree_file, true);
+        let (walked, walked_steps) = records_and_steps(&tree_file, false);
+        let json = |records: &[SymbolRecord]| serde_json::to_string(records).expect("json");
+        assert_eq!(json(&reused), json(&walked));
+        assert!(reused_steps < walked_steps, "{reused_steps} steps reusing, {walked_steps} walking again");
+        let container = |name: &str| {
+            let record = reused.iter().find(|record| record.identity.name == name).expect("member");
+            record.relations.container.as_ref().map(|container| container.name.clone())
+        };
+        assert_eq!(container("new").as_deref(), Some("S"));
+        assert_eq!(container("u").as_deref(), Some("U"));
+        assert!(reused.iter().find(|record| record.identity.name == "S").expect("S").relations.implements.iter().any(|target| target.name == "T"));
+
+        let plain = parsed(&dir, "plain.rs", "struct P;\nfn f() {}\n");
+        assert!(plain.definitions(&MetadataSelection::for_kinds(None)).expect("definitions").rust_walk.is_none());
+    }
+
+    /// A member kind added only to complete a selected type's lists gets no
+    /// record facets of its own, and the selected types are those of a
+    /// query over every kind: field and variant lists keep the members'
+    /// access, `static` flags and doc comments.
+    #[test]
+    fn widened_members_complete_their_owners_without_record_facets() {
+        use crate::file::query::{Capability, SymbolQuery};
+        let dir = tempfile::TempDir::new().expect("temp");
+        for (name, source, kinds) in [
+            (
+                "owners.rs",
+                "/// S.\npub struct S {\n    /// Doc of f.\n    pub f: u8,\n    #[allow(dead_code)]\n    g: Vec<u8>,\n}\n\
+                 /// E.\npub enum E {\n    /// A.\n    A,\n    #[deprecated]\n    B(u8),\n}\n",
+                vec![SymbolKindV2::Type, SymbolKindV2::Enum],
+            ),
+            (
+                "Owner.java",
+                "class Owner {\n    /** Doc of f. */\n    public static final int F = 1;\n    private String g;\n    enum Mode { /** On. */ ON, OFF }\n}\n",
+                vec![SymbolKindV2::Class, SymbolKindV2::Enum],
+            ),
+        ] {
+            let tree_file = parsed(&dir, name, source);
+            let capabilities = [Capability::Flags, Capability::Metrics, Capability::Containment];
+            let narrow = tree_file.query(&SymbolQuery::new().kinds(kinds.clone()).capabilities(capabilities)).expect("narrow");
+            let wide = tree_file.query(&SymbolQuery::new().capabilities(capabilities)).expect("wide");
+            let json = |records: Vec<&SymbolRecord>| serde_json::to_string(&records).expect("json");
+            fn owners<'r>(records: &'r [SymbolRecord], kinds: &[SymbolKindV2]) -> Vec<&'r SymbolRecord> {
+                records.iter().filter(|record| kinds.contains(&record.kind)).collect()
+            }
+            assert!(!owners(&narrow.index.symbols, &kinds).is_empty(), "{name}");
+            assert_eq!(narrow.index.symbols.len(), owners(&narrow.index.symbols, &kinds).len(), "{name}");
+            assert_eq!(json(owners(&narrow.index.symbols, &kinds)), json(owners(&wide.index.symbols, &kinds)), "{name}");
+
+            let selection = MetadataSelection::for_kinds(Some(kinds.clone()));
+            let definitions = tree_file.definitions(&selection).expect("definitions");
+            let facts = RecordFacts { flags: true, metrics: true, containment: true };
+            let records = tree_file.records_from(definitions.symbols, &selection, facts, None).expect("records");
+            let members: Vec<&SymbolRecord> = records.iter().filter(|record| !kinds.contains(&record.kind)).collect();
+            assert!(members.iter().any(|record| record.kind == SymbolKindV2::EnumVariant), "{name}");
+            for member in members {
+                assert!(member.source.declaration_text.is_none() && member.source.signature_text.is_none(), "{name} {}", member.identity.name);
+                assert!(member.attributes.is_empty() && member.metrics.is_none(), "{name} {}", member.identity.name);
+            }
+        }
+    }
+
+    /// Each record's key is [`stable_symbol_key`] with its position among
+    /// the records of its kind and qualified name, and its ID is that key's,
+    /// for repeated locals and overloads alike.
+    #[test]
+    fn record_keys_and_ids_are_the_stable_symbol_keys() {
+        use crate::shared::{stable_symbol_key, symbol_id_from_stable_key};
+        let dir = tempfile::TempDir::new().expect("temp");
+        for (name, source) in [
+            ("keys.rs", "fn f() { let x = 1; let x = x + 1; }\nfn g(x: u8) {}\nstruct S;\nimpl S { fn m(&self) {} }\n"),
+            ("keys.cpp", "int f(int a);\nint f(double a);\nnamespace n { int f(); }\n"),
+        ] {
+            let records = parsed(&dir, name, source).symbol_records().expect("records");
+            let mut seen: HashMap<(SymbolKindV2, String), u32> = HashMap::new();
+            assert!(records.len() >= 4, "{name}");
+            for record in &records {
+                let ordinal = seen.entry((record.kind, record.identity.qualified_name.clone())).or_insert(0);
+                let key = stable_symbol_key(record.language, &record.source.file_path, record.kind, &record.identity.qualified_name, *ordinal);
+                *ordinal += 1;
+                assert_eq!(record.identity.stable_key, key, "{name}");
+                assert_eq!(record.id, symbol_id_from_stable_key(&key), "{name}");
+            }
+            assert!(seen.values().any(|&count| count > 1), "{name}: a repeated key");
+        }
+    }
+
+    /// Outside Rust and Swift, a file whose selected records write no base
+    /// relates nothing: the linker builds no declaration index, and the
+    /// records are those it built before.
+    #[test]
+    fn a_file_without_written_bases_builds_no_relation_index() {
+        let dir = tempfile::TempDir::new().expect("temp");
+        for (name, source) in [
+            ("plain.go", "package p\ntype S struct { f int }\nfunc (s S) M() {}\nfunc F() {}\n"),
+            ("plain.py", "class A:\n    def m(self):\n        pass\ndef f():\n    pass\n"),
+            ("plain.ts", "class A { m() {} }\ninterface I { x: number }\nfunction f() {}\n"),
+        ] {
+            let tree_file = parsed(&dir, name, source);
+            let selection = MetadataSelection::for_kinds(None);
+            let definitions = tree_file.definitions(&selection).expect("definitions");
+            let before = crate::analysis::counters::work_counters();
+            let records = tree_file
+                .records_from(definitions.symbols, &selection, RecordFacts { containment: true, ..RecordFacts::default() }, None)
+                .expect("records");
+            let work = crate::analysis::counters::work_counters().since(before);
+            assert!(records.len() >= 4, "{name}");
+            assert_eq!(work.relation_links, 1, "{name}");
+            assert_eq!(work.shared_context_steps, 0, "{name}");
+        }
+        // A written base still resolves.
+        let based = parsed(&dir, "based.py", "class A:\n    pass\nclass B(A):\n    pass\n");
+        let (records, _) = records_and_steps(&based, true);
+        let b = records.iter().find(|record| record.identity.name == "B").expect("B");
+        assert_eq!(b.relations.unclassified_bases.iter().chain(&b.relations.extends).map(|target| target.name.as_str()).collect::<Vec<_>>(), ["A"]);
     }
 }

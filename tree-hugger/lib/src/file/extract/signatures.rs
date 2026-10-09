@@ -3,6 +3,7 @@
 //! `static_flags` modules, which read any declaration node.
 
 use super::*;
+use crate::file::parents::IndexedParent as _;
 
 /// Extracts function signature from a function/method node.
 ///
@@ -830,7 +831,7 @@ pub(crate) fn find_c_param_name(node: Node<'_>, source: &str) -> Option<String> 
 pub(crate) fn extract_c_return_type(node: Node<'_>, source: &str) -> Option<String> {
     // If the node is function_declarator, look at the parent
     let function_node = if node.kind() == "function_declarator" {
-        node.parent()?
+        node.indexed_parent()?
     } else {
         node
     };

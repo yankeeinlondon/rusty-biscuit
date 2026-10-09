@@ -1,4 +1,5 @@
 use super::*;
+use crate::file::parents::IndexedParent as _;
 
 /// Reads the C# access keywords on a declaration, combining
 /// `protected internal` and `private protected`; `file` is ModulePrivate.
@@ -59,10 +60,10 @@ pub(super) fn extract_csharp_declaration_visibility(
         return Some(Visibility::Private);
     }
 
-    let parent = member_slot(declaration).parent()?;
+    let parent = member_slot(declaration).indexed_parent()?;
     let owner = match parent.kind() {
         "compilation_unit" => return Some(Visibility::Internal),
-        "declaration_list" => parent.parent()?,
+        "declaration_list" => parent.indexed_parent()?,
         _ => return None,
     };
     match owner.kind() {

@@ -19,11 +19,12 @@ use std::rc::Rc;
 
 use tree_sitter::Node;
 
+use crate::file::parents::IndexedParent as _;
 use crate::analysis::counters::{count_relation_link, count_shared_context_steps};
 use crate::analysis::qualifying_prefixes;
 use crate::analysis::scope::{TYPE, VALUE};
 use crate::file::extract::{
-    BasePath, ImplHeader, ImportBinding, PathAnchor, RELATION_NAMESPACE, WrittenBase, base_path, declaration_keyword,
+    BasePath, DeclaredBases, ImplHeader, ImportBinding, PathAnchor, RELATION_NAMESPACE, WrittenBase, base_path, declaration_keyword,
     declared_bases, declared_generic_names, file_namespace_index, impl_header, impl_of_member, impl_type_parameters,
     csharp_arity, csharp_partial_shape, import_binding, is_csharp_struct, namespace_name,
 };
@@ -313,7 +314,33 @@ struct FileWalk<'a> {
     /// Rust `impl` blocks in source order.
     impls: Vec<Node<'a>>,
     extensions: Vec<Node<'a>>,
-    lexical: Lexical<'a>,
+    lexical: Rc<Lexical<'a>>,
+}
+
+/// A Rust file's [`Lexical`] walk, built once by the definitions pass
+/// ([`impl_self_types`]) and handed to [`link_relations`]. The walk reads
+/// only the entries' nodes and kinds ([`walk_key`]); a linker whose entries
+/// differ in either builds its own.
+pub(crate) struct LexicalWalk<'tree> {
+    key: Vec<(usize, usize, usize, SymbolKindV2)>,
+    lexical: Rc<Lexical<'tree>>,
+    collected: lexical::Collected<'tree>,
+}
+
+impl<'tree> LexicalWalk<'tree> {
+    fn build(entries: &[Declared<'_>], root: Node<'tree>, source: &'tree str) -> Self {
+        let (lexical, collected) = Lexical::build(entries, root, ProgrammingLanguage::Rust, source, |_| false);
+        Self { key: walk_key(entries), lexical: Rc::new(lexical), collected }
+    }
+
+    fn share(&self) -> Self {
+        Self { key: self.key.clone(), lexical: Rc::clone(&self.lexical), collected: self.collected.clone() }
+    }
+}
+
+/// What [`Lexical::build`] reads of each entry.
+fn walk_key(entries: &[Declared<'_>]) -> Vec<(usize, usize, usize, SymbolKindV2)> {
+    entries.iter().map(|entry| (entry.name.id(), entry.declaration.id(), entry.anchor.id(), entry.kind)).collect()
 }
 
 /// What the resolver reads of one declaration: its record or, before
@@ -584,6 +611,9 @@ struct Declarations<'a> {
     root: Node<'a>,
     source: &'a str,
     walk: OnceCell<FileWalk<'a>>,
+    /// A walk built before these declarations, used by [`Self::walk`] when
+    /// its key matches the entries.
+    prebuilt: RefCell<Option<LexicalWalk<'a>>>,
     /// PHP `namespace N;` statements, in source order.
     php_namespaces: Vec<Node<'a>>,
     /// The C# or Scala namespace in force at each child of the root.
@@ -649,6 +679,7 @@ impl<'a> Declarations<'a> {
             root,
             source,
             walk: OnceCell::new(),
+            prebuilt: RefCell::new(None),
             php_namespaces,
             namespaces,
             extension_owners: OnceCell::new(),
@@ -778,7 +809,12 @@ impl<'a> Declarations<'a> {
     fn binding_name(&self, idx: usize) -> Cow<'a, str> {
         let entry = &self.entries[idx];
         let displayed = if self.language == ProgrammingLanguage::Rust {
-            Cow::Owned(entry.qualified_name.split("::").map(|segment| crate::analysis::name_identity::key(self.language, segment).into_owned()).collect::<Vec<_>>().join("::"))
+            // An ASCII name without a raw identifier is its own key.
+            if entry.qualified_name.is_ascii() && !entry.qualified_name.contains("r#") {
+                Cow::Borrowed(entry.qualified_name)
+            } else {
+                Cow::Owned(entry.qualified_name.split("::").map(|segment| crate::analysis::name_identity::key(self.language, segment).into_owned()).collect::<Vec<_>>().join("::"))
+            }
         } else { crate::analysis::name_identity::key(self.language, entry.qualified_name) };
         let text = |node: Node<'_>| self.source.get(node.start_byte()..node.end_byte());
         match self.language {
@@ -817,7 +853,7 @@ impl<'a> Declarations<'a> {
     fn package_scope(&self, node: Node<'_>) -> String {
         let mut top = node;
         let mut blocks = Vec::new();
-        while let Some(parent) = top.parent() {
+        while let Some(parent) = top.indexed_parent() {
             if parent.id() == self.root.id() {
                 break;
             }
@@ -879,12 +915,12 @@ impl<'a> Declarations<'a> {
 
     /// The record whose declaration is the nearest scope around `node`.
     fn enclosing_scope(&self, node: Node<'_>) -> Option<usize> {
-        let mut ancestor = node.parent();
+        let mut ancestor = node.indexed_parent();
         while let Some(current) = ancestor {
             if let Some(&idx) = self.scopes_by_node.get(&current.id()) {
                 return Some(idx);
             }
-            ancestor = current.parent();
+            ancestor = current.indexed_parent();
         }
         None
     }
@@ -892,14 +928,14 @@ impl<'a> Declarations<'a> {
     /// The declarations of the Rust modules around `node`, innermost first.
     fn enclosing_modules(&self, node: Node<'_>) -> Vec<usize> {
         let mut modules = Vec::new();
-        let mut ancestor = node.parent();
+        let mut ancestor = node.indexed_parent();
         while let Some(current) = ancestor {
             if current.kind() == "mod_item"
                 && let Some(&idx) = self.scopes_by_node.get(&current.id())
             {
                 modules.push(idx);
             }
-            ancestor = current.parent();
+            ancestor = current.indexed_parent();
         }
         modules
     }
@@ -912,10 +948,17 @@ impl<'a> Declarations<'a> {
     fn walk(&self) -> &FileWalk<'a> {
         self.walk.get_or_init(|| {
             let language = self.language;
-            let (lexical, collected) = Lexical::build(&self.entries, self.root, language, self.source, |node| {
-                language == ProgrammingLanguage::Swift
-                    && declaration_keyword(node, language).as_deref() == Some("extension")
-            });
+            let prebuilt = self.prebuilt.take().filter(|prebuilt| prebuilt.key == walk_key(&self.entries));
+            let (lexical, collected) = match prebuilt {
+                Some(prebuilt) => (prebuilt.lexical, prebuilt.collected),
+                None => {
+                    let (lexical, collected) = Lexical::build(&self.entries, self.root, language, self.source, |node| {
+                        language == ProgrammingLanguage::Swift
+                            && declaration_keyword(node, language).as_deref() == Some("extension")
+                    });
+                    (Rc::new(lexical), collected)
+                }
+            };
             let mut walk = FileWalk {
                 named: HashMap::new(),
                 by_owner: HashMap::new(),
@@ -976,7 +1019,7 @@ impl<'a> Declarations<'a> {
     fn names_scope(&self, node: Node<'_>) -> bool {
         node.id() == self.root.id()
             || self.scopes_by_node.contains_key(&node.id())
-            || node.parent().is_some_and(|parent| self.scopes_by_node.contains_key(&parent.id()))
+            || node.indexed_parent().is_some_and(|parent| self.scopes_by_node.contains_key(&parent.id()))
     }
 
     /// Whether an owner without a record around `at` binds `first` in the
@@ -1354,7 +1397,7 @@ impl<'a> Declarations<'a> {
     /// The nearest scope declaration around `member`, when no lexical
     /// region (a block, a callable, an anonymous owner) lies between them.
     fn direct_owner(&self, member: usize) -> Option<usize> {
-        let mut ancestor = self.entries[member].declaration.parent();
+        let mut ancestor = self.entries[member].declaration.indexed_parent();
         while let Some(current) = ancestor {
             count_shared_context_steps(1);
             match self.scopes_by_node.get(&current.id()) {
@@ -1362,7 +1405,7 @@ impl<'a> Declarations<'a> {
                 _ if opens_lexical_region(self.language, current) => return None,
                 _ => {}
             }
-            ancestor = current.parent();
+            ancestor = current.indexed_parent();
         }
         None
     }
@@ -1590,7 +1633,7 @@ impl<'a> Declarations<'a> {
         if prefix.is_empty() || !self.is_ambiguous_owner(prefix) {
             return None;
         }
-        let mut ancestor = at.parent();
+        let mut ancestor = at.indexed_parent();
         while let Some(current) = ancestor {
             count_shared_context_steps(1);
             if let Some(&idx) = self.scopes_by_node.get(&current.id())
@@ -1598,7 +1641,7 @@ impl<'a> Declarations<'a> {
             {
                 return Some(self.group_of(idx));
             }
-            ancestor = current.parent();
+            ancestor = current.indexed_parent();
         }
         None
     }
@@ -1956,10 +1999,10 @@ impl<'a> Declarations<'a> {
         count_shared_context_steps(own.len());
         let mut params = TypeParams { layers: vec![Rc::new(own.into_iter().collect::<HashSet<String>>())], unknown: false };
         let mut previous = skip;
-        let mut ancestor = node.parent();
+        let mut ancestor = node.indexed_parent();
         while let Some(current) = ancestor {
             if lexical.is_lexical_node(current) {
-                ancestor = current.parent();
+                ancestor = current.indexed_parent();
                 continue;
             }
             let read = if let Some(&owner) = self.scopes_by_node.get(&current.id())
@@ -1976,10 +2019,10 @@ impl<'a> Declarations<'a> {
                     Some(owner) => params.extend(self.owner_generic_context(owner)),
                     None => params.unknown = true,
                 }
-                ancestor = current.parent();
+                ancestor = current.indexed_parent();
                 continue;
             } else {
-                ancestor = current.parent();
+                ancestor = current.indexed_parent();
                 continue;
             };
             count_shared_context_steps(1);
@@ -1999,7 +2042,7 @@ impl<'a> Declarations<'a> {
             if !layer.is_empty() {
                 params.layers.push(layer);
             }
-            ancestor = current.parent();
+            ancestor = current.indexed_parent();
         }
         params
     }
@@ -2054,12 +2097,12 @@ fn php_namespace_at<'a>(node: Node<'_>, statements: &[Node<'_>], source: &'a str
             .and_then(|name| source.get(name.start_byte()..name.end_byte()))
             .map_or("", str::trim)
     };
-    let mut ancestor = node.parent();
+    let mut ancestor = node.indexed_parent();
     while let Some(current) = ancestor {
         if current.kind() == "namespace_definition" && current.child_by_field_name("body").is_some() {
             return text(current);
         }
-        ancestor = current.parent();
+        ancestor = current.indexed_parent();
     }
     // In source order: the last one before `node` by binary search.
     let before = statements.partition_point(|statement| statement.start_byte() < node.start_byte());
@@ -2069,12 +2112,12 @@ fn php_namespace_at<'a>(node: Node<'_>, statements: &[Node<'_>], source: &'a str
 /// The Scala `package object` around `node`, if any: one is only ever a
 /// top-level or block-package statement.
 fn scala_package_object(node: Node<'_>) -> Option<Node<'_>> {
-    let mut ancestor = node.parent();
+    let mut ancestor = node.indexed_parent();
     while let Some(current) = ancestor {
         if current.kind() == "package_object" {
             return Some(current);
         }
-        ancestor = current.parent();
+        ancestor = current.indexed_parent();
     }
     None
 }
@@ -2117,15 +2160,25 @@ enum Change {
 /// each Swift extension member to its extension's owner
 /// (`relations.container`, and `parent` when the self type or owner
 /// resolves).
-pub(super) fn link_relations(
+///
+/// `prebuilt` is the definitions pass's walk of a Rust file
+/// ([`impl_self_types`]), reused when the records are its declarations.
+pub(super) fn link_relations<'tree>(
     records: &mut [SymbolRecord],
-    inputs: &[RelationInput<'_>],
-    root: Node<'_>,
+    inputs: &[RelationInput<'tree>],
+    root: Node<'tree>,
     language: ProgrammingLanguage,
-    source: &str,
+    source: &'tree str,
     containment: bool,
+    prebuilt: Option<LexicalWalk<'tree>>,
 ) {
     count_relation_link();
+    let bases = written_base_lists(records, inputs, language, source);
+    // Only Rust impls and Swift extensions relate anything beyond the bases
+    // a record writes.
+    if bases.is_empty() && !matches!(language, ProgrammingLanguage::Rust | ProgrammingLanguage::Swift) {
+        return;
+    }
     let changes = {
         let entries = records
             .iter()
@@ -2139,8 +2192,9 @@ pub(super) fn link_relations(
             })
             .collect();
         let declarations = Declarations::new(entries, root, language, source);
+        *declarations.prebuilt.borrow_mut() = prebuilt;
         let mut changes = Vec::new();
-        written_bases(&declarations, records, inputs, &mut changes);
+        written_bases(&declarations, records, inputs, bases, &mut changes);
         if language == ProgrammingLanguage::Rust {
             impl_relations(&declarations, records, inputs, containment, &mut changes);
         }
@@ -2194,23 +2248,39 @@ impl WrittenTargets {
     }
 }
 
-/// The bases each selected type-like record writes in its own header.
+/// The bases each selected type-like record writes in its own header, by
+/// record index; a record that writes none is left out.
+fn written_base_lists(
+    records: &[SymbolRecord],
+    inputs: &[RelationInput<'_>],
+    language: ProgrammingLanguage,
+    source: &str,
+) -> Vec<(usize, DeclaredBases)> {
+    records
+        .iter()
+        .zip(inputs)
+        .enumerate()
+        .filter(|(_, (record, input))| {
+            input.wanted
+                && (declares_bases(record.kind)
+                    || (language == ProgrammingLanguage::Scala && record.kind == SymbolKindV2::Module))
+        })
+        .map(|(idx, (_, input))| (idx, declared_bases(input.name, language, source)))
+        .filter(|(_, bases)| !(bases.extends.is_empty() && bases.implements.is_empty() && bases.unclassified.is_empty()))
+        .collect()
+}
+
+/// Resolves the bases [`written_base_lists`] found.
 fn written_bases<'a>(
     declarations: &Declarations<'a>,
     records: &[SymbolRecord],
     inputs: &[RelationInput<'a>],
+    bases: Vec<(usize, DeclaredBases)>,
     changes: &mut Vec<Change>,
 ) {
     let language = declarations.language;
-    for (idx, (record, input)) in records.iter().zip(inputs).enumerate() {
-        if !input.wanted || !(declares_bases(record.kind)
-            || (language == ProgrammingLanguage::Scala && record.kind == SymbolKindV2::Module)) {
-            continue;
-        }
-        let bases = declared_bases(input.name, language, declarations.source);
-        if bases.extends.is_empty() && bases.implements.is_empty() && bases.unclassified.is_empty() {
-            continue;
-        }
+    for (idx, bases) in bases {
+        let (record, input) = (&records[idx], &inputs[idx]);
         // A lexical declaration's own parameters are bindings of its own
         // scope; a named one's go with its owners'. Only parameters that can
         // name a type count (a C++ `template <int N>` binds a value).
@@ -2449,12 +2519,21 @@ fn resolve_self_type<'s, 'a>(declarations: &'s Declarations<'a>, impl_item: Node
 /// [`link_relations`] makes; `None` when it does not resolve. The
 /// definitions pass reads it for an impl member's container kind, before
 /// records exist.
-pub(super) fn impl_self_types(entries: Vec<Declared<'_>>, root: Node<'_>, source: &str) -> HashMap<usize, Option<usize>> {
+///
+/// Also returns the walk it built, for [`link_relations`] to reuse.
+pub(super) fn impl_self_types<'tree>(
+    entries: Vec<Declared<'_>>,
+    root: Node<'tree>,
+    source: &'tree str,
+) -> (HashMap<usize, Option<usize>>, LexicalWalk<'tree>) {
+    let walk = LexicalWalk::build(&entries, root, source);
     let declarations = Declarations::new(entries, root, ProgrammingLanguage::Rust, source);
-    declarations
+    *declarations.prebuilt.borrow_mut() = Some(walk.share());
+    let owners = declarations
         .walk()
         .impls
         .iter()
         .filter_map(|&node| Some((node.id(), resolve_self_type(&declarations, node)?.self_type)))
-        .collect()
+        .collect();
+    (owners, walk)
 }

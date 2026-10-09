@@ -22,6 +22,7 @@
 
 use tree_sitter::Node;
 
+use crate::file::parents::IndexedParent as _;
 use crate::file::extract::{next_syntax_sibling, prev_syntax_sibling};
 use crate::shared::ProgrammingLanguage;
 
@@ -109,7 +110,7 @@ fn c_type_specifier<'tree>(node: Node<'tree>, names: &mut Vec<Node<'tree>>) {
         return;
     }
     let declares = node.child_by_field_name("body").is_some()
-        || node.parent().is_some_and(|parent| match parent.kind() {
+        || node.indexed_parent().is_some_and(|parent| match parent.kind() {
             "declaration" | "field_declaration" => {
                 parent.child_by_field_name("type").is_some_and(|ty| ty.id() == node.id())
                     && parent.child_by_field_name("declarator").is_none()
@@ -300,12 +301,12 @@ fn python_type_parameters<'tree>(list: Node<'tree>, names: &mut Vec<Node<'tree>>
 }
 
 fn has_ancestor(node: Node<'_>, kind: &str) -> bool {
-    let mut current = node.parent();
+    let mut current = node.indexed_parent();
     while let Some(ancestor) = current {
         if ancestor.kind() == kind {
             return true;
         }
-        current = ancestor.parent();
+        current = ancestor.indexed_parent();
     }
     false
 }
@@ -328,9 +329,9 @@ fn cpp<'tree>(node: Node<'tree>, names: &mut Vec<Node<'tree>>) {
         // written inline or qualified (`C::~C`); an explicit `obj.~C()`
         // call names it.
         "destructor_name" => {
-            let declarator = node.parent().and_then(|parent| match parent.kind() {
+            let declarator = node.indexed_parent().and_then(|parent| match parent.kind() {
                 "function_declarator" => Some(parent),
-                "qualified_identifier" => parent.parent().filter(|outer| outer.kind() == "function_declarator"),
+                "qualified_identifier" => parent.indexed_parent().filter(|outer| outer.kind() == "function_declarator"),
                 _ => None,
             });
             if declarator.is_some() {
@@ -378,7 +379,7 @@ fn swift<'tree>(node: Node<'tree>, names: &mut Vec<Node<'tree>>) {
             );
         }
         // `<each T>` declares; `repeat each T` reads.
-        "type_parameter_pack" if node.parent().is_some_and(|parent| parent.kind() == "type_parameter") => {
+        "type_parameter_pack" if node.indexed_parent().is_some_and(|parent| parent.kind() == "type_parameter") => {
             names.extend(first_child(node, "user_type").and_then(|user| first_child(user, "type_identifier")));
         }
         // `[k = o]` declares `k`; `[weak self]` captures an existing name.
@@ -422,7 +423,7 @@ pub(crate) const SCALA_IMPORT_SEGMENT_KINDS: &[&str] = &["identifier", "operator
 /// [`SCALA_IMPORT_SEGMENT_KINDS`] child of an `import_declaration`.
 pub(crate) fn is_scala_import_segment(node: Node<'_>) -> bool {
     SCALA_IMPORT_SEGMENT_KINDS.contains(&node.kind())
-        && node.parent().is_some_and(|parent| parent.kind() == "import_declaration")
+        && node.indexed_parent().is_some_and(|parent| parent.kind() == "import_declaration")
 }
 
 /// The first segment of the Scala import path `segment` belongs to
@@ -489,9 +490,9 @@ fn swift_pattern_binds(pattern: Node<'_>) -> bool {
             return true;
         }
         top = node;
-        current = node.parent();
+        current = node.indexed_parent();
     }
-    let Some(parent) = top.parent() else { return false };
+    let Some(parent) = top.indexed_parent() else { return false };
     let field_of_top = (0..parent.child_count())
         .find(|&index| parent.child(index as u32).is_some_and(|child| child.id() == top.id()))
         .and_then(|index| parent.field_name_for_child(index as u32));
@@ -618,7 +619,7 @@ pub(crate) fn python_captures<'a>(pattern: Node<'a>, source: &str, bind: &mut im
         let children: Vec<Node<'a>> = node.named_children(&mut cursor).collect();
         match node.kind() {
             "dotted_name" => {
-                let binds = node.parent().is_some_and(|parent| matches!(parent.kind(), "case_pattern" | "keyword_pattern"))
+                let binds = node.indexed_parent().is_some_and(|parent| matches!(parent.kind(), "case_pattern" | "keyword_pattern"))
                     && children.len() == 1
                     && source.get(node.start_byte()..node.end_byte()) != Some("_");
                 if binds {

@@ -12,6 +12,7 @@
 
 use std::collections::HashMap;
 
+use crate::file::parents::IndexedParent as _;
 use crate::analysis::counters::count_shared_context_steps;
 use crate::shared::schema_v2::{GenericParam, GenericParamKind};
 
@@ -295,7 +296,7 @@ fn typescript_generics(declaration: Node<'_>, source: &str) -> Vec<Param> {
 
 fn go_generics(declaration: Node<'_>, name: Node<'_>, source: &str) -> Vec<Param> {
     // A `type` declaration (or group) holds one spec per name.
-    let owner = match name.parent() {
+    let owner = match name.indexed_parent() {
         Some(spec) if matches!(spec.kind(), "type_spec" | "type_alias") => spec,
         _ => declaration,
     };
@@ -443,7 +444,7 @@ fn cpp_generics(
     // `template <class T> template <class U> void A<T>::f(U)` the inner one
     // is the member's.
     if let Some(template) = declaration
-        .parent()
+        .indexed_parent()
         .filter(|parent| parent.kind() == "template_declaration")
     {
         if let Some(list) = template.child_by_field_name("parameters") {

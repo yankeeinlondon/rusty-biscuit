@@ -5,13 +5,14 @@
 //! type: the trait as written, negativity, and the self type's text and path.
 
 use super::*;
+use crate::file::parents::IndexedParent as _;
 
 /// The `impl_item` whose body directly declares `declaration`, if any.
 pub(crate) fn impl_of_member(declaration: Node<'_>) -> Option<Node<'_>> {
     declaration
-        .parent()
+        .indexed_parent()
         .filter(|list| list.kind() == "declaration_list")?
-        .parent()
+        .indexed_parent()
         .filter(|parent| parent.kind() == "impl_item")
 }
 

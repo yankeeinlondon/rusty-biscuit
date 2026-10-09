@@ -1,6 +1,7 @@
 //! C visibility, and the file-scope linkage rule C++ shares.
 
 use super::*;
+use crate::file::parents::IndexedParent as _;
 
 /// C visibility. Only file-scope functions and objects have an access level,
 /// decided by [`linkage_visibility`]; types, tags, members, enumerators and
@@ -25,12 +26,12 @@ pub(super) fn has_linkage(kind: SymbolKind) -> bool {
 /// looking through `extern "C"` blocks, preprocessor conditionals and
 /// template headers.
 pub(super) fn is_namespace_scope(declaration: Node<'_>) -> bool {
-    let mut current = declaration.parent();
+    let mut current = declaration.indexed_parent();
     while let Some(node) = current {
         match node.kind() {
             "translation_unit" => return true,
             "declaration_list" => {
-                if !node.parent().is_some_and(|parent| {
+                if !node.indexed_parent().is_some_and(|parent| {
                     matches!(parent.kind(), "namespace_definition" | "linkage_specification")
                 }) {
                     return false;
@@ -46,7 +47,7 @@ pub(super) fn is_namespace_scope(declaration: Node<'_>) -> bool {
             | "preproc_elifdef" => {}
             _ => return false,
         }
-        current = node.parent();
+        current = node.indexed_parent();
     }
     false
 }
@@ -87,12 +88,12 @@ fn has_specifier(node: Node<'_>, kind: &str, keyword: &str, source: &str) -> boo
 }
 
 fn in_unnamed_namespace(declaration: Node<'_>) -> bool {
-    let mut current = declaration.parent();
+    let mut current = declaration.indexed_parent();
     while let Some(node) = current {
         if node.kind() == "namespace_definition" && node.child_by_field_name("name").is_none() {
             return true;
         }
-        current = node.parent();
+        current = node.indexed_parent();
     }
     false
 }
@@ -132,7 +133,7 @@ fn is_const_object(declaration: Node<'_>, name: Node<'_>, source: &str) -> bool 
 /// The child of `ancestor` on the path down to `descendant`.
 fn child_on_path<'tree>(ancestor: Node<'tree>, descendant: Node<'tree>) -> Option<Node<'tree>> {
     let mut node = descendant;
-    while let Some(parent) = node.parent() {
+    while let Some(parent) = node.indexed_parent() {
         if parent == ancestor {
             return Some(node);
         }
@@ -336,7 +337,7 @@ impl<'src> TemplateSignature<'src> {
     /// (`auto`, `Concept auto`), which makes it an abbreviated template.
     fn of(declaration: Node<'_>, function: Node<'_>, source: &'src str) -> Option<Self> {
         let header = declaration
-            .parent()
+            .indexed_parent()
             .filter(|parent| parent.kind() == "template_declaration");
         if header.is_none() && !has_placeholder_parameter(function) {
             return None;
@@ -415,12 +416,12 @@ fn return_type<'src>(declaration: Node<'_>, function: Node<'_>, source: &'src st
 /// unnamed namespace contributes an empty segment.
 fn enclosing_namespaces<'src>(declaration: Node<'_>, source: &'src str) -> Vec<&'src str> {
     let mut blocks = Vec::new();
-    let mut current = declaration.parent();
+    let mut current = declaration.indexed_parent();
     while let Some(node) = current {
         if node.kind() == "namespace_definition" {
             blocks.push(own_namespace_segments(node, source));
         }
-        current = node.parent();
+        current = node.indexed_parent();
     }
     blocks.into_iter().rev().flatten().collect()
 }

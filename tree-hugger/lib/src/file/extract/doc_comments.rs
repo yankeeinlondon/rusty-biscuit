@@ -2,6 +2,7 @@
 //! Python docstring. Ordinary comments are never documentation.
 
 use super::*;
+use crate::file::parents::IndexedParent as _;
 
 /// The cleaned documentation attached to the declaration `node`, or `None`
 /// when it has none (or only blank doc comments).
@@ -46,7 +47,7 @@ pub(crate) fn extract_doc_comment(
                     Attachment::Empty if language == ProgrammingLanguage::Go => return None,
                     Attachment::Empty | Attachment::Absent => {}
                 }
-                match current.parent() {
+                match current.indexed_parent() {
                     Some(parent) if documents_through(parent, language) => current = parent,
                     _ => return None,
                 }

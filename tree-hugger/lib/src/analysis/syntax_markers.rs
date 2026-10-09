@@ -20,6 +20,7 @@
 
 use tree_sitter::Node;
 
+use crate::file::parents::IndexedParent as _;
 use crate::shared::ProgrammingLanguage;
 
 /// The marker tokens one walk of a file collects ([`syntax_markers`]).
@@ -100,8 +101,8 @@ fn java_inferred_type(node: Node<'_>) -> Option<Node<'_>> {
         "local_variable_declaration" | "enhanced_for_statement" | "resource" => node.child_by_field_name("type"),
         "formal_parameter"
             if node
-                .parent()
-                .and_then(|list| list.parent())
+                .indexed_parent()
+                .and_then(|list| list.indexed_parent())
                 .is_some_and(|owner| owner.kind() == "lambda_expression") =>
         {
             node.child_by_field_name("type")
@@ -184,7 +185,7 @@ fn argument_label(node: Node<'_>, language: ProgrammingLanguage) -> Option<Node<
         }
         (ProgrammingLanguage::Swift, "value_argument_label") => node.named_child(0),
         (ProgrammingLanguage::Scala, "assignment_expression")
-            if node.parent().is_some_and(|parent| parent.kind() == "arguments") =>
+            if node.indexed_parent().is_some_and(|parent| parent.kind() == "arguments") =>
         {
             node.child_by_field_name("left")
         }
@@ -208,9 +209,9 @@ fn argument_label(node: Node<'_>, language: ProgrammingLanguage) -> Option<Node<
 /// that key stays an occurrence.
 fn go_struct_literal_element(element: Node<'_>) -> bool {
     element
-        .parent()
+        .indexed_parent()
         .filter(|body| body.kind() == "literal_value")
-        .and_then(|body| body.parent())
+        .and_then(|body| body.indexed_parent())
         .filter(|literal| literal.kind() == "composite_literal")
         .and_then(|literal| literal.child_by_field_name("type"))
         .is_some_and(|written| written.kind() == "struct_type")
@@ -228,11 +229,21 @@ fn swift_element_labels<'tree>(node: Node<'tree>, markers: &mut Vec<Node<'tree>>
             node.children_by_field_name("name", &mut cursor)
                 .filter(|name| name.kind() == "simple_identifier"),
         ),
-        _ => markers.extend(node.named_children(&mut cursor).filter(|child| {
-            child.kind() == "simple_identifier"
-                && child.next_sibling().is_some_and(|colon| colon.kind() == ":")
-                && child.next_named_sibling().is_some_and(|pattern| pattern.kind() == "pattern")
-        })),
+        _ => {
+            // Siblings read from one child list: each `next_sibling` would
+            // be a descent from the root.
+            let children: Vec<Node<'tree>> = node.children(&mut cursor).collect();
+            for (idx, child) in children.iter().enumerate() {
+                let after = &children[idx + 1..];
+                if child.is_named()
+                    && child.kind() == "simple_identifier"
+                    && after.first().is_some_and(|colon| colon.kind() == ":")
+                    && after.iter().find(|next| next.is_named()).is_some_and(|pattern| pattern.kind() == "pattern")
+                {
+                    markers.push(*child);
+                }
+            }
+        }
     }
 }
 

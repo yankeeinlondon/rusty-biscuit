@@ -3,6 +3,7 @@
 
 use super::attributes::modifier_host;
 use super::*;
+use crate::file::parents::IndexedParent as _;
 use crate::shared::Modifier;
 
 /// Whether a declaration is declared `async`: its own `async` keyword token,
@@ -19,7 +20,7 @@ pub(crate) fn is_async_declaration(declaration: Node<'_>, name: Node<'_>, langua
                     .is_some_and(|modifiers| has_async_token(modifiers))
         }
         ProgrammingLanguage::JavaScript | ProgrammingLanguage::TypeScript => {
-            let function = match name.parent() {
+            let function = match name.indexed_parent() {
                 Some(binding)
                     if matches!(
                         binding.kind(),
@@ -192,7 +193,7 @@ fn rust_modifiers(declaration: Node<'_>, name: Node<'_>, modifiers: &mut Vec<Mod
         }
         _ => {}
     }
-    if name.parent().is_some_and(|parent| parent.kind() == "mut_pattern") {
+    if name.indexed_parent().is_some_and(|parent| parent.kind() == "mut_pattern") {
         modifiers.push(Modifier::Mut);
     }
 }

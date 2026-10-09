@@ -16,6 +16,7 @@
 
 use tree_sitter::Node;
 
+use crate::file::parents::IndexedParent as _;
 use crate::shared::ProgrammingLanguage;
 use crate::analysis::occurrences::invoked_operand;
 
@@ -24,9 +25,9 @@ use super::{ANY_CATEGORY, BindingRule, BindingSite, Dynamic, Placement, TYPE, VA
 /// Scopes the vendored locals query lacks: generators, class static blocks,
 /// `switch` bodies, a `with` body, and the declarations whose type or
 /// signature parameters would otherwise leak into the enclosing scope.
+/// A `with` body is one too, reached from its statement ([`with_body`]).
 pub(super) fn extra_scope(node: Node<'_>) -> bool {
-    is_with_body(node)
-        || matches!(
+    matches!(
         node.kind(),
         "generator_function_declaration"
             | "generator_function"
@@ -48,19 +49,16 @@ pub(super) fn extra_scope(node: Node<'_>) -> bool {
         )
 }
 
-/// The `body` of a `with` statement.
-fn is_with_body(node: Node<'_>) -> bool {
-    node.parent().is_some_and(|parent| {
-        parent.kind() == "with_statement"
-            && parent.child_by_field_name("body").is_some_and(|body| body.id() == node.id())
-    })
+/// The `body` of `node` when it is a `with` statement.
+pub(super) fn with_body(node: Node<'_>) -> Option<Node<'_>> {
+    (node.kind() == "with_statement").then(|| node.child_by_field_name("body")).flatten()
 }
 
-/// A `with` body, or the function around a direct `eval` call
-/// ([`is_direct_eval`]).
+/// For a `with` statement, its body; for a direct `eval` call
+/// ([`is_direct_eval`]), the function around it.
 pub(super) fn dynamic<'tree>(node: Node<'tree>, language: ProgrammingLanguage, source: &str) -> Option<Dynamic<'tree>> {
-    if is_with_body(node) {
-        return Some(Dynamic::Scope(node));
+    if let Some(body) = with_body(node) {
+        return Some(Dynamic::Scope(body));
     }
     is_direct_eval(node, language, source).then_some(Dynamic::FunctionOf(node))
 }
@@ -179,9 +177,9 @@ pub(super) fn binding_sites<'tree>(node: Node<'tree>, typed: bool, sites: &mut V
         "enum_declaration" | "internal_module" | "module" => named(declared(both, false)),
         "type_parameter" => named(declared(TYPE, false)),
         "variable_declarator" => {
-            let is_var = node.parent().is_some_and(|parent| parent.kind() == "variable_declaration");
+            let is_var = node.indexed_parent().is_some_and(|parent| parent.kind() == "variable_declaration");
             let is_const = node
-                .parent()
+                .indexed_parent()
                 .and_then(|parent| parent.child_by_field_name("kind"))
                 .is_some_and(|kind| kind.kind() == "const");
             // Calling a `const` bound to a function expression calls that
@@ -231,7 +229,7 @@ pub(super) fn binding_sites<'tree>(node: Node<'tree>, typed: bool, sites: &mut V
         "import_clause" => {
             let mut cursor = node.walk();
             for child in node.named_children(&mut cursor) {
-                import_names(child, typed && node.parent().is_some_and(type_only_import), &mut |name, type_only| {
+                import_names(child, typed && node.indexed_parent().is_some_and(type_only_import), &mut |name, type_only| {
                     let rule = if type_only { declared(TYPE, false) } else { declared(ANY_CATEGORY, true) };
                     sites.push(BindingSite { name, rule, is_import: true, bare_pattern: None });
                 });
@@ -242,7 +240,7 @@ pub(super) fn binding_sites<'tree>(node: Node<'tree>, typed: bool, sites: &mut V
             let mut cursor = node.walk();
             let first = node.named_children(&mut cursor).find(|child| !child.is_extra());
             if let Some(name) = first.filter(|name| name.kind() == "identifier") {
-                let type_only = typed && (type_only_import(node) || node.parent().is_some_and(type_only_import));
+                let type_only = typed && (type_only_import(node) || node.indexed_parent().is_some_and(type_only_import));
                 let rule = if type_only { declared(TYPE, false) } else { declared(ANY_CATEGORY, true) };
                 sites.push(BindingSite { name, rule, is_import: true, bare_pattern: None });
             }
@@ -323,7 +321,7 @@ pub(super) fn reference_category(node: Node<'_>, typed: bool) -> u8 {
     if node.kind() == "type_identifier" {
         return TYPE;
     }
-    match node.parent() {
+    match node.indexed_parent() {
         Some(parent) if parent.kind() == "nested_type_identifier" => TYPE | VALUE,
         _ => VALUE,
     }

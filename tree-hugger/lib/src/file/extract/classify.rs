@@ -5,6 +5,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 
 use super::*;
+use crate::file::parents::IndexedParent as _;
 use crate::analysis::counters::count_shared_context_steps;
 
 pub(crate) fn is_block_like_dead_code_container(kind: &str) -> bool {
@@ -163,7 +164,7 @@ fn is_constructor_declaration(
         ProgrammingLanguage::JavaScript | ProgrammingLanguage::TypeScript => {
             declaration.kind() == "method_definition"
                 && declaration
-                    .parent()
+                    .indexed_parent()
                     .is_some_and(|parent| parent.kind() == "class_body")
                 && node_text(name, source) == Some("constructor")
         }
@@ -205,11 +206,11 @@ fn is_constructor_declaration(
 /// Whether a Python assignment is a statement directly in a class body.
 fn is_python_class_attribute_statement(assignment: Node<'_>) -> bool {
     assignment
-        .parent()
+        .indexed_parent()
         .filter(|statement| statement.kind() == "expression_statement")
-        .and_then(|statement| statement.parent())
+        .and_then(|statement| statement.indexed_parent())
         .filter(|block| block.kind() == "block")
-        .and_then(|block| block.parent())
+        .and_then(|block| block.indexed_parent())
         .is_some_and(|owner| owner.kind() == "class_definition")
 }
 
@@ -256,7 +257,7 @@ fn refine_variable_kind(
         if cursor == declaration {
             break;
         }
-        current = cursor.parent();
+        current = cursor.indexed_parent();
     }
 
     // A C++ variable template member (`template<class T> static T x;`) parses
@@ -272,7 +273,7 @@ fn refine_variable_kind(
     // PHP `simple_parameter`, Java `catch_formal_parameter` and the like, or
     // a bare name directly in a parameter list.
     if declaration.kind().ends_with("_parameter")
-        || declaration.parent().is_some_and(|parent| {
+        || declaration.indexed_parent().is_some_and(|parent| {
             matches!(
                 parent.kind(),
                 "parameters" | "formal_parameters" | "parameter_list"
@@ -283,7 +284,7 @@ fn refine_variable_kind(
     }
     // Go `const ( A = 1 )`: the keyword sits on the spec's parent.
     if declaration
-        .parent()
+        .indexed_parent()
         .is_some_and(|parent| parent.kind() == "const_declaration")
     {
         return SymbolKind::Constant;
@@ -293,7 +294,7 @@ fn refine_variable_kind(
 }
 
 fn is_in_type_body(declaration: Node<'_>) -> bool {
-    declaration.parent().is_some_and(|parent| {
+    declaration.indexed_parent().is_some_and(|parent| {
         matches!(
             parent.kind(),
             "class_body" | "enum_class_body" | "protocol_body"
@@ -375,7 +376,7 @@ pub(crate) fn is_transparent_wrapper_kind(kind: &str) -> bool {
 /// kind, member `static`, storage `static` and access agree.
 pub(crate) fn member_slot(declaration: Node<'_>) -> Node<'_> {
     let mut slot = declaration;
-    while let Some(parent) = slot.parent()
+    while let Some(parent) = slot.indexed_parent()
         && is_transparent_wrapper_kind(parent.kind())
     {
         slot = parent;
@@ -387,7 +388,7 @@ pub(crate) fn member_slot(declaration: Node<'_>) -> Node<'_> {
 /// trait, interface, protocol, object, `impl` or extension body, rather than
 /// inside a function.
 pub(crate) fn is_direct_member(declaration: Node<'_>) -> bool {
-    let mut current = member_slot(declaration).parent();
+    let mut current = member_slot(declaration).indexed_parent();
     while let Some(parent) = current {
         if is_member_container_kind(parent.kind()) {
             return true;
@@ -395,7 +396,7 @@ pub(crate) fn is_direct_member(declaration: Node<'_>) -> bool {
         if !is_member_body_kind(parent.kind()) {
             return false;
         }
-        current = parent.parent();
+        current = parent.indexed_parent();
     }
     false
 }
@@ -433,7 +434,7 @@ fn is_function_local_member(
     language: ProgrammingLanguage,
 ) -> bool {
     if language == ProgrammingLanguage::Lua
-        && name.parent().is_some_and(|parent| {
+        && name.indexed_parent().is_some_and(|parent| {
             matches!(
                 parent.kind(),
                 "method_index_expression" | "dot_index_expression"
@@ -443,7 +444,7 @@ fn is_function_local_member(
         return false;
     }
 
-    let mut current = member_slot(declaration).parent();
+    let mut current = member_slot(declaration).indexed_parent();
     while let Some(node) = current {
         if is_member_owner_kind(node.kind()) {
             return false;
@@ -451,7 +452,7 @@ fn is_function_local_member(
         if is_function_node_kind(node.kind()) {
             return true;
         }
-        current = node.parent();
+        current = node.indexed_parent();
     }
     false
 }
@@ -513,7 +514,7 @@ pub(crate) fn find_symbol_container<'tree>(
     }
 
     let mut child = declaration;
-    while let Some(parent) = child.parent() {
+    while let Some(parent) = child.indexed_parent() {
         if !is_sibling_scoped_container(child, language)
             && let Some(container) =
                 preceding_sibling_container(child, parent, language, source, scopes)
@@ -576,11 +577,11 @@ pub(crate) fn go_receiver_type_name(method: Node<'_>, source: &str) -> Option<St
 pub(crate) fn is_unnamed_type_owner(node: Node<'_>) -> bool {
     match node.kind() {
         "class" | "object" | "anonymous_class" | "anonymous_object_creation_expression" => true,
-        "class_body" => node.parent().is_some_and(|parent| {
+        "class_body" => node.indexed_parent().is_some_and(|parent| {
             matches!(parent.kind(), "object_creation_expression" | "enum_constant")
         }),
         "template_body" => node
-            .parent()
+            .indexed_parent()
             .is_some_and(|parent| parent.kind() == "instance_expression"),
         // A Scala `given` is not an extracted symbol, so its instance body
         // names no container.
@@ -589,7 +590,7 @@ pub(crate) fn is_unnamed_type_owner(node: Node<'_>) -> bool {
             node.child_by_field_name("name").is_none()
                 && anonymous_member_declaration(node).is_none()
         }
-        "struct_type" => node.parent().is_none_or(|parent| parent.kind() != "type_spec"),
+        "struct_type" => node.indexed_parent().is_none_or(|parent| parent.kind() != "type_spec"),
         _ => false,
     }
 }
@@ -604,7 +605,7 @@ pub(crate) fn anonymous_member_declaration(specifier: Node<'_>) -> Option<Node<'
     {
         return None;
     }
-    specifier.parent().filter(|parent| {
+    specifier.indexed_parent().filter(|parent| {
         parent.kind() == "field_declaration" && parent.child_by_field_name("declarator").is_none()
     })
 }
@@ -692,7 +693,7 @@ fn go_type_container<'tree>(node: Node<'tree>, source: &str) -> Option<Container
         .ok()?
         .to_string();
     let owner = node
-        .parent()
+        .indexed_parent()
         .filter(|declaration| {
             declaration.kind() == "type_declaration" && !is_grouped_go_type_declaration(*declaration)
         })
@@ -835,7 +836,7 @@ pub(crate) fn named_container(
 }
 
 pub(crate) fn is_definition_like_reference(node: Node<'_>, language: ProgrammingLanguage) -> bool {
-    let Some(parent) = node.parent() else {
+    let Some(parent) = node.indexed_parent() else {
         return false;
     };
 
@@ -1159,12 +1160,12 @@ pub(crate) fn is_exported_definition(symbol: &SymbolInfo, node: Node<'_>, root: 
     // `export const a = 1, f = () => …;` exports each declarator, and a
     // function bound to one is anchored at the declarator's value.
     let mut declaration = node;
-    while let Some(parent) = declaration.parent()
+    while let Some(parent) = declaration.indexed_parent()
         && matches!(parent.kind(), "variable_declarator" | "lexical_declaration" | "variable_declaration")
     {
         declaration = parent;
     }
-    declaration.parent().is_some_and(|parent| is_export_node(parent.kind()))
+    declaration.indexed_parent().is_some_and(|parent| is_export_node(parent.kind()))
 }
 
 pub(crate) fn is_rust_public_definition(node: Node<'_>) -> bool {
@@ -1194,7 +1195,7 @@ pub(crate) fn is_rust_public_definition(node: Node<'_>) -> bool {
             return false;
         }
 
-        current = cursor_node.parent();
+        current = cursor_node.indexed_parent();
     }
 
     false
@@ -1213,7 +1214,7 @@ pub(crate) fn is_export_node(kind: &str) -> bool {
 pub(crate) fn is_top_level_definition(node: Node<'_>, root: Node<'_>) -> bool {
     let mut current = Some(node);
     while let Some(cursor) = current {
-        let Some(parent) = cursor.parent() else {
+        let Some(parent) = cursor.indexed_parent() else {
             break;
         };
 
@@ -1579,8 +1580,8 @@ mod tests {
                 // A class's methods sit in its `class_body`; an object
                 // literal's directly in the `object`.
                 let owner = method
-                    .parent()
-                    .and_then(|parent| if parent.kind() == "class_body" { parent.parent() } else { Some(parent) })
+                    .indexed_parent()
+                    .and_then(|parent| if parent.kind() == "class_body" { parent.indexed_parent() } else { Some(parent) })
                     .map(|owner| owner.kind())
                     .unwrap_or_default();
                 (

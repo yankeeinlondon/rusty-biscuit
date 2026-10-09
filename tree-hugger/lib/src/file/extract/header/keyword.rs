@@ -12,6 +12,7 @@
 //! case-insensitive).
 
 use super::super::*;
+use crate::file::parents::IndexedParent as _;
 
 /// Where a declaration kind's keyword token sits.
 enum KeywordSite {
@@ -52,9 +53,9 @@ pub(crate) fn declaration_keyword(declaration: Node<'_>, language: ProgrammingLa
             return find_child_by_kind(declaration, kind).map(|_| keyword.to_string());
         }
         KeywordSite::Parent { parents, list, tokens } => declaration
-            .parent()
+            .indexed_parent()
             .and_then(|parent| match list {
-                Some(list) if parent.kind() == list => parent.parent(),
+                Some(list) if parent.kind() == list => parent.indexed_parent(),
                 _ => Some(parent),
             })
             .filter(|statement| parents.contains(&statement.kind()))

@@ -110,7 +110,23 @@ pub fn stable_symbol_key(
     qualified_or_name: &str,
     sibling_ordinal: u32,
 ) -> String {
-    let file_part = file.to_string_lossy().replace('\\', "/").trim().to_string();
+    stable_key_with_path(language, &stable_key_path(file), kind, qualified_or_name, sibling_ordinal)
+}
+
+/// The spelling of `file` a [`stable_symbol_key`] holds.
+pub(crate) fn stable_key_path(file: &Path) -> String {
+    file.to_string_lossy().replace('\\', "/").trim().to_string()
+}
+
+/// [`stable_symbol_key`] for a file whose [`stable_key_path`] is `file_part`,
+/// so a file's records spell their path once.
+pub(crate) fn stable_key_with_path(
+    language: ProgrammingLanguage,
+    file_part: &str,
+    kind: SymbolKindV2,
+    qualified_or_name: &str,
+    sibling_ordinal: u32,
+) -> String {
     format!(
         "{}::{}::{:?}::{}::{}",
         language.query_name(),
@@ -119,6 +135,15 @@ pub fn stable_symbol_key(
         qualified_or_name,
         sibling_ordinal
     )
+}
+
+/// `provenance.extractor_version` of every record: this crate's version
+/// and [`crate::file::EXTRACTOR_REVISION`].
+fn extractor_version() -> &'static str {
+    static VERSION: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+        format!("{}+rev.{}", env!("CARGO_PKG_VERSION"), crate::file::EXTRACTOR_REVISION)
+    });
+    &VERSION
 }
 
 /// Converts a stable symbol key to a deterministic `SymbolId`.
@@ -374,14 +399,25 @@ fn declared_type_views(symbol: &SymbolInfo) -> TypeFacet {
 
 impl From<SymbolInfo> for SymbolRecord {
     fn from(value: SymbolInfo) -> Self {
+        let qualified_name = record_qualified_name(&value);
+        let stable_key = stable_symbol_key(value.language, &value.file, SymbolKindV2::from(value.kind), qualified_name, 0);
+        Self::with_stable_key(value, stable_key)
+    }
+}
+
+/// The qualified name a record of `value` carries: its own, else its name.
+pub(crate) fn record_qualified_name(value: &SymbolInfo) -> &str {
+    if value.qualified_name.is_empty() { &value.name } else { &value.qualified_name }
+}
+
+impl SymbolRecord {
+    /// The record of `value` whose identity is `stable_key` (and the ID it
+    /// hashes to): [`From<SymbolInfo>`] with the sibling ordinal the caller
+    /// already knows, so no other key is built.
+    pub(crate) fn with_stable_key(value: SymbolInfo, stable_key: String) -> Self {
         let kind = SymbolKindV2::from(value.kind);
         let declaration_span = text_span_from_range(&value.range);
-        let qualified_name = if value.qualified_name.is_empty() {
-            value.name.clone()
-        } else {
-            value.qualified_name.clone()
-        };
-        let stable_key = stable_symbol_key(value.language, &value.file, kind, &qualified_name, 0);
+        let qualified_name = record_qualified_name(&value).to_string();
         let level = VisibilityLevel::from(value.visibility);
 
         let mut comments = Vec::new();
@@ -483,11 +519,7 @@ impl From<SymbolInfo> for SymbolRecord {
             metrics: None,
             provenance: ProvenanceFacet {
                 extractor: "tree-sitter".to_string(),
-                extractor_version: format!(
-                    "{}+rev.{}",
-                    env!("CARGO_PKG_VERSION"),
-                    crate::file::EXTRACTOR_REVISION
-                ),
+                extractor_version: extractor_version().to_string(),
                 parse_pass: AnalysisPass::Parse.as_str().to_string(),
             },
             kind_data,
@@ -691,6 +723,32 @@ mod tests {
         assert_eq!(symbol_id_from_stable_key(&key).0, "7d883dc4d6d958aff41b8871016c3cdea132b3b661b1a5da1a1923b30c86a7a4");
     }
 
+    /// The key built from a file's spelled path once is the key built from
+    /// the path itself, separators, edge spaces and non-ASCII included; a
+    /// record converted with it holds that key and its ID.
+    #[test]
+    fn stable_key_with_path_is_stable_symbol_key() {
+        for (path, kind, name, ordinal) in [
+            ("src/lib.rs", SymbolKindV2::Function, "hello", 0),
+            ("C:\\work\\src\\lib.rs", SymbolKindV2::Method, "S::m", 3),
+            ("  dir/with space/ü.rs  ", SymbolKindV2::Field, "S.f", 1),
+            ("", SymbolKindV2::Unknown, "", 0),
+        ] {
+            let path = Path::new(path);
+            let expected = stable_symbol_key(ProgrammingLanguage::Rust, path, kind, name, ordinal);
+            assert_eq!(stable_key_with_path(ProgrammingLanguage::Rust, &stable_key_path(path), kind, name, ordinal), expected);
+        }
+        let symbol = sample_symbol();
+        let key = stable_symbol_key(symbol.language, &symbol.file, SymbolKindV2::from(symbol.kind), record_qualified_name(&symbol), 2);
+        let record = SymbolRecord::with_stable_key(symbol.clone(), key.clone());
+        assert_eq!(record.identity.stable_key, key);
+        assert_eq!(record.id, symbol_id_from_stable_key(&key));
+        let converted: SymbolRecord = symbol.into();
+        assert_eq!(converted.identity.stable_key, stable_symbol_key(record.language, &record.source.file_path, record.kind, &record.identity.qualified_name, 0));
+        assert_eq!(converted.provenance.extractor_version, record.provenance.extractor_version);
+        assert_eq!(record.provenance.extractor_version, format!("{}+rev.{}", env!("CARGO_PKG_VERSION"), crate::file::EXTRACTOR_REVISION));
+    }
+
     #[test]
     fn stable_key_and_id_are_deterministic() {
         let key = stable_symbol_key(
@@ -704,6 +762,28 @@ mod tests {
         let second = symbol_id_from_stable_key(&key);
         assert_eq!(first, second);
         assert_eq!(first.0.len(), 64);
+    }
+
+    fn sample_symbol() -> SymbolInfo {
+        SymbolInfo {
+            name: "m".to_string(),
+            kind: SymbolKind::Method,
+            scope: SymbolScope::Member,
+            qualified_name: String::new(),
+            is_namespace_rooted: false,
+            range: CodeRange { start_line: 2, start_column: 5, end_line: 2, end_column: 6, start_byte: 14, end_byte: 15 },
+            language: ProgrammingLanguage::Rust,
+            file: Path::new("src\\a b.rs").to_path_buf(),
+            container_name: Some("S".to_string()),
+            container_kind: None,
+            doc_comment: None,
+            visibility: None,
+            is_static: false,
+            is_static_storage: false,
+            is_async: false,
+            signature: Some(FunctionSignature::new()),
+            type_metadata: None,
+        }
     }
 
     #[test]
