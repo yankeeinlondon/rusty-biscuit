@@ -1061,8 +1061,11 @@ enum OriginChange {
 const REPLACEMENT_ORIGIN: &str = "http://gitea.example.invalid/o/other.git";
 
 /// How long the checkpoint waits for the head outcome: the listing's own
-/// wait, after which nothing the worker does can reach this listing.
-const CHECKPOINT_WAIT: Duration = Duration::from_secs(3);
+/// wait, after which nothing the worker does can reach this listing. These
+/// listings set that wait (`TEST_WAIT_BUDGET_VAR`) above the real 3 s budget,
+/// which a `windows-latest` worker's `ls-remote` and fetch overran; a listing
+/// still returns as soon as its worker finishes.
+const CHECKPOINT_WAIT: Duration = Duration::from_secs(20);
 
 /// Holds `gitea`'s next PR reply until the head attempt of the listing about
 /// to run (an attempt ID other than the one stored now) has an outcome, then
@@ -1104,7 +1107,8 @@ fn change_origin_at_checkpoint(fixture: &MixedFixture, gitea: &FakeGitea, change
 /// One listing through `command` with `change` applied at the checkpoint;
 /// its worker is waited for. Fails unless the checkpoint was reached inside
 /// the listing's wait.
-fn listing_with_origin_change(fixture: &MixedFixture, gitea: &FakeGitea, command: Command, change: OriginChange) -> String {
+fn listing_with_origin_change(fixture: &MixedFixture, gitea: &FakeGitea, mut command: Command, change: OriginChange) -> String {
+    command.env(TEST_WAIT_BUDGET_VAR, CHECKPOINT_WAIT.as_millis().to_string());
     let reached = change_origin_at_checkpoint(fixture, gitea, change);
     let stderr = keyless_listing(fixture, command);
     gitea.before_reply(|| {});
