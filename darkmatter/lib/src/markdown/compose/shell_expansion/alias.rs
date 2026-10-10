@@ -75,8 +75,11 @@ pub fn resolve_alias(name: &str) -> Option<ResolvedAlias> {
 /// edits, so a fresh `ComposeOptions` starts with an empty record.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct AliasResolutions {
-    outcomes: Arc<Mutex<HashMap<(String, String), Option<ResolvedAlias>>>>,
+    outcomes: Arc<Mutex<HashMap<AliasLookup, Option<ResolvedAlias>>>>,
 }
+
+/// `(login shell, name)`: the same name can be an alias in one shell only.
+type AliasLookup = (String, String);
 
 impl AliasResolutions {
     /// [`resolve_alias`] against `login_shell`, the request's
@@ -356,6 +359,27 @@ mod tests {
 
         assert_eq!(resolved.executable, "ls");
         assert!(resolutions.resolve(super::super::probe::login_shell(&Default::default()), "ll").is_none());
+    }
+
+    /// The record answers a repeat lookup, a miss included, without starting
+    /// the shell again; a different login shell is asked for itself.
+    #[cfg(unix)]
+    #[test]
+    fn a_record_starts_each_shell_once_per_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("starts.log");
+        let shell = stub_shell(dir.path(), &format!("echo started >> '{}'\nexit 1", log.display()));
+        let other_dir = tempfile::tempdir().unwrap();
+        let other = stub_shell(other_dir.path(), &format!("echo started >> '{}'\nexit 1", log.display()));
+        let starts = || std::fs::read_to_string(&log).unwrap_or_default().lines().count();
+        let resolutions = AliasResolutions::default();
+
+        assert!(resolutions.resolve(shell.to_str(), "ll").is_none());
+        assert!(resolutions.clone().resolve(shell.to_str(), "ll").is_none());
+        assert_eq!(starts(), 1);
+
+        assert!(resolutions.resolve(other.to_str(), "ll").is_none());
+        assert_eq!(starts(), 2);
     }
 
     /// Integration test: resolve a known alias from the current shell.

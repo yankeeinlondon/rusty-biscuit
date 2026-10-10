@@ -4137,6 +4137,16 @@ mod tests {
         assert_ne!(id(&opts), id(&other));
     }
 
+    /// Unlike the shared runtime above, the alias lookup record is a memo: two
+    /// requests with separate records compose and cache identically.
+    #[test]
+    fn options_identity_ignores_the_alias_lookup_record() {
+        let opts = fixed_opts();
+        let other = fixed_opts();
+        assert_eq!(id(&opts), id(&other));
+        assert_eq!(fp(&opts), fp(&other));
+    }
+
     #[test]
     fn options_identity_preflight_weak_does_not_extend_lifetime() {
         use super::super::super::preflight::PreflightGraphNode;
