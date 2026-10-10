@@ -2,7 +2,8 @@
 //!
 //! Resolves shell aliases to their underlying commands by querying the user's
 //! login shell (`$SHELL`). This allows `::shell` directives to use common
-//! aliases like `ll`, `la`, etc.
+//! aliases like `ll`, `la`, etc. Composition reads `SHELL` from the request's
+//! captured environment (`resolve_alias_in`), never from the process.
 //!
 //! The shell is started through the bounded `shell_expansion::launcher`,
 //! whose module docs explain why the query runs in a detached session.
@@ -58,6 +59,14 @@ pub struct ResolvedAlias {
 pub fn resolve_alias(name: &str) -> Option<ResolvedAlias> {
     let shell = std::env::var("SHELL").ok()?;
     resolve_alias_with_shell(&shell, name, ALIAS_LOOKUP_TIMEOUT)
+}
+
+/// [`resolve_alias`] against `login_shell`, the request's
+/// [`login_shell`](super::probe::login_shell), which is how composition
+/// resolves aliases. With no shell, none is started and the name is not an
+/// alias.
+pub(crate) fn resolve_alias_in(login_shell: Option<&str>, name: &str) -> Option<ResolvedAlias> {
+    resolve_alias_with_shell(login_shell?, name, ALIAS_LOOKUP_TIMEOUT)
 }
 
 /// [`resolve_alias`] with the shell and time budget injected, so tests can drive
@@ -296,6 +305,23 @@ mod tests {
         let shell = stub_shell(dir.path(), "exit 1");
 
         assert!(query_alias(shell.to_str().unwrap(), "ll", Duration::from_secs(10)).is_none());
+    }
+
+    /// Composition asks the shell its request names; a request whose
+    /// environment has no `SHELL` has no aliases, whatever the process has.
+    #[cfg(unix)]
+    #[test]
+    fn request_shell_decides_alias_resolution() {
+        let dir = tempfile::tempdir().unwrap();
+        let shell = stub_shell(dir.path(), "echo \"ll='ls -l'\"");
+        let environment =
+            std::collections::HashMap::from([("SHELL".to_string(), shell.to_string_lossy().into_owned())]);
+
+        let resolved = resolve_alias_in(super::super::probe::login_shell(&environment), "ll")
+            .expect("the request's shell reports ll as an alias");
+
+        assert_eq!(resolved.executable, "ls");
+        assert!(resolve_alias_in(super::super::probe::login_shell(&Default::default()), "ll").is_none());
     }
 
     /// Integration test: resolve a known alias from the current shell.

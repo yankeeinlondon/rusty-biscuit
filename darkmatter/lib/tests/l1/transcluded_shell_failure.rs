@@ -149,9 +149,9 @@ fn assert_unhandled_failure_fails(span: Span, failure: usize, placement: Placeme
     }
 }
 
-/// Each row is its own test so the matrix runs in parallel under nextest; a
-/// missing program is looked up as a login-shell alias before it is reported,
-/// which takes seconds on a host with a heavy shell profile.
+/// Each row is its own test so the matrix runs in parallel under nextest. A
+/// missing program is looked up as an alias in the request's `SHELL`; these
+/// requests capture no environment, so no login shell is started.
 macro_rules! unhandled_failure_rows {
     ($($name:ident: $span:ident, $failure:literal, $placement:ident;)*) => {
         $(

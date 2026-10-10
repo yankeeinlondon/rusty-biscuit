@@ -27,6 +27,7 @@ use crate::markdown::compose::expression::ResolutionContext;
 use crate::markdown::compose::frontmatter_interpolation::FrontmatterSeedState;
 use crate::markdown::compose::preflight::collect::resolve_executable;
 use crate::markdown::compose::shell_expansion::policy::normalize_command;
+use crate::markdown::compose::shell_expansion::probe::login_shell;
 use crate::markdown::compose::shell_expansion::store::resolve_policy_paths;
 use crate::markdown::compose::shell_expansion::tokenize::{parse_pipeline, tokenize};
 use crate::markdown::compose::shell_expansion::types::{
@@ -70,6 +71,9 @@ pub struct ResolvedShellValue {
     directive: FrontmatterShellDirective,
     then_pipeline: Option<ShellPipeline>,
     else_pipeline: Option<ShellPipeline>,
+    /// The context's login shell, which [`Self::commands`] asks to expand an
+    /// alias as execution does.
+    login_shell: Option<String>,
 }
 
 impl PartialEq for ResolvedShellValue {
@@ -126,6 +130,7 @@ impl ResolvedShellValue {
             directive,
             then_pipeline,
             else_pipeline,
+            login_shell: login_shell(context.env()).map(str::to_string),
         })
     }
 
@@ -152,8 +157,11 @@ impl ResolvedShellValue {
         let mut commands = Vec::new();
         for pipeline in self.pipelines() {
             for action in &pipeline.actions {
-                let (executable, args) =
-                    resolve_executable(&action.command.executable, &action.command.args);
+                let (executable, args) = resolve_executable(
+                    self.login_shell.as_deref(),
+                    &action.command.executable,
+                    &action.command.args,
+                );
                 let normalized = normalize_command(&executable, &args);
                 if !commands.contains(&normalized) {
                     commands.push(normalized);
