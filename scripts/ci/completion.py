@@ -734,6 +734,10 @@ def report_outcomes(path: Path) -> dict[str, str]:
     suites = [root] if root.tag == "testsuite" else list(root.iter("testsuite"))
     outcomes: dict[str, str] = {}
     for suite in suites:
+        # Nextest reports each setup script as a suite of its own. It is not a
+        # test, and a failed one leaves the tests it gates without a report.
+        if suite.get("name", "").startswith("@setup-script:"):
+            continue
         for case in suite.iter("testcase"):
             identity = f"{suite.get('name', '')}::{case.get('name', '')}"
             if case.find("failure") is not None or case.find("error") is not None:

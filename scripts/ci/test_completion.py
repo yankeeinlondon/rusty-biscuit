@@ -555,6 +555,24 @@ class CompletionValidatorOracleTests(ValidatorHarness):
         self.assertIn("claudine::stowaway", stderr)
         self.assertFalse(out.exists())
 
+    def test_a_setup_script_is_not_an_unexpected_identity(self):
+        # Nextest's JUnit carries each setup script as its own suite, as the
+        # repo-deps cell's `build-ci-build` did on windows-latest.
+        document = junit_document([junit_case("green_one"), junit_case("green_two")]).replace(
+            "</testsuites>\n",
+            '    <testsuite name="@setup-script:build-ci-build" tests="1" disabled="0" '
+            'errors="0" failures="0">\n'
+            '        <testcase name="build-ci-build" classname="@setup-script:build-ci-build" '
+            'time="1.0"></testcase>\n'
+            "    </testsuite>\n"
+            "</testsuites>\n",
+        )
+        tree = self.staging_tree(
+            {"L1/claudine.xml": document}, [self.manifest_entry("L1/claudine.xml")]
+        )
+        code, stderr, _ = self.validate(artifacts=tree)
+        self.assertEqual(0, code, stderr)
+
     def test_an_extra_filter_that_narrows_the_selection_is_refused(self):
         # Both sides agree — one test expected, one test reported — and both
         # were narrowed by an ad hoc filter. The only thing that catches it is
