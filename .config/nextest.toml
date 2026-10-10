@@ -14,6 +14,22 @@
 #
 # `just sanity` uses `!(...slow...)` to exclude every non-default tier in one shot.
 
+experimental = ["setup-scripts"]
+
+# Every `ci-build` end-to-end fixture first rebuilds the shipped binary
+# (`shipped_wrapper`), deliberately, so a stale one can never be driven. From a
+# CI archive the checkout's own `target/` starts cold: the first fixture to ask
+# compiled `ci-build` and its dependencies inside its own test, every concurrent
+# fixture queued on Cargo's lock behind it, and on `windows-latest` the first
+# four hit the 90s kill together. Building once here, before any of them runs,
+# leaves each fixture's own rebuild the no-op it is on a warm tree.
+[scripts.setup.build-ci-build]
+command = 'cargo build --quiet --no-default-features --features build-tools --manifest-path scripts/Cargo.toml --bin ci-build'
+
+[[profile.default.scripts]]
+filter = 'binary_id(repo-deps::bin/ci-build)'
+setup = 'build-ci-build'
+
 [test-groups]
 # Claudine's L1 library tests repeatedly perform repository discovery, so CI
 # keeps their concurrency bounded on contended runners. Local runs use the
