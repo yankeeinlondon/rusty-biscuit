@@ -81,14 +81,16 @@
 # checkout or an RUSTY_BISCUIT_PRE_PUSH_AREAS override keeps the working-tree
 # replan below, which is wider feedback and never published as evidence.
 #
-# Gate execution uses a report-producing local Nextest profile and an unwrapped
-# target directory reserved for local CI. Kache restores immutable hardlinks
-# into the normal target directory; a later feature-set change can make rustc
-# try to overwrite one and fail before any test runs. `BISCUIT_CI_TARGET_DIR`
-# may relocate the reserved directory, but it must remain exclusive to
-# unwrapped local-CI runs.
+# Gate execution uses a report-producing local Nextest profile and runs rustc
+# unwrapped. Where a rustc wrapper is in effect (`kache-host.sh wrapper`), it
+# builds in a target directory reserved for local CI: kache restores immutable
+# hardlinks into the normal target directory, and a later feature-set change can
+# make rustc try to overwrite one and fail before any test runs. Where none is,
+# it builds in the normal target directory, so a warm local build is reused.
+# `BISCUIT_CI_TARGET_DIR` overrides both, and must stay exclusive to unwrapped
+# local-CI runs.
 #
-# That one reserved directory is also this recipe's answer to CI's producer:
+# That one target directory is also this recipe's answer to CI's producer:
 # every tier it runs is a child of this process and shares that target tree, so
 # the compile CI performs once in `ci-build produce` happens here once too,
 # without serializing an archive. Nothing would consume one — there is no second
@@ -164,7 +166,18 @@ ci-local *args="":
         exit 2
     fi
     ci_repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)"
-    export CARGO_TARGET_DIR="${BISCUIT_CI_TARGET_DIR:-${ci_repo_root}/target/ci-local}"
+    # The reserved directory exists because of a rustc wrapper (see above).
+    # With none in effect, the gates build in the normal target directory and
+    # reuse the developer's warm build. A wrapper of any kind, or a decision
+    # `kache-host.sh` cannot make, keeps the reserved one: wrapped and
+    # unwrapped builds never share a target directory.
+    if [[ -n "${BISCUIT_CI_TARGET_DIR:-}" ]]; then
+        export CARGO_TARGET_DIR="${BISCUIT_CI_TARGET_DIR}"
+    elif [[ "$(bash "${ci_repo_root}/scripts/kache-host.sh" wrapper 2>/dev/null)" == "kache-host: wrapper=none "* ]]; then
+        export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-${ci_repo_root}/target}"
+    else
+        export CARGO_TARGET_DIR="${ci_repo_root}/target/ci-local"
+    fi
     export RUSTC_WRAPPER=""
     export NEXTEST_PROFILE="local-evidence"
     # Nextest resolves relative JUnit paths below the workspace target even

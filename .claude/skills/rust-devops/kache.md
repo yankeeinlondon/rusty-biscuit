@@ -231,8 +231,10 @@ use a fresh target directory on the build volume and clear `RUSTC_WRAPPER`; the
 normal repository target remains untouched and the result is independent of
 the cache. The repository's `just ci-local` path enforces that isolation with
 the unwrapped `target/ci-local` directory (relocatable only through
-`BISCUIT_CI_TARGET_DIR`). Its `local-evidence` Nextest profile preserves local
-parallelism while emitting CI-compatible JUnit. Nextest writes that report
+`BISCUIT_CI_TARGET_DIR`) wherever a rustc wrapper is in effect; on a host with
+none (`kache-host.sh wrapper` reports `wrapper=none`) it builds in the normal
+target directory, so the hook reuses a warm local build. Its `local-evidence`
+Nextest profile preserves local parallelism while emitting CI-compatible JUnit. Nextest writes that report
 under the workspace target rather than the isolated Cargo target, so the hook
 points JUnit staging at the workspace target explicitly.
 

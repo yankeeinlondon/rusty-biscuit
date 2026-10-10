@@ -136,6 +136,7 @@ class CiLocalTests(unittest.TestCase):
         expect_success: bool = True,
         output: dict | None = None,
         plan_fields: dict | None = None,
+        wrapper: str | None = "kache",
     ) -> list[dict]:
         if packages is None:
             packages = [gate_loop_package(name) for name in ("parallel", "serial")]
@@ -148,6 +149,8 @@ class CiLocalTests(unittest.TestCase):
             bin_dir.mkdir()
             scripts.mkdir(parents=True)
             shutil.copyfile(RECIPE, root / "ci-local.just")
+            # The real wrapper decision, which picks the target directory.
+            shutil.copyfile(ROOT / "scripts" / "kache-host.sh", root / "scripts" / "kache-host.sh")
             (root / "policy.just").write_text(thread_policy_recipe(), encoding="utf-8")
             (root / "justfile").write_text(
                 'red := ""\ngreen := ""\nreset := ""\nimport "ci-local.just"\n',
@@ -260,13 +263,15 @@ class CiLocalTests(unittest.TestCase):
             environment.update({
                 "PATH": str(bin_dir) + os.pathsep + environment.get("PATH", ""),
                 "CARGO_TARGET_DIR": str(root / "polluted-target"),
-                "RUSTC_WRAPPER": "kache",
                 "TEST_CALL_LOG": str(root / "calls.jsonl"),
                 "TEST_CORES": str(cores),
                 "TEST_REAL_JUST": JUST,
                 "TEST_POLICY_RECIPE": str(root / "policy.just"),
                 "TEST_COMPANION_LOG": str(root / "companions.jsonl"),
             })
+            environment.pop("RUSTC_WRAPPER", None)
+            if wrapper is not None:
+                environment["RUSTC_WRAPPER"] = wrapper
             # The hook exports these for the run it wraps, and this suite runs
             # inside that run's self-test loop; a fed plan would refuse `--all`.
             for key in (
@@ -323,6 +328,15 @@ class CiLocalTests(unittest.TestCase):
                 call["junit_target_dir"].removesuffix("/target"),
                 call["junit_workspace_root"],
             )
+
+    def test_with_no_rustc_wrapper_the_gates_share_the_normal_target(self) -> None:
+        # No wrapper, so no kache hardlinks to collide with: the gates build
+        # where the developer's own builds go, here the exported directory.
+        calls = self.run_recipe(wrapper=None)
+        self.assertTrue(calls)
+        for call in calls:
+            self.assertTrue(call["target_dir"].replace("\\", "/").endswith("/polluted-target"), call)
+            self.assertEqual("", call["rustc_wrapper"])
 
     def test_parallel_policy_is_bounded_and_does_not_leak_to_other_gates(self) -> None:
         calls = self.run_recipe()
