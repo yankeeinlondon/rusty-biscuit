@@ -4,6 +4,10 @@
 //! a name that is not on PATH as a possible alias. The stub login shell logs
 //! every start, so the test counts how often each name was looked up across a
 //! full preflight-plus-compose run, driven the way `md compose` drives it.
+//!
+//! The missing name sits where preflight sees it but execution never runs it
+//! (a false page block, an untaken ternary branch): run, it would fail the
+//! compose as not found, and handled-failure fallbacks do not cover that.
 #![cfg(unix)]
 
 use std::path::Path;
@@ -53,9 +57,9 @@ fn a_compose_run_looks_each_name_up_once() {
     std::fs::set_permissions(&shell, std::fs::Permissions::from_mode(0o755)).unwrap();
 
     let source = dir.path().join("doc.md");
-    let content = "---\nfm_alias: $(dm-memo-alias x)\nfm_missing: $(dm-memo-missing x)::ok\n---\n\
+    let content = "---\nfm_alias: $(dm-memo-alias x)\nfm_missing: $( false ? dm-memo-missing x : echo skipped )\n---\n\
                    ::shell dm-memo-alias x\n\n\
-                   ::shell --when-error \"(missing)\" dm-memo-missing x\n\n\
+                   ::block when=\"false\"\n::shell dm-memo-missing x\n::end-block\n\n\
                    Frontmatter: {{ fm_alias }} / {{ fm_missing }}\n";
     std::fs::write(&source, content).unwrap();
     let document = Markdown::try_from(source.as_path()).unwrap();
@@ -80,8 +84,8 @@ fn a_compose_run_looks_each_name_up_once() {
 
     let output = composed.content();
     assert_eq!(output.matches("aliased x").count(), 2, "{output}");
-    assert!(output.contains("(missing)"), "{output}");
-    assert!(output.contains("Frontmatter: aliased x / false"), "{output}");
+    assert!(!output.contains("dm-memo-missing"), "{output}");
+    assert!(output.contains("Frontmatter: aliased x / skipped"), "{output}");
     assert_eq!(lookups(&log, "dm-memo-alias"), 1, "alias lookups");
     assert_eq!(lookups(&log, "dm-memo-missing"), 1, "missing-name lookups");
     assert!(started.elapsed() < Duration::from_secs(5), "took {:?}", started.elapsed());
