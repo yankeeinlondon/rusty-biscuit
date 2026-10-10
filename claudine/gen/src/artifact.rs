@@ -11,11 +11,13 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, LazyLock};
 
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 
 use crate::errors::GenError;
+use crate::memo::FileMemo;
 
 /// The artifact schema this consumer understands.
 pub const EXPECTED_SCHEMA_VERSION: u64 = 2;
@@ -66,6 +68,15 @@ struct Offering {
 /// Lookup index over the artifact's offering ids.
 #[derive(Debug)]
 pub struct ArtifactIndex {
+    /// Shared by every load of the same artifact bytes in one process.
+    joins: Arc<Joins>,
+    /// Present when `generated_at` exceeded [`MAX_AGE_DAYS`] at load time.
+    pub staleness_warning: Option<String>,
+}
+
+/// The clock-independent part of an [`ArtifactIndex`].
+#[derive(Debug)]
+struct Joins {
     /// Exact wire id → identity key.
     exact: BTreeMap<String, String>,
     /// Bare model-id part (after the FIRST `/` of the wire id) → every
@@ -75,31 +86,30 @@ pub struct ArtifactIndex {
     families: BTreeMap<String, FamilyEntry>,
     /// The artifact's RFC3339 `generated_at` stamp, verbatim.
     generated_at: String,
-    /// Present when `generated_at` exceeded [`MAX_AGE_DAYS`] at load time.
-    pub staleness_warning: Option<String>,
+    generated_at_utc: DateTime<Utc>,
 }
 
 impl ArtifactIndex {
     /// Identity key for an exact `source/model-id` wire id.
     pub fn exact_key(&self, wire_id: &str) -> Option<&str> {
-        self.exact.get(wire_id).map(String::as_str)
+        self.joins.exact.get(wire_id).map(String::as_str)
     }
 
     /// The family entry for a `vendor/family` key.
     pub fn family(&self, key: &str) -> Option<&FamilyEntry> {
-        self.families.get(key)
+        self.joins.families.get(key)
     }
 
     /// The artifact's RFC3339 `generated_at` stamp, verbatim.
     pub fn generated_at(&self) -> &str {
-        &self.generated_at
+        &self.joins.generated_at
     }
 
     /// Identity key for a bare model id, only when every artifact
     /// offering spelled that way shares exactly ONE identity key —
     /// zero matches and key-ambiguous spellings both return `None`.
     pub fn bare_unique_key(&self, model_id: &str) -> Option<&str> {
-        let keys = self.bare.get(model_id)?;
+        let keys = self.joins.bare.get(model_id)?;
         if keys.len() == 1 {
             keys.iter().next().map(String::as_str)
         } else {
@@ -120,12 +130,35 @@ pub fn load(area: &Path) -> Result<ArtifactIndex, GenError> {
 }
 
 /// Path- and clock-parameterized loader (the testable core of [`load`]).
+///
+/// The parsed index is reused while the file's bytes are unchanged: every
+/// provider pass joins against the same artifact.
 pub fn load_from(path: &Path, now: DateTime<Utc>) -> Result<ArtifactIndex, GenError> {
     if !path.is_file() {
         return Err(GenError::ArtifactMissing {
             path: path.to_path_buf(),
         });
     }
+    static JOINS: LazyLock<FileMemo<Arc<Joins>>> = LazyLock::new(FileMemo::new);
+    let joins = JOINS.get_or_try_insert(format!("{path:?}"), || {
+        Ok((Arc::new(parse_joins(path)?), vec![path.to_path_buf()]))
+    })?;
+    let age_days = (now - joins.generated_at_utc).num_days();
+    let staleness_warning = (age_days > MAX_AGE_DAYS).then(|| {
+        format!(
+            "models-catalog artifact is stale: generated_at {} is {age_days} days old \
+             (max {MAX_AGE_DAYS}) — regenerate with `cargo run -p unchained-ai-gen --bin \
+             emit-catalog`; catalog_id joins may name outdated releases",
+            joins.generated_at
+        )
+    });
+    Ok(ArtifactIndex {
+        joins,
+        staleness_warning,
+    })
+}
+
+fn parse_joins(path: &Path) -> Result<Joins, GenError> {
     let text = std::fs::read_to_string(path).map_err(|source| GenError::Io {
         path: path.to_path_buf(),
         source,
@@ -151,16 +184,6 @@ pub fn load_from(path: &Path, now: DateTime<Utc>) -> Result<ArtifactIndex, GenEr
             ),
         }
     })?;
-    let age_days = (now - generated_at.with_timezone(&Utc)).num_days();
-    let staleness_warning = (age_days > MAX_AGE_DAYS).then(|| {
-        format!(
-            "models-catalog artifact is stale: generated_at {} is {age_days} days old \
-             (max {MAX_AGE_DAYS}) — regenerate with `cargo run -p unchained-ai-gen --bin \
-             emit-catalog`; catalog_id joins may name outdated releases",
-            artifact.generated_at
-        )
-    });
-
     let mut exact = BTreeMap::new();
     let mut bare: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     for offering in artifact.offerings {
@@ -175,12 +198,12 @@ pub fn load_from(path: &Path, now: DateTime<Utc>) -> Result<ArtifactIndex, GenEr
         }
         exact.insert(offering.id, key);
     }
-    Ok(ArtifactIndex {
+    Ok(Joins {
         exact,
         bare,
         families: artifact.families,
         generated_at: artifact.generated_at,
-        staleness_warning,
+        generated_at_utc: generated_at.with_timezone(&Utc),
     })
 }
 
