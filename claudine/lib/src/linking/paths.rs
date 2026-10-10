@@ -331,8 +331,11 @@ impl Default for ProviderSkillPaths {
 ///
 /// If no repository root can be detected, falls back to `cwd`.
 pub fn resolve_repo_root(cwd: &Path) -> PathBuf {
-    if let Ok(Some(git)) = sniff::filesystem::detect_git(cwd, false, 1) {
-        return git.repo_root;
+    // Discovery alone yields the root; a full `detect_git` would also walk
+    // the working-tree status and the commit history to produce data that
+    // is discarded here.
+    if let Ok(Some(git)) = sniff::filesystem::git::GitRepo::discover(cwd) {
+        return git.repo_root().to_path_buf();
     }
 
     if let Ok(Some(repo)) = sniff::filesystem::detect_repo(cwd) {
