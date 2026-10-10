@@ -473,7 +473,9 @@ fn resolve_rejects_non_markdown() {
 
 #[test]
 fn resolve_missing_file() {
-    let err = resolve_composition_source("/nonexistent/path/test.md", &crate::test_support::snapshot()).unwrap_err();
+    let dir = TempDir::new().unwrap();
+    let missing = dir.path().join("nonexistent").join("test.md");
+    let err = resolve_composition_source(missing.to_str().unwrap(), &crate::test_support::snapshot()).unwrap_err();
     assert!(matches!(
         err,
         CompositionError::FileReferenceNoMatch { .. }
@@ -799,7 +801,8 @@ fn bare_no_match_keeps_the_candidate_report() {
 
 #[test]
 fn detailed_resolution_preserves_non_no_match_typed_errors() {
-    let context = FileResolutionContext::new("/tmp");
+    let dir = TempDir::new().unwrap();
+    let context = FileResolutionContext::new(dir.path());
     let err = resolve_composition_source_in_context("https://example.com/prompt.md", &context)
         .unwrap_err();
     match err {
@@ -953,19 +956,14 @@ fn is_markdown_path_variants() {
     assert!(!is_markdown_path(Path::new("test")));
 }
 
-/// Acceptance criterion #5: the shipped `prompts/_reviews/cross-platform.md` prompt
-/// (already fixed to `---` fences) loads as a composition source with
+/// Acceptance criterion #5: a frozen copy of `prompts/_reviews/cross-platform.md`
+/// (intentionally not kept in step with the live prompt; fixed to `---` fences) loads as a composition source with
 /// non-empty frontmatter and a body that begins with the real heading. No
 /// YAML keys from the frontmatter may leak into the body.
 #[test]
 fn cross_platform_prompt_composes_cleanly() {
-    let manifest_dir = biscuit_test_harness::manifest_dir!();
-    let workspace_root = manifest_dir
-        .parent()
-        .expect("claudine/lib parent")
-        .parent()
-        .expect("workspace root");
-    let path = workspace_root.join("prompts/_reviews/cross-platform.md");
+    let path = biscuit_test_harness::manifest_dir!()
+        .join("tests/fixtures/frozen_prompts/prompts/_reviews/cross-platform.md");
 
     let source = resolve_composition_source(path.to_str().unwrap(), &crate::test_support::snapshot())
         .expect("cross-platform.md should resolve and parse cleanly");

@@ -834,7 +834,7 @@ mod tests {
     fn env_options(root: &Path) -> ComposeRequest {
         let env = HashMap::from([(
             "PROJECT_ROOT".to_string(),
-            env_value(&root),
+            env_value(root),
         )]);
         detached_options(root, env).derive(|options| options.with_portable_env(["PROJECT_ROOT"]))
     }
@@ -889,7 +889,12 @@ mod tests {
         );
 
         let content = format!("<img src=\"{destination}\">\n");
-        let (output, report) = normalize(&content, &options_with_repo(&fixture.source));
+        // The source in the same long-name spelling as the destination: the
+        // Windows runner's temp directory is the 8.3 `RUNNER~1`, which
+        // `canonicalize` expands, and a short-name repository root would not
+        // anchor the destination.
+        let source = biscuit_file::canonicalize_simplified(&fixture.source).unwrap();
+        let (output, report) = normalize(&content, &options_with_repo(&source));
 
         assert_eq!(output, format!("<img src=\"../assets/{long_name}/image.png\">\n"));
         assert_eq!(report.link_normalizations_applied, 1);

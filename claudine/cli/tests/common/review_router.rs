@@ -1,7 +1,8 @@
 //! Shipped-review-router fixture shared by the provided-partial terminal tests.
 //!
 //! `fixes/2026-09-10-no-interactive-completion` reproduces its report through
-//! the real `prompts/review.md`: a supplied `spec=` partial must be offered for
+//! a frozen copy of `prompts/review.md` (intentionally not kept in step with the
+//! live prompt): a supplied `spec=` partial must be offered for
 //! completion *before* the router's first `initialize` guard dereferences it
 //! with `frontmatter(spec, ...)`. Two test binaries drive that flow — the PTY
 //! suite (`level1_review_router_partial_pty.rs`) for ordering and data flow,
@@ -28,7 +29,7 @@ pub fn review_router_fixture(multiple: bool) -> (CliProcessFixture, PathBuf) {
     fixture.initialize_repository();
     fixture.seed_user_config();
     let router = fixture.cwd().join("prompts/review.md");
-    write(&router, include_str!("../../../../prompts/review.md"));
+    write(&router, include_str!("../fixtures/frozen_prompts/prompts/review.md"));
     write(
         &fixture.cwd().join("prompts/_reviews/feature-review.md"),
         "---\n$schema:\n  spec: file(required;eager;match(**/*spec*.md))\nselected: \"{{ frontmatter(spec, 'marker') }}\"\n---\nSELECTED={{ selected }}\nSPEC={{ spec }}\nTOKEN={{ token }}\n",

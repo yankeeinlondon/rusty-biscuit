@@ -132,48 +132,65 @@ fn compose(
         .map_err(|error| error.to_string())
 }
 
-#[test]
-fn unhandled_shell_failure_fails_the_composition_in_every_placement() {
+/// One row of the matrix: the span fails unhandled, wherever it is placed.
+fn assert_unhandled_failure_fails(span: Span, failure: usize, placement: Placement) {
     let sleep = sleeping_command();
     let failures = [
         ("non-zero exit", FAILS, Duration::from_secs(60), "exit"),
         ("missing program", MISSING, Duration::from_secs(60), "not found"),
         ("timeout", sleep.as_str(), Duration::from_secs(1), "timed out"),
     ];
-    let mut rows = Vec::new();
-    for span in [Span::Shell, Span::ShellBlock, Span::Frontmatter] {
-        for failure in failures {
-            for placement in [Placement::Inline, Placement::Transcluded, Placement::Nested] {
-                rows.push((span, failure, placement));
-            }
-        }
+    let (failure, command, timeout, fragment) = failures[failure];
+    let dir = repo();
+    let row = format!("{span:?} / {failure} / {placement:?}");
+    match compose(dir.path(), placement, &span.file(command, false), timeout, false) {
+        Ok(composed) => panic!("{row}: composed instead of failing:\n{composed}"),
+        Err(error) => assert!(error.contains(fragment), "{row}: expected `{fragment}` in: {error}"),
     }
-    // Rows run concurrently, each in its own repository: a missing program is
-    // looked up as a login-shell alias before it is reported, which takes
-    // seconds on a host with a heavy shell profile.
-    let problems: Vec<String> = std::thread::scope(|scope| {
-        let handles: Vec<_> = rows
-            .iter()
-            .map(|&(span, (failure, command, timeout, fragment), placement)| {
-                scope.spawn(move || {
-                    let dir = repo();
-                    let row = format!("{span:?} / {failure} / {placement:?}");
-                    match compose(dir.path(), placement, &span.file(command, false), timeout, false) {
-                        Ok(composed) => Some(format!("{row}: composed instead of failing:\n{composed}")),
-                        Err(error) if !error.contains(fragment) => {
-                            Some(format!("{row}: expected `{fragment}` in: {error}"))
-                        }
-                        Err(_) => None,
-                    }
-                })
-            })
-            .collect();
-        handles
-            .into_iter()
-            .filter_map(|handle| handle.join().expect("row thread"))
-            .collect()
-    });
-    assert!(problems.is_empty(), "{}", problems.join("\n\n"));
+}
+
+/// Each row is its own test so the matrix runs in parallel under nextest; a
+/// missing program is looked up as a login-shell alias before it is reported,
+/// which takes seconds on a host with a heavy shell profile.
+macro_rules! unhandled_failure_rows {
+    ($($name:ident: $span:ident, $failure:literal, $placement:ident;)*) => {
+        $(
+            #[test]
+            fn $name() {
+                assert_unhandled_failure_fails(Span::$span, $failure, Placement::$placement);
+            }
+        )*
+    };
+}
+
+unhandled_failure_rows! {
+    unhandled_shell_exit_inline: Shell, 0, Inline;
+    unhandled_shell_exit_transcluded: Shell, 0, Transcluded;
+    unhandled_shell_exit_nested: Shell, 0, Nested;
+    unhandled_shell_missing_inline: Shell, 1, Inline;
+    unhandled_shell_missing_transcluded: Shell, 1, Transcluded;
+    unhandled_shell_missing_nested: Shell, 1, Nested;
+    unhandled_shell_timeout_inline: Shell, 2, Inline;
+    unhandled_shell_timeout_transcluded: Shell, 2, Transcluded;
+    unhandled_shell_timeout_nested: Shell, 2, Nested;
+    unhandled_block_exit_inline: ShellBlock, 0, Inline;
+    unhandled_block_exit_transcluded: ShellBlock, 0, Transcluded;
+    unhandled_block_exit_nested: ShellBlock, 0, Nested;
+    unhandled_block_missing_inline: ShellBlock, 1, Inline;
+    unhandled_block_missing_transcluded: ShellBlock, 1, Transcluded;
+    unhandled_block_missing_nested: ShellBlock, 1, Nested;
+    unhandled_block_timeout_inline: ShellBlock, 2, Inline;
+    unhandled_block_timeout_transcluded: ShellBlock, 2, Transcluded;
+    unhandled_block_timeout_nested: ShellBlock, 2, Nested;
+    unhandled_frontmatter_exit_inline: Frontmatter, 0, Inline;
+    unhandled_frontmatter_exit_transcluded: Frontmatter, 0, Transcluded;
+    unhandled_frontmatter_exit_nested: Frontmatter, 0, Nested;
+    unhandled_frontmatter_missing_inline: Frontmatter, 1, Inline;
+    unhandled_frontmatter_missing_transcluded: Frontmatter, 1, Transcluded;
+    unhandled_frontmatter_missing_nested: Frontmatter, 1, Nested;
+    unhandled_frontmatter_timeout_inline: Frontmatter, 2, Inline;
+    unhandled_frontmatter_timeout_transcluded: Frontmatter, 2, Transcluded;
+    unhandled_frontmatter_timeout_nested: Frontmatter, 2, Nested;
 }
 
 #[test]

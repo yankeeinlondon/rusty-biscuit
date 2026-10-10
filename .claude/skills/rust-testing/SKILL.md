@@ -6,7 +6,7 @@ description: |-
   nextest filtersets, suite audits, and fuzzing. Load this
   before writing or reviewing tests in the rusty-biscuit workspace.
 hash: 61d07be7e22c9f45-43ee6f6bd18f4fb0
-last_updated: 2026-09-24
+last_updated: 2026-10-09
 ---
 # Rust Testing — Rusty Biscuit Monorepo
 
@@ -60,6 +60,9 @@ the wrong thing.
 10. **Scope final gates by blast radius**, never by a workspace-wide run, and
     do not add `--no-fail-fast`: CI already passes it.
     → [verification-scope.md](verification-scope.md), [recipes.md](recipes.md)
+11. **An L1 test over 5 s is a failing test.** It passes on a development host
+    and times out on a 2-core CI runner. Make it fast; a `slow_` prefix or a
+    nextest `slow-timeout` override is not a fix. → [test-speed.md](test-speed.md)
 
 ## Decision Tree: "What tier should my test live in?"
 
@@ -67,8 +70,9 @@ Start at the **requirement**, not the code:
 
 ```text
 Does the test need a real terminal, browser, or device to verify behaviour?
-├── NO  → Is it slow (>5 s) or does it hammer an external API?
-│   ├── NO  → L1 (default). Name it normally.
+├── NO  → Does it hammer an external API?
+│   ├── NO  → L1 (default). Name it normally. Over 5 s? It is failing:
+│   │         make it fast (test-speed.md), don't rename it.
 │   └── YES → L1 with `slow_` prefix so sanity skips it.
 ├── YES → Is it a headless browser test?
 │   ├── YES → Browser tier. Name it `browser_*`.
@@ -149,6 +153,7 @@ To narrow a recipe to one module, pass a positional filter:
 | Open when you are…                                                          | File |
 |-----------------------------------------------------------------------------|------|
 | designing or reviewing any test: assertions, boundaries, timing, performance evidence | [test-design.md](test-design.md) |
+| making a test that takes more than 5 s fast, or reviewing one              | [test-speed.md](test-speed.md) |
 | choosing a tier, gating, requiring a backend or real resource, reading env switches | [tiers-and-gating.md](tiers-and-gating.md) |
 | naming a test or module, writing a filterset, narrowing a recipe            | [tier-filters.md](tier-filters.md) |
 | running or writing `level2_*` tests, or making them parallel-safe           | [l2-tests.md](l2-tests.md) |

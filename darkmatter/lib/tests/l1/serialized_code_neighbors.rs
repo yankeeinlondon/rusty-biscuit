@@ -21,7 +21,7 @@ use biscuit_terminal::terminal::Terminal;
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::output::{HtmlOptions, TerminalOptions};
 use darkmatter::markdown::render_tree::fold_markdown_to_document;
-use matrix::{Context, DIALECTS, contexts, for_each_case, groups, opts};
+use matrix::{Context, contexts, for_each_case, groups, opts};
 use renderable::tree::{MarkdownDialect, RenderStrictness, SourceDescriptor, render_markdown_node};
 
 /// The separator the shared writer puts between touching code spans.
@@ -91,41 +91,49 @@ fn check(markdown: &str, values: (&str, &str), html_backed: bool) -> Vec<String>
     problems
 }
 
-/// Serializes every case in `contexts` in both dialects and checks the
-/// result through darkmatter. Returns the case count, how many carried a
-/// separator, and the failures.
-fn run(contexts: &[Context]) -> (usize, usize, Vec<String>) {
+/// Serializes every case in `contexts` in `dialect` and checks the result
+/// through darkmatter. Returns the case count, how many carried a separator,
+/// and the failures.
+fn run(contexts: &[Context], dialect: MarkdownDialect) -> (usize, usize, Vec<String>) {
     let (mut cases, mut separated) = (0, 0);
     let mut failures = Vec::new();
     for_each_case(contexts, |case| {
-        for dialect in DIALECTS {
-            cases += 1;
-            let label = format!(
-                "{:?} / {} / {} / {} / {dialect:?}",
-                case.context, case.route, case.boundary.name, case.pair
-            );
-            let markdown = match render_markdown_node(&case.node, &opts(dialect, RenderStrictness::Warn)) {
-                Ok(rendered) => rendered.output,
-                Err(error) => {
-                    failures.push(format!("{label}: writer failed: {error}"));
-                    continue;
-                }
-            };
-            if markdown.contains(SEPARATOR) {
-                separated += 1;
+        cases += 1;
+        let label = format!(
+            "{:?} / {} / {} / {} / {dialect:?}",
+            case.context, case.route, case.boundary.name, case.pair
+        );
+        let markdown = match render_markdown_node(&case.node, &opts(dialect, RenderStrictness::Warn)) {
+            Ok(rendered) => rendered.output,
+            Err(error) => {
+                failures.push(format!("{label}: writer failed: {error}"));
+                return;
             }
-            let html_backed = dialect == MarkdownDialect::MarkdownPlus && case.context.html_in_markdown_plus();
-            for problem in check(&markdown, case.values, html_backed) {
-                failures.push(format!("{label}: {problem}\n{markdown}"));
-            }
+        };
+        if markdown.contains(SEPARATOR) {
+            separated += 1;
+        }
+        let html_backed = dialect == MarkdownDialect::MarkdownPlus && case.context.html_in_markdown_plus();
+        for problem in check(&markdown, case.values, html_backed) {
+            failures.push(format!("{label}: {problem}\n{markdown}"));
         }
     });
     (cases, separated, failures)
 }
 
-fn assert_group(index: usize) {
-    let (cases, separated, failures) = run(&groups()[index]);
-    assert!(separated > 0, "group {index}: no case carried a separator");
+/// Checks one dialect over every `parts`-th context of group `index`, starting
+/// at `part`. Contexts are independent, so the slices together cover each
+/// group exactly while running as parallel tests.
+fn assert_slice(index: usize, dialect: MarkdownDialect, part: usize, parts: usize) {
+    let slice: Vec<Context> = groups()[index].iter().copied().skip(part).step_by(parts).collect();
+    let (cases, separated, failures) = run(&slice, dialect);
+    assert!(cases > 0, "group {index} part {part}/{parts}: no cases");
+    // MarkdownPlus lowers some contexts to raw HTML with no separator, so only
+    // the plain dialect must always show one.
+    assert!(
+        dialect != MarkdownDialect::Markdown || separated > 0,
+        "group {index} part {part}/{parts}: no case carried a separator"
+    );
     assert!(
         failures.is_empty(),
         "{} failures in {cases} cases ({separated} with a separator); first four:\n{}",
@@ -134,29 +142,45 @@ fn assert_group(index: usize) {
     );
 }
 
-#[test]
-fn serialized_neighbors_render_in_paragraphs_compositions_and_roots() {
-    assert_group(0);
+macro_rules! slices {
+    ($($name:ident: $group:expr, $dialect:expr, $part:expr, $parts:expr;)*) => {
+        $(#[test] fn $name() { assert_slice($group, $dialect, $part, $parts); })*
+    };
 }
 
-#[test]
-fn serialized_neighbors_render_in_headings_and_section_headings() {
-    assert_group(1);
-}
-
-#[test]
-fn serialized_neighbors_render_in_every_table_cell_position() {
-    assert_group(2);
-}
-
-#[test]
-fn serialized_neighbors_render_in_quotes_lists_and_footnotes() {
-    assert_group(3);
-}
-
-#[test]
-fn serialized_neighbors_render_in_disclosures_and_columns() {
-    assert_group(4);
+slices! {
+    neighbors_in_paragraphs_compositions_and_roots_markdown_0: 0, MarkdownDialect::Markdown, 0, 4;
+    neighbors_in_paragraphs_compositions_and_roots_markdown_1: 0, MarkdownDialect::Markdown, 1, 4;
+    neighbors_in_paragraphs_compositions_and_roots_markdown_2: 0, MarkdownDialect::Markdown, 2, 4;
+    neighbors_in_paragraphs_compositions_and_roots_markdown_3: 0, MarkdownDialect::Markdown, 3, 4;
+    neighbors_in_paragraphs_compositions_and_roots_plus_0: 0, MarkdownDialect::MarkdownPlus, 0, 4;
+    neighbors_in_paragraphs_compositions_and_roots_plus_1: 0, MarkdownDialect::MarkdownPlus, 1, 4;
+    neighbors_in_paragraphs_compositions_and_roots_plus_2: 0, MarkdownDialect::MarkdownPlus, 2, 4;
+    neighbors_in_paragraphs_compositions_and_roots_plus_3: 0, MarkdownDialect::MarkdownPlus, 3, 4;
+    neighbors_in_headings_and_section_headings_markdown_0: 1, MarkdownDialect::Markdown, 0, 2;
+    neighbors_in_headings_and_section_headings_markdown_1: 1, MarkdownDialect::Markdown, 1, 2;
+    neighbors_in_headings_and_section_headings_plus_0: 1, MarkdownDialect::MarkdownPlus, 0, 2;
+    neighbors_in_headings_and_section_headings_plus_1: 1, MarkdownDialect::MarkdownPlus, 1, 2;
+    neighbors_in_table_cells_markdown_0: 2, MarkdownDialect::Markdown, 0, 4;
+    neighbors_in_table_cells_markdown_1: 2, MarkdownDialect::Markdown, 1, 4;
+    neighbors_in_table_cells_markdown_2: 2, MarkdownDialect::Markdown, 2, 4;
+    neighbors_in_table_cells_markdown_3: 2, MarkdownDialect::Markdown, 3, 4;
+    neighbors_in_table_cells_plus_0: 2, MarkdownDialect::MarkdownPlus, 0, 4;
+    neighbors_in_table_cells_plus_1: 2, MarkdownDialect::MarkdownPlus, 1, 4;
+    neighbors_in_table_cells_plus_2: 2, MarkdownDialect::MarkdownPlus, 2, 4;
+    neighbors_in_table_cells_plus_3: 2, MarkdownDialect::MarkdownPlus, 3, 4;
+    neighbors_in_quotes_lists_and_footnotes_markdown_0: 3, MarkdownDialect::Markdown, 0, 3;
+    neighbors_in_quotes_lists_and_footnotes_markdown_1: 3, MarkdownDialect::Markdown, 1, 3;
+    neighbors_in_quotes_lists_and_footnotes_markdown_2: 3, MarkdownDialect::Markdown, 2, 3;
+    neighbors_in_quotes_lists_and_footnotes_plus_0: 3, MarkdownDialect::MarkdownPlus, 0, 3;
+    neighbors_in_quotes_lists_and_footnotes_plus_1: 3, MarkdownDialect::MarkdownPlus, 1, 3;
+    neighbors_in_quotes_lists_and_footnotes_plus_2: 3, MarkdownDialect::MarkdownPlus, 2, 3;
+    neighbors_in_disclosures_and_columns_markdown_0: 4, MarkdownDialect::Markdown, 0, 3;
+    neighbors_in_disclosures_and_columns_markdown_1: 4, MarkdownDialect::Markdown, 1, 3;
+    neighbors_in_disclosures_and_columns_markdown_2: 4, MarkdownDialect::Markdown, 2, 3;
+    neighbors_in_disclosures_and_columns_plus_0: 4, MarkdownDialect::MarkdownPlus, 0, 3;
+    neighbors_in_disclosures_and_columns_plus_1: 4, MarkdownDialect::MarkdownPlus, 1, 3;
+    neighbors_in_disclosures_and_columns_plus_2: 4, MarkdownDialect::MarkdownPlus, 2, 3;
 }
 
 #[test]

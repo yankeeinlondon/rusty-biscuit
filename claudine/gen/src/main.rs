@@ -187,8 +187,8 @@ fn run(
             let scope = slug_scope(&slug);
             // catalog.json spans every provider, so generate the full
             // roster even when only one data.rs is being checked.
-            for slug in &slugs {
-                let (generation, outcome) = claudine_gen::check_area(&area, slug, snapshot)?;
+            let checked = claudine_gen::check_all(&area, snapshot)?;
+            for (slug, (generation, outcome)) in slugs.iter().zip(checked) {
                 if scope.contains(slug) {
                     if !matches!(outcome, CheckOutcome::Clean) {
                         drifted = true;

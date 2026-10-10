@@ -47,7 +47,8 @@
 //! re-deriving the fixture:
 //!
 //! ```text
-//! CLAUDINE_UPDATE_SHIPPED_PROMPT_HASHES=1 just test-cli shipped_prompt_route_drift::   # in claudine/
+//! CLAUDINE_UPDATE_SHIPPED_PROMPT_HASHES=1 cargo nextest run -p claudine-cli \
+//!     -F prompt-tests --test prompts shipped_prompt_route_drift::
 //! ```
 
 use darkmatter::markdown::Markdown;
@@ -146,8 +147,8 @@ fn shipped_implement_prompts_have_not_drifted_from_their_fixture() {
          at `claudine/cli/tests/fixtures/shipped_implement_route/`.\n\
          Re-derive that fixture from the new shipped bytes (keeping only the \
          documented `say:`/`effect:`/`shell:` removals), then refresh this pin with:\n\
-         \x20 CLAUDINE_UPDATE_SHIPPED_PROMPT_HASHES=1 just test-cli \
-         shipped_prompt_route_drift:: (in claudine/)"
+         \x20 CLAUDINE_UPDATE_SHIPPED_PROMPT_HASHES=1 cargo nextest run -p claudine-cli \
+         -F prompt-tests --test prompts shipped_prompt_route_drift::"
     );
 }
 

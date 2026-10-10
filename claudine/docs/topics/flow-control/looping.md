@@ -71,7 +71,7 @@ What's available inside a loop's `while:` / `until:` expression:
 
 - **Frontmatter properties** of the document (top-level keys and dotted nested paths like `state.phase`).
 - **Ambient loop variables** under `state.loop` — see [Ambient variables](#ambient-variables) below.
-- **Environment variables** under `env.NAME`.
+- **Environment variables** under `env.NAME`. On Windows the name matches without regard to case, as Windows itself does, so `env.PATH` reads the variable Windows reports as `Path`.
 - **Runtime context** under `ctx.*` (e.g. `ctx.current_package_area`, `ctx.dirty_files`). Each iteration is a composition run of its own, so it captures its own `ctx`: Git working state (`ctx.branch`, `ctx.staged_files`, `ctx.dirty_files`, …) is observed as the previous iterations left it, while launch-facing values come from the invocation's launch inputs rather than the wrapper's ambient CWD, so the child-working-directory switch cannot make CWD-derived values drift between iterations or steps. See [Composition — Launch-Anchored Prepared Context](../composition.md#launch-anchored-prepared-context).
 - **Literals** — strings (`'review'` / `"review"`), numbers, `true`, `false`, `null`.
 - **Comparisons** — `==`, `!=`, `>`, `>=`, `<`, `<=`.

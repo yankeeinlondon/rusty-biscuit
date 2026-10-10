@@ -402,12 +402,23 @@ fn spawn_compose(
     listener: &WebhookListener,
     document: &str,
 ) -> PipedRun {
+    spawn_compose_with_env(fixture, listener, document, &[])
+}
+
+/// [`spawn_compose`] with `env` set on the child.
+fn spawn_compose_with_env(
+    fixture: &CliProcessFixture,
+    listener: &WebhookListener,
+    document: &str,
+    env: &[(&str, &str)],
+) -> PipedRun {
     write_webhook_route(fixture.home());
     write_one_line_claude(fixture.bin_dir());
     let prompt = fixture.cwd().join("drain.md");
     write(&prompt, document);
     let mut command = fixture.command_std();
     listener.apply_route_env(&mut command);
+    command.envs(env.iter().copied());
     command.args(["compose", "--claude", prompt.to_str().expect("UTF-8 prompt path")]);
     PipedRun::spawn(command, None)
 }
@@ -448,23 +459,30 @@ fn a_rejected_success_message_is_reported_and_the_exit_code_stays_zero() {
     assert!(requests[0].body.contains("drain-rejected-marker"));
 }
 
-/// R3: two deliveries that never finish share one 10-second drain budget,
-/// are named in one warning that says delivery is unknown, and leave the
-/// exit code alone.
+/// The shortened drain budget the stalled-delivery test runs under, set
+/// through the `test-fixtures` seam in `shutdown.rs`. Long enough that two
+/// deliveries sharing it (2 s) are told apart from one budget each (4 s) with
+/// 1.8 s of scheduling slack on the passing side.
+const SHORT_DRAIN_BUDGET: Duration = Duration::from_millis(2000);
+
+/// R3: two deliveries that never finish share one drain budget, are named in
+/// one warning that says delivery is unknown, and leave the exit code alone.
 ///
-/// This waits out the real budget; there is deliberately no production
-/// override to shorten it. It is not named `slow_`, because claudine's L1
-/// filter excludes `slow_` tests from every recipe (only darkmatter declares
-/// `l1-include-slow`), so the marker would leave it running nowhere.
+/// The budget is shortened to [`SHORT_DRAIN_BUDGET`]; the production 10 s value
+/// is covered by the library's `DELIVERY_DRAIN_BUDGET` tests. It is not named
+/// `slow_`, because claudine's L1 filter excludes `slow_` tests from every
+/// recipe (only darkmatter declares `l1-include-slow`).
 #[test]
 fn stalled_deliveries_share_one_drain_budget_and_are_reported_as_unknown() {
     let fixture = CliProcessFixture::named("lifecycle-message-stalled");
     let listener = WebhookListener::start(ListenerMode::NeverReply);
-    let run = spawn_compose(
+    let budget_ms = SHORT_DRAIN_BUDGET.as_millis().to_string();
+    let run = spawn_compose_with_env(
         &fixture,
         &listener,
         "---\nsuccess:\n  message: \"drain-stalled-success-body\"\n\
          finalize:\n  message: \"drain-stalled-finalize-body\"\n---\nSay hello.\n",
+        &[("CLAUDINE_TEST_DRAIN_BUDGET_MS", &budget_ms)],
     );
 
     let (run, requests) = run.await_requests(&listener, 2);
@@ -480,14 +498,15 @@ fn stalled_deliveries_share_one_drain_budget_and_are_reported_as_unknown() {
     let stderr = &finished.stderr;
     assert_eq!(finished.status.code(), Some(0), "stderr:\n{stderr}");
     // The drain starts just before the second request lands, so it ends a
-    // little under 10 s after it. One budget per delivery would take 20 s.
+    // little under one budget after it. One budget per delivery would take
+    // twice that.
     assert!(
-        waited >= Duration::from_secs(8),
+        waited >= SHORT_DRAIN_BUDGET - Duration::from_millis(1000),
         "the drain waited for the stalled deliveries ({waited:?})\n{stderr}"
     );
     assert!(
-        waited < Duration::from_secs(15),
-        "both deliveries shared one 10 s budget ({waited:?})\n{stderr}"
+        waited < SHORT_DRAIN_BUDGET * 2 - Duration::from_millis(200),
+        "both deliveries shared one {SHORT_DRAIN_BUDGET:?} budget ({waited:?})\n{stderr}"
     );
 
     let warning = pending_warning(stderr)
@@ -587,6 +606,10 @@ fn spawn_silent_notify_compose(fixture: &CliProcessFixture, title: &str, stall: 
         .args(["compose", "--claude", prompt.to_str().expect("UTF-8 prompt path")]);
     if stall {
         command.env("CLAUDINE_TEST_DESKTOP_NOTIFICATION", "stall");
+        command.env(
+            "CLAUDINE_TEST_DRAIN_BUDGET_MS",
+            SHORT_DRAIN_BUDGET.as_millis().to_string(),
+        );
     }
     PipedRun::spawn(command, None)
 }
@@ -612,11 +635,11 @@ fn a_terminal_notify_is_drained_and_its_failure_reported_without_host_ui() {
 }
 
 /// R3/R6: a terminal `notify` that never finishes holds the exit for the
-/// 10-second drain budget, is then named by its safe `desktop notification`
-/// label as unknown, and leaves the exit code alone.
+/// drain budget, is then named by its safe `desktop notification` label as
+/// unknown, and leaves the exit code alone.
 ///
-/// Like the stalled-route test above, this waits out the real budget under an
-/// ordinary L1 name. The stall seam exists only in `test-fixtures` builds.
+/// Like the stalled-route test above, this runs under [`SHORT_DRAIN_BUDGET`].
+/// The stall seam exists only in `test-fixtures` builds.
 #[cfg(feature = "test-fixtures")]
 #[test]
 fn a_stalled_terminal_notify_is_reported_as_unknown_after_the_drain_budget() {
@@ -632,12 +655,12 @@ fn a_stalled_terminal_notify_is_reported_as_unknown_after_the_drain_budget() {
     let stderr = &finished.stderr;
     assert_eq!(finished.status.code(), Some(0), "stderr:\n{stderr}");
     assert!(
-        waited >= Duration::from_secs(8),
+        waited >= SHORT_DRAIN_BUDGET - Duration::from_millis(1000),
         "the drain waited for the stalled notification ({waited:?})\n{stderr}"
     );
     assert!(
-        waited < Duration::from_secs(15),
-        "the drain gave up at its 10 s budget ({waited:?})\n{stderr}"
+        waited < SHORT_DRAIN_BUDGET * 2,
+        "the drain gave up at its {SHORT_DRAIN_BUDGET:?} budget ({waited:?})\n{stderr}"
     );
 
     let warning = pending_warning(stderr)

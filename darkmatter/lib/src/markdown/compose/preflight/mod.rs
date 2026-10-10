@@ -373,7 +373,9 @@ mod acceptance_tests {
     use std::collections::HashSet;
 
     use crate::markdown::Markdown;
-    use crate::markdown::compose::{ComposeOperation, ComposeOptions};
+    use crate::markdown::compose::{
+        ComposeOperation, ComposeOptions, ComposeRequest, RequestSnapshot,
+    };
     use serde_json::json;
     use tempfile::TempDir;
 
@@ -735,8 +737,12 @@ flag: a
             }
             let options = execute_options(approval.clone(), temp.path())
                 .with_set_overrides(serde_json::Value::Object(overrides.clone()));
+            // Prepare against the temp dir: `test_request` defaults to the process
+            // cwd inside this repository, and its Git discovery costs per case.
+            let request = ComposeRequest::prepare(options, &RequestSnapshot::new(temp.path()))
+                .expect("request should prepare");
             let (composed, _) = md
-                .compose_with(&crate::markdown::compose::test_request(options))
+                .compose_with(&request)
                 .unwrap_or_else(|e| panic!("compose failed for {overrides:?}: {e}"));
 
             // For every branch whose `flag_i == 1`, the branch's command must

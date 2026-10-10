@@ -61,9 +61,15 @@ fn control_grant() -> PolicyGrant {
     .expect("control grant parses")
 }
 
+/// The real Pi research, projected once per process: each case edits the grant, not the research.
+fn pi_research() -> &'static claudine_gen::steering_catalog::ResearchSteering {
+    static RESEARCH: std::sync::OnceLock<claudine_gen::steering_catalog::ResearchSteering> =
+        std::sync::OnceLock::new();
+    RESEARCH.get_or_init(|| load_research(&area(), "pi", &context_at(&area())).expect("real Pi research projects"))
+}
+
 fn errors_for(grant: PolicyGrant, adapters: Vec<ReviewedAdapter>) -> Vec<String> {
-    let research = load_research(&area(), "pi", &context_at(&area())).expect("real Pi research projects");
-    activation_errors("pi", &research, &ActivationPolicy { adapters, grants: vec![grant], blocks: vec![] })
+    activation_errors("pi", pi_research(),&ActivationPolicy { adapters, grants: vec![grant], blocks: vec![] })
 }
 
 fn block(profile_id: &str, reason: &str) -> PolicyBlock {

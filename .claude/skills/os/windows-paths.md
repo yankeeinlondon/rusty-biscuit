@@ -71,12 +71,25 @@ with a path in the message. Processes and the environment are in
    so a Windows test that seeds a cache file writes to the real per-user
    path, keyed by its temporary repository, and deletes what it seeded
    (`worktree/cli/tests/perf_support`'s `pr_store`, 2026-09-25).
-3. **GitHub's Windows runner has an 8.3 short-name TEMP (`RUNNER~1`); no
-   developer machine does.** Short-versus-long spelling bugs reproduce only
-   on CI. `current_dir()` reports the spelling it was given; `canonicalize`
-   re-spells to long names. Model "what the child reports": the
-   `launched_spelling` test helper canonicalizes on Unix (for the macOS
-   `/var` symlink) and keeps the raw path on Windows.
+3. **GitHub's Windows runner has an 8.3 short-name TEMP (`RUNNER~1`); a
+   developer machine usually does not.** `current_dir()` reports the spelling
+   it was given; `canonicalize` re-spells to long names. Model "what the child
+   reports": the `launched_spelling` test helper canonicalizes on Unix (for
+   the macOS `/var` symlink) and keeps the raw path on Windows. A test that
+   mixes a canonical path with a fixture's raw one passes locally and fails on
+   CI. To reproduce locally, create a long-named directory under TEMP, read its
+   short name (`for %I in ("<dir>") do @echo %~sI` in `cmd`), and run the test
+   from PowerShell with `$env:TEMP` and `$env:TMP` set to that short spelling
+   (2026-10-09, darkmatter `link_normalization`).
+3a. **`windows-latest` fails at 260 characters where a dev host may not.**
+   `link.exe` on the runner failed with `LNK1104: cannot open file` on a
+   266-character path. The `B:` dev host has `LongPathsEnabled=1` and linked a
+   301-character path fine, so the failure cannot be reproduced there. It came
+   from a test building a fixture crate beside its binary inside an extracted
+   nextest archive (`%TEMP%\nextest-archive-…\target\…`), which nests a second
+   `target\…\deps\rustc*\`. Keep nested builds under a short `%TEMP%` directory
+   and count the deepest path against 260 (`repo-deps` `ci-build` archive
+   tests, 2026-10-09).
 4. **`Path::join("a/b")` keeps the literal `/`.** A native-spelling needle
    built from it has mixed separators and matches nothing. Re-join through
    `.components().collect::<PathBuf>()` to normalize. A context's
@@ -192,7 +205,14 @@ Compare against that, never against `to_string_lossy()`.
     `FileReference::new("docs/*.md")` is a `NoMatch` on every OS. Found
     2026-10-02 on `build-win-native`
     (`glob_reference::literal::a_literal_miss_that_looks_like_a_glob_hints_at_glob_references`).
-
+17. **Test expectations built from raw `fs::canonicalize` fail against
+    production output that is already simplified** (left `C:\…`, right
+    `\\?\C:\…`): build the expected value with
+    `biscuit_file::canonicalize_simplified`. Likewise a fixture path `"/repo/x.md"`
+    is rootless on Windows and renders as `file:///B:/repo/x.md` (current
+    drive); use `C:/repo/x.md` and expect `file:///C:/repo/x.md` there.
+    Found 2026-10-09 in Darkmatter `resolves_repo_root_reference`,
+    `meta_schema_reference_graph`, and the two `file://` diagnostic tests.
 
 ## Worktree include links and junctions
 

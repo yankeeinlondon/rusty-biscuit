@@ -1,16 +1,16 @@
-//! Staging shipped prompts, with everything they transclude, into a test
-//! workspace.
+//! Staging prompts, with everything they transclude, into a test workspace.
 //!
-//! A shipped prompt pulls shared fragments in with `::file` directives, and a
-//! fragment added to one used to break every test that staged that prompt from
-//! a hand-kept list of snippets. [`stage_shipped_prompts`] follows the
-//! directives instead, so the staged set always matches what the prompt reads.
+//! A prompt pulls shared fragments in with `::file` directives, and a fragment
+//! added to one used to break every test that staged that prompt from a
+//! hand-kept list of snippets. Staging follows the directives instead, so the
+//! staged set always matches what the prompt reads.
 //!
-//! Call sites bind `let repository = workspace_root();` and name each entry
-//! by its full repository path (`"prompts/implement.md"`). CI's test-input
-//! index (`docs/cicd/test-inputs.md`) reads that spelling as a read of the
-//! entry, and follows the entry's `::file` directives, so a change to the entry
-//! or to any fragment it transcludes schedules the test.
+//! The repository's `prompts/` are internal tools, never tested by CI, so a
+//! Level 1 or Level 2 test stages a frozen copy through
+//! [`stage_frozen_prompts`]: `tests/fixtures/frozen_prompts/` holds them
+//! byte-for-byte at their repository-relative paths, intentionally not kept in
+//! step with `prompts/`. Only the opt-in `prompts` binary (`prompt-tests`)
+//! reads the live tree, through [`stage_shipped_prompts`].
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -26,6 +26,19 @@ pub fn workspace_root() -> PathBuf {
         .to_path_buf()
 }
 
+/// The frozen copy of the repository's `prompts/` directory.
+pub fn frozen_prompts_dir() -> PathBuf {
+    biscuit_test_harness::manifest_dir!().join("tests/fixtures/frozen_prompts/prompts")
+}
+
+/// Stages frozen prompts the way [`stage_shipped_prompts`] stages live ones.
+/// Each entry is relative to `prompts/` (`"implement.md"`), so the spelling
+/// never names a live prompt.
+pub fn stage_frozen_prompts(staged: &Path, entries: &[&str]) -> Vec<String> {
+    let pending = entries.iter().map(|&entry| entry.to_owned()).collect();
+    stage_from(&frozen_prompts_dir(), staged, pending)
+}
+
 /// Copies each `entries` prompt, a repository path under `prompts/`, from
 /// `repository` into `staged`, which stands in for `prompts/`, together with
 /// every file those prompts transclude through `::file`, recursively. Returns
@@ -37,9 +50,7 @@ pub fn workspace_root() -> PathBuf {
 /// Route targets reached through frontmatter rather than `::file` are not
 /// followed; list them in `entries`.
 pub fn stage_shipped_prompts(repository: &Path, staged: &Path, entries: &[&str]) -> Vec<String> {
-    let shipped = repository.join("prompts");
-    let mut seen = BTreeSet::new();
-    let mut pending: Vec<String> = entries
+    let pending = entries
         .iter()
         .map(|entry| {
             entry
@@ -48,6 +59,11 @@ pub fn stage_shipped_prompts(repository: &Path, staged: &Path, entries: &[&str])
                 .to_owned()
         })
         .collect();
+    stage_from(&repository.join("prompts"), staged, pending)
+}
+
+fn stage_from(shipped: &Path, staged: &Path, mut pending: Vec<String>) -> Vec<String> {
+    let mut seen = BTreeSet::new();
     while let Some(relative) = pending.pop() {
         if !seen.insert(relative.clone()) {
             continue;

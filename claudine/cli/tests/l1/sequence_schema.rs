@@ -514,8 +514,9 @@ fn sequence_proxy_target_partial_fails_typed_before_the_target_initialize() {
     // The shipped router is the proxy target: it is the first document to
     // classify `spec` as a file input, and its own `initialize` guard reads
     // that value through `frontmatter()`.
+    // A frozen copy, intentionally not kept in step with `prompts/review.md`.
     let target = fixture.cwd().join("review.md");
-    fs::write(&target, include_str!("../../../../prompts/review.md")).unwrap();
+    fs::write(&target, include_str!("../fixtures/frozen_prompts/prompts/review.md")).unwrap();
 
     let md_file = fixture.cwd().join("seq.md");
     fs::write(

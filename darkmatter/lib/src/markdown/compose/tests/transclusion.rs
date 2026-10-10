@@ -2387,11 +2387,8 @@ mod file_links_compose {
             matches!(
                 &error,
                 crate::markdown::types::MarkdownError::FileLinks(
-                    crate::markdown::compose::FileLinksError::GlobReference {
-                        source: biscuit_file::GlobReferenceError::RelativeTreeEscape { .. },
-                        ..
-                    }
-                )
+                    crate::markdown::compose::FileLinksError::GlobReference { source, .. }
+                ) if matches!(**source, biscuit_file::GlobReferenceError::RelativeTreeEscape { .. })
             ),
             "{error:?}"
         );

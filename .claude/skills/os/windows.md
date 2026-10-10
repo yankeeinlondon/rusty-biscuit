@@ -73,14 +73,60 @@ hold the rest:
   interpreter's directory to a process-scoped `PATH` (confirm a successful
   `--version`; do not assume the install directory, e.g. Python313). A PASS
   alone is not evidence: read the captured output for the planner's own lines.
+- **Run Windows tests from PowerShell, not from Git Bash.** An agent's Bash
+  tool on Windows is Git Bash (MSYS). Under it, every `pr_flow_rehearsal` route
+  whose stage runs a local-transport `git push` failed: git exited
+  `0xC0000005` (`STATUS_ACCESS_VIOLATION`) with empty stderr, and the unmodified
+  code failed the same way. The same tests pass from PowerShell. They still
+  fail from a `powershell.exe` launched *by* Git Bash, and they still pass from
+  PowerShell given Git Bash's extra variables or its `PATH` order. So the
+  trigger is an MSYS ancestor, not an environment value. Reproduce a Windows
+  failure from the PowerShell tool before diagnosing it. Found 2026-10-08.
+- **A `.cmd` shim costs ~17 ms of `cmd.exe` per launch, and a fixture that  spawns git dozens of times pays it every time.** Measured 2026-10-09: 20  `git rev-parse` calls took 567 ms direct and 919 ms through a `git.cmd`.  `pr_flow_rehearsal` installs `claudine-fake-relay` as `git.exe` with  `"forward": true` instead. Likewise, one `git config` spawn is ~50 ms:  write a fixture repository's config straight into `.git/config`.
+- **A Cygwin install on the machine `PATH` takes over `just` recipes.** On the
+  `B:` dev host `C:\cygwin64\bin` is a machine entry, which Windows places ahead
+  of every user entry, so `bash`, `env`, `mktemp`, and `python3` resolve to
+  Cygwin and Git's `usr\bin` is absent. A `#!/usr/bin/env bash` recipe then
+  runs under Cygwin bash. Its `mktemp` yields `/tmp/…` or `/cygdrive/c/…`,
+  which native Python opens as `B:\tmp\…`, and its `python3` is a wrapper that
+  fails under any other shell. `just ci-local --plan` and the pre-push hook fail
+  with `FileNotFoundError` on their own temp files. With Git's `usr\bin` first
+  but Cygwin still present, the same recipe's `git` children segfaulted
+  (exit 139). With Cygwin removed, everything resolved to native or MSYS tools
+  and `git` ran cleanly. Before running a hook or `ci-local` there, use a
+  process-scoped `PATH` that drops every `cygwin` entry and prepends
+  `C:\Program Files\Git\usr\bin` and the real Python directory. Found
+  2026-10-08 while pushing from that host.
+- **Three ways a bash script loses data on Windows** (found 2026-10-09 making
+  `scripts/ci/test_ci_local.py` pass there):
+  - Native `jq.exe` ends `-r` lines with CRLF, so a name read back keeps a
+    `\r` and matches nothing. `jq --binary` keeps LF; `just ci-local` and the
+    pre-push hook wrap `jq` that way when `OS=Windows_NT`. In the hook it
+    surfaced as "branch main does not exist on origin": the PR base read back
+    from `gh pr list` was `main\r`. Cygwin's `jq` writes LF, which hid it.
+  - `subprocess.run([bash, "-c", script])` passes the script on the command
+    line, where MSYS and Cygwin bash re-split it at nested quotes and run only
+    the first fragment, exiting 0. Write the script to a file and run
+    `bash <file>`, as GitHub does.
+  - A recipe that interpolates `{{ args }}` into bash eats a Windows path's
+    backslashes (`C:UserskenAppData…`). Pass paths with forward slashes
+    (`Path.as_posix()`).
+- **A `cmd /C` line cannot start a command with `@1>&2`.** `for /L %i in
+  (…) do @1>&2 echo x` runs a command named `1`, which fails. Write
+  `@(1>&2 echo x)`. The group also avoids the trailing space that
+  `echo x 1>&2` puts on each line. Found 2026-10-08 in claudine's
+  `semantic_stderr_buffer_is_drained_before_run_closes`.
 - **A `.cmd`/`.bat` cannot receive an argument containing a newline** ("batch
   file arguments are invalid"). A fake provider that receives a multi-line
   prompt must be a compiled `.exe`; see the rustc-built fixture in claudine's
   `inline_compose_hash.rs`. This is not only a test concern: Claudine delivers
   the composed prompt as one `-t` argument, so a real npm-installed
-  `goose.cmd`/`claude.cmd` on a user's `PATH` fails the same way. The
-  `wrap_compose_validation` stub was still a `.cmd` until 2026-09-22, and the
-  first native-Windows run of `claudine-cli` is what found it.
+  `opencode.cmd` on a user's `PATH` failed `just commit` the same way.
+  `claudine::child_environment::command` now starts an npm `cmd-shim`'s
+  target directly (`claudine/lib/src/npm_shim.rs`); a batch file in any other
+  shape still fails. The `wrap_compose_validation` stub was still a `.cmd`
+  until 2026-09-22, and the first native-Windows run of `claudine-cli` is
+  what found it.
 - **An SSH session's processes are already inside a Job Object**, and that Job
   forbids nesting, so `AssignProcessToJobObject` returns
   `ERROR_ACCESS_DENIED` (`Access is denied. (0x80070005)`, the `windows`
@@ -157,6 +203,17 @@ hold the rest:
   stderr) and is fixed by `process_group(0)` plus a negative-PID `SIGKILL`.
   Measured on build-win-native, 2026-09-24
   (`worktree/fixes/2026-09-24-ux-improvements/spike-s2.md`).
+- **A named pipe's name outlives the dropped server handle for a moment.**
+  Closing the last instance cancels the pending `ConnectNamedPipe` in the
+  kernel asynchronously, so a client opening the name right after
+  `ServerHandle::shutdown()` returned could still succeed, then fail mid-RPC
+  with `Unknown`, `Cancelled` or `Unavailable` ("transport error"). Unix
+  unlinks the socket synchronously and never shows it. Under load (40 parallel
+  copies) `steering::tests::with_daemon::a_restarted_daemon_gets_a_fresh_registration_and_nothing_is_replayed`
+  failed 39 of 40 times with `Unknown` instead of `Unavailable`, yet passed
+  alone. The pipe cleanup's `wait_released` now polls the name until it
+  resolves `NotFound` (bounded 2 s). To reproduce a test that is flaky on one
+  OS, run its binary 40 times in parallel (`--exact`), not nextest once.
 
 ## Current-directory locks
 
@@ -254,6 +311,24 @@ because overlapping host-network detections fail-fast the test process
   `drop()` of a `Copy` return value, a deleted function). It proves
   signatures, not runtime behavior.
 
+- **Clippy can be red only on Windows.** `PathBuf`/`OsString` is 32 bytes on
+  Windows and 24 on Unix, so an error enum holding several paths (or an error
+  that does, like `biscuit_file::GlobReferenceError`) can cross
+  `result_large_err`'s 128-byte limit on Windows alone. One such variant failed
+  every `Result` in Darkmatter that carried the enum (190 errors at 136 bytes).
+  Fix it by sharing the large cause (`Arc`/`Box`) in that variant, not by
+  raising the limit. If the error is classified by downcasting its `source()`
+  chain, the downcast has to name the wrapper type. The workspace
+  `clippy.toml` threshold (136) was measured on Unix. `claudine::CompositionError`
+  is 144 bytes on Windows, with ten variants over the limit, so the claudine
+  library allows the lint under `cfg(windows)` instead of changing a public
+  error shape; Linux lint runs still enforce the threshold. Lints that depend
+  on `cfg` code also show up only here, and only once the crates beneath them
+  compile: `dead_code` and `unused_mut` on items only `#[cfg(unix)]` code uses,
+  and `needless_return` on a `return` inside a `#[cfg(windows)]` block that
+  becomes the function's tail once its `#[cfg(not(windows))]` sibling is
+  compiled out.
+
 A cross-compile is compile evidence. Behavioral evidence comes from
 `just cross-check <pkg> --os windows` or the `windows-latest` CI leg.
 
@@ -342,3 +417,28 @@ which processes hold it.
 - **Restart Manager (`RmGetList`) is a worse wrapper for the same question.**
   It has no directory or long-path support, it is slower per path, and a
   missing path returns success with an empty list.
+
+## COM lifetime and cpal
+
+Found 2026-10-08 on the `B:` dev host: `playa effect drop-4` exited with an
+access violation (`0xC0000005`, reported by Git Bash as `Segmentation fault`)
+at the end of every `just install`.
+
+- **cpal's WASAPI host caches one process-global `IMMDeviceEnumerator` but
+  initializes COM per thread.** Its thread-local guard calls `CoUninitialize`
+  when its thread exits. If that was the last COM apartment in the process,
+  COM unloads `MMDevApi.dll`, and the next cpal call on any other thread calls
+  through a vtable in unmapped memory. Any code that gives each cpal call its
+  own short-lived thread (a timeout worker, for example) hits this on the
+  *second* call. playa pins COM with `CoIncrementMTAUsage` before spawning
+  those workers (`pin_com_for_process` in `playa/lib/src/native_audio.rs`).
+- **Diagnose with `cdbX64.exe`.** It ships with the WinDbg Store app at
+  `%LOCALAPPDATA%\Microsoft\WindowsApps\cdbX64.exe`. Put commands in a file
+  passed with `-cf`, because quoting `-c` through PowerShell silently produced
+  no output. Use `bu combase!CoInitializeEx` / `CoCreateInstance` /
+  `CoUninitialize` with `~.; kc 8; gc` actions, and finish with `lm u` to see
+  which DLLs were unloaded.
+- **A host with no sound hardware still lists one `SWD\MMDEVAPI` audio
+  endpoint**, while `Get-CimInstance Win32_SoundDevice` is empty. cpal then
+  reports no output device, and playa reports that error directly instead
+  of falling back to host players.

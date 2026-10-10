@@ -61,7 +61,9 @@
 #![cfg(unix)]
 
 use crate::common;
-use common::prompt_staging::stage_shipped_prompts;
+// The shipped prompts these tests compose are frozen copies, intentionally not
+// kept in step with `prompts/`.
+use common::prompt_staging::{frozen_prompts_dir, stage_frozen_prompts};
 use common::wrap::seed_minimal_config;
 use common::{augmented_path, helper_command, write_executable};
 
@@ -505,15 +507,6 @@ fn level2_ac28_lazy_roots_refresh_between_lifecycle_events() {
     }
 }
 
-fn workspace_root() -> PathBuf {
-    biscuit_test_harness::manifest_dir!()
-        .parent()
-        .expect("claudine/cli parent")
-        .parent()
-        .expect("workspace root")
-        .to_path_buf()
-}
-
 /// AC28, shipped-prompt clause: a real shipped prompt whose lifecycle handlers
 /// reference a lazy root composes end to end under a real Claudine run.
 ///
@@ -527,7 +520,7 @@ fn workspace_root() -> PathBuf {
 fn level2_ac28_shipped_prompt_that_references_a_lazy_root_composes() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
-    let shipped = fs::read_to_string(workspace_root().join("prompts/plan.md"))
+    let shipped = fs::read_to_string(frozen_prompts_dir().join("plan.md"))
         .expect("the shipped planning prompt must be readable");
     assert!(
         shipped.contains("current.time"),
@@ -539,7 +532,7 @@ fn level2_ac28_shipped_prompt_that_references_a_lazy_root_composes() {
     fs::create_dir_all(fixture.repo.join("features/f1")).unwrap();
     fs::write(fixture.repo.join("features/f1/spec.md"), "# fixture spec\n").unwrap();
     // What `plan.md` transcludes must sit beside both documents composed below.
-    stage_shipped_prompts(&workspace_root(), &fixture.repo, &["prompts/plan.md"]);
+    stage_frozen_prompts(&fixture.repo, &["plan.md"]);
     let real = "plan.md".to_string();
     let control = write_document(
         &fixture,
@@ -593,7 +586,7 @@ fn level2_ac28_shipped_format_prompt_counts_files_dirtied_by_its_own_shell_step(
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     const DIRTIED: usize = 2;
-    let shipped = fs::read_to_string(workspace_root().join("prompts/format.md"))
+    let shipped = fs::read_to_string(frozen_prompts_dir().join("format.md"))
         .expect("the shipped format prompt must be readable");
     assert!(
         shipped.contains("length(current.dirty_files)"),

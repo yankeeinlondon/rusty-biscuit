@@ -16,7 +16,7 @@
 
 use crate::common;
 
-use common::prompt_staging::{stage_shipped_prompts, workspace_root};
+use common::prompt_staging::stage_frozen_prompts;
 use common::{CliProcessFixture, InlineAgentStub, sh_quote, strip_ansi, write, write_executable};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -572,16 +572,14 @@ fn inline_compose_proxy_target_initialize_creates_a_file_its_prompt_includes() {
 
 // ── AC10: the shipped implementation router ─────────────────────────────────
 
-/// Stage the shipped router and the drift-guarded `implement-plan.md` fixture
-/// under `prompts/`, with fixture-owned spec/plan data at the reported
+/// Stage a frozen copy of the router, intentionally not kept in step with
+/// `prompts/`, and the drift-guarded `implement-plan.md` fixture under `prompts/`, with fixture-owned spec/plan data at the reported
 /// `fixes/2026-09-14-cicd-improvements/` location and no log file.
 fn stage_shipped_route(accept: &Acceptance, plan_phase: u32, target_suffix: &str) {
     let manifest = biscuit_test_harness::manifest_dir!();
-    let repository = workspace_root();
-    stage_shipped_prompts(
-        &repository,
+    stage_frozen_prompts(
         &accept.path("prompts"),
-        &["prompts/implement.md", "prompts/_implement/implement-plan.md"],
+        &["implement.md", "_implement/implement-plan.md"],
     );
     let target = fs::read_to_string(
         manifest.join("tests/fixtures/shipped_implement_route/_implement/implement-plan.md"),

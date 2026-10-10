@@ -29,8 +29,10 @@ pub enum GenError {
     #[error("cannot build the file-resolution context for area `{area}`: {source}")]
     ResolutionContext {
         area: PathBuf,
+        // Boxed to keep `GenError` under clippy's `result_large_err` limit on
+        // Windows, where `PathBuf` (here and inside the source) is wider.
         #[source]
-        source: darkmatter::markdown::compose::ContextBuildError,
+        source: Box<darkmatter::markdown::compose::ContextBuildError>,
     },
 
     #[error("no `{slug}` entry (matched on `slug:`) in roster `{path}`")]

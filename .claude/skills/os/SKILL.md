@@ -62,6 +62,7 @@ environment's cell and how to record an execution ban.
 | Red only on `windows-latest`, a path in the message | 8.3 short-name TEMP (`RUNNER~1`) or verbatim `\\?\` spelling | [windows-paths.md](windows-paths.md) |
 | Red only on `windows-latest`, elapsed time equals some child's timeout | handle inheritance keeps pipes open | [windows.md](windows.md#environment-and-processes) |
 | Windows cell red although every test passed, `UnicodeEncodeError` in the last step | Python's piped stdout is cp1252; workflows must set `PYTHONUTF8=1` | [windows.md](windows.md#environment-and-processes) |
+| Red on Windows only when the agent ran it, a git child exiting `0xC0000005` with empty stderr | the run descended from Git Bash (the agent's Bash tool); rerun from PowerShell | [windows.md](windows.md#environment-and-processes) |
 | Python-gated test PASSes in ~0.3 s on BUILD_WIN over SSH, nothing ran | `python3`/`python` resolve to WindowsApps aliases; prepend the real interpreter on a process-scoped `PATH` | [windows.md](windows.md#environment-and-processes) |
 | Red only on Windows, "still checking" or another wait expiring, many small git commands in `GIT_TRACE` | ~47 ms per git process; read metadata in-process instead of raising the wait | [windows.md](windows.md#environment-and-processes) |
 | Red only on `windows-latest` with an empty failure message | a std handle redirected to `CONOUT$` | [windows-console.md](windows-console.md#attaching-a-console-inside-a-nextest-process) |

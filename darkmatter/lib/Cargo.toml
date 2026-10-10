@@ -32,6 +32,9 @@ effects-instrumentation = []
 work-counters = []
 terminal-tests = ["dep:image"]
 browser-tests = ["dep:biscuit-browser-harness", "dep:chromiumoxide", "dep:futures-util"]
+# Opt-in tests of the repository's internal `prompts/`; run by
+# `just test-prompts`, never by CI.
+prompt-tests = []
 
 [dependencies]
 # Tracing
@@ -210,6 +213,11 @@ required-features = ["browser-tests"]
 name = "browser"
 path = "tests/browser/main.rs"
 required-features = ["browser-tests"]
+
+[[test]]
+name = "prompts"
+path = "tests/prompts/main.rs"
+required-features = ["prompt-tests"]
 
 [[bench]]
 name = "schema_validation"

@@ -5601,9 +5601,11 @@ class CompanionRunnerTests(unittest.TestCase):
         # path: the registry's own recipe for a real suite, run as CI runs it.
         entry = affected_scope.SUITE_REGISTRY["test_runner_loss.py"]
         counts_out = self.root / "counts.json"
+        # POSIX `shlex` treats a Windows path's backslashes as escapes, so the
+        # path is spelled with forward slashes, which Windows also accepts.
         command = shlex.split(entry["recipe"]) + shlex.split(
             entry["counts_args"].replace(
-                affected_scope.COUNTS_OUT_PLACEHOLDER, str(counts_out)
+                affected_scope.COUNTS_OUT_PLACEHOLDER, counts_out.as_posix()
             )
         )
         # The recipe's own interpreter spelling, resolved to the one running
@@ -7939,16 +7941,22 @@ class TestInputSelectionTests(unittest.TestCase):
                     "#[test]\nfn guide_wording_holds() {\n"
                     "    let _ = repo_root().join(\"docs/guide.md\");\n}\n"
                     "#[test]\nfn entry_prompt_composes() {\n"
-                    "    let _ = repo_root().join(\"prompts/entry.md\");\n}\n"
+                    "    let _ = repo_root().join(\"guides/entry.md\");\n}\n"
+                    "#[test]\nfn internal_prompt_composes() {\n"
+                    "    let _ = repo_root().join(\"prompts/plan.md\");\n"
+                    "    let _ = repo_root().join(\"claudine/prompts/plan.md\");\n}\n"
                 ),
                 "other/lib/src/lib.rs": "",
                 "docs/guide.md": "# Guide\n",
                 "docs/unread.md": "# Unread\n",
                 "reader/schemas/base.yaml": "a: 1\n",
-                "prompts/entry.md": "::file \"./_middle.md\"\n::file {{lessons}}\n",
-                "prompts/_middle.md": "  ::file ../prompts/_leaf.md exclude=\"## Notes\"\n",
-                "prompts/_leaf.md": "leaf\n",
-                "prompts/_orphan.md": "orphan\n",
+                "guides/entry.md": "::file \"./_middle.md\"\n::file {{lessons}}\n",
+                "guides/_middle.md": "  ::file ../guides/_leaf.md exclude=\"## Notes\"\n",
+                "guides/_leaf.md": "leaf\n",
+                "guides/_orphan.md": "orphan\n",
+                "prompts/plan.md": "::file ./_fragment.md\n",
+                "prompts/_fragment.md": "fragment\n",
+                "claudine/prompts/plan.md": "plan\n",
                 "reader/prompts/shipped.md": "::file ./_shipped_fragment.md\n",
                 "reader/prompts/_shipped_fragment.md": "fragment\n",
             },
@@ -8029,7 +8037,7 @@ class TestInputSelectionTests(unittest.TestCase):
 
     def test_a_fragment_schedules_the_tests_that_read_a_document_transcluding_it(self) -> None:
         # `entry.md` pulls `_leaf.md` in through `_middle.md`; no code names the leaf.
-        plan = self.plan(["prompts/_leaf.md"])
+        plan = self.plan(["guides/_leaf.md"])
         self.assertEqual(
             [("reader", "ubuntu-latest", "L1")],
             [(cell["package"], cell["environment"], cell["gate"]) for cell in plan["cells"]],
@@ -8038,10 +8046,19 @@ class TestInputSelectionTests(unittest.TestCase):
             "(binary_id(reader::l1) & test(=docs::entry_prompt_composes))",
             plan["cells"][0]["test_filter"],
         )
-        self.assertIn("prompts/_leaf.md", plan["cells"][0]["selection_reason"])
+        self.assertIn("guides/_leaf.md", plan["cells"][0]["selection_reason"])
 
     def test_a_fragment_no_document_transcludes_schedules_nothing(self) -> None:
-        self.assertEqual([], self.plan(["prompts/_orphan.md"])["cells"])
+        self.assertEqual([], self.plan(["guides/_orphan.md"])["cells"])
+
+    def test_an_internal_prompt_a_test_reads_schedules_nothing(self) -> None:
+        # The internal prompt folders are tools CI never tests, so neither a
+        # named prompt nor a fragment it transcludes is a test input.
+        for changed in ("prompts/plan.md", "prompts/_fragment.md", "claudine/prompts/plan.md"):
+            with self.subTest(changed=changed):
+                plan = self.plan([changed])
+                self.assertEqual([], plan["cells"])
+                self.assertEqual([], plan["builds"])
 
     def test_a_fragment_of_an_embedded_document_is_not_source(self) -> None:
         # The embed holds the document's text, not the files it transcludes.
@@ -8606,18 +8623,20 @@ class RealWorkspaceTestInputTests(unittest.TestCase):
                 self.assertEqual(("ubuntu-latest", "L1"), (cells[0]["environment"], cells[0]["gate"]))
                 self.assertIn(self.LIVE_TEST, cells[0]["test_filter"])
 
-    def test_a_prompt_fragment_selects_the_tests_that_stage_its_transcluders(self) -> None:
-        # No test names this fragment; `implement-plan.md` transcludes it.
-        fragment = "prompts/_headless-orchestration.md"
-        self.assertTrue((ROOT / fragment).is_file(), f"{fragment} is no longer tracked")
-        cells = [cell for cell in self.plan(fragment)["cells"] if cell["package"] == "claudine-cli"]
-        self.assertEqual(1, len(cells))
-        self.assertEqual(("ubuntu-latest", "L1"), (cells[0]["environment"], cells[0]["gate"]))
-        self.assertIn(
-            "test(=compose_caller_file_provenance::"
-            "shipped_implement_router_prefers_an_unimplemented_review_over_the_completed_plan)",
-            cells[0]["test_filter"],
-        )
+    def test_a_prompts_only_change_schedules_nothing(self) -> None:
+        # Every tracked file of the internal prompt folders at once: the opt-in
+        # `prompts` targets and the frozen copies read none of them for CI.
+        tracked = subprocess.run(
+            ["git", "ls-files", "prompts", "darkmatter/prompts", "claudine/prompts"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.split()
+        self.assertIn("prompts/_implement/implement-plan.md", tracked)
+        plan = self.plan(*tracked)
+        self.assertEqual([], plan["cells"])
+        self.assertEqual([], plan["builds"])
 
     def test_readme_typos_schedule_nothing(self) -> None:
         for readme in ("README.md", "darkmatter/README.md", "biscuit-file/README.md"):

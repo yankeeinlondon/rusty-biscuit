@@ -136,6 +136,7 @@ class CiLocalTests(unittest.TestCase):
         expect_success: bool = True,
         output: dict | None = None,
         plan_fields: dict | None = None,
+        wrapper: str | None = "kache",
     ) -> list[dict]:
         if packages is None:
             packages = [gate_loop_package(name) for name in ("parallel", "serial")]
@@ -148,6 +149,8 @@ class CiLocalTests(unittest.TestCase):
             bin_dir.mkdir()
             scripts.mkdir(parents=True)
             shutil.copyfile(RECIPE, root / "ci-local.just")
+            # The real wrapper decision, which picks the target directory.
+            shutil.copyfile(ROOT / "scripts" / "kache-host.sh", root / "scripts" / "kache-host.sh")
             (root / "policy.just").write_text(thread_policy_recipe(), encoding="utf-8")
             (root / "justfile").write_text(
                 'red := ""\ngreen := ""\nreset := ""\nimport "ci-local.just"\n',
@@ -260,13 +263,15 @@ class CiLocalTests(unittest.TestCase):
             environment.update({
                 "PATH": str(bin_dir) + os.pathsep + environment.get("PATH", ""),
                 "CARGO_TARGET_DIR": str(root / "polluted-target"),
-                "RUSTC_WRAPPER": "kache",
                 "TEST_CALL_LOG": str(root / "calls.jsonl"),
                 "TEST_CORES": str(cores),
                 "TEST_REAL_JUST": JUST,
                 "TEST_POLICY_RECIPE": str(root / "policy.just"),
                 "TEST_COMPANION_LOG": str(root / "companions.jsonl"),
             })
+            environment.pop("RUSTC_WRAPPER", None)
+            if wrapper is not None:
+                environment["RUSTC_WRAPPER"] = wrapper
             # The hook exports these for the run it wraps, and this suite runs
             # inside that run's self-test loop; a fed plan would refuse `--all`.
             for key in (
@@ -323,6 +328,15 @@ class CiLocalTests(unittest.TestCase):
                 call["junit_target_dir"].removesuffix("/target"),
                 call["junit_workspace_root"],
             )
+
+    def test_with_no_rustc_wrapper_the_gates_share_the_normal_target(self) -> None:
+        # No wrapper, so no kache hardlinks to collide with: the gates build
+        # where the developer's own builds go, here the exported directory.
+        calls = self.run_recipe(wrapper=None)
+        self.assertTrue(calls)
+        for call in calls:
+            self.assertTrue(call["target_dir"].replace("\\", "/").endswith("/polluted-target"), call)
+            self.assertEqual("", call["rustc_wrapper"])
 
     def test_parallel_policy_is_bounded_and_does_not_leak_to_other_gates(self) -> None:
         calls = self.run_recipe()
@@ -1173,7 +1187,9 @@ class PlanSurfaceTests(unittest.TestCase):
             environment.pop("BISCUIT_CI_PLAN_IN", None)
             command = [JUST, "--justfile", str(root / "justfile"), "ci-local", "--all", "--plan"]
             if capture is not None:
-                command += ["--plan-out", str(root / "written-plan.json")]
+                # Forward slashes: the recipe re-reads its arguments through
+                # bash, which would eat a Windows path's backslashes.
+                command += ["--plan-out", (root / "written-plan.json").as_posix()]
             result = subprocess.run(
                 command,
                 cwd=root,
@@ -1517,8 +1533,10 @@ class PlanFedRunTests(unittest.TestCase):
             if through_env:
                 environment["BISCUIT_CI_PLAN_IN"] = str(root / "plan.json")
             else:
-                command += ["--plan-in", str(root / "plan.json")]
-            command += ["--plan-out", str(root / "written-plan.json")]
+                # Forward slashes: the recipe re-reads its arguments through
+                # bash, which would eat a Windows path's backslashes.
+                command += ["--plan-in", (root / "plan.json").as_posix()]
+            command += ["--plan-out", (root / "written-plan.json").as_posix()]
             result = subprocess.run(
                 command, cwd=root, env=environment, capture_output=True, text=True, timeout=60
             )
@@ -1928,9 +1946,15 @@ class WorkflowScopeStepTests(unittest.TestCase):
             # One shell per step, as GitHub runs them; a failing step ends
             # the job unless it is `continue-on-error` (the notes fetch is,
             # and fails here because the fixture has no `origin`).
-            for step in self.steps:
+            for index, step in enumerate(self.steps):
+                # From a file, as GitHub runs a step: on Windows a `-c`
+                # argument goes through the command line, where MSYS and
+                # Cygwin re-split the script at its nested quotes and bash
+                # runs only the first fragment.
+                script = root / f"step-{index}.sh"
+                script.write_text(step.script, encoding="utf-8", newline="\n")
                 result = subprocess.run(
-                    [STEP_BASH, "-c", step.script],
+                    [STEP_BASH, script.as_posix()],
                     cwd=root,
                     env=environment,
                     capture_output=True,

@@ -304,7 +304,8 @@ fn perf_subprocess_counts_meet_sla() {
     let count = |calls: &[Vec<String>], command: &str| {
         recorder::count_matching(calls, |args| args.first().map(String::as_str) == Some(command))
     };
-    assert_eq!(count(&list_calls, "symbolic-ref"), 1, "got {list_calls:?}");
+    // The default branch is read in-process, never through `symbolic-ref`.
+    assert_eq!(count(&list_calls, "symbolic-ref"), 0, "got {list_calls:?}");
     assert_eq!(count(&list_calls, "for-each-ref"), 1, "got {list_calls:?}");
     eprintln!("list_worktrees: {list_elapsed:.2?}, {} git calls", list_calls.len());
 

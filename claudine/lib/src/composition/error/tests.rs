@@ -2780,7 +2780,9 @@ fn proxy_with_diagnostics_share_the_lifecycle_authoring_code_and_project_facets(
 
 // -- Focused frontmatter excerpts (R6) ------------------------------------------
 
-const CLARIFY: &str = include_str!("../../../../../prompts/clarify.md");
+// A frozen copy of `prompts/clarify.md`, intentionally not kept in step with the
+// live prompt.
+const CLARIFY: &str = include_str!("../../../tests/fixtures/frozen_prompts/prompts/clarify.md");
 
 /// The 1-based line of the first line of `text` that starts with `prefix`.
 fn line_starting_with(text: &str, prefix: &str) -> usize {

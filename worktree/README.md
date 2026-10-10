@@ -22,6 +22,9 @@ The **worktree** package area, like many in this monorepo, is composed of both a
 
 ## CLI Commands
 
+Run repository commands from inside a Git repository or one of its worktrees.
+Outside a repository, `wt` explains where to run it and exits with code 1.
+
 - `wt list`
     Lists the worktrees (along with the base repo checkout) which currently exist. See [`docs/cli/list.md`](./docs/cli/list.md) for the full output.
 

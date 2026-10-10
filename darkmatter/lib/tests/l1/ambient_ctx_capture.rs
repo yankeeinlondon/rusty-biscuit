@@ -122,7 +122,7 @@ impl Drop for CwdGuard {
 fn compose_ambient(content: &str) -> String {
     let md: Markdown = content.into();
     let (composed, _report) = md
-        .compose_with(&crate::request_support::request(ComposeOptions::new()))
+        .compose_with(&crate::request_support::process_dir_request(ComposeOptions::new()))
         .expect("compose must succeed");
     composed.content().trim().to_string()
 }
@@ -136,7 +136,7 @@ fn compose_full_capture(content: &str) -> String {
     let md: Markdown = content.into();
     let options = ComposeOptions::new_with_context(full_capture());
     let (composed, _report) = md
-        .compose_with(&crate::request_support::request(options))
+        .compose_with(&crate::request_support::process_dir_request(options))
         .expect("compose must succeed");
     composed.content().trim().to_string()
 }
@@ -158,7 +158,7 @@ fn render_every_variable(options: ComposeOptions) -> HashMap<String, String> {
         .join(" ");
 
     let md: Markdown = document.as_str().into();
-    let (composed, _report) = md.compose_with(&crate::request_support::request(options)).expect("compose must succeed");
+    let (composed, _report) = md.compose_with(&crate::request_support::process_dir_request(options)).expect("compose must succeed");
     let content = composed.content().to_string();
 
     content
@@ -363,11 +363,15 @@ fn descriptors_by_requirements() -> Vec<(ContextRequirements, Vec<&'static str>)
 /// found a value, found nothing, or had no evidence to read. The checked `ctx.*`
 /// lookup reports an omitted key as `ContextProjectionInvariant`, a Darkmatter
 /// bug, so a legitimate capture can never be allowed to produce one.
-fn assert_projection_complete(situation: &str, capture: impl Fn(&ContextRequirements, &str) -> ComposeContext) {
+fn assert_projection_complete(
+    situation: &str,
+    (shard, shards): (usize, usize),
+    capture: impl Fn(&ContextRequirements, &str) -> ComposeContext,
+) {
     let sets = descriptors_by_requirements();
     assert!(sets.len() > 1, "the catalog must span more than the date/time group");
 
-    for (requirements, keys) in sets {
+    for (requirements, keys) in sets.into_iter().skip(shard).step_by(shards) {
         let content: String =
             keys.iter().map(|key| format!("{{{{ ctx.{key} }}}}\n")).collect();
         let context = capture(&requirements, &content);
@@ -388,18 +392,41 @@ fn assert_projection_complete(situation: &str, capture: impl Fn(&ContextRequirem
     }
 }
 
-#[test]
-fn a_repository_capture_projects_every_key_of_each_captured_group() {
+/// Groups are dealt across `REPOSITORY_SHARDS` tests (each over its own
+/// fixture) so nextest runs the repository captures in parallel.
+const REPOSITORY_SHARDS: usize = 4;
+
+fn repository_capture_shard(shard: usize) {
     let fixture = Fixture::build();
-    assert_projection_complete("inside a repository", |_, content| {
+    assert_projection_complete("inside a repository", (shard, REPOSITORY_SHARDS), |_, content| {
         ComposeContext::capture_for_content(&fixture.cwd, content)
     });
 }
 
 #[test]
+fn a_repository_capture_projects_every_key_of_each_captured_group_shard_0() {
+    repository_capture_shard(0);
+}
+
+#[test]
+fn a_repository_capture_projects_every_key_of_each_captured_group_shard_1() {
+    repository_capture_shard(1);
+}
+
+#[test]
+fn a_repository_capture_projects_every_key_of_each_captured_group_shard_2() {
+    repository_capture_shard(2);
+}
+
+#[test]
+fn a_repository_capture_projects_every_key_of_each_captured_group_shard_3() {
+    repository_capture_shard(3);
+}
+
+#[test]
 fn a_capture_outside_any_repository_projects_every_key_of_each_captured_group() {
     let outside = TempDir::new().expect("temp dir");
-    assert_projection_complete("outside a repository", |_, content| {
+    assert_projection_complete("outside a repository", (0, 1), |_, content| {
         ComposeContext::capture_for_content(outside.path(), content)
     });
 }
@@ -407,7 +434,7 @@ fn a_capture_outside_any_repository_projects_every_key_of_each_captured_group() 
 #[test]
 fn a_capture_without_supplied_evidence_projects_every_key_of_each_captured_group() {
     let outside = TempDir::new().expect("temp dir");
-    assert_projection_complete("with empty supplied evidence", |requirements, _| {
+    assert_projection_complete("with empty supplied evidence", (0, 1), |requirements, _| {
         ComposeContext::capture_with_evidence(
             outside.path(),
             requirements,

@@ -104,10 +104,44 @@ pub fn provider_slugs() -> Vec<&'static str> {
 
 /// Generates every provider in [`provider_slugs`] order.
 pub fn generate_all(area: &Path, snapshot: &RequestSnapshot) -> Result<Vec<Generation>, GenError> {
-    provider_slugs()
-        .into_iter()
-        .map(|slug| generate_for_area(area, slug, snapshot))
-        .collect()
+    par_map(provider_slugs(), |slug| generate_for_area(area, slug, snapshot))
+}
+
+/// Runs [`check_area`] for every provider in [`provider_slugs`] order, one
+/// scoped thread each (see [`par_map`]).
+pub fn check_all(
+    area: &Path,
+    snapshot: &RequestSnapshot,
+) -> Result<Vec<(Generation, CheckOutcome)>, GenError> {
+    par_map(provider_slugs(), |slug| check_area(area, slug, snapshot))
+}
+
+/// Maps `items` through `f` on one scoped thread each, returning results in
+/// input order (the first error in that order wins). Providers are independent,
+/// so this keeps output byte-identical to a sequential pass.
+pub(crate) fn par_map<T, R, E>(
+    items: Vec<T>,
+    f: impl Fn(T) -> Result<R, E> + Sync,
+) -> Result<Vec<R>, E>
+where
+    T: Send,
+    R: Send,
+    E: Send,
+{
+    let f = &f;
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = items
+            .into_iter()
+            .map(|item| scope.spawn(move || f(item)))
+            .collect();
+        handles
+            .into_iter()
+            .map(|handle| match handle.join() {
+                Ok(result) => result,
+                Err(panic) => std::panic::resume_unwind(panic),
+            })
+            .collect()
+    })
 }
 
 /// Roster ↔ wired-set cross-validation surfaced by the `check` report.

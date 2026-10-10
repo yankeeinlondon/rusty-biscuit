@@ -50,6 +50,10 @@ fn serve_one(reply: Reply) -> (u16, mpsc::Receiver<Request>, mpsc::Receiver<()>)
         match reply {
             Reply::OkAfter(delay) => {
                 thread::sleep(delay);
+                // Signalled before the write, not after: the client can read
+                // the reply and finish its drain before this thread runs
+                // again, and a later signal would race the assertion.
+                let _ = replied_tx.send(());
                 let body = r#"{"id":"1","channel_id":"2","webhook_id":"1"}"#;
                 let response = format!(
                     "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\
@@ -58,7 +62,6 @@ fn serve_one(reply: Reply) -> (u16, mpsc::Receiver<Request>, mpsc::Receiver<()>)
                 );
                 stream.write_all(response.as_bytes()).expect("write reply");
                 stream.flush().expect("flush reply");
-                let _ = replied_tx.send(());
             }
             // Keep the connection open for as long as the process lives.
             Reply::Never => thread::sleep(Duration::from_secs(600)),

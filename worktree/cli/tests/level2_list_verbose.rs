@@ -1459,6 +1459,7 @@ fn expected_legend_markers(broken: &[Broken]) -> Option<String> {
 
 /// The text a user copies from the note for a row of `kind`: its command or
 /// its path, never broken by a wrap.
+#[cfg_attr(not(unix), allow(unused_variables))]
 fn expected_copyable(kind: Broken, path: &str) -> Option<String> {
     Some(match kind {
         Broken::Missing => "wt remove gone".to_string(),
@@ -1471,6 +1472,7 @@ fn expected_copyable(kind: Broken, path: &str) -> Option<String> {
 
 /// The note `wt` owes an unavailable row of `kind`, whose path Git records
 /// as `path`.
+#[cfg_attr(not(unix), allow(unused_variables))]
 fn expected_note(kind: Broken, path: &str) -> Option<String> {
     Some(match kind {
         Broken::Missing => {

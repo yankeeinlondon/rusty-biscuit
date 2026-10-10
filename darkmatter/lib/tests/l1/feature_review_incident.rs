@@ -1,6 +1,8 @@
 //! The dasherized-identifiers motivating incident
 //! (`darkmatter/features/2026-09-15-dasherized-identifiers`, Success
-//! Criterion 8), against the shipped `prompts/_reviews/feature-review.md`.
+//! Criterion 8), against a frozen copy of `prompts/_reviews/feature-review.md`
+//! in `tests/fixtures/frozen_prompts/`, intentionally not kept in step with the
+//! live prompt.
 //!
 //! The typo landed in `7658203f8` as `{{spec-name}}`. The grammar then lexed it
 //! as `spec - name`, which warned and shipped the verbatim span. The prompt is
@@ -19,16 +21,12 @@ const LIFECYCLE_EVENT_KEYS: &[&str] =
 
 const SHIPPED_SPEC_NAME: &str = "`{{spec_name}}` spec";
 
-fn checkout() -> PathBuf {
-    biscuit_test_harness::manifest_dir!()
-        .parent()
-        .and_then(Path::parent)
-        .expect("the darkmatter library lives two levels below the repository root")
-        .to_path_buf()
+fn frozen() -> PathBuf {
+    biscuit_test_harness::manifest_dir!().join("tests/fixtures/frozen_prompts")
 }
 
-/// A repository holding the shipped prompt (with `prompt` as its text), the
-/// shipped files it transcludes, and one spec.
+/// A repository holding the prompt (with `prompt` as its text), the files it
+/// transcludes, and one spec.
 fn repository(prompt: &str) -> (TempDir, PathBuf, PathBuf) {
     let dir = TempDir::new().unwrap();
     let root = dir.path();
@@ -41,7 +39,7 @@ fn repository(prompt: &str) -> (TempDir, PathBuf, PathBuf) {
         "prompts/_writing-clearly.md",
         "prompts/_input-robustness.md",
     ] {
-        std::fs::copy(checkout().join(transcluded), root.join(transcluded)).unwrap();
+        std::fs::copy(frozen().join(transcluded), root.join(transcluded)).unwrap();
     }
     let prompt_path = root.join("prompts/_reviews/feature-review.md");
     std::fs::write(&prompt_path, prompt).unwrap();
@@ -83,7 +81,7 @@ fn unknown_identifiers(report: &ComposeReport) -> Vec<&ComposeWarning> {
 }
 
 fn shipped() -> String {
-    let text = std::fs::read_to_string(checkout().join("prompts/_reviews/feature-review.md")).unwrap();
+    let text = std::fs::read_to_string(frozen().join("prompts/_reviews/feature-review.md")).unwrap();
     assert_eq!(
         text.matches(SHIPPED_SPEC_NAME).count(),
         1,

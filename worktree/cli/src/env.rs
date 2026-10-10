@@ -33,7 +33,8 @@ pub fn shell_wrapper_active() -> bool {
 /// A debug build's override of `wt list`'s ordinary wait, in milliseconds.
 ///
 /// Binary tests set it on a listing whose worker they hold past the wait, so
-/// that listing ends sooner. Only debug builds read it (the `dev` and `test`
+/// that listing ends sooner, or raise it where a slow runner's worker must
+/// still land inside the wait. Only debug builds read it (the `dev` and `test`
 /// profiles, which local and CI test runs use); a release build always waits
 /// the real budget. The `--refresh`/`--ff` wait is never shortened.
 pub const TEST_WAIT_BUDGET_VAR: &str = "WT_TEST_WAIT_BUDGET_MS";

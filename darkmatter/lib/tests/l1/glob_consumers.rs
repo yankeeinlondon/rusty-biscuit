@@ -159,33 +159,35 @@ fn file_links_merges_every_root_most_local_first() {
 fn match_validation_reads_reference_prefixes() {
     let fixture = monorepo();
     let root = fixture.path();
-    let admits = |cwd: &Path, value: &str, patterns: &[&str]| {
+    // One context per launch directory: every build discovers the repository.
+    let context_root = crate::request_support::context_at(root);
+    let context_pkg = crate::request_support::context_at(&root.join("area/pkg"));
+    let context_guide = crate::request_support::context_at(&root.join("area/pkg/guide"));
+    let admits = |context: &biscuit_file::FileResolutionContext, value: &str, patterns: &[&str]| {
         let patterns: Vec<String> = patterns.iter().map(|pattern| (*pattern).to_string()).collect();
-        file_match_admits(value, &patterns, &crate::request_support::context_at(cwd))
+        file_match_admits(value, &patterns, context)
     };
     let incident = "fixes/2026-09-29-ts-review-improvements/spec.md";
 
     // Incident 2: `^**/…` is a prefix, not a literal `^`.
-    assert!(admits(root, incident, &["^**/*spec*.md"]));
-    assert!(!admits(root, incident, &["^**/*plan*.md"]), "control: the glob still decides");
+    assert!(admits(&context_root, incident, &["^**/*spec*.md"]));
+    assert!(!admits(&context_root, incident, &["^**/*plan*.md"]), "control: the glob still decides");
     // Criterion 4: a repository exclusion composes with a scoped pattern.
     let completed = "fixes/_completed/2026-01-01-old/spec.md";
-    assert!(admits(root, completed, &["^**/*spec*.md"]));
-    assert!(!admits(root, completed, &["^**/*spec*.md", "!&**/_completed/**"]));
+    assert!(admits(&context_root, completed, &["^**/*spec*.md"]));
+    assert!(!admits(&context_root, completed, &["^**/*spec*.md", "!&**/_completed/**"]));
     // Criterion 5: each pattern judges a file from its nearest root.
-    let pkg = root.join("area/pkg");
     let nearest = ["**/*spec*.md", "!fixes/**"];
-    assert!(!admits(&pkg, "fixes/y/spec.md", &nearest), "`fixes/` under the launch directory");
-    assert!(!admits(&pkg, &format!("&{incident}"), &nearest), "`fixes/` under the repository root");
-    assert!(admits(&pkg, "&other/z/spec.md", &nearest));
+    assert!(!admits(&context_pkg, "fixes/y/spec.md", &nearest), "`fixes/` under the launch directory");
+    assert!(!admits(&context_pkg, &format!("&{incident}"), &nearest), "`fixes/` under the repository root");
+    assert!(admits(&context_pkg, "&other/z/spec.md", &nearest));
     // Criterion 11: the file-name view reaches `x/spec.md`, also through `^`.
-    let guide = root.join("area/pkg/guide");
-    assert!(admits(&guide, "x/spec.md", &["spec.md"]));
-    assert!(admits(&guide, "x/spec.md", &["^spec.md"]));
-    assert!(!admits(&guide, "x/spec.md", &["^other.md"]));
+    assert!(admits(&context_guide, "x/spec.md", &["spec.md"]));
+    assert!(admits(&context_guide, "x/spec.md", &["^spec.md"]));
+    assert!(!admits(&context_guide, "x/spec.md", &["^other.md"]));
     // Criterion 12: a file-name negation rejects at any depth.
-    assert!(admits(root, "docs/repo-doc.md", &["*.md", "!_*.md"]));
-    assert!(!admits(root, "docs/_x.md", &["*.md", "!_*.md"]));
+    assert!(admits(&context_root, "docs/repo-doc.md", &["*.md", "!_*.md"]));
+    assert!(!admits(&context_root, "docs/_x.md", &["*.md", "!_*.md"]));
 }
 
 /// Criterion 7 at the compose boundary: in a root union, a caller-supplied
@@ -291,10 +293,8 @@ fn relative_globs_stay_inside_the_repository() {
         assert!(
             matches!(
                 &error,
-                MarkdownError::FileLinks(FileLinksError::GlobReference {
-                    source: GlobReferenceError::RelativeTreeEscape { .. },
-                    ..
-                })
+                MarkdownError::FileLinks(FileLinksError::GlobReference { source, .. })
+                    if matches!(**source, GlobReferenceError::RelativeTreeEscape { .. })
             ),
             "::file-links {pattern}: {error:?}"
         );
@@ -382,9 +382,14 @@ fn absolute_glob_directories_are_case_sensitive_in_every_consumer() {
 /// volume. Where the alias does not open, the checks still run.
 #[test]
 fn absolute_glob_directories_reject_unicode_case_aliases_in_every_consumer() {
-    for (stored, authored) in [("Σ", "ς"), ("SS", "ß")] {
-        assert_consumers_judge_directory_spelling(stored, authored, None);
-    }
+    assert_consumers_judge_directory_spelling("Σ", "ς", None);
+}
+
+/// The `ß` half of the Unicode aliases, a separate test so nextest runs the
+/// two fixtures in parallel.
+#[test]
+fn absolute_glob_directories_reject_sharp_s_case_aliases_in_every_consumer() {
+    assert_consumers_judge_directory_spelling("SS", "ß", None);
 }
 
 /// Criterion 26 below a traversal-only ancestor (mode `0111`): being unable

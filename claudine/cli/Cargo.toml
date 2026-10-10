@@ -39,12 +39,22 @@ name = "claudine-fake-completion"
 path = "tests/bin/fake_completion/main.rs"
 required-features = ["test-fixtures"]
 
+# Test-only Windows `claude` for `tests/l1/pr_flow_rehearsal.rs`, which relays
+# to the test binary's helper mode; gated like the others.
+[[bin]]
+name = "claudine-fake-relay"
+path = "tests/bin/fake_relay/main.rs"
+required-features = ["test-fixtures"]
+
 [features]
 # Keep the bundled DuckDB build out of the ordinary local test graph. CI and
 # the explicit daemon-test recipe enable this feature on every supported OS.
 daemon-tests = ["dep:rendezvous-daemon"]
 terminal-tests = []
 real-tests = []
+# Opt-in tests of the repository's internal `prompts/`; run by
+# `just test-prompts`, never by CI.
+prompt-tests = []
 # Test-only fixture binaries and process-level seams (the library's included):
 # never part of a default build or `cargo install`.
 test-fixtures = ["claudine/test-fixtures"]
@@ -182,6 +192,11 @@ required-features = ["terminal-tests"]
 name = "real"
 path = "tests/real/main.rs"
 required-features = ["real-tests"]
+
+[[test]]
+name = "prompts"
+path = "tests/prompts/main.rs"
+required-features = ["prompt-tests"]
 
 # CI policy: claudine-cli owns the area's L2 (PTY/tmux) tier tests. Its tests
 # need inert AI-provider CLI stubs for provider discovery, and the darkmatter

@@ -1,0 +1,286 @@
+---
+$schema:
+    spec: file(required;eager;match(**/*spec*.md)) -> the specification file providing the basis for this review's findings
+    design: file(match(**/*design*.md)) -> the design file (_optional_) that compliments the spec
+    iteration: number -> the review's iteration number
+    review: file -> the review file which will be created based on this prompt's execution
+    spec_name: string -> the name of the spec (which is really just the spec's folder name)
+    in_loop: boolean -> set by the `review-loop` sequence; when true this review opts out if the previous review already ended the loop
+description: |-
+    Reviews a _feature specification_ to make sure that the specification has been fully implemented. This prompt is also aware of the likelihood of more than one review being necessary and therefore names the reviews `review-{iteration}.md` in the same folder where the feature was specified.
+
+    Note: the caller _can_ pass in the **iteration** number but it should be detected automatically.
+dir: "{{dirname(spec)}}"
+design: |-
+    {{ file_exists(dir + '/design.md') ? dir + '/design.md' : null }}
+iteration: "{{ file_exists(spec) ? (frontmatter(spec, 'review_iterations') || 0) + 1  : 1   }}"
+review: "{{ dirname(spec) + '/review-' + iteration + '.md' }}"
+# A sibling of `spec` in whatever form `spec` arrived, as the implement router
+# does. `decrement_file_index(review)` is not used because it re-anchors a
+# relative `review` on this document's directory, and a sequence step passes a
+# repo-relative `dir`.
+previous_review: "{{ iteration > 1 ? replace(spec, basename(spec), 'review-' + (iteration - 1) + '.md') : null }}"
+spec_name: "{{ parent_dir(spec) }}"
+
+feature_or_fix: "{{ contains(spec, 'fixes') ? 'fix' : 'feature' }}"
+initialize:
+    stack:
+        # Inside the review-loop sequence the step list is static, so a review
+        # whose predecessor already closed the loop opts out here and launches
+        # nothing. A direct `claudine compose` never sets `in_loop`.
+        - when: "in_loop && previous_review && frontmatter(previous_review, 'ready') == true"
+          action:
+              - message: "review #{{iteration}} skipped: {{basename(previous_review)}} already marked `{{parent_dir(spec)}}` production ready"
+              - skip
+start:
+    message: "🏃‍♂️ starting review #{{iteration}} of `{{parent_dir(spec)}}` (_{{feature_or_fix}} in the **{{ctx.area || ctx.repo}}**_)"
+success:
+    stack:
+        - when: "frontmatter(review,'ready') == true"
+          action:
+              - success: "{{feature_or_fix}} review {{iteration}} of `{{ parent_dir(spec) }}` in **{{ctx.area}}** finished and deemed code to be **production ready**"
+              - message: |-
+                    ✅  review #{{iteration}} of `{{parent_dir(spec)}}` in **{{ctx.area || ctx.repo}}** completed successfully (_**production ready**_)
+              - effect: small-group-cheer
+        - when: "frontmatter(review,'ready') == true && frontmatter(review,'human_review') == true"
+          action:
+              - message: |-
+                    🤷  {{feature_or_fix}} review of `{{ parent_dir(spec) }}` -- while production ready -- requires human review. Review items include:
+
+                    {{ as_ordered_list(frontmatter(review,"human_review_items") || []) }}    
+              - info: |-
+                    review #{{iteration}} of `{{ upper(feature_or_fix) + ' ' + parent_dir(spec) }}` -- _while production ready_ -- requires human review ({{length(frontmatter(review, 'human_review_items') || [])}} items):
+    
+                    {{ as_ordered_list(frontmatter(review, 'human_review_items') || []) }}
+        - when: "frontmatter(review,'ready') != true"
+          action:
+              - warn: |-
+                    {{feature_or_fix}} review {{iteration}} of `{{ parent_dir(spec) }}` in the {{ctx.area}} package area has completed successfully but <i><yellow>not</yellow></i> production ready: <blue>{{link(review)}}</blue>
+              - message: |-
+                    ⚠️  review #{{iteration}} for the _{{feature_or_fix}}_ `{{parent_dir(spec)}}` in the **{{ctx.area_description || ctx.repo}}** _completed_ but is NOT production ready! Findings include:
+
+                    {{ as_ordered_list( frontmatter(review,"findings") || [] ) }}
+
+                    {{ 
+                        frontmatter(review,'human_review') == true
+                            ? '- in addition to the code findings blocking readiness there are some rulings that require **human review**:\n' + as_ordered_list( frontmatter(review, 'human_review_items') || [] )
+                            : '- no _human review_ is required at this point'
+                    }}
+              - effect: sad-trombone
+failure:
+    stderr: |-
+        {{feature_or_fix}} review {{iteration}} for `{{parent_dir(spec)}}` in the {{ctx.area}} package area failed to complete!
+    message: |-
+        💥 {{feature_or_fix}} review #{{iteration}} for `{{parent_dir(spec)}}` in **{{ ctx.area || ctx.repo }}** failed to complete ({{err.msg}})!
+    effect: phase-jump-3
+---
+# Review of {{title_case(without_date(parent_dir(spec)))}}
+
+> - {{capitalize(feature_or_fix)}}: `{{parent_dir(spec)}}`
+> - Review File (_output_): `@{{review}}`
+> - Review Iteration: #{{iteration}}
+
+::file ../_senior-reviewer.md
+
+## Context
+
+You are performing a review of the functionality defined by the `{{spec_name}}` spec:
+
+::block when="previous_review"
+- This is the #{{iteration}} iteration of the review/fix cycle for this specification
+- The first thing you will need to check is whether the _findings_ in the review's `## Unblocked Findings` section were all implemented
+    - this is the most obvious thing that the last implementation was supposed to have addressed
+- The second thing you will need to check is whether:
+    - any of the _
+    - any of the _findings_ in the review's `## Blocked Findings` were _unblocked_ prior to the last implementation's
+- The third thing is the repair's log (`{{dirname(spec)}}/log.md`): a finding the repair marked **disputed** is either re-raised with the authority it was missing (see "What blocks readiness") or dropped; never re-raise it unchanged
+::end-block
+
+
+::block when="spec"
+- **Specification:** "@{{spec}}"
+::end-block
+::block when="design"
+- **Technical Design:** "@{{design}}"
+::end-block
+
+::block when="And(spec, design)"
+Read both the specification and design documents and then perform a review on the implementation:
+
+::end-block
+::block when="spec"
+Read both the specification document and then perform a review on the implementation:
+
+::end-block
+::block when="design"
+Read both the specification document and then perform a review on the implementation:
+
+::end-block
+
+- look for gaps in functionality that were designed but not implemented
+- features who's implementation is broken or incomplete
+- functionality the spec asks for which is light on test coverage
+- are there any changes which would make the code more ergonomic, more performant, or both?
+
+## What blocks readiness
+
+A review's job is to find the defects that matter, not to find every defect
+it can construct. A blocking finding costs a full fix cycle and adds code; a
+missed contrived edge case costs little in a repository with no external
+users.
+
+Every finding cites its **authority**, in its first paragraph:
+
+- **spec**: the acceptance criterion, decision, or sentence of the spec (or
+  design) it violates, quoted or numbered; or
+- **regression**: behavior that worked on the base branch and no longer does,
+  reached by a **realistic input**: one an existing call site, template, or
+  fixture produces, or one a user would plausibly type.
+
+A finding with neither is an **observation**. A behavior the spec does not
+require is not made a requirement by a `docs/` page, a CommonMark or other
+external standard, or a reviewer's own expectation of how the code ought to
+behave.
+
+| Priority | Meaning | Blocks `ready` |
+|---|---|---|
+| high | has authority and a realistic input gives a wrong result, or an acceptance criterion is unmet or untested at the level it needs | yes |
+| medium | has authority, but only an unusual input reaches it | no |
+| low | polish, naming, ergonomics | no |
+
+List observations under `## Observations`, one short paragraph each, after the
+findings. Defects in code this spec did not add or change are always
+observations, unless this spec's change made them reachable. An observation
+is information for the spec's author, who either schedules a fix or lets it
+go; it never asks this cycle to repair it.
+
+When a fix for a finding would be large next to the harm it prevents (a new
+escaping or protection layer, new syntax in generated output, a matrix of
+synthetic payloads), say so and recommend documenting the limitation instead.
+
+## Sweep the class before you write
+
+A review that reports one instance of a defect the code has in several places
+is an incomplete review, and it costs a full review/fix cycle for every
+sibling it leaves out. For example: five consecutive reviews each report that
+one more parser coerces a missing, null, or wrong-type field to a permissive
+default. One review that swept every parser for that class would have
+replaced all five.
+
+The sweep is bounded by the spec: siblings are sites this spec added or
+changed, and the call sites that reach them. A sibling outside that boundary
+is an observation.
+
+For every high or medium finding:
+
+- classify it in one sentence that names the defect class, not the file
+- enumerate every sibling site within the boundary: each parser, reader,
+  detector, or projection that handles the same kind of input or makes the
+  same kind of decision
+- check each one, using the same reproduction you used for the first (copy a
+  real fixture, change one field, run the shipped CLI or public API)
+- report the class as **one finding** with an instance table: site, shape
+  tested, observed result, expected result; include the sites that were clean
+
+Do not stop at the first high finding. Finish the sweep, then write.
+
+::block when="previous_review"
+### Recurrence
+
+Compare each finding in this review with the findings of every earlier review
+in this directory. If a finding belongs to the same class as an earlier one:
+
+- say so under a `## Recurrence` heading, naming the earlier review and finding
+- state which sibling sites that fix should have swept and did not
+- sweep them all now, within the spec boundary, so this review carries the
+  complete list
+- set the frontmatter property `recurrence` to `true`; the review loop does not
+  stop on it, so the next repair cycle implements exactly the list this review
+  carries
+
+A class that keeps recurring because each repair adds new machinery, which the
+next review then finds a new edge in, is a sign the requirement has no
+boundary. Say so, and mark the finding medium unless an acceptance criterion
+names the failing case.
+::end-block
+
+::file "../_input-robustness.md"
+
+::file ../_writing-clearly.md 
+
+## Test Rigor — Level 1 / Level 2 / Level 3
+
+Test count is not test rigor. Phrases like "covered by substantial unit and integration tests" are banned from this review unless you can pair each user-facing requirement with a verification level:
+
+- **Level 1 (in-process / PTY).** 
+
+    Unit tests, plus tests that spawn the binary in a pseudo-TTY and feed it manufactured input bytes. Useful and necessary, but does NOT verify the terminal emulator's encoder/decoder behaviour — *we* generate those bytes. Cannot catch bugs like "WezTerm does not emit bare-modifier press events because we forgot to push `REPORT_ALL_KEYS_AS_ESCAPE_CODES`."
+
+- **Level 2 (run-in-real-terminal with IPC).** 
+
+    Spawn the binary inside an actual terminal emulator (WezTerm, Kitty) or multiplexer (tmux), capture the rendered pane text via the terminal's CLI(`wezterm cli get-text`, `kitty @ get-text`, `tmux capture-pane`). Verifies that glyphs, widths, SGR styling, and scrolling render correctly through the real terminal. Input is still byte-level injected via the terminal's CLI, so the terminal's input encoder is NOT exercised.
+
+- **Level 3 (OS keyboard injection).** 
+ 
+    Real OS keyboard events (`cliclick` on macOS, `xdotool` on
+    Linux) injected into the spawned terminal window. The terminal's input encoder fires — this is the only level that can verify "what bytes does the terminal actually emit when the user presses bare Ctrl?" Required for any UX requirement of the form "when the user holds/presses key X, Y happens." Currently env-gated behind `RUN_LEVEL3=1` because focus stability is platform-specific.
+
+When reviewing, for each requirement that asserts user-observable behaviour (modifier-press visibility, hotkey activation, keybinding behaviour, paste / IME / mouse, scroll on overflow, etc.), classify the verification level present and call out any mismatch:
+
+- "Spec requires modifier-press to surface badges" + only Level-1 tests = **gap, not "ready"**.
+- "Spec requires hotkey chord activation" + Level-2 in tmux but no Level-1 chord-byte test = fine.
+- "Spec requires `^X` badges with specific colors" + Level-1 unit tests on style only = needs
+  Level-2 capture verifying real-terminal rendering.
+
+A feature MAY be marked production-ready only when each user-observable requirement of the spec has at minimum
+the level of verification appropriate for it. Reviewers MUST list any requirement whose strongest
+test is at the wrong level under "Findings" with severity at least "high".
+
+::file "../_test-tiers.md"
+
+## Closure
+
+### Review Frontmatter
+
+- Save your review suggestions/findings to "@{{review}}"
+- Save the following frontmatter properties to the review file (@{{review}}):
+    - set `$schema` to "feature-review.yaml"
+    ::file "../_ready.md"
+    - set `reviewed_by` property to "{{ctx.agent}}/{{ctx.model}}" 
+    - set `recurrence` to `true` when any finding repeats the class of a finding in an earlier review (see "Recurrence" above), otherwise `false`
+    - set `created` property to "{{ctx.now}}"
+    - set `spec` property to "{{ parent_dir(spec) }}/{{ basename(spec) }}"
+    - set `implemented` property to `false`
+    - set `description` property to "A **{{feature_or_fix}}** review of `{{ parent_dir(spec) }}/{{ basename(spec) }}`"
+    - set the `{{feature_or_fix}}` property to "{{ parent_dir(review) }}/{{ basename(review) }}"
+    ::block when="iteration > 1"
+    - set the `previous` property to "{{parent_dir(previous_review)}}/{{basename(previous_review)}}"
+    ::end-block
+::block when="iteration >  1"
+- Now set the frontmatter properties of the _previous review_ located at @{{previous_review}}:
+    - set the `next` property on the _previous review_ to "{{parent_dir(review)}}/{{basename(review)}}"
+    - set the `implemented` property to `true`
+::end-block
+
+### Spec Frontmatter
+
+The spec file which underpins the requirements for this feature review needs to have it's frontmatter properties updated too:
+
+- the spec file is located at: {{spec}}
+- Set the `review_iterations` Frontmatter property to '{{iteration}}'
+- if you set the review's `ready` property to `true` then set the spec file's `completed` property to `true`
+
+### Summarize
+
+- Summarize to the caller what was found and be sure to mention whether the review deemed the {{feature_or_fix}} to be **production ready** or not.
+
+::block when="iteration != 1"
+> **Note:** this is _not_ the first review we've done on this functionality but the prior review's suggestions have now all been implemented (or at least the developer has claimed that they are).
+::end-block
+
+**IMPORTANT:**
+
+::block when="ctx.area && has_skill(ctx.area)"
+- use the '{{ctx.area}}' skill during the implementation
+::end-block
+- you are running as part of a non-interactive session! Do not ask the user for feedback or permissions as they can not answer!
