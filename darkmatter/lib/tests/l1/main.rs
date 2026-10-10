@@ -29,6 +29,7 @@ mod layout_matrix_support;
 mod request_support;
 
 mod absent_property_contract;
+mod alias_lookup_once;
 mod ambient_ctx_capture;
 mod array_rendering_json;
 mod as_block_error_registry;
