@@ -101,3 +101,25 @@ Measured 2026-10-05 on `BUILD_LINUX` for Sniff's path-usage query:
   exposes it.
 - Parse `/proc/<pid>/stat` after the last `)`: `comm` can contain spaces and
   parentheses. Field 22 (`starttime`) is the PID-reuse token.
+
+## `/bin/sh` is dash: `set -m` hangs or silently does nothing
+
+Measured 2026-10-10 on a WSL2 Ubuntu host. Debian and Ubuntu (WSL2
+included) link `/bin/sh` to dash; macOS and many other distributions run
+bash as `sh`. A fixture that relies on `sh -c 'set -m; cmd & …'` to put a
+background job in a process group of its own breaks two ways under dash:
+
+- **With a controlling terminal** (a developer running nextest
+  interactively), dash's `set -m` loops on `SIGTTIN` until its process group
+  is the terminal's foreground group. Nextest gives each test its own group,
+  so the shell stops before running anything and the test hangs until
+  nextest's timeout. Without a terminal (CI, an agent's Bash tool) it passes,
+  so it reads as "only on my WSL box".
+- **Without a terminal**, dash prints `can't access tty; job control turned
+  off` and the job stays in the shell's group, so the test passes without
+  exercising its premise.
+
+Run `/bin/bash` explicitly for job-control fixtures (it creates the group
+either way) and assert the group split with `getpgid`. Reproduce the
+terminal case from a non-interactive shell with
+`script -qec "cargo nextest run …" /dev/null`.
