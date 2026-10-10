@@ -2,6 +2,13 @@
 
 Lists all git worktrees along with their status. This is the default command -- running `wt` with no subcommand is equivalent to `wt list`.
 
+Run it from inside a Git repository or one of its worktrees. Outside a repository,
+it exits with code 1 and explains how to proceed:
+
+```text
+Error: This directory is not inside a Git repository. Change to a repository or one of its worktrees, then run wt again.
+```
+
 Before it lists anything, `wt list` checks whether `origin/<default>` is current (fetching it when it is not) and asks for the open pull requests, both in one short wait; see [Checking origin](#checking-origin). The output is then, in order: a caption, the worktree table, a legend, the git graph (image-capable terminals only), a status list holding this run's PR item and the refresh hint, the verbose section (`-v` only), and, after a blank line, any closing notes. Everything is written to stderr.
 
 ## Output
