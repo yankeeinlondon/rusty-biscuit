@@ -695,6 +695,8 @@ pub(crate) fn run_child_stream_semantic(
         // File text never establishes a verdict or replaces parsed text.
         run_scope.retain_fallback_answer(&text, complete);
     }
+    #[cfg(feature = "test-fixtures")]
+    super::super::completion_fixture::await_output_stall();
     let completion_observation = run_scope.freeze_with_output(Some(stream_output.observation_since(started_at)));
     let (parser, stdout_warning) = settle_parser(
         stdout_outcome,
