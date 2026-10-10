@@ -2196,7 +2196,10 @@ fn produce_shared_deps(dir: &Path) -> SharedDeps {
     let counters = dir.join("build-counters");
     let target = dir.join("owner-target");
 
-    let output = Command::new("bash")
+    // From PATH, not a bare `bash`: Windows' `Command` searches System32
+    // first, and on the hosted runner that holds the WSL launcher.
+    let bash = which("bash").expect("bash must be on PATH");
+    let output = Command::new(bash)
         .arg(repo_root().join("scripts/ci/produce-owner.sh"))
         .env("CI_BUILD_BIN", &binary)
         .env("CI_BUILD_PLAN", &plan)
