@@ -64,6 +64,14 @@ impl PreparedSet {
         merged
     }
 
+    /// Whether a positive pattern could admit a file below the directory
+    /// `dir` (a canonical identity).
+    pub(crate) fn may_list_below(&self, dir: &PathIdentity) -> bool {
+        self.patterns
+            .iter()
+            .any(|pattern| !pattern.negated && pattern.may_match_below(dir))
+    }
+
     /// The positive patterns' roots in precedence order, as the context
     /// spells them.
     pub(crate) fn roots(&self) -> Vec<PathBuf> {

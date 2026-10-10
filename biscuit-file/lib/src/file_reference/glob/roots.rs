@@ -55,6 +55,9 @@ pub(crate) struct PatternRoot {
     /// The directory a walk starts in: the root plus the pattern's literal
     /// directory prefix.
     pub walk: PathBuf,
+    /// The walk directory's canonical identity: names the filesystem stores,
+    /// so it compares with the names a walk below the root reads.
+    walk_identity: PathIdentity,
 }
 
 /// Interpolate a pattern's payload, keeping `{{VAR}}` values literal.
@@ -164,6 +167,7 @@ pub(crate) fn prepare(
         let identity = canonical_identity(&root);
         if roots.iter().all(|seen| seen.identity != identity) {
             roots.push(PatternRoot {
+                walk_identity: canonical_identity(&walk),
                 root,
                 identity,
                 walk,
@@ -187,6 +191,24 @@ impl PreparedPattern {
     pub(crate) fn could_match_below(&self, dir: &PathIdentity) -> bool {
         owning_root(&self.roots, dir).is_some_and(|(_, relative)| {
             self.max_depth.is_none_or(|max| relative.len() < max)
+        })
+    }
+
+    /// Whether a walk that reached the directory `dir` (a canonical
+    /// identity) could still find a file this pattern admits below it: `dir`
+    /// leads to one of the walk directories, or lies inside one no deeper than
+    /// a match can reach.
+    ///
+    /// Any root counts, not only the one that owns `dir`: a file below `dir`
+    /// may be owned by a nested root. A `true` that cannot pay off only costs
+    /// a walk; a wrong `false` would hide a match.
+    pub(crate) fn may_match_below(&self, dir: &PathIdentity) -> bool {
+        self.roots.iter().any(|root| {
+            root.walk_identity.starts_with(dir)
+                || (dir.starts_with(&root.walk_identity)
+                    && dir.strip_prefix(&root.identity).is_some_and(|relative| {
+                        self.max_depth.is_none_or(|max| relative.len() < max)
+                    }))
         })
     }
 
