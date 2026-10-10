@@ -265,16 +265,25 @@ fn respelled(root: &Path, supplied: &Path) -> bool {
 /// Whether the existing `path`, reached as `name` in `dir`, is stored under
 /// exactly that spelling.
 ///
-/// The decisive evidence is an entry of `dir` spelled `name`. When `dir`
-/// cannot be listed (a traversal-only directory), the stored spelling is
-/// taken from the canonical path on macOS and Windows, which report stored
-/// names; a symlinked name, or any name on another OS, is accepted only when
+/// On macOS and Windows, which report stored names in a canonical path, a
+/// non-symlink whose canonical name is `name` is accepted without listing
+/// `dir`: a directory such as the system temp dir can hold hundreds of
+/// thousands of entries. Otherwise the decisive evidence is an entry of `dir`
+/// spelled `name`. When `dir` cannot be listed (a traversal-only directory),
+/// the stored spelling is taken from that canonical path on macOS and
+/// Windows; a symlinked name, or any name on another OS, is accepted only when
 /// the directory provably does not fold that name's case. Anything else is
 /// unverified and rejected. On Windows an 8.3 short name (`RUNNER~1`) is the
 /// filesystem's own alternate name for a directory; it is never listed, and
 /// it is accepted.
 fn spelled_as_stored(dir: &Path, name: &OsStr, path: &Path, meta: &std::fs::Metadata) -> bool {
     if cfg!(windows) && is_short_name(name) {
+        return true;
+    }
+    let reports_stored_name = cfg!(any(target_os = "macos", windows)) && !meta.file_type().is_symlink();
+    if reports_stored_name
+        && canonicalize_simplified(path).is_ok_and(|canonical| canonical.file_name() == Some(name))
+    {
         return true;
     }
     if let Ok(entries) = std::fs::read_dir(dir) {
@@ -290,9 +299,9 @@ fn spelled_as_stored(dir: &Path, name: &OsStr, path: &Path, meta: &std::fs::Meta
             return false;
         }
     }
-    if cfg!(any(target_os = "macos", windows)) && !meta.file_type().is_symlink() {
-        return canonicalize_simplified(path)
-            .is_ok_and(|canonical| canonical.file_name() == Some(name));
+    if reports_stored_name {
+        // The canonical name, checked above, is not `name`.
+        return false;
     }
     !folds_case(dir, name, meta)
 }
