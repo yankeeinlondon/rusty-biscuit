@@ -12,6 +12,18 @@ docs_created_during_phase_1:
   - tree-hugger/features/2026-10-11-reexports-all-languages/audit/notes-interface-boundaries.md
   - tree-hugger/features/2026-10-11-reexports-all-languages/audit/samples/ (279 sample files across 16 languages)
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2: []
+docs_updated_during_phase_2:
+  - tree-hugger/features/2026-10-11-reexports-all-languages/spec.md
+  - tree-hugger/features/2026-10-11-reexports-all-languages/implementation-log.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3: []
+docs_updated_during_phase_3:
+  - tree-hugger/features/2026-10-11-reexports-all-languages/implementation-log.md
+  - tree-hugger/features/2026-10-11-reexports-all-languages/spec.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
 packages:
   - tree-hugger
 ---
@@ -69,3 +81,39 @@ no behavior changes to map to tests; the requirement-to-test mapping is
 - `just test` in `tree-hugger/`: 2089 passed, 0 failed, 26 slow, 0 skipped.
 - `just lint`: clean for tree-hugger and tree-hugger-cli.
 - No OS-specific code changed; no cross-check run was needed.
+
+## Phase 2
+
+Phase 2 was **not implemented**. It is blocked on the Phase 1 exit gate.
+
+- The plan states phases 2-6 are conditional on the author's rulings (support
+  contract, canonical representation, consumer exposure, C++ grammar blocker).
+  The task "Freeze support contract" in Wave 2 is still unchecked and the spec
+  is still `draft-spec` with `human_review: true`.
+- Phase 2 ("Define report model", "Wire analysis capability") needs the exact
+  Rust types, JSON shape, method name, capability and schema version, which
+  the author has not pinned. Inventing them would build on an unapproved
+  contract, and the previous handoff said not to start Phase 2 until the spec
+  is finalized.
+- No source, test, skill or plan task changed; no tasks were checked off.
+- Gates: only docs under `tree-hugger/features/` were edited (log, plan and
+  spec frontmatter). The scope command was run and its result is recorded
+  below; no tests were mapped because no behavior changed.
+- Scope command result: `"packages": []`, `change_class: "documentation"`, so the test and lint gates were skipped as permitted.
+
+## Phase 3
+
+Phase 3 was **not implemented**. It is blocked twice over.
+
+- It depends on Phase 2 (report model and planner seam), which was itself not
+  implemented; no `shared/schema_v2` types, capability or extraction seam exist
+  for language workers to target.
+- Phase 2 depends on the author's rulings (support contract, canonical
+  representation, consumer exposure, C++ modules grammar blocker). Task "Freeze
+  support contract" is still unchecked and the spec is still `draft-spec` with
+  `human_review: true`. Per-language contracts cannot be approved by an agent.
+- No source, test or skill changed; no plan tasks were checked off.
+- Gates: only docs under `tree-hugger/features/` changed (log, plan and spec
+  frontmatter), the same set as Phase 2, whose scope result was
+  `"packages": []`, `change_class: "documentation"`. The gates were skipped as
+  permitted; no behavior changed so no tests were mapped.
