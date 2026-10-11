@@ -52,14 +52,14 @@ if [ -f "$CLAUDINE_INLINE_DOC" ]; then printf '\nAgent wrote this.\n' >> "$CLAUD
 exit 0
 "#;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum Entrypoint {
     Compose,
     InlineCompose,
     Sequence,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum Answer {
     Claude,
     Codex,
@@ -124,7 +124,8 @@ fn stage_documents(fixture: &CliProcessFixture, entrypoint: Entrypoint) -> PathB
 
 /// Writes the launcher the pane runs. The exit marker is printed by the
 /// script rather than typed with `$?`, which opens Atuin AI on hosts that
-/// load it.
+/// load it. The begin marker follows the screen clear, so a frame carrying it
+/// can no longer show the previous case's chooser.
 fn write_launcher(fixture: &CliProcessFixture, command: &str, document: &Path, marker: &str) -> PathBuf {
     let record_dir = fixture.cwd().join("record");
     fs::create_dir_all(&record_dir).unwrap();
@@ -148,7 +149,7 @@ fn write_launcher(fixture: &CliProcessFixture, command: &str, document: &Path, m
     .map(|(name, value)| format!("{name}={value}"))
     .join(" ");
     let script = format!(
-        "#!/bin/sh\nprintf '\\033[2J\\033[H'\ncd {cwd} || exit 1\n\
+        "#!/bin/sh\nprintf '\\033[2J\\033[H{marker}_BEGIN\\n'\ncd {cwd} || exit 1\n\
          /usr/bin/env -i {variables} {claudine} {command} {document} -c foo\n\
          printf '\\n{marker}:%s\\n' \"$?\"\n",
         cwd = quoted(fixture.cwd()),
@@ -177,6 +178,9 @@ fn answer(harness: &mut TmuxHarness, entrypoint: Entrypoint, answer: Answer) -> 
     harness
         .send_text(format!("/bin/sh {}\n", sh_quote(&launcher.display().to_string())).as_bytes())
         .expect("send launcher");
+    // Until the launcher clears the screen, the pane still shows the previous
+    // case's chooser; keys sent against that frame race the new process.
+    wait_for_pane_text(harness, &format!("{marker}_BEGIN"), Duration::from_secs(30));
     let chooser = wait_for_pane_text(harness, QUESTION, Duration::from_secs(30));
     // The question renders before the widget; wait for its last choice.
     let chooser = if chooser.plain.lines().any(|line| line.contains("Codex")) {
@@ -211,63 +215,98 @@ fn flattened(text: &str) -> String {
         .join(" ")
 }
 
-/// Every entrypoint × answer: the chooser is legible in the emulator, and the
-/// answer decides ownership only.
-#[test]
-#[serial(level2_terminal)]
-fn level2_tmux_ambiguity_chooser_decides_ownership_for_every_entrypoint() {
-    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+/// Every entrypoint the chooser guards, each answered both ways.
+const ENTRYPOINTS: [Entrypoint; 3] = [Entrypoint::Compose, Entrypoint::InlineCompose, Entrypoint::Sequence];
+const ANSWERS: [Answer; 2] = [Answer::Codex, Answer::Claude];
 
+/// One entrypoint × answer: the chooser is legible in the emulator, and the
+/// answer decides ownership only.
+fn assert_chooser_decides_ownership(entrypoint: Entrypoint, choice: Answer) {
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
     harness.resize(100, 30).expect("resize pane");
-    for entrypoint in [Entrypoint::Compose, Entrypoint::InlineCompose, Entrypoint::Sequence] {
-        for choice in [Answer::Codex, Answer::Claude] {
-            let case = format!("{entrypoint:?} answered {choice:?}");
-            let run = answer(&mut harness, entrypoint, choice);
+    let case = format!("{entrypoint:?} answered {choice:?}");
+    let run = answer(&mut harness, entrypoint, choice);
 
-            let question = flattened(&run.chooser);
-            for phrase in [
-                "Resolving how the arguments after the composition file are read",
-                "read the word after -c differently",
-                QUESTION,
-                "(This decides how the arguments are read, not which agent runs.)",
-            ] {
-                assert!(question.contains(phrase), "{case}: {phrase:?} not drawn:\n{}", run.chooser);
-            }
-            let choices: Vec<&str> = run
-                .chooser
-                .lines()
-                .map(str::trim)
-                .filter(|line| line.ends_with("Claude") || line.ends_with("Codex"))
-                .collect();
-            assert_eq!(choices.len(), 2, "{case}: one row per choice expected:\n{}", run.chooser);
-            assert!(choices[0].ends_with("Claude") && choices[1].ends_with("Codex"), "{case}: {choices:?}");
-            assert_ne!(choices[0], "Claude", "{case}: the default choice is not marked:\n{}", run.chooser);
+    let question = flattened(&run.chooser);
+    for phrase in [
+        "Resolving how the arguments after the composition file are read",
+        "read the word after -c differently",
+        QUESTION,
+        "(This decides how the arguments are read, not which agent runs.)",
+    ] {
+        assert!(question.contains(phrase), "{case}: {phrase:?} not drawn:\n{}", run.chooser);
+    }
+    let choices: Vec<&str> = run
+        .chooser
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.ends_with("Claude") || line.ends_with("Codex"))
+        .collect();
+    assert_eq!(choices.len(), 2, "{case}: one row per choice expected:\n{}", run.chooser);
+    assert!(choices[0].ends_with("Claude") && choices[1].ends_with("Codex"), "{case}: {choices:?}");
+    assert_ne!(choices[0], "Claude", "{case}: the default choice is not marked:\n{}", run.chooser);
 
-            let launches = run.launches();
-            match choice {
-                Answer::Codex => {
-                    assert_eq!(run.status, "0", "{case}: claudine failed in the pane:\n{}", run.frame);
-                    assert_eq!(launches.len(), 1, "{case}: {launches:?}\n{}", run.frame);
-                    let argv = &launches[0];
-                    let at = argv
-                        .iter()
-                        .position(|arg| arg == "-c")
-                        .unwrap_or_else(|| panic!("{case}: `-c` not forwarded: {argv:?}"));
-                    assert_eq!(argv.get(at + 1).map(String::as_str), Some("foo"), "{case}: {argv:?}");
-                }
-                Answer::Claude => {
-                    assert_ne!(run.status, "0", "{case}: the refused launch exited 0:\n{}", run.frame);
-                    assert!(launches.is_empty(), "{case}: Codex must not be spawned: {launches:?}");
-                    let frame = flattened(&run.frame);
-                    assert!(frame.contains("takes a value for Codex"), "{case}:\n{}", run.frame);
-                }
+    let launches = run.launches();
+    match choice {
+        Answer::Codex => {
+            assert_eq!(run.status, "0", "{case}: claudine failed in the pane:\n{}", run.frame);
+            assert_eq!(launches.len(), 1, "{case}: {launches:?}\n{}", run.frame);
+            let argv = &launches[0];
+            let at = argv
+                .iter()
+                .position(|arg| arg == "-c")
+                .unwrap_or_else(|| panic!("{case}: `-c` not forwarded: {argv:?}"));
+            assert_eq!(argv.get(at + 1).map(String::as_str), Some("foo"), "{case}: {argv:?}");
+        }
+        Answer::Claude => {
+            assert_ne!(run.status, "0", "{case}: the refused launch exited 0:\n{}", run.frame);
+            assert!(launches.is_empty(), "{case}: Codex must not be spawned: {launches:?}");
+            let frame = flattened(&run.frame);
+            assert!(frame.contains("takes a value for Codex"), "{case}:\n{}", run.frame);
+        }
+    }
+    assert!(
+        !run.fixture.audio_spool().exists(),
+        "{case}: lifecycle audio was published to {}",
+        run.fixture.audio_spool().display()
+    );
+}
+
+/// One test per entrypoint × answer, so nextest spreads the six `claudine`
+/// runs across workers rather than queuing them inside one test.
+macro_rules! ownership_cases {
+    ($($name:ident => ($entrypoint:ident, $answer:ident),)+) => {
+        const CASES: &[(Entrypoint, Answer)] = &[$((Entrypoint::$entrypoint, Answer::$answer),)+];
+        $(
+            #[test]
+            #[serial(level2_terminal)]
+            fn $name() {
+                require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+                assert_chooser_decides_ownership(Entrypoint::$entrypoint, Answer::$answer);
             }
+        )+
+    };
+}
+
+ownership_cases! {
+    level2_tmux_ambiguity_chooser_compose_answered_codex => (Compose, Codex),
+    level2_tmux_ambiguity_chooser_compose_answered_claude => (Compose, Claude),
+    level2_tmux_ambiguity_chooser_inline_compose_answered_codex => (InlineCompose, Codex),
+    level2_tmux_ambiguity_chooser_inline_compose_answered_claude => (InlineCompose, Claude),
+    level2_tmux_ambiguity_chooser_sequence_answered_codex => (Sequence, Codex),
+    level2_tmux_ambiguity_chooser_sequence_answered_claude => (Sequence, Claude),
+}
+
+/// Guard for the split above: every entrypoint × answer has a generated test.
+#[test]
+fn level2_tmux_ambiguity_chooser_covers_every_entrypoint_and_answer() {
+    for entrypoint in ENTRYPOINTS {
+        for choice in ANSWERS {
             assert!(
-                !run.fixture.audio_spool().exists(),
-                "{case}: lifecycle audio was published to {}",
-                run.fixture.audio_spool().display()
+                CASES.contains(&(entrypoint, choice)),
+                "{entrypoint:?} answered {choice:?} has no generated test"
             );
         }
     }
+    assert_eq!(CASES.len(), ENTRYPOINTS.len() * ANSWERS.len(), "a case is listed twice: {CASES:?}");
 }

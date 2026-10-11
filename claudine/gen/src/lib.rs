@@ -21,6 +21,7 @@ pub mod errors;
 pub mod families;
 pub mod generate;
 pub mod inputs;
+mod memo;
 pub mod offerings;
 pub mod registry;
 pub mod report;

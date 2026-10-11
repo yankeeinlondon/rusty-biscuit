@@ -163,7 +163,7 @@ pub use self::pdf::{Pdf, PdfConfig, PdfError, PdfMarkdown, PdfToc};
 pub use self::file_reference::{
     BaseDirOrigin, CandidatePlanOrder, CompletionEntryForm, ContextAnchor, DetailedOutcome, DetailedResolution, FileReference,
     FileReferenceClass, FileReferenceError, FileReferenceKind, FileResolutionContext,
-    GlobListing, GlobReference, GlobReferenceError, SkippedEntry,
+    GlobListing, GlobReference, GlobReferenceError, PreparedGlobReference, SkippedEntry,
     LaunchMagicScope, MagicPathRegistration, MagicPathTier, MagicSearchRoot, PackageAreaFallback,
     PartialCompletion, PathIdentity, PathPosition, ProbeDisposition, ProbedCandidate, RepositoryScope,
     RepositoryScopeCatalog, RepositoryScopeCatalogError, ResolutionCandidate, ResolutionFailure,

@@ -5347,8 +5347,11 @@ fn run_in_tmux_until_exit(staged: &Staged) -> String {
     let claudine = common::claudine_bin();
     let sentinel = format!("L2_CTL_EXIT_{seq}");
     let env_prefix = staged_env_prefix_augmented(staged);
+    // The sentinel is printed in two halves so the echoed command line never
+    // contains it. That line wraps across the capture, so waiting for a second
+    // occurrence (echo plus output) never matched and burned the deadline.
     let cmd = format!(
-        "cd {ws} && {env_prefix}{claudine} compose --goose {md} ; echo {sentinel}",
+        "cd {ws} && {env_prefix}{claudine} compose --goose {md} ; printf '%s%s\\n' L2_CTL_EXIT_ {seq}",
         ws = staged.workspace.path().display(),
         md = staged.md_file.display(),
     );
@@ -5358,15 +5361,17 @@ fn run_in_tmux_until_exit(staged: &Staged) -> String {
 
     let deadline = Instant::now() + Duration::from_secs(40);
     let mut pane = String::new();
+    let mut exited = false;
     while Instant::now() < deadline {
         pane = harness.capture().map(|f| f.plain).unwrap_or_default();
-        // Two occurrences: the echoed command line and the shell's output.
-        if pane.matches(sentinel.as_str()).count() >= 2 {
+        if pane.contains(sentinel.as_str()) {
+            exited = true;
             break;
         }
         std::thread::sleep(Duration::from_millis(150));
     }
     kill_session_by_name(&session);
+    assert!(exited, "the compose run never exited within 40s; pane:\n{pane}");
     pane
 }
 

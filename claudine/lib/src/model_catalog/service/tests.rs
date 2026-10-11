@@ -202,8 +202,16 @@ fn gemini_can_have_override() {
 
 #[test]
 fn refresh_blocking_does_not_panic() {
-    let service = ModelCatalogService::new();
-    service.refresh_blocking(); // should not panic even if network is down
+    // A failing fake stands in for the real `opencode models` subprocess,
+    // which is unbounded and took 7–30 s on a loaded runner; the temp dir
+    // keeps the refresh out of the user's real listing cache.
+    let tmp = tempfile::tempdir().unwrap();
+    let mut service = ModelCatalogService::with_cache_dir(tmp.path().to_path_buf());
+    service.set_shell_command_fetcher(Arc::new(|program, _args| {
+        Box::pin(async move { Err(CatalogFetchError::CliNotFound(program.into())) })
+    }));
+    service.refresh_blocking(); // should not panic even if the fetch fails
+    assert_eq!(service.shell_command_fetch_attempts(), 1);
 }
 
 #[test]

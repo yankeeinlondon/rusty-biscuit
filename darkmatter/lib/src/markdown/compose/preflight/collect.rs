@@ -30,7 +30,8 @@ use crate::markdown::compose::frontmatter_shell_expansion::{
 };
 use crate::markdown::compose::prepare_frontmatter_for_compose;
 use crate::markdown::compose::value_origin::FrontmatterProvenance;
-use crate::markdown::compose::shell_expansion::alias::resolve_alias;
+use crate::markdown::compose::shell_expansion::alias::AliasResolutions;
+use crate::markdown::compose::shell_expansion::probe::login_shell;
 use crate::markdown::compose::expression::ExpressionFinder;
 use crate::markdown::compose::expression::{Expr, ResolutionContext, parse};
 use crate::markdown::compose::icmp::PlannedIcmpProbe;
@@ -93,10 +94,20 @@ fn directive_action_iter(directive: &ShellDirective) -> Vec<(String, String, Vec
 }
 
 /// Resolves an executable through alias expansion, mirroring the runtime path.
-pub(crate) fn resolve_executable(exe_raw: &str, args_raw: &[String]) -> (String, Vec<String>) {
+///
+/// `login_shell` is the request's
+/// [`login_shell`](crate::markdown::compose::shell_expansion::probe::login_shell),
+/// the shell asked for alias definitions; `aliases` is the request's lookup
+/// record, which execution reads too.
+pub(crate) fn resolve_executable(
+    aliases: &AliasResolutions,
+    login_shell: Option<&str>,
+    exe_raw: &str,
+    args_raw: &[String],
+) -> (String, Vec<String>) {
     if which::which(exe_raw).is_ok() {
         (exe_raw.to_string(), args_raw.to_vec())
-    } else if let Some(resolved) = resolve_alias(exe_raw) {
+    } else if let Some(resolved) = aliases.resolve(login_shell, exe_raw) {
         let mut merged_args = resolved.args;
         merged_args.extend_from_slice(args_raw);
         (resolved.executable, merged_args)
@@ -464,7 +475,12 @@ fn collect_recursive(
     for directive in directives {
         let line = directive.origin.line_number();
         for (raw_action, exe_raw, args_raw) in directive_action_iter(&directive) {
-            let (executable, args) = resolve_executable(&exe_raw, &args_raw);
+            let (executable, args) = resolve_executable(
+                &options.alias_resolutions,
+                login_shell(options.context().env()),
+                &exe_raw,
+                &args_raw,
+            );
             let normalized = normalize_command(&executable, &args);
             if seen.insert(normalized.clone()) {
                 let entry = ShellCommandEntry {
@@ -512,7 +528,12 @@ fn collect_recursive(
                 let exe_raw = action.command.executable.clone();
                 let args_raw = action.command.args.clone();
                 let raw_command = render_action(&exe_raw, &args_raw);
-                let (executable, args) = resolve_executable(&exe_raw, &args_raw);
+                let (executable, args) = resolve_executable(
+                &options.alias_resolutions,
+                login_shell(options.context().env()),
+                &exe_raw,
+                &args_raw,
+            );
                 let normalized = normalize_command(&executable, &args);
                 if !seen.insert(normalized.clone()) {
                     continue;
@@ -946,7 +967,12 @@ fn scan_one_frontmatter(
             };
 
             for (raw_action, exe_raw, args_raw) in directive_action_iter(&directive) {
-                let (executable, args) = resolve_executable(&exe_raw, &args_raw);
+                let (executable, args) = resolve_executable(
+                &options.alias_resolutions,
+                login_shell(options.context().env()),
+                &exe_raw,
+                &args_raw,
+            );
                 let normalized = normalize_command(&executable, &args);
                 if seen.insert(normalized.clone()) {
                     let entry = ShellCommandEntry {

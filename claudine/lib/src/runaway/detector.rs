@@ -221,17 +221,22 @@ impl ContentDetector {
     /// can never precede, delay, or replace the stop it shares a chunk with.
     pub fn observe(&mut self, chunk: &str) -> ContentObservation {
         self.pending.push_str(chunk);
-        let trip = loop {
-            let Some(newline_pos) = self.pending.find('\n') else {
-                break None;
-            };
-            let line: String = self.pending.drain(..=newline_pos).collect();
-            // `line` includes the trailing `\n`; strip it for matching.
-            let completed = &line[..line.len() - 1];
-            if let Some(trip) = self.process_line(completed, true) {
-                break Some(trip);
+        // Walk the buffer with a cursor and drain the consumed prefix once:
+        // draining per line shifts the whole remainder every time, which
+        // is quadratic in the size of a flooded chunk.
+        let buffer = std::mem::take(&mut self.pending);
+        let mut consumed = 0;
+        let mut trip = None;
+        while let Some(offset) = buffer[consumed..].find('\n') {
+            let completed = &buffer[consumed..consumed + offset];
+            consumed += offset + 1;
+            if let Some(found) = self.process_line(completed, true) {
+                trip = Some(found);
+                break;
             }
-        };
+        }
+        self.pending = buffer;
+        self.pending.drain(..consumed);
         self.finish_observation(trip)
     }
 
