@@ -20,6 +20,12 @@
 //! that another process published. The same atomic write records which
 //! credentials the request was sent with ([`CredentialEvidence`]), so a run
 //! that sees the publication learns them without waiting for any receipt.
+//!
+//! Each stored PR also carries its checks status (`failing`, `running`,
+//! `passed`, or `unknown`) from the same request, in the same atomic write, so
+//! a later answer replaces every earlier status. The status of one PR is
+//! lenient on read: a missing, `null`, wrongly typed, or unrecognized value is
+//! `unknown` for that PR only, and every other rule of the file is unchanged.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -32,13 +38,18 @@ use crate::error::WorktreeError;
 use crate::git::git_from;
 use crate::remote_head::{CredentialEvidence, PrFailure, is_attempt_id, present};
 use crate::strict_json;
+pub use sniff::remote::blocking::PrCheckStatus;
 use sniff::remote::blocking::PrUnavailable;
 
 /// Format 3 added `publication`, format 4 `writer`, format 5 dropped
-/// `writer` again, and format 6 added `credentials`. Format 5 is still read,
-/// with [`CredentialEvidence::Unknown`]; any other format is a
-/// [`CachedPrs::Miss`].
-pub const PR_STORE_FORMAT_VERSION: u32 = 6;
+/// `writer` again, format 6 added `credentials`, and format 7 added each PR's
+/// `status`. Formats 5 and 6 are still read, with unknown status (and, for 5,
+/// [`CredentialEvidence::Unknown`]) even if a PR in the file spells a status;
+/// any other format is a [`CachedPrs::Miss`].
+pub const PR_STORE_FORMAT_VERSION: u32 = 7;
+
+/// The format before `status`.
+const STATUSLESS_FORMAT_VERSION: u32 = 6;
 
 /// The format before `credentials`.
 const UNCREDENTIALED_FORMAT_VERSION: u32 = 5;
@@ -60,6 +71,76 @@ pub struct OpenPullRequest {
     pub source_repo: Option<String>,
     pub source_branch: String,
     pub target_branch: String,
+    /// What the PR's reported checks say about its latest source commit; not
+    /// merge readiness. Stored as `failing|running|passed|unknown`; anything
+    /// else read from the store, or no value, is `unknown`.
+    #[serde(default, with = "status_form")]
+    pub status: PrCheckStatus,
+}
+
+/// The stored spelling of a [`PrCheckStatus`], and the lenient read: a status
+/// that is absent, `null`, not a string, or not one of the four names is
+/// [`PrCheckStatus::Unknown`] for its PR, never a reason to drop the file.
+/// A repeated `status` key is still rejected by the struct's own derive.
+mod status_form {
+    use serde::{Deserialize, Deserializer, Serializer};
+    use sniff::remote::blocking::PrCheckStatus;
+
+    pub(super) fn name(status: PrCheckStatus) -> &'static str {
+        match status {
+            PrCheckStatus::Failing => "failing",
+            PrCheckStatus::Running => "running",
+            PrCheckStatus::Passed => "passed",
+            PrCheckStatus::Unknown => "unknown",
+        }
+    }
+
+    pub fn serialize<S: Serializer>(status: &PrCheckStatus, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(name(*status))
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<PrCheckStatus, D::Error> {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        Ok(match value.as_str() {
+            Some("failing") => PrCheckStatus::Failing,
+            Some("running") => PrCheckStatus::Running,
+            Some("passed") => PrCheckStatus::Passed,
+            _ => PrCheckStatus::Unknown,
+        })
+    }
+}
+
+impl OpenPullRequest {
+    /// The stored spelling of [`Self::status`].
+    pub fn status_name(&self) -> &'static str {
+        status_form::name(self.status)
+    }
+}
+
+/// A PR as formats 5 and 6 stored it: no `status`, and one spelled there is
+/// ignored, so those answers always read as unknown.
+#[derive(Deserialize)]
+struct StatuslessPullRequest {
+    number: u64,
+    #[serde(deserialize_with = "present")]
+    url: Option<String>,
+    #[serde(deserialize_with = "present")]
+    source_repo: Option<String>,
+    source_branch: String,
+    target_branch: String,
+}
+
+impl From<StatuslessPullRequest> for OpenPullRequest {
+    fn from(pr: StatuslessPullRequest) -> Self {
+        Self {
+            number: pr.number,
+            url: pr.url,
+            source_repo: pr.source_repo,
+            source_branch: pr.source_branch,
+            target_branch: pr.target_branch,
+            status: PrCheckStatus::Unknown,
+        }
+    }
 }
 
 /// Why an [`OpenPrSource`] has no answer.
@@ -121,7 +202,7 @@ impl OpenPrSource for SniffOpenPrSource {
     }
 
     fn fetch(&self) -> Result<FetchedPrs, PrRequestError> {
-        let answer = sniff::remote::blocking::open_pull_requests(&self.remote_url, self.deadline)
+        let answer = sniff::remote::blocking::open_pull_requests_with_status(&self.remote_url, self.deadline)
             .map_err(|reason| PrRequestError::from_unavailable(&reason))?;
         let pull_requests = answer
             .pull_requests
@@ -133,6 +214,7 @@ impl OpenPrSource for SniffOpenPrSource {
                     source_repo: summary.source_repo,
                     source_branch: summary.source_branch?,
                     target_branch: summary.target_branch?,
+                    status: summary.status,
                 })
             })
             .collect();
@@ -200,7 +282,36 @@ struct StoreFile {
     credentials: CredentialEvidence,
 }
 
-/// Format 5, read with the same strictness; its credentials are unknown.
+/// Format 6, read with the same strictness; its PRs' statuses are unknown.
+#[derive(Deserialize)]
+struct StatuslessStoreFile {
+    format_version: u32,
+    origin_digest: String,
+    fetched_at: u64,
+    publication: String,
+    #[serde(deserialize_with = "present")]
+    source_repo: Option<String>,
+    pull_requests: Vec<StatuslessPullRequest>,
+    #[serde(deserialize_with = "strict_json::nested")]
+    credentials: CredentialEvidence,
+}
+
+impl From<StatuslessStoreFile> for StoreFile {
+    fn from(file: StatuslessStoreFile) -> Self {
+        Self {
+            format_version: file.format_version,
+            origin_digest: file.origin_digest,
+            fetched_at: file.fetched_at,
+            publication: file.publication,
+            source_repo: file.source_repo,
+            pull_requests: file.pull_requests.into_iter().map(Into::into).collect(),
+            credentials: file.credentials,
+        }
+    }
+}
+
+/// Format 5, read with the same strictness; its credentials and statuses are
+/// unknown.
 #[derive(Deserialize)]
 struct UncredentialedStoreFile {
     format_version: u32,
@@ -209,7 +320,7 @@ struct UncredentialedStoreFile {
     publication: String,
     #[serde(deserialize_with = "present")]
     source_repo: Option<String>,
-    pull_requests: Vec<OpenPullRequest>,
+    pull_requests: Vec<StatuslessPullRequest>,
 }
 
 impl From<UncredentialedStoreFile> for StoreFile {
@@ -220,7 +331,7 @@ impl From<UncredentialedStoreFile> for StoreFile {
             fetched_at: file.fetched_at,
             publication: file.publication,
             source_repo: file.source_repo,
-            pull_requests: file.pull_requests,
+            pull_requests: file.pull_requests.into_iter().map(Into::into).collect(),
             credentials: CredentialEvidence::Unknown,
         }
     }
@@ -477,6 +588,7 @@ fn load(path: &Path) -> Option<StoreFile> {
     let bytes = fs::read(path).ok()?;
     let file = match serde_json::from_slice::<FormatOnly>(&bytes).ok()?.format_version {
         PR_STORE_FORMAT_VERSION => serde_json::from_slice::<StoreFile>(&bytes).ok()?,
+        STATUSLESS_FORMAT_VERSION => serde_json::from_slice::<StatuslessStoreFile>(&bytes).ok()?.into(),
         UNCREDENTIALED_FORMAT_VERSION => serde_json::from_slice::<UncredentialedStoreFile>(&bytes).ok()?.into(),
         _ => return None,
     };
@@ -510,6 +622,7 @@ mod tests {
             source_repo: repo.map(str::to_string),
             source_branch: branch.to_string(),
             target_branch: target.to_string(),
+            status: PrCheckStatus::Unknown,
         }
     }
 
@@ -683,10 +796,10 @@ mod tests {
 
         let mut format_5_ill = format_5.clone();
         format_5_ill["publication"] = serde_json::json!("not-an-id");
-        let mut format_7 = format_5.clone();
-        format_7["format_version"] = serde_json::json!(7);
-        format_7["credentials"] = serde_json::json!({ "state": "anonymous" });
-        for (label, document) in [("an invalid format-5 field", format_5_ill), ("format 7", format_7)] {
+        let mut format_8 = format_5.clone();
+        format_8["format_version"] = serde_json::json!(8);
+        format_8["credentials"] = serde_json::json!({ "state": "anonymous" });
+        for (label, document) in [("an invalid format-5 field", format_5_ill), ("format 8", format_8)] {
             fs::write(&store, serde_json::to_vec(&document).unwrap()).unwrap();
             assert_eq!(select_cached(&store, Some(ORIGIN), NOW), CachedPrs::Miss, "{label}");
             assert_eq!(stored_publication(&store, ORIGIN, NOW), None, "{label}");
@@ -784,14 +897,15 @@ mod tests {
     fn the_store_reader_walks_the_input_robustness_matrix() {
         use serde_json::{Value, json};
         let (_dir, root, store) = repo(Some(ORIGIN));
-        seed(&store, &root, NOW, vec![pr(99, Some("o/r"), "fix/x", "main")]);
+        let passed = OpenPullRequest { status: PrCheckStatus::Passed, ..pr(99, Some("o/r"), "fix/x", "main") };
+        seed(&store, &root, NOW, vec![passed.clone()]);
         let written: Value = serde_json::from_slice(&fs::read(&store).unwrap()).unwrap();
         let id = written["publication"].as_str().unwrap().to_string();
         let element = written["pull_requests"][0].clone();
         let publication = |credentials| Some(StoredPublication { id: id.clone(), credentials });
         let expected = PrListing {
             source_repo: Some("o/r".into()),
-            pull_requests: vec![pr(99, Some("o/r"), "fix/x", "main")],
+            pull_requests: vec![passed],
             fetched_at: Some(NOW),
         };
 
@@ -859,8 +973,9 @@ mod tests {
             (Set("/format_version", Some(json!({}))), Miss),
             (Set("/format_version", Some(json!(""))), Miss),
             (Set("/format_version", Some(json!(4))), Miss),
-            (Set("/format_version", Some(json!(7))), Miss),
-            (Text("{", "{\"format_version\":6,"), Miss),
+            (Set("/format_version", Some(json!(8))), Miss),
+            (Set("/format_version", Some(json!(7))), Answer(|_| {})),
+            (Text("{", "{\"format_version\":7,"), Miss),
             // credentials: anything but a valid tagged state is a miss, never
             // read as anonymous; only `anonymous` itself can become a notice
             (Set("/credentials", None), Miss),
@@ -1003,6 +1118,46 @@ mod tests {
                 Answer(|listing| listing.pull_requests[0].target_branch = String::new()),
             ),
             (Text("[{", "[{\"target_branch\":\"main\","), Miss),
+            // status of a PR: lenient for that PR only, never for the file
+            (Set("/pull_requests/0/status", None), Answer(|l| l.pull_requests[0].status = PrCheckStatus::Unknown)),
+            (Set("/pull_requests/0/status", null()), Answer(|l| l.pull_requests[0].status = PrCheckStatus::Unknown)),
+            (Set("/pull_requests/0/status", Some(json!(7))), Answer(|l| l.pull_requests[0].status = PrCheckStatus::Unknown)),
+            (Set("/pull_requests/0/status", Some(json!(true))), Answer(|l| l.pull_requests[0].status = PrCheckStatus::Unknown)),
+            (Set("/pull_requests/0/status", Some(json!([]))), Answer(|l| l.pull_requests[0].status = PrCheckStatus::Unknown)),
+            (Set("/pull_requests/0/status", Some(json!(["passed"]))), Answer(|l| l.pull_requests[0].status = PrCheckStatus::Unknown)),
+            (Set("/pull_requests/0/status", Some(json!({}))), Answer(|l| l.pull_requests[0].status = PrCheckStatus::Unknown)),
+            (Set("/pull_requests/0/status", Some(json!(""))), Answer(|l| l.pull_requests[0].status = PrCheckStatus::Unknown)),
+            (Set("/pull_requests/0/status", Some(json!("bogus"))), Answer(|l| l.pull_requests[0].status = PrCheckStatus::Unknown)),
+            (Set("/pull_requests/0/status", Some(json!("PASSED"))), Answer(|l| l.pull_requests[0].status = PrCheckStatus::Unknown)),
+            (Set("/pull_requests/0/status", Some(json!("unknown"))), Answer(|l| l.pull_requests[0].status = PrCheckStatus::Unknown)),
+            (Set("/pull_requests/0/status", Some(json!("failing"))), Answer(|l| l.pull_requests[0].status = PrCheckStatus::Failing)),
+            (Set("/pull_requests/0/status", Some(json!("running"))), Answer(|l| l.pull_requests[0].status = PrCheckStatus::Running)),
+            (Set("/pull_requests/0/status", Some(json!("passed"))), Answer(|_| {})),
+            (Text("[{", "[{\"status\":\"passed\","), Miss),
+            // ... one wrong element among valid ones spoils only itself
+            (
+                Set("/pull_requests", Some(json!([element.clone(), { "number": 98, "url": null, "source_repo": null, "source_branch": "b", "target_branch": "main", "status": 7 }]))),
+                Answer(|l| {
+                    let mut other = l.pull_requests[0].clone();
+                    (other.number, other.url, other.source_repo, other.source_branch) = (98, None, None, "b".into());
+                    other.status = PrCheckStatus::Unknown;
+                    l.pull_requests.push(other);
+                }),
+            ),
+            // ... and when every element is wrong, every PR is kept, unknown
+            (
+                Set("/pull_requests", Some(json!([
+                    { "number": 99, "url": "https://github.com/o/r/pull/99", "source_repo": "o/r", "source_branch": "fix/x", "target_branch": "main", "status": 7 },
+                    { "number": 98, "url": null, "source_repo": null, "source_branch": "b", "target_branch": "main", "status": null },
+                ]))),
+                Answer(|l| {
+                    let mut other = l.pull_requests[0].clone();
+                    (other.number, other.url, other.source_repo, other.source_branch) = (98, None, None, "b".into());
+                    l.pull_requests[0].status = PrCheckStatus::Unknown;
+                    other.status = PrCheckStatus::Unknown;
+                    l.pull_requests.push(other);
+                }),
+            ),
             // Unknown fields are ignored, as in every earlier format, including
             // a leftover format-4 `writer` (a format-4 file itself is a miss).
             (Set("/writer", Some(json!("listing"))), Answer(|_| {})),
@@ -1034,6 +1189,108 @@ mod tests {
             }
         }
         assert!(wrong.is_empty(), "{} of {} cells read wrong:\n{}", wrong.len(), cells.len(), wrong.join("\n"));
+    }
+
+    #[test]
+    fn statuses_round_trip_and_a_later_answer_replaces_them() {
+        let (_dir, root, store) = repo(Some(ORIGIN));
+        let with = |number, status| OpenPullRequest { status, ..pr(number, Some("o/r"), "fix/x", "main") };
+        let statuses = |listing: &PrListing| listing.pull_requests.iter().map(|pr| (pr.number, pr.status)).collect::<Vec<_>>();
+        let first = vec![
+            with(1, PrCheckStatus::Failing),
+            with(2, PrCheckStatus::Running),
+            with(3, PrCheckStatus::Passed),
+            with(4, PrCheckStatus::Unknown),
+        ];
+        seed(&store, &root, NOW, first.clone());
+        let text = String::from_utf8(fs::read(&store).unwrap()).unwrap();
+        for name in ["failing", "running", "passed", "unknown"] {
+            assert!(text.contains(&format!("\"status\": \"{name}\"")), "{name} is written explicitly: {text}");
+        }
+        assert!(text.contains("\"format_version\": 7"), "{text}");
+
+        // read, write the same listing back, read again
+        for _ in 0..2 {
+            let CachedPrs::Fresh(listing) = select_cached(&store, Some(ORIGIN), NOW) else { panic!("served") };
+            assert_eq!(listing.pull_requests, first);
+            let (_, source) = stub(Ok(listing.pull_requests));
+            assert_eq!(refresh_with(&store, &root, NOW, source), RefreshOutcome::Refreshed);
+        }
+
+        // a later answer replaces every old status, and a failed one keeps them
+        let (_, source) = stub(Ok(vec![with(1, PrCheckStatus::Passed), with(3, PrCheckStatus::Unknown)]));
+        assert_eq!(refresh_with(&store, &root, NOW, source), RefreshOutcome::Refreshed);
+        let (_, failed) = failing(PrFailure::Other);
+        assert_eq!(refresh_with(&store, &root, NOW, failed), RefreshOutcome::Failed(PrFailure::Other));
+        let CachedPrs::Fresh(listing) = select_cached(&store, Some(ORIGIN), NOW) else { panic!("served") };
+        assert_eq!(statuses(&listing), [(1, PrCheckStatus::Passed), (3, PrCheckStatus::Unknown)]);
+
+        // an empty answer is still published, clearing the statuses
+        let (_, source) = stub(Ok(Vec::new()));
+        assert_eq!(refresh_with(&store, &root, NOW, source), RefreshOutcome::Refreshed);
+        let CachedPrs::Fresh(listing) = select_cached(&store, Some(ORIGIN), NOW) else { panic!("served") };
+        assert!(listing.pull_requests.is_empty());
+    }
+
+    /// Formats 5 and 6 predate `status`; one spelled there is not trusted.
+    #[test]
+    fn formats_5_and_6_read_as_unknown_status_whatever_a_pr_spells() {
+        use serde_json::{Value, json};
+        let (_dir, _root, store) = repo(Some(ORIGIN));
+        fs::create_dir_all(store.parent().unwrap()).unwrap();
+        let id = "0123456789abcdef0123456789abcdef";
+        let element = |status: Option<Value>| {
+            let mut element = json!({
+                "number": 99, "url": null, "source_repo": "o/r", "source_branch": "fix/x", "target_branch": "main",
+            });
+            if let Some(status) = status {
+                element["status"] = status;
+            }
+            element
+        };
+        let document = |format: u32, elements: Vec<Value>| {
+            let mut document = json!({
+                "format_version": format, "origin_digest": origin_digest(ORIGIN), "fetched_at": NOW,
+                "publication": id, "source_repo": "o/r", "pull_requests": elements,
+            });
+            if format == 6 {
+                document["credentials"] = json!({ "state": "anonymous" });
+            }
+            document
+        };
+        for format in [5, 6] {
+            for status in [None, Some(json!("passed")), Some(json!("failing")), Some(Value::Null), Some(json!(7))] {
+                fs::write(&store, serde_json::to_vec(&document(format, vec![element(status.clone())])).unwrap()).unwrap();
+                let CachedPrs::Fresh(listing) = select_cached(&store, Some(ORIGIN), NOW) else {
+                    panic!("format {format} with status {status:?} is served");
+                };
+                assert_eq!(listing.pull_requests.len(), 1);
+                assert_eq!(listing.pull_requests[0].status, PrCheckStatus::Unknown, "format {format}, {status:?}");
+            }
+            // the other rules are as before: a bad element, duplicate key, trailing content
+            let bad = document(format, vec![json!({ "number": 99 })]);
+            fs::write(&store, serde_json::to_vec(&bad).unwrap()).unwrap();
+            assert_eq!(select_cached(&store, Some(ORIGIN), NOW), CachedPrs::Miss, "format {format} bad element");
+            let mut text = serde_json::to_string(&document(format, vec![element(None)])).unwrap();
+            text = text.replacen("{", "{\"fetched_at\":1,", 1);
+            fs::write(&store, text.as_bytes()).unwrap();
+            assert_eq!(select_cached(&store, Some(ORIGIN), NOW), CachedPrs::Miss, "format {format} duplicate key");
+            let mut text = serde_json::to_string(&document(format, vec![element(None)])).unwrap();
+            text.push_str("garbage");
+            fs::write(&store, text.as_bytes()).unwrap();
+            assert_eq!(select_cached(&store, Some(ORIGIN), NOW), CachedPrs::Miss, "format {format} trailing");
+        }
+        // format 6 keeps its credentials rule
+        let mut no_credentials = document(6, vec![element(None)]);
+        no_credentials.as_object_mut().unwrap().remove("credentials");
+        fs::write(&store, serde_json::to_vec(&no_credentials).unwrap()).unwrap();
+        assert_eq!(select_cached(&store, Some(ORIGIN), NOW), CachedPrs::Miss);
+        // and its anonymous credentials are kept
+        fs::write(&store, serde_json::to_vec(&document(6, vec![element(None)])).unwrap()).unwrap();
+        assert_eq!(
+            stored_publication(&store, ORIGIN, NOW).map(|p| p.credentials),
+            Some(CredentialEvidence::Anonymous)
+        );
     }
 
     #[test]

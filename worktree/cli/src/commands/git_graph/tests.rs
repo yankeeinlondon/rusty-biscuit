@@ -11,7 +11,7 @@ use worktree::fork_origin::{ForkOrigin, ForkOriginStore};
 use worktree::git::recorder;
 use worktree::graph::{BASE_DEFAULT_WINDOW, GatherInput, LINE_WINDOW, MergedElsewhere, gather};
 use worktree::listing::RefTips;
-use worktree::pull_requests::{OpenPullRequest, PrListing};
+use worktree::pull_requests::{OpenPullRequest, PrCheckStatus, PrListing};
 
 use super::*;
 
@@ -208,6 +208,7 @@ fn pr(number: u64, repo: &str, branch: &str, target: &str) -> OpenPullRequest {
         source_repo: Some(repo.to_string()),
         source_branch: branch.to_string(),
         target_branch: target.to_string(),
+        status: PrCheckStatus::Unknown,
     }
 }
 
