@@ -1,0 +1,3 @@
+$schema:
+  title: "string(min(3)) -> first paragraph\nsecond paragraph"
+  next: boolean

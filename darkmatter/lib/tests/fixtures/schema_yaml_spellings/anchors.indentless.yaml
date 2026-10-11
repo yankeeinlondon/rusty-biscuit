@@ -1,0 +1,7 @@
+kind: schema
+types:
+  status: &arms
+  - number
+  - boolean
+  fallback: *arms
+  next: boolean

@@ -1,0 +1,5 @@
+$schema:
+  title: string(min(3)) -> first paragraph
+
+    second paragraph
+  next: boolean

@@ -1,0 +1,5 @@
+kind: schema
+types:
+  t: string(min(1)) -> a description long enough that the editor
+    wraps it onto a second physical line
+  next: boolean
