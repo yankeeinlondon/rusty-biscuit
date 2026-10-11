@@ -152,9 +152,11 @@ Pipe CLI output to `insta::assert_snapshot!` for visual outputs, tables, and ANS
 
 Use `expectrl` to spawn the binary in a pseudo-terminal for testing TTY-dependent code paths (terminal width queries, interactive prompts, `is_terminal()` conditionals) that are skipped in standard integration tests.
 
-### Test Rigor: Level 1 / Level 2 / Level 3
+### Test Rigor for Terminal Input and Output (Level 1 / 2 / 3)
 
-**Test count is not test rigor.** A feature may have hundreds of unit and integration tests and still ship with a glaring user-visible bug if none of those tests exercise the right layer. Classify every user-observable requirement against these three levels:
+**Test count is not test rigor.** A feature may have hundreds of unit and integration tests and still ship with a glaring user-visible bug if none of those tests exercise the right layer. Classify every user-observable requirement against these three levels.
+
+These are the execution tiers (`level2_`, `level3_`) applied to the terminal boundary. The general model, which also covers browsers, provider APIs, and host discovery, is the F1/F2/F3 fidelity rungs in the `rust-testing` skill's `verification-fidelity.md`. For terminal input, Level 1 is F1 (Synthetic), Level 2 is F2 (Witnessed), and Level 3 is F3 (Native).
 
 > In the rusty-biscuit monorepo the Level 2/3 harnesses (`WezTermHarness`, `KittyHarness`, `TmuxHarness`, `AppleTerminalHarness`, and the `cliclick` Level-3 helper) are implemented once in the shared `biscuit-test-harness` crate. Its `biscuit-test-harness/README.md` documents each harness variant, when to use which, the `SpawnVisibility` background/foreground choice, and the environment each requires — read it before writing or reviewing Level 2/3 tests.
 
@@ -183,14 +185,14 @@ Inject real OS keyboard events into the spawned terminal window — the terminal
 - macOS: [cliclick](./cliclick.md) (e.g. `cliclick kd:ctrl t:r ku:ctrl` for a chord; `kd:ctrl,sleep,ku:ctrl` for a hold)
 - Linux: `xdotool`
 
-This is the **only** level that can verify "what bytes does the terminal actually emit when key X is pressed?" — required for any spec line of the form "*when the user holds/presses key X, Y happens*."
+This is the **only** level that can verify the terminal's input encoder: "what bytes does the terminal actually emit when key X is pressed?" — required for any spec line of the form "*when the user holds/presses key X, Y happens*."
 
 **Caveats:**
-- macOS focus is a shared global resource; gate Level 3 behind `RUN_LEVEL3=1` so non-deterministic focus thrash doesn't break `cargo test`.
+- macOS focus is a shared global resource; gate Level 3 with `require_level!(Level::L3, …)`, which skips unless `RUN_LEVEL3=1` (`just test-l3` sets it), so non-deterministic focus thrash doesn't break the ordinary suite.
 - Before injection, focus the spawned pane explicitly (`wezterm cli activate-pane --pane-id N`) AND raise the app (`osascript -e 'tell application "WezTerm" to activate'`).
 - Provide a parallel chord-injection test alongside the modifier-hold test — the chord variant proves the cliclick→terminal→binary chain works end-to-end, isolating "did the press arrive" from "did the terminal encode it correctly."
 - **Capture during the hold, not after.** Splitting `kd:` and `ku:` with the capture in between is critical when the binary clears its display state on modifier release. A `hold_modifier(800ms)` helper that internally sequences press → sleep → release leaves nothing observable by the time `capture()` runs.
-- **`--test-threads=1` is mandatory** for a Level-3 suite where each test spawns its own GUI window. Parallel runs guarantee one spawned window steals focus from the other before cliclick finishes injecting.
+- **Serial execution is mandatory** (`just test-l3` runs nextest with `-j 1`) for a Level-3 suite where each test spawns its own GUI window. Parallel runs guarantee one spawned window steals focus from the other before cliclick finishes injecting.
 - **Add a "plain key" diagnostic test** alongside the modifier ones (e.g., `kp:arrow-down` + assert active marker moved). When a Level-3 test fails, run the diagnostic first — if it passes, the harness is sound and the failure is in chord/modifier-specific paths; if it fails, focus delivery is broken upstream.
 - **Use `cliclick -m verbose`** in test harness wrappers and pipe stdout+stderr to test stderr. Verbose mode prints what cliclick is dispatching and surfaces Accessibility-permission warnings; without it, silent failures look identical to focus failures.
 - **Test setup gotcha — option hotkey assignment.** A spec line like *"Ctrl+R selects the Red option"* requires the test to spawn the binary with explicit hotkey prefixes (`[CTRL+r] Red` not `Red`). If the binary's spec says plain options have no hotkey, sending `Ctrl+R` against `Red` does nothing — the chord arrives but the binary has nothing bound to it. Failures present as "click didn't transfer focus" diagnostics that send you down the wrong rabbit hole.
