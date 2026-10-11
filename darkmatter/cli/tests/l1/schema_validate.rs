@@ -913,3 +913,174 @@ fn schema_validate_enforces_each_root_union_arm_match() {
         }
     }
 }
+
+// Standalone schema files in the two YAML presentations the source-aware loader
+// accepts beyond the conventional spelling: a block sequence at its parent
+// key's column (indentless) and a plain scalar continued onto more-indented
+// lines. Each presented spelling has a conventional twin with the same meaning,
+// and every list and continuation is followed by a sibling (`next`) whose own
+// constraint is asserted, so a loader that swallowed the sibling cannot pass.
+
+/// Tagged envelope: an indentless property union, and a definition whose
+/// constraint list and description continue onto later physical lines.
+const TAGGED_PRESENTED: &str = "kind: schema\ntypes:\n  title: string(min(3);\n    max(8)) -> the display\n    title of the post\n  status:\n  - number\n  - code: number(min(1))\n  next: boolean\n";
+const TAGGED_CONVENTIONAL: &str = "kind: schema\ntypes:\n  title: string(min(3); max(8)) -> the display title of the post\n  status:\n    - number\n    - code: number(min(1))\n  next: boolean\n";
+
+/// Pure `$schema` envelope: an indentless root union of compact mapping arms,
+/// the first carrying an indentless property union followed by a sibling.
+const ROOT_UNION_PRESENTED: &str = "$schema:\n- title: string(required)\n  status:\n  - number\n  - boolean\n  next: boolean\n- count: number(required)\n";
+const ROOT_UNION_CONVENTIONAL: &str = "$schema:\n  - title: string(required)\n    status:\n      - number\n      - boolean\n    next: boolean\n  - count: number(required)\n";
+
+/// The expected outcome of validating one instance: `None` is valid, otherwise
+/// the failing JSON pointer and a fragment of its reported message.
+type Expected = Option<(&'static str, &'static str)>;
+
+/// Writes `schema` as `schema.yaml`, then validates one document per instance
+/// that references it by relative path, asserting the exit status, the
+/// reported schema, and — for an invalid instance — the problem's path and
+/// message, so success cannot stand in for a schema that was never applied.
+fn assert_spelling_applied(schema: &str, instances: &[(&str, Expected)]) {
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
+    write_file(tmp, "schema.yaml", schema);
+    for (index, (instance, expected)) in instances.iter().enumerate() {
+        let doc = write_file(
+            tmp,
+            &format!("doc-{index}.md"),
+            &format!("---\n$schema: ./schema.yaml\n{instance}\n---\nBody\n"),
+        );
+        let output = process
+            .command()
+            .args(["schema", "validate", "--no-trigger-schemas", "--format", "json"])
+            .arg(&doc)
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let report: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|error| panic!("{instance:?}: {error}: {stdout}"));
+        assert_eq!(report["schema"], "./schema.yaml", "{instance:?}: {stdout}");
+        match expected {
+            None => {
+                assert_eq!(output.status.code(), Some(0), "{instance:?}: {stdout}");
+                assert_eq!(report["valid"], true, "{instance:?}: {stdout}");
+            }
+            Some((path, message)) => {
+                assert_eq!(output.status.code(), Some(1), "{instance:?}: {stdout}");
+                let problems = report["problems"].as_array().unwrap();
+                assert_eq!(problems.len(), 1, "{instance:?}: {stdout}");
+                assert_eq!(problems[0]["path"], *path, "{instance:?}: {stdout}");
+                let reported = problems[0]["message"].as_str().unwrap();
+                assert!(reported.contains(message), "{instance:?}: {stdout}");
+            }
+        }
+    }
+}
+
+const TAGGED_INSTANCES: &[(&str, Expected)] = &[
+    ("title: abcd\nstatus:\n  code: 2\nnext: true", None),
+    ("title: ab", Some(("/title", "shorter than 3 characters"))),
+    // `max(8)` sits on the continuation line.
+    ("title: abcdefghij", Some(("/title", "longer than 8 characters"))),
+    ("status: word", Some(("/status", "anyOf"))),
+    ("status:\n  code: 0", Some(("/status/code", "less than the minimum of 1"))),
+    ("next: nope", Some(("/next", "is not of type \"boolean\""))),
+];
+
+#[test]
+fn schema_validate_applies_tagged_indentless_union_and_continued_scalar() {
+    assert_spelling_applied(TAGGED_PRESENTED, TAGGED_INSTANCES);
+}
+
+#[test]
+fn schema_validate_applies_tagged_presented_spelling_with_crlf() {
+    assert_spelling_applied(&TAGGED_PRESENTED.replace('\n', "\r\n"), TAGGED_INSTANCES);
+}
+
+/// The folded description is the property's description, so the continued
+/// text was read as part of the scalar rather than dropped or mis-keyed.
+#[test]
+fn schema_validate_reports_folded_description_of_continued_scalar() {
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
+    write_file(tmp, "schema.yaml", TAGGED_PRESENTED);
+    let doc = write_file(
+        tmp,
+        "doc.md",
+        "---\n$schema: ./schema.yaml\ntitle: ab\n---\nBody\n",
+    );
+
+    process
+        .command()
+        .args(["schema", "validate", "--no-trigger-schemas", "--format", "json"])
+        .arg(&doc)
+        .assert()
+        .code(1)
+        .stdout(predicate::str::contains(
+            "\"description\":\"the display title of the post\"",
+        ));
+}
+
+#[test]
+fn schema_validate_applies_indentless_pure_root_union() {
+    assert_spelling_applied(
+        ROOT_UNION_PRESENTED,
+        &[
+            ("title: Hi\nstatus: true\nnext: false", None),
+            ("count: 2", None),
+            ("title: Hi\nstatus: word", Some(("/status", "anyOf"))),
+            ("title: Hi\nnext: nope", Some(("/next", "is not of type \"boolean\""))),
+            ("other: 1", Some(("", "\"title\" is a required property"))),
+        ],
+    );
+}
+
+#[test]
+fn schema_validate_rejects_indentless_types_sequence() {
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
+    write_file(tmp, "schema.yaml", "kind: schema\ntypes:\n- title: string\n");
+    let doc = write_file(
+        tmp,
+        "doc.md",
+        "---\n$schema: ./schema.yaml\ntitle: Hello\n---\nBody\n",
+    );
+
+    process
+        .command()
+        .args(["schema", "validate", "--no-trigger-schemas"])
+        .arg(&doc)
+        .assert()
+        .code(2)
+        .stdout(predicate::str::contains("has a schema definition error"))
+        .stdout(predicate::str::contains("must be a mapping"));
+}
+
+/// Each presented spelling, loaded from a real file through the library's
+/// normal reference resolution, compiles to the same JSON Schema value as its
+/// conventional twin. Source spans differ by design; the value must not.
+#[test]
+fn schema_yaml_spellings_resolve_to_conventional_json_schema() {
+    use darkmatter::markdown::schemas::resolve::resolve_schema_with_roots;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path();
+    let context = biscuit_file::FileResolutionContext::new(dir);
+    let resolve = |name: &str, source: &str| {
+        write_file(dir, name, source);
+        let reference = serde_json::json!(format!("./{name}"));
+        let resolved = resolve_schema_with_roots(&reference, dir, &[], &context)
+            .unwrap_or_else(|error| panic!("{name}: {error}"));
+        assert!(resolved.simplified.is_some(), "{name} must load as a SimplifiedSchema");
+        resolved.json_schema
+    };
+
+    for (label, conventional, presented) in [
+        ("tagged", TAGGED_CONVENTIONAL, TAGGED_PRESENTED.to_owned()),
+        ("tagged-crlf", TAGGED_CONVENTIONAL, TAGGED_PRESENTED.replace('\n', "\r\n")),
+        ("root-union", ROOT_UNION_CONVENTIONAL, ROOT_UNION_PRESENTED.to_owned()),
+    ] {
+        let expected = resolve(&format!("{label}.conventional.yaml"), conventional);
+        let actual = resolve(&format!("{label}.presented.yaml"), &presented);
+        assert_eq!(actual, expected, "{label}");
+    }
+}
