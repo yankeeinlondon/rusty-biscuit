@@ -441,6 +441,31 @@ fn an_unknown_name_fails_and_the_base_checkout_is_refused() {
         .stderr(predicate::str::contains("main checkout"));
 }
 
+/// The refusal comes before the report, so nothing is asked and then refused.
+#[cfg(unix)]
+#[test]
+fn a_process_standing_in_the_worktree_blocks_removal_before_the_report() {
+    let fixture = Fixture::new();
+    let wt = fixture.add_worktree("feat/busy", "busy");
+    let mut holder = Command::new("sleep").arg("60").current_dir(&wt).spawn().unwrap();
+    let pid = holder.id().to_string();
+
+    let assert = fixture
+        .wt(&fixture.repo())
+        .args(["remove", "busy", "--force-worktree", "--force-branch"])
+        .assert();
+
+    let _ = holder.kill();
+    let _ = holder.wait();
+    assert
+        .code(4)
+        .stderr(predicate::str::contains("is in use by another program: sleep (pid"))
+        .stderr(predicate::str::contains(pid.as_str()))
+        .stderr(predicate::str::contains("Branch").not());
+    assert!(wt.join("README.md").exists());
+    assert!(fixture.branch_exists("feat/busy"));
+}
+
 // --- The spec's Examples table ----------------------------------------------
 
 #[test]

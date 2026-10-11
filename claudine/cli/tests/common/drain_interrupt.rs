@@ -155,10 +155,6 @@ pub mod pane {
     /// latency.
     const ACK_TIMEOUT: Duration = Duration::from_secs(10);
 
-    /// Pause between seeing the command finish and the first press, so the
-    /// press lands in the drain rather than in the command's last steps.
-    const SETTLE: Duration = Duration::from_millis(500);
-
     /// How long the drain must keep running after the first press is seen.
     const STILL_DRAINING: Duration = Duration::from_secs(1);
 
@@ -202,22 +198,10 @@ pub mod pane {
             SEQ.fetch_add(1, Ordering::Relaxed)
         );
 
-        // Separate lines keep the typed command short: an inline `PATH=` with
-        // the whole system path wraps across many rows.
-        for line in [
-            format!("cd {}", sh_quote(&root.display().to_string())),
-            format!(
-                "export PATH={}:\"$PATH\"",
-                sh_quote(&bin_dir.display().to_string())
-            ),
-            format!("unset {}", PROXY_VARIABLES.join(" ")),
-        ] {
-            harness
-                .send_command_with_env(&line, &[])
-                .expect("prepare the pane shell");
-        }
         let home = root.display().to_string();
         let spool = root.join("playa-spool").display().to_string();
+        let drain_started = root.join("drain-started");
+        let drain_started_env = drain_started.display().to_string();
         let url = listener.webhook_url();
         let env = [
             ("HOME", home.as_str()),
@@ -227,26 +211,46 @@ pub mod pane {
             ("PLAYA_SPOOL_DIR", spool.as_str()),
             (WEBHOOK_URL_ENV, url.as_str()),
             ("NO_PROXY", NO_PROXY_LOOPBACK),
+            ("CLAUDINE_TEST_DRAIN_STARTED", drain_started_env.as_str()),
         ];
+        let assignments: Vec<String> = env
+            .iter()
+            .map(|(name, value)| format!("{name}={}", sh_quote(value)))
+            .collect();
         let quoted: Vec<String> = args.iter().map(|arg| sh_quote(arg)).collect();
-        // The status goes on a fresh line: a notice may end without one, and
-        // the marker is only matched at the start of a row.
+        // Separate lines keep the typed command short: an inline `PATH=` with
+        // the whole system path wraps across many rows. All four go in one
+        // send: the shell reads them in order, and the waits below observe
+        // the run instead of sleeping after each line. The status goes on a
+        // fresh line: a notice may end without one, and the marker is only
+        // matched at the start of a row.
+        let typed = [
+            format!("cd {}", sh_quote(&root.display().to_string())),
+            format!(
+                "export PATH={}:\"$PATH\"",
+                sh_quote(&bin_dir.display().to_string())
+            ),
+            format!("unset {}", PROXY_VARIABLES.join(" ")),
+            format!(
+                "{} {} {} ; printf '\\n%s:%s\\n' {marker} $?",
+                assignments.join(" "),
+                sh_quote(claudine_bin()),
+                quoted.join(" ")
+            ),
+        ]
+        .map(|line| line + "\n")
+        .concat();
         harness
-            .send_command_with_env(
-                &format!(
-                    "{} {} ; printf '\\n%s:%s\\n' {marker} $?",
-                    sh_quote(claudine_bin()),
-                    quoted.join(" ")
-                ),
-                &env,
-            )
+            .send_text(typed.as_bytes())
             .expect("type the command");
 
         if listener.wait_for_request(READY_TIMEOUT).is_none() {
             panic!("the message was never sent; pane:\n{}", pane_text(harness));
         }
         wait_for_pane(harness, command.finished_marker(), READY_TIMEOUT);
-        std::thread::sleep(SETTLE);
+        // The press lands in the drain, not in the command's last steps, only
+        // once the drain has marked its start.
+        wait_for_file(harness, &drain_started, READY_TIMEOUT);
 
         press(harness);
         let noticed = wait_for_pane(harness, command.first_press_notice(), ACK_TIMEOUT);
@@ -280,6 +284,18 @@ pub mod pane {
             !pane.contains(PENDING_REPORT),
             "a forced exit skips the drain's report; pane:\n{pane}"
         );
+    }
+
+    fn wait_for_file(harness: &mut impl TerminalHarness, path: &std::path::Path, timeout: Duration) {
+        let deadline = Instant::now() + timeout;
+        while !path.exists() {
+            assert!(
+                Instant::now() < deadline,
+                "the drain never marked its start within {timeout:?}; is the binary built with `terminal-tests`? pane:\n{}",
+                pane_text(harness)
+            );
+            std::thread::sleep(PANE_POLL);
+        }
     }
 
     fn pane_text(harness: &mut impl TerminalHarness) -> String {

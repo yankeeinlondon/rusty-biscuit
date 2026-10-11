@@ -17,8 +17,8 @@ prompt: |-
 
 model: GLM 5 (agent)
 last_updated: 2026-02-27
-update_policy: 
-    - Duration(6mo)
+content_policy:
+  - ValidFor(6mo)
 ---
 # TypeScript Audio Libraries: A Comprehensive Deep Dive
 

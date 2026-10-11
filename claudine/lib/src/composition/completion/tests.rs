@@ -501,7 +501,7 @@ fn direct_compose_judges_the_live_instance_and_never_touches_the_file() {
         live_frontmatter: &live,
         inline_guard: None,
         prior_body_change: false,
-        today: "2026-09-06",
+        now: "2026-09-06T12:00:00Z".parse().unwrap(),
     })
     .unwrap();
 
@@ -554,7 +554,7 @@ fn inline_layers_the_agent_delta_over_the_live_effective_instance() {
         live_frontmatter: &live,
         inline_guard: Some(&guard),
         prior_body_change: false,
-        today: "2026-09-06",
+        now: "2026-09-06T12:00:00Z".parse().unwrap(),
     })
     .unwrap();
 
@@ -603,7 +603,7 @@ fn an_agent_deletion_is_observable_at_completion() {
         live_frontmatter: &live,
         inline_guard: Some(&guard),
         prior_body_change: false,
-        today: "2026-09-06",
+        now: "2026-09-06T12:00:00Z".parse().unwrap(),
     })
     .unwrap();
 
@@ -635,7 +635,7 @@ fn inline_and_direct_reach_identical_status_for_the_same_instance() {
         live_frontmatter: &live,
         inline_guard: Some(&guard),
         prior_body_change: false,
-        today: "2026-09-06",
+        now: "2026-09-06T12:00:00Z".parse().unwrap(),
     })
     .unwrap();
 
@@ -653,7 +653,7 @@ fn inline_and_direct_reach_identical_status_for_the_same_instance() {
         live_frontmatter: &inline_instance,
         inline_guard: None,
         prior_body_change: false,
-        today: "2026-09-06",
+        now: "2026-09-06T12:00:00Z".parse().unwrap(),
     })
     .unwrap();
 
@@ -686,7 +686,7 @@ fn an_untouched_document_yields_a_body_rejection_and_no_artifact() {
         live_frontmatter: &live,
         inline_guard: Some(&guard),
         prior_body_change: false,
-        today: "2026-09-06",
+        now: "2026-09-06T12:00:00Z".parse().unwrap(),
     })
     .unwrap();
 
@@ -709,7 +709,7 @@ fn inline_completion_without_a_guard_is_a_typed_wiring_error() {
         live_frontmatter: &live,
         inline_guard: None,
         prior_body_change: false,
-        today: "2026-09-06",
+        now: "2026-09-06T12:00:00Z".parse().unwrap(),
     })
     .unwrap_err();
 
@@ -751,7 +751,7 @@ fn a_transient_caller_prompt_survives_the_owned_property_overlay() {
         live_frontmatter: &live,
         inline_guard: Some(&guard),
         prior_body_change: false,
-        today: "2026-09-06",
+        now: "2026-09-06T12:00:00Z".parse().unwrap(),
     })
     .unwrap();
 
@@ -791,7 +791,7 @@ fn carried_body_change_evidence_reaches_the_inline_closure() {
         live_frontmatter: &live,
         inline_guard: Some(&guard),
         prior_body_change: false,
-        today: "2026-09-06",
+        now: "2026-09-06T12:00:00Z".parse().unwrap(),
     })
     .unwrap();
     assert_eq!(
@@ -806,7 +806,7 @@ fn carried_body_change_evidence_reaches_the_inline_closure() {
         live_frontmatter: &live,
         inline_guard: Some(&guard),
         prior_body_change: true,
-        today: "2026-09-06",
+        now: "2026-09-06T12:00:00Z".parse().unwrap(),
     })
     .unwrap();
 

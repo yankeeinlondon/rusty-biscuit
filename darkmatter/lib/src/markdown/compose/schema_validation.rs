@@ -1698,9 +1698,16 @@ mod tests {
             ("{}", serde_json::json!({})),
         ];
 
+        let dir = tempfile::tempdir().unwrap();
+        let request = crate::markdown::compose::ComposeRequest::prepare(
+            ComposeOptions::new(),
+            &crate::markdown::compose::RequestSnapshot::new(dir.path()),
+        )
+        .unwrap();
+
         for (yaml, expected) in cases {
             let mut md = md_with_schema(&format!("$schema:\n  value: any\nvalue: {yaml}\n"));
-            assert!(run(&mut md, &ComposeOptions::new()).is_ok(), "value: {yaml}");
+            assert!(super::run(&mut md, &request).is_ok(), "value: {yaml}");
             assert_eq!(md.frontmatter().as_map().get("value"), Some(&expected));
         }
     }

@@ -320,7 +320,6 @@ fn repository_containment_rejects_an_external_junction() {
         .status()
         .unwrap();
     assert!(status.success());
-    let ctx = FileResolutionContext::new(&repo).with_repository_root(&repo);
 
     assert!(matches!(
         FileReference::new("&external-junction/missing.md")

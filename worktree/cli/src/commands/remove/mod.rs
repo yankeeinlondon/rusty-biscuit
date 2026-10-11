@@ -44,8 +44,8 @@ use worktree::remove::safety::{
 use worktree::remove::missing::{MissingCheckout, MissingRefusal, remove_missing_record};
 use worktree::remove::repair::{self, RepairRefusal};
 use worktree::remove::{
-    CheckoutState, Inventory, PrepareRefusal, collect_inventory, prepare, remove_local_branch,
-    remove_worktree,
+    CheckoutState, Inventory, PrepareRefusal, check_no_processes, collect_inventory, prepare,
+    remove_local_branch, remove_worktree,
 };
 use worktree::remove::included::classify_included;
 use worktree::worktree::{WorktreeEntry, default_branch, find_worktree, parse_worktree_list};
@@ -308,6 +308,10 @@ pub fn run(name: &str, flags: Flags) -> Result<(), WorktreeError> {
             super::go::wrapper_setup_help()
         )));
     }
+
+    // Checked again right before git deletes anything; this one only spares
+    // the user a report and questions that end in this refusal.
+    check_no_processes(&entry.path)?;
 
     // After the guards above, so nothing is repaired for a removal that
     // could not go ahead anyway.
@@ -1084,7 +1088,7 @@ mod tests {
             WorktreeError::Io(std::io::Error::from(std::io::ErrorKind::PermissionDenied)),
             WorktreeError::RefusedToLoseWork("markup".into()),
             WorktreeError::BlockedByEnvironment("markup".into()),
-            WorktreeError::DirectoryInUse("/wt/feat-x".into()),
+            WorktreeError::DirectoryInUse { path: "/wt/feat-x".into(), processes: Vec::new() },
             WorktreeError::Cancelled,
         ];
         for error in errors {

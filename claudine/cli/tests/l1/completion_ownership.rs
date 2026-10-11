@@ -214,28 +214,56 @@ const CURSORS: [Cursor; 6] = [
     Cursor { label: "word after --", words: &["--", "ph"], on_valid_line: Offer::Nothing },
 ];
 
-#[test]
-fn an_error_before_the_cursor_offers_nothing_whatever_the_cursor_shape() {
-    let ws = TestWorkspace::named("complete-ownership-matrix");
+/// One command and one preceding line against every cursor shape. Split per
+/// command and preceding line because each cursor costs a process spawn.
+fn an_error_before_the_cursor_offers_nothing(command: &str, preceding: &Preceding) {
+    let ws = TestWorkspace::named(&format!("complete-ownership-matrix-{command}-{}", preceding.label.replace(' ', "-")));
     plan(ws.path(), "");
-    for command in ["compose", "inline-compose", "sequence"] {
-        for preceding in &PRECEDING {
-            for cursor in &CURSORS {
-                let mut argv = vec![command, "prompts/plan.md"];
-                argv.extend_from_slice(preceding.words);
-                argv.extend_from_slice(cursor.words);
-                let got = run_complete(ws.path(), &argv);
-                let expected = if preceding.valid { cursor.on_valid_line } else { Offer::Nothing };
-                let context = format!("{command} / {} / {} cursor: {argv:?} => {got:?}", preceding.label, cursor.label);
-                match expected {
-                    Offer::Nothing => assert!(got.is_empty(), "{context}"),
-                    Offer::Exactly(want) => assert_eq!(got, want, "{context}"),
-                    Offer::Includes(want) => assert!(got.iter().any(|c| c == want), "{context}"),
-                }
-            }
+    for cursor in &CURSORS {
+        let mut argv = vec![command, "prompts/plan.md"];
+        argv.extend_from_slice(preceding.words);
+        argv.extend_from_slice(cursor.words);
+        let got = run_complete(ws.path(), &argv);
+        let expected = if preceding.valid { cursor.on_valid_line } else { Offer::Nothing };
+        let context = format!("{command} / {} / {} cursor: {argv:?} => {got:?}", preceding.label, cursor.label);
+        match expected {
+            Offer::Nothing => assert!(got.is_empty(), "{context}"),
+            Offer::Exactly(want) => assert_eq!(got, want, "{context}"),
+            Offer::Includes(want) => assert!(got.iter().any(|c| c == want), "{context}"),
         }
     }
 }
+
+macro_rules! error_before_the_cursor_tests {
+    ($($module:ident = $command:literal),* $(,)?) => {
+        $(
+            mod $module {
+                use super::*;
+
+                #[test]
+                fn missing_value() {
+                    an_error_before_the_cursor_offers_nothing($command, &PRECEDING[0]);
+                }
+
+                #[test]
+                fn ambiguous() {
+                    an_error_before_the_cursor_offers_nothing($command, &PRECEDING[1]);
+                }
+
+                #[test]
+                fn valid() {
+                    an_error_before_the_cursor_offers_nothing($command, &PRECEDING[2]);
+                }
+            }
+        )*
+    };
+}
+
+error_before_the_cursor_tests!(
+    an_error_before_the_cursor_offers_nothing_whatever_the_cursor_shape_compose = "compose",
+    an_error_before_the_cursor_offers_nothing_whatever_the_cursor_shape_inline_compose = "inline-compose",
+    an_error_before_the_cursor_offers_nothing_whatever_the_cursor_shape_sequence = "sequence",
+);
 
 #[test]
 fn a_flag_before_the_file_or_after_a_clean_switch_still_completes() {
@@ -267,52 +295,53 @@ const BEFORE_AN_OPTION: [Preceding; 5] = [
 /// prove suggestions survive as well as disappear.
 const OPTIONS_WITH_CANDIDATES: [&str; 5] = ["--debug", "--provider", "--exclude", "--on-rate-limit", "--budget-ledger"];
 
-/// The value slot of every owned option and alias, separate or attached,
-/// empty and partial, after each kind of preceding line: a clean line offers what the option offers
-/// with no provider arguments at all, and any other line offers nothing.
-fn every_owned_option_value_follows_the_words_before_it(command: &str, form: ValueForm) {
-    let ws = TestWorkspace::named(&format!("complete-ownership-option-values-{command}"));
+/// The value slot of one owned option and its aliases, separate or attached,
+/// empty and partial, after each kind of preceding line: a clean line offers
+/// what the option offers with no provider arguments at all, and any other
+/// line offers nothing. `long` is the option's first spelling.
+///
+/// Each option is its own test because every cursor costs a process spawn;
+/// one test over all options exceeded the per-test time budget.
+fn owned_option_value_follows_the_words_before_it(command: &str, form: ValueForm, long: &str) {
+    let option = OWNED_VALUE_OPTIONS
+        .iter()
+        .find(|option| option.spellings[0] == long)
+        .unwrap_or_else(|| panic!("{long} is not an owned value option"));
+    assert!(!option.sequence_only || command == "sequence", "{long} is declared by sequence alone");
+    let ws = TestWorkspace::named(&format!("complete-ownership-option-values-{command}-{}", long.trim_start_matches('-')));
     plan(ws.path(), "");
-    let mut with_candidates = Vec::new();
-    for option in OWNED_VALUE_OPTIONS {
-        if option.sequence_only && command != "sequence" {
-            continue;
-        }
-        for spelling in option.spellings {
-            for value in ["", option.partial] {
-                let attached = format!("{spelling}={value}");
-                let cursor = match form {
-                    ValueForm::Separate => vec![*spelling, value],
-                    // Only a long spelling takes `=`.
-                    ValueForm::Attached if spelling.starts_with("--") => vec![attached.as_str()],
-                    ValueForm::Attached => continue,
-                };
-                let mut baseline_argv = vec![command, "prompts/plan.md"];
-                baseline_argv.extend_from_slice(&cursor);
-                let baseline = run_complete(ws.path(), &baseline_argv);
-                if !baseline.is_empty() && value.is_empty() {
-                    with_candidates.push(*spelling);
-                }
-                for preceding in &BEFORE_AN_OPTION {
-                    let mut argv = vec![command, "prompts/plan.md"];
-                    argv.extend_from_slice(preceding.words);
-                    argv.extend_from_slice(&cursor);
-                    let got = run_complete(ws.path(), &argv);
-                    let context = format!("{} / {cursor:?}: {argv:?} => {got:?}", preceding.label);
-                    if preceding.valid {
-                        assert_eq!(got, baseline, "{context}");
-                    } else {
-                        assert!(got.is_empty(), "{context}");
-                    }
+    let mut offered_on_a_clean_line = false;
+    for spelling in option.spellings {
+        for value in ["", option.partial] {
+            let attached = format!("{spelling}={value}");
+            let cursor = match form {
+                ValueForm::Separate => vec![*spelling, value],
+                // Only a long spelling takes `=`.
+                ValueForm::Attached if spelling.starts_with("--") => vec![attached.as_str()],
+                ValueForm::Attached => continue,
+            };
+            let mut baseline_argv = vec![command, "prompts/plan.md"];
+            baseline_argv.extend_from_slice(&cursor);
+            let baseline = run_complete(ws.path(), &baseline_argv);
+            if !baseline.is_empty() && value.is_empty() {
+                offered_on_a_clean_line = true;
+            }
+            for preceding in &BEFORE_AN_OPTION {
+                let mut argv = vec![command, "prompts/plan.md"];
+                argv.extend_from_slice(preceding.words);
+                argv.extend_from_slice(&cursor);
+                let got = run_complete(ws.path(), &argv);
+                let context = format!("{} / {cursor:?}: {argv:?} => {got:?}", preceding.label);
+                if preceding.valid {
+                    assert_eq!(got, baseline, "{context}");
+                } else {
+                    assert!(got.is_empty(), "{context}");
                 }
             }
         }
     }
-    for option in OPTIONS_WITH_CANDIDATES {
-        if option == "--budget-ledger" && command != "sequence" {
-            continue;
-        }
-        assert!(with_candidates.contains(&option), "{command}: {option} offered nothing on a clean line");
+    if OPTIONS_WITH_CANDIDATES.contains(&long) {
+        assert!(offered_on_a_clean_line, "{command}: {long} offered nothing on a clean line");
     }
 }
 
@@ -325,32 +354,71 @@ enum ValueForm {
     Attached,
 }
 
-#[test]
-fn compose_option_values_follow_the_words_before_them() {
-    every_owned_option_value_follows_the_words_before_it("compose", ValueForm::Separate);
+/// One test per owned option for a command and value form.
+macro_rules! option_value_tests {
+    ($module:ident, $command:literal, $form:expr, [$($name:ident = $long:literal),* $(,)?]) => {
+        mod $module {
+            use super::*;
+            $(
+                #[test]
+                fn $name() {
+                    owned_option_value_follows_the_words_before_it($command, $form, $long);
+                }
+            )*
+        }
+    };
 }
 
-#[test]
-fn compose_attached_option_values_follow_the_words_before_them() {
-    every_owned_option_value_follows_the_words_before_it("compose", ValueForm::Attached);
+/// Options every composition command declares, plus `$extra`.
+macro_rules! shared_option_value_tests {
+    ($module:ident, $command:literal, $form:expr, [$($extra:tt)*]) => {
+        option_value_tests!($module, $command, $form, [
+            debug = "--debug",
+            provider = "--provider",
+            exclude = "--exclude",
+            include = "--include",
+            model = "--model",
+            output = "--output",
+            append_system_prompt = "--append-system-prompt",
+            replace_system_prompt = "--replace-system-prompt",
+            timeout = "--timeout",
+            step_timeout = "--step-timeout",
+            stall_timeout = "--stall-timeout",
+            operation = "--operation",
+            set = "--set",
+            use_ = "--use",
+            max_iterations = "--max-iterations",
+            on_rate_limit = "--on-rate-limit",
+            $($extra)*
+        ]);
+    };
 }
 
-#[test]
-fn inline_compose_option_values_follow_the_words_before_them() {
-    every_owned_option_value_follows_the_words_before_it("inline-compose", ValueForm::Separate);
-}
+shared_option_value_tests!(compose_option_values_follow_the_words_before_them, "compose", ValueForm::Separate, []);
+shared_option_value_tests!(compose_attached_option_values_follow_the_words_before_them, "compose", ValueForm::Attached, []);
+shared_option_value_tests!(inline_compose_option_values_follow_the_words_before_them, "inline-compose", ValueForm::Separate, []);
+shared_option_value_tests!(inline_compose_attached_option_values_follow_the_words_before_them, "inline-compose", ValueForm::Attached, []);
+shared_option_value_tests!(
+    sequence_option_values_follow_the_words_before_them,
+    "sequence",
+    ValueForm::Separate,
+    [fail_fast = "--fail-fast", budget_ledger = "--budget-ledger"]
+);
+shared_option_value_tests!(
+    sequence_attached_option_values_follow_the_words_before_them,
+    "sequence",
+    ValueForm::Attached,
+    [fail_fast = "--fail-fast", budget_ledger = "--budget-ledger"]
+);
 
+/// The per-option tests above name every owned option; a new one must be added.
 #[test]
-fn inline_compose_attached_option_values_follow_the_words_before_them() {
-    every_owned_option_value_follows_the_words_before_it("inline-compose", ValueForm::Attached);
-}
-
-#[test]
-fn sequence_option_values_follow_the_words_before_them() {
-    every_owned_option_value_follows_the_words_before_it("sequence", ValueForm::Separate);
-}
-
-#[test]
-fn sequence_attached_option_values_follow_the_words_before_them() {
-    every_owned_option_value_follows_the_words_before_it("sequence", ValueForm::Attached);
+fn every_owned_value_option_has_a_test() {
+    const COVERED: [&str; 18] = [
+        "--debug", "--provider", "--exclude", "--include", "--model", "--output", "--append-system-prompt",
+        "--replace-system-prompt", "--timeout", "--step-timeout", "--stall-timeout", "--operation", "--set",
+        "--use", "--max-iterations", "--on-rate-limit", "--fail-fast", "--budget-ledger",
+    ];
+    let declared: Vec<&str> = OWNED_VALUE_OPTIONS.iter().map(|option| option.spellings[0]).collect();
+    assert_eq!(declared, COVERED);
 }

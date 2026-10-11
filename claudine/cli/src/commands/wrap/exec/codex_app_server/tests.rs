@@ -20,7 +20,7 @@ use claudine::steering::audit::SteeringAuditLog;
 use claudine::steering::contract::{
     CancellationOutcome, InterruptionConsent, SendOutcome, SteeringMessage, SteeringOrigin, SteeringRequest,
 };
-use claudine::steering::controller::{ControllerConfig, EligibilityFn, ExecutionFacts, SteeringController, Submission};
+use claudine::steering::controller::{ControllerConfig, DeliveryDeadlines, EligibilityFn, ExecutionFacts, SteeringController, Submission};
 use claudine::steering::eligibility::{AutomaticEligibility, Eligibility, ManualEligibility, Route};
 use claudine::steering::identity::{ExecutionId, ProcessStartIdentity, RequestId};
 use claudine::steering::vocabulary::{CaseSupport, ExecutionState, LaunchMode, OperationIntent, SteeringAvailability};
@@ -647,9 +647,19 @@ async fn refusals_mismatches_and_silence_are_reported_as_established() {
     assert_eq!(reply.result.outcome, SendOutcome::Unknown, "{:?}", reply.detail);
 
     // No running turn: nothing is sent.
+    // The completed turn starts a settlement check that holds the mutation
+    // lock until Codex answers its `thread/read`; unanswered, it would wait
+    // out SETTLEMENT_CHECK_DEADLINE (five seconds). Codex reports the thread
+    // still active, so the check reopens the run (`closing = false`).
     let owned4 = owned(false);
+    let _codex4 = FakeCodex::start(&owned4.opened, |message| match method(message) {
+        "thread/read" => vec![result(&message["id"], thread_status("active"))],
+        _ => Vec::new(),
+    });
     owned4.opened.session.observe(&turn_completed(TURN, "completed"));
-    owned4.opened.session.inner.state.lock().unwrap().closing = false;
+    wait_until("the settlement check to reopen the run", || {
+        sent(&owned4, "thread/read").len() == 1 && !owned4.opened.session.inner.state.lock().unwrap().closing
+    });
     owned4.controller.set_state(ExecutionState::Working);
     let reply = owned4.controller.submit(submission(&owned4, OperationIntent::SteerActiveTurn)).await;
     assert_eq!(reply.result.outcome, SendOutcome::Unavailable);
@@ -776,14 +786,28 @@ async fn interruption_phases_stay_separate_when_one_fails() {
     assert_eq!(reply.result.interruption.unwrap().cancellation, CancellationOutcome::Refused);
     assert!(sent(&owned3, "turn/start").is_empty());
 
-    // Interrupt acknowledged but no completion arrives in time: unknown.
+    // Interrupt acknowledged but no completion arrives in time: unknown. The
+    // executor is driven directly so the cancellation deadline can be short
+    // (the controller's is `CONSENTED_CANCELLATION_DEADLINE`, ten seconds).
+    // One second is ~500x FakeCodex's 2 ms poll, so a loaded runner still gets
+    // the acknowledgement in before the deadline; the error text proves the
+    // deadline was hit while waiting for completion, not while awaiting the
+    // interrupt answer (which would also report `Unknown`).
     let owned4 = owned(true);
     let _codex4 = FakeCodex::start(&owned4.opened, |message| match method(message) {
         "turn/interrupt" => vec![result(&message["id"], json!({}))],
         _ => Vec::new(),
     });
-    let reply = owned4.controller.submit(submission(&owned4, OperationIntent::InterruptThenSubmit)).await;
-    assert_eq!(reply.result.interruption.unwrap().cancellation, CancellationOutcome::Unknown);
+    let cancellation = tokio::time::Instant::now() + Duration::from_secs(1);
+    let deadlines = DeliveryDeadlines { cancellation: Some(cancellation), acceptance: cancellation + Duration::from_secs(1) };
+    let request = submission(&owned4, OperationIntent::InterruptThenSubmit).request;
+    let report = super::executor::deliver(&owned4.opened.session.inner, request, "fixture", deadlines).await;
+    assert_eq!(report.result.interruption.unwrap().cancellation, CancellationOutcome::Unknown);
+    assert!(
+        report.error.as_deref().is_some_and(|error| error.contains("cancellation was not confirmed before the deadline")),
+        "{:?}",
+        report.error
+    );
     assert!(sent(&owned4, "turn/start").is_empty(), "no replacement without confirmed cancellation");
 }
 

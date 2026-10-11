@@ -69,13 +69,12 @@ fn config() -> DmlsConfig {
 }
 
 /// All provider diagnostics for one document, as normalized JSON.
-fn diagnostics_json(path: &Path, config: &DmlsConfig) -> Value {
+fn diagnostics_json(path: &Path, config: &DmlsConfig, contexts: &RepositoryContexts) -> Value {
     let text = std::fs::read_to_string(path).expect("read corpus document");
     let root = path.parent().expect("document directory").to_path_buf();
     let uri: Uri = url::Url::from_file_path(path).unwrap().as_str().parse().unwrap();
     let state = OverlayState::default();
-    let resolution =
-        RepositoryContexts::new(RequestSnapshot::new(&root)).for_document(path);
+    let resolution = contexts.for_document(path);
     let overlay =
         state.for_document(&uri, &text, path, config, std::slice::from_ref(&root), &resolution);
     let source_map = SourceMap::new(uri.clone(), 1, PositionEncoding::Utf16, Arc::from(text.as_str()));
@@ -119,9 +118,12 @@ fn normalize_paths(value: &mut Value, manifest: &Path) {
 #[test]
 fn mapping_only_corpus_diagnostics_match_pre_descent_baseline() {
     let config = config();
+    // One cache for the whole corpus: the repository context is built once per
+    // repository rather than once per document (each build walks this monorepo).
+    let contexts = RepositoryContexts::new(RequestSnapshot::new(manifest_dir()));
     let mut observed = serde_json::Map::new();
     for (name, path) in corpus() {
-        observed.insert(name, diagnostics_json(&path, &config));
+        observed.insert(name, diagnostics_json(&path, &config, &contexts));
     }
     let observed = Value::Object(observed);
     let baseline_path = manifest_dir().join("tests/fixtures/mapping_only_corpus/baseline.json");

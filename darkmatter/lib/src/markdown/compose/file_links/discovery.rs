@@ -12,6 +12,7 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use biscuit_file::{FileResolutionContext, GlobReference};
 
@@ -100,7 +101,7 @@ fn discover_glob(
     source_canonical: &Path,
     line: usize,
 ) -> Result<(Vec<PathBuf>, PathBuf, Vec<biscuit_file::SkippedEntry>), FileLinksError> {
-    let glob_error = |source| FileLinksError::GlobReference { line, source };
+    let glob_error = |source| FileLinksError::GlobReference { line, source: Arc::new(source) };
     let listing = GlobReference::new([glob])
         .and_then(|globs| globs.list_files(document_context))
         .map_err(glob_error)?;
@@ -510,10 +511,8 @@ mod tests {
         let err = discover_content("::file-links [invalid\n", &source).unwrap_err();
         assert!(matches!(
             err,
-            FileLinksError::GlobReference {
-                source: biscuit_file::GlobReferenceError::InvalidGlob { .. },
-                ..
-            }
+            FileLinksError::GlobReference { source, .. }
+                if matches!(*source, biscuit_file::GlobReferenceError::InvalidGlob { .. })
         ));
     }
 
@@ -696,10 +695,8 @@ mod tests {
         assert!(
             matches!(
                 err,
-                FileLinksError::GlobReference {
-                    source: biscuit_file::GlobReferenceError::RelativeTreeEscape { .. },
-                    ..
-                }
+                FileLinksError::GlobReference { ref source, .. }
+                    if matches!(**source, biscuit_file::GlobReferenceError::RelativeTreeEscape { .. })
             ),
             "{err:?}"
         );

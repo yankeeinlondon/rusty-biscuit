@@ -216,6 +216,7 @@ fn a_string_documents_relative_link_resolves_from_the_request_directory() {
 }
 
 /// Approves every shell command once.
+#[cfg_attr(not(unix), allow(dead_code))]
 struct ApproveAll;
 
 impl ShellApprovalHandler for ApproveAll {

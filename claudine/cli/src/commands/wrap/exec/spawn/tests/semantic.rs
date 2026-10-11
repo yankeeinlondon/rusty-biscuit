@@ -101,7 +101,9 @@ fn semantic_stderr_buffer_is_drained_before_run_closes() {
     let summary = run_stderr_script(
         &output,
         "exec 1>&-; i=1; while [ $i -le 128 ]; do echo diagnostic-$i >&2; i=$((i + 1)); done",
-        "for /L %i in (1,1,128) do @1>&2 echo diagnostic-%i",
+        // `@1>&2 echo` would run a command named `1`; the group keeps the
+        // redirection apart and adds no trailing space to the echoed line.
+        "for /L %i in (1,1,128) do @(1>&2 echo diagnostic-%i)",
     );
 
     assert_eq!(summary.exit_code, 0);

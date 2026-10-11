@@ -298,7 +298,7 @@ fn execute_pipeline_timeout_fallback_emits_warning() {
         "val": "$(sleep 10 && echo after)"
     }));
     let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
-        timeout: Duration::from_secs(2),
+        timeout: Duration::from_secs(1),
         timeout_behavior: super::super::shell_expansion::types::ShellTimeoutBehavior::EmptyString,
         policy_root: Some(temp_dir.path().to_path_buf()),
         approval_handler: Some(Arc::new(MockApproval)),

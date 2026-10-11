@@ -9,7 +9,8 @@
 //! host player delegation automatically.
 //!
 //! Native playback never terminates the process. Failures before audio reaches
-//! the device fall back to host players in the same call; a device-open
+//! the device fall back to host players in the same call, except finding no
+//! output device at all, which is reported directly; a device-open
 //! timeout or a post-submit stall also disables native playback for the rest
 //! of the process so later calls skip the device entirely.
 
@@ -425,6 +426,10 @@ impl NativePlaybackError {
     /// the same call.
     pub(crate) fn should_fallback_to_host(&self) -> bool {
         match self {
+            // With no output device a host player has nowhere to play either;
+            // falling back would only replace this error with a misleading
+            // "install mpv or FFmpeg" one.
+            Self::Stream(rodio::DeviceSinkError::NoDevice) => false,
             Self::UnsupportedFormat(_)
             | Self::UrlNotSupported
             | Self::NativePlaybackDisabled

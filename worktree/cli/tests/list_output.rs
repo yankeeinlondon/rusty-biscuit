@@ -64,6 +64,21 @@ impl Home {
 }
 
 #[test]
+fn listing_outside_a_repository_explains_how_to_proceed() {
+    let dir = tempfile::tempdir().expect("non-repository directory");
+    let home = Home::new();
+    for args in [&[][..], &["list"][..]] {
+        let output = home.wt(dir.path(), args);
+        assert_eq!(output.status.code(), Some(1));
+        assert!(output.stdout.is_empty());
+        assert_eq!(
+            String::from_utf8_lossy(&output.stderr).trim(),
+            "Error: This directory is not inside a Git repository. Change to a repository or one of its worktrees, then run wt again."
+        );
+    }
+}
+
+#[test]
 fn list_output_is_the_redesigned_table() {
     let repo = tempfile::tempdir().expect("create temp dir");
     let main = repo.path().join("main");

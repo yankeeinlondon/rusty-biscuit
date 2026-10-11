@@ -68,7 +68,7 @@ async fn run_interactive(repo_scope: bool) -> Result<()> {
 
     // Phase 0: Check for existing global config in repo mode
     if repo_scope {
-        let global_config = dirs::home_dir()
+        let global_config = biscuit_file::home_dir()
             .map(|h| h.join(".claudine").join("config.json"))
             .unwrap_or_else(|| PathBuf::from("~/.claudine/config.json"));
 
@@ -161,7 +161,7 @@ async fn run_interactive(repo_scope: bool) -> Result<()> {
         None
     } else {
         let scope = ResourceScope::User;
-        let home_dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from("~"));
+        let home_dir = biscuit_file::home_dir().unwrap_or_else(|| PathBuf::from("~"));
         let mut canonical = CanonicalProviderSettings::default();
         for resource in LinkableResource::ALL {
             if let CanonicalSelection::Selected { provider, .. } = select_canonical_provider(
@@ -204,7 +204,7 @@ async fn run_interactive(repo_scope: bool) -> Result<()> {
     let config_path = if repo_scope {
         repo_root.join(".claudine").join("config.json")
     } else {
-        dirs::home_dir()
+        biscuit_file::home_dir()
             .unwrap_or_else(|| PathBuf::from("~"))
             .join(".claudine")
             .join("config.json")
@@ -282,7 +282,7 @@ fn load_existing_init_config(
     repo_scope: bool,
     repo_root: &std::path::Path,
 ) -> Option<ClaudineConfig> {
-    let home = dirs::home_dir()?;
+    let home = biscuit_file::home_dir()?;
     let user_config = home.join(".claudine").join("config.json");
     let repo_config = repo_root.join(".claudine").join("config.json");
 
@@ -385,7 +385,7 @@ async fn run_quick(repo_scope: bool) -> Result<()> {
         let repo_root = resolve_repo_root(&cwd);
         repo_root.join(".claudine").join("config.json")
     } else {
-        dirs::home_dir()
+        biscuit_file::home_dir()
             .unwrap_or_else(|| PathBuf::from("~"))
             .join(".claudine")
             .join("config.json")
@@ -484,7 +484,7 @@ fn default_config(repo_scope: bool) -> Result<ClaudineConfig> {
         let cwd = std::env::current_dir()?;
         let repo_root = resolve_repo_root(&cwd);
         let scope = ResourceScope::User;
-        let home_dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from("~"));
+        let home_dir = biscuit_file::home_dir().unwrap_or_else(|| PathBuf::from("~"));
         let preference = ranked_provider_preferences(&installed_providers, &[]);
         let mut canonical = CanonicalProviderSettings::default();
         for resource in LinkableResource::ALL {

@@ -74,6 +74,43 @@ modules:
 test *args="":
     @just _test_workspace {{ args }}
 
+# The internal `prompts/` folders (root, `darkmatter/`, `claudine/`) are never
+# tested by CI or `just test`. This schema-validates every prompt with
+# darkmatter's `md`, then runs each package's `prompt-tests` targets. A prompt
+# may be a draft, so failures are informational: the recipe reports them and
+# exits 0.
+# Opt-in tests of the internal prompt folders (informational, never CI)
+test-prompts:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    failed=()
+    step() {
+        local name="$1"
+        shift
+        echo
+        echo "── ${name}"
+        "$@" || failed+=("${name}")
+    }
+    validate() {
+        cargo build --quiet -p darkmatter-cli --bin md || return
+        local md
+        md="$(cargo metadata --format-version 1 --no-deps | jq -r .target_directory)/debug/md"
+        mapfile -t prompts < <(git ls-files prompts darkmatter/prompts claudine/prompts | grep '\.md$')
+        "${md}" schema validate --quiet "${prompts[@]}"
+    }
+    step "schema validation" validate
+    step "claudine" cargo nextest run -p claudine -F prompt-tests -E 'test(/shipped_implement_plan_/)'
+    step "claudine-cli" cargo nextest run -p claudine-cli -F prompt-tests,test-fixtures --test prompts
+    step "claudine-cli L2" just _test_l2 claudine-cli \
+        --features terminal-tests,test-fixtures,prompt-tests --test level2 shipped_implement
+    step "darkmatter" cargo nextest run -p darkmatter -F prompt-tests --test prompts
+    echo
+    if (( ${#failed[@]} )); then
+        echo "Prompt tests failed (informational; prompts may be drafts): ${failed[*]}"
+    else
+        echo "Prompt tests passed."
+    fi
+
 # Verify that every package-area test recipe preserves Ctrl+C as exit 130.
 check-test-interrupts:
     @just _check_test_interrupts
