@@ -32,7 +32,8 @@ packages:
     - claudine-gen
 related:
     - 2026-09-29-steering-pipeline
-    - 2026-09-27-sequence-improvements
+    - 2026-10-24-sequence-containers
+    - 2026-10-26-task-inputs-and-providers
     - 2026-09-18-edit-integration
     - 2026-09-08-steering
     - 2026-07-02-provider-metadata
@@ -146,7 +147,7 @@ prompt and stops before the researcher launches, so no lifecycle event fires.
 | Three recipes ran `cargo run -p claudine-cli`, which fails because the package has four binaries | Fixed |
 | 20 of the 22 fleet prompts reported a failure with `err.message`, which is not a field; the reason printed empty | Fixed; the field is `err.msg` |
 | 17 of the 21 fleet prompts accept any document dated today; only 4 validate the contract | Open |
-| A sequence plans one researcher before any step exists, so a prompt cannot choose a researcher per provider | Open; described in `2026-09-27-sequence-improvements` |
+| A sequence plans one researcher before any step exists, so a prompt cannot choose a researcher per provider | Open; described in `2026-10-26-task-inputs-and-providers` |
 
 ### The refresh is not turnkey
 
@@ -394,7 +395,7 @@ uses the same means: sequences, lifecycle events, and the expression engine.
 A Rust command is not built.
 
 Claudine cannot carry the whole refresh yet. Improvements to sequences and
-lifecycle events are under way in `2026-09-27-sequence-improvements` and
+lifecycle events are under way in `2026-10-24-sequence-containers` and
 related work. Until they land, `just research <topic>` carries the research
 stage, and the other stages are run by hand.
 
@@ -411,7 +412,7 @@ in the reasoning-level runs of 2026-09-29.
 | Skip a provider that is current | Yes, in `initialize` | Verified |
 | Write a stamp into a document | Yes, inside the repository | Verified |
 | Read a value from another document's frontmatter | Yes, `frontmatter(file, key)` | Verified |
-| Choose the researcher for each provider | No. One agent is planned before any step exists | Verified; described in `2026-09-27-sequence-improvements` |
+| Choose the researcher for each provider | No. One agent is planned before any step exists | Verified; described in `2026-10-26-task-inputs-and-providers` |
 | Set reasoning effort | No. It is passed on the command line, in each agent's spelling | Verified |
 | Run several researchers at once over one roster | No. Three runs are started by a recipe | Verified |
 | Cover for a researcher at its usage limit | No. The recipe starts the covering runs | Verified |

@@ -1,5 +1,5 @@
 kind: schema
-# Draft function contracts for review during 2026-09-16-expression-type-system.
+# Draft function contracts for review during 2026-10-28-schema-enhancements.
 # These declarations target the shared argument-conversion layer, not today's
 # runtime. M1 adopts shared conversions; M2 rejects implicit null propagation.
 # Behavior metadata carries the settled exceptions shared by runtime and DMLS.

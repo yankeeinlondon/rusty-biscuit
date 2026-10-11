@@ -11,7 +11,7 @@ completed_phases:
   - 1
 blocked_phases:
   - phase: 4
-    on: the sequence and lifecycle improvements of 2026-09-27-sequence-improvements
+    on: the sequence and lifecycle work of 2026-10-24-sequence-containers through 2026-10-26-task-inputs-and-providers
   - phase: 6
     on: 2026-09-28-content-policy
 ---

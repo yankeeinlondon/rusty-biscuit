@@ -1,5 +1,5 @@
 //! Differential evidence against production APIs; the candidate model imports no Claudine types.
-#[path = "../../../../darkmatter/features/2026-09-22-lifecycle-events/spike/model.rs"]
+#[path = "../../../features/2026-10-27-darkmatter-lifecycle-ownership/spike/model.rs"]
 mod model;
 
 use claudine::composition::lifecycle::actions::RetryBackoff;

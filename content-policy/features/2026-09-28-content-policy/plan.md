@@ -6,7 +6,7 @@ agent: claude/opus
 yolo: true
 spec: 2026-09-28-content-policy
 depends-on:
-    - 2026-09-28-recursive-schema-types
+    - 2026-10-29-recursive-schema-types
 source_files_during_phase_2:
     - content-policy/lib/src/lib.rs
     - content-policy/lib/src/model.rs
