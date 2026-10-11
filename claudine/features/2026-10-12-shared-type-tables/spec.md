@@ -30,6 +30,13 @@ reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-11
 review_iterations: 0
 human_review: false
+message_to_agent: |-
+    Phase 1 (analysis only) is recorded in implementation-log.md: copy-site line numbers, invariants, coverage map, and baseline (darkmatter `just test` 9154/9154 passed, 11 skipped; `just lint` clean on macOS).
+    Points for Phase 2:
+    - The root copy in `expand_document_imports` has two arms: `shape.properties.clone()` for Single, and an empty `IndexMap::new()` for Union. Both must become `Arc`s, still after the `schema_has_imports` early return.
+    - The missing-name error in `expand_import` says "top-level `$schema:` entries are its named types". That is literal error text: keep it unchanged. Fix only the `Namespace` and field doc comments to mention `kind: schema` / `types`.
+    - Existing tests already cover both envelopes as single-use import targets (`lib/tests/l1/suggest_constraint_phase4.rs::named_imports_share_pure_and_tagged_mapping_namespaces`) and dependency dedup (`multiple_imports_from_same_file_resolve_and_dedup`). The real gaps are allocation identity (private `resolve_namespace` tests with `Arc::ptr_eq`) and use-site independence (one type imported twice with a modifier on one use) for cross-file, root `@this`, and `@this` inside an imported file, across both envelopes.
+    - The worktree has unrelated uncommitted darkmatter changes from 2026-10-11-schema-loader-yaml-spellings. Do not touch them; none are in `resolve.rs`.
 pipeline_step: 2
 related:
     - 2026-10-29-recursive-schema-types

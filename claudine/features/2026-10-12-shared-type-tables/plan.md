@@ -4,6 +4,11 @@ created: 2026-10-11
 phase: 1
 agent: codex/gpt-6.1-sol
 yolo: true
+source_files_during_phase_1: []
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+packages: []
 ---
 
 # Shared Named-Type Tables Implementation Plan
@@ -56,7 +61,7 @@ accurately.
 This wave runs sequentially before implementation. All paths below are relative
 to the repository root.
 
-- [ ] **Map ownership**
+- [x] **Map ownership**
   - Inspect `darkmatter/lib/src/markdown/schemas/resolve.rs`: `Namespace`,
     `CachedNamespace`, `expand_document_imports`, `resolve_namespace`,
     `load_named_types`, and the selected-definition clone in import expansion.
@@ -67,7 +72,7 @@ to the repository root.
     cache lookup, canonical cache keys, imported-file base directories,
     request-scoped resolution context, schema roots, cycle stack, and depth cap.
 
-- [ ] **Map coverage**
+- [x] **Map coverage**
   - Inventory tests in the resolver's existing private test modules, including
     `schema_plus_phase1` and `multiple_imports_from_same_file_resolve_and_dedup`,
     plus standalone-envelope and shipped-schema corpus coverage.
@@ -80,7 +85,7 @@ to the repository root.
     conventions; construct request context from fixture inputs and avoid
     process-wide environment changes or new dependencies.
 
-- [ ] **Capture baseline**
+- [x] **Capture baseline**
   - Run `just test` from `darkmatter/` before source changes and save its result
     in the implementation log. Record pre-existing failures separately.
   - Record the existing resolver/corpus test identities so final validation
