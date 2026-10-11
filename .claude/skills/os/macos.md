@@ -374,3 +374,12 @@ When walking shared-cache dependencies, `dyld_info -linked_dylibs` marks
 `/usr/lib/libobjc-env.dylib` this way; treating it as a required library falsely
 rejects valid programs. Traverse required dependencies and preserve the weak
 import distinction.
+
+## Stale Homebrew library search paths
+
+A cached `libgit2-sys` build script can retain a removed versioned Cellar path
+when Homebrew updates libgit2. Linking then fails with `library 'git2' not found`
+even though `/opt/homebrew/opt/libgit2/lib` contains the installed library.
+For a scoped local verification run, `LIBRARY_PATH=/opt/homebrew/opt/libgit2/lib`
+lets the linker find the current library without changing repository code or
+modifying cached artifacts. This was verified with the Sniff L1 suite.

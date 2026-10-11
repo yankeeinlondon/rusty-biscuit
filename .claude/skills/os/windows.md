@@ -411,9 +411,18 @@ which processes hold it.
   not anything holds the path (6 ms at 100k handles). Calls scale nearly
   linearly across threads up to the core count, so walk large trees in
   parallel and in priority order.
+- **Shipped Sniff behavior.** `filesystem/query/win32_paths.rs` makes this
+  file-side query on regular-file/directory entries retained by the existing
+  tree walk. It reads file identity through the same opened handle and
+  rejects replacements, uses pointer-aligned response storage, and joins at
+  most eight scoped workers with the request collector installed. A holder
+  first seen after enumeration is reopened and reconfirmed through the file
+  side before associating a creation token; unconfirmed evidence stays
+  identity-uncertain. The caller exclusion remains visible in the docs.
 - **Never open a pipe path to probe it.** Opening `\\.\pipe\…`, even
   `GetFileAttributesW` on it, connects to a waiting server as a client.
-  Take the entry type from the directory walk.
+  Take the entry type from the directory walk. Sniff also rejects direct local,
+  UNC, and GLOBALROOT named-pipe namespaces before root metadata lookup.
 - **Restart Manager (`RmGetList`) is a worse wrapper for the same question.**
   It has no directory or long-path support, it is slower per path, and a
   missing path returns success with an empty list.

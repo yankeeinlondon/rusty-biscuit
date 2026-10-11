@@ -276,3 +276,16 @@ that is the host, not the test.
 to every remote run, so `BISCUIT_TEST_REQUIRED_BACKENDS=tmux just cross-check
 claudine-cli --os wsl --features terminal-tests level2_` cannot pass by
 skipping.
+
+## Source snapshots and stale archive binaries
+
+A tar overlay preserves the source host's modification times. If those times
+precede a package's existing build artifacts, Cargo can reuse an older test
+binary for a different feature selection even though a preceding area test
+built the new code. This occurred in a private Sniff snapshot: the area run
+included a new retention test, but the library-only archive omitted it. Touch
+the overlaid source files using the guest clock (or clean that package in the
+private target) before building the archive, and compare the expected test
+names with its actual PASS listing. Rebuilding after touching the package's
+query sources included and passed the missing test. `--extract-to` also needs
+an existing destination directory.
