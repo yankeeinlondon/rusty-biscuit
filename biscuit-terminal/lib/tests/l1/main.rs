@@ -45,6 +45,7 @@ mod prelude_exports;
 mod progress_parity;
 mod prose_cells_parity;
 mod prose_containers;
+mod prose_destination_syntax;
 mod prose_destinations;
 mod prose_documented_tags;
 mod prose_grammar;

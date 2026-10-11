@@ -236,7 +236,7 @@ are inline code on every target.
 
 | Markdown | Result | Notes |
 |---|---|---|
-| `[desc](ref)` | a link, `<a href="ref">desc</a>` | The URL is protected from later phases, so `_` in a URL is not emphasis |
+| `[desc](ref)` | a link, `<a href="ref">desc</a>` | The destination is literal text: `_`, backticks, and `<!-- -->` in a URL are kept as written (see [Opaque regions](#opaque-regions)) |
 | `**text**` | bold | Only the doubled-asterisk form is bold |
 | `_text_` | italics | Only the single-underscore form is italic |
 | `` `code` `` | inline code | Nothing inside is interpreted |
@@ -322,6 +322,7 @@ left-to-right pass sets these regions aside, taking whichever starts first:
 | Code span | `` `**x**` `` | the span value (see [Code spans](#code-spans)) |
 | `<code-block>` body | `<code-block>**x**</code-block>` | everything up to the first `</code-block>`, exactly |
 | Quoted tag attribute | `<a href="https://e.io/a>**b**">t</a>` | the attribute value, with only the [`quoted_attr`](#escape-mechanism) escapes resolved |
+| Markdown link destination | ``[x](https://e.io/a`y`b<!-- -->c)`` | the destination exactly, with only `\(` and `\)` resolved |
 | HTML comment | `a<!-- **x** -->b` | nothing: the comment adds no node, so this is the text `ab` |
 
 Nothing inside a region is interpreted as Prose: no emphasis, link, tag,
@@ -334,6 +335,22 @@ unchanged. A `<code-block>` with no closing tag takes the rest of the input.
 for a fenced block. An escaped `\<code-block>` is literal text, and its body is
 ordinary prose.
 
+A Markdown link destination is the text between the `(` right after a link
+label's closing `]` and the first `)` not written `\)`. Code spans, comments,
+and `<code-block>` tags inside it are destination text, while the label is
+still ordinary prose:
+
+| Input | Link destination on every target | Label |
+|---|---|---|
+| ``[x](https://x.io/a`y`b) tail`` | ``https://x.io/a`y`b`` | `x` |
+| `[x](https://x.io/a<!-- -->b) tail` | `https://x.io/a<!-- -->b` | `x` |
+| ``[`code`](https://x.io/a`y`b)`` | ``https://x.io/a`y`b`` | inline code `code` |
+
+The destination is set aside only where a link is read. In `Prose`, a blank
+line ends a label first, so in `[a`, blank line, ``b](u`y`)`` there is no
+link and `y` is inline code; `InlineProse` has no paragraphs and reads one
+link to `` u`y` ``.
+
 An HTML comment is `<!-->`, `<!--->`, or `<!--` up to the first `-->`, as in
 CommonMark. It has no visible content, which is what lets `Prose` and
 `InlineProse` read back their own Markdown: two code spans that would touch
@@ -342,8 +359,8 @@ and `b` with nothing between them. A paragraph holding only comments is no
 paragraph. Like a code span, a comment never crosses a blank line or a fence
 line, and an unclosed `<!--` is literal text. Comment-shaped text stays
 content where the grammar does not read a comment: inside a code span, a
-fenced block, a `<code-block>` body, a recognized tag's quoted attribute, or
-after an escape. `Prose::escape_text("<!-- x -->")` is `\<!-- x --\>`, which
+fenced block, a `<code-block>` body, a recognized tag's quoted attribute, a
+Markdown link destination, or after an escape. `Prose::escape_text("<!-- x -->")` is `\<!-- x --\>`, which
 shows `<!-- x -->`.
 
 This also holds for the tag that encloses a region. Tag text inside a quoted

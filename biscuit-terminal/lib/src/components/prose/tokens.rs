@@ -391,6 +391,11 @@ fn parse_nodes(content: &str, lifted: &[Lifted], opts: InlineOptions) -> Vec<Ren
                 if matches!(entry, Lifted::Comment) {
                     continue;
                 }
+                // A destination no link consumed is the text it was.
+                if let Lifted::Destination { source, .. } = entry {
+                    text.push_str(source);
+                    continue;
+                }
                 flush_render_text(&mut text, &mut nodes);
                 match entry {
                     Lifted::Span(value) => nodes.push(RenderNode::inline_code(value.clone())),
@@ -401,7 +406,7 @@ fn parse_nodes(content: &str, lifted: &[Lifted], opts: InlineOptions) -> Vec<Ren
                         &mut nodes,
                     ),
                     Lifted::CodeBody(body) => push_code(None, body, opts, &mut nodes),
-                    Lifted::Comment => {}
+                    Lifted::Comment | Lifted::Destination { .. } => {}
                 }
             }
             continue;
