@@ -277,11 +277,13 @@ let exported = file.exported_symbols()?;     // here: `Point` and `origin`
 ```
 
 An `ImportSymbol` has the local `name`, the `original_name` and `alias` when
-the import renames, and the `source` module. Its `is_reexport` flag marks a
-Rust `pub use` (any visibility on the `use`); other languages always report
-`false`. That flag is the only re-export signal: re-exports are detected for
-Rust `pub use` only, so filter `imported_symbols()` on `is_reexport` to list
-them. Exports come from export
+the import renames, and the `source` module. Its `is_reexport` flag is
+`true` for an import that a `syntax` or `declared` entry of the file's
+re-export report forwards (Rust `pub use`, `pub(crate) use`, a TypeScript
+`export { x }` of an import, a Python `from m import a as a`), in every
+language the report covers; a Rust `pub(self) use` is not a re-export. An
+import that is only exposed at runtime (a Python import with no `__all__`)
+is not flagged. `TreeFile::reexports()` returns the report itself. Exports come from export
 syntax (Rust `pub` at module level, JavaScript `export`, and so on), not
 from a `Public` visibility level: `Point::norm` above is public but not
 exported. The same imports and exports are on every query result as

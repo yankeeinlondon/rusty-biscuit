@@ -217,7 +217,11 @@ An entry for `shapes.rs` after `hug functions`, trimmed:
   Each import also carries a required `reexported` boolean, which may be
   `true` only under that capability. An entry that has a report without the
   capability, the capability without a report, or a marker without the
-  capability is refused and recomputed.
+  capability is refused and recomputed. So is a report whose well-typed
+  content no analysis could produce: a state that disagrees with the
+  language or with its limits, spans outside the file, entries out of
+  source order, names that contradict the form, an `import_span` that is not
+  an import, or a marker that disagrees with the entries.
 
 An entry is internally consistent by construction, and the reader checks it:
 an entry whose contents contradict its coverage is refused. The

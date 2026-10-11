@@ -34,8 +34,12 @@ the output changed; the linked pages describe the current behavior.
 ## Unused library APIs removed
 
 - **`TreeFile::reexported_symbols()` is removed.** It always returned an
-  empty list. Re-exports are detected for Rust `pub use` only: filter
-  `imported_symbols()` on `ImportSymbol::is_reexport`.
+  empty list. Use `TreeFile::reexports()` for the forwarding report, or
+  filter `imported_symbols()` on `ImportSymbol::is_reexport`.
+- **`is_reexport` and `unused-import` follow the re-export report.** The flag
+  is decided from forwarding entries in every language, not from a Rust
+  `visibility_modifier`, so a Rust `pub(self) use` is no longer a re-export
+  and loses its `unused-import` exemption.
 - **The query drift module is removed** (`check_query_drift`,
   `check_all_drift`, `summarize_drift`, `expected_upstream_revisions`,
   `DriftReport`, `DriftItem`). It only compared two revision strings.

@@ -150,7 +150,7 @@ hug symbols --changed                         # only files with Git changes
 | `--scope item\|member\|local` | records in that scope | replaces the default; `symbols` defaults to `item` and `member`, the other commands to every scope |
 | `--all-scopes` | every scope | conflicts with `--scope` |
 | `--visibility LEVEL` | records with exactly that level | `public`, `protected`, `private`, `internal`, `package`, `crate`, `module_private`, `protected_internal`, `private_protected`, `unknown`; `unknown` matches only Unknown, never public or private |
-| `--exported` | exported records (`is_exported`, re-exports included) | independent of `--visibility`: a public method is usually not a module export |
+| `--exported` | exported records (`is_exported`, declarations only; synthetic prelude records under `--prelude`) | independent of `--visibility`: a public method is usually not a module export |
 | `--prelude` | the names a package re-exports from its Rust prelude | see [`--prelude`](./symbol-reports/selectors.md#--prelude) |
 | `--in PATTERN` | members of a container whose name matches | the immediate container (`container_name`); a qualified pattern matches the enclosing declaration's qualified name |
 | `--exclude-tests` / `--tests-only` | non-test / test-only records | mutually exclusive; uses the test rules in [Deprecation and test flags](./symbol-kinds-and-visibility/documentation-flags-and-metrics.md#deprecation-and-test-flags) |

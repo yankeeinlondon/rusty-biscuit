@@ -77,9 +77,12 @@ other modules. `coverage.state` is `complete`, `limited` or `not_applicable`
 a negative only when the state is `complete`. The report is absent unless it
 was asked for; `TreeFile::reexports()` always computes it.
 
-> **Planned:** the per-language extractors. Until a language's extractor
-> lands, its report is `limited` with a whole-file `grammar_gap` limit and no
-> entries.
+Every other language has an extractor that reads only the analyzed file. It
+reports the language's dedicated forwarding syntax and its bounded static
+conventions, and it limits coverage (never a `complete` negative) where the
+file uses a form it cannot judge, such as a computed export list or syntax the
+pinned grammar cannot parse. A C++20 module file is `limited` over the whole
+file with the `grammar_gap` reason.
 
 `occurrences` and `reference_coverage` are described in
 [Scope-Aware References](../references.md).

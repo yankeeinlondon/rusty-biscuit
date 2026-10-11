@@ -89,7 +89,7 @@ Semantic rules, for every language:
 | Rule | Finds | `hug` default |
 |------|-------|---------------|
 | `dead-code` | Statements after an unconditional `return`, `throw`, `break`, `panic!` or process exit in the same block | on |
-| `unused-import` | An import never used in the file (Rust `pub use` re-exports are exempt) | off (low confidence) |
+| `unused-import` | An import never used in the file (an import a re-export entry forwards is exempt: Rust `pub use` but not `pub(self) use`, a TypeScript `export { x }`, a Python `__all__` member) | off (low confidence) |
 | `undefined-symbol` | A reference to a name that is not declared, imported or a builtin | experimental |
 | `unused-symbol` | A declaration never referenced or exported | experimental |
 | `undefined-module` | A qualified reference whose qualifier is not declared or imported | experimental |

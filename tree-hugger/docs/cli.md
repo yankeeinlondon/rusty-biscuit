@@ -91,7 +91,7 @@ ignores case.
 - `--kind <KIND>` - Only these kinds (snake_case: `function`, `type_alias`, `enum_variant`, …); narrows the command's kinds, never widens them
 - `--scope item|member|local`, `--all-scopes` - Only these scopes; `symbols` hides locals (`item` and `member` by default), the other commands show every scope
 - `--visibility <LEVEL>` - Exactly this visibility (`public`, `crate`, `private`, …, `unknown`)
-- `--exported` - Only exported declarations (re-exports included)
+- `--exported` - Only exported declarations (declarations only; forwarding is in `--json-full`'s `reexports`, and `--prelude` adds synthetic Rust prelude records)
 - `--prelude` - Only symbols explicitly exported by the prelude module
 - `--in <PATTERN>` - Only members of a matching container (`classes`: the container itself)
 - `--exclude-tests`, `--tests-only` - Drop, or keep only, test code and helpers in test files
