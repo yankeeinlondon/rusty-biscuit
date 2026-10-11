@@ -4,7 +4,7 @@ name: docs-audit-code-defects
 spec: spec.md
 total_phases: 4
 created: 2026-10-11
-phase: 1
+phase: 3
 agent: codex/default
 yolo: true
 source_files_during_phase_1:
@@ -12,8 +12,50 @@ source_files_during_phase_1:
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - tree-hugger/lib/src/file/tree_file.rs
+  - tree-hugger/lib/src/file/mod.rs
+  - tree-hugger/lib/src/queries/mod.rs
+  - tree-hugger/lib/src/rule_registry.rs
+  - tree-hugger/lib/queries/php/lint.scm
+  - tree-hugger/lib/tests/l1/main.rs
+  - tree-hugger/lib/tests/l1/lint_diagnostics.rs
+  - tree-hugger/lib/tests/l1/lint_severity_registry.rs
+  - tree-hugger/lib/tests/l1/rule_registry_consistency.rs
+  - tree-hugger/lib/tests/l1/symbols_cache.rs
+  - tree-hugger/lib/tests/fixtures/lint/undefined_symbol.py
+  - tree-hugger/cli/Cargo.toml
+  - tree-hugger/cli/tests/cli.rs
+  - tree-hugger/cli/tests/lint_severity_agreement.rs
+  - tree-hugger/cli/tests/symbols/cache_upgrade.rs
+  - tree-hugger/cli/tests/fixtures/golden/symbols.json
+  - tree-hugger/cli/tests/fixtures/golden/symbols.jsonl
+docs_updated_during_phase_2:
+  - tree-hugger/docs/library/diagnostics.md
+  - tree-hugger/docs/cli.md
+  - tree-hugger/docs/release-notes.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+  - .claude/skills/tree-hugger/diagnostics.md
+  - .claude/skills/tree-hugger/query-system.md
+source_files_during_phase_3:
+  - tree-hugger/lib/src/file/tree_file.rs
+  - tree-hugger/lib/src/lib.rs
+  - tree-hugger/lib/src/queries/mod.rs
+  - tree-hugger/lib/src/queries/drift.rs
+  - tree-hugger/lib/tests/l1/phase6_neovim_query_reuse.rs
+  - tree-hugger/lib/tests/l1/tree_file.rs
+docs_updated_during_phase_3:
+  - tree-hugger/docs/library.md
+  - tree-hugger/docs/queries.md
+  - tree-hugger/docs/release-notes.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+  - .claude/skills/tree-hugger/api-reference.md
+  - .claude/skills/tree-hugger/query-system.md
 packages:
   - tree-hugger
+  - tree-hugger-cli
 ---
 
 # Implementation plan: docs audit code defects
@@ -114,7 +156,7 @@ design ruling or performance spike blocks implementation.
 
 ### Wave 2: Concurrent implementation tasks
 
-- [ ] **Unify rule policy**
+- [x] **Unify rule policy**
   - Own `lib/src/file/tree_file.rs`, `lib/src/queries/mod.rs`,
     `lib/src/rule_registry.rs`, and `lib/src/file/mod.rs`. Replace all six
     `severity_for_rule` calls with registry severity lookup; remove that
@@ -138,7 +180,7 @@ design ruling or performance spike blocks implementation.
     Provide emit-capable fixture cases so unexercised rules cannot silently
     pass. Check unknown-ID fallback and message-table IDs, resolving aliases.
     Inspect message arms as needed without adding public API only for a test.
-- [ ] **Repair PHP queries**
+- [x] **Repair PHP queries**
   - Own `lib/queries/php/lint.scm` and PHP regressions in
     `lib/tests/l1/lint_diagnostics.rs`. Depend on the Phase 1 sample parse.
     Use anchored case-insensitive `#match?` predicates for `exec` and `eval`.
@@ -157,7 +199,7 @@ and existing lint test module. Consistency tests may be red until both land.
 
 ### Wave 3: Sequential integration and delivery
 
-- [ ] **Verify cache agreement**
+- [x] **Verify cache agreement**
   - Rewrite the Phase 1 baseline for final `Warning` behavior. Add a revision
     `"50"` `StaleRevision` row in `cli/tests/symbols/cache_upgrade.rs`, using
     the existing computed fingerprint mechanism and test-owned temp directory.
@@ -177,7 +219,7 @@ and existing lint test module. Consistency tests may be red until both land.
   - Check `hug lint --list-rules` omits all three removed IDs. Prove consistency
     guards reject a query-only or registry-only addition, using a test-local
     perturbation or a temporary edit restored before delivery.
-- [ ] **Document diagnostic behavior**
+- [x] **Document diagnostic behavior**
   - Update `docs/library/diagnostics.md`: explain undefined-symbol plainly,
     remove the library-Error discrepancy and never-emitted-rule claims, and
     correct eval/exec languages, versions, PHP semantics, and namespace limits.
@@ -187,7 +229,7 @@ and existing lint test module. Consistency tests may be red until both land.
   - Add release-note entries for severity agreement, rule removals, PHP exec
     findings, and newly detected case-insensitive PHP eval calls. Defer the
     removed-name warning claim until Change 3 supplies that behavior.
-- [ ] **Validate first change**
+- [x] **Validate first change** _(gates passed; the signed commit is made by the separate commit process, as this session's instructions forbid committing — see the implementation log)_
   - From `tree-hugger/`, run `just test` and `just lint` for both packages.
     Record commands/results and map F1/F2 acceptance items to test evidence.
     Repair failures and rerun affected checks; never use `cargo test` or
@@ -207,7 +249,7 @@ and stale caches cannot restore old severity. Change 1 is signed and verified.
 
 ### Wave 4: Concurrent removal tasks
 
-- [ ] **Remove placeholder method**
+- [x] **Remove placeholder method**
   - Own the `TreeFile::reexported_symbols()` removal and its obsolete docs/
     imports. Preserve `ImportSymbol::is_reexport` and existing Rust import
     extraction; do not introduce its replacement feature.
@@ -215,7 +257,7 @@ and stale caches cannot restore old severity. Change 1 is signed and verified.
     `pub use a::B;` and `use c::D;`: only B has `is_reexport == true`.
   - Update `docs/library.md` and skill `api-reference.md` to explain the
     remaining Rust-only signal without promising all-language coverage.
-- [ ] **Remove drift module**
+- [x] **Remove drift module**
   - Own deletion of `lib/src/queries/drift.rs`, `pub mod drift`, and crate-root
     exports of `DriftItem`, `DriftReport`, `check_query_drift`,
     `check_all_drift`, and `summarize_drift`; remove
@@ -233,7 +275,7 @@ wiring/query guidance. They can run concurrently after Change 1 is delivered.
 
 ### Wave 5: Sequential removal validation
 
-- [ ] **Verify removal coverage**
+- [x] **Verify removal coverage** _(gates passed; the signed commit is made by the separate commit process, as this session's instructions forbid committing — see the implementation log)_
   - Integrate both tasks and add one release-note line per removed API group.
     Search exact removed symbol names across `tree-hugger/lib/`,
     `tree-hugger/cli/`, `tree-hugger/docs/`, and the tree-hugger skill.

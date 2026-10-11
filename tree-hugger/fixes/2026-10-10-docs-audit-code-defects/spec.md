@@ -38,25 +38,23 @@ implemented: false
 implemented_by: claude/opus
 human_review: false
 message_to_agent: |-
-    Phase 1 (readiness) is done; see the Phase 1 section of implementation-log.md.
-    (1) lib/tests/l1/symbols_cache.rs now has
-    `a_warm_hit_replays_the_stored_diagnostic_severity`. It is deliberately
-    severity-neutral (it asserts a warm hit serves whatever severity is stored,
-    and replays an edited `Info`), so it stays valid after the fix. A one-off
-    temporary assertion proved revision 50 stores and replays `Error` for both
-    `undefined-symbol` findings (`compute_total`, `items`); it was removed and
-    never left in the tree. In Phase 2, add the final assertion that the
-    stored/served severity is `Warning`, plus the revision-50 cache-upgrade row.
-    (2) PHP grammar: bare `exec(...)` is `function: (name)`; `\exec(...)` is
-    `function: (qualified_name (name))` with NO `prefix:` field (an anonymous
-    `\` token precedes the name); `Foo\exec` is `(qualified_name prefix:
-    (namespace_name (name)) (name))`; `namespace\exec` is `(relative_name
-    (name))`; `EXEC`/`eval` are plain `(name)`. Discriminator for the global
-    form: `(qualified_name !prefix (name) @n)`.
-    (3) Registry has `has_rule` (alias-aware), `get` (alias-aware, returns
-    Option) and `get_or_default` (unknown -> Warning; do NOT use it).
-    (4) Selector assembly is `Command::kind()` in cli/src/main.rs (the only
-    caller of `parse_selectors`, called once from main); warn there.
+    Phases 2 and 3 (Changes 1 and 2) are implemented and both gates pass;
+    neither is committed (this pipeline commits separately), so the working
+    tree holds both. See "## Phase 2" and "## Phase 3" in
+    implementation-log.md.
+    (1) EXTRACTOR_REVISION is "51" and was not bumped for Change 2 (no
+    extracted record changed). Change 3 (F4 license, F6/F7 CLI) changes no
+    extracted record either; provenance is not part of a cached record.
+    (2) docs/queries.md now has a "### Refreshing a vendored query"
+    section where "### Drift" was; the F4 license wording edit is in the
+    provenance table above it in the same page.
+    (3) phase6_neovim_query_reuse::all_queries_compile_with_provenance now
+    requires a provenance record with a nonempty upstream_revision for every
+    (language, query kind); keep it when extending the F4 provenance test.
+    (4) Release notes have a new top section "Unused library APIs removed";
+    add Change 3's lines as their own section above it.
+    (5) Earlier Change 1 notes still apply: SEMANTIC_RULE_IDS is public in
+    tree_hugger::file::tree_file; use RuleRegistry::has_rule for F7.
 ---
 
 # Six code defects found while auditing the Tree Hugger docs
