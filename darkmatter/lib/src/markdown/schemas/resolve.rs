@@ -25,6 +25,7 @@ use std::{
     collections::{BTreeSet, HashMap},
     fs,
     path::{Component, Path, PathBuf},
+    sync::Arc,
 };
 
 use biscuit_file::{FileReference, FileReferenceKind, FileResolutionContext};
@@ -864,11 +865,18 @@ fn parse_raw_json_schema(path: &Path, bytes: &[u8]) -> Result<ResolvedSchema, Sc
 //
 // `Name@fileref` inlines the definition of a named type `Name` from the
 // referenced file at the use site (structural substitution). A schema file's
-// top-level `$schema:` entries are its named types; `@this` targets the
+// top-level mapping entries (under `$schema:`, or `types:` in a
+// `kind: schema` document) are its named types; `@this` targets the
 // current file. Postfix composes outward: `Name[]@file` becomes an array of
 // the inlined type, and `Name(constraints)@file` applies constraints to the
 // inlined value. Expansion is eager, bounded, and cycle-checked (named types
 // form a DAG in v1); `to_json_schema` still rejects any import that survives.
+//
+// Each namespace's unexpanded table is parsed once per expansion and shared
+// through an `Arc`: the cache, every later import of that file, and every
+// `@this` hold the same immutable allocation. Only the selected definition is
+// cloned, so each use site expands and modifies its own copy. The sharing
+// ends with `expand_document_imports`; nothing persists across calls.
 
 /// Hard cap on named-type import expansion depth. Mirrors the inline-object
 /// depth cap so import chains cannot bypass the recursion guard indefinitely.
@@ -886,17 +894,19 @@ enum NamespaceKey {
     File(PathBuf),
 }
 
-/// A named-type namespace: the set of top-level `$schema:` entries a file (or
-/// the inline document) exposes for `Name@…` imports, plus the context needed
-/// to resolve relative imports and `@this` inside it.
+/// A named-type namespace: the top-level mapping entries (`$schema:`, or
+/// `types:` under `kind: schema`) a file (or the inline document) exposes for
+/// `Name@…` imports, plus the context needed to resolve relative imports and
+/// `@this` inside it.
 struct Namespace {
     /// Cycle-detection identity for this namespace.
     key: NamespaceKey,
     /// Directory that relative imports authored inside this namespace resolve
     /// against (mirrors `$schema` file-ref resolution).
     base_dir: PathBuf,
-    /// The unexpanded top-level named types (`$schema:` entries).
-    named_types: IndexMap<String, PropertyDef>,
+    /// The unexpanded top-level named types, shared with the namespace cache
+    /// and every other resolution of the same namespace. Never mutated.
+    named_types: Arc<IndexMap<String, PropertyDef>>,
 }
 
 /// Drives eager, bounded, cycle-checked expansion of `Name@file` imports over
@@ -918,7 +928,7 @@ struct ImportEngine {
 
 struct CachedNamespace {
     base_dir: PathBuf,
-    named_types: IndexMap<String, PropertyDef>,
+    named_types: Arc<IndexMap<String, PropertyDef>>,
 }
 
 /// Expands every `Name@file` import in `schema`. `base_dir` and `key` describe
@@ -940,10 +950,11 @@ fn expand_document_imports(
         return Ok((schema, Vec::new()));
     }
     // `@this` resolves against the document's own (unexpanded) named types.
-    let named_types = match &schema {
+    // `schema` is consumed by expansion below, so this is the one copy.
+    let named_types = Arc::new(match &schema {
         SimplifiedSchema::Single(shape) => shape.properties.clone(),
         SimplifiedSchema::Union(_) => IndexMap::new(),
-    };
+    });
     let current = Namespace {
         key,
         base_dir: base_dir.to_path_buf(),
@@ -1148,7 +1159,7 @@ impl ImportEngine {
             return Ok(Namespace {
                 key: current.key.clone(),
                 base_dir: current.base_dir.clone(),
-                named_types: current.named_types.clone(),
+                named_types: Arc::clone(&current.named_types),
             });
         }
         let file_ref =
@@ -1209,10 +1220,10 @@ impl ImportEngine {
             return Ok(Namespace {
                 key: NamespaceKey::File(canonical),
                 base_dir: cached.base_dir.clone(),
-                named_types: cached.named_types.clone(),
+                named_types: Arc::clone(&cached.named_types),
             });
         }
-        let named_types = load_named_types(&path)?;
+        let named_types = Arc::new(load_named_types(&path)?);
         let base_dir = path
             .parent()
             .map(Path::to_path_buf)
@@ -1221,7 +1232,7 @@ impl ImportEngine {
             canonical.clone(),
             CachedNamespace {
                 base_dir: base_dir.clone(),
-                named_types: named_types.clone(),
+                named_types: Arc::clone(&named_types),
             },
         );
         Ok(Namespace {
@@ -3635,5 +3646,220 @@ mod bare_name_phase3 {
     #[test]
     fn _pathbuf_used() {
         let _ = PathBuf::new();
+    }
+}
+
+/// Shared named-type tables: allocation identity through the real resolver,
+/// and use-site independence through public resolution, for both standalone
+/// mapping envelopes as the import target.
+#[cfg(test)]
+mod shared_type_tables {
+    use super::*;
+    use serde_json::json;
+
+    /// Writes `types.yaml` holding `body` (a two-space-indented mapping) as
+    /// either a pure `$schema:` or a tagged `kind: schema` / `types:` envelope.
+    fn write_types(dir: &Path, tagged: bool, body: &str) -> PathBuf {
+        let header = if tagged { "kind: schema\ntypes:\n" } else { "$schema:\n" };
+        let path = dir.join("types.yaml");
+        std::fs::write(&path, format!("{header}{body}")).unwrap();
+        path
+    }
+
+    fn engine(dir: &Path) -> ImportEngine {
+        ImportEngine {
+            stack: Vec::new(),
+            dependencies: BTreeSet::new(),
+            schema_roots: Vec::new(),
+            file_resolution_context: FileResolutionContext::new(dir),
+            namespace_cache: HashMap::new(),
+        }
+    }
+
+    fn root_namespace(dir: &Path, named_types: IndexMap<String, PropertyDef>) -> Namespace {
+        Namespace {
+            key: NamespaceKey::Root,
+            base_dir: dir.to_path_buf(),
+            named_types: Arc::new(named_types),
+        }
+    }
+
+    fn resolve_root(dir: &Path, schema: &str) -> ResolvedSchema {
+        let value: YamlValue = serde_yaml_ng::from_str(schema).unwrap();
+        resolve_yaml_schema(&value, dir, &FileResolutionContext::new(dir))
+            .expect("schema must resolve")
+    }
+
+    // ── Allocation identity ──────────────────────────────────────────────
+
+    #[test]
+    fn first_load_cache_and_later_imports_share_one_table() {
+        for tagged in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let types = write_types(dir.path(), tagged, "  A: 'string(required)'\n  B: number\n");
+            let mut engine = engine(dir.path());
+            let root = root_namespace(dir.path(), IndexMap::new());
+
+            let first = engine.resolve_namespace("./types.yaml", &root).unwrap();
+            let canonical = canonical_path(&types);
+            assert_eq!(first.key, NamespaceKey::File(canonical.clone()));
+            let cached = &engine.namespace_cache[&canonical];
+            assert!(
+                Arc::ptr_eq(&first.named_types, &cached.named_types),
+                "tagged={tagged}: first load and cache entry must share one allocation"
+            );
+
+            // Two later imports, selecting distinct names and spelling the
+            // reference differently, reach the same canonical cache entry.
+            let for_a = engine.resolve_namespace("./types.yaml", &root).unwrap();
+            let for_b = engine.resolve_namespace("types.yaml", &root).unwrap();
+            assert!(for_a.named_types.contains_key("A"), "tagged={tagged}");
+            assert!(for_b.named_types.contains_key("B"), "tagged={tagged}");
+            for later in [&for_a, &for_b] {
+                assert!(
+                    Arc::ptr_eq(&later.named_types, &first.named_types),
+                    "tagged={tagged}: later imports must reuse the first-loaded table"
+                );
+            }
+
+            // Full expansion of both imports keeps that one cached table.
+            let importer: YamlValue =
+                serde_yaml_ng::from_str("x: A@./types.yaml\ny: B@types.yaml\n").unwrap();
+            let schema = parse_yaml_schema(&importer).unwrap();
+            engine.expand_schema(schema, &root).unwrap();
+            assert!(
+                Arc::ptr_eq(&engine.namespace_cache[&canonical].named_types, &first.named_types),
+                "tagged={tagged}: expansion must not replace the cached table"
+            );
+            assert_eq!(engine.dependencies.iter().collect::<Vec<_>>(), vec![&canonical]);
+        }
+    }
+
+    #[test]
+    fn this_from_inline_root_shares_the_root_table() {
+        let dir = tempfile::tempdir().unwrap();
+        let schema: YamlValue = serde_yaml_ng::from_str("name: string\n").unwrap();
+        let SimplifiedSchema::Single(shape) = parse_yaml_schema(&schema).unwrap() else {
+            panic!("mapping schema must parse as a single shape");
+        };
+        let root = root_namespace(dir.path(), shape.properties);
+        let mut engine = engine(dir.path());
+
+        for _ in 0..2 {
+            let this = engine.resolve_namespace("this", &root).unwrap();
+            assert_eq!(this.key, NamespaceKey::Root);
+            assert!(
+                Arc::ptr_eq(&this.named_types, &root.named_types),
+                "`@this` must share the root's table"
+            );
+        }
+        assert!(engine.namespace_cache.is_empty(), "`@this` loads no file");
+        assert!(engine.dependencies.is_empty(), "`@this` records no dependency");
+    }
+
+    #[test]
+    fn this_from_loaded_file_shares_that_files_table() {
+        for tagged in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let types = write_types(dir.path(), tagged, "  name: string\n");
+            let mut engine = engine(dir.path());
+            let root = root_namespace(dir.path(), IndexMap::new());
+            let file = engine.resolve_namespace("./types.yaml", &root).unwrap();
+
+            for _ in 0..2 {
+                let this = engine.resolve_namespace("this", &file).unwrap();
+                assert_eq!(this.key, NamespaceKey::File(canonical_path(&types)));
+                assert!(
+                    Arc::ptr_eq(&this.named_types, &file.named_types),
+                    "tagged={tagged}: `@this` in a file must share that file's table"
+                );
+                assert!(
+                    !Arc::ptr_eq(&this.named_types, &root.named_types),
+                    "tagged={tagged}: a file's table must be distinct from the root's"
+                );
+            }
+        }
+    }
+
+    // ── Use-site independence ────────────────────────────────────────────
+
+    #[test]
+    fn cross_file_type_imported_twice_keeps_each_use_independent() {
+        for tagged in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let types = write_types(dir.path(), tagged, "  name: 'string(required)'\n");
+            let resolved = resolve_root(
+                dir.path(),
+                "primary: 'name(required; not-empty)@./types.yaml -> primary name'\n\
+                 backup: name@./types.yaml\n",
+            );
+            assert_eq!(
+                resolved.json_schema["properties"],
+                json!({
+                    "primary": {"type": "string", "pattern": "\\S", "description": "primary name"},
+                    "backup": {"anyOf": [{"type": "null"}, {"type": "string"}]},
+                }),
+                "tagged={tagged}: only `primary` carries its use-site modifiers"
+            );
+            assert_eq!(resolved.json_schema["required"], json!(["primary"]), "tagged={tagged}");
+            assert_eq!(resolved.imports, vec![canonical_path(&types)], "tagged={tagged}");
+        }
+    }
+
+    #[test]
+    fn root_this_type_imported_twice_keeps_each_use_independent() {
+        let dir = tempfile::tempdir().unwrap();
+        let resolved = resolve_root(
+            dir.path(),
+            "name: 'number(required)'\n\
+             primary: 'name(required; min(1))@this -> primary count'\n\
+             backup: name@this\n",
+        );
+        assert_eq!(
+            resolved.json_schema["properties"],
+            json!({
+                "name": {"type": "number"},
+                "primary": {"type": "number", "minimum": 1, "description": "primary count"},
+                "backup": {"anyOf": [{"type": "null"}, {"type": "number"}]},
+            })
+        );
+        assert_eq!(resolved.json_schema["required"], json!(["name", "primary"]));
+        assert!(resolved.imports.is_empty());
+    }
+
+    #[test]
+    fn this_inside_imported_file_selects_that_files_type() {
+        for tagged in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let types = write_types(
+                dir.path(),
+                tagged,
+                "  name: 'string(required)'\n  wrapper:\n    \
+                 first: 'name(required; not-empty)@this -> first'\n    second: name@this\n",
+            );
+            // The root defines its own, different `name`, so the output shows
+            // which namespace each `@this` selected.
+            let resolved = resolve_root(
+                dir.path(),
+                "name: number\nlocal: 'name(required)@this'\nw: wrapper@./types.yaml\n",
+            );
+            let properties = &resolved.json_schema["properties"];
+            assert_eq!(properties["local"], json!({"type": "number"}), "tagged={tagged}");
+            assert_eq!(
+                properties["w"],
+                json!({"anyOf": [{"type": "null"}, {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "first": {"type": "string", "pattern": "\\S", "description": "first"},
+                        "second": {"anyOf": [{"type": "null"}, {"type": "string"}]},
+                    },
+                    "required": ["first"],
+                }]}),
+                "tagged={tagged}: `@this` inside types.yaml must select its string `name`"
+            );
+            assert_eq!(resolved.json_schema["required"], json!(["local"]), "tagged={tagged}");
+            assert_eq!(resolved.imports, vec![canonical_path(&types)], "tagged={tagged}");
+        }
     }
 }
