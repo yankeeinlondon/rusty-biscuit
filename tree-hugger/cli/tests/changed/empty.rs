@@ -132,7 +132,7 @@ fn no_source_files_remains_an_error_without_changed() {
     repo.write("notes.txt", "unsupported source\n");
     let ordinary = repo.hug(&["--json", "symbols"]);
     assert_eq!(ordinary.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&ordinary.stderr).contains("NoSourceFiles"), "{}", String::from_utf8_lossy(&ordinary.stderr));
+    assert!(String::from_utf8_lossy(&ordinary.stderr).starts_with("error: No supported source files found in `"), "{}", String::from_utf8_lossy(&ordinary.stderr));
     let changed = repo.json(&["--json", "symbols", "--changed"]);
     assert_eq!(changed["files"], serde_json::json!([]));
     assert_eq!(changed["errors"], serde_json::json!([]));

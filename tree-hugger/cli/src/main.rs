@@ -672,6 +672,28 @@ fn parse_selectors(args: &[String]) -> Vec<RuleSelector> {
     args.iter().filter_map(|s| RuleSelector::parse(s)).collect()
 }
 
+/// Warns once per distinct `--deny`, `--warn` or `--allow` rule name that the
+/// registry does not know (aliases are known). The selector is still kept and
+/// matches nothing, so the exit status is unchanged.
+fn warn_unknown_rules(command: &CommandKind) {
+    let CommandKind::Lint {
+        deny, warn, allow, ..
+    } = command
+    else {
+        return;
+    };
+    let registry = RuleRegistry::builtin();
+    let mut warned = HashSet::new();
+    for selector in deny.iter().chain(warn).chain(allow) {
+        if let RuleSelector::Rule(name) = selector
+            && !registry.has_rule(name)
+            && warned.insert(name.as_str())
+        {
+            eprintln!("warning: unknown rule '{}'", render::neutralized(name));
+        }
+    }
+}
+
 /// The kind of command being executed (without the arguments).
 #[derive(Debug, Clone)]
 pub(crate) enum CommandKind {
@@ -884,7 +906,16 @@ impl From<LanguageArg> for ProgrammingLanguage {
     }
 }
 
-fn main() -> Result<(), TreeHuggerError> {
+// `fn main() -> Result` would print an error as its `Debug` dump; print its
+// `Display` text, with control characters escaped, as every other error is.
+fn main() {
+    if let Err(error) = run() {
+        eprintln!("error: {}", render::neutralized(&error.to_string()));
+        std::process::exit(1);
+    }
+}
+
+fn run() -> Result<(), TreeHuggerError> {
     // Handle dynamic completion requests (COMPLETE=<shell> hug ...). This must
     // run before any other stdout writes; it exits the process if a completion
     // request was served.
@@ -978,6 +1009,7 @@ fn main() -> Result<(), TreeHuggerError> {
     });
 
     let command_kind = cli.command.kind().expect("completions already handled");
+    warn_unknown_rules(&command_kind);
     let analysis_options = AnalysisOptions::from_command(&command_kind);
 
     if matches!(

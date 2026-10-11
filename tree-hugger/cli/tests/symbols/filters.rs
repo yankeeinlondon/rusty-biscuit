@@ -271,7 +271,7 @@ fn file_and_name_flags_bypass_positional_classification() {
     // "no source files" failure, as for positional filters.
     let excluded = scratch.hug(&["--json", "functions", "--file", "ignored.py", "--exclude-files", "ignored.py"]);
     assert_eq!(excluded.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&excluded.stderr).contains("NoSourceFiles"));
+    assert!(String::from_utf8_lossy(&excluded.stderr).starts_with("error: No supported source files found in `"));
     assert_argument_error(&scratch, &["functions", "--file", "~someone/x.rs"], "--file ~someone/x.rs");
 }
 
@@ -1178,7 +1178,7 @@ fn literal_positional_paths_select_what_the_walker_selects() {
         assert_eq!(fast, selection(&scratch, &glob, extra), "{patterns:?} {extra:?} against {glob:?}");
         if expected.is_empty() {
             assert_eq!(fast.0, Some(1), "{patterns:?} {extra:?}: {}", fast.2);
-            assert!(fast.2.contains("NoSourceFiles"), "{patterns:?} {extra:?}: {}", fast.2);
+            assert!(fast.2.starts_with("error: No supported source files found in `"), "{patterns:?} {extra:?}: {}", fast.2);
         } else {
             assert_eq!(fast.0, Some(0), "{patterns:?} {extra:?}: {}", fast.2);
             assert_eq!(selected_files(&fast.1), expected, "{patterns:?} {extra:?}");
