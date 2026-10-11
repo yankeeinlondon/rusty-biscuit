@@ -734,6 +734,23 @@ fn value_span(node: &Node<YamlSpan>, base: usize) -> SourceSpan {
     shift(loc, base)
 }
 
+/// Widens a value span to the start of its line when only indentation precedes
+/// it there.
+///
+/// A block mapping's [`FmEntry::value_span`] starts at its first key, so a
+/// slice taken from it reads that key at column 0 while its siblings keep
+/// their authored indentation. Darkmatter's source-aware schema readers follow
+/// continued plain scalars by indentation and need every line's real column;
+/// a value that starts after its key on the same line is returned unchanged.
+pub(crate) fn line_aligned_span(text: &str, span: SourceSpan) -> SourceSpan {
+    let line_start = text[..span.start].rfind('\n').map_or(0, |newline| newline + 1);
+    if text[line_start..span.start].bytes().all(|byte| byte == b' ') {
+        line_start..span.end
+    } else {
+        span
+    }
+}
+
 /// Shifts a YAML-relative span into document coordinates.
 fn shift(span: YamlSpan, base: usize) -> SourceSpan {
     (base + span.start as usize)..(base + span.end as usize)

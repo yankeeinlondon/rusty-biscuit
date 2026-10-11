@@ -17,6 +17,7 @@ use darkmatter::markdown::schemas::{
     PositionMap, SchemaError, SchemaOriginKind, SuggestionLintProblem, SuggestionLintReason,
     ValidationOptions, ValidationProblem, ValidationProblemCode, ValidationReport,
     SchemaValueKind, SchemaValueNode, classify_schema_reference, flow_collection_end,
+    decode_scalar_node,
     locate_schema_value,
     parse_property_definition, parse_schema_declaration, parse_yaml_schema,
 };
@@ -446,10 +447,13 @@ fn smallest_invalid_definition_span(
     text: &str,
     parent: &crate::overlay::FmEntry,
 ) -> Option<std::ops::Range<usize>> {
-    let value_span = complete_flow_value_span(text, parent.value_span.clone());
-    // The slice is deliberately not dedented: the locator reads *relative*
-    // indentation, so keeping the authored columns keeps every span it reports
-    // an exact document offset.
+    let value_span = crate::overlay::frontmatter::line_aligned_span(
+        text,
+        complete_flow_value_span(text, parent.value_span.clone()),
+    );
+    // The slice is deliberately not dedented, and starts at its line: the
+    // locator reads indentation, so keeping the authored columns keeps every
+    // span it reports an exact document offset.
     let root = locate_schema_value(text.get(value_span.clone())?, value_span.start)?;
     let mut candidates = Vec::new();
     collect_definition_candidates(&root, &parent.key, 0, &mut candidates);
@@ -989,13 +993,14 @@ fn standalone_type_definition_diagnostic(ctx: &DocumentContext) -> Option<Diagno
         // otherwise miss its entry and fall through to the whole-document
         // `dm.schema.document_malformed` fallback.
         let entry = ast.entry_by_key_path(&[payload_key, key])?;
-        let span = match &error {
+        let token = grammar_token_span(ctx.text, payload_key, key, value, &error);
+        let span = token.unwrap_or_else(|| match &error {
             SchemaError::Grammar { property, .. } if property != key => ast
                 .entry_by_key_path(&[payload_key, key, property])
                 .map(|nested| nested.value_span.clone())
                 .unwrap_or_else(|| entry.value_span.clone()),
             _ => entry.value_span.clone(),
-        };
+        });
         let range = ctx.source_map.byte_range_to_lsp(span)?;
         return Some(diagnostic(
             range,
@@ -1006,6 +1011,97 @@ fn standalone_type_definition_diagnostic(ctx: &DocumentContext) -> Option<Diagno
         ));
     }
     None
+}
+
+/// The authored range of the token a standalone definition's grammar error
+/// names, or `None` when it cannot be recovered exactly.
+///
+/// The grammar error's span is relative to the decoded expression, which a
+/// folded or quoted scalar does not author verbatim, so it is projected
+/// through the offending scalar's decoded map. The offending scalar is the one
+/// whose own re-parse reproduces the error; the decoded text must also equal
+/// the YAML parser's value, or the map describes other text. `None` keeps the
+/// caller's whole-value fallback, and never yields an empty range.
+fn grammar_token_span(
+    text: &str,
+    payload_key: &str,
+    key: &str,
+    value: &serde_yaml_ng::Value,
+    error: &SchemaError,
+) -> Option<std::ops::Range<usize>> {
+    let SchemaError::Grammar { span, message: expected, .. } = error else {
+        return None;
+    };
+    let SchemaValueKind::Mapping(definitions) = standalone_payload_node(text, payload_key)?.kind
+    else {
+        return None;
+    };
+    let definition = definitions.into_iter().find(|entry| entry.key == key)?;
+    let mut scalars = Vec::new();
+    collect_string_scalars(
+        text,
+        key,
+        source_column(text, definition.key_span.start),
+        &definition.value,
+        value,
+        &mut scalars,
+    );
+    scalars.into_iter().find_map(|(property, holder, node, semantic)| {
+        let reproduced = matches!(
+            parse_property_definition(&property, &serde_yaml_ng::Value::String(semantic.to_string())),
+            Err(SchemaError::Grammar { span: ref candidate, ref message, .. })
+                if candidate == span && *message == *expected
+        );
+        if !reproduced {
+            return None;
+        }
+        let (scalar, _) = decode_scalar_node(text, node.span.start, holder)?;
+        if scalar.decoded() != semantic {
+            return None;
+        }
+        scalar.project(span.clone()).filter(|range| !range.is_empty())
+    })
+}
+
+/// Pairs each located string scalar under a definition with its YAML value,
+/// as `(property, holder column, node, value)`. A sequence item inherits its
+/// property; a structural disagreement between the two trees contributes
+/// nothing below it.
+fn collect_string_scalars<'a>(
+    text: &str,
+    property: &str,
+    holder: usize,
+    node: &'a SchemaValueNode,
+    value: &'a serde_yaml_ng::Value,
+    out: &mut Vec<(String, usize, &'a SchemaValueNode, &'a str)>,
+) {
+    match (&node.kind, value) {
+        (SchemaValueKind::Scalar, serde_yaml_ng::Value::String(semantic)) => {
+            out.push((property.to_string(), holder, node, semantic));
+        }
+        (SchemaValueKind::Mapping(entries), serde_yaml_ng::Value::Mapping(mapping)) => {
+            for entry in entries {
+                if let Some(child) = mapping.get(entry.key.as_str()) {
+                    let holder = source_column(text, entry.key_span.start);
+                    collect_string_scalars(text, &entry.key, holder, &entry.value, child, out);
+                }
+            }
+        }
+        (SchemaValueKind::Sequence(items), serde_yaml_ng::Value::Sequence(values))
+            if items.len() == values.len() =>
+        {
+            for (item, child) in items.iter().zip(values) {
+                // An item's continuation lines must sit deeper than its `-`,
+                // which is the last indicator before the item on its line.
+                let line_start = text[..item.span.start].rfind('\n').map_or(0, |index| index + 1);
+                let holder = text[line_start..item.span.start]
+                    .rfind('-')
+                    .unwrap_or(holder);
+                collect_string_scalars(text, property, holder, item, child, out);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// An invalid **outer** standalone declaration, ranged at the smallest authored

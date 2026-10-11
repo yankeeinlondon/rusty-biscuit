@@ -153,7 +153,20 @@ fn block_cursor(
     {
         return Some((region.definition_span.start, vec![region.kind]));
     }
+    line_cursor(ctx, overlay, offset)
+}
 
+/// [`block_cursor`]'s line-based reading, for frontmatter and for standalone
+/// source no loaded model describes.
+///
+/// A line that is neither a `key:` value nor a `- ` item may continue a plain
+/// scalar begun on an earlier line; the cursor then belongs to that scalar,
+/// whose value starts on its holder line.
+fn line_cursor(
+    ctx: &DocumentContext,
+    overlay: &crate::overlay::DocumentOverlay,
+    offset: usize,
+) -> Option<(usize, Vec<MetaSchemaKind>)> {
     let (line_start, prefix) = line_prefix(ctx.text, offset);
     let indent = prefix.len() - prefix.trim_start().len();
     let trimmed = prefix.trim_start();
@@ -169,8 +182,57 @@ fn block_cursor(
         let kinds = meta_schema_kinds_for_line(overlay, &ancestors, "", true)?;
         Some((offset, kinds))
     } else {
-        None
+        line_cursor(ctx, overlay, continued_scalar_holder(ctx.text, line_start, indent)?)
     }
+}
+
+/// The content end of the line holding the plain scalar that the line at
+/// `line_start` (indented `indent`) continues, or `None` when it continues
+/// none.
+///
+/// The holder is the nearest earlier line indented less that carries a `key:`
+/// or `- ` indicator; less-indented lines without one are earlier
+/// continuations of the same scalar. Blank lines fold into the scalar, while a
+/// comment line ends it. The holder's value must open a plain scalar on its
+/// own line: an empty value, a quoted or block scalar, a flow collection, or
+/// node properties are not continued this way.
+fn continued_scalar_holder(text: &str, line_start: usize, indent: usize) -> Option<usize> {
+    let mut needed = indent;
+    let mut end = line_start;
+    while end > 0 {
+        let start = text[..end - 1].rfind('\n').map_or(0, |index| index + 1);
+        let line = text[start..end - 1].trim_end_matches('\r');
+        end = start;
+        let trimmed = line.trim_start();
+        let line_indent = line.len() - trimmed.len();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if trimmed.starts_with('#') {
+            return None;
+        }
+        if line_indent >= needed {
+            continue;
+        }
+        let mut value = trimmed;
+        let mut held = false;
+        if let Some(after_dash) = value.strip_prefix("- ") {
+            value = after_dash.trim_start();
+            held = true;
+        }
+        if let Some(colon) = mapping_separator(value, false) {
+            value = value[colon + 1..].trim_start();
+            held = true;
+        }
+        if !held {
+            needed = line_indent;
+            continue;
+        }
+        let opens_plain = !value.is_empty()
+            && !value.starts_with(['#', '|', '>', '\'', '"', '[', '{', '!', '&', '*']);
+        return opens_plain.then_some(start + line.len());
+    }
+    None
 }
 
 /// The `(value_start, ancestors, key)` a cursor inside a flow collection
@@ -2153,8 +2215,12 @@ fn enclosing_path(
                     })
                     .collect();
             }
-            // No enclosing mapping at column 0 is a real answer, not a gap.
-            None if indent == 0 => return Vec::new(),
+            // No enclosing mapping at column 0 is a real answer, not a gap,
+            // except for an indentless sequence item, whose parent key
+            // shares its column.
+            None if indent == 0 && !is_sequence_item_line(ctx.text, line_start) => {
+                return Vec::new();
+            }
             _ => {}
         }
     }
@@ -2222,16 +2288,25 @@ fn value_cursor(
 /// The full chain of ancestor keys above `line_start`, outermost first, for a
 /// line at column `indent` — one key per strictly-decreasing indent level, so
 /// nested inline-object mappings resolve. Empty for a top-level line.
+///
+/// A `- ` item line may also be held by an earlier `key:` line at its own
+/// column (an indentless block sequence); sibling items at that column are
+/// skipped on the way there.
 fn enclosing_path_by_indent(text: &str, line_start: usize, indent: usize) -> Vec<String> {
     let mut path = Vec::new();
     let mut needed = indent;
+    let mut indentless_item = is_sequence_item_line(text, line_start);
     for line in text[..line_start].lines().rev() {
         let trimmed = line.trim_start();
         if trimmed.is_empty() || trimmed == "---" {
             continue;
         }
         let line_indent = line.len() - trimmed.len();
-        if line_indent < needed {
+        let held_indentless = indentless_item
+            && line_indent == needed
+            && !(trimmed == "-" || trimmed.starts_with("- "));
+        if line_indent < needed || held_indentless {
+            indentless_item = false;
             let key = mapping_separator(trimmed, false)
                 .map_or(trimmed, |colon| &trimmed[..colon])
                 .trim();
@@ -2246,6 +2321,12 @@ fn enclosing_path_by_indent(text: &str, line_start: usize, indent: usize) -> Vec
     }
     path.reverse();
     path
+}
+
+/// Whether the line starting at `line_start` is a block sequence item.
+fn is_sequence_item_line(text: &str, line_start: usize) -> bool {
+    let line = text[line_start..].lines().next().unwrap_or_default().trim();
+    line == "-" || line.starts_with("- ")
 }
 
 /// Whether a scalar value is plausibly a local file path (not a URL or an

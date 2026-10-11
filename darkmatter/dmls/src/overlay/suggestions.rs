@@ -57,7 +57,7 @@ pub fn inline_lints(text: &str, ast: Option<&FrontmatterAst>) -> SuggestionState
     // Scope the span-projection source to just the `$schema` value's subtree so
     // a decoy frontmatter field before `$schema` carrying identical expression
     // text cannot capture the diagnostic span.
-    let value_span = schema_entry.value_span.clone();
+    let value_span = crate::overlay::frontmatter::line_aligned_span(text, schema_entry.value_span.clone());
     let schema_yaml_source = &text[value_span.start..value_span.end];
     let schema = match parse_yaml_schema_with_source(
         schema_value,
