@@ -256,6 +256,22 @@ Ranges come from the concrete syntax tree, never from parsing the message text:
   (a visible, non-zero-width range).
 - A YAML parse error ranges the parser's reported position; the last-good tree
   keeps completion and hover alive meanwhile.
+- In a standalone schema document, a `dm.schema.invalid_type_definition`
+  grammar error ranges the **offending token** inside the definition, even
+  when the value continues onto later lines. Here `bogus` is underlined on
+  line 5, not the whole value from line 4:
+
+  ```yaml
+  kind: schema
+  types:
+    t: string(min(1);
+      bogus(2))
+  ```
+
+  When the token cannot be placed exactly — for example, a sibling uses a
+  presentation the schema grammar does not support, such as a block scalar —
+  the diagnostic falls back to the definition's whole value. It is never given
+  an empty or guessed range.
 - `dm.transclusion.nullable_target` ranges the complete `{{ ... }}` target
   expression. DMLS suppresses it when an enclosing supported guard proves the
   same property present, including `file_exists(x)`, truthy `x`, `!!x`,

@@ -158,17 +158,90 @@ The semantic parsers operate on YAML values, while DMLS and other diagnostic
 consumers additionally require exact source spans. The v1 source-aware grammar
 is deliberately capped at these authored presentations:
 
-- plain, single-quoted, and double-quoted scalars;
-- block and flow sequences;
+- plain, single-quoted, and double-quoted scalars, where a plain scalar may
+  continue onto more-indented lines;
+- block and flow sequences, including a block sequence whose `-` sits at the
+  same column as its parent key;
 - implicit scalar-key block and flow mappings;
 - explicit scalar-key block mapping pairs, including compact mapping items in
   block sequences; and
 - mapping-value anchors and scalar aliases used by the shipped schema corpus.
 
+The last two YAML spellings are what serializers and editors that wrap lines
+tend to produce. Each means exactly what its conventional spelling means.
+
+**Indentless sequences.** Wherever the grammar accepts a sequence, its items
+may sit at the parent key's column. The list ends at the next line at that
+column that is not a `- ` item, so `next` below is a sibling definition, not
+part of `t`:
+
+```yaml
+kind: schema
+types:
+  t:
+  - string
+  - number
+  next: boolean
+```
+
+`t` is the property-level union `[string, number]`. The same holds for a union
+nested in a mapping arm, for compact mapping items (`- count: number`), and
+after an anchor (`status: &arms` followed by `- number`). Indentation never
+changes which values are allowed: an indentless list under `$schema` is a
+root-level union, while a list under `types` is still rejected because `types`
+must be a mapping.
+
+**Continued plain scalars.** An unquoted value may continue onto lines indented
+past its key or `-`. The type expression, its constraints, and its description
+can all be split this way:
+
+```yaml
+kind: schema
+types:
+  t: string(min(1);
+    max(8)) -> a description long enough that the editor
+    wraps it onto another physical line
+  next: boolean
+```
+
+The schema parser receives the value exactly as YAML decodes it: adjacent
+lines join with one space, and their indentation and any trailing comment are
+dropped. A blank line between two content lines becomes a line break instead,
+so the description below is `first paragraph` and `second paragraph` on two
+lines, the same as the quoted `"string(min(3)) -> first paragraph\nsecond
+paragraph"`:
+
+```yaml
+$schema:
+  title: string(min(3)) -> first paragraph
+
+    second paragraph
+  next: boolean
+```
+
+The value ends at the first line that is not indented past its key (here
+`next`) or at a comment line. Folding never makes an invalid expression valid;
+`string(min(1)` continued onto `bogus(2))` is still an unknown constraint.
+
+**Ranges.** Source maps and `suggest(...)` candidate spans are byte ranges into
+the original file, with its line endings left as authored (LF or CRLF). A token
+on a continuation line is ranged on that line, without its indentation. A token
+or expression that crosses a line break gets one range from its first authored
+byte to its last, with the break and indentation inside it. Editor positions
+are a separate step: DMLS converts these byte ranges to the line and column
+encoding the editor negotiated (UTF-8 or UTF-16), so a grammar error such as
+`bogus` above is underlined on its own line, not across the whole value.
+
 This is a SimplifiedSchema authoring grammar, not a promise to project every
-presentation accepted by a general YAML parser. Tags, block scalars, complex
-keys, explicit flow-mapping keys, directives, and other unlisted YAML
-presentations are outside the v1 source-map and DMLS contract. Authors should
+presentation accepted by a general YAML parser. Tags, block scalars (`|`,
+`>`), quoted scalars continued across lines, complex keys, explicit
+flow-mapping keys, directives, and other unlisted YAML presentations are
+outside the v1 source-map and DMLS contract; a schema file that uses one fails
+to load with `could not project SimplifiedSchema expression spans through YAML
+source`. Every non-comment line of a schema value must belong to a presentation
+the grammar recognizes, so an unrecognized one fails rather than being skipped.
+Frontmatter lookup is more tolerant and also follows tags, block scalars, and
+quoted continuations; that does not extend to schema documents. Authors should
 prefer ordinary `key: value` mappings. Expanding this closed boundary requires
 a separately specified feature; discovering another valid-but-unlisted YAML
 spelling is not a production-readiness regression for these meta-types.

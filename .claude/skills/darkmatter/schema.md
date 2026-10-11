@@ -153,6 +153,19 @@ Literal discriminants use one presentation-neutral union-arm selector shared
 by library validation and DMLS. Expression-typed values enable expression
 completion, hover, and `dm.expression.*` diagnostics.
 
+Source spans come from one locator in `simplified/source.rs` with two
+grammars. Strict (schema documents) and tolerant (frontmatter) share
+indentless sequences and plain scalars continued onto more-indented lines;
+only tolerant follows tags, block scalars, quoted continuations, and empty
+values. Strict fails unless every non-comment line belongs to the value, and
+checks each decoded scalar against `serde_yaml_ng` before projecting. A
+source-aware slice must start at a line boundary (indentation included) or be
+dedented, because indentation decides where a continuation ends; DMLS widens
+mid-line value spans with `overlay::frontmatter::line_aligned_span`. Never add
+a third locator. The authored boundary is documented in
+`darkmatter/docs/topics/schemas/definition.md` (Source-Aware Presentation
+Boundary).
+
 ## Testing
 
 For grammar or schema changes, cover:
