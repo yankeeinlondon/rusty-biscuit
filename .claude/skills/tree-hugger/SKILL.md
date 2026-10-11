@@ -33,6 +33,7 @@ describe implementation. When they disagree, the code wins and both get fixed.
 - [Using the `hug` CLI](../../../tree-hugger/docs/cli.md): **the canonical CLI usage document**: every command, option, output format and exit status. `cli/README.md` is only an overview that links here
 - [Symbol Reports](../../../tree-hugger/docs/symbol-reports.md): the declaration commands end to end, JSON envelopes, `--json-full`, `--sort`, `--changed`, `--stats`, exit status
 - [Symbol Kinds, Visibility and `static`](../../../tree-hugger/docs/symbol-kinds-and-visibility.md): per-language kinds, containers, visibility, grammar limits
+- [Re-exports](../../../tree-hugger/docs/reexports.md): the forwarding report per language, evidence, coverage states and limit reasons
 - [Declared Type Relations](../../../tree-hugger/docs/type-relations.md): `extends`/`implements`/`unclassified_bases` per language
 - [Scope-Aware References](../../../tree-hugger/docs/references.md): occurrences, confidence, coverage reasons, recursion, `hug refs`
 - [Cyclomatic Complexity](../../../tree-hugger/docs/cyclomatic-complexity.md): counting rules, when the value is `null`

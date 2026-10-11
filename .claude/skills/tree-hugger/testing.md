@@ -48,7 +48,12 @@ When modifying queries or symbol extraction:
    The re-export report's matrix lives in `cache_robustness`
    (`reexport_report_fields_are_served_only_when_consistent` and its limited,
    not-applicable, widening and duplicate-key siblings; JSON paths under
-   `reexports.entries[n]`), and the consumers in `tests/l1/reexports_consumers.rs`.
+   `reexports.entries[n]`), and the consumers in `tests/l1/reexports_consumers.rs`. Public-surface equivalence
+   (direct = complete index = selective = cache cold/hit/narrowed/widened for all
+   16 fixtures; extraction reads no forwarding target; one shared definitions pass;
+   widening extracts once, a hit extracts nothing) is `tests/l1/reexports_equivalence.rs`,
+   and the other-scan-root hit is `cache_lookup::json_full_reexports_agree_fresh_hit_and_from_another_scan_root`.
+   Behavior docs: `docs/reexports.md`.
    `cache_robustness` pins which malformed
    shapes of the entry fields and record columns (including nested generics,
    relation targets and attribute/modifier members) are served or
