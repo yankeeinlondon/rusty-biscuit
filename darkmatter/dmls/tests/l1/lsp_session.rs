@@ -3897,6 +3897,49 @@ fn meta_schema_phase7_inline_hover_completion_and_diagnostics() {
     fixture.shutdown();
 }
 
+/// A block-sequence `type-definition` value's span starts at its first `-`,
+/// partway into the line. The malformed arm after it is still ranged exactly,
+/// because the locator reads the slice from the start of that line with
+/// every item's authored column intact; read from the `-`, the first item
+/// would seem to continue onto the second.
+#[test]
+fn a_malformed_arm_after_the_first_block_sequence_item_is_ranged_exactly() {
+    let workspace = LspWorkspace::new();
+    let text = concat!(
+        "---\n",
+        "$schema:\n",
+        "  definition: type-definition\n",
+        "definition:\n",
+        "  - number\n",
+        "  - boolean(bogus(1))\n",
+        "---\n\nbody\n",
+    );
+    let path = workspace.path().join("sequence-arm.md");
+    std::fs::write(&path, text).unwrap();
+
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(path).unwrap();
+    open(&fixture, uri.as_str(), text);
+
+    let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+    let definition_errors: Vec<&Value> = diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic["code"] == json!("dm.schema.invalid_type_definition"))
+        .collect();
+    assert_eq!(definition_errors.len(), 1, "{diagnostics:#?}");
+    assert_eq!(
+        definition_errors[0]["range"],
+        json!({
+            "start": { "line": 5, "character": 4 },
+            "end": { "line": 5, "character": 21 }
+        }),
+        "{diagnostics:#?}"
+    );
+
+    fixture.shutdown();
+}
+
 #[test]
 fn schema_definition_errors_are_independent_and_property_ranged() {
     let workspace = LspWorkspace::new();
