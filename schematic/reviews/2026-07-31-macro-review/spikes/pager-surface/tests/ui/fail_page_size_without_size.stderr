@@ -1,0 +1,23 @@
+error[E0277]: `ListRoles` has no authored page size
+ --> tests/ui/fail_page_size_without_size.rs:4:33
+  |
+4 |     let _ = client.list_roles().page_size(10);
+  |                                 ^^^^^^^^^ `.page_size(..)` needs a `PageSize` in the definition
+  |
+  = help: the trait `PageSizeKnob` is not implemented for `ListRoles`
+  = note: the definition for `ListRoles` does not declare a `PageSize`, so the generated pager has no `.page_size(..)`
+help: the following other types implement trait `PageSizeKnob`
+ --> /kache/workspace/src/generated.rs:33:0
+  |
+  = note: `ListIssues`
+ ::: /kache/workspace/src/generated.rs:68:0
+  |
+  = note: `ListBatches`
+ ::: /kache/workspace/src/generated.rs:96:0
+  |
+  = note: `ListRepos`
+ ::: /kache/workspace/src/generated.rs:137:0
+  |
+  = note: `SearchScroll`
+note: required by a bound in `Pager::<E>::page_size`
+ --> /kache/workspace/src/pager.rs:83:4

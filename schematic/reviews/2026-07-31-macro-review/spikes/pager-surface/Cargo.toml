@@ -1,0 +1,22 @@
+[package]
+name = "pager-surface"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "Throwaway spike: async pager and generated type surface for D14"
+
+# Empty table: keeps this crate out of the rusty-biscuit workspace.
+[workspace]
+
+[dependencies]
+futures = "0.3"
+reqwest = { version = "0.13", default-features = false, features = ["json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1.43", features = ["rt", "macros", "sync", "time", "net", "io-util"] }
+url = "2"
+
+[dev-dependencies]
+tokio = { version = "1.43", features = ["rt", "rt-multi-thread", "macros", "sync", "time", "net", "io-util"] }
+trybuild = "1"

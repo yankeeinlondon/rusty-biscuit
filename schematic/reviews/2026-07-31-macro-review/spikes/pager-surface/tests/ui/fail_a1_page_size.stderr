@@ -1,0 +1,8 @@
+error[E0599]: the method `page_size` exists for struct `Pager1<pager_surface::generated::ListRoles>`, but its trait bounds were not satisfied
+ --> tests/ui/fail_a1_page_size.rs:3:40
+  |
+3 |     let _ = Pager1::<ListRoles>::new().page_size(10);
+  |                                        ^^^^^^^^^
+  |
+  = note: the following trait bounds were not satisfied:
+          `pager_surface::generated::ListRoles: PageSizeKnob`

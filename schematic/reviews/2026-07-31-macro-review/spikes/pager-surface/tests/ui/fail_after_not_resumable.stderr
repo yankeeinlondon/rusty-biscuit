@@ -1,0 +1,17 @@
+error[E0277]: `ListRoles` has no resumable cursor
+ --> tests/ui/fail_after_not_resumable.rs:4:33
+  |
+4 |     let _ = client.list_roles().after("r1");
+  |                                 ^^^^^ `.after(..)` needs a resumable cursor in the definition
+  |
+  = help: the trait `ResumeAfter` is not implemented for `ListRoles`
+  = note: the definition for `ListRoles` does not mark its cursor `resumable`
+help: the following other types implement trait `ResumeAfter`
+ --> /kache/workspace/src/generated.rs:64:0
+  |
+  = note: `ListBatches`
+ ::: /kache/workspace/src/generated.rs:83:0
+  |
+  = note: `ListEvents`
+note: required by a bound in `Pager::<E>::after`
+ --> /kache/workspace/src/pager.rs:108:4

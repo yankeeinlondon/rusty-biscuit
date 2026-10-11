@@ -1,0 +1,64 @@
+error[E0277]: the trait bound `DemoRequest: From<Foreign>` is not satisfied
+  --> tests/ui/send_foreign_request.rs:13:20
+   |
+13 |     let _ = c.send(Foreign).await;
+   |               ---- ^^^^^^^ the trait `From<Foreign>` is not implemented for `DemoRequest`
+   |               |
+   |               required by a bound introduced by this call
+   |
+   = help: `DemoRequest` implements trait `From<T>`:
+             From<DeleteBranchRequest>
+             From<DownloadArchiveRequest>
+             From<GetCommitActivityRequest>
+             From<GetPullRequest>
+             From<GetReadmeRawRequest>
+             From<GetRepoRequest>
+             From<GraphQlRequest<Op>>
+             From<ListPullsRequest>
+             From<PullModelRequest>
+             From<StreamChatRequest>
+   = note: required for `Foreign` to implement `Into<DemoRequest>`
+note: required by a bound in `DemoClient::send`
+  --> /kache/workspace/src/client.rs:170:4
+
+error[E0277]: the trait bound `DemoRequest: From<Foreign>` is not satisfied
+  --> tests/ui/send_foreign_request.rs:13:13
+   |
+13 |     let _ = c.send(Foreign).await;
+   |             ^^^^^^^^^^^^^^^ the trait `From<Foreign>` is not implemented for `DemoRequest`
+   |
+   = help: `DemoRequest` implements trait `From<T>`:
+             From<DeleteBranchRequest>
+             From<DownloadArchiveRequest>
+             From<GetCommitActivityRequest>
+             From<GetPullRequest>
+             From<GetReadmeRawRequest>
+             From<GetRepoRequest>
+             From<GraphQlRequest<Op>>
+             From<ListPullsRequest>
+             From<PullModelRequest>
+             From<StreamChatRequest>
+   = note: required for `Foreign` to implement `Into<DemoRequest>`
+note: required by a bound in `DemoClient::send`
+  --> /kache/workspace/src/client.rs:170:4
+
+error[E0277]: the trait bound `DemoRequest: From<Foreign>` is not satisfied
+  --> tests/ui/send_foreign_request.rs:13:29
+   |
+13 |     let _ = c.send(Foreign).await;
+   |                             ^^^^^ the trait `From<Foreign>` is not implemented for `DemoRequest`
+   |
+   = help: `DemoRequest` implements trait `From<T>`:
+             From<DeleteBranchRequest>
+             From<DownloadArchiveRequest>
+             From<GetCommitActivityRequest>
+             From<GetPullRequest>
+             From<GetReadmeRawRequest>
+             From<GetRepoRequest>
+             From<GraphQlRequest<Op>>
+             From<ListPullsRequest>
+             From<PullModelRequest>
+             From<StreamChatRequest>
+   = note: required for `Foreign` to implement `Into<DemoRequest>`
+note: required by a bound in `DemoClient::send`
+  --> /kache/workspace/src/client.rs:170:4

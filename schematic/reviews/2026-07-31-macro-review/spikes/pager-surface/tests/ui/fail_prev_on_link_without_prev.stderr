@@ -1,0 +1,50 @@
+error[E0277]: `ListRepos` has no backward direction
+ --> tests/ui/fail_prev_on_link_without_prev.rs:4:19
+  |
+4 |     let _ = pages.prev().await;
+  |                   ^^^^ this needs a backward leg (`Cursor.backward` or `NextLink.prev`) in the definition
+  |
+  = help: the trait `HasPrev` is not implemented for `ListRepos`
+help: the following other types implement trait `HasPrev`
+ --> /kache/workspace/src/generated.rs:65:0
+  |
+  = note: `ListBatches`
+ ::: /kache/workspace/src/generated.rs:110:0
+  |
+  = note: `ListCommits`
+note: required by a bound in `Pages::<E>::prev`
+ --> /kache/workspace/src/pager.rs:177:4
+
+error[E0277]: `ListRepos` has no backward direction
+ --> tests/ui/fail_prev_on_link_without_prev.rs:4:13
+  |
+4 |     let _ = pages.prev().await;
+  |             ^^^^^^^^^^^^ this needs a backward leg (`Cursor.backward` or `NextLink.prev`) in the definition
+  |
+  = help: the trait `HasPrev` is not implemented for `ListRepos`
+help: the following other types implement trait `HasPrev`
+ --> /kache/workspace/src/generated.rs:65:0
+  |
+  = note: `ListBatches`
+ ::: /kache/workspace/src/generated.rs:110:0
+  |
+  = note: `ListCommits`
+note: required by a bound in `Pages::<E>::prev`
+ --> /kache/workspace/src/pager.rs:177:4
+
+error[E0277]: `ListRepos` has no backward direction
+ --> tests/ui/fail_prev_on_link_without_prev.rs:4:26
+  |
+4 |     let _ = pages.prev().await;
+  |                          ^^^^^ this needs a backward leg (`Cursor.backward` or `NextLink.prev`) in the definition
+  |
+  = help: the trait `HasPrev` is not implemented for `ListRepos`
+help: the following other types implement trait `HasPrev`
+ --> /kache/workspace/src/generated.rs:65:0
+  |
+  = note: `ListBatches`
+ ::: /kache/workspace/src/generated.rs:110:0
+  |
+  = note: `ListCommits`
+note: required by a bound in `Pages::<E>::prev`
+ --> /kache/workspace/src/pager.rs:177:4

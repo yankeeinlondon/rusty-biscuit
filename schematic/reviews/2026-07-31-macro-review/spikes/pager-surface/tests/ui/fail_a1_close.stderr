@@ -1,0 +1,8 @@
+error[E0599]: the method `close` exists for struct `Pages1<pager_surface::generated::ListRoles>`, but its trait bounds were not satisfied
+ --> tests/ui/fail_a1_close.rs:3:40
+  |
+3 |     Pager1::<ListRoles>::new().pages().close();
+  |                                        ^^^^^ method cannot be called on `Pages1<pager_surface::generated::ListRoles>` due to unsatisfied trait bounds
+  |
+  = note: the following trait bounds were not satisfied:
+          `<pager_surface::generated::ListRoles as Paginated>::Kind = Scroll`
