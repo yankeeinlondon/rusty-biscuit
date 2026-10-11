@@ -1,6 +1,6 @@
 ---
 area: darkmatter
-status: draft-spec
+status: finalized-spec
 $schema:
     status: |-
         enum(
@@ -21,7 +21,12 @@ $schema:
     clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented_by: string -> the agent who implemented the plan
-reviewed: false
+reviewed: true
+reviewed_by: "codex/final_risk_review (inherited GPT-6 model; exact variant not exposed)"
+reviewed_on: 2026-10-11
+clarified: true
+clarified_by: codex/gpt-6.1-sol
+review_note: the clarification process served as a review
 review_iterations: 0
 created: 2026-10-11
 owner: Ken Snyder <ken@ken.net>
@@ -30,15 +35,16 @@ packages:
 related:
     - 2026-10-11-clean-fidelity
 human_review: true
+needs_rulings: false
 references:
     investigation.md: Current-build headless investigation, including conditions, findings, limitations, and reproduction instructions. It demonstrates present queue blockage without establishing the historical incident's cause.
     measurements.json: Sanitized per-request measurements, timing notes, and process resource observations from the investigation. These are baseline evidence rather than future acceptance guarantees.
     probe.py: Bounded headless client exercising the server through its normal protocol. It records request and edit-send durations without retaining document bodies.
 message_to_agent: |-
-    Current-build investigation and two clarification batches establish
-    behavior requirements and reference response targets. Do not begin
-    implementation until remaining resource, operational, and completion
-    rulings are resolved. No replacement architecture is selected.
+    Human clarification establishes behavior, structural work bounds,
+    operations, delivery, and acceptance requirements. Architecture details
+    belong to planning within these requirements. This clarification task does
+    not authorize runtime implementation, installation, or editor control.
 implemented: false
 ---
 
@@ -88,9 +94,8 @@ cursor move queues another request.
 
 The fix must keep editor requests responsive while analysis is pending, prevent
 obsolete work from publishing results, and bound queued and running work.
-The author has approved reference response targets below. Concrete resource
-and stopping limits still require explicit approval before implementation
-planning.
+The author has approved the reference response targets, structural resource
+limits, and checkpoint-based stopping criteria below.
 
 `dmls` owns the investigation and the server's request handling, document state,
 workspace analysis, cancellation, and publication. Changes to `darkmatter`,
@@ -119,7 +124,7 @@ file count, request mix, edit frequency, build mode, and host conditions for
 each measurement. Report request latency and work behavior under those
 conditions rather than presenting measurements as universal guarantees.
 
-The investigation must:
+The investigation's original questions were:
 
 1. Attempt to reproduce the incident with the current `dmls` build through its
    normal protocol path, distinguishing current behavior from the historical
@@ -176,6 +181,12 @@ sample count, basic cursor positions, and host variability cannot establish a
 performance distribution, cancellation stopping time, or resource budget.
 The evidence supports fixing the demonstrated current queue blockage; the
 historical timeout's exact cause remains unknown.
+
+The investigation did not measure cancellation receipt-to-stop intervals or
+queued/running work counts, and did not monitor network traffic, filesystem
+writes, credential reads, or subprocess creation. Source inspection and the
+baseline probes do not fulfill those validation obligations; implementation
+acceptance must provide the deterministic checks below.
 
 ## Accepted Behavior
 
@@ -247,9 +258,13 @@ observes cancellation before the request completes, return the protocol
 cancellation response. A completed request does not acquire a second response
 when a later cancellation arrives.
 
-Numerical stopping and resource limits require measurement and human approval.
-The meaning of a safe checkpoint remains to be specified. These rules define
-required behavior rather than a choice of threads, tasks, or queues.
+Check cancellation and version freshness before starting work, between
+separable stages, and before publication. Once work is no longer needed,
+start no further stage. An indivisible operation may finish, retaining its
+capacity slot until it actually ends, but cannot publish obsolete results.
+These checkpoint criteria replace the earlier proposed numerical stopping
+deadline; no elapsed stopping deadline is required. They define behavior
+rather than a choice of threads, tasks, or queues.
 
 ### Work Limits and Overload
 
@@ -259,16 +274,81 @@ analysis. Preserve shared work that remains useful. Schedule documents fairly
 so that, after an edit burst ends, each document's latest version is eventually
 analyzed; dropping old queued versions must not permanently drop analysis.
 
+The accepted structural maxima are:
+
+- At most one latest pending analysis per document.
+- At most one active workspace graph rebuild and one dirty indication that
+  another rebuild is needed.
+- Aggregate active expensive work, including startup scanning, analysis,
+  parsing, validation, graph rebuilding, and indivisible calls, cannot exceed
+  the host's reported CPU parallelism. Planning may choose a lower worker
+  limit to meet response targets.
+- Startup job channels and completed-result channels each have capacity no
+  greater than the chosen worker limit. Completed-result retention across all
+  work must also be bounded, rather than bypassing those channel limits with
+  an unbounded result store.
+- No additional interactive-request waiting queue may be introduced to wait
+  for analysis capacity.
+
+These are work bounds, not a fixed global memory cap. Per-document pending
+state and workspace graph/storage can scale with the number and size of inputs.
+
 When analysis is unavailable or a work limit is reached, requests return current
 results where possible, otherwise a protocol-valid empty or unavailable result
 promptly. They must not wait for space in an analysis queue. Exact response
 encoding remains method-specific and must preserve protocol validity.
-Concrete queued/running limits and stopping budgets are still unresolved.
+
+### Failure and Shutdown
+
+Contain unexpected analysis errors and caught panics to affected work. Mark
+affected analysis unavailable, publish no invalid results, and keep unrelated
+documents usable. Retire resource accounting when work actually ends. Retry
+only after a legitimate new edit, a relevant dependency change, or a supported
+explicit refresh; do not automatically retry failed analysis. Malformed
+document content continues to produce ordinary diagnostics.
+
+This containment does not promise survival after a process abort, resource
+exhaustion, or broken protocol transport. Those conditions also limit the
+exactly-one-response contract because the process cannot deliver a response
+after transport or process failure.
+
+Handle protocol shutdown promptly without waiting behind analysis. Stop
+accepting new analysis, discard pending analysis, suppress further analysis
+publication, and signal cancellation at the defined checkpoints. No independent
+analysis process may survive the server. No forced thread termination or
+elapsed process-exit deadline is required.
+
+### Operational Evidence and Privacy
+
+Use the existing logging mechanism. Default logging includes slow-operation
+and failure events plus summaries at bounded frequency. Distinguish server
+queue, handler, and analysis latency; report work counts, supersession,
+cancellation, and suppressed obsolete results. Detailed logging is opt-in and
+rate-limited. Planning chooses the exact rates and slow-event thresholds.
+
+Both modes may include session-local document identifiers, document versions,
+method names, and outcomes. Neither may include document content, file paths,
+credentials, environment values, raw configuration, or unsanitized error text.
+Sanitize relevant existing logs as part of this change. Write locally to stderr
+or an explicitly selected log file, with no outgoing telemetry. Standard output
+remains reserved for protocol messages.
+
+Server timing begins at server receipt; report it separately from the approved
+client response clock. Validate that logging emits useful events, bounds output,
+and respects these privacy rules.
+
+### Delivery and Fallback
+
+Deliver the behavior by default under the existing launch, protocol, and
+configuration contract, without a new enablement flag. Fallback is a manual
+return to the previous build or a code revert. This task does not authorize
+installation, replacing the installed binary, or launching, restarting, or
+controlling Zed. Package ownership remains evidence-driven as defined above.
 
 ## Acceptance Criteria
 
-The following behavior and reference response targets are approved. Resource
-and stopping thresholds remain unresolved; final completion criteria are pending.
+The following behavior, reference response targets, structural limits, and
+checkpoint criteria are approved.
 
 | Requirement | Validation |
 | --- | --- |
@@ -278,9 +358,12 @@ and stopping thresholds remain unresolved; final completion criteria are pending
 | Dependency freshness | Change a known schema, referenced document, configuration, or context; verify affected results invalidate and unrelated documents remain usable, including authoritative open buffers |
 | Feature recovery | Verify current diagnostics push when ready; request-based features recover on the next request and applicable negotiated refresh is honored |
 | Cancellation responses | Observe cancellation before completion and verify one cancellation response; verify later cancellation produces no duplicate response |
-| Cancellation stopping | Measure client-send-to-server-receipt and receipt-to-stop intervals separately, observing request-specific work and shared work; the stopping threshold remains pending |
+| Cancellation stopping | Observe checks before work, between separable stages, and before publication; after cancellation or obsolescence, verify no further unneeded stage starts, shared useful work may continue, and indivisible work retains its slot until completion |
 | Supersession and fairness | Burst edits on multiple documents with paused analysis; verify old queued versions are replaced, obsolete running work cannot publish, shared useful work remains, and latest versions are analyzed after the burst |
-| Bounded overload | Observe queued and running work separately, including uninterruptible operations; requests return current or protocol-valid empty/unavailable results without waiting for analysis capacity; numerical limits remain pending |
+| Bounded overload | Verify each structural maximum, bounded completed-result retention, and slot retention for indivisible operations; requests return current or protocol-valid empty/unavailable results without waiting for analysis capacity |
+| Analysis failure isolation | Inject an unexpected analysis error and a catchable panic; verify affected unavailability, no invalid publication, accurate resource retirement, usable unrelated documents, and no retry until an allowed trigger |
+| Prompt shutdown | Pause analysis, send shutdown through the protocol, and verify the response does not wait for analysis; pending work is discarded, new analysis stops, publication is suppressed, and no independent analysis process survives |
+| Operational logging | Exercise slow work, cancellation, supersession, and failure in default and detailed modes; verify useful timing/count events, bounded output, sanitized payloads, local destinations, and protocol-only standard output |
 | Passive analysis | Retain sentinel-based coverage through the normal protocol; parsing/validation changes also require library coverage |
 | Cross-platform correctness | Run deterministic protocol and work-management checks on macOS, Linux, native Windows, and WSL2; reference numerical performance applies only to the approved macOS conditions |
 
@@ -288,13 +371,28 @@ The current baseline probe does not implement pause controls, stopping events,
 or work counters. Those validation controls will be needed during implementation;
 they must not be described as evidence already gathered.
 
-## Remaining Human Rulings
+## Definition of Done
 
-- Concrete limits for queued and running work, safe-checkpoint meaning, and
-  numerical cancellation/obsolete-work stopping budgets.
-- Required operational evidence, diagnostics/logging and privacy boundaries,
-  rollout/fallback, and final acceptance criteria and definition of done.
+Implementation is complete and ready for review when all approved acceptance
+criteria pass, reference performance evidence records at least ten independent
+batches per scenario, and qualifying deterministic correctness evidence is
+available for macOS, Linux, native Windows, and WSL2. Complete required checks
+and update affected READMEs, current topic documentation, and skills alongside
+the behavior change. Missing required evidence means implementation is incomplete.
 
-Implementation planning remains blocked on these rulings. The author owns the
-decisions. Clarification and the investigation do not authorize implementation
-or imply that the historical cause is known.
+Follow the existing resolved CI plan and evidence-reuse policy; these acceptance
+requirements do not authorize speculative CI cells. The author closes the
+review cycle and controls lifecycle completion. An agent does not move this
+specification into a completed directory.
+
+## Planning Decisions and Human Rulings
+
+No required human rulings remain. Planning must select the architecture, worker
+limit within the approved maximum, bounded completed-result retention mechanism,
+checkpoint placement consistent with the defined stages, method-specific
+protocol responses, and logging rates/thresholds. These implementation choices
+must satisfy the approved requirements rather than replace them.
+
+Clarification and final risk review are complete. No additional preparatory
+spike is required before planning. Clarification and the investigation do not
+authorize runtime implementation or imply that the historical cause is known.
