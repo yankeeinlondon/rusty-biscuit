@@ -4047,3 +4047,60 @@ fn retaining_queries_give_back_the_source_they_analyzed_on_every_lookup() {
     assert_eq!(as_value(&result), uncached(&path, &occurrences));
     assert_eq!(source_identity(&back), identity);
 }
+
+/// The stored `undefined-symbol` diagnostic of an entry whose index is `value`.
+fn undefined_symbol_severities(value: &Value) -> Vec<Value> {
+    value["diagnostics"]
+        .as_array()
+        .expect("diagnostics array")
+        .iter()
+        .filter(|diagnostic| diagnostic["rule"] == "undefined-symbol")
+        .map(|diagnostic| diagnostic["severity"].clone())
+        .collect()
+}
+
+/// A warm hit serves each diagnostic's stored severity; it never restamps it.
+/// A change to how severity is stamped therefore reaches cached files only
+/// through a fingerprint change, which is what `EXTRACTOR_REVISION` is for.
+#[test]
+fn a_warm_hit_replays_the_stored_diagnostic_severity() {
+    let dir = TempDir::new().expect("temp");
+    let path = dir.path().join("undefined.py");
+    std::fs::write(&path, "total = compute_total(items)\n").expect("write source");
+    let source = || read(&path).experimental_semantics(true);
+    let query = SymbolQuery::new().capabilities([Capability::Diagnostics]);
+    let cache = cache_in(&dir);
+
+    let (lookup, cold, _) = cached(&cache, source(), &query);
+    assert!(matches!(lookup, CacheLookup::Miss(_)), "cold run: {lookup:?}");
+    let uncached = as_value(&source().query(&query).expect("uncached query"));
+    assert_eq!(cold, uncached, "the cold result equals an uncached run");
+    let computed = undefined_symbol_severities(&cold["index"]);
+    assert!(!computed.is_empty(), "the fixture reports undefined-symbol: {cold:#}");
+
+    let entry_path = files_with_extension(&dir.path().join("cache"), "json")
+        .into_iter()
+        .next()
+        .expect("one stored entry");
+    let mut entry = read_entry(&entry_path);
+    assert_eq!(undefined_symbol_severities(&entry), computed, "the entry stores the computed severity");
+
+    let (lookup, warm, _) = cached(&cache, source(), &query);
+    assert_eq!(lookup, CacheLookup::Hit);
+    assert_eq!(undefined_symbol_severities(&warm["index"]), computed);
+
+    // A severity no current build stamps on `undefined-symbol` proves the
+    // hit serves what is stored rather than recomputing it.
+    for diagnostic in entry["diagnostics"].as_array_mut().expect("diagnostics") {
+        if diagnostic["rule"] == "undefined-symbol" {
+            diagnostic["severity"] = json!("Info");
+        }
+    }
+    write_entry(&entry_path, &entry);
+    let (lookup, replayed, _) = cached(&cache, source(), &query);
+    assert_eq!(lookup, CacheLookup::Hit);
+    assert!(
+        undefined_symbol_severities(&replayed["index"]).iter().all(|severity| severity == "Info"),
+        "the hit replays the stored severity: {replayed:#}"
+    );
+}
