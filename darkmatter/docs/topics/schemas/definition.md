@@ -866,7 +866,7 @@ Resolved example objects are emitted onto the JSON Schema as the `x-darkmatter-e
 
 ### Cross-File Named-Type Imports (`Name@file`)
 
-`Name@fileref` **inlines** the definition of the named type `Name` from the referenced file at the use site — structural substitution, not a persistent reference. A schema file's **top-level `$schema:` entries are its named types**; each is a full SimplifiedSchema definition (scalar, enum, union, or an inline object with literal or pattern keys).
+`Name@fileref` **inlines** the definition of the named type `Name` from the referenced file at the use site — structural substitution, not a persistent reference. A schema file's **top-level mapping entries are its named types** — the entries under `$schema:` in a pure envelope, or under `types:` in a `kind: schema` envelope (see [Standalone Schema Documents](#standalone-schema-documents)). Each is a full SimplifiedSchema definition (scalar, enum, union, or an inline object with literal or pattern keys).
 
 ```yaml
 $schema:
@@ -890,6 +890,21 @@ Rules:
 - Expansion is **eager, bounded, and cycle-checked**. Named types form a DAG; a type that transitively references itself is a recursion error (`SchemaError::ImportCycle`), and an import chain that exceeds the depth cap is rejected — the same protection as the inline-object nesting cap. True recursive types are deferred.
 - Each import is a **dependency edge** recorded on the resolved schema (`ResolvedSchema.imports`) so the schema cache and DMLS index can invalidate when an imported file changes.
 - `to_json_schema` rejects any unresolved import that reaches conversion, exactly as it rejects unresolved root-union file arms — imports are always expanded by the resolver first.
+
+> **Implementation note:** within one schema resolution, each target file's
+> named types are parsed once and shared, unexpanded, by every import of that
+> file, and the document's own table is shared by every `@this`. Each use site
+> still receives its own copy of the selected definition, so a constraint,
+> description, or `[]` on one import never affects another:
+>
+> ```yaml
+> $schema:
+>     primary: name(required)@./types.yaml  # required here only
+>     backup:  name@./types.yaml            # unaffected by `primary`
+> ```
+>
+> The sharing ends when that resolution finishes: nothing is kept between
+> calls, and it reduces copying without promising a fixed end-to-end speedup.
 
 Because a named type can be *any* definition and `@` inlines it, composition (named types + `@` + `[]` + unions + pattern keys) **is** the type system — SimplifiedSchema's ergonomic answer to JSON Schema `$ref` / `$defs`.
 
