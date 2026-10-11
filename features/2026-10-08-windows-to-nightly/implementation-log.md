@@ -5,7 +5,51 @@ source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
-packages: []
+source_files_during_phase_2:
+  - scripts/ci/schema.py
+  - scripts/ci/local_evidence.py
+  - scripts/ci/observation_notes.py
+  - scripts/ci/completion.py
+  - scripts/ci/test_schema.py
+  - scripts/ci/test_evidence_reuse.py
+  - scripts/ci/test_completion.py
+  - scripts/ci/test_cross_check.py
+  - scripts/cross-check.sh
+  - .githooks/pre-push
+  - .githooks/tests/test-pre-push.sh
+  - .github/ci/schemas/contract.json
+docs_updated_during_phase_2:
+  - docs/cicd/schema-versions.md
+  - docs/topics/ci-cd.md
+  - .github/ci/schemas/README.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+  - .claude/skills/rust-devops/ci-cd.md
+  - .claude/skills/os/ci-evidence.md
+source_files_during_phase_3:
+  - scripts/ci/schema.py
+  - scripts/ci/reuse_validation.py
+  - scripts/ci/affected_scope.py
+  - scripts/ci/test_schema.py
+  - scripts/ci/test_reuse_validation.py
+  - scripts/ci/test_affected_scope.py
+  - scripts/ci-rollup.rs
+  - scripts/ci-rollup-tests.rs
+  - tools/test-toolkit/tests/ci_workflow_contracts.rs
+  - .github/workflows/ci.yml
+  - .github/ci/schemas/contract.json
+docs_updated_during_phase_3:
+  - .github/ci/README.md
+  - .github/ci/schemas/README.md
+  - docs/cicd/schema-versions.md
+  - docs/topics/ci-cd.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+  - .claude/skills/rust-devops/ci-cd.md
+  - .claude/skills/os/ci-evidence.md
+packages:
+  - repo-deps
+  - test-toolkit
 ---
 
 # Implementation log
@@ -341,3 +385,280 @@ column. Workflow YAML is contract-inspected only, so no YAML matrix is added.
   run, because no source changed.
 - Skipped / not done: no hosted run, no rig run, no `gh` mutation. Recovery
   diagnosis covered the two latest nightly runs only.
+
+## Phase 2
+
+Durable observation storage and verification (Waves 3-5). Python only; no
+workflow, planner (`affected_scope.py`), or plan-version change, so the plan
+stays at version 7 and `RECEIPT_SCHEMA_VERSION` at 2.
+
+### What changed
+
+- `schema.py`: observation collection (`COLLECTION_SCHEMA_VERSION = 3`) with
+  `validate_collection`, `validate_observation`, `observation_identity`,
+  `is_version`, `loads_strict`; four new rejection codes
+  (`observation-link-invalid`, `observation-id-mismatch`,
+  `observation-report-unavailable`, `observation-proof-missing`);
+  `receipt_cell_problems` extracted from `validate_receipt` so a receipt and an
+  observation share one cell contract. Reader defects 1, 2, 3, 5 (for every
+  note, plan, prior-receipt, and manifest loader), and 6 from the Phase 1
+  inventory are fixed; 4 is fixed in `completion.py`.
+- `local_evidence.py::verify_cells` rewritten as gather-then-resolve
+  (`_read_note`/`_read_collection`/`_read_legacy`, `_plan_keys`,
+  `_qualification`, `_supersedes`). v1, v2, and v3 notes feed one resolver.
+  `candidate_commits` now includes the coverage boundary commit and, for an
+  all-zero base, enumerates annotated reachable ancestors (cap 500, one
+  `merge-base --is-ancestor` per noted commit, no merge base, no full walk).
+- `observation_notes.py` (new): `receipt_observations`, `merge_observations`,
+  `publish` (local write -> fetch into a scratch ref -> union -> rebase local
+  notes onto the fetched tip -> non-force push, 5 attempts, jittered backoff),
+  and the `publish-receipt` CLI (exit 0 published, 4 local only, 3 nothing
+  recorded).
+- `pre-push` and `cross-check.sh` publish through `publish-receipt`; the hook no
+  longer force-fetches the notes ref or feeds a prior receipt (the collection
+  carries earlier cells); `cross-check.sh` copies its WSL report to the evidence
+  directory first so the observation's digest names something that outlives the
+  script.
+- `completion.py`: version via `is_version`, strict JSON, `nextest_version`
+  must be a string (`null` used to become the text `"None"`), `backends` and
+  `companion_suites` must be lists of strings (used to raise `TypeError`); the
+  completion record now types `run` and `attempt`.
+
+### Departures from the Phase 1 rulings (all assumptions, pending author review)
+
+- **`proof` is forbidden for `hook` and required for `rig`/`hosted`/`seed`.**
+  Both existing publishers (hook, `cross-check.sh`) prove through the report
+  counts of their cell and have no expected-listing or completion-record digest
+  to cite, so they publish `hook` observations. A `rig` observation is only
+  accepted once Phase 4 produces real proof. The ruling listed `proof` as always
+  present.
+- **`features` is a single string** (the plan's build identity spells isolated
+  features as one string), not a list. Absent means no feature arguments.
+- **`reports[].store` is `host-dir` or `artifact`**; `git` was dropped (nothing
+  would write or verify it). An `artifact` reference is unavailable unless the
+  caller passes a `report_probe`; the probe is Phase 4's seam.
+- **`producer.host`** is `{os, kernel, label?, report_dir?}`; `report_dir` is
+  required only when a `host-dir` report is cited.
+- **Automatic retry links.** `publish` links a new observation of a cell to the
+  single unretried observation already in the collection (none or several =
+  unlinked). A republication of an identical run is dropped before linking.
+  Content-addressed ids make retry cycles unconstructible; the cycle, self-link,
+  dangling, and cross-cell checks remain as defense and are tested for the
+  constructible cases (dangling, cross-cell).
+- **Boundary commit now consulted.** The merge base itself was excluded
+  before; the spec asks for the coverage boundary, so it is included.
+- **Backend and feature checks are v3-only.** `_observation_refusal` rejects an
+  observation whose proved backends miss the plan cell's `backends` or whose
+  `features` differ from the plan build's isolated features. v2 cells keep the
+  checks they had; their `receipt_cell` already marks an unproved L2 `partial`.
+- `search-exhausted` is not added yet: nothing in this phase can exhaust a
+  bounded search into a decision (Phase 3 owns the fallback reasons).
+- An existing v1 note, or a v2 note whose reports are no longer retained,
+  cannot be carried into a collection; publishing then fails locally with the
+  reason instead of dropping the older proof.
+
+### Requirement-to-test mapping
+
+| Behavior | Test (`scripts/ci/`) |
+|---|---|
+| Collection credits every package it holds; evidence names the observation | `test_evidence_reuse.ObservationCollectionTests.test_a_collection_credits_every_package_it_holds` |
+| Boundary commit is a candidate; changed inputs refused | `...test_the_coverage_boundary_commit_is_a_candidate`, `...test_a_changed_gate_input_on_the_boundary_is_refused` |
+| Newer failure beats older pass; later pass restores reuse | `...test_a_newer_failure_beats_an_older_pass_of_equivalent_inputs`, `...test_a_later_passing_commit_restores_reuse_over_an_older_failure` |
+| Retry lineage (pass supersedes failure; failure supersedes pass) | `...test_a_retry_that_passes_supersedes_the_failure_it_names`, `...test_a_retry_that_fails_supersedes_the_pass_it_names` |
+| Unordered disagreement executes; agreeing passes credit once | `...test_unlinked_disagreeing_observations_on_one_commit_conflict`, `...test_results_on_unordered_commits_conflict` (real merge), `...test_unlinked_agreeing_passes_credit_the_cell_once` |
+| Incomplete observations neither credit nor supersede | `...test_an_incomplete_observation_neither_credits_nor_supersedes` |
+| Invalid links / forged ids / wrong ref | `...test_a_dangling_retry_link_rejects_the_whole_collection`, `...test_a_retry_across_cells_is_rejected`, `...test_an_id_that_is_not_the_identity_of_its_content_is_rejected`, `...test_a_note_filed_under_the_wrong_environment_is_credited_to_neither`; schema: `CollectionValidationTests` |
+| Reports: missing, altered, other host, artifact probe, failure still blocks, must be cited | `ObservationReportTests` (6 tests) |
+| Feature and backend refusal | `...test_features_other_than_the_plans_are_refused`, `...test_an_observation_that_misses_a_planned_backend_is_refused` (backend case calls `_observation_refusal` directly: building an executing L2 plan fixture was out of proportion) |
+| Bootstrap: all-zero base reads head, finds ancestor proof, ignores non-ancestors, needs no merge base, bounded by notes | `BootstrapDiscoveryTests` (5 tests) |
+| Strict JSON in notes: duplicate key, trailing content, NaN, boolean version | `StrictDocumentTests`; schema: `StrictJsonTests`, `ReceiptReaderRobustnessTests` |
+| Input matrix, collection side (envelope, observation, producer/proof, report ref, cell fields), one edit per cell with an unedited control for each | `ObservationMatrixTests` (6 tests, every assertion through `verify_cells`) |
+| Publication: local+remote, sequential packages, idempotence, retry linking, second host union, lost race retried, unrelated commit's notes survive a rebase, unreachable remote keeps proof local, retry bound, oversize writes nothing, same id different content | `PublicationTests` (11 tests, real bare remote and second clone) |
+| Recorder round trip (read/write/read), v2 note carried not overwritten, missing reports publish nothing, CLI exit 4 local-only | `RecorderPublicationTests` |
+| Hook publishes a one-observation v3 collection from a `hook` producer; follow-ups, failures, stacked PR bases still behave | `.githooks/tests/test-pre-push.sh` (all pass; reads through the `receipt_view` jq projection) |
+| `cross-check.sh` publishes via the collection and retains its report first | `test_cross_check.WslObservationPublicationTests` (static contract: the shell path itself was not run end to end) |
+| Reader defects: version first, bool/float versions, crash on non-dict cell and bad first `test_filter`, bool duration/exit code, null build/report | `test_schema.ReceiptReaderRobustnessTests` |
+| Completion/manifest defects | `test_completion.ManifestReaderRobustnessTests` (null/non-string `nextest_version`, bool/float version, non-list declarations, duplicate key), `test_schema.CompletionRecordValidationTests` (version first, typed `run`/`attempt`) |
+
+Matrix cells still open: the nightly-certification, anchor, and resume columns
+belong to Phases 3 and 5; the expected-manifest per-field walk (absent/null/wrong
+type for every field) was not done as a full table, only the defects the Phase 1
+inventory named. The plan's final "Assert complete matrix" task therefore stays
+unchecked.
+
+### Gates run (macOS, local)
+
+- `scripts/ci/suite_runner.py` counts: `test_schema.py` 190, `test_completion.py`
+  73-74, `test_cross_check.py` 30, `test_local_evidence.py` 23,
+  `test_evidence_reuse.py` 135 - all pass.
+- Unittest runs, all pass: `test_resolved_plan`, `test_ci_local`,
+  `test_consolidation`, `test_constraints`, `test_runner_loss`, `test_build_key`,
+  `test_publish_gaps`, `test_reuse_validation` (432 + 310 tests combined).
+- `.githooks/tests/test-pre-push.sh`: pass. `shellcheck -S warning` on the hook
+  and `cross-check.sh`: clean. `bash -n scripts/cross-check.sh`: clean.
+- `cargo nextest run -p test-toolkit --test ci_workflow_contracts`: 165 passed.
+- `cargo nextest run -p repo-deps`: 471 passed, **1 timed out**:
+  `ci-build archive::tests::slow_real_package_archives_read_their_fixtures_from_the_consumers_checkout`
+  (90 s `slow_` test that archives a real package). I did not touch `ci-build`
+  or archives and did not re-run it on the unmodified tree, so I cannot say it is
+  pre-existing; treat it as unverified. The frozen-contract tests
+  (`plan_fields_match_the_frozen_contract`, `completion_record_fields_match_the_frozen_contract`,
+  `the_rejection_vocabulary_matches_the_frozen_cross_language_contract`) pass.
+- Not run: `test_affected_scope.py` (the planner is unchanged), `just lint`
+  (no Python linter is wired; Rust is unchanged), `just test-l2`.
+
+### OS evidence
+
+macOS only. Nothing in this phase is compiled or `cfg`-gated; the Windows-facing
+choices are deliberate: git is called with a list argv and stdin (no shell
+quoting), the ancestor list goes through `git rev-list --stdin` so a long list
+cannot overflow the 32 KiB Windows command line, paths are only joined with
+`pathlib`, and no `canonicalize`. `just cross-check` runs a package's Rust
+tiers, not the Python companion suites, so it would not exercise this code;
+native Windows and WSL2 runs of the Python suites and of `publish-receipt`
+against a real remote were **not** performed. Phase 4 should smoke
+`observation_notes.py publish-receipt` on both rigs.
+
+### Notes for later phases
+
+- `verify_cells(..., report_probe=...)` is the seam for hosted `artifact`
+  reports (Phase 4); `publish(..., before_push=..., sleep=...)` are test seams.
+- The resolver has no `schedule` special case yet: `ci.yml` still skips
+  cell verification for `schedule` and `workflow_dispatch`, and `nightly_base`
+  is unchanged (Phase 3).
+- `.githooks/pre-push` no longer force-fetches `refs/notes/ci-local/<env>`.
+  The scope note still uses `attach_note`'s `+ref:ref` fetch; that is a
+  different ref, so it was left alone.
+
+## Phase 3
+
+Migration-aware nightly planning and audits (Waves 6-7). Waves 6 (planner, anchor
+resolution, scheduled overlay) were done in the orchestrator; Wave 7 ran as two
+foreground subagents with disjoint ownership (`ci-rollup.rs`; `ci.yml` plus the
+workflow contract test).
+
+### What changed
+
+- `schema.py`: coverage vocabulary (`ANCHOR_REASONS`, `ANCHOR_MODES`,
+  `ANCHOR_SOURCE_KINDS`, `COVERAGE_POLICY_VERSION`), the plan's optional
+  `coverage_anchors` (validated by `_coverage_anchor`: reason, mode, anchor, and
+  source must agree), the certification document
+  (`CERTIFICATION_SCHEMA_VERSION = 1`, `validate_certification`,
+  `policy_digest`, `certification_name`), and the planner's anchor input
+  (`validate_anchor_input`). `contract.json` regenerated.
+- `reuse_validation.py`: `nightly_base` is gone. `resolve_anchors` finds, per
+  scheduled environment, the newest successful nightly on `main` that is an
+  ancestor and proved *that* environment: a valid certification artifact
+  (looked up by name, downloaded and validated, bound to run, head, environment,
+  digest, policy version, and passed audits), or, for a run with no
+  certification for any scheduled environment, the environment's `schedule`
+  membership in `environments.json` at that commit plus every `coverage-audit`
+  job succeeding. Bounded, paginated search (4 pages of 50). Coded fallbacks:
+  `bootstrap-no-run`, `api-failure`, `search-exhausted`, `policy-uncertified`,
+  `no-qualifying-ancestor`. New CLI modes `nightly-anchors` and `certify`.
+- `affected_scope.py`: `calculate_scope` selection was extracted into a nested
+  `select_group` (behavior-preserving; the full 733-test planner/schema suite
+  passed after the extraction). `coverage_groups` runs it once per distinct
+  anchor, `merge_selections` unions cells once per `{package, environment,
+  gate}`, `apply_policy_delta` adds cells current policy requires that the
+  anchor's certification never covered and records `inherited_cells`. New
+  `--anchors FILE` derives each diff itself (`git_changes`); malformed anchors or
+  anchors that do not cover exactly the scheduled environments stop planning.
+- `ci.yml`: the schedule path calls `nightly-anchors` and passes `--anchors`; the
+  evidence verifier/overlay now runs on `schedule` (only `workflow_dispatch`
+  skips it); the scope job reads `actions: read`; the scope summary prints
+  execute/reuse/gap counts and the anchor reasons; the `certify-nightly` job
+  (schedule-only, after `ci-gate` success, contents+actions read) uploads each
+  certification under its exact name with 90-day retention.
+- `ci-rollup.rs`: reused-cell proof is checked (`check_reused_proof`); optional
+  `coverage_anchors` is read and summarized; all-reused, gap-only, and empty
+  plans roll up cleanly.
+
+### Departures from the Phase 1 rulings (assumptions, pending author review)
+
+- **No plan version bump.** The ruling said plan v8. `coverage_anchors` is
+  optional and absent outside a nightly, so the version follows the required set
+  (the same rule `event`/`deferred_environments` use). This also leaves v8 to the
+  archive-guard fix that names it, and no Rust constant or hook fixture moved.
+- **Certification is one artifact per environment** (the ruling's per-environment
+  `{certified, cells, audits}` map became a top-level document), and it carries
+  `covered_cells` plus `cells.inherited` so coverage stays transitive across
+  nightlies that execute nothing; the ruling carried counts only, which could not
+  support the policy-delta comparison.
+- **Legacy anchors prove no cell list** (`covered_cells = null`): the planner
+  takes them to cover what the diff does not reselect and adds no delta. Expired
+  gaps and newly required backends since a legacy run are therefore invisible
+  until the first certified nightly.
+- **Audit counting uses job names** (`coverage-audit` at the end of the job
+  name, `area-ci (<area>) / coverage-audit` in the real run) from the Actions
+  jobs API; `required` is the number of scheduled areas. This was not run
+  against a real hosted run.
+- **`certify-nightly` fails the run** if it cannot publish, so an uncertified run
+  can never be mistaken for a baseline.
+
+### Requirement-to-test mapping
+
+| Behavior | Test |
+|---|---|
+| Bootstrap, API failure, exhausted search, non-ancestor, newest wins, failed/incomplete/foreign/other-event/other-branch runs never anchor | `test_reuse_validation.NightlyAnchorTests` |
+| WSL2-only legacy history anchors WSL2 only, Windows stays full | `...test_a_legacy_wsl2_only_success_anchors_wsl2_and_leaves_windows_in_full_scope` (resolver); `test_affected_scope.CoverageAnchorTests.test_wsl2_only_history_anchors_wsl2_and_runs_windows_in_full` (plan) |
+| Certified dual nightly shares one anchor/diff | `...test_a_certified_dual_environment_nightly_anchors_both_environments`; `...test_a_certified_dual_nightly_shares_one_anchor_and_one_diff` |
+| Unchanged certified head plans nothing, inherits all | `CoverageAnchorTests.test_an_unchanged_certified_head_plans_no_cell_and_inherits_everything` |
+| Policy delta (expired gap / new gate or backend) with an empty diff | `CoverageAnchorTests.test_current_policy_adds_uncovered_cells_whatever_the_diff_says`, `...test_a_delta_cell_joins_a_package_the_diff_already_selected` |
+| Skipped audits earn neither anchor | `NightlyAnchorTests.test_a_legacy_run_with_a_skipped_audit_earns_neither_anchor`; certification `audits` edits in the matrix |
+| Different anchors use their own diffs; identical inputs give identical plans; bootstrap equals the unanchored full plan | `CoverageAnchorTests` (3 tests) |
+| Certification input matrix (absent/null/wrong type/empty per field, unknown field, wrong run/head/environment/digest, uncertified, short audits, duplicate key, trailing content, unreadable artifact), through `resolve_anchors` | `NightlyAnchorTests.test_certification_input_matrix_every_edit_loses_the_anchor` (control row proves the unedited document is credited); schema side `test_schema.CertificationValidationTests` |
+| Anchor-input matrix (planner side), exit via `RuntimeError`/`SystemExit` | `CoverageAnchorTests.test_anchor_input_matrix_every_malformed_document_stops_planning`, `...test_certified_and_legacy_entries_must_agree_with_their_coverage_shape`, `...test_the_command_refuses_anchors_beside_a_file_list_or_all` |
+| Plan `coverage_anchors` shape/contradiction rejection | `test_schema.CoverageAnchorValidationTests` |
+| Certification content: transitive coverage, gaps cover nothing, failed gate/short audits never certify, command writes one artifact per anchored environment | `test_reuse_validation.CertificationTests` |
+| Reused-proof audit, stale completion not credited, all-reused/gap-only/empty plans, anchors summary | `ci-rollup-tests.rs` (10 tests named in the Wave 7 report; 285 `ci-rollup` tests pass) |
+| Workflow wiring: anchors not single base, verifier on schedule not dispatch, scope permissions, certification job read-only/gated/not in `ci-gate`, PR/push cadence unchanged | `ci_workflow_contracts.rs` (5 new tests; 170 pass) |
+
+### Gates run (macOS, local)
+
+- Planner/schema/evidence Python suites: `test_affected_scope`, `test_resolved_plan`,
+  `test_schema` (733 after the refactor, before new tests), then `test_evidence_reuse`,
+  `test_local_evidence`, `test_completion`, `test_cross_check`, `test_ci_local`,
+  `test_resolved_plan`, `test_consolidation`, `test_constraints`, `test_runner_loss`,
+  `test_build_key`, `test_publish_gaps`, `test_reuse_validation`, `test_schema`
+  (936) - all pass after two summary-string test failures I caused (an
+  unneeded rewording of the dispatch row, reverted). Counts: `test_reuse_validation`
+  42, `test_schema` 200, `CoverageAnchorTests` 13.
+- `CDPATH= bash .githooks/tests/test-pre-push.sh`: 68 passed (a set `CDPATH`
+  breaks the script's repo-root discovery with a misleading "hook not
+  executable"; unrelated to this change).
+- `actionlint .github/workflows/*.yml`: clean.
+- `cargo nextest run -p test-toolkit`: 468 passed. `cargo nextest run -p repo-deps`:
+  489 passed, 1 timed out - the same `slow_real_package_archives_...` test as
+  Phase 2, unrelated and still unverified against the baseline.
+- Real-workspace smoke: `affected_scope.py --event schedule --anchors` with a
+  full Windows and a legacy WSL2 anchor produced a plan that validates
+  (88 cells, WSL2 inherits 68, 7 s).
+- Not run: `just lint` (no Python linter is wired; Rust changes are tests and
+  rollup only), `just test-l2`, a hosted run, any rig run.
+
+### OS evidence
+
+macOS only. The changes are Python, workflow YAML, and Rust rollup/test code with
+no `cfg`-gated paths; git is invoked with a list argv and `zipfile`/`pathlib`
+only. Native Windows and WSL2 runs of the Python suites and of
+`observation_notes.py publish-receipt` against a real remote remain **not done**
+(Phase 4). The certification download path (`gh api .../zip`) and the audit job
+name pattern have never run against a real hosted run.
+
+### Matrix status
+
+Done in this phase: certification document and anchor input (planner and
+resolver sides), plan `coverage_anchors`. Still open for the final "Assert
+complete matrix" task: resume-state columns (Phase 5), the expected-manifest
+per-field walk, and a duplicate-key walk of the plan reader.
+
+### Notes for later phases
+
+- The first nightly after merge is a bootstrap (no nightly has ever succeeded),
+  so both environments run the full gated workspace on hosted runners until a
+  rig or hosted producer publishes observations (Phase 4) or a nightly is
+  certified.
+- `certify` needs the real job names; if `coverage-audit` ever gets a `name:`,
+  update `reuse_validation.AUDIT_JOB`.
+- `workflow_dispatch` never anchors and never certifies.

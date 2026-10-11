@@ -3,7 +3,7 @@ kind: plan
 title: Scoped Windows nightlies and resumable evidence seeding
 created: 2026-10-11
 total_phases: 6
-phase: 1
+phase: 3
 agent: codex/gpt-6.1-sol
 yolo: true
 spec: 2026-10-08-windows-to-nightly
@@ -11,7 +11,51 @@ source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
-packages: []
+source_files_during_phase_2:
+  - scripts/ci/schema.py
+  - scripts/ci/local_evidence.py
+  - scripts/ci/observation_notes.py
+  - scripts/ci/completion.py
+  - scripts/ci/test_schema.py
+  - scripts/ci/test_evidence_reuse.py
+  - scripts/ci/test_completion.py
+  - scripts/ci/test_cross_check.py
+  - scripts/cross-check.sh
+  - .githooks/pre-push
+  - .githooks/tests/test-pre-push.sh
+  - .github/ci/schemas/contract.json
+docs_updated_during_phase_2:
+  - docs/cicd/schema-versions.md
+  - docs/topics/ci-cd.md
+  - .github/ci/schemas/README.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+  - .claude/skills/rust-devops/ci-cd.md
+  - .claude/skills/os/ci-evidence.md
+source_files_during_phase_3:
+  - scripts/ci/schema.py
+  - scripts/ci/reuse_validation.py
+  - scripts/ci/affected_scope.py
+  - scripts/ci/test_schema.py
+  - scripts/ci/test_reuse_validation.py
+  - scripts/ci/test_affected_scope.py
+  - scripts/ci-rollup.rs
+  - scripts/ci-rollup-tests.rs
+  - tools/test-toolkit/tests/ci_workflow_contracts.rs
+  - .github/workflows/ci.yml
+  - .github/ci/schemas/contract.json
+docs_updated_during_phase_3:
+  - .github/ci/README.md
+  - .github/ci/schemas/README.md
+  - docs/cicd/schema-versions.md
+  - docs/topics/ci-cd.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+  - .claude/skills/rust-devops/ci-cd.md
+  - .claude/skills/os/ci-evidence.md
+packages:
+  - repo-deps
+  - test-toolkit
 ---
 
 # Implementation plan
@@ -68,7 +112,7 @@ Every phase has an exit checkpoint. Waves have globally unique numeric indices. 
 
 ### Wave 3 — Shared schema foundation
 
-- [ ] **Version contracts**
+- [x] **Version contracts**
   - Implement the selected collection contract in `schema.py` and its validators. Preserve independent receipt/run/host contexts; distinguish observation completion, outcome, producer completion, and accepted gaps.
   - Keep version-1/2 receipt reads only where their existing evidence contracts qualify; do not upgrade provenance in place. Add migration-plan fields with an appropriate resolved-plan version bump when required.
   - Move all affected schema mirrors, regenerate `.github/ci/schemas/contract.json`, and update `docs/cicd/schema-versions.md` together. Inspect current versions rather than assuming the next number remains free.
@@ -76,11 +120,11 @@ Every phase has an exit checkpoint. Waves have globally unique numeric indices. 
 
 ### Wave 4 — Parallel evidence services
 
-- [ ] **Publish observations**
+- [x] **Publish observations**
   - Implement fetch/merge/bounded retry of note updates without force overwrites. Preserve other packages, hosts, attempts, and original proof; repeated publication of one immutable observation is idempotent.
   - Persist reports and observations locally before publication. Surface fetch, retention, upload, and ref-update errors; remote publication failure leaves proof local and uncovered cells scheduled.
   - Ownership: a dedicated publication helper and its tests; the integrator owns changes to shared schema/CLI files.
-- [ ] **Verify observations**
+- [x] **Verify observations**
   - Refactor discovery to enumerate annotated reachable ancestors from fetched refs, including the head and coverage boundary. Bootstrap/all-zero bases must not require a merge base or a walk of every commit.
   - Independently verify tested commit/tree, gate-input closure, features/filter, expected/observed identities, reports, completion, target/runtime, backends, and build identity. Reject unreachable squash/rebase candidates; unknown closures require execution.
   - Resolve equivalent-input outcomes by the frozen lineage rules; reject invalid/cyclic links, preserve newer failure precedence, and require execution for unresolved conflicts. Later qualifying retry passes may restore reuse.
@@ -88,7 +132,7 @@ Every phase has an exit checkpoint. Waves have globally unique numeric indices. 
 
 ### Wave 5 — Evidence integration
 
-- [ ] **Integrate evidence**
+- [x] **Integrate evidence**
   - Connect collection reads/writes to existing recorder and hook publication paths without changing strict/warn/scope-only/no-verify meanings. Completed failures remain observations, not passing proof; preserve completed cells independently of a failed or interrupted pass.
   - Update module/function docs and inline comments changed by the new discovery, publication, or precedence behavior. Explain rejection reasons through existing summaries.
   - Prove sequential packages, mixed hosts/runs, same-commit retries, concurrent ref conflicts, delayed publication, invalid lineage, expired reports, missing notes, newer failure, and later-pass recovery in isolated local fixtures.
@@ -99,23 +143,23 @@ Every phase has an exit checkpoint. Waves have globally unique numeric indices. 
 
 ### Wave 6 — Canonical scope
 
-- [ ] **Resolve migration**
+- [x] **Resolve migration**
   - Extend `reuse_validation.py` to verify recorded coverage policy and required audit results, returning per-environment anchors and precise fallback reasons. Green orchestration alone is insufficient.
   - Have `affected_scope.py` calculate each environment's selection, union cells once, and record anchors/reasons in one resolved plan. Old WSL2-only history anchors WSL2 while Windows selects the full gated workspace; after a certified dual-environment nightly both use the common anchor.
   - Evaluate policy at the current run date and add newly required coverage even with an empty source diff. Receipts never become comparison anchors. Failed/canceled/incomplete/foreign/non-ancestor runs never advance or roll back the successful anchor.
   - Preserve package identities, area derivation, internal prompt exclusions, suite ownership, direct-dependent seam policy, and narrowed test-input behavior. Archive-only Ubuntu must not enable Ubuntu tests, lint, or check.
-- [ ] **Overlay scheduled proof**
+- [x] **Overlay scheduled proof**
   - Enable verification for schedules, including no-baseline/all-zero and boundary receipts. Apply one verified evidence overlay before deriving dispatch rows, builds, and preflight demand.
   - Derive all workflow consumers from the resolved plan; remove any single-base workflow diff assumption incompatible with migration. Consumers do not calculate their own selections.
   - Record execute/reuse/gap counts and fallback frequency in the existing summary. Windows reuse removes native producers; WSL2 still demands its Linux archive and Windows guest host where necessary.
 
 ### Wave 7 — Parallel consumers
 
-- [ ] **Audit reused proof**
+- [x] **Audit reused proof**
   - Update `scripts/ci-rollup.rs` and relevant contracts to verify reused-cell provenance without crediting an old completion as this run's execution. Require actual completion records for executing cells.
   - Ensure fully reused/gap-only plans launch necessary normal audits despite empty execution rows; truly unchanged and unchanged-policy plans launch no package builds/tests/preflight. Preserve producer failures and policy-free `ci-gate` folding.
   - Ownership: rollup/results/audit code and tests; no concurrent workflow edits.
-- [ ] **Preserve cadence**
+- [x] **Preserve cadence**
   - Update workflow wiring and `ci_workflow_contracts` for canonical migration selection, scheduled overlay, producer demand, explicit opt-ins, and empty plans.
   - Keep existing event-table authority, Linux-only check/lint policy, 90-minute same-tree PR wait, and failure/cancellation/timeout fallback to ordinary Linux/macOS. Do not reintroduce Windows/WSL2 through a fallback or another workflow.
   - Ownership: workflow orchestration and workflow contracts; coordinate shared fixtures with the integrator.
