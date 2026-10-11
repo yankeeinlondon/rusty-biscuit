@@ -3,7 +3,7 @@ kind: plan
 name: reexports-all-languages
 total_phases: 6
 created: 2026-10-11
-phase: 2
+phase: 4
 agent: codex/gpt-6.1-sol
 yolo: true
 source_files_during_phase_1: []
@@ -54,18 +54,73 @@ skills_files_updated_during_phase_2:
   - .claude/skills/tree-hugger/analysis-pipeline.md
   - .claude/skills/tree-hugger/api-reference.md
   - .claude/skills/tree-hugger/testing.md
-source_files_during_phase_3: []
+source_files_during_phase_3:
+  - tree-hugger/lib/src/analysis/reexports/mod.rs
+  - tree-hugger/lib/src/analysis/reexports/common.rs
+  - tree-hugger/lib/src/analysis/reexports/rust.rs
+  - tree-hugger/lib/src/analysis/reexports/ecma/mod.rs
+  - tree-hugger/lib/src/analysis/reexports/ecma/bindings.rs
+  - tree-hugger/lib/src/analysis/reexports/ecma/cjs.rs
+  - tree-hugger/lib/src/analysis/reexports/python.rs
+  - tree-hugger/lib/src/analysis/reexports/go.rs
+  - tree-hugger/lib/src/analysis/reexports/perl.rs
+  - tree-hugger/lib/src/analysis/reexports/lua.rs
+  - tree-hugger/lib/src/analysis/reexports/swift.rs
+  - tree-hugger/lib/src/analysis/reexports/scala.rs
+  - tree-hugger/lib/src/analysis/reexports/cpp.rs
+  - tree-hugger/lib/src/analysis/reexports/csharp.rs
+  - tree-hugger/lib/src/file/mod.rs
+  - tree-hugger/lib/tests/l1/main.rs
+  - tree-hugger/lib/tests/l1/reexports_support.rs
+  - tree-hugger/lib/tests/l1/symbols_reexports.rs
+  - tree-hugger/lib/tests/l1/symbols_reexports_rust.rs
+  - tree-hugger/lib/tests/l1/symbols_reexports_ecma.rs
+  - tree-hugger/lib/tests/l1/symbols_reexports_python_perl.rs
+  - tree-hugger/lib/tests/l1/symbols_reexports_go_lua.rs
+  - tree-hugger/lib/tests/l1/symbols_reexports_swift_scala_csharp.rs
+  - tree-hugger/lib/tests/l1/symbols_reexports_cpp.rs
+  - tree-hugger/cli/tests/symbols/cache_upgrade.rs
+  - tree-hugger/cli/tests/symbols/wiring.rs
+  - tree-hugger/cli/tests/fixtures/golden/symbols.json
+  - tree-hugger/cli/tests/fixtures/golden/symbols.jsonl
 docs_updated_during_phase_3:
   - tree-hugger/features/2026-10-11-reexports-all-languages/implementation-log.md
   - tree-hugger/features/2026-10-11-reexports-all-languages/spec.md
+  - tree-hugger/docs/symbol-records/file-index.md
 docs_created_during_phase_3: []
-skills_files_updated_during_phase_3: []
-source_files_during_phase_4: []
+skills_files_updated_during_phase_3:
+  - .claude/skills/tree-hugger/analysis-pipeline.md
+  - .claude/skills/tree-hugger/api-reference.md
+  - .claude/skills/tree-hugger/testing.md
+source_files_during_phase_4:
+  - tree-hugger/cli/src/main.rs
+  - tree-hugger/cli/tests/symbols/cache_robustness.rs
+  - tree-hugger/lib/src/analysis/mod.rs
+  - tree-hugger/lib/src/analysis/reexports/mod.rs
+  - tree-hugger/lib/src/cache/mod.rs
+  - tree-hugger/lib/src/cache/stored_evidence.rs
+  - tree-hugger/lib/src/cache/stored_reexports.rs
+  - tree-hugger/lib/src/cache/symbol_cache.rs
+  - tree-hugger/lib/src/file/tree_file.rs
+  - tree-hugger/lib/src/shared/symbol.rs
+  - tree-hugger/lib/tests/l1/main.rs
+  - tree-hugger/lib/tests/l1/reexports_consumers.rs
 docs_updated_during_phase_4:
   - tree-hugger/features/2026-10-11-reexports-all-languages/implementation-log.md
   - tree-hugger/features/2026-10-11-reexports-all-languages/spec.md
+  - tree-hugger/docs/cache-design/entry-format.md
+  - tree-hugger/docs/cache-design/robustness.md
+  - tree-hugger/docs/cli.md
+  - tree-hugger/docs/library.md
+  - tree-hugger/docs/library/diagnostics.md
+  - tree-hugger/docs/release-notes.md
+  - tree-hugger/docs/symbol-reports.md
 docs_created_during_phase_4: []
-skills_files_updated_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/tree-hugger/analysis-pipeline.md
+  - .claude/skills/tree-hugger/api-reference.md
+  - .claude/skills/tree-hugger/diagnostics.md
+  - .claude/skills/tree-hugger/testing.md
 source_files_during_phase_5: []
 docs_updated_during_phase_5:
   - tree-hugger/features/2026-10-11-reexports-all-languages/implementation-log.md
@@ -352,17 +407,17 @@ Depends on Phase 2. Workers own distinct language modules and fixtures; one
 integration owner owns shared dispatch, planner, constructors, and revision
 bumps. Grouping does not presume which candidates the audit accepts.
 
-- [ ] **Implement explicit forwarding**
+- [x] **Implement explicit forwarding**
   - Implement approved Rust, Swift, and Scala contracts, with language-local
     positive/negative fixtures. Cover Rust grouping, `self`, restrictions,
     enclosing scopes, and external-crate forms where approved; Swift import
     qualifiers; Scala selectors, exclusions/givens, and object-member paths.
-- [ ] **Implement ECMA forwarding**
+- [x] **Implement ECMA forwarding**
   - Implement JavaScript/TypeScript direct and indirect export forms, default
     exclusions, namespace/module distinction, aliases and type-only forms.
     Cover approved CommonJS forms with proof about shadowed globals and
     reassignment. Preserve existing local-export reference behavior.
-- [ ] **Implement remaining contracts**
+- [x] **Implement remaining contracts**
   - Implement approved patterns and coverage reasons for Python, Go, Perl,
     Lua, Java, PHP, Bash, Zsh, C, C++, and C#. Use language-local modules and
     table-driven expectations to keep this bounded group reviewable.
@@ -377,7 +432,7 @@ separate forwarding sites; deduplicate duplicate captures of one site.
 
 ### Wave 5: Sequential language integration
 
-- [ ] **Integrate language coverage**
+- [x] **Integrate language coverage**
   - Join implementations through the shared seam and add a 16-language coverage
     guard with dialect-specific rows where needed. Register new tests in the
     consolidated L1 targets and spell fixture reads in CI-resolvable forms.
@@ -395,7 +450,7 @@ uses only the analyzed file and does not fabricate target definitions.
 
 ### Wave 6: Concurrent integration tasks
 
-- [ ] **Persist forwarding evidence**
+- [x] **Persist forwarding evidence**
   - Update `cache/symbol_cache.rs`, strict stored evidence adapters, in-memory
     snapshots/conversions in `cache/mod.rs`, and coverage sufficiency/projection
     under one owner. Store the approved schema, computed state, entries,
@@ -406,7 +461,7 @@ uses only the analyzed file and does not fabricate target definitions.
     may turn damaged evidence into negative coverage.
   - Add final schema-bump and stale-revision rows without rewriting historical
     key formulas. Keep storage and identities independent of the scan root.
-- [ ] **Preserve consumer semantics**
+- [x] **Preserve consumer semantics**
   - Update `analysis::import_record`, direct imported-symbol output, and
     `unused-import` exemptions to use proven per-import forwarding evidence.
     Arrange diagnostics after necessary facts, without invoking public methods
@@ -424,7 +479,7 @@ ordering edits. Shared schema changes return to the integration owner.
 
 ### Wave 7: Sequential cache validation
 
-- [ ] **Exercise robustness matrix**
+- [x] **Exercise robustness matrix**
   - Implement the completed JSON matrix through real producer fixtures, controls,
     and one edit per cell. Assert output equality with uncached analysis and
     observable refusal/recomputation; include nested names, reason and qualifier

@@ -51,18 +51,73 @@ skills_files_updated_during_phase_2:
   - .claude/skills/tree-hugger/analysis-pipeline.md
   - .claude/skills/tree-hugger/api-reference.md
   - .claude/skills/tree-hugger/testing.md
-source_files_during_phase_3: []
+source_files_during_phase_3:
+  - tree-hugger/lib/src/analysis/reexports/mod.rs
+  - tree-hugger/lib/src/analysis/reexports/common.rs
+  - tree-hugger/lib/src/analysis/reexports/rust.rs
+  - tree-hugger/lib/src/analysis/reexports/ecma/mod.rs
+  - tree-hugger/lib/src/analysis/reexports/ecma/bindings.rs
+  - tree-hugger/lib/src/analysis/reexports/ecma/cjs.rs
+  - tree-hugger/lib/src/analysis/reexports/python.rs
+  - tree-hugger/lib/src/analysis/reexports/go.rs
+  - tree-hugger/lib/src/analysis/reexports/perl.rs
+  - tree-hugger/lib/src/analysis/reexports/lua.rs
+  - tree-hugger/lib/src/analysis/reexports/swift.rs
+  - tree-hugger/lib/src/analysis/reexports/scala.rs
+  - tree-hugger/lib/src/analysis/reexports/cpp.rs
+  - tree-hugger/lib/src/analysis/reexports/csharp.rs
+  - tree-hugger/lib/src/file/mod.rs
+  - tree-hugger/lib/tests/l1/main.rs
+  - tree-hugger/lib/tests/l1/reexports_support.rs
+  - tree-hugger/lib/tests/l1/symbols_reexports.rs
+  - tree-hugger/lib/tests/l1/symbols_reexports_rust.rs
+  - tree-hugger/lib/tests/l1/symbols_reexports_ecma.rs
+  - tree-hugger/lib/tests/l1/symbols_reexports_python_perl.rs
+  - tree-hugger/lib/tests/l1/symbols_reexports_go_lua.rs
+  - tree-hugger/lib/tests/l1/symbols_reexports_swift_scala_csharp.rs
+  - tree-hugger/lib/tests/l1/symbols_reexports_cpp.rs
+  - tree-hugger/cli/tests/symbols/cache_upgrade.rs
+  - tree-hugger/cli/tests/symbols/wiring.rs
+  - tree-hugger/cli/tests/fixtures/golden/symbols.json
+  - tree-hugger/cli/tests/fixtures/golden/symbols.jsonl
 docs_updated_during_phase_3:
   - tree-hugger/features/2026-10-11-reexports-all-languages/implementation-log.md
   - tree-hugger/features/2026-10-11-reexports-all-languages/spec.md
+  - tree-hugger/docs/symbol-records/file-index.md
 docs_created_during_phase_3: []
-skills_files_updated_during_phase_3: []
-source_files_during_phase_4: []
+skills_files_updated_during_phase_3:
+  - .claude/skills/tree-hugger/analysis-pipeline.md
+  - .claude/skills/tree-hugger/api-reference.md
+  - .claude/skills/tree-hugger/testing.md
+source_files_during_phase_4:
+  - tree-hugger/cli/src/main.rs
+  - tree-hugger/cli/tests/symbols/cache_robustness.rs
+  - tree-hugger/lib/src/analysis/mod.rs
+  - tree-hugger/lib/src/analysis/reexports/mod.rs
+  - tree-hugger/lib/src/cache/mod.rs
+  - tree-hugger/lib/src/cache/stored_evidence.rs
+  - tree-hugger/lib/src/cache/stored_reexports.rs
+  - tree-hugger/lib/src/cache/symbol_cache.rs
+  - tree-hugger/lib/src/file/tree_file.rs
+  - tree-hugger/lib/src/shared/symbol.rs
+  - tree-hugger/lib/tests/l1/main.rs
+  - tree-hugger/lib/tests/l1/reexports_consumers.rs
 docs_updated_during_phase_4:
   - tree-hugger/features/2026-10-11-reexports-all-languages/implementation-log.md
   - tree-hugger/features/2026-10-11-reexports-all-languages/spec.md
+  - tree-hugger/docs/cache-design/entry-format.md
+  - tree-hugger/docs/cache-design/robustness.md
+  - tree-hugger/docs/cli.md
+  - tree-hugger/docs/library.md
+  - tree-hugger/docs/library/diagnostics.md
+  - tree-hugger/docs/release-notes.md
+  - tree-hugger/docs/symbol-reports.md
 docs_created_during_phase_4: []
-skills_files_updated_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/tree-hugger/analysis-pipeline.md
+  - .claude/skills/tree-hugger/api-reference.md
+  - .claude/skills/tree-hugger/diagnostics.md
+  - .claude/skills/tree-hugger/testing.md
 source_files_during_phase_5: []
 docs_updated_during_phase_5:
   - tree-hugger/features/2026-10-11-reexports-all-languages/implementation-log.md
@@ -210,7 +265,9 @@ extractors marked planned.
 
 ## Phase 3
 
-Phase 3 was **not implemented**. It is blocked twice over.
+The earlier "not implemented" stop below is void (the author's rulings landed and Phase 2 was built); Phase 3 was implemented, see "Phase 3 (implemented)" after it.
+
+Phase 3 was **not implemented** at that time. It was blocked twice over.
 
 - It depends on Phase 2 (report model and planner seam), which was itself not
   implemented; no `shared/schema_v2` types, capability or extraction seam exist
@@ -224,6 +281,57 @@ Phase 3 was **not implemented**. It is blocked twice over.
   frontmatter), the same set as Phase 2, whose scope result was
   `"packages": []`, `change_class: "documentation"`. The gates were skipped as
   permitted; no behavior changed so no tests were mapped.
+
+### Phase 3 (implemented)
+
+Implemented the eleven language extractors behind the Phase 2 seam. The
+orchestrator split `analysis/reexports.rs` into `reexports/mod.rs` (dispatch),
+`common.rs` (`entry`, `limit`, `finish`, `damaged_nodes`) and one module per
+language, then ran six foreground-equivalent workers over disjoint files
+(Rust; JS+TS; Swift+Scala+C#; Python+Perl; Go+Lua; C++), each owning its
+module and its `tests/l1/symbols_reexports_<group>.rs`. The orchestrator then
+integrated, replaced the placeholder guard and ran the gates.
+
+- `EXTRACTOR_REVISION` moved `"52"` to `"53"` (the spec pinned 52). Revision 52
+  entries hold the placeholder `grammar_gap` report, so they must not be
+  served. Row: `cache_upgrade::entry_from_extractor_revision_fifty_two_is_not_served_after_the_language_extractors_land`.
+  Goldens `symbols.json`/`symbols.jsonl` carry `rev.53`.
+- `symbols_reexports::every_language_reports_not_applicable_or_its_forwarding_entries`
+  is the 16-language guard (5 `not_applicable`, 11 one forwarding snippet each,
+  all `complete` with entries; the two tables must partition all languages).
+  `a_language_without_forwarding_syntax_is_a_complete_negative_not_a_placeholder`
+  covers the negative.
+- `wiring::json_full_carries_the_reexport_report_and_json_does_not` now asserts a real
+  Rust `pub use` entry and the import marker on only the forwarded import.
+- Each language file has per-contract-row tests asserting whole entries, spans,
+  import linkage, markers, a nearby negative, parse recovery, and a corpus test
+  over its audit samples (read with `include_str!` inside each test).
+
+Rulings made by workers where the contract was silent (all in the code and its
+tests; review in Phase 6): Rust `cfg_attr` counts as `conditional`; Rust `pub use x as _`
+reports `exported_name` `_`; C++ `using enum` is a `wildcard`; C++ `#if` does not
+set `conditional`; Python with any `__all__` reports only listed or redundant-alias
+imports; Perl `use Mod;` with unlisted names gives `cross_file_export_list`; Lua
+merge/copy/`pcall` forms give `dynamic_forwarding`; Go `amb-dot-import-alias`
+stays `complete` with no entry; shadowed ES `import` uses `shadowed_global`.
+
+Known gaps reported by workers: no Perl `ImportRecord`s exist, so Perl
+`import_span` is always `None`; `.cppm` is not a recognized extension; Swift
+`#if` is tracked among top-level siblings only; TS `export import A = B.C`
+marks only `B`'s import; Go matches an unaliased import by its raw last path
+segment (`yaml.v3`).
+
+Phase 4 still owns: the full cache invariants and JSON matrix, import-site
+linkage for `unused-import`, and `imported_symbols()`/CLI `is_reexport`.
+`docs/reexports.md` is Phase 5.
+
+### Gates
+
+- Scope command: the tree changes `tree-hugger` source and tests, so the gates ran.
+- `just test` in `tree-hugger/`: 2360 passed, 0 failed.
+- `just lint`: clean for tree-hugger and tree-hugger-cli.
+- OS: no `cfg(windows)` or path-comparison code; tests write temp files with
+  literal names only. No cross-check run (macOS only).
 
 ## Phase 4
 
@@ -241,6 +349,77 @@ Phase 4 was **not implemented**. It is blocked transitively.
 - Gates: only docs under `tree-hugger/features/` changed. The scope result is
   recorded below.
 - Scope command result: `"packages": []`, `change_class: "documentation"`, so the test and lint gates were skipped as permitted.
+
+### Phase 4 (implemented)
+
+The earlier "not implemented" notes above are void; Phase 4 was built on the Phase 2 seam and the Phase 3 extractors.
+
+**Consumers.** `analysis::reexports::flag_forwarded_imports` is now the single
+place `ImportSymbol::is_reexport` is decided: it runs `extract`, marks the import
+records by exact span (`mark_forwarded_imports`) and copies the result back to the
+imports. The planner calls it right after the imports are read and before
+diagnostics (`Diagnostics` requires `Reexports`), so the `unused-import`
+exemption reads proven forwarding. `TreeFile::imported_symbols()`,
+`lint_diagnostics()`, `try_lint_diagnostics()` and `try_diagnostics()` call it
+through `forwarded_imports_from_nodes`. The Rust-only `import_is_reexport`
+visibility-modifier check is deleted, so Rust `pub(self) use` loses its
+exemption (documented in `release-notes.md` and `library/diagnostics.md`).
+`analysis::import_record` now takes `&ImportSymbol` and copies `is_reexport`
+into `ImportRecord::reexported`. The CLI's `import_symbols_from_index` copies
+the stored marker (the stale comment is gone), and `hug imports` requests
+`Capability::Reexports` so the marker is computed. Rust `--prelude` is
+untouched (its detection already used its own resolver path).
+
+**Cache.** `cache/stored_reexports.rs::validate_reexports` runs in
+`StoredEntry::validate` after the capability/marker coupling Phase 2 added:
+state against language (`is_not_applicable`, new beside `extract`), limits
+against state, limit and entry spans against the source, limit order, entry
+source order, statement-contains-specifier, name nullability per form,
+empty-string names, excluded names only on wildcards, strictly ascending
+caveats, `import_span` equal to an import's span, and marker agreement with the
+entries. Deserialization (Phase 2) already refuses absent, null, mistyped,
+repeated and unknown members. No `#[serde(default)]`, `unwrap_or_default` or
+`.ok()` exists in the changed readers. The import inventory digest already
+covers each `reexported` marker, so a flipped marker is refused by the
+inventory check first.
+
+**Requirement to test.**
+
+| Behavior | Test |
+|---|---|
+| Every report field x every shape (absent, null, wrong type, one/every wrong element, empty, duplicate key, trailing), from a real `hug` entry | `cache_robustness::reexport_report_fields_are_served_only_when_consistent` (complete TS report), `a_limited_reexport_report_is_served_only_when_consistent` (limited JS report, limit reason and span leaves) |
+| Well-typed inconsistencies: report without capability, deleted positive entries, wrong import site, spans outside the file, order, form vs names, excluded names, caveats, limits vs state, state vs language | `well_typed_reexport_inconsistencies_in_a_complete_report_are_refused`, `..._in_a_limited_report_are_refused`, `a_not_applicable_language_is_complete_only_as_not_applicable` |
+| Narrow entry widened, not read as empty; then hit | `an_entry_without_reexports_is_widened_not_read_as_empty` |
+| Nullable names served as null and visible in output | `a_nullable_reexport_name_is_served_as_null` |
+| Raw duplicate and trailing members | `a_duplicated_or_trailing_reexport_member_is_refused_and_recomputed` |
+| `is_reexport`, stored marker, `unused-import` agree; `pub(self)` loses the exemption; Python exposed import is not exempt; TS local export exempts only its import; uncomputed marks nothing | `tests/l1/reexports_consumers.rs` (six tests) |
+| CLI conversion copies the marker | `hug` unit test `imports_from_an_index_carry_the_stored_reexport_marker` |
+
+Every refused cell asserts a miss and output equal to an uncached run; inconsistency
+cases also assert the refusal reason printed by `--verbose`.
+
+**Decisions.** The matrix was built on the existing `cache_robustness` harness
+(`Column`, `check_column`) and not a new one. Null `source` and null `local_name`
+on a populated entry are served (the matrix says `S`); the served value is asserted
+in `a_nullable_reexport_name_is_served_as_null`. Marker coupling cannot be reached
+for flipped markers (inventory digest first) but is reached by deleting entries.
+A deleted non-linked entry (for example a bare `export * from`) is undetectable
+without a parse; the limit is the one the evidence checks already document.
+
+**Departures from the plan.** None in behavior. `mark_forwarded_imports` stays (now
+called by `flag_forwarded_imports`). The CLI `--json-full` capability request and
+the golden files were Phase 3 work and needed no change.
+
+**Gates.**
+
+- Scope command not needed: source and tests changed, so both gates ran.
+- `just test` in `tree-hugger/`: 2375 passed, 0 failed.
+- `just lint`: clean for both packages.
+- Several `cache_robustness` tests exceed 5 s under full-suite load (the existing
+  matrix tests do too; the new complete-report matrix takes about 3 s alone). They
+  are the repo's established thread-per-column pattern; not changed.
+- OS: no `cfg(windows)` or path code added; fixtures are literal names in scratch
+  repos. macOS only; no `cross-check` run.
 
 ## Phase 5
 
