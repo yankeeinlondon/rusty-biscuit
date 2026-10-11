@@ -2,7 +2,7 @@
 kind: feature
 name: reexports-all-languages
 area: tree-hugger
-status: draft-spec
+status: finalized-spec
 scheduled: true
 origin: ruling on `2026-10-10-docs-audit-code-defects` (F3), which removed the placeholder `TreeFile::reexported_symbols()` and moved the real capability here
 packages:
@@ -32,32 +32,17 @@ reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: "2026-10-11"
 review_iterations: 0
-human_review: true
-human_review_items:
-  - |-
-    **Decide the support contract before any code is written (Phase 1 exit gate).**
-
-    The audit of all 16 languages is finished (see the "Audit results" section of this spec). The plan cannot continue to Phase 2 until you rule on what "re-export" supports, because every later phase builds on that contract. Phase 1 was run non-interactively, so nothing below was approved on your behalf.
-
-    Decisions needed:
-    - **Supported conventions.** Options: (a) dedicated syntax only, simple but leaves Python, Perl, Lua and CommonJS unsupported; (b) dedicated syntax plus bounded static conventions, more useful, needs per-language rules; (c) broad inference, rejected by repo rules. Also rule on the borderline cases: C# `TypeForwardedTo`, Java `requires transitive`, PHP `class_alias`, shell sourcing "barrel" files, and Python's `import X as X` marker.
-    - **Canonical representation.** Recommended: a dedicated typed report in the file index, a `TreeFile` method, a query capability, and a stored imported-binding marker. You must pin the exact type names, JSON shape, method name and schema version.
-    - **Consumer exposure.** Recommended: keep declaration lists unchanged, expose the report separately, keep `hug imports` flags, include the report in full-index JSON, add no new command.
-    - **C++20 modules grammar blocker.** The pinned tree-sitter-cpp (newest published) cannot parse `export import` or `export module`, and some module files parse as ordinary declarations with no error. Options: (1) ship C++ with `using` forms only and report modules as "limited" (honest, no scope growth); (2) authorize a grammar upgrade or fork (full coverage, new scope and risk); (3) drop C++ from the goal. I recommend option 1.
-
-    I recommend approving option (b) above with option 1 for C++, then marking this spec finalized so Phase 2 can be refined from it.
+human_review: false
 message_to_agent: |-
-  Phase 4 was also attempted and stopped for the same reason (Phases 2 and 3 are unbuilt; no report model, cache schema or consumer seam exists to persist or consume). Nothing changed in source.
-  Phase 3 was also attempted and stopped: Phase 2 is unbuilt and the rulings are still pending. Re-run Phase 2, then Phase 3, only after spec.md is finalized with concrete types and JSON.
-  Phase 1 produced audit evidence only; no Rust code changed. Read audit/notes-*.md (per-construct tables) and the "Audit results" section in spec.md. Samples are under audit/samples/<lang>/ and are meant to become regression fixtures (copy into the L1 fixture layout, they parse with the pinned grammars). Probe tool: /tmp/th-probe (disposable, may be gone; rebuild from the lockfile versions). The probe hides anonymous tokens (`default`, `*`, `type`, `static`, `global`, `using namespace`), so inspect tokens, not just named nodes. The placeholder `reexported_symbols()` is already removed. The author's rulings are still pending: do not start Phase 2 until spec.md is finalized/planned with concrete types and JSON. Phase 2 was attempted and stopped for exactly this reason; nothing was implemented, so re-run Phase 2 after the rulings.
+  Phase 2 is done (report types, Capability::Reexports, schema 5.2, revision 52, TreeFile::reexports(), basic cache persistence). Seam for Phase 3: `analysis/reexports.rs::extract` matches every ProgrammingLanguage; replace each placeholder arm (currently a whole-file limited/grammar_gap via `unimplemented_language`) with the language extractor. It receives `tree_file` and the import records; extend its signature if a language needs the definition captures. Entries must be in source order and deduplicated by span; `mark_forwarded_imports` already sets ImportRecord::reexported from entries' import_span. `tests/l1/symbols_reexports.rs::every_language_reports_not_applicable_or_a_limited_whole_file` asserts the placeholder and must be narrowed as languages land. Cache writes/reads the report but only two consistency checks exist; Phase 4 owns the full invariants. imported_symbols()/is_reexport and the unused-import exemption are untouched. Earlier notes follow.   The author accepted every recommendation on 2026-10-11 (see "Author rulings" in this spec); the Phase 1 exit gate is closed and the spec is finalized. Phases 2-6 recorded "blocked" stops earlier; those stops are void, nothing was implemented, so start at Phase 2. The "Finalized design" section pins the types, JSON, capability, schema version and CLI behavior; the per-language contract table is the support contract. Audit evidence and samples are under audit/ (samples are meant to become L1 fixtures). The probe hides anonymous tokens (`default`, `*`, `type`, `static`, `global`, `using namespace`), so inspect tokens, not just named nodes.
 ---
 
 # Spec: Re-exports across all supported languages
 
-This draft defines the goal, the language audit, and the constraints on an
-implementation. The choices in **Open questions** still need the author's
-decision before implementation planning. Recommendations in that section are
-not approved decisions. This review does not implement the feature.
+This spec defines the goal, the language audit, the author's rulings and the
+finalized design. The author accepted every recommendation on 2026-10-11;
+**Author rulings** records them and **Finalized design** pins the API, JSON,
+capability, schema version and CLI behavior that implementation follows.
 
 ## Problem and starting point
 
@@ -85,14 +70,12 @@ alone would leave CLI import results inconsistent. The declaration field
 that represent resolved Rust prelude exports.
 
 **Review note — dependency correction.** `2026-10-10-docs-audit-code-defects`
-decides to remove the placeholder
-[TreeFile::reexported_symbols()](../../lib/src/file/tree_file.rs) from the
-`tree-hugger` library because it always returns an empty list. As checked on
-2026-10-11, that removal is still pending in this checkout, and the library
-docs still mention the method. This feature must coordinate with that removal;
-it must not assume it has already happened or preserve the empty behavior.
-The earlier decision also rejects delivering a language-neutral API that
-only works for Rust.
+removed the placeholder `TreeFile::reexported_symbols()` from the
+`tree-hugger` library because it always returned an empty list; the removal
+has landed and is recorded in the release notes. The replacement is the new
+`TreeFile::reexports()` method (see **Finalized design**). The earlier
+decision also rejects delivering a language-neutral API that only works for
+Rust.
 
 ## Goal
 
@@ -225,31 +208,361 @@ Cross-cutting findings that shape the design:
   no error flag. Coverage cannot be derived from `has_error` alone.
 - The placeholder `TreeFile::reexported_symbols()` is already removed in this
   checkout (the removal landed with the docs-audit work; only the release note
-  remains). The replacement name is still the author's ruling.
+  remains). Its replacement is `TreeFile::reexports()`.
 
-### Author decision package (pending; nothing below is approved)
+### Author rulings (2026-10-11)
 
-1. **Conventions.** Recommended: dedicated syntax plus bounded static
-   conventions. Proposed supported set: Rust, JavaScript, TypeScript, Swift,
-   Scala, Go (aliases and value copies), Python, Perl, Lua, and C++ named/
-   wildcard `using`. Proposed "no applicable construct": Java (symbols), C,
-   Bash, Zsh, PHP, C# `using` forms. To rule on: C# `TypeForwardedTo`
-   (lean: admit with an unresolved-source limit), Java `requires transitive`
-   (lean: out of scope or a separate kind), `class_alias` (lean: out), shell
-   barrel files (lean: out), Python basis marker and `import X as X`.
-2. **Representation.** Recommended: typed report in `FileSymbolIndex`, a
-   `TreeFile` method and `SymbolQuery` capability, plus a stored imported-
-   binding marker; schema version from the changed shape. Exact type names,
-   JSON and method name remain to be pinned by the author.
-3. **Consumers.** Recommended: separate exposure; `exported_symbols()` and
-   `--exported` stay declaration-only; `hug imports` keeps flags; full-index
-   JSON carries the requested report; no new command.
-4. **Grammar blocker (C++20 modules).** Options: (a) ship C++ with the
-   `using` forms only and report modules as limited (honest, no scope
-   expansion; recommended); (b) authorize a grammar upgrade or fork; (c) drop
-   C++ from the goal. Per the out-of-scope rules this needs the author.
-5. **Scala/TS/JS grammar gaps.** Recommended: report damaged or unparsed
-   export syntax as a limited region, never a definite complete negative.
+The author accepted every recommendation in the decision package:
+
+1. **Conventions: dedicated syntax plus bounded static conventions.** The
+   supported languages are Rust, JavaScript, TypeScript, Swift, Scala, Go
+   (aliases and value copies), Python, Perl, Lua, C++ (named and wildcard
+   namespace-scope `using`) and C# (`TypeForwardedTo` only). Java, C, Bash,
+   Zsh and PHP have no applicable construct. Borderline cases:
+   - C# `[assembly: TypeForwardedTo]` is **admitted**, with the
+     `source_unresolved` caveat.
+   - Java `requires transitive` is **out of scope**. It exposes a module
+     dependency, not symbols, and JLS 7.7.1 itself separates it from
+     re-export.
+   - PHP `class_alias` is **out of scope**. It is a runtime call.
+   - Shell files that source other files as a "barrel" are **out of scope**.
+   - Python reports both bases: the declared interface (`declared`) and
+     runtime exposure (`exposed`). The redundant alias `import X as X` /
+     `from m import X as X` counts as **declared**.
+2. **Representation: a dedicated typed report**, carried in
+   `FileSymbolIndex`, a `TreeFile` method, a `SymbolQuery` capability and a
+   stored marker on each import record. The exact spellings are pinned in
+   **Finalized design**.
+3. **Consumers: exposed separately.** `exported_symbols()` and `--exported`
+   stay declaration-only. `hug imports` keeps its flags. `--json-full`
+   carries the report. No new command, flag or synthesized alias declaration
+   is added.
+4. **C++20 modules: option 1.** C++ ships the namespace-scope `using` forms
+   only. A file containing module syntax reports `limited` with the
+   `grammar_gap` reason. There is no grammar upgrade or fork, and C++ stays in
+   the goal.
+5. **Grammar gaps in Scala, TypeScript and JavaScript.** Damaged or unparsed
+   forwarding syntax limits coverage (`parse_error` or `grammar_gap`). It
+   never yields a complete negative.
+
+Rulings on the audit's smaller questions, taken from the same
+recommendations:
+
+- Rust `pub(self) use` is effectively private and is **not** a re-export. It
+  therefore loses the `unused-import` exemption it has today. This is the one
+  intended diagnostic change for Rust; every other visibility-restricted
+  `pub use` keeps the exemption. A `pub use` inside a function body is not
+  reported, because it is not part of any module interface.
+- Swift `public import` without `@_exported` is an access-control fact, not
+  forwarding, and is not reported. `@_exported import` carries the
+  `unstable_feature` caveat.
+- TypeScript `export as namespace X` is not reported.
+  `export import A = B.C` is reported only when `B` is an import binding.
+- CommonJS merge forms (`Object.assign(module.exports, require(..))`,
+  `{...require(..)}`) limit coverage with `dynamic_forwarding`. They are not
+  merge forwards.
+- Python `__all__ += mod.__all__` limits coverage with
+  `cross_file_export_list`.
+- Go matches an unaliased import by its explicit alias or else its last path
+  segment. A last-segment match carries the `inferred_package_name` caveat.
+- Lua's legacy `module()` limits coverage with `dynamic_forwarding`.
+- Scala `given` selectors produce a wildcard entry with the `givens_only`
+  caveat. Exporting a value's members (`export impl.run`) is in scope, as the
+  definition section already requires.
+- C++ type aliases (`using T = ns::T`, `typedef`) and class-member `using` are
+  outside the definition, as are `#include` and C `typedef`/`#define`.
+
+## Finalized design
+
+### Library API
+
+```rust
+impl TreeFile {
+    /// The file's re-export report, computed through the analysis planner.
+    pub fn reexports(&self) -> Result<ReexportReport, TreeHuggerError>;
+}
+
+pub enum Capability { /* existing variants */ Reexports }
+```
+
+`Capability::Reexports` serializes as `"reexports"`. It is appended to
+`Capability::ALL` after `Metrics`, and its only prerequisite is
+`Declarations`, because extraction reads the import and definition captures.
+`Capability::Diagnostics` gains `Reexports` as a prerequisite, so the
+`unused-import` exemption always has proven facts. Re-exports never require
+`References`, `Occurrences`, `Semantics` or `Diagnostics`. Indirect forms
+need only a same-file, module-scope binding scan over the definition and
+import captures. `TreeFile::imported_symbols()` also requests `Reexports`, so
+that `ImportSymbol::is_reexport` comes from the report rather than from
+today's Rust-only check.
+
+The types live in the new module `shared/schema_v2/reexports.rs` and are
+re-exported from the crate root:
+
+```rust
+pub struct ReexportReport {
+    pub coverage: ReexportCoverage,
+    /// Source order (by `span.start_byte`), one entry per forwarding site.
+    pub entries: Vec<ReexportEntry>,
+}
+
+pub struct ReexportCoverage {
+    pub state: ReexportCoverageState,
+    /// Ascending by (`span.start_byte`, `reason`). Empty exactly when `state`
+    /// is not `Limited`.
+    pub limits: Vec<ReexportLimit>,
+}
+
+#[serde(rename_all = "snake_case")]
+pub enum ReexportCoverageState { Complete, Limited, NotApplicable }
+
+pub struct ReexportLimit {
+    pub reason: ReexportLimitReason,
+    /// The region the limit covers; a whole-file limit spans the root node.
+    pub span: TextSpan,
+}
+
+/// New reasons may be added; existing ones keep their meaning.
+#[serde(rename_all = "snake_case")]
+pub enum ReexportLimitReason {
+    ParseError,           // ERROR/MISSING touching forwarding syntax
+    GrammarGap,           // forwarding syntax the pinned grammar cannot represent
+    ComputedExportList,   // export list not built from literals
+    CrossFileExportList,  // export list extended from another module
+    ReboundBinding,       // forwarded name or interface table reassigned
+    ShadowedGlobal,       // require/module/exports/import shadowed
+    DynamicForwarding,    // runtime forwarding: Object.assign, spread, module(), custom import
+    UnexpandedMacro,      // Rust macro body that may contain `pub use`
+}
+
+pub struct ReexportEntry {
+    pub form: ReexportForm,
+    pub evidence: ReexportEvidence,
+    /// The name callers import; `None` for `Wildcard` and `Module`.
+    pub exported_name: Option<String>,
+    /// The name in the source; `Some` exactly for `Named` and `ValueCopy`.
+    pub original_name: Option<String>,
+    /// The same-file binding the forward goes through, when one does.
+    pub local_name: Option<String>,
+    /// The module, package or path as written; `None` when the file
+    /// does not state one (C# `TypeForwardedTo`).
+    pub source: Option<String>,
+    /// Names a wildcard excludes (Scala `x as _`); empty otherwise.
+    pub excluded_names: Vec<String>,
+    /// Qualified name of the enclosing module, namespace or object;
+    /// `None` at file level.
+    pub scope: Option<String>,
+    /// Written visibility restriction (`crate`, `super`, `in crate::a`);
+    /// `None` when unrestricted.
+    pub restriction: Option<String>,
+    pub type_only: bool,
+    /// Under a build or runtime condition (Rust `cfg`, Swift `#if`, Python
+    /// `if`/`try`, Go build constraint); never evaluated.
+    pub conditional: bool,
+    /// Ascending.
+    pub caveats: Vec<ReexportCaveat>,
+    /// `span` of the `ImportRecord` this entry forwards, when it forwards one.
+    pub import_span: Option<TextSpan>,
+    /// The forwarding specifier or clause.
+    pub span: TextSpan,
+    /// The whole forwarding statement.
+    pub statement_span: TextSpan,
+}
+
+#[serde(rename_all = "snake_case")]
+pub enum ReexportForm { Named, Wildcard, Namespace, Module, ValueCopy }
+
+#[serde(rename_all = "snake_case")]
+pub enum ReexportEvidence { Syntax, Declared, Exposed }
+
+#[serde(rename_all = "snake_case")]
+pub enum ReexportCaveat {
+    MutableBinding,       // Go `var` copy
+    SourceUnresolved,     // C# TypeForwardedTo: target assembly not in the file
+    FallbackLookup,       // C++ using-directive: names found only when not shadowed
+    UnstableFeature,      // Swift `@_exported`
+    InferredPackageName,  // Go import matched by its last path segment
+    GivensOnly,           // Scala `given` selector
+}
+```
+
+Every key of these types is always serialized, including `null`, `[]` and
+`false`. No field uses `skip_serializing_if` or `#[serde(default)]`. That
+keeps the cache reader strict (see the robustness matrix in the plan).
+
+**Forms.** `named` forwards one name. `wildcard` forwards every public name of
+`source` without listing them. `namespace` exposes a whole module under
+`exported_name` (`export * as ns`, Python `import X as X` of a module,
+`pub extern crate x as y`). `module` makes `source` the file's whole interface
+(`module.exports = require("m")`, `export =` of an imported module,
+`return require("m")`). `value_copy` is a new binding initialized from an
+imported value (Go `var`/`const`); it does not preserve identity.
+
+**Evidence.** `syntax` is dedicated forwarding syntax. `declared` is a
+convention that the language's tooling treats as an explicit interface
+declaration: Python `__all__`, redundant aliases and star imports; Perl
+Exporter lists; Lua's returned table; CommonJS; Go value copies. `exposed` is
+runtime exposure with no declaration, which today means only a public
+module-level Python import when the module has no `__all__`.
+
+**Coverage.** `not_applicable` is decided by language alone (Java, C, Bash,
+Zsh, PHP); `entries` and `limits` are then empty. Otherwise the state is
+`limited` when any limit exists and `complete` when none does. An ERROR or
+MISSING node limits coverage only when it contains or immediately follows a
+forwarding trigger token for the language: `export`, `use`, `import`,
+`using`, `__all__`, `@EXPORT*`, `module.exports`/`exports`, or a chunk-final
+`return`. Unrelated parse errors leave valid entries and `complete` coverage
+intact. The report describes the whole file. Kind filters, predicates and
+`scan_root` never change it.
+
+**Not computed.** `FileSymbolIndex::reexports` is `None` exactly when
+`completed_capabilities` lacks `reexports`; the key is then omitted from
+JSON, as `occurrences` is. When computed, an empty `entries` list is a
+`complete` negative only if `coverage.state` says so.
+
+**Duplicates and order.** Captures of the same site (same `span`) collapse to
+one entry. Distinct sites that expose the same name stay separate.
+
+### Stored import marker
+
+`ImportRecord` gains a required `reexported: bool`, always serialized. It is
+`true` exactly when an entry with evidence `syntax` or `declared` has an
+`import_span` equal to that record's `span`. It is meaningful only when
+`reexports` is in `completed_capabilities`; otherwise it is `false` for every
+record, and the cache reader rejects any `true`. The CLI's index-to-
+`ImportSymbol` conversion copies it into `is_reexport` instead of hard-coding
+`false`. `exposed` entries never set it, so a plain unused Python import is
+still reported.
+
+### Schema and revision
+
+- `SchemaVersion::V5_2` ("shape with `imports[].reexported` and the optional
+  `reexports` report") becomes `CURRENT`. `V5_1` is documented as no longer
+  emitted.
+- `EXTRACTOR_REVISION` goes from `"51"` to `"52"`, with its cache-upgrade
+  row.
+- `ExportRecord`, `SymbolRecord` and `visibility.is_reexported` keep their
+  current shape and meaning. Synthetic prelude records are unchanged.
+
+### JSON examples
+
+Spans are abridged as `{…}`. They use the existing `TextSpan` shape.
+
+Renamed ES-module forward, `export { parse as read } from "./parser";`:
+
+```json
+{ "form": "named", "evidence": "syntax", "exported_name": "read",
+  "original_name": "parse", "local_name": null, "source": "./parser",
+  "excluded_names": [], "scope": null, "restriction": null, "type_only": false,
+  "conditional": false, "caveats": [], "import_span": null,
+  "span": {…}, "statement_span": {…} }
+```
+
+Import, then export, `import { a as local } from "m"; export { local as b };`:
+
+```json
+{ "form": "named", "evidence": "syntax", "exported_name": "b",
+  "original_name": "a", "local_name": "local", "source": "m",
+  "excluded_names": [], "scope": null, "restriction": null, "type_only": false,
+  "conditional": false, "caveats": [], "import_span": {…},
+  "span": {…}, "statement_span": {…} }
+```
+
+Wildcard and namespace, `export * from "m"; export * as ns from "m";`:
+
+```json
+[{ "form": "wildcard", "evidence": "syntax", "exported_name": null,
+   "original_name": null, "local_name": null, "source": "m", "...": "…" },
+ { "form": "namespace", "evidence": "syntax", "exported_name": "ns",
+   "original_name": null, "local_name": null, "source": "m", "...": "…" }]
+```
+
+Restricted Rust forward in a nested module, `mod a { pub(crate) use std::io::Read as R; }`:
+
+```json
+{ "form": "named", "evidence": "syntax", "exported_name": "R",
+  "original_name": "Read", "local_name": null, "source": "std::io",
+  "excluded_names": [], "scope": "a", "restriction": "crate",
+  "type_only": false, "conditional": false, "caveats": [],
+  "import_span": {…}, "span": {…}, "statement_span": {…} }
+```
+
+Type-only TypeScript forward, `export type { Shape } from "./shapes";`: a
+`named` entry with `"type_only": true`.
+
+A limited Python file, where `__all__ = names()` is computed:
+
+```json
+{ "coverage": { "state": "limited",
+                "limits": [{ "reason": "computed_export_list", "span": {…} }] },
+  "entries": [] }
+```
+
+Not applicable (any Java file): `{ "coverage": { "state": "not_applicable",
+"limits": [] }, "entries": [] }`.
+
+Not computed: the `reexports` key is absent from the file index, and
+`"reexports"` is absent from `completed_capabilities`.
+
+### Per-language support contract
+
+The audit row IDs (P1–P17, G1–G13, L1–L11, U1–U7) refer to
+`audit/notes-static-conventions.md`. Constructs not listed here are not
+reported. The `docs/reexports.md` page carries this table in current-behavior
+form.
+
+| Language | Reported (form / evidence) | Limits and caveats | Not reported |
+|---|---|---|---|
+| Rust | `pub use` and every restricted form except `pub(self)`: `named`, glob → `wildcard`, `pub extern crate x [as y]` → `namespace`; `syntax`; `restriction` holds the written restriction; `cfg` attribute → `conditional` | `unexpanded_macro` when a `macro_rules!` body or item-position macro token tree contains `pub` … `use` | `pub(self) use`, `use` inside fn bodies |
+| JavaScript | `export {..} from`, `export *`, `export * as ns`, `default` specifiers, import-then-export (`local_name`), `export default <imported>`: `syntax`. CommonJS `module.exports = require()` → `module`, `module.exports.x = require().x` / `exports.x = …` → `named`: `declared` | `parse_error` (import attributes), `shadowed_global`, `dynamic_forwarding` (merge forms), `rebound_binding` | local exports (they stay `ExportRecord`) |
+| TypeScript | the JavaScript forms; statement or specifier `type` → `type_only`; `export =` imported binding → `module`/`declared`; `export import A = B.C` with `B` imported → `named`/`syntax` | `parse_error` / `grammar_gap` for `export type *` and `export import … = require()` | `export as namespace` |
+| Python | names in a literal `__all__` bound by a module-level import, redundant aliases, `from m import *`: `declared`. Without `__all__`, every other public module-level import: `exposed`. `import a.b` exposes `a` as `namespace`. `if`/`try` → `conditional` | `computed_export_list`, `cross_file_export_list`, `rebound_binding` | function- or class-local imports, `__future__`, underscore names |
+| Go | `type X = pkg.Y` (including generic aliases): `named`/`syntax`. Package-level `var`/`const X = pkg.Y`: `value_copy`/`declared`. Exported (uppercase) names only. A `//go:build` constraint → `conditional` on every entry | `mutable_binding` (`var`), `inferred_package_name` | defined types, embedding, plain/blank/dot imports |
+| Perl | names in literal `@EXPORT`/`@EXPORT_OK`/`%EXPORT_TAGS` bound by `use Mod qw(..)` in the same package, with an Exporter marker: `named`/`declared`, `exported == original == local` | `computed_export_list`, `dynamic_forwarding` (custom `sub import`, globs), `rebound_binding` (later `sub NAME`), `grammar_gap` (qualified `@Pkg::EXPORT…`) | locally defined subs |
+| Lua | `return require("m")` → `module`; a returned table constructor or `M.x = <import-derived>; return M` (U4–U7 rules) → `named`: `declared` | `shadowed_global` (`local require`), `rebound_binding`, `dynamic_forwarding` (`module()`, metatables) | table assignments with no final `return M` |
+| Swift | `@_exported import M` → `wildcard`; `@_exported import struct M.T` → `named`: `syntax`, caveat `unstable_feature`; `#if` → `conditional` | — | `public import`, plain `import` |
+| Scala 3 | `export` selectors: `named` (renames), `*`/`_` → `wildcard` with `excluded_names`, `given` → `wildcard` with caveat `givens_only`; `source` is the path; `syntax` | `parse_error` for modified or annotated `export` (never read as public); `grammar_gap` for multi-clause `export a.b, c.d.{e}` | Scala 2 (no construct) |
+| C++ | namespace-scope `using ns::x;` → `named`; `using namespace ns;` → `wildcard` with caveat `fallback_lookup`; `scope` is the namespace; `syntax` | `grammar_gap` (whole file) when module syntax appears at translation-unit level, whether parsed as ERROR or misparsed as a declaration whose type is `import`, `module` or `export`; `parse_error` for `using typename` and multi-name `using` | type aliases, class-member `using`, `#include` |
+| C# | `[assembly: TypeForwardedTo(typeof(N.T))]` → `named`/`syntax`, `exported_name` `N.T`, `source` `null`, caveat `source_unresolved` | — | all `using` forms |
+| Java, C, Bash, Zsh, PHP | nothing: `not_applicable` | — | `requires transitive`, `#include`, `source`/`.`, `export -f`, `autoload`, `use`, `include`/`require`, `class_alias` |
+
+### CLI behavior
+
+- `--json-full` additionally requests `Capability::Reexports`. Each file
+  index then carries `reexports` and `imports[].reexported`, and
+  `completed_capabilities` lists `"reexports"`.
+- `hug imports` text and JSON output do not change. Its import conversion
+  reads the stored marker, so `is_reexport` agrees between fresh and cached
+  runs.
+- `--exported` and `exported_symbols()` stay declaration-only. The CLI guide
+  line that says "re-exports included" is corrected to say what is actually
+  listed (exported declarations, plus synthetic Rust prelude records under
+  `--prelude`).
+- No new command, flag or styled view is added, so no L2 terminal tests are
+  required.
+- Callers find out what is supported per language from
+  `docs/reexports.md`, and per file from `coverage.state`.
+
+### Cache invariants
+
+The cache reader refuses an entry, recomputes it and rewrites it when any of
+these hold:
+
+- `reexports` is in `completed_capabilities` but the report is missing, or
+  the report is present without the capability.
+- The state is `limited` with no limits, or the state is not `limited` and
+  limits exist.
+- The state is `not_applicable` for a supported language, or a supported
+  state is recorded for a `not_applicable` language.
+- An entry's form does not match its name nullability (see the field docs
+  above).
+- An `import_span` does not equal the span of an `ImportRecord`.
+- A `reexported` marker disagrees with the entries.
+- A span lies outside the file's byte length.
+- Duplicate keys, unknown enum values, or any key absent or `null` where the
+  type does not allow it.
+
+The plan's robustness matrix is expanded to these fields.
 
 ## Design constraints
 
@@ -332,8 +645,8 @@ local ES-module export occurrences: a local export reads its local binding,
 whereas `export ... from "m"` must not bind names to unrelated local symbols.
 
 The `tree-hugger-cli` package must preserve re-export evidence in cached
-import conversion and full-index JSON. Whether it also adds a command or
-changes declaration listings remains an open design choice below. The Rust
+import conversion and full-index JSON. It adds no command and leaves
+declaration listings unchanged (see **CLI behavior**). The Rust
 `--prelude` resolver already follows targets across files; this feature must
 not expand that resolver to other languages. If its detection is switched
 to shared facts, preserve its existing public-only selection and synthetic
@@ -347,100 +660,24 @@ the contract changes. Keep READMEs as overviews with links into `docs/`.
 Review source comments on every changed behavior; distinguish normal
 extraction from CLI synthetic records when documenting flags.
 
-## Open questions
+## Resolved questions
 
-### Which conventions should count?
+The three open questions from the draft were decided on 2026-10-11. The
+pros and cons that informed them are in git history for this file.
 
-This determines what “all languages” promises and whether callers can rely
-on a negative answer. The audit must settle the exact supported patterns
-before these options can be finalized.
-
-1. **Dedicated syntax only.** Pros: a small extractor with strong syntax
-   evidence. Cons: excludes useful Python, Perl, Lua, and CommonJS forwarding;
-   it must report those as unsupported rather than claiming no concept.
-2. **Dedicated syntax plus bounded static conventions — recommended.**
-   Recognize explicitly documented patterns whose source and exposure can be
-   established within one file; attach evidence kind and coverage reasons.
-   Pros: useful language coverage while keeping uncertain cases visible.
-   Cons: requires language-specific rules for export lists, mutation,
-   shadowing, conditional syntax, and module interfaces. Recommendation:
-   this meets the goal without guessing intent or executing programs.
-3. **Broad public-interface inference.** Treat public-looking imports,
-   header includes, and common filenames as evidence. Pros: finds more
-   possible interfaces. Cons: false positives, filesystem-dependent meaning,
-   and unstable lint suppression. It conflicts with the repository's rule
-   that naming conventions are not reported as visibility facts unless that
-   change is explicitly designed and documented.
-
-For the recommended option, use categorical evidence such as “explicit
-syntax” or “static convention,” not an invented numeric confidence score.
-The final report must distinguish complete supported analysis, limited
-analysis with reasons, no applicable language construct, and not computed.
-For example, a computed Python `__all__` must not produce a complete empty
-answer. Decide which conditions limit a region versus the whole file, and
-how callers discover the supported patterns for their language.
-
-### What is the canonical API and serialized representation?
-
-Existing import and declaration records do not represent all wildcard,
-module, member-forwarding, or coverage cases. This is a public API and schema
-decision, so exact types and migration must be agreed before coding.
-
-1. **Extend imports and filter them.** Pros: close to the current Rust flag;
-   little new API. Cons: exports need not create a local import, Scala can
-   forward object members, and a boolean cannot express form or coverage.
-2. **A dedicated re-export report in the file index — recommended.** A
-   `TreeFile` method and queries expose the same report: typed entries plus
-   coverage and reasons. Entries distinguish named, wildcard, and
-   namespace/module forwarding and retain source, names, scope, qualifiers,
-   spans, and evidence. Pros: accurately represents forwarding without
-   inventing declarations; makes cached and uncached output consistent.
-   Cons: adds schema fields, validation, capability rules, and adapters.
-   Recommendation: these costs directly support the goal and avoid forcing
-   wildcard or unknown-target evidence into declaration records.
-3. **Extend the existing export records to cover every form.** Pros: one
-   export collection. Cons: currently these records refer to local exported
-   declarations; a tagged redesign changes every consumer and must preserve
-   local binding behavior and distinguish unresolved forwards from local
-   exports. Evaluate this if the audit shows it is simpler than a separate
-   report; merely adding a flag is insufficient.
-
-Whichever is chosen, preserve `ImportSymbol::is_reexport` for actual imported
-bindings and define the corresponding stored representation. Decide whether
-the removed method name should return the new report or whether a clearer
-new name is needed. Do not restore an import-only list under a contract that
-promises every forwarding form. Pin Rust API and JSON examples for a renamed
-export, wildcard, restricted export, type-only export, and limited result.
-
-### How should declaration queries and the CLI expose re-exports?
-
-The existing `exported_symbols()` method and declaration query `--exported`
-filter select declarations, while forwarding may have no local definition.
-Changing them requires deciding what a “symbol” means in these interfaces.
-
-1. **Expose the report separately; keep declaration queries about
-   declarations — recommended.** Pros: preserves kind filters, IDs, counts,
-   and unresolved-target semantics; a full-index report can carry every form.
-   Cons: callers must ask for forwarding separately. Recommendation: this
-   gives a truthful single-file answer without pretending a wildcard is a
-   declaration. Correct docs that currently imply ordinary declaration
-   listings already include general re-exports.
-2. **Synthesize named alias declarations alongside originals.** Pros:
-   existing listing and exported filters can show known alias names. Cons:
-   kind and signature may be unknown, counts and IDs change, and wildcard
-   forwarding still needs a separate representation. Specify deterministic
-   alias identity, unresolved kinds, flag meanings, and interaction with
-   Rust prelude records before choosing it.
-3. **Add a combined export command while retaining separate library
-   collections.** Pros: users can inspect local exports and forwards in one
-   view without changing declaration records. Cons: adds CLI design and
-   rendering work beyond the minimum library feature.
-
-Specify the exact command/flag/output behavior before implementation.
-Regardless of the option, `hug imports` must preserve imported-binding flags,
-and full-index JSON must expose requested forwarding coverage. A new styled
-view requires the existing real-terminal test harness and terminal-rendering
-components; do not make a new CLI command a silent scope expansion.
+1. **Which conventions count:** dedicated syntax plus bounded static
+   conventions, with categorical evidence (`syntax`, `declared`, `exposed`).
+   There is no numeric confidence score. The supported patterns are in the
+   per-language contract table.
+2. **Canonical API and serialized representation:** a dedicated
+   `ReexportReport` in the file index, exposed by `TreeFile::reexports()` and
+   `Capability::Reexports`, plus `ImportRecord::reexported`. The method is
+   named `reexports()` rather than reusing `reexported_symbols()`, because it
+   returns a report, not symbols. `ImportSymbol::is_reexport` is kept for
+   actual imported bindings.
+3. **Declaration queries and CLI exposure:** the report is exposed
+   separately and declaration queries stay about declarations. No synthesized
+   alias declarations and no combined export command are added.
 
 ## Out of scope
 
@@ -468,7 +705,8 @@ blocker for the author rather than weakening that goal during implementation.
   and lack of computed analysis are separately documented.
 - The author resolves the three open questions. The spec then names concrete
   API types, JSON examples, capability prerequisites, schema-version impact,
-  and CLI behavior before it is marked finalized or planned.
+  and CLI behavior before it is marked finalized or planned. (Met 2026-10-11:
+  see **Author rulings** and **Finalized design**.)
 
 ### Implementation complete, ready for review
 

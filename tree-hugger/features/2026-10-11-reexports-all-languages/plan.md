@@ -3,7 +3,7 @@ kind: plan
 name: reexports-all-languages
 total_phases: 6
 created: 2026-10-11
-phase: 1
+phase: 2
 agent: codex/gpt-6.1-sol
 yolo: true
 source_files_during_phase_1: []
@@ -15,12 +15,45 @@ docs_created_during_phase_1:
   - tree-hugger/features/2026-10-11-reexports-all-languages/audit/notes-interface-boundaries.md
   - tree-hugger/features/2026-10-11-reexports-all-languages/audit/samples/ (279 sample files across 16 languages)
 skills_files_updated_during_phase_1: []
-source_files_during_phase_2: []
+source_files_during_phase_2:
+  - tree-hugger/lib/src/shared/schema_v2/reexports.rs
+  - tree-hugger/lib/src/shared/schema_v2/mod.rs
+  - tree-hugger/lib/src/shared/schema_v2/types.rs
+  - tree-hugger/lib/src/analysis/reexports.rs
+  - tree-hugger/lib/src/analysis/mod.rs
+  - tree-hugger/lib/src/analysis/coverage.rs
+  - tree-hugger/lib/src/analysis/counters.rs
+  - tree-hugger/lib/src/file/query.rs
+  - tree-hugger/lib/src/file/mod.rs
+  - tree-hugger/lib/src/file/tree_file.rs
+  - tree-hugger/lib/src/cache/mod.rs
+  - tree-hugger/lib/src/cache/stored_evidence.rs
+  - tree-hugger/lib/src/cache/symbol_cache.rs
+  - tree-hugger/cli/src/refs.rs
+  - tree-hugger/lib/tests/l1/main.rs
+  - tree-hugger/lib/tests/l1/symbols_reexports.rs
+  - tree-hugger/lib/tests/l1/symbols_cache.rs
+  - tree-hugger/lib/tests/l1/cache_tests.rs
+  - tree-hugger/cli/tests/symbols/cache_robustness.rs
+  - tree-hugger/cli/tests/symbols/cache_upgrade.rs
+  - tree-hugger/cli/tests/symbols/refs.rs
+  - tree-hugger/cli/tests/symbols/report.rs
+  - tree-hugger/cli/tests/symbols/reports.rs
+  - tree-hugger/cli/tests/symbols/wiring.rs
+  - tree-hugger/cli/tests/fixtures/golden/symbols.json
+  - tree-hugger/cli/tests/fixtures/golden/symbols.jsonl
 docs_updated_during_phase_2:
   - tree-hugger/features/2026-10-11-reexports-all-languages/spec.md
   - tree-hugger/features/2026-10-11-reexports-all-languages/implementation-log.md
+  - tree-hugger/docs/symbol-records.md
+  - tree-hugger/docs/symbol-records/file-index.md
+  - tree-hugger/docs/symbol-records/versions.md
+  - tree-hugger/docs/cache-design/entry-format.md
 docs_created_during_phase_2: []
-skills_files_updated_during_phase_2: []
+skills_files_updated_during_phase_2:
+  - .claude/skills/tree-hugger/analysis-pipeline.md
+  - .claude/skills/tree-hugger/api-reference.md
+  - .claude/skills/tree-hugger/testing.md
 source_files_during_phase_3: []
 docs_updated_during_phase_3:
   - tree-hugger/features/2026-10-11-reexports-all-languages/implementation-log.md
@@ -39,8 +72,15 @@ docs_updated_during_phase_5:
   - tree-hugger/features/2026-10-11-reexports-all-languages/spec.md
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5: []
+source_files_during_phase_6: []
+docs_updated_during_phase_6:
+  - tree-hugger/features/2026-10-11-reexports-all-languages/implementation-log.md
+  - tree-hugger/features/2026-10-11-reexports-all-languages/spec.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6: []
 packages:
   - tree-hugger
+  - tree-hugger-cli
 ---
 
 # Re-exports across all supported languages: implementation plan
@@ -48,6 +88,10 @@ packages:
 ## Phase 1: Establish language evidence and settle the contract
 
 ### Necessary Rules
+
+**Update 2026-10-11:** the author accepted every recommendation below; the
+spec is `finalized-spec` and the exit gate is closed. The text that follows
+is kept as written at planning time.
 
 The specification is still `draft-spec`. Its three open questions require
 the author's decisions; recommendations below are planning assumptions, not
@@ -89,8 +133,8 @@ Author rulings needed after the audit:
    combined export view, or synthesized alias declarations is assumed. If
    approved, add their concrete identity/rendering/test work before Phase 2.
 4. **Removal coordination.** `2026-10-10-docs-audit-code-defects` requires
-   removing the empty `reexported_symbols()` placeholder. It still exists in
-   this checkout. Record who owns that removal and the final replacement API;
+   removing the empty `reexported_symbols()` placeholder. (Resolved: the
+   removal has landed; the replacement is `TreeFile::reexports()`.) Record who owns that removal and the final replacement API;
    neither preserve empty behavior nor restore an import-only API promising
    general forwarding. Reconcile docs when the prerequisite lands.
 5. **Risk scope.** No performance spike: the specification already identifies
@@ -154,7 +198,7 @@ probe if necessary. No runtime language interpreter or compiler is needed.
     `file/tree_file.rs`, `analysis/mod.rs`, `file/query.rs`,
     `analysis/coverage.rs`, `shared/schema_v2`, both cache layers,
     `cli/src/main.rs`, and `cli/src/prelude.rs`.
-- [ ] **Freeze support contract**
+- [x] **Freeze support contract**
   - Obtain and record the author's rulings above. In a non-interactive run,
     prepare the concrete decision package and report the pending gate; do not
     treat silence as approval or mark the specification finalized/planned.
@@ -222,6 +266,45 @@ wrong type/duplicate/trailing content means R; `false` is a value, not absence.
 Freeze the corresponding individual columns in Wave 2. Do not add configurable
 inputs merely to satisfy this matrix.
 
+#### Frozen field columns (2026-10-11)
+
+The author accepted the recommended design (see the spec's **Finalized
+design**). The role columns above now map to the JSON paths below. Each row
+is one matrix column. The shape rows (absent, null, wrong type, element edits,
+empty, duplicate key, trailing document) apply to every path, with the
+null/empty exceptions given here. Every key is always written, so an absent
+key is `R` for every path.
+
+| JSON path (under the file index) | Null | Empty / zero value | Element edits |
+|---|---|---|---|
+| `reexports` (object; present iff `"reexports"` in `completed_capabilities`) | R | R for `{}` | — |
+| `reexports.coverage` | R | R for `{}` | — |
+| `reexports.coverage.state` | R | R for `""`; unknown variant R | N/A |
+| `reexports.coverage.limits` | R | S only when state is not `limited` | R |
+| `reexports.coverage.limits[].reason` | R | R for `""`; unknown variant R | N/A |
+| `reexports.coverage.limits[].span` (+ 6 numeric leaves) | R | numeric rule below | R |
+| `reexports.entries` | R | S only when coverage permits (never by deleting a positive report's entries) | R |
+| `reexports.entries[].form` | R | R | N/A |
+| `reexports.entries[].evidence` | R | R | N/A |
+| `reexports.entries[].exported_name` | S only for `wildcard`/`module` | R for `""` | N/A |
+| `reexports.entries[].original_name` | S unless `named`/`value_copy` | R for `""` | N/A |
+| `reexports.entries[].local_name` | S | R for `""` | N/A |
+| `reexports.entries[].source` | S | R for `""` | N/A |
+| `reexports.entries[].excluded_names` | R | S | R (member `""` R) |
+| `reexports.entries[].scope` | S (file level) | R for `""` | N/A |
+| `reexports.entries[].restriction` | S (unrestricted) | R for `""` | N/A |
+| `reexports.entries[].type_only` | R | `false` is a value | N/A |
+| `reexports.entries[].conditional` | R | `false` is a value | N/A |
+| `reexports.entries[].caveats` | R | S | R (unknown variant R) |
+| `reexports.entries[].import_span` | S (forwards no import) | R for `{}`; must equal an `imports[].span` | R |
+| `reexports.entries[].span`, `.statement_span` (+ leaves) | R | numeric rule below | R |
+| `imports[].reexported` | R | `false` valid; `true` R unless a `syntax`/`declared` entry links it and the capability completed | N/A |
+| `completed_capabilities` (`"reexports"` member) | R | R for `[]` | R (unknown member R) |
+| `schema_version` (`5.2` only) and extractor revision `52` | R | R | R for objects |
+
+Spans must also lie within the file's byte length. The well-typed
+inconsistency cases are the spec's **Cache invariants**.
+
 The JSON matrix test extends the existing CLI `cache_robustness` harness. Start
 from a real `hug`-produced entry and a control proving each field affects the
 public report, imported flag, or reuse decision. Edit one cell at a time,
@@ -235,14 +318,14 @@ not just deserialization success. Preserve existing matrix rows and exceptions.
 
 ### Wave 3: Sequential foundation tasks
 
-- [ ] **Define report model**
+- [x] **Define report model**
   - Implement the approved types/re-exports in `shared/schema_v2` and the
     imported-binding stored marker. Update required constructors, public
     serialization/schema tests, and analyzer fingerprints together.
   - Add reusable test expectations for named/wildcard/module forms and coverage
     states. Keep local declaration exports and synthetic prelude aliases under
     their existing identities and flag semantics.
-- [ ] **Wire analysis capability**
+- [x] **Wire analysis capability**
   - Integrate the approved capability and internal extraction seam in
     `file/query.rs`, `analysis/mod.rs`, and `analysis/coverage.rs`. Route the
     direct API through the same planner; never call public extraction methods

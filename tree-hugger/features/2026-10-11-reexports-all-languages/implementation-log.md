@@ -12,12 +12,45 @@ docs_created_during_phase_1:
   - tree-hugger/features/2026-10-11-reexports-all-languages/audit/notes-interface-boundaries.md
   - tree-hugger/features/2026-10-11-reexports-all-languages/audit/samples/ (279 sample files across 16 languages)
 skills_files_updated_during_phase_1: []
-source_files_during_phase_2: []
+source_files_during_phase_2:
+  - tree-hugger/lib/src/shared/schema_v2/reexports.rs
+  - tree-hugger/lib/src/shared/schema_v2/mod.rs
+  - tree-hugger/lib/src/shared/schema_v2/types.rs
+  - tree-hugger/lib/src/analysis/reexports.rs
+  - tree-hugger/lib/src/analysis/mod.rs
+  - tree-hugger/lib/src/analysis/coverage.rs
+  - tree-hugger/lib/src/analysis/counters.rs
+  - tree-hugger/lib/src/file/query.rs
+  - tree-hugger/lib/src/file/mod.rs
+  - tree-hugger/lib/src/file/tree_file.rs
+  - tree-hugger/lib/src/cache/mod.rs
+  - tree-hugger/lib/src/cache/stored_evidence.rs
+  - tree-hugger/lib/src/cache/symbol_cache.rs
+  - tree-hugger/cli/src/refs.rs
+  - tree-hugger/lib/tests/l1/main.rs
+  - tree-hugger/lib/tests/l1/symbols_reexports.rs
+  - tree-hugger/lib/tests/l1/symbols_cache.rs
+  - tree-hugger/lib/tests/l1/cache_tests.rs
+  - tree-hugger/cli/tests/symbols/cache_robustness.rs
+  - tree-hugger/cli/tests/symbols/cache_upgrade.rs
+  - tree-hugger/cli/tests/symbols/refs.rs
+  - tree-hugger/cli/tests/symbols/report.rs
+  - tree-hugger/cli/tests/symbols/reports.rs
+  - tree-hugger/cli/tests/symbols/wiring.rs
+  - tree-hugger/cli/tests/fixtures/golden/symbols.json
+  - tree-hugger/cli/tests/fixtures/golden/symbols.jsonl
 docs_updated_during_phase_2:
   - tree-hugger/features/2026-10-11-reexports-all-languages/spec.md
   - tree-hugger/features/2026-10-11-reexports-all-languages/implementation-log.md
+  - tree-hugger/docs/symbol-records.md
+  - tree-hugger/docs/symbol-records/file-index.md
+  - tree-hugger/docs/symbol-records/versions.md
+  - tree-hugger/docs/cache-design/entry-format.md
 docs_created_during_phase_2: []
-skills_files_updated_during_phase_2: []
+skills_files_updated_during_phase_2:
+  - .claude/skills/tree-hugger/analysis-pipeline.md
+  - .claude/skills/tree-hugger/api-reference.md
+  - .claude/skills/tree-hugger/testing.md
 source_files_during_phase_3: []
 docs_updated_during_phase_3:
   - tree-hugger/features/2026-10-11-reexports-all-languages/implementation-log.md
@@ -36,8 +69,15 @@ docs_updated_during_phase_5:
   - tree-hugger/features/2026-10-11-reexports-all-languages/spec.md
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5: []
+source_files_during_phase_6: []
+docs_updated_during_phase_6:
+  - tree-hugger/features/2026-10-11-reexports-all-languages/implementation-log.md
+  - tree-hugger/features/2026-10-11-reexports-all-languages/spec.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6: []
 packages:
   - tree-hugger
+  - tree-hugger-cli
 ---
 
 # Implementation Log for 2026-10-11-reexports-all-languages (6 phases)
@@ -96,22 +136,77 @@ no behavior changes to map to tests; the requirement-to-test mapping is
 
 ## Phase 2
 
-Phase 2 was **not implemented**. It is blocked on the Phase 1 exit gate.
+Implemented the shared report model and the analysis seam. (The earlier
+"not implemented" stop was void once the author's rulings landed; see
+"Author rulings".) Per-language extraction is Phase 3.
 
-- The plan states phases 2-6 are conditional on the author's rulings (support
-  contract, canonical representation, consumer exposure, C++ grammar blocker).
-  The task "Freeze support contract" in Wave 2 is still unchecked and the spec
-  is still `draft-spec` with `human_review: true`.
-- Phase 2 ("Define report model", "Wire analysis capability") needs the exact
-  Rust types, JSON shape, method name, capability and schema version, which
-  the author has not pinned. Inventing them would build on an unapproved
-  contract, and the previous handoff said not to start Phase 2 until the spec
-  is finalized.
-- No source, test, skill or plan task changed; no tasks were checked off.
-- Gates: only docs under `tree-hugger/features/` were edited (log, plan and
-  spec frontmatter). The scope command was run and its result is recorded
-  below; no tests were mapped because no behavior changed.
-- Scope command result: `"packages": []`, `change_class: "documentation"`, so the test and lint gates were skipped as permitted.
+### What was built
+
+- `shared/schema_v2/reexports.rs`: `ReexportReport`, `ReexportCoverage`,
+  `ReexportCoverageState`, `ReexportLimit`/`Reason`, `ReexportEntry`,
+  `ReexportForm`, `ReexportEvidence`, `ReexportCaveat`, exactly as pinned in
+  the spec. Every key is always written; no `serde(default)`/`skip_serializing_if`;
+  nullable roles use a `nullable` deserializer (absent key is an error, not
+  `None`); `deny_unknown_fields`. `ReexportEntry::forwards_import_at` is the
+  single rule for the import marker (`exposed` never marks).
+- `ImportRecord::reexported` (required bool) and `FileSymbolIndex::reexports`
+  (`Option`, key omitted when `None`, null refused on read).
+- `SchemaVersion::V5_2` is `CURRENT`; `EXTRACTOR_REVISION` is `"52"`, with the
+  `SchemaBump` upgrade row for revision 51.
+- `Capability::Reexports` (last in `ALL`; prerequisite `Declarations`);
+  `Diagnostics` now requires it.
+- `analysis/reexports.rs`: `extract` (one call per analysis, counted by the new
+  `WorkCounters::reexport_extractions`) and `mark_forwarded_imports` (exact
+  import span match). `extract` matches every language: Java, C, Bash, Zsh,
+  PHP are `not_applicable`; the other 11 are a whole-file
+  `limited`/`grammar_gap` placeholder until Phase 3 replaces each arm, so an
+  unimplemented language can never read as a `complete` negative.
+- `PassPlan::reexports`; `coverage::project` drops the report and clears the
+  markers together; `record_passes_suffice` never widens `Reexports` without a
+  parse.
+- `TreeFile::reexports()`.
+- Cache: `reexports` (required, nullable) in the entry, `reexported` in each
+  stored import (and in the import-inventory digest, whose pinned value moved
+  with the schema), and two consistency checks (report iff capability; marker
+  needs capability). The full invariant list and matrix are Phase 4.
+- CLI `refs.rs`: boxed `FileSymbolIndex` in `Phased::Analyzed` (clippy
+  `large_enum_variant` after the index grew). No behavior change.
+
+### Requirement-to-test mapping
+
+| Behavior | Test |
+|---|---|
+| types round-trip with every key; absent key refused, null name read; unknown key/variant refused; constructors' JSON | `schema_v2::reexports::tests::*` (unit) |
+| marker only for `syntax`/`declared` at the exact import span | `analysis::reexports::tests::*` (unit) |
+| capability order, closure, `Diagnostics` needs `Reexports`, no reference prerequisites | `symbols_reexports::capability_closure_and_order_are_pinned` |
+| uncomputed is absent (no key, no capability, markers false), not empty | `symbols_reexports::an_unrequested_report_is_absent_not_empty` |
+| all 16 languages: 5 `not_applicable`, 11 limited whole-file with root span | `symbols_reexports::every_language_reports_not_applicable_or_a_limited_whole_file` |
+| whole-file report under kind filter; direct API equals query | `symbols_reexports::the_report_describes_the_whole_file_whatever_kinds_are_selected`, `the_complete_index_carries_the_report_and_the_capability` |
+| one extraction, none unrequested, no reference captures/resolutions/diagnostics for a cheap request | `symbols_reexports::extraction_runs_once_and_only_when_required` |
+| cache hit, narrowing, widening equal uncached | `symbols_reexports::a_cached_report_equals_the_uncached_report_across_a_narrowing_and_a_widening` |
+| damaged entries (report/capability mismatch, absent key, stray marker) recomputed and rewritten | `symbols_reexports::an_entry_whose_report_and_capability_disagree_is_recomputed` |
+| revision 51 entries not served | `cache_upgrade::entry_from_extractor_revision_fifty_one_is_not_served_after_the_reexports_bump` |
+| real `hug --json-full` carries the report, `--json` does not | `wiring::json_full_carries_the_reexport_report_and_json_does_not` |
+
+Existing tests updated for the version/revision/capability changes: schema
+5.1 literals, golden files, the pinned import-inventory digest, the
+incompatible-version lists, `cache_robustness` expectations.
+
+### Not done here (by plan)
+
+Per-language extraction (Phase 3); persistence strictness beyond the two
+checks, the JSON matrix, import-site linkage for `unused-import`,
+`imported_symbols()`/CLI `is_reexport` (Phase 4); `docs/reexports.md` (Phase 5).
+Docs updated now: `symbol-records*`, `cache-design/entry-format.md`, with the
+extractors marked planned.
+
+### Gates
+
+- Scope command: `"packages": ["tree-hugger","tree-hugger-cli","test-toolkit"]`,
+  `change_class: "package"`, so both gates ran.
+- `just test` in `tree-hugger/`: 2106 passed, 0 failed.
+- `just lint`: clean for tree-hugger and tree-hugger-cli.
+- OS: no `cfg` or path code touched; no cross-check run (macOS only).
 
 ## Phase 3
 
@@ -164,3 +259,50 @@ Phase 5 was **not implemented**. It is blocked transitively.
 - Gates: only docs under `tree-hugger/features/` changed.
 - Scope command result: see below.
 - Scope command result: `"packages": []`, `change_class: "documentation"`, so the test and lint gates were skipped as permitted.
+
+## Phase 6
+
+Phase 6 was **not completed**; the feature is not implemented. It is blocked
+transitively by the same pending author rulings.
+
+- Phase 6 validates and hands off the feature built by Phases 2-5. None of that
+  exists: no report model, capability, language extraction, cache evidence,
+  consumer change, equivalence tests or docs. `spec.md` is still `draft-spec`
+  with `human_review: true`; the support contract, canonical representation,
+  consumer exposure and C++ modules grammar blocker are unruled.
+- Because nothing was implemented, "implementation complete, ready for review"
+  cannot be reported and `implemented`/`completed_phase` were deliberately NOT
+  set (doing so would be false). No plan tasks were checked off.
+- No source, test or skill file changed. No requirement-to-test mapping exists.
+- Gates: `just test` / `just lint` skipped; only docs under
+  `tree-hugger/features/` changed. Scope command
+  (`git status --porcelain ... | xargs python3 scripts/ci/affected_scope.py`)
+  was run from the repository root; result `"packages": []`,
+  `change_class: "documentation"`.
+- OS evidence: none needed; no code changed.
+- Placeholder-removal coordination: `reexported_symbols()` is already removed.
+
+## Author rulings (2026-10-11)
+
+The author accepted every recommendation in the decision package, which
+closes the Phase 1 exit gate. The Phase 2–6 "blocked" entries above are void:
+nothing was built, so execution restarts at Phase 2.
+
+- `spec.md` is now `finalized-spec` (`human_review: false`). It records the
+  rulings, and its **Finalized design** pins the following:
+  - `TreeFile::reexports()` and `Capability::Reexports`, whose only
+    prerequisite is `Declarations`. `Diagnostics` now depends on
+    `Reexports`.
+  - The `ReexportReport` types and their JSON, with every key always
+    written.
+  - `ImportRecord::reexported` and `SchemaVersion::V5_2`.
+  - `EXTRACTOR_REVISION` `"52"`.
+  - The per-language contract table, the CLI behavior (`--json-full` only)
+    and the cache invariants.
+- Intended behavior change: Rust `pub(self) use` is no longer a re-export,
+  so it loses its `unused-import` exemption. This must be documented when
+  Phase 4 lands.
+- C++20 modules: there is no grammar change. A file containing module syntax
+  reports `limited`/`grammar_gap`.
+- In `plan.md`, "Freeze support contract" is checked off. The robustness
+  matrix role columns are frozen to concrete JSON paths.
