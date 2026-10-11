@@ -117,6 +117,9 @@ struct Tally {
     succeeded: u64,
     partial: u64,
     omitted: u64,
+    /// Inspected processes for which the budget expired before this
+    /// mechanism started.
+    not_attempted: u64,
     limitations: Limitations,
 }
 
@@ -150,6 +153,7 @@ pub(crate) fn run<B: UsageBackend>(
             succeeded: 0,
             partial: 0,
             omitted: 0,
+            not_attempted: 0,
             limitations: Limitations::default(),
         })
         .collect();
@@ -372,9 +376,13 @@ fn inspect<B: UsageBackend>(
         }) else {
             continue;
         };
-        tally.attempted += 1;
         let example = LimitationExample::pid(candidate.pid);
         match inspection.result {
+            // Carries no evidence or limitations.
+            InspectionResult::NotAttempted => {
+                tally.not_attempted += 1;
+                continue;
+            }
             InspectionResult::Complete => tally.succeeded += 1,
             InspectionResult::Partial => {
                 tally.succeeded += 1;
@@ -399,12 +407,26 @@ fn inspect<B: UsageBackend>(
                 Some(example.with_detail(detail)),
             ),
         }
+        tally.attempted += 1;
         for limitation in inspection.limitations {
             tally.limitations.merge(limitation);
         }
-        for raw in inspection.evidence {
-            let Some(found) = context.match_object(&raw.object) else {
-                continue;
+        for mut raw in inspection.evidence {
+            debug_assert!(
+                raw.matched.is_some() || raw.object.identity.is_some(),
+                "a backend must validate a path-only observation while its budget remains"
+            );
+            // Never a path lookup here: the budget may have expired since the
+            // backend read this, and a refused lookup would discard it.
+            let found = match raw.matched.take() {
+                Some(found) => found,
+                None if raw.object.identity.is_some() => {
+                    match context.match_object(&raw.object) {
+                        Some(found) => found,
+                        None => continue,
+                    }
+                }
+                None => continue,
             };
             if evidence.len() as u64 + retained_for_process >= MAX_EVIDENCE_PER_PROCESS
                 || *retained_total >= MAX_EVIDENCE_TOTAL
@@ -450,6 +472,7 @@ fn finish(
         succeeded,
         partial,
         omitted,
+        not_attempted,
         mut limitations,
     } = tally;
     let mut coverage = Coverage {
@@ -481,9 +504,18 @@ fn finish(
     }
     coverage.attempted = Some(attempted);
     coverage.succeeded = Some(succeeded);
-    if attempted == 0 && skipped > 0 {
+    if not_attempted > 0 {
+        limitations.record(
+            LimitationKind::BudgetExhausted,
+            "the budget expired before this mechanism was started for some processes",
+            not_attempted,
+            None,
+        );
+    }
+    if attempted == 0 && (skipped > 0 || not_attempted > 0) {
         coverage.status = CoverageStatus::NotAttempted;
         coverage.reason = Some("the budget expired before inspection started".to_string());
+        coverage.limitations = limitations.into_vec();
         return coverage;
     }
     if skipped > 0 {

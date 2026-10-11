@@ -190,15 +190,21 @@ impl<S: Source> UsageBackend for LibprocBackend<S> {
         let mut handles = Tally::new(Mechanism::OpenHandles, pid);
         let mut cwd = Tally::new(Mechanism::WorkingDirectories, pid);
         self.inspect_descriptors(candidate, context, &mut handles);
-        self.inspect_cwd(pid, context, &mut cwd);
+        let cwd_started = !context.budget.expired();
+        if cwd_started {
+            self.inspect_cwd(pid, context, &mut cwd);
+        }
 
         // A changed or missing start time means the PID was reused or the
         // process exited during inspection, so nothing read can be attributed.
+        // The check runs even after the budget expired: it is what makes the
+        // evidence already read attributable.
         if candidate.creation_token.is_some() && self.creation_token(pid) != candidate.creation_token
         {
             return [handles, cwd].into_iter().map(Tally::vanished).collect();
         }
-        vec![handles.finish(), cwd.finish()]
+        let cwd = if cwd_started { cwd.finish() } else { cwd.not_attempted() };
+        vec![handles.finish(), cwd]
     }
 
     fn creation_token(&mut self, pid: u32) -> Option<u64> {
@@ -288,6 +294,7 @@ impl<S: Source> LibprocBackend<S> {
                     write: open.flags & FWRITE != 0,
                 }),
                 event_only: Some(open.flags & O_EVTONLY != 0),
+                matched: None,
             });
         }
     }
@@ -317,6 +324,7 @@ impl<S: Source> LibprocBackend<S> {
                 watch: None,
                 access: None,
                 event_only: None,
+                matched: None,
             });
         }
     }

@@ -593,26 +593,57 @@ fn target_only_matches_a_module_that_is_the_target_file() {
     assert!(report.processes.is_empty(), "{:#?}", report.processes);
 }
 
+/// Runs the full query, letting the first process inspection make `checks`
+/// budget checks before the budget expires.
+fn query_expiring_during_modules(fake: &mut Fake, root: &Path, checks: i64) -> PathUsageReport {
+    let budget = Budget::start(Duration::from_secs(60)).unwrap();
+    let mut backend =
+        super::tests::ExpiringDuringInspection::new(ModuleBackend::with_source(fake), checks);
+    run(root, &PathUsageOptions::default(), &mut backend, &budget, chrono::Utc::now()).expect("report")
+}
+
 #[test]
 fn a_budget_expiring_between_modules_keeps_what_was_read() {
     let scene = scene();
-    let mut fake = Fake::default().with(
-        PID,
-        Scripted::new()
-            .module(&scene.root.join("bin").join("tool.exe"))
-            .module(&scene.root.join("bin").join("helper.dll")),
-    );
-    // The first per-module check passes; the second finds it expired.
-    let budget = Budget::expiring_after_checks(1);
-    let (_, inspections) = inspect_directly(&scene, &mut fake, &budget);
-    assert_eq!(inspections[0].result, InspectionResult::Partial);
-    assert_eq!(inspections[0].evidence.len(), 1);
-    assert!(
-        inspections[0]
-            .limitations
-            .iter()
-            .any(|l| l.kind == LimitationKind::BudgetExhausted)
-    );
+    let tool = scene.root.join("bin").join("tool.exe");
+    let helper = scene.root.join("bin").join("helper.dll");
+    let mut fake = Fake::default().with(PID, Scripted::new().image(&tool).module(&helper));
+    // The first module's read check and lookup pass; the second module's read
+    // check finds the budget expired.
+    let report = query_expiring_during_modules(&mut fake, &scene.root, 2);
+
+    assert!(report.budget_exhausted);
+    assert_eq!(report.processes.len(), 1, "{:#?}", report.processes);
+    let record = &report.processes[0];
+    assert_eq!(record.pid, PID);
+    assert_eq!(record.creation_token, Some(CREATED));
+    assert_eq!(record.executable.as_ref().map(|e| e.as_path()), Some(tool.as_path()));
+    assert_eq!(record.evidence.len(), 1, "{:#?}", record.evidence);
+    let evidence = &record.evidence[0];
+    assert_eq!(evidence.kind, EvidenceKind::LoadedModule);
+    assert_eq!(evidence.match_basis, MatchBasis::PathLookup);
+    assert_eq!(paths(evidence), vec![indexed(&tool)]);
+    assert!(evidence.identity.is_some());
+
+    let modules = coverage(&report, Mechanism::LoadedModules);
+    assert_eq!(modules.status, CoverageStatus::Partial, "{modules:#?}");
+    assert_eq!(limitation_count(modules, LimitationKind::BudgetExhausted), 1, "{modules:#?}");
+}
+
+#[test]
+fn a_module_whose_lookup_the_budget_refuses_is_a_gap_not_evidence() {
+    let scene = scene();
+    let tool = scene.root.join("bin").join("tool.exe");
+    let mut fake = Fake::default().with(PID, Scripted::new().module(&tool));
+    // The module's read check passes; its lookup finds the budget expired.
+    let (report, counts) = measure(|| query_expiring_during_modules(&mut fake, &scene.root, 1));
+
+    assert!(report.budget_exhausted);
+    assert!(report.processes.is_empty(), "{:#?}", report.processes);
+    assert_eq!(counts.get(counters::QUERY_PATH_LOOKUPS), 0);
+    let modules = coverage(&report, Mechanism::LoadedModules);
+    assert_eq!(modules.status, CoverageStatus::Partial, "{modules:#?}");
+    assert_eq!(limitation_count(modules, LimitationKind::BudgetExhausted), 1, "{modules:#?}");
 }
 
 #[test]

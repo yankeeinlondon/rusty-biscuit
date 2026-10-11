@@ -4,7 +4,9 @@
 //! The classification logic is generic over [`Source`], so tests can script
 //! denials, exits, and undersized buffers on any host; the FFI source
 //! ([`ffi::Win32`]) exists on Windows only. A module is observed by path
-//! only, so the query looks its path up to decide whether it is in scope.
+//! only, so the backend looks each in-scope path up as it reads it and keeps
+//! that match with the evidence; a module the budget stopped before its
+//! lookup is a coverage gap, never evidence.
 //!
 //! Foreign file handles are never duplicated: reading the identity of
 //! a duplicated handle can block for as long as its owner has synchronous
@@ -17,7 +19,7 @@ use super::backend::{
     ProcessCandidate, ProcessDetails, RawEvidence, Tally, UsageBackend,
 };
 use super::budget::Budget;
-use super::matching::{self, ObservedObject};
+use super::matching::ObservedObject;
 use super::report::{EvidenceKind, LimitationExample, LimitationKind, Limitations, Mechanism};
 use crate::performance::{self, counters};
 use chrono::{DateTime, Utc};
@@ -32,6 +34,8 @@ pub(crate) const WORKING_DIRECTORIES_UNSUPPORTED: &str =
      another process's memory";
 pub(crate) const DIRECTORY_CHANGE_SUBSCRIPTIONS_UNSUPPORTED: &str =
     "handle ownership does not identify a ReadDirectoryChangesW subscription";
+
+const BUDGET_EXPIRED: &str = "the budget expired while a process's modules were being read";
 
 /// Module-list capacity for the first read.
 pub(crate) const DEFAULT_MODULE_CAPACITY: usize = 256;
@@ -384,14 +388,9 @@ impl<S: Source> ModuleBackend<S> {
             }
             Err(fault) => return whole(tally, fault),
         };
-        let spellings = context.root.spellings();
         for module in modules {
             if context.budget.expired() {
-                return tally.problem(
-                    LimitationKind::BudgetExhausted,
-                    "the budget expired while a process's modules were being read",
-                    None,
-                );
+                return tally.problem(LimitationKind::BudgetExhausted, BUDGET_EXPIRED, None);
             }
             performance::increment_counter(counters::QUERY_MODULE_INSPECTIONS, 1);
             let path = match self.source.module_path(process, module) {
@@ -420,22 +419,27 @@ impl<S: Source> ModuleBackend<S> {
                 }
             };
             tally.successes += 1;
-            // A text pre-filter only: the query's identity lookup decides, so
-            // each module is looked up at most once.
-            if !spellings.iter().any(|root| matching::may_contain(root, &path)) {
+            let object = ObservedObject {
+                identity: None,
+                path: Some(path),
+                deleted: false,
+            };
+            // Validated now, while the budget remains: the query makes no
+            // lookup of its own, so a module kept unvalidated would be lost.
+            let Some(found) = context.match_object(&object) else {
+                if context.budget.exhausted() {
+                    return tally.problem(LimitationKind::BudgetExhausted, BUDGET_EXPIRED, None);
+                }
                 continue;
-            }
+            };
             tally.evidence.push(RawEvidence {
                 kind: EvidenceKind::LoadedModule,
-                object: ObservedObject {
-                    identity: None,
-                    path: Some(path),
-                    deleted: false,
-                },
+                object,
                 descriptor: None,
                 watch: None,
                 access: None,
                 event_only: None,
+                matched: Some(found),
             });
         }
     }

@@ -94,6 +94,9 @@ pub(crate) enum InspectionResult {
     /// The process exited, or its PID now names a different lifetime.
     Vanished,
     Failed(String),
+    /// The budget expired before this mechanism started for the process; the
+    /// query counts it as budget-skipped work, not as an attempt.
+    NotAttempted,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -104,6 +107,12 @@ pub(crate) struct RawEvidence {
     pub(crate) watch: Option<WatchInfo>,
     pub(crate) access: Option<Access>,
     pub(crate) event_only: Option<bool>,
+    /// The backend's own match, made while the budget remained. Required for
+    /// a path-only object: the query never looks a path up after inspection,
+    /// because an expired budget would refuse the lookup and discard evidence
+    /// the backend already read. An object with an identity may leave it
+    /// unset; matching an identity consults only the captured tree.
+    pub(crate) matched: Option<ObjectMatch>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -111,7 +120,8 @@ pub(crate) struct MechanismInspection {
     pub(crate) mechanism: Mechanism,
     pub(crate) result: InspectionResult,
     /// Evidence that is not in scope is dropped by the query; a backend may
-    /// pre-filter with [`InspectionContext::match_object`] to bound memory.
+    /// pre-filter with [`InspectionContext::match_object`] to bound memory,
+    /// and must for a path-only object (see [`RawEvidence::matched`]).
     pub(crate) evidence: Vec<RawEvidence>,
     pub(crate) limitations: Vec<Limitation>,
 }
@@ -234,6 +244,16 @@ impl Tally {
         MechanismInspection {
             mechanism: self.mechanism,
             result: InspectionResult::Vanished,
+            evidence: Vec::new(),
+            limitations: Vec::new(),
+        }
+    }
+
+    /// The budget expired before this mechanism started; nothing was read.
+    pub(crate) fn not_attempted(self) -> MechanismInspection {
+        MechanismInspection {
+            mechanism: self.mechanism,
+            result: InspectionResult::NotAttempted,
             evidence: Vec::new(),
             limitations: Vec::new(),
         }
