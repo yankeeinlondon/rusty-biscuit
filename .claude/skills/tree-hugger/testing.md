@@ -41,7 +41,9 @@ When modifying queries or symbol extraction:
    4.3, no `occurrences`/`reference_coverage` keys) cannot be servable stale
    payloads, so `assert_schema_bump_entry_is_not_served` checks each by hand (a
    `SchemaBump` row: what the old shape lacked and how to recognize the current
-   one): rejected under both keys; a later schema bump adds a row there.
+   one): rejected under both keys; a later schema bump adds a row there
+   (revision 51, schema 5.1, lacks `reexports`, `imports[].reexported` and the
+   `reexports` capability).
    `cache_robustness` pins which malformed
    shapes of the entry fields and record columns (including nested generics,
    relation targets and attribute/modifier members) are served or

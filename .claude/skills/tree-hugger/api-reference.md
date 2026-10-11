@@ -43,6 +43,7 @@ fn referenced_symbols(&self) -> Result<Vec<ReferencedSymbol>, TreeHuggerError>
 
 // Whole-file reference evidence: an `Occurrences` query selecting no kinds
 fn reference_evidence(&self) -> Result<ReferenceEvidence, TreeHuggerError>
+fn reexports(&self) -> Result<ReexportReport, TreeHuggerError> // whole-file forwarding report
 ```
 
 `referenced_symbols()` is the older name-only usage list (diagnostics read
@@ -199,9 +200,10 @@ not valid Unicode, and `lossless_portable_relative` gives the same text or
 | `Occurrences` | References | keeps `occurrences` + `reference_coverage` (whole file) in the index |
 | `Semantics` | Occurrences | semantic pass (recursion read from the occurrences) |
 | `StructuredDocs` | Declarations | docs pass |
-| `Diagnostics` | Declarations | diagnostics pass |
+| `Diagnostics` | Reexports | diagnostics pass (reads proven forwarding for the `unused-import` exemption) |
 | `Flags` | Declarations | `visibility.is_test` / `is_deprecated` while records are built (`extract/flags.rs`, `attributes.rs`) |
 | `Metrics` | Declarations | `metrics` facet while records are built (`extract/metrics.rs`) |
+| `Reexports` | Declarations | `FileSymbolIndex::reexports` + `imports[].reexported` (`analysis/reexports.rs`); whole file, no reference captures; `None` = not computed |
 
 Flags and metrics are filled in `TreeFile::records_from` (`RecordFacts`) for
 wanted kinds only; without the capability the flags are `false` and the facet

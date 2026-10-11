@@ -6,7 +6,7 @@ post-lookup predicates.
 
 ## Schema
 
-- **Schema v2 module, schema version 5.1**: `shared/schema_v2` with facet-based
+- **Schema v2 module, schema version 5.2**: `shared/schema_v2` with facet-based
   `SymbolRecord` and staged `FileSymbolIndex`; records, file indexes, CLI
   envelopes and analyzer fingerprints emit `SchemaVersion::CURRENT` (the module
   keeps its historical `v2` name). Records carry no timestamps, so output and
@@ -86,6 +86,22 @@ post-lookup predicates.
   directories are never opened, so they no longer fail the scan. Tests compare
   each literal with the same pattern bracketed (`src/lib.r[s]`, forces the
   walk): `filters::literal_positional_paths_select_what_the_walker_selects`.
+- **Re-exports** (`analysis/reexports.rs`, types in
+  `shared/schema_v2/reexports.rs`): `Capability::Reexports` (prerequisite
+  `Declarations`; `Diagnostics` requires it) makes `run_indexed` call
+  `reexports::extract` once, after the import records exist, then
+  `mark_forwarded_imports` sets `ImportRecord::reexported` by exact import span
+  for `syntax`/`declared` entries only. `FileSymbolIndex::reexports` is `None`
+  exactly when the capability was not computed (key omitted); `coverage::project`
+  drops the report and clears the markers together, and
+  `record_passes_suffice` never widens it without a parse. `extract` matches
+  every language: Java/C/Bash/Zsh/PHP are `not_applicable`, every other
+  language is a whole-file `limited`/`grammar_gap` until its extractor lands
+  (never a `complete` negative). `work_counters().reexport_extractions` proves
+  one extraction per analysis and none without the capability. The cache entry
+  writes a required, nullable `reexports` key and `imports[].reexported`;
+  `StoredEntry::validate` refuses a report without the capability (or the
+  reverse) and a marker without it.
 - **Parent navigation goes through the parent index** (`file/parents.rs`):
   `run_query` installs one per file (`TreeFile::with_parent_index`, one
   `TreeCursor` pass); inside it `node.indexed_parent()` / `parents::parent` /
