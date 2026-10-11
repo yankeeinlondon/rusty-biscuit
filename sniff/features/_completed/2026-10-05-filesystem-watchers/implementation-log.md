@@ -1375,10 +1375,9 @@ must exist before `--extract-to`; the first replay exposed that setup omission,
 which was corrected without changing source. The final macOS full suite after
 the retention regression test passed **3,346/3,346**, 33 skipped.
 
-The broader full-area native Linux-host and full-area WSL2 runs remain open in
-the checklist. Earlier native backend evidence is in Phases 3–6; this
-continuation does not manufacture current receipts from it. The implementation
-is complete, ready for review; remaining verification scope is explicitly shown.
+The implementation is complete, ready for review. Earlier native backend
+evidence is in Phases 3–6; this continuation does not manufacture current
+receipts from it. Cross-OS coverage is handled by the existing CI/CD schedule.
 
 
 Final archive verification rebuilt the library-only archive after refreshing
@@ -1406,3 +1405,62 @@ Windows focused query validation is **89/89 passed**, and final native lint
 passed. The corresponding macOS query suite passed **117/117**; this last
 behavior change is Windows-gated. Documentation describes file-side
 `observed_path` as the queried spelling, since the owner's spelling is unknown.
+
+
+### Completion checklist correction (2026-10-10)
+
+At the author's direction, removed the manual cross-OS full-area completion
+gates from the plan. Local validation is complete; OS testing runs
+automatically through CI/CD under its existing event-based environment
+schedule. The additional remote checks above remain recorded evidence, not
+prerequisites for implementation handoff. No CI policy or scope was changed.
+
+## Review cycle 1 fixes
+
+### Hexadecimal inotify watch descriptors (2026-10-11)
+
+Departure from the spec: it said to parse a decimal watch descriptor, but the
+kernel's `fs/notify/fdinfo.c` writes `wd:%x`. Registration `wd` is now parsed
+as hexadecimal, so `wd:a` is retained as identifier 10 and `wd:10` reports
+16; absent, empty, signed, `0x`-prefixed, duplicate, and overflowing values
+remain malformed and keep valid siblings. A sweep of every other kernel-text
+numeric reader in the Linux backend (registration `ino`/`sdev`/`mask` hex,
+`fdinfo` header `flags` octal and `ino` decimal, `stat` start time decimal,
+`/proc` PID and `fd` names decimal) found them correct. The query-contract
+doc now states that every registration field is hexadecimal.
+
+### Unix cwd inspection gated on the budget (2026-10-11)
+
+The Linux and macOS backends now check the shared budget after a process's
+descriptor scan and read its working directory only while the budget lasts.
+A skipped read returns a new per-process `InspectionResult::NotAttempted`,
+which the query counts separately from attempts: `working_directories`
+coverage carries a `budget_exhausted` limitation with the count of skipped
+processes, and is `not_attempted` when no process's cwd was read, `partial`
+otherwise. Descriptor evidence already read is kept, and the start-time
+recheck still runs after an expired inspection so that evidence stays
+attributable. A sweep of the other transitions found them already gated: the
+shared process loop (before each `inspect`), the Windows file-side scan to
+module inspection and module to module, new-holder confirmation, enrichment,
+and the root recheck. Linux `fdinfo` reads were judged part of the
+per-descriptor unit that the loop already gates, not a separate mechanism
+start. The query-contract doc now describes the between-mechanism check.
+
+### Path-only matches validated during inspection (2026-10-11)
+
+The Windows module loop kept only raw module paths after a text pre-filter,
+and the shared report builder looked each one up afterwards; once the budget
+had expired that lookup was refused, so a module read before expiry was
+discarded with every later one and the process vanished from the report.
+`RawEvidence` now carries an optional `matched` (`ObjectMatch`): the module
+loop looks each in-scope path up as it reads it and keeps the match, and a
+module whose lookup the budget refuses is a `budget_exhausted` problem on
+`loaded_modules` rather than evidence. The report builder never performs a
+path lookup: it uses the backend's match, or matches an identity against the
+captured tree (budget-free), and a debug assertion enforces that path-only
+evidence arrives validated. The matcher still honors the budget. The shared
+test fake now validates its path-only evidence during inspection like a real
+backend. A sweep found the other projections clean: Linux descriptors, cwd,
+and inotify and macOS vnodes and cwd all carry native identities; Windows
+file-side holders arrive as already projected evidence. The Windows section
+and matching rules of the query-contract doc now say when the lookup runs.
