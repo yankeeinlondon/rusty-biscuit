@@ -45,6 +45,12 @@ does bare Ctrl emit)?
 host-terminal gotcha below. Cannot deliver Kitty keyboard-protocol bytes
 (tmux strips them), graphics protocols, or truecolor display fidelity.
 
+**The tmux server is the harness's own.** Sessions run on
+`tmux -L biscuit-test-harness -f /dev/null`: no developer `tmux.conf`
+(a plugin-manager config cost 2.1 s per server start), same defaults as
+CI. A test's own `tmux` call against a harness session must use
+`tmux::tmux_command()`; a bare `tmux` asks the default server.
+
 ## Backend matrix
 
 | Harness | Headless | Capabilities | Best for | Cannot verify |
@@ -211,7 +217,8 @@ let harness = WezTermHarness::new()
 ```
 
 `TmuxHarness` has no visibility knob (detached sessions). `AppleTerminalHarness`
-always snapshot-and-restores frontmost focus around its `do script` call.
+opens its window with `open -g` and restores frontmost focus if the spawn
+displaced it.
 
 ## `SharedHarness<T>` — amortise the 2-3 s spawn cost
 
@@ -259,11 +266,13 @@ declare the backend, or each test self-spawns its own window.
 **Parallel self-spawn mode is the default.** `_test_l2` skips the broker,
 exports no `BISCUIT_SHARED_*`, and runs nextest at `-j N`, so every
 `shared_or_spawn()` takes its fallback branch and spawns an *owned*,
-`Drop`-cleaned pane: there is no shared resource to contend for.
+`Drop`-cleaned pane: no pane is shared, but the WezTerm mux is (see "WezTerm
+clients take turns" below).
 N is `_test_l2_threads`: `max(1, floor(logical_cores / 2))` on every host, CI
 runners included, because every worker drives a real terminal and one WezTerm
 mux server serves them all; at 14 workers on a 16-core Mac its spawn and
-capture calls time out. The count follows the host, not the OS: that Mac's
+capture calls timed out until the harness made WezTerm clients take turns. The
+count follows the host, not the OS: that Mac's
 pre-push run gets 8, a GitHub-hosted `ubuntu-latest` runner (4 cores) 2, and a
 GitHub-hosted `macos-latest` runner (3 cores) 1. It controls worker count, not
 CPU affinity or a guaranteed reservation.
@@ -281,6 +290,31 @@ l2-serial-reason = "every test reads and writes the one system clipboard"
 That package gets the shared-pane `-j 1` path above. `BISCUIT_L2_THREADS`
 overrides both (`1` forces serial). Backstop: claudine-cli L2 carries a 1 s
 leak-grace override in `.config/nextest.toml` for concurrent child teardown.
+
+### WezTerm clients take turns
+
+The WezTerm GUI serves every `wezterm cli` client on its main thread and,
+while one is connected, pushes it render changes for every busy pane. Many
+clients at once collapse it: 16 parallel tests' clients took 13–40 s each
+(2026-10-10), surfacing as `WezTerm not available` or a 15 s spawn timeout
+on a *different set of tests each run*, each of which passes alone. A sample
+of `wezterm-gui` (`sample <pid> 5`) during the stall shows the main thread in
+`GetPaneRenderChangesResponse` encoding. The harness therefore:
+
+- runs at most **two** clients per mux at a time, across all processes and
+  worktrees, in arrival order (lock files
+  `biscuit-wezterm-cli-<socket>-{0,1}.lock` and a `-queue` directory in the
+  temporary directory; random order left a 1–2 s tail wait that pushed
+  single tests past 5 s). A waiter holds an OS lock on its queue entry, so
+  a crashed or killed waiter's entry is detected and removed on every OS;
+- runs every client with `wezterm --skip-config` (the GUI exports
+  `WEZTERM_CONFIG_FILE` into its panes, so honoring it evaluated the
+  developer's whole config on every `spawn`);
+- reuses an answered `available()` probe for 2 s and sweeps stale panes at
+  most once per 30 s per mux, since `list` is the heaviest call.
+
+A test that shells out to `wezterm cli` itself bypasses the turns; go
+through the harness. Never raise a WezTerm timeout to "fix" this symptom.
 
 ## Level 3 — OS keyboard injection
 
@@ -416,6 +450,7 @@ AppleScript state).
 | `bin_exe!("name")` | `PathBuf` of a workspace binary, resolved at run time so an archived run (the `wsl2-ubuntu` leg) finds it. Never spawn `env!("CARGO_BIN_EXE_…")` directly. |
 | `apply_color_forcing_env(&mut Command)` | Set `FORCE_COLOR`/`CLICOLOR_FORCE`/`TERM`/`COLORTERM`, clear `NO_COLOR`. |
 | `wait_for_prompt(&mut harness)` | Poll `capture()` until `$`/`#`/`%` (5 s cap). |
+| `send_command_settled(&mut harness, cmd, env)` | Type a command line, wait for the pane to show it, return the settled frame. Use instead of `send_command_with_env` + `capture_settled`, which sleeps a fixed `settle()` first. |
 | `run_with_timeout` / `run_with_stdin_timeout` | Wall-clock timeout with pipe-deadlock-safe draining. |
 | `SPAWN_TIMEOUT`, `SEND_TIMEOUT`, `CAPTURE_TIMEOUT`, `QUERY_TIMEOUT`, `CLEANUP_TIMEOUT` | Default timeouts. |
 

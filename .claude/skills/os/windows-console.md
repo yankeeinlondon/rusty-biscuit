@@ -15,11 +15,8 @@ processes and the environment in [windows.md](windows.md).
   minute, so a second spawn seconds later is 0.1 s. `wezterm cli list` does
   not evaluate the config at all, which is why the harness's availability
   gate passes and only the spawn times out (15 s `SPAWN_TIMEOUT`).
-  `biscuit-test-harness` now runs every `wezterm` client under an empty
-  `WEZTERM_CONFIG_FILE` unless the caller set one; the mux server keeps its
-  own config. The empty config is a private, uniquely created temporary file
-  retained until that client exits and then removed; creation/write errors
-  propagate rather than selecting an existing shared pathname. Do not "fix"
+  `biscuit-test-harness` now runs every `wezterm` client as
+  `wezterm --skip-config`; the mux server keeps its own config. Do not "fix"
   this by raising the timeout.
 - A headless `wezterm-mux-server` reachable through `WEZTERM_UNIX_SOCKET`
   (`C:\Users\ken\.local\share\wezterm\sock`) is all the Level 2 tier needs
