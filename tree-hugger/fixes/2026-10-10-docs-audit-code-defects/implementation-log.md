@@ -49,9 +49,64 @@ docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
   - .claude/skills/tree-hugger/api-reference.md
   - .claude/skills/tree-hugger/query-system.md
+source_files_during_phase_4:
+  - tree-hugger/lib/src/queries/provenance.rs
+  - tree-hugger/cli/src/main.rs
+  - tree-hugger/cli/tests/command_feedback.rs
+  - tree-hugger/cli/tests/changed/empty.rs
+  - tree-hugger/cli/tests/symbols/filters.rs
+docs_updated_during_phase_4:
+  - tree-hugger/docs/cli.md
+  - tree-hugger/docs/library/diagnostics.md
+  - tree-hugger/docs/queries.md
+  - tree-hugger/docs/release-notes.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/tree-hugger/cli-architecture.md
+  - .claude/skills/tree-hugger/diagnostics.md
+  - .claude/skills/tree-hugger/query-system.md
 packages:
   - tree-hugger
   - tree-hugger-cli
+source_code:
+  - tree-hugger/lib/tests/l1/symbols_cache.rs
+  - tree-hugger/lib/src/file/tree_file.rs
+  - tree-hugger/lib/src/file/mod.rs
+  - tree-hugger/lib/src/queries/mod.rs
+  - tree-hugger/lib/src/rule_registry.rs
+  - tree-hugger/lib/queries/php/lint.scm
+  - tree-hugger/lib/tests/l1/main.rs
+  - tree-hugger/lib/tests/l1/lint_diagnostics.rs
+  - tree-hugger/lib/tests/l1/lint_severity_registry.rs
+  - tree-hugger/lib/tests/l1/rule_registry_consistency.rs
+  - tree-hugger/lib/tests/fixtures/lint/undefined_symbol.py
+  - tree-hugger/cli/Cargo.toml
+  - tree-hugger/cli/tests/cli.rs
+  - tree-hugger/cli/tests/lint_severity_agreement.rs
+  - tree-hugger/cli/tests/symbols/cache_upgrade.rs
+  - tree-hugger/cli/tests/fixtures/golden/symbols.json
+  - tree-hugger/cli/tests/fixtures/golden/symbols.jsonl
+  - tree-hugger/lib/src/lib.rs
+  - tree-hugger/lib/src/queries/drift.rs
+  - tree-hugger/lib/tests/l1/phase6_neovim_query_reuse.rs
+  - tree-hugger/lib/tests/l1/tree_file.rs
+  - tree-hugger/lib/src/queries/provenance.rs
+  - tree-hugger/cli/src/main.rs
+  - tree-hugger/cli/tests/command_feedback.rs
+  - tree-hugger/cli/tests/changed/empty.rs
+  - tree-hugger/cli/tests/symbols/filters.rs
+documentation:
+  - tree-hugger/docs/library/diagnostics.md
+  - tree-hugger/docs/cli.md
+  - tree-hugger/docs/release-notes.md
+  - tree-hugger/docs/library.md
+  - tree-hugger/docs/queries.md
+  - .claude/skills/tree-hugger/diagnostics.md
+  - .claude/skills/tree-hugger/query-system.md
+  - .claude/skills/tree-hugger/api-reference.md
+  - .claude/skills/tree-hugger/cli-architecture.md
+completed_phase: 4
+implemented: true
 ---
 
 # Implementation Log for 2026-10-10-docs-audit-code-defects (4 phases)
@@ -381,3 +436,125 @@ Also no case-insensitive `drift` left in `lib/src`, `cli/src`, the READMEs, or
   no path comparison or `cfg`; no cross-check was run.
 
 Input robustness matrix: not applicable (no reader changed).
+
+## Phase 4
+
+Change 3 (F4 + F6 + F7). Done directly, without subagents: the provenance
+edit and the `main.rs` edits are small and file-disjoint.
+
+### F4: query licenses
+
+- `lib/src/queries/provenance.rs`: `overlay_query_provenance` now uses
+  `REPOSITORY_LICENSE` (`AGPL-3.0-only`) instead of `"MIT"`. Perl's original
+  `locals.scm` already used it; vendored records keep `Apache-2.0`.
+- New unit test `queries::provenance::tests::every_record_carries_the_license_of_its_origin`
+  partitions `all_query_provenance()` by `TranslationStatus::Original`
+  (no hard-coded language/kind list), asserts both partitions are nonempty,
+  every `Original` is the literal `"AGPL-3.0-only"`, and every other record is
+  `nvim-treesitter` / `Apache-2.0` (so modified vendored queries keep upstream).
+  **Fails before:** `Swift Comments is a Tree Hugger original: left "MIT"`.
+- Manifest license key (Verify item 3): unchanged from Phase 1, none present.
+- `EXTRACTOR_REVISION` not bumped: provenance is not part of a cached record.
+
+### F6: readable command errors
+
+- `cli/src/main.rs`: the old `main` body is now `run() -> Result<(), TreeHuggerError>`;
+  `main` prints `error: {render::neutralized(&error.to_string())}` and exits 1.
+  No `source()` chain. Clap usage errors still exit 2 (verified by the existing
+  CLI suite); `process::exit` paths and broken-pipe handling are untouched
+  (`report::imports_and_lint_end_quietly_on_a_closed_pipe` and friends pass).
+- Reproduced before/after in a scratch dir (`mkdir .git`, `hug symbols 'missing/**'`
+  etc.): before `Error: NoSourceFiles { … }`; after
+  `error: No supported source files found in `…``, status 1.
+
+### F7: unknown rule warnings
+
+- `cli/src/main.rs`: `warn_unknown_rules(&CommandKind)` runs once in `run()`
+  right after `cli.command.kind()` (the single selector assembly point), so
+  `AnalysisOptions::from_command` cloning cannot double-print. It walks the
+  already-parsed `deny`, `warn`, `allow` selectors, checks only
+  `RuleSelector::Rule(name)` (so `all`/`ALL` and `category:` are exempt by
+  construction), uses `RuleRegistry::builtin().has_rule` (alias-aware; the
+  spec's `is_known` does not exist, as recorded in Phase 1), dedupes with a
+  `HashSet` per run, and neutralizes the name. `RuleSelector::parse` and exit
+  statuses are unchanged.
+- Export-test grep (Verify item 4), rerun this phase:
+  `grep -nE -- "--warn|--deny|--allow" cli/tests/symbols/export_controls.rs export_ctags.rs export_ctags_paths.rs`
+  → no matches (exit 1). Their empty-stderr expectations stand.
+
+### Tests changed because they asserted the defect
+
+Three existing assertions matched the `Debug` variant name `NoSourceFiles`,
+which only appeared because of F6. They now assert the `Display` form
+(`starts_with("error: No supported source files found in `")`):
+`cli/tests/changed/empty.rs::no_source_files_remains_an_error_without_changed`
+and two assertions in `cli/tests/symbols/filters.rs`. Status assertions unchanged.
+The god-files "does not exist" / "not a directory" tests in `cli/tests/cli.rs`
+are unchanged and pass.
+
+### Requirement → test mapping
+
+New binary `cli/tests/command_feedback.rs` (default autotests, L1, no tier
+marker; scratch dirs hold only a `.git` directory, no `git` spawn; reads no
+repository file):
+
+| Requirement | Test | Fails before fix |
+|---|---|---|
+| F4 every `Original` is `AGPL-3.0-only`, every vendored keeps `Apache-2.0` | `provenance::tests::every_record_carries_the_license_of_its_origin` | yes |
+| F6 `symbols`, `refs`, `lint`, `imports`, `god-files` failures: status 1, starts `error: `, Display text (scan root named), no `{`/`Error:`, one line | `a_failing_command_prints_its_display_message_and_exits_1` (table of 5) | yes |
+| F6 control character escaped `\u{1b}` in error (Unix only) | `a_control_character_in_a_failing_path_is_escaped` | yes |
+| F7 `--warn unused-variable`, `--deny unwrap-cal`, `--allow no-such-rule`: exactly one warning each, status 0 | `an_unknown_rule_name_warns_once_and_keeps_the_exit_status` | yes |
+| F7 repeated within and across all three flags → one line per distinct name | `a_repeated_unknown_rule_name_warns_once_per_run` | yes |
+| F7 known rule, alias `unreachable-code`, `all`, `ALL`, `category:correctness` → no warning | `known_rules_aliases_and_special_selectors_do_not_warn` | no (control) |
+| F7 control-bearing unknown name escaped | `an_unknown_rule_name_with_a_control_character_is_escaped` | yes |
+| F7 lint findings still decide status beside an unknown name | `lint_findings_still_decide_the_status_beside_an_unknown_rule` | yes |
+
+Fails-before evidence: `src/main.rs` was temporarily reverted with
+`git checkout` (patch saved to `/tmp/ph4-main.patch`, re-applied with
+`git apply`): 6 failed, the control passed.
+
+Input robustness matrix: not applicable (no reader changed).
+
+### Gates
+
+- Scope: `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`
+  → `packages: ['tree-hugger', 'tree-hugger-cli', 'test-toolkit']`,
+  `change_class: package`; gates required.
+- **Host trap:** the shell's `CDPATH` lists `/Volumes/coding/personal/rusty-biscuit`
+  first, so a relative `cd tree-hugger` from this worktree can land in the main
+  checkout. A first `just lint` showed `Checking tree-hugger (/Volumes/coding/personal/…)`
+  and was discarded; all gates below were rerun after `cd` to the absolute
+  worktree path (cargo output confirms worktree paths).
+- First `just test` failed on `changed empty::no_source_files_remains_an_error_without_changed`
+  (asserted the old `Debug` text; fixed as above, with `filters.rs`).
+- `just test` (`/Volumes/coding/wt/rusty-biscuit/feat-symbols/tree-hugger`):
+  **2089 tests run: 2089 passed** (43 slow, all pre-existing; new tests each <0.4 s).
+- `just lint`: exit 0, no warnings, both packages.
+- `just test-l2`: **7 passed** (tmux, wezterm, kitty).
+- OS evidence: macOS (all gates). Native Windows:
+  `just cross-check tree-hugger-cli --os windows <six test names>` → **6 passed**
+  (the Unix-only control-character path test is cfg'd out). Note: in archive mode
+  `cross-check` rejects `--test`, and an `-E 'binary(…)'` filterset is broken by
+  remote shell quoting; positional name filters work. Linux/WSL2 not run
+  (assumed portable: plain stderr text, no path comparison or `cfg` beyond the
+  Unix-only test).
+
+### F1–F7 audit
+
+- F1/F2 (Phase 2): revision-50 cache-upgrade row present
+  (`cli/tests/symbols/cache_upgrade.rs`), shared-fixture `source-inputs`
+  declared in `cli/Cargo.toml`, consistency guards pass in `just test`.
+- F3/F5 (Phase 3): removed-symbol search over `tree-hugger/lib`, `cli`, `docs`,
+  `.claude/skills/tree-hugger` → only `docs/release-notes.md`.
+- F4, F6, F7: above.
+
+### Departures
+
+- **No commit.** The plan asks for Change 3's signed local commit; this
+  session's instructions forbid committing or staging. Commits are made by the
+  separate commit process.
+- F7 uses `has_rule` (spec said `is_known`), as recorded in Phase 1.
+- The plan's "Grep … before finishing F7" was done this phase as well as in
+  Phase 1; result unchanged.
+
+Implementation complete, ready for review.

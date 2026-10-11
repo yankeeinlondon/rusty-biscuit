@@ -13,7 +13,8 @@ packages:
   - tree-hugger
   - tree-hugger-cli
 needs_rulings: false
-review_iterations: 1
+review_iterations: 2
+completed: true
 $schema:
     status: |-
         enum(
@@ -34,27 +35,15 @@ $schema:
     clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented_by: string -> the agent who implemented the plan
-implemented: false
-implemented_by: claude/opus
+implemented: true
+implemented_by: "claude/opus"
 human_review: false
 message_to_agent: |-
-    Phases 2 and 3 (Changes 1 and 2) are implemented and both gates pass;
-    neither is committed (this pipeline commits separately), so the working
-    tree holds both. See "## Phase 2" and "## Phase 3" in
-    implementation-log.md.
-    (1) EXTRACTOR_REVISION is "51" and was not bumped for Change 2 (no
-    extracted record changed). Change 3 (F4 license, F6/F7 CLI) changes no
-    extracted record either; provenance is not part of a cached record.
-    (2) docs/queries.md now has a "### Refreshing a vendored query"
-    section where "### Drift" was; the F4 license wording edit is in the
-    provenance table above it in the same page.
-    (3) phase6_neovim_query_reuse::all_queries_compile_with_provenance now
-    requires a provenance record with a nonempty upstream_revision for every
-    (language, query kind); keep it when extending the F4 provenance test.
-    (4) Release notes have a new top section "Unused library APIs removed";
-    add Change 3's lines as their own section above it.
-    (5) Earlier Change 1 notes still apply: SEMANTIC_RULE_IDS is public in
-    tree_hugger::file::tree_file; use RuleRegistry::has_rule for F7.
+    All four phases are implemented. Phase 4 is uncommitted in the working
+    tree (this pipeline commits separately). Phase 4 added cli/tests/command_feedback.rs and updated three
+    older CLI assertions that matched the Debug variant name `NoSourceFiles`.
+    Host trap: CDPATH puts the main checkout first, so always `cd` to the
+    absolute worktree path before running `just` gates.
 ---
 
 # Six code defects found while auditing the Tree Hugger docs

@@ -53,9 +53,64 @@ docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
   - .claude/skills/tree-hugger/api-reference.md
   - .claude/skills/tree-hugger/query-system.md
+source_files_during_phase_4:
+  - tree-hugger/lib/src/queries/provenance.rs
+  - tree-hugger/cli/src/main.rs
+  - tree-hugger/cli/tests/command_feedback.rs
+  - tree-hugger/cli/tests/changed/empty.rs
+  - tree-hugger/cli/tests/symbols/filters.rs
+docs_updated_during_phase_4:
+  - tree-hugger/docs/cli.md
+  - tree-hugger/docs/library/diagnostics.md
+  - tree-hugger/docs/queries.md
+  - tree-hugger/docs/release-notes.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/tree-hugger/cli-architecture.md
+  - .claude/skills/tree-hugger/diagnostics.md
+  - .claude/skills/tree-hugger/query-system.md
 packages:
   - tree-hugger
   - tree-hugger-cli
+source_code:
+  - tree-hugger/lib/tests/l1/symbols_cache.rs
+  - tree-hugger/lib/src/file/tree_file.rs
+  - tree-hugger/lib/src/file/mod.rs
+  - tree-hugger/lib/src/queries/mod.rs
+  - tree-hugger/lib/src/rule_registry.rs
+  - tree-hugger/lib/queries/php/lint.scm
+  - tree-hugger/lib/tests/l1/main.rs
+  - tree-hugger/lib/tests/l1/lint_diagnostics.rs
+  - tree-hugger/lib/tests/l1/lint_severity_registry.rs
+  - tree-hugger/lib/tests/l1/rule_registry_consistency.rs
+  - tree-hugger/lib/tests/fixtures/lint/undefined_symbol.py
+  - tree-hugger/cli/Cargo.toml
+  - tree-hugger/cli/tests/cli.rs
+  - tree-hugger/cli/tests/lint_severity_agreement.rs
+  - tree-hugger/cli/tests/symbols/cache_upgrade.rs
+  - tree-hugger/cli/tests/fixtures/golden/symbols.json
+  - tree-hugger/cli/tests/fixtures/golden/symbols.jsonl
+  - tree-hugger/lib/src/lib.rs
+  - tree-hugger/lib/src/queries/drift.rs
+  - tree-hugger/lib/tests/l1/phase6_neovim_query_reuse.rs
+  - tree-hugger/lib/tests/l1/tree_file.rs
+  - tree-hugger/lib/src/queries/provenance.rs
+  - tree-hugger/cli/src/main.rs
+  - tree-hugger/cli/tests/command_feedback.rs
+  - tree-hugger/cli/tests/changed/empty.rs
+  - tree-hugger/cli/tests/symbols/filters.rs
+documentation:
+  - tree-hugger/docs/library/diagnostics.md
+  - tree-hugger/docs/cli.md
+  - tree-hugger/docs/release-notes.md
+  - tree-hugger/docs/library.md
+  - tree-hugger/docs/queries.md
+  - .claude/skills/tree-hugger/diagnostics.md
+  - .claude/skills/tree-hugger/query-system.md
+  - .claude/skills/tree-hugger/api-reference.md
+  - .claude/skills/tree-hugger/cli-architecture.md
+completed_phase: 4
+implemented: true
 ---
 
 # Implementation plan: docs audit code defects
@@ -294,7 +349,7 @@ provenance remain correct, and Change 2 is signed and verified.
 
 ### Wave 6: Concurrent implementation tasks
 
-- [ ] **Correct query licenses**
+- [x] **Correct query licenses**
   - Own `lib/src/queries/provenance.rs` and its tests. Use
     `REPOSITORY_LICENSE` for original overlays; retain Perl's original license.
     Iterate all provenance records: every `Original` is `AGPL-3.0-only`,
@@ -303,7 +358,7 @@ provenance remain correct, and Change 2 is signed and verified.
   - Update license wording in `docs/queries.md` and any corresponding skill
     wording that disagrees. Record Phase 1 manifest findings without adding
     license keys or changing upstream revision strings.
-- [ ] **Repair CLI feedback**
+- [x] **Repair CLI feedback**
   - Own `cli/src/main.rs` and focused CLI tests. Move the existing body into
     `run() -> Result<(), TreeHuggerError>`; make `main` print
     `error: <neutralized Display>` on any returned error and exit 1.
@@ -333,7 +388,7 @@ The provenance task is independent and can run in a separate subagent.
 
 ### Wave 7: Sequential final integration
 
-- [ ] **Update CLI guidance**
+- [x] **Update CLI guidance**
   - Update `docs/cli.md` and `docs/library/diagnostics.md` for unknown-selector
     warnings, once-per-name behavior, aliases, and unchanged status semantics.
     Correct command-level error examples/exit documentation where applicable.
@@ -341,7 +396,7 @@ The provenance task is independent and can run in a separate subagent.
     removed rule names accepted with a warning. Review relevant CLI skill
     wording and changed-symbol comments; retain README overview scope.
     Current docs must not name or link this dated fix or another spec.
-- [ ] **Run final gates**
+- [x] **Run final gates**
   - Run `just test`, `just lint`, and the existing `just test-l2` from
     `tree-hugger/`; use nextest and the shared focus-preserving terminal
     harness. No new styled view is introduced, so new L2 scenarios are not
@@ -360,7 +415,7 @@ The provenance task is independent and can run in a separate subagent.
     subsequent changes or failures justify it.
   - Create and verify only Change 3's signed local commit using the same
     unattended procedure. Keep unrelated work out of every commit.
-- [ ] **Prepare review handoff**
+- [x] **Prepare review handoff**
   - Check off only completed tasks with evidence. Report the three verified
     commits, validation results, observed environments, and any unmet criterion.
     If a criterion cannot be met, stop and report it without weakening the gate.
