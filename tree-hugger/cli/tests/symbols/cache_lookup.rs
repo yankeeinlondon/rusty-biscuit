@@ -272,3 +272,39 @@ fn a_json_run_after_a_listing_widens_the_entry_by_the_flags() {
         assert!(warm.starts_with("cache: 1 hits, 0 partial hits, 0 misses; parsed 0 files"), "{args:?}: {warm}");
     }
 }
+
+/// A forwarding file reports the same re-exports and import markers fresh,
+/// from a cache hit, and from another scan root; the hit parses nothing.
+#[test]
+fn json_full_reexports_agree_fresh_hit_and_from_another_scan_root() {
+    let source = "import { a } from './a';\nexport { a };\nexport * from './b';\nexport { c as d } from './c';\n";
+    let scratch = Scratch::new(&[("sub/index.ts", source)]);
+    let run = |dir: &std::path::Path, file: &str, extra: &[&str]| {
+        let mut args = vec!["--verbose", "--json-full", "symbols", file];
+        args.extend_from_slice(extra);
+        let output = scratch.process(&args).current_dir(dir).output().expect("run hug");
+        assert!(output.status.success(), "hug {args:?}: {}", String::from_utf8_lossy(&output.stderr));
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        let json = json_of(&String::from_utf8(output.stdout).expect("utf-8 stdout"));
+        let index = json["indexes"][0].clone();
+        let markers: Vec<Value> = index["imports"].as_array().expect("imports").iter().map(|import| import["reexported"].clone()).collect();
+        (stderr, index["reexports"].clone(), markers)
+    };
+
+    let (_, uncached, uncached_markers) = run(scratch.repo.path(), "sub/index.ts", &["--no-cache"]);
+    assert_eq!(uncached["coverage"]["state"], "complete");
+    assert_eq!(uncached["entries"].as_array().expect("entries").len(), 3, "{uncached}");
+    assert_eq!(uncached_markers, [Value::Bool(true)]);
+
+    let (cold_stats, cold, cold_markers) = run(scratch.repo.path(), "sub/index.ts", &[]);
+    assert!(cold_stats.starts_with("cache: 0 hits, 0 partial hits, 1 misses"), "{cold_stats}");
+    let (warm_stats, warm, warm_markers) = run(scratch.repo.path(), "sub/index.ts", &[]);
+    assert!(warm_stats.starts_with("cache: 1 hits, 0 partial hits, 0 misses; parsed 0 files"), "{warm_stats}");
+    let (sub_stats, from_sub, sub_markers) = run(&scratch.repo.path().join("sub"), "index.ts", &[]);
+    assert!(sub_stats.starts_with("cache: 1 hits, 0 partial hits, 0 misses; parsed 0 files"), "{sub_stats}");
+
+    for (label, report, markers) in [("cold", &cold, &cold_markers), ("warm", &warm, &warm_markers), ("other root", &from_sub, &sub_markers)] {
+        assert_eq!(report, &uncached, "{label}");
+        assert_eq!(markers, &uncached_markers, "{label}");
+    }
+}

@@ -49,6 +49,7 @@ mod symbols_relation_work;
 mod symbols_relations;
 mod symbols_query;
 mod reexports_consumers;
+mod reexports_equivalence;
 mod symbols_reexports;
 mod reexports_support;
 mod symbols_reexports_cpp;
