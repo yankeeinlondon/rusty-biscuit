@@ -2184,7 +2184,7 @@ fn line_prefix(text: &str, offset: usize) -> (usize, &str) {
 }
 
 /// The chain of ancestor keys enclosing the cursor, outermost first. Empty for
-/// a top-level line.
+/// a top-level key line; a column-0 `- ` item belongs to the key above it.
 ///
 /// The frontmatter AST is the authority whenever it describes the *current*
 /// buffer: its containment is structural and its key segments are decoded, so a

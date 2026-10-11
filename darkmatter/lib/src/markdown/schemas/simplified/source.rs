@@ -3,13 +3,16 @@
 //! ## V1 presentation boundary
 //!
 //! The locator covers the SimplifiedSchema authoring presentations exercised by
-//! the shipped schema corpus: plain, single-quoted, and double-quoted scalars;
-//! block and flow sequences; implicit scalar-key block and flow mappings;
-//! explicit scalar-key block mapping pairs in mapping roots or compact sequence
-//! items; and the mapping-value anchors and scalar aliases used by that corpus.
-//! This is not a general YAML concrete-syntax tree. Other YAML presentations
-//! accepted by `serde_yaml_ng` are outside the v1 source-map contract and may
-//! return a projection error even when semantic parsing succeeds.
+//! the shipped schema corpus: plain, single-quoted, and double-quoted scalars,
+//! with a plain scalar allowed to continue onto more-indented lines; block
+//! sequences, including one aligned with its parent key, and flow sequences;
+//! implicit scalar-key block and flow mappings; explicit scalar-key block
+//! mapping pairs in mapping roots or compact sequence items; and the
+//! mapping-value anchors and scalar aliases used by that corpus. This is not a
+//! general YAML concrete-syntax tree. Other YAML presentations accepted by
+//! `serde_yaml_ng` (tags, block scalars, quoted scalars continued across lines)
+//! are outside the v1 source-map contract and return a projection error even
+//! when semantic parsing succeeds.
 
 use std::{collections::BTreeMap, ops::Range};
 

@@ -14,8 +14,9 @@
 //! the grammar's EBNF defines. It never searches decoded text for a delimiter.
 //!
 //! Positions project through the [`super::yaml_scalar`] seam, so plain,
-//! single-quoted, and double-quoted scalars, CRLF input, and multibyte content
-//! all report authored document ranges rather than decoded ones. Nothing here
+//! single-quoted, and double-quoted scalars, text on a plain scalar's
+//! continuation line, CRLF input, and multibyte content all report authored
+//! document ranges rather than decoded ones. Nothing here
 //! reads a file, expands an import, or evaluates anything.
 
 use std::ops::Range;
