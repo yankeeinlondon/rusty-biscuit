@@ -398,6 +398,20 @@ Options:
 - `--experimental-semantics` - Enable experimental semantic diagnostics
 - `--list-rules` - Print registered rule metadata and exit
 
+A `--deny`, `--warn` or `--allow` value that is not a registered rule ID or
+alias, such as a typo or a rule that has been removed, is still accepted but
+matches nothing, so `hug` prints a warning on stderr and carries on. Each
+distinct name is reported once per run, however many flags repeat it; `all`
+and `category:<name>` are not rule names and are never reported. The warning
+does not change the exit status:
+
+```text
+$ hug lint --deny unwrap-cal --warn unwrap-cal src/main.rs
+warning: unknown rule 'unwrap-cal'
+src/main.rs (Rust)
+  (no diagnostics)
+```
+
 For `lint`, a multi-file scan only prints files that have diagnostics; if every
 file is clean it prints a single `No lint diagnostics in N files.` line. A
 single-file lint still prints `(no diagnostics)` as explicit confirmation.
@@ -470,6 +484,16 @@ hug completions powershell >> $PROFILE                      # PowerShell
 | `0` | Success, including an empty selection and a reader that closed early (`hug … \| head`) |
 | `1` | A file could not be analyzed, `lint` found an error-severity diagnostic, `refs` matched several declarations, a ctags record was skipped, Git or package discovery failed, or stdout could not be written (`error: cannot write output`) |
 | `2` | Invalid usage, such as conflicting options |
+
+A command that fails prints one `error: <message>` line on stderr, with any
+control characters in it shown as `\u{…}` escapes:
+
+```text
+$ hug symbols 'missing/**'
+error: No supported source files found in `/home/me/project`
+$ hug god-files nope-dir
+error: Failed to read `nope-dir`: god-files scan directory does not exist
+```
 
 [Exit status](./symbol-reports.md#exit-status) in Symbol Reports gives the
 exact rules for the declaration commands.

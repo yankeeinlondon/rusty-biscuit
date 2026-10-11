@@ -224,7 +224,7 @@ for note in &prov.notes {
 | `upstream_revision` | `0.10.4` | the crate version | the crate version |
 | `upstream_path` | `queries/<lang>/locals.scm` in nvim-treesitter | same as `local_path` | same as `local_path` |
 | `local_path` | `queries/vendor/<lang>/locals.scm` | `queries/vendor/perl/locals.scm` | `queries/<lang>/<kind>.scm` |
-| `license` | `Apache-2.0` | `AGPL-3.0-only` | as recorded in the library |
+| `license` | `Apache-2.0` | `AGPL-3.0-only` | `AGPL-3.0-only` |
 | `translation_status` | `captures-renamed`, or `multiple-changes` when patterns changed too | `original` | `original` |
 
 `notes` lists, in plain sentences, every change made to a vendored query
@@ -232,6 +232,11 @@ beyond the renaming. Those notes are the record of *why* a vendored file
 differs from upstream: when you change a vendored query, add a note. A test
 checks that every language whose vendored query was changed records its
 changes.
+
+Every query Tree Hugger writes itself carries the repository's license,
+`AGPL-3.0-only`. A vendored query keeps its upstream license, `Apache-2.0`,
+even after Tree Hugger changes it; a test checks both for every record.
+
 `all_query_provenance()` returns the records for every language and query
 kind at once.
 

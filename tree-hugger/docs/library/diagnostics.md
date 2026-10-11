@@ -163,6 +163,13 @@ or `category:<name>` (such as `category:restriction`), and `apply_policy`
 returns the severity after allow, warn, deny and strict selectors, in that
 order of precedence.
 
+`RuleSelector::parse` does not check a rule ID against the registry: an
+unknown ID parses and matches nothing. Check it with
+`registry.has_rule(id)`, which also accepts aliases such as
+`unreachable-code`. `hug lint` does this for its `--deny`, `--warn` and
+`--allow` values and prints `warning: unknown rule '<name>'` once per
+distinct unknown name, without changing the exit status.
+
 The `severity` on a diagnostic as returned is its rule's registry
 `default_severity`, whether or not the rule is enabled by default, so the
 library and an unconfigured `hug lint` agree (`undefined-symbol` is a

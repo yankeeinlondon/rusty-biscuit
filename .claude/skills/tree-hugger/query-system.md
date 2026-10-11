@@ -402,6 +402,11 @@ Vendored `locals.scm` provenance is per language (`vendored_locals_changes` in
 lost patterns is `MultipleChanges` with one note per change, else
 `CapturesRenamed`. **Perl's `queries/vendor/perl/locals.scm` is a Tree Hugger
 `Original`** (repository license `AGPL-3.0-only`), not nvim-treesitter's.
+Every `Original` record (Perl's `locals.scm` and every overlay `lint`,
+`references`, `comments` and `locals` query) uses `REPOSITORY_LICENSE`;
+vendored records keep `Apache-2.0` even when modified.
+`provenance::tests::every_record_carries_the_license_of_its_origin` checks
+every record.
 When you edit a vendored query, update its notes in the same change;
 `phase6_neovim_query_reuse::every_locals_definition_capture_is_inventoried`
 fails if a new `@local.definition.*` capture is missing from the inventory.

@@ -4,6 +4,33 @@ Changes to Tree Hugger that alter what it reports or how its output looks,
 newest first. Each note shows the change with a before/after example where
 the output changed; the linked pages describe the current behavior.
 
+## Query licenses, readable command errors, unknown rule warnings
+
+- **Tree Hugger's own queries are labeled `AGPL-3.0-only`**, the
+  repository's license, in their provenance records; they were labeled
+  `MIT`. Vendored nvim-treesitter queries keep `Apache-2.0`. See
+  [Tree-sitter Queries](./queries.md#provenance).
+- **A failing command prints a readable error.** It used to print the
+  error's internal structure:
+
+  ```text
+  $ hug god-files nope-dir
+  Error: Io { path: "nope-dir", source: Custom { kind: Other, error: "god-files scan directory does not exist" } }
+  ```
+
+  Now it prints one line, still with exit status `1`:
+
+  ```text
+  $ hug god-files nope-dir
+  error: Failed to read `nope-dir`: god-files scan directory does not exist
+  ```
+
+- **Unknown rule names are accepted with a warning.** `--deny`, `--warn` and
+  `--allow` values that name no registered rule, including the removed
+  `unused-variable`, `shadowed-variable` and `deprecated-syntax`, print
+  `warning: unknown rule '<name>'` once per run and leave the exit status
+  unchanged. See [Using the `hug` CLI](./cli.md#lint).
+
 ## Unused library APIs removed
 
 - **`TreeFile::reexported_symbols()` is removed.** It always returned an

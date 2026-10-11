@@ -340,6 +340,12 @@ Policy selectors target rules by ID or category (`category:correctness`):
 - `--strict`: promote all warnings to errors (does not enable experimental
   rules)
 - Syntax diagnostics are always errors and always fail the exit code
+- An unknown rule ID (not `has_rule`, which accepts aliases) is kept as a
+  selector that matches nothing; `main::warn_unknown_rules` prints
+  `warning: unknown rule '<name>'` (neutralized) once per distinct name,
+  right after `Command::kind()` builds the selectors, not in
+  `parse_selectors`. `RuleSelector::parse` stays non-validating. Status is
+  unchanged. Tests: `cli/tests/command_feedback.rs`.
 
 ## Resolver and Adapter Architecture
 

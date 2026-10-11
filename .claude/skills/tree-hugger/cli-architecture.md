@@ -139,6 +139,12 @@ command or flag updates `docs/cli.md`, not the README.
   User-facing contract: `tree-hugger/docs/symbol-reports.md` (`order.rs` points
   at it); update it with any change to kind sets, envelope, order or
   `--verbose`.
+- **Command errors**: `main` only wraps `run() -> Result<(), TreeHuggerError>`;
+  an `Err` prints `error: {render::neutralized(Display)}` and exits 1 (never
+  the `Debug` dump `fn main() -> Result` would print, and no `source()`
+  chain: `Io`'s `Display` already includes it). Clap usage errors keep 2;
+  paths that call `process::exit` themselves are unaffected. Tests:
+  `cli/tests/command_feedback.rs`.
 - **`hug refs`** (`cli/src/refs.rs`, wired early in `main::run_refs`; user
   contract `tree-hugger/docs/references/hug-refs.md`): the first positional is
   the name (`NamePattern::exact`, matched with `SymbolQuery::matches`, so smart
