@@ -1266,3 +1266,143 @@ repository. The elevated SSH session was used except where noted.
 - New limitations to document: delete-pending entries are invisible; cost
   scales with the system's handle count; opening an entry on a hung network
   redirector can block, which is the same R1 overrun risk every OS carries.
+
+## Phase 5 continuation and Phase 7 (2026-10-10)
+
+The author's Option D is implemented. Native Windows now reports file and
+folder holders through `NtQueryInformationFile` class 47, in addition to loaded
+modules. The CLI uses the existing library report without a second scan.
+
+### Implementation and contracts
+
+- The query has an optional file-side backend step after process enumeration.
+  The Windows backend reuses regular-file/directory entries from the one tree
+  walk; pipes, devices, and descendant symlinks are not opened for probing.
+- Each path is opened attribute-only with full sharing and a verbatim native
+  spelling. File identity is read from that same handle; replacement since the
+  walk is a visible gap. The 4 KiB, pointer-aligned result buffer grows on both
+  length-mismatch and buffer-overflow statuses, with budget checks before every
+  retry and a 16 MiB ceiling. Permission denial and delete-pending paths are
+  distinct limitations; `delete_pending` is a new serialized limitation kind.
+- Normal directories precede normal files; `target`, `node_modules`, and
+  in-tree Git-ignored entries are scheduled last, without excluding them.
+  At most eight scoped workers run; all are joined and their performance
+  counts are attributed to the captured request collector.
+- Evidence is capped as workers produce it, rather than buffering every path's
+  PID list. Per-process and query-wide retention limits also include loaded
+  modules. Matched paths are sorted; hard-link aliases retain every indexed path.
+- Enumerated holders retain process handles through inspection/enrichment.
+  A PID first seen after enumeration is opened and its path queried again while
+  the new process handle is held. Only reconfirmed evidence receives that
+  lifetime key; other earlier evidence remains in a separate uncertain record.
+  Failed enrichment preserves evidence. The native API excludes the caller.
+- Windows `open_handles` coverage counts paths, not processes. It is independent
+  of process-enumeration completeness because the file-side call returns PIDs
+  independently; uncertain lifetime associations remain explicit gaps.
+- `filesystem.query.path_holder_inspections` counts scheduled path probes,
+  including failures. Native buffer retries and lifetime reconfirmation do not
+  count as newly scheduled paths.
+
+### Departures and drift resolved
+
+- Ignore rules are read only from `.gitignore` files within the captured tree.
+  Ancestor/global Git exclusions and `.git/info/exclude` are not consulted.
+  They affect neither inclusion nor matching. This keeps prioritization local
+  without repository inventory; inaccessible or malformed ignore files affect
+  prioritization only. Reading those policy files is an exception to the
+  no-file-body-read rule; user file contents are never inspected.
+- The file-side scan's count unit differs from per-process inspection. The
+  public `Coverage.attempted` comment and topic documentation now state both.
+- The earlier Windows docs said no threads and loaded modules only. They now
+  describe scoped workers, file-side evidence, process-handle retention, and
+  caller exclusion. Planned markers were removed for the built capability.
+- The plan anticipated an `inotify` dev-dependency. Phase 3 actually used
+  existing `libc` calls; dependency docs record the shipped code, with no new
+  crate added in this continuation.
+- READMEs, CLI/topic docs, dependency notes, Sniff skill, and OS skill were
+  updated. No specification body was rewritten and no lifecycle directory moved.
+
+### Acceptance traceability
+
+| Spec item | Named tests |
+| --- | --- |
+| 1: equivalent text/JSON, no inventory | CLI `text_and_json_are_projections_of_one_retained_report`, `a_live_json_perf_query_is_one_object_and_does_no_inventory`; core `one_tree_walk_serves_every_process_and_no_inventory_runs` |
+| 2: controlled children per OS | Linux `live::the_shipped_linux_backend_inventories_descriptors_cwd_and_inotify`; macOS `live::a_controlled_child_is_found_by_its_descriptors_and_cwd_through_the_var_alias`; Windows `live::a_controlled_child_is_found_by_its_open_file_and_directory` |
+| 3: Linux inotify | `the_fdinfo_reader_gives_every_malformed_shape_a_defined_outcome`, `kernel_device_numbers_are_normalized_to_stat_encoding`, Linux live tests |
+| 4: failures, reuse, budgets, unavailable identity | Core fake-backend suite; Windows `file_side_failures_and_replacements_are_visible_without_invented_evidence`, `a_file_side_pid_missing_from_enumeration_keeps_uncertain_evidence`, `a_new_holder_is_reconfirmed_without_assigning_its_identity_to_earlier_paths`, `file_side_workers_stop_at_the_budget_and_flush_the_request_counters`, `native_buffer_growth_retries_both_statuses_and_stops_when_the_budget_expires`, `native_denial_delete_pending_and_malformed_success_are_distinct_gaps` |
+| 5: macOS FSEvents unsupported | `live::the_shipped_macos_backend_inventories_descriptors_and_cwd` |
+| 6: tree scope, aliases, Unicode, Windows spellings | Core matching/tree/native-string tests; Windows `spellings::verbatim_case_variant_and_short_name_module_paths_match_the_long_path`, `spellings::a_case_sensitive_directory_matches_only_the_module_its_spelling_names`, `spellings::a_module_path_with_an_unpaired_surrogate_matches_and_round_trips`, `ffi::native_paths_preserve_unc_verbatim_and_unpaired_surrogate_spellings` |
+| 7: CLI behavior and hostile text | `sniff/cli/tests/l1/filesystem_query.rs` |
+| 8: hidden/ignored, self, threads, supported mechanisms | Core tree tests; Linux `live::the_querying_process_is_listed_once_and_its_threads_are_not_processes`; macOS `live::the_querying_process_keeps_its_genuine_usage_only`; Windows `directories_precede_files_and_ignored_entries_are_scheduled_last_without_exclusion`, `live::the_shipped_windows_backend_inventories_loaded_modules`; caller exclusion documented |
+
+Windows also has controlled-child tests
+`handle_owners_are_found_while_a_child_waits_in_lock_file_ex` and
+`handle_owners_are_found_while_a_child_waits_in_read_directory_changes`.
+They use readiness handshakes with bounded waits and guards that kill and reap
+children on every normal or panic path. UNC coverage verifies native spelling
+and the existing component-aware prefilter; it does not require a network share.
+
+### Verification
+
+- macOS: final `just test` in `sniff/`: **3,345 passed**, 33 skipped.
+  `just lint` passed. Strict library clippy with `--all-targets`, `remote`, and
+  `-D warnings` passed. `git diff --check` passed.
+- Native Windows: full `just test` in an isolated snapshot:
+  **3,273 passed**, 25 skipped. The snapshot was initialized as a Git repository
+  after a repository-observation test exposed its missing `.git`; no new commit
+  was created. The latest native query tests, including all three holder child
+  scenarios and UNC/native UTF-16 spelling conversion, passed in that run.
+- Native Windows lint initially caught a manual slice-size calculation in the
+  new FFI closure; it was changed to `size_of_val`. Final lint is recorded below.
+- WSL2/Linux backend: verification through the running Ubuntu-26.04 guest and a
+  nextest archive with its builder target hidden is recorded below. This is
+  WSL2 evidence, not a separate native Linux-host receipt.
+- `just ci-local --plan` reviewed: source changes select Sniff and its declared
+  cells, compile unchanged direct consumers in Sniff's check cell, and include
+  the archive-path guard. The displayed plan also contains existing branch
+  changes outside this continuation. These new tests read only temporary
+  fixtures, so no new `source-inputs` declarations are needed.
+
+No commit, push, or `cargo fmt` was run. The author closes the review cycle and
+moves the feature; the agent leaves it in its active directory.
+
+WSL2 verification completed on the running Ubuntu-26.04 guest reached through
+`BUILD_WIN`: focused `just test filesystem::query::` passed **118/118** across
+Sniff and its CLI; a library nextest archive passed **117/117** with the
+builder target hidden. All four live Linux tests ran, including descriptor/cwd/
+inotify correlation and the caller/thread check. The extracted-archive directory
+must exist before `--extract-to`; the first replay exposed that setup omission,
+which was corrected without changing source. The final macOS full suite after
+the retention regression test passed **3,346/3,346**, 33 skipped.
+
+The broader full-area native Linux-host and full-area WSL2 runs remain open in
+the checklist. Earlier native backend evidence is in Phases 3–6; this
+continuation does not manufacture current receipts from it. The implementation
+is complete, ready for review; remaining verification scope is explicitly shown.
+
+
+Final archive verification rebuilt the library-only archive after refreshing
+source timestamps in the guest: **118/118 passed**, with the new retention
+regression explicitly present. The earlier 117-test replay reused an older
+artifact and is not the final evidence. This snapshot/Cargo mtime trap and
+archive extraction-directory requirement are now recorded in the OS skill.
+
+Final native Windows focused validation after the retention and limitation
+aggregation changes: **88/88 passed**, including the open-file/cwd/directory,
+blocked-lock, blocked-notification, and native spelling cases. `just lint`
+passed without warnings after the slice-size correction. Final macOS full
+validation remained **3,346/3,346 passed**, 33 skipped. The limitation test now
+checks aggregation and bounded examples for ten unknown process lifetimes.
+The Windows-only follow-up changed no Linux production code; its portable
+classifier was rechecked on macOS and native Windows.
+
+The final pipe-namespace review found an overbroad root comment claiming
+metadata never opens an object; on Windows a named-pipe metadata lookup can
+connect to its server. Root validation now rejects direct local, UNC, and
+GLOBALROOT named-pipe spellings before metadata. The Windows regression
+`pipe_namespaces_are_rejected_without_any_metadata_or_process_probe` passed
+with both metadata and process-enumeration counters at zero. Final native
+Windows focused query validation is **89/89 passed**, and final native lint
+passed. The corresponding macOS query suite passed **117/117**; this last
+behavior change is Windows-gated. Documentation describes file-side
+`observed_path` as the queried spelling, since the owner's spelling is unknown.

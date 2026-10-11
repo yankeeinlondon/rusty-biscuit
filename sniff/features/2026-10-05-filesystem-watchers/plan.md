@@ -140,18 +140,18 @@ The work splits into:
 
 - [ ] `just test` and `just lint` pass in the sniff area on macOS and Linux; the
       Windows and WSL2 legs pass for the mechanisms each can exercise.
-- [ ] Every acceptance item (1-8) in the spec is covered by a named test (see the
+- [x] Every acceptance item (1-8) in the spec is covered by a named test (see the
       traceability table in Phase 7).
-- [ ] A controlled child holding an open file and a cwd is discovered on every
+- [x] A controlled child holding an open file and a cwd is discovered on every
       supported OS; a live inotify registration on Linux/WSL2 resolves to the right
       device/inode; macOS reports FSEvents as `unsupported`.
-- [ ] Text and JSON are projections of one captured report; `--json --perf` is one
+- [x] Text and JSON are projections of one captured report; `--json --perf` is one
       valid JSON object; runtime errors use the stated JSON shape.
-- [ ] No default-inventory scan, process cache, network, privilege elevation,
+- [x] No default-inventory scan, process cache, network, privilege elevation,
       process termination, or abandoned/killed worker thread exists.
-- [ ] Docs describe current behavior; **planned** markers removed only by the change
+- [x] Docs describe current behavior; **planned** markers removed only by the change
       that lands the code; implementation log records every departure from the spec.
-- [ ] Agent terminal state is "implementation complete, ready for review"; the
+- [x] Agent terminal state is "implementation complete, ready for review"; the
       feature directory is **not** moved to `_completed`.
 
 ### Waves
@@ -481,7 +481,7 @@ Gated `#[cfg(windows)]`. Depends on Wave 3, R2, and S2. Not WSL2.
 
 ### Wave 6 (parallel, with Phases 3 and 4)
 
-- [ ] **Handle owners (R2 option D, file-side query)** - for each entry of the
+- [x] **Handle owners (R2 option D, file-side query)** - for each entry of the
       already-walked tree (the walk gives the type; never open anything that is
       not a file or directory, because opening a pipe path connects to it):
       `CreateFileW` with `FILE_READ_ATTRIBUTES`, `FILE_SHARE_READ |
@@ -514,18 +514,16 @@ Gated `#[cfg(windows)]`. Depends on Wave 3, R2, and S2. Not WSL2.
       enrichment; no threads terminated, no worker left running past return
       (any worker used must be cooperatively cancelled and joined, with counter
       collector propagated).
-- [ ] **Windows tests** - controlled child with open file and directory handle
+- [x] **Windows tests** - controlled child with open file and directory handle
       (handshake, guard cleanup); case-sensitive directory test; verbatim/UNC/
       short-name spelling tests; UTF-16 path with an unpaired surrogate round-trip
       (serialization test runs on any host; matching test Windows-gated).
       Reach the Windows host per the `os` skill.
-      **Partly done (Phase 5):** case-sensitive, verbatim, case-variant,
-      short-name, and unpaired-surrogate tests exist for module paths, plus a
-      live child found by its loaded executable. The open-file and
-      directory-handle child test waits on the Handle owners task. It must
-      also cover a child blocked in `LockFileEx` and one blocked in a
-      synchronous `ReadDirectoryChangesW`, both reported without the query
-      hanging, and budget exhaustion leaving `partial` coverage.
+      **Completed 2026-10-10:** module spelling tests remain; file-side
+      native spelling tests add UNC/verbatim and unpaired UTF-16 cases.
+      Controlled children cover open files/directories and pending lock and
+      synchronous directory-change I/O. Portable tests cover budget gaps,
+      bounded retention, worker counters, native buffer retries, and failures.
 
 Checkpoint: Windows L1 tests green on the native Windows host; any capability
 omitted under R2 documented as a limitation in report output and tests.
@@ -585,30 +583,30 @@ JSON modes; `sniff filesystem` bare output snapshot unchanged.
 
 ### Wave 8 (parallel)
 
-- [ ] **Topic and CLI docs** - update `docs/topics/filesystem-query.md` and
+- [x] **Topic and CLI docs** - update `docs/topics/filesystem-query.md` and
       `docs/cli/filesystem_query.md` to the finalized coverage statuses (add
       `not_attempted`), outcome/exit rules, serialization, and the R1 deadline
       wording; remove **planned** markers only for built behavior; docs never name
       a feature/fix directory; audience is a developer new to the repo (compact
       examples, a Mermaid flow of the query phases and budget).
-- [ ] **READMEs and dependency docs** - sniff library and CLI READMEs;
+- [x] **READMEs and dependency docs** - sniff library and CLI READMEs;
       `docs/dependencies.md` records each selected crate's version, license, native
       build requirements, runtime coverage; note `inotify` as dev-dependency only.
-- [ ] **Skills** - update `.claude/skills/sniff/` (new API, counters, request
+- [x] **Skills** - update `.claude/skills/sniff/` (new API, counters, request
       tier note) and `.claude/skills/os/` (per-OS evidence facts learned in
       Phases 3-5, including any Windows/WSL2/macOS traps found).
-- [ ] **Implementation log** - `implementation-log.md` with rulings, spike
+- [x] **Implementation log** - `implementation-log.md` with rulings, spike
       outcomes, crate selections, and every departure from the spec.
-- [ ] **Comment and doc drift pass** - every behavior-bearing symbol's `///`/`//!`
+- [x] **Comment and doc drift pass** - every behavior-bearing symbol's `///`/`//!`
       reviewed; drift resolved in favor of the code and reported.
 
 ### Verification
 
 - [ ] **Local** - `just test` and `just lint` in `sniff/`; `just test` on a Linux
       host and WSL2 (nextest archive per `os` skill) and native Windows.
-- [ ] **CI scope review** - `just ci-local --plan` reviewed before pushing; no
+- [x] **CI scope review** - `just ci-local --plan` reviewed before pushing; no
       area-keyed stores; confirm no extra `source-inputs` required (R11).
-- [ ] **Acceptance traceability** - table in the implementation log mapping each
+- [x] **Acceptance traceability** - table in the implementation log mapping each
       spec acceptance item 1-8 to its tests:
 
 | Spec item | Covered by |
@@ -622,6 +620,22 @@ JSON modes; `sniff filesystem` bare output snapshot unchanged.
 | 7 CLI outputs, exit codes, JSON, hostile text | Phase 6 tests |
 | 8 hidden/ignored, self usage, threads, no all-unsupported cheat | Phases 2, 3, 4, 5 |
 
-- [ ] **Handoff** - set spec status per lifecycle, report "implementation
+- [x] **Handoff** - set spec status per lifecycle, report "implementation
       complete, ready for review"; do not move to `_completed` and do not run
       `just complete`.
+
+
+## Completion record (2026-10-10)
+
+Windows handle-owner implementation and Phase 7 documentation/handoff are
+complete, ready for review. The unchecked verification boxes are deliberate:
+macOS and native Windows full-area suites passed, and the Linux query suite
+passed in WSL2, including archive replay with the builder target hidden. A
+separate native Linux-host full-area run and full-area WSL2 run have not been
+performed in this continuation; the aggregate Local/Done test boxes require
+those broader runs. Exact evidence and departures are in the implementation log.
+
+The planned `inotify` dev-dependency was not added: live watch fixtures use
+existing `libc`. Windows scheduling reads only in-tree `.gitignore` rules,
+and never excludes ignored paths. These departures are recorded in the log
+and current topic/dependency docs.

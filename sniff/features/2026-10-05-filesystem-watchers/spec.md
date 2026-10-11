@@ -19,8 +19,8 @@ $schema:
     clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented_by: string -> the agent who implemented the plan
-status: draft-spec
-implemented: false
+status: implemented
+implemented: true
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-05
@@ -72,20 +72,8 @@ human_review_items:
 
     **Recommendation: Option B**, because it keeps the feature useful on Windows without breaking the spec's safety rules. If the packaging cost is not acceptable for this release, choose **Option A** and treat Windows handle discovery as a follow-up feature; do not choose Option C.
 message_to_agent: |-
-  Phases 2-6 are built. Read the Phase 6 section of `implementation-log.md` first; Phase 5's notes on Windows still apply.
+  Implementation complete, ready for review. The author-approved Windows file-side handle query is built, and topic/CLI docs, READMEs, dependency notes, skills, and acceptance traceability were updated. Read the Phase 5 continuation and Phase 7 section of implementation-log.md for actual behavior, departures, and validation. Full macOS/native Windows suites and focused WSL2 archive verification are recorded there; the broader Linux/WSL2 verification boxes in plan.md remain open. Do not move this feature to _completed or run just complete; the author closes the review cycle.
 
-  Both review items were answered on 2026-10-06 (see `human_review_items` and the "Phase 1 addendum" in `implementation-log.md`):
-  - R1 (deadline contract): Option 1 confirmed. The existing "stops scheduling work" wording in the CLI help and docs stays as it is.
-  - R2 (Windows handle owners): Option D, the file-side query. Before Phase 7, finish the Phase 5 "Handle owners" task as now written in `plan.md`, plus the open-file/directory-handle part of "Windows tests". Read the S2d-S2f findings in the log and the `os` skill (`windows.md`, "Asking which processes have a path open") first. Then run Phase 7.
-
-  Phase 6 facts that matter for Phase 7:
-  - The CLI is `sniff/cli/src/{args/filesystem.rs,commands/filesystem_query.rs,output/filesystem/query.rs}`; tests are `sniff/cli/tests/l1/filesystem_query.rs` (18) plus unit tests in the CLI lib target.
-  - `sniff/docs/cli/filesystem_query.md` was rewritten to the shipped behavior and the topic page's "Planned: CLI" marker was removed in Phase 6, so Phase 7 reviews those pages rather than writing them. The CLI README gained one line only; the library README was not touched.
-  - Hidden test seam: `SNIFF_FILESYSTEM_QUERY_REPLAY=<report.json>` makes the command render that report instead of querying. It is documented as "not a supported interface". The test fixture scrubs inherited `SNIFF_*` variables.
-  - Only sigil file references (`@ & ^ ~ vault:`) go through biscuit-file; ordinary paths go to the library unchanged. A directory resolves as the first `NonFile` candidate because biscuit-file matches regular files only.
-  - The three pre-parse `std::env::args()` scans in `sniff/cli/src/commands/mod.rs` were switched to `args_os` (non-UTF-8 argv panicked before clap).
-  - Gates: macOS `just test` 3270/3270, `just lint` and strict clippy (`--all-targets -D warnings`, with and without `test-fixtures`) clean; Linux 138/138 and native Windows 134/134 for the `filesystem` filter via `just cross-check sniff-cli`; WSL2 not run (no WSL-specific CLI path).
-  - The Phase 7 acceptance-traceability row for spec item 7 maps to `filesystem_query.rs`; item 1's "no inventory" proof is `a_live_json_perf_query_is_one_object_and_does_no_inventory` (counters limited to `filesystem.query.*`/`filesystem.io.*`).
 ---
 
 # Filesystem process and watcher discovery
