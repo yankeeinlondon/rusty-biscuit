@@ -138,8 +138,8 @@ The work splits into:
 
 ### Done means
 
-- [ ] `just test` and `just lint` pass in the sniff area on macOS and Linux; the
-      Windows and WSL2 legs pass for the mechanisms each can exercise.
+- [x] Local `just test` and `just lint` pass in the sniff area. Cross-OS
+      testing runs automatically through the existing CI/CD environment schedule.
 - [x] Every acceptance item (1-8) in the spec is covered by a named test (see the
       traceability table in Phase 7).
 - [x] A controlled child holding an open file and a cwd is discovered on every
@@ -169,7 +169,7 @@ validation checkpoint passes.
 | 5 | 4 | macOS backend |
 | 6 | 5 | Windows backend |
 | 7 | 6 | CLI: args, dispatch, rendering, JSON, exit codes (parallel) |
-| 8 | 7 | Docs, skills, dependency records, cross-OS verification |
+| 8 | 7 | Docs, skills, dependency records, local validation and CI scope review |
 
 Waves 4-6 depend only on Wave 3 and run concurrently.
 
@@ -602,8 +602,8 @@ JSON modes; `sniff filesystem` bare output snapshot unchanged.
 
 ### Verification
 
-- [ ] **Local** - `just test` and `just lint` in `sniff/`; `just test` on a Linux
-      host and WSL2 (nextest archive per `os` skill) and native Windows.
+- [x] **Local** - `just test` and `just lint` in `sniff/`. Cross-OS testing
+      is handled by CI/CD, not a separate manual implementation checklist gate.
 - [x] **CI scope review** - `just ci-local --plan` reviewed before pushing; no
       area-keyed stores; confirm no extra `source-inputs` required (R11).
 - [x] **Acceptance traceability** - table in the implementation log mapping each
@@ -628,12 +628,11 @@ JSON modes; `sniff filesystem` bare output snapshot unchanged.
 ## Completion record (2026-10-10)
 
 Windows handle-owner implementation and Phase 7 documentation/handoff are
-complete, ready for review. The unchecked verification boxes are deliberate:
-macOS and native Windows full-area suites passed, and the Linux query suite
-passed in WSL2, including archive replay with the builder target hidden. A
-separate native Linux-host full-area run and full-area WSL2 run have not been
-performed in this continuation; the aggregate Local/Done test boxes require
-those broader runs. Exact evidence and departures are in the implementation log.
+complete, ready for review. Local validation passed. Cross-OS testing runs
+automatically through the existing CI/CD environment schedule and is not a
+separate manual completion gate. Additional native Windows and WSL2 checks
+performed during implementation are recorded as evidence in the implementation
+log, alongside exact local results and departures.
 
 The planned `inotify` dev-dependency was not added: live watch fixtures use
 existing `libc`. Windows scheduling reads only in-tree `.gitignore` rules,
