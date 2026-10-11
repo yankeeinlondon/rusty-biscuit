@@ -21,7 +21,9 @@ $schema:
     clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented_by: string -> the agent who implemented the plan
-reviewed: false
+reviewed: true
+reviewed_by: codex/gpt-6.1-sol
+reviewed_on: 2026-10-11
 review_iterations: 0
 created: 2026-10-11
 owner: Ken Snyder <ken@ken.net>
@@ -114,7 +116,10 @@ These are hypotheses for the implementer to confirm; they are not yet proven.
   container, and `pulldown-cmark-to-cmark` writes that container's prefix in
   front of them. Compose's recognizer (`scan_darkmatter_directives`,
   [`compose/directives_api.rs`](../../lib/src/markdown/compose/directives_api.rs))
-  does not accept a `> ` prefix, so the directive no longer exists.
+  does not accept a `> ` prefix for those lines, so their recognition changes.
+  Block-pair scanning separately supports quoted shell blocks; protection must
+  share each family's existing recognition rules rather than introduce a new
+  directive grammar.
 - **Container prefixes lost for non-paragraph children of list items.**
   `pulldown-cmark-to-cmark` and the string passes that follow it
   (`fix_list_indentation`, `restore_list_markers`,
@@ -137,17 +142,28 @@ document opts into or out of under `style.markdown`.
 ### Invariants (always on, not configurable)
 
 1. **Directive lines are fixed points.** Every line that compose's directive
-   recognizer accepts comes out of cleanup byte-for-byte unchanged, at the
-   same column, in the same order, and in the same container. The same holds
-   for opaque directive bodies such as `::shell`, and for `{{ … }}` expressions,
-   which are never escaped. Cleanup never adds or removes a container prefix
+   scanners recognize comes out of cleanup byte-for-byte unchanged, including
+   its line terminator, at the same column, in the same order, and in the same
+   container. Absolute line numbers may change when earlier prose is formatted.
+   Protection covers every family, including disclosure boundaries and quoted
+   `::shell-block` regions. Shell-block bodies are opaque; a `::shell` line
+   carries its command on that line. Expression tokens (`{{ … }}`, escaped
+   expressions, and body shell expressions) retain their exact source spelling
+   and order; cleanup never evaluates them or splits inside them. Cleanup never
+   adds or removes a container prefix
    (`>`, list indent) on a directive line. It never inserts blank lines next to
    one either: in B1, a blank line after `::block` would turn the tight list
    into a loose one once compose removes the directive. Ordinary Markdown
    _between_ `::block` and `::end-block` is still formatted.
 2. **CommonMark structure is invariant.** Rules may change spelling only. No
-   rule may change the block tree, meaning which container each block is in,
-   block kinds, the ordered-list start number, or code-block content.
+   rule may change which container each block is in, block kinds, the
+   ordered-list start number, or code-block content. Inline meaning also stays
+   unchanged: links, images, emphasis, hard breaks, raw HTML, and task state.
+   Two narrow, intentional exceptions are allowed: an explicitly selected
+   `list-item-padding` or `list-interior-padding` value may change whether a
+   list is tight or loose (see [List spacing](#list-spacing)), and
+   `default-language` may add an info string to an unlabeled fence. These
+   exceptions are checked against the resolved rules, never ignored globally.
 3. **No trailing whitespace is introduced.** A whitespace-only line or a
    trailing space appears in the output only if it was in the input at the same
    logical position. Bytes inside fenced or indented code are preserved.
@@ -157,8 +173,13 @@ document opts into or out of under `style.markdown`.
    equivalent, cleanup returns the input **unchanged** and reports one
    diagnostic, `clean.fidelity-fallback`, naming the first diverging block (line
    and column in the input, plus the kind of difference).
-   - `md clean` prints the diagnostic to stderr and includes it in the `--json`
-     envelope. `--save` writes nothing.
+   - Human CLI output prints the diagnostic to stderr. `--json` includes it
+     only in the existing version-1 envelope and keeps stderr empty. The
+     envelope reports `changed: false`, `applied: []`; even accepted candidate
+     frontmatter repairs are discarded. Without `--save`, human mode emits
+     the original document; `--save` writes nothing. A fidelity refusal is a
+     report-only finding and exits `0`; unrepaired invalid YAML remains an
+     error and exits `1`.
    - DMLS returns no edits and shows the diagnostic through
      `window/showMessage` at `Warning` level, so a format-on-save that declined
      is visible rather than silent.
@@ -167,7 +188,8 @@ document opts into or out of under `style.markdown`.
 
 ### Rules: `style.markdown`
 
-These keys are added to the baseline schema
+These keys are optional (missing or `null` means no document override) and
+are added to the embedded baseline schema
 ([`docs/schemas/darkmatter.yaml`](../../docs/schemas/darkmatter.yaml)) under
 the existing `style` root, so DMLS completes and validates them like any other
 `style.*` key:
@@ -184,12 +206,24 @@ style:
         indentation: "enum(preserve, 2, 4, 8; default(4)) -> Spaces per nested-list level; preserve leaves list indentation as authored."
         ordered-lists: "boolean(default(true)) -> Renumber ordered lists that are neither uniform nor sequential."
         list-padding: "boolean(default(true)) -> Ensure one blank line before and after every list."
-        list-interior-padding: "enum(preserve, none, only-prose, prose-and-child-elements; default(preserve)) -> Blank lines between a list item and its children."
+        list-item-padding: "enum(preserve, none, one; default(preserve)) -> Blank lines between sibling items of the same list."
+        list-interior-padding: "enum(preserve, none, except-nested-lists, all; default(preserve)) -> Blank lines between an item's first line and the blocks nested inside it."
         default-language: "string(default(text); suggest(text, plain)) -> Language added to unlabeled code fences; an empty string adds none."
 ```
 
 The exact schema DSL spelling is the implementer's to get right; the types and
-defaults above are the decision.
+defaults above are the decision. YAML indentation values are integers `2`, `4`,
+or `8`, or the string `preserve`; quoted numerals are not silently coerced.
+Defaults are runtime rule defaults, not values inserted into frontmatter. They
+remain available when the baseline is disabled or replaced. A document schema
+may constrain these keys further but cannot authorize unsupported rule values.
+
+The `style:` runtime parser and descriptor catalog must also recognize
+`markdown` and validate its leaves. Rendering accepts valid cleanup settings
+without treating them as unknown or inactive render styles, including under
+`--strict-style`; rendering does not run cleanup. DMLS completion and validation
+use the same declarations as the library. Updating only the YAML catalog is
+insufficient.
 
 | Key | Default | Behavior | Example |
 | --- | --- | --- | --- |
@@ -197,39 +231,162 @@ defaults above are the decision.
 | `table-layout` | `true` | Pads cells so each column has one width, and aligns the delimiter row. Never changes how the table renders. | `\| a \| bb \|` rows padded to equal widths |
 | `unwrap` | `false` | Joins single newlines inside paragraphs, including list-item and blockquote paragraphs. Hard breaks (trailing two spaces or `\`) stay. | `one\ntwo` → `one two` |
 | `fixed-width` | `false` | An integer, or `true` (meaning 120), first unwraps and then re-wraps prose to that display width, counting container prefixes. It implies `unwrap`. `false` means no re-wrapping. | `fixed-width: 80` |
-| `indentation` | `4` | `2`, `4`, or `8` re-indents nested lists to N spaces per level, using CommonMark-valid marker padding where an 8-space step needs it so the list tree is the same. `preserve` leaves list indentation as authored. | 2-space nesting → 4-space |
+| `indentation` | `4` | `2`, `4`, or `8` re-indents nested lists to N spaces per level, using CommonMark-valid marker padding where needed so the list tree is the same. Marker width sets a minimum continuation indent; when N spaces would change the tree, use the nearest valid continuation indent instead. `preserve` leaves list indentation as authored. | 2-space nesting → 4-space |
 | `ordered-lists` | `true` | Leaves a list alone when every number equals the first (`1,1,1`, `3,3,3`) or the numbers count up by one from the first (`1,2,3`, `3,4,5`). Otherwise renumbers sequentially from the first number. Render-neutral, because CommonMark uses only the start number. | `1,3,8` → `1,2,3`; `1,1,1` unchanged |
-| `list-padding` | `true` | Ensures exactly one blank line before and after each list block (never more), unless the neighbor is a directive line (invariant 1) or the list is the first or last block in its container. | `Intro:\n- a` → `Intro:\n\n- a` |
-| `list-interior-padding` | `preserve` | `preserve` leaves the blank lines inside list items as authored. `none` removes blank lines between an item and its children. `only-prose` puts one blank line before an item's paragraph children but none before a nested list. `prose-and-child-elements` puts one blank line before every child block. | see below |
-| `default-language` | `"text"` | Adds this info string to a fence that has none. `""` adds nothing. | ```` ``` ```` → ```` ```text ```` |
+| `list-padding` | `true` | Ensures exactly one blank line before and after each list block (never more), where doing so preserves the block tree and tight/loose state, unless the neighbor is a directive line (invariant 1) or the list is the first or last block in its container. Required separators are never removed. | `Intro:\n- a` → `Intro:\n\n- a` |
+| `list-item-padding` | `preserve` | Blank lines **between sibling items**. See [List spacing](#list-spacing). | `none`: `- a\n\n- b` → `- a\n- b` |
+| `list-interior-padding` | `preserve` | Blank lines **inside an item**, before the blocks nested in it. See [List spacing](#list-spacing). | `all`: blank line added before a nested list |
+| `default-language` | `"text"` | Adds this info string to a fence that has none. Existing info strings remain exact. Values containing line breaks, control characters, or backticks are rejected so they cannot break a fence. `""` adds nothing. | ```` ``` ```` → ```` ```text ```` |
 
-`list-interior-padding` example, under `only-prose`:
+#### List spacing
 
-```md
-- item
+Three settings control blank lines around and inside lists. Each owns a
+different kind of boundary:
 
-    A paragraph child gets a blank line before it.
-    - a nested list does not
+```text
+Some intro paragraph.
+                              <- list-padding           (before the list)
+- Install the tool
+                              <- list-interior-padding  (item -> nested block)
+    Run it once first.
+                              <- list-interior-padding  (nested block -> next nested block)
+    - macOS
+                              <- list-item-padding      (between nested siblings)
+    - Linux
+                              <- list-item-padding      (between top-level siblings)
+- Configure it
+                              <- list-padding           (after the list)
+Closing paragraph.
 ```
 
-A blank line inside a list item makes the list _loose_ in CommonMark, so it
-renders with paragraph spacing. That is the point of the setting, and why the
-default is `preserve`. The fidelity guard ignores tight/loose state for that
-reason.
+The blank lines are drawn at every boundary a setting _could_ fill. What each
+setting actually does depends on its value. `list-padding` is a boolean and
+is on by default. The other two default to `preserve`, which leaves your blank
+lines exactly as you wrote them.
+
+**Why these two default to `preserve`: tight and loose lists.** In CommonMark,
+a blank line between two items of a list, or between an item's first line and
+something nested in it, makes that whole list _loose_. Every item in a loose
+list renders as a paragraph, with more vertical space between items in HTML.
+A list with no such blank lines is _tight_. So these two settings change how
+a list looks when rendered, not just how its source looks. That is why they
+are opt-in, and why the fidelity guard allows a tight/loose change only on a
+list where one of them was explicitly set. `list-padding` never affects
+tight/loose, because blank lines outside a list don't count.
+
+##### `list-item-padding`: blank lines between sibling items
+
+It applies to the siblings of every list, at every nesting level. The boundary
+from the end of an item, including its last nested block, to the next sibling
+is a sibling boundary.
+
+| Value | Meaning |
+| --- | --- |
+| `preserve` | Leave sibling spacing as written. |
+| `none` | No blank line between siblings. Lists become tight unless something inside an item keeps them loose. |
+| `one` | Exactly one blank line between siblings, never more. Lists become loose. |
+
+The same list under each value:
+
+```md
+<!-- none -->
+- apples
+- pears
+    - green
+    - red
+- plums
+
+<!-- one (list-interior-padding left at preserve) -->
+- apples
+
+- pears
+    - green
+
+    - red
+
+- plums
+```
+
+Under `one`, both lists get one blank line between siblings: the top-level
+items and the nested `green`/`red`. `- green` stays directly under `- pears`
+because that boundary is an item's interior, which `list-interior-padding`
+owns. Here it is left at `preserve`.
+
+The CLI's existing `--compact` maps to `none` and `--loose` maps to `one`.
+With neither flag, nothing is overridden.
+
+##### `list-interior-padding`: blank lines inside an item
+
+A list item's _first line_ is the text after its marker. Anything after that
+inside the item is a _nested block_: another paragraph, a nested list, a code
+block, or a blockquote. This setting controls the blank line before each
+nested block that follows directly after the item's first line or a previous
+nested block.
+
+CommonMark already requires a blank line before a **paragraph** nested in an
+item; without it, the text merges into the line above. Cleanup never removes
+that blank line. So in practice the values differ only for nested lists, code
+blocks, and blockquotes, which can sit directly under the line above.
+
+| Value | Meaning |
+| --- | --- |
+| `preserve` | Leave interior spacing as written. |
+| `none` | Remove every blank line inside items that CommonMark doesn't require. Nested lists, code blocks, and quotes sit directly under the line above. |
+| `except-nested-lists` | One blank line before every nested block **except** a nested list, which stays directly under its parent line. This suits documents where items carry prose and code but sub-bullets read as part of the item. |
+| `all` | One blank line before every nested block, including nested lists. |
+
+The same item under each value:
+
+```md
+<!-- none -->
+- Install the tool
+    ```sh
+    brew install tool
+    ```
+    - macOS
+    - Linux
+
+<!-- except-nested-lists -->
+- Install the tool
+
+    ```sh
+    brew install tool
+    ```
+    - macOS
+    - Linux
+
+<!-- all -->
+- Install the tool
+
+    ```sh
+    brew install tool
+    ```
+
+    - macOS
+    - Linux
+```
+
+Required blank lines are never removed. These include the one before a nested
+paragraph, and the one between a nested list and a paragraph after it (without
+it, the paragraph would join the last nested item). Any boundary a value
+cannot reach safely is left as written.
 
 **With every rule at its default**, cleanup:
+
 - repairs frontmatter non-destructively
 - leaves directives untouched
 - keeps every hard wrap
 - fixes misnumbered ordered lists
-- makes list indentation 4 spaces
+- requests 4-space list indentation, retaining valid continuation indents
 - pads tables
-- pads lists with one blank line before and after
+- pads lists with one blank line before and after where structure permits
 - labels unlabeled fences `text`
 
-**With every body rule off**, only the frontmatter is repaired: `unwrap: false`,
+**With every body rule off**, the body is byte-for-byte unchanged, including
+blank lines, markers, line endings, and final-newline presence; only enabled
+frontmatter repair can edit the document. These settings are: `unwrap: false`,
 `fixed-width: false`, `ordered-lists: false`, `list-padding: false`,
-`table-layout: false`, `default-language: ""`, and
+`table-layout: false`, `default-language: ""`, `list-item-padding: preserve`,
 `list-interior-padding: preserve`, and `indentation: preserve`.
 
 ### Resolution and precedence
@@ -242,11 +399,39 @@ The value of each rule is resolved independently, highest first:
 3. DMLS workspace config, for DMLS runs only. The current `formatting.cleanup`
    and `formatting.fixed_width` are replaced by a `formatting.markdown` object
    with the same keys as `style.markdown`.
-4. The baseline schema default.
+4. The runtime default documented in the baseline schema.
 
-If the frontmatter is unrepairable, or `style.markdown` fails validation,
-cleanup does not guess. It reports the schema diagnostic and formats the body
-with levels 1, 3, and 4 only.
+Absent or `null` values fall through; `false`, `preserve`, and `""` are explicit
+values. A CLI parser's default is not an explicit flag. `--ignore-incidental-newlines`
+sets `unwrap: false` and `fixed-width: false`, overriding a document's width;
+`--fixed-width N` sets width N and implies unwrapping. Their existing mutual
+exclusion remains. At other levels, a resolved positive width also implies
+unwrapping; `fixed-width: false` does not cancel a separately enabled unwrap.
+
+Resolve document rules once, passively, from the original frontmatter or a
+syntax-repaired candidate when the original cannot parse. Never execute an
+expression, shell command, remote read, or composition to obtain a setting.
+Pending executable values are unusable as formatting settings and produce a
+source-positioned diagnostic. An invalid `style.markdown` object is ignored as
+a whole, while CLI/workspace/default rules still apply. Unrelated frontmatter
+schema findings do not invalidate otherwise usable formatting settings.
+Invalid workspace rules are reported by the config loader and do not enter
+the resolved options.
+
+Unrepaired invalid YAML retains the CLI's existing error contract: exit `1`,
+no save, and a JSON envelope with an empty stderr in JSON mode. DMLS returns no
+edits and reports the finding. Do not silently clean a body while claiming the
+whole malformed document was accepted. If YAML parses but document rules are
+invalid, body formatting may proceed using levels 1, 3, and 4.
+
+`frontmatter: false` is decided before committing any repair: candidate repairs
+may help read settings but are never emitted when repair is disabled. If
+malformed YAML prevents discovering this setting, repair is enabled by the
+other applicable levels; an undiscoverable setting is not guessed. Preserve
+the entire original frontmatter block, even empty blocks, delimiters, comments,
+and line terminators, except for accepted repair edits. If disabling repair leaves invalid YAML,
+return the invalid outcome without emitting the candidate. Preserve its following
+blank-line boundary unless a body rule explicitly and safely changes it.
 
 ### Passes not covered by a rule
 
@@ -259,57 +444,157 @@ remains must be one of two things:
   trip added, such as escape and emphasis restoration
 - **mapped to a rule above**
 
-Anything else is removed. The implementer records each pass and which of the
-three outcomes it got in the implementation log.
+Anything else is removed. This intentionally removes ambient `PREFER_ITALICS`
+restyling from cleanup; authored emphasis delimiters remain intact. It also
+removes unconditional blank-line and final-newline normalization. Every rule
+must preserve disabled regions rather than expose them to incidental serializer
+rewrites. Preserve untouched LF/CRLF terminators and BOMs; newly inserted body
+lines use the local neighboring line terminator (LF for an empty body). The
+implementer records each pass and which of the three outcomes it got in the
+implementation log.
 
 ### Frontmatter repair moves into the library
 
 `frontmatter: true` has to mean the same thing in DMLS as in the CLI. The repair
 orchestration in `cli/src/commands/clean/frontmatter_repair.rs` moves into the
 `darkmatter` library behind one entry point that both consumers call. The CLI
-keeps only argument handling and output. DMLS gets frontmatter repair as part
-of formatting.
+keeps only argument handling, output, and file writes. DMLS gets frontmatter
+repair as part of formatting, using the current editor buffer rather than a
+fresh disk read.
+
+The shared entry point accepts raw document text, explicit rule overrides, and
+the caller's existing document resolution context/schema controls. It returns
+output text, an outcome (`unchanged`, `changed`, `declined`, or `invalid`),
+source-positioned diagnostics, and only repairs actually emitted. It must be
+usable before constructing a `Markdown`, since malformed frontmatter is part
+of its input contract. Lower-level body-only APIs use the same protected
+transforms and guard; their existing string-returning wrappers return the
+original body on refusal. Diagnostic-aware consumers use the result-bearing
+API. No default wrapper retains the old newline-stripping behavior.
+
+Use the existing Darkmatter schema-cleaning machinery and biscuit-file YAML
+analysis/edit utilities; do not add a second YAML editor. Schema selection
+retains baseline → matching triggers → document schema, with the existing CLI
+schema overrides. File-backed requests use the document context derived from
+the caller's request; stdin and untitled editor buffers have no file-backed
+trigger discovery. A shared repair routine must not recapture the process
+working directory, home, or repository, and DMLS must not add network access or
+execute document content. A missing or unreadable referenced schema is reported
+through the existing typed errors, not silently replaced by a guessed schema.
+
+Frontmatter repair and body formatting are one transaction. Check the final
+candidate once all transforms have finished, including reflow and reassembly. On refusal,
+discard all candidate edits. The guard compares body meaning independently
+from frontmatter; frontmatter safety remains the existing repair proof. DMLS
+converts byte-based authored spans to the client's negotiated position encoding
+and sends warnings through its router/client layer, keeping the formatter
+library free of protocol side effects.
 
 ## Decision: Guard on Structure, Fail Closed
 
-**Choice:** compare a normalized structural fingerprint of the input and the
+**Choice:** compare normalized structure and inline meaning of the input and
 output, and fall back to the whole unchanged document when they differ.
 
-**Fingerprint:** the pulldown-cmark block tree with:
+**Comparison:** compare normalized semantic event sequences directly; no
+hash is required. Retain the original source ranges so a mismatch can name the
+first affected input block. Use the same cleanup parser options for input and
+output: all currently enabled extensions, excluding smart punctuation and
+definition lists. This covers Darkmatter's Markdown dialect, not only the
+CommonMark subset used by the reproductions.
 
-- container kinds and their nesting (list with ordered flag and start, item,
-  blockquote, heading level, table, HTML block, thematic break, footnote
-  definition)
-- code-block content bytes (info string excluded, since `default-language`
-  may add one)
-- inline text with whitespace runs collapsed and soft breaks treated as spaces
-  (so `unwrap` and `fixed-width` pass)
-- table cell text with surrounding whitespace trimmed (so `table-layout`
-  passes)
-- **ignoring** tight/loose list state, list-marker characters, and ordered
-  item numbers after the first
-- plus the ordered sequence of directive lines from the directive recognizer,
-  each with its raw text and container path
+Compare:
+
+- all container kinds and nesting, list ordered flag/start, headings, table
+  column alignment and cells, footnote definitions, and extension blocks
+- inline structure and values: emphasis/strong/strikethrough, inline code,
+  link/image destination and title, hard breaks, footnote references, task
+  checkbox state, and inline/block HTML bytes
+- decoded text exactly (coalesce adjacent text events before comparison),
+  allowing only ordinary prose soft breaks to become
+  spaces or move under resolved `unwrap`/`fixed-width`; do not collapse arbitrary
+  whitespace runs, nonbreaking spaces, code whitespace, or HTML
+- code-block content bytes, checked from source spans as well as events so
+  parser normalization cannot conceal line-ending or whitespace changes;
+  existing fence info strings exactly, with only the
+  resolved `default-language` addition allowed on an originally unlabeled fence
+- reference definitions, including unused definitions, their labels, targets,
+  and titles: these do not all appear in the event stream, so retain the
+  parser's definition table/source ranges rather than silently dropping them
+- list tight/loose state except at lists affected by an explicitly requested
+  `list-item-padding` or `list-interior-padding` value; list marker spelling is separately preserved when no rule
+  authorizes changing it; ordered numbers after the first may change only
+  under the ordered-list rule
+- protected source spans: complete directive lines with prefixes/terminators,
+  expression spellings, opaque shell bodies, their order/container placement,
+  and whether immediately neighboring lines are blank
+
+Directive-aware parsing must avoid lazy-continuation reassociation without
+breaking lists that continue across a directive. Reuse source spans and
+container information; do not clean independently split chunks and concatenate
+them. Code examples that merely look like directives remain ordinary code.
+Both parses use the same protection policy. Compare protected bytes separately
+from any masked event view, so masking cannot hide moved or lost syntax.
+Malformed/unpaired directive regions are left unchanged and reported, without
+attempting composition. A serializer failure likewise returns a declined result
+rather than a silent string fallback. Use the same report-only diagnostic
+channel for these refusals, with a reason that distinguishes malformed syntax,
+serialization failure, and an actual semantic mismatch.
+
+```mermaid
+flowchart TD
+    A[Original document and caller context] --> B[Resolve rules and prepare safe YAML repairs]
+    B --> C[Format protected body and apply reflow]
+    C --> D[Check final candidate against original]
+    D -->|Equivalent under resolved rules| E[Return candidate and accepted repairs]
+    D -->|Mismatch or unsafe input| F[Return original and diagnostic; write nothing]
+```
+
+
+**Diagnostic representation:** extend the Darkmatter-owned clean diagnostic
+model to represent `clean.fidelity-fallback`; do not add Markdown-specific
+codes to biscuit-file's YAML diagnostic enum. Preserve the version-1 JSON
+fields and existing code/classification spellings. This report-only finding
+uses `non_deterministic_find`, `repairs: []`, a whole-document authored span,
+and one-based lines/byte columns. Keep diagnostics in stable source order.
+If the output adds a block with no direct input counterpart, use the nearest
+input boundary (EOF if appropriate). No synthetic output coordinates are
+reported as authored coordinates.
 
 **Why fail closed, for the whole document:** cleanup is a convenience, and
 corruption is not an acceptable trade for it. Falling back block by block would
 mean splicing original and cleaned text, which creates the same seam bugs this
 fix removes. A document that comes back uncleaned with a diagnostic is a clear,
-correct result. Each fallback the corpus check finds is a bug to fix, not a
-state to tolerate.
+correct result. A fallback on valid supported syntax is a cleanup defect, not
+successful formatting. The corpus check must distinguish those defects from intentionally
+malformed documentation examples and report both; the latter still remain
+unchanged with a diagnostic.
 
-**Parse budget:** the cleanup parse-count tests (`tests/parse_count.rs`)
-currently assert exactly one parse per cleanup entry point. The guard adds one
-parse of the output; the input's events already exist. The budget becomes
-**two**, and the guard's parse must go through `cleanup_parser` so the count
-stays measurable.
+**Parse budget:** the existing
+[`parse-count tests`](../../lib/src/markdown/cleanup/tests/parse_count.rs)
+measure cleanup and reflow parses, not every parse performed by directive
+scanning. Plain body cleanup changes from one counted parse to two (reuse the
+unmodified input events, then parse the final candidate). Cleanup plus the
+existing separate reflow changes from two to at most three counted parses;
+the guard runs after reflow, never just before it. Standalone strip/reflow
+helpers retain their existing counts unless made guarded public operations,
+in which case their final-output parse is included explicitly. Unchanged or
+malformed protected input may short-circuit below these ceilings.
+
+Shared directive/code-region scanners also construct parsers outside
+`cleanup_parser`; record those separately or route reusable scans through the
+same instrumentation. Do not claim the counted budget is total work while
+leaving these scans unmeasured. Reuse available event/range information rather
+than introducing a parse per directive or rule. No performance spike or new
+benchmark gate is required for this review.
 
 ## Out of Scope
 
 - **Refactoring the CLI flags.** That is a future change. Existing flags keep
   working, and a flag that maps to a rule overrides the document for that run.
-  `--ignore-incidental-newlines` stays as it is. It becomes redundant under the
-  new `unwrap: false` default but is harmless.
+  `--ignore-incidental-newlines` remains accepted and explicitly disables
+  document-selected reflow. `--compact` and `--loose` become overrides of
+  `list-item-padding` (`none` and `one`), and the library's compact and loose
+  cleanup variants are expressed the same way.
 - **Heading structure** (no skipped levels). It is deferred and is not added
   to the schema until it is built, so no key exists that silently does
   nothing.
@@ -321,12 +606,18 @@ stays measurable.
 
 1. **Reproductions.** E1, D1, C1, A1, B1, and F1 are L1 tests in
    `lib/src/markdown/cleanup/tests/`. With all rules at their defaults, each
-   output equals its input, except D1, which gains only `text` on its fence and
-   stays at column 8. E1, C1, and D1 also keep their structure under
-   each non-default `indentation` value (`2`, `8`, `preserve`), `unwrap: true`, `fixed-width: 80`, and each
-   `list-interior-padding` value.
+   output equals its input exactly, except D1, which gains only `text` on its
+   fence and stays at column 8. (Every repro is already 4-space indented,
+   padded, and correctly numbered, so no default rule has anything to change.)
+   With body rules disabled, output equals input exactly. E1, C1, and D1 also
+   keep their structure under each non-default `indentation` value
+   (`2`, `8`, `preserve`), `unwrap: true`, `fixed-width: 80`, and each
+   `list-item-padding` and `list-interior-padding` value, allowing only the
+   documented tight/loose change. Test multi-digit markers and code children where a requested indent
+   cannot be used literally.
 2. A1 and B1, after cleanup, give the same `md compose` output as their
-   inputs, with `when` both true and false.
+   inputs, with `when` both true and false, using fixture-owned data and no
+   shell/network effects.
 3. **Directive fixed points.** For every rule, there is a test with a directive
    line following each of: a blockquote paragraph, a list-item paragraph
    (ordered and unordered, nested two levels), and a table. Each test shows the
@@ -336,33 +627,67 @@ stays measurable.
    includes `fixed-width: true` resolving to 120, `fixed-width` implying
    `unwrap`, `default-language: ""` adding nothing, and `ordered-lists`
    leaving `1,1,1`, `3,3,3`, and `3,4,5` alone while fixing `1,3,8` and
-   `2,2,5`.
-5. **Precedence.** Tests show that a CLI flag beats the document, the
+   `2,2,5`. Every example in [List spacing](#list-spacing) is a test, with its
+   expected output exactly as shown. Required separators (a nested paragraph,
+   and a paragraph after a nested list) survive `none` under both padding
+   rules.
+5. **DMLS config migration.** The old `formatting.cleanup` /
+   `formatting.fixed_width` shape is translated with one migration warning per
+   key, as described in the sibling-spacing decision. A mixed old/new config
+   is rejected with a diagnostic. `--compact` and `--loose` produce the same
+   output as `list-item-padding: none` and `one`.
+6. **Precedence.** Tests show that a CLI flag beats the document, the
    document beats DMLS config, and DMLS config beats the schema default. They
    also show that an invalid `style.markdown` falls back as described in
    [Resolution and precedence](#resolution-and-precedence).
-6. **Fidelity guard.** `clean.fidelity-fallback` has tests that use an
+7. **Fidelity guard.** `clean.fidelity-fallback` has tests that use an
    artificially broken pass (a test-only hook). They show that `md clean` writes
    nothing under `--save` and reports the diagnostic in `--json`, and that DMLS
-   `formatting` returns an empty edit list and sends one warning.
-7. **Frontmatter parity.** Frontmatter repair is a library entry point. The
+   `formatting` returns an empty edit list and sends one warning. Also cover
+   mutations of link targets, titles, emphasis, hard breaks, HTML, task state,
+   table alignment, reference definitions, expressions, and code/info strings.
+   Verify that default mode detects tight/loose changes, while an explicit
+   padding rule permits only the intended lists to change spacing. Include a
+   failure introduced by reflow and a refusal after a candidate YAML repair;
+   the original whole document survives and `applied` is empty.
+8. **Frontmatter parity.** Frontmatter repair is a library entry point. The
    same broken-frontmatter fixture is repaired identically by `md clean` and by
-   DMLS `formatting`. With `frontmatter: false`, both leave it byte-for-byte.
-8. **Idempotence.** `clean(clean(x)) == clean(x)` for every fixture in criteria
+   DMLS `formatting`. With `frontmatter: false`, both leave the block
+   byte-for-byte; if it remains invalid YAML, CLI returns the documented error
+   and DMLS returns no edit.
+9. **Idempotence.** `clean(clean(x)) == clean(x)` for every fixture in criteria
    1–4.
-9. **Real-world fixture.** `prompts/commit.md` at blob `464e2d90e` is checked
+10. **Real-world fixture.** `prompts/commit.md` at blob `464e2d90e` is checked
    in as a cleanup fixture. With defaults, its output composes without error,
    passes the guard, and keeps every hard wrap.
-10. **Corpus check.** Run cleanup with defaults (without saving) over every
+11. **Corpus check.** Run cleanup with defaults (without saving) over every
     tracked `*.md` file in the repository. The implementation log records how
-    many guard fallbacks occurred. Each one is either fixed in this change or
-    written up as a new `_unscheduled` fix with its minimal reproduction. The
+    many documents were processed, changed, declined, or invalid, and the
+    reasons for refusals. Each fallback on valid supported syntax is either
+    fixed in this change or written up as a new `_unscheduled` fix with its
+    minimal reproduction. Intentionally malformed examples are recorded
+    separately rather than treated as regressions. This scan is passive: it
+    never composes documents or executes shell/remote content. The
     run is not added as a CI gate.
-11. The parse-count tests assert a budget of two, and still pass.
-12. **Docs** are updated in the same change:
+12. Parse-count tests enforce the entry-point ceilings described above,
+    including final-output verification after reflow. Record separately counted
+    scanner parses so the reported budget cannot hide repeated scanning.
+13. **Source fidelity and invocation coverage.** Include CRLF, mixed line
+    endings, BOMs, empty frontmatter, missing final newline, all-body-rules-off,
+    unused reference definitions, and malformed directive/frontmatter cases.
+    Use shipped-schema corpus validation plus normal CLI invocation tests
+    (`CliProcessFixture`) for `md clean`, stdin/JSON/save, and the top-level
+    `md FILE --save` route. Exercise DMLS formatting through its protocol route,
+    with the current unsaved buffer, positioned diagnostics, and no host focus.
+    Use the monorepo test toolkit and nextest via package-area recipes; pure
+    text/protocol checks belong in L1 and need no real terminal or browser.
+14. **Docs** are updated in the same change:
     - a `docs/` topic page for `style.markdown` covering each key, a compact
       example per key, the precedence order (as a Mermaid diagram), and the
-      invariants
+      invariants. List spacing gets its own section, written for a reader who
+      has never heard of tight and loose lists: the boundary diagram, what
+      tight and loose mean and how each looks when rendered, and a
+      same-input/each-value example for every value of both padding rules
     - [`docs/cli/clean.md`](../../docs/cli/clean.md): the invariants, the
       fallback diagnostic, and that the document's `style.markdown` drives
       cleanup unless a flag overrides it
@@ -373,3 +698,17 @@ stays measurable.
       holds
     - the `darkmatter` skill (`.claude/skills/darkmatter/`) where it describes
       cleanup
+
+## Decision: Sibling Spacing Is Its Own Rule
+
+The existing compact and loose controls (`--compact`/`--loose`, the library's
+compact and loose variants, DMLS's `formatting.cleanup`) govern blank lines
+**between sibling items**. `list-interior-padding` governs a different
+boundary, so it cannot replace them. `list-item-padding` carries that control
+instead, so documents get the same choice CLI callers have.
+
+DMLS migration: the old `formatting.cleanup` and `formatting.fixed_width`
+shape is recognized and translated with a migration warning. `compact`
+becomes `list-item-padding: none`, `loose` becomes `one`, `default` sets no
+override, and `fixed_width` becomes `fixed-width`. A config that mixes the old
+and new shapes is rejected. Unknown keys are never silently ignored.
