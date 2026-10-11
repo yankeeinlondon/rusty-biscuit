@@ -32,7 +32,7 @@ mod resolve;
 use std::path::{Path, PathBuf};
 
 pub use error::FileReferenceError;
-pub use glob::{GlobListing, GlobReference, GlobReferenceError, SkippedEntry};
+pub use glob::{GlobListing, GlobReference, GlobReferenceError, PreparedGlobReference, SkippedEntry};
 pub use portable::{
     Attempt, AttemptOutcome, ConfigurationProblem, EnvAnchorProblem, FilterProblem, Finding,
     IntentForms, InvalidTarget, NotApplicable, PORTABLE_ENV_VARIABLES, PathIdentity,

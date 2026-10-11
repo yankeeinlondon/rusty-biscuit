@@ -63,6 +63,8 @@ pub(crate) async fn finish(code: i32) -> std::convert::Infallible {
     let deadline = effective_deadline(Instant::now(), DRAIN_DEADLINE.get().copied());
     let _drain_interrupt = (has_pending_deliveries() && !holds_interrupt_guard())
         .then(install_drain_interrupt_guard);
+    #[cfg(feature = "terminal-tests")]
+    mark_drain_started_for_terminal_tests();
     drain_deliveries(deadline).await.report();
     flush_streams();
     std::process::exit(code)
@@ -85,6 +87,20 @@ fn drain_budget() -> std::time::Duration {
         return std::time::Duration::from_millis(millis);
     }
     DELIVERY_DRAIN_BUDGET
+}
+
+/// Test seam, compiled only with the `terminal-tests` feature: with
+/// `CLAUDINE_TEST_DRAIN_STARTED=<path>` set, creates `<path>` once the drain's
+/// interrupt ladder is in place and the drain is about to wait.
+///
+/// The terminal-tier drain Ctrl+C tests press only after this file exists, so
+/// their first press lands in the drain rather than in the command's last
+/// steps, however slowly the runner reaches it.
+#[cfg(feature = "terminal-tests")]
+fn mark_drain_started_for_terminal_tests() {
+    if let Some(path) = std::env::var_os("CLAUDINE_TEST_DRAIN_STARTED") {
+        let _ = std::fs::write(path, b"");
+    }
 }
 
 fn effective_deadline(now: Instant, command_deadline: Option<Instant>) -> Instant {

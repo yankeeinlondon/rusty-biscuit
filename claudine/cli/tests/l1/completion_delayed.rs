@@ -72,18 +72,30 @@ fn run(provider: &str, scenario: &str) -> serde_json::Value {
     snapshot
 }
 
-#[test]
-fn fixture_handshakes_retain_answers_before_both_callback_stalls() {
-    for provider in ["claude", "codex"] {
-        for scenario in ["completion-callback", "answer-callback"] {
-            let snapshot = run(provider, scenario);
-            let observation = &snapshot["observation"];
-            assert_eq!(observation["verdict_received"], scenario == "completion-callback");
-            assert!(observation["retained"]["response_text"].as_str().unwrap().contains("review-answer"));
-            assert_eq!(observation["retained"]["response_complete"], scenario == "completion-callback");
-            assert_eq!(observation["stdout"]["operation"], "lifecycle_callback");
+fn assert_handshake_retains_answer_before_callback_stall(provider: &str, scenario: &str) {
+    let snapshot = run(provider, scenario);
+    let observation = &snapshot["observation"];
+    assert_eq!(observation["verdict_received"], scenario == "completion-callback");
+    assert!(observation["retained"]["response_text"].as_str().unwrap().contains("review-answer"));
+    assert_eq!(observation["retained"]["response_complete"], scenario == "completion-callback");
+    assert_eq!(observation["stdout"]["operation"], "lifecycle_callback");
+}
+
+// One test per provider/stall pair, so the four wrapper runs spread across cores.
+macro_rules! handshake_retains_answer_tests {
+    ($($name:ident: $provider:literal, $scenario:literal;)*) => {$(
+        #[test]
+        fn $name() {
+            assert_handshake_retains_answer_before_callback_stall($provider, $scenario);
         }
-    }
+    )*};
+}
+
+handshake_retains_answer_tests! {
+    claude_fixture_handshake_retains_the_answer_before_the_completion_callback_stall: "claude", "completion-callback";
+    claude_fixture_handshake_retains_the_answer_before_the_answer_callback_stall: "claude", "answer-callback";
+    codex_fixture_handshake_retains_the_answer_before_the_completion_callback_stall: "codex", "completion-callback";
+    codex_fixture_handshake_retains_the_answer_before_the_answer_callback_stall: "codex", "answer-callback";
 }
 
 #[test]

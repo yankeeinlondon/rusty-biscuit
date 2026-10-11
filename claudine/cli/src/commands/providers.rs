@@ -449,10 +449,11 @@ fn resolve_gen_binary() -> Option<PathBuf> {
 
 /// A git root that looks like a cargo workspace, for the dev-checkout
 /// `cargo run -p claudine-gen` fallback.
+///
+/// Only the root is needed: a full invocation capture would also read the
+/// checkout's status and package topology.
 fn repo_root_for_cargo_fallback() -> Option<PathBuf> {
-    let invocation =
-        claudine::invocation_context::InvocationContext::capture(crate::request::snapshot()).ok()?;
-    let root = invocation.launch_repository().repo_root()?.to_path_buf();
+    let root = sniff::filesystem::git::repo_root(crate::request::snapshot().request_dir()).ok()??;
     root.join("Cargo.toml").is_file().then_some(root)
 }
 

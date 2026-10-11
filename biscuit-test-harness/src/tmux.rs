@@ -156,17 +156,22 @@ impl TmuxHarness {
 
     /// If [`SHARED_SESSION_ENV`] is set, returns an
     /// [`attach`](Self::attach)-style harness pointing at the
-    /// pre-spawned session. Otherwise spawns a fresh session (owned).
+    /// pre-spawned session, first respawning its shell if an earlier test
+    /// left a command running there. Otherwise spawns a fresh session
+    /// (owned).
     ///
     /// ## Errors
     ///
     /// Propagates whatever [`spawn_shell`](TerminalHarness::spawn_shell)
-    /// returns when no shared session is available.
+    /// returns when no shared session is available, or a failed
+    /// `respawn-pane` of a busy shared pane.
     pub fn shared_or_spawn() -> io::Result<Self> {
         if let Ok(name) = std::env::var(SHARED_SESSION_ENV) {
             let trimmed = name.trim();
             if !trimmed.is_empty() {
-                return Ok(Self::attach(trimmed));
+                let mut h = Self::attach(trimmed);
+                h.reclaim_busy_pane()?;
+                return Ok(h);
             }
         }
         let mut h = Self::new();
@@ -211,6 +216,61 @@ impl TmuxHarness {
             .trim()
             .parse()
             .map_err(|e| io::Error::other(format!("tmux pane_width not a u32: {e}")))
+    }
+
+    /// Respawns the shell of a shared pane whose terminal is owned by
+    /// anything other than that shell.
+    ///
+    /// A test that panics while its program is still running (a chooser
+    /// awaiting input, say) leaves that program in the pane's foreground,
+    /// where it reads every later test's keystrokes and fails them all.
+    /// `respawn-pane -k` reruns the pane's original command with the
+    /// session's environment; it starts in the temp dir because the dead
+    /// test's working directory has usually been deleted.
+    fn reclaim_busy_pane(&mut self) -> io::Result<()> {
+        if !self.pane_is_busy() {
+            return Ok(());
+        }
+        let session = self.session().to_string();
+        let start_dir = std::env::temp_dir();
+        let mut cmd = Command::new("tmux");
+        cmd.args(["respawn-pane", "-k", "-t", &session, "-c"])
+            .arg(&start_dir);
+        let out = run_with_timeout(&mut cmd, SPAWN_TIMEOUT)?;
+        if !out.status.success() {
+            return Err(io::Error::other(format!(
+                "tmux respawn-pane failed: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            )));
+        }
+        wait_for_prompt(self)
+    }
+
+    /// `true` when the pane's terminal has a foreground process group other
+    /// than the pane's shell, i.e. a command is still running in it.
+    #[cfg(unix)]
+    fn pane_is_busy(&self) -> bool {
+        let mut query = Command::new("tmux");
+        query.args(["display-message", "-p", "-t", self.session(), "#{pane_pid}"]);
+        let Ok(out) = run_with_timeout(&mut query, QUERY_TIMEOUT) else {
+            return false;
+        };
+        let pane_pid = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if pane_pid.is_empty() {
+            return false;
+        }
+        let mut ps = Command::new("ps");
+        ps.args(["-o", "tpgid=", "-p", &pane_pid]);
+        let Ok(out) = run_with_timeout(&mut ps, QUERY_TIMEOUT) else {
+            return false;
+        };
+        let foreground = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        !foreground.is_empty() && foreground != pane_pid
+    }
+
+    #[cfg(not(unix))]
+    fn pane_is_busy(&self) -> bool {
+        false
     }
 
     fn session(&self) -> &str {

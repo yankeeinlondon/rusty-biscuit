@@ -1267,6 +1267,7 @@ let roots = specs.roots(&ctx);              // for callers that walk themselves
 | `matches(&path, &ctx)` | `bool` | membership of one path, which need not exist; a relative path is read from the context's `cwd`. Never fails: a pattern whose roots the context cannot supply admits and rejects nothing, and an invalid context admits nothing |
 | `roots(&ctx)` | `Vec<PathBuf>` | the positive patterns' roots, in precedence order |
 | `lists_file(&path, &ctx)` | `bool` | whether `list_files` would list an existing file its walk reached: `matches`, except that a file symlink whose target leaves the tree (a skipped entry) is not listed. For a caller that walks `roots` itself with its own filters, as Claudine's completion does, and must offer exactly what a listing would |
+| `prepare(&ctx)` | `Option<PreparedGlobReference>` | the patterns resolved once (`None` for an invalid context), for a caller that walks the roots itself and judges many files: `roots()`, `lists_file(&path)` as above without resolving again, and `may_list_below(&dir)`, which is `false` for a directory below which no positive pattern can admit a file, so the walk may skip it (see below) |
 | `matches_without_context(&path)` | `bool` | membership of an absolute path for a caller with no request: bare patterns read from the filesystem root (`**/fixes/**/spec.md` judges the full path), absolute patterns as written; patterns that need a context admit and reject nothing |
 | `with_file_name_view()` | `GlobReference` | also match a bare file name at any depth when the glob after the prefix has no `/` (`*.md`, `!_*.md`) |
 | `escape(text)` | `String` | make text literal: `[id].md` → `[[]id[]].md` |
@@ -1451,7 +1452,29 @@ Three cases are not errors:
 `take_first` (and so `%`) fails only when the unreadable directory could hold
 a file that precedes its result: under the first root with a match, a
 directory whose files are all deeper than that match cannot change it.
-`matches`, `lists_file`, `matches_without_context`, and `roots` never fail.
+`matches`, `lists_file`, `matches_without_context`, `roots`, and `prepare`
+never fail.
+
+A walk that skips each directory `may_list_below` rules out lists the same
+files as one that does not. A directory stays open when it leads to a
+pattern's literal leading directories, or lies inside them no deeper than a
+match can reach; a `**` or file-name pattern reaches every depth. Launched
+from a home folder, `DOCS/*.md` enters only `DOCS/`, where an unpruned walk
+would read the whole folder:
+
+```rust,no_run
+use std::collections::HashMap;
+use biscuit_file::{FileResolutionContext, GlobReference, PathIdentity};
+
+let ctx = FileResolutionContext::from_snapshot("/home/me", None, HashMap::new());
+let docs = GlobReference::new(["DOCS/*.md"])?.prepare(&ctx).expect("valid context");
+assert!(docs.may_list_below(&PathIdentity::new("/home/me/DOCS".as_ref())));
+assert!(!docs.may_list_below(&PathIdentity::new("/home/me/Library".as_ref())));
+# Ok::<(), biscuit_file::GlobReferenceError>(())
+```
+
+`may_list_below` takes the directory's canonical identity: the root's
+canonical spelling joined with the names the walk read.
 
 ### When a literal reference misses
 

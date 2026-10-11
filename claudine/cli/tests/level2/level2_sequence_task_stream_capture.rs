@@ -282,18 +282,18 @@ exit 0
 /// a later event *after* the stall separates them: an idle flush puts the block
 /// ahead of that marker, `close()` puts it behind.
 ///
-/// The stall spans the ticker's *second* tick on purpose. Cadence and silence
-/// window are one value, so the first tick only flushes if the block was
-/// stamped within a hair of the ticker starting; under pane setup and load it
-/// usually is not, and the block then waits for the tick after. A stall of only
-/// 1.5 cadences made that a coin flip — the run ended first and `close()`
-/// drained the block.
+/// The stall lasts until the test creates [`IDLE_RELEASE_FILE`], which it does
+/// once the block is visible. A fixed stall had to outlast the ticker's
+/// *second* tick (cadence and silence window are one value, so the first tick
+/// rarely flushes) plus load margin; one too short let `close()` drain the
+/// block first.
 fn claude_idle_stub() -> String {
     format!(
         r#"#!/bin/sh
 printf '%s\n' '{{"type":"system","subtype":"init","session_id":"stub-idle","model":"stub-model"}}'
 printf '%s\n' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"held-idle-block\n"}}]}}}}'
-sleep {IDLE_STALL_SECS}
+i=0
+while [ ! -e "$HOME/{IDLE_RELEASE_FILE}" ] && [ "$i" -lt {IDLE_STALL_POLLS} ]; do sleep 0.05; i=$((i + 1)); done
 printf '%s\n' '{{"type":"tool_use","name":"Bash","input":{{"command":"post-stall-marker"}}}}'
 printf '%s\n' '{{"type":"result","subtype":"success","is_error":false,"result":"done"}}'
 exit 0
@@ -303,20 +303,23 @@ exit 0
 
 /// The idle-flush cadence this fixture drives the real binary at.
 ///
-/// Small enough to be cheap, but not so small that a loaded pane can starve the
-/// ticker thread between ticks.
-const IDLE_FLUSH_INTERVAL_SECS: u64 = 3;
+/// Short, because nothing below depends on a tick landing in time: the stub
+/// stalls until the flushed block is *seen* in the pane, so a loaded runner
+/// that starves the ticker only delays the release instead of failing it.
+const IDLE_FLUSH_INTERVAL: &str = "0.5s";
 
-/// How long [`claude_idle_stub`] stalls: **four** cadences, where two is the
-/// bare minimum.
-///
-/// The flush lands on the second tick — at most `2 × cadence` after the block is
-/// stamped, whatever the provider's startup lag, since both the stamp and the
-/// stall are measured from that same moment. The surplus two cadences are the
-/// margin the discriminating assertion spends. Derived from the cadence rather
-/// than written as its own wall-clock number so shortening one cannot silently
-/// eat the other.
-const IDLE_STALL_SECS: u64 = IDLE_FLUSH_INTERVAL_SECS * 4;
+/// File, under the staged `HOME`, whose creation ends [`claude_idle_stub`]'s
+/// stall. The test creates it once the idle-flushed block is in the pane.
+const IDLE_RELEASE_FILE: &str = "idle-release";
+
+/// Upper bound on [`claude_idle_stub`]'s stall, in 50 ms polls (30 s), so a
+/// regressed flush still lets the run finish and fail on the order assertion
+/// rather than hang the pane.
+const IDLE_STALL_POLLS: u32 = 600;
+
+/// How long the test watches the pane for the idle-flushed block before
+/// releasing the stub anyway.
+const IDLE_FLUSH_OBSERVE: Duration = Duration::from_secs(25);
 
 struct Staged {
     workspace: TestWorkspace,
@@ -435,19 +438,19 @@ fn run_in_pane(
     rows: u32,
     extra_env: &[(&str, &str)],
 ) -> Capture {
-    run_in_pane_within(harness, staged, cols, rows, extra_env, Duration::from_secs(45))
+    launch_in_pane(harness, staged, cols, rows, extra_env);
+    finish_in_pane(harness, Duration::from_secs(45))
 }
 
-/// [`run_in_pane`] with an explicit deadline, for fixtures that deliberately
-/// outlast the default (the idle-flush stall).
-fn run_in_pane_within(
+/// Type [`run_in_pane`]'s command into the pane and return without waiting,
+/// for a test that must act while the run is still in flight.
+fn launch_in_pane(
     harness: &mut TmuxHarness,
     staged: &Staged,
     cols: u32,
     rows: u32,
     extra_env: &[(&str, &str)],
-    deadline: Duration,
-) -> Capture {
+) {
     harness.resize(cols, rows).expect("resize pane");
 
     let claudine = cargo_bin("claudine").display().to_string();
@@ -481,7 +484,10 @@ fn run_in_pane_within(
     harness
         .send_command_with_env(&cmd, &env)
         .expect("send claudine command");
+}
 
+/// Wait out a [`launch_in_pane`] run and capture its finished frame.
+fn finish_in_pane(harness: &mut TmuxHarness, deadline: Duration) -> Capture {
     let capture = wait_for_exit_marker(harness, deadline);
     let _ = biscuit_test_harness::wait_for_prompt(harness);
     capture
@@ -987,13 +993,12 @@ fn level2_mega_merge_s10_parallel_proxy_failure_task_integrity() {
 /// still running, so it cannot have come from the end-of-stream drain.
 ///
 /// `CLAUDINE_IDLE_FLUSH_INTERVAL` is what makes that honesty cheap. The ticker's
-/// cadence and silence window are one knob defaulting to 30s, so proving the
-/// flush beat the drain used to cost a 75s stall — two 30s ticks plus margin.
-/// The override moves the *clock*, not the mechanism: the flush still has to
-/// arrive ahead of an event the stub emits only after its stall, and the stall
-/// still spans two full ticks, so what the assertions below rule out is
-/// unchanged. Only a real binary in a real pane can be observed here, which is
-/// why the seam has to be an env var rather than a constructor argument.
+/// cadence and silence window are one knob defaulting to 30s. The override
+/// moves the *clock*, not the mechanism, and the stall ends only once the
+/// flushed block is in the pane (or a 30s bound passes), so the flush still has
+/// to arrive ahead of an event the stub emits only after its stall. Only a real
+/// binary in a real pane can be observed here, which is why the seam has to be
+/// an env var rather than a constructor argument.
 #[test]
 #[serial(level2_terminal)]
 fn level2_prompt_idle_flush_keeps_the_task_bar_in_tmux() {
@@ -1005,15 +1010,24 @@ fn level2_prompt_idle_flush_keeps_the_task_bar_in_tmux() {
         IDLE_FLUSH_DOC,
         &claude_idle_stub(),
     );
-    let cadence = format!("{IDLE_FLUSH_INTERVAL_SECS}s");
-    let capture = run_in_pane_within(
+    launch_in_pane(
         &mut harness,
         &staged,
         110,
         130,
-        &[("CLAUDINE_IDLE_FLUSH_INTERVAL", cadence.as_str())],
-        Duration::from_secs(60),
+        &[("CLAUDINE_IDLE_FLUSH_INTERVAL", IDLE_FLUSH_INTERVAL)],
     );
+    // Hold the provider until the block is visible: while it stalls, only the
+    // idle flush can put the block in the pane. Release it either way, so a
+    // block that never surfaced fails on the order assertion below.
+    let observe_until = Instant::now() + IDLE_FLUSH_OBSERVE;
+    while Instant::now() < observe_until
+        && !harness.capture().expect("capture pane").plain.contains("held-idle-block")
+    {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    fs::write(staged.workspace.path().join(IDLE_RELEASE_FILE), b"").expect("release the stub");
+    let capture = finish_in_pane(&mut harness, Duration::from_secs(60));
 
     assert_eq!(
         capture.exit_code, 0,

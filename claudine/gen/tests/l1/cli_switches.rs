@@ -27,7 +27,12 @@ const IMAGE_TYPED: &str = "    value_type: variadic\n    variadic_min: 1\n    at
 const OSS_TYPED: &str = "    value_type: none\n    attachment: []\n";
 
 fn generate_with(document: &str) -> Result<Generation, GenError> {
-    let fixture = Fixture::for_slug("codex").with_real_overrides();
+    generate_in(&Fixture::for_slug("codex").with_real_overrides(), document)
+}
+
+/// Generates `document` in `fixture`, a workspace a test reuses across its
+/// generations so each later one reuses the parses of unchanged inputs.
+fn generate_in(fixture: &Fixture, document: &str) -> Result<Generation, GenError> {
     fixture.write(DOC, document);
     fixture.generate()
 }
@@ -498,7 +503,8 @@ fn judge(fixture: &Fixture, cell: &Cell) -> Result<(), String> {
 /// Record order in the research document never changes the output.
 #[test]
 fn output_order_does_not_depend_on_document_order() {
-    let forward = generate_with(FIXTURE).unwrap();
+    let fixture = Fixture::for_slug("codex").with_real_overrides();
+    let forward = generate_in(&fixture, FIXTURE).unwrap();
     // Move the --config record after --remote.
     let start = FIXTURE.find("  - flag: --config\n").unwrap();
     let end = FIXTURE.find("  - flag: --image\n").unwrap();
@@ -506,7 +512,7 @@ fn output_order_does_not_depend_on_document_order() {
     let without = format!("{}{}", &FIXTURE[..start], &FIXTURE[end..]);
     let tail = without.find("config_paths:").unwrap();
     let reordered = format!("{}{}{}", &without[..tail], config, &without[tail..]);
-    let reordered = generate_with(&reordered).unwrap();
+    let reordered = generate_in(&fixture, &reordered).unwrap();
     assert_eq!(cli_switches(&forward), cli_switches(&reordered));
     assert_eq!(forward.data_rs, reordered.data_rs);
     let flags: Vec<&str> = cli_switches(&forward)["researched"]
@@ -525,7 +531,8 @@ fn output_order_does_not_depend_on_document_order() {
 fn a_spelling_may_repeat_at_disjoint_command_paths() {
     let mcp_json = "  - flag: --json\n    value_type: none\n    attachment: []\n    invocation_scope:\n      - applies_to: command\n        command: [mcp, list]\n    description: \"Print the server list as JSON.\"\n    evidence_ids: [codex-cli-reference]\n";
     let document = edited("  - flag: --remote\n", &format!("{mcp_json}  - flag: --remote\n"));
-    let generation = generate_with(&document).unwrap();
+    let fixture = Fixture::for_slug("codex").with_real_overrides();
+    let generation = generate_in(&fixture, &document).unwrap();
     let json_records: Vec<&Value> = cli_switches(&generation)["researched"]
         .as_array()
         .unwrap()
@@ -539,7 +546,7 @@ fn a_spelling_may_repeat_at_disjoint_command_paths() {
         "  - flag: --remote\n",
         &format!("{}  - flag: --remote\n", mcp_json.replace("command: [mcp, list]", "command: [exec]")),
     );
-    assert!(matches!(generate_with(&clash), Err(GenError::CliSwitchInvalid { .. })));
+    assert!(matches!(generate_in(&fixture, &clash), Err(GenError::CliSwitchInvalid { .. })));
 }
 
 /// A document written before revision 2 validates against the frozen
@@ -1057,7 +1064,10 @@ fn run_override_part(part: usize) {
         check_override_grid(&cells);
     }
 
-    let base = OverrideDoc::from_catalog(cli_switches(&generate_with(FIXTURE).unwrap()));
+    // One workspace serves the base generation and every cell of the part;
+    // the research document stays the unedited fixture throughout.
+    let fixture = Fixture::for_slug("codex").with_real_overrides();
+    let base = OverrideDoc::from_catalog(cli_switches(&generate_in(&fixture, FIXTURE).unwrap()));
     if part == 0 {
         // The fixed records the edits name, so a fixture change fails here first.
         let flags: Vec<String> = match &base.value {
@@ -1073,7 +1083,6 @@ fn run_override_part(part: usize) {
         assert_eq!(flags, [CONFIG, IMAGE, JSON_FLAG, MODEL, OSS, REMOTE].map(|f| Value::from(f).to_string()));
     }
 
-    let fixture = Fixture::for_slug("codex").with_real_overrides();
     let pristine = std::fs::read_to_string(fixture.path("docs/providers/overrides/codex.yaml")).unwrap();
     let mine: Vec<&OverrideCell> = cells.iter().skip(part).step_by(OVERRIDE_PARTS).collect();
     run_matrix(
@@ -1205,7 +1214,6 @@ fn check_override_grid(cells: &[OverrideCell]) {
 fn judge_override(fixture: &Fixture, pristine: &str, base: &OverrideDoc, cell: &OverrideCell) -> Result<(), String> {
     let mut doc = base.clone();
     (cell.edit)(&mut doc);
-    fixture.write(DOC, FIXTURE);
     let overrides = fixture.path("docs/providers/overrides/codex.yaml");
     let mut text = pristine.to_string();
     text.push_str(&doc.render());

@@ -550,7 +550,7 @@ mod tests {
         let content = "::shell-block\nsleep 10 && echo after\n::end-block\n";
         let temp_dir = TempDir::new().unwrap();
         let options = test_request(ComposeOptions::new().with_shell(ShellExpansionOptions {
-            timeout: std::time::Duration::from_secs(2),
+            timeout: std::time::Duration::from_secs(1),
             timeout_behavior: ShellTimeoutBehavior::EmptyString,
             policy_root: Some(temp_dir.path().to_path_buf()),
             approval_handler: Some(Arc::new(AllowAllHandler)),

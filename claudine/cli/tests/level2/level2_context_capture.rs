@@ -86,8 +86,80 @@ use common::{CliProcessFixture, clear_no_color};
 /// frame is taken. The catalog was 929 unwrapped lines on 2026-09-20; the
 /// heights below leave room for it to keep growing.
 fn capture_context(args: &[&str], cols: u32, rows: u32) -> CapturedFrame {
+    capture_context_with(args, cols, rows, |_| None)
+}
+
+/// [`capture_context`] for `--values`, launched from a seeded fixture
+/// repository rather than this checkout.
+///
+/// The values report reads the launch repository's git state and package
+/// topology; from the test process's directory that is the whole monorepo,
+/// a second or more of CPU per run that nextest's parallel workers then
+/// multiply. The fixture keeps every repository row populated, with values
+/// long enough to wrap.
+fn capture_values_context(cols: u32, rows: u32) -> CapturedFrame {
+    capture_context_with(&["--values"], cols, rows, |fixture| {
+        seed_values_repository(fixture);
+        Some(fixture.cwd().to_path_buf())
+    })
+}
+
+/// Makes the fixture workspace a one-package Cargo repository with a single
+/// commit whose subject is long enough to wrap, plus a dirty source file.
+fn seed_values_repository(fixture: &CliProcessFixture) {
+    let root = fixture.cwd();
+    std::fs::write(
+        root.join("Cargo.toml"),
+        "[package]\nname = \"context-values-fixture\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(root.join("src/lib.rs"), "pub fn fixture() {}\n").unwrap();
+    let docs = root.join("docs/reference");
+    std::fs::create_dir_all(&docs).unwrap();
+    std::fs::write(
+        docs.join("an-intentionally-long-document-name-for-wrapping-checks.md"),
+        "# Notes\n",
+    )
+    .unwrap();
+    fixture.initialize_repository();
+    for args in [
+        &["add", "-A"][..],
+        &[
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.com",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-q",
+            "-m",
+            "feat(context): seed a fixture repository whose commit subject is deliberately long enough to wrap the values column",
+        ][..],
+    ] {
+        let status = common::helper_command("git")
+            .args(args)
+            .current_dir(root)
+            .status()
+            .expect("git should run in the fixture repository");
+        assert!(status.success(), "git {args:?} failed in the fixture repository");
+    }
+    std::fs::write(root.join("src/lib.rs"), "pub fn fixture() {}\n// dirty\n").unwrap();
+}
+
+/// Captures a `claudine context` run; `launch` may seed the fixture and name
+/// the directory the command starts in (the session's own directory when
+/// `None`).
+fn capture_context_with(
+    args: &[&str],
+    cols: u32,
+    rows: u32,
+    launch: impl FnOnce(&CliProcessFixture) -> Option<std::path::PathBuf>,
+) -> CapturedFrame {
     let fixture = CliProcessFixture::named("claudine-context-l2");
     fixture.seed_user_config();
+    let launch_dir = launch(&fixture);
     static SEQ: AtomicU32 = AtomicU32::new(0);
     let session = format!(
         "biscuit_ctx_l2_{}_{}",
@@ -115,8 +187,11 @@ fn capture_context(args: &[&str], cols: u32, rows: u32) -> CapturedFrame {
     // `KEY='v' cmd` prefix so the line can open with the `REPORT_SENTINEL`
     // print — see `report_plain_slice` for why the sentinel has to precede
     // claudine's first byte of output.
+    let cd = launch_dir.map_or_else(String::new, |dir| {
+        format!("cd '{}' && ", dir.display().to_string().replace('\'', "'\\''"))
+    });
     let cmd = format!(
-        "printf '{REPORT_SENTINEL}\\n'; env HOME='{home}' CLAUDINE_RENDEZVOUS_REPORT=false FORCE_COLOR=1 COLUMNS={cols_s} {claudine} context {}; printf done > '{done}'",
+        "{cd}printf '{REPORT_SENTINEL}\\n'; env HOME='{home}' CLAUDINE_RENDEZVOUS_REPORT=false FORCE_COLOR=1 COLUMNS={cols_s} {claudine} context {}; printf done > '{done}'",
         args.join(" ")
     );
     harness
@@ -494,7 +569,7 @@ fn level2_context_default_caps_at_140_in_wide_tmux() {
 #[serial(level2_terminal)]
 fn level2_context_values_narrow_in_tmux() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
-    let frame = capture_context(&["--values"], 120, 400);
+    let frame = capture_values_context(120, 400);
 
     assert_box_glyphs_and_left_margin(&frame);
     for header in ["Property", "Type", "Value"] {
@@ -527,7 +602,7 @@ fn level2_context_values_narrow_in_tmux() {
 #[serial(level2_terminal)]
 fn level2_context_values_at_140_fills_cap_in_tmux() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
-    let frame = capture_context(&["--values"], 140, 400);
+    let frame = capture_values_context(140, 400);
 
     assert_box_glyphs_and_left_margin(&frame);
     assert_fills_to_140_cap_with_right_margin(&frame);
@@ -550,7 +625,7 @@ fn level2_context_values_at_140_fills_cap_in_tmux() {
 #[serial(level2_terminal)]
 fn level2_context_values_caps_at_140_in_wide_tmux() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
-    let frame = capture_context(&["--values"], 160, 400);
+    let frame = capture_values_context(160, 400);
 
     assert_box_glyphs_and_left_margin(&frame);
     assert_fills_to_140_cap_with_right_margin(&frame);
@@ -854,7 +929,7 @@ fn level2_context_default_preserves_columns_at_min_width_in_tmux() {
 #[serial(level2_terminal)]
 fn level2_context_values_preserves_columns_at_min_width_in_tmux() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
-    let frame = capture_context(&["--values"], MIN_SUPPORTED_WIDTH, 400);
+    let frame = capture_values_context(MIN_SUPPORTED_WIDTH, 400);
 
     assert_box_glyphs_and_left_margin(&frame);
     assert_no_planner_diagnostic(&frame);

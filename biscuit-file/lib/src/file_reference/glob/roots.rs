@@ -55,6 +55,9 @@ pub(crate) struct PatternRoot {
     /// The directory a walk starts in: the root plus the pattern's literal
     /// directory prefix.
     pub walk: PathBuf,
+    /// The walk directory's canonical identity: names the filesystem stores,
+    /// so it compares with the names a walk below the root reads.
+    walk_identity: PathIdentity,
 }
 
 /// Interpolate a pattern's payload, keeping `{{VAR}}` values literal.
@@ -164,6 +167,7 @@ pub(crate) fn prepare(
         let identity = canonical_identity(&root);
         if roots.iter().all(|seen| seen.identity != identity) {
             roots.push(PatternRoot {
+                walk_identity: canonical_identity(&walk),
                 root,
                 identity,
                 walk,
@@ -187,6 +191,24 @@ impl PreparedPattern {
     pub(crate) fn could_match_below(&self, dir: &PathIdentity) -> bool {
         owning_root(&self.roots, dir).is_some_and(|(_, relative)| {
             self.max_depth.is_none_or(|max| relative.len() < max)
+        })
+    }
+
+    /// Whether a walk that reached the directory `dir` (a canonical
+    /// identity) could still find a file this pattern admits below it: `dir`
+    /// leads to one of the walk directories, or lies inside one no deeper than
+    /// a match can reach.
+    ///
+    /// Any root counts, not only the one that owns `dir`: a file below `dir`
+    /// may be owned by a nested root. A `true` that cannot pay off only costs
+    /// a walk; a wrong `false` would hide a match.
+    pub(crate) fn may_match_below(&self, dir: &PathIdentity) -> bool {
+        self.roots.iter().any(|root| {
+            root.walk_identity.starts_with(dir)
+                || (dir.starts_with(&root.walk_identity)
+                    && dir.strip_prefix(&root.identity).is_some_and(|relative| {
+                        self.max_depth.is_none_or(|max| relative.len() < max)
+                    }))
         })
     }
 
@@ -265,16 +287,25 @@ fn respelled(root: &Path, supplied: &Path) -> bool {
 /// Whether the existing `path`, reached as `name` in `dir`, is stored under
 /// exactly that spelling.
 ///
-/// The decisive evidence is an entry of `dir` spelled `name`. When `dir`
-/// cannot be listed (a traversal-only directory), the stored spelling is
-/// taken from the canonical path on macOS and Windows, which report stored
-/// names; a symlinked name, or any name on another OS, is accepted only when
+/// On macOS and Windows, which report stored names in a canonical path, a
+/// non-symlink whose canonical name is `name` is accepted without listing
+/// `dir`: a directory such as the system temp dir can hold hundreds of
+/// thousands of entries. Otherwise the decisive evidence is an entry of `dir`
+/// spelled `name`. When `dir` cannot be listed (a traversal-only directory),
+/// the stored spelling is taken from that canonical path on macOS and
+/// Windows; a symlinked name, or any name on another OS, is accepted only when
 /// the directory provably does not fold that name's case. Anything else is
 /// unverified and rejected. On Windows an 8.3 short name (`RUNNER~1`) is the
 /// filesystem's own alternate name for a directory; it is never listed, and
 /// it is accepted.
 fn spelled_as_stored(dir: &Path, name: &OsStr, path: &Path, meta: &std::fs::Metadata) -> bool {
     if cfg!(windows) && is_short_name(name) {
+        return true;
+    }
+    let reports_stored_name = cfg!(any(target_os = "macos", windows)) && !meta.file_type().is_symlink();
+    if reports_stored_name
+        && canonicalize_simplified(path).is_ok_and(|canonical| canonical.file_name() == Some(name))
+    {
         return true;
     }
     if let Ok(entries) = std::fs::read_dir(dir) {
@@ -290,9 +321,9 @@ fn spelled_as_stored(dir: &Path, name: &OsStr, path: &Path, meta: &std::fs::Meta
             return false;
         }
     }
-    if cfg!(any(target_os = "macos", windows)) && !meta.file_type().is_symlink() {
-        return canonicalize_simplified(path)
-            .is_ok_and(|canonical| canonical.file_name() == Some(name));
+    if reports_stored_name {
+        // The canonical name, checked above, is not `name`.
+        return false;
     }
     !folds_case(dir, name, meta)
 }

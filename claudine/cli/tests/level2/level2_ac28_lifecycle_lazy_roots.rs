@@ -294,67 +294,33 @@ fn event_line<'a>(lines: &'a [String], event: &str) -> &'a str {
 /// are mutually exclusive within one iteration: a clean provider exit reaches
 /// `success` (and then the `loop` gate), a non-zero exit reaches `failure`, and
 /// a harness key the plan parser rejects blocks before the provider is invoked.
-#[test]
-fn level2_ac28_lazy_roots_resolve_in_every_lifecycle_event() {
-    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+/// Each run is its own test, in its own fixture, so nextest can run them side by
+/// side; `the_three_runs_reach_all_seven_events` keeps their union whole.
+mod level2_ac28_lazy_roots_resolve_in_every_lifecycle_event {
+    use super::*;
 
-    let fixture = stage();
-    let ok = write_document(&fixture, "ok.md", &probe_document(""));
-    let blocked = write_document(
-        &fixture,
-        "blocked.md",
-        &probe_document("step_timeout: \"not-a-duration\"\n"),
-    );
+    const SUCCESS_EVENTS: &[&str] = &["initialize", "start", "success", "finalize", "loop"];
+    const FAILURE_EVENTS: &[&str] = &["initialize", "start", "failure", "finalize"];
+    const BLOCKED_EVENTS: &[&str] = &["initialize", "blocked", "finalize"];
 
-    let success_pane = compose_in_tmux(
-        &fixture,
-        &fixture.repo,
-        &ok,
-        "",
-        at_least(fixture.events_path(), 5),
-    );
-    let success_run = fixture.events();
+    /// Composes the probe document once and asserts the run recorded exactly
+    /// `events`, each resolving both lazy roots.
+    fn assert_run(provider_exit: i32, extra_frontmatter: &str, events: &[&str]) {
+        require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
-    write_provider(&fixture, 3);
-    let failure_pane = compose_in_tmux(
-        &fixture,
-        &fixture.repo,
-        &ok,
-        "",
-        at_least(fixture.events_path(), success_run.len() + 4),
-    );
-    let failure_run = fixture.events()[success_run.len()..].to_vec();
+        let fixture = stage();
+        write_provider(&fixture, provider_exit);
+        let document = write_document(&fixture, "probe.md", &probe_document(extra_frontmatter));
+        let pane = compose_in_tmux(
+            &fixture,
+            &fixture.repo,
+            &document,
+            "",
+            at_least(fixture.events_path(), events.len()),
+        );
+        let run = fixture.events();
 
-    let recorded_so_far = success_run.len() + failure_run.len();
-    let blocked_pane = compose_in_tmux(
-        &fixture,
-        &fixture.repo,
-        &blocked,
-        "",
-        at_least(fixture.events_path(), recorded_so_far + 3),
-    );
-    let blocked_run = fixture.events()[recorded_so_far..].to_vec();
-
-    let expected = format!("branch={BRANCH_BEFORE} key={ENV_VALUE}");
-    let runs: [(&Vec<String>, &[&str], &String); 3] = [
-        (
-            &success_run,
-            &["initialize", "start", "success", "finalize", "loop"],
-            &success_pane,
-        ),
-        (
-            &failure_run,
-            &["initialize", "start", "failure", "finalize"],
-            &failure_pane,
-        ),
-        (
-            &blocked_run,
-            &["initialize", "blocked", "finalize"],
-            &blocked_pane,
-        ),
-    ];
-    let mut reached: Vec<String> = Vec::new();
-    for (run, events, pane) in runs {
+        let expected = format!("branch={BRANCH_BEFORE} key={ENV_VALUE}");
         assert_eq!(
             run.len(),
             events.len(),
@@ -362,29 +328,47 @@ fn level2_ac28_lazy_roots_resolve_in_every_lifecycle_event() {
         );
         for event in events {
             assert_eq!(
-                event_line(run, event),
+                event_line(&run, event),
                 format!("{event} {expected}"),
                 "the `{event}` handler must resolve both lazy roots; the run \
                  recorded {run:?}; pane:\n{pane}"
             );
-            reached.push((*event).to_string());
         }
     }
 
-    for event in [
-        "initialize",
-        "start",
-        "success",
-        "blocked",
-        "failure",
-        "finalize",
-        "loop",
-    ] {
-        assert!(
-            reached.iter().any(|seen| seen == event),
-            "AC28 covers all seven lifecycle events; `{event}` was never reached \
-             across the three runs, which reached {reached:?}"
-        );
+    #[test]
+    fn success_run() {
+        assert_run(0, "", SUCCESS_EVENTS);
+    }
+
+    #[test]
+    fn failure_run() {
+        assert_run(3, "", FAILURE_EVENTS);
+    }
+
+    #[test]
+    fn blocked_run() {
+        assert_run(3, "step_timeout: \"not-a-duration\"\n", BLOCKED_EVENTS);
+    }
+
+    #[test]
+    fn the_three_runs_reach_all_seven_events() {
+        for event in [
+            "initialize",
+            "start",
+            "success",
+            "blocked",
+            "failure",
+            "finalize",
+            "loop",
+        ] {
+            assert!(
+                [SUCCESS_EVENTS, FAILURE_EVENTS, BLOCKED_EVENTS]
+                    .iter()
+                    .any(|events| events.contains(&event)),
+                "AC28 covers all seven lifecycle events; no run reaches `{event}`"
+            );
+        }
     }
 }
 
