@@ -307,26 +307,6 @@ For every high or medium finding:
 
 Do not stop at the first high finding. Finish the sweep, then write.
 
-::block when="previous_review"
-### Recurrence
-
-Compare each finding in this review with the findings of every earlier review
-in this directory. If a finding belongs to the same class as an earlier one:
-
-- say so under a `## Recurrence` heading, naming the earlier review and finding
-- state which sibling sites that fix should have swept and did not
-- sweep them all now, within the spec boundary, so this review carries the
-  complete list
-- set the frontmatter property `recurrence` to `true`; the review loop does not
-  stop on it, so the next repair cycle implements exactly the list this review
-  carries
-
-A class that keeps recurring because each repair adds new machinery, which the
-next review then finds a new edge in, is a sign the requirement has no
-boundary. Say so, and mark the finding medium unless an acceptance criterion
-names the failing case.
-::end-block
-
 ::file "../_input-robustness.md"
 
 ::file ../_writing-clearly.md 
@@ -370,7 +350,6 @@ test is at the wrong level under "Findings" with severity at least "high".
     - set `$schema` to "feature-review.yaml"
     ::file "../_ready.md"
     - set `reviewed_by` property to "{{ctx.agent}}/{{ctx.model}}" 
-    - set `recurrence` to `true` when any finding repeats the class of a finding in an earlier review (see "Recurrence" above), otherwise `false`
     - set `created` property to "{{ctx.now}}"
     - set `spec` property to "{{ parent_dir(spec) }}/{{ basename(spec) }}"
     - set `implemented` property to `false`
@@ -397,33 +376,23 @@ The spec file which underpins the requirements for this feature review needs to 
 ::block when="iteration != 1"
 > **Note:** this is _not_ the first review we've done on this functionality but the prior review's suggestions have now all been implemented (or at least the developer has claimed that they are).
 ::end-block
-::block when="iteration == 1"
 
-### Human in the Loop?
-
-This is the first review after the implementation completed:
-
-- during this implementation the agent was strongly encouraged to complete the work including making small design decisions where there was a gap
-- this means that there may now be several "decisions" that the agent made without a review or things that were deferred because a decision was needed. If either condition exists then we will stop now to get feedback:
-    - report all decisions/rules/deferred scope that needs to be reviewed
-    - take the time to write this clearly, giving examples where possible
-    - avoid jargon and do not assume that the caller knows this repo
-    - YOU MUST set the `human_in_the_loop` to `true` on the review file ({{review}})
-- if no review is required by the caller then you must set `human-in-the-loop` to `false` on the review file ({{review}})
-
-::end-block
-
-::block when="iteration == 1 && !is_empty('next')"
+::block when="!is_empty('next')"
 
 ### Spec and Plan Refresh
 
-We are in a multi-plan based implementation:
+If you have marked this review as "ready" then that means that the current review/fix cycle for {{spec}} is finishing but in this case this spec is part of a broader
+spec pipeline and the _next_ spec and plan need to be updated.
 
-- the next spec is '{{next}}', it has a plan located at '{{next_plan}}'
+> **Note:** if you did NOT set `ready` to `true` then you can skip this for now
+
+We are in a multi-spec based implementation pipeline:
+
+- the next spec is '{{next_spec}}'; it has a plan located at '{{next_plan}}'
 - both the **spec** and the **plan** were written _before_ the current spec was implemented
 - we must now refresh the next spec and plan based on:
     - what we've learned during the implementation of the current phase
-    - 
+    - any deferred scope that needs to be moved into this next phase
 
 ::end-block
 
