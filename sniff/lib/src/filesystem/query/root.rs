@@ -78,14 +78,43 @@ fn symlink_metadata(path: &Path) -> io::Result<std::fs::Metadata> {
     std::fs::symlink_metadata(path)
 }
 
+#[cfg(windows)]
+fn is_pipe_namespace(path: &Path) -> bool {
+    use std::path::{Component, Prefix};
+    let equal = |name: &std::ffi::OsStr, expected: &str| {
+        name.to_str().is_some_and(|name| name.eq_ignore_ascii_case(expected))
+    };
+    let mut components = path.components();
+    let Some(Component::Prefix(prefix)) = components.next() else { return false };
+    match prefix.kind() {
+        Prefix::DeviceNS(name) | Prefix::Verbatim(name) if equal(name, "pipe") => true,
+        Prefix::UNC(_, share) | Prefix::VerbatimUNC(_, share) if equal(share, "pipe") => true,
+        Prefix::DeviceNS(name) | Prefix::Verbatim(name) if equal(name, "GLOBALROOT") => {
+            let mut names = components.filter_map(|component| match component {
+                Component::Normal(name) => Some(name),
+                _ => None,
+            });
+            names.next().is_some_and(|name| equal(name, "Device"))
+                && names.next().is_some_and(|name| equal(name, "NamedPipe"))
+        }
+        _ => false,
+    }
+}
+
 /// Resolves the root alias once and captures its identity.
 ///
-/// Every file-type decision comes from `symlink_metadata`, which never opens
-/// the object, so a FIFO or device is rejected before anything could wait on
-/// it.
+/// Windows pipe namespaces are rejected before metadata lookup, which can
+/// connect to a waiting pipe server. Other non-file targets are rejected
+/// before an identity handle is opened.
 pub(crate) fn resolve(path: &Path, budget: &Budget) -> Result<Root, PathUsageError> {
     if budget.expired() {
         return Err(timeout(path, budget));
+    }
+    #[cfg(windows)]
+    if is_pipe_namespace(path) {
+        return Err(PathUsageError::UnsupportedTargetKind {
+            path: path.to_path_buf(), file_type: "named_pipe",
+        });
     }
     let link_metadata = symlink_metadata(path).map_err(|e| io_error(path, e))?;
     if let Some(file_type) = unsupported_kind(&link_metadata.file_type()) {
