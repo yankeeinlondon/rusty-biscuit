@@ -255,33 +255,19 @@ not enforce, so the vendored version matches the import path directly.
 `find_unsupported_predicates` and `find_hook_predicates` scan query text for
 these predicates.
 
-### Drift
+### Refreshing a vendored query
 
-**Drift** is the gap between a vendored query and the current upstream
-version. The library records the nvim-treesitter revision every vendored
-query was taken from (`expected_upstream_revisions()` returns `0.10.4`), and
-`check_all_drift(Some(revision))` reports each vendored query whose recorded
-revision differs from the one you pass. Tree Hugger's own queries never
-drift.
+Each vendored query's provenance records the nvim-treesitter revision it was
+taken from (`upstream_revision`, `0.10.4` today). Nothing compares it with
+upstream automatically. To refresh a vendored query, compare it with the
+upstream file at the revision recorded in its provenance and at the new one,
+carry over Tree Hugger's changes (the provenance `notes` list them), and
+update the recorded revision in `lib/src/queries/provenance.rs`.
 
-```rust
-let reports = tree_hugger::check_all_drift(Some("0.10.5"));
-print!("{}", tree_hugger::summarize_drift(&reports));
-// Upstream drift detected in N query(s):
-//   Rust locals (queries/rust/locals.scm):
-//     - upstream revision changed from 0.10.4 to 0.10.5
-```
-
-The check compares revisions only. It does not fetch upstream or compare file
-contents; the content, path and capture-level drift kinds in `DriftItem` are
-defined but no check produces them yet. Refreshing a vendored query is a
-manual job: compare it with the upstream file at the new revision, carry over
-Tree Hugger's changes (the provenance `notes` list them), and update the
-recorded revision.
-
-`QueryInventory` complements this with a static list of the captures each
-upstream suite (`locals`, `highlights`, `injections`, `folds`, `indents`)
-offers per language, flagging the ones Tree Hugger reuses. Only `locals` is
+`QueryInventory` complements the provenance records with a static list of
+the captures each upstream suite (`locals`, `highlights`, `injections`,
+`folds`, `indents`) offers per language, flagging the ones Tree Hugger
+reuses. Only `locals` is
 vendored today.
 
 ## Changing a query

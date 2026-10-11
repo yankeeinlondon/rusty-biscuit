@@ -381,7 +381,7 @@ src/main.rs (Rust)
  42 |     let value = result.unwrap();
     |                        ^^^^^^
 
-[semantic] error [undefined-symbol]: Reference to undefined symbol `foo`
+[semantic] warning [undefined-symbol]: Reference to undefined symbol 'foo'
   --> src/main.rs:50:5
 
 [syntax] error: Missing semicolon

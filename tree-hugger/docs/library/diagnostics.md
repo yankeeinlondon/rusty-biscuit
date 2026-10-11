@@ -77,8 +77,8 @@ Pattern rules:
 | `unwrap-call` | Rust | `.unwrap()` | off (`restriction`) |
 | `expect-call` | Rust | `.expect()` | off (`restriction`) |
 | `debugger-statement` | JavaScript, TypeScript | `debugger;` | on |
-| `eval-call` | JavaScript, TypeScript, Python, PHP | `eval()` | on |
-| `exec-call` | Python | `exec()` | on |
+| `eval-call` | JavaScript, TypeScript, Python, PHP | `eval()` (in PHP in any letter case, such as `EVAL()`) | on |
+| `exec-call` | Python, PHP | `exec()`: in Python it runs a string as code, in PHP a shell command | on |
 | `breakpoint-call` | Python | `breakpoint()` | on |
 | `console-log` | JavaScript, TypeScript | `console.log()` | off |
 | `print-call` | Python | `print()` | off |
@@ -97,6 +97,27 @@ Semantic rules, for every language:
 Syntax diagnostics carry the rule ID `invalid-syntax` in their metadata and
 are always on.
 
+In PHP, where function names ignore letter case, `exec-call` reports
+`exec('ls')`, `EXEC('ls')` and the global `\exec('ls')`. It does not report
+`Foo\exec('ls')` or `namespace\exec('ls')`, which call a different function
+that shares the name, nor PHP's other ways to run a command: `shell_exec`,
+`system`, `passthru`, `proc_open`, `popen` and the backtick operator. So
+`hug lint --deny exec-call` fails on PHP files that call `exec()` as well as
+Python ones.
+
+`undefined-symbol` reports a name a file uses but neither defines nor
+imports, and that is not a language builtin:
+
+```python
+total = compute_total(items)   # reports `compute_total` and `items`
+```
+
+It skips qualified names such as `os.path` (`undefined-module` checks the
+qualifier), single-character names and names starting with `_`. It sees one
+file at a time, so wildcard imports (`from x import *`), names made by macros
+or at run time, and gaps in the builtin lists produce false positives; that
+is why it is experimental and low confidence.
+
 `unused-import` is off by default because, without type resolution, a
 syntactic scan cannot see an import used only through a trait method (Rust
 `Write` for `.write_all()`) or a macro. The **experimental** rules run only
@@ -111,9 +132,7 @@ let file = SourceFile::read("src/main.rs")?.experimental_semantics(true).parse()
 ```
 
 `hug lint --list-rules` prints every registered rule with its category,
-severity, confidence and default. The registry also holds
-`unused-variable`, `shadowed-variable` and `deprecated-syntax`, which no
-analysis reports today.
+severity, confidence and default. Every listed rule can be reported.
 
 ## Choosing which rules to show
 
@@ -144,10 +163,11 @@ or `category:<name>` (such as `category:restriction`), and `apply_policy`
 returns the severity after allow, warn, deny and strict selectors, in that
 order of precedence.
 
-The `severity` on a diagnostic as returned is the library's own and is not
-always the registry default: `undefined-symbol` is returned as `Error` while
-its registry default is `Warning`. Apply the registry when the severity
-matters.
+The `severity` on a diagnostic as returned is its rule's registry
+`default_severity`, whether or not the rule is enabled by default, so the
+library and an unconfigured `hug lint` agree (`undefined-symbol` is a
+`Warning` in both). A selector changes it only when you apply the policy as
+above.
 
 ## Ignore comments
 

@@ -279,8 +279,9 @@ let exported = file.exported_symbols()?;     // here: `Point` and `origin`
 An `ImportSymbol` has the local `name`, the `original_name` and `alias` when
 the import renames, and the `source` module. Its `is_reexport` flag marks a
 Rust `pub use` (any visibility on the `use`); other languages always report
-`false`. `reexported_symbols()` exists but always returns an empty list, so
-filter `imported_symbols()` on `is_reexport` instead. Exports come from export
+`false`. That flag is the only re-export signal: re-exports are detected for
+Rust `pub use` only, so filter `imported_symbols()` on `is_reexport` to list
+them. Exports come from export
 syntax (Rust `pub` at module level, JavaScript `export`, and so on), not
 from a `Public` visibility level: `Point::norm` above is public but not
 exported. The same imports and exports are on every query result as

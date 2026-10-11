@@ -19,7 +19,8 @@ Pattern-based rules defined in `<lang>/lint.scm` queries.
 | **Python** | `eval-call` | Usage of `eval()` | on |
 | **Python** | `exec-call` | Usage of `exec()` | on |
 | **Python** | `breakpoint-call` | Usage of `breakpoint()` | on |
-| **PHP** | `eval-call` | Usage of `eval()` | on |
+| **PHP** | `eval-call` | `eval()`, any letter case | on |
+| **PHP** | `exec-call` | `exec()`/`\exec()`, any letter case; not `Foo\exec()` | on |
 
 `unwrap-call` and `expect-call` are `restriction`-category rules: the construct
 is
@@ -34,7 +35,7 @@ Symbol analysis rules computed at runtime:
 
 | Rule | Severity | Description | Default |
 |------|----------|-------------|---------|
-| `undefined-symbol` | Error | Reference to undefined symbol | experimental |
+| `undefined-symbol` | Warning | Reference to undefined symbol | experimental |
 | `undefined-module` | Warning | Reference to undefined module or namespace | experimental |
 | `unused-symbol` | Warning | Symbol defined but never used | experimental |
 | `unused-import` | Warning | Imported symbol never referenced | off (low confidence) |
@@ -261,11 +262,14 @@ CLI output with context:
    ) @diagnostic.todo-macro
    ```
 
-2. **Add severity mapping** (optional, defaults to Info):
-   ```rust
-   // In queries/mod.rs — severity_for_rule()
-   "todo-macro" => DiagnosticSeverity::Info,
-   ```
+2. **Register the rule** in `rule_registry.rs` with its `languages` and
+   `default_severity`. The registry is the only severity table: every
+   diagnostic is stamped with its rule's `default_severity` (an unregistered
+   ID gets `Info`). A rule emitted by Rust code instead of a query also goes
+   in `SEMANTIC_RULE_IDS` (`file/tree_file.rs`). `rule_registry_consistency`
+   fails if a query capture, registry entry or message arm is missing on one
+   side, and `lint_severity_registry` needs an emitting case for the rule.
+   Any registry or emitted-diagnostic change also bumps `EXTRACTOR_REVISION`.
 
 3. **Add message formatting** (optional):
    ```rust

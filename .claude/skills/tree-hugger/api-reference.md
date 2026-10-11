@@ -41,15 +41,16 @@ fn local_symbols(&self) -> Result<Vec<SymbolInfo>, TreeHuggerError>
 // All identifier references in the file
 fn referenced_symbols(&self) -> Result<Vec<ReferencedSymbol>, TreeHuggerError>
 
-// Re-exported imports
-fn reexported_symbols(&self) -> Result<Vec<ImportSymbol>, TreeHuggerError>
-
 // Whole-file reference evidence: an `Occurrences` query selecting no kinds
 fn reference_evidence(&self) -> Result<ReferenceEvidence, TreeHuggerError>
 ```
 
 `referenced_symbols()` is the older name-only usage list (diagnostics read
 the same captures); it carries no owner, kind or confidence.
+
+There is no re-export method: re-exports are detected for Rust `pub use`
+only, through `ImportSymbol::is_reexport` on `imported_symbols()`; every
+other language reports `false`.
 
 #### Reference Evidence (`shared/schema_v2/occurrences.rs`)
 

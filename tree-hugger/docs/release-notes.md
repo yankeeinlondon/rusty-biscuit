@@ -4,6 +4,53 @@ Changes to Tree Hugger that alter what it reports or how its output looks,
 newest first. Each note shows the change with a before/after example where
 the output changed; the linked pages describe the current behavior.
 
+## Unused library APIs removed
+
+- **`TreeFile::reexported_symbols()` is removed.** It always returned an
+  empty list. Re-exports are detected for Rust `pub use` only: filter
+  `imported_symbols()` on `ImportSymbol::is_reexport`.
+- **The query drift module is removed** (`check_query_drift`,
+  `check_all_drift`, `summarize_drift`, `expected_upstream_revisions`,
+  `DriftReport`, `DriftItem`). It only compared two revision strings.
+  Each vendored query's provenance still records its upstream revision; see
+  [Tree-sitter Queries](./queries.md#refreshing-a-vendored-query).
+
+## Lint severities follow the rule registry; PHP `exec` and `EVAL` reported
+
+- **One severity.** A library diagnostic now carries its rule's registry
+  default severity. `undefined-symbol` was returned by the library as
+  `Error` while `hug lint --experimental-semantics` showed a `Warning`; both
+  now say `Warning`. Cached entries from earlier builds are recomputed.
+- **Rules that never fired are gone.** `unused-variable`,
+  `shadowed-variable` and `deprecated-syntax` are no longer registered or
+  listed by `hug lint --list-rules`. Use `unused-symbol` for unused locals.
+- **PHP `exec()` is reported** under `exec-call` (now titled "Dynamic code
+  or command execution (exec)"), including `EXEC()` and the global
+  `\exec()`, but not `Foo\exec()`. `--deny exec-call` therefore also fails on
+  PHP files.
+- **PHP `eval` matches in any letter case**, so `EVAL(...)` and similar
+  spellings gain new `eval-call` findings. Python stays case-sensitive.
+
+Before:
+
+```text
+$ hug lint --plain run.php   # exec('ls'); EVAL('1;');
+(nothing reported)
+```
+
+After:
+
+```text
+$ hug lint --plain run.php
+run.php (PHP)
+[lint] warning [exec-call]: Dynamic code or command execution via exec() is discouraged
+...
+[lint] warning [eval-call]: Use of eval() is discouraged
+...
+```
+
+See [Diagnostics](./library/diagnostics.md).
+
 ## Automatic package sections in stats
 
 `hug functions|types|symbols|classes --stats` now prints overall totals followed
