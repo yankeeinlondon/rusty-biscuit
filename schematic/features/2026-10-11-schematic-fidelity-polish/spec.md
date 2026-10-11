@@ -109,11 +109,13 @@ implementer before it is relied on.
     are an accepted gap, not a defect to fix (D53, R39). A module shared by
     several APIs (emqx) also loses its combined-module docs (R51).
 12. **`schematic-define` hygiene.** The README has about 7 drifted,
-    non-compiling examples and is not doctested (ledger row 19), and the vendor
-    pagination constructors (`github()`, `gitlab()`, `bitbucket()`,
-    `gitea()`, **checked:** present in `schematic/define/src/pagination.rs`)
-    sit in the vendor-neutral crate. Spec 4a removes the old pagination types;
-    this spec moves only what remains.
+    non-compiling examples and is not doctested (ledger row 19). The vendor
+    pagination constructors (`github()`, `gitlab()`, `bitbucket()`, `gitea()`,
+    **checked:** present in `schematic/define/src/pagination.rs`) sat in the
+    vendor-neutral crate. The author ruled (D55-4) that each API owns its own
+    small strategy function in `schematic-definitions`, and spec 4a does that
+    work. This spec moves no presets; it verifies none remains in
+    `schematic-define` and that no shared preset layer was introduced (R43).
 13. **No closing audit.** The whole body of work (parent D20) requires every
     defect-ledger row and every recommendation 1-14 closed or recorded as an
     accepted gap, and requires sniff to retire its hand-written provider
@@ -134,8 +136,8 @@ D49, D20).
   limit vocabulary, OAuth2 grants, serializable definitions; response model v2,
   GraphQL). This spec consumes their output.
 - Changing the runtime, envelope, credentials, or pagination model (specs 2, 3
-  and 4a). Spec 4a removes the old pagination types; this spec only moves the
-  vendor pagination constructors that remain.
+  and 4a). Spec 4a removes the old pagination types and gives each API its own
+  strategy function (D55-4); this spec only verifies the result (R43).
 - Per-endpoint typed wrapper methods (D53, accepted gap against D49 item 3 and
   recommendation 12; R39).
 - WebSocket fixes and the typed message enums (spec 6). This spec only exports
@@ -155,8 +157,10 @@ Restated in full so the implementer need not open the parent. Provenance:
 - **D18 (fourth landing, fidelity and hygiene).** A fourth landing carries
   fidelity and hygiene work that does not change the definition vocabulary:
   OpenAPI schemars-bridge fixes; the `x-schematic` round trip; Postman example
-  bodies; README doctests; moving vendor pagination presets out of the neutral
-  crate; per-API feature flags in the generated crate.
+  bodies; README doctests; vendor pagination presets out of the neutral crate
+  (superseded by D55-4: each API owns its own strategy function, delivered by
+  spec 4a, so this spec only verifies it); per-API feature flags in the
+  generated crate.
 - **D46 (stage order).** WebSocket is landing 3 and fidelity and polish is
   landing 4. The single generated API list (replacing seven parallel lists) and
   required constant headers as OpenAPI parameters go to landing 4.
@@ -190,8 +194,21 @@ Restated in full so the implementer need not open the parent. Provenance:
   its own type with its own generator. The AsyncAPI exporter exports what that
   model holds.
 - **D14/D19/D42 (pagination, consumed here).** `PaginationStyle` was replaced
-  by the model of spec 3. The vendor constructors named by D18 must be moved
-  in the form that model took, not necessarily as `PaginationStyle` values.
+  by the model of spec 3.
+- **D55-4 (vendor presets).** Each API owns its own small pagination strategy
+  function in `schematic-definitions`. No preset moves and no shared preset
+  layer exists. Spec 4a delivers this; R43 verifies it.
+- **D55 (`?` in paths).** Spec 1 only warns about `?` in a path template. Spec
+  4a owns the hard error and the migration of the nine endpoints (Gitea 1,
+  GitLab 1, OpenAI 7). This spec verifies the error is in force and no `?`
+  path remains.
+- **D56 (consumed here).** The runtime trait is `EndpointSpec` (Decided).
+  `auth_policy` is kept with a builder form and `oauth_scopes` is removed
+  (D56-6). The response vocabulary of spec 5 includes the end-marker `keep`
+  modifier and the `Bytes` framing. Definitions serialize through plain serde
+  derives on `RestApi`/`Endpoint`/`EndpointParams`/`ParamDef`, with JSON
+  definition snapshots from spec 4a. No credential resolves means anonymous
+  (D56-1).
 - **D36 (consumed here).** Same-address endpoints that differ by a body
   selector merge into one OpenAPI operation listing both content types. This
   spec's exporter changes must not regress that.
@@ -210,8 +227,8 @@ Restated in full so the implementer need not open the parent. Provenance:
 - **Parent recommendations (D1: everything in scope).** Recommendations 7
   (constant headers), 8 (bridge), 9 (`x-schematic`), 10 (module-path
   resolvers, feature flags), 11 (single list), 12 (docs honesty; typed
-  convenience methods are an accepted gap, D53), and 14 (README doctests,
-  vendor move of what spec 4a leaves) belong here.
+  convenience methods are an accepted gap, D53), and 14 (README doctests; the
+  vendor-preset item is verification only, R43) belong here.
 
 ## Requirements
 
@@ -293,7 +310,12 @@ added it uses `just test-l2` and must never take window focus.
 - **R10. The importer reads `x-schematic` for the supported subset.** The
   supported subset is the set in P10-b below. For each field in the subset,
   export, then import, then export yields a semantically equal definition and
-  document: ordering and normalization may differ; meaning may not.
+  document: ordering and normalization may differ; meaning may not. The subset
+  includes the D56 end-marker `keep` modifier and the `Bytes` framing from
+  spec 5's response vocabulary. Definition serialization tests, and the
+  round trip where it compares definitions, build on the JSON definition
+  snapshots and plain serde derives (`RestApi`, `Endpoint`, `EndpointParams`,
+  `ParamDef`) from spec 4a rather than a new serialization form.
   Validated by: L1 round-trip tests in `schematic-define` / `schematic-gen`
   over the committed OpenAPI artifacts and over purpose-built fixtures; the
   assertion compares parsed values, not bytes.
@@ -511,17 +533,22 @@ added it uses `just test-l2` and must never take window focus.
   with a stated reason, and a drifted example fails `just test`. Examples that
   describe vocabulary changed by specs 3 to 5 (including 4a and 4b) are rewritten to the current API.
   Validated by: doctests in `schematic-define` via `just test`.
-- **R43. Vendor pagination constructors leave the neutral crate.** Spec 4a
-  removes the old pagination types; this requirement moves only what remains of
-  the vendor constructors. The public
-  API of `schematic-define` has no `github()`, `gitlab()`, `bitbucket()`, or
-  `gitea()` pagination constructor (or whatever specs 3 and 4a left of them), and
-  `schematic-definitions` provides them (D18; the GitHub, GitLab, Gitea, and
-  Bitbucket definitions use the `schematic-definitions` copies; the
-  Bitbucket-style helper inlined 15 times elsewhere collapses to one shared
-  helper, parent 4.1). Generated output and exported OpenAPI for those four
-  APIs are unchanged. Validated by: compile-level check (absence from the
-  define API), and the artifact-drift tests.
+- **R43. Verify vendor pagination constructors are gone (D55-4).** Each API owns
+  its own small strategy function in `schematic-definitions`, delivered by spec
+  4a. This spec moves no presets. It verifies that the public API of
+  `schematic-define` has no vendor-named pagination constructor (`github()`,
+  `gitlab()`, `bitbucket()`, `gitea()`) after spec 4a, and that no shared
+  preset layer (a common module or crate of vendor presets) was introduced in
+  `schematic-definitions` or elsewhere. Generated output and exported OpenAPI
+  for the four APIs are unchanged by this spec. Validated by: a compile-level
+  check or grep (absence from the define API, recorded in the log), a grep for
+  a shared preset layer, and the artifact-drift tests.
+- **R52. Verify `?` in path templates is a hard error and none remains
+  (D55).** Spec 1 only warns; spec 4a owns the hard error and the migration of
+  the nine endpoints (Gitea 1, GitLab 1, OpenAI 7). This spec verifies the
+  error is in force and that no registered endpoint path contains `?`. Validated
+  by: an L1 scan over all registered endpoints (or a recorded grep plus the
+  existing error test from spec 4a), and the log entry.
 
 ### Ledger disposition and whole-work done (D20)
 
@@ -542,10 +569,13 @@ added it uses `just test-l2` and must never take window focus.
   reason: the optional-auth variant (Ollama); the legacy-versus-modern auth
   dual-source cleanup; invented HuggingFace stub shapes; orphaned types; typed
   convenience methods (D53, R39). It must map: `Schema::module_path` to spec
-  4a; `?` in path templates to spec 1; removal of the old pagination types and
-  conversion to spec 4a; the emqx combined-module docs loss to this spec (R51);
-  vendor pagination constructors to spec 4a (removes the old types) and this
-  spec (R43, moves only what remains). Validated by: self-check that 22 + 14
+  4a; `?` in path templates to specs 1 (warning) and 4a (hard error and
+  migration of the nine endpoints), verified here (R52); removal of the old
+  pagination types and conversion to spec 4a; the emqx combined-module docs
+  loss to this spec (R51); vendor pagination constructors to spec 4a (each API
+  owns its own strategy function, D55-4), verified here with no move (R43);
+  `oauth_scopes` as removed in spec 4a (D56-6), with the `x-schematic`
+  `oauth_scopes` copy deleted accordingly. Validated by: self-check that 22 + 14
   rows are present and none is blank (a script or checklist; not committed as
   a test, because the log moves when the spec closes). The starting assignment
   is in "Ledger and recommendation starting map" below.
@@ -612,7 +642,7 @@ repo-relative. Symbol names marked Proposed are illustrative.
 | Module-path resolver | `schematic-definitions` (owner), used by `schematic-gen` | One function for Rust, OpenAPI, Postman names (R36, R37) | Decided (D49): unify. Proposed: location |
 | Doc emission, `gen/src/output/assemble/lib_rs.rs` and `codegen/client/` doc generation | `schematic-gen` | `no_run` fences, correct quick-start, complete `ApiKey` literal, no `///;` (R38 to R41) | Decided (D49) |
 | `#![doc = include_str!("../README.md")]` and README rewrites | `schematic-define` | R42 | Decided (D18) |
-| Vendor pagination constructors | `schematic-definitions` (destination), `schematic-define` (source) | R43; moves only what spec 4a leaves | Decided (D18) |
+| Vendor pagination constructor and `?`-path verification | `schematic-define`, `schematic-definitions` | R43, R52; verification only, nothing moves (D55) | Decided (D55-4) |
 | Ledger disposition table | the implementation log of this feature | R45 to R47 | Decided (D20) |
 
 ## Suggested phases
@@ -638,7 +668,9 @@ green whenever generation changed.
 8. **Generated-docs honesty pass.** R38 to R41, R51. Regenerate.
 9. **Postman.** R19 to R24. Regenerate collections.
 10. **AsyncAPI.** R25 to R28 after spec 6's WebSocket types are confirmed.
-11. **README doctests and vendor pagination move.** R42, R43.
+11. **README doctests and verifications.** R42; verify R43 (no vendor-named
+    pagination constructor, no shared preset layer) and R52 (`?` error in
+    force, no `?` path remains).
 12. **Docs, skills, drift pass.** R48, R49.
 13. **Ledger disposition and whole-work done.** R44 to R47; final full run of
     every acceptance command.
@@ -647,7 +679,7 @@ green whenever generation changed.
 
 Done means all of the following, with evidence in `implementation-log.md`:
 
-- Every requirement R1 to R51 is met, or listed in the log as a deviation or
+- Every requirement R1 to R52 is met, or listed in the log as a deviation or
   accepted gap with a reason.
 - The build and tests pass on macOS, Linux, native Windows, and WSL2 per the
   repository rules. The implementer runs what the current host can run and uses
@@ -732,7 +764,7 @@ the table.
 | 11 | One generated list | This spec, R34 |
 | 12 | Docs honesty pass | This spec, R38 to R41 (typed send and `send_raw` from spec 2); typed convenience methods: ACCEPTED GAP (D53) |
 | 13 | WebSocket follow-through | Spec 6 |
-| 14 | `schematic-define` hygiene | README and vendor move of what remains: this spec (R42, R43); `ConnectionParam`/`ParamType` collapse: spec 6 (D8); `env_auth[0]` retirement and `deprecated`: spec 4b; old pagination types removal: spec 4a; pagination payload: spec 3 |
+| 14 | `schematic-define` hygiene | README doctests: this spec (R42); vendor pagination constructors: spec 4a (per-API strategy functions, D55-4), verified here (R43); `ConnectionParam`/`ParamType` collapse: spec 6 (D8); `env_auth[0]` retirement and `deprecated`: spec 4b; old pagination types removal: spec 4a; pagination payload: spec 3 |
 
 Additional dispositions the final table must carry (not ledger rows or
 numbered recommendations):
@@ -740,9 +772,10 @@ numbered recommendations):
 | Item | Disposition |
 |---|---|
 | `Schema::module_path` dead on the REST path | Spec 4a |
-| `?` in path templates | Spec 1 |
+| `?` in path templates | Spec 1 (warning) and spec 4a (hard error, migration of the nine endpoints: Gitea 1, GitLab 1, OpenAI 7); this spec verifies the error is in force and no `?` path remains (R52) |
 | Removal of the old pagination types, and conversion to the spec 3 model | Spec 4a |
-| Vendor pagination constructors | Spec 4a removes the old types; this spec (R43) moves only what remains |
+| Vendor pagination constructors | Spec 4a (each API owns its own small strategy function in `schematic-definitions`, D55-4); this spec moves nothing and verifies none remains in `schematic-define` and no shared preset layer exists (R43) |
+| `oauth_scopes` | Removed in spec 4a (D56-6); `auth_policy` kept with a builder form; the `x-schematic` `oauth_scopes` copy is deleted accordingly |
 | emqx combined-module docs loss | This spec, R51 |
 | Optional-auth variant (Ollama) | ACCEPTED GAP; reason recorded by the implementer from the earlier specs' logs |
 | Legacy-versus-modern auth dual-source cleanup | ACCEPTED GAP; reason recorded likewise |
@@ -780,8 +813,8 @@ use.
   recipe.
 - Delete `SchematicSchemaExtension` and `AuthExtension` if P10-b's default is
   taken.
-- Edit `schematic-definitions` source files to move vendor pagination
-  constructors (R43) and to adopt the single API list (R34). This is *not* a
+- Edit `schematic-definitions` source files to adopt the single API list
+  (R34). No vendor pagination preset moves (R43 is verification). This is *not* a
   rewrite of the roughly 519 endpoint literals; if a change would touch more than
   the API-level constructor calls, stop and log it as an open question.
 - Build and test every dependent crate listed above (read-only use of their
@@ -804,13 +837,17 @@ use.
   Their outputs this spec consumes:
   - Spec 1: the isolated compile check (R30, R38 use it), partial generation
     (R32), per-output validation, the stale-tree deletion (verified by R50),
-    and the `?`-in-path-template fix.
+    and the `?`-in-path-template warning (the hard error is spec 4a's).
   - Spec 2: typed send and `send_raw` (what the quick-start and docs call, R39);
     rate-limit, request-id, and error-table extension data.
-  - Spec 3: the pagination model (what R43 moves from).
+  - Spec 3: the pagination model (what R43 verifies against).
   - Spec 4a: builders and typed registration (R7, R19 rely on an authoritative
-    registry; the API-level constructors R34 and R43 touch); removal of the
-    old pagination types; the `Schema::module_path` disposition.
+    registry; the API-level constructors R34 touches); removal of the
+    old pagination types and the vendor-named constructors, with per-API
+    strategy functions (R43); the hard error for `?` in paths and the
+    migration of the nine endpoints (R52); `oauth_scopes` removal; JSON
+    definition snapshots and plain serde derives on `RestApi`/`Endpoint`/
+    `EndpointParams`/`ParamDef` (R10); the `Schema::module_path` disposition.
   - Spec 4b: the definition vocabulary the exporters and importer must read and
     write (typed path params, auth override, `deprecated`, rate-limit
     vocabulary, `env_auth[0]` retirement, `oneOf`, serializable definitions,
@@ -850,11 +887,15 @@ unless the author rules otherwise before planning.
   and OpenAPI cannot express, **refreshed to include everything written by
   specs 2, 4a, 4b and 5**: rate limit, `deprecated`, auth override, endpoint
   `cross_origin`, request-id, the error table, `x-schematic-selector`, response
-  shapes, and secret markers, in addition to the earlier document level
+  shapes (including the D56 end-marker `keep` modifier and the `Bytes`
+  framing), and secret markers, in addition to the earlier document level
   (`module_path`, `request_suffix`, `env_mapping`, `headers`) and operation
   level (`request` where it carries more than OpenAPI shows, such as
   `FormField` detail; `response` kind and content type where standard fields
-  are not enough; `headers`; `oauth_scopes`, if kept). The implementer
+  are not enough; `headers`). `oauth_scopes` was removed in spec 4a (D56-6),
+  so its `x-schematic` copy is deleted, not carried. `auth_policy` is kept
+  with a builder form. Where the extension carries definition data, it builds
+  on spec 4a's plain serde derives and JSON definition snapshots. The implementer
   **re-derives the subset from the actual extension structs at plan time**; the
   list above is a starting point, not authority. Add `version: 1` (integer
   major) to the document-level extension and read an absent version as 1.
@@ -1052,6 +1093,11 @@ occurs, for the author's review 1.
 20. Any comment/doc drift found and how it was resolved (R49).
 21. Pre-authorizations used, with what was done under each.
 22. The stale-tree check (R50) and the emqx combined-module docs fix (R51).
+23. The vendor-constructor and shared-preset-layer verification (R43) and the
+    `?`-path verification (R52), with the grep or scan output.
+24. The `x-schematic` subset's coverage of the `keep` modifier and `Bytes`
+    framing, the deletion of the `oauth_scopes` copy, and which spec 4a JSON
+    snapshots the round trip and definition-serialization tests build on.
 
 ## Refresh notes
 
@@ -1068,9 +1114,9 @@ review 1 and their implementation logs:
 - **Spec 2 (runtime and envelope).** Whether typed send or `send_raw` or a
   convenience method is the documented call path (R39, P10-g); the final
   `AuthMethod`/auth strategy field set (R40's `ApiKey` literal).
-- **Spec 3 (pagination).** What of `PaginationStyle` remains and where the
-  vendor constructors now live (R43); whether the 35-endpoint inventory still
-  holds.
+- **Spec 3 (pagination).** What of `PaginationStyle` remains (R43 verifies no
+  vendor-named constructor remains in `schematic-define`); whether the
+  35-endpoint inventory still holds.
 - **x-schematic subset (P10-b).** Re-derive the subset from the actual
   extension structs after specs 2, 4a, 4b and 5 land: rate-limit, deprecated,
   auth override, endpoint `cross_origin`, request-id, error table,
@@ -1078,10 +1124,11 @@ review 1 and their implementation logs:
   subset in the plan.
 - **Spec 4a (definition API) and 4b (definition vocabulary).** Typed registration and whether nested types are
   auto-registered (R7); the shape of API-level constructors that the single
-  list and vendor move touch (R34, R43); the `oauth_scopes`/`auth_policy`
-  choice (P12), which changes the `x-schematic` subset (P10-b) and the OpenAPI
-  `security` mapping; serializable definitions (which may let `x-schematic`
-  carry more); the typed path parameters, `deprecated`, and rate limit
+  list touches (R34); the per-API strategy functions and the `?` hard error
+  and migration (R43, R52); the `oauth_scopes` removal and `auth_policy`
+  builder form (decided, D56-6), reflected in the `x-schematic` subset
+  (P10-b) and the OpenAPI `security` mapping; serializable definitions and
+  JSON snapshots (which may let `x-schematic` carry more); the typed path parameters, `deprecated`, and rate limit
   vocabulary that the exporters and importer must now read or write.
 - **Spec 5 (response model v2 and GraphQL).** Success/error/stream shapes and
   selector-merged operations in the exporters (R2 to R4, R21); whether GraphQL

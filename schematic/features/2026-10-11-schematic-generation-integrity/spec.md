@@ -58,7 +58,7 @@ related: []
 - The runtime package, the response envelope, typed send, credential precedence, redirects, deadline, and redaction implementation (spec 2). This spec only separates query parameters so redaction can be built later.
 - Pagination (spec 3), definition API and builders (spec 4), response model v2, selectors, and GraphQL (spec 5), WebSocket (spec 6), fidelity and polish including feature flags, the module-path resolver unification, and the generated-docs honesty pass (spec 7).
 - Query-parameter `required`, style, `explode`, and enum fidelity (spec 4).
-- Any edit to the roughly 519 endpoint literals in the definitions (openai alone has 265), except the one narrow migration in R33 (the Gitea `?recursive=true` endpoint), or to a dependent crate's source (sniff, biscuit-speaks, model-citizen, the homelab crates). This spec is otherwise generator-only.
+- Any edit to the roughly 519 endpoint literals in the definitions (openai alone has 265), or to a dependent crate's source (sniff, biscuit-speaks, model-citizen, the homelab crates). This spec is generator-only. The nine endpoints that put `?` in a path template are not migrated here (R33; spec 4a owns the migration).
 
 ## Background: decisions this spec implements
 
@@ -72,7 +72,7 @@ Provenance: parent review `schematic/reviews/2026-07-31-macro-review/spec.md`, s
 - **D23 (prerequisite only).** Network-error text will keep the URL with secret query values masked; that needs the generator to keep query parameters out of the path string (S6 / P7). This spec delivers the split; the masking belongs to spec 2.
 - **D36 (forward hook only).** In spec 5, two endpoints on the same method and path will be told apart by a selector, making uniqueness `(method, path, selector)`. This spec's duplicate check must be shaped so the selector can be added, and must not implement a selector.
 - **D40 (relevant fact).** An `ApiKeyParam`'s name will be a secret automatically; the generated client must therefore never print the key value.
-- **D50 spec 1 scope.** Generation integrity: D9, per-output validation, D49 compile check, duplicate `operationId` fix, D33, query-parameter split, and deletion of the stale tree (a pre-authorization the author must confirm, item 2). Generator only apart from the R33 migration; no dependent crate changes.
+- **D50 spec 1 scope.** Generation integrity: D9, per-output validation, D49 compile check, duplicate `operationId` fix, D33, query-parameter split, and deletion of the stale tree (a pre-authorization the author must confirm, item 2). Generator only; no dependent crate changes.
 - **D20 (whole-work rule).** Every defect-ledger row is closed or recorded as an accepted gap. This spec closes rows 1 (text and binary bodies), 2 (`--api <one>` deletion), 5 (`ApiKeyParam`), 6 (duplicate `operationId`), 16 (`#[ignore]`d compile test), and 18 (stale tree).
 
 ## Requirements
@@ -192,8 +192,8 @@ Validated by: `just test-schema`, `just lint-schema`, and `just test {pkg}` from
 **R32. Live feature counts recorded.** The implementer measures, from the definitions at hand, how many endpoints use text bodies, binary bodies, multipart bodies, `ApiKeyParam`, header parameters, and cookie parameters, and records the numbers in `implementation-log.md` next to the parent's figures, including a note reconciling or not reconciling "six" against "about 29" (D49 item 6).
 Validated by: a small test or script output pasted in the log; there is no pass/fail assertion beyond the numbers being recorded. The endpoint literal count is about 519 (openai alone 265); record the measured total next to it.
 
-**R33. `?` in a path template is a hard error.** Parent recommendation 3 lists `?` in path templates among the silent drops to turn into `validate_api` errors: a query parameter smuggled into a path string cannot be separated, redacted, or typed. A path template containing `?` fails validation with an `error` diagnostic (feature `query-in-path`, default 20) for every output. The one shipped case, Gitea `GetGitTreeRecursive` (`/repos/{owner}/{repo}/git/trees/{sha}?recursive=true`), is migrated to a proper declared query parameter `recursive` in the same change that lands the check, so the tree stays green; the committed Gitea schema, OpenAPI, and Postman artifacts are regenerated and the diff is explained by this migration. This is the only endpoint-definition edit this spec makes (Pre-authorizations item 9).
-Validated by: L1 unit tests in `gen/src/validation.rs` (a `?` path is rejected, a clean path accepted); a Gitea definition test that no endpoint path contains `?` and that `recursive` is a query parameter; the wire-equivalence test (R29) extended to show the migrated endpoint still sends `?recursive=true`.
+**R33. `?` in a path template is a warning (forward hook for spec 4a).** Parent recommendation 3 lists `?` in path templates among the silent drops to surface in `validate_api`: a query parameter smuggled into a path string cannot be separated, redacted, or typed. A path template containing `?` produces a `warning` diagnostic (severity `warning` in this spec's own diagnostic format; feature `query-in-path`, default 20) that names the API and endpoint, for every output. It does not fail generation. Nine endpoints currently do this: Gitea `GetGitTreeRecursive` (`?recursive=true`), the GitLab `/projects/{id}/repository/files/{file_path}?ref={git_ref}` endpoint, and seven OpenAI `/responses` endpoints (`?beta=true`). Per the author's ruling (2026-10-11, D55), this spec migrates none of them and edits no endpoint definition. The check is a forward hook: spec 4a (definition-api) raises the severity to `error` and migrates all nine in the same change, so the severity must be a single value in one place that 4a can change.
+Validated by: L1 unit tests in `gen/src/validation.rs` (a `?` path yields one `query-in-path` warning naming its endpoint, a clean path yields none); a test over the live definitions that generation yields exactly nine `query-in-path` warnings, one per named endpoint, and still succeeds; a test that the check's severity is read from one constant.
 
 **R34. Runtime ABI marker hook.** Spec 2 adds a runtime ABI marker (D39, P11). This spec defines the interface the partial-generation compatibility check reads now: a single constant in the generator (for example `RUNTIME_ABI_MARKER_SOURCE`, an `Option` of the marker the retained `shared.rs` or runtime declares) that the generator compares between the retained output and the one being assembled. While spec 2 has not landed the marker is absent, and the check degrades to the interim default 4 (byte-diff of `shared.rs`). When the marker exists the marker comparison replaces the byte-diff; spec 2 changes the constant's source, not the check.
 Validated by: L1 test with the marker absent (byte-diff behavior, R5) and a test with a fixture marker present on both sides (equal markers proceed, unequal markers abort before any write).
@@ -219,7 +219,7 @@ Decided means a parent decision fixes it. Proposed is this spec's suggestion; th
 | `legacy_env_mapping_for` in `define/src/types.rs` (`schematic-define`) | Possible additive change only if default 15 permits | Proposed |
 | `with_api_key_param` and the generator-local `ApiKeyParam` env scan (`schematic-gen`) | R23, R24 | **Temporary**: spec 2 owns credentials (D11) and removes both |
 | Diagnostic severities and public validator surface (`schematic-gen`) | Owned here; spec 6 (WebSocket) maps its validation onto the same type, severities, and entry points | Decided as ownership; shape Proposed |
-| `query-in-path` check and Gitea `GetGitTreeRecursive` migration (`schematic-gen`, `schematic-definitions`) | R33 | Decided (parent recommendation 3); migration is the single definition edit |
+| `query-in-path` warning check (`schematic-gen`) | R33 | Decided (D55: warning here; error and migration of the nine endpoints move to spec 4a) |
 | Runtime ABI marker constant (`schematic-gen`) | R34 | Interface Decided here; marker supplied by spec 2 (D39) |
 | Header and cookie parameter fields and builders (`schematic-gen`, `codegen/request_structs/`) | R25, R26 | Decided (D10, D33) |
 | `RequestParts` and `into_parts` query separation (`schematic-gen` template for `schematic-schema/src/shared.rs`, and `codegen/request_structs/{into_parts,shared}.rs`) | R28 | Decided as a requirement (S6, D23 prerequisite); shape Proposed (default 12) |
@@ -230,7 +230,7 @@ Decided means a parent decision fixes it. Proposed is this spec's suggestion; th
 The plan may refine this. Each phase ends with `just test` and `just lint` green in `schematic/` and nothing committed.
 
 1. **Baseline and safety net.** Capture golden request lines (R29) and the live feature counts (R32) from the current generator. Add the isolated compile-check helper and its negative control (R16 to R18), initially compiling the fixture set and the 18 APIs as they are. This phase guards every later generator change (the reason D49 puts it first).
-2. **Validation foundation.** `ValidationDiagnostic`, per-output validators, duplicate id and `(method, path)` checks with the selector hook, type and identifier checks (R8 to R13), the `?`-in-path error with the Gitea migration (R33), and the diagnostic severities exposed for spec 6.
+2. **Validation foundation.** `ValidationDiagnostic`, per-output validators, duplicate id and `(method, path)` checks with the selector hook, type and identifier checks (R8 to R13), the `?`-in-path warning (R33), and the diagnostic severities exposed for spec 6.
 3. **Duplicate `operationId`.** Merge fix, final scan, artifact test, regenerate `openapi/ollama.json` (R14, R15).
 4. **Partial generation.** Inventory reader, two-phase writer, group-only cleanup, shared-file rebuild, runtime compatibility rule and the ABI marker hook (R34), failure reporting, OpenAPI and Postman group rule, README and `generate-one` docs (R1 to R7).
 5. **Query split.** Change `RequestParts` and the client URL building; wire equivalence against the golden lines (R28, R29). Run `just generate` and inspect the schema diff.
@@ -262,9 +262,8 @@ These are requests, not grants. They would otherwise pause an unattended run, th
 6. Change the public shape of the generated `RequestParts` and `into_parts` in `schematic-schema` (R28). No dependent uses them (verified by search while drafting).
 7. Remove or rename `#[ignore]`d tests in `gen/tests/l1/e2e_generation.rs` and adjust the `test-e2e` recipe (R17).
 8. **Conditional:** an additive field or function in `schematic-define` only if default 15 allows.
-9. Edit the single Gitea `GetGitTreeRecursive` endpoint definition (and its `definitions/README.md` row) to declare `recursive` as a query parameter (R33).
 
-Not pre-authorized, so the implementer stops and logs rather than proceeds: editing any dependent crate; changing CI configuration or scope; creating the `schematic-runtime` package; touching the roughly 519 endpoint literals in the definitions beyond the single Gitea endpoint migration in R33 (Pre-authorizations item 9); adding a selector syntax; committing, unless the plan says so.
+Not pre-authorized, so the implementer stops and logs rather than proceeds: editing any dependent crate; changing CI configuration or scope; creating the `schematic-runtime` package; touching the roughly 519 endpoint literals in the definitions (including the nine `?`-in-path endpoints, which spec 4a migrates); adding a selector syntax; committing, unless the plan says so.
 
 ## Dependencies and ordering
 
@@ -295,7 +294,7 @@ The parent's P7 (query-parameter separation) is wholly owned here, and the diagn
 17. **Compile-check scope.** Default if not ruled before planning: two `slow_` tests, one over the fixture set and one over the full 18-API output.
 18. **`checks/cargo-machete.txt`.** An explicit author-confirmed pre-authorization item (item 3). Default if not ruled before planning: if the file has a regeneration recipe (look in the root `justfile` and `just/` recipes), regenerate it; if not, leave it and log the stale line as a finding for the author.
 19. **Docs page location.** Default if not ruled before planning: `schematic/docs/generation/` with one page for partial generation and validation and one for request-side features.
-20. **Feature identifiers.** Default if not ruled before planning: kebab-case strings from a `Feature` enum (`text-request-body`, `binary-request-body`, `api-key-param`, `header-parameter`, `cookie-parameter`, `duplicate-endpoint-id`, `duplicate-method-path`, `invalid-type-syntax`, `duplicate-operation-id`, `query-in-path`).
+20. **Feature identifiers.** Default if not ruled before planning: kebab-case strings from a `Feature` enum (`text-request-body`, `binary-request-body`, `api-key-param`, `header-parameter`, `cookie-parameter`, `duplicate-endpoint-id`, `duplicate-method-path`, `invalid-type-syntax`, `duplicate-operation-id`, `query-in-path`). `query-in-path` is a warning-severity feature id here (R33); spec 4a raises it to an error.
 21. **Naming of new tests and files.** Default if not ruled before planning: `gen/tests/l1/fresh_output_compile.rs`, `gen/tests/l1/partial_generation.rs`, `gen/tests/l1/request_side_features.rs`; tests use `slow_` only where they invoke cargo. Keep to the `rust-testing` skill's layout rules (`test_layout.rs` enforces some).
 22. **Partial generation for OpenAPI and Postman.** Default if not ruled before planning: artifacts are written only for regenerated groups, named by the group's resolved module path as today. The two divergent module-path resolvers are spec 7's, so if they disagree for some name (the `PagerDutyApi` case) log it and do not fix it here.
 
@@ -347,6 +346,7 @@ Record every one of these in `implementation-log.md` for review 1:
     - the interim incompatible-shared-runtime default (default 4, `shared.rs` byte-diff) and how it will hand over to the spec 2 runtime ABI marker (R34);
     - `with_api_key_param` (default 16), a temporary public surface for spec 2 to remove;
     - whether the offline compile check works on Windows and WSL2 (not only macOS and Linux), recorded per host;
+    - confirmation that spec 4a owns raising `query-in-path` to an error and migrating the nine endpoints, and that this spec's warning count (nine) matches the live definitions;
     - verification that the generated client sends `RequestBody::Raw` with its declared `Content-Type` (the unverified claim in Problem item 2), with the mock-server evidence.
 - Every dependency added, every file touched outside `schematic/`, and every dependent crate build result.
 - Any comment-versus-code drift found and how it was resolved (code assumed correct).
@@ -355,7 +355,7 @@ Record every one of these in `implementation-log.md` for review 1:
 
 None: first in order. `refresh_required` is `false`; `depends_on` stays `[]`.
 
-Later specs may be affected by this spec's outcomes, recorded here so the refresh of specs 2 to 7 knows where to look: the final `RequestParts` shape and the explicit `ApiKeyParam` setter (spec 2); the `endpoint_uniqueness_key` hook (spec 5); how partial generation treats shared files and the "incompatible shared-runtime change" rule (spec 2's runtime-package version check and spec 7's feature flags, which parent question 11 says interact with D9); and the diagnostics format and severities (spec 6 maps WebSocket validation onto them; spec 7 may add a machine-readable flag).
+Later specs may be affected by this spec's outcomes, recorded here so the refresh of specs 2 to 7 knows where to look: the final `RequestParts` shape and the explicit `ApiKeyParam` setter (spec 2); the `endpoint_uniqueness_key` hook (spec 5); how partial generation treats shared files and the "incompatible shared-runtime change" rule (spec 2's runtime-package version check and spec 7's feature flags, which parent question 11 says interact with D9); the `query-in-path` check (R33; spec 4a raises it from warning to error and migrates the nine endpoints that put `?` in a path template, per D55); and the diagnostics format and severities (spec 6 maps WebSocket validation onto them; spec 7 may add a machine-readable flag).
 
 Interim items later specs replace, recorded here for their refresh:
 

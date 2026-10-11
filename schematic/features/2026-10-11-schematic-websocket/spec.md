@@ -205,8 +205,15 @@ the parent spec named in the frontmatter, section 15 unless noted.
 - **D28 and D31 (cross-origin and managed transport), as they apply to the
   handshake.** Credentials attach only to an allowed origin; the default is
   `same_origin`; Schematic follows redirects itself according to the policy.
-  Whether and how this reaches a WebSocket handshake is **not decided** by the
-  parent; this spec's default is R7 and is logged for review.
+  For a WebSocket handshake the author ruled (D56, 2026-10-11): the client
+  never follows a redirect; a 3xx upgrade response is an error with the
+  `Location` header visible (R7, planning item 8). **Decided.**
+- **D56 (author rulings, 2026-10-11), as they apply here.** (a) No credential
+  resolving is not an error: the connect call proceeds anonymously and reports
+  `Anonymous`, exactly as REST does (D11 literally). (b) The runtime trait is
+  `EndpointSpec`. (c) Any per-call override that tightens a shared setting
+  uses the simple subset rule (D56-2). (d) Under a deadline, per-request time
+  is `min(remaining, per-request timeout)` (D56-3).
 - **D39.** The shared runtime lives in a hand-written package (working name
   `schematic-runtime`; spec 2 fixes the final name, which this spec uses
   verbatim). Generated clients depend on it and stay thin.
@@ -295,25 +302,31 @@ stated order; removing the winner makes the next level win); a 401 case
 asserting the server received exactly one upgrade request; one test per auth
 strategy asserting placement (header versus query).
 
-**R6. A missing credential fails loudly before dialing.** This matches the
-runtime-envelope spec's proposed REST default (that spec owns credential
-precedence and the managed builder; if it rules otherwise, this rule follows
-it). If the definition's auth strategy is not `None` and no credential
-resolves at any level, `connect_*` fails before sending anything with a
-`MissingCredential` error (mock server records zero connections), unless the
-client was built anonymous. The explicit anonymous option exists and is
-reported as `AuthMethod::Anonymous`.
-Validated by: L1 mock-server test (zero connections recorded); L1 unit test
-for the explicit anonymous option.
+**R6. No resolvable credential connects anonymously.** (Decided, D56; REST
+and WebSocket behave the same.) If the definition's auth strategy is not
+`None` and no credential resolves at any level, `connect_*` proceeds without
+an auth header or query credential and reports `AuthMethod::Anonymous`. It
+does not fail before dialing. If the server rejects the anonymous handshake,
+the rejection arrives as the handshake error carrying the HTTP status and
+response headers (no retry, per R5). No public explicit-anonymous option is
+added by this spec; a way to state anonymous explicitly exists only if the
+managed builder from the runtime-envelope spec already provides one, and then
+this spec passes it through.
+Validated by: L1 mock-server test: an authenticated API with no credential at
+any level connects and the server sees an upgrade request with no auth header
+and no credential query parameter, and the client reports `Anonymous`; L1
+mock-server test: a server that answers the upgrade with 401 yields a
+handshake error exposing status and headers, and the server saw exactly one
+upgrade request.
 
 **R7. Secrets never leak from connection setup; the handshake never leaves
-its origin.** (The never-follow redirect default is stricter than the
-`same_origin` policy; see planning item 8 and the review agenda.) The sentinel credential value appears in no `Display` or
+its origin.** (Never following a redirect is Decided, D56; it is
+stricter than the `same_origin` policy.) The sentinel credential value appears in no `Display` or
 error text, no logged URL, and no stored metadata of the WebSocket client,
 including for `ApiKeyParam` (query-string) placement, for a refused
 connection, and for a stalled handshake. The handshake follows no redirect: a
-3xx upgrade response is an error naming the status, no second request is
-made, and no credential reaches any other origin (the mock "other origin"
+3xx upgrade response is an error naming the status with the `Location` header
+visible, no second request is made, and no credential reaches any other origin (the mock "other origin"
 records zero requests).
 Validated by: L1 mock-server tests with a sentinel in the query string:
 connection refused (closed port), handshake stall past the timeout, and 302
@@ -509,7 +522,8 @@ Marked **Decided** only where the parent decided it; everything else is
 | Handshake credential resolution | `schematic-gen` (`client.rs`) emitting calls into `schematic-runtime` | Resolve once with D11 precedence, place per `AuthStrategy`, report `AuthMethod`. | Rules: Decided (D11, D48). Reuse of runtime functions: Proposed |
 | Bearer host template | `schematic-gen` (`ws_codegen/shared.rs`) | Remove the trailing `;` defect; add a compile test. | Decided (fix); test shape Proposed |
 | Host module | `schematic-gen` (`ws_codegen/host.rs`) | Event hub named `{ApiName}EventHub`; `WsHandler` gains `on_authenticated` hook returning an optional outbound message; no fixed envelope. | Proposed |
-| `WsClientOptions` | `schematic-schema` (generated `ws_shared`, from `ws_codegen/shared.rs`) | `receive_timeout` enforced; gains explicit anonymous option and credential setters. | Proposed |
+| `WsClientOptions` | `schematic-schema` (generated `ws_shared`, from `ws_codegen/shared.rs`) | `receive_timeout` enforced; gains credential setters. No explicit-anonymous option unless the runtime's managed builder already has one (R6). | Proposed |
+| Runtime trait | `schematic-runtime` | The runtime trait generated clients implement is `EndpointSpec`. | Decided (D56) |
 | Mock WS server helper | `schematic-schema` tests (and `schematic-gen` tests that need it) | See R16. Built on `tokio-tungstenite`, already a dependency of `schematic-schema`. | Proposed |
 
 Notes for the implementer:
@@ -673,19 +687,16 @@ otherwise before planning, and logs the adoption.
    and before `Ready`; replay of an `AuthFlowHints` challenge exchange after a
    reconnect is **not** added unless the existing client already handles
    challenges (**unverified**; check and log).
-7. **Missing credential behavior (R6).** *Default:* match the
-   runtime-envelope spec's proposed REST default: fail before sending with
-   `MissingCredential` unless the client was built anonymous. That spec owns
-   credential precedence and the managed builder. The parent's D11 puts
-   anonymous last in the precedence; this default reads that as "anonymous only
-   when chosen or when the definition declares no auth". If the runtime spec
-   rules differently, follow it. Flag for review.
-8. **Handshake and the cross-origin policy.** *Default:* no `cross_origin`
-   field on `WebSocketApi`; the client connects only to its configured base
-   origin plus endpoint path, never follows a redirect, and treats a 3xx
-   upgrade response as an error. This is stricter than the `same_origin`
-   default and than D31's "the cross-origin rule always holds"; it is kept
-   deliberately and flagged in the review agenda as a candidate deviation.
+7. **Missing credential behavior (R6).** **Decided (D56):** when no credential
+   resolves, connect proceeds anonymously and reports `Anonymous` (D11
+   literally), the same as REST. There is no fail-before-dialing rule and no
+   new public explicit-anonymous option.
+8. **Handshake and the cross-origin policy.** **Decided (D56):** no
+   `cross_origin` field on `WebSocketApi`; the client connects only to its
+   configured base origin plus endpoint path, never follows a redirect, and
+   treats a 3xx upgrade response as an error with `Location` visible. Possible
+   follow-up, only if a real device needs it: reuse the REST `cross_origin`
+   policy on `WebSocketApi`. Not part of this spec.
 9. **`receive_timeout` semantics (R8).** *Default:* idle inbound timeout
    across all frame types, including ping and pong, reset on every inbound
    frame; expiry is an error event then the reconnect policy.
@@ -731,7 +742,16 @@ otherwise before planning, and logs the adoption.
     `tokio-tungstenite`'s server side, in `schematic-schema`'s test support,
     shared with `schematic-gen` tests by a dev-only module or small
     dev-dependency path; no new third-party crate.
-20. **ElevenLabs normalization scope.** *Default:* normalize what the
+20. **Timing under a deadline and overrides (D56-2, D56-3).** *Decided:* when a
+    deadline is in force, the time allowed for one connect attempt (dial,
+    handshake, and open-message write) is `min(remaining, per-request
+    timeout)`, and a reconnect attempt uses the same rule, so connect and
+    reconnect timing are computed identically from the runtime's single
+    helper. A long-lived socket has no overall deadline after it is `Ready`
+    (see Non-goals). Any per-connect override that tightens a shared setting
+    (for example a shorter timeout) follows the simple subset rule; this spec
+    adds no override that loosens one.
+21. **ElevenLabs normalization scope.** *Default:* normalize what the
     `WebSocketApi` definition declares (params, auth, env mapping) and the
     standalone message payload types, if they do not use `schematic_define`; do not change its protocol
     behavior.
@@ -800,10 +820,9 @@ The implementer logs each of these in `implementation-log.md` for review 1:
    error kinds, file layout, helper placement).
 3. Every deviation from this spec or the parent's decisions, and the reason.
 4. Every open question found, with the evidence and the safest reading used.
-5. Specifically: the missing-credential rule (item 7, R6), the redirect
-   default (item 8; never follow, a 3xx upgrade is an error) as a candidate
-   deviation from `same_origin` and D31's "always holds", the `responds_with`
-   shape (item 1), the untagged typed-message decoding risk (item 10; no
+5. Specifically (the missing-credential rule, the redirect rule and the
+   runtime trait name are ruled by D56 and are not review items): the
+   `responds_with` shape (item 1), the untagged typed-message decoding risk (item 10; no
    discriminator), the `send_value` / `next_value_event` naming (item 11), TLS
    for `wss://` (item 16), the `auth_policy` outcome (item 12), the Samsung
    correlation decision (item 17), the corrected device paths and their
@@ -827,7 +846,8 @@ before its plan runs. Things that may change it:
   `env_auth[0]` retirement; typed path parameters.
 - **From the runtime-and-envelope spec:** final runtime package name, whether
   credential resolution, redaction and `AuthMethod` are reusable outside HTTP
-  send, `TransportError` kinds (the missing-credential kind in R6), the
+  send, `TransportError` kinds (the handshake-rejection kind carrying status and
+  headers, R6 and R7), the
   managed-builder TLS option name (item 16), and any middleware hooks.
 - **From the generation-integrity spec:** the validation-diagnostic format
   (item 3) and the isolated fresh-output compile check (R4).

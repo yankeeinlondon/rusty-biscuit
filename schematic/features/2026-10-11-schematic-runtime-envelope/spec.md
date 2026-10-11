@@ -114,6 +114,9 @@ for the eight-spec split; the author confirms them at review 1.
   spec 5 extends it to the stream and GraphQL codecs. `ErrorKind` is
   `#[non_exhaustive]`, so spec 5 adds `UnexpectedContentType` without a
   breaking change (PD17).
+- **Plain serde derives on `RestApi`, `Endpoint`, `EndpointParams`, and
+  `ParamDef`** are spec 4a's (D56). This spec adds fields to `RestApi` but adds
+  no serde derive to any of those types and makes no claim about them.
 - **`request_id_header` and `secret_names`**: semantics and the API-level
   fields. Spec 4a owns only builder sugar and the per-parameter `.secret()`
   marker.
@@ -127,11 +130,13 @@ for the eight-spec split; the author confirms them at review 1.
   supplies only the primitives spec 3 needs (page number slot in metadata,
   link-origin check, deadline handle, `InvalidArgument` kind).
 - Builders, typed registration, per-endpoint cross-origin override, the
-  `oauth_scopes` / `auth_policy` choice (specs 4a and 4b). **No endpoint literal
+  `oauth_scopes` / `auth_policy` choice (specs 4a and 4b; D56 keeps `auth_policy`
+  with a builder form and removes `oauth_scopes`, both spec 4a's, and nothing
+  here depends on either). **No endpoint literal
   (about 519; openai 265) is edited in this spec** (parent D42, D30).
 - Response model v2 (success and error sets, selectors, stream end
   conditions, error mapping), GraphQL primitive and codec, SSE/NDJSON codecs
-  (spec 5). The `Decode` trait shape defined here must *allow* them (R25), but
+  (spec 5). The `Decode` trait shape defined here must *allow* them (R30), but
   this spec ships only the JSON, text, binary, and empty codecs.
 - Generation integrity, partial generation, the isolated compile check, the
   query-parameter split, and request-side features (spec 1, a dependency).
@@ -203,11 +208,14 @@ shown. A sentinel-key test must prove a query-string key never appears in any
 error text. (Requires the query/path split delivered by spec 1.)
 
 **D24 (failures before anything is sent).** These are the outer
-`TransportError` with specific kinds (for example `MissingCredential`,
+`TransportError` with specific kinds (for example
 `CrossOriginRejected`, `InvalidArgument`, `Timeout`) and still carry request
-metadata. Named cases: missing credential, page size above the declared
-maximum, origin rejected, invalid argument. sniff's "auth required" case moves
-to the `TransportError` kind.
+metadata. Named cases: page size above the declared
+maximum, origin rejected, invalid argument. The parent's "missing credential"
+case and sniff's "auth required" `TransportError` kind are superseded by D56
+(author, 2026-10-11): no credential resolving is not a failure before sending
+(see D11 below); sniff's "auth required" branch reads the server's 401 from
+the envelope.
 
 **D25 (undecodable 2xx).** A 2xx reply that cannot be decoded is a Failure
 inside the envelope with the real status kept, kind `MalformedSuccess`, raw
@@ -239,6 +247,11 @@ definition's order. Single attempt: no chain of keys, no retry, and no silent
 anonymous retry if rejected; a consumer may make a separate anonymous call.
 Every envelope reports the auth method (never the value). Credentials are
 resolved once per request, so the report matches what was sent.
+**D56 (author, 2026-10-11), D11 literally:** when no credential resolves, the
+client sends anonymously and reports `AuthMethod::Anonymous`. For an API whose
+definition requires authentication, the server's 401 arrives in the envelope
+with its evidence. REST and WebSocket behave the same. There is no
+before-sending failure for a missing credential.
 
 **D28 + D30 (cross-origin policy).** The policy for requests to a different
 origin is authored in the API definition (a `schematic-define` primitive) and
@@ -253,7 +266,11 @@ governs both redirects and followed next-page links. Five values:
 | `deny` | No redirects and no followed cross-links. |
 
 Default when the definition says nothing: `same_origin`. A caller may tighten
-the policy (for example to `deny`) but never loosen it beyond the definition.
+the policy but never loosen it beyond the definition. **D56 (author,
+2026-10-11), amending D28: tighten-only is one simple rule.** A caller may
+choose `deny`, `same_origin`, or an `allow_origins` list that is a subset of
+the definition's own list; every other choice is rejected at client
+construction.
 Credentials attach only to allowed origins. Because policies require
 Schematic to follow redirects itself, the HTTP client is built with redirects
 disabled and Schematic follows them hop by hop: hop limit, per-hop origin
@@ -273,10 +290,15 @@ migrated in this spec.
 
 **D13 (shared deadline).** Opt-in. A caller sets one overall deadline for an
 operation (all requests it spans) on a monotonic clock. Each request gets the
-remaining time. Once spent, no further request is sent and a `DeadlineExceeded`
+remaining time, **amended by D56 (author, 2026-10-11): each request under an
+opted-in deadline gets `min(remaining budget, the client's per-request
+timeout)`**, the per-request timeout defaulting to 30 s and settable on the
+managed builder. Once spent, no further request is sent and a `DeadlineExceeded`
 error reports the completed requests and elapsed time. Dropping the call
 cancels in-flight work and spawns no detached tasks. The 30 s per-request
-default is unchanged for callers who do not opt in.
+default is unchanged for callers who do not opt in. Example: a 120-second
+deadline whose first request hangs: that request times out at 30 s, leaving
+90 s of budget.
 
 **D39 (runtime home).** A new hand-written package (working name
 `schematic-runtime`) holds the envelope and metadata, `TransportError`,
@@ -293,7 +315,9 @@ request enum remains is left to planning.
 runtime guard follows the new response model in landing 1: kept, changed, or
 removed as that model requires. The behavior on an unexpected response kind
 must be covered by a test under the new model, or the guard is gone and the
-test list says so.
+test list says so. **D56 (author, 2026-10-11): the guard is removed.** A server
+reply whose content does not match the endpoint's declared kind is
+`MalformedSuccess` with status, headers, and raw body kept.
 
 **D50 (plan structure).** This is spec 2 of 8. Each plan is implemented end to
 end without a human in the loop; the tree must be green (macOS, Linux, native
@@ -324,7 +348,8 @@ Two throwaway prototypes under
   generator, and real providers were untested.
 - `pager-surface/`: deadline (150 ms pages, 400 ms budget: third request cut
   off, error reported 2 completed pages and elapsed, each request received the
-  remaining budget, nothing sent afterwards); drop-cancel on HTTP/1.1 only
+  remaining budget, nothing sent afterwards; D56 now bounds each request by
+  `min(remaining, per-request timeout)`); drop-cancel on HTTP/1.1 only
   (server saw the connection close, live tasks 1 to 0); host policy (link
   differing in port, scheme, or host rejected with zero requests to the other
   server; a declared extra origin followed). Pager content belongs to spec 3.
@@ -416,7 +441,7 @@ a 500 with an empty body, a 200 with an undecodable body, and a body cut off
 after headers each give an envelope.
 
 **R9. Pre-send failures are `TransportError` with request metadata (D24).**
-Missing credential, an origin rejected by policy, and an invalid argument each
+An origin rejected by policy and an invalid argument each
 return `Err(TransportError)` with its specific kind, carrying redacted request
 metadata and `elapsed`, and the mock records zero requests. Validated by: L1 in
 `schematic-runtime`, one case per pre-send kind in PD7 (the page-size-above-max
@@ -457,7 +482,11 @@ proves the trait path with a runtime-test fixture.) Validated by: L1 in
 **R14. Precedence (D11).** With sentinel tokens present at per-call, client
 level, an environment variable, and nowhere, the mock sees exactly one
 credential per request, in the order per-call, client-level, environment,
-anonymous; removing the winner makes the next one win. Validated by: L1 in
+anonymous; removing the winner makes the next one win. With nothing resolving, the mock
+receives one request with no credential and the envelope reports
+`AuthMethod::Anonymous`, for an API whose definition requires authentication as
+well (D56); a mock 401 arrives as an envelope Failure with its status, headers,
+and raw body. Validated by: L1 in
 `schematic-runtime` (generic) and one L1 through a generated client in
 `schematic-schema`'s test set.
 
@@ -565,24 +594,38 @@ kind `RedirectRefused`. Each followed hop re-decides whether the
 already-resolved credential is attached for the new URL (D11: credentials are
 resolved once per request, not once per hop). Validated by: L1 in `schematic-runtime` (one case per status).
 
-**R25. Tighten-only override (D28).** A caller may set a policy at least as
-restrictive as the definition's (PD1); an attempt to loosen is rejected at
-client construction with an error, and no request is sent. A caller override
-to `deny` takes effect. Validated by: L1 in `schematic-runtime`.
+**R25. Tighten-only override (D28, D56). Decided: D56 (author, 2026-10-11).** A
+caller may set the policy to `deny`, to `same_origin`, or to an `allow_origins`
+list that is a subset of the definition's own `allow_origins` list. Every other
+choice (any value when the definition's value is not `allow_origins` and the
+choice is not `deny` or `same_origin`; an `allow_origins` list containing an
+origin the definition does not list; `allow_without_credentials`; `allow_any`)
+is rejected at client construction with a typed `BuildError`, and no request is
+sent. A choice equal to the definition's own value passes only if it is one of
+the three allowed forms. Validated by: L1 table test in `schematic-runtime`
+(each allowed form takes effect; each rejected form fails construction with zero
+requests at the mock; `allow_origins` subset accepted, superset and disjoint
+list rejected).
 
 ### Deadline, raw, hooks, guard
 
-**R26. Shared deadline (D13).** A deadline object created once can be passed to
-several sends. Across N requests to a mock that delays each response, a
+**R26. Shared deadline (D13, D56). Decided: D56 (author, 2026-10-11).** A
+deadline object created once can be passed to several sends. Each request under
+an opted-in deadline gets `min(remaining budget, the client's per-request
+timeout)`; the per-request timeout defaults to 30 s and is settable on the
+managed builder. Across N requests to a mock that delays each response, a
 deadline smaller than the sum stops the operation: no request is sent after the
 deadline and a `DeadlineExceeded` `TransportError` reports the completed
-request count and elapsed time. Each request is given the remaining time (D13; the
-mock records the effective timeout or the time it gave up). The alternative
-`min(remaining, per-request timeout)` is on the Human review agenda, not
-adopted here (PD23). Dropping the future
-cancels the in-flight request (the mock sees the connection close) and no task
-keeps running (a runtime shutdown completes promptly). Without a deadline the
-30 s per-request default applies unchanged. Validated by: L1 in
+request count and elapsed time. Worked example: a 120-second deadline and a
+first request to a mock that hangs: the first request times out at 30 s
+(`Timeout`), leaving 90 s of budget for the next request (the test uses scaled
+durations, for example a 12 s deadline, 3 s per-request timeout, and a 9 s
+remainder, and asserts the remainder rather than waiting real time). A deadline
+shorter than the per-request timeout bounds the request at the remaining time
+(the mock records the effective timeout or the time it gave up). Dropping the
+future cancels the in-flight request (the mock sees the connection close) and
+no task keeps running (a runtime shutdown completes promptly). Without a
+deadline the per-request timeout applies unchanged. Validated by: L1 in
 `schematic-runtime`. The monotonic-clock property is validated by inspection of
 the use of `Instant` (a wall-clock-moving test is not portable).
 
@@ -593,13 +636,14 @@ metadata and `Display`; a cross-origin redirect refused under `same_origin`;
 a deadline honored. Typed sends still fail to compile for a wrong response
 type. Validated by: L1 in `schematic-runtime`.
 
-**R28. `ResponseKind` guard disposition (D49).** The disposition (PD26) is
-implemented and the behavior of a response of an unexpected content kind is
-covered by a test under the new model: a JSON endpoint receiving non-JSON
-content is `MalformedSuccess` (R10), a text or binary endpoint decodes any
-content type, and the test list in the implementation log says whether the
-guard was kept, changed, or removed. Validated by: L1 in `schematic-runtime`
-and `schematic-schema`.
+**R28. `ResponseKind` guard removed (D49, D56). Decided: D56 (author,
+2026-10-11).** The runtime guard and its error are removed; this spec adds no
+`UnexpectedContentType` (spec 5 may add it). A server reply that does not match
+the endpoint's declared kind (a JSON endpoint receiving non-JSON content) is
+`MalformedSuccess` (R10) with status, headers, and raw body kept; a text or
+binary endpoint decodes any content type. The implementation log lists the
+tests that replace the guard. Validated by: L1 in `schematic-runtime` and
+`schematic-schema`, plus a search showing the guard and its error are gone.
 
 **R29. Existing hooks preserved (typed-send spike, Q2). Proposed: the parent
 decides neither the hook types, the mechanism, `ErrorKind::Hook`, nor the
@@ -656,7 +700,8 @@ The migration list also includes spec 1's temporary `with_api_key_param`
 and generator-local environment scan: this spec removes both and migrates every
 user of them onto the runtime's credential handling (R14 to R16). Behavior is
 preserved: sniff's anonymous retry stays in sniff (PD31); sniff's
-"auth required" branch uses `TransportError` kind `MissingCredential`.
+"auth required" branch reads the server's 401 from the envelope (D56: no
+credential resolving sends anonymously; there is no `MissingCredential`).
 Validated by: each package's own `just test {pkg}` and `just lint`, run from
 the repo root (or the package area's recipes); a search for the removed names across the dependents.
 
@@ -673,14 +718,9 @@ into `schematic-runtime`. Validated by: the spec-1 isolated compile check
 over a fresh generation that includes the WebSocket modules, plus `just
 lint-schema`.
 
-**R36. REST no-credential rule. Proposed (agenda entry).** For an API whose
-definition requires authentication, when no credential resolves (per-call,
-client level, environment all empty), the send fails before sending with
-`TransportError` kind `MissingCredential`, unless the client was built with an
-explicit anonymous setting. This makes REST and the WebSocket spec agree.
-Validated by: L1 in `schematic-runtime` (zero requests at the mock; explicit
-anonymous sends once with `AuthMethod::Anonymous`; an API that does not
-require authentication is unaffected).
+**R36. Withdrawn (D56, author, 2026-10-11).** The rule that a send fails before
+sending when no credential resolves is deleted; see D11. The number is kept so
+that R references stay stable. The anonymous behavior is covered by R14 and R16.
 
 **R37. Area justfile and gates.** `schematic-runtime` is added to the
 `schematic/justfile` recipes that enumerate packages (`sanity`, `test`, `lint`,
@@ -708,13 +748,13 @@ location are Proposed (PD11).
 
 | Symbol | What it does | Status |
 |---|---|---|
-| `EndpointSpec` trait | Links a request type to `Success`, `Failure`, `Decode`, `ENDPOINT_ID`, `DECLARED_ERROR_STATUSES` (default `400..=599`). Named `EndpointSpec` for continuity with the existing generated trait and to avoid colliding with the `schematic-define` struct `Endpoint`; a default flagged for review 1. | Proposed (typed-send spike): the name, the `Decode` detail, and `DECLARED_ERROR_STATUSES`; typed association Decided (D3) |
+| `EndpointSpec` trait | Links a request type to `Success`, `Failure`, `Decode`, `ENDPOINT_ID`, `DECLARED_ERROR_STATUSES` (default `400..=599`). Named `EndpointSpec` for continuity with the existing generated trait and to avoid colliding with the `schematic-define` struct `Endpoint`. | Name Decided (D56, author, 2026-10-11); `Decode` detail and `DECLARED_ERROR_STATUSES` Proposed (typed-send spike); typed association Decided (D3) |
 | `Decode<E>` trait | Async decode of the live response into `Output`; one impl per codec; a multi-shape success is a generated enum implementing it. | Proposed (not a parent decision) |
 | Codecs `Json<T>`, `Text`, `Binary`, `Empty` | Built-in decoders. SSE, NDJSON, GraphQL codecs are spec 5. | Proposed |
 | `Response<T, E>` { `meta`, `outcome` } | The envelope; `data()`, `error()`, `into_result()`, `into_parts()`, `is_decode_failure()`, `is_interrupted()`. | Decided (D7, D25, D26); `into_parts` Proposed |
 | `Outcome<T, E>` = `Success(T)` / `Failure(ApiError<E>)` | Inner enum. | Decided (D7) |
 | `ApiError<E>` { `kind`, `body: Bytes` } | Failure with raw body always kept. | Decided (raw body, D7); shape Proposed |
-| `ErrorKind<E>` (`#[non_exhaustive]`) | `Declared(E)`, `Undeclared`, `MalformedError`, `MalformedSuccess`, `BodyInterrupted`, `RedirectRefused`, `Hook`. | `Declared`, `Undeclared`, `MalformedSuccess`, `BodyInterrupted`, `RedirectRefused` Decided (D25, D26, D32, D48); `MalformedError`, `Hook`, `#[non_exhaustive]` Proposed (S17 unratified); spec 5 adds `UnexpectedContentType` |
+| `ErrorKind<E>` (`#[non_exhaustive]`) | `Declared(E)`, `Undeclared`, `MalformedError`, `MalformedSuccess`, `BodyInterrupted`, `RedirectRefused`, `Hook`. | `Declared`, `Undeclared`, `MalformedSuccess`, `BodyInterrupted`, `RedirectRefused` Decided (D25, D26, D32, D48); `MalformedError`, `Hook`, `#[non_exhaustive]` Proposed (S17 unratified); spec 5 may add `UnexpectedContentType` (this spec adds none; D56) |
 | `NoDeclaredError` | Uninhabited placeholder failure type. | Decided (D48); name Proposed |
 | `ResponseMeta` / `RequestMeta` | Metadata fields of D21/D48, all redacted, plus `endpoint_id`. | Decided (field set); struct layout Proposed |
 | `AuthMethod` | `PerCall`, `ClientLevel`, `EnvVar(name)`, `Anonymous`. | Decided (D48) |
@@ -932,19 +972,12 @@ here. Each has a default. **Default if not ruled before planning** means the
 implementer adopts it and logs it in the Human review agenda; nothing here is
 a decision of the author.
 
-**PD1. Tighten-only comparison and rejection form (P1; R4, R25).**
-Default if not ruled before planning: define each policy by what it reaches
-(set of origins) and where credentials go. `deny`: reaches nothing, no
-credentials. `same_origin`: reaches the base; credentials to the base.
-`allow_origins(L)`: reaches base and L; credentials to those. `allow_without_credentials`:
-reaches any origin; credentials to the base only. `allow_any`: reaches any
-origin; credentials to any. A caller policy P' is permitted under definition
-policy P only when reach(P') is a subset of reach(P) **and** credential-targets(P')
-is a subset of credential-targets(P). So `allow_origins(L')` with L' a subset of
-L is permitted; `allow_origins` over `allow_without_credentials` is **not**
-comparable and is rejected. Rejection is a runtime error at client
-construction (a typed `BuildError`), because the definition's policy is data;
-a compile error is not feasible.
+**PD1. Tighten-only rule (P1; R4, R25). Decided: D56 (author, 2026-10-11),
+amending D28.** A caller may choose `deny`, `same_origin`, or an `allow_origins`
+list that is a subset of the definition's own list; everything else is rejected
+at client construction as a typed `BuildError` (the definition's policy is
+data, so a compile error is not feasible). There is no reach or
+credential-target partial order.
 
 **PD2. `deny` and same-origin next-page links (P1; R23).** Default if not ruled
 before planning: `deny` still follows same-origin next-page links (it forbids
@@ -977,17 +1010,18 @@ clients expose `ClientBuilder::cross_origin(policy)` as the tighten-only
 override.
 
 **PD7. `TransportError` kinds (P2; R9).** Default if not ruled before planning
-(`#[non_exhaustive]`): `MissingCredential`, `CrossOriginRejected`,
+(`#[non_exhaustive]`): `CrossOriginRejected`,
 `InvalidArgument` (also used for a page size above the declared maximum, set
 by spec 3), `InvalidUrl`, `Connect` (DNS failure, connection refused or reset
 before a response head), `Tls`, `Timeout` (per-request timeout fired before a
 response head arrived), `DeadlineExceeded`, `Cancelled` is *not* a kind (drop
 cancels silently), and `Other(String)` for unclassified library errors with
-the library URL stripped. A timeout after a response head is `BodyInterrupted`
+the library URL stripped. There is no `MissingCredential` kind: no other
+pre-send case needs it (D56). A timeout after a response head is `BodyInterrupted`
 (an envelope), not `Timeout`.
 
 **PD8. Managed builder surface and names (P3; R18).** Default if not ruled
-before planning, on `schematic_runtime::ClientBuilder`: `base_url`, `timeout`,
+before planning, on `schematic_runtime::ClientBuilder`: `base_url`, `timeout` (the per-request timeout, default 30 s; D56),
 `connect_timeout`, `proxy`, `add_root_certificate` (PEM or DER bytes),
 `user_agent`, `default_header`, `pool(&SharedPool)` and `SharedPool::new()`,
 `danger_accept_invalid_certificates()`, `credentials`, `cross_origin`,
@@ -1052,7 +1086,7 @@ before planning: accepted as not `Clone` and not `Sync`; documented.
 
 **PD17. `ErrorKind` shape (P5; S17).** Default if not ruled before planning:
 `#[non_exhaustive]`; variants as in Design; `UnexpectedContentType` is
-**not added here; spec 5 adds it** (the enum is `#[non_exhaustive]`, so the
+**not added here; spec 5 may add it** (the enum is `#[non_exhaustive]`, so the
 addition is not breaking). A wrong content type on a JSON endpoint is
 `MalformedSuccess` per D25 in this spec.
 
@@ -1075,13 +1109,14 @@ and response headers alike (built-in list, auth-strategy names, and
 **PD22. Placeholder error type name (P5).** Default if not ruled before
 planning: `NoDeclaredError`.
 
-**PD23. Deadline arithmetic (P6; R26).** Default if not ruled before planning:
-each request under an opted-in deadline gets the remaining time (D13
-literally), so the 30 s default does not bound a request once a deadline is
-set. The alternative `min(remaining, per-request timeout)`, which keeps the
-30 s bound, is on the Human review agenda. The deadline
-is a `Deadline` handle created once (`Deadline::after(duration)`) and passed in
-`CallOptions`. The session-close grace after expiry belongs to spec 3.
+**PD23. Deadline arithmetic (P6; R26). Decided: D56 (author, 2026-10-11),
+amending D13.** Each request under an opted-in deadline gets `min(remaining
+budget, the client's per-request timeout)`; the per-request timeout defaults to
+30 s and is settable on the managed builder (`timeout`, PD8). Example: a
+120-second deadline with a hung first request: the first request times out at
+30 s, leaving 90 s. The deadline is a `Deadline` handle created once
+(`Deadline::after(duration)`) and passed in `CallOptions`. The session-close
+grace after expiry belongs to spec 3.
 
 **PD24. HTTP/2 cancel wording (P6; S16).** Default if not ruled before
 planning: the cancel criterion accepts "stream reset" as the HTTP/2 form of
@@ -1100,11 +1135,10 @@ documented behavior requires another origin (for example GitHub's upload host
 via `allow_origins`); if no evidence exists in the tree, leave `same_origin`
 and log.
 
-**PD26. `ResponseKind` guard (P5; D49; R28).** Default if not ruled before
-planning: remove the runtime guard and its error. The typed `Decode`
-implementations make a wrong-kind call unrepresentable for text and binary,
-and a JSON endpoint receiving non-JSON becomes `MalformedSuccess`. The log
-lists the tests that replace it.
+**PD26. `ResponseKind` guard (P5; D49; R28). Decided: D56 (author,
+2026-10-11).** The runtime guard and its error are removed. A server mismatch
+is `MalformedSuccess` with status, headers, and raw body kept; this spec adds no
+`UnexpectedContentType`. The log lists the tests that replace the guard.
 
 **PD27. Status classification (R3, R10).** Default if not ruled before
 planning: a final response with status 2xx is decoded as success; any other
@@ -1154,11 +1188,9 @@ caller-supplied label" for the auth method while D48 fixes `AuthMethod` to four
 values with no label. Default if not ruled before planning: follow D48 (no
 label).
 
-**PD35. REST no-credential rule (R36). Proposed.** Default if not ruled before
-planning: for an API that requires authentication, when no credential resolves
-the send fails before sending with `TransportError` kind `MissingCredential`
-unless the client was built with an explicit anonymous setting. It is the
-rule the WebSocket spec assumes; the author confirms it at review 1.
+**PD35. Withdrawn (D56, author, 2026-10-11).** With no credential resolved the
+client sends anonymously and reports `AuthMethod::Anonymous` (D11 literally);
+the number is kept so that PD references stay stable.
 
 ## Risks and failure modes
 
@@ -1244,16 +1276,11 @@ Record in `implementation-log.md`, for review 1, as they occur:
 10. **Parent contradictions or gaps noticed** (see Refresh notes for the ones
     already known).
 11. **Items for the author's ruling at review 1** (each is a default or a
-    Proposed item, not a decision):
-    - PD1: tighten-only comparison and rejection form.
+    Proposed item, not a decision). Ruled by D56 (author, 2026-10-11) and so
+    not on this list: tighten-only (PD1), deadline arithmetic (PD23), the
+    `ResponseKind` guard removal (PD26), the `EndpointSpec` name, and the
+    no-credential rule (R36, PD35 withdrawn):
     - PD14: `send_raw` signature and the interrupted-body result.
-    - PD23: deadline arithmetic. Adopted: each request gets the remaining time
-      (D13). Alternative: `min(remaining, per-request timeout)`.
-    - PD26: removal of the `ResponseKind` guard.
-    - The trait name `EndpointSpec` (default; alternative `Endpoint`, which
-      collides with the `schematic-define` struct).
-    - The `MissingCredential` default for an authenticated API with no
-      resolved credential (R36, PD35).
     - The hook mechanism by name: a marker trait implemented by the JSON
       codec, extended by spec 5 (R29, PD10).
     - Proposed items that the parent does not decide: the hook types,
@@ -1311,7 +1338,7 @@ keep flagged:
   this P9 item unassigned).
 - D49 item 5 puts the `ResponseKind` guard disposition in landing 1 "with the
   new response model", but the response model v2 arrives in spec 5; PD26
-  decides it against the spec 2 model.
+  (Decided, D56) removes the guard against the spec 2 model.
 - The parent maps "middleware hooks" to P3 (spec 2) while D31 calls the hooks
   mechanism "later"; PD10 builds none.
 - The parent does not say whether `schematic-runtime` is a workspace member

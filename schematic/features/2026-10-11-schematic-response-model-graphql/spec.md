@@ -190,9 +190,14 @@ not required reading.
 - **D10 backstop (context from spec 1).** A declared feature must either reach the
   selected output or produce a diagnostic identifying API, endpoint, feature, and
   unsupported target.
-- **D49 item 5 (context from spec 2).** Spec 2 owns the `ResponseKind` runtime
-  guard and records its disposition (kept, changed, or removed). This spec makes no
-  decision about the guard; it only builds against whatever spec 2 landed.
+- **D49 item 5 (context from spec 2).** Spec 2 removes the `ResponseKind` runtime guard
+  and adds no `UnexpectedContentType`. This spec builds nothing against the guard.
+- **D56 (author rulings, 2026-10-11).** (1) Stream end marker: consumed by default,
+  `keep` modifier delivers it; Ollama uses `keep`. (2) `Bytes` is a third framing, set
+  non-exhaustive. (3) When no credential resolves the client sends anonymously and reports
+  `Anonymous` (D56-1); no `MissingCredential` path exists. (4) Per-request time under a
+  deadline is `min(remaining, per-request timeout)` (D56-3). The runtime trait is
+  `EndpointSpec`. Pager-managed inputs are exempt from "required" (D55-5).
 - **D50 and D51.** This is spec 5 of 8 (1 generation integrity, 2 runtime envelope,
   3 pagination, 4a definition API, 4b definition vocabulary, 5 this spec, 6
   websocket, 7 fidelity polish). It depends on spec 4b, which depends on 4a, whose
@@ -231,9 +236,10 @@ response's `Content-Type` (media type only, parameters ignored, case-insensitive
 matched against each shape's declared content type. A response that matches no
 declared content type is a failure inside the envelope with kind
 `UnexpectedContentType`, status, headers, and the raw body kept. `ErrorKind` is
-`#[non_exhaustive]`; `UnexpectedContentType` is this spec's addition to it (**PROPOSED**:
-spec 2's PD17 excludes it, so the two are reconciled in Refresh notes and ruled on in
-review 1). A single-shape
+`#[non_exhaustive]`; `UnexpectedContentType` is this spec's addition to it, needed only
+for multi-shape selection (**PROPOSED**, unchanged: the `ResponseKind` guard is removed
+by spec 2 and spec 2 adds no `UnexpectedContentType`, so nothing else supplies it; ruled
+on in review 1). A single-shape
 endpoint does not check the content type; a body that does not decode is
 `MalformedSuccess` (D25).
 *Validated by:* L1 mock-server tests (generated fixture client against a local
@@ -268,14 +274,20 @@ generated fixture client in `schematic-gen`.
 
 **R8.** The end condition is one of: data line equals X, event named X, field equals
 X, or connection close (the default). For each form, a mock stream that reaches the
-declared end finishes cleanly with no error item. For all three terminator forms
-(data line, event, and field equals) the terminating line, event, or item is consumed
-as the end marker and not delivered as an item. A field-equals item (Ollama
-`done=true`, which carries the evaluation statistics) is therefore not delivered, and
-those statistics are not available to the caller (Default D-18; the alternative,
-delivering it as the last item, is on the Human review agenda for the author to rule
-on at review 1).
-*Validated by:* L1 mock-server tests, one per form, in the runtime package.
+declared end finishes cleanly with no error item. The definition chooses per stream
+whether the end marker is consumed or kept, with a general end modifier `keep`
+(**Decided**, D56-2 refining D37; the modifier name `keep` is a Proposed default). By
+default the matching terminator (data line, event, or field-equals item) is consumed as
+the end marker and not delivered: OpenAI `[DONE]` and Anthropic `message_stop` rely on
+that. With `keep` the matching line, event, or item is delivered as the last item and
+then the stream finishes cleanly. Ollama's definition uses `keep` so its final
+`done=true` line, which carries the token statistics (for example `eval_count`), is
+delivered as the LAST item (Default D-18).
+*Validated by:* L1 mock-server tests, one per form, in the runtime package, plus two
+fixture-driven tests: a stream whose terminator is consumed by default (`[DONE]` data
+line; the last delivered item is the one before it) and an Ollama-style NDJSON fixture
+ending in a `done=true` line with `eval_count`, declared with `keep`, whose last
+delivered item is that line with the statistics intact.
 
 **R9.** A stream that closes before its declared end yields exactly one explicit
 "ended early" error item and then ends. It is distinct from a clean end, from a
@@ -294,9 +306,17 @@ the field).
 *Validated by:* L1 mock-server test asserting the envelope is returned before the
 mock finishes sending.
 
+**R11a.** Per-request time under a deadline is `min(remaining, per-request timeout)`
+(**Decided**, D56-3). A stream inherits the deadline of the call that opened it, and
+each per-item read respects the remaining budget at that moment: when the budget is
+exhausted mid-stream the stream yields the deadline error item and ends (the same
+terminal behavior as `Interrupted`; spec 2 owns the deadline error kind).
+*Validated by:* L1 mock-server test (a stream whose items arrive slower than the
+remaining budget, and one where the per-request timeout is the smaller bound).
+
 **R12.** Spec 2 owns the hook mechanism (a marker trait implemented by
-JSON-decoded endpoints) and the `ResponseKind` guard disposition. This spec only
-extends that mechanism to the new codecs: the stream codecs (`Sse`, `Ndjson`,
+JSON-decoded endpoints). The `ResponseKind` guard is removed by spec 2, so nothing here
+builds against it. This spec only extends that mechanism to the new codecs: the stream codecs (`Sse`, `Ndjson`,
 `Bytes`) do not implement the marker, so a hook registered for a text, binary, or
 stream endpoint is a compile error in the generated client, not a silent no-op; the
 `GraphQl<D>` codec implements it per R41. Any existing definition among the four
@@ -371,10 +391,11 @@ the fixture crate.
 
 ### Exporters, importer, and the vocabulary change
 
-**R22.** `Endpoint::response` no longer has the pre-v2 type. This spec owns updating
-spec 4a's JSON baselines and its byte-comparison allow-list for that change (spec 4a's
-frozen tests are expected to differ exactly where `Endpoint::response` serializes, and
-only there). Everything that read it
+**R22.** `Endpoint::response` no longer has the pre-v2 type. Spec 4a owns the plain serde
+derives on `RestApi`, `Endpoint`, `EndpointParams`, and `ParamDef` and their JSON
+snapshots; this spec updates 4a's JSON baselines and its allow-list when
+`Endpoint::response` changes (spec 4a's frozen tests are expected to differ exactly where
+`Endpoint::response` serializes, and only there). Everything that read it
 compiles against the new vocabulary: the generator (client, request structs, enum,
 module docs, traits), validation, the OpenAPI exporter and importer, the Postman
 exporter, and the vendor-extension serializer.
@@ -439,7 +460,9 @@ success shape's content type; it needs no new fidelity beyond that.
 
 **R30.** Ollama's native streaming endpoints (generate, chat, pull, push, create, and
 any other that streams by default) are migrated to NDJSON stream shapes with item
-types and the `done=true` end condition where the reply says so. For generate and chat
+types and the `done=true` end condition where the reply says so, declared with `keep`
+(R8) so the final `done=true` line, carrying the token statistics, is delivered as the
+last item. For generate and chat
 (which also support `stream: false`) a second endpoint with a non-streaming JSON shape
 exists and the pair is distinguished by the selector (R13). Ollama's OpenAI-compatible
 chat and completion endpoints use SSE with the data-line `[DONE]` end condition. The
@@ -463,9 +486,9 @@ type for the Messages stream events and end condition event named `message_stop`
 Anthropic client for both endpoints.
 
 **R33.** ElevenLabs `StreamSpeech` declares a streaming binary shape so the generated
-method no longer buffers the whole body (Default D-17: byte-chunk framing, an
-**extension of D6's closed framing set (SSE, NDJSON), PROPOSED** and on the Human review
-agenda). The
+method no longer buffers the whole body (Default D-17: byte-chunk framing with a declared
+content type, a third framing on the same `Stream` shape; **Decided**, D56-8, an
+extension of D6; the framing set stays non-exhaustive). The
 timestamps stream variant is NDJSON when its reply is line-delimited JSON; otherwise
 it stays a JSON or text shape and the implementer logs why. Unverified: ElevenLabs'
 reply framing; confirm against `schematic/docs/research/elevenlabs-api.md` and the
@@ -496,7 +519,9 @@ variables type; L1 validation test for the unregistered data type.
 
 **R36.** `schematic-gen` generates a typed request for each operation into the same
 client crate as the REST endpoints, sent through the same generic send, with the same
-credentials, cross-origin rule, deadline, and envelope. The wire body is
+credentials, cross-origin rule, deadline, and envelope. When no credential resolves, the
+operation is sent anonymously and the envelope reports `Anonymous` (D56-1), as for REST.
+The wire body is
 `{"query": <document>, "variables": <typed variables>}` (and `operationName` only when
 the author sets one; Default D-21). The document is sent exactly as written; the
 generator does not parse it.
@@ -539,7 +564,9 @@ are JSON paths into the request body (`variables.first`, `variables.after`), who
 signal is `pageInfo.hasNextPage`, whose cursor is read from `pageInfo.endCursor`, and
 whose items are selected by path (`nodes` or `edges[*].node`) under the operation's
 data root (Default D-12). The generated pager exposes only the knobs the strategy
-authors (as for REST).
+authors (as for REST). Pager-managed inputs (`variables.first`, `variables.after`, and the
+backward-leg equivalents) are exempt from the "required" check (D55-5), exactly as for
+REST pagination inputs: the pager supplies them, so the caller is not forced to.
 *Validated by:* L1 mock-server test paging a two-page connection to the end and a
 compile-fail test that an unauthored knob is not callable.
 
@@ -570,19 +597,21 @@ names (`success`, `passed`, `partial_errors`, `request_wide_errors`, `permission
 
 ### Cross-cutting
 
-**R44.** Every new definition type this spec adds (success shapes, stream framing and
-end conditions, status matches, the error set, the selector, the GraphQL operation and
-address rule) derives `Serialize`, `Deserialize`, and `PartialEq` (and `Debug`/`Clone`
-as the surrounding types do), because spec 4a's round-trip test serializes every
-definition and now covers `Endpoint::response` and the `RestApi` error set. The earlier
-claim of "no new serde obligation" was wrong.
+**R44.** Spec 4a owns the plain serde derives on `RestApi`, `Endpoint`, `EndpointParams`,
+and `ParamDef` and the JSON snapshots. Every new definition type this spec adds (success
+shapes, stream framing and end conditions including the `keep` modifier, status matches,
+the error set, the selector, the GraphQL operation and address rule) derives
+`Serialize`, `Deserialize`, and `PartialEq` (and `Debug`/`Clone` as the surrounding types
+do) so that 4a's derives and round-trip test cover `Endpoint::response` and the `RestApi`
+error set. This spec updates 4a's JSON baselines and allow-list where
+`Endpoint::response` changes (R22).
 *Validated by:* spec 4a's definition round-trip test over the real
 `schematic-definitions`, including the four migrated APIs.
 
 ## Design
 
-All symbol names are **Proposed** unless marked Decided. The only Decided items are
-the behaviors in "Background" (D-numbers). Where specs 4a and 4b have already fixed a name or
+All symbol names are **Proposed** unless marked Decided (the runtime trait `EndpointSpec`
+is Decided). The only Decided items are the behaviors in "Background" (D-numbers). Where specs 4a and 4b have already fixed a name or
 signature (builder methods, the definition context), conform to it and log the
 difference.
 
@@ -592,13 +621,17 @@ difference.
   `Text`, `Binary`, `Empty`, `Stream { framing: StreamFraming, item: Schema, end:
   StreamEnd }`; `SuccessShape { shape: ResponseShape, content_type: Option<String> }`;
   an endpoint holds a non-empty `Vec<SuccessShape>`. `StreamFraming` is `Sse`,
-  `Ndjson`, and (Default D-17, PROPOSED extension of D6's closed set) `Bytes`.
+  `Ndjson`, and (Default D-17, **Decided** D56-8, extension of D6) `Bytes`, which carries a
+declared content type; the framing set stays non-exhaustive.
   The definition struct is `Endpoint` in `schematic-define`; any new type here must not
   reuse that name. The runtime trait that generated request types implement is
   `EndpointSpec` (spec 2's default), never `Endpoint`.
 - **`StreamEnd` (Proposed).** `DataLineEquals(String)`, `EventNamed(String)`,
   `FieldEquals { field: String, value: serde_json::Value }` (a dotted path allowed),
-  `ConnectionClose` (the default).
+  `ConnectionClose` (the default). An `End` modifier named `keep` (Proposed name; the
+  behavior is Decided, D56-2) applies to the three terminator forms: with it the matching
+  line, event, or item is delivered as the last item instead of being consumed. Builder
+  form: `.keep_end()` after the end form.
 - **Error vocabulary (Proposed).** `StatusMatch` (`Exact(u16)`, `Range(RangeInclusive<u16>)`,
   with a `class(4)` constructor); the error set is spec 4a's `ErrorSet`
   (not `ErrorTable` or `ErrorRule`), widened here to hold (`StatusMatch`, shape)
@@ -757,7 +790,7 @@ parent spec.
   differently from what this spec assumes, conform to what landed and log it.
 - **Transitively requires:** spec 2 (`2026-10-11-schematic-runtime-envelope`: envelope,
   typed send, the `EndpointSpec` trait, codecs, hook marker trait, managed builder,
-  `send_raw`, cross-origin, the `ResponseKind` disposition), spec 3
+  `send_raw`, cross-origin; the `ResponseKind` guard is removed), spec 3
   (`schematic-pagination`: the pagination model GraphQL pagination uses), and spec 4a.
   Spec 4b depends on them, so they are expected to be landed; the baseline phase
   verifies this and the run stops (and logs) if spec 2's envelope is absent. The
@@ -843,16 +876,14 @@ are not decisions until the author confirms them in review 1.
 - **Default D-16 (content type checks).** *Default if not ruled before planning:* none for
   single-shape endpoints; only R3 for multi-shape. SSE and NDJSON decoding do not require
   the matching response `Content-Type`.
-- **Default D-17 (raw byte streams).** The parent's D6 stream framings are SSE and NDJSON
-  only (a closed set), but the parent also lists ElevenLabs `stream_speech` as in scope.
-  *PROPOSED default if not ruled before planning:* add a third framing `Bytes` (raw
-  chunks) whose item is a byte chunk. This is an extension of D6's closed framing set and
-  is flagged for review 1.
-- **Default D-18 (field-equals delivery).** See R8. *Default if not ruled before
-  planning:* parent-compliant. The matching item (Ollama `done=true`) is consumed as the
-  end marker and not delivered, like the data-line and event terminators. Trade-off: that
-  item carries Ollama's evaluation statistics, which are then unavailable to the caller.
-  The alternative (deliver it as the last item) is on the Human review agenda.
+- **Decision D-17 (raw byte streams; Decided, D56-8, extension of D6).** A third stream
+  framing `Bytes` (byte chunks with a declared content type) on the same `Stream` shape;
+  the framing set stays non-exhaustive. ElevenLabs `stream_speech` uses it.
+- **Decision D-18 (stream end marker; Decided, D56-2, refines D37).** See R8. The
+  matching end-marker line is consumed by default (OpenAI `[DONE]`, Anthropic
+  `message_stop`); the general `keep` modifier (name is a Proposed default) delivers it as
+  the last item instead. Ollama's definition uses `keep` so its final `done=true` line,
+  with `eval_count` and the other token statistics, reaches the caller.
 - **Default D-19 (migration scope).** *Default if not ruled before planning:* hand-migrate
   Ollama, LM Studio, Anthropic, and ElevenLabs only; any other API found with streaming (a
   `stream` body field or an SSE/NDJSON reply, for example OpenAI chat completions) is
@@ -900,8 +931,8 @@ are not decisions until the author confirms them in review 1.
   streaming endpoint always sends `stream: true`, and the non-streaming one `stream:
   false`, by the selector; mock tests record the bodies (R14).
 - **Unverified provider facts.** The reply framing and end conditions of Ollama (including
-  whether the `done` item, which carries the evaluation statistics, should be delivered
-  rather than consumed), LM Studio, Anthropic, and ElevenLabs are
+  whether its final `done=true` line carries the statistics as the migration assumes),
+  LM Studio, Anthropic, and ElevenLabs are
   taken from the parent and from the repository's research documents, not re-verified
   against live providers. Treat them as unverified and flag them in review 1.
 - **Compile-time and binary-size cost.** Per-endpoint wrapper methods cost about 7 s at
@@ -964,21 +995,16 @@ what was chosen, the alternatives considered, and why:
    differences from specs 4a and 4b; the shape of `StreamError`, `GraphQlFailure`, and the
    generated enums.
 3. **Every deviation** from a requirement, a decision, or a parent criterion, with the
-   test that stands in for it. Known candidates: the `Bytes` framing as a PROPOSED
-   extension of D6's closed framing set (D-17, R33); expanding non-class ranges on export
+   test that stands in for it. Known candidate: expanding non-class ranges on export
    (D-25).
 4. **Every open design question found**, including, for the author to rule on at review 1:
-   - **Ollama final item (D-18, R8):** the default consumes the `done=true` item as the end
-     marker (parent-compliant), so its evaluation statistics are not available; the
-     alternative is to deliver the final item as the last item. Surface the trade-off.
    - **`UnexpectedContentType` (R3):** this spec's PROPOSED addition to the
-     `#[non_exhaustive]` `ErrorKind`; spec 2's PD17 excludes it.
+     `#[non_exhaustive]` `ErrorKind`, for multi-shape selection only; spec 2 adds none.
    - **Malformed stream item (R10):** a malformed item yields an error item and the stream
      continues with the next item; confirm that continuing is wanted.
    - **Level precedence (D-7):** the parent says both "endpoint overrides" and "most
      specific wins"; whether endpoint entries should win outright (endpoint-first) or
      specificity decides across the merged table.
-   - **`Bytes` framing (D-17, R33):** PROPOSED extension of D6's closed framing set.
    - **Selector scope (D-1, R13):** a top-level body field only; nested fields and
      non-JSON bodies are rejected.
    - Also: how the ElevenLabs
@@ -990,7 +1016,7 @@ what was chosen, the alternatives considered, and why:
 6. **Unverified provider facts** assumed in the migrations (Ollama, LM Studio, Anthropic,
    ElevenLabs framing, end conditions, and content types) and which research document or
    code each came from.
-7. **Any hook removed** (D-26). The `ResponseKind` guard disposition belongs to spec 2.
+7. **Any hook removed** (D-26).
 8. **Which environments were exercised** (macOS, Linux, native Windows, WSL2) and which were
    not, with the reason.
 9. **Any gap or contradiction found in the parent** while implementing.
@@ -1000,11 +1026,12 @@ what was chosen, the alternatives considered, and why:
 This spec is a draft (`refresh_required: true`). Before its plan runs, refresh it from the
 outcomes of the earlier specs' review 1:
 
-- **Spec 2 (runtime and envelope):** the final names and locations of `Endpoint`, the
-  codecs, `StreamError`-like types, `NoDeclaredError`, `ErrorKind` (which is `#[non_exhaustive]`; reconcile this spec's
-  PROPOSED `UnexpectedContentType` with spec 2's PD17, which excludes it), the hook marker
-  trait and `ResponseKind` disposition (spec 2's; this spec only extends the marker to
-  stream and GraphQL codecs), the managed builder (where the
+- **Spec 2 (runtime and envelope):** the final names and locations of `EndpointSpec`
+  (Decided), the codecs, `StreamError`-like types, `NoDeclaredError`, `ErrorKind` (which
+  is `#[non_exhaustive]`; this spec's PROPOSED `UnexpectedContentType` stands, since spec
+  2 adds none), the hook marker trait (spec 2's; this spec only extends the marker to
+  stream and GraphQL codecs; the `ResponseKind` guard is removed), the deadline
+  `min(remaining, per-request timeout)` rule for streams, the managed builder (where the
   GraphQL address override goes), `send_raw`, whether stream responses are acceptable as
   non-`Clone`/non-`Sync`, and `elapsed` for streams. Any of these may replace a Proposed
   name or remove a requirement.
