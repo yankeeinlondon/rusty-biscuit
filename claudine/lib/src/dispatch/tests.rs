@@ -33,7 +33,7 @@ async fn dispatch_returns_default_for_unknown_event() {
     let raw = json!({"hook_event_name": "CompletelyNewEvent"});
     let env = EnvironmentContext::default();
 
-    let outcome = dispatch(&raw, Provider::Claude, &env).await.unwrap();
+    let outcome = dispatch(&raw, Provider::Claude, &env, crate::test_support::process_snapshot()).await.unwrap();
     assert_eq!(outcome, DispatchOutcome::default());
 }
 
@@ -209,7 +209,7 @@ async fn dispatch_loads_repo_scoped_config_from_environment_context() {
 
     let claudine_config = loader::load_claudine_config(Some(&config_path), None).unwrap();
     let runtime_config =
-        loader::compile_canonical_runtime(claudine_config, Some(repo.path())).unwrap();
+        loader::compile_canonical_runtime(claudine_config, Some(repo.path()), crate::test_support::process_snapshot()).unwrap();
     let runtime = DispatchRuntimeContext {
         canonical_config: Some(Arc::new(runtime_config)),
     };
@@ -288,7 +288,7 @@ async fn cached_runtime_context_reuses_loaded_config_after_file_removal() {
 
     let claudine_config = loader::load_claudine_config(Some(&config_path), None).unwrap();
     let runtime_config =
-        loader::compile_canonical_runtime(claudine_config, Some(repo.path())).unwrap();
+        loader::compile_canonical_runtime(claudine_config, Some(repo.path()), crate::test_support::process_snapshot()).unwrap();
     let runtime = DispatchRuntimeContext {
         canonical_config: Some(Arc::new(runtime_config)),
     };
@@ -376,7 +376,7 @@ async fn protect_blocks_before_tool_even_without_binding() {
     let mut config = ClaudineConfig::default();
     config.protect.enabled = true;
 
-    let runtime = loader::compile_canonical_runtime(config, None).unwrap();
+    let runtime = loader::compile_canonical_runtime(config, None, crate::test_support::process_snapshot()).unwrap();
 
     let mut meta = EventMeta::new(Provider::Claude, AgenticEvent::BeforeTool);
     meta.tool_name = Some("Bash".to_string());
@@ -403,7 +403,7 @@ async fn dispatch_protect_before_tool_produces_deny_response() {
     let mut config = ClaudineConfig::default();
     config.protect.enabled = true;
 
-    let runtime = loader::compile_canonical_runtime(config, None).unwrap();
+    let runtime = loader::compile_canonical_runtime(config, None, crate::test_support::process_snapshot()).unwrap();
 
     let mut meta = EventMeta::new(Provider::Claude, AgenticEvent::BeforeTool);
     meta.tool_name = Some("Bash".to_string());
@@ -442,7 +442,7 @@ async fn dispatch_protect_after_tool_blocks_dangerous_mcp_response() {
     let mut config = ClaudineConfig::default();
     config.protect.enabled = true;
 
-    let runtime = loader::compile_canonical_runtime(config, None).unwrap();
+    let runtime = loader::compile_canonical_runtime(config, None, crate::test_support::process_snapshot()).unwrap();
 
     let mut meta = EventMeta::new(Provider::Claude, AgenticEvent::AfterTool);
     meta.tool_name = Some("mcp__evil__read".to_string());
@@ -475,7 +475,7 @@ async fn dispatch_protect_unparsed_bash_shaped_tool_is_blocked() {
     let mut config = ClaudineConfig::default();
     config.protect.enabled = true;
 
-    let runtime = loader::compile_canonical_runtime(config, None).unwrap();
+    let runtime = loader::compile_canonical_runtime(config, None, crate::test_support::process_snapshot()).unwrap();
 
     let mut meta = EventMeta::new(Provider::Claude, AgenticEvent::BeforeTool);
     meta.tool_name = Some("Bash".to_string());
@@ -612,7 +612,7 @@ async fn canonical_dispatch_returns_default_when_no_binding() {
     config.logging = false;
     config.default_sounds = DefaultSounds::default();
 
-    let runtime = loader::compile_canonical_runtime(config, None).unwrap();
+    let runtime = loader::compile_canonical_runtime(config, None, crate::test_support::process_snapshot()).unwrap();
 
     let mut meta = EventMeta::new(Provider::Claude, AgenticEvent::SessionStart);
     meta.env = EnvironmentContext::default();
@@ -649,7 +649,7 @@ async fn canonical_dispatch_executes_sound_effect_binding() {
         }],
     );
 
-    let runtime = loader::compile_canonical_runtime(config, None).unwrap();
+    let runtime = loader::compile_canonical_runtime(config, None, crate::test_support::process_snapshot()).unwrap();
 
     let mut meta = EventMeta::new(Provider::Claude, AgenticEvent::SessionStart);
     meta.env = EnvironmentContext::default();
@@ -675,7 +675,7 @@ async fn canonical_dispatch_protect_blocks_before_tool() {
     config.protect.enabled = true;
     config.default_sounds = DefaultSounds::default();
 
-    let runtime = loader::compile_canonical_runtime(config, None).unwrap();
+    let runtime = loader::compile_canonical_runtime(config, None, crate::test_support::process_snapshot()).unwrap();
 
     let mut meta = EventMeta::new(Provider::Claude, AgenticEvent::BeforeTool);
     meta.tool_name = Some("Bash".to_string());
@@ -733,7 +733,7 @@ async fn canonical_dispatch_when_gated_action_executes_or_skips_via_runtime_bind
         }],
     );
 
-    let runtime = loader::compile_canonical_runtime(config, None)
+    let runtime = loader::compile_canonical_runtime(config, None, crate::test_support::process_snapshot())
         .expect("runtime should compile from a `when`-gated config");
 
     // Branch 1: `when` evaluates true → Call runs, fails to launch the

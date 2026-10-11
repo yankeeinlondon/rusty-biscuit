@@ -11,7 +11,7 @@ use darkmatter::markdown::schemas::{
 
 use super::{
     CompositionError, ResolvedCompositionSource, build_effective_instance,
-    is_composition_independent, load_effective_schema_in_context, top_level_pointer_segment,
+    is_composition_independent, load_effective_schema, top_level_pointer_segment,
     value_needs_composition,
 };
 
@@ -39,7 +39,7 @@ pub fn unresolved_supplied_files(
         return Vec::new();
     }
     let Ok(Some(effective)) =
-        load_effective_schema_in_context(source, None, Some(document_context))
+        load_effective_schema(source, None, document_context, records)
     else {
         return Vec::new();
     };
@@ -300,9 +300,10 @@ pub(super) fn rebase_caller_file_problems(
 
 /// The unresolved-reference text, naming the caller's base directory.
 fn caller_no_match_reason(provided: &str, origin: &FileResolutionContext) -> String {
-    format!(
-        "{NO_MATCH} `{provided}` while resolving from `{}`",
-        origin.cwd().display(),
+    darkmatter::markdown::errors::with_glob_hint(
+        format!("{NO_MATCH} `{provided}` while resolving from `{}`", origin.cwd().display()),
+        biscuit_file::ResolutionFailure::NoMatch,
+        provided,
     )
 }
 
@@ -394,8 +395,7 @@ fn supplied_file_arms<'a>(
                 candidate[name] = serde_json::Value::Array(vec![candidate[name].take()]);
             }
         }
-        let schemas = DarkmatterSchemas::new()
-            .with_file_resolution_context(document_context.clone())
+        let schemas = DarkmatterSchemas::new(document_context.clone())
             .with_baseline(SimplifiedSchema::Single(relaxed))
             .ok()?;
         let projected = schemas.effective_for(&schema_source).ok()??;

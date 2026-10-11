@@ -17,10 +17,12 @@ mod log;
 mod output;
 mod perf;
 mod provider_values;
+mod request;
 mod shutdown;
 mod steering;
 mod table_utils;
 mod telemetry;
+mod terminal_gate;
 
 use args::{Cli, Commands};
 
@@ -229,10 +231,13 @@ fn main() -> Result<()> {
     if let Some(code) = run_audio_worker_if_requested()? {
         std::process::exit(code);
     }
+    #[cfg(feature = "test-fixtures")]
+    commands::wrap::exec::completion_fixture::initialize()?;
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
-    color_eyre::install()?;
+    terminal_gate::install_report_hooks()?;
+    claudine::render::console::set_console_writer(terminal_gate::write_library_line);
 
     // `run` returns only for an error raised before the runtime exists; every
     // other exit goes through `shutdown::finish` inside the runtime.
@@ -384,7 +389,8 @@ async fn dispatch(
     } else {
         claudine::child_environment::LaunchDirectoryMode::Ordinary
     };
-    claudine::child_environment::initialize_process_launch_directory(launch_mode)?;
+    let launch_dir = claudine::child_environment::initialize_process_launch_directory(launch_mode)?;
+    request::initialize(launch_dir)?;
     // Attach the partitioned agent tail to the composition command. The tail is
     // captured before clap and never reconstructed from clap matches or argv.
     inject_caller_arguments(&mut cli, caller_arguments);

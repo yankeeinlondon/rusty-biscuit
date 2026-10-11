@@ -38,7 +38,7 @@ impl Default for ModelCache {
 impl ModelCache {
     /// Create a new cache using the default `~/.claudine/cache/models` directory.
     pub fn new() -> Self {
-        let cache_dir = dirs::home_dir()
+        let cache_dir = biscuit_file::home_dir()
             .unwrap_or_else(|| PathBuf::from("."))
             .join(".claudine")
             .join("cache")

@@ -35,7 +35,7 @@ fn ternary_condition_uses_read_side_functions_with_context() {
     use crate::markdown::compose::ComposeContext;
     let dir = tempfile::TempDir::new().unwrap();
     std::fs::write(dir.path().join("Cargo.toml"), "[package]").unwrap();
-    let rc = super::super::expression::ResolutionContext::new(dir.path().to_path_buf());
+    let rc = super::super::expression::ResolutionContext::at(dir.path().to_path_buf());
     let state = FrontmatterSeedState::new(
         std::collections::HashMap::new(),
         ComposeContext::fixed_for_testing(),
@@ -99,7 +99,7 @@ fn scan_frontmatter(
 #[allow(dead_code)]
 fn execute_frontmatter_shell_expansion(
     frontmatter: &mut Frontmatter,
-    options: &ComposeOptions,
+    options: &crate::markdown::compose::ComposeRequest,
     runtime: &mut PipelineRuntime,
     pre_interpolation_snapshot: Option<&std::collections::HashMap<String, String>>,
 ) -> MarkdownResult<FrontmatterShellExpansionReport> {

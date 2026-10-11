@@ -71,7 +71,12 @@ fn parse_events(events: &[Event<'_>]) -> Vec<RichNode> {
                 i = end_idx + 1;
             }
             Event::Text(text) => {
-                nodes.push(RichNode::Text(text.to_string()));
+                // The parser splits text at escapes and entities; one node per
+                // run lets a writer see where a line's text really starts.
+                match nodes.last_mut() {
+                    Some(RichNode::Text(previous)) => previous.push_str(text),
+                    _ => nodes.push(RichNode::Text(text.to_string())),
+                }
                 i += 1;
             }
             Event::Code(code) => {

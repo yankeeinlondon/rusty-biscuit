@@ -2310,7 +2310,10 @@ fn render_god_analysis(term: &Terminal, plain: bool, analysis: &GodAnalysis) {
             term,
             plain,
             2,
-            &format!("- <dim>note: {}</dim>", render::literal(note)),
+            &format!(
+                "- <dim>note: {}</dim>",
+                Prose::escape_text_outside_code_spans(&render::neutralized(note)),
+            ),
         );
     }
 
@@ -2375,7 +2378,10 @@ fn render_symbol_block(term: &Terminal, plain: bool, block: &SymbolBlock) {
         None => String::new(),
     };
     let doc = match &block.doc_summary {
-        Some(summary) => format!(" <dim>— {}</dim>", render::literal(summary)),
+        Some(summary) => format!(
+            " <dim>— {}</dim>",
+            Prose::escape_text_outside_code_spans(&render::neutralized(summary)),
+        ),
         None => String::new(),
     };
 
@@ -2418,8 +2424,8 @@ fn format_refactor_hint(hint: &RefactorHint) -> String {
     match hint {
         RefactorHint::DominatedBySingleSymbol { name, share } => {
             format!(
-                "likely refactor: `{}` holds {:.0}% of the code — split by responsibility",
-                render::literal(name),
+                "likely refactor: {} holds {:.0}% of the code — split by responsibility",
+                renderable::markdown::code_span(&render::neutralized(name)),
                 share * 100.0
             )
         }

@@ -29,7 +29,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use biscuit_file::FileReference;
+use biscuit_file::{FileReference, FileResolutionContext};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -242,11 +242,21 @@ pub fn evaluate(
     evaluate_with_fixture_base(provider, seed, research, None)
 }
 
+/// Where empirical `./_fixtures/...` references resolve: the area's request
+/// context derived onto the research topic directory.
+pub(crate) struct FixtureBase(FileResolutionContext);
+
+impl FixtureBase {
+    pub(crate) fn new(context: &FileResolutionContext, topic_dir: &Path) -> Self {
+        Self(context.for_cwd(topic_dir))
+    }
+}
+
 fn evaluate_with_fixture_base(
     provider: &str,
     seed: Option<&ErrorVocabulary>,
     research: &ResearchVocabulary,
-    fixture_base: Option<&Path>,
+    fixture_base: Option<&FixtureBase>,
 ) -> FindingsReport {
     let mut findings = Vec::new();
 
@@ -400,7 +410,7 @@ fn check_needle_hygiene(research: &ResearchVocabulary, findings: &mut Vec<Findin
 fn check_provenance(
     seed: Option<&ErrorVocabulary>,
     research: &ResearchVocabulary,
-    fixture_base: Option<&Path>,
+    fixture_base: Option<&FixtureBase>,
     findings: &mut Vec<Finding>,
 ) {
     let seed_rows = seed.map(seed_rows).unwrap_or_default();
@@ -414,7 +424,7 @@ fn check_provenance(
 fn provenance_for(
     row: &ProvenanceRow<'_>,
     in_seed: bool,
-    fixture_base: Option<&Path>,
+    fixture_base: Option<&FixtureBase>,
     findings: &mut Vec<Finding>,
 ) {
     let branch = row.row.branch;
@@ -463,7 +473,7 @@ fn check_empirical_provenance(
     branch: Branch,
     label: &str,
     empirical: Option<&EmpiricalEvidence>,
-    fixture_base: Option<&Path>,
+    fixture_base: Option<&FixtureBase>,
     findings: &mut Vec<Finding>,
 ) {
     let Some(empirical) = empirical else {
@@ -508,7 +518,7 @@ fn check_empirical_provenance(
         return;
     };
     let resolved = FileReference::new(fixture)
-        .and_then(|reference| reference.resolve_from(fixture_base));
+        .and_then(|reference| reference.resolve_in_context(&fixture_base.0));
     match resolved {
         Ok(Some(_)) => {}
         Ok(None) => findings.push(Finding {
@@ -749,9 +759,15 @@ pub fn read_seed(area: &Path, slug: &str) -> Result<Option<ErrorVocabulary>, Gen
 
 /// Reads a provider's research vocabulary from its schema-validated
 /// frontmatter (so a malformed document fails the same way generation would).
-pub fn read_research(area: &Path, slug: &str) -> Result<ResearchVocabulary, GenError> {
+/// The document's `$schema` resolves through `context` (the area's context
+/// from [`inputs::area_resolution_context`]).
+pub fn read_research(
+    area: &Path,
+    slug: &str,
+    context: &FileResolutionContext,
+) -> Result<ResearchVocabulary, GenError> {
     let path = research_doc_path(area, slug);
-    let frontmatter = inputs::load_validated_frontmatter(&path)?;
+    let frontmatter = inputs::load_validated_frontmatter(&path, context)?;
     parse_research(slug, &frontmatter)
 }
 
@@ -764,7 +780,8 @@ fn parse_research(slug: &str, frontmatter: &Value) -> Result<ResearchVocabulary,
 }
 
 /// The full gate: read the seed + research doc, evaluate, and atomically replace
-/// the explicit outcome report.
+/// the explicit outcome report. The research document resolves through
+/// `context` (see [`read_research`]).
 ///
 /// ## Returns
 ///
@@ -777,13 +794,14 @@ pub fn check_provider(
     area: &Path,
     slug: &str,
     findings_path: &Path,
+    context: &FileResolutionContext,
 ) -> Result<FindingsReport, GenError> {
-    let fixture_base = area.join(format!("docs/research/{TOPIC}"));
+    let fixture_base = FixtureBase::new(context, &area.join(format!("docs/research/{TOPIC}")));
     let report = match read_seed(area, slug) {
         Err(error) => {
             FindingsReport::gate_error(slug, GateErrorScope::GateInput, error.to_string())
         }
-        Ok(seed) => match read_research(area, slug) {
+        Ok(seed) => match read_research(area, slug, context) {
             Ok(research) => {
                 evaluate_with_fixture_base(slug, seed.as_ref(), &research, Some(&fixture_base))
             }

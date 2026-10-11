@@ -98,7 +98,12 @@ event loop, `MarkProcessor`, `RuleProcessor`) have been **deleted**.
   [Code Highlighting](./rendering/code-highlighting.md).
 - The HTML browser fold produces a fragment; `DarkmatterPage::render_to_browser`
   and `HtmlPage` assembly compose the full document. Raw HTML handling follows
-  the renderable browser renderer's `RawHtmlPolicy`.
+  the renderable browser renderer's `RawHtmlPolicy`; darkmatter uses `Escape`,
+  so `<b>x</b>` in a document shows as the literal text `<b>x</b>`. An HTML
+  comment has no visible content and is the exception: `<!-- note -->`, and
+  the `` `a`<!-- -->`b` `` separator that Markdown written by renderable puts
+  between touching code spans, show nothing in HTML or the terminal, while
+  `md` Markdown output keeps them.
 
 ### Render Path
 

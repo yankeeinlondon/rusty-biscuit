@@ -236,14 +236,7 @@ const PROXY_TRANSITION_SITE_BASELINE: &[AllowedSite] = &[
 /// document identity, hand-off, and lifecycle error routing. A repo-wide ban
 /// would false-positive on the many legitimate output paths that build their
 /// text through a component and print it at the boundary.
-const TRANSITION_PRINT_BASELINE: &[AllowedSite] = &[AllowedSite {
-    site: "harness_orch::loop_control::classify_attempt_phase",
-    calls: 1,
-    reason: "not ad hoc: the content is built by `output::format_user_interrupt_status()` \
-             and this is only the boundary write. It reports a Ctrl+C to the operator \
-             before the lifecycle guard closes, which is a status line rather than a \
-             transition diagnostic.",
-}];
+const TRANSITION_PRINT_BASELINE: &[AllowedSite] = &[];
 
 /// The transition-path files [`TRANSITION_PRINT_BASELINE`] governs, relative to
 /// the package area.
@@ -353,10 +346,10 @@ const PREPARED_CONTEXT_CAPTURE_BASELINE: &[AllowedSite] = &[
                  `build_preflight_graph_with_invocation` instead",
     },
     AllowedSite {
-        site: "system_prompt::prepare::compose_prompt_markdown",
+        site: "commands::context::render_values_report",
         calls: 1,
-        reason: "library compatibility branch when no shared session context \
-                 exists; the session path supplies the launch capture",
+        reason: "`claudine context --values` reports the host at the request \
+                 snapshot's launch directory; it composes no document",
     },
     AllowedSite {
         site: "loop_control::target_launch::rebuild_target_launch",

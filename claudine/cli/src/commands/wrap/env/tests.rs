@@ -510,7 +510,7 @@ fn build_child_env_overrides_pwd_to_match_child_cwd() {
         cwd.path(),
         &[],
         OverlayReasons::none(),
-        &HomeBaseline::capture(),
+        &HomeBaseline::capture(crate::request::snapshot()),
         &EnvBaseline::capture(),
         None,
     )
@@ -549,7 +549,7 @@ fn build_child_env_overwrites_stale_agent_cwd_with_process_launch_directory() {
         cwd.path(),
         &[("AGENT_CWD".to_string(), "stale/value".to_string())],
         OverlayReasons::none(),
-        &HomeBaseline::capture(),
+        &HomeBaseline::capture(crate::request::snapshot()),
         &EnvBaseline::capture(),
         None,
     )
@@ -588,7 +588,7 @@ fn build_child_env_stamps_interactive_gates_for_child_and_hook() {
         cwd.path(),
         &[],
         OverlayReasons::none(),
-        &HomeBaseline::capture(),
+        &HomeBaseline::capture(crate::request::snapshot()),
         &EnvBaseline::capture(),
         None,
     )
@@ -608,7 +608,7 @@ fn build_child_env_stamps_interactive_gates_for_child_and_hook() {
         cwd.path(),
         &[],
         OverlayReasons::none(),
-        &HomeBaseline::capture(),
+        &HomeBaseline::capture(crate::request::snapshot()),
         &EnvBaseline::capture(),
         None,
     )
@@ -637,7 +637,7 @@ fn build_child_env_includes_claudine_pid_for_interactive_wrapper() {
         cwd.path(),
         &[],
         OverlayReasons::none(),
-        &HomeBaseline::capture(),
+        &HomeBaseline::capture(crate::request::snapshot()),
         &EnvBaseline::capture(),
         None,
     )
@@ -679,7 +679,7 @@ fn build_child_env_includes_claudine_pid_for_non_interactive_wrapper() {
         cwd.path(),
         &[],
         OverlayReasons::none(),
-        &HomeBaseline::capture(),
+        &HomeBaseline::capture(crate::request::snapshot()),
         &EnvBaseline::capture(),
         None,
     )
@@ -906,7 +906,7 @@ fn build_child_env_inherits_the_supplied_baseline() {
         cwd.path(),
         &[],
         OverlayReasons::none(),
-        &HomeBaseline::capture(),
+        &HomeBaseline::capture(crate::request::snapshot()),
         &baseline,
         None,
     )
@@ -1017,7 +1017,7 @@ fn repo_root_hint_sets_metadata_but_not_child_cwd() {
         cwd.path(),
         &[],
         OverlayReasons::none(),
-        &HomeBaseline::capture(),
+        &HomeBaseline::capture(crate::request::snapshot()),
         &EnvBaseline::capture(),
         Some(hint_dir.path()),
     )
@@ -1042,7 +1042,7 @@ fn repo_root_hint_none_falls_back_to_cwd_detection() {
         cwd.path(),
         &[],
         OverlayReasons::none(),
-        &HomeBaseline::capture(),
+        &HomeBaseline::capture(crate::request::snapshot()),
         &EnvBaseline::capture(),
         None,
     )

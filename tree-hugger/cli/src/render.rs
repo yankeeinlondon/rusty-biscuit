@@ -25,7 +25,7 @@ use std::path::{Path, PathBuf};
 
 use biscuit_terminal::discovery::detection::ColorDepth;
 use biscuit_terminal::prelude::{
-    Prose, Table, TableCellContent, TableColumn, Terminal, TerminalRenderable, UnorderedList,
+    InlineProse, LineBreaks, Prose, Table, TableCellContent, TableColumn, Terminal, TerminalRenderable, UnorderedList,
     WordWrap, strip_escape_codes,
 };
 use tree_hugger::{
@@ -125,7 +125,7 @@ impl Layout for TerminalLayout<'_, '_> {
         for item in items {
             // The list gives each item its hanging indent and wraps it at the
             // renderer's width (never, when that width is unbounded).
-            list.add(Prose::new(item.as_str()).with_word_wrap(WordWrap::None));
+            list.add(Prose::new(item.as_str()).with_line_breaks(LineBreaks::Hard).with_word_wrap(WordWrap::None));
         }
         self.renderer.list(self.out, indent, &list)
     }
@@ -445,7 +445,7 @@ impl Renderer {
                 let location = format!("{}:{line}", self.display(Path::new(&relative)));
                 let linked = self.link(&record.source.file_path, line, &literal(&location));
                 let location: TableCellContent = if linked.starts_with("<a ") {
-                    Prose::new(linked).into()
+                    InlineProse::new(linked).into()
                 } else {
                     neutralized(&location).into()
                 };
@@ -722,6 +722,7 @@ impl Renderer {
     /// columns more than the first.
     fn hanging_line(&self, out: &mut dyn Write, indent: usize, hanging: u32, markup: &str) -> io::Result<()> {
         let rendered = Prose::new(markup)
+            .with_line_breaks(LineBreaks::Hard)
             .with_word_wrap(self.wrap(hanging))
             .render(&self.term_at(indent));
         self.write_indented(out, indent, &rendered)

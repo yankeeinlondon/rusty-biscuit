@@ -231,13 +231,13 @@ impl Icon {
 
 impl TerminalRenderable for Icon {
     fn render(&self, term: &Terminal) -> String {
-        use biscuit_terminal::components::prose::Prose;
+        use biscuit_terminal::components::prose::InlineProse;
 
         if self.nerd_font && let Some(c) = self.nerd_font_char() {
-            return Prose::new(c.to_string()).render(term);
+            return InlineProse::new(c.to_string()).render(term);
         }
         if let Some(c) = self.unicode_char() {
-            return Prose::new(c.to_string()).render(term);
+            return InlineProse::new(c.to_string()).render(term);
         }
         #[cfg(feature = "image")]
         {
@@ -248,7 +248,7 @@ impl TerminalRenderable for Icon {
                 return s;
             }
         }
-        Prose::new(self.id.clone()).render(term)
+        InlineProse::new(self.id.clone()).render(term)
     }
 
     fn layout(&self) -> &Layout {

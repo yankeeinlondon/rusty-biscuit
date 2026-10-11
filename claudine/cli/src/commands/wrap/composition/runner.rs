@@ -30,7 +30,7 @@ use darkmatter::markdown::compose::ComposeContext;
 
 use super::env::LaunchWorkspaceContext;
 use super::preflight::{
-    PreflightBlockedOutcome, emit_preflight_blocked_and_finalize_in_context,
+    PreflightBlockedOutcome, emit_preflight_blocked_and_finalize,
     preflight_blocked_control_error,
 };
 use super::target::composition_dispatch_context;
@@ -191,7 +191,7 @@ pub(super) fn run_composition_body(
                 // Route through the stack-aware runner so `blocked.stack` and
                 // `finalize.stack` fire (spec.md:436/650/652), not just the
                 // legacy top-level surface.
-                let preflight_outcome = emit_preflight_blocked_and_finalize_in_context(
+                let preflight_outcome = emit_preflight_blocked_and_finalize(
                     guard,
                     lifecycle_effect_engine,
                     emitter,
@@ -203,7 +203,7 @@ pub(super) fn run_composition_body(
                     base_dir,
                     Some(launch_workspace.launch_cwd.as_path()),
                     Some(lifecycle_context),
-                    request.prepared.input_layers.file_resolution_context.as_ref(),
+                    &request.prepared.input_layers.file_resolution_context,
                     request
                         .invocation_context
                         .as_ref()
@@ -253,7 +253,7 @@ pub(super) fn run_composition_body(
             // is a composition-preflight blocked path: route through
             // the stack-aware runner so `blocked.stack` and
             // `finalize.stack` fire.
-            let preflight_outcome = emit_preflight_blocked_and_finalize_in_context(
+            let preflight_outcome = emit_preflight_blocked_and_finalize(
                 guard,
                 lifecycle_effect_engine,
                 emitter,
@@ -265,7 +265,7 @@ pub(super) fn run_composition_body(
                 base_dir,
                 Some(launch_workspace.launch_cwd.as_path()),
                 Some(lifecycle_context),
-                request.prepared.input_layers.file_resolution_context.as_ref(),
+                &request.prepared.input_layers.file_resolution_context,
                 request
                     .invocation_context
                     .as_ref()

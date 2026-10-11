@@ -29,7 +29,7 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 
 use crate::config::WorkspaceConfig;
-use crate::graph::WorkspaceGraph;
+use crate::graph::{DocumentContexts, WorkspaceGraph};
 use crate::workspace::discover_workspace;
 use crate::workspace::startup::{SilentProgress, collect_indices_from_files};
 
@@ -129,8 +129,9 @@ impl BenchReport {
     }
 }
 
-/// Runs the bench index over `root`.
-pub fn bench_index(root: &Path) -> BenchReport {
+/// Runs the bench index over `root`, resolving path references through
+/// `contexts` as the server does.
+pub fn bench_index(root: &Path, contexts: &dyn DocumentContexts) -> BenchReport {
     let config = WorkspaceConfig::default();
     let total_start = Instant::now();
     let mut stages = StageTimings::default();
@@ -154,7 +155,7 @@ pub fn bench_index(root: &Path) -> BenchReport {
     // Graph build → reverse index → snapshot swap, timed as the three R-6
     // stages the batch startup path runs back to back inside `from_indices`.
     let build_start = Instant::now();
-    let assembly = WorkspaceGraph::assemble(&indices, BENCH_GENERATION, &[]);
+    let assembly = WorkspaceGraph::assemble(&indices, BENCH_GENERATION, &[], contexts);
     stages.graph_build_ms = elapsed_ms(build_start);
 
     let reverse_start = Instant::now();
@@ -254,6 +255,12 @@ mod libc_rusage {
 mod tests {
     use super::*;
 
+    fn test_contexts(root: &Path) -> crate::context::RepositoryContexts {
+        crate::context::RepositoryContexts::new(
+            darkmatter::markdown::compose::RequestSnapshot::new(root),
+        )
+    }
+
     fn write(root: &Path, rel: &str, body: &str) {
         let path = root.join(rel);
         if let Some(parent) = path.parent() {
@@ -269,7 +276,7 @@ mod tests {
         write(root, "a.md", "# A\n\n[to b](b.md)\n");
         write(root, "b.md", "# B\n\n## Sub\n");
 
-        let report = bench_index(root);
+        let report = bench_index(root, &test_contexts(root));
         assert_eq!(report.files, 2);
         assert_eq!(report.counts.documents, 2);
         assert!(report.counts.nodes >= 4); // 2 docs + headings + links
@@ -304,7 +311,7 @@ mod tests {
             );
         }
 
-        let report = bench_index(root);
+        let report = bench_index(root, &test_contexts(root));
         assert_eq!(report.files, 6);
         assert_eq!(report.counts.documents, 6);
 
@@ -329,7 +336,7 @@ mod tests {
     fn test_summary_renders() {
         let temp = tempfile::tempdir().unwrap();
         write(temp.path(), "a.md", "# A\n");
-        let report = bench_index(temp.path());
+        let report = bench_index(temp.path(), &test_contexts(temp.path()));
         let summary = report.to_summary();
         assert!(summary.contains("indexed 1 files"));
         assert!(summary.contains("graph:"));

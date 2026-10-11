@@ -59,7 +59,7 @@ fn scope_at(root: &Path, dir: &Path) -> HashMap<String, String> {
     );
     let (composed, _) = Markdown::try_from(document.as_path())
         .unwrap()
-        .compose_with(ComposeOptions::new_with_context(context).with_source_file(&document))
+        .compose_with(&crate::request_support::request(ComposeOptions::new_with_context(context).with_source_file(&document)))
         .unwrap();
     composed
         .content()

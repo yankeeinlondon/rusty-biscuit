@@ -88,7 +88,7 @@ command or flag updates `docs/cli.md`, not the README.
   `classes` routines write to a `render::Layout`
   (`heading`/`row`/`list`/`note`/`blank`), never to bytes: `TerminalLayout`
   renders each line, `prose::ProseLayout` writes the same markup unrendered
-  (`--plain` drops style/link nodes parsed with `Prose::to_render_nodes`, never
+  (`--plain` drops style/link nodes parsed with `InlineProse::to_render_nodes`, never
   a `<` scan), and `markdown::MarkdownLayout` writes CommonMark (headings for
   package/group/file, nested items for rows/sections, hard-break doc lines,
   `**`/`*` kept, spans/links dropped, text nodes CommonMark-escaped);

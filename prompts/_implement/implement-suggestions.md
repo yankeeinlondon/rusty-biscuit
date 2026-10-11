@@ -160,8 +160,8 @@ Create a `### Finding Ledger` in this iteration's log section before editing cod
 - Record blockers and whether they have been removed by an accepted decision or
   changed prerequisite. Complete all unblocked work while genuine blockers remain.
 - Finish each row as **fixed**, **already fixed**, **clean**, **blocked**,
-  **deferred**, or **unresolved**. `clean` is for checked sibling sites, not a
-  finding that requires repair. Record evidence for fixed/already-fixed/clean
+  **deferred**, **unresolved**, or **disputed**. `clean` is for checked sibling sites,
+  not a finding that requires repair. Record evidence for fixed/already-fixed/clean
   rows and a concrete reason for every open row.
 - A parent finding is fixed only when every required child is verified and no
   discovered defect remains open. Use already fixed only if no repair was needed
@@ -198,7 +198,8 @@ For every finding, before any code changes:
   file the review named (for example: "a load-bearing field's absent, null,
   wrong-type, and invalid-element shapes are coerced to a permissive default")
 - grep for every sibling site: every parser, reader, detector, or projection
-  that handles the same kind of input or makes the same kind of decision
+  that handles the same kind of input or makes the same kind of decision,
+  within the code this spec added or changed and the call sites that reach it
 - fix every instance you find in this cycle and add a test case for each,
   whether or not the review named it
 - trace changed identity, scope, category, arity, or other decision evidence
@@ -216,20 +217,43 @@ uncached equivalence checks must also assert the independently expected facts.
 The following are not permitted for anything that is itself a defect against
 the specification: "flagged for the reviewer", "left unchanged", "deliberately
 left tolerant", "out of scope for this finding", "possible follow-up". Either
-fix it in this cycle, or record it as blocked, deferred, or unresolved in the
-ledger and closing report with the reason. These outcomes do not count as fixed.
+fix it in this cycle, or record it as blocked, deferred, unresolved, or disputed
+in the ledger and closing report with the reason. These outcomes do not count
+as fixed.
+
+### Dispute a finding that has no authority
+
+A high finding must cite its authority: a spec acceptance criterion, decision,
+or sentence it violates, or a regression from the base branch reached by an
+input a real call site, template, fixture, or user produces. When a finding
+cites neither, or its cited authority does not say what the finding claims,
+do not implement it. Record it in the ledger and closing report as
+**disputed**, with one sentence naming the authority it lacks; the next review
+must cite that authority or drop the finding.
+
+Also dispute, rather than build, a repair that is large next to the harm it
+prevents: a new escaping or protection layer, new syntax in generated output,
+or code that exists only to satisfy synthetic payloads. Propose documenting
+the limitation instead. Each such layer is new surface the next review can
+find an edge in.
+
+Observations and medium or low findings never require a repair; take one only
+when it is a small, surgical change inside the spec's code.
 
 ::block when="review && file_exists(review) && frontmatter(review, 'recurrence') == true"
 **This review reports a recurring finding class.** Its `## Recurrence` section
 names the sibling sites an earlier fix missed. That list is the minimum scope
-for this cycle: fix every site it names, then run your own sweep for any it
-missed. A site left from that list repeats the class a third time.
+for this cycle, apart from any finding you dispute: fix every site it names,
+then run your own sweep for any it missed.
 ::end-block
 
 The repository's surgical-changes rule bounds each change to the defect class.
 It does not bound it to the sentence in the review.
 
 ::file "../_input-robustness.md"
+
+::file "../_headless-orchestration.md"
+
 
 Now your task is to:
 
@@ -259,11 +283,12 @@ Now your task is to:
 
     - use `### Completion Report`; state **complete**, **partial**, or **blocked**
       and the elapsed duration. Complete requires every finding repaired or
-      independently verified already fixed and all required checks passing.
+      independently verified already fixed, or disputed with its missing authority
+      documented, and all required checks passing.
       Blocked means all remaining work depends on unavailable prerequisites;
       otherwise an incomplete cycle is partial.
     - count parent findings: `total = fixed + already fixed + blocked + deferred
-      + unresolved`. No parent may remain pending, be counted twice, or be
+      + unresolved + disputed`. No parent may remain pending, be counted twice, or be
       reported fixed while any required instance/consumer remains open.
     - summarize verified repairs and list every open finding/child ID, what
       remains, its reason, and the next required action. An evaluated finding

@@ -28,7 +28,7 @@ sniff = { path = "../../sniff/lib", default-features = false }
 tree-hugger = { path = "../lib" }
 url = "2.5"
 # Reads the inline nodes of the listing's Prose markup for the Markdown and
-# plain Prose exports (biscuit-terminal's `Prose::to_render_nodes`).
+# plain Prose exports (biscuit-terminal's `InlineProse::to_render_nodes`).
 renderable = { path = "../../renderable" }
 biscuit-test-harness = { path = "../../biscuit-test-harness", optional = true }
 test-toolkit = { path = "../../tools/test-toolkit", optional = true }

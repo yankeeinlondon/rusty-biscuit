@@ -704,7 +704,7 @@ functions:
     #[test]
     fn lazy_operators_are_dispatchable() {
         let lookup = FsLookup {
-            ctx: ResolutionContext::new(std::env::temp_dir()),
+            ctx: ResolutionContext::at(std::env::temp_dir()),
         };
         for name in lazy_operator_names() {
             let err = dispatch_error(name, &lookup);
@@ -728,7 +728,7 @@ functions:
     #[test]
     fn every_descriptor_overload_is_dispatchable_at_its_declared_arity() {
         let lookup = FsLookup {
-            ctx: ResolutionContext::new(std::env::temp_dir()),
+            ctx: ResolutionContext::at(std::env::temp_dir()),
         };
 
         let mut failures = Vec::new();
@@ -753,7 +753,7 @@ functions:
     #[test]
     fn unknown_function_is_rejected() {
         let lookup = FsLookup {
-            ctx: ResolutionContext::new(std::env::temp_dir()),
+            ctx: ResolutionContext::at(std::env::temp_dir()),
         };
         let err = dispatch_error("definitely_not_a_real_function", &lookup)
             .expect("an unknown function must error");
@@ -936,6 +936,8 @@ functions:
             // Phase 5 — link and skill functions
             "link(file)",
             "link(target, desc)",
+            "code_link(file)",
+            "code_link(target, desc)",
             "has_skill(name)",
             "has_local_skill(name)",
         ];
@@ -991,7 +993,7 @@ mod phase2_tests {
         std::fs::write(dir.path().join("review-2.md"), "").unwrap();
         std::fs::create_dir(dir.path().join("sub")).unwrap();
         std::fs::write(dir.path().join("sub/note.md"), "").unwrap();
-        let ctx = ResolutionContext::new(dir.path().to_path_buf());
+        let ctx = ResolutionContext::at(dir.path().to_path_buf());
         let mut data = std::collections::HashMap::new();
         data.insert("items".to_string(), serde_json::json!([1, 2, 3]));
         data.insert("obj".to_string(), serde_json::json!({"a": 1}));
@@ -1285,7 +1287,7 @@ mod more_context_descriptor_tests {
 
         only("has_command(cmd)");
         only("has_binary(name_or_path)");
-        let context = ResolutionContext::new(std::env::temp_dir());
+        let context = ResolutionContext::at(std::env::temp_dir());
         for probe in ["sh", "definitely-not-a-real-bin-zzz", "", "./relative"] {
             let args = [serde_json::json!(probe)];
             assert_eq!(

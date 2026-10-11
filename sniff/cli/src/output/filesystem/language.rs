@@ -2,7 +2,7 @@ use std::fmt::Write;
 use std::path::Path;
 
 use biscuit_terminal::components::list::UnorderedList;
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::{InlineProse, Prose};
 use biscuit_terminal::components::renderable::{RenderableTerminalContent, TerminalRenderable};
 use biscuit_terminal::terminal::Terminal;
 use sniff::filesystem::FrameworkStats;
@@ -51,14 +51,14 @@ fn render_language_name(
     } else {
         name.to_string()
     };
-    Prose::new(&markup).render(term)
+    InlineProse::new(&markup).render(term)
 }
 
 fn render_language_usage(
     lang: &sniff::filesystem::languages::LanguageStats,
     term: &Terminal,
 ) -> String {
-    Prose::new(format!(
+    InlineProse::new(format!(
         "{} direct, {} framework ({:.1}%)",
         format_number(lang.direct_file_count),
         format_number(lang.framework_file_count),
@@ -160,7 +160,7 @@ fn render_language_table_for_package(pkg: &Package, verbose: u8, term: &Terminal
                 term,
             )),
             TableCellContent::Text(render_language_usage(lang, term)),
-            TableCellContent::Text(Prose::new(format!("{:.2}", lang.signal)).render(term)),
+            TableCellContent::Text(InlineProse::new(format!("{:.2}", lang.signal)).render(term)),
         ]);
     }
 
@@ -230,7 +230,7 @@ pub fn render_language_section(
 
             let mut items: Vec<RenderableTerminalContent> = Vec::new();
             for pkg in packages {
-                let title = Prose::new(format!("<b>{}</b>", pkg.name)).render(&term);
+                let title = InlineProse::new(format!("<b>{}</b>", pkg.name)).render(&term);
                 let body = render_language_table_for_package(pkg, verbose, &term);
                 items.push(RenderableTerminalContent::String(title));
                 items.push(RenderableTerminalContent::String(body));
@@ -258,7 +258,7 @@ pub fn render_language_section(
 
             let mut items: Vec<RenderableTerminalContent> = Vec::new();
             for pkg in &area_packages {
-                let title = Prose::new(format!("<b>{}</b>", pkg.name)).render(&term);
+                let title = InlineProse::new(format!("<b>{}</b>", pkg.name)).render(&term);
                 let body = render_language_table_for_package(pkg, verbose, &term);
                 items.push(RenderableTerminalContent::String(title));
                 items.push(RenderableTerminalContent::String(body));
@@ -310,7 +310,7 @@ pub fn render_language_section(
 
             let primary = langs.primary;
             if let Some(primary) = primary {
-                let line = Prose::new(format!(
+                let line = InlineProse::new(format!(
                     "<b>{}</b> is the primary language in this repo",
                     primary
                 ))
@@ -340,7 +340,7 @@ pub fn render_language_section(
                         &term,
                     )),
                     TableCellContent::Text(render_language_usage(lang, &term)),
-                    TableCellContent::Text(Prose::new(format!("{:.2}", lang.signal)).render(&term)),
+                    TableCellContent::Text(InlineProse::new(format!("{:.2}", lang.signal)).render(&term)),
                 ]);
             }
 

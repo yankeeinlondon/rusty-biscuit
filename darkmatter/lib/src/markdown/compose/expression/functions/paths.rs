@@ -24,4 +24,5 @@ pub(super) const BINDINGS: &[FunctionBinding] = &[
     FunctionBinding { canonical: "dir_leading", aliases: &["dirleading"], evaluation: EvaluationMode::Context, handler: Some(FunctionHandler::Context(super::dir_leading_fn)) },
     FunctionBinding { canonical: "join", aliases: &[], evaluation: EvaluationMode::Context, handler: Some(FunctionHandler::Context(super::join_fn)) },
     FunctionBinding { canonical: "link", aliases: &[], evaluation: EvaluationMode::Context, handler: Some(FunctionHandler::Context(super::link_fn)) },
+    FunctionBinding { canonical: "code_link", aliases: &["codelink"], evaluation: EvaluationMode::Context, handler: Some(FunctionHandler::Context(super::code_link_fn)) },
 ];

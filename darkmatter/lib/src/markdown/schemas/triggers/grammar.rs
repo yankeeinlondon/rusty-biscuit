@@ -20,6 +20,7 @@
 //!
 //! See [`parse_match_arms`] for the entry point.
 
+use biscuit_file::{FileReference, FileReferenceKind, GlobReference, GlobReferenceError};
 use serde_yaml_ng::Value as YamlValue;
 
 use crate::markdown::schemas::errors::SchemaError;
@@ -78,15 +79,63 @@ pub enum MatchExpr {
 
 /// A `$path:` glob list, parsed from a string or sequence of strings.
 ///
-/// Reuses the same shape as [`Constraint::Match`]: a list of glob patterns
-/// where `!`-prefixed entries are negations. Compiled lazily by the matcher.
-#[derive(Debug, Clone, PartialEq)]
+/// Each pattern is a [`GlobReference`] pattern (`[!][prefix]glob`) with the
+/// file-name view, so `$path` judges a document exactly as `match()`
+/// validation judges a value. The prefixes `@`, `vault:`, and `%`, and a
+/// `{{VAR}}` anywhere in a pattern, are definition errors: whether a schema
+/// applies must not depend on the launch directory, vault configuration, or
+/// an arbitrary environment variable. `~` is allowed.
+#[derive(Debug, Clone)]
 pub struct PathGlobs {
     /// The raw authored glob patterns (with `!` prefixes intact).
     pub patterns: Vec<String>,
+    /// One single-pattern reference per authored pattern, in order.
+    pub(crate) compiled: Vec<PathPattern>,
+}
+
+/// One compiled `$path` pattern. Negation is kept here rather than in the
+/// reference so each pattern can be judged in its own context (see
+/// [`super::matcher::PathSubject`]).
+#[derive(Debug, Clone)]
+pub(crate) struct PathPattern {
+    pub negated: bool,
+    /// Bare, `./`, and `../` patterns are read from the trigger's
+    /// [`pattern_cwd`](super::LoadedTrigger::pattern_cwd); every other prefix
+    /// from the document's context.
+    pub relative: bool,
+    pub reference: GlobReference,
+}
+
+impl PartialEq for PathGlobs {
+    fn eq(&self, other: &Self) -> bool {
+        self.patterns == other.patterns
+    }
 }
 
 impl PathGlobs {
+    /// Parse and check an authored pattern list.
+    ///
+    /// ## Errors
+    ///
+    /// [`SchemaError::TriggerMatch`] naming the pattern for a list with no
+    /// pattern, no positive pattern, a pattern that is not a glob reference,
+    /// or a forbidden prefix.
+    pub fn new(patterns: Vec<String>) -> Result<Self, SchemaError> {
+        if patterns.is_empty() {
+            return Err(SchemaError::TriggerMatch {
+                message: "$path must have at least one glob pattern".into(),
+            });
+        }
+        let mut compiled = Vec::with_capacity(patterns.len());
+        for pattern in &patterns {
+            compiled.push(compile_path_pattern(pattern)?);
+        }
+        if compiled.iter().all(|pattern| pattern.negated) {
+            return Err(path_error(None, "needs at least one pattern that is not a `!` exclusion"));
+        }
+        Ok(Self { patterns, compiled })
+    }
+
     fn from_yaml(value: &YamlValue) -> Result<Self, SchemaError> {
         let patterns = match value {
             YamlValue::String(s) => vec![s.clone()],
@@ -116,12 +165,76 @@ impl PathGlobs {
                 });
             }
         };
-        if patterns.is_empty() {
-            return Err(SchemaError::TriggerMatch {
-                message: "$path must have at least one glob pattern".into(),
-            });
+        Self::new(patterns)
+    }
+}
+
+/// Compile one `$path` pattern, refusing the prefixes a trigger may not use.
+fn compile_path_pattern(authored: &str) -> Result<PathPattern, SchemaError> {
+    if authored.contains("{{") {
+        return Err(path_error(
+            Some(authored),
+            "cannot use a `{{VAR}}` environment variable: whether a schema applies must not depend on one",
+        ));
+    }
+    let (negated, body) = match authored.strip_prefix('!') {
+        Some(rest) => (true, rest),
+        None => (false, authored),
+    };
+    // Built positive so a lone `!` pattern still compiles; the list-level
+    // check above reports a list with no positive pattern.
+    let reference = GlobReference::new([body])
+        .map_err(|error| path_error(Some(authored), &glob_error_reason(&error)))?
+        .with_file_name_view();
+    let kind = FileReference::new(body)
+        .map(|reference| reference.class().kind)
+        .map_err(|error| path_error(Some(authored), &error.to_string()))?;
+    let relative = match kind {
+        FileReferenceKind::Magic => {
+            return Err(path_error(
+                Some(authored),
+                "cannot use `@`: its roots depend on the launch directory",
+            ));
         }
-        Ok(Self { patterns })
+        FileReferenceKind::Vault => {
+            return Err(path_error(
+                Some(authored),
+                "cannot use `vault:`: its roots depend on vault configuration",
+            ));
+        }
+        FileReferenceKind::ImplicitRelative | FileReferenceKind::ExplicitRelative => true,
+        FileReferenceKind::Absolute
+        | FileReferenceKind::RepositoryRoot
+        | FileReferenceKind::RepositoryScoped
+        | FileReferenceKind::Home
+        | FileReferenceKind::Url => false,
+    };
+    Ok(PathPattern {
+        negated,
+        relative,
+        reference,
+    })
+}
+
+/// The glob-reference error without its own restatement of the pattern,
+/// which [`path_error`] already names as authored.
+fn glob_error_reason(error: &GlobReferenceError) -> String {
+    match error {
+        GlobReferenceError::RejectedPrefix { prefix, reason, .. } => {
+            format!("cannot use {prefix}: {reason}")
+        }
+        GlobReferenceError::MalformedPrefix { source, .. } => format!("is malformed: {source}"),
+        GlobReferenceError::InvalidGlob { message, .. } => format!("is not a valid glob: {message}"),
+        other => other.to_string(),
+    }
+}
+
+fn path_error(pattern: Option<&str>, reason: &str) -> SchemaError {
+    SchemaError::TriggerMatch {
+        message: match pattern {
+            Some(pattern) => format!("$path pattern `{pattern}` {reason}"),
+            None => format!("$path {reason}"),
+        },
     }
 }
 

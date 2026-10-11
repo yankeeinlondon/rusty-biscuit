@@ -95,7 +95,7 @@ fn bench_runtime_config_loading(c: &mut Criterion) {
     group.bench_function("load_claudine_config", |b| {
         b.iter(|| {
             let config = load_claudine_config(Some(black_box(path.as_path())), None).unwrap();
-            let runtime = compile_canonical_runtime(config, None).unwrap();
+            let runtime = compile_canonical_runtime(config, None, &darkmatter::markdown::compose::RequestSnapshot::new(std::env::temp_dir())).unwrap();
             let binding = runtime
                 .get_binding(&claudine::events::AgenticEvent::BeforeTool)
                 .unwrap();

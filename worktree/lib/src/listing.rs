@@ -6,11 +6,12 @@
 //! branch merges into the column's target?
 
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::path::Path;
 use std::sync::Mutex;
 
 use crate::cache::{CACHE_FORMAT_VERSION, Cache, CacheKey, CacheValue};
 use crate::fork_origin::ForkOriginStore;
-use crate::git::git_command;
+use crate::git::{calls, git_command_in};
 use crate::pull_requests::unix_now;
 use crate::worktree::WorktreeEntry;
 
@@ -33,10 +34,16 @@ impl RefTips {
     pub const FORMAT: &'static str = "--format=%(objectname) %(refname) %(symref)";
 
     /// Reads every local and remote-tracking branch tip in the current
-    /// repository. `None` when git fails, so a failure is never mistaken for
-    /// a repository without branches.
+    /// repository; see [`RefTips::read_in`].
     pub fn read() -> Option<Self> {
-        git_command(&["for-each-ref", Self::FORMAT, "refs/heads", "refs/remotes"])
+        Self::read_in(Path::new("."))
+    }
+
+    /// Reads every local and remote-tracking branch tip in the repository at
+    /// `repo`. `None` when git fails, so a failure is never mistaken for a
+    /// repository without branches.
+    pub fn read_in(repo: &Path) -> Option<Self> {
+        git_command_in(repo, &["for-each-ref", Self::FORMAT, "refs/heads", "refs/remotes"])
             .ok()
             .map(|output| Self::parse(&output))
     }
@@ -90,8 +97,13 @@ impl RefSnapshot {
 
     /// Reads the current repository's tips ([`RefTips::read`]).
     pub fn read() -> Self {
+        Self::read_in(Path::new("."))
+    }
+
+    /// Reads the tips of the repository at `repo` ([`RefTips::read_in`]).
+    pub fn read_in(repo: &Path) -> Self {
         let read_at = unix_now();
-        Self::new(RefTips::read(), read_at)
+        Self::new(RefTips::read_in(repo), read_at)
     }
 
     /// The tips read; empty when the read failed.
@@ -150,18 +162,15 @@ impl Comparison {
     }
 }
 
-/// Compares `branch_sha` against `target_sha` through the SHA-pair cache.
+/// Compares `branch_sha` against `target_sha` through the SHA-pair cache,
+/// running Git in `repo`.
 ///
 /// On a miss, `rev-list --left-right --count` and a speculative
 /// `merge-tree --write-tree` run in parallel; the merge result is discarded
 /// when one side contains the other, since such a merge cannot conflict.
 /// `None` when `rev-list` fails; a failure is never cached.
-pub fn compare_cached(cache: &Mutex<Cache>, target_sha: &str, branch_sha: &str) -> Option<Comparison> {
-    let key = CacheKey {
-        target_tip_sha: target_sha.to_string(),
-        branch_tip_sha: branch_sha.to_string(),
-        version: CACHE_FORMAT_VERSION,
-    };
+pub fn compare_cached(repo: &Path, cache: &Mutex<Cache>, target_sha: &str, branch_sha: &str) -> Option<Comparison> {
+    let key = cache_key(target_sha, branch_sha);
     if let Some(value) = cache.lock().expect("cache mutex poisoned").get(&key).copied() {
         return Some(Comparison {
             ahead: value.ahead,
@@ -170,26 +179,52 @@ pub fn compare_cached(cache: &Mutex<Cache>, target_sha: &str, branch_sha: &str) 
         });
     }
 
-    let comparison = compare_live(target_sha, branch_sha)?;
+    let comparison = compare_live(repo, target_sha, branch_sha)?;
     cache.lock().expect("cache mutex poisoned").put(
         key,
         CacheValue {
             ahead: comparison.ahead,
             behind: comparison.behind,
             is_clean: comparison.is_clean,
+            line: None,
         },
     );
     Some(comparison)
 }
 
-fn compare_live(target_sha: &str, branch_sha: &str) -> Option<Comparison> {
+fn cache_key(target_sha: &str, branch_sha: &str) -> CacheKey {
+    CacheKey {
+        target_tip_sha: target_sha.to_string(),
+        branch_tip_sha: branch_sha.to_string(),
+        version: CACHE_FORMAT_VERSION,
+    }
+}
+
+/// [`line_steps`] from `branch_sha` to `target_sha`, kept in `cache` with the
+/// [`compare_cached`] entry for the same pair (which must exist), so a warm
+/// listing asks Git nothing for it either.
+pub fn line_steps_cached(repo: &Path, cache: &Mutex<Cache>, target_sha: &str, branch_sha: &str) -> Option<LineSteps> {
+    let key = cache_key(target_sha, branch_sha);
+    let cached = cache.lock().expect("cache mutex poisoned").get(&key).copied();
+    if let Some(steps) = cached.and_then(|value| value.line) {
+        return Some(steps);
+    }
+    let steps = line_steps(repo, branch_sha, target_sha)?;
+    if let Some(value) = cached {
+        cache.lock().expect("cache mutex poisoned").put(key, CacheValue { line: Some(steps), ..value });
+    }
+    Some(steps)
+}
+
+fn compare_live(repo: &Path, target_sha: &str, branch_sha: &str) -> Option<Comparison> {
+    let handle = calls::TaskHandle::current();
     std::thread::scope(|scope| {
-        let counts = scope.spawn(|| ahead_behind(target_sha, branch_sha));
-        let merge = scope.spawn(|| {
-            git_command(&["merge-tree", "--write-tree", target_sha, branch_sha]).is_ok()
+        let counts = scope.spawn(move || handle.run(|| ahead_behind(repo, target_sha, branch_sha)));
+        let merge = scope.spawn(move || {
+            handle.run(|| git_command_in(repo, &["merge-tree", "--write-tree", target_sha, branch_sha]).is_ok())
         });
-        let (ahead, behind) = counts.join().expect("rev-list thread panicked")?;
-        let speculative_is_clean = merge.join().expect("merge-tree thread panicked");
+        let speculative_is_clean = calls::joined(merge.join().expect("merge-tree thread panicked"));
+        let (ahead, behind) = calls::joined(counts.join().expect("rev-list thread panicked"))?;
         Some(Comparison {
             ahead,
             behind,
@@ -199,9 +234,9 @@ fn compare_live(target_sha: &str, branch_sha: &str) -> Option<Comparison> {
 }
 
 /// `(ahead, behind)` of `branch` relative to `target`.
-fn ahead_behind(target: &str, branch: &str) -> Option<(usize, usize)> {
+fn ahead_behind(repo: &Path, target: &str, branch: &str) -> Option<(usize, usize)> {
     let range = format!("{target}...{branch}");
-    let output = git_command(&["rev-list", "--left-right", "--count", &range]).ok()?;
+    let output = git_command_in(repo, &["rev-list", "--left-right", "--count", &range]).ok()?;
     let mut parts = output.split_whitespace();
     let behind = parts.next()?.parse().ok()?;
     let ahead = parts.next()?.parse().ok()?;
@@ -224,6 +259,27 @@ pub struct Caption {
     pub ahead: usize,
     /// Tracking-ref commits the local branch lacks.
     pub behind: usize,
+    /// When behind: the tracking ref's own line (first-parent chain) from
+    /// the local tip, which is shorter than `behind` when merges brought the
+    /// rest in. `None` when not behind or Git couldn't say.
+    pub behind_on_line: Option<LineSteps>,
+}
+
+pub use crate::cache::LineSteps;
+
+/// The first-parent steps from `from` to `to` (`to` must descend from
+/// `from`): one `rev-list --first-parent --parents`, counting each line and
+/// each line with more than one parent.
+pub(crate) fn line_steps(repo: &Path, from: &str, to: &str) -> Option<LineSteps> {
+    let output = git_command_in(repo, &["rev-list", "--first-parent", "--parents", &format!("{from}..{to}"), "--"]).ok()?;
+    let mut steps = LineSteps { commits: 0, merges: 0 };
+    for line in output.lines().filter(|line| !line.trim().is_empty()) {
+        steps.commits += 1;
+        if line.split_whitespace().count() > 2 {
+            steps.merges += 1;
+        }
+    }
+    Some(steps)
 }
 
 /// How [`Caption`] reads.
@@ -822,6 +878,7 @@ malformed
             tracking_sha: "f".repeat(40),
             ahead,
             behind,
+            behind_on_line: None,
         }
         .state();
         assert_eq!(caption(0, 0), CaptionState::InSync);
@@ -903,6 +960,26 @@ mod repo_tests {
 
     fn caption_state(list: &WorktreeList) -> Option<CaptionState> {
         list.caption.as_ref().map(Caption::state)
+    }
+
+    /// One merge on `main`'s own line brings in two side commits: the line
+    /// is one step, a merge, though `main` gained three commits.
+    #[test]
+    #[serial_test::serial]
+    fn line_steps_count_only_the_first_parent_line_and_its_merges() {
+        let repo = TestRepo::new();
+        let _guard = DirGuard::enter(&repo.path());
+        let base = repo.sha("HEAD");
+        repo.git(&["checkout", "-q", "-b", "side"]);
+        repo.commit("s1.txt");
+        repo.commit("s2.txt");
+        repo.git(&["checkout", "-q", "main"]);
+        repo.git(&["merge", "-q", "--no-ff", "-m", "merge side", "side"]);
+        let merged = repo.sha("HEAD");
+        assert_eq!(line_steps(Path::new("."), &base, &merged), Some(LineSteps { commits: 1, merges: 1 }));
+        let after = repo.commit("d1.txt");
+        assert_eq!(line_steps(Path::new("."), &base, &after), Some(LineSteps { commits: 2, merges: 1 }));
+        assert_eq!(line_steps(Path::new("."), &after, &after), Some(LineSteps { commits: 0, merges: 0 }));
     }
 
     #[test]
@@ -1320,8 +1397,9 @@ mod repo_tests {
         let rev_lists = |calls: &[Vec<String>]| {
             recorder::count_matching(calls, |args| args.first().map(String::as_str) == Some("rev-list"))
         };
-        // Caption, two target comparisons, and one parent comparison.
-        assert_eq!(rev_lists(&cold_calls), 4, "got {cold_calls:?}");
+        // Caption, its own-line steps (main is behind), two target
+        // comparisons, and one parent comparison.
+        assert_eq!(rev_lists(&cold_calls), 5, "got {cold_calls:?}");
 
         recorder::start_recording();
         let warm = list_worktrees().unwrap();
@@ -1336,5 +1414,41 @@ mod repo_tests {
         assert_eq!(warm.comparisons, cold.comparisons);
         assert_eq!(warm.target, cold.target);
     }
-}
 
+    /// Every thread a local gather spawns (dirtiness per entry, one per
+    /// branch comparison, and the two halves of a live comparison) hands its
+    /// count back, so a scope around the gather counts exactly the calls the
+    /// recorder logs; none of them fails to start.
+    #[test]
+    #[serial_test::serial]
+    fn a_counting_scope_sees_every_call_of_a_threaded_local_gather() {
+        let repo = TestRepo::with_origin();
+        let _stores = stores(&repo);
+        let _guard = DirGuard::enter(&repo.path());
+        let feature = repo.add_worktree("fix/x", "fix-x", "main");
+        repo.commit_in(&feature, "fix.txt");
+        let other = repo.add_worktree("fix/y", "fix-y", "main");
+        repo.commit_in(&other, "other.txt");
+        repo.push_commit_to_origin("main", "upstream.txt");
+        repo.git(&["fetch", "-q", "origin"]);
+
+        let list = crate::worktree::parse_worktree_state().unwrap();
+        let refs = list.ref_snapshot().clone();
+        let cache = list.load_comparison_cache();
+        recorder::start_recording();
+        let scope = crate::git::calls::CallScope::enter();
+        let (dirty, facts) = list.gather_local(refs.tips(), &cache);
+        let counted = scope.finish();
+        let calls = recorder::finish_recording();
+
+        assert_eq!(dirty.len(), 3);
+        assert!(facts.comparisons.contains_key("fix/x") && facts.comparisons.contains_key("fix/y"));
+        for command in ["status", "rev-list", "merge-tree"] {
+            assert!(
+                recorder::has_any_matching(&calls, |args| args.iter().any(|arg| arg == command)),
+                "the gather ran `{command}` on a spawned thread: {calls:?}"
+            );
+        }
+        assert_eq!(counted, calls.len() as u64, "{calls:?}");
+    }
+}

@@ -2,7 +2,7 @@
 //!
 //! Run with: `cargo run -p biscuit-terminal --example two-column-prose`
 
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::{LineBreaks, Prose};
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::two_column::TwoColumn;
 use biscuit_terminal::terminal::Terminal;
@@ -18,6 +18,7 @@ fn main() {
         "- Predictable wrapping\n",
         "- Stacks when narrow"
     ))
+    .with_line_breaks(LineBreaks::Hard)
     .with_word_wrap(WordWrap::WrapProse(None, None));
 
     let right_column = Prose::new(concat!(

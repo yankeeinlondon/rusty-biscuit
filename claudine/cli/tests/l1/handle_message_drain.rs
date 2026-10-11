@@ -26,9 +26,18 @@ const HANDLE_DEADLINE_SECONDS: u64 = 2;
 /// still separates the two.
 const DEADLINE_ALLOWANCE: Duration = Duration::from_secs(4);
 
+/// The over-deadline case's handler deadline, shorter than
+/// [`HANDLE_DEADLINE_SECONDS`] because this test lasts as long as its busy
+/// `call` child (the child holds the handler's output pipes open).
+const OVER_DEADLINE_SECONDS: u64 = 1;
+
+/// Slack for the over-deadline case. The handler must exit well before the
+/// busy child does, and an uncapped drain would add about 9 s to the deadline.
+const OVER_DEADLINE_ALLOWANCE: Duration = Duration::from_millis(1500);
+
 /// How long the `call` action in the over-deadline case keeps the handler
-/// busy; comfortably past the deadline plus [`DEADLINE_ALLOWANCE`].
-const BUSY_SECONDS: u64 = 8;
+/// busy; past the deadline plus [`OVER_DEADLINE_ALLOWANCE`] (2.5 s).
+const BUSY_SECONDS: u64 = 3;
 
 /// Write a user config whose `session_end` hook runs `actions`, next to the
 /// webhook route.
@@ -147,7 +156,7 @@ fn a_handler_past_its_deadline_exits_124_and_reports_the_pending_message() {
         ]),
     );
     let listener = WebhookListener::start(ListenerMode::NeverReply);
-    let run = spawn_handle(&fixture, &listener, Some(HANDLE_DEADLINE_SECONDS));
+    let run = spawn_handle(&fixture, &listener, Some(OVER_DEADLINE_SECONDS));
 
     let (run, _) = run.await_requests(&listener, 1);
     let sent = Instant::now();
@@ -157,7 +166,7 @@ fn a_handler_past_its_deadline_exits_124_and_reports_the_pending_message() {
 
     assert_eq!(finished.status.code(), Some(124), "stderr:\n{stderr}");
     assert!(
-        waited < Duration::from_secs(HANDLE_DEADLINE_SECONDS) + DEADLINE_ALLOWANCE,
+        waited < Duration::from_secs(OVER_DEADLINE_SECONDS) + OVER_DEADLINE_ALLOWANCE,
         "no drain wait after the deadline ({waited:?})\n{stderr}"
     );
     assert!(stderr.contains("deadline exceeded"), "{stderr}");
@@ -168,13 +177,4 @@ fn a_handler_past_its_deadline_exits_124_and_reports_the_pending_message() {
         stderr.find("deadline exceeded") < stderr.find("still sending at exit"),
         "the deadline diagnostic comes before the drain's warning:\n{stderr}"
     );
-
-    // The busy `call` child outlives the handler. On Windows a process whose
-    // working directory is inside the fixture would block its cleanup.
-    if cfg!(windows) {
-        let busy_until = sent + Duration::from_secs(BUSY_SECONDS + 1);
-        if let Some(remaining) = busy_until.checked_duration_since(Instant::now()) {
-            std::thread::sleep(remaining);
-        }
-    }
 }

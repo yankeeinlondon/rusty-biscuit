@@ -23,7 +23,7 @@
 //! ```ignore
 //! use darkmatter::markdown::schemas::{DarkmatterSchemas, completion};
 //!
-//! let api = DarkmatterSchemas::new();
+//! let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(std::env::temp_dir()));
 //! if let Some(effective) = api.effective_for(&md)? {
 //!     for property in completion::completable_properties(&effective) {
 //!         let suggestion = completion::for_property(&effective, &property);
@@ -284,7 +284,7 @@ mod tests {
     fn effective(yaml_body: &str) -> EffectiveSchema {
         let md_text = format!("---\n{yaml_body}---\nbody\n");
         let md: Markdown = md_text.as_str().into();
-        let api = DarkmatterSchemas::new();
+        let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(std::env::temp_dir()));
         api.effective_for(&md)
             .expect("effective_for")
             .expect("effective schema present")

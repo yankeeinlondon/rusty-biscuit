@@ -441,6 +441,31 @@ fn an_unknown_name_fails_and_the_base_checkout_is_refused() {
         .stderr(predicate::str::contains("main checkout"));
 }
 
+/// The refusal comes before the report, so nothing is asked and then refused.
+#[cfg(unix)]
+#[test]
+fn a_process_standing_in_the_worktree_blocks_removal_before_the_report() {
+    let fixture = Fixture::new();
+    let wt = fixture.add_worktree("feat/busy", "busy");
+    let mut holder = Command::new("sleep").arg("60").current_dir(&wt).spawn().unwrap();
+    let pid = holder.id().to_string();
+
+    let assert = fixture
+        .wt(&fixture.repo())
+        .args(["remove", "busy", "--force-worktree", "--force-branch"])
+        .assert();
+
+    let _ = holder.kill();
+    let _ = holder.wait();
+    assert
+        .code(4)
+        .stderr(predicate::str::contains("is in use by another program: sleep (pid"))
+        .stderr(predicate::str::contains(pid.as_str()))
+        .stderr(predicate::str::contains("Branch").not());
+    assert!(wt.join("README.md").exists());
+    assert!(fixture.branch_exists("feat/busy"));
+}
+
 // --- The spec's Examples table ----------------------------------------------
 
 #[test]
@@ -596,15 +621,32 @@ fn ordinary_ignored_entries_are_disposable() {
             .args(["remove", "feat-x"])
             .assert()
             .code(0)
-            .stderr(predicate::str::contains("Also deletes ignored files"))
-            .stderr(predicate::str::contains("deletes"))
-            .stderr(predicate::str::contains(ignore));
+            .stderr(predicate::str::contains("Also deletes ignored files").not());
         assert!(!wt.exists(), "{ignore}");
     }
 }
 
 #[test]
-fn mixed_ignored_directory_report_names_disposable_files() {
+fn ignored_children_in_tracked_directories_are_not_reported() {
+    let fixture = Fixture::new();
+    fs::write(fixture.repo().join(".gitignore"), b"*.log\ntarget/\n").unwrap();
+    fs::create_dir_all(fixture.repo().join("darkmatter/src")).unwrap();
+    fixture.commit(&fixture.repo(), "darkmatter/src/lib.rs");
+    git(&fixture.repo(), &["add", ".gitignore"]);
+    git(&fixture.repo(), &["commit", "-q", "-m", "ignore"]);
+    let wt = fixture.add_worktree("feat/x", "feat-x");
+    fs::write(wt.join("darkmatter/build.log"), b"cache").unwrap();
+    fs::create_dir_all(wt.join("target")).unwrap();
+    fs::write(wt.join("target/app"), b"generated").unwrap();
+
+    fixture.wt(&fixture.repo()).args(["remove", "feat-x"])
+        .assert().code(0)
+        .stderr(predicate::str::contains("Also deletes ignored files").not());
+    assert!(!wt.exists());
+}
+
+#[test]
+fn mixed_ignored_directory_reports_only_protected_files() {
     let fixture = Fixture::new();
     fs::write(fixture.repo().join(".gitignore"), b"config/\n").unwrap();
     fs::write(fixture.repo().join(".worktreeinclude"), b"config/.env\n").unwrap();
@@ -618,7 +660,7 @@ fn mixed_ignored_directory_report_names_disposable_files() {
     fixture.wt(&fixture.repo()).args(["remove", "feat-x"])
         .assert().code(3)
         .stderr(predicate::str::contains("config/.env (new)"))
-        .stderr(predicate::str::contains("Also deletes ignored files: config/cache.bin"));
+        .stderr(predicate::str::contains("config/cache.bin").not());
     assert!(wt.join("config/.env").exists());
     assert!(wt.join("config/cache.bin").exists());
 }
@@ -2598,7 +2640,7 @@ fn a_missing_directory_has_only_its_record_removed_and_its_safe_branch_deleted()
     assert!(stderr.contains("Removed the record of worktree feat-gone"), "{stderr}");
     assert!(stderr.contains("Deleted branch feat/gone"), "{stderr}");
     // Nothing claims files were checked: there were none.
-    assert!(!stderr.contains("No uncommitted or ignored files"), "{stderr}");
+    assert!(!stderr.contains("No uncommitted or protected included files"), "{stderr}");
     assert!(listed_block(&fixture, &gone).is_none(), "{}", porcelain(&fixture));
     assert!(!fixture.branch_exists("feat/gone"));
     assert!(!gone.exists(), "nothing is recreated");
@@ -2694,7 +2736,7 @@ fn an_unlinked_worktree_is_repaired_then_its_files_are_protected() {
     let output = fixture.wt(&fixture.repo()).args(["remove", "lhg-before"]).output().unwrap();
     let stderr = stderr_of(&output);
     assert_eq!(output.status.code(), Some(3), "{stderr}");
-    assert!(stderr.contains("Restored the link for lhg-before so its files could be checked"), "{stderr}");
+    assert!(stderr.contains("Its .git file was missing"), "{stderr}");
     assert!(stderr.contains("Uncommitted files (1)"), "{stderr}");
     assert!(stderr.contains("Nothing was removed"), "{stderr}");
     assert!(stderr.contains("The .git link restored for lhg-before was left in place"), "{stderr}");
@@ -2720,8 +2762,8 @@ fn a_clean_unlinked_worktree_is_repaired_and_removed_with_its_safe_branch() {
         .args(["remove", "feat-x"])
         .assert()
         .code(0)
-        .stderr(predicate::str::contains("Restored the link for feat-x"))
-        .stderr(predicate::str::contains("No uncommitted or ignored files"))
+        .stderr(predicate::str::contains("Its .git file was missing"))
+        .stderr(predicate::str::contains("No uncommitted or protected included files"))
         .stderr(predicate::str::contains("Removed worktree feat-x"))
         .stderr(predicate::str::contains("Deleted branch feat/x"));
     assert!(!wt.exists());
@@ -2767,7 +2809,7 @@ fn a_repair_that_is_not_verified_refuses_even_with_every_force_flag() {
     assert!(stderr.contains("retry wt remove feat-x"), "{stderr}");
     assert_eq!(stderr.matches("Not verified: Git couldn't resolve").count(), 1, "said once: {stderr}");
     assert!(stderr.contains("Repair output:"), "{stderr}");
-    assert!(!stderr.contains("Restored the link"), "never claimed: {stderr}");
+    assert!(!stderr.contains("wt restored it to check"), "never claimed: {stderr}");
     assert!(!stderr.contains("prune"), "{stderr}");
     assert!(!stderr.contains("Nothing was changed"), "{stderr}");
     assert_eq!(fs::read_to_string(wt.join("notes.txt")).unwrap(), "keep me\n");
@@ -2864,7 +2906,7 @@ fn a_repaired_worktree_hands_off_and_finishes_with_the_ordinary_checks() {
         .args(["remove", "feat-x"])
         .assert()
         .code(0)
-        .stderr(predicate::str::contains("Restored the link for feat-x"))
+        .stderr(predicate::str::contains("Its .git file was missing"))
         .get_output()
         .stdout
         .clone();
@@ -3072,7 +3114,7 @@ fn a_checkout_replaced_by_a_link_after_repair_refuses() {
     let stderr = stderr_of(&output);
     assert!(stderr.contains("Git couldn't restore a verified link"), "{stderr}");
     assert!(stderr.contains("is now a link"), "{stderr}");
-    assert!(!stderr.contains("Restored the link"), "never claimed: {stderr}");
+    assert!(!stderr.contains("wt restored it to check"), "never claimed: {stderr}");
     assert_link_refusal_kept_everything(&fixture, &wt, &saved, &output);
 }
 
@@ -3204,40 +3246,38 @@ fn a_missing_directory_with_an_unchanged_split_index_is_removed() {
     assert!(listed_block(&fixture, &gone).is_none());
 }
 
-/// The review's split-index reproduction and its sibling shapes: the shared
-/// file a split index's entries live in changes after `diff-index` checked
-/// it, leaving `index` itself byte-identical. Removal refuses (exit 3) and
-/// keeps the record, both index files, and the branch: unforced over a clean
-/// index, and with every force flag over reported staged work.
+/// The review's split-index reproduction: the shared file a split index's
+/// entries live in changes after `diff-index` checked it, leaving `index`
+/// itself byte-identical. Removal refuses (exit 3) and keeps the record, both
+/// index files, and the branch: unforced over a clean index, and with every
+/// force flag over reported staged work. Every shape of the change is the
+/// library's `a_split_index_whose_shared_file_changes_after_inspection_refuses`;
+/// this test only proves the refusal reaches the command, so it takes one shape
+/// per flag set.
 #[cfg(unix)]
 #[test]
 fn a_split_index_whose_shared_file_changes_after_its_check_refuses_even_with_every_force_flag() {
-    let edits = [
-        ("corrupted", "printf corrupt > \"$shared\""),
-        ("removed", "rm \"$shared\""),
-        ("emptied", ": > \"$shared\""),
-        ("given trailing garbage", "printf garbage >> \"$shared\""),
-        ("replaced by a directory", "rm \"$shared\" && mkdir \"$shared\""),
+    let cases = [
+        (false, &[][..], "corrupted", "printf corrupt > \"$shared\""),
+        (true, &ALL_FORCE_FLAGS[..], "removed", "rm \"$shared\""),
     ];
-    for (stage, flags) in [(false, &[][..]), (true, &ALL_FORCE_FLAGS[..])] {
-        for (shape, edit) in edits {
-            let fixture = Fixture::new();
-            let (gone, index, shared) = missing_with_a_split_index(&fixture, "feat/split", "split", stage);
-            let primary = fs::read(&index).unwrap();
-            let path = one_shot_git_shim(&fixture, "diff-index", &format!("shared='{}'; {edit}", shared.display()));
+    for (stage, flags, shape, edit) in cases {
+        let fixture = Fixture::new();
+        let (gone, index, shared) = missing_with_a_split_index(&fixture, "feat/split", "split", stage);
+        let primary = fs::read(&index).unwrap();
+        let path = one_shot_git_shim(&fixture, "diff-index", &format!("shared='{}'; {edit}", shared.display()));
 
-            let output = fixture.wt(&fixture.repo()).env("PATH", path).args(["remove", "split"]).args(flags).output().unwrap();
+        let output = fixture.wt(&fixture.repo()).env("PATH", path).args(["remove", "split"]).args(flags).output().unwrap();
 
-            let stderr = stderr_of(&output);
-            let case = format!("{shape}, staged: {stage}, flags: {flags:?}");
-            assert_eq!(output.status.code(), Some(3), "{case}: {stderr}");
-            assert!(stderr.contains("can't be inspected") && stderr.contains("start over"), "{case}: {stderr}");
-            assert!(!stderr.contains("Removed the record") && !stderr.contains("Deleted branch"), "{case}: {stderr}");
-            assert!(listed_block(&fixture, &gone).is_some(), "{case}: the record stays");
-            assert_eq!(fs::read(&index).unwrap(), primary, "{case}: only the shared file changed");
-            assert!(fs::symlink_metadata(&shared).is_ok() || shape == "removed", "{case}");
-            assert!(fixture.branch_exists("feat/split"), "{case}");
-        }
+        let stderr = stderr_of(&output);
+        let case = format!("{shape}, staged: {stage}, flags: {flags:?}");
+        assert_eq!(output.status.code(), Some(3), "{case}: {stderr}");
+        assert!(stderr.contains("can't be inspected") && stderr.contains("start over"), "{case}: {stderr}");
+        assert!(!stderr.contains("Removed the record") && !stderr.contains("Deleted branch"), "{case}: {stderr}");
+        assert!(listed_block(&fixture, &gone).is_some(), "{case}: the record stays");
+        assert_eq!(fs::read(&index).unwrap(), primary, "{case}: only the shared file changed");
+        assert!(fs::symlink_metadata(&shared).is_ok() || shape == "removed", "{case}");
+        assert!(fixture.branch_exists("feat/split"), "{case}");
     }
 }
 

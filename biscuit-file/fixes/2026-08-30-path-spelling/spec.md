@@ -1,5 +1,29 @@
 ---
-status: draft
+status: draft-spec
+$schema:
+  status: |-
+    enum(
+        draft-spec,
+        finalized-spec,
+        planned,
+        implemented,
+        review-findings,
+        human-in-the-loop,
+        completed,
+        on-hold,
+        abandoned
+    ) -> an indicator of progress for this specification
+  reviewed: boolean -> indicates whether the specification file has been reviewed by another agent from the one which created the spec
+  reviewed_by: string -> the agent and model used in the spec review
+  reviewed_on: date -> the date the spec was reviewed
+  review_iterations: number -> the number of implementation reviews have taken place in the review/fix cycle
+  clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
+  implemented: boolean -> indicates whether this spec's plan has been implemented
+  implemented_by: string -> the agent who implemented the plan
+reviewed: true
+reviewed_by: codex/gpt-6.1-sol
+reviewed_on: 2026-10-03
+review_iterations: 2
 created: 2026-08-30
 area: biscuit-file
 packages:
@@ -8,36 +32,54 @@ packages:
   - claudine-cli
   - darkmatter
   - darkmatter-cli
+human_review: false
+message_to_agent: |-
+  All six phases are implemented; terminal state is "implementation complete, ready for review" (do not move the fix to `_completed`).
+
+  Phase 6: docs (biscuit-file topic Home section with a Mermaid home-resolution flow and a new "Canonicalizing Paths" section with the rule, examples, and a decision flow; Darkmatter compose-requests; Claudine file-referencing; biscuit-file README), skills (biscuit-file api/architecture, claudine, darkmatter, os/windows trap 2), and a comment-drift pass. The drift pass found Claudine CLI tests gated off Windows because "the fixture home cannot replace the known folder", which has been false since Phase 4. They were re-enabled: 7 in compose_prompt_tiers, 1 in completion_compose, 1 in propagated_context_fixtures, 9 in mcp_cli. `run_complete_with_home` now also sets USERPROFILE. Darkmatter's last three `dirs::home_dir()` test expectations now use `biscuit_file::home_dir()`, and the unused `dirs` dependency was removed from darkmatter/lib/Cargo.toml.
+
+  Not yet run on native Windows: build-win-native compiled and archived everything, then stopped at its storage floor (33.6 GiB free, 50 GiB required). If a re-enabled test fails on `windows-latest`, fix it forward rather than re-gating it for the home reason.
+
+  Known red cells that predate this phase and are outside this fix: darkmatter `current_root_documentation_contract` and `current_root_migration_guard` (need `.claude/skills/claudine/` content from another workstream); the `md_entry_points_agree_on_every_reference` 30 s timeout under load; and the test-toolkit archive-path guard (8 `context_construction_guard.rs` files use `env!("CARGO_MANIFEST_DIR")`; a one-line `manifest_dir!()` swap each).
+
+  A separate commit process committed the working tree at 13:18 during Phase 6, so most Phase 6 edits are in commits `7458c3a7a`..`e1ddcd346`, which carry Phase 5 subjects. Only the plan, log, and spec frontmatter updates are uncommitted.
+implemented: true
 ---
 
-# Path spelling is one seam, and it must be testable on every host
+# Test path spelling on every host and centralize filesystem path lookup
 
 ## Summary
 
-Windows names one directory many ways: verbatim (`\\?\C:\Users\ken\...`),
-legacy (`C:\Users\ken\...`), 8.3 short-name (`C:\Users\RUNNER~1\...`), and
-mixed-separator (`C:\temp\docs/file.md`). The reference-resolution stack
-treats spelling equivalence as a correctness question — dedupe, precedence,
-containment, and the finalized grammar all depend on it — yet the logic that
-answers it is exercised almost entirely through real Windows filesystem
-paths, and the seam that *produces* spellings (`canonicalize`, home-dir
-resolution) is scattered and unguarded.
+Windows can spell a directory with a drive path (`C:\Users\ken`), a
+verbatim prefix (`\\?\C:\Users\ken`), a short name (`C:\Users\RUNNER~1`), or
+mixed separators (`C:\temp\docs/file.md`). Different spellings can break
+candidate deduplication, search order, and repository containment when a
+producer and its consumer use different rules.
 
-PR #66 paid the bill for both gaps at once: 23 Windows-only test failures
-across five packages plus one production panic, none reproducible on the
-macOS development host, all traceable to two mechanical causes. This spec
-makes the two causes structurally impossible to reintroduce:
+This fix has three goals:
 
-1. **Spelling logic becomes host-independent testable.** The layers that
-   decide "same directory or not" gain pure string-level tests that run on
-   every OS, in the style the `reference_grammar` suite already proves out.
-2. **Spelling production becomes one guarded seam.**
-   `biscuit_file::canonicalize_simplified` (added in PR #66) becomes the
-   only sanctioned canonicalization whose result may cross a comparison or
-   grammar boundary; raw `std::fs::canonicalize` in production code is
-   audited down to an allowlist and held there by a drift guard. Home-dir
-   resolution joins the seam because `dirs::home_dir()` on Windows ignores
-   environment overrides, which silently breaks hermetic test homes.
+1. Test Windows lexical comparison rules (comparison without consulting the
+   filesystem) on every host through the production implementation. Test filesystem aliases separately:
+   text alone cannot establish that `RUNNER~1` names `Runner Administrator`.
+2. Route filesystem canonicalization that leaves a private comparison through
+   biscuit-file's [canonicalize_simplified](../../lib/src/path_text.rs), which
+   resolves an existing path and removes a Windows prefix only when safe.
+   Guard legitimate exceptions with a source inventory.
+3. Make Claudine's home-based reads and writes honor the same home choice.
+   The public home lookup already exists; the author must choose whether its
+   Windows behavior changes before this part is implemented.
+
+**Reader's note from the 2026-10-03 review:** the incident below is historical.
+Biscuit-file now has [PathIdentity](../../lib/src/file_reference/portable/path_identity.rs),
+a lossless lexical comparison type, and
+[Windows text tests](../../lib/src/file_reference/portable/path_identity/tests.rs)
+that run on every host. Its [home_dir](../../lib/src/file_reference/context.rs)
+helper still uses the Windows known-folder lookup, while Darkmatter's
+[RequestSnapshot::from_process](../../../darkmatter/lib/src/markdown/compose/context/request.rs)
+captures an environment-selected home. Implementation must extend these
+existing pieces rather than create a second path parser or duplicate public
+home helper. The [file-reference topic](../../docs/topics/file-references.md)
+is the current contract.
 
 ## Background — the PR #66 incident
 
@@ -60,165 +102,287 @@ Windows build host does not reproduce, and `Path::join("a/b")` preserves the
 literal `/`, so needle strings built from fixture paths carry mixed
 separators that match nothing.
 
-## The defect
+## Remaining defects and scope
 
-### Defect one — spelling equivalence is only tested where it can't be run
+The incident exposed two gaps: tests did not exercise the Windows spelling
+rules on development hosts, and callers could create a spelling their next
+consumer rejected. Existing identity tests now cover much of the first gap;
+what remains is proving candidate ordering and the consumers' boundaries
+with those rules. Do not reproduce already-covered parser cases as a second
+implementation.
 
-`file_reference/resolve.rs` dedupes candidates by `normalize_components`,
-resolves precedence by first-seen order, and validates containment against
-repository roots. All of that is lexical — no filesystem required — yet its
-Windows-spelling behavior is asserted only in `#[cfg(windows)]` tests
-against `TempDir` paths. A developer on macOS gets zero signal, and (as the
-`precedence_flip` test proved) can ship an assertion that is simply wrong,
-because nothing on their machine ever runs it.
+Home lookup remains inconsistent. Claudine's config loader honors process
+overrides, but many config writers, provider paths, logs, and caches still use
+the OS profile. A fixture can therefore read one home and write another.
+Changing that behavior is intentional, but affects real users who override
+`USERPROFILE`, including users of shells on Windows. Do not assume all users'
+environment values equal the OS profile.
 
-The counter-example already exists in-tree: `reference_grammar` tests such
-as `windows_absolute_and_unc_classify_absolute_on_any_host` classify Windows
-spellings as pure strings, run on every OS, and stayed green throughout the
-incident. `normalize_relative_path` in darkmatter's trigger discovery
-documents the same principle ("testable on every platform"). The pattern is
-proven; it just doesn't cover the layers that broke.
-
-### Defect two — spelling production is scattered and unguarded
-
-`std::fs::canonicalize` is the only std way to resolve symlinks, and its
-Windows result is verbatim. That is fine inside a closed key-space (both
-sides of every comparison canonicalized the same way — e.g.
-`invocation_context::canonical_key`, `protect::path`) and wrong everywhere
-else. Nothing distinguishes the two uses today except a comment, so each new
-call site is a coin flip that only Windows CI ever calls. PR #66 fixed four
-leaking sites one at a time; the class survives.
-
-The home-dir variant: on Unix `dirs::home_dir()` reads `$HOME`, so hermetic
-test fixtures work; on Windows it consults only the known-folder API, so the
-same fixture pattern silently reads and could write the developer's real
-`~/.claudine`. PR #66 patched exactly one call site
-(`dispatch/loader.rs::user_config_path`, via `std::env::home_dir()`, which
-is env-first on the pinned toolchain); roughly a dozen `dirs::home_dir()`
-sites remain in claudine alone, and config *save* still resolves differently
-from config *load*.
+The implementation scope is the five packages in frontmatter. Audit raw
+filesystem canonicalization throughout the workspace to identify escaping
+results; remediation and the executable guard cover these five packages.
+Record findings in other packages in the implementation log for separate
+work. Expanding remediation requires the author decision under Open questions.
+A workspace-wide scan does not authorize new dependencies across every area.
 
 ## Required behavior
 
-### R1 — string-level spelling tests for dedupe, precedence, and containment
+### Lexical comparison, candidate order, and containment
 
-Table-driven tests over string spellings — verbatim, legacy, 8.3
-short-name, UNC, and mixed-separator forms of one root — asserting, on every
-OS with no `TempDir` and no `#[cfg(windows)]`:
+Use biscuit-file's [PathIdentity](../../lib/src/file_reference/portable/path_identity.rs)
+for comparison rules. Its public constructor interprets paths using the
+host's grammar: passing `C:\repo` to a Unix `Path` does not simulate Windows.
+Extend the existing test-only Windows text entry point to exercise the same
+production Windows parser. Where necessary, extract the smallest internal
+ordering or comparison function that accepts parsed identities; keep the
+public API and host-native interpretation unchanged.
 
-- candidate count after dedupe (two spellings of one root → one candidate);
-- surviving provenance (first-seen order; matches the same-spelling
-  collapse);
-- the reported path spelling (legacy, per `simplify_root`);
-- containment verdicts for the repository-scope catalog and any lexical
-  boundary check biscuit-file owns: a verbatim document against a legacy
-  boundary must produce a deliberate, tested outcome — never a silent
-  "no match".
+Tests must reach production comparison and ordering code, not a test-only
+reimplementation. Cover these cases:
 
-Where the production entry point takes `&Path` values that in practice come
-from `canonicalize`, introduce a thin inner function parameterized on the
-already-spelled paths so the tables can drive it without touching the
-filesystem. The public API does not change.
+| Input or operation | Required result |
+| --- | --- |
+| Safe verbatim drive spelling and its legacy spelling | Same lexical identity; duplicate candidates retain the first occurrence and its provenance |
+| Ordinary `C:\repo\docs/file.md` and `C:\repo\docs\file.md` | Same identity under Windows grammar |
+| Verbatim paths containing `/`, `.` or `..` | Preserve Windows literal-name rules; do not apply ordinary-path normalization |
+| Legacy UNC and corresponding verbatim UNC | Equivalent identity when their names are equal; different servers or shares remain distinct |
+| `C:\repo` and `D:\repo`, or `C:repo` and `C:\repo` | Distinct identities |
+| `C:\Repo` and `C:\repo` | Distinct names; only drive-letter case is folded |
+| Boundary `C:\repo` and document `C:\repo-old\x.md` | Outside: containment uses whole components |
+| Short and long names, or symlink aliases | No lexical unification; they require filesystem evidence |
+| Non-Unicode native names | Preserve distinct raw names; do not turn lossy display text into identity |
 
-`#[cfg(windows)]` tests remain only for behavior that genuinely requires the
-Windows filesystem (8.3 name generation, junction traversal); each must
-state in its doc comment why a string-level test cannot cover it.
+Test candidate counts and first-seen provenance with distinct tags, including
+reversing input order. Pin emitted path spelling separately from identity:
+remove a verbatim prefix only when the reduction preserves meaning, and
+preserve the spelling when it cannot be safely reduced. Identity equivalence
+does not promise a portable rendering.
 
-### R2 — canonicalize audit and drift guard
+For biscuit-file's [RepositoryScopeCatalog](../../lib/src/file_reference/context.rs),
+which validates repository and package roots, preserve its requirement that
+roots arrive absolute and normalized. A reducible verbatim root is rejected
+as unnormalized until the caller simplifies it; this is an explicit error,
+not an empty search result. Tests must distinguish constructor validation
+from document containment against an already-valid catalog.
 
-Audit every `std::fs::canonicalize` / `.canonicalize()` in production code
-workspace-wide (tests excluded). Each site ends in one of two states:
+Lexical containment is only the first check. Keep canonical checks that reject
+symlinks or junctions escaping the repository or file-tree boundary, including
+checks through the nearest existing ancestor for missing targets. Do not
+replace them with lexical tests. Keep native Windows tests for actual 8.3
+aliases, junctions, and platform conversion; document why those require the
+Windows filesystem. A fixture must not assume 8.3 generation is enabled.
 
-- **Key-space (allowed):** the result never leaves a comparison space where
-  both sides are canonicalized identically. The site gains a comment naming
-  the invariant and joins the guard's allowlist.
-- **Boundary-crossing (converted):** the site moves to
-  `biscuit_file::canonicalize_simplified`.
+### Canonicalization audit and source guard
 
-Add a repo-lint test in the style of the existing dispatch-inventory drift
-guard: it scans production sources for raw canonicalize, diffs against the
-allowlist, and fails with the offending `file:line` when a new unlisted site
-appears. The allowlist lives next to the guard so extending it is a
-reviewed, deliberate act.
+Audit filesystem calls written as `std::fs::canonicalize`, imported or aliased
+`fs::canonicalize`, path-method `.canonicalize()`, and direct
+`dunce::canonicalize`. Classify each production call by where its result goes:
 
-### R3 — one home-dir seam that honors overrides on every OS
+- **Private comparison:** both operands receive identical canonicalization;
+  the result stays inside that comparison. Keep a narrowly identified
+  exception with a reason naming this invariant.
+- **Result passed onward:** a returned, stored, serialized, displayed, or
+  reparsed path, or a path compared against another producer's spelling, uses
+  biscuit-file's [canonicalize_simplified](../../lib/src/path_text.rs).
+  A hash or cache key is private only when its entire lifetime and every
+  producer follow the same spelling contract.
 
-Introduce a single home-resolution helper with `std::env::home_dir()`
-semantics (`$HOME`/`%USERPROFILE%` first, platform API as fallback) and
-route claudine's `dirs::home_dir()` call sites through it — config load
-**and** save, backups, logs, model-catalog cache, and the per-provider
-config paths, so no two surfaces can resolve home differently. The helper's
-natural owner is biscuit-file next to `canonicalize_simplified` (it is the
-same "one spelling seam" concern); claudine consumes it.
+Preserve each call's error handling and canonicalization frequency. Do not
+add existence requirements to paths that currently support missing files.
+Do not silently convert errors to empty search results or add panicking
+fallbacks. The helper itself is the allowed direct `dunce` call. Any other
+exception needs a concrete invariant; being inside biscuit-file is not an
+exception by itself.
 
-The guard from R2 also flags new direct `dirs::home_dir()` calls in the
-swept packages.
+Add a source guard using the existing Claudine
+[dispatch inventory](../../../claudine/cli/tests/l1/dispatch_inventory.rs)
+as a model. Register it in an existing Level 1 test target. Its inventory must:
 
-### R4 — contract tests for `canonicalize_simplified`
+- Discover production Rust source for both library and CLI in each of the
+  five packages, including module files outside conventional `src` folders
+  when manifests declare them. Inspect all target-specific source branches.
+- Exclude inline and separate test-only modules, comments, and string
+  literals. Do not mistake Darkmatter's style-name normalization function for
+  filesystem canonicalization.
+- Recognize qualified, imported, aliased, and path-method forms above. Where
+  a lightweight scanner cannot resolve a receiver, report the candidate for
+  explicit review instead of silently ignoring it. Document macro-expansion
+  limitations; this is a source guard, not proof about compiled code.
+- Identify exceptions by repository-relative path and enclosing item plus
+  operation, with exact occurrence counts and a reason. Line numbers belong
+  in diagnostics, not identity. Fail on new calls and unused exceptions.
+- Reject direct `dirs::home_dir` and `std::env::home_dir` in Claudine after
+  home lookup is unified, except at an approved process-capture boundary.
+  Recognize imported aliases and function references as well as calls.
+- Test the scanner with small source fixtures: new call, alias, allowed call,
+  moved line, deleted exception, inline test, and string/comment lookalikes.
+  Fail if required source roots are missing; an empty scan cannot pass.
 
-On every host: for an existing plain directory, the result carries no
-verbatim disk prefix and round-trips through `to_portable_string` without
-falling back to native spelling. On Windows additionally: the result of
-canonicalizing a verbatim spelling equals the result of canonicalizing its
-legacy spelling.
+Declare repository source reads in forms the
+[rust-testing skill](../../../.claude/skills/rust-testing/SKILL.md) can index.
+For cross-package reads, declare the guard's source inputs in package
+metadata as required by [test-input rules](../../../docs/cicd/test-inputs.md).
+An archive run must have the inputs available at runtime through the existing
+test harness. Do not use compile-time absolute checkout paths or skip the
+guard when inputs are absent.
+
+### Consistent home lookup
+
+Resolve the first Open question before implementing home lookup. The
+requirements below describe the recommended option; choosing another option
+requires revising these requirements to match. Reuse biscuit-file's existing [home_dir](../../lib/src/file_reference/context.rs), which supplies
+the default captured home for file resolution, rather than adding a helper
+with the same purpose under a new name.
+
+If the recommended option is accepted, use the pinned toolchain's
+`std::env::home_dir()` result filtered to absolute paths: `HOME` on POSIX and
+`USERPROFILE` on native Windows, with the standard library's platform fallback.
+Do not add a Windows `HOME`-over-`USERPROFILE` rule. Preserve `Option<PathBuf>`,
+non-Unicode native path support, and the `file-reference` feature boundary.
+Do not canonicalize the home, require it to exist, or rebase a relative home.
+A relative selected home yields `None`, without a second lookup of the real
+profile that could defeat an override.
+
+Route Claudine's home-based config load and save, backups, logs, cache,
+provider config, and fallback home uses through the chosen shared reader.
+Reuse an authoritative captured home in request-scoped code; do not reread
+the environment midway through a request. Preserve explicitly configured
+provider roots, storage overrides, and injected context homes. An explicit
+cleared home stays cleared. Permission and policy paths using home must use
+that same captured value; document that process environment is an input, not
+proof of a trusted filesystem boundary.
+
+If the shared helper changes, replace Darkmatter's duplicate process home
+reader with it and revise its now-obsolete explanation of the two readers.
+Update the file-reference topic, affected READMEs and Claudine topic pages,
+and skill guidance describing lookup behavior. Document that native Windows
+users relocate home with `USERPROFILE`; setting only `HOME` is insufficient.
+Audit `dirs::config_dir`, `cache_dir`, and `data_dir` in the affected home-based
+flows: replacing a fallback home must not leave the primary write destination
+outside the fixture. Preserve intentional OS-folder policies and seed their
+fixture directories explicitly rather than claiming every storage path is
+home-based.
+
+### Canonicalization helper contract
+
+Biscuit-file's [canonicalize_simplified](../../lib/src/path_text.rs) remains
+available without `file-reference`. For an existing ordinary temporary
+directory, prove the result is absolute, usable for I/O, and accepted by
+[try_portable_string](../../lib/src/path_text.rs), the rendering helper that
+reports when portable spelling is unavailable. Compare against the real
+canonical target: macOS `/var` and `/private/var` need not keep the authored
+spelling. Missing paths return an I/O error.
+
+On native Windows, canonicalizing a safe verbatim disk path and its legacy
+form yields the same result. Where available, an actual short-name alias
+must reach the same target. Do not promise that every canonical result loses
+its prefix: long paths, reserved names, trailing dots or spaces, and UNC paths
+must follow the existing safe-reduction and native-rendering contracts.
+Use existing rendering tests for unsafe cases rather than requiring unusual
+filesystem names on every host. Refeeding an unsimplifiable result into the
+file-reference grammar must produce the existing explicit error, not panic
+or change the grammar's device-prefix prohibition.
 
 ## Design decisions
 
-- **Extend the proven pattern, don't invent one.** R1 copies the
-  `reference_grammar` string-classification style rather than introducing a
-  mocking layer or a virtual filesystem. The logic under test is lexical;
-  the tests should be too.
-- **Guard by allowlist, not by ban.** Raw `canonicalize` has legitimate
-  key-space uses; removing it entirely would force `canonicalize_simplified`
-  into places where verbatim is actually safer (open-by-handle style
-  operations). The guard makes the distinction visible and reviewed instead
-  of implicit.
-- **Home seam sweeps claudine only, defines in biscuit-file.** claudine is
-  where the hermeticity hole bit and where the call sites cluster. Other
-  areas adopt the helper opportunistically; forcing a workspace-wide sweep
-  now would balloon the change for no demonstrated defect (Rule 3).
-- **No behavior change for real Windows users.** They do not set `HOME`, and
-  `%USERPROFILE%` env equals the known folder in practice; the env-first
-  order only matters when someone deliberately overrides — which is the
-  point.
+- **Reuse the existing identity implementation.** Tests that run everywhere
+  must invoke the production Windows parser; a second string normalizer
+  could pass while the resolver remains broken.
+- **Keep identity, I/O paths, and presentation separate.** A prefix can be
+  ignored for comparison while remaining necessary to open the file. Safe
+  simplification must never rename a verbatim-only path.
+- **Guard direct `dunce` calls too.** Otherwise a caller can bypass the shared
+  canonicalization function while appearing compliant. Keep reviewed
+  exceptions for private comparisons rather than banning valid raw paths.
+- **Audit widely, change the named packages.** The incident spans those
+  consumers. A wider migration is a separate scope decision, not an
+  incidental dependency expansion during this fix.
+- **No performance spike is needed.** The planned work replaces lookups at
+  existing sites and adds test-only checks. Preserve the number of filesystem
+  calls; propose measurement only if implementation introduces a new known
+  runtime cost.
 
 ## Open questions
 
-1. Should the R2 guard also cover `dunce::canonicalize` called directly
-   (bypassing the named seam), or is the seam function purely a
-   documentation convenience? Leaning: guard it too — one name, one
-   grep target.
-2. `darkmatter` and `biscuit-*` areas have their own `dirs::home_dir()`
-   uses. Sweep them in this fix or file follow-ups per area after the
-   claudine sweep proves the helper's shape?
+### Should the existing public home lookup honor environment overrides on Windows?
+
+This is a public behavior choice: other biscuit-file callers currently get
+the OS profile even when `USERPROFILE` points elsewhere. Claudine and
+Darkmatter must converge on a documented policy so fixtures and real launches
+cannot read one home and write another.
+
+1. **Change the existing biscuit-file helper to the environment-first policy
+   above (recommended).** Pros: one reader for defaults and process snapshots;
+   consistent config reads and writes; no duplicate API. Cons: changes native
+   Windows behavior for every default caller with an overridden
+   `USERPROFILE`, including home-based search and permission paths. Mitigate
+   by auditing affected callers, documenting the change, and preserving
+   explicit captured homes and provider overrides. This best achieves the
+   single-reader goal and matches the two applications' process behavior.
+2. **Keep the OS-profile helper and add an explicitly named process-home
+   reader.** Pros: preserves existing defaults and allows controlled launches
+   to relocate home. Cons: two public policies remain; each caller must choose
+   correctly, and the source guard must enforce the choice. Requires separate
+   documentation and tests for both policies.
+3. **Keep OS lookup and inject homes into every application boundary.**
+   Pros: no shared public behavior change; explicit dependencies. Cons:
+   larger application plumbing across config, reporting, and providers;
+   ambient convenience calls still risk inconsistent lookup. This is useful
+   for request internals but does not alone fix all default reads and writes.
+
+### Should remediation and the guard extend beyond the five named packages?
+
+1. **Keep the five-package implementation and record outside findings
+   (recommended).** Pros: bounded dependencies and review; addresses the
+   demonstrated failures. Cons: remaining callers need separate fixes.
+   This is proportional to the evidence while preserving the workspace audit.
+2. **Convert and guard every workspace package now.** Pros: broader protection
+   against recurrence. Cons: expands dependencies, callers, documentation,
+   and verification beyond the listed scope. The author must approve the
+   additional package inventory before implementation.
 
 ## Verification
 
-- A macOS-only `just test` run fails if any PR #66 spelling bug is
-  reintroduced: verbatim dedupe collapse, `?`-segment boundary mismatch,
-  device-prefix rejection of a self-manufactured spelling, or a provenance
-  flip in the precedence order. Prove non-vacuity by neutering each guard
-  once and confirming red (per the established test discipline).
-- The drift-guard test goes red when a raw `canonicalize` (or direct
-  `dirs::home_dir` in swept packages) is added outside the allowlist, and
-  its failure message names the file and line.
-- On Windows, a test that sets `HOME`/`USERPROFILE` to a fixture home reads
-  and writes claudine config only under that fixture — verified by a
-  round-trip test that writes config through the production save path and
-  observes the file under the fixture home.
-- Full suites for the touched packages stay green on macOS, Linux, and
-  native Windows (the `build-linux` / `build-win-native` hosts).
+- Run affected Level 1 suites with `just test` from each touched package area
+  (nextest). The lexical ordering, identity, and scanner tests execute on
+  macOS, Linux, native Windows, and WSL2. Ordinary filesystem tests remain
+  portable; native Windows evidence covers actual aliases and junctions.
+- A development-host run catches wrong Windows identity rules and ordering.
+  Do not claim it proves Windows I/O, prefix reduction by the platform
+  library, or real junction behavior. For newly extracted comparison code,
+  temporarily break one relevant comparison or ordering rule and confirm the
+  targeted test fails; restore the edit before completing verification.
+- Source-guard fixtures prove that an unlisted filesystem call or home
+  lookup fails with `file:line`, and that stale exceptions fail too.
+- Use the monorepo's [test toolkit](../../../tools/test-toolkit/README.md)
+  and each area's existing child-process fixtures for home round trips.
+  Set `HOME` and `USERPROFILE` in the child's environment, use a temporary
+  home, and invoke production config load and save. Assert the written file
+  is under the fixture and reload it there. Do not read or write the real
+  profile. Test conflicting overrides to pin the platform's chosen variable,
+  relative and missing home inputs, explicit home injection, and unchanged
+  captured home after the process environment changes. Isolate environment
+  changes in child processes rather than mutating a multithreaded test's
+  process environment.
+- Run `just lint` for changed package areas. Use `just test-l2` only for
+  affected existing Level 2 tests; headless child-process config tests belong
+  in Level 1. No terminal or browser window may gain focus.
+- Reuse qualifying passing evidence for unchanged required cells; obtain
+  missing behavioral evidence on each required environment using the
+  repository's existing cross-check procedures. Report any environment gap
+  explicitly. No new CI matrix or gate is part of this fix.
 
 ## Out of scope
 
-- The CI-side hardening (running the scope self-test in `just ci-local`, a
-  `just cross-check` recipe) — tracked separately in
-  `fixes/_unscheduled/ci-preflight-local-parity.md`.
-- Changing what spelling any production surface *emits*. The
-  portable-vs-native contracts (portable `ctx.*` and Markdown presentation,
-  native eager-`file()` identity) are ratified in
-  `claudine/features/2026-08-26-finalized-references/spec.md` D8 and are not
-  revisited here.
-- Short-name (8.3) ↔ long-name unification. `canonicalize_simplified`
-  resolves to long names when it runs; surfaces that deliberately report the
-  as-launched spelling (e.g. `ctx.cwd`) keep doing so.
+- CI scheduling or preflight changes, tracked separately as
+  `ci-preflight-local-parity`.
+- Changing output contracts: context path values and Markdown presentation
+  remain portable, while eager file-expression identity retains native
+  spelling. See the [OS guidance](../../../.claude/skills/os/SKILL.md) and
+  current package topic pages; do not normalize all displayed paths as part
+  of the audit.
+- Lexical short-name/long-name unification, filesystem name case folding,
+  or equating symlink aliases without filesystem lookup. As-launched paths
+  retain their existing reporting policy.
+- Glob grammar changes, a new virtual filesystem, and unrelated source or
+  comment cleanup. Maintain comments and docs whose behavior this fix changes.

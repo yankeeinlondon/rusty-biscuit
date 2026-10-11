@@ -10,12 +10,15 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crossbeam_channel::unbounded;
 
 use crate::config::WorkspaceConfig;
-use crate::graph::{DocumentIndex, IndexTimings, WorkspaceIndex, index_document_timed};
+use crate::graph::{
+    DocumentContexts, DocumentIndex, IndexTimings, WorkspaceIndex, index_document_timed,
+};
 
 use super::discover::{DiscoveryReport, discover_workspace};
 
@@ -80,8 +83,9 @@ pub fn index_workspace(
     roots: &[PathBuf],
     config: &WorkspaceConfig,
     reporter: &dyn ProgressReporter,
+    contexts: Arc<dyn DocumentContexts>,
 ) -> WorkspaceIndex {
-    WorkspaceIndex::from_indices(collect_indices(roots, config, reporter))
+    WorkspaceIndex::from_indices(collect_indices(roots, config, reporter), contexts)
 }
 
 /// Indexes an already-discovered file list, returning the per-document map and
@@ -247,7 +251,12 @@ mod tests {
         write(root, "ignore.txt", "no");
 
         let progress = RecordingProgress::default();
-        let index = index_workspace(&[root.to_path_buf()], &WorkspaceConfig::default(), &progress);
+        let index = index_workspace(
+            &[root.to_path_buf()],
+            &WorkspaceConfig::default(),
+            &progress,
+            Arc::new(crate::graph::NoContexts),
+        );
 
         assert_eq!(index.len(), 2);
         assert_eq!(index.snapshot().document_count(), 2);
@@ -263,6 +272,7 @@ mod tests {
             &[temp.path().to_path_buf()],
             &WorkspaceConfig::default(),
             &SilentProgress,
+            Arc::new(crate::graph::NoContexts),
         );
         assert!(index.is_empty());
     }

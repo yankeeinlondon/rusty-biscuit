@@ -216,9 +216,11 @@ never overwritten, and a read-only config directory is reported rather than
 fatal). On a qualifying host, activation belongs to `just init` — by hand,
 `just kache-status` rules whether the filesystem earns it.
 
-The standing `cross-check` clones must stay unwrapped; use the empty-string
-form (`RUSTC_WRAPPER=""`) for that, not merely unsetting the variable — code
-that merely unsets now inherits the config-file wrapper on qualifying hosts.
+The standing `cross-check` clones must stay unwrapped. The Unix remote prelude
+exports `RUSTC_WRAPPER=""` and `RUSTC_WORKSPACE_WRAPPER=""` before native or
+archive builds. Use those empty values for ad hoc builds too: unsetting a
+variable permits host Cargo config or automatic cold-build shims to reactivate
+the wrapper.
 
 If kache prints storage-layout advice on a non-clone volume, do **not** take
 its first two suggestions: `windows_hardlink = true` is unsafe because Cargo

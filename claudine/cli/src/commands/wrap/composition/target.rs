@@ -464,7 +464,7 @@ fn prompt_for_agent_state(
 ) -> Result<Provider> {
     if let Some(markup) = agent_prompt_message(state, source_path) {
         let term = wrap_terminal();
-        log::message(&Prose::new(markup).render(&term));
+        log::message(&claudine::composition::agent_message_prose(markup).render(&term));
     }
 
     let plan = scoped_picker_plan_for_state(state, hints, snapshot, favorite)?;

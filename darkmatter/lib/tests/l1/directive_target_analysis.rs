@@ -14,7 +14,7 @@ use serde_json::{Value, json};
 fn document_with_schema(properties: &str, values: &str) -> (Markdown, EffectiveSchema, Value) {
     let source = format!("---\n$schema:\n{properties}{values}---\nbody\n");
     let markdown = Markdown::from(source.as_str());
-    let effective = DarkmatterSchemas::new()
+    let effective = DarkmatterSchemas::new(crate::request_support::cwd_context())
         .effective_for(&markdown)
         .expect("schema resolves")
         .expect("effective schema");
@@ -200,7 +200,7 @@ fn guard_narrowing_matches_evaluator_truth_tables() {
 
     for (condition, values, expected_result, expected_paths) in cases {
         assert_eq!(
-            evaluate_condition_against(condition, &values, temp.path()).unwrap(),
+            evaluate_condition_against(condition, &values, &biscuit_file::FileResolutionContext::new(temp.path())).unwrap(),
             expected_result,
             "evaluator result for `{condition}`",
         );

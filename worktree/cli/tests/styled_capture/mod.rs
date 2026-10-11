@@ -39,6 +39,7 @@ pub struct Style {
     pub bold: bool,
     pub dim: bool,
     pub italic: bool,
+    pub inverse: bool,
     pub strikethrough: bool,
 }
 
@@ -189,12 +190,14 @@ fn apply_sgr(style: &mut Style, params: &str) {
             1 => style.bold = true,
             2 => style.dim = true,
             3 => style.italic = true,
+            7 => style.inverse = true,
             9 => style.strikethrough = true,
             22 => {
                 style.bold = false;
                 style.dim = false;
             }
             23 => style.italic = false,
+            27 => style.inverse = false,
             29 => style.strikethrough = false,
             30..=37 => style.fg = Some(Color::Indexed((code - 30) as u8)),
             39 => style.fg = None,

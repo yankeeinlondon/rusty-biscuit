@@ -309,7 +309,7 @@ fn config_path(config_dir: Option<&Path>) -> PathBuf {
     match config_dir {
         Some(dir) => dir.join("config.toml"),
         None => {
-            let home = dirs::home_dir().unwrap_or_default();
+            let home = biscuit_file::home_dir().unwrap_or_default();
             home.join(".codex").join("config.toml")
         }
     }
@@ -320,7 +320,7 @@ fn wrapper_script_path(config_dir: Option<&Path>) -> PathBuf {
     match config_dir {
         Some(dir) => dir.join("codex-notify-wrapper.sh"),
         None => {
-            let home = dirs::home_dir().unwrap_or_default();
+            let home = biscuit_file::home_dir().unwrap_or_default();
             home.join(".claudine").join("codex-notify-wrapper.sh")
         }
     }

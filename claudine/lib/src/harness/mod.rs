@@ -19,7 +19,7 @@ pub use error::{HarnessError, PathResolutionFailure, ResolutionDetail};
 pub use model::*;
 pub use parse::{has_harness_properties, parse_harness_plan};
 pub use resolve::{
-    HarnessResolutionContext, resolve_harness_path, resolve_harness_path_in_context,
+    resolve_harness_path,
 };
 pub use runtime::{build_attempt_outcome, classify_failure, concise_message, failure_message};
 pub use shell::{

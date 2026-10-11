@@ -9,6 +9,7 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use claudine_catalog_types::{AcpServerMode, ModelCatalogSource};
+use darkmatter::markdown::compose::RequestSnapshot;
 use serde_json::Value;
 use strum::{IntoEnumIterator, VariantNames};
 
@@ -102,11 +103,45 @@ pub fn provider_slugs() -> Vec<&'static str> {
 }
 
 /// Generates every provider in [`provider_slugs`] order.
-pub fn generate_all(area: &Path) -> Result<Vec<Generation>, GenError> {
-    provider_slugs()
-        .into_iter()
-        .map(|slug| generate_for_area(area, slug))
-        .collect()
+pub fn generate_all(area: &Path, snapshot: &RequestSnapshot) -> Result<Vec<Generation>, GenError> {
+    par_map(provider_slugs(), |slug| generate_for_area(area, slug, snapshot))
+}
+
+/// Runs [`check_area`] for every provider in [`provider_slugs`] order, one
+/// scoped thread each (see [`par_map`]).
+pub fn check_all(
+    area: &Path,
+    snapshot: &RequestSnapshot,
+) -> Result<Vec<(Generation, CheckOutcome)>, GenError> {
+    par_map(provider_slugs(), |slug| check_area(area, slug, snapshot))
+}
+
+/// Maps `items` through `f` on one scoped thread each, returning results in
+/// input order (the first error in that order wins). Providers are independent,
+/// so this keeps output byte-identical to a sequential pass.
+pub(crate) fn par_map<T, R, E>(
+    items: Vec<T>,
+    f: impl Fn(T) -> Result<R, E> + Sync,
+) -> Result<Vec<R>, E>
+where
+    T: Send,
+    R: Send,
+    E: Send,
+{
+    let f = &f;
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = items
+            .into_iter()
+            .map(|item| scope.spawn(move || f(item)))
+            .collect();
+        handles
+            .into_iter()
+            .map(|handle| match handle.join() {
+                Ok(result) => result,
+                Err(panic) => std::panic::resume_unwind(panic),
+            })
+            .collect()
+    })
 }
 
 /// Roster ↔ wired-set cross-validation surfaced by the `check` report.
@@ -178,9 +213,16 @@ pub fn find_area(from: &Path) -> Result<PathBuf, GenError> {
 
 /// Runs the full pipeline for one provider under `area`.
 ///
+/// Research inputs load through [`inputs::load`] with `snapshot`, the
+/// request's process state.
+///
 /// Order matters: schema↔catalog compatibility and source-collision gates
 /// run BEFORE any value mapping.
-pub fn generate_for_area(area: &Path, slug: &str) -> Result<Generation, GenError> {
+pub fn generate_for_area(
+    area: &Path,
+    slug: &str,
+    snapshot: &RequestSnapshot,
+) -> Result<Generation, GenError> {
     let topics: BTreeSet<&str> = REGISTRY
         .iter()
         .filter_map(|entry| match entry.source {
@@ -189,7 +231,7 @@ pub fn generate_for_area(area: &Path, slug: &str) -> Result<Generation, GenError
         })
         .collect();
     let topics: Vec<&str> = topics.into_iter().collect();
-    let inputs = inputs::load(area, slug, &topics)?;
+    let inputs = inputs::load(area, slug, &topics, snapshot)?;
     // The expected-offering join needs the committed unchained-ai
     // artifact; its absence or schema mismatch fails generation loudly.
     let artifact = artifact::load(area)?;
@@ -241,8 +283,12 @@ pub fn generate_for_area(area: &Path, slug: &str) -> Result<Generation, GenError
 /// Generates and byte-compares against the committed data.rs. This is the
 /// single code path behind both the CLI `check` subcommand and the nextest
 /// drift test.
-pub fn check_area(area: &Path, slug: &str) -> Result<(Generation, CheckOutcome), GenError> {
-    let generation = generate_for_area(area, slug)?;
+pub fn check_area(
+    area: &Path,
+    slug: &str,
+    snapshot: &RequestSnapshot,
+) -> Result<(Generation, CheckOutcome), GenError> {
+    let generation = generate_for_area(area, slug, snapshot)?;
     let committed_path = committed_data_path(area, slug);
     if !committed_path.is_file() {
         return Ok((

@@ -14,6 +14,7 @@
 use std::path::Path;
 
 use biscuit_speaks::{SpeedLevel, TtsConfig, TtsFailoverStrategy};
+use biscuit_terminal::components::prose::LineBreaks;
 use biscuit_terminal::components::status::{Status, StatusState, StatusTheme};
 use biscuit_terminal::prelude::{Prose, TerminalRenderable};
 use biscuit_terminal::terminal::Terminal;
@@ -310,7 +311,9 @@ pub struct LifecycleRuntimeState {
 /// Trait for emitting lifecycle notification side effects.
 ///
 /// Injectable to allow test doubles that capture emissions without hitting
-/// real stderr, messaging, TTS, or sound playback.
+/// real stderr, messaging, TTS, or sound playback. The text channels keep the
+/// rows of their text: a newline (authored, or inside an interpolated value
+/// such as a captured output) starts a new line.
 pub trait LifecycleEmitter: Sync {
     /// Write a plain prose line (no status glyph) to stderr.
     ///
@@ -344,10 +347,11 @@ pub trait LifecycleEmitter: Sync {
     /// default renders the same way [`DefaultLifecycleEmitter`] would.
     fn emit_info(&self, text: &str, term: &Terminal) {
         let rendered = Status::from_prose(text)
+            .with_line_breaks(LineBreaks::Hard)
             .state(StatusState::Info)
             .theme(StatusTheme::Circular)
             .render(term);
-        eprintln!("{rendered}");
+        crate::render::console::write_stderr_line(&rendered);
     }
 
     /// Write a styled `Warning` status line to stderr.
@@ -356,10 +360,11 @@ pub trait LifecycleEmitter: Sync {
     /// owning lifecycle event.
     fn emit_warn(&self, text: &str, term: &Terminal) {
         let rendered = Status::from_prose(text)
+            .with_line_breaks(LineBreaks::Hard)
             .state(StatusState::Warning)
             .theme(StatusTheme::Circular)
             .render(term);
-        eprintln!("{rendered}");
+        crate::render::console::write_stderr_line(&rendered);
     }
 
     /// Write a styled `Success` status line to stderr.
@@ -368,10 +373,11 @@ pub trait LifecycleEmitter: Sync {
     /// owning lifecycle event.
     fn emit_success(&self, text: &str, term: &Terminal) {
         let rendered = Status::from_prose(text)
+            .with_line_breaks(LineBreaks::Hard)
             .state(StatusState::Success)
             .theme(StatusTheme::Circular)
             .render(term);
-        eprintln!("{rendered}");
+        crate::render::console::write_stderr_line(&rendered);
     }
 
     /// Write a plain prose line (no status glyph) to **stdout**.
@@ -380,8 +386,8 @@ pub trait LifecycleEmitter: Sync {
     /// are honored, but no status decoration is applied. Authors opt into this
     /// knowing stdout is otherwise reserved for pipeable command data.
     fn emit_stdout(&self, text: &str, term: &Terminal) {
-        let rendered = Prose::new(text).render(term);
-        println!("{rendered}");
+        let rendered = Prose::new(text).with_line_breaks(LineBreaks::Hard).render(term);
+        crate::render::console::write_stdout_line(&rendered);
     }
 }
 
@@ -392,8 +398,8 @@ impl LifecycleEmitter for DefaultLifecycleEmitter {
     fn emit_stderr(&self, _signal: LifecycleSignal, text: &str, term: &Terminal) {
         // `stderr` carries no status: it is plain prose (rich text/links honored)
         // routed to STDERR. Status glyphs belong to `info`/`warn` only.
-        let rendered = Prose::new(text).render(term);
-        eprintln!("{rendered}");
+        let rendered = Prose::new(text).with_line_breaks(LineBreaks::Hard).render(term);
+        crate::render::console::write_stderr_line(&rendered);
     }
 
     fn emit_message(

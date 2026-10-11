@@ -36,6 +36,16 @@ fn header_contains_marker_glyph() {
 }
 
 #[test]
+fn header_is_preceded_by_one_blank_spacing_row() {
+    let term = test_terminal();
+    let header = strip_ansi_codes(&render_system_prompt_header("appended", &term));
+    let rows: Vec<&str> = header.split('\n').collect();
+    assert_eq!(rows.len(), 2, "{header:?}");
+    assert_eq!(rows[0], "", "{header:?}");
+    assert!(rows[1].contains("System Prompt"), "{header:?}");
+}
+
+#[test]
 fn header_contains_action_appended() {
     let term = test_terminal();
     let header = render_system_prompt_header("appended", &term);
@@ -142,7 +152,7 @@ fn summary_relative_path_when_base_provided() {
         path: sp.clone(),
         scope: crate::system_prompt::StandardPromptScope::Repo,
     };
-    let base = sp.parent().unwrap().canonicalize().unwrap();
+    let base = biscuit_file::canonicalize_simplified(sp.parent().unwrap()).unwrap();
     let summary =
         render_system_prompt_summary(&source, SystemPromptMode::Append, 10, Some(&base), &term);
     let plain = strip_ansi_codes(&summary);
@@ -173,7 +183,7 @@ fn plain_terminal() -> Terminal {
 fn display_label_nerd_font_in_base_uses_glyph_with_path() {
     let term = nerd_font_terminal();
     let tmp = tempfile::tempdir().unwrap();
-    let base = tmp.path().canonicalize().unwrap();
+    let base = biscuit_file::canonicalize_simplified(tmp.path()).unwrap();
     let path = base.join(".claude").join("system-prompt.md");
     let label = resolve_display_label(&path, Some(&base), &term);
     // The glyph stands in for the repo root, followed by the relative
@@ -188,7 +198,7 @@ fn display_label_nerd_font_in_base_uses_glyph_with_path() {
 fn display_label_no_nerd_font_in_base_uses_relative() {
     let term = plain_terminal();
     let tmp = tempfile::tempdir().unwrap();
-    let base = tmp.path().canonicalize().unwrap();
+    let base = biscuit_file::canonicalize_simplified(tmp.path()).unwrap();
     // Use a nested path to confirm subdir support.
     let path = base.join(".claude").join("system-prompt.md");
     let label = resolve_display_label(&path, Some(&base), &term);
@@ -199,7 +209,7 @@ fn display_label_no_nerd_font_in_base_uses_relative() {
 fn display_label_outside_base_uses_absolute() {
     let term = plain_terminal();
     let tmp = tempfile::tempdir().unwrap();
-    let base = tmp.path().canonicalize().unwrap();
+    let base = biscuit_file::canonicalize_simplified(tmp.path()).unwrap();
     // Path that does not share the base prefix.
     let outside = std::path::PathBuf::from("/etc/hosts");
     let label = resolve_display_label(&outside, Some(&base), &term);
@@ -251,7 +261,7 @@ fn summary_visible_label_is_blue() {
         .osc_link_support(true)
         .build();
     let tmp = tempfile::tempdir().unwrap();
-    let base = tmp.path().canonicalize().unwrap();
+    let base = biscuit_file::canonicalize_simplified(tmp.path()).unwrap();
     let sp = base.join("system-prompt.md");
     std::fs::write(&sp, "x").unwrap();
     let source = SystemPromptSource::StandardDiscovered {
@@ -271,7 +281,7 @@ fn summary_visible_label_is_blue() {
 fn summary_emits_osc8_for_file_link() {
     let term = Terminal::builder().osc_link_support(true).build();
     let tmp = tempfile::tempdir().unwrap();
-    let base = tmp.path().canonicalize().unwrap();
+    let base = biscuit_file::canonicalize_simplified(tmp.path()).unwrap();
     let sp = base.join("system-prompt.md");
     std::fs::write(&sp, "x").unwrap();
     let source = SystemPromptSource::StandardDiscovered {
@@ -282,7 +292,7 @@ fn summary_emits_osc8_for_file_link() {
         render_system_prompt_summary(&source, SystemPromptMode::Append, 10, Some(&base), &term);
     // OSC8 opener: ESC ]8;;
     assert!(summary.contains("\x1b]8;;file://"));
-    let abs = sp.canonicalize().unwrap();
+    let abs = biscuit_file::canonicalize_simplified(&sp).unwrap();
     let href = Url::from_file_path(&abs).unwrap();
     assert!(summary.contains(href.as_str()));
 }
@@ -304,7 +314,7 @@ fn summary_file_uri_percent_encodes_reserved_characters() {
         Some(tmp.path()),
         &term,
     );
-    let href = Url::from_file_path(sp.canonicalize().unwrap()).unwrap();
+    let href = Url::from_file_path(biscuit_file::canonicalize_simplified(&sp).unwrap()).unwrap();
 
     assert!(summary.contains(href.as_str()));
     assert!(href.as_str().contains("prompt%20%23100%25.md"));

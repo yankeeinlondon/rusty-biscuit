@@ -1,3 +1,3 @@
 ---
-$schema: external.yaml
+$schema: ./external.yaml
 ---

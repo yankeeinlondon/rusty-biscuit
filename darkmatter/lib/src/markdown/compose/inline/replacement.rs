@@ -6,7 +6,7 @@ use super::super::body_origin::{BodyProvenance, EditOrigin};
 use super::super::value_origin::{DataPaths, OverrideOrigin, ValuePathSegment};
 use super::super::super::types::MarkdownResult;
 use super::super::replacement;
-use super::super::{ComposeOptions, EffectiveState, EffectiveStateBuilder};
+use super::super::{EffectiveState, EffectiveStateBuilder};
 use serde_json::Value;
 use std::collections::HashMap;
 use tracing::debug;
@@ -25,7 +25,7 @@ use tracing::debug;
 pub(crate) fn run_stage(
     markdown: &mut Markdown,
     state: &EffectiveState,
-    options: &ComposeOptions,
+    options: &crate::markdown::compose::ComposeRequest,
     body: &mut BodyProvenance,
     frontmatter_data: &DataPaths,
 ) -> MarkdownResult<usize> {

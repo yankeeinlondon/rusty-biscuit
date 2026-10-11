@@ -79,7 +79,7 @@ fn detect_table() {
         let opts = load_options(&dir);
         let inputs = load_inputs(&dir);
         let inputs_ref: Vec<&Markdown> = inputs.iter().collect();
-        let schema = detect_schema(&inputs_ref, opts);
+        let schema = detect_schema(&inputs_ref, opts, &biscuit_file::FileResolutionContext::new(&dir));
         let actual = schema_to_yaml(&schema);
 
         let expected_path = dir.join("expected.yaml");

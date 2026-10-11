@@ -789,6 +789,11 @@ fn level2_proxy_routes_share_identity_across_routes_in_tmux() {
 
     let init_staged = stage("claudine-l2-parity-init", INITIALIZE_PROXY_DOC, 0);
     let init = run_in_pane(&mut harness, &init_staged, &TTY_COLOR, &[]);
+    // The terminal route must not inherit the initialize route's exit marker
+    // or error block when asserting its own exactly-once emission.
+    drop(harness);
+    let mut harness = TmuxHarness::new();
+    harness.spawn_shell().expect("isolated terminal proxy pane");
     let term_staged = stage("claudine-l2-parity-term", TERMINAL_PROXY_DOC, 3);
     let term = run_in_pane(&mut harness, &term_staged, &TTY_COLOR, &[]);
 
@@ -882,13 +887,13 @@ fn level2_proxy_routes_share_identity_across_routes_in_tmux() {
     let init_plain = normalize_wrapped_block(&init.frame.plain);
     let term_plain = normalize_wrapped_block(&term.frame.plain);
     assert!(
-        init_plain.contains("`initialize` event of"),
+        init_plain.contains("initialize event of"),
         "the initialize route must render its structured event label separately \
          from the property path.\nplain:\n{}",
         init.frame.plain
     );
     assert!(
-        term_plain.contains("`failure` event of"),
+        term_plain.contains("failure event of"),
         "the terminal route must render its structured event label separately \
          from the property path.\nplain:\n{}",
         term.frame.plain

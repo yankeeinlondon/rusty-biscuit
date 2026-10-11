@@ -39,7 +39,7 @@ fn many_file_directives_in_one_phase_compose_byte_identically() {
     .unwrap();
 
     let md = Markdown::try_from(root.as_path()).unwrap();
-    let (composed, _report) = md.compose_with(transclude_only(&root)).unwrap();
+    let (composed, _report) = md.compose_with(&crate::request_support::request(transclude_only(&root))).unwrap();
     let text = composed.content();
 
     assert_eq!(
@@ -50,7 +50,7 @@ fn many_file_directives_in_one_phase_compose_byte_identically() {
 
     // Determinism: re-composing the same source yields byte-identical output.
     let md2 = Markdown::try_from(root.as_path()).unwrap();
-    let (composed2, _report2) = md2.compose_with(transclude_only(&root)).unwrap();
+    let (composed2, _report2) = md2.compose_with(&crate::request_support::request(transclude_only(&root))).unwrap();
     assert_eq!(text, composed2.content());
 }
 
@@ -70,7 +70,7 @@ fn differing_parent_state_does_not_reuse_child_output() {
             ComposeOperation::Interpolation,
             ComposeOperation::BlockTransclusion,
         ]);
-        md.compose_with(opts).unwrap().0.content().to_string()
+        md.compose_with(&crate::request_support::request(opts)).unwrap().0.content().to_string()
     };
 
     // The child inherits the parent frontmatter as external state (see

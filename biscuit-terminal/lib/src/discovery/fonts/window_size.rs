@@ -33,10 +33,7 @@ use crate::discovery::detection::is_tty;
 /// ```
 #[cfg(unix)]
 pub fn window_size_pixels() -> Option<WindowSizePixels> {
-    use crate::discovery::raw_mode::{RawModeGuard, TERMINAL_QUERY_MUTEX};
-    use std::io::{Read, Write};
-    use std::os::unix::io::AsRawFd;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
 
     // Must be a TTY to query
     if !is_tty() {
@@ -50,71 +47,23 @@ pub fn window_size_pixels() -> Option<WindowSizePixels> {
         return None;
     }
 
-    // Open /dev/tty for direct terminal access
-    let mut tty = match std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open("/dev/tty")
-    {
-        Ok(f) => f,
-        Err(e) => {
-            tracing::trace!("window_size_pixels(): failed to open /dev/tty: {}", e);
-            return None;
-        }
-    };
-
-    let fd = tty.as_raw_fd();
-
-    // Serialize terminal access to prevent race conditions
-    let _lock = TERMINAL_QUERY_MUTEX.lock().ok()?;
-
-    // Enter raw mode on /dev/tty fd (RAII guard restores on drop)
-    let _guard = RawModeGuard::new(fd).ok()?;
-
-    // Write CSI 14 t query
-    let query = b"\x1b[14t";
-    if tty.write_all(query).is_err() {
-        tracing::trace!("window_size_pixels(): failed to write query");
-        return None;
-    }
-    let _ = tty.flush();
-
-    // Read response with timeout and hard limits to prevent hangs
-    let timeout = Duration::from_millis(100);
-    let start = Instant::now();
-    let mut buffer = Vec::with_capacity(32);
-    let mut byte = [0u8; 1];
-    const MAX_BYTES: usize = 64;
-    const MAX_ITERATIONS: usize = 100;
-    let mut iterations = 0;
-
-    while start.elapsed() < timeout && buffer.len() < MAX_BYTES && iterations < MAX_ITERATIONS {
-        iterations += 1;
-        match tty.read(&mut byte) {
-            Ok(1) => {
-                buffer.push(byte[0]);
-                // Check if we've received the terminating 't'
-                if byte[0] == b't' && buffer.len() > 4 {
-                    break;
-                }
+    let response =
+        match crate::discovery::tty_query::round_trip(b"\x1b[14t", Duration::from_millis(100)) {
+            Ok(response) => response,
+            Err(e) => {
+                tracing::debug!("window_size_pixels(): {e}");
+                return None;
             }
-            Ok(0) => {
-                // No data available, continue waiting
-                std::thread::sleep(Duration::from_millis(5));
-            }
-            Ok(_) => {}
-            Err(_) => break,
-        }
-    }
+        };
 
     // Parse response: \x1b[4;height;widtht
-    let result = parse_csi_14t_response(&buffer);
+    let result = parse_csi_14t_response(&response);
     if result.is_some() {
         tracing::debug!("window_size_pixels(): detected {:?}", result);
     } else {
         tracing::debug!(
             "window_size_pixels(): failed to parse response: {:?}",
-            String::from_utf8_lossy(&buffer)
+            String::from_utf8_lossy(&response)
         );
     }
 

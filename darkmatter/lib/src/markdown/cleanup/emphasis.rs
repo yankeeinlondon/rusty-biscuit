@@ -53,10 +53,16 @@ pub(super) fn preserve_original_emphasis<'a>(
         match event {
             Event::Start(Tag::Emphasis) => {
                 // Determine emphasis style: use standardized if specified, otherwise original
-                let is_underscore = if let Some(style) = standardize_emphasis {
-                    style == EmphasisStyle::Underscore
-                } else {
-                    range.start < content.len() && content[range.start..].starts_with('_')
+                let original_underscore =
+                    range.start < content.len() && content[range.start..].starts_with('_');
+                let is_underscore = match standardize_emphasis {
+                    Some(style)
+                        if (style == EmphasisStyle::Underscore) != original_underscore
+                            && single_marker_fits(content, range, style) =>
+                    {
+                        style == EmphasisStyle::Underscore
+                    }
+                    _ => original_underscore,
                 };
                 style_stack.push(is_underscore);
 
@@ -110,6 +116,82 @@ pub(super) fn preserve_original_emphasis<'a>(
     }
 
     result
+}
+
+/// Whether `style`'s single marker can replace the delimiters of the
+/// emphasis spanning `range` in `content` and still open and close there.
+///
+/// CommonMark lets `_` open or close only at a word boundary (`a*b*c` is
+/// emphasis, `a_b_c` is not), and a neighbor of the same character would
+/// join the run (`*_b_*` restyled to `*` becomes `**b**`). Where the marker
+/// does not fit, the author's original marker is kept.
+fn single_marker_fits(content: &str, range: &Range<usize>, style: EmphasisStyle) -> bool {
+    let (Some(opener_end), Some(closer_start)) =
+        (range.start.checked_add(1), range.end.checked_sub(1))
+    else {
+        return false;
+    };
+    let (Some(head), Some(body), Some(tail)) = (
+        content.get(..range.start),
+        content.get(opener_end..closer_start),
+        content.get(range.end..),
+    ) else {
+        return false;
+    };
+    let marker = match style {
+        EmphasisStyle::Underscore => '_',
+        EmphasisStyle::Asterisk => '*',
+    };
+    let before = head.chars().next_back();
+    let first = body.chars().next();
+    let last = body.chars().next_back();
+    let after = tail.chars().next();
+    if [before, first, last, after].contains(&Some(marker)) {
+        return false;
+    }
+    if marker == '*' {
+        // The original `_` flanked here, and `*` flanks wherever `_` does.
+        return true;
+    }
+    readings(before).iter().all(|&before| {
+        readings(first).iter().all(|&first| {
+            left_flanking(before, first)
+                && (!right_flanking(before, first) || before == Flank::Punct)
+        })
+    }) && readings(last).iter().all(|&last| {
+        readings(after).iter().all(|&after| {
+            right_flanking(last, after) && (!left_flanking(last, after) || after == Flank::Punct)
+        })
+    })
+}
+
+/// How a character beside a delimiter run counts for CommonMark flanking.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Flank {
+    Space,
+    Punct,
+    Word,
+}
+
+/// The classes `side` may be read as. A line edge counts as whitespace; a
+/// non-ASCII symbol is punctuation to some readers and not to others, so it
+/// is tried both ways.
+fn readings(side: Option<char>) -> &'static [Flank] {
+    match side {
+        None => &[Flank::Space],
+        Some(c) if c.is_whitespace() => &[Flank::Space],
+        Some(c) if c.is_ascii_punctuation() => &[Flank::Punct],
+        Some(c) if c.is_alphanumeric() || c.is_ascii() => &[Flank::Word],
+        Some(_) => &[Flank::Punct, Flank::Word],
+    }
+}
+
+fn left_flanking(before: Flank, after: Flank) -> bool {
+    after != Flank::Space && (after != Flank::Punct || before != Flank::Word)
+}
+
+fn right_flanking(before: Flank, after: Flank) -> bool {
+    before != Flank::Space && (before != Flank::Punct || after != Flank::Word)
 }
 
 /// Replaces emphasis placeholders with actual markers.

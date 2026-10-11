@@ -47,7 +47,7 @@ pub fn scrub_text(input: &str) -> String {
 /// Degenerate one-character homes (e.g. `/`) are ignored — replacing them
 /// would mangle every path.
 fn home_prefix() -> Option<String> {
-    let home = dirs::home_dir()?;
+    let home = biscuit_file::home_dir()?;
     let home = home.to_str()?;
     (home.len() > 1).then(|| home.to_string())
 }
@@ -153,7 +153,7 @@ mod tests {
 
     #[test]
     fn rewrites_home_directory_prefix() {
-        let home = dirs::home_dir().expect("home dir");
+        let home = biscuit_file::home_dir().expect("home dir");
         let input = format!("read failed: {}/project/file.txt", home.display());
         let out = scrub_text(&input);
         assert!(!out.contains(home.to_str().unwrap()), "out: {out}");

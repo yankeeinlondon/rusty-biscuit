@@ -132,7 +132,7 @@ fn run_loop_lifecycle_with_engine_path(
         &effect_engine,
         &crate::composition::lifecycle_executor::SystemShellRunner,
         emitter,
-        None,
+        crate::test_support::process_context(),
         None,
         |_ctx, guard| {
             // A successful provider iteration has crossed preflight and start.
@@ -651,7 +651,7 @@ fn run_loop_lifecycle_emitting_terminal(
         &effect_engine,
         &shell_runner,
         emitter,
-        None,
+        &crate::test_support::context_for(prompt_path),
         None,
         |ctx, guard| {
             *invocations.borrow_mut() += 1;
@@ -668,7 +668,7 @@ fn run_loop_lifecycle_emitting_terminal(
                 &shell_runner,
                 emitter,
                 prompt_path.parent(),
-                None,
+                crate::test_support::process_context(),
                 Some(&timing),
                 None,
             );

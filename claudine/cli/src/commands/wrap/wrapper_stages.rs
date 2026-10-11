@@ -538,7 +538,7 @@ pub(crate) fn run_execution_stage(
     wrapper_span: &tracing::Span,
     mut perf_collector: Option<&mut crate::perf::CommandPerfCollector>,
     invocation: &claudine::invocation_context::InvocationContext,
-) -> Result<crate::output::native_exit::NativeExit> {
+) -> Result<(crate::output::native_exit::NativeExit, i32)> {
     if let Some(WrapperHarness {
         source_path,
         source_context,
@@ -548,10 +548,9 @@ pub(crate) fn run_execution_stage(
     }) = wrapper_harness
     {
         let initial_compose_context = initial_materialized.compose_context.clone();
-        let input_layers = claudine::composition::CallerInputLayers {
-            file_resolution_context: initial_materialized.file_resolution_context.clone(),
-            ..Default::default()
-        };
+        let input_layers = claudine::composition::CallerInputLayers::new(
+            initial_materialized.file_resolution_context.clone(),
+        );
         let mut prompt_state = harness_orch::HarnessPromptState {
             mode: harness_orch::HarnessPromptMode::Passthrough,
             original_ref: source_path.display().to_string(),
@@ -669,10 +668,10 @@ pub(crate) fn run_execution_stage(
         }
         // The harness loop reported its own attempts; the exit code is all
         // that reaches this report.
-        Ok(crate::output::native_exit::NativeExit::new(
+        Ok((crate::output::native_exit::NativeExit::new(
             harness_code,
             claudine::harness::ProcessTermination::Completed,
-        ))
+        ), harness_code))
     } else if use_structured {
         // Presence bracket for the direct structured-stream path (the
         // harness path above reports per attempt inside
@@ -747,7 +746,7 @@ pub(crate) fn run_execution_stage(
             collector.set_agent_perf(result.telemetry.into_agent_perf(None));
         }
         // Both streams were forwarded live, so nothing was captured.
-        Ok(crate::output::native_exit::NativeExit::new(result.data, result.termination))
+        Ok((crate::output::native_exit::NativeExit::new(result.data, result.termination), result.data))
     }
 }
 

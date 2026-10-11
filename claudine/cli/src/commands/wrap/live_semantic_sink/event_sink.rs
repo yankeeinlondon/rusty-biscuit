@@ -3,6 +3,7 @@
 //! status rendering, dispatch, and JSONL logging for [`LiveSemanticSink`].
 
 use super::LiveSemanticSink;
+use super::super::run_scope;
 use super::Section;
 use claudine::events::AgenticEvent;
 use claudine::render::StreamRenderable;
@@ -11,6 +12,26 @@ use serde_json::Value;
 
 impl SemanticEventSink for LiveSemanticSink {
     fn on_semantic_event(&mut self, event: SemanticEvent) {
+        // The run this reader belongs to has ended (its wrapper stopped waiting
+        // and settled the summary). A late event must not render, dispatch a
+        // lifecycle hook, or log into a run that is over or into the next
+        // iteration of a loop.
+        if run_scope::current_closed() {
+            return;
+        }
+
+        // Recorded before anything renders: a terminal error from a stderr
+        // bridge reaches no parser line, so this is how the wrapper learns it.
+        if let SemanticEvent::Error {
+            message,
+            terminal: true,
+            kind,
+            ..
+        } = &event
+        {
+            run_scope::report_terminal_error(kind.as_str().to_string(), message.clone());
+        }
+
         // 0. Boundary flush: a buffered thought coalesces and renders before
         //    any non-`Reasoning` event, so a tool call / output text / turn
         //    end never interleaves mid-thought. Mirrors the `task_progress`
@@ -214,6 +235,7 @@ impl SemanticEventSink for LiveSemanticSink {
         //    zero or more emission units (empty = silent / verbosity-gated);
         //    each unit is routed to its section exactly as the previous
         //    per-arm `emit_section_line` calls did.
+        run_scope::observe(run_scope::observation::Operation::RenderComputation);
         let units = self.renderer.render(&event, &self.terminal, self.verbosity);
         for unit in units {
             self.emit_section_line(super::section_for(unit.class), &unit.text);
@@ -228,10 +250,15 @@ impl SemanticEventSink for LiveSemanticSink {
         let agentic = Self::to_agentic(&event);
         let log_agentic = agentic.unwrap_or(AgenticEvent::Notification);
         let meta = self.dispatch_meta(&event, log_agentic);
+        if run_scope::current_closed() { return; }
         if let Some(emit_log) = self.emit_event_log.as_ref() {
+            run_scope::observe(run_scope::observation::Operation::SemanticLogging);
             emit_log(&event, &meta);
         }
+        // A logger admitted before cutoff may resume after the run settled.
+        if run_scope::current_closed() { return; }
         if let Some(agentic) = agentic {
+            run_scope::observe(run_scope::observation::Operation::HookCallback);
             (self.dispatch)(agentic, meta);
         }
     }

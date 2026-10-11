@@ -7,6 +7,7 @@
 //! transmitted, and a screenshot of the window. The sizing rule itself is
 //! covered at L1 in biscuit-terminal's `git_graph` tests.
 
+use std::cell::Cell;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -102,6 +103,8 @@ struct Fixture {
     worktrees: Vec<String>,
     /// Set by [`Fixture::sparse_lanes`].
     sparse: Option<SparseLanes>,
+    /// The next [`Fixture::commit`]'s commit time, in Unix seconds.
+    clock: Cell<i64>,
 }
 
 impl Fixture {
@@ -127,6 +130,7 @@ impl Fixture {
             main,
             worktrees: Vec::new(),
             sparse: None,
+            clock: Cell::new(1_700_000_000),
         };
         fixture.commit(&fixture.main, "main.txt", "main 1");
         fixture.commit(&fixture.main, "main.txt", "main 2");
@@ -291,7 +295,18 @@ impl Fixture {
     fn commit(&self, dir: &Path, file: &str, message: &str) {
         fs::write(dir.join(file), message).unwrap();
         run_git(dir, &["add", "."]);
-        run_git(dir, &["commit", "-m", message]);
+        // A minute apart: the graph ranks lanes by their tips' commit times in
+        // whole seconds, so wall-clock commits made within one second would
+        // leave which lane is newest to the machine's speed.
+        let date = format!("@{} +0000", self.clock.replace(self.clock.get() + 60));
+        let status = Command::new("git")
+            .current_dir(dir)
+            .args(["commit", "-m", message])
+            .env("GIT_AUTHOR_DATE", &date)
+            .env("GIT_COMMITTER_DATE", &date)
+            .status()
+            .expect("git should be installed");
+        assert!(status.success(), "git commit failed in {dir:?}");
     }
 
     fn path(&self, name: &str) -> PathBuf {
@@ -462,7 +477,10 @@ impl GraphRun {
         fs::write(
             &script,
             format!(
-                "cd '{main}'\n\
+                // A Kitty launched beside others can still be at its initial
+                // size when the shell starts; `wt` must see the requested one.
+                "for _ in $(seq 50); do [ \"$(stty size)\" = '{lines} {columns}' ] && break; sleep 0.1; done\n\
+                 cd '{main}'\n\
                  printf '\\033[16t'; IFS=';t' read -rs -d t -t 2 _ ch cw\n\
                  clear\n\
                  script -q '{rec}' env -u TERM_PROGRAM HOME='{home}' XDG_CACHE_HOME='{home}/cache' '{wt}' list\n\
@@ -546,7 +564,7 @@ impl GraphRun {
 
     /// The image `wt` asked for and the rows it left for it, measured on the
     /// screen text and on the pixels Kitty drew. Returns the hidden-lane count
-    /// from the elision notice, if there is one; call it through
+    /// from the closing notes, if they have one; call it through
     /// [`graph_drawn_or_skip!`].
     fn assert_graph_drawn(&self) -> Result<Option<usize>, Unobserved> {
         let (cell_w, cell_h) = self.cell;
@@ -566,8 +584,9 @@ impl GraphRun {
         // must reserve the same number or text overlaps the image.
         assert_eq!(image.rows, image.png.height().div_ceil(cell_h), "reserved rows vs Kitty's rows");
 
-        // Screen text: the image hangs below the legend, and the next text is
-        // the notice (or the done marker), at most one blank row after it.
+        // Screen text: the image hangs below the legend, and the next text
+        // (the status list, the notes, or the done marker) is at most one
+        // blank row after it.
         let legend = self.screen_row("parent deleted");
         let next = (legend + 1..self.screen.len())
             .find(|&row| !self.screen[row].trim().is_empty())
@@ -582,12 +601,13 @@ impl GraphRun {
 
         self.assert_pixels_match(legend, next)?;
 
-        // "Some history is not shown" may follow the image instead.
-        Ok(self.screen[next]
-            .trim()
-            .strip_suffix(" not shown")
-            .and_then(|notice| notice.strip_suffix(" more worktrees").or_else(|| notice.strip_suffix(" more worktree")))
-            .map(|count| count.parse().expect("numeric hidden-lane count")))
+        Ok(self.screen[next..].iter().find_map(|row| {
+            let note = row.trim().strip_prefix("- ")?;
+            let (count, _) = note
+                .split_once(" worktrees aren't in the graph:")
+                .or_else(|| note.split_once(" worktree isn't in the graph:"))?;
+            Some(count.parse().expect("numeric hidden-lane count"))
+        }))
     }
 
     /// The drawn part of the transmitted PNG must appear exactly where the
@@ -698,9 +718,10 @@ impl GraphRun {
     }
 }
 
-/// A short window: the base view's graph is capped at half the rows, so
-/// lanes are left out and the notice counts them; the image Kitty draws fills
-/// exactly the rows `wt` reserved.
+/// A short window: the base view's graph gets only the rows the rest of the
+/// listing leaves (`graph_row_budget`, unit tested), so lanes are left out
+/// and a note counts them; the image Kitty draws fills exactly the rows `wt`
+/// reserved.
 #[test]
 #[serial(level2_terminal)]
 fn level2_graph_height_cap_elides_lanes_in_a_short_kitty_window() {
@@ -709,10 +730,10 @@ fn level2_graph_height_cap_elides_lanes_in_a_short_kitty_window() {
     let fixture = Fixture::new();
     let run = GraphRun::new(&fixture, 100, 32);
 
-    assert!(run.transmitted.rows <= run.lines / 2, "{} rows exceed half of {}", run.transmitted.rows, run.lines);
+    assert!(run.transmitted.rows < run.lines, "{} rows fill the {}-row window", run.transmitted.rows, run.lines);
     run.assert_table_intact();
     let hidden = graph_drawn_or_skip!(run).unwrap_or_else(|| {
-        panic!("the capped graph should end with an elision notice:\n{}", run.screen.join("\n"))
+        panic!("the capped graph should note the lanes it left out:\n{}", run.screen.join("\n"))
     });
     assert!((1..BRANCHES.len()).contains(&hidden), "{hidden} hidden lanes of {}", BRANCHES.len());
 }
@@ -751,7 +772,7 @@ fn level2_graph_draws_a_merged_branch_in_kitty() {
         run.keep_evidence("merged");
         assert!(run.transmitted.rows <= run.lines / 2, "{} rows exceed half of {}", run.transmitted.rows, run.lines);
         let all = run.all.join("\n");
-        assert!(!all.contains("Some history is not shown"), "a merged branch is complete history:\n{all}");
+        assert!(!names_an_omission(&all), "a merged branch is complete history:\n{all}");
         run.assert_table_intact();
         assert_eq!(graph_drawn_or_skip!(run), None, "no lane is left out:\n{}", run.screen.join("\n"));
     }
@@ -774,8 +795,8 @@ fn level2_graph_restores_lane_density_in_kitty() {
     run.keep_evidence("sparse");
     assert!(run.transmitted.rows <= run.lines / 2, "{} rows exceed half of {}", run.transmitted.rows, run.lines);
     let all = run.all.join("\n");
-    assert!(!all.contains("Some history is not shown"), "every fork and merge is drawn:\n{all}");
-    assert!(!all.contains("more worktree"), "no lane is left out:\n{all}");
+    assert!(!names_an_omission(&all), "every fork and merge is drawn:\n{all}");
+    assert!(!all.contains("in the graph:"), "no lane is left out:\n{all}");
     run.assert_table_intact();
     assert_eq!(graph_drawn_or_skip!(run), None, "no lane is left out:\n{}", run.screen.join("\n"));
 }
@@ -796,8 +817,8 @@ fn level2_graph_draws_a_branch_continued_after_its_merge_in_kitty() {
     run.keep_evidence("continued");
     assert!(run.transmitted.rows <= run.lines / 2, "{} rows exceed half of {}", run.transmitted.rows, run.lines);
     let all = run.all.join("\n");
-    assert!(!all.contains("Some history is not shown"), "the continued branch is connected:\n{all}");
-    assert!(!all.contains("more worktree"), "no lane is left out:\n{all}");
+    assert!(!names_an_omission(&all), "the continued branch is connected:\n{all}");
+    assert!(!all.contains("in the graph:"), "no lane is left out:\n{all}");
     run.assert_table_intact();
     assert_eq!(graph_drawn_or_skip!(run), None, "no lane is left out:\n{}", run.screen.join("\n"));
 }
@@ -834,4 +855,21 @@ fn level2_sparse_lanes_fixture_has_the_observed_topology() {
     assert_eq!(record("fix/sniff"), Some(("fix/wt-ux", sparse.w1.as_str())), "created at W1");
     assert_eq!(record("fix/wt-ux"), Some(("main", sparse.d5.as_str())), "created at d5");
     assert_eq!(record("feat/schema-enhancement"), Some(("main", sparse.d2.as_str())), "created at d2");
+}
+
+/// Whether the closing notes say the graph left something out: a lane it
+/// couldn't join, a merge or label it couldn't draw, or history Git couldn't
+/// establish.
+fn names_an_omission(text: &str) -> bool {
+    let joined = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    [
+        "isn't joined to the others",
+        "doesn't join its lane",
+        "drawn as a plain commit",
+        "label isn't in the graph",
+        "clone is shallow",
+        "couldn't answer every question",
+    ]
+    .iter()
+    .any(|phrase| joined.contains(phrase))
 }

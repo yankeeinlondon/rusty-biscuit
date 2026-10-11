@@ -52,32 +52,8 @@ pub(crate) use git::{fetch_recent_commits, render_recent_commits};
 pub use capabilities::DeferredCapabilities;
 pub use groups::{ContextGroup, ContextRequirements};
 pub use snapshot::ContextCaptureEvidence;
-pub(crate) use datetime::populate_datetime;
 #[cfg(test)]
 pub(crate) use snapshot::{GIT_DISCOVERY_COUNT, REPOSITORY_DISCOVERY_COUNT};
-
-fn capture_repository_scope_catalog(
-    base_dir: &Path,
-) -> Option<biscuit_file::RepositoryScopeCatalog> {
-    let capture = snapshot::ContextCapture::new(
-        base_dir,
-        &[ContextGroup::Repo],
-        Ok(base_dir.to_path_buf()),
-    );
-    super::repository_scope::RepositoryObservation {
-        root: capture.repo_root,
-        info: capture.repo_info,
-    }
-    .scope_catalog()
-}
-
-pub fn capture_file_resolution_context(base_dir: &Path) -> biscuit_file::FileResolutionContext {
-    let mut context = biscuit_file::FileResolutionContext::new(base_dir);
-    if let Some(catalog) = capture_repository_scope_catalog(base_dir) {
-        context = context.with_repository_scope_catalog(catalog);
-    }
-    context
-}
 
 /// Capture all runtime context variables for the given base directory.
 pub(crate) fn capture_runtime_context(base_dir: &Path) -> CaptureResult {
@@ -94,12 +70,22 @@ pub(crate) fn capture_runtime_context_for_content(base_dir: &Path, content: &str
 }
 
 /// Capture runtime context for the specified groups only.
+///
+/// `environment` is the caller's request environment; the `Agent` group
+/// derives `agent`/`model` from it.
 pub(crate) fn capture_runtime_context_for_groups(
     base_dir: &Path,
     groups: &[ContextGroup],
+    environment: &HashMap<String, String>,
 ) -> CaptureResult {
     let requirements = ContextRequirements::from_groups(groups.iter().copied());
-    capture_runtime_context_for_requirements(base_dir, &requirements)
+    capture_runtime_context_for_requirements_with_cwd(
+        base_dir,
+        &requirements,
+        Ok(base_dir.to_path_buf()),
+        DocumentSeed::default(),
+        environment.clone(),
+    )
 }
 
 pub(crate) fn capture_runtime_context_for_requirements(
@@ -119,16 +105,21 @@ pub(crate) fn capture_runtime_context_for_seeded_requirements(
         requirements,
         Ok(base_dir.to_path_buf()),
         seed,
+        HashMap::new(),
     )
 }
 
+/// The process environment is never read here: an ambient capture starts with
+/// `environment` (empty from the public `ComposeContext::capture_for_*`), and
+/// a [`ComposeRequest`](crate::markdown::compose::ComposeRequest) installs its
+/// snapshot's environment over it.
 fn capture_runtime_context_for_requirements_with_cwd(
     base_dir: &Path,
     requirements: &ContextRequirements,
     invocation_cwd: std::io::Result<std::path::PathBuf>,
     seed: DocumentSeed<'_>,
+    environment: HashMap<String, String>,
 ) -> CaptureResult {
-    let environment = std::env::vars().collect();
     let groups: Vec<_> = requirements.iter().collect();
     let cap = snapshot::ContextCapture::new(base_dir, &groups, invocation_cwd);
     populate_capture(cap, requirements, environment, seed)
@@ -253,6 +244,7 @@ mod tests {
             &requirements,
             Ok(outside.path().to_path_buf()),
             DocumentSeed::default(),
+            HashMap::new(),
         );
 
         let cwd = values.get("cwd").and_then(Value::as_str).expect("ctx.cwd");
@@ -272,6 +264,7 @@ mod tests {
             &requirements,
             Err(std::io::Error::other("forced current directory failure")),
             DocumentSeed::default(),
+            HashMap::new(),
         );
 
         assert_eq!(values.get("cwd"), Some(&Value::Null));

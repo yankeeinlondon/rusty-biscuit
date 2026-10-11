@@ -97,7 +97,7 @@ $schema:
 | `boolean`    | Any JSON boolean.                                                                                      | Constraints: `default`, `required`.                                                                                                                                             |
 | `boolish`    | A JSON boolean **or** the strings `"true"` / `"false"` (any case).                                     | Compiles to `anyOf: [boolean, enum]`. A `"true"` / `"false"` value is **normalized** to a real boolean (see [Type Coercion](#type-coercion)).                                  |
 | `object`     | Any YAML/JSON object.                                                                                  | No nested-schema authoring in v1 — `object` accepts any shape. Reference an external file for deeper typing.                                                                    |
-| `file`       | A file reference parsed via `biscuit-file::FileReference`. Single or array form.                       | Constraints: `eager`, `match(glob, ...)`, `required`. **Lazy by default**; `file(eager)` resolves and checks existence (implicit paths from the document directory first, then the repository root; explicit `./`/`../` from the document directory only). Schema-selected file values materialize as absolute native paths at the request boundary; lazy values use the first unprobed candidate. See [Files](#files).        |
+| `file`       | A file reference parsed via `biscuit-file::FileReference`. Single or array form.                       | Constraints: `eager`, `match(glob, ...)` (each glob a prefixed glob reference such as `^**/*spec*.md`), `required`. **Lazy by default**; `file(eager)` resolves and checks existence (implicit paths from the document directory first, then the repository root; explicit `./`/`../` from the document directory only). Schema-selected file values materialize as absolute native paths at the request boundary; lazy values use the first unprobed candidate. See [Files](#files).        |
 | `enum`       | A value from an explicit set.                                                                          | Constraints required — the members are the constraint. See [Enumerations](#enumerations).                                                                                       |
 | `literal`    | Exactly one scalar value, of any scalar type.                                                          | Compiles to JSON Schema `const`. Bare `true`/`2` are typed; quoting forces string. Constraints: `required`, an equal `default`. See [Literals](#literals).                       |
 | `url`        | A string parseable as an absolute URL.                                                                 | Constraints: `scheme(...)`, `default`, `required`.                                                                                                                              |
@@ -492,14 +492,61 @@ Relative paths in an eager check resolve like implicit file references: a bare p
 (`spec.md`, `notes/spec.md`) is tried **from the prompt document's directory first,
 then the repository root**, while an explicit `./`/`../` path resolves from the
 document directory only. This is the same order `$schema` file references and the expression
-path (`file_exists`/`frontmatter`) use. No ambient current working directory is read
-once the resolution context is captured.
+path (`file_exists`/`frontmatter`) use. Every eager check resolves through the request's
+file-resolution context; a document with no path of its own (a string or stdin) resolves
+from that context's directory. No ambient current working directory is read.
 
 `match(globs)` shapes path completion: it decides which candidates a tool offers.
 In a single schema it only suggests paths, so an existing file outside the
 configured globs still validates. In a root union, it is also an arm constraint:
 an existing file outside an arm's declared glob rules that arm out. This holds
 when the other arms declare the same glob, a different glob, or no glob.
+
+Each glob is a **glob reference**: an optional `!` (exclude), an optional
+file-reference prefix, then the glob. The prefix says where the glob starts,
+so one schema can mean the same files from any launch directory:
+
+| Prefix | Example | Judged from |
+|---|---|---|
+| _(none)_ | `**/*spec*.md`, `*.md` | the value's directory, then the repository root |
+| `./` | `./docs/*.md` | the value's directory only |
+| `../` | `../shared/*.md` | the parent of the value's directory only |
+| `&` | `&fixes/**/spec.md` | the repository root only |
+| `^` | `^**/*spec*.md` | the package, the package area, then the repository root |
+| `@` | `@prompts/*.md` | the launch directory's package, package area, and repository root, then home |
+| `~/` | `~/notes/**/*.md` | your home folder |
+| absolute | `/srv/specs/*.md` | that folder |
+| `vault:` | `vault:journal/**/*.md` | each configured vault root |
+| `{{VAR}}` | `{{SPECS_DIR}}/*.md` | the folder the variable names; its value is literal text, never glob syntax |
+| `!` | `!&**/_completed/**` | excludes what the rest of the pattern, with its own prefix, matches |
+
+- **The value's directory** is the launch directory for a value a caller
+  supplies (`md compose doc.md spec=…`, a completion, a chooser) and the
+  document's folder for a value written in the frontmatter, so a bare, `./`,
+  or `../` pattern can mean two different places. Use `&`, `^`, or `@` when a
+  pattern must mean one place for both.
+- **Nearest root.** A file is judged only relative to the first of a
+  pattern's folders that contains it, so `match(**/*spec*.md, !fixes/**)`
+  launched from `pkg/` rejects `pkg/fixes/x/spec.md` and the repository
+  root's `fixes/y/spec.md` alike.
+- **File-name view.** A pattern with no `/` after its prefix (`*.md`,
+  `^*.md`, `!_*.md`) also matches a file's bare name at any depth, so
+  `match(*.md, !_*.md)` rejects `docs/_draft.md`.
+- `*` stays within one path segment and `**` crosses segments; matching is
+  case-sensitive on every OS.
+- A pattern that is not a glob reference is a schema definition error naming
+  the property and pattern: `%…` (a glob already recurses), a URL, an
+  invalid glob, or a list of only `!` exclusions.
+
+A prefixed pattern means the same files wherever `md` runs. Here `journal`
+offers Markdown from every configured vault except its templates, and `spec`
+offers spec files from anywhere in the repository:
+
+```yaml
+$schema:
+    journal: "file(match('vault:journal/**/*.md', '!vault:journal/_templates/**'))"
+    spec:    "file(eager; match('&**/features/**/spec.md'))"
+```
 
 ```yaml
 $schema:
@@ -530,12 +577,14 @@ The rules:
 - Only an **existing** file is judged. A value that names no file yet (a lazy
   output path, a partial a chooser is about to complete, a value still holding
   `{{ … }}` or `$(…)`) never rules an arm out; existence is `eager`'s job.
-- The path is compared in portable `/` spelling, relative to the launch
-  directory, which is where completion walks the glob; a file outside it is
-  compared relative to the document's directory, then the repository root.
-  What completion offers, the arm accepts.
-- Document-authored and caller-supplied values follow the same rule, each
-  resolved from its own origin. In a `file[]`, every item must match.
+- The path is judged from the value's directory, as above: a caller-supplied
+  value from the launch directory, which is where completion walks the glob,
+  so what completion offers, the arm accepts; a document-authored value from
+  the document's folder. Each is resolved from that same origin. In a
+  `file[]`, every item must match.
+- Coercion, which runs without a request, judges only an existing absolute
+  path against the bare and absolute patterns (by its full path), so a
+  `./`, `&`, `^`, or `@` pattern cannot steer how a sibling value is coerced.
 
 When a schema arm selects `file(eager)`, validation probes the candidate plan and
 materializes the winning **absolute native path**. A lazy `file` value materializes
@@ -952,9 +1001,15 @@ The resolution rules:
 Path references in `$schema` resolve like implicit file references: a bare path is
 tried **from the document's directory first, then the repository root**, while an explicit
 `./`/`../` reference resolves from the document's directory only. A bare **name**
-(`$schema: claudine.yaml`, no path separator) instead resolves against the configured
-[schema roots](#repository-trigger-schemas) nearest-first. No ambient current working
-directory is read.
+(`$schema: claudine.yaml`, no path separator) instead resolves to the first of the
+five [schema roots](#schema-roots) that holds that file; write `./claudine.yaml` for a
+file beside the document. The same lookup applies to a bare name in an import
+(`Name@claudine.yaml`) or `example(claudine.yaml)`. A name no root holds is an
+error, which suggests `./claudine.yaml` when a file of that name sits beside the
+document. When no root is searched at all (none of the five folders exists,
+trigger discovery is off with `--no-trigger-schemas`, or `md` is checking a
+document outside a repository), a bare name resolves like any other bare path.
+No ambient current working directory is read.
 
 Remote (`http://` / `https://`) references are **not supported** in v1 and produce a clear `SchemaError::RemoteUnsupported` directing the user to download the schema locally.
 
@@ -1034,7 +1089,7 @@ Schema. Wrap the properties under a sole root `$schema:` key, or use
 A baseline schema is a SimplifiedSchema or JSON Schema that every validated document inherits. The library exposes:
 
 ```rust
-let api = DarkmatterSchemas::new()
+let api = DarkmatterSchemas::new(context)
     .with_baseline_from_file("./schemas/baseline.yaml")?;
 ```
 
@@ -1271,6 +1326,16 @@ md schema detect <file>... [--format yaml|json] [--merge]
 
 Without `--merge`, multiple inputs emit one schema per file with a header comment.
 
+Each document's references are judged from the document itself, the way `md compose` and `md schema validate` resolve them, not from the directory you ran `md` in. A document in another repository finds `./`, bare, `&`, and `^` references in its own repository and `@` references in the launch scope; a document outside every repository keeps the `~` you opened it through; and two spellings of the same path (such as macOS `/var/…` and `/private/var/…`) give the same result. For example, `~/other-repo/docs/plan.md` declares `diagram: './flow.md'` (beside it) and `readme: '&README.md'` (at its repository's root). Run from `~/work/app`, a different repository:
+
+```text
+$ md schema detect ~/other-repo/docs/plan.md
+# detected from: /Users/me/other-repo/docs/plan.md
+$schema:
+  diagram: file
+  readme: file
+```
+
 ### Detection Algorithm
 
 For each top-level frontmatter property (excluding `$schema`), the inferred type is:
@@ -1386,11 +1451,16 @@ The entry point is `darkmatter::markdown::schemas::DarkmatterSchemas`.
 
 ```rust
 use darkmatter::markdown::Markdown;
+use darkmatter::markdown::compose::{RequestSnapshot, build_resolution_context};
 use darkmatter::markdown::schemas::{DarkmatterSchemas, DetectOptions};
 use std::path::Path;
 
+// Every `$schema` reference and `file` value resolves through a built
+// file-resolution context: there is no constructor without one.
+let context = build_resolution_context(&RequestSnapshot::new("/work/blog"))?;
+
 // Build the API with a baseline.
-let api = DarkmatterSchemas::new()
+let api = DarkmatterSchemas::new(context)
     .with_baseline_from_file("./schemas/baseline.yaml")?;
 
 // Validate a document.
@@ -1417,7 +1487,7 @@ let detected = api.detect(&refs, DetectOptions { merge: true });
 
 | Type                  | Purpose                                                                                                             |
 |-----------------------|---------------------------------------------------------------------------------------------------------------------|
-| `DarkmatterSchemas`   | Top-level entry point. Holds optional baseline and the LRU validator cache.                                         |
+| `DarkmatterSchemas`   | Top-level entry point. Holds the request's file-resolution context, an optional baseline, and the LRU validator cache. |
 | `EffectiveSchema`     | The fully-resolved schema for a document. Carries the SimplifiedSchema projection (when available), the compiled JSON Schema, the validator, and `origins: SchemaOriginMap` (each top-level property's provenance: document, baseline, or referenced file). |
 | `ValidationReport`    | `valid: bool` + `problems: Vec<ValidationProblem>` + `pending: Vec<PendingValue>` (populated only by `validate_with_options`). |
 | `ValidationProblem`   | `path` (JSON pointer), `message`, `kind`, `property`, optional `line` / `column`, optional `arm_index` for root-union failures, optional `description`; plus the span-aware fields `code: ValidationProblemCode`, `instance_path: JsonPointer`, optional `schema_path`, `offending_property`, and `file_reference: Option<FileReferenceDiagnostic>`. |
@@ -1441,8 +1511,11 @@ let detected = api.detect(&refs, DetectOptions { merge: true });
 - `parse_yaml_schema(&serde_yaml_ng::Value)` — parse a YAML value into a `SimplifiedSchema`.
 - `to_json_schema(&SimplifiedSchema)` — lower to Draft 2020-12 JSON Schema (`serde_json::Value`).
 - `EffectiveSchema::validate_for_phase(frontmatter, SchemaPhase)` — validate an already-resolved working instance at `Launch` or `Completion` without mutating it or resolving another schema.
-- `detect_schema(&[&Markdown], DetectOptions)` — multi-file detection entry point.
-- `detect_from_document(&Markdown)` — single-document detection (returns a `SchemaShape`).
+- `detect_schema(&[&Markdown], DetectOptions, &FileResolutionContext)` — multi-file detection entry point; `file` inference resolves through the context derived to each document.
+- `detect_schema_with_contexts(&[&Markdown], DetectOptions, &[FileResolutionContext])` — the same with one context per document, for documents that do not share the request's tree.
+- `detect_from_document(&Markdown, &FileResolutionContext)` — single-document detection (returns a `SchemaShape`).
+
+Detection is passive: it derives the supplied context to each document and never discovers a repository. A reference that does not resolve is a `string`, and so is every value when that derivation is invalid, so pass a context that admits the document: the request's for a document inside its tree, otherwise the one prepared for that document (in another repository, in none, or opened through another spelling of its path). `md schema detect` passes each argument's document context.
 - `schema_to_yaml(&SimplifiedSchema)` — serialise a SimplifiedSchema back to YAML (used by `md schema detect --format yaml`).
 - `lint_suggestions(&SimplifiedSchema)` — check every `suggest(...)` candidate against its target schema; returns `Vec<SuggestionLintProblem>` (never a `SchemaError` for an invalid candidate).
 - `suggestions_for_path(&SimplifiedSchema, &[&str])` — query lint-valid completion candidates for a property path; returns `Option<SuggestionQuery>` with YAML-safe insertion text.
@@ -1473,7 +1546,7 @@ Caller tools (for example Claudine) can render their own schema-language reports
 
 ### Validator Cache
 
-`ValidatorCache` keys compiled validators by the xxHash (XXH64, via `biscuit-hash`) of the canonicalised JSON Schema bytes plus the schema's base directory, launch-area fallback, and repository anchors, and is bounded by an LRU policy. A hit also requires the request's whole file-resolution context to match, so a validator compiled without a repository root never answers for a request that has one (its implicit `dir/file.md` paths would lose the repository-root candidate). The default cache size is `DEFAULT_CACHE_SIZE` (64) and is configurable via the `DARKMATTER_SCHEMA_CACHE_SIZE` environment variable (`CACHE_SIZE_ENV`). Validating a large corpus reuses compiled validators across files with the same effective schema.
+`ValidatorCache` keys compiled validators by the xxHash (XXH64, via `biscuit-hash`) of the canonicalised JSON Schema bytes plus the schema's base directory, launch-area fallback, and repository anchors, and is bounded by an LRU policy. `validator_for(schema, base_dir, &context)` takes the request's file-resolution context, and a hit requires that whole context to match, so a validator compiled without a repository root never answers for a request that has one (its implicit `dir/file.md` paths would lose the repository-root candidate). `structural_validator_for(schema)` serves validators for callers with no request (coercion probes, example checks): they judge a `file` value by its syntax alone and never read the filesystem. The default cache size is `DEFAULT_CACHE_SIZE` (64) and is configurable via the `DARKMATTER_SCHEMA_CACHE_SIZE` environment variable (`CACHE_SIZE_ENV`). Validating a large corpus reuses compiled validators across files with the same effective schema.
 
 ## Shell-Completion Integration
 
@@ -1497,7 +1570,8 @@ All failure modes are variants of `SchemaError`:
 | Variant                 | Meaning                                                                                                   |
 |-------------------------|-----------------------------------------------------------------------------------------------------------|
 | `Grammar`               | A type-and-constraint string could not be parsed. Carries property name, message, and byte span.          |
-| `Unresolved`            | `$schema` reference could not be resolved via `FileReference`.                                            |
+| `Unresolved`            | `$schema` reference is malformed or `FileReference` rejected it; carries the typed resolver error.        |
+| `NoMatch`               | `$schema` reference matched no file (a path, or a bare name no schema root holds); a text with `*`, `?`, or `[` adds the literal-glob hint. |
 | `AmbiguousReferenced`   | Referenced file is neither a valid SimplifiedSchema nor a valid JSON Schema.                              |
 | `RemoteUnsupported`     | `http://` / `https://` `$schema` references are rejected in v1.                                           |
 | `SchemaDocument`        | A recognized standalone schema document (pure or tagged envelope) has a missing or malformed payload.     |
@@ -1546,7 +1620,7 @@ The stage is **not** part of the `ComposeOperation` enum — it cannot be exclud
 ### Library API
 
 ```rust
-use darkmatter::markdown::compose::ComposeOptions;
+use darkmatter::markdown::compose::{ComposeOptions, ComposeRequest};
 use darkmatter::markdown::schemas::SimplifiedSchema;
 
 let baseline: SimplifiedSchema = /* ... */;
@@ -1554,7 +1628,9 @@ let baseline: SimplifiedSchema = /* ... */;
 let options = ComposeOptions::new()
     .with_baseline_schema(baseline);
 
-let (composed, report) = md.compose_with(options)?;
+// `snapshot` is the request's `RequestSnapshot` (see ../compose-requests.md).
+let request = ComposeRequest::prepare(options, &snapshot)?;
+let (composed, report) = md.compose_with(&request)?;
 ```
 
 `with_baseline_schema` accepts a pre-built `SimplifiedSchema` (not a file path). When both baseline and document `$schema` declare the same property, the **document wins** — matching the existing `schemas::resolve::merge` rule.
@@ -1576,6 +1652,7 @@ for `md compose`; `--baseline-schema <path>` replaces it, and
   - Constraint / format failure: `invalid <inverse>property</inverse>: <message>`.
 - Each bullet carries the YAML source `line:col` when available.
 - **Per-problem description sub-line**: when the failing property declares a description (via `-> ...`, an inline-object per-property description, or a `description` keyword in a referenced JSON Schema), it renders as a sub-line beneath the bullet, reusing the same dimmed-italic treatment as the document-level `description:` line. The document-level and per-problem description lines coexist. Schema-preparation failures (empty problems list) render no per-problem description.
+- **Failure-class sub-line**: a `file` value that failed to resolve adds `failure: <class>` beneath its bullet, for example `failure: no-match` (no such file) or `failure: invalid-reference` (malformed, or a relative path that climbs out of the file tree). The class is the stable part to match on; the message is not. `md schema validate` prints the same sub-line.
 - Root-union failures include the arm index (e.g. `schema arm 2`).
 - For optional (nullable) properties, a failing non-null value whose problem sits **below** the property (e.g. `/config/name`) reports that typed arm's sub-path rather than a generic `anyOf` failure at the nullable wrapper. A same-path scalar failure (e.g. a bad `time` string) still reports the `anyOf` wrapper message.
 
@@ -1630,9 +1707,9 @@ unless the same baseline is supplied explicitly.
 `md schema about` is the **implementation-bound CLI reference** for this topic. Its contents come from a typed descriptor catalog (`schema_type_descriptors`, `schema_constraint_descriptors`, `schema_shape_descriptors`, `inline_object_rule_descriptors`, `coercion_rule_descriptors`, `validation_behavior_descriptors` in `darkmatter::markdown::schemas`), which library callers can consume to render their own reports. Drift between this prose document and the CLI report is caught by parity tests that pin the descriptor catalog to the implemented `SimplifiedType` and `Constraint` enums.
 ### Repository Trigger Schemas
 
-File-backed CLI and DMLS validation can discover `schemas/` directories from
-the document's directory through an explicit repository or workspace boundary.
-A YAML file opts into activation by declaring `kind: trigger-schema`:
+File-backed CLI and DMLS validation discover trigger schemas in the five
+[schema roots](#schema-roots) of the document being checked. A YAML file in
+one of those folders opts into activation by declaring `kind: trigger-schema`:
 
 ```yaml
 kind: trigger-schema
@@ -1644,11 +1721,93 @@ match:
 $schema: prompt.yaml
 ```
 
-The envelope and payload are separate files. Bare filenames such as
-`prompt.yaml` resolve against discovered schema roots, nearest first; use
+The envelope and payload are separate files. A bare filename such as
+`prompt.yaml` resolves to the first schema root that holds it; use
 `./prompt.yaml` when the intended file is beside the referencing document or
-schema. A trigger filename in a nearer root shadows the same filename in every
-farther root.
+schema. A trigger filename in an earlier root shadows the same filename in
+every later root: the shadowed file is reported by `md schema triggers` and
+never evaluated.
+
+#### Schema roots
+
+Darkmatter and DMLS look for schema files in exactly five folders, searched
+most local first:
+
+| # | Root | Present when | Example |
+|---|------|--------------|---------|
+| 1 | package root | the document is inside a package of a monorepo | `{package}/schemas/` |
+| 2 | package-area root | the document is inside a package area | `claudine/schemas/` |
+| 3 | file tree root | always | `{repo}/schemas/` in a repository |
+| 4 | the folder `SCHEMAS_DIR` names | the variable is set | `$SCHEMAS_DIR/` |
+| 5 | your home folder | a home folder is known | `~/schemas/` |
+
+```mermaid
+flowchart LR
+    D[document being checked] --> P["1. package root/schemas"]
+    P --> A["2. package-area root/schemas"]
+    A --> T["3. file tree root/schemas"]
+    T --> S["4. $SCHEMAS_DIR (if set)"]
+    S --> H["5. ~/schemas"]
+    H --> R["the first root holding a file name wins"]
+```
+
+- The package and package area are those of the **document**, not of the
+  directory you launched `md` from. `md` searches the roots only for a
+  document in a repository; DMLS searches them for any document inside an
+  open workspace folder. Outside a repository the file tree root is the tree
+  the document was opened in (often its own folder).
+- `SCHEMAS_DIR` names the schemas folder **itself**, which can be any folder
+  you choose: with `SCHEMAS_DIR=/opt/team/dm-defs`, files are read from
+  `/opt/team/dm-defs/`, never from `/opt/team/dm-defs/schemas/`. It must be an
+  absolute path; an empty or relative value adds no root and
+  `md schema triggers` reports it as invalid.
+- A folder that does not exist is skipped. A root that names the same folder
+  as an earlier one (say `SCHEMAS_DIR` pointing at `~/schemas`) is searched
+  once, at the earlier position.
+- A folder Darkmatter cannot inspect or read is an **error**, never a skipped
+  root. If `locked/` has mode `000`, a root at `locked/anchor/schemas/` stops
+  trigger discovery and bare-name `$schema` lookup with an I/O error naming
+  that folder, so a `policy.yaml` in a later root such as `~/schemas/` can
+  never stand in for the one you could not read. `md schema validate` and
+  `md schema triggers` report the error and show no partial result; DMLS
+  reports it on the document's `$schema` (or the top of its frontmatter).
+- `schemas/` folders anywhere else, such as `{package}/docs/schemas/`, are
+  not searched.
+- Both values come from the environment the process started with. DMLS reads
+  them when the editor starts the server, so a GUI editor that lacks a shell
+  variable lacks `SCHEMAS_DIR` too; restart the server after changing it.
+
+#### Matching a path with `$path`
+
+`$path` takes one or more [glob references](#files), the same
+patterns `match()` uses, and matches when some positive pattern admits the
+document and no `!` pattern does:
+
+```yaml
+kind: trigger-schema
+match:
+    $path:
+        - "^docs/**"     # docs/ of the document's package, area, or repository
+        - "!**/_*.md"    # but never a file whose name starts with `_`
+$schema: docs.yaml
+```
+
+- A pattern whose glob names no folder (`SKILL.md`, `*.md`) also matches that
+  file name at any depth.
+- A bare, `./`, or `../` pattern is read from the folder that holds the
+  trigger's `schemas/` folder, so a package trigger's `*.md` matches every
+  Markdown file in the package. A trigger in `SCHEMAS_DIR` or `~/schemas` lives
+  outside your repositories, so its bare patterns are read from the checked
+  document's file tree root: `docs/*.md` there matches `{repo}/docs/x.md`,
+  not `{repo}/pkg/docs/x.md`. Prefer `&`, `^`, or `**/` in user-level
+  triggers; they say which root they mean.
+- `&`, `^`, `~`, and absolute paths are allowed. `~/notes/**` is how a
+  trigger in `~/schemas` applies across all of your notes.
+- `@`, `%`, `vault:`, and a `{{VAR}}` **anywhere** in a pattern are
+  definition errors naming the pattern: whether a schema applies must not
+  depend on the launch directory, vault configuration, or an arbitrary
+  environment variable. So are an invalid glob and a list of only `!`
+  patterns.
 
 Property conditions reuse SimplifiedSchema type expressions. A condition
 without `required` is a guard: absence is allowed, but a present value of the
@@ -1660,17 +1819,28 @@ Stateful or phase-specific constraints (`eager`, imports, `example`,
 
 The match grammar supports freely nested `all`, `any`, `none`, and
 `min-match: { count, of }` combinators. A sequence under `match:` is an outer
-OR of independent arms. `$path` matches the boundary-relative,
-forward-slash-separated, case-sensitive path with gitignore-style globs. Every
-arm must contain a satisfiable presence gate or `$path`; otherwise the vacuous
-arm is a load error.
+OR of independent arms. `$path` is case-sensitive on every OS (see
+[Matching a path with `$path`](#matching-a-path-with-path)). Every arm must
+contain a satisfiable presence gate or `$path`; otherwise the vacuous arm is a
+load error.
 
-Effective precedence is caller baseline, matching trigger payloads (nearest
-root and then filename order), then the document's own `$schema`. Trigger
+Effective precedence is caller baseline, matching trigger payloads (schema
+root order and then filename order), then the document's own `$schema`. Trigger
 payloads must be merge-compatible object schemas. Discovery is transactional:
 an invalid opted-in envelope rejects the scan, while unrelated YAML files are
 ignored. Library hosts opt in explicitly with
 `DarkmatterSchemas::with_trigger_discovery`; `md compose` and
 `md schema validate` opt in for repository-backed files and accept
-`--no-trigger-schemas`. Use `md schema triggers <file>` to inspect roots,
-shadowing, matched arms, and defeat explanations.
+`--no-trigger-schemas`. Use `md schema triggers <file>` to inspect the five
+roots (marking absent folders and an unset or invalid `SCHEMAS_DIR`),
+shadowing, matched arms, and defeat explanations. A root it cannot inspect
+fails the command with the I/O error instead of a listing:
+
+```text
+Schema roots (search order):
+1. package root: none (the document is not in a package)
+2. package-area root: /repo/claudine/schemas
+3. file tree root: /repo/schemas
+4. SCHEMAS_DIR: unset
+5. home: /home/me/schemas (absent)
+```

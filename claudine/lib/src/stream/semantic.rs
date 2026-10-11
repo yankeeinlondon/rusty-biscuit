@@ -5,8 +5,8 @@
 //! file changes, plan updates, diagnostics) emitted during a wrapped
 //! non-interactive session.
 //!
-//! Every successfully-parsed JSONL line from a provider becomes exactly one
-//! `SemanticEvent`. Typed variants carry their own fields plus an `extra`
+//! Each successfully-parsed JSONL line from a provider can produce zero or
+//! more `SemanticEvent` values. Typed variants carry their own fields plus an `extra`
 //! [`serde_json::Value`] object for provider-specific spillover. Unknown but
 //! parseable events become [`SemanticEvent::ProviderExtension`] so nothing is
 //! dropped.
@@ -239,14 +239,20 @@ impl SemanticEvent {
 
 /// Sink interface for stream parsers.
 ///
-/// Every successfully-parsed JSONL line produces exactly one [`SemanticEvent`]
+/// Each successfully-parsed JSONL line can produce zero or more [`SemanticEvent`]
 /// delivered via `on_semantic_event`. Malformed JSON is surfaced as
 /// [`SemanticEvent::Warning`] rather than propagated as an error.
 pub trait SemanticEventSink: Send {
+    /// Observe original answer text before event normalization or callbacks
+    /// (Codex agent messages render as Reasoning). This is answer
+    /// data only, never a completion verdict. Implementations must not block.
+    fn on_response_text(&mut self, _text: &str) {}
+
     fn on_semantic_event(&mut self, event: SemanticEvent);
 }
 
 impl<S: SemanticEventSink + ?Sized> SemanticEventSink for Box<S> {
+    fn on_response_text(&mut self, text: &str) { (**self).on_response_text(text); }
     fn on_semantic_event(&mut self, event: SemanticEvent) {
         (**self).on_semantic_event(event);
     }
@@ -292,6 +298,7 @@ impl<S: SemanticEventSink> Clone for SharedSemanticSink<S> {
 }
 
 impl<S: SemanticEventSink> SemanticEventSink for SharedSemanticSink<S> {
+    fn on_response_text(&mut self, text: &str) { self.inner.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).on_response_text(text); }
     fn on_semantic_event(&mut self, event: SemanticEvent) {
         let mut guard = self
             .inner
@@ -332,6 +339,7 @@ impl<S: SemanticEventSink> ObservedSemanticSink<S> {
 }
 
 impl<S: SemanticEventSink> SemanticEventSink for ObservedSemanticSink<S> {
+    fn on_response_text(&mut self, text: &str) { self.inner.on_response_text(text); }
     fn on_semantic_event(&mut self, event: SemanticEvent) {
         self.stdout_event_seen.store(true, Ordering::SeqCst);
         self.inner.on_semantic_event(event);
@@ -372,6 +380,7 @@ impl<S: SemanticEventSink> StalledProgressObserverSink<S> {
 }
 
 impl<S: SemanticEventSink> SemanticEventSink for StalledProgressObserverSink<S> {
+    fn on_response_text(&mut self, text: &str) { self.inner.on_response_text(text); }
     fn on_semantic_event(&mut self, event: SemanticEvent) {
         if event.is_stdout_progress_class() {
             // Short critical section: stamp progress, then release before any

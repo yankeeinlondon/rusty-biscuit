@@ -32,7 +32,7 @@ pub fn run(args: UninstallArgs) -> Result<()> {
 
     if !args.keep_config {
         // Remove config files
-        if let Some(home) = dirs::home_dir() {
+        if let Some(home) = biscuit_file::home_dir() {
             let config_path = home.join(".claudine").join("config.json");
             if config_path.exists() {
                 std::fs::remove_file(&config_path)?;

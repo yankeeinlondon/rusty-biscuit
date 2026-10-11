@@ -29,6 +29,7 @@ facts and traps, not user docs.
 | `wt list` background worker, PR store, live-head store, receipts, the wait and its budgets | [list-remote.md](list-remote.md) |
 | The `wt list` git graph: gathering, classification, layout, Kitty L2, graph perf | [git-graph.md](git-graph.md) |
 | Any worktree test: stand-ins (`ProxyStub`, `FakeGitea`, `HoldingOrigin`), fixtures, L2 recipes, perf gates | [testing.md](testing.md) |
+| Building a fixture repository: config writes, bulk commits, template copies, counting `git` spawns | [fixtures.md](fixtures.md) |
 
 ## Rules that bite everywhere
 
@@ -52,6 +53,19 @@ facts and traps, not user docs.
 - **Network code is bounded and noninteractive.** It goes through
   `live_remote`, which disables credential prompts and kills the whole process
   tree at its deadline.
+- **A thread that runs Git must carry the call-count scope.** Take
+  `git::calls::TaskHandle::current()` before spawning, run the task through
+  `handle.run(..)`, and pass each joined result through `calls::joined`.
+  Without it the thread's Git calls silently drop out of a `git_calls` count
+  (scopes are per thread). Any new helper that starts Git calls
+  `calls::started()` once, after a successful spawn, or uses `calls::output`.
+- **Read repository metadata through `git_metadata`, not a git process.**
+  Origin URL, default branch, branch-name validity, `core.sshCommand`, and ref
+  targets are read in-process with `gix`, falling back to git only when `gix`
+  cannot read the repository. A git process costs ~47 ms on Windows, and a
+  dozen redundant ones once pushed the refresh worker past `wt list`'s 3 s
+  wait there. A new read gets a parity test against the git command it
+  replaces ([performance-testing](../../../worktree/docs/performance-testing.md#git-processes)).
 - **Tests never reach the network.** Use the stand-ins in
   [testing.md](testing.md) and `example.invalid` origins.
 - **The graph never substitutes what it cannot draw.** It marks the plan

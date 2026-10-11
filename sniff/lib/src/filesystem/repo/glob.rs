@@ -28,8 +28,12 @@ use super::detection::{RepoEvidence, probe_exists, probe_is_dir};
 use super::seed::PackageSeed;
 use super::standard::{GlobDialect, MonorepoStandard, PackageProvenance};
 
-/// Manifest file names that mark a directory as a package boundary.
-const MANIFEST_FILES: [&str; 4] = ["Cargo.toml", "package.json", "pyproject.toml", "go.mod"];
+/// The file names sniff treats as package manifests: a directory holding one
+/// of them is a package boundary. This is the single list sniff uses for
+/// package detection; a consumer that watches for package changes (for
+/// example, a language server) should use it rather than copying the names.
+pub const PACKAGE_MANIFEST_FILE_NAMES: &[&str] =
+    &["Cargo.toml", "package.json", "pyproject.toml", "go.mod"];
 
 /// The seeds a membership expansion resolved, and whether they are every
 /// member the patterns declare.
@@ -407,7 +411,7 @@ fn literal_prefix(pattern: &str) -> PathBuf {
 
 /// Whether `dir` contains a recognized package manifest.
 fn dir_has_manifest(dir: &Path) -> bool {
-    MANIFEST_FILES
+    PACKAGE_MANIFEST_FILE_NAMES
         .iter()
         .any(|name| probe_exists(&dir.join(name)))
 }
@@ -415,6 +419,14 @@ fn dir_has_manifest(dir: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn package_manifest_file_names_are_pinned() {
+        assert_eq!(
+            PACKAGE_MANIFEST_FILE_NAMES,
+            &["Cargo.toml", "package.json", "pyproject.toml", "go.mod"]
+        );
+    }
 
     fn set(patterns: &[&str]) -> GlobSet {
         let owned: Vec<String> = patterns.iter().map(|p| p.to_string()).collect();

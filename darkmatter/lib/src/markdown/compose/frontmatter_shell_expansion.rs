@@ -46,7 +46,7 @@ use super::shell_expansion::{
     PreparedShellDirective, execute_prepared_directive, execute_prepared_outcome,
     prepare_directive,
 };
-use super::{ComposeOptions, ComposeWarning};
+use super::ComposeWarning;
 use crate::markdown::frontmatter::Frontmatter;
 use crate::markdown::span::{SourceSpan, Spanned};
 use crate::markdown::types::{MarkdownError, MarkdownResult};
@@ -1251,7 +1251,7 @@ pub(crate) fn scan_frontmatter(
 /// - Command execution fails (blacklisted, denied, execution error, etc.)
 pub(crate) fn execute_frontmatter_shell_expansion(
     frontmatter: &mut Frontmatter,
-    options: &ComposeOptions,
+    options: &crate::markdown::compose::ComposeRequest,
     runtime: &mut PipelineRuntime,
     provenance: &mut FrontmatterProvenance,
     ctx: &SourceContext,
@@ -1275,7 +1275,7 @@ pub(crate) fn execute_frontmatter_shell_expansion(
 
     // Resolve policy paths once for all directives
     let shell_opts = options.shell_options();
-    let policy_paths = resolve_policy_paths(&shell_opts, &options.source)?;
+    let policy_paths = resolve_policy_paths(&shell_opts, &options.source, options.resolution_context())?;
     runtime.shell.ensure_loaded(&policy_paths)?;
 
     // Snapshot frontmatter values for ternary condition lookups. Built lazily
@@ -1452,7 +1452,7 @@ enum Pending {
 fn expand_pending(
     item: Pending,
     result: Option<ShellResultKind>,
-    options: &ComposeOptions,
+    options: &crate::markdown::compose::ComposeRequest,
     shell_runtime: &ShellExpansionRuntime,
 ) -> Result<(Value, Vec<ComposeWarning>), ShellExpansionError> {
     match (item, result) {
@@ -1550,7 +1550,7 @@ fn outcome_value(kind: ShellResultKind, code: Option<i32>, stdout: &str, stderr:
 pub(crate) fn directive_reachable_pipelines(
     directive: &FrontmatterShellDirective,
     frontmatter: &Frontmatter,
-    options: &ComposeOptions,
+    options: &crate::markdown::compose::ComposeRequest,
     ctx: &SourceContext,
 ) -> Result<Vec<ShellPipeline>, ShellExpansionError> {
     match &directive.ast {
@@ -1691,7 +1691,7 @@ fn prepare_branch_pipeline(
     pipeline: ShellPipeline,
     raw_command: String,
     candidate: &FrontmatterShellDirective,
-    options: &ComposeOptions,
+    options: &crate::markdown::compose::ComposeRequest,
     policy_paths: &ShellPolicyPaths,
     runtime: &mut ShellExpansionRuntime,
     ctx: &SourceContext,
@@ -1744,7 +1744,7 @@ enum PreparedBranch {
 fn prepare_optional_branch(
     branch: &Branch,
     candidate: &FrontmatterShellDirective,
-    options: &ComposeOptions,
+    options: &crate::markdown::compose::ComposeRequest,
     policy_paths: &ShellPolicyPaths,
     runtime: &mut ShellExpansionRuntime,
     ctx: &SourceContext,

@@ -73,6 +73,18 @@ pub(crate) fn progress_html(
     fallback_text: &str,
     outer_style: &str,
 ) -> String {
+    progress_html_with_label(hints, fallback_text, outer_style, escape_html)
+}
+
+/// [`progress_html`] with the encoding of the visible label element's body
+/// supplied by the caller. MarkdownPlus needs it because a reader parses that
+/// body as Markdown, so HTML escaping alone would let its punctuation act.
+pub(crate) fn progress_html_with_label(
+    hints: &ProgressHints,
+    fallback_text: &str,
+    outer_style: &str,
+    label_body: impl Fn(&str) -> String,
+) -> String {
     let value = hints.value.clamp(0.0, 1.0);
     let percentage = (value * 100.0).round() as u32;
 
@@ -150,7 +162,7 @@ pub(crate) fn progress_html(
         .map(|label| {
             format!(
                 r#"<span class="progress-label">{}</span>"#,
-                escape_html(label)
+                label_body(label)
             )
         })
         .unwrap_or_default();

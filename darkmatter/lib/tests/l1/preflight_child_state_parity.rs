@@ -150,45 +150,72 @@ fn base_options(root: &Path, dir: &Path) -> ComposeOptions {
         .with_shell_timeout(std::time::Duration::from_secs(60))
 }
 
-#[test]
-fn child_commands_are_approved_with_the_bytes_they_execute() {
-    for row in ROWS {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let root = write_files(dir.path(), row.files);
-        let document = Markdown::try_from(root.as_path()).expect("load root");
-        let options = (row.options)(base_options(&root, dir.path()));
+fn assert_row_approved_with_executed_bytes(row: &Row) {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = write_files(dir.path(), row.files);
+    let document = Markdown::try_from(root.as_path()).expect("load root");
+    let options = (row.options)(base_options(&root, dir.path()));
 
-        let approved: HashSet<String> = document
-            .compose_preflight(&options)
-            .unwrap_or_else(|error| panic!("{}: preflight failed: {error}", row.name))
-            .approval_set()
-            .into_iter()
-            .collect();
-        assert!(
-            approved.contains(row.command),
-            "{}: approval set {approved:?} lacks {:?}",
-            row.name,
-            row.command
-        );
+    let approved: HashSet<String> = document
+        .compose_preflight(&crate::request_support::request(options.clone()))
+        .unwrap_or_else(|error| panic!("{}: preflight failed: {error}", row.name))
+        .approval_set()
+        .into_iter()
+        .collect();
+    assert!(
+        approved.contains(row.command),
+        "{}: approval set {approved:?} lacks {:?}",
+        row.name,
+        row.command
+    );
 
-        let (composed, report) = document
-            .compose_with(options.with_pre_approved_commands(approved))
-            .unwrap_or_else(|error| panic!("{}: compose failed: {error}", row.name));
-        let output = row.command.trim_start_matches("echo ");
-        assert_eq!(
-            composed.content().contains(output),
-            row.executes,
-            "{}: composed output: {}",
-            row.name,
-            composed.content()
-        );
-        assert!(
-            report.warnings.iter().all(|w| !w.message.contains("pre-approved")),
-            "{}: {:?}",
-            row.name,
-            report.warnings
-        );
-    }
+    let (composed, report) = document
+        .compose_with(&crate::request_support::request(options.with_pre_approved_commands(approved)))
+        .unwrap_or_else(|error| panic!("{}: compose failed: {error}", row.name));
+    let output = row.command.trim_start_matches("echo ");
+    assert_eq!(
+        composed.content().contains(output),
+        row.executes,
+        "{}: composed output: {}",
+        row.name,
+        composed.content()
+    );
+    assert!(
+        report.warnings.iter().all(|w| !w.message.contains("pre-approved")),
+        "{}: {:?}",
+        row.name,
+        report.warnings
+    );
+}
+
+/// One test per `ROWS` entry, so nextest runs the rows in parallel.
+macro_rules! row_tests {
+    ($($name:ident: $index:literal;)*) => {
+        $(
+            #[test]
+            fn $name() {
+                assert_row_approved_with_executed_bytes(&ROWS[$index]);
+            }
+        )*
+
+        #[test]
+        fn every_row_has_a_test() {
+            assert_eq!(ROWS.len(), [$($index),*].len());
+        }
+    };
+}
+
+row_tests! {
+    parent_default_is_approved_as_executed: 0;
+    value_derived_in_the_parent_is_approved_as_executed: 1;
+    data_override_layer_is_approved_as_executed: 2;
+    caller_override_is_approved_as_executed: 3;
+    partial_without_interpolation_is_approved_as_executed: 4;
+    nested_partial_is_approved_as_executed: 5;
+    transclusion_local_set_is_approved_as_executed: 6;
+    shell_block_in_a_conditional_partial_is_approved_as_executed: 7;
+    untaken_branch_is_approved_as_executed: 8;
+    frontmatter_command_in_the_partial_is_approved_as_executed: 9;
 }
 
 /// A parent `$(...)` value is expanded before its child composes, so a child
@@ -206,7 +233,7 @@ fn child_command_embedding_a_parent_shell_value_is_a_dynamic_shape() {
     );
     let document = Markdown::try_from(root.as_path()).expect("load root");
     let error = document
-        .compose_preflight(&base_options(&root, dir.path()))
+        .compose_preflight(&crate::request_support::request(base_options(&root, dir.path())))
         .expect_err("a child command built from a pending parent value");
     assert!(
         matches!(
@@ -259,7 +286,7 @@ fn a_child_command_built_from_an_unobserved_parent_value_is_refused() {
         let root = write_files(dir.path(), files);
         let document = Markdown::try_from(root.as_path()).expect("load root");
         let error = document
-            .compose_preflight(&base_options(&root, dir.path()))
+            .compose_preflight(&crate::request_support::request(base_options(&root, dir.path())))
             .expect_err("the command's executed bytes are not knowable at discovery");
         assert!(
             matches!(
@@ -287,14 +314,14 @@ fn an_overridden_unobserved_value_is_approved_as_executed() {
     let document = Markdown::try_from(root.as_path()).expect("load root");
     let options = base_options(&root, dir.path()).with_set_overrides(json!({ "flag": "given" }));
     let approved: HashSet<String> = document
-        .compose_preflight(&options)
+        .compose_preflight(&crate::request_support::request(options.clone()))
         .expect("preflight succeeds")
         .approval_set()
         .into_iter()
         .collect();
     assert!(approved.contains("echo alias-given"), "{approved:?}");
     let (composed, _) = document
-        .compose_with(options.with_pre_approved_commands(approved))
+        .compose_with(&crate::request_support::request(options.with_pre_approved_commands(approved)))
         .expect("compose succeeds");
     assert!(composed.content().contains("alias-given"), "{}", composed.content());
 }
@@ -322,7 +349,7 @@ fn a_command_reading_a_lazy_root_is_an_unevaluated_dependency() {
         let root = write_files(dir.path(), files);
         let document = Markdown::try_from(root.as_path()).expect("load root");
         let error = document
-            .compose_preflight(&base_options(&root, dir.path()))
+            .compose_preflight(&crate::request_support::request(base_options(&root, dir.path())))
             .expect_err("a command reading current.* has no approvable bytes");
         assert!(
             matches!(
@@ -358,14 +385,14 @@ fn a_when_error_block_does_not_absorb_a_pre_approval_violation() {
         // Fixture check: with its bytes approved the block runs.
         let (composed, _) = document
             .compose_with(
-                base_options(&root, dir.path())
-                    .with_pre_approved_commands(HashSet::from(["echo ran-main".to_string()])),
+                &crate::request_support::request(base_options(&root, dir.path())
+                    .with_pre_approved_commands(HashSet::from(["echo ran-main".to_string()]))),
             )
             .unwrap_or_else(|error| panic!("{name}: approved compose failed: {error}"));
         assert!(composed.content().contains("ran-main"), "{name}: {}", composed.content());
 
         let error = document
-            .compose_with(base_options(&root, dir.path()).with_pre_approved_commands(HashSet::new()))
+            .compose_with(&crate::request_support::request(base_options(&root, dir.path()).with_pre_approved_commands(HashSet::new())))
             .map(|(composed, _)| composed.content().to_string())
             .expect_err("an unapproved command is a hard composition failure");
         assert!(error.pre_approval_violation().is_some(), "{name}: {error:?}");

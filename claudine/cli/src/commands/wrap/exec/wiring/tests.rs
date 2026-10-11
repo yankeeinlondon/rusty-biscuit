@@ -918,3 +918,75 @@ exec sleep 30
         result.data.error_message
     );
 }
+
+/// Kimi's stderr is passed through by the session's output worker, never
+/// written by the reader thread itself.
+#[cfg(unix)]
+#[test]
+fn wire_session_stderr_passthrough_is_delivered_by_the_output_worker() {
+    use crate::commands::wrap::output_worker::tests::Gate;
+    use crate::commands::wrap::output_worker::{Drained, Stream};
+
+    struct ExitOnly;
+    impl SemanticStreamParser for ExitOnly {
+        fn feed_line(&mut self, _line: &str) {}
+        fn finish(self: Box<Self>, exit_code: i32) -> StreamExecutionSummary {
+            self.snapshot(exit_code)
+        }
+        fn snapshot(&self, exit_code: i32) -> StreamExecutionSummary {
+            StreamExecutionSummary {
+                exit_code,
+                ..Default::default()
+            }
+        }
+    }
+
+    let mut env = HashMap::new();
+    env.insert(OsString::from("PATH"), std::env::var_os("PATH").unwrap());
+    env.insert(OsString::from("HOME"), std::env::temp_dir().into_os_string());
+    claudine::child_environment::contribute_child_environment(&mut env).unwrap();
+    let (gate, _entered) = Gate::new(true);
+    let output = StreamOutput::with_sink(Box::new(gate.clone()));
+    // The child exits only after reading the session's initialize and prompt
+    // requests, so neither write can meet a closed pipe.
+    let args = vec![
+        "-c".to_string(),
+        "echo wire-stderr >&2; read -r _initialize; read -r _prompt".to_string(),
+    ];
+    let mut child_spawned = false;
+
+    let result = run_kimi_wire_session(
+        WireSessionConfig {
+            binary: Path::new("/bin/sh"),
+            args: &args,
+            env: &env,
+            cwd: &std::env::temp_dir(),
+            prompt: "hello".to_string(),
+            timeout: Some(Duration::from_secs(30)),
+            client_name: "claudine-test",
+            client_version: "0",
+            capabilities: WireClientCapabilities::default(),
+            env_context: EnvironmentContext::default(),
+        },
+        WireSessionWiring {
+            build_parser: Box::new(|_, _, _| Box::new(ExitOnly)),
+            stream_output: Arc::clone(&output),
+            live_metrics: LiveMetrics::default(),
+            runtime_context: claudine::dispatch::DispatchRuntimeContext::default(),
+            content_early_rx: None,
+        },
+        &mut child_spawned,
+    );
+
+    assert!(child_spawned);
+    let result = result.expect("the wire session must settle");
+    assert_eq!(result.data.exit_code, 0);
+    assert_eq!(output.drain(Instant::now() + Duration::from_secs(10)), Drained::Complete);
+    let stderr: String = gate
+        .written()
+        .into_iter()
+        .filter(|(stream, _)| *stream == Stream::Stderr)
+        .map(|(_, bytes)| String::from_utf8(bytes).unwrap())
+        .collect();
+    assert_eq!(stderr, "wire-stderr\n");
+}

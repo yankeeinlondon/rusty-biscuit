@@ -1,9 +1,14 @@
 # Project Dependencies
 
+- `claudine-cli` uses `base64` 0.22 to retain invalid UTF-8 stdout losslessly
+  in bounded completion observations. This crate already exists in the
+  workspace dependency graph; no version or native dependency is added.
+
+
 ## Recent Dependency Notes
 
 - `tree-hugger-cli` adds a direct local `renderable` edge for the render-tree
-  node types of biscuit-terminal's `Prose::to_render_nodes`, which its
+  node types of biscuit-terminal's `InlineProse::to_render_nodes`, which its
   Markdown and plain Prose exports read. biscuit-terminal already depends on
   `renderable`, so this adds no new package. See
   [tree-hugger dependencies](../tree-hugger/docs/dependencies.md).
@@ -21,6 +26,19 @@
   this adds no new package. JS/TS identity decodes Unicode escapes without
   normalization. See `tree-hugger/docs/dependencies.md`.
 
+- `renderable` adds `pulldown-cmark` 0.13 as a **dev-dependency** with
+  `default-features = false` (2026-10-03). It was already in the graph through
+  `darkmatter`, so the lockfile gains one edge and no package. Its tests parse
+  the output of `renderable::markdown::code_span` with a real CommonMark
+  parser to prove every value round-trips as one code span.
+- `content-policy` (library) and `content-policy-cli` join the workspace
+  (2026-09-29). No crate is new to the graph. The
+  library takes `biscuit-file` with `default-features = false` and only `yaml`,
+  so a policy check never builds Biscuit File's PDF crates, and its
+  off-by-default `file-adapter` feature adds only `biscuit-file/file-reference`.
+  `just deps-check` in `content-policy/` fails the lint when either feature set
+  reaches a PDF crate or a Darkmatter crate. See
+  `content-policy/docs/dependencies.md`.
 - `biscuit-test-harness` adds a Linux-only `x11rb = "0.13.2"` edge with
   `default-features = false` and only the `xtest` feature (2026-09-28). The
   crate is pure Rust and was already in the graph through `clipboard-rs`, so
@@ -223,7 +241,10 @@
   carries those four crates; the library's send-only builds are unchanged. Its
   `tests/research_cli.rs` uses the workspace `biscuit-test-harness` as a
   development dependency for `bin_exe!`, so the binary resolves on the WSL2
-  nextest-archive leg. No new external crate was added.
+  nextest-archive leg. No new external crate was added. It also names
+  `biscuit-file` (only `file-reference`) directly, already in the tree through
+  that feature, so `messenger research validate` resolves its document
+  arguments with `FileReference`.
 - `worktree/lib` uses `biscuit-hash` for the SHA-pair cache file name. The cache
   stores deterministic ahead/behind and clean-merge results under the user cache
   directory, keyed by canonical repo-root xxHash plus the compared pair of tip
@@ -240,6 +261,10 @@
   nonblocking lock on `<repo hash>.prs.lock`, which lets only one background
   refresh of the PR store make a request; the PR store binds its answer to a
   `biscuit-hash` BLAKE3 digest of `origin`'s URL.
+- `worktree/lib` uses `gix` (pinned `=0.84.0`, the version `sniff` builds, with
+  only `sha1` and `revision`) to read repository metadata in-process: `origin`'s
+  URL, the default branch, branch-name validity, `core.sshCommand`, and ref
+  targets. Each read replaced a git process, which costs ~47 ms on Windows.
 - `worktree/cli` uses `insta` as a development dependency to snapshot the shell
   wrappers `wt --completions` generates and the `wt list` table, and
   `serde_json` (development) to seed the PR store and edit a handoff record in
@@ -348,6 +373,8 @@ This is a Rust workspace with the following modules:
 - `biscuit-file/cli/Cargo.toml` - File utilities CLI (`bf`)
 - `biscuit-hash/lib/Cargo.toml` - Hashing library (xxHash, BLAKE3, Argon2id)
 - `biscuit-hash/cli/Cargo.toml` - Hashing CLI (`bh`)
+- `content-policy/lib/Cargo.toml` - Content policy evaluation and renewal for Markdown frontmatter (serde, serde_json, chrono, biscuit-hash, biscuit-file with only `yaml`)
+- `content-policy/cli/Cargo.toml` - Content policy CLI (`policy`) (clap, clap_complete, biscuit-terminal, chrono)
 - `biscuit-icon/lib/Cargo.toml` - Curated offline domain icons + on-demand Iconify lookup (renderable, biscuit-terminal, rusqlite bundled, reqwest, strum)
 - `biscuit-icon/cli/Cargo.toml` - Icon CLI (`icon`) (clap, clap_complete unstable-dynamic, color-eyre)
 - `biscuit-speaks/lib/Cargo.toml` - Cross-platform TTS library (native-first Playa feature, xxHash audio cache, detached preparation)
@@ -387,7 +414,7 @@ This is a Rust workspace with the following modules:
 - `unchained-ai/lib/Cargo.toml` - LLM pipeline primitives and provider integrations
 - `unchained-ai/gen/Cargo.toml` - Provider model enum generator (`gen-models`)
 - `unchained-ai/cli/Cargo.toml` - Future AI CLI (`unchained`)
-- `worktree/lib/Cargo.toml` - Git worktree business logic (git subprocess orchestration, SHA-pair status cache)
+- `worktree/lib/Cargo.toml` - Git worktree business logic (git subprocess orchestration, SHA-pair status cache, the `wt list` pipeline, graph gathering, and `--perf` timings; no terminal dependency)
 - `worktree/cli/Cargo.toml` - Worktree CLI (`wt`)
 - `tools/test-toolkit/Cargo.toml` - Shared test lifecycle helpers
 - `biscuit-test-harness/Cargo.toml` - Real-terminal test harness (WezTerm, Kitty, tmux, Apple Terminal)
@@ -424,6 +451,18 @@ This is a Rust workspace with the following modules:
     _CLI tool for hashing files and strings._
 
     _Tags: workspace, cli, hashing_
+
+- [content-policy](./content-policy/lib) _v0.1.0_
+
+    _Declares, evaluates, and renews content policies carried in Markdown frontmatter. Its dependency graph has no PDF crate and no path to Darkmatter; see [`content-policy/docs/dependencies.md`](./content-policy/docs/dependencies.md)._
+
+    _Tags: workspace, library, markdown, policy_
+
+- [content-policy-cli](./content-policy/cli) _v0.1.0_
+
+    _CLI (`policy`) for checking and renewing a document's content policy._
+
+    _Tags: workspace, cli, markdown, policy_
 
 - [biscuit-speaks](./biscuit-speaks) _v0.1.0_
 

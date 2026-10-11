@@ -250,3 +250,100 @@ fn test_multibyte_spans() {
     let mapping = map.entry(0).mapping.as_ref().expect("mapping entry");
     assert_eq!(mapping.value, Some(5..14));
 }
+
+fn context_path(source: &str, line: usize) -> Vec<PathSegment> {
+    SourceMap::new(source)
+        .block_value_context(source, line)
+        .expect("context")
+        .path
+}
+
+fn key_segment(name: &str) -> PathSegment {
+    PathSegment::Key(name.to_string())
+}
+
+#[test]
+fn test_block_value_context_zero_indent_sequence_under_key() {
+    let source = "content_policy:\n- first\n- second\n";
+    assert_eq!(
+        context_path(source, 1),
+        vec![key_segment("content_policy"), PathSegment::Index(0)]
+    );
+    assert_eq!(
+        context_path(source, 2),
+        vec![key_segment("content_policy"), PathSegment::Index(1)]
+    );
+}
+
+#[test]
+fn test_block_value_context_following_key_after_zero_indent_sequence_is_root() {
+    let source = "content_policy:\n- first\n- second\nother: 1\n";
+    assert_eq!(context_path(source, 3), vec![key_segment("other")]);
+}
+
+#[test]
+fn test_block_value_context_second_zero_indent_sequence_restarts_index() {
+    let source = "a:\n- one\n- two\nb:\n- three\n";
+    assert_eq!(
+        context_path(source, 4),
+        vec![key_segment("b"), PathSegment::Index(0)]
+    );
+}
+
+#[test]
+fn test_block_value_context_zero_indent_sequence_of_mappings() {
+    let source = "p:\n- rule: x\n  action: a\n- rule: y\n";
+    assert_eq!(
+        context_path(source, 2),
+        vec![key_segment("p"), PathSegment::Index(0), key_segment("action")]
+    );
+    assert_eq!(
+        context_path(source, 3),
+        vec![key_segment("p"), PathSegment::Index(1), key_segment("rule")]
+    );
+}
+
+#[test]
+fn test_block_value_context_indentless_sequence_under_nested_key() {
+    let source = "outer:\n  inner:\n  - x\n  sibling: 1\n";
+    assert_eq!(
+        context_path(source, 2),
+        vec![key_segment("outer"), key_segment("inner"), PathSegment::Index(0)]
+    );
+    assert_eq!(
+        context_path(source, 3),
+        vec![key_segment("outer"), key_segment("sibling")]
+    );
+}
+
+#[test]
+fn test_block_value_context_root_sequence_stays_at_root() {
+    let source = "- one\n- two\n";
+    assert_eq!(context_path(source, 1), vec![PathSegment::Index(1)]);
+}
+
+#[test]
+fn test_block_value_context_sequence_after_inline_value_key_stays_at_root() {
+    // `a: 1` has an inline value, so it cannot own the following dash lines.
+    let source = "a: 1\n- x\n";
+    assert_eq!(context_path(source, 1), vec![PathSegment::Index(0)]);
+}
+
+#[test]
+fn test_key_occurrences_under_zero_indent_sequence() {
+    let source = "p:\n- rule: x\n  action: a\n";
+    let map = SourceMap::new(source);
+    let paths: Vec<_> = map
+        .key_occurrences(source)
+        .into_iter()
+        .map(|occurrence| occurrence.path)
+        .collect();
+    assert_eq!(
+        paths,
+        vec![
+            vec![key_segment("p")],
+            vec![key_segment("p"), PathSegment::Index(0), key_segment("rule")],
+            vec![key_segment("p"), PathSegment::Index(0), key_segment("action")],
+        ]
+    );
+}

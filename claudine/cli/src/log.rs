@@ -1,11 +1,12 @@
-use std::io::Write;
 use std::sync::LazyLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::{LineBreaks, Prose};
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::discovery::detection::{ColorDepth, ColorMode};
 use biscuit_terminal::terminal::Terminal;
+
+use crate::commands::wrap::output_worker::Stream;
 
 static PLAIN: AtomicBool = AtomicBool::new(false);
 
@@ -109,51 +110,82 @@ fn plain_terminal(width: u32) -> Terminal {
     term
 }
 
+/// Write `text` to `stream` through [`crate::terminal_gate::write`]; returns
+/// whether it was queued or written.
+///
+/// Every function below goes through here, so during a wrapped run none of
+/// them waits on the terminal, and after a stall none of them takes the
+/// stdout/stderr lock an abandoned output-worker write still holds.
+fn emit(stream: Stream, text: std::fmt::Arguments<'_>) -> bool {
+    crate::terminal_gate::write(stream, text.to_string().as_bytes())
+}
+
 /// Write a message to stderr (always visible, no verbose flag required).
 pub fn message(msg: &str) {
-    let _ = writeln!(std::io::stderr(), "{msg}");
+    emit(Stream::Stderr, format_args!("{msg}\n"));
 }
 
 /// Write an info message to stderr (only when INFO tracing level is enabled).
 #[allow(dead_code)]
 pub fn info(msg: &str) {
     if tracing::enabled!(tracing::Level::INFO) {
-        let _ = writeln!(std::io::stderr(), "{msg}");
+        emit(Stream::Stderr, format_args!("{msg}\n"));
     }
 }
 
 /// Write data to stdout (for piping/machine consumption).
 pub fn data(msg: &str) {
-    let _ = writeln!(std::io::stdout(), "{msg}");
+    emit(Stream::Stdout, format_args!("{msg}\n"));
 }
 
 /// Write output to stdout without a trailing newline.
 pub fn output(msg: &str) {
-    let _ = write!(std::io::stdout(), "{msg}");
+    emit(Stream::Stdout, format_args!("{msg}"));
 }
 
 /// Write a warning to stderr in yellow, rendered through Prose.
+///
+/// A single newline in `msg` starts a new row (hard break).
 pub fn warn(msg: &str) {
-    let term = terminal();
-    let rendered =
-        Prose::new(format!("<orange><bold>warning:</bold></orange> {msg}")).render(&term);
-    let _ = writeln!(std::io::stderr(), "{rendered}");
+    let rendered = warning_text(msg, &terminal());
+    emit(Stream::Stderr, format_args!("{rendered}\n"));
+}
+
+fn warning_text(msg: &str, term: &Terminal) -> String {
+    Prose::new(format!("<orange><bold>warning:</bold></orange> {msg}"))
+        .with_line_breaks(LineBreaks::Hard)
+        .render(term)
 }
 
 /// Write an error to stderr in red, rendered through Prose.
 ///
 /// Error messages may contain Prose tags (e.g. `<blue>--flag</blue>`) for
-/// styled rendering of CLI switches and other highlights.
+/// styled rendering of CLI switches and other highlights. A single newline
+/// in `msg` starts a new row (hard break), as in a multi-line error report.
 pub fn error(msg: &str) {
-    let term = terminal();
-    let rendered = Prose::new(format!("<red><bold>Error:</bold></red> {msg}")).render(&term);
-    let _ = writeln!(std::io::stderr(), "\n{rendered}");
+    let rendered = error_text(msg, &terminal());
+    emit(Stream::Stderr, format_args!("\n{rendered}\n"));
+}
+
+fn error_text(msg: &str, term: &Terminal) -> String {
+    Prose::new(format!("<red><bold>Error:</bold></red> {msg}"))
+        .with_line_breaks(LineBreaks::Hard)
+        .render(term)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use serial_test::serial;
+
+    #[test]
+    fn warnings_and_errors_keep_each_message_row() {
+        let term = plain_terminal(200);
+        let warning = biscuit_terminal::utils::escape_codes::strip_escape_codes(warning_text("first\nsecond", &term));
+        assert_eq!(warning.lines().collect::<Vec<_>>(), ["warning: first", "second"]);
+        let error = biscuit_terminal::utils::escape_codes::strip_escape_codes(error_text(":\n- a\n- b", &term));
+        assert_eq!(error.lines().collect::<Vec<_>>(), ["Error: :", "- a", "- b"]);
+    }
 
     #[test]
     #[serial]
@@ -268,5 +300,51 @@ mod tests {
         assert_eq!(t1.is_tty, t2.is_tty);
         assert_eq!(t1.color_depth, t2.color_depth);
         assert_eq!(t1.width(), t2.width());
+    }
+
+    /// After a stall the log functions neither write nor wait on the stream
+    /// locks an abandoned output-worker write holds; each refusal is counted.
+    #[test]
+    fn log_writes_after_a_stall_return_without_taking_the_stream_locks() {
+        crate::terminal_gate::mark_stalled();
+
+        let returned = crate::terminal_gate::tests::returns_while_std_streams_are_locked(|| {
+            message("message");
+            info("info");
+            data("data");
+            output("output");
+            warn("warning");
+            error("error");
+        });
+
+        assert!(returned, "a log write waited on a stalled terminal");
+        assert!(crate::terminal_gate::skipped_writes() >= 5);
+    }
+
+    /// During a wrapped run every log function queues its text on the output
+    /// worker, so none of them waits on a terminal the worker is stuck on,
+    /// even before any drain has found the stall.
+    #[test]
+    fn log_writes_during_a_wrapped_run_are_queued_while_the_worker_is_stuck() {
+        let routed = crate::terminal_gate::tests::RoutedToBlockedWorker::new();
+
+        let returned = crate::terminal_gate::tests::returns_while_std_streams_are_locked(|| {
+            message("message");
+            data("data");
+            output("output");
+            warn("warning");
+            error("error");
+        });
+
+        assert!(returned, "a log write waited on the stuck terminal");
+        let written = routed.release();
+        let text: Vec<String> = written
+            .iter()
+            .map(|(_, bytes)| String::from_utf8_lossy(bytes).into_owned())
+            .collect();
+        assert_eq!(text[1..3], ["message\n".to_string(), "data\n".to_string()]);
+        assert_eq!(text[3], "output");
+        assert!(text[4].contains("warning"));
+        assert!(text[5].contains("Error"));
     }
 }

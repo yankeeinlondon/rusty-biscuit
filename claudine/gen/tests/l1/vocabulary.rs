@@ -7,6 +7,7 @@
 use std::path::Path;
 
 use claudine_gen::inputs::load;
+use darkmatter::markdown::compose::RequestSnapshot;
 use claudine_gen::{RESEARCH_TOPIC, build_vocabulary, load_error_vocabulary};
 
 /// The claudine package-area root (parent of this crate's manifest dir).
@@ -20,6 +21,11 @@ fn area() -> &'static Path {
     })
 }
 
+/// A request snapshot at the area that reads nothing from the test process.
+fn snapshot() -> RequestSnapshot {
+    RequestSnapshot::new(area())
+}
+
 /// Every provider that owns a structured stream parser (Kilo shares
 /// OpenCode's wire parser but carries its own researched vocabulary).
 const PARSER_BACKED: &[&str] = &[
@@ -29,7 +35,7 @@ const PARSER_BACKED: &[&str] = &[
 #[test]
 fn every_research_vocabulary_projects_to_runtime_strings() {
     for slug in PARSER_BACKED {
-        let inputs = load(area(), slug, &[RESEARCH_TOPIC])
+        let inputs = load(area(), slug, &[RESEARCH_TOPIC], &snapshot())
             .unwrap_or_else(|err| panic!("load `{slug}`: {err}"));
         let vocab = load_error_vocabulary(&inputs)
             .unwrap_or_else(|err| panic!("parse `{slug}` vocabulary: {err}"))
@@ -49,7 +55,7 @@ fn every_research_vocabulary_projects_to_runtime_strings() {
 
 #[test]
 fn kimi_research_projects_the_complete_jsonrpc_code_mapping() {
-    let inputs = load(area(), "kimi", &[RESEARCH_TOPIC]).unwrap();
+    let inputs = load(area(), "kimi", &[RESEARCH_TOPIC], &snapshot()).unwrap();
     let vocab = load_error_vocabulary(&inputs).unwrap().unwrap();
     let mapping: Vec<(i64, &str)> = vocab
         .code_buckets
@@ -76,8 +82,8 @@ fn kimi_research_projects_the_complete_jsonrpc_code_mapping() {
 
 #[test]
 fn build_vocabulary_is_deterministic_and_well_formed() {
-    let first = build_vocabulary(area()).expect("vocabulary generation must succeed");
-    let second = build_vocabulary(area()).expect("vocabulary generation must succeed");
+    let first = build_vocabulary(area(), &snapshot()).expect("vocabulary generation must succeed");
+    let second = build_vocabulary(area(), &snapshot()).expect("vocabulary generation must succeed");
     assert_eq!(first, second, "build_vocabulary must be byte-deterministic");
     assert!(first.ends_with('\n') && !first.ends_with("\n\n"));
     // Goose (parserless) emits an explicitly empty table; Kimi carries the
@@ -89,11 +95,11 @@ fn build_vocabulary_is_deterministic_and_well_formed() {
 #[test]
 fn kilo_research_preserves_shared_seed_order() {
     let opencode = load_error_vocabulary(
-        &load(area(), "opencode", &[RESEARCH_TOPIC]).unwrap(),
+        &load(area(), "opencode", &[RESEARCH_TOPIC], &snapshot()).unwrap(),
     )
         .unwrap()
         .unwrap();
-    let kilo = load_error_vocabulary(&load(area(), "kilo", &[RESEARCH_TOPIC]).unwrap())
+    let kilo = load_error_vocabulary(&load(area(), "kilo", &[RESEARCH_TOPIC], &snapshot()).unwrap())
         .unwrap()
         .unwrap();
     assert_eq!(opencode.kind_buckets, kilo.kind_buckets);

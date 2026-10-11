@@ -27,6 +27,8 @@ use std::sync::{Mutex, OnceLock};
 use claudine::messaging::{DELIVERY_DRAIN_BUDGET, drain_deliveries, has_pending_deliveries};
 use tokio::time::Instant;
 
+use crate::commands::wrap::output_worker::Drained;
+use crate::commands::wrap::stream_io::StreamOutput;
 use crate::commands::compose::interrupt::{UserInterruptGuard, install_drain_interrupt_guard};
 
 /// The latest moment the drain may run to, when a command set one.
@@ -61,6 +63,8 @@ pub(crate) async fn finish(code: i32) -> std::convert::Infallible {
     let deadline = effective_deadline(Instant::now(), DRAIN_DEADLINE.get().copied());
     let _drain_interrupt = (has_pending_deliveries() && !holds_interrupt_guard())
         .then(install_drain_interrupt_guard);
+    #[cfg(feature = "terminal-tests")]
+    mark_drain_started_for_terminal_tests();
     drain_deliveries(deadline).await.report();
     flush_streams();
     std::process::exit(code)
@@ -72,8 +76,35 @@ pub(crate) fn exit_before_runtime(code: i32) -> ! {
     std::process::exit(code)
 }
 
+/// The total drain budget; `CLAUDINE_TEST_DRAIN_BUDGET_MS` shortens it in
+/// `test-fixtures` builds so a test need not wait out the real 10 s.
+fn drain_budget() -> std::time::Duration {
+    #[cfg(feature = "test-fixtures")]
+    if let Some(millis) = std::env::var("CLAUDINE_TEST_DRAIN_BUDGET_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+    {
+        return std::time::Duration::from_millis(millis);
+    }
+    DELIVERY_DRAIN_BUDGET
+}
+
+/// Test seam, compiled only with the `terminal-tests` feature: with
+/// `CLAUDINE_TEST_DRAIN_STARTED=<path>` set, creates `<path>` once the drain's
+/// interrupt ladder is in place and the drain is about to wait.
+///
+/// The terminal-tier drain Ctrl+C tests press only after this file exists, so
+/// their first press lands in the drain rather than in the command's last
+/// steps, however slowly the runner reaches it.
+#[cfg(feature = "terminal-tests")]
+fn mark_drain_started_for_terminal_tests() {
+    if let Some(path) = std::env::var_os("CLAUDINE_TEST_DRAIN_STARTED") {
+        let _ = std::fs::write(path, b"");
+    }
+}
+
 fn effective_deadline(now: Instant, command_deadline: Option<Instant>) -> Instant {
-    let budget = now + DELIVERY_DRAIN_BUDGET;
+    let budget = now + drain_budget();
     command_deadline.map_or(budget, |deadline| deadline.min(budget))
 }
 
@@ -84,8 +115,20 @@ fn holds_interrupt_guard() -> bool {
         .is_some()
 }
 
+/// How long the exit waits for queued terminal output when no run set a clock.
+const OUTPUT_DRAIN_BUDGET: std::time::Duration = std::time::Duration::from_secs(10);
+
 fn flush_streams() {
     use std::io::Write;
+    // Terminal output is written by one worker thread. Let it finish what a
+    // run queued before the process exits. A terminal that stopped accepting
+    // output leaves that thread holding the stdout lock, and flushing here
+    // would wait on it forever.
+    if let Some(output) = StreamOutput::shared_if_created()
+        && output.drain_final(OUTPUT_DRAIN_BUDGET) == Drained::Disabled
+    {
+        return;
+    }
     let _ = std::io::stdout().flush();
     let _ = std::io::stderr().flush();
 }

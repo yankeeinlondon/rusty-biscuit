@@ -6,19 +6,23 @@
 # > additional documents that support the specification file in their definition.
 $schema:
     - description: string -> description of this _feature review_
+      feature: string -> the **feature** name this review relates to
       ready: boolean -> whether the reviewer believed that the code is "production ready"
       spec: string -> the underlying _specification file_ that this review is based on
       created: datetime -> an ISO8601 representation of the date and time this review was created (using host's timezone)
       agent: "string -> a string representation of agent and model: `${agent}/${model}`"
-      feature: string -> the **feature** name this review relates to
       implemented: boolean -> boolean flag indicating whether this review's suggestions has been implemented
-      next: string
-      previous: string
-    - description: string -> description of this _feature review_
+      next: string -> the _next_ feature review that was conducted
+      previous: string -> the _prior- feature review that was conducted
+      findings: string[] -> findings that the reviewer found and believes needs to be fixed before the feature is deemed production ready
+      observations: string[] -> titles of issues the reviewer noticed that do not block readiness (outside the spec, or not reachable by a realistic input); the author either schedules a fix or lets it go, and none is repaired in the current cycle
+    - description: string -> description of this _fix review_
+      fix: string -> the **fix** name this review related to
       ready: boolean -> whether the reviewer believed that the code is "production ready"
       created: datetime -> an ISO8601 representation of the date and time this review was created (using host's timezone)
       agent: "string -> a string representation of agent and model: `${agent}/${model}`"
-      fix: string -> the **fix** name this review related to
       implemented: boolean
       next: string
       previous: string
+      findings: string[]
+      observations: string[] -> titles of issues the reviewer noticed that do not block readiness (outside the spec, or not reachable by a realistic input); the author either schedules a fix or lets it go, and none is repaired in the current cycle

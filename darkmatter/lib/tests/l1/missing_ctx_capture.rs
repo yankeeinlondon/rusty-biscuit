@@ -38,13 +38,13 @@ fn write(dir: &Path, name: &str, content: &str) -> PathBuf {
 
 fn compose_file(path: &Path, options: ComposeOptions) -> Result<String, MarkdownError> {
     let md = Markdown::try_from(path).expect("document loads");
-    md.compose_with(options.with_source_file(path.to_path_buf()))
+    md.compose_with(&crate::request_support::request(options.with_source_file(path.to_path_buf())))
         .map(|(composed, _)| composed.content().to_string())
 }
 
 fn compose_text(content: &str, options: ComposeOptions) -> Result<String, MarkdownError> {
     let md: Markdown = content.into();
-    md.compose_with(options).map(|(composed, _)| composed.content().to_string())
+    md.compose_with(&crate::request_support::request(options)).map(|(composed, _)| composed.content().to_string())
 }
 
 /// Asserts `error` is a missing capture of `key` in `group`, reachable through
@@ -429,7 +429,7 @@ fn a_captured_group_without_evidence_renders_its_typed_projection() {
 
     let md: Markdown = content.into();
     let (composed, report) = md
-        .compose_with(ComposeOptions::new_with_context(context))
+        .compose_with(&crate::request_support::request(ComposeOptions::new_with_context(context)))
         .expect("captured null/empty values render");
     // Cleanup escapes the `|` separators for Markdown table safety.
     assert_eq!(composed.content().trim().replace("\\|", "|"), "branch=[]|dirty=0|root=[]");
@@ -455,7 +455,7 @@ fn a_captured_group_without_evidence_renders_its_typed_projection() {
 fn an_unknown_key_warns_once_and_is_not_a_missing_capture() {
     let dir = TempDir::new().unwrap();
     let (composed, report) = Markdown::from("os={{ ctx.oss }}\n")
-        .compose_with(ComposeOptions::new_with_context(date_time_only(dir.path())))
+        .compose_with(&crate::request_support::request(ComposeOptions::new_with_context(date_time_only(dir.path()))))
         .expect("an unknown key is not fatal");
 
     assert_eq!(composed.content().trim(), "os=");
@@ -508,7 +508,7 @@ fn ambient_preflight_discovers_a_ternary_branch_that_reads_runtime_context() {
         "---\nlabel: \"{{ ctx.os }}\"\nplatform: \"$(true ? echo {{ ctx.os }} : echo none)\"\n---\nbody\n"
             .into();
     let preflight = md
-        .compose_preflight(&ComposeOptions::new())
+        .compose_preflight(&crate::request_support::request(ComposeOptions::new()))
         .expect("pre-flight reads the upgraded context");
 
     let commands: Vec<_> = preflight.entries.iter().map(|entry| entry.normalized.as_str()).collect();
@@ -537,7 +537,7 @@ fn preflight_tolerates_a_body_missing_capture_that_the_compose_pass_owns() {
     for condition in ["false", "true"] {
         let md: Markdown = document(condition).as_str().into();
         let preflight = md
-            .compose_preflight(&options())
+            .compose_preflight(&crate::request_support::request(options()))
             .expect("discovery is not the verdict on a missing capture");
         let mut commands: Vec<_> = preflight.entries.iter().map(|entry| entry.normalized.as_str()).collect();
         commands.sort_unstable();
@@ -563,7 +563,7 @@ fn preflight_reports_a_missing_capture_instead_of_a_dynamic_command_shape() {
     let md: Markdown =
         "---\nplatform: \"$(true ? echo {{ ctx.os }} : echo none)\"\n---\nbody\n".into();
     let error = md
-        .compose_preflight(&ComposeOptions::new_with_context(date_time_only(dir.path())))
+        .compose_preflight(&crate::request_support::request(ComposeOptions::new_with_context(date_time_only(dir.path()))))
         .expect_err("the command's shape cannot be known");
     assert_not_captured(&error, "os", ContextGroup::Os);
     assert!(!error.to_string().contains("dynamic command shape"), "{error}");

@@ -505,7 +505,9 @@ fn side_effect_short_form_routes_through_expression_path() {
     let shell = MockShell::new(0);
     let recorder = Recorder::default();
     let harness = Harness::default();
-    let context = ctx(
+    let source_path = dir.path().join("t.md");
+    let file_context = crate::test_support::context_for(&source_path);
+    let mut context = ctx(
         LifecycleSignal::Start,
         &fm,
         None,
@@ -513,8 +515,9 @@ fn side_effect_short_form_routes_through_expression_path() {
         &shell,
         &recorder,
         &harness,
-        Path::new("t.md"),
+        &source_path,
     );
+    context.file_resolution_context = &file_context;
     let outcome = context.execute_event(&config);
     assert_eq!(outcome, LifecycleEventOutcome::default());
     assert!(dir.path().join("out/log.md").exists());

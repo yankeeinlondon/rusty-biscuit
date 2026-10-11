@@ -37,12 +37,10 @@
 //! the provider writes through the overlay's nested file, and the user's file
 //! must not change.
 //!
-//! Claudine resolves the default provider source and overlay storage through
-//! `dirs::home_dir()`, which on native Windows reads the known-folder profile
-//! and ignores `USERPROFILE`. The launcher therefore names both roots
-//! explicitly — the user's Codex root through `CODEX_HOME`, overlay storage
-//! through `CLAUDINE_OVERLAY_DIR` — so neither resolves to the runner's real
-//! profile, while the home variables still reach the child unchanged.
+//! The launcher names both roots explicitly — the user's Codex root through
+//! `CODEX_HOME`, overlay storage through `CLAUDINE_OVERLAY_DIR` — so neither
+//! resolves to the runner's real profile even if a home variable is missed,
+//! while the home variables still reach the child unchanged.
 //!
 //! Run via the canonical recipe: `just test-l2 provider_overlay_capture`.
 
@@ -422,7 +420,8 @@ fn main() {
             ("APPDATA", fixture.home().join("AppData").join("Roaming").display().to_string()),
             ("LOCALAPPDATA", fixture.home().join("AppData").join("Local").display().to_string()),
             ("PATH", path.to_string_lossy().into_owned()),
-            // The known-folder profile would otherwise supply both roots.
+            // Named explicitly so this launch covers the selector and the
+            // storage override, not only the home-derived defaults.
             ("CODEX_HOME", codex.display().to_string()),
             ("CLAUDINE_OVERLAY_DIR", launches.display().to_string()),
             ("NO_COLOR", "1".to_string()),

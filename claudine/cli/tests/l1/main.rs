@@ -20,6 +20,8 @@ mod cli_process_fixture;
 mod codex_app_server;
 mod command_routing;
 mod completion_cli;
+mod completion_delayed;
+mod completion_committed_prompt_schema;
 mod completion_compose;
 mod completion_contract;
 mod completion_inline_compose;
@@ -29,6 +31,8 @@ mod completion_resolution_round_trip;
 mod completion_sequence;
 mod completion_setter;
 mod compose_caller_file_provenance;
+#[cfg(unix)]
+mod compose_closed_pipe_delivery;
 #[cfg(unix)]
 mod compose_cli;
 #[cfg(unix)]
@@ -44,6 +48,7 @@ mod compose_interactive_timeout_cli;
 #[cfg(unix)]
 mod compose_removed_validation_keys;
 mod compose_prompt_tiers;
+mod context_construction_guard;
 mod compose_repository_context;
 mod compose_schema_cli;
 #[cfg(unix)]
@@ -63,6 +68,7 @@ mod detached_audio;
 mod diagnostic_discovery;
 mod dispatch_inventory;
 mod effective_diagnostic_render;
+mod entry_point_parity;
 mod error_guards;
 mod errors_command;
 mod exit_site_guard;
@@ -72,6 +78,7 @@ mod handle_deadline;
 mod handle_message_drain;
 mod handle_repo_config;
 mod handoff_owners;
+mod home_lookup_round_trip;
 mod hooks_cli;
 #[cfg(unix)]
 mod inline_completion_lifecycle;
@@ -109,14 +116,17 @@ mod lifecycle_message_drain_console_windows;
 mod lifecycle_message_drain_interrupt;
 #[cfg(unix)]
 mod loop_cli;
+// Installs the `claudine-fake-goose` fixture binary on Windows, which only
+// `test-fixtures` builds.
+#[cfg(feature = "test-fixtures")]
 mod loop_gate_ambient;
 mod loop_initialize_state;
 mod mcp_cli;
 mod override_boundary_guard;
+mod path_lookup_guard;
 mod preflight_execution_parity;
-mod pr_flow_rehearsal;
-mod prompt_guide_defects;
 mod lifecycle_set_shell_values;
+mod literal_glob_hint;
 #[cfg(unix)]
 mod prompt_reporting;
 // Installs the `claudine-fake-pi` fixture binary, which only `test-fixtures`
@@ -162,8 +172,6 @@ mod sequence_prompt_property;
 #[cfg(unix)]
 mod sequence_schema;
 mod sequence_sources_cli;
-mod shipped_prompt_contract;
-mod shipped_prompt_route_drift;
 mod shipped_prompts;
 mod skills_integration;
 mod spawn_site_guard;

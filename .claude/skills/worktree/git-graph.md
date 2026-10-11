@@ -1,19 +1,26 @@
 # `wt list` Git Graph: Gathering, Layout, Tests
 
-Load before changing `cli/src/commands/git_graph.rs`, `git_graph/topology.rs`,
-or graph tests. The behavior a user sees is in `worktree/docs/git-graph.md`;
+Load before changing `lib/src/graph.rs` (gathering), `lib/src/graph/topology.rs`,
+`cli/src/commands/git_graph.rs` (conversion and rendering), or graph tests. The behavior a user sees is in `worktree/docs/git-graph.md`;
 this page holds the implementation facts and traps.
 
 ## Division of labor
 
-- `commands/git_graph.rs` only **gathers** `GraphFacts` (full SHAs, fork points,
-  merge commits, refs, `incomplete`) and builds a biscuit-terminal `GitGraph`.
-- `GitGraph` owns lanes, tags, merges, trimming, and sizing.
-- It filters PRs by source repository first, because `GitGraph` matches by
-  branch name alone.
+- `worktree::graph` (library) only **gathers** `GraphFacts` (full SHAs, fork
+  points, merge commits, refs, `incomplete`) in library-owned types
+  (`GraphLine`, `LaneEntry`, `LaneMerge`). The library must not depend on
+  biscuit-terminal, so never reuse the terminal component's types there.
+- `cli/src/commands/git_graph.rs::to_git_graph` maps those facts onto a
+  biscuit-terminal `GitGraph`; `GitGraph` owns lanes, tags, merges, trimming,
+  and sizing.
+- `to_git_graph` filters PRs by source repository first, because `GitGraph`
+  matches by branch name alone.
+- Fact tests live in `lib/src/graph/tests.rs`; tests that need the resulting
+  `GitGraph` (merges in the Mermaid text, layout) stay in
+  `cli/src/commands/git_graph/tests.rs`.
 - There is no minimum terminal width for the graph.
 
-## Gathering (`git_graph/topology.rs`)
+## Gathering (`lib/src/graph.rs`, `lib/src/graph/topology.rs`)
 
 Two stages on scoped threads.
 
@@ -50,7 +57,7 @@ lane tip, then a diverged `origin/<default>` tip. Results:
 | unmerged | — | lane |
 | merged directly | strong | lane `T --not C^1`, `with_merge(T, C)` |
 | no separate history | strong | a label at `T`, never an empty lane |
-| integrated otherwise | weak | lane, no merge, incomplete |
+| integrated otherwise | weak | lane, no merge, `GraphFacts::merged_elsewhere` (not incomplete) |
 
 - A strong result wins at the first candidate that yields one. A weak result
   lets the walk continue; it is returned only when no later candidate is strong.
@@ -58,6 +65,13 @@ lane tip, then a diverged `origin/<default>` tip. Results:
   merge (`MergedDirectly { after_indirect: true }`).
 - A `GatherGap` before any weak result is the result; one after it returns the
   weak result.
+- Integrated otherwise is a **verified** answer, never a gap: `place` reports
+  it as `Placement::merged_through` (the carrying merge `C` and its lane), and
+  `assemble` turns it into `MergedElsewhere`, naming the carrying branch only
+  when a drawn placement's own merge (`merges_at`) is `C`. It used to set
+  `incomplete`, which produced a "history not shown" note nobody could act on
+  (observed 2026-10-04: a branch whose last commit reached `origin/main`
+  through another branch's PR).
 - A merged branch's fork is measured against `C^1`, or against its parent's tip
   only when the merge went elsewhere and was not found after an indirect match
   (the parent's tip contains `T` otherwise).
@@ -122,7 +136,8 @@ A lane's boundary (the first commit below it) is classified too, sharing one
 - Every gathered line passes its branch tip (`GraphLine::with_tip`). `GitGraph`
   labels a line without commits at that tip and never at its fork.
 - A tag, fork, or merge commit it cannot draw sets `GitGraphPlan::incomplete`
-  ("Some history is not shown") **instead of being substituted**.
+  **instead of being substituted**; `wt list` words it as a closing note
+  ([list.md](list.md)).
 - `GraphLine::with_merge(source, destination)` (a `LaneMerge`, appended oldest
   first) draws a `merge`. A source in the middle of a lane makes `GitGraph` emit
   that lane in segments: pause after the source and the lanes forked at it,
@@ -207,12 +222,16 @@ Other L1 facts:
 
 ### Graph-stage timings (`cli/tests/perf_graph_stages.rs`, Unix only)
 
-- `graph gather` and `graph image render (biscuit-terminal)` exist only when
-  stderr is a terminal and `TERM_PROGRAM` names an image emulator, so a captured
-  `wt list --perf` never reports them. `graph gather` is a child of the
-  `remote wait ‖ local gather` (or `local gather`) group and overlaps the
-  wait, so it is not part of the total; the render is a top-level row.
-- The test runs `wt list --perf` through `script` in a 120×40 pty over
+- `graph_history` and `graph_render` exist only when stderr is a terminal and
+  `TERM_PROGRAM` names an image emulator, so a captured `wt list --perf`
+  never reports them. `graph_history` is a concurrent child of
+  `remote_and_local` (or `local_reads`) and overlaps the wait, so it is not
+  part of the total; its sequential steps (`shallow_check`, `default_tips`,
+  `focused_merge_base`, `verbose_details`, `lane_assembly`) carry `git_calls`
+  that add up to its own. `graph::gather_timed` records them; the whole
+  assembly loop, repeats and fork-holder searches included, is one
+  `lane_assembly` step. The render is a top-level span.
+- The test runs `wt list --perf=json` through `script` in a 120×40 pty over
   `perf_support::graph::GraphFixture` (floor, ordinary, older essential
   connections, multiple selected branches; built by `git fast-import`), and
   separately at 200×60 over `GraphFixture::observed_sparse_lanes()`, printing
@@ -224,8 +243,42 @@ Other L1 facts:
   `git_graph::tests::observed_sparse_lanes()` and in Kitty by
   `Fixture::sparse_lanes()`.
 - It emulates **Ghostty**, because every other Kitty-protocol emulator waits out
-  a 1 s cursor-position query in an unanswering pty, and `--perf` prints
-  durations of 1 s or more in tenths of a second, which hides every difference.
+  a 1 s cursor-position query in an unanswering pty, which would swamp the
+  render stage.
 - The floor row measures the remaining fixed cost (about 350 ms).
 - Record with
   `WT_GRAPH_PERF_SAMPLES=10 just test-perf perf_graph --cargo-profile release`.
+
+## Focused view: lanes that hold a fork
+
+- `focused_view` loops: after each `assemble`, every `GraphFacts::forked_off_line`
+  entry (a fork no drawn lane holds, found by `drawn`, which checks each
+  lane's `placed` anchors **and** its drawn entries) looks for a
+  `fork_holder`: an undrawn worktree branch whose first-parent chain holds
+  the fork (`classify` gives `NoSeparateHistory`), recorded parent first.
+  Found holders are selected with their own recorded parents and the view
+  is gathered again; the loop ends when nothing new is found.
+- **Trap:** `GitGraph::in_view` filters a focused view's lanes itself. It
+  used to keep only the current branch and its parent, so a holder `wt`
+  passed was silently dropped and its fork reported as undrawn. It now keeps
+  the parent chain and any lane holding an in-view lane's fork.
+- `git_graph::to_git_graph` (a CLI function; `GraphFacts` is the library's) tags each `MergedElsewhere` tip `in <into>`
+  (`with_ref`), only when that tip is one of the branch line's drawn
+  entries: an undrawn ref would come back as a `GraphOmission::Tag` note.
+
+## Merges into lanes other than parent or default
+
+- `place` classifies against parent, default, and origin only. When that
+  gives `Unmerged` or `IntegratedOtherwise`, `direct_merge_elsewhere` tries
+  every other selected branch (not the parent) and accepts only
+  `MergedDirectly` (tip is the merge's second parent). It overrides only
+  `merge`: the fork and stop stay from the first classification. Measuring
+  the fork against the merging lane hung a merged-into-child branch from
+  the child.
+- Cost: one `--is-ancestor` per (branch, other lane) pair not already in
+  `Classifications`, pinned in
+  `the_base_view_gives_every_worktree_branch_a_line`.
+- `GitGraph`'s emitter used to drop a merge whose destination lane is
+  emitted before the source lane (depth-first order). `EmitState::awaiting`
+  now parks a lane before such a destination; emitting the source resumes
+  it, and the final loop drops only waits that can never end.

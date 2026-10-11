@@ -15,6 +15,12 @@ use std::hint::black_box;
 
 const SYNTHETIC_PROPERTY_COUNT: usize = 512;
 
+/// Anchors schema resolution at the process directory with the process's home
+/// and environment, as the context-free constructors did.
+fn process_context() -> biscuit_file::FileResolutionContext {
+    biscuit_file::FileResolutionContext::new(std::env::current_dir().expect("process directory"))
+}
+
 fn synthetic_baseline(property_count: usize) -> Value {
     let mut properties = Map::with_capacity(property_count);
     let mut required = Vec::with_capacity(property_count / 4);
@@ -63,7 +69,7 @@ fn bench_baseline(c: &mut Criterion, label: &str, baseline: Value) {
     let properties = property_count(&baseline);
     let baseline_only = baseline_only_document();
     let with_document_schema = document_schema();
-    let api = DarkmatterSchemas::new()
+    let api = DarkmatterSchemas::new(process_context())
         .with_baseline_json_schema(baseline)
         .expect("benchmark baseline must be valid");
 
@@ -108,7 +114,7 @@ fn bench_baseline(c: &mut Criterion, label: &str, baseline: Value) {
 
 fn bench_document_only(c: &mut Criterion) {
     let document = document_schema();
-    let api = DarkmatterSchemas::new();
+    let api = DarkmatterSchemas::new(process_context());
     api.effective_for(&document)
         .expect("document-only assembly must succeed")
         .expect("document schema must produce an effective schema");
@@ -149,9 +155,10 @@ fn bench_default_baseline_initialization(c: &mut Criterion) {
         b.iter(|| black_box(darkmatter_base_json_schema()));
     });
 
+    let context = process_context();
     group.bench_function("configure_default_baseline", |b| {
         b.iter(|| {
-            let api = DarkmatterSchemas::new()
+            let api = DarkmatterSchemas::new(context.clone())
                 .with_darkmatter_baseline_json_schema()
                 .expect("built-in benchmark baseline must be valid");
             black_box(api);
@@ -160,7 +167,7 @@ fn bench_default_baseline_initialization(c: &mut Criterion) {
 
     group.bench_function("configure_and_resolve_default_baseline", |b| {
         b.iter(|| {
-            let api = DarkmatterSchemas::new()
+            let api = DarkmatterSchemas::new(context.clone())
                 .with_darkmatter_baseline_json_schema()
                 .expect("built-in benchmark baseline must be valid");
             let effective = api

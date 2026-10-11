@@ -245,8 +245,8 @@ fn ms_to_duration(ms: f64) -> Duration {
 /// detection-domain aliasing, root-stage suppression, or HOT selection applies
 /// here. Heterogeneous work counters share no meaningful denominator, so every
 /// node — the root included — carries [`MetricShare::Unknown`]. The component
-/// still prints `100%` on the root, which is expected and not a defect: it
-/// overrides the root's share unconditionally.
+/// still prints `100%` on the root, which is expected and not a defect: by
+/// default it overrides the root's share.
 pub(crate) fn counter_tree(report: &PerformanceReport) -> Option<MetricNode> {
     if report.counters.is_empty() {
         return None;
@@ -1085,8 +1085,8 @@ mod tests {
         }
 
         // R-1: the projection sets `Unknown` on the root as R3 specifies, but
-        // `collect_rows` overrides the root's share unconditionally
-        // (`metrics_tree.rs:459-463`), so the rendered root row reads `100%`.
+        // `MetricsTree` overrides the root's share unless built with
+        // `with_given_root_share`, so the rendered root row reads `100%`.
         // That is the accepted component behavior, not a defect to file.
         let rendered = strip_escape_codes(
             MetricsTree::new(tree).render(&Terminal::builder().width(200).build()),

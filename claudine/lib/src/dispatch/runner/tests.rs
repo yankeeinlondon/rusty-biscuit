@@ -115,15 +115,7 @@ async fn message_action_skipped_when_no_route() {
 
     let messaging = crate::messaging::RuntimeMessagingSettings::default();
 
-    let result = execute_actions(
-        &actions,
-        None,
-        &meta(),
-        DispatchConfig::Canonical(&ClaudineConfig::default()),
-        &messaging,
-        false,
-        None,
-    )
+    let result = execute_actions(&actions, None, &meta(), DispatchConfig::Canonical(&ClaudineConfig::default()), crate::test_support::process_snapshot(), &messaging, false, None)
     .await
     .unwrap();
 
@@ -146,15 +138,7 @@ async fn message_action_does_not_block() {
 
     let messaging = crate::messaging::RuntimeMessagingSettings::default();
 
-    let result = execute_actions(
-        &actions,
-        None,
-        &meta(),
-        DispatchConfig::Canonical(&ClaudineConfig::default()),
-        &messaging,
-        true,
-        None,
-    )
+    let result = execute_actions(&actions, None, &meta(), DispatchConfig::Canonical(&ClaudineConfig::default()), crate::test_support::process_snapshot(), &messaging, true, None)
     .await;
 
     assert!(result.is_ok());
@@ -177,15 +161,7 @@ async fn execute_actions_runs_bash_action_with_canonical_config() {
         },
     ];
 
-    let result = execute_actions(
-        &actions,
-        None,
-        &meta(),
-        DispatchConfig::Canonical(&config),
-        &messaging,
-        true,
-        None,
-    )
+    let result = execute_actions(&actions, None, &meta(), DispatchConfig::Canonical(&config), crate::test_support::process_snapshot(), &messaging, true, None)
     .await;
 
     assert!(result.is_ok());
@@ -202,15 +178,7 @@ async fn execute_actions_message_action_with_canonical_config() {
         when: None,
     }];
 
-    let result = execute_actions(
-        &actions,
-        None,
-        &meta(),
-        DispatchConfig::Canonical(&config),
-        &messaging,
-        false,
-        None,
-    )
+    let result = execute_actions(&actions, None, &meta(), DispatchConfig::Canonical(&config), crate::test_support::process_snapshot(), &messaging, false, None)
     .await
     .unwrap();
 
@@ -269,15 +237,7 @@ async fn audio_actions_publish_in_order_and_return_before_worker_execution() {
         },
     ];
     let start = Instant::now();
-    let result = execute_actions(
-        &actions,
-        None,
-        &meta(),
-        DispatchConfig::Canonical(&config),
-        &RuntimeMessagingSettings::default(),
-        false,
-        None,
-    )
+    let result = execute_actions(&actions, None, &meta(), DispatchConfig::Canonical(&config), crate::test_support::process_snapshot(), &RuntimeMessagingSettings::default(), false, None)
     .await
     .unwrap();
 
@@ -374,15 +334,7 @@ async fn speak_action_warns_once_when_handoff_fails() {
         gender: None,
         when: None,
     }];
-    execute_actions(
-        &actions,
-        None,
-        &meta(),
-        DispatchConfig::Canonical(&config),
-        &RuntimeMessagingSettings::default(),
-        false,
-        None,
-    )
+    execute_actions(&actions, None, &meta(), DispatchConfig::Canonical(&config), crate::test_support::process_snapshot(), &RuntimeMessagingSettings::default(), false, None)
     .await
     .unwrap();
 
@@ -408,15 +360,7 @@ async fn blocking_call_command_failure_fails_closed() {
         when: None,
     }];
 
-    let result = execute_actions(
-        &actions,
-        None,
-        &meta(),
-        DispatchConfig::Canonical(&config),
-        &messaging,
-        true,
-        None,
-    )
+    let result = execute_actions(&actions, None, &meta(), DispatchConfig::Canonical(&config), crate::test_support::process_snapshot(), &messaging, true, None)
     .await
     .unwrap()
     .expect("blocking call failure must synthesize a deny response");
@@ -440,15 +384,7 @@ async fn blocking_call_without_actionable_response_falls_through() {
         when: None,
     }];
 
-    let result = execute_actions(
-        &actions,
-        None,
-        &meta(),
-        DispatchConfig::Canonical(&config),
-        &messaging,
-        true,
-        None,
-    )
+    let result = execute_actions(&actions, None, &meta(), DispatchConfig::Canonical(&config), crate::test_support::process_snapshot(), &messaging, true, None)
     .await
     .unwrap();
 
@@ -474,15 +410,7 @@ async fn when_condition_true_executes_action_and_can_block() {
         when: Some("tool_name == 'Bash'".to_string()),
     }];
 
-    let result = execute_actions(
-        &actions,
-        None,
-        &make_meta_for_when_tests(),
-        DispatchConfig::Canonical(&config),
-        &messaging,
-        true,
-        None,
-    )
+    let result = execute_actions(&actions, None, &make_meta_for_when_tests(), DispatchConfig::Canonical(&config), crate::test_support::process_snapshot(), &messaging, true, None)
     .await
     .unwrap()
     .expect("call action with truthy when should still run and synthesize a deny");
@@ -502,15 +430,7 @@ async fn when_condition_false_skips_call_action_and_no_blocking_response() {
         when: Some("tool_name == 'Read'".to_string()),
     }];
 
-    let result = execute_actions(
-        &actions,
-        None,
-        &make_meta_for_when_tests(),
-        DispatchConfig::Canonical(&config),
-        &messaging,
-        true,
-        None,
-    )
+    let result = execute_actions(&actions, None, &make_meta_for_when_tests(), DispatchConfig::Canonical(&config), crate::test_support::process_snapshot(), &messaging, true, None)
     .await
     .unwrap();
 
@@ -532,15 +452,7 @@ async fn when_invalid_expression_skips_action_non_fatally() {
         when: Some("&& this is not a valid condition".to_string()),
     }];
 
-    let result = execute_actions(
-        &actions,
-        None,
-        &make_meta_for_when_tests(),
-        DispatchConfig::Canonical(&config),
-        &messaging,
-        true,
-        None,
-    )
+    let result = execute_actions(&actions, None, &make_meta_for_when_tests(), DispatchConfig::Canonical(&config), crate::test_support::process_snapshot(), &messaging, true, None)
     .await;
 
     let outcome = result.expect("invalid `when` expression must not error the runner");
@@ -574,15 +486,7 @@ async fn when_skipped_call_does_not_replace_prior_selected_response() {
         },
     ];
 
-    let result = execute_actions(
-        &actions,
-        None,
-        &make_meta_for_when_tests(),
-        DispatchConfig::Canonical(&config),
-        &messaging,
-        true,
-        None,
-    )
+    let result = execute_actions(&actions, None, &make_meta_for_when_tests(), DispatchConfig::Canonical(&config), crate::test_support::process_snapshot(), &messaging, true, None)
     .await
     .unwrap()
     .expect("first call should produce a blocking deny");
@@ -610,15 +514,7 @@ async fn when_env_var_resolves_via_env_namespace() {
         when: Some(format!("env.{key} == 'yes'")),
     }];
 
-    let result = execute_actions(
-        &actions,
-        None,
-        &make_meta_for_when_tests(),
-        DispatchConfig::Canonical(&config),
-        &messaging,
-        true,
-        None,
-    )
+    let result = execute_actions(&actions, None, &make_meta_for_when_tests(), DispatchConfig::Canonical(&config), crate::test_support::process_snapshot(), &messaging, true, None)
     .await
     .unwrap();
 
@@ -647,15 +543,7 @@ async fn when_missing_env_var_is_falsy_and_skips_action() {
         when: Some("env.CLAUDINE_DISPATCH_WHEN_ENV_VAR_ABSENT".to_string()),
     }];
 
-    let result = execute_actions(
-        &actions,
-        None,
-        &make_meta_for_when_tests(),
-        DispatchConfig::Canonical(&config),
-        &messaging,
-        true,
-        None,
-    )
+    let result = execute_actions(&actions, None, &make_meta_for_when_tests(), DispatchConfig::Canonical(&config), crate::test_support::process_snapshot(), &messaging, true, None)
     .await
     .unwrap();
 
@@ -680,15 +568,7 @@ async fn when_ctx_fields_do_not_require_precomputed_event_metadata() {
         when: Some("ctx.today != ''".to_string()),
     }];
 
-    let result = execute_actions(
-        &actions,
-        None,
-        &make_meta_for_when_tests(),
-        DispatchConfig::Canonical(&config),
-        &messaging,
-        true,
-        None,
-    )
+    let result = execute_actions(&actions, None, &make_meta_for_when_tests(), DispatchConfig::Canonical(&config), crate::test_support::process_snapshot(), &messaging, true, None)
     .await;
 
     let response = result
@@ -711,15 +591,7 @@ async fn when_ctx_today_resolves() {
         when: Some("ctx.today != ''".to_string()),
     }];
 
-    let result = execute_actions(
-        &actions,
-        None,
-        &make_meta_for_when_tests(),
-        DispatchConfig::Canonical(&config),
-        &messaging,
-        true,
-        None,
-    )
+    let result = execute_actions(&actions, None, &make_meta_for_when_tests(), DispatchConfig::Canonical(&config), crate::test_support::process_snapshot(), &messaging, true, None)
     .await
     .unwrap()
     .expect("ctx.today != '' should be truthy and let the call fire");
@@ -743,15 +615,7 @@ async fn when_git_branch_matches_main_resolves_truthy() {
         when: Some("git.branch == 'main'".to_string()),
     }];
 
-    let result = execute_actions(
-        &actions,
-        None,
-        &meta_with_full_env(),
-        DispatchConfig::Canonical(&config),
-        &messaging,
-        true,
-        None,
-    )
+    let result = execute_actions(&actions, None, &meta_with_full_env(), DispatchConfig::Canonical(&config), crate::test_support::process_snapshot(), &messaging, true, None)
     .await
     .unwrap()
     .expect("git.branch == 'main' should resolve truthy and let the call fire");
@@ -776,15 +640,7 @@ async fn when_git_is_dirty_resolves_as_boolean() {
         when: Some("!git.is_dirty".to_string()),
     }];
 
-    let result = execute_actions(
-        &actions,
-        None,
-        &meta,
-        DispatchConfig::Canonical(&config),
-        &messaging,
-        true,
-        None,
-    )
+    let result = execute_actions(&actions, None, &meta, DispatchConfig::Canonical(&config), crate::test_support::process_snapshot(), &messaging, true, None)
     .await
     .unwrap()
     .expect("!git.is_dirty should resolve truthy when is_dirty is false");
@@ -806,15 +662,7 @@ async fn when_hardware_cores_numeric_comparison() {
         when: Some("hardware.cores > 8".to_string()),
     }];
 
-    let result = execute_actions(
-        &actions,
-        None,
-        &meta_with_full_env(),
-        DispatchConfig::Canonical(&config),
-        &messaging,
-        true,
-        None,
-    )
+    let result = execute_actions(&actions, None, &meta_with_full_env(), DispatchConfig::Canonical(&config), crate::test_support::process_snapshot(), &messaging, true, None)
     .await
     .unwrap()
     .expect("hardware.cores > 8 should resolve truthy with cores=16");
@@ -834,15 +682,7 @@ async fn when_project_language_matches() {
         when: Some("project.language == 'Rust'".to_string()),
     }];
 
-    let result = execute_actions(
-        &actions,
-        None,
-        &meta_with_full_env(),
-        DispatchConfig::Canonical(&config),
-        &messaging,
-        true,
-        None,
-    )
+    let result = execute_actions(&actions, None, &meta_with_full_env(), DispatchConfig::Canonical(&config), crate::test_support::process_snapshot(), &messaging, true, None)
     .await
     .unwrap()
     .expect("project.language == 'Rust' should resolve truthy");
@@ -868,15 +708,7 @@ async fn when_nested_tool_input_path() {
         when: Some("tool_input.command == 'npm test'".to_string()),
     }];
 
-    let result = execute_actions(
-        &actions,
-        None,
-        &meta,
-        DispatchConfig::Canonical(&config),
-        &messaging,
-        true,
-        None,
-    )
+    let result = execute_actions(&actions, None, &meta, DispatchConfig::Canonical(&config), crate::test_support::process_snapshot(), &messaging, true, None)
     .await
     .unwrap()
     .expect("nested tool_input.command should resolve truthy");
@@ -900,15 +732,7 @@ async fn when_extra_dot_path_resolves() {
         when: Some("extra.attempt > 1".to_string()),
     }];
 
-    let result = execute_actions(
-        &actions,
-        None,
-        &meta,
-        DispatchConfig::Canonical(&config),
-        &messaging,
-        true,
-        None,
-    )
+    let result = execute_actions(&actions, None, &meta, DispatchConfig::Canonical(&config), crate::test_support::process_snapshot(), &messaging, true, None)
     .await
     .unwrap()
     .expect("extra.attempt > 1 should resolve truthy with attempt=3");
@@ -931,15 +755,7 @@ async fn when_tool_response_path_resolves() {
         when: Some("tool_response.exit_code == 0".to_string()),
     }];
 
-    let result = execute_actions(
-        &actions,
-        None,
-        &meta,
-        DispatchConfig::Canonical(&config),
-        &messaging,
-        true,
-        None,
-    )
+    let result = execute_actions(&actions, None, &meta, DispatchConfig::Canonical(&config), crate::test_support::process_snapshot(), &messaging, true, None)
     .await
     .unwrap()
     .expect("tool_response.exit_code == 0 should resolve truthy and let the call fire");
@@ -960,15 +776,7 @@ async fn when_env_fallback_syntax_works() {
         when: Some("env.CLAUDINE_TEST_MISSING || 'default' == 'default'".to_string()),
     }];
 
-    let result = execute_actions(
-        &actions,
-        None,
-        &make_meta_for_when_tests(),
-        DispatchConfig::Canonical(&config),
-        &messaging,
-        true,
-        None,
-    )
+    let result = execute_actions(&actions, None, &make_meta_for_when_tests(), DispatchConfig::Canonical(&config), crate::test_support::process_snapshot(), &messaging, true, None)
     .await
     .unwrap()
     .expect("env fallback syntax should evaluate truthy and let the call fire");
@@ -990,15 +798,7 @@ async fn when_ctx_year_resolves() {
         when: Some("ctx.year != ''".to_string()),
     }];
 
-    let result = execute_actions(
-        &actions,
-        None,
-        &make_meta_for_when_tests(),
-        DispatchConfig::Canonical(&config),
-        &messaging,
-        true,
-        None,
-    )
+    let result = execute_actions(&actions, None, &make_meta_for_when_tests(), DispatchConfig::Canonical(&config), crate::test_support::process_snapshot(), &messaging, true, None)
     .await
     .unwrap()
     .expect("ctx.year != '' should be truthy and let the call fire");
@@ -1023,15 +823,7 @@ async fn when_missing_git_block_is_falsy() {
         when: Some("git.branch == 'main'".to_string()),
     }];
 
-    let result = execute_actions(
-        &actions,
-        None,
-        &meta,
-        DispatchConfig::Canonical(&config),
-        &messaging,
-        true,
-        None,
-    )
+    let result = execute_actions(&actions, None, &meta, DispatchConfig::Canonical(&config), crate::test_support::process_snapshot(), &messaging, true, None)
     .await
     .unwrap();
 

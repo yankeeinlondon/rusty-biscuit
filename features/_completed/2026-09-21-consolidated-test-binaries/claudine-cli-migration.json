@@ -7435,6 +7435,23 @@
     {
       "harness": true,
       "modules": [
+        "pr_flow_rehearsal",
+        "prompt_guide_defects",
+        "shipped_implement_router",
+        "shipped_prompt_contract",
+        "shipped_prompt_route_drift",
+        "shipped_prompts"
+      ],
+      "name": "prompts",
+      "path": "claudine/cli/tests/prompts/main.rs",
+      "required_features": [
+        "prompt-tests"
+      ],
+      "tier": "prompts"
+    },
+    {
+      "harness": true,
+      "modules": [
         "real_inline_write_grant",
         "real_opencode_yolo_subagent",
         "real_pi_steering"

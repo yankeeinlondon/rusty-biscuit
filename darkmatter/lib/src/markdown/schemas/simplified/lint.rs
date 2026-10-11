@@ -190,7 +190,7 @@ fn lint_atom(
 
     let property = property_path.join(".");
     let target = suggestion_target_schema(&property, atom)?;
-    let validator = super::super::validate::build_validator(&target, None, None)?;
+    let validator = super::super::validate::build_structural_validator(&target)?;
     let is_number = matches!(atom.ty, TypeExpr::Primitive(SimplifiedType::Number));
 
     for candidate in candidates {

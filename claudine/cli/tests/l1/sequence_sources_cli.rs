@@ -352,7 +352,7 @@ fn file_references_resolve_from_the_authoring_document() {
         &source,
         claudine::composition::SequenceSourceOptions {
             shell_runner: None,
-            file_resolution_context: Some(&request_context),
+            file_resolution_context: &request_context,
         },
     )
     .unwrap()

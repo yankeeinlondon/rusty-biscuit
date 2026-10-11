@@ -24,6 +24,7 @@ use claudine_gen::{
     Check, GateErrorScope, GateStatus, check_agent_errors, evaluate_agent_errors,
 };
 use claudine_gen::agent_errors_check::{read_research, read_seed};
+use darkmatter::markdown::compose::RequestSnapshot;
 use darkmatter::markdown::compose::conditions::evaluate_condition_against;
 
 /// The real claudine package area (parent of this crate's manifest dir) — the
@@ -33,6 +34,13 @@ fn real_area() -> PathBuf {
         .parent()
         .expect("gen crate lives under the claudine package area")
         .to_path_buf()
+}
+
+/// The area's file-resolution context, built from a snapshot that reads
+/// nothing from the test process.
+fn context_at(area: &Path) -> biscuit_file::FileResolutionContext {
+    claudine_gen::inputs::area_resolution_context(area, &RequestSnapshot::new(area))
+        .expect("area resolution context builds")
 }
 
 /// Builds a synthetic area with the real sidecar, an immutable seed baseline, and a research
@@ -79,6 +87,8 @@ fn outcome_error_scope(path: &Path) -> Option<String> {
 
 fn run_checker(area: &Path, slug: &str, findings: &Path) -> std::process::Output {
     Command::new(bin_exe!("claudine-gen"))
+        // Not the monorepo the test runs in: its snapshot would walk every package.
+        .current_dir(area)
         .arg("--area")
         .arg(area)
         .arg("agent-errors")
@@ -162,7 +172,7 @@ fn clean_document_writes_explicit_clean_outcome() {
     let dir = tempfile::tempdir().unwrap();
     let findings = scaffold_area(dir.path(), "codex", SEED_BASELINE, CLEAN_DOC);
 
-    let report = check_agent_errors(dir.path(), "codex", &findings).expect("gate runs");
+    let report = check_agent_errors(dir.path(), "codex", &findings, &context_at(dir.path())).expect("gate runs");
     assert!(report.is_clean(), "unexpected findings: {:?}", report.findings);
     assert_eq!(report.status, GateStatus::Clean);
     assert_eq!(outcome_status(&findings), "clean");
@@ -180,7 +190,7 @@ fn workspace_archived_seed_survives_graduation_and_detects_identity_changes() {
     let seed = read_seed(&area, "codex")
         .expect("real seed baseline parses")
         .expect("Codex has an archived Phase-A seed");
-    let mut research = read_research(&area, "codex").expect("real research parses");
+    let mut research = read_research(&area, "codex", &context_at(&area)).expect("real research parses");
     let clean = evaluate_agent_errors("codex", Some(&seed), &research);
     assert!(clean.is_clean(), "real archived baseline drifted: {:?}", clean.findings);
 
@@ -204,30 +214,46 @@ fn workspace_archived_seed_survives_graduation_and_detects_identity_changes() {
     );
 }
 
-#[test]
-fn all_archived_seeds_match_their_post_graduation_research_rows() {
+/// One `#[test]` per provider so nextest runs the parse- and schema-resolve-heavy
+/// research loads in parallel instead of serially inside one test.
+fn assert_archived_seed_matches_research(slug: &str) {
     let area = real_area();
-    for slug in [
-        "antigravity",
-        "claude",
-        "codex",
-        "gemini",
-        "kilo",
-        "kimi",
-        "opencode",
-        "pi",
-        "qwen",
-    ] {
-        let seed = read_seed(&area, slug)
-            .unwrap_or_else(|error| panic!("{slug}: archived seed must parse: {error}"))
-            .unwrap_or_else(|| panic!("{slug}: archived seed must exist"));
-        let research = read_research(&area, slug)
-            .unwrap_or_else(|error| panic!("{slug}: research must parse: {error}"));
-        let report = evaluate_agent_errors(slug, Some(&seed), &research);
-        assert!(report.is_clean(), "{slug}: archived seed drifted: {:?}", report.findings);
-    }
+    let seed = read_seed(&area, slug)
+        .unwrap_or_else(|error| panic!("{slug}: archived seed must parse: {error}"))
+        .unwrap_or_else(|| panic!("{slug}: archived seed must exist"));
+    let research = read_research(&area, slug, &context_at(&area))
+        .unwrap_or_else(|error| panic!("{slug}: research must parse: {error}"));
+    let report = evaluate_agent_errors(slug, Some(&seed), &research);
+    assert!(report.is_clean(), "{slug}: archived seed drifted: {:?}", report.findings);
+}
+
+macro_rules! archived_seed_tests {
+    ($($name:ident => $slug:literal),+ $(,)?) => {
+        $(
+            #[test]
+            fn $name() {
+                assert_archived_seed_matches_research($slug);
+            }
+        )+
+    };
+}
+
+archived_seed_tests! {
+    archived_seed_matches_research_antigravity => "antigravity",
+    archived_seed_matches_research_claude => "claude",
+    archived_seed_matches_research_codex => "codex",
+    archived_seed_matches_research_gemini => "gemini",
+    archived_seed_matches_research_kilo => "kilo",
+    archived_seed_matches_research_kimi => "kimi",
+    archived_seed_matches_research_opencode => "opencode",
+    archived_seed_matches_research_pi => "pi",
+    archived_seed_matches_research_qwen => "qwen",
+}
+
+#[test]
+fn parserless_goose_has_no_archived_seed() {
     assert!(
-        read_seed(&area, "goose").expect("missing seed is valid").is_none(),
+        read_seed(&real_area(), "goose").expect("missing seed is valid").is_none(),
         "parser-less Goose must not gain a fabricated Phase-A seed"
     );
 }
@@ -238,13 +264,13 @@ fn failing_document_writes_findings_and_persists_across_reruns() {
     let findings = scaffold_area(dir.path(), "codex", SEED_BASELINE, DROPPED_SEED_DOC);
 
     // First run: the dropped seed is flagged and the file is written.
-    let report = check_agent_errors(dir.path(), "codex", &findings).expect("gate runs");
+    let report = check_agent_errors(dir.path(), "codex", &findings, &context_at(dir.path())).expect("gate runs");
     assert!(!report.is_clean(), "expected findings for a dropped seed");
     assert_eq!(outcome_status(&findings), "findings");
 
     // Non-convergence: re-running against the still-bad document keeps the
     // machine-visible failure in place (budget exhaustion leaves this artifact).
-    let rerun = check_agent_errors(dir.path(), "codex", &findings).expect("gate reruns");
+    let rerun = check_agent_errors(dir.path(), "codex", &findings, &context_at(dir.path())).expect("gate reruns");
     assert!(!rerun.is_clean());
     assert_eq!(outcome_status(&findings), "findings");
 }
@@ -255,14 +281,14 @@ fn corrected_document_replaces_findings_with_explicit_clean() {
     let findings = scaffold_area(dir.path(), "codex", SEED_BASELINE, DROPPED_SEED_DOC);
 
     // Fail once so a stale findings file exists.
-    check_agent_errors(dir.path(), "codex", &findings).unwrap();
+    check_agent_errors(dir.path(), "codex", &findings, &context_at(dir.path())).unwrap();
     assert!(findings.exists());
 
     // The model "corrects" the document (simulated by overwriting it); the next
     // run must replace the stale findings report so success is explicit.
     let doc = dir.path().join("docs/research/agent-errors/codex.md");
     fs::write(&doc, CLEAN_DOC).unwrap();
-    let report = check_agent_errors(dir.path(), "codex", &findings).expect("gate reruns");
+    let report = check_agent_errors(dir.path(), "codex", &findings, &context_at(dir.path())).expect("gate reruns");
     assert!(report.is_clean(), "corrected doc should be clean: {:?}", report.findings);
     assert_eq!(outcome_status(&findings), "clean");
 }
@@ -289,7 +315,7 @@ requires_claudine_update: false
 # Bad
 ";
     let findings = scaffold_area(dir.path(), "codex", SEED_BASELINE, bad_doc);
-    let report = check_agent_errors(dir.path(), "codex", &findings).expect("gate error persists");
+    let report = check_agent_errors(dir.path(), "codex", &findings, &context_at(dir.path())).expect("gate error persists");
     assert_eq!(report.status, GateStatus::GateError);
     assert_eq!(report.error_scope, Some(GateErrorScope::ResearchDocument));
     assert!(
@@ -312,7 +338,7 @@ fn invalid_seed_writes_terminal_gate_input_error_scope() {
         CLEAN_DOC,
     );
 
-    let report = check_agent_errors(dir.path(), "codex", &findings)
+    let report = check_agent_errors(dir.path(), "codex", &findings, &context_at(dir.path()))
         .expect("authoritative input error persists");
     assert_eq!(report.status, GateStatus::GateError);
     assert_eq!(report.error_scope, Some(GateErrorScope::GateInput));
@@ -353,6 +379,7 @@ fn fleet_clean_action_requires_explicit_clean_status() {
     let dir = tempfile::tempdir().unwrap();
     let report = dir.path().join("outcome.md");
     let data = serde_json::json!({"findings": report.display().to_string()});
+    let condition_context = context_at(dir.path());
     let fleet_text = fs::read_to_string(real_area().join("docs/research/agent-errors/_fleet.md"))
         .expect("read fleet lifecycle");
     assert!(
@@ -404,20 +431,20 @@ fn fleet_clean_action_requires_explicit_clean_status() {
         )
         .unwrap();
         assert_eq!(
-            evaluate_condition_against(clean_condition, &data, dir.path()).unwrap(),
+            evaluate_condition_against(clean_condition, &data, &condition_context).unwrap(),
             expected_clean
         );
         assert_eq!(
-            evaluate_condition_against(findings_condition, &data, dir.path()).unwrap(),
+            evaluate_condition_against(findings_condition, &data, &condition_context).unwrap(),
             expected_findings
         );
         assert_eq!(
-            evaluate_condition_against(repairable_gate_error_condition, &data, dir.path())
+            evaluate_condition_against(repairable_gate_error_condition, &data, &condition_context)
                 .unwrap(),
             expected_repair
         );
         assert_eq!(
-            evaluate_condition_against(gate_input_condition, &data, dir.path()).unwrap(),
+            evaluate_condition_against(gate_input_condition, &data, &condition_context).unwrap(),
             expected_input
         );
     }
@@ -427,11 +454,11 @@ fn fleet_clean_action_requires_explicit_clean_status() {
         "---\nstatus: gate_error\nprovider: codex\nerror_scope: unexpected\n---\n# Outcome\n",
     )
     .unwrap();
-    assert!(evaluate_condition_against(unknown_scope_condition, &data, dir.path()).unwrap());
+    assert!(evaluate_condition_against(unknown_scope_condition, &data, &condition_context).unwrap());
 
     fs::remove_file(&report).unwrap();
     assert!(!report.exists(), "absence is an error branch, never clean");
     assert!(
-        !evaluate_condition_against("file_exists(findings)", &data, dir.path()).unwrap()
+        !evaluate_condition_against("file_exists(findings)", &data, &condition_context).unwrap()
     );
 }

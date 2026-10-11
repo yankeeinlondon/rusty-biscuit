@@ -157,8 +157,9 @@ report byte, including sibling headings and `file://` links.
 
 - Dynamic text is backslash-escaped for Prose and Markdown. Prose has no
   backtick escape (it renders the backslash), so only Markdown escapes
-  backticks.
-- Link targets percent-encode `( ) space < >`.
+  backticks, and only Markdown escapes `~` and `&` (strikethrough and
+  entity references).
+- Link targets percent-encode `& ( ) space < >`.
 - `RecentCommits::projected` is the single file-pruning authority for text
   and JSON. `to_json()` ignores every display option.
 

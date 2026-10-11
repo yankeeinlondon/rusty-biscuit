@@ -1,11 +1,12 @@
 ---
 source: worktree/cli/tests/list_flags.rs
+assertion_line: 153
 expression: "offered.join(\"\\n\")"
 ---
 --fast-forward	Fast-forward the local default branch to origin/<default> (listing only)
 --help	Print help
 --ignore-api	Check origin with Git only, never the provider API, for this repository from now on (listing only; recorded in ~/.wt.json)
---perf	Emit a performance report to stderr after command completion
+--perf	Emit a performance report to stderr after the listing (`json`: one `WT_PERF_JSON` line)
 --refresh	Wait for a full update from origin, up to 75 s instead of 3 s (listing only)
 --verbose	Show detailed commit history for the current worktree
 --version	Print version

@@ -11,7 +11,7 @@
 //! printing to stdout.
 
 use biscuit_terminal::components::list::UnorderedList;
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::{InlineProse, LineBreaks, Prose};
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::status::{Status, StatusState};
 use biscuit_terminal::components::table::{Table, TableCellContent, TableColumn};
@@ -33,6 +33,7 @@ use darkmatter::markdown::schemas::{
     schema_shape_descriptors, schema_type_descriptors, validation_behavior_descriptors,
     match_safe_constraint_descriptors, trigger_grammar_descriptors,
 };
+use renderable::markdown::code_span;
 
 const LEFT_MARGIN_CH: u32 = 1;
 const RIGHT_MARGIN_CH: u32 = 2;
@@ -203,7 +204,7 @@ In this example, constraints are added to a string, a number, and an array of st
                 vec![
                     prose_cell(format_constraint_use(c)),
                     prose_cell(format_targets(c.target_types)),
-                    prose_cell(format_constraint_meaning(c)),
+                    rows_cell(format_constraint_meaning(c)),
                 ]
             })
             .collect();
@@ -243,9 +244,9 @@ In this example, constraints are added to a string, a number, and an array of st
         let mut markdown = String::new();
         for item in grammar {
             markdown.push_str(&format!(
-                "- **{}.** `{}` — {}\n",
+                "- **{}.** {} — {}\n",
                 escape_markdown(item.name),
-                escape_markdown(item.form),
+                code_span(item.form),
                 item.description,
             ));
         }
@@ -370,6 +371,7 @@ In this example, constraints are added to a string, a number, and an array of st
             };
             list.add(
                 Prose::new(item)
+                    .with_line_breaks(LineBreaks::Hard)
                     .with_word_wrap(WordWrap::WrapProse(Some(8), Some(2))),
             );
         }
@@ -478,9 +480,12 @@ fn expression_function_signatures_markdown() -> String {
 }
 
 fn prose_cell<T: Into<String>>(text: T) -> TableCellContent {
-    Prose::new(text.into())
-        .with_word_wrap(WordWrap::WrapProse(Some(6), None))
-        .into()
+    InlineProse::new(text.into()).into()
+}
+
+/// A cell whose single newlines start new rows (a summary, then `- ` rows).
+fn rows_cell<T: Into<String>>(text: T) -> TableCellContent {
+    InlineProse::new(text.into()).with_line_breaks(LineBreaks::Hard).into()
 }
 
 fn format_constraint_use(constraint: &SchemaConstraintDescriptor) -> String {

@@ -86,6 +86,8 @@
 //! missing backend into a hard failure. Run via `just test-l2`.
 
 use crate::common;
+#[cfg(feature = "prompt-tests")]
+use common::prompt_staging::{stage_shipped_prompts, workspace_root};
 use common::wrap::seed_minimal_config;
 use common::{augmented_path, init_git_repo, write_executable};
 
@@ -4877,8 +4879,12 @@ fn level2_lifecycle_loop_router_initialize_proxy_is_honored() {
 // `say:`, `effect:`, and `shell:` properties are respectively a real TTS call,
 // real audio playback, and a pair of commands that are denied without an
 // interactive approver (which would divert the run to `blocked` before the
-// loop's second iteration). `tests/l1/shipped_prompt_route_drift.rs` mechanically
-// holds that copy in sync and fails when either shipped file changes.
+// loop's second iteration). `tests/prompts/shipped_prompt_route_drift.rs`
+// mechanically holds that copy in sync and fails when either shipped file
+// changes.
+//
+// These rows read the live `prompts/`, so they compile only with the opt-in
+// `prompt-tests` feature (`just test-prompts`); CI never runs them.
 
 /// A fake `goose` that records the phase heading of the body it was handed.
 ///
@@ -4886,6 +4892,7 @@ fn level2_lifecycle_loop_router_initialize_proxy_is_honored() {
 /// phase is read out of the *rendered* body (`# Implement Phase N of M`), which
 /// makes the loop's per-iteration mutation observable without adding any
 /// marker property to the document under test.
+#[cfg(feature = "prompt-tests")]
 fn write_phase_recording_goose(bin_dir: &Path, events_log: &Path) {
     write_executable(
         &bin_dir.join("goose"),
@@ -4907,6 +4914,7 @@ fn write_phase_recording_goose(bin_dir: &Path, events_log: &Path) {
 /// `implement.md` for the routed run, `_implement/implement-plan.md` for the
 /// direct run. Both receive the same `spec=` parameter, so the only difference
 /// between the two runs is the hand-off itself.
+#[cfg(feature = "prompt-tests")]
 fn stage_shipped_implement_route(entry: &str, total_phases: usize) -> Staged {
     let workspace = tempdir().unwrap();
     let root = workspace.path().to_path_buf();
@@ -4933,36 +4941,19 @@ fn stage_shipped_implement_route(entry: &str, total_phases: usize) -> Staged {
     write_phase_recording_goose(&bin_dir, &events_log);
 
     let manifest = biscuit_test_harness::manifest_dir!();
-    let repo_root = manifest
-        .ancestors()
-        .nth(2)
-        .expect("repository root is two levels above claudine/cli");
-    fs::copy(
-        repo_root.join("prompts/implement.md"),
-        root.join("implement.md"),
-    )
-    .expect("copy the shipped router");
+    // The snippets the target transcludes are prose only, so the shipped bytes
+    // serve as-is; only the target itself is the side-effect-free fixture.
+    let repository = workspace_root();
+    stage_shipped_prompts(
+        &repository,
+        &root,
+        &["prompts/implement.md", "prompts/_implement/implement-plan.md"],
+    );
     fs::copy(
         manifest.join("tests/fixtures/shipped_implement_route/_implement/implement-plan.md"),
         root.join("_implement/implement-plan.md"),
     )
     .expect("copy the drift-guarded implement-plan fixture");
-    // The target transcludes these shipped snippets from its parent
-    // directory; they are prose only, so the shipped bytes serve as-is.
-    for snippet in [
-        "_no_formatting.md",
-        "_os.md",
-        "_set_spec_schema.md",
-        "_test-tiers.md",
-        "_input-robustness.md",
-        "_finish-before-exit.md",
-    ] {
-        fs::copy(
-            repo_root.join("prompts").join(snippet),
-            root.join(snippet),
-        )
-        .expect("copy a snippet the implement-plan fixture transcludes");
-    }
 
     // The router branches on `frontmatter(spec, 'implemented')`; an unimplemented
     // spec is the branch that reaches `implement-plan.md`.
@@ -4991,6 +4982,7 @@ fn stage_shipped_implement_route(entry: &str, total_phases: usize) -> Staged {
 /// only the provider, TTS executable, and lifecycle shell commands are doubled.
 /// Recorders assemble each line before appending so concurrent TTS output cannot
 /// split a command's argument record.
+#[cfg(feature = "prompt-tests")]
 fn stage_shipped_optional_commit_message() -> Staged {
     let workspace = tempdir().unwrap();
     let root = workspace.path().to_path_buf();
@@ -5062,37 +5054,16 @@ exit 0
         ),
     );
 
-    let manifest = biscuit_test_harness::manifest_dir!();
-    let repo_root = manifest
-        .ancestors()
-        .nth(2)
-        .expect("repository root is two levels above claudine/cli");
-    // Staged in the shipped layout: the prompt transcludes `../_no_formatting.md`,
-    // `../_os.md`, `../_set_spec_schema.md`, `../_test-tiers.md`,
-    // `../_input-robustness.md`, and `../_finish-before-exit.md`, so it lives
-    // one directory down and the snippets sit beside that directory, inside
-    // the workspace.
-    fs::create_dir_all(root.join("_implement")).unwrap();
+    // Staged in the shipped layout: the prompt transcludes `../` snippets, so
+    // it lives one directory down and the snippets sit beside that directory,
+    // inside the workspace.
+    let repository = workspace_root();
+    stage_shipped_prompts(
+        &repository,
+        &root,
+        &["prompts/_implement/implement-plan.md"],
+    );
     let md_file = root.join("_implement/implement-plan.md");
-    fs::copy(
-        repo_root.join("prompts/_implement/implement-plan.md"),
-        &md_file,
-    )
-    .expect("copy the shipped implement-plan prompt");
-    for snippet in [
-        "_no_formatting.md",
-        "_os.md",
-        "_set_spec_schema.md",
-        "_test-tiers.md",
-        "_input-robustness.md",
-        "_finish-before-exit.md",
-    ] {
-        fs::copy(
-            repo_root.join("prompts").join(snippet),
-            root.join(snippet),
-        )
-        .expect("copy a snippet the shipped implement-plan prompt transcludes");
-    }
     fs::write(
         root.join("feature/plan.md"),
         "---\ntotal_phases: 1\nstart_phase: 1\n---\n\n# Plan\n",
@@ -5155,6 +5126,7 @@ exit 0
     }
 }
 
+#[cfg(feature = "prompt-tests")]
 fn run_shipped_optional_commit_message(commit_message: Option<&str>) -> (Vec<String>, String) {
     let staged = stage_shipped_optional_commit_message();
     let params = commit_message.map_or_else(
@@ -5185,6 +5157,7 @@ fn run_shipped_optional_commit_message(commit_message: Option<&str>) -> (Vec<Str
 /// provider, and select the AI-generated-message branch at event time.
 #[test]
 #[serial(level2_lifecycle_control)]
+#[cfg(feature = "prompt-tests")]
 fn level2_shipped_implement_plan_unset_commit_message_reaches_provider_and_auto_branch() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
@@ -5207,6 +5180,7 @@ fn level2_shipped_implement_plan_unset_commit_message_reaches_provider_and_auto_
 /// command double as one exact `-m` argument, including its embedded space.
 #[test]
 #[serial(level2_lifecycle_control)]
+#[cfg(feature = "prompt-tests")]
 fn level2_shipped_implement_plan_supplied_commit_message_runs_exact_commit_branch() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
@@ -5244,6 +5218,7 @@ fn level2_shipped_implement_plan_supplied_commit_message_runs_exact_commit_branc
 /// asked to do on each iteration — not over a marker the test injected.
 #[test]
 #[serial(level2_lifecycle_control)]
+#[cfg(feature = "prompt-tests")]
 fn level2_lifecycle_shipped_implement_route_matches_direct_run() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
@@ -5372,8 +5347,11 @@ fn run_in_tmux_until_exit(staged: &Staged) -> String {
     let claudine = common::claudine_bin();
     let sentinel = format!("L2_CTL_EXIT_{seq}");
     let env_prefix = staged_env_prefix_augmented(staged);
+    // The sentinel is printed in two halves so the echoed command line never
+    // contains it. That line wraps across the capture, so waiting for a second
+    // occurrence (echo plus output) never matched and burned the deadline.
     let cmd = format!(
-        "cd {ws} && {env_prefix}{claudine} compose --goose {md} ; echo {sentinel}",
+        "cd {ws} && {env_prefix}{claudine} compose --goose {md} ; printf '%s%s\\n' L2_CTL_EXIT_ {seq}",
         ws = staged.workspace.path().display(),
         md = staged.md_file.display(),
     );
@@ -5383,15 +5361,17 @@ fn run_in_tmux_until_exit(staged: &Staged) -> String {
 
     let deadline = Instant::now() + Duration::from_secs(40);
     let mut pane = String::new();
+    let mut exited = false;
     while Instant::now() < deadline {
         pane = harness.capture().map(|f| f.plain).unwrap_or_default();
-        // Two occurrences: the echoed command line and the shell's output.
-        if pane.matches(sentinel.as_str()).count() >= 2 {
+        if pane.contains(sentinel.as_str()) {
+            exited = true;
             break;
         }
         std::thread::sleep(Duration::from_millis(150));
     }
     kill_session_by_name(&session);
+    assert!(exited, "the compose run never exited within 40s; pane:\n{pane}");
     pane
 }
 

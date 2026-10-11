@@ -267,7 +267,8 @@ pub fn proxy_handoff_allowed(chain: &[std::path::PathBuf], target: &std::path::P
 
 /// Resolve a `Proxy` target reference to an existing prompt file.
 ///
-/// Delegates to [`crate::harness::resolve_harness_path`], the thin adapter over
+/// Delegates to [`crate::harness::resolve_harness_path`] with the request's
+/// context, the thin adapter over
 /// the shared [`biscuit_file::FileReference`] grammar: implicit references are
 /// source-relative then repository-relative, `@` is a magic-root search, `&`
 /// pins to the repository root, `^` searches package, package-area, then
@@ -287,41 +288,9 @@ pub fn proxy_handoff_allowed(chain: &[std::path::PathBuf], target: &std::path::P
 pub fn resolve_proxy_target(
     target: &str,
     source_path: &std::path::Path,
-    repo_root: Option<&std::path::Path>,
-) -> Result<std::path::PathBuf, crate::harness::HarnessError> {
-    let package_area = package_area_for_source(source_path, repo_root);
-    let ctx = crate::harness::HarnessResolutionContext {
-        source_path,
-        repo_root,
-        package_area: package_area.as_deref(),
-    };
-    crate::harness::resolve_harness_path(target, &ctx)
-}
-
-/// Snapshot-preserving proxy resolver used by Claudine orchestration routes.
-pub fn resolve_proxy_target_in_context(
-    target: &str,
-    source_path: &std::path::Path,
     request_context: &biscuit_file::FileResolutionContext,
 ) -> Result<std::path::PathBuf, crate::harness::HarnessError> {
-    crate::harness::resolve_harness_path_in_context(target, source_path, request_context)
-}
-
-fn package_area_for_source(
-    source_path: &std::path::Path,
-    repo_root: Option<&std::path::Path>,
-) -> Option<std::path::PathBuf> {
-    let root = repo_root?;
-    let source_dir = source_path.parent()?;
-    let repo = sniff::filesystem::repo::detect_repo_structure(root)
-        .ok()
-        .flatten()?;
-    let area = repo.package_area_label_for_dir(source_dir)?;
-    Some(if area.is_empty() {
-        root.to_path_buf()
-    } else {
-        root.join(area.as_ref())
-    })
+    crate::harness::resolve_harness_path(target, source_path, request_context)
 }
 
 /// Parse a lifecycle delay string (e.g. `"5m"`, `"0s"`, `"30 sec"`) into a

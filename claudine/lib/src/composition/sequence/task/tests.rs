@@ -85,9 +85,15 @@ fn marker_path(tag: &str) -> PathBuf {
 /// soon as the kill lands instead of a fixed margin past a write time the
 /// descendant never reached. A survivor still fails, and fails naming the pid
 /// that outlived its command.
+///
+/// The command's process group is watched the same way, because the
+/// descendant is only the member the fixture chose to publish: a process the
+/// command shell forked itself, such as a trailing `sleep`, can outlive the
+/// reap too.
 #[cfg(unix)]
 struct BackgroundedDescendant {
     pid_path: PathBuf,
+    group_path: PathBuf,
 }
 
 #[cfg(unix)]
@@ -101,6 +107,7 @@ impl BackgroundedDescendant {
     fn new(tag: &str) -> Self {
         Self {
             pid_path: marker_path(&format!("{tag}-pid")),
+            group_path: marker_path(&format!("{tag}-pgid")),
         }
     }
 
@@ -119,24 +126,59 @@ impl BackgroundedDescendant {
     /// — so the test failed at its own deadline rather than on the behavior.
     /// Making publication a precondition of the command completing also
     /// removes the vacuous case where nothing was ever backgrounded. `exit 90`
-    /// bounds the wait at ~10 s so a broken fixture fails loudly instead of
-    /// hanging.
+    /// bounds the wait at ~60 s so a broken fixture fails loudly instead of
+    /// hanging. The budget is deliberately long: every iteration forks
+    /// `/bin/sleep`, so the loop's wall-clock cost and the descendant's
+    /// publication delay stretch together under load — a short attempt budget
+    /// can give up on a descendant that was merely starved, failing the test
+    /// on fixture timing rather than on the behavior under test.
+    ///
+    /// The command shell first records its own pid, which is the group id:
+    /// the runner makes it the leader of a new group.
     fn background(&self, body: &str) -> String {
         format!(
-            "/bin/sh -c 'echo $$ > \"{pid}\"; {body}' & \
+            "echo $$ > \"{group}\"; \
+             /bin/sh -c 'echo $$ > \"{pid}\"; {body}' & \
              attempts=0; while [ ! -s \"{pid}\" ]; do \
-             attempts=$((attempts + 1)); [ $attempts -lt 1000 ] || exit 90; \
+             attempts=$((attempts + 1)); [ $attempts -lt 6000 ] || exit 90; \
              sleep 0.01; done;",
             pid = self.pid_path.display(),
+            group = self.group_path.display(),
         )
     }
 
-    /// Block until the recorded process is gone, then drop the pid file.
+    /// A body that performs `action` only when the descendant outlived the
+    /// command shell — the survivor tell every reap contract asserts never
+    /// fires.
+    ///
+    /// Gated on the parent's death, not on a fuse. The first form was
+    /// `sleep 1; <action>`: the descendant acted one second after it started
+    /// and the test asserted the reap landed first. Under full-suite load the
+    /// kill chain — the command shell noticing the pid file, its first stdout
+    /// byte, the capture thread reading it, the 20 ms wait poll, the group
+    /// SIGKILL — once took ~30 s, so the marker landed ahead of a *working*
+    /// reap and the test reported a leak that never happened. The reap kills
+    /// the descendant and its parent in one broadcast, so a reaped descendant
+    /// never observes the death at any load; a genuine survivor sees the
+    /// parent go (a zombie still answers `kill -0`, so the observation waits
+    /// for the epilogue's `child.wait`) and acts within one poll interval.
+    /// The trailing `sleep 30` keeps a survivor alive past `REAP_DEADLINE` so
+    /// `assert_reaped`'s pid watch reports it by pid — it exits on its own,
+    /// so a failed run leaves nothing behind. `action` must not contain
+    /// single quotes: the body is interpolated into a single-quoted
+    /// `/bin/sh -c '…'` string by [`Self::background`].
+    fn survivor_action(action: &str) -> String {
+        format!("while kill -0 $PPID 2>/dev/null; do sleep 0.1; done; {action}; sleep 30")
+    }
+
+    /// Block until the recorded process and every member of the command's
+    /// process group are gone, then drop the pid files.
     ///
     /// ## Panics
     ///
-    /// Panics if the pid was never published, or if the process is still alive
-    /// at [`Self::REAP_DEADLINE`].
+    /// Panics if the pid was never published, or if the process or a group
+    /// member is still alive at [`Self::REAP_DEADLINE`]. A surviving group is
+    /// killed first, so a failed run leaves nothing behind.
     fn assert_reaped(&self) {
         let stop = Instant::now() + Self::REAP_DEADLINE;
         let pid = loop {
@@ -164,6 +206,29 @@ impl BackgroundedDescendant {
              more than {:?}",
             Self::REAP_DEADLINE,
         );
+
+        let group: i32 = fs::read_to_string(&self.group_path)
+            .expect("the command shell records its group before backgrounding")
+            .trim()
+            .parse()
+            .expect("the recorded group id is a number");
+        let _ = fs::remove_file(&self.group_path);
+        while group_has_live_member(group) && Instant::now() < stop {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let survived = group_has_live_member(group);
+        if survived {
+            // SAFETY: `kill(2)` on the group this test's command led.
+            unsafe {
+                libc::kill(-group, libc::SIGKILL);
+            }
+        }
+        assert!(
+            !survived,
+            "a member of the command's process group {group} outlived its \
+             command by more than {:?}",
+            Self::REAP_DEADLINE,
+        );
     }
 }
 
@@ -175,6 +240,15 @@ impl BackgroundedDescendant {
 #[cfg(unix)]
 fn process_is_alive(pid: i32) -> bool {
     unsafe { libc::kill(pid, 0) == 0 }
+}
+
+/// Whether process group `pgid` still has a member that can be signalled.
+///
+/// Like [`process_is_alive`] it counts a zombie on Linux; macOS answers
+/// `EPERM` for a group of zombies, which reads as empty.
+#[cfg(unix)]
+fn group_has_live_member(pgid: i32) -> bool {
+    unsafe { libc::kill(-pgid, 0) == 0 }
 }
 
 // -- fixtures ---------------------------------------------------------------
@@ -209,6 +283,20 @@ fn write_yaml(dir: &Path, name: &str, value: &Value) {
     fs::write(dir.join(name), serde_json::to_string_pretty(value).unwrap()).unwrap();
 }
 
+/// `path` in the portable spelling `message` names it by. An external task
+/// document is canonicalized, which re-spells the Windows runner's 8.3
+/// `RUNNER~1` temp directory and macOS's `/var` symlink; the sequence's own
+/// document keeps the spelling it was opened with. Either names the same file.
+fn reported_source(path: &Path, message: &str) -> String {
+    let raw = biscuit_file::to_portable_string(path);
+    let canonical =
+        biscuit_file::to_portable_string(&biscuit_file::canonicalize_simplified(path).unwrap());
+    [raw, canonical]
+        .into_iter()
+        .find(|spelling| message.contains(spelling.as_str()))
+        .unwrap_or_else(|| panic!("{message}\nnames neither spelling of {}", path.display()))
+}
+
 /// A sequence document whose single step is the task under test.
 fn one_step_source(dir: &Path, step: Value) -> String {
     write_source(
@@ -233,6 +321,7 @@ struct Fixture {
     settings: GlobalSettings,
     messaging: RuntimeMessagingSettings,
     source_path: PathBuf,
+    file_resolution_context: biscuit_file::FileResolutionContext,
 }
 
 impl Fixture {
@@ -244,12 +333,12 @@ impl Fixture {
         // walks the *process* CWD's repository topology before either of them
         // runs, which under nextest is the monorepo checkout.
         let resolved = crate::composition::resolve_fixture_source(source)?;
-        let plan = resolve_sequence_plan(&resolved)?.expect("fixture declares a sequence");
+        let plan = resolve_sequence_plan(&resolved, &crate::test_support::context_for(&resolved.resolved_path))?.expect("fixture declares a sequence");
         // Demand-driven: no fixture references `ctx.*`, so the preflight walk is
         // handed a date/time-only context instead of probing git, the repo, the
         // OS, and the hardware once per test.
         let context = ComposeContext::capture_for_content(&PathBuf::from("."), "");
-        let graph = build_preflight_graph_with_context(&plan, &resolved, context.clone())?;
+        let graph = build_preflight_graph_with_context(&plan, &resolved, context.clone(), &crate::test_support::context_for(&resolved.resolved_path))?;
 
         let overlay = build_step_overlay(&plan, 0).as_set_overrides(None);
         let mut frontmatter: Map<String, Value> = resolved
@@ -298,6 +387,7 @@ impl Fixture {
                 repo: None,
             },
             source_path: PathBuf::from(source),
+            file_resolution_context: crate::test_support::context_for(source),
         })
     }
 
@@ -347,7 +437,7 @@ impl Fixture {
             base_dir: None,
             ctx_base_dir: None,
             prepared_context: None,
-            file_resolution_context: None,
+            file_resolution_context: &self.file_resolution_context,
             effect_engine: &self.engine,
             shell_runner: wiring.lifecycle_shell,
             emitter: wiring.recorder,
@@ -1632,7 +1722,10 @@ mod shell_tasks {
             .run(
                 &format!(
                     "{} echo done",
-                    descendant.background(&format!("sleep 1; echo late > \"{}\"", marker.display())),
+                    descendant.background(&BackgroundedDescendant::survivor_action(&format!(
+                        "echo late > \"{}\"",
+                        marker.display()
+                    ))),
                 ),
                 Duration::from_secs(30),
                 None,
@@ -1696,7 +1789,10 @@ mod shell_tasks {
         let result = SystemTaskShell::failing_wait().run(
             &format!(
                 "{} echo started; sleep 300",
-                descendant.background(&format!("sleep 1; echo late > \"{}\"", marker.display())),
+                descendant.background(&BackgroundedDescendant::survivor_action(&format!(
+                    "echo late > \"{}\"",
+                    marker.display()
+                ))),
             ),
             Duration::from_secs(300),
             None,
@@ -1988,7 +2084,7 @@ mod shell_streaming {
             .run(
                 &format!(
                     "{} printf 'now\\n'",
-                    descendant.background("sleep 1; printf 'late\\n'"),
+                    descendant.background(&BackgroundedDescendant::survivor_action("printf late")),
                 ),
                 Duration::from_secs(30),
                 None,
@@ -2043,7 +2139,7 @@ mod shell_streaming {
         let result = SystemTaskShell::failing_wait().run(
             &format!(
                 "{} printf 'buffered\\n'; sleep 300",
-                descendant.background("sleep 1; printf 'late\\n'"),
+                descendant.background(&BackgroundedDescendant::survivor_action("printf late")),
             ),
             Duration::from_secs(300),
             None,
@@ -2387,7 +2483,8 @@ mod side_effect_tasks {
         let snapshot = info.snapshot.as_ref().expect("set failures are typed");
         assert_eq!(snapshot.code, "composition.lifecycle_invalid");
         assert_eq!(snapshot.detail["property"], json!(expected));
-        assert!(snapshot.message.contains(&source), "{}", snapshot.message);
+        let portable_source = biscuit_file::to_portable_string(Path::new(&source));
+        assert!(snapshot.message.contains(&portable_source), "{}", snapshot.message);
         let err_value = info.to_value();
         assert_eq!(err_value["detail"]["property"], snapshot.detail["property"]);
         assert_eq!(err_value["code"], json!(snapshot.code));
@@ -2395,7 +2492,7 @@ mod side_effect_tasks {
         let restored = crate::diagnostics::RestoredDiagnostic::new((**snapshot).clone());
         let rendered = strip_escape_codes(restored.report_block_error_optimistic(Some(200)));
         assert!(rendered.contains(expected), "{rendered}");
-        assert!(rendered.contains(&source), "{rendered}");
+        assert!(rendered.contains(&portable_source), "{rendered}");
     }
 
     #[test]
@@ -2830,7 +2927,7 @@ mod task_stack_diagnostics {
         let info = &outcome.error.as_ref().expect("the stack failure is reported").info;
         let snapshot = info.snapshot.as_ref().expect("stack failures are typed");
         let err_value = info.to_value();
-        let source = biscuit_file::to_portable_string(expected_source);
+        let source = reported_source(expected_source, &snapshot.message);
 
         // `info.property` is the executor's own finding, so only a runtime
         // failure has one; a parse failure's path lives in the typed snapshot
@@ -3811,7 +3908,7 @@ mod serial_groups {
         let info = &outcome.error.as_ref().expect("group failure is reported").info;
         let snapshot = info.snapshot.as_ref().expect("set failures are typed");
         let err_value = info.to_value();
-        let source = biscuit_file::to_portable_string(expected_source);
+        let source = reported_source(expected_source, &snapshot.message);
 
         assert_eq!(info.property.as_deref(), Some(expected_property));
         assert_eq!(snapshot.detail["property"], json!(expected_property));

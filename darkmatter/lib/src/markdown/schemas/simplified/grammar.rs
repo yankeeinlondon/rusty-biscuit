@@ -1550,7 +1550,11 @@ impl<'a> Parser<'a> {
                 if args.is_empty() {
                     return self.err("`match` requires at least one glob", kw_span);
                 }
-                let globs = args.into_iter().map(|a| a.lex).collect();
+                let globs: Vec<String> = args.iter().map(|a| a.lex.clone()).collect();
+                if let Some((index, error)) = crate::markdown::schemas::file_match::definition_error(&globs) {
+                    let span = index.map_or(kw_span.start..self.lex.pos, |index| args[index].span.clone());
+                    return self.err(format!("`match`: {error}"), span);
+                }
                 Constraint::Match(globs)
             }
             ("scheme", true) => {

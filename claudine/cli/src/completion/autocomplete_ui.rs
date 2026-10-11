@@ -355,7 +355,7 @@ fn badge_markup(badge: &str) -> String {
 }
 
 fn path_label(path: &Path) -> String {
-    path.canonicalize()
+    biscuit_file::canonicalize_simplified(path)
         .map(|p| to_portable_string(&p))
         .unwrap_or_else(|_| to_portable_string(path))
 }
@@ -364,7 +364,7 @@ fn file_href(path: &Path) -> Option<String> {
     let absolute: PathBuf = if path.is_absolute() {
         path.to_path_buf()
     } else {
-        path.canonicalize().ok()?
+        biscuit_file::canonicalize_simplified(path).ok()?
     };
     Url::from_file_path(absolute)
         .ok()

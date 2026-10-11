@@ -145,8 +145,8 @@ pub use self::toml_impl::{Toml, TomlError, TomlSource};
 pub use self::yaml::{
     EditAudit, EditRejection, EditSetOutcome, RejectedEdit, Yaml, YamlAnalysis, YamlCertainty,
     YamlDiagnostic, YamlDiagnosticCode, YamlError, YamlLocation, YamlParseFailure,
-    YamlParseOutcome, YamlPathSegment, YamlRepair, YamlSource, YamlValueLocation, analyze_yaml,
-    apply_edit_set, locate_yaml_key, locate_yaml_value,
+    YamlParseOutcome, YamlPathSegment, YamlRepair, YamlSource, YamlValueLocation,
+    YamlValueProperties, analyze_yaml, apply_edit_set, locate_yaml_key, locate_yaml_value,
 };
 
 #[cfg(feature = "yaml")]
@@ -163,10 +163,11 @@ pub use self::pdf::{Pdf, PdfConfig, PdfError, PdfMarkdown, PdfToc};
 pub use self::file_reference::{
     BaseDirOrigin, CandidatePlanOrder, CompletionEntryForm, ContextAnchor, DetailedOutcome, DetailedResolution, FileReference,
     FileReferenceClass, FileReferenceError, FileReferenceKind, FileResolutionContext,
+    GlobListing, GlobReference, GlobReferenceError, PreparedGlobReference, SkippedEntry,
     LaunchMagicScope, MagicPathRegistration, MagicPathTier, MagicSearchRoot, PackageAreaFallback,
     PartialCompletion, PathIdentity, PathPosition, ProbeDisposition, ProbedCandidate, RepositoryScope,
     RepositoryScopeCatalog, RepositoryScopeCatalogError, ResolutionCandidate, ResolutionFailure,
-    RelativeRoute, RootProvenance, find_git_root, home_dir,
+    RelativeRoute, RootProvenance, capture_env, find_git_root, home_dir,
 };
 
 #[cfg(feature = "file-reference")]

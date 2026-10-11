@@ -254,26 +254,55 @@ const ROWS: &[Row] = &[
     },
 ];
 
+fn assert_row_launches_approved_bytes(row: &Row) {
+    let fixture = fixture("preflight-parity");
+    let result = run(&fixture, row.files, &[command_for(row.value)], row.args);
+    assert_eq!(result.code, Some(0), "{}: {}", row.name, result.output);
+    assert_eq!(
+        result.output.contains(&format!("ran/{}", row.value)),
+        row.executes,
+        "{}: {}",
+        row.name,
+        result.output
+    );
+    assert!(
+        !result.output.contains("pre-approved") && !result.output.contains("Could not transclude"),
+        "{}: {}",
+        row.name,
+        result.output
+    );
+}
+
+/// One test per `ROWS` entry, so each process spawn runs in parallel under
+/// nextest instead of serially in one test.
+macro_rules! row_tests {
+    ($($test:ident => $index:expr,)*) => {
+        $(
+            #[test]
+            fn $test() {
+                assert_row_launches_approved_bytes(&ROWS[$index]);
+            }
+        )*
+    };
+}
+
+row_tests! {
+    every_launched_command_is_approved_inline_proxy_overlay => 0,
+    every_launched_command_is_approved_partial_caller_value => 1,
+    every_launched_command_is_approved_partial_no_interpolation => 2,
+    every_launched_command_is_approved_partial_reported_row => 3,
+    every_launched_command_is_approved_partial_direct_target => 4,
+    every_launched_command_is_approved_partial_target_default => 5,
+    every_launched_command_is_approved_nested_conditional_partial => 6,
+    every_launched_command_is_approved_transclusion_local_set => 7,
+    every_launched_command_is_approved_reserved_sequence_input => 8,
+    every_launched_command_is_approved_sequence_task_subdirectory => 9,
+    every_launched_command_is_approved_untaken_branch => 10,
+}
+
 #[test]
-fn every_launched_command_is_approved_with_its_executed_bytes() {
-    for row in ROWS {
-        let fixture = fixture("preflight-parity");
-        let result = run(&fixture, row.files, &[command_for(row.value)], row.args);
-        assert_eq!(result.code, Some(0), "{}: {}", row.name, result.output);
-        assert_eq!(
-            result.output.contains(&format!("ran/{}", row.value)),
-            row.executes,
-            "{}: {}",
-            row.name,
-            result.output
-        );
-        assert!(
-            !result.output.contains("pre-approved") && !result.output.contains("Could not transclude"),
-            "{}: {}",
-            row.name,
-            result.output
-        );
-    }
+fn every_launched_command_rows_are_all_tested() {
+    assert_eq!(ROWS.len(), 11, "add a row_tests! entry for each ROWS row");
 }
 
 /// Discovery is condition-blind: the untaken branch's command still needs
@@ -295,28 +324,42 @@ fn an_untaken_branch_is_discovered_without_executing() {
 /// a changed command from its own state, so the command is audited again, and
 /// refused non-interactively when only the first iteration's bytes are
 /// approved — for a body command and for a lifecycle `shell` action alike.
+const LOOP_BODY: &str = "---\nn: 0\nloop:\n    while: \"n < 2\"\n    action: \"increment(n)\"\n---\n::file ./loop-part.md\n";
+const LOOP_LIFECYCLE: &str = "---\nn: 0\nloop:\n    while: \"n < 2\"\n    action: \"increment(n)\"\nsuccess:\n  stack:\n    - action: {action: shell, command: \"git check-ref-format --branch ran/{{ n }}\"}\n---\nbody\n";
+
+fn loop_files(document: &'static str) -> [(&'static str, &'static str); 2] {
+    [("loop.md", document), ("loop-part.md", "::shell git check-ref-format --branch ran/{{ n }}\n")]
+}
+
 #[test]
 fn a_loop_iteration_audits_the_bytes_its_own_state_produces() {
-    const BODY: &str = "---\nn: 0\nloop:\n    while: \"n < 2\"\n    action: \"increment(n)\"\n---\n::file ./loop-part.md\n";
-    const LIFECYCLE: &str = "---\nn: 0\nloop:\n    while: \"n < 2\"\n    action: \"increment(n)\"\nsuccess:\n  stack:\n    - action: {action: shell, command: \"git check-ref-format --branch ran/{{ n }}\"}\n---\nbody\n";
-    let files = |document| [("loop.md", document), ("loop-part.md", "::shell git check-ref-format --branch ran/{{ n }}\n")];
     let every = [command_for("0"), command_for("1"), command_for("2")];
 
     let accepted = fixture("preflight-parity-loop");
-    let result = run(&accepted, &files(BODY), &every, &["compose", "--claude", "loop.md"]);
+    let result = run(&accepted, &loop_files(LOOP_BODY), &every, &["compose", "--claude", "loop.md"]);
     assert_eq!(result.code, Some(0), "{}", result.output);
     for value in ["ran/0", "ran/1", "ran/2"] {
         assert!(result.output.contains(value), "{value}: {}", result.output);
     }
+}
 
-    for (name, document) in [("body", BODY), ("lifecycle", LIFECYCLE)] {
-        let refused = fixture("preflight-parity-loop-refused");
-        let result = run(&refused, &files(document), &[command_for("0")], &["compose", "--claude", "loop.md"]);
-        assert_ne!(result.code, Some(0), "{name}: {}", result.output);
-        assert!(result.collapsed().contains("requires approval"), "{name}: {}", result.output);
-        assert!(result.collapsed().contains("ran/1"), "{name}: {}", result.output);
-        assert!(!result.output.contains("pre-approved"), "{name}: {}", result.output);
-    }
+fn assert_loop_refused_beyond_first_iteration(name: &str, document: &'static str) {
+    let refused = fixture("preflight-parity-loop-refused");
+    let result = run(&refused, &loop_files(document), &[command_for("0")], &["compose", "--claude", "loop.md"]);
+    assert_ne!(result.code, Some(0), "{name}: {}", result.output);
+    assert!(result.collapsed().contains("requires approval"), "{name}: {}", result.output);
+    assert!(result.collapsed().contains("ran/1"), "{name}: {}", result.output);
+    assert!(!result.output.contains("pre-approved"), "{name}: {}", result.output);
+}
+
+#[test]
+fn a_loop_body_command_is_refused_when_only_the_first_iteration_is_approved() {
+    assert_loop_refused_beyond_first_iteration("body", LOOP_BODY);
+}
+
+#[test]
+fn a_loop_lifecycle_shell_is_refused_when_only_the_first_iteration_is_approved() {
+    assert_loop_refused_beyond_first_iteration("lifecycle", LOOP_LIFECYCLE);
 }
 
 /// A command whose bytes discovery cannot know is a hard preparation failure.

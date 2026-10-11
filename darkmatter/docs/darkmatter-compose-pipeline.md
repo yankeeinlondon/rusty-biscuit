@@ -88,6 +88,25 @@ block-beta
 
 > **Note:** items marked with `🏁` are implemented
 
+## The Request
+
+Before any stage runs, the caller prepares a
+[compose request](./topics/compose-requests.md): a `RequestSnapshot` (the
+request directory, home directory, environment, and extra `@` roots) goes
+through the context builder, which discovers the repository and validates the
+result, and becomes a `ComposeRequest` holding one required file-resolution
+context. Pre-flight and every stage below take that request, so they resolve
+`./`, `&`, `^`, `@`, `~`, and `{{VAR}}` references identically, and `ctx.*` and
+`env.*` read the same snapshot. A request that cannot be built fails before
+anything runs, rather than surfacing later as a missing file.
+
+```mermaid
+flowchart LR
+    S[RequestSnapshot] --> B[build_resolution_context] --> R[ComposeRequest]
+    O[ComposeOptions] --> R
+    R --> P[pre-flight] --> I[Inline Pre] --> T[Transclusion] --> Q[Inline Post] --> F[Finalization]
+```
+
 ## Pipeline Stages
 
 ### 1. Inline Pre

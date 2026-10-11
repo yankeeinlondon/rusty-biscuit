@@ -154,6 +154,13 @@ Each lifecycle property is an object containing any of these fields:
 | `success` | string | Status line rendered with a success style. |
 | `stack` | list | Ordered list of conditional actions (see [Stacks](#stacks)). |
 
+The `stdout`, `stderr`, `info`, `warn`, and `success` channels keep the lines of their text: each newline, whether written in the YAML (a `|` block) or carried by an interpolated value such as a captured output, starts a new line. For example, `info: 'captured=[{{ last(outputs) }}]'` after a step printed `line one` and `  line two` shows:
+
+```text
+ℹ captured=[line one
+  line two]
+```
+
 Most lifecycle output is written to stderr, messaging routes, or desktop notifications. The `stdout` channel is the lone exception: it writes to stdout, which is otherwise reserved for pipeable command output, so reach for it only when you specifically want lifecycle text on stdout.
 
 A `message` or `notify` sent from a terminal event (`success`, `failure`, `finalize`) finishes, or is reported as unfinished, before the process exits normally. Claudine waits at most 10 seconds for it. A send still running at that limit is reported with a warning, and whether it arrived is unknown. The exit code does not change. See [Messaging → The CLI drains before every ordinary exit](../messaging.md#the-cli-drains-before-every-ordinary-exit).
@@ -517,6 +524,46 @@ failure:
     - when: "err.code == 'io.write_failed' && err.cause.code == 'io.permission_denied'"
       action: { notify: "Cannot write {{ err.detail.path }} — check permissions" }
 ```
+
+#### Planned: delayed-completion diagnostic
+
+**Planned, not yet implemented:** `ClaudineCompletionDelayed` will use
+`err.code == 'timeout.claudine_completion_delayed'` when Claudine reaches its
+cleanup deadline without a confirmed provider completion verdict. Its
+`err.detail` will retain available response data and the observed cleanup
+state, with explicit completeness flags. `err.msg` will remain a concise
+headline and will not include the response body.
+
+For example, a failure handler will be able to print an identified answer:
+
+```yaml
+failure:
+  stack:
+    - when: "err.code == 'timeout.claudine_completion_delayed' && err.detail.response_text != null"
+      action: { stdout: "{{ err.detail.response_text }}" }
+```
+
+Printing the answer will not repair the failed transaction. Existing recovery
+directives and sequence/loop `fail_fast` policy will govern subsequent work.
+A confirmed successful provider result with delayed presentation will remain
+success and will not fire this failure handler. See
+[planned completion behavior](../timeouts.md#planned-delayed-claudine-completion).
+
+The planned diagnostic's `transient` disposition means another attempt may
+succeed. It does not mean the provider did nothing: edits, commits, or messages
+may already have completed before Claudine lost confirmation. Read the retained
+answer and inspect the resulting state before choosing `retry`, which repeats
+the transaction. Retained provider text is data; do not execute it as a shell
+command or treat it as authored lifecycle instructions.
+
+Sequence continuation uses `fail_fast: false` on the sequence document, with
+no overriding `--fail-fast` flag. The failed step stays failed and the overall
+sequence returns failure even though later steps run. The default is
+`fail_fast: true`, which stops later steps. Loop continuation uses the loop's
+own `fail_fast: false`. `no_error` only covers lifecycle side-effect failures;
+it does not repair an unconfirmed provider transaction. The diagnostic-specific
+sequence example and recovery checks remain planned until populated detail
+reaches both `failure` and `finalize`.
 
 #### Deprecated aliases
 

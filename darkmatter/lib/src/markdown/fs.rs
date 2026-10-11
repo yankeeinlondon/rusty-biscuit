@@ -1,4 +1,63 @@
+use biscuit_file::{FileReference, FileReferenceError, FileResolutionContext, ProbeDisposition};
 use std::path::PathBuf;
+
+/// What a reference names when a directory is as acceptable as a file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReferenceEntry {
+    File(PathBuf),
+    Directory(PathBuf),
+}
+
+/// Resolves `reference` to the first candidate in its plan that exists as a
+/// regular file or a directory.
+///
+/// Precedence is file resolution's own: candidates are taken in the shared
+/// resolver's order ([`FileReference::resolve_detailed`]), with its
+/// containment checks, so an earlier file outranks a later directory and an
+/// earlier directory outranks a later file. A candidate whose metadata cannot
+/// be read (permission denied, a symlink loop) stops the search exactly as it
+/// stops file resolution; a later candidate never turns that failure into a
+/// result. An existing entry that is neither (a socket, a FIFO) is skipped. A
+/// recursive (`%`) reference resolves to files only.
+///
+/// ## Returns
+///
+/// `Ok(None)` when no candidate exists as a file or a directory. A
+/// [`ReferenceEntry::File`] is the path [`FileReference::resolve_in_context`]
+/// returns.
+///
+/// ## Errors
+///
+/// The resolver's typed error, including [`FileReferenceError::Io`] for the
+/// first candidate whose metadata cannot be read.
+pub fn resolve_entry_in_context(
+    reference: &FileReference,
+    context: &FileResolutionContext,
+) -> Result<Option<ReferenceEntry>, FileReferenceError> {
+    let resolution = reference.resolve_detailed(context);
+    if !reference.class().recursive {
+        // The resolver probed every candidate before its outcome and advanced
+        // past each `NonFile` one; the first of those that is a directory
+        // precedes the file match, the I/O failure, or the miss.
+        for probed in resolution.candidates() {
+            if probed.disposition() != ProbeDisposition::NonFile {
+                continue;
+            }
+            let path = probed.candidate().path();
+            match std::fs::metadata(path) {
+                Ok(metadata) if metadata.is_dir() => {
+                    return Ok(Some(ReferenceEntry::Directory(path.to_path_buf())));
+                }
+                Ok(_) => {}
+                Err(source) if source.kind() == std::io::ErrorKind::NotFound => {}
+                Err(source) => {
+                    return Err(FileReferenceError::Io { path: path.to_path_buf(), source });
+                }
+            }
+        }
+    }
+    Ok(resolution.into_convenience()?.map(ReferenceEntry::File))
+}
 
 /// Recursively collect all markdown files (`.md`, `.dm`) under a directory.
 ///

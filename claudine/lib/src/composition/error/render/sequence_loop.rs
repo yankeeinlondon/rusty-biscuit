@@ -6,7 +6,7 @@
 //! this family here.
 
 use super::super::*;
-use super::{escape_prose_path, render_file_link};
+use super::{escape_prose_path, render_file_link, rows};
 
 /// Render the [`StatusBlock`] for a sequence/loop-family [`CompositionError`].
 pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
@@ -27,15 +27,19 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
             let title = exit_reason
                 .clone()
                 .unwrap_or_else(|| "iteration failed".to_string());
-            let body =
-                format!("Iteration {iteration} exited with code {exit_code}.\n\n{reason}");
+            // `reason` puts the watchdog detail on its own `↳` row.
+            let body = vec![
+                Prose::new(format!("Iteration {iteration} exited with code {exit_code}.")),
+                rows(reason.as_str()),
+            ];
             StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("CompositionError", &title))
                 .body(body)
         }
         CompositionError::LoopRateLimited { .. } => StatusBlock::new(StatusState::Error)
             .error_header(ErrorHeader::new("CompositionError", "rate limited"))
-            .body(err.to_string())
+            // The message puts the provider's reset detail on its own `↳` row.
+            .body(rows(err.to_string()))
             .hint(
                 "Re-run after the listed reset time, or use \
                      `--on-rate-limit pause` to wait automatically.",
@@ -109,24 +113,25 @@ fn render_sequence_missing_properties_block(
     failures: &[SequenceMissingPropertiesStep],
 ) -> StatusBlock {
     let plural = if failures.len() == 1 { "step" } else { "steps" };
-    let mut body = format!(
+    let mut body = vec![Prose::new(format!(
         "Missing required schema properties in {} {plural} of the sequence.",
         failures.len()
-    );
+    ))];
 
+    // One paragraph per step: its heading, then one row per detail.
     for failure in failures {
         let file_link = render_file_link(&failure.source_path);
-        body.push_str(&format!(
-            "\n\n<b>Step {}: <cyan>{}</cyan></b> ({file_link})",
+        let mut step = format!(
+            "<b>Step {}: <cyan>{}</cyan></b> ({file_link})",
             failure.step,
             escape_prose_path(&failure.step_name),
-        ));
+        );
         if let Some(desc) = failure
             .frontmatter_description
             .as_deref()
             .filter(|d| !d.trim().is_empty())
         {
-            body.push_str(&format!("\n  <i><dim>{}</dim></i>", escape_prose_path(desc)));
+            step.push_str(&format!("\n  <i><dim>{}</dim></i>", escape_prose_path(desc)));
         }
         if !failure.missing.is_empty() {
             for prop in &failure.missing {
@@ -139,13 +144,14 @@ fn render_sequence_missing_properties_block(
                 if let Some(desc) = prop.description.as_deref().filter(|d| !d.trim().is_empty()) {
                     line.push_str(&format!(" <i><dim>— {}</dim></i>", escape_prose_path(desc)));
                 }
-                body.push_str(&line);
+                step.push_str(&line);
             }
         } else if !failure.pointer_paths.is_empty() {
             for pointer in &failure.pointer_paths {
-                body.push_str(&format!("\n  - <cyan>`{pointer}`</cyan>"));
+                step.push_str(&format!("\n  - <cyan>`{pointer}`</cyan>"));
             }
         }
+        body.push(rows(step));
     }
 
     StatusBlock::new(StatusState::Error)

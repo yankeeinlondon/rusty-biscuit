@@ -372,9 +372,9 @@ mod partial_completion {
     /// `$HOME`.
     ///
     /// POSIX home discovery honors `$HOME`, so the guard's directory is what
-    /// appears. Native Windows resolves the profile directory through the OS
-    /// known-folder API and ignores `HOME` outright (D11), so the guard cannot
-    /// redirect it and the native profile is the only home leg there.
+    /// appears. Native Windows reads `USERPROFILE` and never `HOME`, so the
+    /// guard cannot redirect it and the process's own profile is the home leg
+    /// there.
     #[cfg(not(windows))]
     fn expected_home(guard_home: &Path) -> std::path::PathBuf {
         guard_home.to_path_buf()
@@ -474,9 +474,9 @@ mod partial_completion {
         git_init(repo_root);
         let repo_root_canon = canonical(repo_root);
 
-        // Unset HOME while the test runs. Unlike a bare `$HOME` read, the shared
-        // cross-platform provider still supplies the native profile home (D11),
-        // so the home leg persists in the magic search order.
+        // Unset HOME while the test runs. Unlike a bare `$HOME` read,
+        // `biscuit_file::home_dir()` falls back to the platform's profile
+        // lookup, so the home leg persists in the magic search order.
         let previous_home = env::var_os("HOME");
         unsafe { env::remove_var("HOME") };
 

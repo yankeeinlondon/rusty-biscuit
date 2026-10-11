@@ -4,7 +4,7 @@ use std::fmt::Write;
 use std::path::{Path, PathBuf};
 
 use biscuit_terminal::components::list::UnorderedList;
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::{InlineProse, Prose};
 use biscuit_terminal::components::renderable::{RenderableTerminalContent, TerminalRenderable};
 use biscuit_terminal::terminal::Terminal;
 use sniff::filesystem::git::{ConventionalCommit, FileAction, FileStatus, RefKind};
@@ -74,12 +74,14 @@ pub(crate) fn filter_packages<'a>(packages: &'a [Package], filters: &[String]) -
 
 mod deps;
 mod docs;
+mod file_list;
 mod files;
 mod language;
 mod lockfile;
 mod package_areas;
 mod packages;
 mod path_format;
+pub(crate) mod query;
 mod repo;
 
 // Re-exports from submodules
@@ -366,7 +368,7 @@ pub fn render_hash_section(
         writeln!(out).unwrap();
         let items: Vec<String> = bullet_points
             .iter()
-            .map(|bp| Prose::new(bp.as_str()).render(&terminal))
+            .map(|bp| InlineProse::new(bp.as_str()).render(&terminal))
             .collect();
         let list = UnorderedList::new(items).with_bullet("  - ");
         writeln!(out, "{}", list.render(&terminal)).unwrap();
@@ -408,7 +410,7 @@ pub fn render_hash_section(
 
     let rendered_items: Vec<String> = file_items
         .iter()
-        .map(|item| Prose::new(item.as_str()).render(&terminal))
+        .map(|item| InlineProse::new(item.as_str()).render(&terminal))
         .collect();
     let list = UnorderedList::new(rendered_items);
     writeln!(out, "{}", list.render(&terminal)).unwrap();
@@ -813,12 +815,12 @@ pub fn render_git_section(
     if !status_items.is_empty() {
         let rendered_items: Vec<String> = status_items
             .iter()
-            .map(|item| Prose::new(item.as_str()).render(&terminal))
+            .map(|item| InlineProse::new(item.as_str()).render(&terminal))
             .collect();
         let list = UnorderedList::new(rendered_items);
         writeln!(out, "{}", list.render(&terminal)).unwrap();
     } else {
-        let clean = Prose::new("<dim>No changes</dim>");
+        let clean = InlineProse::new("<dim>No changes</dim>");
         writeln!(out, "  {}", clean.render(&terminal)).unwrap();
     }
 

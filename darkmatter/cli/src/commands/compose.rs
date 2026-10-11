@@ -7,12 +7,13 @@ use crate::artifact::{
     OutputArtifact, emit_or_show_artifact, html_artifact, json_artifact, markdown_plus_artifact,
     open_output_artifact,
 };
-use crate::io::{load_markdown, resolve_file_path};
+use crate::io::{load_markdown, open_argument, resolve_file_path};
+use crate::request::MdRequest;
 use color_eyre::eyre::{Context, Result, eyre};
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::cleanup::ListSpacingMode;
-use darkmatter::markdown::compose::ComposeOptions;
-use std::path::PathBuf;
+use darkmatter::markdown::compose::{ComposeOptions, ComposeRequest};
+use std::path::{Path, PathBuf};
 use tracing::{info, instrument};
 
 /// Resolved allow flags for compose validation.
@@ -173,6 +174,7 @@ pub fn run_compose(
     remote_config: darkmatter::markdown::compose::RemoteReadConfig,
     cache_root: Option<&PathBuf>,
     cli: &Cli,
+    request: &MdRequest,
 ) -> Result<()> {
     info!("starting compose pipeline");
     use biscuit_terminal::terminal::Terminal;
@@ -190,44 +192,19 @@ pub fn run_compose(
     // cwd/env/attached streams within one process still detect afresh.
     let term_cell: std::cell::OnceCell<Terminal> = std::cell::OnceCell::new();
 
-    let launch_dir = std::env::current_dir().wrap_err("Failed to capture launch directory")?;
-    let launch_repository = sniff::filesystem::git::GitRepo::discover(&launch_dir)
-        .ok()
-        .flatten()
-        .map(|repo| repo.repo_root().to_path_buf());
-    let launch_repo_structure = launch_repository
-        .as_deref()
-        .and_then(|root| sniff::filesystem::repo::detect_repo_structure(root).ok().flatten());
-    let launch_package_area = launch_repo_structure.as_ref().and_then(|repo| {
-        repo.package_area_label_for_dir(&launch_dir).map(|area| {
-            if area.is_empty() {
-                repo.root.clone()
-            } else {
-                repo.root.join(area.as_ref())
-            }
-        })
-    });
-    let mut launch_file_resolution_context =
-        biscuit_file::FileResolutionContext::new(launch_dir.clone());
-    if let Some(repository_root) = launch_repository {
-        launch_file_resolution_context =
-            launch_file_resolution_context.with_repository_root(repository_root);
-    }
-    if let Some(package_area) = launch_package_area {
-        launch_file_resolution_context =
-            launch_file_resolution_context.with_package_area(package_area);
-    }
+    let launch_dir = request.launch_dir().to_path_buf();
 
     // Resolve the input path once through FileReference (handles @-prefixed paths)
     // and reuse for both loading and source_file/policy_root.
     let resolve_start = perf.then(Instant::now);
-    let resolved_input = if let Some(path) = input
+    let opened_input = if let Some(path) = input
         && path.to_str() != Some("-")
     {
-        Some(resolve_file_path(path)?)
+        Some(open_argument(path, request)?)
     } else {
         None
     };
+    let resolved_input = opened_input.as_ref().map(|opened| opened.path().to_path_buf());
     let resolve_input_dur = resolve_start.map(|s| s.elapsed()).unwrap_or_default();
 
     let load_start = perf.then(Instant::now);
@@ -235,74 +212,19 @@ pub fn run_compose(
         Markdown::try_from(resolved.as_path())
             .wrap_err_with(|| format!("Failed to load file: {:?}", resolved))?
     } else {
-        load_markdown(None)?
+        load_markdown(None, request)?
     };
     let load_input_dur = load_start.map(|s| s.elapsed()).unwrap_or_default();
-    // The input as authored, so a quoted `~/…` or `{{VAR}}/…` argument can
-    // supply the document's tree root (an unquoted `~` was already expanded by
-    // the shell and carries no anchor).
-    let input_reference =
-        input.and_then(|path| biscuit_file::FileReference::new(&path.to_string_lossy()).ok());
-    let file_resolution_context = resolved_input.as_ref().map_or_else(
-        || launch_file_resolution_context.clone(),
-        |resolved| {
-            let document_context = match &input_reference {
-                Some(reference) => launch_file_resolution_context.for_source_reference(reference, resolved),
-                None => launch_file_resolution_context.for_source(resolved),
-            };
-            if document_context.validate().is_ok() {
-                document_context
-            } else {
-                let source_repository = resolved.parent().and_then(|source_dir| {
-                    sniff::filesystem::git::GitRepo::discover(source_dir)
-                        .ok()
-                        .flatten()
-                        .map(|repo| repo.repo_root().to_path_buf())
-                        .or_else(|| {
-                            darkmatter::markdown::compose::find_git_root_from(source_dir)
-                        })
-                });
-                let source_repo_structure = source_repository.as_deref().and_then(|root| {
-                    sniff::filesystem::repo::detect_repo_structure(root)
-                        .ok()
-                        .flatten()
-                });
-                let source_package_area = source_repo_structure.as_ref().and_then(|repo| {
-                    resolved.parent().and_then(|source_dir| {
-                        repo.package_area_label_for_dir(source_dir).map(|area| {
-                            if area.is_empty() {
-                                repo.root.clone()
-                            } else {
-                                repo.root.join(area.as_ref())
-                            }
-                        })
-                    })
-                });
-                let mut external_context = biscuit_file::FileResolutionContext::from_snapshot(
-                    resolved
-                        .parent()
-                        .map(std::path::Path::to_path_buf)
-                        .unwrap_or_else(|| launch_dir.clone()),
-                    launch_file_resolution_context
-                        .home_dir()
-                        .map(std::path::Path::to_path_buf),
-                    launch_file_resolution_context.env().clone(),
-                );
-                if let Some(repository_root) = source_repository {
-                    external_context = external_context.with_repository_root(repository_root);
-                }
-                if let Some(package_area) = source_package_area {
-                    external_context = external_context.with_package_area(package_area);
-                }
-                match &input_reference {
-                    Some(reference) => {
-                        external_context.for_trusted_external_source_reference(reference, resolved)
-                    }
-                    None => external_context.for_trusted_external_source(resolved),
-                }
-            }
-        },
-    );
+    // One context for validation, pre-flight, and compose: the document's own
+    // (derived from the launch context, or built at the document when it lies
+    // in another repository), or the launch context itself for stdin. It
+    // derives from the input as authored, so a quoted `~/…` or `{{VAR}}/…`
+    // argument supplies the document's tree root (an unquoted `~` was already
+    // expanded by the shell and carries no anchor).
+    let file_resolution_context = match &opened_input {
+        Some(opened) => opened.document_context(request)?,
+        None => request.launch_context()?.clone(),
+    };
 
     // The request boundary (D3): one demand-driven context capture for the
     // document plus the request's repository observation, both anchored on the
@@ -319,7 +241,7 @@ pub fn run_compose(
     // interpolation inside transclusion targets (e.g., `::file @{{ctx.pkg}}/{{plan}}`)
     // can resolve user-provided variables during the validation pass.
     let opts_start = perf.then(Instant::now);
-    options = apply_compose_baseline_schema(options, baseline_schema, no_baseline_schema)?;
+    options = apply_compose_baseline_schema(options, baseline_schema, no_baseline_schema, request)?;
     options = options.with_trigger_schemas(!no_trigger_schemas);
 
     // Parse --state as JSON or JSON5
@@ -358,10 +280,13 @@ pub fn run_compose(
 
     if !override_map.is_empty() {
         options = options
-            .with_file_resolution_context(file_resolution_context)
             .with_file_ref_fallback_dir(&launch_dir)
             .with_set_overrides(serde_json::Value::Object(override_map));
     }
+    let prepare_request = |options: ComposeOptions| -> Result<ComposeRequest> {
+        ComposeRequest::with_context(options, file_resolution_context.clone())
+            .wrap_err("Failed to prepare the compose request")
+    };
 
     // ── Reference validation ───────────────────────────────────────────
     // Validate before composing so broken references are caught early.
@@ -375,7 +300,7 @@ pub fn run_compose(
         };
 
         let val_options = ReferenceValidationOptions::with_graph(
-            ReferenceGraphOptions::with_compose(options.clone()),
+            ReferenceGraphOptions::with_compose(&prepare_request(options.clone())?),
         );
 
         match md.validate_references(val_options) {
@@ -440,11 +365,16 @@ pub fn run_compose(
         timeout: timeout_secs
             .map(std::time::Duration::from_secs)
             .unwrap_or(std::time::Duration::from_secs(10)),
-        policy_root: resolved_input.as_ref().and_then(|p| {
-            p.parent()
+        // Shell policy lives beside the document, or in the launch directory
+        // for stdin, so pre-flight and execution read the same files and a
+        // stdin run never falls through to the user's home.
+        policy_root: Some(
+            resolved_input
+                .as_ref()
+                .and_then(|p| p.parent())
                 .filter(|parent| !parent.as_os_str().is_empty())
-                .map(|parent| parent.to_path_buf())
-        }),
+                .map_or_else(|| launch_dir.clone(), Path::to_path_buf),
+        ),
         approval_handler: None,
         ..Default::default()
     };
@@ -483,13 +413,14 @@ pub fn run_compose(
     // not once per stage. Must follow the remote-read-config and cache-root
     // wiring above so the shared runtime inherits both.
     options = options.with_shared_remote_fetch();
+    let mut compose_request = prepare_request(options)?;
     let build_options_dur = opts_start.map(|s| s.elapsed()).unwrap_or_default();
 
     if shell_report {
         // `--shell` reports condition-blind approval candidates: every command
         // that *could* run under any document state, routed through the same
         // pre-flight collector that authorization uses.
-        let preflight = md.compose_preflight(&options)?;
+        let preflight = md.compose_preflight(&compose_request)?;
         print_shell_command_report(&preflight.entries);
         print_icmp_effect_report(&preflight.icmp_probes);
         drop(options_ctx_ref);
@@ -507,11 +438,12 @@ pub fn run_compose(
     // is disabled (nothing to approve) and the per-`::shell` per-shell-block
     // stages never need to gate against an approval set.
     use darkmatter::markdown::compose::ComposeOperation;
+    let options = compose_request.options();
     if options.is_enabled(ComposeOperation::ShellExpansion)
         || options.is_enabled(ComposeOperation::ShellBlocks)
         || options.is_enabled(ComposeOperation::FrontmatterShellExpansion)
     {
-        match md.compose_preflight_approvals(&options, preflight_handler.clone()) {
+        match md.compose_preflight_approvals(&compose_request, preflight_handler.clone()) {
             Ok(approvals) => {
                 if cli.verbose > 0 {
                     eprintln!(
@@ -524,9 +456,11 @@ pub fn run_compose(
                 // Reuse the graph the preflight walk already resolved so the
                 // transclusion stage skips a redundant target-resolution pass
                 // (v2 design "reuse the collection walk").
-                options = options
-                    .with_pre_approved_commands(approvals.pre_approved_commands)
-                    .with_preflight_graph(approvals.preflight_graph);
+                compose_request = compose_request.map_options(|options| {
+                    options
+                        .with_pre_approved_commands(approvals.pre_approved_commands)
+                        .with_preflight_graph(approvals.preflight_graph)
+                });
             }
             Err(e) => {
                 return Err(preflight_approval_error(e));
@@ -534,7 +468,7 @@ pub fn run_compose(
         }
     }
 
-    let (composed, report) = md.compose_with(options).map_err(|e| {
+    let (composed, report) = md.compose_with(&compose_request).map_err(|e| {
         use darkmatter::markdown::MarkdownError::ShellExpansion;
         use darkmatter::markdown::compose::ShellExpansionError;
 
@@ -682,12 +616,18 @@ pub fn run_compose(
 
     // Emit compose warnings to stderr
     if !report.warnings.is_empty() {
-        use biscuit_terminal::components::renderable::TerminalRenderable;
-        use biscuit_terminal::prelude::{Status, StatusState};
         let term = term_cell.get_or_init(Terminal::default);
         for warning in &report.warnings {
-            let status = Status::from_prose(&warning.message).state(StatusState::Warning);
-            eprintln!("{}", status.render(term));
+            // A tolerated file-reference failure keeps its stable class row.
+            let prose = match warning.resolution_failure {
+                Some(failure) => format!(
+                    "{}\n<dim>failure:</dim> {}",
+                    warning.message,
+                    darkmatter::markdown::errors::resolution_failure_name(failure)
+                ),
+                None => warning.message.clone(),
+            };
+            eprintln!("{}", warning_rows(&prose, term));
         }
     }
 
@@ -703,18 +643,16 @@ pub fn run_compose(
         // The view lists errors only; a warning (a missing link inside text an
         // expression inserted) is reported line by line.
         use biscuit_terminal::components::prose::Prose;
-        use biscuit_terminal::prelude::{Status, StatusState};
         use darkmatter::markdown::reference::validate::{ReferenceIssueCode, ReferenceSeverity};
         for issue in report.issues.iter().filter(|i| {
             i.severity == ReferenceSeverity::Warning && i.code == ReferenceIssueCode::MissingLocalTarget
         }) {
-            let status = Status::from_prose(format!(
+            let markup = format!(
                 "{} <dim>(line {}, inside inserted text)</dim>",
-                Prose::escape_text(&issue.message),
+                Prose::escape_text_outside_code_spans(&issue.message),
                 issue.origin.line,
-            ))
-            .state(StatusState::Warning);
-            eprintln!("{}", status.render(term));
+            );
+            eprintln!("{}", warning_rows(&markup, term));
         }
     }
 
@@ -741,17 +679,31 @@ pub fn run_compose(
     Ok(())
 }
 
+/// A warning status for `markup`, whose further lines (a `hint:` or
+/// `failure:` row) each start a row of their own.
+fn warning_rows(markup: &str, term: &biscuit_terminal::terminal::Terminal) -> String {
+    use biscuit_terminal::components::prose::LineBreaks;
+    use biscuit_terminal::components::renderable::TerminalRenderable;
+    use biscuit_terminal::prelude::{Status, StatusState};
+
+    Status::from_prose(markup)
+        .with_line_breaks(LineBreaks::Hard)
+        .state(StatusState::Warning)
+        .render(term)
+}
+
 fn apply_compose_baseline_schema(
     options: ComposeOptions,
     baseline_schema: Option<&PathBuf>,
     no_baseline_schema: bool,
+    request: &MdRequest,
 ) -> Result<ComposeOptions> {
     if no_baseline_schema {
         return Ok(options);
     }
 
     if let Some(path) = baseline_schema {
-        let resolved = resolve_file_path(path)?;
+        let resolved = resolve_file_path(path, request.launch_context()?)?;
         let raw = std::fs::read_to_string(&resolved)
             .wrap_err_with(|| format!("Failed to read baseline schema: {}", resolved.display()))?;
         let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(&raw).wrap_err_with(|| {
@@ -944,7 +896,7 @@ fn format_compose_perf_report(
     compose_perf: Option<&darkmatter::markdown::compose::ComposePerfReport>,
 ) -> String {
     use biscuit_terminal::components::block_quote::BlockQuote;
-    use biscuit_terminal::components::prose::Prose;
+    use biscuit_terminal::components::prose::{LineBreaks, Prose};
     use biscuit_terminal::components::renderable::TerminalRenderable as _;
     use biscuit_terminal::components::two_column::TwoColumn;
     use biscuit_terminal::utils::color::{Color, Tailwind};
@@ -1009,7 +961,10 @@ fn format_compose_perf_report(
     let title = Prose::new("<b><yellow>Compose Performance</yellow></b>").render_optimistic(None);
 
     // ── Two-column layout ────────────────────────────────────────────
-    let columns = TwoColumn::new(Prose::new(left.trim_end()), Prose::new(right.trim_end()))
+    let columns = TwoColumn::new(
+        Prose::new(left.trim_end()).with_line_breaks(LineBreaks::Hard),
+        Prose::new(right.trim_end()).with_line_breaks(LineBreaks::Hard),
+    )
         .with_left_percent(0.5)
         .with_gap(2);
 
@@ -1030,6 +985,23 @@ fn format_compose_perf_report(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn warning_rows_put_each_extra_line_on_a_row_of_its_own() {
+        let term = biscuit_terminal::terminal::Terminal::builder()
+            .width(200)
+            .color_depth(biscuit_terminal::discovery::detection::ColorDepth::None)
+            .build();
+        let rendered = biscuit_terminal::utils::escape_codes::strip_escape_codes(warning_rows(
+            "File not found: a.md\nhint: quote it\n<dim>failure:</dim> no-match",
+            &term,
+        ));
+        let rows: Vec<&str> = rendered.lines().collect();
+        assert_eq!(rows.len(), 3, "{rendered:?}");
+        assert!(rows[0].ends_with("File not found: a.md"), "{rendered:?}");
+        assert_eq!(rows[1], "hint: quote it");
+        assert_eq!(rows[2], "failure: no-match");
+    }
 
     #[test]
     fn parse_compose_setter_rejects_empty_key() {

@@ -76,6 +76,7 @@ sniff runtime     # Native, WSL 1, or WSL 2 runtime
 sniff hardware    # Hardware information (CPU, GPU, memory, storage)
 sniff network     # Network information (interfaces, local IPs, WAN IP)
 sniff filesystem  # Filesystem information (git, languages, monorepo)
+sniff filesystem query <path>  # Processes using a file or directory tree
 ```
 
 **Discovery Tools:**
@@ -103,6 +104,17 @@ sniff language    # Programming language results
 sniff files       # Broad file association results
 sniff docs        # Repository markdown documents
 ```
+
+`sniff files --association image` shows image counts and their percentage of
+all files in the reported scope. It scans the owning package (excluding nested
+packages), or the base directory when that directory has no owning package.
+Adding `-v` to a filtered report lists every matching file — each entry a
+hyperlink to the actual file, resolved against the owning package root or
+base directory the scan used — without changing the scan, its percentages, or
+JSON output. Classification is capped at 10,000 files within that scope; text
+output labels a capped scan as incomplete, and JSON includes `truncated: true`
+and `limit: 10000`. A capped verbose list covers only the captured sample.
+See [file association reports](../docs/cli/files.md) for examples.
 
 **Blast Radius:**
 

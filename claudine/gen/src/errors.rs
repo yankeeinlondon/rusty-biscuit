@@ -26,6 +26,15 @@ pub enum GenError {
     #[error("failed to load Markdown at `{path}`: {message}")]
     Markdown { path: PathBuf, message: String },
 
+    #[error("cannot build the file-resolution context for area `{area}`: {source}")]
+    ResolutionContext {
+        area: PathBuf,
+        // Boxed to keep `GenError` under clippy's `result_large_err` limit on
+        // Windows, where `PathBuf` (here and inside the source) is wider.
+        #[source]
+        source: Box<darkmatter::markdown::compose::ContextBuildError>,
+    },
+
     #[error("no `{slug}` entry (matched on `slug:`) in roster `{path}`")]
     RosterEntryMissing { slug: String, path: PathBuf },
 

@@ -497,6 +497,12 @@ fn default_caption_for_syntax(syntax: ReferenceSyntax) -> String {
 mod tests {
     use super::*;
 
+    fn graph_options() -> crate::markdown::reference::types::ReferenceGraphOptions {
+        crate::markdown::reference::types::ReferenceGraphOptions::with_compose(&crate::markdown::compose::test_request(
+            crate::markdown::compose::ComposeOptions::new(),
+        ))
+    }
+
     #[test]
     fn inline_summary_empty() {
         let s = FileTreeInlineSummary::default();
@@ -676,7 +682,7 @@ mod tests {
         };
         use crate::markdown::reference::snapshot::PreparedHeadingSnapshot;
         use crate::markdown::reference::types::{
-            ReferenceGraph, ReferenceGraphNode, ReferenceGraphOptions, ReferenceInsertion,
+            ReferenceGraph, ReferenceGraphNode, ReferenceInsertion,
             ReferenceInsertionContext, ReferenceOrigin, ReferenceRecord, ReferenceSet,
             ReferenceTarget,
         };
@@ -785,7 +791,7 @@ mod tests {
 
         let graph = ReferenceGraph::from_build(
             &Markdown::new(""),
-            &ReferenceGraphOptions::default(),
+            &graph_options(),
             ReferenceGraphMode::Full,
             root,
             vec![child_a, child_b],
@@ -813,7 +819,7 @@ mod tests {
         };
         use crate::markdown::reference::snapshot::PreparedHeadingSnapshot;
         use crate::markdown::reference::types::{
-            ReferenceGraph, ReferenceGraphNode, ReferenceGraphOptions, ReferenceInsertion,
+            ReferenceGraph, ReferenceGraphNode, ReferenceInsertion,
             ReferenceInsertionContext, ReferenceOrigin, ReferenceRecord, ReferenceSet,
             ReferenceTarget,
         };
@@ -859,7 +865,7 @@ mod tests {
 
         let graph = ReferenceGraph::from_build(
             &Markdown::new(""),
-            &ReferenceGraphOptions::default(),
+            &graph_options(),
             ReferenceGraphMode::Full,
             root,
             vec![child],

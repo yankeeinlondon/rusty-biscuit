@@ -434,15 +434,16 @@ fn test_absent_and_empty_frontmatter_perform_no_schema_work() {
 
     // Positive control: the probe fires when frontmatter is present.
     let with_frontmatter = repo.write("docs/has-fm.md", "---\ntitle: Fine\n---\n\n# Body\n");
-    fixture
+    let output = fixture
         .command()
         .arg("clean")
         .arg(&with_frontmatter)
         .arg("--baseline-schema")
         .arg(&missing)
         .assert()
-        .failure()
-        .stderr(predicates::str::contains("does-not-exist.yaml"));
+        .failure();
+    let stderr = common::unwrapped(&String::from_utf8_lossy(&output.get_output().stderr));
+    assert!(stderr.contains("does-not-exist.yaml"), "{stderr}");
 
     // Counter proof: no frontmatter, and no empty frontmatter, do no schema
     // work at all — so the unloadable baseline is never reached.

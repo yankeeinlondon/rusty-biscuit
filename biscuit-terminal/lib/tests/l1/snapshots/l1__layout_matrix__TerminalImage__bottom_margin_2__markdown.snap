@@ -2,4 +2,4 @@
 source: biscuit-terminal/lib/tests/layout_matrix.rs
 expression: md
 ---
-![[Image: tiny.png]](tiny.png)
+![\[Image: tiny.png\]](tiny.png)

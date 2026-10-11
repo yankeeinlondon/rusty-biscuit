@@ -33,6 +33,7 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
 use lsp_server::{Connection, Message, Notification, Request, RequestId, Response};
+use darkmatter::markdown::compose::RequestSnapshot;
 use serde_json::{Value, json};
 
 /// Deadline every request/notification helper gives one protocol message.
@@ -165,6 +166,23 @@ impl<'workspace> LspFixture<'workspace> {
         Self::start_with_worker_epilogue_delay(workspace, Duration::ZERO)
     }
 
+    /// The snapshot every session gets unless a test supplies its own: the
+    /// workspace as request directory, a fixture `HOME` inside it, and an
+    /// empty environment, so no test reads the developer's home or variables.
+    pub fn fixture_snapshot(workspace: &LspWorkspace) -> RequestSnapshot {
+        RequestSnapshot::new(workspace.path())
+            .with_home(Some(workspace.path().join("home")))
+    }
+
+    /// Like [`LspFixture::start`], with the server's request snapshot (its
+    /// `HOME`, environment, and extra `@` roots) supplied by the test.
+    pub fn start_with_snapshot(
+        workspace: &'workspace LspWorkspace,
+        snapshot: RequestSnapshot,
+    ) -> Self {
+        Self::spawn(workspace, Duration::ZERO, snapshot)
+    }
+
     /// Like [`LspFixture::start`], but the worker waits `epilogue_delay` after
     /// `run_server` returns and before it records completion and publishes its
     /// outcome.
@@ -179,13 +197,21 @@ impl<'workspace> LspFixture<'workspace> {
         workspace: &'workspace LspWorkspace,
         epilogue_delay: Duration,
     ) -> Self {
+        Self::spawn(workspace, epilogue_delay, Self::fixture_snapshot(workspace))
+    }
+
+    fn spawn(
+        workspace: &'workspace LspWorkspace,
+        epilogue_delay: Duration,
+        snapshot: RequestSnapshot,
+    ) -> Self {
         let (server_side, client_side) = Connection::memory();
         let (outcome_tx, outcome_rx) = mpsc::channel();
         let observations = workspace.observations();
         let worker_observations = Arc::clone(&observations);
         let workspace_root: PathBuf = workspace.path().to_path_buf();
         let server_thread = std::thread::spawn(move || {
-            let result = dmls::run_server(server_side, dmls::RunOptions::default())
+            let result = dmls::run_server(server_side, dmls::RunOptions::new(snapshot))
                 .map_err(|error| error.to_string());
             if !epilogue_delay.is_zero() {
                 std::thread::sleep(epilogue_delay);

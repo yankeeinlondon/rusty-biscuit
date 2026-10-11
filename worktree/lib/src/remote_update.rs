@@ -212,7 +212,7 @@ pub fn run_attempt(request: AttemptRequest<'_>, seams: &Seams<'_>) -> AttemptEnd
         return AttemptEnd::WriteFailed;
     }
     // Both the refspec and the ls-remote pattern are built from the name.
-    if !is_valid_branch_name(main, &branch) {
+    if !is_valid_branch_name(&branch) {
         return recorder.finish(Outcome::CheckFailed { reason: CheckFailure::Other }, None);
     }
 
@@ -415,7 +415,8 @@ fn changed(main: &Path, origin: &str, branch: &str) -> Option<UnavailableReason>
 /// The object ID `refs/remotes/origin/<branch>` points at, if it exists.
 fn tracking_tip(main: &Path, branch: &str) -> Option<String> {
     let refname = format!("refs/remotes/origin/{branch}");
-    git_from(main, main, &["rev-parse", "--verify", "--quiet", &refname]).ok()
+    crate::git_metadata::reference_target(main, &refname)
+        .unwrap_or_else(|| git_from(main, main, &["rev-parse", "--verify", "--quiet", &refname]).ok())
 }
 
 #[cfg(test)]

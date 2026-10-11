@@ -77,6 +77,23 @@ fn test_about_kitty_plain_includes_setting_locators_without_config() {
 }
 
 #[test]
+fn test_about_kitty_plain_table_cells_show_values_without_escape_backslashes() {
+    let output = about_kitty_without_config()
+        .args(["about", "kitty", "--plain"])
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("$XDG_CONFIG_HOME/kitty/kitty.conf"),
+        "candidate path not shown verbatim:\n{stdout}"
+    );
+    assert!(!stdout.contains("\\_"), "escape backslash leaked:\n{stdout}");
+}
+
+#[test]
 fn test_about_alacritty_plain_includes_config_candidates_per_os_target() {
     assert_cmd::Command::cargo_bin("bt").unwrap()
         .env_remove("TERM")

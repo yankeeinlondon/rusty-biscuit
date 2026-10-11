@@ -62,10 +62,10 @@ pub fn run_sequence(
         Some(ledger) => {
             let shared = args.shared.clone();
             crate::budget::run_with_ledger(&ledger, &shared, || {
-                run_sequence_inner(args, verbose, startup_timings)
+                run_sequence_inner(args, verbose, startup_timings, crate::request::snapshot())
             })
         }
-        None => run_sequence_inner(args, verbose, startup_timings),
+        None => run_sequence_inner(args, verbose, startup_timings, crate::request::snapshot()),
     }
 }
 
@@ -233,6 +233,7 @@ fn run_sequence_inner(
     args: SequenceArgs,
     verbose: u8,
     startup_timings: Option<crate::perf::StartupTimings>,
+    request: &darkmatter::markdown::compose::RequestSnapshot,
 ) -> Result<i32> {
     let SequenceArgs {
         mut shared,
@@ -265,7 +266,7 @@ fn run_sequence_inner(
     let stderr_is_tty = std::io::stderr().is_terminal()
         || std::env::var_os("FORCE_COLOR").is_some();
 
-    let invocation = claudine::invocation_context::InvocationContext::capture()?;
+    let invocation = claudine::invocation_context::InvocationContext::capture(request)?;
     let file_resolution_context = invocation.launch_file_resolution_context().clone();
     let source = match resolve_sequence_source(&file, &file_resolution_context) {
         Ok(source) => source,
@@ -343,7 +344,7 @@ fn run_sequence_inner(
     let shell_runner = |command: &str| expand_shell_source(command, &shell_options);
     let source_options = composition::SequenceSourceOptions {
         shell_runner: Some(&shell_runner),
-        file_resolution_context: Some(&file_resolution_context),
+        file_resolution_context: &file_resolution_context,
     };
 
     let plan = composition::resolve_sequence_plan_with(&source, source_options)?.ok_or_else(
@@ -396,7 +397,12 @@ fn run_sequence_inner(
     // the repository, never through launch as another candidate.
     let launch_area_fallback = Some(invocation.launch_cwd().to_path_buf());
     let (source, set_overrides, dropped_optionals) =
-        composition::drop_invalid_optionals(source, set_overrides, launch_area_fallback.as_deref());
+        composition::drop_invalid_optionals(
+            source,
+            set_overrides,
+            launch_area_fallback.as_deref(),
+            &file_resolution_context,
+        );
     emit_dropped_optional_warnings(&dropped_optionals);
 
     let execution_options = SequenceExecutionOptions {
@@ -483,7 +489,7 @@ mod tests {
         }
         let md = Markdown::with_frontmatter(fm, "body");
         fs::write(&file, md.as_string()).unwrap();
-        claudine::composition::resolve_composition_source(file.to_string_lossy().as_ref())
+        claudine::composition::resolve_composition_source(file.to_string_lossy().as_ref(), crate::request::snapshot())
             .unwrap()
     }
 
@@ -544,7 +550,10 @@ mod tests {
             fail_fast: None,
             budget_ledger: None,
         };
-        let report = run_sequence_inner(args, 0, None).unwrap_err();
+        // Launched beside the document: the test process's directory is
+        // inside this checkout, whose capture would walk the whole repository.
+        let request = crate::request::snapshot().at_request_dir(dir.path());
+        let report = run_sequence_inner(args, 0, None, &request).unwrap_err();
         let err = report
             .downcast::<CompositionError>()
             .expect("report should carry CompositionError");

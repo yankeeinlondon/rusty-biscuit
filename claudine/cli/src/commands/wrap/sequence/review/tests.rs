@@ -17,8 +17,10 @@ use super::*;
 
 /// The sequence from the original report. The shipped file has 22 steps (the
 /// report counted 21 against an earlier revision), five of them `stage-N`
-/// shell steps.
-const REVIEW_LOOP: &str = include_str!("../../../../../../../prompts/review-loop.md");
+/// shell steps. A frozen copy of `prompts/review-loop.md`, intentionally not
+/// kept in step with the live prompt.
+const REVIEW_LOOP: &str =
+    include_str!("../../../../../tests/fixtures/frozen_prompts/prompts/review-loop.md");
 
 fn step(index: usize, name: &str, field: Option<ExecutableField>) -> SequenceStep {
     SequenceStep {
@@ -148,7 +150,7 @@ fn shipped_review_loop_hides_exactly_its_stage_steps() {
         original_text: REVIEW_LOOP.to_string(),
         markdown: REVIEW_LOOP.to_string().into(),
     };
-    let plan = resolve_sequence_plan(&source)
+    let plan = resolve_sequence_plan(&source, &crate::request::test_context())
         .expect("review-loop.md normalizes")
         .expect("review-loop.md declares a sequence");
     assert_eq!(plan.steps.len(), 22);

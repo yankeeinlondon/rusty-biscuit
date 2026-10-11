@@ -53,7 +53,7 @@ use super::{
     errors::SchemaError,
     simplified::parse_yaml_schema,
     simplified::to_json_schema,
-    validate::{ValidatorCache, build_validator},
+    validate::{ValidatorCache, build_structural_validator},
 };
 
 /// Process-wide cache for `example(...)` returns-target validators (F28).
@@ -61,7 +61,7 @@ use super::{
 /// A property carrying multiple `example(...)` references — or the same schema
 /// resolved more than once — otherwise rebuilds the identical target validator
 /// per reference per resolution. The returns-target is compiled with no
-/// file-reference anchors (`build_validator(target, None, None)` — the check is
+/// file-reference anchors (`build_structural_validator(target)` — the check is
 /// structural/type-level, never filesystem existence), so a cache keyed on the
 /// target JSON alone returns a byte-identical validator on a hit. Kept separate
 /// from the effective-schema and coercion caches so these small target schemas
@@ -179,7 +179,7 @@ pub fn validate_example_object(reference: &str, object: &Value) -> Result<(), Sc
     // serialized to a YAML string for the `yaml` content-format arm (Feature D).
     // The caller's object is never mutated.
     let coerced = coerce_frontmatter(envelope, object);
-    let validator = build_validator(envelope, None, None).map_err(|source| {
+    let validator = build_structural_validator(envelope).map_err(|source| {
         SchemaError::InvalidExample {
             reference: reference.to_string(),
             message: format!("example envelope failed to build a validator: {source}"),
@@ -196,7 +196,7 @@ pub fn validate_example_object(reference: &str, object: &Value) -> Result<(), Sc
     // inherited `parameter[]` shape (single-key maps, O-A4).
     if let Some(parameters) = object.get("parameters") {
         let target = parameters_target_json();
-        let validator = build_validator(target, None, None).map_err(|source| {
+        let validator = build_structural_validator(target).map_err(|source| {
             SchemaError::InvalidExample {
                 reference: reference.to_string(),
                 message: format!("parameters target failed to build a validator: {source}"),
@@ -249,7 +249,7 @@ pub fn validate_returns_against_target(
     // (Feature D). The caller's `object` is never mutated.
     let coerced = coerce_value_against_schema(target, returns);
     let validator = RETURNS_TARGET_VALIDATOR_CACHE
-        .validator_for(target, None)
+        .structural_validator_for(target)
         .map_err(|source| SchemaError::InvalidExample {
             reference: reference.to_string(),
             message: format!("annotated target schema failed to build a validator: {source}"),

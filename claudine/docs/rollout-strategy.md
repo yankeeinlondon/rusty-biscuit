@@ -200,7 +200,7 @@ own Scope section now records it:
 | R11 classification of `claudine.yaml` as always-on | **Superseded by step 5**, which makes it a trigger |
 | R11 row that moves `expression-functions.yaml` | **Superseded by step 7**, which replaces the catalog; moving it first means migrating it twice |
 | Named-type constraint inheritance and bare local type names | **Moves** to the Darkmatter schema groundwork ahead of step 8; see [conflict X2](#conflicts-between-specs) |
-| R10 (`no-shell-expansion`), R11 code-generated embedding, R12 (discovery scopes, `SCHEMA_DIR`, activation predicates, failure recovery), R7c (lifecycle error diagnostics in the editor), criteria 18 and 20–22, the `schema-trigger` rename, the AND/OR trigger grammar, the unified global entry point | **Parked** as an unscheduled Darkmatter feature. Revisit when step 10 is planned, because step 10 needs the same descriptor mechanism |
+| R10 (`no-shell-expansion`), R11 code-generated embedding, R12 (discovery scopes, `SCHEMAS_DIR`, activation predicates, failure recovery), R7c (lifecycle error diagnostics in the editor), criteria 18 and 20–22, the `schema-trigger` rename, the AND/OR trigger grammar, the unified global entry point | **Parked** as an unscheduled Darkmatter feature. Revisit when step 10 is planned, because step 10 needs the same descriptor mechanism |
 
 The alternative on record, in the schema-enhancements directory's
 `strict-mode-integration-design.md`, is to fold the core into step 7 and have

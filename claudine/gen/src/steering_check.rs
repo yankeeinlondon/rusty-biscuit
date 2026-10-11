@@ -3,6 +3,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
+use biscuit_file::FileResolutionContext;
+use darkmatter::markdown::compose::RequestSnapshot;
 use serde::Serialize;
 use serde_json::Value;
 
@@ -50,16 +52,22 @@ impl SteeringValidation {
 }
 
 /// Validate one schema-v4 steering document, including cross-record references
-/// and the case products that a shape schema cannot express.
-pub fn check_provider(area: &Path, slug: &str) -> Result<SteeringValidation, GenError> {
+/// and the case products that a shape schema cannot express. Each document's
+/// `$schema` resolves through `context` (the area's context from
+/// [`inputs::area_resolution_context`]).
+pub fn check_provider(
+    area: &Path,
+    slug: &str,
+    context: &FileResolutionContext,
+) -> Result<SteeringValidation, GenError> {
     let path = area.join(format!("docs/research/{TOPIC}/{slug}.md"));
-    let document = inputs::load_validated_frontmatter(&path)?;
+    let document = inputs::load_validated_frontmatter(&path, context)?;
     let mut result = evaluate(slug, &document);
     let execution_path = area.join(format!(
         "docs/research/non-interactive-sessions/{slug}.md"
     ));
     if execution_path.is_file() {
-        let execution = inputs::load_validated_frontmatter(&execution_path)?;
+        let execution = inputs::load_validated_frontmatter(&execution_path, context)?;
         validate_execution_references(slug, &execution, &document, &mut result.errors);
         // Activation applicability needs the typed projection, which is only
         // meaningful once the relational checks above hold.
@@ -79,8 +87,9 @@ pub fn check_provider(area: &Path, slug: &str) -> Result<SteeringValidation, Gen
 }
 
 /// Validate every active research provider in roster order, plus policy
-/// entries naming a provider outside that roster.
-pub fn check_fleet(area: &Path) -> Result<Vec<SteeringValidation>, GenError> {
+/// entries naming a provider outside that roster. Every document resolves
+/// through one context built from `snapshot` rebased at the area.
+pub fn check_fleet(area: &Path, snapshot: &RequestSnapshot) -> Result<Vec<SteeringValidation>, GenError> {
     let active = inputs::roster_active_slugs(area)?;
     let orphans = steering_catalog::orphan_policy_errors(
         &active,
@@ -89,7 +98,8 @@ pub fn check_fleet(area: &Path) -> Result<Vec<SteeringValidation>, GenError> {
     if !orphans.is_empty() {
         return Err(GenError::SteeringActivationInvalid { errors: orphans.join("\n") });
     }
-    active.iter().map(|slug| check_provider(area, slug)).collect()
+    let context = inputs::area_resolution_context(area, snapshot)?;
+    active.iter().map(|slug| check_provider(area, slug, &context)).collect()
 }
 
 fn evaluate(slug: &str, document: &Value) -> SteeringValidation {

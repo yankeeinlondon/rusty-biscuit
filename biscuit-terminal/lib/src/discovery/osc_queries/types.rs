@@ -36,6 +36,10 @@ pub enum OscQueryError {
 }
 
 /// Default timeout for an actual terminal OSC round trip.
+///
+/// This bounds an exchange the terminal has started answering. A local
+/// terminal that sends nothing at all is given up on after a much shorter
+/// silence budget (`docs/discovery/terminal-queries.md`).
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// RGB color with 8-bit components.

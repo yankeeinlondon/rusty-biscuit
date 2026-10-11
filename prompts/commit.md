@@ -29,11 +29,10 @@ initialize:
               - skip
 start:
     message: |-
-        🗳️  starting **git commits** in {{ ctx.repo }} -> **{{ctx.branch}}** (_<dim>using </dim>{{ctx.agent}}/{{ctx.model}}_)
-        {{ ctx.is_monorepo ? '&nbsp;&nbsp;**packages impacted:** ' + as_unordered_list(ctx.dirty_packages) : '' }}
+        🗳️  starting **git commits** in {{ ctx.repo }} -> **{{ctx.branch}}** (_<dim>using </dim>{{ctx.agent}}/{{ctx.model}}_). {{ ctx.is_monorepo ? 'Packages impacted:\n\n' + as_unordered_list(ctx.dirty_packages) : '' }}
 success:
     message: |-
-        🗳️  staged files in {{ctx.area || ctx.repo }}'s **{{ctx.branch}}** branch, have been **committed to git** (_but not pushed_)
+        🗳️  staged files in {{ctx.area || ctx.repo }}'s **{{ctx.branch}}** branch, have been **committed to git**
 failure:
     message: |-
         💥  the staged files in {{ctx.area || ctx.repo }}'s **{{ctx.branch}} branch failed to commit as requested! The error was:
@@ -139,6 +138,8 @@ In addition to the best practices above, the repository keeps a short journal of
 
 Step 5 says when, and how rarely, an entry may be added.
 
+::file "./_headless-orchestration.md"
+
 ## Task
 
 Your task is to:
@@ -153,7 +154,6 @@ Your task is to:
 - this context may help us contextualize the changes of some or all of the staged files you are responsible for
 
 ::end-block
-
 2.  Look for files that have been _moved_ and make sure they are captured into groups first so that we can correctly commit these commits correctly
 3.  Then organize the remaining staged files into **semantic groups**
     - a group will have one or more _staged files_ associated with it

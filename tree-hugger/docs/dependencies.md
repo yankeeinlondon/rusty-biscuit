@@ -28,7 +28,7 @@ adapter and adds no parser dependency to the shipped binary.
 `tree-hugger-cli` depends on the workspace `renderable` crate (path
 `../../renderable`, default features) for the render-tree node types
 (`renderable::tree::{RenderNode, NodeKind}`) that biscuit-terminal's
-`Prose::to_render_nodes` returns. The Markdown export and plain Prose export
+`InlineProse::to_render_nodes` returns. The Markdown export and plain Prose export
 read the listing's generated Prose markup through those nodes instead of
 scanning text. biscuit-terminal already depends on `renderable`, so the
 build graph gains no new crate; the repository-wide `renderable` Markdown

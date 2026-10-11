@@ -56,6 +56,10 @@ name = "level2_graph_in_kitty"
 required-features = ["terminal-tests"]
 
 [[test]]
+name = "level2_list_perf"
+required-features = ["terminal-tests"]
+
+[[test]]
 name = "level2_list_verbose"
 required-features = ["terminal-tests"]
 

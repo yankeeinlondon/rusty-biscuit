@@ -54,6 +54,8 @@ conducted to determine how well the current implementation meets the requirement
 
 ::file "../_test-tiers.md"
 
+::file "../_headless-orchestration.md"
+
 ## Task
 
 Your task is to implement phase {{phase}} of the plan found in '@{{plan}}'.

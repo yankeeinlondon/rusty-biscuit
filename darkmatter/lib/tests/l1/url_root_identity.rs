@@ -62,7 +62,7 @@ async fn a_url_root_composes_from_the_fetched_text_without_refetching_it() {
             ..Default::default()
         });
     let document = Markdown::from(fetched.as_str());
-    let (composed, _) = tokio::task::spawn_blocking(move || document.compose_with(options))
+    let (composed, _) = tokio::task::spawn_blocking(move || document.compose_with(&crate::request_support::request(options)))
         .await
         .unwrap()
         .expect("the URL root composes");

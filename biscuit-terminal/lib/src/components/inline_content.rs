@@ -1,6 +1,6 @@
 use std::any::Any;
 
-use crate::components::prose::Prose;
+use crate::components::prose::InlineProse;
 use crate::components::renderable::{RenderableTerminalContent, TerminalRenderable};
 use crate::components::text_block::TextBlock;
 use crate::terminal::Terminal;
@@ -24,8 +24,9 @@ use crate::utils::layout::Layout;
 /// block box, so `Layout` box properties (`margin`, `padding`, `width`,
 /// `max_width`, `alignment`) are **N/A** — the containing block owns the box.
 /// `Style::color` and `Style::emphasis` flow through child components such as
-/// [`Prose`]. `Style::background` may be honored by an inline `Span` child,
-/// painting only the inline content. `Style::border` is N/A.
+/// [`InlineProse`], the styled-text component for content inside a line.
+/// `Style::background` may be honored by an inline `Span` child, painting
+/// only the inline content. `Style::border` is N/A.
 ///
 /// ## Examples
 ///
@@ -35,7 +36,7 @@ use crate::utils::layout::Layout;
 /// // Owned builder chain (no mut needed)
 /// let inline = InlineContent::default()
 ///     .with("Hello, ")
-///     .with(Prose::new("<b>world</b>"));
+///     .with(InlineProse::new("<b>world</b>"));
 /// ```
 ///
 /// ```
@@ -43,7 +44,7 @@ use crate::utils::layout::Layout;
 ///
 /// // Mutable push chain
 /// let mut inline = InlineContent::default();
-/// inline.push("foo").push(Prose::new("<b>bar</b>"));
+/// inline.push("foo").push(InlineProse::new("<b>bar</b>"));
 /// ```
 ///
 /// ```
@@ -52,7 +53,7 @@ use crate::utils::layout::Layout;
 /// // From a vec of pre-converted items
 /// let inline = InlineContent::new(vec![
 ///     RenderableTerminalContent::from("foo"),
-///     RenderableTerminalContent::from(Prose::new("<b>bar</b>")),
+///     RenderableTerminalContent::from(InlineProse::new("<b>bar</b>")),
 /// ]);
 /// ```
 ///
@@ -167,8 +168,8 @@ impl From<RenderableTerminalContent> for InlineContent {
     }
 }
 
-impl From<Prose> for InlineContent {
-    fn from(value: Prose) -> Self {
+impl From<InlineProse> for InlineContent {
+    fn from(value: InlineProse) -> Self {
         InlineContent {
             parts: vec![RenderableTerminalContent::from(value)],
             separator: None,
@@ -201,7 +202,7 @@ impl InlineContent {
     ///
     /// let inline = InlineContent::default()
     ///     .with("Hello, ")
-    ///     .with(Prose::new("<b>world</b>"));
+    ///     .with(InlineProse::new("<b>world</b>"));
     /// ```
     pub fn with<T: Into<RenderableTerminalContent>>(mut self, item: T) -> Self {
         self.parts.push(item.into());
@@ -248,8 +249,8 @@ impl InlineContent {
         self
     }
 
-    /// Appends a [`Prose`] component.
-    pub fn add_prose(&mut self, content: Prose) -> &mut Self {
+    /// Appends an [`InlineProse`] component.
+    pub fn add_inline_prose(&mut self, content: InlineProse) -> &mut Self {
         self.parts.push(RenderableTerminalContent::from(content));
         self
     }
@@ -430,7 +431,7 @@ mod tests {
 
     #[test]
     fn test_from_renderable_content_component_variant() {
-        let content = RenderableTerminalContent::from(Prose::new("component"));
+        let content = RenderableTerminalContent::from(InlineProse::new("component"));
         let inline = InlineContent::from(content);
         assert_eq!(inline.len(), 1);
         assert!(inline.render_optimistic(Some(80)).contains("component"));
@@ -438,7 +439,7 @@ mod tests {
 
     #[test]
     fn test_from_prose() {
-        let inline = InlineContent::from(Prose::new("styled"));
+        let inline = InlineContent::from(InlineProse::new("styled"));
         assert_eq!(inline.len(), 1);
         assert!(inline.render_optimistic(Some(80)).contains("styled"));
     }
@@ -479,7 +480,7 @@ mod tests {
     fn test_with_mixed_types() {
         let inline = InlineContent::default()
             .with("text ")
-            .with(Prose::new("styled"));
+            .with(InlineProse::new("styled"));
         let output = inline.render_optimistic(Some(80));
         assert!(output.starts_with("text "));
         assert!(output.contains("styled"));
@@ -575,8 +576,8 @@ mod tests {
     fn test_separator_with_components() {
         let inline = InlineContent::default()
             .with_separator(" + ")
-            .with(Prose::new("alpha"))
-            .with(Prose::new("beta"));
+            .with(InlineProse::new("alpha"))
+            .with(InlineProse::new("beta"));
         let output = inline.render_optimistic(Some(80));
         assert!(output.contains("alpha"));
         assert!(output.contains(" + "));
@@ -588,7 +589,7 @@ mod tests {
         let inline = InlineContent::default()
             .with_separator(": ")
             .with("label")
-            .with(Prose::new("value"));
+            .with(InlineProse::new("value"));
         let output = inline.render_optimistic(Some(80));
         assert!(output.starts_with("label: "));
         assert!(output.contains("value"));
@@ -637,7 +638,7 @@ mod tests {
     #[test]
     fn test_push_mixed_types() {
         let mut inline = InlineContent::default();
-        inline.push("text ").push(Prose::new("styled"));
+        inline.push("text ").push(InlineProse::new("styled"));
         let output = inline.render_optimistic(Some(80));
         assert!(output.starts_with("text "));
         assert!(output.contains("styled"));
@@ -674,7 +675,7 @@ mod tests {
     #[test]
     fn test_add_prose() {
         let mut inline = InlineContent::default();
-        inline.add_text("prefix: ").add_prose(Prose::new("content"));
+        inline.add_text("prefix: ").add_inline_prose(InlineProse::new("content"));
         let output = inline.render_optimistic(Some(80));
         assert!(output.starts_with("prefix: "));
         assert!(output.contains("content"));
@@ -696,7 +697,7 @@ mod tests {
         let mut inline = InlineContent::default();
         inline
             .add_text("plain ")
-            .add_prose(Prose::new("prose "))
+            .add_inline_prose(InlineProse::new("prose "))
             .add_text_block(TextBlock::new("block"));
         let output = inline.render_optimistic(Some(80));
         assert!(output.starts_with("plain "));
@@ -750,7 +751,7 @@ mod tests {
     fn test_no_newlines_between_mixed_items() {
         let inline = InlineContent::default()
             .with("text")
-            .with(Prose::new("prose"))
+            .with(InlineProse::new("prose"))
             .with(TextBlock::new("block"));
         let output = inline.render_optimistic(Some(80));
         assert!(!output.contains('\n'));
@@ -795,7 +796,7 @@ mod tests {
     fn test_len_from_single_item() {
         assert_eq!(InlineContent::from("x").len(), 1);
         assert_eq!(InlineContent::from(String::from("x")).len(), 1);
-        assert_eq!(InlineContent::from(Prose::new("x")).len(), 1);
+        assert_eq!(InlineContent::from(InlineProse::new("x")).len(), 1);
         assert_eq!(InlineContent::from(TextBlock::new("x")).len(), 1);
         assert_eq!(
             InlineContent::from(RenderableTerminalContent::from("x")).len(),
@@ -998,7 +999,7 @@ mod tests {
     fn test_as_any_wrong_type() {
         let inline = InlineContent::from("test");
         let any_ref = inline.as_any();
-        assert!(any_ref.downcast_ref::<Prose>().is_none());
+        assert!(any_ref.downcast_ref::<InlineProse>().is_none());
     }
 
     #[test]
@@ -1123,7 +1124,7 @@ mod tests {
     fn test_prose_bold_renders_inline() {
         let inline = InlineContent::default()
             .with("normal ")
-            .with(Prose::new("<bold>bold</bold>"))
+            .with(InlineProse::new("<bold>bold</bold>"))
             .with(" normal");
         let output = inline.render_optimistic(Some(80));
         // Bold wraps with escape codes: \x1b[1m ... \x1b[22m
@@ -1136,7 +1137,7 @@ mod tests {
     #[test]
     fn test_prose_html_tags_render_inline() {
         let inline = InlineContent::default()
-            .with(Prose::new("<red>error</red>"))
+            .with(InlineProse::new("<red>error</red>"))
             .with(": something broke");
         let output = inline.render_optimistic(Some(80));
         assert!(output.contains("error"));
@@ -1146,9 +1147,9 @@ mod tests {
     #[test]
     fn test_multiple_styled_prose_inline() {
         let inline = InlineContent::default()
-            .with(Prose::new("<bold>key</bold>"))
+            .with(InlineProse::new("<bold>key</bold>"))
             .with(": ")
-            .with(Prose::new("<dim>value</dim>"));
+            .with(InlineProse::new("<dim>value</dim>"));
         let output = inline.render_optimistic(Some(80));
         assert!(output.contains("key"));
         assert!(output.contains(": "));
@@ -1220,8 +1221,8 @@ mod tests {
     fn test_separator_with_add_prose() {
         let mut inline = InlineContent::default().with_separator(" ");
         inline
-            .add_prose(Prose::new("hello"))
-            .add_prose(Prose::new("world"));
+            .add_inline_prose(InlineProse::new("hello"))
+            .add_inline_prose(InlineProse::new("world"));
         let output = inline.render_optimistic(Some(80));
         assert!(output.contains("hello"));
         assert!(output.contains("world"));

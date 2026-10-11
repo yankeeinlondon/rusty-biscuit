@@ -16,7 +16,7 @@ Text Replacement allows us to find/replace a string pairing in the document body
 
     > **Note:** if `replace` is defined but is NOT a dictionary, it is simply ignored from a Text Replacement standpoint
 
-- Calling `.compose()` on a Markdown struct kicks off Markdown composition features
+- Calling `.compose_with(&request)` on a Markdown struct kicks off Markdown composition features
     - this has nothing to do with exporting to a target output like HTML, terminal, AST, etc.
     - this is the trigger which will update the content based on the Darkmatter DSL found on the page
 - When we transform content with the `replace` property a dictionary we will find all _keys_ in the dictionary and replace them with the _value_ for the given _key_.

@@ -1,13 +1,9 @@
-//! Color name lookups, href resolution, and the [`ProseStyle`] tag-intent
-//! helper.
+//! Color name lookups and the [`ProseStyle`] tag-intent helper.
 //!
-//! Resolves bracketed-tag color names to [`renderable::color`] values, an
-//! href to an absolute reference, and a tag name to the [`ProseStyle`] intent
-//! the parser lowers into a shared render-tree node. No terminal escapes are
+//! Resolves bracketed-tag color names to [`renderable::color`] values and a
+//! tag name to the [`ProseStyle`] intent the parser lowers into a shared
+//! render-tree node. No terminal escapes are
 //! emitted here — the shared tree renderers own all SGR lowering.
-
-use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use crate::utils::color::{Tailwind, WebColor};
 
@@ -63,133 +59,6 @@ fn parse_hex_rgb(hex: &str) -> Option<(u8, u8, u8)> {
     let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
 
     Some((r, g, b))
-}
-
-/// Resolve an href value, handling relative file paths.
-///
-/// Path resolution rules:
-/// - URLs (http://, https://, etc.) are returned as-is
-/// - Absolute paths (/path/to/file) are returned as file:// URLs
-/// - Paths starting with ./ are resolved relative to CWD
-/// - Other paths (no ./ prefix) are resolved relative to:
-///   1. If in a git repo monorepo: package root containing CWD
-///   2. If in a git repo: repo root
-///   3. Otherwise: CWD (fallback)
-pub(super) fn resolve_href(href: &str) -> String {
-    // Empty href
-    if href.is_empty() {
-        return String::new();
-    }
-
-    // URLs pass through unchanged
-    if href.starts_with("http://")
-        || href.starts_with("https://")
-        || href.starts_with("file://")
-        || href.starts_with("mailto:")
-    {
-        return href.to_string();
-    }
-
-    // Absolute paths become file:// URLs
-    if href.starts_with('/') {
-        return format!("file://{}", href);
-    }
-
-    // Relative paths starting with ./ are relative to CWD
-    if let Some(relative_path) = href.strip_prefix("./") {
-        if let Ok(cwd) = std::env::current_dir() {
-            let resolved = cwd.join(relative_path);
-            if let Ok(canonical) = resolved.canonicalize() {
-                return format!("file://{}", canonical.display());
-            }
-            // Fall back to non-canonical path
-            return format!("file://{}", resolved.display());
-        }
-        // CWD unavailable, return as-is
-        return href.to_string();
-    }
-
-    // Other relative paths: resolve from git root (or package root in monorepo)
-    if let Some(base) = find_git_relative_base() {
-        let resolved = base.join(href);
-        if let Ok(canonical) = resolved.canonicalize() {
-            return format!("file://{}", canonical.display());
-        }
-        // Fall back to non-canonical path if file doesn't exist yet
-        return format!("file://{}", resolved.display());
-    }
-
-    // No git root found, fall back to CWD
-    if let Ok(cwd) = std::env::current_dir() {
-        let resolved = cwd.join(href);
-        return format!("file://{}", resolved.display());
-    }
-
-    // Last resort: return as-is
-    href.to_string()
-}
-
-/// Find the base directory for resolving relative paths without ./ prefix.
-fn find_git_relative_base() -> Option<PathBuf> {
-    let cwd = std::env::current_dir().ok()?;
-    let git_root = find_git_root(&cwd)?;
-
-    if let Some(package_root) = find_package_root(&cwd, &git_root)
-        && package_root != git_root
-    {
-        return Some(package_root);
-    }
-
-    Some(git_root)
-}
-
-/// Find the git repository root starting from the given path.
-fn find_git_root(start: &Path) -> Option<PathBuf> {
-    let output = Command::new("git")
-        .args(["rev-parse", "--show-toplevel"])
-        .current_dir(start)
-        .output()
-        .ok()?;
-
-    if output.status.success() {
-        let path_str = String::from_utf8(output.stdout).ok()?;
-        return Some(PathBuf::from(path_str.trim()));
-    }
-
-    let mut current = start.to_path_buf();
-    loop {
-        if current.join(".git").exists() {
-            return Some(current);
-        }
-        if !current.pop() {
-            return None;
-        }
-    }
-}
-
-/// Find the nearest package root (directory with Cargo.toml) between start and repo root.
-fn find_package_root(start: &Path, git_root: &Path) -> Option<PathBuf> {
-    let mut current = start.to_path_buf();
-
-    loop {
-        let cargo_toml = current.join("Cargo.toml");
-        if cargo_toml.exists()
-            && let Ok(contents) = std::fs::read_to_string(&cargo_toml)
-            && contents.contains("[package]")
-        {
-            return Some(current);
-        }
-
-        if current == git_root || !current.starts_with(git_root) {
-            break;
-        }
-
-        if !current.pop() {
-            break;
-        }
-    }
-
-    None
 }
 
 /// Compare two strings case-insensitively, skipping hyphens in `input`.

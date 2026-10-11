@@ -43,7 +43,7 @@ use std::time::{Duration, Instant};
 use test_toolkit::{Backend, Level, require_level};
 
 use crate::common;
-use common::{TestWorkspace, augmented_path, clear_no_color, write_executable};
+use common::{TestWorkspace, augmented_path, sh_quote, write_executable};
 
 /// A document whose body holds one unapproved `::shell` command, so composing
 /// it surfaces the approval prompt. The `echo` marker also lets the
@@ -157,20 +157,24 @@ fn prompt_region(frame: &CapturedFrame) -> (Vec<String>, Vec<String>) {
 /// extracts.
 fn capture_prompt_in_mode(harness: &mut TmuxHarness, staged: &Staged, dry_run: bool) -> CapturedFrame {
     // This fixture asserts a *colored* surface under `FORCE_COLOR=1`, which an
-    // ambient `NO_COLOR` out-votes — see `common::clear_no_color`.
-    clear_no_color(harness);
+    // ambient `NO_COLOR` out-votes — see `common::clear_no_color`. The unset,
+    // the clear, and the `cd` share one command line so the pane is waited on
+    // once rather than three times.
 
     let home = staged.workspace.path().to_string_lossy().into_owned();
     let path = augmented_path(&staged.bin_dir);
     let path = path.to_string_lossy().into_owned();
     let claudine = cargo_bin("claudine").display().to_string();
 
-    harness.send_text(b"clear\n").expect("clear pane");
-    let _ = biscuit_test_harness::wait_for_prompt(harness);
-
     harness
-        .send_text(format!("cd {}\n", staged.workspace.path().display()).as_bytes())
-        .expect("cd into workspace");
+        .send_text(
+            format!(
+                "unset NO_COLOR; clear; cd {}\n",
+                sh_quote(&staged.workspace.path().display().to_string())
+            )
+            .as_bytes(),
+        )
+        .expect("prepare the pane");
     let _ = biscuit_test_harness::wait_for_prompt(harness);
 
     let mut cmd = format!("{claudine} compose --goose");
@@ -218,6 +222,11 @@ fn level2_dry_run_approval_prompt_matches_normal_mode_in_tmux() {
     let staged = stage();
 
     let normal = capture_prompt_in_mode(&mut harness, &staged, false);
+    // A fresh pane prevents the second capture from matching the first
+    // invocation's approval prompt while its clear command is still queued.
+    drop(harness);
+    let mut harness = TmuxHarness::new();
+    harness.spawn_shell().expect("isolated dry-run approval pane");
     let dry_run = capture_prompt_in_mode(&mut harness, &staged, true);
 
     let (normal_plain, _) = prompt_region(&normal);

@@ -12,7 +12,7 @@
 
 use std::io::{self, Write};
 
-use biscuit_terminal::prelude::Prose;
+use biscuit_terminal::prelude::InlineProse;
 use renderable::tree::{NodeKind, RenderNode};
 
 use crate::render::{Layout, Row, neutralized};
@@ -105,7 +105,8 @@ impl Layout for MarkdownLayout<'_> {
 /// One line of generated Prose markup as CommonMark inline content.
 fn inline(markup: &str) -> String {
     let mut line = Escaper::default();
-    line.nodes(&Prose::new(markup).to_render_nodes());
+    // Inline parsing normalizes carriage returns; expose controls before parsing.
+    line.nodes(&InlineProse::new(neutralized(markup)).to_render_nodes());
     let mut text = line.text;
     // Trailing spaces would form a hard break or be trimmed from a heading.
     let kept = text.trim_end_matches(' ').len();

@@ -26,13 +26,15 @@ use super::{
 use crate::markdown::compose::expression::ResolutionContext;
 use crate::markdown::compose::frontmatter_interpolation::FrontmatterSeedState;
 use crate::markdown::compose::preflight::collect::resolve_executable;
+use crate::markdown::compose::shell_expansion::alias::AliasResolutions;
 use crate::markdown::compose::shell_expansion::policy::normalize_command;
+use crate::markdown::compose::shell_expansion::probe::login_shell;
 use crate::markdown::compose::shell_expansion::store::resolve_policy_paths;
 use crate::markdown::compose::shell_expansion::tokenize::{parse_pipeline, tokenize};
 use crate::markdown::compose::shell_expansion::types::{
     ShellExpansionError, ShellExpansionRuntime, ShellPipeline,
 };
-use crate::markdown::compose::{ComposeContext, ComposeOptions};
+use crate::markdown::compose::ComposeContext;
 
 /// Checks an authored whole-value `$( … )` without resolving or running it.
 ///
@@ -70,6 +72,11 @@ pub struct ResolvedShellValue {
     directive: FrontmatterShellDirective,
     then_pipeline: Option<ShellPipeline>,
     else_pipeline: Option<ShellPipeline>,
+    /// The context's login shell, which [`Self::commands`] asks to expand an
+    /// alias as execution does.
+    login_shell: Option<String>,
+    /// The context's alias lookup record, shared with the rest of the run.
+    alias_resolutions: AliasResolutions,
 }
 
 impl PartialEq for ResolvedShellValue {
@@ -104,6 +111,7 @@ impl ResolvedShellValue {
         resolution: ResolutionContext,
     ) -> Result<Self, ShellExpansionError> {
         let ctx = value_context(key, authored);
+        let alias_resolutions = resolution.alias_resolutions.clone();
         let directive = parse_shell_value(resolved, key, Some(authored), &ctx)?
             .ok_or_else(|| not_a_shell_value(key, &ctx))?;
         let (mut then_pipeline, mut else_pipeline) = (None, None);
@@ -126,6 +134,8 @@ impl ResolvedShellValue {
             directive,
             then_pipeline,
             else_pipeline,
+            login_shell: login_shell(context.env()).map(str::to_string),
+            alias_resolutions,
         })
     }
 
@@ -152,8 +162,12 @@ impl ResolvedShellValue {
         let mut commands = Vec::new();
         for pipeline in self.pipelines() {
             for action in &pipeline.actions {
-                let (executable, args) =
-                    resolve_executable(&action.command.executable, &action.command.args);
+                let (executable, args) = resolve_executable(
+                    &self.alias_resolutions,
+                    self.login_shell.as_deref(),
+                    &action.command.executable,
+                    &action.command.args,
+                );
                 let normalized = normalize_command(&executable, &args);
                 if !commands.contains(&normalized) {
                     commands.push(normalized);
@@ -181,7 +195,7 @@ impl ResolvedShellValue {
 /// All values read the same `state`; none sees another's result. The values
 /// share one command cache created for this call, so a command two of them
 /// name runs once, and nothing is reused from an earlier call. Commands run
-/// under `options`' shell settings and must be in its pre-approved set when it
+/// under the request's shell settings and must be in its pre-approved set when it
 /// has one; without one, shell policy and the approval handler decide as they
 /// do for any frontmatter value.
 ///
@@ -194,10 +208,11 @@ impl ResolvedShellValue {
 pub fn execute_resolved_shell_values(
     values: &[&ResolvedShellValue],
     state: HashMap<String, Value>,
-    options: &ComposeOptions,
+    request: &crate::markdown::compose::ComposeRequest,
 ) -> Result<Vec<(String, Value)>, ShellExpansionError> {
+    let options = request;
     let shell_opts = options.shell_options();
-    let policy_paths = resolve_policy_paths(&shell_opts, &options.source)?;
+    let policy_paths = resolve_policy_paths(&shell_opts, &options.source, options.resolution_context())?;
     let mut shell = ShellExpansionRuntime::new();
     shell.ensure_loaded(&policy_paths)?;
     let resolution = options.frontmatter_resolution_context();

@@ -1,5 +1,5 @@
 ---
-source: darkmatter/lib/tests/error_snapshots/transclusion.rs
+source: darkmatter/lib/tests/l1/error_snapshots/transclusion.rs
 expression: out
 ---
 ⤫ TransclusionError: missing source context
@@ -8,4 +8,4 @@ expression: out
 ┃ 
 ┃ Note: Relative transclusions require a file-backed source.
 ┃ 
-┃ Try using an absolute path or `@/` repo-root reference.
+┃ Try using an absolute path or @/ repo-root reference.

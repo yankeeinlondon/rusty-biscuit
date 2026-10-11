@@ -34,31 +34,10 @@ use super::normalize::normalize_plan;
 /// directory; `@`/`&`/`^`/`vault:`/`~`/absolute keep their usual meanings. The
 /// reference is authored inside the composition source, so the source
 /// document's directory is the base and the launch directory is never a
-/// fallback here.
-pub fn resolve_sequence_reference(raw: &str, source_path: &Path) -> Result<PathBuf, CompositionError> {
-    let file_ref =
-        FileReference::new(raw).map_err(|e| CompositionError::SequenceExternalLoad {
-            context: format!("`{raw}`"),
-            source: e.into(),
-        })?;
-
-    let base_dir = source_path.parent().unwrap_or_else(|| Path::new("."));
-    let ctx = build_sequence_resolution_context(&file_ref, base_dir, source_path);
-
-    file_ref
-        .resolve_in_context(&ctx)
-        .map_err(|e| CompositionError::SequenceExternalLoad {
-            context: format!("`{raw}`"),
-            source: e.into(),
-        })?
-        .ok_or_else(|| CompositionError::SequenceExternalLoad {
-            context: format!("`{raw}`"),
-            source: SequenceLoadCause::NotFound,
-        })
-}
-
-/// Snapshot-preserving external sequence resolver.
-pub fn resolve_sequence_reference_in_context(
+/// fallback here. The source's context is derived from the request's
+/// (`for_source`), so repository anchors come from the request, not from a
+/// fresh discovery.
+pub fn resolve_sequence_reference(
     raw: &str,
     source_path: &Path,
     request_context: &FileResolutionContext,
@@ -77,38 +56,10 @@ pub fn resolve_sequence_reference_in_context(
         })?
         .ok_or_else(|| CompositionError::SequenceExternalLoad {
             context: format!("`{raw}`"),
-            source: SequenceLoadCause::NotFound,
+            source: SequenceLoadCause::NotFound {
+                glob_hint: biscuit_file::ResolutionFailure::NoMatch.glob_hint(raw),
+            },
         })
-}
-
-/// Capture the request-scoped resolution anchors for an external sequence
-/// reference authored inside a composition source.
-///
-/// The worktree root and package area are discovered once here (via `sniff`)
-/// and passed in, so `FileReference` resolution never re-probes repository
-/// topology per candidate.
-fn build_sequence_resolution_context(
-    file_ref: &FileReference,
-    base_dir: &Path,
-    source_path: &Path,
-) -> FileResolutionContext {
-    let mut ctx = FileResolutionContext::new(base_dir).with_source_path(source_path);
-
-    let Ok(Some(repo_root)) = sniff::filesystem::git::repo_root(base_dir) else {
-        return ctx;
-    };
-    if !base_dir.starts_with(&repo_root) {
-        return ctx;
-    }
-    ctx = ctx.with_repository_root(repo_root.clone());
-
-    if file_ref.class().kind == biscuit_file::FileReferenceKind::RepositoryScoped
-        && let Ok(Some(repo)) = sniff::filesystem::detect_repo(&repo_root)
-        && let Some(area) = repo.package_area_label_for_dir(base_dir)
-    {
-        ctx = ctx.with_package_area(repo_root.join(area.as_ref()));
-    }
-    ctx
 }
 
 /// Load a referenced sequence source and normalize it into a plan.
@@ -123,6 +74,7 @@ pub fn load_referenced_sequence(
     invocation_path: &Path,
     frontmatter: &Map<String, Value>,
     document_fail_fast: bool,
+    file_resolution_context: &FileResolutionContext,
 ) -> Result<SequencePlan, CompositionError> {
     let format = SourceFormat::for_path(path);
     let loaded = data::load_document(path)?;
@@ -143,7 +95,13 @@ pub fn load_referenced_sequence(
     let items = select_items(&document, reference, formal)?;
 
     let items = match &reference.operator {
-        Some(operator) => apply_source_operator(items, operator, frontmatter, invocation_path)?,
+        Some(operator) => apply_source_operator(
+            items,
+            operator,
+            frontmatter,
+            invocation_path,
+            file_resolution_context,
+        )?,
         None => items,
     };
 
@@ -159,6 +117,7 @@ pub fn load_referenced_sequence(
             path,
             frontmatter,
             document_fail_fast,
+            file_resolution_context,
         )?;
         // The steps are the referenced document's own `sequence:` list, read
         // without an offset or operator, so its authored key order applies
@@ -242,10 +201,11 @@ fn apply_source_operator(
     operator: &SourceOperator,
     frontmatter: &Map<String, Value>,
     invocation_path: &Path,
+    file_resolution_context: &FileResolutionContext,
 ) -> Result<Vec<Value>, CompositionError> {
-    let base_dir = invocation_path.parent().unwrap_or_else(|| Path::new("."));
     data::apply_operator(items, operator, &|expression, item| {
-        let lookup = SourceExpressionLookup::new(frontmatter, base_dir).with_item(item);
+        let lookup = SourceExpressionLookup::new(frontmatter, file_resolution_context, invocation_path)
+            .with_item(item);
         super::expr::evaluate_whole(expression, &lookup)
     })
 }

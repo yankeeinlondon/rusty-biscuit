@@ -64,16 +64,19 @@ pub(crate) fn materialize_passthrough_harness_seed(
     let context = document_epoch.capture_launch_context(&requirements);
     let options = claudine::composition::bind_agent_workspace(
         darkmatter::markdown::compose::ComposeOptions::new_with_context(context.clone())
-            .with_context_authority(document_epoch.compose_context_authority())
-            .with_file_resolution_context(source_context.file_resolution_context().clone()),
+            .with_context_authority(document_epoch.compose_context_authority()),
         source_path,
         shell_cwd,
     );
+    let request = claudine::composition::compose_request(
+        options,
+        source_context.file_resolution_context().clone(),
+    )?;
     invocation.record_compose_operation();
     document_epoch.record_prepared_context_consumer(
         claudine::invocation_context::PreparedContextConsumer::EffectiveFrontmatter,
     );
-    let (composed, _report) = source_markdown.compose_with(options)?;
+    let (composed, _report) = source_markdown.compose_with(&request)?;
 
     let frontmatter = frontmatter_map_to_value(composed.frontmatter());
     let live_frontmatter =
@@ -85,7 +88,7 @@ pub(crate) fn materialize_passthrough_harness_seed(
         selection_hints: claudine::composition::EffectiveSelectionHints::default(),
         inline_closure_plan: None,
         launch_schema: None,
-        file_resolution_context: Some(source_context.file_resolution_context().clone()),
+        file_resolution_context: source_context.file_resolution_context().clone(),
         compose_context: Some(context),
         document_epoch: Some(document_epoch),
         live_frontmatter,
@@ -174,7 +177,7 @@ mod tests {
         )
         .unwrap();
 
-        let invocation = claudine::invocation_context::InvocationContext::capture_at(&launch_dir);
+        let invocation = claudine::invocation_context::InvocationContext::capture_at(crate::request::snapshot(), &launch_dir).unwrap();
         let source_context = invocation.derive_source(&source).unwrap();
         let materialized = materialize_passthrough_harness_seed(
             &source,
@@ -196,9 +199,7 @@ mod tests {
             serde_json::json!(biscuit_file::to_portable_string(&launch_repo))
         );
         assert_eq!(materialized.prompt, "provider-owned prompt");
-        let resolution = materialized
-            .file_resolution_context
-            .expect("overlay seed keeps the source resolution snapshot");
+        let resolution = materialized.file_resolution_context;
         assert_eq!(resolution.repository_root(), Some(source_repo.as_path()));
         assert_eq!(resolution.source_path(), Some(source.as_path()));
     }

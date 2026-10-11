@@ -45,7 +45,10 @@ local and hosted runs. Its package policy is deliberately narrow:
   since the last successful ancestor nightly, with Linux joining only as a
   demanded archive producer. No qualifying baseline means full scope;
   `workflow_dispatch` plans everything. The `ci:all-os` label plans every
-  environment for a pull request and takes effect on the next push. A push
+  environment for a pull request and takes effect on the next push; such a
+  run never takes the hook's scope receipt, which is planned for the
+  event's own environments (until 2026-10-06 it did, and the label was
+  silently ignored). A push
   whose pull request validation is reused plans with `--proven-event
   pull_request`: the proven environments land in `proven_environments`, so
   only Windows runs, and an empty plan skips everything as before. The hook
@@ -135,6 +138,10 @@ selected areas with a reason each, the packages contributing to each, and one
 `schema.validate_resolved_plan` is its contract and
 `.github/ci/schemas/contract.json` is the field list Rust tooling asserts
 against. Downstream jobs consume that document rather than rediscovering scope.
+The planner's metadata read is registry-free (`cargo metadata --no-deps --offline`);
+member edges come from `member_dependency_graph`, and nothing may read `resolve`. A new
+input that needs the resolve needs its own decision (docs/topics/ci-cd.md, "How the
+planner reads the workspace").
 Package remains the stored identity everywhere; **area is a derived grouping**,
 computed from the manifest directory with the same rule as
 `sniff repo package-area` and kept honest by a drift contract rather than by a
@@ -278,6 +285,13 @@ Reusable lessons from closing a "docs change ran no test" gap
 - **Measure precision against real history before shipping a selector.** The
   first cut here would have scheduled cells on 49 of 62 merges; excluding
   tempdir-relative joins and mock literals brought it to 32, all genuine.
+- **Follow an input's own includes before asking tests to list them.** Tests
+  that composed shipped prompts kept hand lists of the fragments each prompt
+  pulls in with `::file`, and every new fragment broke them. Staging now
+  follows the directives, and so does the planner: a changed file transcluded
+  by a document a test reads schedules that test. Replayed over the last 62
+  merges to `main` (2026-10-04), it added units on 3, all tests composing a
+  prompt whose fragment changed.
 - **Justify cross-host evidence by the change, not the test.** Whether a test
   is OS-independent is undecidable in practice and an annotation drifts. "No
   source in this package changed, only a data file it reads" is derivable, and
@@ -330,7 +344,8 @@ Keep two claims distinct:
 When changing the current evidence implementation, preserve these agreed
 semantics:
 
-- A matching local scope receipt is authoritative. CI reuses it; a missing,
+- A matching local scope receipt is authoritative, except on a `ci:all-os`
+  pull request. CI reuses it; a missing,
   stale, malformed, or mismatched receipt makes CI calculate scope itself.
   Live as of 2026-09-11: the hook publishes it on `refs/notes/ci-local/scope`
   in every mode, before any gate, from the committed `base..head` path set;
@@ -544,6 +559,18 @@ archive mode: `-p <pkg>` moves into the filterset because `--archive-file`
 forbids it, `_archive_drop_build_flags` removes the Cargo build flags, and a
 missing `cargo-nextest` is a hard error — the `cargo test` fallback recompiles,
 which is the one thing an archive consumer must never do.
+
+The verified `<build>/tools/ci-build[.exe]` is also the planner's key helper:
+`_ci_build_verify` emits `key_helper=${tool}` only after verification, the
+`gate` step (not `expected`) requires it nonempty and exports
+`BISCUIT_CI_BUILD_BIN`, and `just cross-check` binds the same variable in its
+Unix and Windows archive scripts. Without it `scripts/ci/build_key.py` runs
+`cargo run --bin ci-build`, a cold compile. `planned_keys` strips
+`BISCUIT_CI_BUILD_WRAP` and sets `RUSTC_WRAPPER=""` for the helper child so it
+never runs as a compiler wrapper. A `requires-toolchain` suite still makes its
+own deliberate Cargo calls; only the helper build is avoided. On BUILD_WIN a
+planner test passes in ~0.3 s when `python3` is the Store alias — check captured
+output, not PASS.
 
 `scripts/ci/fixtures/archive-portability/` is the proof: a three-member
 workspace carrying one of every payload class, built in one checkout and run

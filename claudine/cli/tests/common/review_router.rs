@@ -1,7 +1,8 @@
 //! Shipped-review-router fixture shared by the provided-partial terminal tests.
 //!
 //! `fixes/2026-09-10-no-interactive-completion` reproduces its report through
-//! the real `prompts/review.md`: a supplied `spec=` partial must be offered for
+//! a frozen copy of `prompts/review.md` (intentionally not kept in step with the
+//! live prompt): a supplied `spec=` partial must be offered for
 //! completion *before* the router's first `initialize` guard dereferences it
 //! with `frontmatter(spec, ...)`. Two test binaries drive that flow — the PTY
 //! suite (`level1_review_router_partial_pty.rs`) for ordering and data flow,
@@ -17,8 +18,8 @@ use super::{CliProcessFixture, write};
 pub const PARTIAL: &str = "fixes/2026-09-10-local";
 
 /// Seed the shipped router, its proxy target, spec candidates under the
-/// `packages/example` launch area, and a same-substring decoy at the repository
-/// root that only a mis-anchored candidate scope would find.
+/// `packages/example` launch area, and a decoy spec at the repository root
+/// that the supplied partial does not match.
 ///
 /// The `goose` stub records the prompt it receives at `$HOME/provider-prompt`
 /// and prints `provider reached`, so a test can prove which selection crossed
@@ -28,7 +29,7 @@ pub fn review_router_fixture(multiple: bool) -> (CliProcessFixture, PathBuf) {
     fixture.initialize_repository();
     fixture.seed_user_config();
     let router = fixture.cwd().join("prompts/review.md");
-    write(&router, include_str!("../../../../prompts/review.md"));
+    write(&router, include_str!("../fixtures/frozen_prompts/prompts/review.md"));
     write(
         &fixture.cwd().join("prompts/_reviews/feature-review.md"),
         "---\n$schema:\n  spec: file(required;eager;match(**/*spec*.md))\nselected: \"{{ frontmatter(spec, 'marker') }}\"\n---\nSELECTED={{ selected }}\nSPEC={{ spec }}\nTOKEN={{ token }}\n",
@@ -43,14 +44,14 @@ pub fn review_router_fixture(multiple: bool) -> (CliProcessFixture, PathBuf) {
             "---\nreviewed: true\nmarker: beta\n---\nBeta specification.\n",
         );
     }
-    // Decoy outside the launch area (`packages/example`) that matches the same
-    // `fixes/2026-09-10-local` substring. Candidate discovery must walk from the
-    // frozen launch origin, so this file is invisible to a package-area launch;
-    // a scope anchored at the repository root — or recaptured from the ambient
-    // CWD after the wrapper switches there — would pull it in and turn the
-    // single-match confirmation into a chooser.
+    // Decoy outside the launch area (`packages/example`). The router's bare
+    // `match(**/*spec*.md)` searches the launch directory and then the
+    // repository root, so the walk reaches this file; only the supplied
+    // `fixes/2026-09-10-local` partial keeps it out, leaving the single-match
+    // confirmation a confirmation. A repository-root spec that matched the
+    // partial would be offered after the launch area's (native order).
     write(
-        &fixture.cwd().join("fixes/2026-09-10-local-decoy/spec.md"),
+        &fixture.cwd().join("fixes/2026-09-10-remote-decoy/spec.md"),
         "---\nreviewed: true\nmarker: decoy\n---\nDecoy specification outside the launch area.\n",
     );
     install_goose(&fixture);
@@ -124,7 +125,7 @@ pub fn assert_provider_received(prompt: &str, selected: &str, directory: &str) {
     assert!(prompt.contains(&format!("SELECTED={selected}")), "prompt: {prompt}");
     assert!(portable.contains(directory), "prompt: {prompt}");
     assert!(prompt.contains("TOKEN=retained"), "prompt: {prompt}");
-    assert!(!prompt.contains("local-decoy"), "prompt: {prompt}");
+    assert!(!prompt.contains("remote-decoy"), "prompt: {prompt}");
 }
 
 /// True when `plain` — a captured frame with its rows joined back together —

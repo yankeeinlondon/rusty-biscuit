@@ -29,6 +29,14 @@ will never execute. CI enables the tier features for its reusable all-tier
 build; `just test-l2`, `just test-l3`, and `just test-browser` enable only the
 features their tier requires.
 
+## Source-guard Test Dependencies
+
+- `toml` (test-only, `darkmatter` and `darkmatter-cli`) — the shared
+  `path_lookup_guard` engine reads each package's `[lib]`, `[[bin]]`, and
+  `[package].build` with a real TOML parser, so every spelling Cargo accepts
+  selects the same sources and a malformed manifest fails the guard. Every
+  other package that includes the engine already depends on `toml`.
+
 ## Execution Identity and Network Context
 
 - `biscuit-hash` with the `blake3` feature computes `ctx.sid`, the full BLAKE3
@@ -133,11 +141,17 @@ protocol-focused:
   frontmatter block extraction, single-document reference extraction, and the
   later-phase parsing surfaces).
 - `biscuit-file` (`file-reference` feature, default features off) —
-  file-reference resolution conventions.
+  file-reference resolution conventions, and the Git discovery that keys the
+  per-repository context cache.
 - `biscuit-hash` — xxHash content-hash identity for the Phase 3 invalidation
-  engine (`WorkspaceIndex`).
+  engine (`WorkspaceIndex`) and the rescan's package-manifest fingerprints.
+- `sniff` — `PACKAGE_MANIFEST_FILE_NAMES`, the manifest names DMLS watches so
+  adding a package rebuilds the repository's context. Already compiled through
+  `darkmatter`.
 - `wait-timeout` (test-only) — bounded, cross-platform reaping for the real
   `dmls` stdio subprocess lifecycle test.
+- `tracing-test` (test-only) — scoped log capture for the context-build
+  failure log.
 
 ## DMLS Zed CLI (`darkmatter/dmls/zed-dmls-cli`)
 

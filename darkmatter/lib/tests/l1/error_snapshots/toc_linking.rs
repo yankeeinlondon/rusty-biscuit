@@ -69,18 +69,21 @@ fn invalid_level_shows_range() {
 }
 
 #[test]
-fn file_not_found_hints_at_fallback_chain() {
-    let err = TocLinkingError::FileNotFound {
+fn unresolved_target_names_its_failure_and_hints_at_fallback_chain() {
+    let err = TocLinkingError::Unresolved {
         path: "./missing.md".into(),
         line: 6,
+        failure: Some(biscuit_file::ResolutionFailure::NoMatch),
+        glob_hint: None,
     };
     let out = render(&err);
     assert_contains_all(
         &out,
         &[
             "TocLinkingError",
-            "file not found",
+            "file reference failure",
             "./missing.md",
+            "failure: no-match",
             "fallback",
         ],
     );

@@ -4,9 +4,8 @@
 //! property-name ordering the completer sorts them by.
 
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
 
-use biscuit_file::YamlValue;
+use biscuit_file::{FileReference, YamlValue};
 
 use darkmatter::markdown::schemas::{
     Constraint, EffectiveSchema, PropertyAtom, PropertyDef, SchemaArm, SimplifiedSchema,
@@ -15,7 +14,7 @@ use darkmatter::markdown::schemas::{
 use crate::completion::fuzzy;
 use crate::completion::scopes::ScopeContext;
 
-use super::resolve_prompt_path;
+use super::CommittedPrompt;
 
 /// Property name candidates for the cursor partial.
 ///
@@ -112,10 +111,10 @@ fn declaration_rank(declared_order: &[String], name: &str, iter_idx: usize) -> u
 ///
 /// [`BTreeMap`]: std::collections::BTreeMap
 pub(crate) fn declared_property_order(file_arg: &str, ctx: &ScopeContext) -> Vec<String> {
-    let Some(path) = resolve_prompt_path(file_arg, ctx) else {
+    let Some(prompt) = CommittedPrompt::resolve(file_arg, ctx) else {
         return Vec::new();
     };
-    let Ok(text) = std::fs::read_to_string(&path) else {
+    let Ok(text) = std::fs::read_to_string(&prompt.path) else {
         return Vec::new();
     };
     let Some(yaml) = extract_frontmatter_yaml(&text) else {
@@ -130,11 +129,7 @@ pub(crate) fn declared_property_order(file_arg: &str, ctx: &ScopeContext) -> Vec
     else {
         return Vec::new();
     };
-    let base_dir = path
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| PathBuf::from("."));
-    schema_keys_in_order(schema_value, &base_dir)
+    schema_keys_in_order(schema_value, &prompt)
 }
 
 /// Splits the leading `---`-delimited frontmatter block out of a Markdown
@@ -152,13 +147,13 @@ fn extract_frontmatter_yaml(text: &str) -> Option<&str> {
 /// Returns the property-name sequence for a `$schema` YAML value, following
 /// file references as needed. Returns an empty `Vec` for shapes that have
 /// no single ordered property set (root unions, unsupported types).
-fn schema_keys_in_order(value: &YamlValue, base_dir: &Path) -> Vec<String> {
+fn schema_keys_in_order(value: &YamlValue, prompt: &CommittedPrompt) -> Vec<String> {
     match value {
         YamlValue::Mapping(map) => map
             .keys()
             .filter_map(|k| k.as_str().map(str::to_string))
             .collect(),
-        YamlValue::String(reference) => referenced_schema_keys(reference, base_dir),
+        YamlValue::String(reference) => referenced_schema_keys(reference, prompt),
         _ => Vec::new(),
     }
 }
@@ -168,8 +163,17 @@ fn schema_keys_in_order(value: &YamlValue, base_dir: &Path) -> Vec<String> {
 /// whose root holds a `$schema:` mapping are SimplifiedSchema documents
 /// (the order comes from that nested mapping); everything else is a raw JSON
 /// Schema (the order comes from its top-level `properties` object).
-fn referenced_schema_keys(reference: &str, base_dir: &Path) -> Vec<String> {
-    let candidate = base_dir.join(reference);
+///
+/// The reference resolves as Darkmatter resolves a `$schema` file: through
+/// the shared file-reference grammar in the prompt document's context, so
+/// `./` stays document-relative and `@`/`&`/`^`/`~/` reach their roots.
+fn referenced_schema_keys(reference: &str, prompt: &CommittedPrompt) -> Vec<String> {
+    let Ok(file_ref) = FileReference::new(reference.trim()) else {
+        return Vec::new();
+    };
+    let Ok(Some(candidate)) = file_ref.resolve_in_context(&prompt.context) else {
+        return Vec::new();
+    };
     let Ok(text) = std::fs::read_to_string(&candidate) else {
         return Vec::new();
     };

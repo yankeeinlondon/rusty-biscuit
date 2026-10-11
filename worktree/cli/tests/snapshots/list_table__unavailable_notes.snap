@@ -8,4 +8,4 @@ expression: "Unavailable::new().notes()"
  - feat-locked: Git can't read this worktree: /code/wts/feat-locked couldn't be inspected (Permission denied (os error 13)); Git reports: gitdir file points to non-existent location.
  - feat-gitdir: Git can't read this worktree: its .git couldn't be inspected (Permission denied (os error 13)); Git reports: gitdir file points to non-existent location.
  - feat-broken: Git can't read this worktree: its .git exists, but Git can't use it; Git reports: gitdir file points to non-existent location.
- - lhg-before: its .git file is missing;  wt remove lhg-before  attempts to restore the link before checking its files. To restore it without removing it, run  git -C /code/wts/rusty-biscuit worktree repair /code/wts/lhg-before .
+ - lhg-before: its .git file is missing;  wt remove lhg-before  removes it.

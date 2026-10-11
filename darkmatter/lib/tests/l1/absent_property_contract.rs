@@ -25,7 +25,7 @@ fn compose(content: &str) -> Result<(String, ComposeReport), MarkdownError> {
         .with_source_file(path.clone());
     Markdown::try_from(path.as_path())
         .unwrap()
-        .compose_with(options)
+        .compose_with(&crate::request_support::request(options))
         .map(|(composed, report)| (composed.content().trim_end().to_string(), report))
 }
 

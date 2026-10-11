@@ -8,7 +8,8 @@
 //! for the same path are coalesced to one change so a single save doesn't
 //! trigger repeated re-indexing.
 
-use std::path::PathBuf;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 use lsp_types::{
     DidChangeWatchedFilesRegistrationOptions, FileChangeType, FileSystemWatcher, GlobPattern,
@@ -65,12 +66,75 @@ pub fn watch_registration(config: &WorkspaceConfig) -> Option<Registration> {
             kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
         }
     }));
+    // Context inputs: a package manifest changes `^` resolution, and a
+    // repository's `.git/config` decides whether discovery succeeds. Neither
+    // is a workspace document; a change only drops cached contexts.
+    watchers.extend(context_input_globs().map(|pattern| FileSystemWatcher {
+        glob_pattern: GlobPattern::String(pattern),
+        kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
+    }));
     let options = DidChangeWatchedFilesRegistrationOptions { watchers };
     Some(Registration {
         id: WATCH_REGISTRATION_ID.to_string(),
         method: "workspace/didChangeWatchedFiles".to_string(),
         register_options: Some(serde_json::to_value(options).ok()?),
     })
+}
+
+/// The watcher globs for context inputs: `**/<name>` for each package
+/// manifest name sniff detects packages by, then `**/.git/config`.
+pub fn context_input_globs() -> impl Iterator<Item = String> {
+    sniff::filesystem::repo::PACKAGE_MANIFEST_FILE_NAMES
+        .iter()
+        .map(|name| format!("**/{name}"))
+        .chain(std::iter::once("**/.git/config".to_string()))
+}
+
+/// Whether `path` is a context input rather than a workspace document: a
+/// package manifest or a file inside a `.git` directory.
+pub fn is_context_input(path: &Path) -> bool {
+    let is_manifest = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| sniff::filesystem::repo::PACKAGE_MANIFEST_FILE_NAMES.contains(&name));
+    is_manifest || path.components().any(|component| component.as_os_str() == ".git")
+}
+
+/// Content hashes of every package manifest under `roots`, for the
+/// server-rescan fallback to detect a manifest change no client reported.
+///
+/// The walk honors `.gitignore` and skips hidden directories, as workspace
+/// discovery does.
+pub fn scan_manifests(roots: &[PathBuf]) -> HashMap<PathBuf, u64> {
+    let mut manifests = HashMap::new();
+    for root in roots {
+        for entry in ignore::WalkBuilder::new(root).build().flatten() {
+            let path = entry.path();
+            let is_manifest = path.file_name().and_then(|name| name.to_str()).is_some_and(|name| {
+                sniff::filesystem::repo::PACKAGE_MANIFEST_FILE_NAMES.contains(&name)
+            });
+            if is_manifest && let Ok(bytes) = std::fs::read(path) {
+                manifests.insert(path.to_path_buf(), biscuit_hash::xx_hash_bytes(&bytes));
+            }
+        }
+    }
+    manifests
+}
+
+/// The manifests that were created, changed, or deleted between two
+/// [`scan_manifests`] results.
+pub fn changed_manifests(
+    before: &HashMap<PathBuf, u64>,
+    after: &HashMap<PathBuf, u64>,
+) -> Vec<PathBuf> {
+    let mut changed: Vec<PathBuf> = after
+        .iter()
+        .filter(|(path, hash)| before.get(*path) != Some(*hash))
+        .map(|(path, _)| path.clone())
+        .chain(before.keys().filter(|path| !after.contains_key(*path)).cloned())
+        .collect();
+    changed.sort();
+    changed
 }
 
 /// A coalesced filesystem change.
@@ -157,7 +221,20 @@ mod tests {
         assert_eq!(registration.method, "workspace/didChangeWatchedFiles");
         let options: DidChangeWatchedFilesRegistrationOptions =
             serde_json::from_value(registration.register_options.unwrap()).unwrap();
-        assert_eq!(options.watchers.len(), 4); // Markdown plus YAML schema roots.
+        // Markdown, YAML schema roots, four package manifests, `.git/config`.
+        assert_eq!(options.watchers.len(), 9);
+        let globs: Vec<String> = options
+            .watchers
+            .iter()
+            .map(|watcher| match &watcher.glob_pattern {
+                GlobPattern::String(glob) => glob.clone(),
+                GlobPattern::Relative(_) => String::new(),
+            })
+            .collect();
+        for name in sniff::filesystem::repo::PACKAGE_MANIFEST_FILE_NAMES {
+            assert!(globs.contains(&format!("**/{name}")), "{name} watched: {globs:?}");
+        }
+        assert!(globs.contains(&"**/.git/config".to_string()), "{globs:?}");
     }
 
     #[test]
@@ -169,7 +246,38 @@ mod tests {
         let registration = watch_registration(&config).unwrap();
         let options: DidChangeWatchedFilesRegistrationOptions =
             serde_json::from_value(registration.register_options.unwrap()).unwrap();
-        assert_eq!(options.watchers.len(), 2);
+        assert_eq!(options.watchers.len(), 7);
+    }
+
+    #[test]
+    fn test_context_inputs_are_manifests_and_git_files() {
+        assert!(is_context_input(Path::new("/w/pkg/Cargo.toml")));
+        assert!(is_context_input(Path::new("/w/web/package.json")));
+        assert!(is_context_input(Path::new("/w/.git/config")));
+        assert!(!is_context_input(Path::new("/w/docs/a.md")));
+        assert!(!is_context_input(Path::new("/w/schemas/s.yaml")));
+    }
+
+    #[test]
+    fn test_manifest_scan_reports_created_changed_and_deleted() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().to_path_buf();
+        std::fs::create_dir_all(root.join("a")).unwrap();
+        std::fs::write(root.join("a/Cargo.toml"), "[package]\n").unwrap();
+        std::fs::write(root.join("a/notes.md"), "# notes\n").unwrap();
+        let before = scan_manifests(std::slice::from_ref(&root));
+        assert_eq!(before.len(), 1);
+
+        std::fs::write(root.join("a/Cargo.toml"), "[package]\nname = \"a\"\n").unwrap();
+        std::fs::create_dir_all(root.join("b")).unwrap();
+        std::fs::write(root.join("b/package.json"), "{}").unwrap();
+        let after = scan_manifests(std::slice::from_ref(&root));
+        assert_eq!(
+            changed_manifests(&before, &after),
+            vec![root.join("a/Cargo.toml"), root.join("b/package.json")]
+        );
+        assert_eq!(changed_manifests(&after, &before), changed_manifests(&before, &after));
+        assert!(changed_manifests(&after, &after).is_empty());
     }
 
     #[test]

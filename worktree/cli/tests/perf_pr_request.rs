@@ -2,7 +2,7 @@
 //! whose refresh fails, with a PR request held by the provider, with a
 //! live-head check or a fetch held by `origin`, and with `-r` and `--ff`
 //! against a held `origin`, against the targets in
-//! `worktree/docs/performance-testing.md` (warm `list gather` 120 ms, cold
+//! `worktree/docs/performance-testing.md` (warm `local_gather` 120 ms, cold
 //! 300 ms, full non-image `wt list` 1 s when the worker answers at once, 3 s
 //! plus that when it stalls, and the worker's 10 s check and 60 s fetch
 //! deadlines for `-r` and `--ff`). Every request goes to a local stand-in, so
@@ -15,20 +15,23 @@ use std::process::Stdio;
 use std::time::{Duration, Instant};
 
 use perf_support::{
-    FakeGitea, GiteaReply, HoldingOrigin, MixedFixture, ProxyStub, WorkerReaper, list_gather_from_perf,
-    refresh_workers, stage_from_perf, wait_for_refresh_workers,
+    FakeGitea, GiteaReply, HoldingOrigin, MixedFixture, ProxyStub, WorkerReaper, local_gather, perf_timings,
+    refresh_workers, stage_at, wait_for_refresh_workers,
 };
 use remote_fixture::{Fixture, UploadPackGate, assert_no_spinner};
 use serial_test::serial;
 use worktree::pull_requests::{CachedPrs, origin_url, select_cached, unix_now};
 use worktree::remote_head::REMOTE_HEAD_REFRESH_DEADLINE;
 use worktree::remote_update::FETCH_DEADLINE;
+use worktree::timing::Stage;
 
 const WARM_LIST_GATHER_BOUND: Duration = Duration::from_millis(120);
 const COLD_LIST_GATHER_BOUND: Duration = Duration::from_millis(300);
 const FULL_COMMAND_BOUND: Duration = Duration::from_millis(1000);
+/// The launch of the refresh worker and the wait for it.
+const REFRESH_WORKER: &[Stage] = &[Stage::RemoteAndLocal, Stage::RefreshWorker];
 /// What a stage may take beyond the work it waits for: the foreground PR
-/// reads (`pr gather` before the wait plus `pr reread` after it, no request) and `remote wait` past its 3 s.
+/// reads (`origin_lookup` before the wait plus `pr_cache_read` after it, no request) and `refresh_worker` past its 3 s.
 const STAGE_SLACK: Duration = Duration::from_millis(300);
 /// Ordinary listing's wait for a stalled worker (spec §3).
 const REMOTE_WAIT: Duration = Duration::from_secs(3);
@@ -36,18 +39,18 @@ const REMOTE_WAIT: Duration = Duration::from_secs(3);
 /// killing the held transport, publishing, and the local gather and render.
 const FORCED_SLACK: Duration = Duration::from_secs(3);
 
-/// `(list gather, pr gather)` from one `wt list --perf`.
+/// `(local_gather, origin_lookup)` from one `wt list --perf=json`.
 fn stages(fixture: &MixedFixture, proxy: &ProxyStub) -> (Duration, Duration) {
     let output = fixture
         .wt_command_via(proxy)
-        .args(["list", "--perf"])
+        .args(["list", "--perf=json"])
         .output()
         .expect("wt list --perf should run");
     assert!(output.status.success(), "wt list --perf failed");
     let stderr = String::from_utf8_lossy(&output.stderr);
     (
-        list_gather_from_perf(&stderr).expect("list gather stage"),
-        stage_from_perf(&stderr, "pr gather").expect("pr gather stage"),
+        local_gather(&perf_timings(&stderr)).expect("local_gather stage"),
+        stage_at(&perf_timings(&stderr), &[Stage::OriginLookup]).expect("origin_lookup stage"),
     )
 }
 
@@ -92,9 +95,9 @@ fn perf_list_meets_sla_with_the_network_down() {
     let warm = (0..5).map(|_| stages(&fixture, &proxy).0).min().unwrap();
     let full = best_full_command(&fixture, &proxy);
 
-    eprintln!("network down: cold list gather {cold:.2?}, warm {warm:.2?}, full {full:.2?}");
-    assert!(cold < COLD_LIST_GATHER_BOUND, "cold list gather {cold:.2?}");
-    assert!(warm < WARM_LIST_GATHER_BOUND, "warm list gather {warm:.2?}");
+    eprintln!("network down: cold local_gather {cold:.2?}, warm {warm:.2?}, full {full:.2?}");
+    assert!(cold < COLD_LIST_GATHER_BOUND, "cold local_gather {cold:.2?}");
+    assert!(warm < WARM_LIST_GATHER_BOUND, "warm local_gather {warm:.2?}");
     assert!(full < FULL_COMMAND_BOUND, "full wt list {full:.2?}");
 }
 
@@ -119,21 +122,22 @@ fn best_full_command_with_store(fixture: &MixedFixture, proxy: &ProxyStub, age: 
         .expect("at least one timed run")
 }
 
-/// The foreground PR reads (`pr gather` plus the `pr reread` child of the
-/// wait's group) from one `wt list --perf` with the store reseeded `age` old,
+/// The foreground PR reads (`origin_lookup` plus the `pr_cache_read` child of the
+/// wait's group) from one `wt list --perf=json` with the store reseeded `age` old,
 /// and its rendered output.
 fn pr_reads_with_store(fixture: &MixedFixture, proxy: &ProxyStub, age: Duration) -> (Duration, String) {
     fixture.seed_pr_store(age, 99, "divergent-0");
     let output = fixture
         .wt_command_via(proxy)
-        .args(["list", "--perf"])
+        .args(["list", "--perf=json"])
         .env("NO_COLOR", "1")
         .output()
         .expect("wt list --perf should run");
     assert!(output.status.success(), "wt list --perf failed");
     let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-    let reads = stage_from_perf(&stderr, "pr gather").expect("pr gather stage")
-        + stage_from_perf(&stderr, "pr reread").expect("pr reread child");
+    let timings = perf_timings(&stderr);
+    let reads = stage_at(&timings, &[Stage::OriginLookup]).expect("origin_lookup stage")
+        + stage_at(&timings, &[Stage::RemoteAndLocal, Stage::PrCacheRead]).expect("pr_cache_read child");
     (reads, stderr)
 }
 
@@ -191,7 +195,7 @@ fn perf_list_meets_sla_with_a_stale_answer_and_a_failing_refresh() {
 /// A PR request that the provider holds costs a listing its 3 s wait and no
 /// more, like a held live-head check: the worker's head half ends at once
 /// (the branch-head API answers 404 and git's fallback is refused), the
-/// `remote wait` stage ends at the wait, and the command returns within that
+/// `refresh_worker` stage ends at the wait, and the command returns within that
 /// plus the full-command bound while the PR request is still held.
 #[test]
 #[serial]
@@ -211,7 +215,7 @@ fn perf_a_held_pr_request_costs_the_listing_only_its_wait() {
         let t0 = Instant::now();
         let output = fixture
             .wt_command_via_gitea(&gitea)
-            .args(["list", "--perf"])
+            .args(["list", "--perf=json"])
             .env("NO_COLOR", "1")
             .output()
             .expect("wt list --perf should run");
@@ -220,24 +224,24 @@ fn perf_a_held_pr_request_costs_the_listing_only_its_wait() {
         assert!(output.status.success(), "wt list --perf failed:\n{stderr}");
         let text = stderr.split_whitespace().collect::<Vec<_>>().join(" ");
         assert!(text.contains("- PRs as of 12 min ago - running this command again"), "pending, then the hint:\n{stderr}");
-        samples.push((stage_from_perf(&stderr, "remote wait").expect("remote wait stage"), full));
+        samples.push((stage_at(&perf_timings(&stderr), REFRESH_WORKER).expect("refresh_worker stage"), full));
     }
     let held = gitea.waiting() == 1;
     gitea.release(GiteaReply::Status(503));
     let left = wait_for_refresh_workers(fixture.main(), 0, Duration::from_secs(20));
 
-    eprintln!("held PR request: (remote wait, full) {samples:.2?}");
+    eprintln!("held PR request: (refresh_worker, full) {samples:.2?}");
     assert!(held, "the PR request was still held after both listings returned");
     assert_eq!(gitea.requests(), 1, "one PR request at a time");
     assert!(left.is_empty(), "every worker exited: {left:?}");
     for (wait, full) in &samples {
-        assert!(*wait >= REMOTE_WAIT && *wait < REMOTE_WAIT + STAGE_SLACK, "remote wait {wait:?}");
+        assert!(*wait >= REMOTE_WAIT && *wait < REMOTE_WAIT + STAGE_SLACK, "refresh_worker {wait:?}");
         assert!(*full < REMOTE_WAIT + FULL_COMMAND_BOUND, "full wt list {full:?}");
     }
 }
 
 /// A live-head check that `origin` holds costs a listing its 3 s wait and no
-/// more: the `remote wait` stage ends at the wait, and the command returns
+/// more: the `refresh_worker` stage ends at the wait, and the command returns
 /// within that plus the full-command bound while the worker is still held.
 /// The deterministic no-join proof is
 /// `list_prs::a_held_live_head_check_holds_the_listing_only_until_its_deadline`.
@@ -258,38 +262,38 @@ fn perf_a_held_live_head_check_costs_the_listing_only_its_wait() {
         let t0 = Instant::now();
         let output = fixture
             .wt_command_direct()
-            .args(["list", "--perf"])
+            .args(["list", "--perf=json"])
             .output()
             .expect("wt list --perf should run");
         let full = t0.elapsed();
         assert!(output.status.success(), "wt list --perf failed");
         let stderr = String::from_utf8_lossy(&output.stderr);
-        samples.push((stage_from_perf(&stderr, "remote wait").expect("remote wait stage"), full));
+        samples.push((stage_at(&perf_timings(&stderr), REFRESH_WORKER).expect("refresh_worker stage"), full));
     }
     let blocked = origin.wait_for_requests(1, Duration::from_secs(20));
     let held = fixture.head_lock_held();
     let released = fixture.wait_until_unlocked(Duration::from_secs(20), || origin.close_held());
 
-    eprintln!("held live-head check: (remote wait, full) {samples:.2?}");
+    eprintln!("held live-head check: (refresh_worker, full) {samples:.2?}");
     assert!(blocked, "a worker made the held request");
     assert!(held, "the worker was still held after both listings returned");
     assert!(released, "the worker exited and released its locks");
     for (wait, full) in &samples {
-        assert!(*wait >= REMOTE_WAIT && *wait < REMOTE_WAIT + STAGE_SLACK, "remote wait {wait:?}");
+        assert!(*wait >= REMOTE_WAIT && *wait < REMOTE_WAIT + STAGE_SLACK, "refresh_worker {wait:?}");
         assert!(*full < REMOTE_WAIT + FULL_COMMAND_BOUND, "full wt list {full:?}");
     }
 }
 
-/// `wt <args> --perf` from the fixture's main checkout: its elapsed time, its
-/// `remote wait` stage, and its stderr with whitespace collapsed.
+/// `wt <args> --perf=json` from the fixture's main checkout: its elapsed time, its
+/// `refresh_worker` stage, and its stderr with whitespace collapsed.
 fn timed_listing(fixture: &Fixture, args: &[&str]) -> (Duration, Duration, String) {
     let t0 = Instant::now();
-    let output = fixture.wt(&fixture.main).args(args).arg("--perf").output().expect("wt runs");
+    let output = fixture.wt(&fixture.main).args(args).arg("--perf=json").output().expect("wt runs");
     let elapsed = t0.elapsed();
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(output.status.success(), "wt {args:?} failed:\n{stderr}");
     assert_no_spinner(&stderr);
-    let wait = stage_from_perf(&stderr, "remote wait").expect("remote wait stage");
+    let wait = stage_at(&perf_timings(&stderr), REFRESH_WORKER).expect("refresh_worker stage");
     (elapsed, wait, stderr.split_whitespace().collect::<Vec<_>>().join(" "))
 }
 
@@ -306,10 +310,10 @@ fn perf_a_held_fetch_costs_the_listing_only_its_wait() {
     let (full, wait, stderr) = timed_listing(&fixture, &["list"]);
     let still_held = gate.runs() == 2 && refresh_workers(&fixture.main).len() == 1;
 
-    eprintln!("held fetch: remote wait {wait:.2?}, full {full:.2?}");
+    eprintln!("held fetch: refresh_worker {wait:.2?}, full {full:.2?}");
     assert!(stderr.contains("pulling remote updates in the background"), "still pulling:\n{stderr}");
     assert!(still_held, "the worker was still held in its fetch after the listing returned");
-    assert!(wait >= REMOTE_WAIT && wait < REMOTE_WAIT + STAGE_SLACK, "remote wait {wait:?}");
+    assert!(wait >= REMOTE_WAIT && wait < REMOTE_WAIT + STAGE_SLACK, "refresh_worker {wait:?}");
     assert!(full < REMOTE_WAIT + FULL_COMMAND_BOUND, "full wt list {full:?}");
 }
 
@@ -357,7 +361,7 @@ fn perf_fast_forward_against_a_held_fetch_reports_within_the_fetch_deadline() {
 
     let (full, wait, stderr) = timed_listing(&fixture, &["--ff"]);
 
-    eprintln!("--ff, held fetch: remote wait {wait:.2?}, full {full:.2?}");
+    eprintln!("--ff, held fetch: refresh_worker {wait:.2?}, full {full:.2?}");
     assert_eq!(gate.runs(), 2, "one check and one fetch");
     assert!(
         stderr.contains(&format!("fetch didn't finish within {} s", FETCH_DEADLINE.as_secs())),

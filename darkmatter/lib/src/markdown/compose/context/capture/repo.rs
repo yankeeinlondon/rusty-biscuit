@@ -230,7 +230,7 @@ mod tests {
     fn repo_root_has_no_trailing_slash() {
         let root = biscuit_test_harness::manifest_dir!();
         let (values, _, _, _, _) =
-            capture_runtime_context_for_groups(&root, &[ContextGroup::Repo]);
+            capture_runtime_context_for_groups(&root, &[ContextGroup::Repo], &std::collections::HashMap::new());
         if let Some(Value::String(rr)) = values.get("repo_root") {
             assert!(
                 !rr.ends_with('/'),

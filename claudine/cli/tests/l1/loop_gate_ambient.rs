@@ -11,18 +11,22 @@ use common::{CliProcessFixture, strip_ansi};
 /// page and this test cannot drift apart.
 const LIFECYCLE_DOC: &str = include_str!("../../../docs/topics/flow-control/lifecycle.md");
 
-/// Install a fake `goose` that records one line per call and exits 0.
+/// Install a fake `goose` that appends one line to `$PROVIDER_MARKER` per call
+/// and exits 0.
 fn install_counting_goose(bin_dir: &Path) {
     #[cfg(unix)]
     common::write_executable(
         &bin_dir.join("goose"),
-        "#!/bin/sh\nprintf 'call\\n' >> \"$CLAUDINE_COUNT_FILE\"\ncat > /dev/null\nexit 0\n",
+        "#!/bin/sh\nprintf 'call\\n' >> \"$PROVIDER_MARKER\"\ncat > /dev/null\nexit 0\n",
     );
+    // A built binary, not a `.cmd` shim: Rust refuses to pass the multi-line
+    // prompt argument to a batch file ("batch file arguments are invalid").
     #[cfg(windows)]
-    common::write(
-        &bin_dir.join("goose.cmd"),
-        "@echo off\r\necho call>>\"%CLAUDINE_COUNT_FILE%\"\r\nexit /b 0\r\n",
-    );
+    fs::copy(
+        biscuit_test_harness::bin_exe!("claudine-fake-goose"),
+        bin_dir.join("goose.exe"),
+    )
+    .unwrap();
 }
 
 /// Run `claudine compose --goose` on `document` and return (provider calls,
@@ -36,7 +40,7 @@ fn compose_loop(document: &str) -> (usize, String) {
 
     let output = fixture
         .command()
-        .env("CLAUDINE_COUNT_FILE", &count_path)
+        .env("PROVIDER_MARKER", &count_path)
         .args(["compose", "--goose", md_file.to_str().unwrap()])
         .output()
         .unwrap();

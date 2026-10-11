@@ -49,9 +49,13 @@ fn fixture(stem: &str) -> Markdown {
 
 /// Composes `md` with only `op` enabled, discarding the result under a black box.
 fn compose_stage(md: &Markdown, op: ComposeOperation) {
-    let options = ComposeOptions::new().only(&[op]);
+    let request = darkmatter::markdown::compose::ComposeRequest::prepare(
+        ComposeOptions::new().only(&[op]),
+        &darkmatter::markdown::compose::RequestSnapshot::new(std::env::temp_dir()),
+    )
+    .expect("prepare request");
     let (composed, report) = md
-        .compose_with(options)
+        .compose_with(&request)
         .expect("compose must not fault");
     black_box((composed, report));
 }

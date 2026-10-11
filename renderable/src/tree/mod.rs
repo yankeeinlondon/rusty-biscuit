@@ -34,7 +34,7 @@ mod source;
 mod validate;
 
 pub use attrs::{
-    AriaAttrName, BrowserAttrNameError, BrowserAttrs, CodeRenderHints, ColumnConditional,
+    AriaAttrName, BlockElement, BrowserAttrNameError, BrowserAttrs, CodeRenderHints, ColumnConditional,
     ColumnWidthKind, ColumnsHints, ComponentHints, DataAttrName, DisclosureStyleHints,
     HintNamespace, HrAlignment, HrKind, HrWeight, ImageBrowserAttrs, ImageDecoding, ImageLoading,
     LinkBrowserAttrs, LinkRelation, LinkTarget, ListMarkerPolicy, ListRenderHints, NodeAttrs,
@@ -55,7 +55,7 @@ pub use inherit::InheritedStyle;
 pub use document::{Document, DocumentMetadata, Frontmatter, FrontmatterFormat};
 pub use error::{RenderError, RenderStrictness, Rendered};
 pub use graphics::horizontal_rule_svg;
-pub use node::{ColumnAlign, HeadingDepth, HeadingDepthError, NodeKind, RenderNode};
+pub use node::{ColumnAlign, HeadingDepth, HeadingDepthError, NodeKind, RenderNode, is_html_comment_only};
 pub use render::{
     BrowserDocumentBody, BrowserRenderOptions, CodeRenderer, MarkdownDialect,
     MarkdownRenderOptions, MarkdownStyleOptions, RawHtmlPolicy, render_browser_document,

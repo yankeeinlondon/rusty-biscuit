@@ -3,8 +3,12 @@
 use super::*;
 use crate::composition::CompositionMode;
 use crate::composition::resolve::resolve_composition_source;
+#[cfg(feature = "prompt-tests")]
+use crate::composition::resolve::resolve_composition_source_in_context;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+#[cfg(feature = "prompt-tests")]
+use std::path::Path;
 use tempfile::TempDir;
 
 fn make_source(dir: &TempDir, document: &str) -> ResolvedCompositionSource {
@@ -18,6 +22,10 @@ fn make_source(dir: &TempDir, document: &str) -> ResolvedCompositionSource {
     crate::composition::resolve_fixture_source(file.to_str().unwrap()).unwrap()
 }
 
+// These helpers and the two `shipped_implement_plan_*` tests read the live
+// `prompts/` tree, so they compile only with the opt-in `prompt-tests` feature
+// (`just test-prompts`); CI never runs them.
+#[cfg(feature = "prompt-tests")]
 fn shipped_implement_plan() -> PathBuf {
     biscuit_test_harness::manifest_dir!()
         .ancestors()
@@ -26,11 +34,46 @@ fn shipped_implement_plan() -> PathBuf {
         .join("prompts/_implement/implement-plan.md")
 }
 
+#[cfg(feature = "prompt-tests")]
+fn copy_tree(from: &Path, to: &Path) {
+    fs::create_dir_all(to).unwrap();
+    for entry in fs::read_dir(from).unwrap() {
+        let entry = entry.unwrap();
+        let target = to.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            copy_tree(&entry.path(), &target);
+        } else {
+            fs::copy(entry.path(), &target).unwrap();
+        }
+    }
+}
+
+/// Prepares the shipped `implement-plan` prompt from a byte-for-byte copy of
+/// the shipped `prompts/` tree inside a fresh git repository.
+///
+/// The prompt resolves its `::file ../_*.md` transclusions relative to its own
+/// directory and reads `ctx.*` from its repository, so it needs a repository
+/// around `prompts/`, not this checkout: capturing the monorepo's dirty-file
+/// list and topology cost seconds and decided nothing the test asserts.
+#[cfg(feature = "prompt-tests")]
 fn prepare_shipped_implement_plan(
     plan: &Path,
     commit_message: Option<&str>,
 ) -> PreparedComposition {
-    let source = resolve_composition_source(shipped_implement_plan().to_str().unwrap()).unwrap();
+    let shipped = shipped_implement_plan();
+    let shipped_prompts = shipped.ancestors().nth(2).expect("prompts/ is two levels above the prompt");
+    let repo = TempDir::new().unwrap();
+    copy_tree(shipped_prompts, &repo.path().join("prompts"));
+    let status = std::process::Command::new("git")
+        .args(["init", "--quiet"])
+        .current_dir(repo.path())
+        .status()
+        .expect("git must be available for repository-context tests");
+    assert!(status.success(), "git init failed for {}", repo.path().display());
+
+    let prompt = repo.path().join("prompts/_implement/implement-plan.md");
+    let context = crate::test_support::context_for(&prompt);
+    let source = resolve_composition_source_in_context(prompt.to_str().unwrap(), &context).unwrap();
     let mut overrides = serde_json::json!({
         "plan": plan,
     });
@@ -41,16 +84,20 @@ fn prepare_shipped_implement_plan(
             .insert("commit_message".to_string(), message.into());
     }
 
+    // The caller names the source's repository, as a canonical route derives
+    // it from the source context.
     prepare_direct_with_schema(
         &source,
         PrepareOptions {
             set_overrides: Some(overrides),
-            ..Default::default()
+            source_repo_root: context.repository_root().map(Path::to_path_buf),
+            ..PrepareOptions::new(context)
         },
     )
     .expect("the shipped implement-plan prompt should prepare")
 }
 
+#[cfg(feature = "prompt-tests")]
 fn success_shell_commands(prepared: &PreparedComposition) -> Vec<String> {
     crate::composition::lifecycle::collect_lifecycle_shell_commands_for(
         &prepared.lifecycle,
@@ -112,10 +159,11 @@ fn no_schema_passes_through_unchanged() {
     let dir = TempDir::new().unwrap();
     let source = make_source(&dir, "---\ntitle: Hello\n---\nbody\n");
 
-    let prepared = prepare_direct_with_schema(&source, PrepareOptions::default()).unwrap();
+    let prepared = prepare_direct_with_schema(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
     assert!(prepared.prompt.contains("body"));
 }
 
+#[cfg(feature = "prompt-tests")]
 #[test]
 fn shipped_implement_plan_prepares_with_unset_optional_commit_message() {
     let dir = TempDir::new().unwrap();
@@ -138,7 +186,10 @@ fn shipped_implement_plan_prepares_with_unset_optional_commit_message() {
     assert_eq!(
         commands,
         [
-            format!("git add {}", prepared.source_repo_root.as_ref().unwrap().display()),
+            format!(
+                "git add {}",
+                biscuit_file::to_portable_string(prepared.source_repo_root.as_ref().unwrap())
+            ),
             "just commit".to_string(),
             "git add ..".to_string(),
             "git commit -m \"\"".to_string(),
@@ -147,6 +198,7 @@ fn shipped_implement_plan_prepares_with_unset_optional_commit_message() {
     );
 }
 
+#[cfg(feature = "prompt-tests")]
 #[test]
 fn shipped_implement_plan_preserves_supplied_commit_message_in_preflight_command() {
     let dir = TempDir::new().unwrap();
@@ -183,7 +235,7 @@ fn valid_required_property_passes() {
         "---\n$schema:\n  title: 'string(required)'\ntitle: Plan a feature\n---\nbody\n",
     );
 
-    let prepared = prepare_direct_with_schema(&source, PrepareOptions::default()).unwrap();
+    let prepared = prepare_direct_with_schema(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
     let fm = prepared.effective_frontmatter.as_object().unwrap();
     assert_eq!(
         fm.get("title").and_then(|v| v.as_str()),
@@ -199,7 +251,7 @@ fn missing_required_returns_missing_properties_error() {
         "---\n$schema:\n  title: 'string(required)'\n---\nbody\n",
     );
 
-    let err = prepare_direct_with_schema(&source, PrepareOptions::default()).unwrap_err();
+    let err = prepare_direct_with_schema(&source, PrepareOptions::new(crate::test_support::context())).unwrap_err();
     match err {
         CompositionError::MissingProperties {
             missing,
@@ -223,7 +275,7 @@ fn invalid_required_returns_schema_validation_error() {
         "---\n$schema:\n  count: 'number(required)'\ncount: not-a-number\n---\nbody\n",
     );
 
-    let err = prepare_direct_with_schema(&source, PrepareOptions::default()).unwrap_err();
+    let err = prepare_direct_with_schema(&source, PrepareOptions::new(crate::test_support::context())).unwrap_err();
     assert!(
         matches!(err, CompositionError::SchemaValidation { .. }),
         "got: {err:?}"
@@ -238,7 +290,7 @@ fn invalid_optional_is_dropped_and_retried() {
         "---\n$schema:\n  title: 'string(required)'\n  count: 'number'\ntitle: Plan\ncount: not-a-number\n---\nbody\n",
     );
 
-    let prepared = prepare_direct_with_schema(&source, PrepareOptions::default()).unwrap();
+    let prepared = prepare_direct_with_schema(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
     let fm = prepared.effective_frontmatter.as_object().unwrap();
     assert_eq!(fm.get("title").and_then(|v| v.as_str()), Some("Plan"));
     assert_eq!(
@@ -264,7 +316,7 @@ fn invalid_optional_setter_is_dropped_and_retried() {
             "title": "Plan",
             "count": "not-a-number",
         })),
-        ..Default::default()
+        ..PrepareOptions::new(crate::test_support::context())
     };
     let prepared = prepare_direct_with_schema(&source, options).unwrap();
     let fm = prepared.effective_frontmatter.as_object().unwrap();
@@ -293,7 +345,7 @@ fn schema_validates_while_lifecycle_err_span_is_deferred() {
         "---\n$schema:\n  phase: 'number(required)'\n  total_phases: 'number(required)'\nphase: 1\ntotal_phases: 3\nfailure:\n  message: \"❌️ phase {{phase}} failed: {{err.msg}}\"\n---\nbody\n",
     );
 
-    let prepared = prepare_direct_with_schema(&source, PrepareOptions::default()).unwrap();
+    let prepared = prepare_direct_with_schema(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
     let fm = prepared.effective_frontmatter.as_object().unwrap();
 
     // Ordinary schema inputs validated and present.
@@ -332,7 +384,7 @@ fn invalid_optional_drop_leaves_missing_required_surfaced() {
         "---\n$schema:\n  title: 'string(required)'\n  count: 'number'\ncount: not-a-number\n---\nbody\n",
     );
 
-    let err = prepare_direct_with_schema(&source, PrepareOptions::default()).unwrap_err();
+    let err = prepare_direct_with_schema(&source, PrepareOptions::new(crate::test_support::context())).unwrap_err();
     match err {
         CompositionError::MissingProperties { missing, .. } => {
             assert_eq!(missing.len(), 1);
@@ -349,7 +401,7 @@ fn schema_parse_error_for_invalid_schema_shape() {
     // which is a malformed-schema problem, not a reference-resolution one.
     let source = make_source(&dir, "---\n$schema: 42\n---\nbody\n");
 
-    let err = prepare_direct_with_schema(&source, PrepareOptions::default()).unwrap_err();
+    let err = prepare_direct_with_schema(&source, PrepareOptions::new(crate::test_support::context())).unwrap_err();
     assert!(
         matches!(
             err,
@@ -370,7 +422,7 @@ fn schema_parse_error_for_grammar_failure_names_property_and_keeps_path_load_dis
         "---\n$schema:\n    spec: file(required, match(**/*spec*.md))\nspec: \"x\"\n---\nbody\n",
     );
 
-    let err = prepare_direct_with_schema(&source, PrepareOptions::default()).unwrap_err();
+    let err = prepare_direct_with_schema(&source, PrepareOptions::new(crate::test_support::context())).unwrap_err();
     let CompositionError::SchemaParse {
         property, message, ..
     } = &err
@@ -392,7 +444,7 @@ fn missing_required_surfaces_description_metadata() {
         "---\n$schema:\n  title: 'string(required) -> The page title'\n---\nbody\n",
     );
 
-    let err = prepare_direct_with_schema(&source, PrepareOptions::default()).unwrap_err();
+    let err = prepare_direct_with_schema(&source, PrepareOptions::new(crate::test_support::context())).unwrap_err();
     match err {
         CompositionError::MissingProperties { missing, .. } => {
             assert_eq!(missing[0].description.as_deref(), Some("The page title"));
@@ -409,7 +461,7 @@ fn missing_required_surfaces_frontmatter_description() {
         "---\n$schema:\n  title: 'string(required)'\ndescription: Plan a feature implementation\n---\nbody\n",
     );
 
-    let err = prepare_direct_with_schema(&source, PrepareOptions::default()).unwrap_err();
+    let err = prepare_direct_with_schema(&source, PrepareOptions::new(crate::test_support::context())).unwrap_err();
     match err {
         CompositionError::MissingProperties {
             frontmatter_description,
@@ -432,7 +484,7 @@ fn enum_missing_required_includes_members_in_type_label() {
         "---\n$schema:\n  tier: 'enum(small, medium, large; required)'\n---\nbody\n",
     );
 
-    let err = prepare_direct_with_schema(&source, PrepareOptions::default()).unwrap_err();
+    let err = prepare_direct_with_schema(&source, PrepareOptions::new(crate::test_support::context())).unwrap_err();
     match err {
         CompositionError::MissingProperties { missing, .. } => {
             let label = missing[0]
@@ -457,7 +509,7 @@ fn set_overrides_can_supply_missing_required() {
 
     let options = PrepareOptions {
         set_overrides: Some(serde_json::json!({ "title": "Plan" })),
-        ..Default::default()
+        ..PrepareOptions::new(crate::test_support::context())
     };
     let prepared = prepare_direct_with_schema(&source, options).unwrap();
     let fm = prepared.effective_frontmatter.as_object().unwrap();
@@ -476,7 +528,7 @@ fn inline_compose_with_schema_validates_after_prompt_check() {
         "---\n$schema:\n  prompt: 'string(required)'\n---\nbody\n",
     );
 
-    let err = prepare_inline_with_schema(&source, PrepareOptions::default()).unwrap_err();
+    let err = prepare_inline_with_schema(&source, PrepareOptions::new(crate::test_support::context())).unwrap_err();
     // The schema declares `prompt` as required, but `prepare_inline`
     // checks `PromptPropertyMissing` first against the raw source.
     // Darkmatter, however, runs schema validation during compose for
@@ -501,7 +553,7 @@ fn inline_compose_with_valid_prompt_and_schema_succeeds() {
         "---\n$schema:\n  prompt: 'string(required)'\nprompt: List three colors\n---\nbody\n",
     );
 
-    let prepared = prepare_inline_with_schema(&source, PrepareOptions::default()).unwrap();
+    let prepared = prepare_inline_with_schema(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
     assert!(prepared.prompt.contains("List three colors"));
 }
 
@@ -525,7 +577,7 @@ fn optional_string_resolved_to_null_passes_direct() {
         ),
     );
 
-    let prepared = prepare_direct_with_schema(&source, PrepareOptions::default()).unwrap();
+    let prepared = prepare_direct_with_schema(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
     let fm = prepared.effective_frontmatter.as_object().unwrap();
     assert!(
         fm.contains_key("design"),
@@ -552,7 +604,7 @@ fn optional_string_resolved_to_null_passes_inline() {
         ),
     );
 
-    let prepared = prepare_inline_with_schema(&source, PrepareOptions::default()).unwrap();
+    let prepared = prepare_inline_with_schema(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
     let fm = prepared.effective_frontmatter.as_object().unwrap();
     assert!(
         fm.contains_key("design"),
@@ -579,7 +631,7 @@ fn required_string_resolved_to_null_is_a_missing_property_for_direct_compose() {
         ),
     );
 
-    let err = prepare_direct_with_schema(&source, PrepareOptions::default()).unwrap_err();
+    let err = prepare_direct_with_schema(&source, PrepareOptions::new(crate::test_support::context())).unwrap_err();
     let CompositionError::MissingProperties { missing, .. } = err else {
         panic!("required property resolved to null must surface as MissingProperties, got: {err:?}");
     };
@@ -610,7 +662,7 @@ fn required_expression_resolved_to_null_is_tolerated_at_inline_launch() {
         ),
     );
 
-    let prepared = prepare_inline_with_schema(&source, PrepareOptions::default()).unwrap();
+    let prepared = prepare_inline_with_schema(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
     let launch = prepared.launch_schema.as_ref().expect("schema retained");
     assert_eq!(launch.phase, Some(darkmatter::markdown::schemas::SchemaPhase::Launch));
     let report = launch.report.as_ref().expect("launch report retained");
@@ -641,7 +693,7 @@ fn inline_launch_succeeds_with_required_non_eager_properties_absent() {
         &format!("---\n{VOIP_SHAPED_SCHEMA}prompt: Research VoIP\n---\nbody\n"),
     );
 
-    let prepared = prepare_inline_with_schema(&source, PrepareOptions::default()).unwrap();
+    let prepared = prepare_inline_with_schema(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
     let report = prepared
         .launch_schema
         .as_ref()
@@ -678,7 +730,7 @@ fn direct_compose_of_the_same_document_reports_every_required_gap() {
         &format!("---\n{VOIP_SHAPED_SCHEMA}prompt: Research VoIP\n---\nbody\n"),
     );
 
-    let err = prepare_direct_with_schema(&source, PrepareOptions::default()).unwrap_err();
+    let err = prepare_direct_with_schema(&source, PrepareOptions::new(crate::test_support::context())).unwrap_err();
     let CompositionError::MissingProperties { missing, .. } = err else {
         panic!("expected MissingProperties, got: {err:?}");
     };
@@ -694,12 +746,7 @@ fn inline_launch_fails_naming_a_missing_eager_prompt() {
     let dir = TempDir::new().unwrap();
     let source = make_source(&dir, &format!("---\n{VOIP_SHAPED_SCHEMA}---\nbody\n"));
 
-    let err = pre_validate_schema_for_mode(
-        &source,
-        None,
-        None,
-        CompositionMode::InlineFrontmatterPrompt,
-    )
+    let err = pre_validate_schema_for_mode(&source, None, None, &crate::test_support::context(), CompositionMode::InlineFrontmatterPrompt)
     .unwrap_err();
     let CompositionError::MissingProperties { missing, .. } = err else {
         panic!("expected MissingProperties naming prompt, got: {err:?}");
@@ -723,18 +770,13 @@ fn inline_launch_type_checks_a_present_required_non_eager_value() {
         &format!("---\n{VOIP_SHAPED_SCHEMA}prompt: Research VoIP\nproducts: not-an-object\n---\nbody\n"),
     );
 
-    let err = pre_validate_schema_for_mode(
-        &source,
-        None,
-        None,
-        CompositionMode::InlineFrontmatterPrompt,
-    )
+    let err = pre_validate_schema_for_mode(&source, None, None, &crate::test_support::context(), CompositionMode::InlineFrontmatterPrompt)
     .unwrap_err();
     assert!(
         matches!(err, CompositionError::SchemaValidation { ref problems, .. } if problems.iter().any(|p| p == "/products")),
         "got: {err:?}"
     );
-    let err = prepare_inline_with_schema(&source, PrepareOptions::default()).unwrap_err();
+    let err = prepare_inline_with_schema(&source, PrepareOptions::new(crate::test_support::context())).unwrap_err();
     assert!(matches!(err, CompositionError::SchemaValidation { .. }), "got: {err:?}");
 }
 
@@ -747,18 +789,13 @@ fn a_caller_supplied_prompt_satisfies_the_eager_launch_gate_transiently() {
     let source = make_source(&dir, &format!("---\n{VOIP_SHAPED_SCHEMA}---\nauthored body\n"));
     let overrides = serde_json::json!({ "prompt": "Research VoIP handsets" });
 
-    let pre = pre_validate_schema_for_mode(
-        &source,
-        Some(&overrides),
-        None,
-        CompositionMode::InlineFrontmatterPrompt,
-    )
+    let pre = pre_validate_schema_for_mode(&source, Some(&overrides), None, &crate::test_support::context(), CompositionMode::InlineFrontmatterPrompt)
     .unwrap();
     let prepared = prepare_inline_with_schema(
         &pre.source,
         PrepareOptions {
             set_overrides: pre.set_overrides,
-            ..Default::default()
+            ..PrepareOptions::new(crate::test_support::context())
         },
     )
     .unwrap();
@@ -779,15 +816,10 @@ fn status_report_for_inline_mode_defers_required_non_eager_gaps() {
         &dir,
         &format!("---\n{VOIP_SHAPED_SCHEMA}prompt: Research VoIP\n---\nbody\n"),
     );
-    let inline = build_schema_status_report_for_mode(
-        &source,
-        None,
-        None,
-        CompositionMode::InlineFrontmatterPrompt,
-    )
+    let inline = build_schema_status_report_for_mode(&source, None, None, &crate::test_support::context(), CompositionMode::InlineFrontmatterPrompt)
     .unwrap()
     .unwrap();
-    let direct = build_schema_status_report(&source, None, None).unwrap().unwrap();
+    let direct = build_schema_status_report(&source, None, None, &crate::test_support::context()).unwrap().unwrap();
     let state = |report: &SchemaStatusReport, name: &str| {
         report.required.iter().find(|p| p.name == name).unwrap().state
     };
@@ -806,7 +838,7 @@ fn missing_string_property_maps_to_text_plain_shape() {
         &dir,
         "---\n$schema:\n  title: 'string(required)'\n---\nbody\n",
     );
-    let err = prepare_direct_with_schema(&source, PrepareOptions::default()).unwrap_err();
+    let err = prepare_direct_with_schema(&source, PrepareOptions::new(crate::test_support::context())).unwrap_err();
     match err {
         CompositionError::MissingProperties { missing, .. } => {
             assert_eq!(
@@ -829,7 +861,7 @@ fn missing_number_property_maps_to_number_shape() {
         &dir,
         "---\n$schema:\n  count: 'number(required; integer)'\n---\nbody\n",
     );
-    let err = prepare_direct_with_schema(&source, PrepareOptions::default()).unwrap_err();
+    let err = prepare_direct_with_schema(&source, PrepareOptions::new(crate::test_support::context())).unwrap_err();
     match err {
         CompositionError::MissingProperties { missing, .. } => {
             assert_eq!(
@@ -852,7 +884,7 @@ fn missing_boolean_property_maps_to_boolean_shape() {
         &dir,
         "---\n$schema:\n  ready: 'boolean(required)'\n---\nbody\n",
     );
-    let err = prepare_direct_with_schema(&source, PrepareOptions::default()).unwrap_err();
+    let err = prepare_direct_with_schema(&source, PrepareOptions::new(crate::test_support::context())).unwrap_err();
     match err {
         CompositionError::MissingProperties { missing, .. } => {
             assert_eq!(missing[0].interactive_shape, Some(InteractiveShape::Boolean));
@@ -868,7 +900,7 @@ fn missing_enum_property_maps_to_enum_one_shape() {
         &dir,
         "---\n$schema:\n  tier: 'enum(small, medium, large; required)'\n---\nbody\n",
     );
-    let err = prepare_direct_with_schema(&source, PrepareOptions::default()).unwrap_err();
+    let err = prepare_direct_with_schema(&source, PrepareOptions::new(crate::test_support::context())).unwrap_err();
     match err {
         CompositionError::MissingProperties { missing, .. } => match &missing[0]
             .interactive_shape
@@ -891,7 +923,7 @@ fn missing_enum_array_property_maps_to_enum_many_shape() {
         &dir,
         "---\n$schema:\n  tags: 'enum(a, b, c)[](required)'\n---\nbody\n",
     );
-    let err = prepare_direct_with_schema(&source, PrepareOptions::default()).unwrap_err();
+    let err = prepare_direct_with_schema(&source, PrepareOptions::new(crate::test_support::context())).unwrap_err();
     match err {
         CompositionError::MissingProperties { missing, .. } => {
             assert!(matches!(
@@ -910,7 +942,7 @@ fn missing_file_property_maps_to_file_shape() {
         &dir,
         "---\n$schema:\n  template: 'file(required)'\n---\nbody\n",
     );
-    let err = prepare_direct_with_schema(&source, PrepareOptions::default()).unwrap_err();
+    let err = prepare_direct_with_schema(&source, PrepareOptions::new(crate::test_support::context())).unwrap_err();
     match err {
         CompositionError::MissingProperties { missing, .. } => {
             assert_eq!(
@@ -932,7 +964,7 @@ fn missing_file_array_property_maps_to_file_array_shape() {
         &dir,
         "---\n$schema:\n  attachments: 'file[](required)'\n---\nbody\n",
     );
-    let err = prepare_direct_with_schema(&source, PrepareOptions::default()).unwrap_err();
+    let err = prepare_direct_with_schema(&source, PrepareOptions::new(crate::test_support::context())).unwrap_err();
     match err {
         CompositionError::MissingProperties { missing, .. } => {
             assert_eq!(
@@ -954,7 +986,7 @@ fn missing_file_property_preserves_match_patterns() {
         &dir,
         "---\n$schema:\n  cover: \"file(match('*.png', '*.jpg'); required)\"\n---\nbody\n",
     );
-    let err = prepare_direct_with_schema(&source, PrepareOptions::default()).unwrap_err();
+    let err = prepare_direct_with_schema(&source, PrepareOptions::new(crate::test_support::context())).unwrap_err();
     match err {
         CompositionError::MissingProperties { missing, .. } => match &missing[0]
             .interactive_shape
@@ -976,7 +1008,7 @@ fn missing_object_property_has_no_interactive_shape() {
         &dir,
         "---\n$schema:\n  config: 'object(required)'\n---\nbody\n",
     );
-    let err = prepare_direct_with_schema(&source, PrepareOptions::default()).unwrap_err();
+    let err = prepare_direct_with_schema(&source, PrepareOptions::new(crate::test_support::context())).unwrap_err();
     match err {
         CompositionError::MissingProperties { missing, .. } => {
             assert_eq!(missing[0].interactive_shape, None);
@@ -991,7 +1023,7 @@ fn missing_object_property_has_no_interactive_shape() {
 fn status_report_is_none_when_no_schema() {
     let dir = TempDir::new().unwrap();
     let source = make_source(&dir, "---\ntitle: hi\n---\nbody\n");
-    let report = build_schema_status_report(&source, None, None).unwrap();
+    let report = build_schema_status_report(&source, None, None, &crate::test_support::context()).unwrap();
     assert!(report.is_none());
 }
 
@@ -1002,7 +1034,7 @@ fn status_report_categorizes_required_and_optional() {
         &dir,
         "---\n$schema:\n  title: 'string(required)'\n  description: 'string'\ntitle: Plan\n---\nbody\n",
     );
-    let report = build_schema_status_report(&source, None, None).unwrap().unwrap();
+    let report = build_schema_status_report(&source, None, None, &crate::test_support::context()).unwrap().unwrap();
     assert_eq!(report.required.len(), 1);
     assert_eq!(report.required[0].name, "title");
     assert_eq!(report.required[0].state, PropertyState::Valid);
@@ -1018,7 +1050,7 @@ fn status_report_marks_missing_required_correctly() {
         &dir,
         "---\n$schema:\n  title: 'string(required)'\n---\nbody\n",
     );
-    let report = build_schema_status_report(&source, None, None).unwrap().unwrap();
+    let report = build_schema_status_report(&source, None, None, &crate::test_support::context()).unwrap().unwrap();
     assert_eq!(report.required[0].state, PropertyState::Missing);
 }
 
@@ -1029,7 +1061,7 @@ fn status_report_marks_invalid_required_correctly() {
         &dir,
         "---\n$schema:\n  count: 'number(required)'\ncount: not-a-number\n---\nbody\n",
     );
-    let report = build_schema_status_report(&source, None, None).unwrap().unwrap();
+    let report = build_schema_status_report(&source, None, None, &crate::test_support::context()).unwrap().unwrap();
     assert_eq!(report.required[0].state, PropertyState::Invalid);
 }
 
@@ -1046,7 +1078,7 @@ fn status_report_judges_a_caller_file_from_the_launch_area() {
 
     let state = |spec: &str| {
         let overrides = serde_json::json!({ "spec": spec });
-        build_schema_status_report(&source, Some(&overrides), Some(launch.path()))
+        build_schema_status_report(&source, Some(&overrides), Some(launch.path()), &crate::test_support::context())
             .unwrap()
             .unwrap()
             .required[0]
@@ -1068,7 +1100,7 @@ fn status_report_overrides_supply_missing_required() {
         "---\n$schema:\n  title: 'string(required)'\n---\nbody\n",
     );
     let overrides = serde_json::json!({ "title": "supplied" });
-    let report = build_schema_status_report(&source, Some(&overrides), None)
+    let report = build_schema_status_report(&source, Some(&overrides), None, &crate::test_support::context())
         .unwrap()
         .unwrap();
     assert_eq!(report.required[0].state, PropertyState::Valid);
@@ -1081,7 +1113,7 @@ fn status_report_flags_invalid_optional() {
         &dir,
         "---\n$schema:\n  title: 'string(required)'\n  count: 'number'\ntitle: Plan\ncount: nope\n---\nbody\n",
     );
-    let report = build_schema_status_report(&source, None, None).unwrap().unwrap();
+    let report = build_schema_status_report(&source, None, None, &crate::test_support::context()).unwrap().unwrap();
     assert!(report.has_invalid_optional);
 }
 
@@ -1106,7 +1138,7 @@ fn status_report_does_not_mark_templated_required_as_invalid() {
             "---\nbody\n",
         ),
     );
-    let report = build_schema_status_report(&source, None, None).unwrap().unwrap();
+    let report = build_schema_status_report(&source, None, None, &crate::test_support::context()).unwrap().unwrap();
     let runtime = report
         .required
         .iter()
@@ -1146,7 +1178,7 @@ fn status_report_does_not_mark_templated_optional_as_invalid() {
             "---\nbody\n",
         ),
     );
-    let report = build_schema_status_report(&source, None, None).unwrap().unwrap();
+    let report = build_schema_status_report(&source, None, None, &crate::test_support::context()).unwrap().unwrap();
     assert!(
         !report.has_invalid_optional,
         "templated optional must not be flagged invalid: {:?}",
@@ -1200,7 +1232,7 @@ fn pre_validate_does_not_reject_template_bearing_value() {
         "---\n$schema:\n  runtime_agent: 'enum(goose; required)'\nruntime_agent: '{{ env.AGENT }}'\n---\nbody\n",
     );
 
-    let pre = pre_validate_schema(&source, None, None)
+    let pre = pre_validate_schema(&source, None, None, &crate::test_support::context())
         .expect("template-bearing required value must pass pre-validation");
     // Source/overrides are returned unchanged.
     assert!(pre.set_overrides.is_none());
@@ -1227,7 +1259,7 @@ fn pre_validate_defers_template_invalid_required_to_prepare_time() {
         "---\n$schema:\n  runtime_agent: 'enum(goose; required)'\nruntime_agent: '{{ env.AGENT }}'\n---\nbody\n",
     );
 
-    let pre = pre_validate_schema(&source, None, None);
+    let pre = pre_validate_schema(&source, None, None, &crate::test_support::context());
     assert!(
         pre.is_ok(),
         "pre-validation must defer template-bearing invalid-required to prepare-time"
@@ -1245,7 +1277,7 @@ fn pre_validate_still_surfaces_literal_invalid_required() {
         "---\n$schema:\n  count: 'number(required)'\ncount: not-a-number\n---\nbody\n",
     );
 
-    let err = pre_validate_schema(&source, None, None).unwrap_err();
+    let err = pre_validate_schema(&source, None, None, &crate::test_support::context()).unwrap_err();
     assert!(
         matches!(err, CompositionError::SchemaValidation { .. }),
         "expected SchemaValidation for literal invalid-required, got: {err:?}"
@@ -1264,7 +1296,7 @@ fn pre_validate_still_surfaces_genuinely_missing_required() {
         "---\n$schema:\n  title: 'string(required)'\n---\nbody\n",
     );
 
-    let err = pre_validate_schema(&source, None, None).unwrap_err();
+    let err = pre_validate_schema(&source, None, None, &crate::test_support::context()).unwrap_err();
     assert!(
         matches!(err, CompositionError::MissingProperties { .. }),
         "expected MissingProperties, got: {err:?}"
@@ -1282,7 +1314,7 @@ fn drop_invalid_optionals_skips_template_bearing_values() {
         "---\n$schema:\n  count: 'number'\ncount: '{{ env.COUNT }}'\n---\nbody\n",
     );
 
-    let (scrubbed, _, _) = drop_invalid_optionals(source, None, None);
+    let (scrubbed, _, _) = drop_invalid_optionals(source, None, None, &crate::test_support::context());
     let value = scrubbed
         .markdown
         .frontmatter()
@@ -1302,7 +1334,7 @@ fn drop_invalid_optionals_still_drops_literal_invalid_values() {
         "---\n$schema:\n  count: 'number'\ncount: nope\n---\nbody\n",
     );
 
-    let (scrubbed, _, _) = drop_invalid_optionals(source, None, None);
+    let (scrubbed, _, _) = drop_invalid_optionals(source, None, None, &crate::test_support::context());
     assert!(
         !scrubbed
             .markdown
@@ -1321,7 +1353,7 @@ fn drop_invalid_optionals_keeps_optional_eager_file_failures() {
         "---\n$schema:\n  spec: 'file(eager)'\nspec: missing/spec.md\n---\nbody\n",
     );
 
-    let (scrubbed, _, dropped) = drop_invalid_optionals(source, None, None);
+    let (scrubbed, _, dropped) = drop_invalid_optionals(source, None, None, &crate::test_support::context());
     assert!(dropped.is_empty());
     assert_eq!(
         scrubbed.markdown.frontmatter().as_map().get("spec"),
@@ -1338,7 +1370,7 @@ fn pre_validate_schema_reports_optional_eager_file_failures() {
         "---\n$schema:\n  spec: 'file(eager)'\nspec: missing/spec.md\n---\nbody\n",
     );
 
-    let err = pre_validate_schema(&source, None, None)
+    let err = pre_validate_schema(&source, None, None, &crate::test_support::context())
         .expect_err("optional eager file failures should not be dropped");
     match err {
         CompositionError::SchemaValidation {
@@ -1365,12 +1397,7 @@ fn inline_launch_allows_absent_eager_but_rejects_present_invalid_eager() {
         &dir,
         "---\n$schema:\n  label: 'string(eager)'\n---\nbody\n",
     );
-    pre_validate_schema_for_mode(
-        &absent,
-        None,
-        None,
-        CompositionMode::InlineFrontmatterPrompt,
-    )
+    pre_validate_schema_for_mode(&absent, None, None, &crate::test_support::context(), CompositionMode::InlineFrontmatterPrompt)
     .expect("an eager-only property remains optional");
 
     let invalid = make_source(
@@ -1378,12 +1405,7 @@ fn inline_launch_allows_absent_eager_but_rejects_present_invalid_eager() {
         "---\n$schema:\n  label: 'string(eager)'\nlabel: []\n---\nbody\n",
     );
     assert!(matches!(
-        pre_validate_schema_for_mode(
-            &invalid,
-            None,
-            None,
-            CompositionMode::InlineFrontmatterPrompt,
-        ),
+        pre_validate_schema_for_mode(&invalid, None, None, &crate::test_support::context(), CompositionMode::InlineFrontmatterPrompt),
         Err(CompositionError::SchemaValidation { .. })
     ));
 }
@@ -1401,7 +1423,7 @@ fn provided_file_match_partial_reports_unresolved_file_reference() {
     );
     let overrides = serde_json::json!({ "spec": "everywhere" });
 
-    let err = pre_validate_schema(&source, Some(&overrides), None)
+    let err = pre_validate_schema(&source, Some(&overrides), None, &crate::test_support::context())
         .expect_err("a provided file(match) partial with no literal match should surface a typed error");
     match err {
         CompositionError::UnresolvedFileReference {
@@ -1437,7 +1459,7 @@ fn provided_file_array_match_partial_reports_unresolved_file_reference() {
     );
     let overrides = serde_json::json!({ "attachments": ["everywhere"] });
 
-    let err = pre_validate_schema(&source, Some(&overrides), None)
+    let err = pre_validate_schema(&source, Some(&overrides), None, &crate::test_support::context())
         .expect_err("a provided file[](match) partial with no literal match should surface a typed error");
     match err {
         CompositionError::UnresolvedFileReference {
@@ -1473,7 +1495,7 @@ fn provided_file_scalar_for_array_property_match_partial_reports_unresolved_file
     );
     let overrides = serde_json::json!({ "attachments": "everywhere" });
 
-    let err = pre_validate_schema(&source, Some(&overrides), None)
+    let err = pre_validate_schema(&source, Some(&overrides), None, &crate::test_support::context())
         .expect_err("a scalar partial for file[](match) should surface a typed error");
     match err {
         CompositionError::UnresolvedFileReference {
@@ -1502,7 +1524,7 @@ fn provided_file_array_multi_element_partial_reports_first_element() {
     );
     let overrides = serde_json::json!({ "attachments": ["everywhere", "here"] });
 
-    let err = pre_validate_schema(&source, Some(&overrides), None).expect_err(
+    let err = pre_validate_schema(&source, Some(&overrides), None, &crate::test_support::context()).expect_err(
         "a multi-element file[](match) partial with no literal match should surface a typed error",
     );
     match err {
@@ -1559,7 +1581,7 @@ fn provided_file_array_with_non_string_elements_stays_schema_validation() {
     );
     let overrides = serde_json::json!({ "attachments": [42, true] });
 
-    let err = pre_validate_schema(&source, Some(&overrides), None)
+    let err = pre_validate_schema(&source, Some(&overrides), None, &crate::test_support::context())
         .expect_err("non-string array elements should fail validation");
     assert!(
         matches!(err, CompositionError::SchemaValidation { .. }),
@@ -1579,7 +1601,7 @@ fn provided_file_without_match_stays_schema_validation() {
     );
     let overrides = serde_json::json!({ "spec": "missing/spec.md" });
 
-    let err = pre_validate_schema(&source, Some(&overrides), None)
+    let err = pre_validate_schema(&source, Some(&overrides), None, &crate::test_support::context())
         .expect_err("a bare-file bad value should still fail validation");
     assert!(
         matches!(err, CompositionError::SchemaValidation { .. }),
@@ -1642,7 +1664,7 @@ fn post_shell_valid_value_passes() {
 
     let opts = PrepareOptions {
         pre_approved_commands: Some(approve_echo()),
-        ..Default::default()
+        ..PrepareOptions::new(crate::test_support::context())
     };
     let prepared = prepare_direct_with_schema(&source, opts).unwrap();
     let tier = prepared
@@ -1676,7 +1698,7 @@ fn post_shell_invalid_required_returns_schema_validation_error() {
 
     let opts = PrepareOptions {
         pre_approved_commands: Some(approve_echo()),
-        ..Default::default()
+        ..PrepareOptions::new(crate::test_support::context())
     };
     let err = prepare_direct_with_schema(&source, opts).unwrap_err();
     assert!(
@@ -1707,7 +1729,7 @@ fn post_shell_invalid_optional_is_dropped_with_diagnostic() {
 
     let opts = PrepareOptions {
         pre_approved_commands: Some(approve_echo()),
-        ..Default::default()
+        ..PrepareOptions::new(crate::test_support::context())
     };
     let prepared = prepare_direct_with_schema(&source, opts).unwrap();
     let fm = prepared.effective_frontmatter.as_object().unwrap();
@@ -1734,7 +1756,7 @@ fn pre_validation_drop_surfaces_diagnostic() {
         "---\n$schema:\n  count: 'number'\ncount: nope\n---\nbody\n",
     );
 
-    let pre = pre_validate_schema(&source, None, None).unwrap();
+    let pre = pre_validate_schema(&source, None, None, &crate::test_support::context()).unwrap();
     assert_eq!(pre.dropped_optionals.len(), 1);
     assert_eq!(pre.dropped_optionals[0].property, "count");
     assert_eq!(
@@ -1776,7 +1798,12 @@ fn schema_reference_stays_document_relative_through_claudine_load() {
     );
 
     // Fallback points at a dir WITHOUT schema.yaml.
-    let effective = load_effective_schema(&source, Some(fallback_dir.path())).unwrap();
+    let effective = load_effective_schema(
+        &source,
+        Some(fallback_dir.path()),
+        &crate::test_support::context_for(&source.resolved_path),
+        &Default::default(),
+    ).unwrap();
     assert!(
         effective.is_some(),
         "$schema reference must resolve from the document dir, not the fallback",
@@ -1800,7 +1827,12 @@ fn root_union_schema_string_arm_stays_document_relative_through_claudine_load() 
         "---\n$schema:\n  - ./arm-a.yaml\n  - fallback: string\nkind: feature\n---\nbody\n",
     );
 
-    let effective = load_effective_schema(&source, Some(fallback_dir.path())).unwrap();
+    let effective = load_effective_schema(
+        &source,
+        Some(fallback_dir.path()),
+        &crate::test_support::context_for(&source.resolved_path),
+        &Default::default(),
+    ).unwrap();
     assert!(
         effective.is_some(),
         "root-union $schema string arm must resolve from the document dir, not the fallback",
@@ -1839,7 +1871,7 @@ fn file_property_and_file_exists_agree_across_schema_and_body() {
 
     let options = PrepareOptions {
         file_ref_fallback_dir: Some(fallback_dir.path().to_path_buf()),
-        ..Default::default()
+        ..PrepareOptions::new(crate::test_support::context())
     };
 
     // Prepare threads the fallback into both Darkmatter composition
@@ -1880,7 +1912,7 @@ impl Drop for CwdGuard {
 fn make_source_in(dir: &std::path::Path, document: &str) -> ResolvedCompositionSource {
     let file = dir.join("prompt.md");
     fs::write(&file, document).unwrap();
-    resolve_composition_source(file.to_str().unwrap()).unwrap()
+    resolve_composition_source(file.to_str().unwrap(), &crate::test_support::snapshot()).unwrap()
 }
 
 /// `pre_validate_schema` with a `file(required)` value resolves against the
@@ -1903,7 +1935,7 @@ fn pre_validate_schema_resolves_file_against_document_dir() {
     );
 
     let _cwd = CwdGuard::enter(unrelated.path());
-    let pre = pre_validate_schema(&source, None, Some(fallback_dir.path()))
+    let pre = pre_validate_schema(&source, None, Some(fallback_dir.path()), &crate::test_support::context())
         .expect("spec.md under the document dir must validate, CWD-independently");
     assert!(pre.dropped_optionals.is_empty());
 }
@@ -1924,7 +1956,7 @@ fn pre_validate_schema_rejects_launch_only_file() {
     );
 
     let _cwd = CwdGuard::enter(unrelated.path());
-    let err = pre_validate_schema(&source, None, None)
+    let err = pre_validate_schema(&source, None, None, &crate::test_support::context())
         .expect_err("launch-only spec.md must be unreachable from the document context");
     assert!(
         matches!(err, CompositionError::SchemaValidation { .. }),
@@ -1951,7 +1983,7 @@ fn pre_validate_schema_defers_caller_eager_file_to_canonical_preparation() {
         let overrides = serde_json::json!({ "spec": "spec.md" });
 
         let _cwd = CwdGuard::enter(unrelated.path());
-        let pre = pre_validate_schema(&source, Some(&overrides), Some(launch_dir.path()))
+        let pre = pre_validate_schema(&source, Some(&overrides), Some(launch_dir.path()), &crate::test_support::context())
             .expect("caller-originated `spec.md` must reach canonical preparation");
         assert_eq!(pre.set_overrides, Some(overrides));
     }
@@ -1990,7 +2022,7 @@ fn pre_validate_schema_keeps_unresolved_caller_file_partials_interactive() {
             &format!("---\n$schema:\n  {schema}\n---\nbody\n"),
         );
 
-        let err = pre_validate_schema(&source, Some(&overrides), Some(dir.path()))
+        let err = pre_validate_schema(&source, Some(&overrides), Some(dir.path()), &crate::test_support::context())
             .expect_err("the exact `everywhere` partial must remain interactive");
         match err {
             CompositionError::UnresolvedFileReference {
@@ -2025,7 +2057,7 @@ fn pre_validate_schema_ignores_launch_copy_when_source_exists() {
     );
 
     let _cwd = CwdGuard::enter(unrelated.path());
-    pre_validate_schema(&source, None, Some(fallback_dir.path()))
+    pre_validate_schema(&source, None, Some(fallback_dir.path()), &crate::test_support::context())
         .expect("the source-local value must validate independently of the launch copy");
 }
 
@@ -2046,7 +2078,7 @@ fn drop_invalid_optionals_keeps_unresolvable_eager_file_for_validation() {
 
     let _cwd = CwdGuard::enter(unrelated.path());
     let (scrubbed, _overrides, dropped) =
-        drop_invalid_optionals(source, None, Some(fallback_dir.path()));
+        drop_invalid_optionals(source, None, Some(fallback_dir.path()), &crate::test_support::context());
 
     assert!(
         scrubbed
@@ -2081,7 +2113,7 @@ fn drop_invalid_optionals_keeps_unresolved_eager_file_when_no_fallback() {
     );
 
     let _cwd = CwdGuard::enter(unrelated.path());
-    let (scrubbed, _overrides, dropped) = drop_invalid_optionals(source, None, None);
+    let (scrubbed, _overrides, dropped) = drop_invalid_optionals(source, None, None, &crate::test_support::context());
 
     assert!(
         scrubbed
@@ -2098,7 +2130,7 @@ fn drop_invalid_optionals_keeps_unresolved_eager_file_when_no_fallback() {
 }
 
 /// Sequence phase 1C analog: each sequence step pre-validates via
-/// `pre_validate_schema(source, Some(step_overrides), launch_area)` before
+/// `pre_validate_schema(source, Some(step_overrides), launch_area, &crate::test_support::context())` before
 /// per-step prepare (see `wrap::sequence::phase1c`). A step whose `file`
 /// value comes through the per-step overlay (`set_overrides`) resolves against
 /// the document directory (`base_dir`), CWD-independently; the launch-area
@@ -2122,7 +2154,7 @@ fn sequence_step_pre_validation_resolves_file_against_document_dir() {
     let step_overrides = serde_json::json!({ "spec": "step-spec.md" });
 
     let _cwd = CwdGuard::enter(unrelated.path());
-    pre_validate_schema(&source, Some(&step_overrides), Some(fallback_dir.path()))
+    pre_validate_schema(&source, Some(&step_overrides), Some(fallback_dir.path()), &crate::test_support::context())
         .expect("a per-step file value under the document dir must pass sequence pre-validation");
 }
 
@@ -2145,7 +2177,7 @@ fn status_report_marks_document_dir_file_valid() {
     );
 
     let _cwd = CwdGuard::enter(unrelated.path());
-    let report = build_schema_status_report(&source, None, Some(fallback_dir.path()))
+    let report = build_schema_status_report(&source, None, Some(fallback_dir.path()), &crate::test_support::context())
         .unwrap()
         .unwrap();
     let spec = report
@@ -2176,13 +2208,13 @@ fn a_stored_literal_token_is_judged_by_its_text() {
             encode_yaml_scalar("alpha")
         ),
     );
-    let pre = pre_validate_schema(&valid, None, None).expect("the decoded text is in the enum");
+    let pre = pre_validate_schema(&valid, None, None, &crate::test_support::context()).expect("the decoded text is in the enum");
     assert_eq!(
         pre.source.markdown.frontmatter().as_map()["mode"],
         serde_json::json!(encode("alpha")),
         "the token is kept for composition to decode"
     );
-    let status = build_schema_status_report(&valid, None, None).unwrap().unwrap();
+    let status = build_schema_status_report(&valid, None, None, &crate::test_support::context()).unwrap().unwrap();
     assert!(!status.has_invalid_optional, "{status:?}");
 
     let invalid = make_source(
@@ -2192,7 +2224,7 @@ fn a_stored_literal_token_is_judged_by_its_text() {
             encode_yaml_scalar("$(echo 1)")
         ),
     );
-    let (scrubbed, _, dropped) = drop_invalid_optionals(invalid, None, None);
+    let (scrubbed, _, dropped) = drop_invalid_optionals(invalid, None, None, &crate::test_support::context());
     assert!(
         !scrubbed.markdown.frontmatter().as_map().contains_key("count"),
         "a token holding command text is data, not a pending command"
@@ -2213,13 +2245,13 @@ fn a_data_override_is_judged_and_an_authored_one_is_deferred() {
     let value = serde_json::json!({"count": "{{ n }}"});
 
     let authored = LayeredOverrides::from_parts(Some(&value), &Default::default());
-    pre_validate_layered_for_mode(&source, &authored, None, CompositionMode::ChainedDocument)
+    pre_validate_layered_for_mode(&source, &authored, None, &crate::test_support::context(), CompositionMode::ChainedDocument)
         .expect("an authored template is deferred to composition");
 
     let data_keys = std::collections::BTreeSet::from(["count".to_string()]);
     let data = LayeredOverrides::from_parts(Some(&value), &data_keys);
     let error =
-        pre_validate_layered_for_mode(&source, &data, None, CompositionMode::ChainedDocument)
+        pre_validate_layered_for_mode(&source, &data, None, &crate::test_support::context(), CompositionMode::ChainedDocument)
             .expect_err("a data string cannot satisfy `number`");
     assert!(matches!(error, CompositionError::SchemaValidation { .. }), "{error:?}");
 }
@@ -2243,7 +2275,7 @@ fn provided_file_match_partial_in_a_union_reports_unresolved_file_reference() {
         ),
     ] {
         let source = make_source(&dir, &format!("---\n$schema:\n{schema}---\nbody\n"));
-        let err = pre_validate_schema(&source, Some(&overrides), None)
+        let err = pre_validate_schema(&source, Some(&overrides), None, &crate::test_support::context())
             .expect_err("a union file(match) partial with no literal match must fail");
         let CompositionError::UnresolvedFileReference {
             property,
@@ -2269,6 +2301,41 @@ fn provided_file_match_partial_in_a_union_reports_unresolved_file_reference() {
         "---\n$schema:\n  - spec: 'file(required;match(**/*spec*.md);eager)'\n  \
          - spec: 'file(required;match(**/*spec*.md);eager)[]'\n---\nbody\n",
     );
-    let err = pre_validate_schema(&source, Some(&overrides), None).expect_err("still invalid");
+    let err = pre_validate_schema(&source, Some(&overrides), None, &crate::test_support::context()).expect_err("still invalid");
     assert!(matches!(err, CompositionError::SchemaValidation { .. }), "{err}");
+}
+
+#[test]
+fn schema_status_report_keeps_the_heading_and_each_property_on_rows() {
+    use biscuit_terminal::prelude::TerminalRenderable;
+
+    let status = |name: &str, state| PropertyStatus {
+        name: name.to_string(),
+        type_label: "string".to_string(),
+        description: None,
+        state,
+    };
+    let report = SchemaStatusReport {
+        source_path: PathBuf::from("prompts/seq.md"),
+        required: vec![
+            status("state", PropertyState::Valid),
+            status("topic", PropertyState::Missing),
+        ],
+        optional: vec![status("tone", PropertyState::Valid)],
+        has_invalid_optional: false,
+        raw_json_schema: false,
+    };
+    let term = biscuit_terminal::terminal::Terminal::builder()
+        .width(300)
+        .color_depth(biscuit_terminal::discovery::detection::ColorDepth::None)
+        .build();
+    let rendered = biscuit_terminal::utils::escape_codes::strip_escape_codes(
+        schema_status_report_prose(&report).render(&term),
+    );
+    let rows: Vec<&str> = rendered.lines().map(str::trim).filter(|row| !row.is_empty()).collect();
+    assert_eq!(rows.len(), 4, "heading plus one row per property: {rows:#?}");
+    assert!(rows[0].ends_with("prompt has the following schema:"), "{rows:#?}");
+    assert!(rows[1].starts_with("✓ state: string"), "{rows:#?}");
+    assert!(rows[2].starts_with("⍉ topic: string"), "{rows:#?}");
+    assert!(rows[3].starts_with("✓ tone: string"), "{rows:#?}");
 }

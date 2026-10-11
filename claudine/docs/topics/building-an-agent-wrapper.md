@@ -197,7 +197,7 @@ After the centralized-providers refactor, adding a ninth provider has a much sma
 ### 3. Stream parsing (if applicable)
 
 - [ ] Add [`stream/protocol/<provider>.rs`](../../lib/src/stream/protocol/) with a tagged `*Event` enum (every field `#[serde(default)]`, no `deny_unknown_fields`).
-- [ ] Add `stream/<provider>_semantic.rs` implementing `SemanticStreamParser` with a two-pass `feed_line` (`Value` first, then typed deserialize).
+- [ ] Add `stream/<provider>_semantic.rs` implementing `SemanticStreamParser` with a two-pass `feed_line` (`Value` first, then typed deserialize), and a `snapshot` that returns exactly what `finish` would, without consuming the parser or emitting events (add the provider to `lib/tests/l1/parser_snapshot.rs`).
 - [ ] Implement `ProviderBehavior::create_semantic_parser` on the new provider's behavior struct in `provider/<name>.rs`.
 - [ ] Ship the `unknown_event_type_fails_typed` test alongside per-variant deserialization tests.
 

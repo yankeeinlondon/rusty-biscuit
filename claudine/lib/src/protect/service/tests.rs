@@ -53,7 +53,7 @@ fn bash_safe_command_is_allowed() {
 #[test]
 fn write_to_ssh_config_is_blocked() {
     let service = default_service();
-    let home = dirs::home_dir().unwrap();
+    let home = biscuit_file::home_dir().unwrap();
     let ssh_path = format!("{}/.ssh/config", home.display());
     let decision = service.evaluate(&ProtectRequest::WritePath {
         paths: vec![&ssh_path],
@@ -94,7 +94,7 @@ fn windows_sensitive_path_allow_rule_reaches_protect_service() {
 #[test]
 fn write_paths_array_blocks_when_any_path_is_sensitive() {
     let service = default_service();
-    let home = dirs::home_dir().unwrap();
+    let home = biscuit_file::home_dir().unwrap();
     let ssh_path = format!("{}/.ssh/config", home.display());
     // First entry is benign; the sensitive second entry must still block.
     let decision = service.evaluate(&ProtectRequest::WritePath {
@@ -226,7 +226,7 @@ fn rm_boot_blocked_even_with_boot_in_allow_paths() {
 #[test]
 fn relative_path_traversal_to_ssh_is_blocked() {
     let service = default_service();
-    let home = dirs::home_dir().unwrap();
+    let home = biscuit_file::home_dir().unwrap();
     let cwd = format!("{}/projects/myapp", home.display());
     let decision = service.evaluate(&ProtectRequest::WritePath {
         paths: vec!["../../.ssh/config"],
@@ -344,7 +344,7 @@ fn write_to_non_allowed_sensitive_path_is_still_blocked() {
 #[test]
 fn symlinked_cwd_to_home_blocks_write_to_ssh() {
     let tmp = tempfile::tempdir().unwrap();
-    let home = dirs::home_dir().unwrap();
+    let home = biscuit_file::home_dir().unwrap();
 
     // Create symlink: tmp/home-link -> $HOME
     let home_link = tmp.path().join("home-link");
@@ -364,4 +364,47 @@ fn symlinked_cwd_to_home_blocks_write_to_ssh() {
         decision.is_blocked(),
         "write through symlinked cwd to ~/.ssh should be blocked after canonicalization"
     );
+}
+
+/// A blocked write to an existing file is reported in the shared canonical
+/// spelling, never a Windows verbatim (`\\?\`) path, and an absolute allow
+/// path authored in the launch spelling still suppresses it. On macOS the
+/// temporary home is reached through `/var` -> `/private/var`.
+#[test]
+fn an_existing_sensitive_file_is_reported_and_allowed_in_the_shared_canonical_spelling() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    let key = home.join(".ssh").join("id_ed25519");
+    std::fs::create_dir_all(key.parent().unwrap()).unwrap();
+    std::fs::write(&key, "key").unwrap();
+    let target = key.to_string_lossy().into_owned();
+    let expected = biscuit_file::canonicalize_simplified(&key)
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    assert!(!expected.starts_with(r"\\?\"), "the helper keeps a verbatim prefix: {expected}");
+
+    let mut service = default_service();
+    service.path_checker = SensitivePathChecker::with_home_dir(home.clone());
+    let decision = service.evaluate(&ProtectRequest::WritePath {
+        paths: vec![&target],
+        cwd: None,
+    });
+    let blocked = decision.blocked.expect("a write into the home's .ssh is blocked");
+    assert_eq!(blocked.group, RuleGroup::SensitivePaths);
+    assert_eq!(blocked.target_path.as_deref(), Some(expected.as_str()));
+    assert_eq!(blocked.matched_text, expected);
+
+    let mut config = ProtectConfig::default();
+    config.rules.sensitive_paths = Some(RuleGroupConfig::Detailed(RuleGroupDetailedConfig {
+        enabled: true,
+        allow_paths: vec![home.join(".ssh").to_string_lossy().into_owned()],
+    }));
+    let mut service = ProtectService::new(config, ProtectPlatform::current()).unwrap();
+    service.path_checker = SensitivePathChecker::with_home_dir(home);
+    let decision = service.evaluate(&ProtectRequest::WritePath {
+        paths: vec![&target],
+        cwd: None,
+    });
+    assert!(!decision.is_blocked(), "the authored allow path suppresses the block: {decision:?}");
 }

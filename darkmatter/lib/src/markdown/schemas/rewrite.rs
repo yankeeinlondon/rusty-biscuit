@@ -78,24 +78,7 @@ pub fn rewrite_eager_file_values(
     base_dir: &Path,
     fallback: Option<&Path>,
     composition_pending: &HashSet<String>,
-) -> NormalizationOutcome {
-    rewrite_eager_file_values_in_context(
-        json_schema,
-        instance,
-        base_dir,
-        fallback,
-        composition_pending,
-        None,
-    )
-}
-
-pub(super) fn rewrite_eager_file_values_in_context(
-    json_schema: &Value,
-    instance: &Value,
-    base_dir: &Path,
-    fallback: Option<&Path>,
-    composition_pending: &HashSet<String>,
-    request_context: Option<&biscuit_file::FileResolutionContext>,
+    request_context: &biscuit_file::FileResolutionContext,
 ) -> NormalizationOutcome {
     if let Some(arms) = json_schema.get("anyOf").and_then(Value::as_array) {
         return rewrite_root_union(
@@ -131,7 +114,7 @@ fn rewrite_root_union(
     base_dir: &Path,
     fallback: Option<&Path>,
     composition_pending: &HashSet<String>,
-    request_context: Option<&biscuit_file::FileResolutionContext>,
+    request_context: &biscuit_file::FileResolutionContext,
 ) -> NormalizationOutcome {
     for arm in arms {
         let wrapped = validate::wrap_arm_as_root_schema(arm);
@@ -203,7 +186,7 @@ fn rewrite_object(
     base_dir: &Path,
     fallback: Option<&Path>,
     composition_pending: &HashSet<String>,
-    request_context: Option<&biscuit_file::FileResolutionContext>,
+    request_context: &biscuit_file::FileResolutionContext,
 ) -> NormalizationOutcome {
     let (Some(props), Some(obj)) = (
         schema.get("properties").and_then(Value::as_object),
@@ -253,7 +236,7 @@ fn rewrite_property(
     value: &Value,
     base_dir: &Path,
     fallback: Option<&Path>,
-    request_context: Option<&biscuit_file::FileResolutionContext>,
+    request_context: &biscuit_file::FileResolutionContext,
 ) -> Option<Value> {
     if value.is_null() {
         return None;
@@ -307,7 +290,7 @@ fn rewrite_property_union(
     value: &Value,
     base_dir: &Path,
     fallback: Option<&Path>,
-    request_context: Option<&biscuit_file::FileResolutionContext>,
+    request_context: &biscuit_file::FileResolutionContext,
 ) -> Option<Value> {
     let mut eager_matches = 0;
     let mut rewritten: Option<Value> = None;
@@ -356,7 +339,7 @@ fn rewrite_file_value(
     value: &Value,
     base_dir: &Path,
     _fallback: Option<&Path>,
-    request_context: Option<&biscuit_file::FileResolutionContext>,
+    request_context: &biscuit_file::FileResolutionContext,
 ) -> Option<Value> {
     let Value::String(raw) = value else {
         return None;
@@ -378,21 +361,7 @@ fn rewrite_file_value(
         // the value), but degrade gracefully rather than panic.
         Err(_) => return None,
     };
-    let (repository_root, package_area) = match request_context {
-        Some(snapshot) => (
-            snapshot.repository_root().map(Path::to_path_buf),
-            snapshot.package_area().map(Path::to_path_buf),
-        ),
-        None => (None, None),
-    };
-    let resolved = match resolve_document_file_ref(
-        &file_ref,
-        base_dir,
-        repository_root.as_deref(),
-        package_area.as_deref(),
-        &[],
-        request_context,
-    ) {
+    let resolved = match resolve_document_file_ref(&file_ref, base_dir, request_context) {
         Ok(Some(abs)) => abs,
         // `None`: the reference is well-formed but resolves to nothing local
         // (e.g. a remote-resolving value validation accepted). Leave verbatim
@@ -419,7 +388,7 @@ fn rewrite_array_items(
     value: &Value,
     base_dir: &Path,
     fallback: Option<&Path>,
-    request_context: Option<&biscuit_file::FileResolutionContext>,
+    request_context: &biscuit_file::FileResolutionContext,
 ) -> Option<Value> {
     let Value::Array(items) = value else {
         return None;
@@ -446,7 +415,7 @@ fn rewrite_inline_object(
     value: &Value,
     base_dir: &Path,
     fallback: Option<&Path>,
-    request_context: Option<&biscuit_file::FileResolutionContext>,
+    request_context: &biscuit_file::FileResolutionContext,
 ) -> Option<Value> {
     let Value::Object(obj) = value else {
         return None;
@@ -511,13 +480,13 @@ mod tests {
         });
         let input = json!({"spec": "@spec.md"});
 
-        let outcome = rewrite_eager_file_values_in_context(
+        let outcome = rewrite_eager_file_values(
             &schema,
             &input,
             &child_base,
             None,
             &HashSet::new(),
-            Some(&context),
+            &context,
         );
 
         assert_eq!(context.repository_root(), None);
@@ -586,7 +555,14 @@ mod tests {
         let schema = eager_file_schema();
         let instance = json!({ "spec": "./spec.md" });
         let pending = HashSet::new();
-        let outcome = rewrite_eager_file_values(&schema, &instance, &base_dir, None, &pending);
+        let outcome = rewrite_eager_file_values(
+            &schema,
+            &instance,
+            &base_dir,
+            None,
+            &pending,
+            &biscuit_file::FileResolutionContext::new(&base_dir),
+        );
         assert!(outcome.changed);
         assert_eq!(outcome.value["spec"], json!("spec.md"));
     }
@@ -603,7 +579,7 @@ mod tests {
         let base_dir = repo.path().join("docs");
 
         // Projection via the shared helper the expression path uses.
-        let ctx = ResolutionContext::new(base_dir.clone());
+        let ctx = ResolutionContext::at(base_dir.clone());
         let relative = relative_fn(&[json!("./guide.md")], &ctx).expect("relative_fn resolves");
         assert_eq!(relative, json!("guide.md"));
 
@@ -611,7 +587,14 @@ mod tests {
         let schema = eager_file_schema();
         let instance = json!({ "spec": "./guide.md" });
         let pending = HashSet::new();
-        let outcome = rewrite_eager_file_values(&schema, &instance, &base_dir, None, &pending);
+        let outcome = rewrite_eager_file_values(
+            &schema,
+            &instance,
+            &base_dir,
+            None,
+            &pending,
+            &biscuit_file::FileResolutionContext::new(&base_dir),
+        );
         assert!(outcome.changed);
         assert_eq!(outcome.value["spec"], relative);
     }
@@ -628,7 +611,14 @@ mod tests {
         });
         let instance = json!({ "spec": "./spec.md" });
         let pending = HashSet::new();
-        let outcome = rewrite_eager_file_values(&schema, &instance, repo.path(), None, &pending);
+        let outcome = rewrite_eager_file_values(
+            &schema,
+            &instance,
+            repo.path(),
+            None,
+            &pending,
+            &biscuit_file::FileResolutionContext::new(repo.path()),
+        );
         assert!(!outcome.changed);
         assert_eq!(outcome.value, instance);
     }
@@ -645,7 +635,14 @@ mod tests {
         });
         let instance = json!({ "doc": "./spec.md" });
         let pending = HashSet::new();
-        let outcome = rewrite_eager_file_values(&schema, &instance, repo.path(), None, &pending);
+        let outcome = rewrite_eager_file_values(
+            &schema,
+            &instance,
+            repo.path(),
+            None,
+            &pending,
+            &biscuit_file::FileResolutionContext::new(repo.path()),
+        );
         assert!(outcome.changed);
         assert_eq!(outcome.value["doc"], json!("spec.md"));
     }
@@ -661,7 +658,14 @@ mod tests {
         });
         let instance = json!({ "email": "user@example.com" });
         let pending = HashSet::new();
-        let outcome = rewrite_eager_file_values(&schema, &instance, repo.path(), None, &pending);
+        let outcome = rewrite_eager_file_values(
+            &schema,
+            &instance,
+            repo.path(),
+            None,
+            &pending,
+            &biscuit_file::FileResolutionContext::new(repo.path()),
+        );
         assert!(!outcome.changed);
         assert_eq!(outcome.value, instance);
     }
@@ -676,7 +680,14 @@ mod tests {
         let schema = lazy_file_schema();
         let instance = json!({ "spec": "./spec.md" });
         let pending = HashSet::new();
-        let outcome = rewrite_eager_file_values(&schema, &instance, repo.path(), None, &pending);
+        let outcome = rewrite_eager_file_values(
+            &schema,
+            &instance,
+            repo.path(),
+            None,
+            &pending,
+            &biscuit_file::FileResolutionContext::new(repo.path()),
+        );
         assert!(!outcome.changed);
         assert_eq!(outcome.value["spec"], json!("./spec.md"));
     }
@@ -694,12 +705,26 @@ mod tests {
         // First rewrite: `./area/spec.md` → repo-relative `area/spec.md`.
         let raw = json!({ "spec": "./area/spec.md" });
         let pending = HashSet::new();
-        let first = rewrite_eager_file_values(&schema, &raw, base_dir, None, &pending);
+        let first = rewrite_eager_file_values(
+            &schema,
+            &raw,
+            base_dir,
+            None,
+            &pending,
+            &biscuit_file::FileResolutionContext::new(base_dir),
+        );
         assert!(first.changed);
         assert_eq!(first.value["spec"], json!("area/spec.md"));
 
         // Second rewrite: already-canonical value is a fixpoint.
-        let second = rewrite_eager_file_values(&schema, &first.value, base_dir, None, &pending);
+        let second = rewrite_eager_file_values(
+            &schema,
+            &first.value,
+            base_dir,
+            None,
+            &pending,
+            &biscuit_file::FileResolutionContext::new(base_dir),
+        );
         assert!(!second.changed, "second rewrite must be a no-op");
         assert_eq!(first.value, second.value);
     }
@@ -717,7 +742,14 @@ mod tests {
         let schema = eager_file_schema();
         let instance = json!({ "spec": "./does-not-exist.md" });
         let pending = HashSet::new();
-        let outcome = rewrite_eager_file_values(&schema, &instance, repo.path(), None, &pending);
+        let outcome = rewrite_eager_file_values(
+            &schema,
+            &instance,
+            repo.path(),
+            None,
+            &pending,
+            &biscuit_file::FileResolutionContext::new(repo.path()),
+        );
         assert!(!outcome.changed);
         assert_eq!(outcome.value["spec"], json!("./does-not-exist.md"));
     }
@@ -730,7 +762,14 @@ mod tests {
         let schema = eager_file_schema();
         let instance = json!({ "spec": "https://example.com/spec.md" });
         let pending = HashSet::new();
-        let outcome = rewrite_eager_file_values(&schema, &instance, repo.path(), None, &pending);
+        let outcome = rewrite_eager_file_values(
+            &schema,
+            &instance,
+            repo.path(),
+            None,
+            &pending,
+            &biscuit_file::FileResolutionContext::new(repo.path()),
+        );
         assert!(!outcome.changed);
         assert_eq!(outcome.value["spec"], json!("https://example.com/spec.md"));
     }
@@ -741,7 +780,14 @@ mod tests {
         let schema = optional_eager_file_schema();
         let instance = json!({});
         let pending = HashSet::new();
-        let outcome = rewrite_eager_file_values(&schema, &instance, repo.path(), None, &pending);
+        let outcome = rewrite_eager_file_values(
+            &schema,
+            &instance,
+            repo.path(),
+            None,
+            &pending,
+            &biscuit_file::FileResolutionContext::new(repo.path()),
+        );
         assert!(!outcome.changed);
         assert_eq!(outcome.value, instance);
     }
@@ -753,7 +799,14 @@ mod tests {
         let schema = optional_eager_file_schema();
         let instance = json!({ "spec": null });
         let pending = HashSet::new();
-        let outcome = rewrite_eager_file_values(&schema, &instance, repo.path(), None, &pending);
+        let outcome = rewrite_eager_file_values(
+            &schema,
+            &instance,
+            repo.path(),
+            None,
+            &pending,
+            &biscuit_file::FileResolutionContext::new(repo.path()),
+        );
         assert!(!outcome.changed);
         assert_eq!(outcome.value["spec"], json!(null));
     }
@@ -767,7 +820,14 @@ mod tests {
         let schema = optional_eager_file_schema();
         let instance = json!({ "spec": "./spec.md" });
         let pending = HashSet::new();
-        let outcome = rewrite_eager_file_values(&schema, &instance, repo.path(), None, &pending);
+        let outcome = rewrite_eager_file_values(
+            &schema,
+            &instance,
+            repo.path(),
+            None,
+            &pending,
+            &biscuit_file::FileResolutionContext::new(repo.path()),
+        );
         assert!(outcome.changed);
         assert_eq!(outcome.value["spec"], json!("spec.md"));
     }
@@ -795,7 +855,14 @@ mod tests {
             "config": { "path": "./spec.md", "label": "untouched" }
         });
         let pending = HashSet::new();
-        let outcome = rewrite_eager_file_values(&schema, &instance, repo.path(), None, &pending);
+        let outcome = rewrite_eager_file_values(
+            &schema,
+            &instance,
+            repo.path(),
+            None,
+            &pending,
+            &biscuit_file::FileResolutionContext::new(repo.path()),
+        );
         assert!(outcome.changed);
         assert_eq!(outcome.value["config"]["path"], json!("spec.md"));
         assert_eq!(outcome.value["config"]["label"], json!("untouched"));
@@ -817,7 +884,14 @@ mod tests {
         });
         let instance = json!({ "refs": ["./a.md", "./b.md"] });
         let pending = HashSet::new();
-        let outcome = rewrite_eager_file_values(&schema, &instance, repo.path(), None, &pending);
+        let outcome = rewrite_eager_file_values(
+            &schema,
+            &instance,
+            repo.path(),
+            None,
+            &pending,
+            &biscuit_file::FileResolutionContext::new(repo.path()),
+        );
         assert!(outcome.changed);
         assert_eq!(outcome.value["refs"], json!(["a.md", "b.md"]));
     }
@@ -851,7 +925,14 @@ mod tests {
         });
         let instance = json!({ "kind": "feature", "spec": "./spec.md" });
         let pending = HashSet::new();
-        let outcome = rewrite_eager_file_values(&schema, &instance, repo.path(), None, &pending);
+        let outcome = rewrite_eager_file_values(
+            &schema,
+            &instance,
+            repo.path(),
+            None,
+            &pending,
+            &biscuit_file::FileResolutionContext::new(repo.path()),
+        );
         assert!(outcome.changed);
         assert_eq!(outcome.value["spec"], json!("spec.md"));
         assert_eq!(outcome.value["kind"], json!("feature"));
@@ -873,7 +954,14 @@ mod tests {
         });
         let instance = json!({ "spec": "spec.md" });
         let pending = HashSet::new();
-        let outcome = rewrite_eager_file_values(&schema, &instance, repo.path(), None, &pending);
+        let outcome = rewrite_eager_file_values(
+            &schema,
+            &instance,
+            repo.path(),
+            None,
+            &pending,
+            &biscuit_file::FileResolutionContext::new(repo.path()),
+        );
         assert!(!outcome.changed);
         assert_eq!(outcome.value, instance);
     }
@@ -895,7 +983,14 @@ mod tests {
         });
         let instance = json!({ "spec": "./spec.md" });
         let pending = HashSet::new();
-        let outcome = rewrite_eager_file_values(&schema, &instance, repo.path(), None, &pending);
+        let outcome = rewrite_eager_file_values(
+            &schema,
+            &instance,
+            repo.path(),
+            None,
+            &pending,
+            &biscuit_file::FileResolutionContext::new(repo.path()),
+        );
         assert!(outcome.changed);
         assert_eq!(outcome.value["spec"], json!("spec.md"));
     }
@@ -920,7 +1015,14 @@ mod tests {
         });
         let instance = json!({ "spec": "./spec.md" });
         let pending = HashSet::new();
-        let outcome = rewrite_eager_file_values(&schema, &instance, repo.path(), None, &pending);
+        let outcome = rewrite_eager_file_values(
+            &schema,
+            &instance,
+            repo.path(),
+            None,
+            &pending,
+            &biscuit_file::FileResolutionContext::new(repo.path()),
+        );
         assert!(!outcome.changed, "ambiguous union must not be rewritten");
         assert_eq!(outcome.value["spec"], json!("./spec.md"));
     }
@@ -946,7 +1048,14 @@ mod tests {
             "design": "./design.md"
         });
         let pending: HashSet<String> = ["spec".to_string()].into_iter().collect();
-        let outcome = rewrite_eager_file_values(&schema, &instance, repo.path(), None, &pending);
+        let outcome = rewrite_eager_file_values(
+            &schema,
+            &instance,
+            repo.path(),
+            None,
+            &pending,
+            &biscuit_file::FileResolutionContext::new(repo.path()),
+        );
         assert!(outcome.changed);
         assert_eq!(
             outcome.value["spec"],
@@ -980,7 +1089,14 @@ mod tests {
             "config": { "path": "$(echo spec.md)" }
         });
         let pending = HashSet::new();
-        let outcome = rewrite_eager_file_values(&schema, &instance, repo.path(), None, &pending);
+        let outcome = rewrite_eager_file_values(
+            &schema,
+            &instance,
+            repo.path(),
+            None,
+            &pending,
+            &biscuit_file::FileResolutionContext::new(repo.path()),
+        );
         assert!(!outcome.changed, "pending nested scalar must be skipped");
         assert_eq!(outcome.value["config"]["path"], json!("$(echo spec.md)"));
     }
@@ -995,7 +1111,14 @@ mod tests {
         let schema = eager_file_schema();
         let instance = json!({ "spec": 42 });
         let pending = HashSet::new();
-        let outcome = rewrite_eager_file_values(&schema, &instance, repo.path(), None, &pending);
+        let outcome = rewrite_eager_file_values(
+            &schema,
+            &instance,
+            repo.path(),
+            None,
+            &pending,
+            &biscuit_file::FileResolutionContext::new(repo.path()),
+        );
         assert!(!outcome.changed);
         assert_eq!(outcome.value["spec"], json!(42));
     }
@@ -1009,7 +1132,14 @@ mod tests {
         let schema = eager_file_schema();
         let instance = json!("not-an-object");
         let pending = HashSet::new();
-        let outcome = rewrite_eager_file_values(&schema, &instance, repo.path(), None, &pending);
+        let outcome = rewrite_eager_file_values(
+            &schema,
+            &instance,
+            repo.path(),
+            None,
+            &pending,
+            &biscuit_file::FileResolutionContext::new(repo.path()),
+        );
         assert!(!outcome.changed);
         assert_eq!(outcome.value, instance);
     }

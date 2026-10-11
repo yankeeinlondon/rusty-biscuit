@@ -360,7 +360,7 @@ fn normal_compose_path_renders_all_git_context_values_from_one_snapshot() {
     let document: Markdown = "Branch: {{ ctx.branch }}\n\nWorktree: {{ ctx.worktree ? ctx.worktree : \"main\" }}\n\nConflicts:\n\n{{ ctx.merge_conflicts }}\n".into();
     let context = ComposeContext::capture_for_document(repo.path(), &document);
     let (composed, report) = document
-        .compose_with(ComposeOptions::new_with_context(context))
+        .compose_with(&crate::request_support::request(ComposeOptions::new_with_context(context)))
         .expect("Git-context document composes");
 
     assert!(report.warnings.is_empty(), "unexpected compose warnings: {report:?}");

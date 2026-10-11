@@ -84,15 +84,22 @@ pub(super) const POST_SIGKILL_REAP_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Visible feedback line emitted on the first counted interrupt (Q14).
 ///
-/// One static byte string per rung so the Unix async-signal-safe write stays
-/// allocation- and format-free; the Windows loop emits the identical bytes
-/// from its poll body so users see the same feedback regardless of host. The
-/// glyphs are UTF-8 encoded inline so the message survives any locale setting.
+/// Both hosts show the identical bytes. The glyphs are UTF-8 encoded inline
+/// so the message survives any locale setting.
 pub(super) const INTERRUPT_FEEDBACK_FIRST: &[u8] =
     "\u{26a0} interrupt received \u{2014} press again to escalate\n".as_bytes();
 /// Visible feedback line emitted on every subsequent counted interrupt (Q14).
 pub(super) const INTERRUPT_FEEDBACK_REPEAT: &[u8] =
     "\u{26a0} interrupt received \u{2014} escalating\n".as_bytes();
+
+/// The feedback line for the `count`th counted press (1-indexed).
+pub(super) fn interrupt_feedback(count: u8) -> &'static [u8] {
+    if count == 1 {
+        INTERRUPT_FEEDBACK_FIRST
+    } else {
+        INTERRUPT_FEEDBACK_REPEAT
+    }
+}
 
 #[cfg(test)]
 mod tests;

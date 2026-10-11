@@ -56,6 +56,7 @@ pub(super) enum Preflight {
 
 /// Spawns the child, opens `control` over its stdin, waits for readiness,
 /// and submits `task`.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn spawn_retained(
     binary: &Path,
     args: &[String],
@@ -64,6 +65,7 @@ pub(super) fn spawn_retained(
     control: &Arc<dyn StdioControl>,
     task: &str,
     child_spawned: &mut bool,
+    run_scope: super::super::super::run_scope::RunScope,
 ) -> Result<Preflight> {
     let launch_args = control.launch_args();
     let args = launch_args.as_deref().unwrap_or(args);
@@ -84,7 +86,7 @@ pub(super) fn spawn_retained(
     let (stdout_tx, stdout_rx) = mpsc::channel();
     let observer = Arc::clone(control);
     thread::spawn(move || {
-        for line in BufReader::new(stdout).lines() {
+        for line in BufReader::new(super::super::super::run_scope::retention::RetainingReader::capture_only(stdout, run_scope)).lines() {
             let failed = line.is_err();
             if let Ok(line) = &line {
                 observer.observe(line);

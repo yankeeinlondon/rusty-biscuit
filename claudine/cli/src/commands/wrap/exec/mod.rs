@@ -6,13 +6,15 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use claudine::stream::parser::SemanticStreamParser;
-use claudine::stream::summary::StreamExecutionSummary;
 use color_eyre::eyre::Result;
 
+#[cfg(feature = "test-fixtures")]
+pub(crate) mod completion_fixture;
 pub(crate) mod control;
 pub(crate) mod exit;
 pub(crate) mod codex_app_server;
 pub(crate) mod pi_rpc;
+pub(crate) mod reader_join;
 pub(crate) mod spawn;
 pub(crate) mod stream_capture;
 #[cfg(test)]
@@ -84,6 +86,9 @@ impl ProcessTelemetry {
 /// Result of a child process execution, enriched with termination info.
 pub(crate) struct ProcessResult<T> {
     pub(crate) data: T,
+    /// Frozen pre-callback observations; diagnostic projection is added at settlement.
+    #[allow(dead_code)]
+    pub(crate) completion_observation: Option<super::run_scope::CompletionObservation>,
     pub(crate) termination: claudine::harness::ProcessTermination,
     pub(crate) telemetry: ProcessTelemetry,
     /// Immediate child PID returned by `std::process::Command::spawn()`,
@@ -119,6 +124,15 @@ pub(crate) struct ProcessResult<T> {
     /// both streams; the captured path returns whole streams in `data`, and
     /// the inherited and wire paths leave this `None`.
     pub(crate) stream_tails: Option<StreamTails>,
+    /// Warnings for output readers that panicked, timed out, or failed to
+    /// forward after the child exited. Never a provider failure: the child's
+    /// own outcome stands, only its output may be incomplete.
+    ///
+    /// Each spawn path queues these for stderr; callers also store them on
+    /// the session-end record and the attempt's
+    /// [`OutputStatus`](claudine::harness::OutputStatus), where they survive
+    /// a terminal that could not show them.
+    pub(crate) reader_warnings: Vec<String>,
 }
 
 /// The last raw lines of a structured child's stdout and stderr, bounded by
@@ -161,7 +175,9 @@ pub(crate) fn structured_native_exit(
 /// rendered lines afterwards. A sequence task frames this stream's lines with a
 /// bar gutter *after* rendering, so the renderer must wrap to a width that
 /// leaves room for it — otherwise every full-width line overflows the terminal
-/// by the gutter's width once the bar is prepended. Pass `0` for an
+/// by the gutter's width once the bar is prepended. A nonzero inset on a
+/// terminal also holds partial lines until they are complete, so they are
+/// rendered (and folded) rather than streamed raw. Pass `0` for an
 /// undecorated stream.
 ///
 /// [`TerminalOptions`]: darkmatter::markdown::output::terminal::TerminalOptions
@@ -183,7 +199,9 @@ pub(crate) fn new_assistant_stream_inset(inset: u32) -> claudine::render::Assist
         opts.image_mode = TerminalImageMode::Never;
         opts
     });
+    let hold_partial_lines = inset > 0 && term.is_some();
     claudine::render::AssistantStream::new(term, terminal_options)
+        .holding_partial_lines(hold_partial_lines)
 }
 
 /// Callback type used by [`run_child_stream_semantic`] for assistant text.
@@ -215,68 +233,6 @@ pub(crate) type SemanticParserBuilder = Box<
         + Send
         + 'static,
 >;
-
-/// Minimal fallback parser used when the real parser thread panics.
-struct ErrorParser {
-    exit_code: i32,
-}
-
-impl SemanticStreamParser for ErrorParser {
-    fn feed_line(&mut self, _line: &str) {}
-
-    fn finish(self: Box<Self>, _exit_code: i32) -> StreamExecutionSummary {
-        StreamExecutionSummary {
-            is_error: true,
-            error_kind: Some("parse_failure".into()),
-            error_message: Some("Stream parser thread panicked".into()),
-            exit_code: self.exit_code,
-            ..Default::default()
-        }
-    }
-}
-
-/// Join a thread with a timeout. Returns `true` if the thread joined
-/// successfully within the deadline, `false` if it timed out.
-///
-/// On timeout the thread is **leaked** (detached) rather than panicked,
-/// because the reader threads only terminate when their pipe closes and
-/// there is no safe way to interrupt a blocking `BufReader::lines()` call
-/// from outside.
-fn join_with_timeout(handle: thread::JoinHandle<()>, timeout: Duration) -> bool {
-    let start = Instant::now();
-    while start.elapsed() < timeout {
-        // `is_finished()` is available on Rust 1.69+ and does not block.
-        if handle.is_finished() {
-            let _ = handle.join();
-            return true;
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
-    tracing::warn!(
-        "reader thread did not exit within {:?}; detaching (pipe may still be held open by a descendant process)",
-        timeout
-    );
-    std::mem::forget(handle);
-    false
-}
-
-/// Join a thread that returns a value, with a timeout. Returns the value
-/// on success or a fallback on timeout.
-fn join_with_timeout_or<T>(handle: thread::JoinHandle<T>, timeout: Duration, fallback: T) -> T {
-    let start = Instant::now();
-    while start.elapsed() < timeout {
-        if handle.is_finished() {
-            return handle.join().unwrap_or(fallback);
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
-    tracing::warn!(
-        "reader thread did not exit within {:?}; using fallback result",
-        timeout
-    );
-    std::mem::forget(handle);
-    fallback
-}
 
 /// After the main child exits, kill any orphaned descendant processes so
 /// inherited pipe fds are closed and reader threads unblock. Without this,

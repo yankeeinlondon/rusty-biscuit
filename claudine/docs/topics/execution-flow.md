@@ -300,6 +300,21 @@ Constructs a `CompositionExecutionRequest` with `mode: ChainedDocument`, the pre
 
 Loads the `WrapperProfile` for the resolved provider and locates the binary on disk.
 
+On Windows, a provider installed with `npm install -g` is found as a `.cmd`
+batch shim (for example `%APPDATA%\npm\opencode.cmd`). Windows cannot pass a
+batch file an argument that contains a newline, and the composed prompt is
+delivered as one such argument, so Claudine starts the program the shim would
+run instead of the shim itself:
+
+| Shim's last line | Claudine starts |
+|---|---|
+| `"%dp0%\node_modules\opencode-ai\bin\opencode.exe" %*` | `opencode.exe` |
+| `"%_prog%" "%dp0%\node_modules\@openai\codex\bin\codex.js" %*` | `node.exe` beside the shim if present, else `node` from `PATH`, with `codex.js` as the first argument |
+
+This applies to every child Claudine starts, not only providers. A batch file in
+any other shape is started unchanged and still cannot receive a multi-line
+argument; install a native executable instead.
+
 ##### 6c. Early Header Emission
 
 Emits the execution line to stderr with `ComposeDisplay::Compose`, showing provider, file reference, operation, and flags.
@@ -419,7 +434,7 @@ system-prompt launch state, or build the lifecycle runtime.
     - Agents should always start at the repo root for permission-grant scope and consistent context — many provider sandboxes treat CWD as the trust boundary.
     - The original launch CWD is preserved separately on `LaunchContext`/`LaunchWorkspaceContext` so downstream stages (system-prompt discovery, package-area detection) still know where the user actually invoked Claudine from.
 
-    **Implication for loops, sequences, and `ctx.*`:** because the CWD mutation persists for the parent claudine process across iterations and across sequence steps, any code that re-derives state from `std::env::current_dir()` between iterations (notably `ComposeContext::capture()` for `ctx.current_package_area` and friends) will see the post-switch CWD on iteration 2+ / step 2+. The intended fix is a Claudine-owned launch-CWD scratchpad captured once at process startup and used as the base directory for every `ComposeContext::capture_for_dir(...)` call — not re-reading the process CWD, and not anchoring to the source file's parent (which would change the user-facing meaning of `ctx.current_package_area`).
+    **Implication for loops, sequences, and `ctx.*`:** the CWD mutation persists for the parent claudine process across iterations and across sequence steps, so nothing downstream reads the process CWD. The `claudine` binary captures its launch directory, HOME, and environment once at startup as a request snapshot, and every invocation context, `ctx.*` capture, and file-resolution context is built from that snapshot. Iteration 2+ and step 2+ therefore see the same launch directory as iteration 1, and `ctx.current_package_area` keeps describing where the user invoked Claudine, not the source file's directory.
 
 2. Detects harness from effective frontmatter via `has_harness_properties()`
 3. Builds lifecycle context and creates `LifecycleRunGuard`

@@ -12,6 +12,23 @@ static OSC10_SUPPORT: OnceLock<bool> = OnceLock::new();
 static OSC11_SUPPORT: OnceLock<bool> = OnceLock::new();
 static OSC12_SUPPORT: OnceLock<bool> = OnceLock::new();
 
+/// Terminal apps known to answer OSC 10/11/12 color queries. The one list
+/// both the support heuristic and the live query consult. Apple Terminal is
+/// left out: its answers are unreliable (see
+/// `docs/research/standards/osc/osc-10-11-12.md`).
+pub(super) fn answers_color_queries(app: &TerminalApp) -> bool {
+    matches!(
+        app,
+        TerminalApp::Kitty
+            | TerminalApp::Wezterm
+            | TerminalApp::ITerm2
+            | TerminalApp::Alacritty
+            | TerminalApp::Ghostty
+            | TerminalApp::Foot
+            | TerminalApp::Contour
+    )
+}
+
 /// Internal function to check if OSC queries are supported based on heuristics.
 ///
 /// This function NEVER attempts actual OSC queries. It uses:
@@ -36,16 +53,7 @@ fn is_osc_query_supported_heuristic(code: u8) -> bool {
     }
 
     let app = get_terminal_app();
-    let supported = matches!(
-        app,
-        TerminalApp::Kitty
-            | TerminalApp::Wezterm
-            | TerminalApp::ITerm2
-            | TerminalApp::Alacritty
-            | TerminalApp::Ghostty
-            | TerminalApp::Foot
-            | TerminalApp::Contour
-    );
+    let supported = answers_color_queries(&app);
 
     tracing::debug!(
         code,

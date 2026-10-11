@@ -6,12 +6,15 @@
 //! `Cargo.toml` sets `autotests = false`, so a file in this directory that is
 //! not declared below never compiles; `test_layout.rs` rejects one.
 
+mod boundary_containment;
 mod completion_round_trip;
 mod detailed_resolution;
 mod file_tree;
 mod finalized_reference_resolution;
+mod glob_reference;
 mod implicit_relative;
 mod magic_local_roots;
+mod path_lookup_guard;
 mod parse_count;
 mod portable_path;
 mod precedence_flip;

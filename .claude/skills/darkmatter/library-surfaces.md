@@ -25,8 +25,10 @@ behavior.
 
 ## Composition and expressions
 
-- `ComposeOptions` is the request authority for context, file resolution,
-  remote policy, cache, schemas, and rendering options.
+- `ComposeRequest` is the request authority: it owns the required
+  `FileResolutionContext` (built by `build_resolution_context` from a
+  `RequestSnapshot`) and `Deref`s to `ComposeOptions`, which carries remote
+  policy, cache, schemas, and rendering options but no context.
 - `EffectiveContext` and the expression runtime expose `ctx.*`, `doc.*`, and
   `env.*` without ambient recapture.
 - Expression descriptors are typed catalogs used by both library callers and

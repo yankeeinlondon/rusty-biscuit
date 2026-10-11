@@ -176,6 +176,24 @@ impl From<&Path> for PathIdentity {
     }
 }
 
+/// Keep the first item for each [`PathIdentity`], in input order.
+///
+/// The one ordering rule behind candidate and `@` root dedupe: a later item
+/// whose identity was already seen is dropped, so the earlier item keeps its
+/// provenance and its own path spelling. Taking identities rather than paths
+/// lets every host test the Windows equalities (verbatim versus legacy, drive
+/// case, mixed separators) through this function.
+pub(crate) fn first_seen_by_identity<T>(
+    items: impl IntoIterator<Item = T>,
+    identity: impl Fn(&T) -> PathIdentity,
+) -> Vec<T> {
+    let mut seen = std::collections::HashSet::new();
+    items
+        .into_iter()
+        .filter(|item| seen.insert(identity(item)))
+        .collect()
+}
+
 /// A relative route: generated parent hops followed by names copied from the
 /// target.
 ///

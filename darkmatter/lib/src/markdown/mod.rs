@@ -223,7 +223,7 @@ impl Markdown {
         let content = Arc::from(self.content.as_str());
         match &self.source {
             Some(ComposeSource::File(path)) => {
-                let absolute = path.canonicalize().unwrap_or_else(|_| path.clone());
+                let absolute = biscuit_file::canonicalize_simplified(path).unwrap_or_else(|_| path.clone());
                 biscuit_terminal::errors::SourceContext::new(absolute, path.clone(), content)
             }
             _ => biscuit_terminal::errors::SourceContext::new(
@@ -246,7 +246,7 @@ impl Markdown {
         let content = Arc::from(content.as_str());
         match &self.source {
             Some(ComposeSource::File(path)) => {
-                let absolute = path.canonicalize().unwrap_or_else(|_| path.clone());
+                let absolute = biscuit_file::canonicalize_simplified(path).unwrap_or_else(|_| path.clone());
                 biscuit_terminal::errors::SourceContext::with_frontmatter(
                     absolute,
                     path.clone(),
@@ -277,7 +277,7 @@ impl Markdown {
             return None;
         };
         let loaded = self.loaded.as_ref()?;
-        let absolute = path.canonicalize().unwrap_or_else(|_| path.clone());
+        let absolute = biscuit_file::canonicalize_simplified(path).unwrap_or_else(|_| path.clone());
         Some(biscuit_terminal::errors::SourceContext::new(
             absolute,
             path.clone(),
@@ -1057,7 +1057,7 @@ impl TryFrom<&Path> for Markdown {
         // offending file. `try_from_content` would build an "unknown" context,
         // and `with_source` only runs on success — so without this the path is
         // lost on exactly the error that needs it.
-        let absolute = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        let absolute = biscuit_file::canonicalize_simplified(path).unwrap_or_else(|_| path.to_path_buf());
         let ctx = biscuit_terminal::errors::SourceContext::new(
             absolute,
             path.to_path_buf(),

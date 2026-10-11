@@ -260,7 +260,7 @@ impl<'a> McpImporter<'a> {
 // ---------------------------------------------------------------------------
 
 pub(crate) fn discover_claude_configs(repo_root: Option<&Path>) -> Vec<(PathBuf, Scope)> {
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    let home = biscuit_file::home_dir().unwrap_or_else(|| PathBuf::from("."));
     let mut configs = Vec::new();
 
     let user_config = home.join(".claude.json");
@@ -288,7 +288,7 @@ pub(crate) fn discover_claude_configs(repo_root: Option<&Path>) -> Vec<(PathBuf,
 }
 
 pub(crate) fn discover_codex_configs(repo_root: Option<&Path>) -> Vec<(PathBuf, Scope)> {
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    let home = biscuit_file::home_dir().unwrap_or_else(|| PathBuf::from("."));
     let mut configs = Vec::new();
     let user_config = home.join(".codex").join("config.toml");
     if user_config.exists() {
@@ -304,7 +304,7 @@ pub(crate) fn discover_codex_configs(repo_root: Option<&Path>) -> Vec<(PathBuf, 
 }
 
 pub(crate) fn discover_gemini_configs(repo_root: Option<&Path>) -> Vec<(PathBuf, Scope)> {
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    let home = biscuit_file::home_dir().unwrap_or_else(|| PathBuf::from("."));
     let mut configs = Vec::new();
     let user_config = home.join(".gemini").join("settings.json");
     if user_config.exists() {
@@ -320,7 +320,7 @@ pub(crate) fn discover_gemini_configs(repo_root: Option<&Path>) -> Vec<(PathBuf,
 }
 
 pub(crate) fn discover_opencode_configs(repo_root: Option<&Path>) -> Vec<(PathBuf, Scope)> {
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    let home = biscuit_file::home_dir().unwrap_or_else(|| PathBuf::from("."));
     let mut configs = Vec::new();
     let user_config = home.join(".config").join("opencode").join("opencode.json");
     if user_config.exists() {

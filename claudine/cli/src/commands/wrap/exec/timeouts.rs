@@ -91,11 +91,21 @@ pub(crate) fn detect_step_timeout(
 /// `EarlyTermination::*` messages (these feed the summary, not the
 /// user-visible timing surface). Kept as a small local helper so the
 /// internal format stays stable.
+///
+/// Every rendering carries its unit: bare seconds below a minute (`59s`),
+/// minutes from 60 to 3599 s with the leftover seconds appended when nonzero
+/// (`2m`, `59m59s`), and hours with minutes from 3600 s (`1h0m`).
 pub(crate) fn format_internal_duration(secs: u64) -> String {
     if secs < 60 {
         format!("{secs}s")
     } else if secs < 3_600 {
-        format!("{}", secs / 60)
+        let minutes = secs / 60;
+        let remainder = secs % 60;
+        if remainder == 0 {
+            format!("{minutes}m")
+        } else {
+            format!("{minutes}m{remainder}s")
+        }
     } else {
         format!("{}h{}m", secs / 3_600, (secs % 3_600) / 60)
     }

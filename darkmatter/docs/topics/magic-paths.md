@@ -13,31 +13,46 @@ When darkmatter encounters an `@`-prefixed reference like `@config/settings.toml
 
 The first directory containing a match wins. Each root is searched exactly once; registering an intrinsic root again as a magic path does not add a second probe.
 
-These anchors come from the request's **launch `@` scope**, not from the document being composed. Transcluded and nested documents keep the scope of the request, so an `@` reference inside `includes/chapter.md` searches the same tree as one in the root document, while `./`, bare, `&`, and `^` references stay relative to the document that wrote them. For `md compose` the request directory is the directory you ran `md` in. If the input document lies outside that directory's repository, `md` builds the context from the document's own repository instead. A library caller supplies the scope with `ComposeOptions::with_file_resolution_context()`; without one, compose captures it at the root document's directory. See [the launch `@` scope](../../../biscuit-file/docs/topics/file-references.md#the-launch--scope) for the full contract.
+These anchors come from the request's **launch `@` scope**, not from the document being composed. Transcluded and nested documents keep the scope of the request, so an `@` reference inside `includes/chapter.md` searches the same tree as one in the root document, while `./`, bare, `&`, and `^` references stay relative to the document that wrote them. For `md compose` the request directory is the directory you ran `md` in. If the input document lies outside that directory's repository, `md` builds the context from the document's own repository for its `./`, bare, `&`, and `^` references, but its `@` references keep the launch scope and any `--magic-root` directories: run from `~/work/app`, `::file @magic.md` in `~/work/lib/doc.md` reads `~/work/app/magic.md`, not `~/work/lib/magic.md`. A library caller names its request directory in a `RequestSnapshot` and prepares a `ComposeRequest` from it (see [compose requests](./compose-requests.md)). See [the launch `@` scope](../../../biscuit-file/docs/topics/file-references.md#the-launch--scope) for the full contract.
 
 ## Adding Custom Search Roots
 
-Use `ComposeOptions::with_magic_path()` to insert custom directories into the search order:
+### From the `md` command line
+
+Give `md` a `--magic-root <DIR>` before the subcommand to add a root for that one run. Repeat it to add several; they are searched in the order given, each ahead of its tier's intrinsic roots (`PathPosition::Start`, tier inferred from the path):
+
+```bash
+# @prompts/review.md now also finds ./shared/prompts/review.md
+# and ~/.claudine/prompts/prompts/review.md
+md --magic-root shared --magic-root ~/.claudine/prompts compose '@prompts/review.md'
+```
+
+The root applies to every route, so every command that reads a file argument (`md compose`, `md render`, `md clean`, `md toc`, `md delta`, `md graph`, `md hash`, `md validate refs`, `md schema validate`, `md schema detect`, `md schema triggers`, `md code-block`, and the frontmatter commands) searches it, both for the document argument and for the references inside the document and its transclusions. A relative `DIR` is relative to the directory you ran `md` in. A `DIR` that does not exist or is not a directory stops `md` with an error naming it, rather than being skipped. `md` reads no environment variable or configuration file for extra roots.
+
+### From the library
+
+Add directories to the search order on the request snapshot. The context builder applies them, and it is the only place magic roots enter a context:
 
 ```rust
-use darkmatter::markdown::compose::{ComposeOptions, PathPosition};
+use darkmatter::markdown::compose::{ComposeOptions, ComposeRequest, PathPosition, RequestSnapshot};
 
 // Launched from /project (a git repository)
-let options = ComposeOptions::new()
-    .with_source_file("docs/root.md")
+let snapshot = RequestSnapshot::new("/project")
     // Inside the local root: local tier, before the intrinsic local roots
-    .with_magic_path("/project/.claudine", PathPosition::Start)
+    .with_magic_root("/project/.claudine", PathPosition::Start)
     // Outside the local root: user tier, after every local root, before HOME
-    .with_magic_path("/home/user/.claudine", PathPosition::Start)
+    .with_magic_root("/home/user/.claudine", PathPosition::Start)
     // Outside the local root: user tier, after HOME
-    .with_magic_path("/etc/defaults", PathPosition::End);
+    .with_magic_root("/etc/defaults", PathPosition::End);
+let request = ComposeRequest::prepare(ComposeOptions::new().with_source_file("docs/root.md"), &snapshot)?;
+# Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
 ### Tiers
 
 Every root belongs to a tier, and the **local tier is always searched before the user tier**. A magic path that lies inside the local root (the repository root, or the request directory when there is none) is local; every other path — including one under `$HOME` and one such as `/etc/defaults` — is user tier. No position can move a user-tier path ahead of a local file.
 
-`with_magic_path` always infers the tier from the path. When the local root *is* `$HOME`, inference cannot tell a user convention from a local one; a caller that needs the explicit `MagicPathTier::User` override registers the root with `add_magic_path_with_tier` on the `FileResolutionContext` it passes to `with_file_resolution_context()`.
+`with_magic_root` infers the tier from the path. When the local root *is* `$HOME`, inference cannot tell a user convention from a local one; a caller that needs the explicit override registers the root with `with_magic_root_tier(path, position, MagicPathTier::User)`.
 
 ### `PathPosition::Start`
 
@@ -61,31 +76,21 @@ With the configuration above, a reference like `@skills/SKILL.md` would search:
 
 ## Where Magic Paths Apply
 
-Magic paths are threaded through all four darkmatter subsystems that construct `FileReference`:
-
-| Subsystem | File | Function |
-|-----------|------|----------|
-| Compose transclusion | `compose/transclusion/resolver.rs` | `resolve_path()` |
-| Reference graph | `reference/graph.rs` | `resolve_local_target()` |
-| Reference validation | `reference/validate.rs` | `validate_local_path()` |
-| Cross-doc fragment validation | `reference/validate.rs` | `validate_cross_doc_fragment()` |
-
-This ensures consistent `@` resolution regardless of whether you are composing documents, building dependency graphs, or validating references.
+Magic roots live on the request's `FileResolutionContext`, so every surface that resolves through it sees them: compose transclusion, read-side expression functions, the reference graph, and reference validation. Transcluded and nested documents derive their contexts from the request's, so they keep the same roots.
 
 ## Graph and Validation APIs
 
-The graph and validation APIs receive magic paths through `ReferenceGraphOptions`, which wraps `ComposeOptions`:
+The graph and validation APIs take the same prepared request:
 
 ```rust
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::compose::{ComposeOptions, PathPosition};
+use darkmatter::markdown::compose::{ComposeOptions, ComposeRequest, PathPosition, RequestSnapshot};
 use darkmatter::markdown::reference::types::ReferenceGraphOptions;
 
-let compose = ComposeOptions::new()
-    .with_source_file("docs/root.md")
-    .with_magic_path("/project/.claudine", PathPosition::Start);
-
-let graph_options = ReferenceGraphOptions { compose };
+let snapshot = RequestSnapshot::new("/project")
+    .with_magic_root("/project/.claudine", PathPosition::Start);
+let request = ComposeRequest::prepare(ComposeOptions::new().with_source_file("docs/root.md"), &snapshot)?;
+let graph_options = ReferenceGraphOptions::with_compose(&request);
 
 let md = Markdown::new("# Doc\n\n[link](@/shared.md)");
 let graph = md.reference_graph(graph_options)?;
@@ -94,23 +99,20 @@ let graph = md.reference_graph(graph_options)?;
 
 ## Cache Behavior
 
-Magic paths are included in the compose cache hash, together with the launch `@` scope and each supplied context's tier-aware magic-root registrations. Any of these can change which file an `@` reference picks, so different configurations produce different cache keys and cached results from one are never served to another.
+The request context's tier-aware magic-root registrations are included in the compose cache hash, together with the launch `@` scope. Any of these can change which file an `@` reference picks, so different configurations produce different cache keys and cached results from one are never served to another.
 
 ## Use Case: Claudine
 
-The primary motivation for magic paths is [claudine](../../claudine/), which needs `@` references to reach Claudine-specific prompt directories as well as the repository. Claudine registers its conventions on the `FileResolutionContext` it hands to darkmatter, not through `with_magic_path`, because its `~/.claudine` roots need the explicit user-tier override:
+The primary motivation for magic paths is [claudine](../../claudine/), which needs `@` references to reach Claudine-specific prompt directories as well as the repository. Claudine registers those roots on its request snapshot, and the builder adds them to every context it builds for the invocation. Its `~/.claudine` roots need the explicit user-tier override:
 
 ```rust
-use biscuit_file::{FileResolutionContext, MagicPathTier, PathPosition};
-use darkmatter::markdown::compose::ComposeOptions;
+use biscuit_file::{MagicPathTier, PathPosition};
+use darkmatter::markdown::compose::RequestSnapshot;
 
-let context = FileResolutionContext::new(&launch_dir)
-    .with_repository_root(&repo_root)
-    .add_magic_path(repo_root.join(".claudine/prompts"), PathPosition::Start)
-    .add_magic_path_with_tier(home.join(".claudine/prompts"), PathPosition::Start, MagicPathTier::User);
-let options = ComposeOptions::new()
-    .with_source_file(&source.resolved_path)
-    .with_file_resolution_context(context);
+let snapshot = RequestSnapshot::from_process()?
+    .with_magic_root(repo_root.join(".claudine/prompts"), PathPosition::Start)
+    .with_magic_root_tier(home.join(".claudine/prompts"), PathPosition::Start, MagicPathTier::User);
+# Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
 So `@review.md` resolves from the project's `.claudine/prompts/` and the rest of the local tree first, and only then from the user's `~/.claudine/prompts/` and `HOME`. Claudine's full registration and order are documented in [shell completions](../../../claudine/docs/topics/completions/shell-completions.md#scopes).

@@ -40,6 +40,7 @@ pub use aggregate_view::{
 };
 pub use ownership::PackageOwnershipLookup;
 pub use area::{AreaError, detect_area};
+pub use glob::PACKAGE_MANIFEST_FILE_NAMES;
 pub use identity::{RepoIdentity, detect_repo_identity, detect_repo_identity_with_repo};
 pub use lockfile::{
     LockfileObservation, LockfileReason, LockfileStatus, StandaloneLockfileObservation,

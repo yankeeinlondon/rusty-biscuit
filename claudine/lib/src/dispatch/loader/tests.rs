@@ -121,7 +121,7 @@ fn compile_canonical_runtime_indexes_by_event() {
     );
     config.default_sounds = DefaultSounds::default();
 
-    let runtime = compile_canonical_runtime(config, None).unwrap();
+    let runtime = compile_canonical_runtime(config, None, crate::test_support::process_snapshot()).unwrap();
     assert!(runtime.get_binding(&AgenticEvent::HumanInTheLoop).is_some());
     assert!(runtime.get_binding(&AgenticEvent::SessionStart).is_none());
 }
@@ -132,7 +132,7 @@ fn compile_canonical_runtime_builds_protect() {
     config.protect.enabled = true;
     config.default_sounds = DefaultSounds::default();
 
-    let runtime = compile_canonical_runtime(config, None).unwrap();
+    let runtime = compile_canonical_runtime(config, None, crate::test_support::process_snapshot()).unwrap();
     assert!(runtime.protect_service().is_some());
 }
 
@@ -142,7 +142,7 @@ fn compile_canonical_runtime_no_protect_when_disabled() {
     config.protect.enabled = false;
     config.default_sounds = DefaultSounds::default();
 
-    let runtime = compile_canonical_runtime(config, None).unwrap();
+    let runtime = compile_canonical_runtime(config, None, crate::test_support::process_snapshot()).unwrap();
     assert!(runtime.protect_service().is_none());
 }
 
@@ -164,7 +164,7 @@ fn compile_canonical_runtime_compiles_call_mappers() {
         }],
     );
 
-    let runtime = compile_canonical_runtime(config, None).unwrap();
+    let runtime = compile_canonical_runtime(config, None, crate::test_support::process_snapshot()).unwrap();
     let binding = runtime
         .get_binding(&AgenticEvent::BeforeTool)
         .expect("missing binding");
@@ -190,7 +190,7 @@ fn compile_canonical_runtime_compiles_expression_matcher() {
         "tool_name == 'Bash' && git.branch == 'main'".to_string(),
     );
 
-    let runtime = compile_canonical_runtime(config, None).unwrap();
+    let runtime = compile_canonical_runtime(config, None, crate::test_support::process_snapshot()).unwrap();
     let binding = runtime
         .get_binding(&AgenticEvent::BeforeTool)
         .expect("missing binding");
@@ -218,7 +218,7 @@ fn compile_canonical_runtime_compiles_regex_matcher_fallback() {
         .matchers
         .insert(AgenticEvent::BeforeTool, "Bash|Edit".to_string());
 
-    let runtime = compile_canonical_runtime(config, None).unwrap();
+    let runtime = compile_canonical_runtime(config, None, crate::test_support::process_snapshot()).unwrap();
     let binding = runtime
         .get_binding(&AgenticEvent::BeforeTool)
         .expect("missing binding");
@@ -244,7 +244,7 @@ fn compile_canonical_runtime_drops_unparseable_matcher() {
         .matchers
         .insert(AgenticEvent::BeforeTool, "[invalid(regex".to_string());
 
-    let runtime = compile_canonical_runtime(config, None).unwrap();
+    let runtime = compile_canonical_runtime(config, None, crate::test_support::process_snapshot()).unwrap();
     let binding = runtime
         .get_binding(&AgenticEvent::BeforeTool)
         .expect("missing binding");
@@ -280,7 +280,7 @@ fn invalid_matcher_in_config_compiles_to_unconditional_binding() {
         .matchers
         .insert(AgenticEvent::BeforeTool, invalid_matcher.to_string());
 
-    let runtime = compile_canonical_runtime(config, None).unwrap();
+    let runtime = compile_canonical_runtime(config, None, crate::test_support::process_snapshot()).unwrap();
     let binding = runtime
         .get_binding(&AgenticEvent::BeforeTool)
         .expect("missing binding");
@@ -324,7 +324,7 @@ fn compile_canonical_runtime_creates_binding_for_matcher_only_event() {
         .matchers
         .insert(AgenticEvent::BeforeTool, "tool_name == 'Bash'".to_string());
 
-    let runtime = compile_canonical_runtime(config, None).unwrap();
+    let runtime = compile_canonical_runtime(config, None, crate::test_support::process_snapshot()).unwrap();
     let binding = runtime
         .get_binding(&AgenticEvent::BeforeTool)
         .expect("matcher-only event should produce a binding");
@@ -350,7 +350,7 @@ fn compile_canonical_runtime_fails_on_invalid_mapper_regex() {
         }],
     );
 
-    let error = compile_canonical_runtime(config, None).unwrap_err();
+    let error = compile_canonical_runtime(config, None, crate::test_support::process_snapshot()).unwrap_err();
     let message = error.to_string();
     assert!(message.contains("invalid mapper regex"));
     assert!(message.contains("before_tool"));
@@ -374,7 +374,7 @@ fn compile_canonical_runtime_bridges_messenger_config() {
         )]),
     });
 
-    let runtime = compile_canonical_runtime(config, None).unwrap();
+    let runtime = compile_canonical_runtime(config, None, crate::test_support::process_snapshot()).unwrap();
     let messaging = runtime.messaging();
     assert!(messaging.user.is_some());
     assert_eq!(
@@ -398,7 +398,7 @@ fn compile_canonical_runtime_no_messenger_gives_empty_messaging() {
     config.default_sounds = DefaultSounds::default();
     config.messenger = None;
 
-    let runtime = compile_canonical_runtime(config, None).unwrap();
+    let runtime = compile_canonical_runtime(config, None, crate::test_support::process_snapshot()).unwrap();
     let messaging = runtime.messaging();
     assert!(messaging.user.is_none());
     assert!(messaging.repo.is_none());
@@ -542,7 +542,7 @@ fn bridge_provider_config_slack_webhook() {
 #[test]
 fn canonical_runtime_exposes_config() {
     let config = ClaudineConfig::default();
-    let runtime = compile_canonical_runtime(config.clone(), None).unwrap();
+    let runtime = compile_canonical_runtime(config.clone(), None, crate::test_support::process_snapshot()).unwrap();
     assert_eq!(runtime.config().preferred_agent, config.preferred_agent);
 }
 

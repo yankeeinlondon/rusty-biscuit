@@ -628,9 +628,11 @@ fn deduplicate_voices(voices: Vec<Voice>) -> Vec<Voice> {
     best_voices.into_values().map(|(voice, _)| voice).collect()
 }
 
-/// Escape pipe characters in markdown table cells.
+/// Escapes a provider-supplied value for a Markdown table cell, so a voice
+/// name or description shows literally rather than as formatting, a link,
+/// or HTML, and its pipes and line endings cannot split the row.
 fn escape_markdown_cell(value: &str) -> String {
-    value.replace('|', "\\|")
+    renderable::markdown::escape_text(&value.replace(['\r', '\n'], " ")).replace('|', "\\|")
 }
 
 /// Result of voice resolution.
@@ -1419,6 +1421,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn markdown_cell_keeps_provider_text_literal_and_row_safe() {
+        assert_eq!(
+            escape_markdown_cell("**Rachel** [clone](x) a|b\nc"),
+            r"\*\*Rachel\*\* \[clone\](x) a\|b c"
+        );
+        assert_eq!(escape_markdown_cell("Eddy (English (UK))"), "Eddy (English (UK))");
+    }
 
     #[test]
     fn test_join_args_multi_word() {

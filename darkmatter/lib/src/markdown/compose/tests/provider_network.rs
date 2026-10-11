@@ -181,7 +181,7 @@ impl Fixture {
             .with_pre_approved_commands(approved)
             .disable(ComposeOperation::Cleanup)
             .disable(ComposeOperation::Normalization);
-        markdown.compose_with(options)
+        markdown.compose_with(&crate::markdown::compose::test_request(options))
     }
 
     async fn request_count(&self) -> usize {

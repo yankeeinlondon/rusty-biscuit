@@ -29,6 +29,25 @@ hold the rest:
   `HANDLE_FLAG_INHERIT` on the current process's stdio before setting the
   detached creation flags (`windows` crate features `Win32_Foundation` and
   `Win32_System_Console`). Unix never sees this; fds are close-on-exec.
+- **Python's piped stdout is cp1252 on a Windows runner.** A script that
+  prints non-ASCII (a check mark, a box-drawing character) raises
+  `UnicodeEncodeError` the moment its output is piped, which every CI step
+  is. `PYTHONUTF8=1` fixes it; `_package-ci.yml` and `_wsl-ci.yml` set it at
+  workflow level, and a contract test keeps it there. Found 2026-10-06:
+  `completion.py`'s check mark failed every Windows L1 cell whose tests had
+  all passed, so Windows could not go green on `main`. Read the job's last
+  step before blaming a runner: these failures were first mistaken for the
+  unrelated "bash startup failure" text that `install-action` prints.
+- **A git process costs ~47 ms on Windows, ~5 ms on macOS.** Process start
+  dominates any code that runs many small git commands, and git for Windows
+  also routes a local-path transport through MSYS `sh.exe`. Symptom: a
+  Windows-only timeout where `GIT_TRACE` shows the same metadata command
+  (`remote get-url`, `symbolic-ref`, `config --get`) run repeatedly. Do not
+  raise the budget; read the metadata in-process (`worktree`'s
+  `git_metadata`, `sniff`'s `gix` use) and keep git for transport. Measure
+  with `GIT_TRACE=<file>` on the child, which timestamps every process. Found
+  2026-10-05: `wt list`'s refresh worker started 14 git processes per fetch
+  and missed its 3 s wait on `windows-latest`.
 - **A refused loopback connection is slow.** Connecting to a closed
   `127.0.0.1` port fails in milliseconds on macOS and Linux, but native
   Windows retries the SYN and reports the refusal after about 2 s. A test
@@ -47,14 +66,67 @@ hold the rest:
   hosted `windows-latest` image installs the real interpreter under that name.
   Found 2026-09-14 by the first native-Windows run of `repo-deps`
   (`scripts/ci-rollup-tests.rs::python_interpreter`).
+- **BUILD_WIN SSH sessions resolve `python3`/`python` to the WindowsApps
+  aliases ahead of the real interpreter.** `--version` fails, so tests gated on
+  `python_interpreter()` skip and nextest reports PASS in ~0.3 s having run
+  nothing. Before a `just cross-check` run that needs Python, prepend the real
+  interpreter's directory to a process-scoped `PATH` (confirm a successful
+  `--version`; do not assume the install directory, e.g. Python313). A PASS
+  alone is not evidence: read the captured output for the planner's own lines.
+- **Run Windows tests from PowerShell, not from Git Bash.** An agent's Bash
+  tool on Windows is Git Bash (MSYS). Under it, every `pr_flow_rehearsal` route
+  whose stage runs a local-transport `git push` failed: git exited
+  `0xC0000005` (`STATUS_ACCESS_VIOLATION`) with empty stderr, and the unmodified
+  code failed the same way. The same tests pass from PowerShell. They still
+  fail from a `powershell.exe` launched *by* Git Bash, and they still pass from
+  PowerShell given Git Bash's extra variables or its `PATH` order. So the
+  trigger is an MSYS ancestor, not an environment value. Reproduce a Windows
+  failure from the PowerShell tool before diagnosing it. Found 2026-10-08.
+- **A `.cmd` shim costs ~17 ms of `cmd.exe` per launch, and a fixture that  spawns git dozens of times pays it every time.** Measured 2026-10-09: 20  `git rev-parse` calls took 567 ms direct and 919 ms through a `git.cmd`.  `pr_flow_rehearsal` installs `claudine-fake-relay` as `git.exe` with  `"forward": true` instead. Likewise, one `git config` spawn is ~50 ms:  write a fixture repository's config straight into `.git/config`.
+- **A Cygwin install on the machine `PATH` takes over `just` recipes.** On the
+  `B:` dev host `C:\cygwin64\bin` is a machine entry, which Windows places ahead
+  of every user entry, so `bash`, `env`, `mktemp`, and `python3` resolve to
+  Cygwin and Git's `usr\bin` is absent. A `#!/usr/bin/env bash` recipe then
+  runs under Cygwin bash. Its `mktemp` yields `/tmp/…` or `/cygdrive/c/…`,
+  which native Python opens as `B:\tmp\…`, and its `python3` is a wrapper that
+  fails under any other shell. `just ci-local --plan` and the pre-push hook fail
+  with `FileNotFoundError` on their own temp files. With Git's `usr\bin` first
+  but Cygwin still present, the same recipe's `git` children segfaulted
+  (exit 139). With Cygwin removed, everything resolved to native or MSYS tools
+  and `git` ran cleanly. Before running a hook or `ci-local` there, use a
+  process-scoped `PATH` that drops every `cygwin` entry and prepends
+  `C:\Program Files\Git\usr\bin` and the real Python directory. Found
+  2026-10-08 while pushing from that host.
+- **Three ways a bash script loses data on Windows** (found 2026-10-09 making
+  `scripts/ci/test_ci_local.py` pass there):
+  - Native `jq.exe` ends `-r` lines with CRLF, so a name read back keeps a
+    `\r` and matches nothing. `jq --binary` keeps LF; `just ci-local` and the
+    pre-push hook wrap `jq` that way when `OS=Windows_NT`. In the hook it
+    surfaced as "branch main does not exist on origin": the PR base read back
+    from `gh pr list` was `main\r`. Cygwin's `jq` writes LF, which hid it.
+  - `subprocess.run([bash, "-c", script])` passes the script on the command
+    line, where MSYS and Cygwin bash re-split it at nested quotes and run only
+    the first fragment, exiting 0. Write the script to a file and run
+    `bash <file>`, as GitHub does.
+  - A recipe that interpolates `{{ args }}` into bash eats a Windows path's
+    backslashes (`C:UserskenAppData…`). Pass paths with forward slashes
+    (`Path.as_posix()`).
+- **A `cmd /C` line cannot start a command with `@1>&2`.** `for /L %i in
+  (…) do @1>&2 echo x` runs a command named `1`, which fails. Write
+  `@(1>&2 echo x)`. The group also avoids the trailing space that
+  `echo x 1>&2` puts on each line. Found 2026-10-08 in claudine's
+  `semantic_stderr_buffer_is_drained_before_run_closes`.
 - **A `.cmd`/`.bat` cannot receive an argument containing a newline** ("batch
   file arguments are invalid"). A fake provider that receives a multi-line
   prompt must be a compiled `.exe`; see the rustc-built fixture in claudine's
   `inline_compose_hash.rs`. This is not only a test concern: Claudine delivers
   the composed prompt as one `-t` argument, so a real npm-installed
-  `goose.cmd`/`claude.cmd` on a user's `PATH` fails the same way. The
-  `wrap_compose_validation` stub was still a `.cmd` until 2026-09-22, and the
-  first native-Windows run of `claudine-cli` is what found it.
+  `opencode.cmd` on a user's `PATH` failed `just commit` the same way.
+  `claudine::child_environment::command` now starts an npm `cmd-shim`'s
+  target directly (`claudine/lib/src/npm_shim.rs`); a batch file in any other
+  shape still fails. The `wrap_compose_validation` stub was still a `.cmd`
+  until 2026-09-22, and the first native-Windows run of `claudine-cli` is
+  what found it.
 - **An SSH session's processes are already inside a Job Object**, and that Job
   forbids nesting, so `AssignProcessToJobObject` returns
   `ERROR_ACCESS_DENIED` (`Access is denied. (0x80070005)`, the `windows`
@@ -64,6 +136,15 @@ hold the rest:
   child alone (2026-09-22). Verify a host with `IsProcessInJob` before
   blaming the code. Tests that spawn through a Job therefore behave
   differently over `just cross-check` than in an interactive session.
+- **`io::Error::from(windows::core::Error)` keeps the HRESULT as the raw OS
+  error**, so `e.kind()` is never `NotFound` for a missing file: it reports
+  `os error -2147024894` (`0x80070002`) with an uncategorized kind. Code that
+  branches on `ErrorKind` must unwrap a `FACILITY_WIN32` HRESULT
+  (`code & 0xFFFF0000 == 0x80070000`) to `from_raw_os_error(code & 0xFFFF)`
+  first; see `io_error` in `sniff/lib/src/filesystem/query/identity.rs`. It
+  passed every macOS and Linux run and was found by the first native-Windows
+  run of the query's root recheck (2026-10-05), which reported a deleted
+  root as "unverified" instead of "changed".
 - **Overriding `USERPROFILE` alone breaks the per-user known folders.**
   `dirs::data_local_dir()` / `data_dir()` go through `SHGetKnownFolderPath`,
   which resolves `LocalAppData`/`RoamingAppData` *beneath `USERPROFILE`* and
@@ -122,6 +203,17 @@ hold the rest:
   stderr) and is fixed by `process_group(0)` plus a negative-PID `SIGKILL`.
   Measured on build-win-native, 2026-09-24
   (`worktree/fixes/2026-09-24-ux-improvements/spike-s2.md`).
+- **A named pipe's name outlives the dropped server handle for a moment.**
+  Closing the last instance cancels the pending `ConnectNamedPipe` in the
+  kernel asynchronously, so a client opening the name right after
+  `ServerHandle::shutdown()` returned could still succeed, then fail mid-RPC
+  with `Unknown`, `Cancelled` or `Unavailable` ("transport error"). Unix
+  unlinks the socket synchronously and never shows it. Under load (40 parallel
+  copies) `steering::tests::with_daemon::a_restarted_daemon_gets_a_fresh_registration_and_nothing_is_replayed`
+  failed 39 of 40 times with `Unknown` instead of `Unavailable`, yet passed
+  alone. The pipe cleanup's `wait_released` now polls the name until it
+  resolves `NotFound` (bounded 2 s). To reproduce a test that is flaky on one
+  OS, run its binary 40 times in parallel (`--exact`), not nextest once.
 
 ## Current-directory locks
 
@@ -219,5 +311,134 @@ because overlapping host-network detections fail-fast the test process
   `drop()` of a `Copy` return value, a deleted function). It proves
   signatures, not runtime behavior.
 
+- **Clippy can be red only on Windows.** `PathBuf`/`OsString` is 32 bytes on
+  Windows and 24 on Unix, so an error enum holding several paths (or an error
+  that does, like `biscuit_file::GlobReferenceError`) can cross
+  `result_large_err`'s 128-byte limit on Windows alone. One such variant failed
+  every `Result` in Darkmatter that carried the enum (190 errors at 136 bytes).
+  Fix it by sharing the large cause (`Arc`/`Box`) in that variant, not by
+  raising the limit. If the error is classified by downcasting its `source()`
+  chain, the downcast has to name the wrapper type. The workspace
+  `clippy.toml` threshold (136) was measured on Unix. `claudine::CompositionError`
+  is 144 bytes on Windows, with ten variants over the limit, so the claudine
+  library allows the lint under `cfg(windows)` instead of changing a public
+  error shape; Linux lint runs still enforce the threshold. Lints that depend
+  on `cfg` code also show up only here, and only once the crates beneath them
+  compile: `dead_code` and `unused_mut` on items only `#[cfg(unix)]` code uses,
+  and `needless_return` on a `return` inside a `#[cfg(windows)]` block that
+  becomes the function's tail once its `#[cfg(not(windows))]` sibling is
+  compiled out.
+
 A cross-compile is compile evidence. Behavioral evidence comes from
 `just cross-check <pkg> --os windows` or the `windows-latest` CI leg.
+
+## Inspecting another process's handles
+
+Measured 2026-10-05 on `BUILD_WIN` for Sniff's path-usage query. The SSH
+session there is **elevated** (High integrity, SeDebugPrivilege), so
+handle/permission counts taken over SSH overstate what a normal user sees.
+Simulate Medium integrity with a filtered token, or use a desktop session.
+
+- **Identity queries on a duplicated *disk* handle can block indefinitely.**
+  If the owning process has synchronous I/O pending on that file object (for
+  example a synchronous handle waiting in `LockFileEx`), the following all
+  block until the owner's I/O ends: `GetFileInformationByHandleEx`
+  (`FileIdInfo`, `FileBasicInfo`), `NtQueryInformationFile`
+  (`FileModeInformation`), `GetFinalPathNameByHandleW`, and
+  `NtQueryObject(ObjectNameInformation)`. `CancelSynchronousIo` on the stuck
+  thread fails with 1168, because the thread is waiting on the file-object
+  lock, not on its own I/O. A synchronous named-pipe server blocks the name
+  queries the same way. `GetFileType` never blocked, so it is the only safe
+  in-process pre-filter.
+- **Terminating a helper process does release it.** A helper process stuck
+  in those calls exited 1.0-1.5 ms after `TerminateProcess`, in 7 of 7
+  trials, and the owner's lock state was unchanged. A thread inside your own
+  process cannot be rescued this way; never terminate it.
+- A process's current directory appears in its handle table as an ordinary
+  directory handle (access `0x100020`), so a FileId match finds it. It cannot
+  be told apart from any other directory handle without reading the PEB.
+- On ReFS (`B:` on that host), `FileIdInfo` is a full 128-bit id, and files in
+  one directory share the upper 64 bits. Compare the pair
+  `(VolumeSerialNumber, 128-bit id)`; the 64-bit
+  `GetFileInformationByHandle` index is not enough.
+- `NtQuerySystemInformation(64)` (`SystemExtendedHandleInformation`, not a
+  named constant in `windows` 0.62) needs a `STATUS_INFO_LENGTH_MISMATCH`
+  retry loop; the snapshot was about 100k handles, 4 MB.
+  `EnumProcessModulesEx` also needs a size retry.
+- A live loaded-module test needs no fixture DLL: hard-link (or copy) the
+  running test executable into the temp tree and start it there. Its main
+  module is then reported at the link's path. `GetModuleFileNameExW`
+  returns a plain `C:\...` spelling, while a `filesystem::query` report's
+  `matched_paths` sit under the verbatim `\\?\` canonical root, so compare
+  against `canonicalize()`, not the plain spelling (found 2026-10-06; eight
+  tests failed only on Windows for this reason).
+- `fsutil.exe file setCaseSensitiveInfo <dir> enable` works on
+  build-win-native (2026-10-06) and needs the directory to exist. Whether the
+  hosted `windows-latest` runner allows it is unverified; the
+  `filesystem::query` case-sensitivity test fails, rather than skips, where it
+  cannot.
+
+## Asking which processes have a path open
+
+Measured 2026-10-06 on `BUILD_WIN`. This is the safe alternative to resolving
+another process's handles (above): open the path yourself and ask the kernel
+which processes hold it.
+
+- **The call:** `CreateFileW(path, FILE_READ_ATTRIBUTES, FILE_SHARE_READ |
+  FILE_SHARE_WRITE | FILE_SHARE_DELETE, OPEN_EXISTING,
+  FILE_FLAG_BACKUP_SEMANTICS for directories)`, then
+  `NtQueryInformationFile(h, …, 47 /* FileProcessIdsUsingFileInformation */)`.
+  The result is a `u32` count, then `usize` PIDs from byte offset 8. Start with
+  a 4 KiB buffer, because every `STATUS_INFO_LENGTH_MISMATCH` retry repeats the
+  whole costly call.
+- **It does not hang** where the handle-side queries do. It returned
+  promptly while the holder was blocked in `LockFileEx` or in a synchronous
+  `ReadDirectoryChangesW` call. Our open and close did not wake the
+  watcher.
+- **Permissions.** No elevation is needed, and no other process is opened. A
+  non-elevated desktop session saw System (PID 4) and other users' processes,
+  the same holders as the elevated SSH session.
+- **What it reports and what it misses:**
+  - It reports open files and directories, cwd, loaded DLLs, a running exe,
+    share-mode-0 holders, and holders with attribute-only or zero access.
+  - Results never roll up to parent directories.
+  - The caller's own PID is never listed.
+  - A delete-pending file cannot be opened (`0xC0000056`), so its holders
+    are invisible.
+  - Long paths need the `\\?\` prefix.
+- **Cost is per call and scales with the system's handle count, not the
+  tree.** About 4 ms plus about 25 µs per 1,000 system handles, whether or
+  not anything holds the path (6 ms at 100k handles). Calls scale nearly
+  linearly across threads up to the core count, so walk large trees in
+  parallel and in priority order.
+- **Never open a pipe path to probe it.** Opening `\\.\pipe\…`, even
+  `GetFileAttributesW` on it, connects to a waiting server as a client.
+  Take the entry type from the directory walk.
+- **Restart Manager (`RmGetList`) is a worse wrapper for the same question.**
+  It has no directory or long-path support, it is slower per path, and a
+  missing path returns success with an empty list.
+
+## COM lifetime and cpal
+
+Found 2026-10-08 on the `B:` dev host: `playa effect drop-4` exited with an
+access violation (`0xC0000005`, reported by Git Bash as `Segmentation fault`)
+at the end of every `just install`.
+
+- **cpal's WASAPI host caches one process-global `IMMDeviceEnumerator` but
+  initializes COM per thread.** Its thread-local guard calls `CoUninitialize`
+  when its thread exits. If that was the last COM apartment in the process,
+  COM unloads `MMDevApi.dll`, and the next cpal call on any other thread calls
+  through a vtable in unmapped memory. Any code that gives each cpal call its
+  own short-lived thread (a timeout worker, for example) hits this on the
+  *second* call. playa pins COM with `CoIncrementMTAUsage` before spawning
+  those workers (`pin_com_for_process` in `playa/lib/src/native_audio.rs`).
+- **Diagnose with `cdbX64.exe`.** It ships with the WinDbg Store app at
+  `%LOCALAPPDATA%\Microsoft\WindowsApps\cdbX64.exe`. Put commands in a file
+  passed with `-cf`, because quoting `-c` through PowerShell silently produced
+  no output. Use `bu combase!CoInitializeEx` / `CoCreateInstance` /
+  `CoUninitialize` with `~.; kc 8; gc` actions, and finish with `lm u` to see
+  which DLLs were unloaded.
+- **A host with no sound hardware still lists one `SWD\MMDEVAPI` audio
+  endpoint**, while `Get-CimInstance Win32_SoundDevice` is empty. cpal then
+  reports no output device, and playa reports that error directly instead
+  of falling back to host players.

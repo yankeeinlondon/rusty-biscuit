@@ -40,7 +40,7 @@ fn compose_rematerialize_resolves_ctx_agent_from_env() {
         &target,
         CallerInputLayers {
             env_overrides: env,
-            ..CallerInputLayers::default()
+            ..CallerInputLayers::new(crate::request::test_context())
         },
     );
 
@@ -66,7 +66,7 @@ fn bootstrap_harness_prompt_reads_an_initialize_target_without_its_body() {
          - action: {ensure_file: 'generated.md'}\n---\nTARGET-BODY\n\n::file generated.md\n",
     )
     .unwrap();
-    let mut state = compose_state(&target, CallerInputLayers::default());
+    let mut state = compose_state(&target, CallerInputLayers::new(crate::request::test_context()));
     let approval = claudine::harness::ShellApprovalOptions::default();
 
     let bootstrap = bootstrap_harness_prompt(&mut state, dir.path(), &approval)
@@ -107,7 +107,7 @@ fn bootstrap_harness_prompt_leaves_a_target_without_initialize_to_the_eager_read
     let dir = tempfile::TempDir::new().unwrap();
     let target = dir.path().join("target.md");
     std::fs::write(&target, "---\ntitle: eager\n---\nBODY\n\n::file missing.md\n").unwrap();
-    let mut state = compose_state(&target, CallerInputLayers::default());
+    let mut state = compose_state(&target, CallerInputLayers::new(crate::request::test_context()));
 
     let bootstrap = bootstrap_harness_prompt(
         &mut state,
@@ -190,7 +190,7 @@ fn harness_reentry_epochs_keep_launch_values_and_source_ownership() {
         ("AGENT".to_string(), "codex".to_string()),
         ("MODEL".to_string(), "gpt-5".to_string()),
     ]);
-    let invocation = claudine::invocation_context::InvocationContext::capture_at(&launch_dir);
+    let invocation = claudine::invocation_context::InvocationContext::capture_at(crate::request::snapshot(), &launch_dir).unwrap();
     let materialized_spec = biscuit_file::to_portable_string(&launch_dir.join("spec.md"));
     let mut state = compose_state(
         &target,
@@ -198,8 +198,8 @@ fn harness_reentry_epochs_keep_launch_values_and_source_ownership() {
             set_overrides: Some(serde_json::json!({ "spec": materialized_spec.clone() })),
             env_overrides: env,
             file_ref_fallback_dir: Some(launch_dir.clone()),
-            file_resolution_context: Some(invocation.launch_file_resolution_context().clone()),
-            ..CallerInputLayers::default()
+            file_resolution_context: invocation.launch_file_resolution_context().clone(),
+            ..CallerInputLayers::new(crate::request::test_context())
         },
     );
     state.source_context = Some(invocation.derive_source(&target).unwrap());
@@ -332,7 +332,7 @@ fn proxy_target_preflight_approves_frontmatter_shell_and_rematerializes() {
         &target,
         CallerInputLayers {
             set_overrides: Some(serde_json::json!({ "spec": "features/x/spec.md" })),
-            ..CallerInputLayers::default()
+            ..CallerInputLayers::new(crate::request::test_context())
         },
     );
 

@@ -5,10 +5,10 @@
 
 use std::io::{self, Write};
 
-use biscuit_terminal::prelude::Prose;
+use biscuit_terminal::prelude::InlineProse;
 use renderable::tree::{NodeKind, RenderNode};
 
-use crate::render::{Layout, Row, literal};
+use crate::render::{Layout, Row, literal, neutralized};
 
 /// The bullet a biscuit-terminal `UnorderedList` puts before each item; its
 /// continuation lines are indented by the bullet's width.
@@ -88,7 +88,8 @@ fn unstyled(markup: &str) -> String {
         }
     }
     let mut collected = String::new();
-    text(&Prose::new(markup).to_render_nodes(), &mut collected);
+    // Inline parsing normalizes carriage returns; expose controls before parsing.
+    text(&InlineProse::new(neutralized(markup)).to_render_nodes(), &mut collected);
     literal(&collected)
 }
 

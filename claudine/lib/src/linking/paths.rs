@@ -52,7 +52,7 @@ pub struct ProviderSkillPaths {
 impl ProviderSkillPaths {
     /// Construct provider paths from capability metadata.
     pub fn new() -> Self {
-        let home_dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+        let home_dir = biscuit_file::home_dir().unwrap_or_else(|| PathBuf::from("."));
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         let repo_root = resolve_repo_root(&cwd);
         Self::from_roots(home_dir, repo_root)
@@ -330,12 +330,16 @@ impl Default for ProviderSkillPaths {
 /// Resolve the repository root for a working directory via Sniff.
 ///
 /// If no repository root can be detected, falls back to `cwd`.
+///
+/// Only the root is needed, so this discovers the repository without reading
+/// its status, commits, or package details, whose cost grows with the
+/// checkout.
 pub fn resolve_repo_root(cwd: &Path) -> PathBuf {
-    if let Ok(Some(git)) = sniff::filesystem::detect_git(cwd, false, 1) {
-        return git.repo_root;
+    if let Ok(Some(git)) = sniff::filesystem::GitRepo::discover(cwd) {
+        return git.repo_root().to_path_buf();
     }
 
-    if let Ok(Some(repo)) = sniff::filesystem::detect_repo(cwd) {
+    if let Ok(Some(repo)) = sniff::filesystem::detect_repo_structure(cwd) {
         return repo.root;
     }
 
@@ -393,7 +397,7 @@ mod tests {
 
         assert_eq!(
             paths.home_dir,
-            dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")),
+            biscuit_file::home_dir().unwrap_or_else(|| PathBuf::from(".")),
             "`new` must root user-scope paths at the process home"
         );
         assert!(

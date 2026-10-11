@@ -1,4 +1,5 @@
-//! Level-2 tests for prose styling, OSC8 hyperlinks, NO_COLOR, and layout.
+//! Level-2 tests for prose styling, inline code, OSC8 hyperlinks, NO_COLOR,
+//! line-break geometry, and layout.
 //!
 //! These tests run the `bt` CLI inside a real terminal emulator so that
 //! escape-sequence output is validated against the actual terminal's
@@ -14,9 +15,13 @@ use crate::common;
 
 use biscuit_test_harness::kitty::KittyHarness;
 use biscuit_test_harness::shared::SharedHarness;
+use biscuit_test_harness::tmux::TmuxHarness;
 use biscuit_test_harness::wezterm::WezTermHarness;
 use biscuit_test_harness::{CapturedFrame, TerminalHarness};
-use common::{bt_command, send_bt_command};
+use common::{OutputRow, active_runs, osc8_destinations, run_bt_output, run_bt_rows, send_bt_command};
+use crate::prose_cells::{attr_run_cells, fg_red_run_cells, osc8_run_cells};
+use biscuit_terminal::components::prose::{LineBreaks, Prose};
+use biscuit_terminal::components::renderable::TerminalRenderable;
 use serial_test::serial;
 use test_toolkit::{Backend, Level, require_level};
 use unicode_width::UnicodeWidthStr;
@@ -49,34 +54,19 @@ fn level2_prose_emits_sgr_in_real_terminal() {
     // Scope FORCE_COLOR=1 to the spawned `bt` and use the CLI
     // `--force-color` flag so styling is decoupled from both the
     // spawned shell's environment AND from `bt`'s TTY detection.
-    harness
-        .send_command_with_env(
-            &bt_command("prose --force-color \"<red>x</red>\""),
-            &[("FORCE_COLOR", "1")],
-        )
-        .expect("send_command_with_env failed");
-    // Wait for the shell prompt to return so the bt output has been
-    // committed to cells before we capture.
-    let _ = biscuit_test_harness::wait_for_prompt(harness);
-
-    let frame_a = harness.capture().expect("capture A failed");
-    // Capture again 200 ms later to defend against the rare WezTerm
-    // get-text race where cell SGR has not been re-emitted into the
-    // dump on the first capture.
-    std::thread::sleep(std::time::Duration::from_millis(200));
-    let frame_b = harness.capture().expect("capture B failed");
+    // The output frame comes from a settled capture (two identical dumps),
+    // which also covers the WezTerm get-text race where cell SGR is not yet
+    // re-emitted on the first dump.
+    let frame = run_bt_output(harness, "prose --force-color \"<red>x</red>\"", FORCED);
 
     // Strict Level 2: the proof is the real terminal's own `get-text
     // --escapes` capture path. We isolate the rendered `x` output line
     // (so a colored shell prompt cannot satisfy the assertion) and
     // require SGR red in the cells WezTerm actually displayed.
     assert!(
-        output_line_has_sgr_red(&frame_a) || output_line_has_sgr_red(&frame_b),
-        "expected SGR red in the captured `x` output line.\n\
-         capture A raw:\n{}\n\
-         capture B raw:\n{}",
-        frame_a.raw,
-        frame_b.raw,
+        output_line_has_sgr_red(&frame),
+        "expected SGR red in the captured `x` output line.\nraw:\n{}",
+        frame.raw,
     );
 }
 
@@ -114,11 +104,7 @@ fn level2_no_color_strips_sgr_in_real_terminal() {
     // Scope NO_COLOR=1 to a single command via the harness helper
     // (portable inline-env syntax; works regardless of the developer's
     // login shell).
-    harness
-        .send_command_with_env(&bt_command("prose \"<red>x</red>\""), &[("NO_COLOR", "1")])
-        .expect("send_command_with_env failed");
-
-    let frame = harness.capture().expect("capture failed");
+    let frame = run_bt_output(harness, "prose \"<red>x</red>\"", &[("NO_COLOR", "1")]);
     assert_no_sgr_red(&frame);
 }
 
@@ -141,26 +127,14 @@ fn level2_prose_emits_sgr_in_kitty() {
 
     // Scope FORCE_COLOR=1 and use the CLI `--force-color` flag for
     // symmetry with the WezTerm test.
-    harness
-        .send_command_with_env(
-            &bt_command("prose --force-color \"<red>x</red>\""),
-            &[("FORCE_COLOR", "1")],
-        )
-        .expect("send_command_with_env failed");
-    let _ = biscuit_test_harness::wait_for_prompt(harness);
-    let frame_a = harness.capture().expect("capture A failed");
-    std::thread::sleep(std::time::Duration::from_millis(200));
-    let frame_b = harness.capture().expect("capture B failed");
+    let frame = run_bt_output(harness, "prose --force-color \"<red>x</red>\"", FORCED);
 
     // Strict Level 2: assert SGR red in the cells Kitty actually
     // displayed, isolated to the rendered `x` output line.
     assert!(
-        output_line_has_sgr_red(&frame_a) || output_line_has_sgr_red(&frame_b),
-        "expected SGR red in the captured `x` output line.\n\
-         capture A raw:\n{}\n\
-         capture B raw:\n{}",
-        frame_a.raw,
-        frame_b.raw,
+        output_line_has_sgr_red(&frame),
+        "expected SGR red in the captured `x` output line.\nraw:\n{}",
+        frame.raw,
     );
 }
 
@@ -260,19 +234,16 @@ fn level2_columns_word_wrap_in_pane() {
     // char and makes the boundary math exact.
     let word_len = cols + 5;
     let long_word: String = std::iter::repeat_n('a', word_len).collect();
-    send_bt_command(harness, &format!("prose \"{long_word}\""));
-
-    let frame = harness.capture().expect("capture failed");
+    let frame = run_bt_output(harness, &format!("prose \"{long_word}\""), &[]);
     let plain = &frame.plain;
 
     // Locate the *output* lines — rows whose trimmed content is
     // composed entirely of 'a' characters (and optionally a single
     // trailing hyphen, which textwrap may insert as a soft-break marker
-    // when forced to break inside a word). Exclude the bt invocation
-    // line which contains literal `bt prose`.
+    // when forced to break inside a word).
     let is_wrap_row = |line: &str| -> bool {
         let trimmed = line.trim_end();
-        if trimmed.is_empty() || is_bt_prose_command(trimmed) {
+        if trimmed.is_empty() {
             return false;
         }
         // Strip an optional trailing soft-break hyphen the prose
@@ -385,15 +356,7 @@ const RICH_EXPECTED_SGR: &[Sgr] = &[
 /// assertion fails when the capture does not contain the rendered style
 /// evidence — the renderer's own byte stream is never consulted.
 fn assert_rich_prose_sgr<H: TerminalHarness>(harness: &mut H) {
-    harness
-        .send_command_with_env(
-            &bt_command(&format!("prose --force-color \"{RICH_PROSE_INPUT}\"")),
-            &[("FORCE_COLOR", "1")],
-        )
-        .expect("send_command_with_env failed");
-    let _ = biscuit_test_harness::wait_for_prompt(harness);
-    std::thread::sleep(std::time::Duration::from_millis(200));
-    let frame = harness.capture().expect("capture failed");
+    let frame = run_bt_output(harness, &format!("prose --force-color \"{RICH_PROSE_INPUT}\""), FORCED);
 
     // Decode SGR across the whole rendered region (the styled inline run and
     // the dim fenced code block land on separate rows). The trailing prompt —
@@ -459,17 +422,7 @@ const NESTED_CODE_BLOCK_INPUT: &str =
 /// cannot clear the enclosing span. The proof is the terminal's own
 /// `get-text` capture: the `before` and `after` rows must each select red.
 fn assert_code_block_restores_parent_style<H: TerminalHarness>(harness: &mut H) {
-    harness
-        .send_command_with_env(
-            &bt_command(&format!(
-                "prose --force-color \"{NESTED_CODE_BLOCK_INPUT}\""
-            )),
-            &[("FORCE_COLOR", "1")],
-        )
-        .expect("send_command_with_env failed");
-    let _ = biscuit_test_harness::wait_for_prompt(harness);
-    std::thread::sleep(std::time::Duration::from_millis(200));
-    let frame = harness.capture().expect("capture failed");
+    let frame = run_bt_output(harness, &format!("prose --force-color \"{NESTED_CODE_BLOCK_INPUT}\""), FORCED);
 
     let before_row = find_bt_output_line(&frame, "before").unwrap_or_else(|| {
         panic!(
@@ -593,15 +546,7 @@ fn level2_prose_nested_emphasis_visible_text_in_wezterm() {
 /// terminal's own `get-text` capture decoded by [`decode_sgr_effects`],
 /// which accepts both the semicolon and colon SGR sub-parameter forms.
 fn assert_prose_inverse_sgr<H: TerminalHarness>(harness: &mut H) {
-    harness
-        .send_command_with_env(
-            &bt_command("prose --force-color \"<inverse>x</inverse>\""),
-            &[("FORCE_COLOR", "1")],
-        )
-        .expect("send_command_with_env failed");
-    let _ = biscuit_test_harness::wait_for_prompt(harness);
-    std::thread::sleep(std::time::Duration::from_millis(200));
-    let frame = harness.capture().expect("capture failed");
+    let frame = run_bt_output(harness, "prose --force-color \"<inverse>x</inverse>\"", FORCED);
 
     let row = find_bt_output_line(&frame, "x").unwrap_or_else(|| {
         panic!(
@@ -659,9 +604,7 @@ fn level2_prose_hidden_renders_as_literal_text_in_wezterm() {
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
 
-    send_bt_command(harness, "prose \"<hidden>x</hidden>\"");
-    let _ = biscuit_test_harness::wait_for_prompt(harness);
-    let frame = harness.capture().expect("capture failed");
+    let frame = run_bt_output(harness, "prose \"<hidden>x</hidden>\"", &[]);
 
     // `<hidden>` is no longer recognized: the whole tag passes through as
     // visible literal text. The isolated output row's compact plain form is
@@ -780,51 +723,23 @@ fn decode_sgr_params(params: &[i64], out: &mut Vec<Sgr>) {
     }
 }
 
-fn is_bt_prose_command(line: &str) -> bool {
-    line.contains("bt prose")
-        || line.contains("bt' prose")
-        || line.contains("bt.exe' prose")
-}
-
+/// The raw row of `frame`, a command's output frame, whose whitespace-free
+/// visible text is exactly `compact_plain`.
 fn find_bt_output_line<'a>(frame: &'a CapturedFrame, compact_plain: &str) -> Option<&'a str> {
-    let raw_lines: Vec<&str> = frame.raw.lines().collect();
-    let plain_lines: Vec<&str> = frame.plain.lines().collect();
-    let cmd_idx = common::find_bt_command_end(&plain_lines, "prose")?;
-    for (i, plain) in plain_lines.iter().enumerate().skip(cmd_idx + 1) {
+    frame.plain.lines().zip(frame.raw.lines()).find_map(|(plain, raw)| {
         let compact: String = plain.chars().filter(|c| !c.is_whitespace()).collect();
-        if compact == compact_plain {
-            return raw_lines.get(i).copied();
-        }
-    }
-    None
+        (compact == compact_plain).then_some(raw)
+    })
 }
 
-/// Decode every [`Sgr`] effect in the rendered output region — the rows
-/// after the `bt prose` command echo and before the next shell prompt.
+/// Decode every [`Sgr`] effect in `frame`, a command's output frame.
 ///
 /// Block-level content (a fenced code block) renders on its own indented
 /// rows, so a styled run and its sibling code block occupy different lines;
-/// a single-row decode cannot see them both. The command echo carries the
-/// literal markup as plain text (no escape bytes), so including it
-/// contributes no spurious effects, and the trailing prompt — which may
-/// carry its own theme SGR — is excluded by stopping at the prompt suffix.
+/// a single-row decode cannot see them both. The output frame holds neither
+/// the echo nor the prompt, so a themed prompt contributes no effects.
 fn rendered_region_effects(frame: &CapturedFrame) -> Vec<Sgr> {
-    let raw_lines: Vec<&str> = frame.raw.lines().collect();
-    let plain_lines: Vec<&str> = frame.plain.lines().collect();
-    let Some(cmd_idx) = common::find_bt_command_end(&plain_lines, "prose") else {
-        return Vec::new();
-    };
-    let mut effects = Vec::new();
-    for (i, plain) in plain_lines.iter().enumerate().skip(cmd_idx + 1) {
-        let trimmed = plain.trim_end();
-        if trimmed.ends_with('$') || trimmed.ends_with('%') || trimmed.ends_with('#') {
-            break;
-        }
-        if let Some(raw) = raw_lines.get(i) {
-            effects.extend(decode_sgr_effects(raw));
-        }
-    }
-    effects
+    frame.raw.lines().flat_map(decode_sgr_effects).collect()
 }
 
 /// Whether the isolated `<red>x</red>` output row carries SGR red.
@@ -859,61 +774,209 @@ fn assert_osc8_link_present(frame: &CapturedFrame, url: &str, label: &str) {
     );
 }
 
-/// Asserts that the `bt` output region of `frame` contains no SGR red
-/// sequences (`\x1b[31m`, `\x1b[91m`).
-///
-/// The bt output region starts after the most recent, potentially wrapped,
-/// `bt prose` command echo and ends before the next shell prompt. Raw and plain
-/// rows are paired by index so prompt styling cannot satisfy the assertion.
+/// Asserts that `frame`, a command's output frame, contains no SGR red
+/// sequences (`\x1b[31m`, `\x1b[91m`). The output frame excludes the prompt,
+/// so prompt styling cannot affect the assertion.
 fn assert_no_sgr_red(frame: &CapturedFrame) {
-    let raw_lines: Vec<&str> = frame.raw.lines().collect();
-    let plain_lines: Vec<&str> = frame.plain.lines().collect();
-
-    let cmd_idx = common::find_bt_command_end(&plain_lines, "prose");
-
-    let Some(cmd_idx) = cmd_idx else {
-        // We could not locate the command line; the test plainly cannot
-        // make a localized assertion. Fall back to a global check.
+    assert!(!frame.plain.trim().is_empty(), "expected `bt` output rows to check");
+    for (i, (plain, raw_line)) in frame.plain.lines().zip(frame.raw.lines()).enumerate() {
         assert!(
-            !frame.raw.contains("\x1b[31m"),
-            "expected NO \\x1b[31m with NO_COLOR=1; could not locate command line. raw:\n{}",
-            frame.raw
-        );
-        assert!(
-            !frame.raw.contains("\x1b[91m"),
-            "expected NO \\x1b[91m with NO_COLOR=1; could not locate command line. raw:\n{}",
-            frame.raw
-        );
-        return;
-    };
-
-    // Walk forward from cmd_idx + 1 up to N lines or until the next
-    // prompt-suffix line. Skip the command line itself (which by
-    // definition carries the literal "<red>x</red>" text the user
-    // typed, but no SGR).
-    const WINDOW: usize = 10;
-    let end_exclusive = (cmd_idx + 1 + WINDOW).min(plain_lines.len());
-
-    for (i, plain) in plain_lines
-        .iter()
-        .enumerate()
-        .take(end_exclusive)
-        .skip(cmd_idx + 1)
-    {
-        let trimmed = plain.trim_end();
-        // Stop scanning once we hit the *next* shell prompt; everything
-        // after it belongs to a subsequent command, not this one.
-        if trimmed.ends_with('$') || trimmed.ends_with('%') || trimmed.ends_with('#') {
-            return;
-        }
-        let raw_line = raw_lines.get(i).copied().unwrap_or("");
-        assert!(
-            !raw_line.contains("\x1b[31m"),
-            "expected NO \\x1b[31m with NO_COLOR=1 in bt output line {i}.\nplain: {plain}\nraw:   {raw_line}",
-        );
-        assert!(
-            !raw_line.contains("\x1b[91m"),
-            "expected NO \\x1b[91m with NO_COLOR=1 in bt output line {i}.\nplain: {plain}\nraw:   {raw_line}",
+            !raw_line.contains("\x1b[31m") && !raw_line.contains("\x1b[91m"),
+            "expected NO red SGR with NO_COLOR=1 in bt output row {i}.\nplain: {plain}\nraw:   {raw_line}",
         );
     }
+}
+
+// ------------------------------------------------------------------
+// Inline code, link extent, unstyled fallback, and break geometry
+// ------------------------------------------------------------------
+
+/// Process-shared tmux session for the inline-code and geometry tests. tmux is
+/// the backend CI hosts; its `capture-pane -e` re-serializes each cell's SGR
+/// and OSC 8 state, so the style and link assertions hold there too.
+static SHARED_TMUX: SharedHarness<TmuxHarness> = SharedHarness::new();
+
+/// Color forced on for the command, so styling does not depend on detection.
+const FORCED: &[(&str, &str)] = &[("FORCE_COLOR", "1")];
+
+/// The output's only row, after asserting the command displayed exactly one.
+fn only_row<'a>(command: &str, frame: &CapturedFrame, rows: &'a [OutputRow]) -> &'a OutputRow {
+    assert_eq!(
+        rows.len(),
+        1,
+        "`bt {command}` must display one row, got {:?}.\nplain:\n{}",
+        rows.iter().map(|row| &row.plain).collect::<Vec<_>>(),
+        frame.plain,
+    );
+    &rows[0]
+}
+
+fn dim_runs(row: &OutputRow) -> Vec<String> {
+    active_runs(&attr_run_cells(&row.raw, "2"), true)
+}
+
+fn red_runs(row: &OutputRow) -> Vec<String> {
+    active_runs(&fg_red_run_cells(&row.raw), true)
+}
+
+/// Link runs are not trimmed: a clickable blank cell beside the label is a
+/// visible defect, unlike an invisible attribute on a blank.
+fn link_runs(row: &OutputRow) -> Vec<String> {
+    active_runs(&osc8_run_cells(&row.raw), false)
+}
+
+/// Inline code in the cells the terminal displays: the backtick delimiters
+/// are gone and the code is dim; inside a colored run the code keeps the color
+/// and the color resumes after it while the dim does not; inside a link the
+/// code is dim and the hyperlink covers exactly the label; a relative link
+/// destination reaches the terminal as a `file://` URL; and with color off the
+/// visible text keeps a backtick fence instead.
+fn assert_inline_code_display<H: TerminalHarness>(harness: &mut H) {
+    let command = "prose --force-color 'See `md hash` here'";
+    let (frame, rows) = run_bt_rows(harness, command, FORCED);
+    let row = only_row(command, &frame, &rows);
+    assert_eq!(row.plain, "See md hash here", "delimiters must not display: {row:?}");
+    assert_eq!(dim_runs(row), ["md hash"], "only the code is dim: {row:?}");
+
+    let command = "prose --force-color '<red>run `md hash` now</red>'";
+    let (frame, rows) = run_bt_rows(harness, command, FORCED);
+    let row = only_row(command, &frame, &rows);
+    assert_eq!(row.plain, "run md hash now", "{row:?}");
+    assert_eq!(red_runs(row), ["run md hash now"], "red spans the code and resumes after it: {row:?}");
+    assert_eq!(dim_runs(row), ["md hash"], "the dim ends with the code: {row:?}");
+
+    let command = "prose --force-color 'see [`inline-block`](https://x.io/a) done'";
+    let (frame, rows) = run_bt_rows(harness, command, FORCED);
+    let row = only_row(command, &frame, &rows);
+    assert_eq!(row.plain, "see inline-block done", "{row:?}");
+    assert_eq!(dim_runs(row), ["inline-block"], "{row:?}");
+    assert_eq!(link_runs(row), ["inline-block"], "the link covers exactly its code label: {row:?}");
+    assert_eq!(osc8_destinations(&row.raw), ["https://x.io/a"], "{row:?}");
+
+    let command = "prose --force-color 'read [plan](plan.md) first'";
+    let (frame, rows) = run_bt_rows(harness, command, FORCED);
+    let row = only_row(command, &frame, &rows);
+    assert_eq!(row.plain, "read plan first", "{row:?}");
+    assert_eq!(link_runs(row), ["plan"], "{row:?}");
+    let destinations = osc8_destinations(&row.raw);
+    assert!(
+        destinations.len() == 1
+            && destinations[0].starts_with("file://")
+            && destinations[0].ends_with("/plan.md"),
+        "a relative destination must reach the terminal as a file URL: {destinations:?}"
+    );
+
+    // Unstyled fallback, through `--plain` and through `NO_COLOR` (which wins
+    // over the forced color).
+    for (command, env) in [
+        ("prose --plain 'See `md hash` here'", FORCED),
+        ("prose 'See `md hash` here'", &[("FORCE_COLOR", "1"), ("NO_COLOR", "1")][..]),
+        ("prose --plain '<red>run `md hash` now</red>'", FORCED),
+        ("prose '<red>run `md hash` now</red>'", &[("FORCE_COLOR", "1"), ("NO_COLOR", "1")][..]),
+    ] {
+        let (frame, rows) = run_bt_rows(harness, command, env);
+        let row = only_row(command, &frame, &rows);
+        assert!(
+            row.plain == "See `md hash` here" || row.plain == "run `md hash` now",
+            "the colorless fallback must show a backtick fence ({command}, {env:?}): {row:?}"
+        );
+        assert!(
+            dim_runs(row).is_empty() && red_runs(row).is_empty(),
+            "the colorless fallback must not be styled ({command}, {env:?}): {row:?}"
+        );
+    }
+}
+
+/// Paragraph and line-break geometry as displayed: a single newline reflows as
+/// one space, a blank line puts a blank row between paragraphs, a backslash
+/// before the newline (or any newline in `Hard` mode) breaks the row,
+/// whitespace around a soft break inside a wrapper collapses to exactly one
+/// space, and a link around an explicit code block displays linked paragraphs
+/// around the dim code.
+///
+/// The commands build their newlines with `printf` so every POSIX shell the
+/// pane may run types them identically.
+fn assert_break_geometry_display<H: TerminalHarness>(harness: &mut H) {
+    let plain_rows = |rows: &[OutputRow]| rows.iter().map(|row| row.plain.clone()).collect::<Vec<_>>();
+
+    let (_, rows) = run_bt_rows(harness, r#"prose --force-color "$(printf 'a\nb')""#, FORCED);
+    assert_eq!(plain_rows(&rows), ["a b"], "a soft break reflows as one space");
+
+    let (_, rows) = run_bt_rows(harness, r#"prose --force-color "$(printf 'a\n\nb')""#, FORCED);
+    assert_eq!(plain_rows(&rows), ["a", "", "b"], "a blank line separates paragraphs");
+
+    let (_, rows) = run_bt_rows(harness, r#"prose --force-color "$(printf 'a\\\nb')""#, FORCED);
+    assert_eq!(plain_rows(&rows), ["a", "b"], "a backslash before the newline breaks the row");
+
+    // `bt prose` has no line-break flag, so `Hard` mode is rendered in-process
+    // and its bytes shown in the pane.
+    let hard = Prose::new("a\nb")
+        .with_line_breaks(LineBreaks::Hard)
+        .render(&common::styled_terminal());
+    let (_, rows) = common::display_bytes_rows(harness, hard.as_bytes());
+    assert_eq!(plain_rows(&rows), ["a", "b"], "in `Hard` mode a newline breaks the row");
+
+    let (frame, rows) = run_bt_rows(
+        harness,
+        r#"prose --force-color "$(printf 'a <b> \nb</b>')""#,
+        FORCED,
+    );
+    let row = only_row("prose 'a <b> \\nb</b>'", &frame, &rows);
+    assert_eq!(row.plain, "a b", "soft-break whitespace across a wrapper is one space: {row:?}");
+    assert_eq!(
+        active_runs(&attr_run_cells(&row.raw, "1"), true),
+        ["b"],
+        "the bold keeps its extent: {row:?}"
+    );
+
+    let command = "prose --force-color '[a<code-block>x</code-block>b](https://e.io)'";
+    let (frame, rows) = run_bt_rows(harness, command, FORCED);
+    let shown: Vec<&OutputRow> = rows.iter().filter(|row| !row.plain.trim().is_empty()).collect();
+    let first = shown.first().unwrap_or_else(|| panic!("no output.\nplain:\n{}", frame.plain));
+    let last = shown.last().expect("output rows");
+    assert_eq!(first.plain, "a", "{:?}", plain_rows(&rows));
+    assert_eq!(last.plain, "b", "{:?}", plain_rows(&rows));
+    for row in [first, last] {
+        assert_eq!(link_runs(row), [row.plain.as_str()], "{row:?}");
+        assert_eq!(osc8_destinations(&row.raw), ["https://e.io"], "{row:?}");
+    }
+    let code = shown
+        .iter()
+        .find(|row| row.plain.trim() == "x")
+        .unwrap_or_else(|| panic!("the code row is missing: {:?}", plain_rows(&rows)));
+    assert_eq!(dim_runs(code), ["x"], "{code:?}");
+    assert!(link_runs(code).is_empty(), "the code block is not linked: {code:?}");
+}
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_prose_inline_code_and_breaks_in_wezterm() {
+    require_level!(Level::L2, WezTermHarness::available(), Backend::WezTerm);
+    let mut guard = SHARED_WEZTERM
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
+    let harness = guard.as_mut().expect("shared WezTerm harness present");
+    assert_inline_code_display(harness);
+    assert_break_geometry_display(harness);
+}
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_prose_inline_code_and_breaks_in_kitty() {
+    require_level!(Level::L2, KittyHarness::available(), Backend::Kitty);
+    let mut guard =
+        SHARED_KITTY.get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
+    let harness = guard.as_mut().expect("shared Kitty harness present");
+    assert_inline_code_display(harness);
+    assert_break_geometry_display(harness);
+}
+
+#[test]
+#[serial(level2_terminal)]
+fn level2_prose_inline_code_and_breaks_in_tmux() {
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+    let mut guard =
+        SHARED_TMUX.get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
+    let harness = guard.as_mut().expect("shared tmux harness present");
+    assert_inline_code_display(harness);
+    assert_break_geometry_display(harness);
 }

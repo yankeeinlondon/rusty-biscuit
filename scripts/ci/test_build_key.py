@@ -16,6 +16,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -72,6 +73,58 @@ class HelperResolutionTests(unittest.TestCase):
         with self.assertRaises(RuntimeError) as raised:
             build_key.planned_keys(["alpha"])
         self.assertIn("schema version", str(raised.exception))
+
+    def _fake_helper_file(self, name: str = "ci-build") -> Path:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        path = Path(temporary.name) / name
+        path.write_text("", encoding="utf-8")
+        return path
+
+    def test_an_empty_override_falls_back_to_candidate_discovery(self) -> None:
+        candidate = self._fake_helper_file()
+        os.environ[build_key.HELPER_ENV] = ""
+        with mock.patch.object(build_key, "_candidates", return_value=[candidate]):
+            self.assertEqual(build_key.helper_command(), [str(candidate)])
+
+    def test_a_nonempty_override_beats_an_existing_candidate_as_one_argument(self) -> None:
+        candidate = self._fake_helper_file()
+        spaced = self._fake_helper_file("ci build")
+        os.environ[build_key.HELPER_ENV] = str(spaced)
+        with mock.patch.object(build_key, "_candidates", return_value=[candidate]):
+            self.assertEqual(build_key.helper_command(), [str(spaced)])
+
+    def test_key_requests_run_outside_compiler_wrapper_mode(self) -> None:
+        helper = self._fake_helper_file()
+        os.environ[build_key.HELPER_ENV] = str(helper)
+        changed = {
+            "BISCUIT_CI_BUILD_WRAP": "1",
+            "RUSTC_WRAPPER": "/some/wrapper",
+            "BISCUIT_CI_BUILD_COUNTER_DIR": "/some/counter",
+            "BUILD_KEY_TEST_ORDINARY": "kept",
+        }
+        previous = {name: os.environ.get(name) for name in changed}
+
+        def restore_environment() -> None:
+            for name, value in previous.items():
+                if value is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = value
+
+        self.addCleanup(restore_environment)
+        os.environ.update(changed)
+        response = json.dumps({"schema_version": build_key.KEY_SCHEMA_VERSION, "keys": ["k1"]})
+        completed = subprocess.CompletedProcess([], 0, stdout=response + "\n", stderr="")
+        with mock.patch.object(build_key.subprocess, "run", return_value=completed) as run:
+            self.assertEqual(build_key.planned_keys(["alpha"]), ["k1"])
+        child = run.call_args.kwargs["env"]
+        self.assertNotIn("BISCUIT_CI_BUILD_WRAP", child)
+        self.assertEqual(child["RUSTC_WRAPPER"], "")
+        self.assertEqual(child["BISCUIT_CI_BUILD_COUNTER_DIR"], "/some/counter")
+        self.assertEqual(child["BUILD_KEY_TEST_ORDINARY"], "kept")
+        self.assertEqual(os.environ["BISCUIT_CI_BUILD_WRAP"], "1")
+        self.assertEqual(os.environ["RUSTC_WRAPPER"], "/some/wrapper")
 
     def test_the_helper_is_resolved_beside_this_module_not_in_the_planned_root(self) -> None:
         # A synthetic fixture workspace has no `scripts/`; resolving the tool

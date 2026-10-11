@@ -2,7 +2,7 @@
 //! warning-header-plus-body shape shared by the Codex tracing bridge and the
 //! file-tool error path.
 
-use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::prose::{LineBreaks, Prose};
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::status::StatusState;
 use biscuit_terminal::prelude::StatusBlock;
@@ -39,8 +39,11 @@ impl EventRenderer {
             let (label, border_color) = error_kind_presentation(kind);
             (label, border_color, escape_prose(message))
         };
+        // The label is its own row, and the agent's message keeps its lines.
         let body = format!("<red><b>{label}</b></red>\n{body_text}");
-        let prose = Prose::new(body).with_word_wrap(WordWrap::WrapProse(None, None));
+        let prose = Prose::new(body)
+            .with_line_breaks(LineBreaks::Hard)
+            .with_word_wrap(WordWrap::WrapProse(None, None));
         let block = StatusBlock::new(StatusState::Error)
             .body(prose)
             .border_color(border_color)
@@ -78,7 +81,8 @@ impl EventRenderer {
 
     /// Render the two-part `Warning` block shape: a `Status::from_prose`
     /// header with the [`StatusState::Warning`] glyph, followed by an
-    /// orange-bordered `BlockQuote` carrying `body_prose` verbatim. Used
+    /// orange-bordered `BlockQuote` carrying `body_prose` verbatim, one row
+    /// per line. Used
     /// by the Codex tracing bridge and the file-tool error path so both
     /// share the same spacing/indent conventions.
     pub(super) fn render_warning_header_and_body(
@@ -88,8 +92,10 @@ impl EventRenderer {
         body_prose: &str,
     ) -> Vec<String> {
         let border_color = Color::Tailwind(Tailwind::Orange700);
-        let body =
-            Prose::new(body_prose.to_string()).with_word_wrap(WordWrap::WrapProse(None, None));
+        // Diagnostic text is shown with its own line structure.
+        let body = Prose::new(body_prose.to_string())
+            .with_line_breaks(LineBreaks::Hard)
+            .with_word_wrap(WordWrap::WrapProse(None, None));
         let block = StatusBlock::new(StatusState::Warning)
             .header(header_prose)
             .body(body)

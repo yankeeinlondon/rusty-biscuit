@@ -36,6 +36,7 @@ impl biscuit_terminal::errors::BlockError for MermaidThemeError {
         &self,
         _term: &biscuit_terminal::terminal::Terminal,
     ) -> biscuit_terminal::components::status_block::StatusBlock {
+        use biscuit_terminal::components::prose::{LineBreaks, Prose};
         use biscuit_terminal::components::status::StatusState;
         use biscuit_terminal::components::status_block::StatusBlock;
         use biscuit_terminal::errors::{ErrorHeader, StatusBlockExt};
@@ -48,16 +49,16 @@ impl biscuit_terminal::errors::BlockError for MermaidThemeError {
                 source,
             } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("MermaidThemeError", "invalid JSON"))
-                .body(format!(
+                .body(Prose::new(format!(
                     "<dim>Message:</dim> {source}\n<dim>Position:</dim> line {line}, column {column}\n<dim>Snippet:</dim>\n  <cyan>{snippet}</cyan>"
-                ))
+                )).with_line_breaks(LineBreaks::Hard))
                 .hint("Validate the JSON with a linter, or check for missing commas/quotes."),
 
             MermaidThemeError::InvalidColor { field, value } => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("MermaidThemeError", "invalid color"))
-                .body(format!(
+                .body(Prose::new(format!(
                     "<dim>Field:</dim> <cyan>{field}</cyan>\n<dim>Value:</dim> <cyan>{value}</cyan>"
-                ))
+                )).with_line_breaks(LineBreaks::Hard))
                 .hint("Accepted formats: <cyan>#rgb</cyan>, <cyan>#rrggbb</cyan>, or a CSS named color."),
         }
     }

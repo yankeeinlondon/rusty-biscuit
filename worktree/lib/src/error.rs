@@ -5,7 +5,7 @@ pub enum WorktreeError {
     #[error("git is not installed or not found on PATH")]
     GitNotFound,
 
-    #[error("not inside a git repository")]
+    #[error("This directory is not inside a Git repository. Change to a repository or one of its worktrees, then run wt again.")]
     NotInGitRepo,
 
     #[error(
@@ -53,14 +53,15 @@ pub enum WorktreeError {
     /// what it would delete could not be checked. Nothing was removed, but
     /// "nothing removed" is not "nothing changed": `wt remove` may already
     /// have run `git worktree repair` to make the files checkable, and that
-    /// repair is never rolled back. The message is Prose markup explaining
-    /// what to do, and says when Git metadata may have changed.
+    /// repair is never rolled back. The message is Prose markup, one line per
+    /// `\n`, explaining what to do, and says when Git metadata may have
+    /// changed.
     #[error("{0}")]
     RefusedToLoseWork(String),
 
     /// The environment prevents the command (for example, no shell wrapper to
     /// move the caller); nothing was removed and no `--force-*` flag helps.
-    /// The message is Prose markup explaining what to do.
+    /// The message is Prose markup, one line per `\n`, explaining what to do.
     #[error("{0}")]
     BlockedByEnvironment(String),
 
@@ -75,10 +76,25 @@ pub enum WorktreeError {
     #[error("branch {branch} moved from {expected} to {found} after it was checked, so it was kept")]
     BranchMoved { branch: String, expected: String, found: String },
 
-    /// Another program holds the worktree directory (Windows only: its
-    /// current directory, or an open file inside). Nothing was removed.
-    #[error("the folder {} is in use by another program", .0.display())]
-    DirectoryInUse(std::path::PathBuf),
+    /// Other programs work in the worktree directory: `processes` stand in
+    /// it, or, when empty, the Windows probe found it held (an open file).
+    /// Nothing was removed.
+    #[error("{}", in_use_message(path, processes))]
+    DirectoryInUse {
+        path: std::path::PathBuf,
+        processes: Vec<sniff::os::WorkingProcess>,
+    },
+
+    /// `git worktree remove` unregistered the worktree and then failed, and
+    /// the rest of its folder could not be deleted either. Nothing after the
+    /// worktree (branch, origin) was removed.
+    #[error(
+        "git unregistered worktree {} but could not delete all of its folder ({reason}). \
+        Nothing else was removed. Delete what is left with: {}",
+        .path.display(),
+        delete_command(path)
+    )]
+    FolderNotFullyRemoved { path: std::path::PathBuf, reason: String },
 
     /// The Windows lock probe renamed the worktree and could not rename it
     /// back. Nothing was removed; `move` restores the original name.
@@ -136,6 +152,11 @@ pub enum WorktreeError {
 
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
+
+    /// Requested timings could not be stated exactly in the timings
+    /// document.
+    #[error(transparent)]
+    Timings(#[from] crate::timing::TimingsError),
 }
 
 /// One worktree listed in an [`WorktreeError::AmbiguousWorktree`] error.
@@ -144,6 +165,42 @@ pub struct WorktreeCandidate {
     pub branch: Option<String>,
     pub basename: String,
     pub path: std::path::PathBuf,
+}
+
+fn in_use_message(path: &std::path::Path, processes: &[sniff::os::WorkingProcess]) -> String {
+    let path = path.display();
+    if processes.is_empty() {
+        return format!("Nothing was removed: the folder {path} is in use by another program.");
+    }
+    // One entry per program name, keeping the order processes were found in.
+    let mut programs: Vec<(&str, Vec<u32>)> = Vec::new();
+    for process in processes {
+        match programs.iter_mut().find(|(name, _)| *name == process.name) {
+            Some((_, pids)) => pids.push(process.pid),
+            None => programs.push((&process.name, vec![process.pid])),
+        }
+    }
+    let listed = programs
+        .iter()
+        .map(|(name, pids)| {
+            let ids = pids.iter().map(u32::to_string).collect::<Vec<_>>().join(", ");
+            format!("{name} (pid{} {ids})", if pids.len() == 1 { "" } else { "s" })
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let who = if processes.len() == 1 { "another program" } else { "other programs" };
+    format!(
+        "Nothing was removed: the folder {path} is in use by {who}: {listed}. \
+        Close them, or move them out of it, and run wt remove again."
+    )
+}
+
+fn delete_command(path: &std::path::Path) -> String {
+    if cfg!(windows) {
+        format!("Remove-Item -Recurse -Force \"{}\"", path.display())
+    } else {
+        format!("rm -rf \"{}\"", path.display())
+    }
 }
 
 fn ambiguous_message(name: &str, candidates: &[WorktreeCandidate]) -> String {

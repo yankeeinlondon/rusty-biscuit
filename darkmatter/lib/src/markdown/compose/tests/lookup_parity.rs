@@ -146,7 +146,9 @@ fn assert_reserved_roots_win(name: &str, lookup: &dyn EvaluationLookup) {
 #[test]
 fn every_production_lookup_keeps_bare_names_out_of_ctx() {
     let state = state();
-    let resolution = ResolutionContext::new(std::env::temp_dir());
+    let file_context = biscuit_file::FileResolutionContext::new(std::env::temp_dir());
+    let resolution = ResolutionContext::new(file_context.clone());
+    let environment = std::collections::HashMap::new();
     let data = json!({ "env": DOCUMENT_ENV });
     let view = std::sync::Arc::new(BindingView::builder(ScopeId::new("parity")).build().unwrap());
 
@@ -183,14 +185,14 @@ fn every_production_lookup_keeps_bare_names_out_of_ctx() {
                 assert_reserved_roots_win(name, &seed);
             }
             "ShortcutLookup" => {
-                let lookup = ShortcutLookup::new(&data, Path::new("."));
+                let lookup = ShortcutLookup::new(&data, &file_context);
                 assert_bare_name_is_a_document_property(name, &lookup);
                 assert_reserved_roots_win(name, &lookup);
             }
             "CtxLookup" => {
                 // Context-only: there is no document to read, so only the
                 // fallback half applies.
-                let lookup = CtxLookup::new(Path::new("."));
+                let lookup = CtxLookup::new(Path::new("."), &environment);
                 assert_bare_name_is_a_document_property(name, &lookup);
             }
             other => panic!("{other} is marked Probed but has no probe"),

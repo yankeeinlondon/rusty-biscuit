@@ -30,7 +30,7 @@ mod schema_validation_integration {
             ComposeOperation::Interpolation,
         ]);
 
-        let err = md.compose_with(options).unwrap_err();
+        let err = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap_err();
         let err_string = format!("{err}");
         assert!(
             err_string.contains("Schema validation failed"),
@@ -67,7 +67,7 @@ mod schema_validation_integration {
 
         let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
 
-        let err = md.compose_with(options).unwrap_err();
+        let err = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap_err();
         match err {
             MarkdownError::SchemaValidationFailed { problems, .. } => {
                 assert!(
@@ -95,7 +95,7 @@ mod schema_validation_integration {
             ])
             .with_fail_fast(false);
 
-        let err = md.compose_with(options).unwrap_err();
+        let err = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap_err();
         match err {
             MarkdownError::SchemaValidationFailed { .. } => {}
             other => panic!("Expected SchemaValidationFailed, got {other:?}"),
@@ -116,7 +116,7 @@ mod schema_validation_integration {
             ComposeOperation::Interpolation,
         ]);
 
-        let (composed, _report) = md.compose_with(options).unwrap();
+        let (composed, _report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         assert_eq!(
             composed.frontmatter().as_map().get("has_spec"),
             Some(&serde_json::json!(true))
@@ -153,7 +153,7 @@ mod schema_validation_integration {
                     ComposeOperation::FrontmatterInterpolation,
                     ComposeOperation::Interpolation,
                 ]);
-            let (composed, _) = md.compose_with(options).unwrap();
+            let (composed, _) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
             assert_eq!(
                 composed.frontmatter().as_map().get("iteration"),
                 Some(&serde_json::json!(3)),
@@ -165,7 +165,11 @@ mod schema_validation_integration {
     #[test]
     fn schema_number_increment_survives_quoted_persistence_round_trips() {
         let dir = tempfile::tempdir().unwrap();
-        let spec = dir.path().join("spec.md");
+        // Only interpolation runs, so the schema stage never makes `spec`
+        // absolute; a spec in a subfolder keeps `dirname(spec)` non-empty
+        // (a bare `spec.md` would build the root path `/review-N.md`).
+        std::fs::create_dir(dir.path().join("specs")).unwrap();
+        let spec = dir.path().join("specs").join("spec.md");
         let prompt = dir.path().join("prompt.md");
         std::fs::write(&spec, "---\n---\nSpec\n").unwrap();
         std::fs::write(
@@ -176,7 +180,7 @@ mod schema_validation_integration {
              \x20 iteration: number\n\
              \x20 review: file\n\
              \x20 previous: file\n\
-             spec: spec.md\n\
+             spec: specs/spec.md\n\
              iteration: \"{{ file_exists(spec) ? (frontmatter(spec, 'review_iterations') || 0) + 1 : 1 }}\"\n\
              review: \"{{ dirname(spec) + '/review-' + iteration + '.md' }}\"\n\
              previous: \"{{ iteration < 2 ? null : decrement_file_index(review) }}\"\n\
@@ -192,7 +196,7 @@ mod schema_validation_integration {
                     ComposeOperation::FrontmatterInterpolation,
                     ComposeOperation::Interpolation,
                 ]);
-            let (composed, _) = md.compose_with(options).unwrap();
+            let (composed, _) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
             let frontmatter = composed.frontmatter().as_map();
 
             assert_eq!(
@@ -203,7 +207,7 @@ mod schema_validation_integration {
                 frontmatter
                     .get("review")
                     .and_then(serde_json::Value::as_str)
-                    .is_some_and(|path| path.ends_with(&format!("review-{expected_iteration}.md"))),
+                    .is_some_and(|path| path == format!("specs/review-{expected_iteration}.md")),
                 "review should use iteration {expected_iteration}: {frontmatter:?}"
             );
             if expected_iteration == 1 {
@@ -214,7 +218,7 @@ mod schema_validation_integration {
                         .get("previous")
                         .and_then(serde_json::Value::as_str)
                         .is_some_and(|path| {
-                            path.ends_with(&format!("review-{}.md", expected_iteration - 1))
+                            path == format!("specs/review-{}.md", expected_iteration - 1)
                         }),
                     "previous should point to the prior iteration: {frontmatter:?}"
                 );
@@ -280,7 +284,7 @@ mod schema_validation_integration {
             ]);
 
         let (composed, _report) = md
-            .compose_with(options)
+            .compose_with(&crate::markdown::compose::test_request(options))
             .expect("compose should succeed once the has_* strings coerce");
 
         let fm = composed.frontmatter();
@@ -320,7 +324,7 @@ mod schema_validation_integration {
 
         let md = Markdown::try_from(root.as_path()).unwrap();
         let options = ComposeOptions::new().with_source_file(root);
-        let (composed, report) = md.compose_with(options).unwrap();
+        let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
         assert!(composed.content().contains("Child body"));
         assert_eq!(report.transclusions_applied, 1);
@@ -348,7 +352,7 @@ mod schema_validation_integration {
         let options = ComposeOptions::new()
             .with_source_file(root)
             .with_fail_fast(true);
-        let err = md.compose_with(options).unwrap_err();
+        let err = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap_err();
 
         match err {
             MarkdownError::SchemaValidationFailed { problems, .. } => {
@@ -424,7 +428,7 @@ mod schema_validation_integration {
         // ── Run 1: cold cache under baseline A ─────────────────────
         let md1 = Markdown::try_from(root.as_path()).unwrap();
         let (_, report1) = md1
-            .compose_with(mk_options("alpha"))
+            .compose_with(&crate::markdown::compose::test_request(mk_options("alpha")))
             .expect("run 1 (baseline alpha, cold cache) should succeed");
         assert!(
             report1.cache_stats.is_some(),
@@ -438,7 +442,7 @@ mod schema_validation_integration {
         // ── Run 2: same baseline A → still nothing persisted to reuse ──
         let md2 = Markdown::try_from(root.as_path()).unwrap();
         let (_, report2) = md2
-            .compose_with(mk_options("alpha"))
+            .compose_with(&crate::markdown::compose::test_request(mk_options("alpha")))
             .expect("run 2 (baseline alpha, warm cache) should succeed");
         assert!(
             report2.cache_stats.is_some(),
@@ -452,7 +456,7 @@ mod schema_validation_integration {
         // ── Run 3: baseline B → distinct key, must not reuse run 1 ─
         let md3 = Markdown::try_from(root.as_path()).unwrap();
         let (_, report3) = md3
-            .compose_with(mk_options("beta"))
+            .compose_with(&crate::markdown::compose::test_request(mk_options("beta")))
             .expect("run 3 (baseline beta) should succeed");
         assert!(
             report3.cache_stats.is_some(),
@@ -506,7 +510,7 @@ mod schema_validation_integration {
         // consulted, so file_exists is false. ─────────────────────
         let md1 = Markdown::try_from(root.as_path()).unwrap();
         let (composed1, report1) = md1
-            .compose_with(mk_options(&fallback_present))
+            .compose_with(&crate::markdown::compose::test_request(mk_options(&fallback_present)))
             .expect("run 1 (present fallback, cold cache) should succeed");
         assert!(
             composed1.content().contains("anchored exists: false"),
@@ -520,7 +524,7 @@ mod schema_validation_integration {
         // reuse run 1's entry. Same (false) resolution outcome. ────
         let md2 = Markdown::try_from(root.as_path()).unwrap();
         let (composed2, report2) = md2
-            .compose_with(mk_options(&fallback_absent))
+            .compose_with(&crate::markdown::compose::test_request(mk_options(&fallback_absent)))
             .expect("run 2 (absent fallback) should succeed");
         assert!(
             composed2.content().contains("anchored exists: false"),
@@ -543,7 +547,6 @@ mod schema_validation_integration {
             .with_source_path(prompt);
         let options = ComposeOptions::new()
             .with_source_file(prompt)
-            .with_file_resolution_context(context)
             .with_file_ref_fallback_dir(launch_dir)
             .with_set_overrides(overrides)
             .with_exclude_keys(exclude_keys)
@@ -553,7 +556,7 @@ mod schema_validation_integration {
             ]);
         Markdown::try_from(prompt)
             .unwrap()
-            .compose_with(options)
+            .compose_with(&crate::markdown::compose::test_request_in(options, context))
             .unwrap()
             .0
     }
@@ -693,9 +696,8 @@ mod schema_validation_integration {
         let composed = Markdown::try_from(prompt.as_path())
             .unwrap()
             .compose_with(
-                ComposeOptions::new()
+                &crate::markdown::compose::test_request_in(ComposeOptions::new()
                     .with_source_file(&prompt)
-                    .with_file_resolution_context(context)
                     .with_set_overrides(serde_json::json!({
                         "spec": "fixes/stable/spec.md"
                     }))
@@ -705,7 +707,7 @@ mod schema_validation_integration {
                         ComposeOperation::FrontmatterInterpolation,
                         ComposeOperation::FrontmatterShellExpansion,
                         ComposeOperation::Interpolation,
-                    ]),
+                    ]), context),
             )
             .expect("post-shell validation should retain the caller projection")
             .0;
@@ -753,10 +755,12 @@ mod schema_validation_integration {
         let context = biscuit_file::FileResolutionContext::new(&launch)
             .with_repository_root(repo.path())
             .with_source_path(&prompt);
-        let options = ComposeOptions::new()
-            .with_source_file(&prompt)
-            .with_file_resolution_context(context)
-            .with_set_overrides(serde_json::json!({ "spec": "spec.md" }));
+        let options = crate::markdown::compose::test_request_in(
+            ComposeOptions::new()
+                .with_source_file(&prompt)
+                .with_set_overrides(serde_json::json!({ "spec": "spec.md" })),
+            context,
+        );
         let mut markdown = Markdown::try_from(prompt.as_path()).unwrap();
         markdown
             .frontmatter_mut()
@@ -837,9 +841,8 @@ mod schema_validation_integration {
         let composed = Markdown::try_from(prompt.as_path())
             .unwrap()
             .compose_with(
-                ComposeOptions::new()
+                &crate::markdown::compose::test_request_in(ComposeOptions::new()
                     .with_source_file(&prompt)
-                    .with_file_resolution_context(context)
                     .with_baseline_schema(baseline)
                     .with_set_overrides(serde_json::json!({
                         "spec": "fixes/layered/spec.md"
@@ -847,7 +850,7 @@ mod schema_validation_integration {
                     .only(&[
                         ComposeOperation::FrontmatterInterpolation,
                         ComposeOperation::Interpolation,
-                    ]),
+                    ]), context),
             )
             .expect("baseline and document schemas should form one effective projection")
             .0;
@@ -895,16 +898,15 @@ mod schema_validation_integration {
         let composed = Markdown::try_from(prompt.as_path())
             .unwrap()
             .compose_with(
-                ComposeOptions::new()
+                &crate::markdown::compose::test_request_in(ComposeOptions::new()
                     .with_source_file(&prompt)
-                    .with_file_resolution_context(context)
                     .with_set_overrides(serde_json::json!({
                         "spec": "fixes/context-only/spec.md"
                     }))
                     .only(&[
                         ComposeOperation::FrontmatterInterpolation,
                         ComposeOperation::Interpolation,
-                    ]),
+                    ]), context),
             )
             .expect("the request context should be sufficient caller provenance")
             .0;
@@ -960,15 +962,14 @@ mod schema_validation_integration {
             Markdown::try_from(prompt)
                 .unwrap()
                 .compose_with(
-                    ComposeOptions::new()
+                    &crate::markdown::compose::test_request_in(ComposeOptions::new()
                         .with_source_file(prompt)
-                        .with_file_resolution_context(origin.for_source(prompt))
                         .with_set_overrides(serde_json::json!({ "spec": raw }))
                         .with_caller_input_records(records.clone())
                         .only(&[
                             ComposeOperation::FrontmatterInterpolation,
                             ComposeOperation::Interpolation,
-                        ]),
+                        ]), origin.for_source(prompt)),
                 )
                 .unwrap()
                 .0
@@ -1069,14 +1070,14 @@ mod schema_validation_integration {
             let composed = Markdown::try_from(prompt.as_path())
                 .unwrap()
                 .compose_with(
-                    ComposeOptions::new()
+                    &crate::markdown::compose::test_request(ComposeOptions::new()
                         .with_source_file(&prompt)
                         .with_set_overrides(serde_json::json!({ "spec": raw }))
                         .with_caller_input_records(records)
                         .only(&[
                             ComposeOperation::FrontmatterInterpolation,
                             ComposeOperation::Interpolation,
-                        ]),
+                        ])),
                 )
                 .unwrap()
                 .0;
@@ -1120,11 +1121,11 @@ mod schema_validation_integration {
         let ambiguous = Markdown::try_from(prompt.as_path())
             .unwrap()
             .compose_with(
-                ComposeOptions::new()
+                &crate::markdown::compose::test_request(ComposeOptions::new()
                     .with_source_file(&prompt)
                     .with_set_overrides(serde_json::json!({ "spec": "spec.md" }))
                     .with_caller_input_records(ambiguous_records)
-                    .only(&[ComposeOperation::Interpolation]),
+                    .only(&[ComposeOperation::Interpolation])),
             )
             .unwrap()
             .0;
@@ -1147,13 +1148,13 @@ mod schema_validation_integration {
         let error = Markdown::try_from(prompt.as_path())
             .unwrap()
             .compose_with(
-                ComposeOptions::new()
+                &crate::markdown::compose::test_request(ComposeOptions::new()
                     .with_source_file(&prompt)
                     .with_set_overrides(
                         serde_json::json!({ "spec": { "unexpected": true } }),
                     )
                     .with_caller_input_records(zero_records)
-                    .only(&[ComposeOperation::Interpolation]),
+                    .only(&[ComposeOperation::Interpolation])),
             )
             .expect_err("normal schema validation owns a zero-match union");
         assert!(matches!(error, MarkdownError::SchemaValidationFailed { .. }));
@@ -1274,15 +1275,14 @@ mod schema_validation_integration {
         let composed = Markdown::try_from(prompt.as_path())
             .unwrap()
             .compose_with(
-                ComposeOptions::new()
+                &crate::markdown::compose::test_request_in(ComposeOptions::new()
                     .with_source_file(&prompt)
-                    .with_file_resolution_context(origin.for_source(&prompt))
                     .with_set_overrides(serde_json::json!({ "spec": "spec.md" }))
                     .with_caller_input_records(records)
                     .only(&[
                         ComposeOperation::FrontmatterInterpolation,
                         ComposeOperation::Interpolation,
-                    ]),
+                    ]), origin.for_source(&prompt)),
             )
             .unwrap()
             .0;
@@ -1356,9 +1356,8 @@ mod schema_validation_integration {
         let composed = Markdown::try_from(prompt.as_path())
             .unwrap()
             .compose_with(
-                ComposeOptions::new()
+                &crate::markdown::compose::test_request_in(ComposeOptions::new()
                     .with_source_file(&prompt)
-                    .with_file_resolution_context(document_context)
                     .with_set_overrides(serde_json::json!({
                         "first": "first.md",
                         "second": "second.md",
@@ -1367,7 +1366,7 @@ mod schema_validation_integration {
                     .only(&[
                         ComposeOperation::FrontmatterInterpolation,
                         ComposeOperation::Interpolation,
-                    ]),
+                    ]), document_context),
             )
             .unwrap()
             .0;
@@ -1506,15 +1505,14 @@ mod schema_validation_integration {
             let error = Markdown::try_from(prompt.as_path())
                 .unwrap()
                 .compose_with(
-                    ComposeOptions::new()
+                    &crate::markdown::compose::test_request_in(ComposeOptions::new()
                         .with_source_file(&prompt)
-                        .with_file_resolution_context(context)
                         .with_file_ref_fallback_dir(&launch)
                         .with_set_overrides(serde_json::json!({ "spec": "spec.md" }))
                         .only(&[
                             ComposeOperation::FrontmatterInterpolation,
                             ComposeOperation::Interpolation,
-                        ]),
+                        ]), context),
                 )
                 .expect_err("a changed root-union file mode must fail closed");
             assert!(
@@ -1557,9 +1555,8 @@ mod schema_validation_integration {
         let error = Markdown::try_from(prompt.as_path())
             .unwrap()
             .compose_with(
-                ComposeOptions::new()
+                &crate::markdown::compose::test_request_in(ComposeOptions::new()
                     .with_source_file(&prompt)
-                    .with_file_resolution_context(context)
                     .with_file_ref_fallback_dir(&launch)
                     .with_set_overrides(serde_json::json!({ "spec": "spec.md" }))
                     .with_pre_approved_commands(["echo text".to_string()].into_iter().collect())
@@ -1567,7 +1564,7 @@ mod schema_validation_integration {
                         ComposeOperation::FrontmatterInterpolation,
                         ComposeOperation::FrontmatterShellExpansion,
                         ComposeOperation::Interpolation,
-                    ]),
+                    ]), context),
             )
             .expect_err("post-shell root-union file-mode drift must fail closed");
         assert!(
@@ -1658,15 +1655,14 @@ mod schema_validation_integration {
             Markdown::try_from(self.prompt.as_path())
                 .unwrap()
                 .compose_with(
-                    ComposeOptions::new()
+                    &crate::markdown::compose::test_request_in(ComposeOptions::new()
                         .with_source_file(&self.prompt)
-                        .with_file_resolution_context(context)
                         .with_file_ref_fallback_dir(&self.launch)
                         .with_set_overrides(overrides)
                         .only(&[
                             ComposeOperation::FrontmatterInterpolation,
                             ComposeOperation::Interpolation,
-                        ]),
+                        ]), context),
                 )
                 .map(|(composed, _)| composed)
         }
@@ -1841,15 +1837,14 @@ mod schema_validation_integration {
         let error = Markdown::try_from(prompt.as_path())
             .unwrap()
             .compose_with(
-                ComposeOptions::new()
+                &crate::markdown::compose::test_request_in(ComposeOptions::new()
                     .with_source_file(&prompt)
-                    .with_file_resolution_context(context)
                     .with_file_ref_fallback_dir(&launch)
                     .with_set_overrides(serde_json::json!({ "spec": "spec.md" }))
                     .only(&[
                         ComposeOperation::FrontmatterInterpolation,
                         ComposeOperation::Interpolation,
-                    ]),
+                    ]), context),
             )
             .expect_err("normal validation must reject a zero-match root union");
         assert!(matches!(error, MarkdownError::SchemaValidationFailed { .. }));
@@ -1882,14 +1877,14 @@ mod schema_validation_integration {
         let error = Markdown::try_from(prompt.as_path())
             .unwrap()
             .compose_with(
-                ComposeOptions::new()
+                &crate::markdown::compose::test_request(ComposeOptions::new()
                     .with_source_file(&prompt)
                     .with_set_overrides(serde_json::json!({ "spec": "%spec.md" }))
                     .with_caller_input_records(records)
                     .only(&[
                         ComposeOperation::FrontmatterInterpolation,
                         ComposeOperation::Interpolation,
-                    ]),
+                    ])),
             )
             .expect_err("a recursive lazy caller file has no single identity");
         let MarkdownError::SchemaValidationFailed { problems, .. } = error else {
@@ -1899,7 +1894,7 @@ mod schema_validation_integration {
         assert!(problems[0].message.contains("file(eager)"));
         assert!(matches!(
             problems[0].file_reference,
-            Some(FileReferenceDiagnostic::ResolutionFailed { ref raw }) if raw == "%spec.md"
+            Some(FileReferenceDiagnostic::ResolutionFailed { ref raw, .. }) if raw == "%spec.md"
         ));
     }
 
@@ -1929,14 +1924,14 @@ mod schema_validation_integration {
         let composed = Markdown::try_from(prompt.as_path())
             .unwrap()
             .compose_with(
-                ComposeOptions::new()
+                &crate::markdown::compose::test_request(ComposeOptions::new()
                     .with_source_file(&prompt)
                     .with_set_overrides(serde_json::json!({ "spec": raw }))
                     .with_caller_input_records(records)
                     .only(&[
                         ComposeOperation::FrontmatterInterpolation,
                         ComposeOperation::Interpolation,
-                    ]),
+                    ])),
             )
             .unwrap()
             .0;
@@ -1973,14 +1968,14 @@ mod schema_validation_integration {
         let composed = Markdown::try_from(prompt.as_path())
             .unwrap()
             .compose_with(
-                ComposeOptions::new()
+                &crate::markdown::compose::test_request(ComposeOptions::new()
                     .with_source_file(&prompt)
                     .with_set_overrides(serde_json::json!({ "spec": null }))
                     .with_caller_input_records(records)
                     .only(&[
                         ComposeOperation::FrontmatterInterpolation,
                         ComposeOperation::Interpolation,
-                    ]),
+                    ])),
             )
             .unwrap()
             .0;
@@ -2020,14 +2015,14 @@ mod schema_validation_integration {
         let composed = Markdown::try_from(prompt.as_path())
             .unwrap()
             .compose_with(
-                ComposeOptions::new()
+                &crate::markdown::compose::test_request(ComposeOptions::new()
                     .with_source_file(&prompt)
                     .with_set_overrides(serde_json::json!({ "caller_label": "present" }))
                     .with_caller_input_records(records)
                     .only(&[
                         ComposeOperation::FrontmatterInterpolation,
                         ComposeOperation::Interpolation,
-                    ]),
+                    ])),
             )
             .unwrap()
             .0;
@@ -2090,7 +2085,7 @@ mod schema_validation_integration {
 
         let composed = Markdown::try_from(prompt.as_path())
             .unwrap()
-            .compose_with(options)
+            .compose_with(&crate::markdown::compose::test_request(options))
             .unwrap()
             .0;
         assert_eq!(composed.frontmatter().as_map()["marker"], serde_json::json!("captured"));
@@ -2127,14 +2122,14 @@ mod schema_validation_integration {
         let composed = Markdown::try_from(prompt.as_path())
             .unwrap()
             .compose_with(
-                ComposeOptions::new()
+                &crate::markdown::compose::test_request(ComposeOptions::new()
                     .with_source_file(&prompt)
                     .with_set_overrides(serde_json::json!({ "spec": "cases/spec.md" }))
                     .with_caller_input_records(records)
                     .only(&[
                         ComposeOperation::FrontmatterInterpolation,
                         ComposeOperation::Interpolation,
-                    ]),
+                    ])),
             )
             .unwrap()
             .0;
@@ -2267,13 +2262,12 @@ mod schema_validation_integration {
         let composed = Markdown::try_from(prompt.as_path())
             .unwrap()
             .compose_with(
-                ComposeOptions::new()
+                &crate::markdown::compose::test_request_in(ComposeOptions::new()
                     .with_source_file(&prompt)
-                    .with_file_resolution_context(context)
                     .only(&[
                         ComposeOperation::FrontmatterInterpolation,
                         ComposeOperation::Interpolation,
-                    ]),
+                    ]), context),
             )
             .unwrap()
             .0;
@@ -2321,9 +2315,8 @@ mod schema_validation_integration {
             let err = Markdown::try_from(prompt.as_path())
                 .unwrap()
                 .compose_with(
-                    ComposeOptions::new()
+                    &crate::markdown::compose::test_request_in(ComposeOptions::new()
                         .with_source_file(&prompt)
-                        .with_file_resolution_context(context)
                         .with_file_ref_fallback_dir(&package)
                         .with_set_overrides(serde_json::json!({ "spec": "spec.md" }))
                         .with_trigger_schemas(true)
@@ -2331,7 +2324,7 @@ mod schema_validation_integration {
                             ComposeOperation::FrontmatterInterpolation,
                             ComposeOperation::FrontmatterShellExpansion,
                             ComposeOperation::Interpolation,
-                        ]),
+                        ]), context),
                 )
                 .expect_err("phase-unstable caller file typing must fail closed");
             assert!(
@@ -2368,15 +2361,14 @@ mod schema_validation_integration {
             let err = Markdown::try_from(prompt.as_path())
                 .unwrap()
                 .compose_with(
-                    ComposeOptions::new()
+                    &crate::markdown::compose::test_request_in(ComposeOptions::new()
                         .with_source_file(&prompt)
-                        .with_file_resolution_context(context)
                         .with_file_ref_fallback_dir(&package)
                         .with_set_overrides(serde_json::json!({ "spec": raw }))
                         .only(&[
                             ComposeOperation::FrontmatterInterpolation,
                             ComposeOperation::Interpolation,
-                        ]),
+                        ]), context),
                 )
                 .expect_err("invalid eager caller input must fail before interpolation");
             let MarkdownError::SchemaValidationFailed { problems, .. } = err else {
@@ -2424,14 +2416,14 @@ mod schema_validation_integration {
         let error = Markdown::try_from(prompt.as_path())
             .unwrap()
             .compose_with(
-                ComposeOptions::new()
+                &crate::markdown::compose::test_request(ComposeOptions::new()
                     .with_source_file(&prompt)
                     .with_set_overrides(serde_json::json!({ "spec": raw }))
                     .with_caller_input_records(records)
                     .only(&[
                         ComposeOperation::FrontmatterInterpolation,
                         ComposeOperation::Interpolation,
-                    ]),
+                    ])),
             )
             .expect_err("the later frontmatter read must report the missing lazy candidate");
         let MarkdownError::Interpolation { cause, .. } = error else {
@@ -2498,7 +2490,7 @@ mod schema_validation_integration {
             let error = Markdown::try_from(prompt.as_path())
                 .unwrap()
                 .compose_with(
-                    ComposeOptions::new()
+                    &crate::markdown::compose::test_request(ComposeOptions::new()
                         .with_source_file(&prompt)
                         .with_set_overrides(serde_json::json!({
                             "first": first_raw,
@@ -2508,7 +2500,7 @@ mod schema_validation_integration {
                         .only(&[
                             ComposeOperation::FrontmatterInterpolation,
                             ComposeOperation::Interpolation,
-                        ]),
+                        ])),
                 )
                 .expect_err("the selected lazy caller file must be missing");
             let MarkdownError::Interpolation { cause, .. } = error else {
@@ -2567,14 +2559,14 @@ mod schema_validation_integration {
             let error = Markdown::try_from(prompt.as_path())
                 .unwrap()
                 .compose_with(
-                    ComposeOptions::new()
+                    &crate::markdown::compose::test_request(ComposeOptions::new()
                         .with_source_file(&prompt)
                         .with_set_overrides(serde_json::json!({ "files": raw }))
                         .with_caller_input_records(records.clone())
                         .only(&[
                             ComposeOperation::FrontmatterInterpolation,
                             ComposeOperation::Interpolation,
-                        ]),
+                        ])),
                 )
                 .expect_err("the selected lazy caller array item must be missing");
             let MarkdownError::Interpolation { cause, .. } = error else {
@@ -2633,14 +2625,14 @@ mod schema_validation_integration {
             let error = Markdown::try_from(prompt.as_path())
                 .unwrap()
                 .compose_with(
-                    ComposeOptions::new()
+                    &crate::markdown::compose::test_request(ComposeOptions::new()
                         .with_source_file(&prompt)
                         .with_set_overrides(serde_json::json!({ "files": raw }))
                         .with_caller_input_records(records.clone())
                         .only(&[
                             ComposeOperation::FrontmatterInterpolation,
                             ComposeOperation::Interpolation,
-                        ]),
+                        ])),
                 )
                 .expect_err("the dynamically selected caller array item must be missing");
             let MarkdownError::Interpolation { cause, .. } = error else {

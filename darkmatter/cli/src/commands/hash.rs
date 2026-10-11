@@ -1,15 +1,17 @@
 //! `md hash` subcommand implementation.
 
-use crate::io::{load_markdown, load_markdown_text};
+use crate::io::{DocumentArgumentError, load_markdown, parse_argument, read_markdown_text};
+use crate::request::MdRequest;
 use biscuit_hash::xx_hash;
 use color_eyre::eyre::{Context, Result, eyre};
 use darkmatter::markdown::hash::{
-    ComputedHash, DEFAULT_HASH_PROPERTY, LAST_UPDATED_KEY, MdHashKind, MdHashOptions, StoredHash,
+    Change, ComputedHash, DEFAULT_HASH_PROPERTY, LAST_UPDATED_KEY, MdHashKind, MdHashOptions, StoredHash,
     select_kind,
 };
-use darkmatter::markdown::{Markdown, fs::collect_markdown_files};
+use darkmatter::markdown::Markdown;
+use darkmatter::markdown::fs::{ReferenceEntry, collect_markdown_files, resolve_entry_in_context};
 use rayon::prelude::*;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tracing::instrument;
 
 /// Hash a markdown document's frontmatter and/or body.
@@ -25,6 +27,7 @@ use tracing::instrument;
 /// bare-hash only: `--save`, `--diff`, and the `structured`/`detailed` kinds are
 /// rejected with a usage error.
 #[instrument(skip_all)]
+#[allow(clippy::too_many_arguments)]
 pub fn run_hash(
     input: Option<&PathBuf>,
     kind: Option<MdHashKind>,
@@ -33,26 +36,43 @@ pub fn run_hash(
     save: bool,
     diff: bool,
     strict: bool,
+    request: &MdRequest,
 ) -> Result<()> {
     let options = resolve_hash_options(kind, body, frontmatter, strict);
 
-    // Directory mode: aggregate hash over all markdown files.
-    if let Some(path) = input
-        && path.is_dir()
-    {
-        return run_hash_directory(path, &options, save, diff);
-    }
+    // A file argument opens once, here, so single-document mode, `--diff`, and
+    // `--save` all act on the entry that decided the mode.
+    let opened = match input {
+        Some(path) if path.to_str() != Some("-") => match open_hash_argument(path, request)? {
+            ReferenceEntry::Directory(directory) => {
+                return run_hash_directory(&directory, &options, save, diff);
+            }
+            ReferenceEntry::File(file) => Some(file),
+        },
+        _ => None,
+    };
 
     if save {
-        let input_path = input
+        let resolved = opened
             .ok_or_else(|| eyre!("--save requires an input file path (stdin is not supported)"))?;
-        let (resolved, source, md) = load_markdown_text(input_path)?;
-        let stored = parse_stored_hash(&md, &options)?;
-        return run_hash_save(&md, &source, &resolved, stored.as_ref(), &options);
+        let (source, md) = read_markdown_text(&resolved)?;
+        let stored = md.stored_hash(&options)?;
+        return run_hash_save(
+            &md,
+            &source,
+            &resolved,
+            stored.as_ref(),
+            &options,
+            chrono::Utc::now(),
+        );
     }
 
-    let md = load_markdown(input)?;
-    let stored = parse_stored_hash(&md, &options)?;
+    let md = match &opened {
+        Some(file) => Markdown::try_from(file.as_path())
+            .wrap_err_with(|| format!("Failed to read file: {:?}", file))?,
+        None => load_markdown(input, request)?,
+    };
+    let stored = md.stored_hash(&options)?;
 
     if diff {
         return run_hash_diff(&md, stored.as_ref(), &options);
@@ -114,15 +134,6 @@ fn parse_ignore_properties(raw: &str, property: &str) -> Vec<String> {
         .collect()
 }
 
-/// Reads and parses the document's stored hash property, or `None` when the
-/// property is absent or null.
-fn parse_stored_hash(md: &Markdown, options: &MdHashOptions) -> Result<Option<StoredHash>> {
-    match md.frontmatter().as_map().get(options.property.as_str()) {
-        None | Some(serde_json::Value::Null) => Ok(None),
-        Some(value) => Ok(Some(StoredHash::parse(value, &options.property)?)),
-    }
-}
-
 /// Prints a computed hash: the flat string for `fm`/`body`/`simple`/`structured`,
 /// or the nested YAML object for `detailed`.
 fn print_computed_hash(computed: &ComputedHash) -> Result<()> {
@@ -174,9 +185,8 @@ fn run_hash_save(
     resolved: &std::path::Path,
     stored: Option<&StoredHash>,
     options: &MdHashOptions,
+    now: chrono::DateTime<chrono::Utc>,
 ) -> Result<()> {
-    let decision = md.plan_hash_save(stored, options)?;
-
     // A first baseline has nothing to compare against, so it has no explanation.
     // Computed here, before the write below, so it describes the in-memory
     // document against its *previous* stored hash.
@@ -185,11 +195,9 @@ fn run_hash_save(
         None => None,
     };
 
-    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let stamp = md.stamp_baseline(source, options, now, Change::Detect)?;
 
-    if let Some(written) = darkmatter::markdown::hash::apply_hash_save_text(
-        source, &decision, options, &today,
-    )? {
+    if let Some(written) = stamp.text {
         std::fs::write(resolved, written)
             .wrap_err_with(|| format!("Failed to write hash to {:?}", resolved))?;
     }
@@ -199,11 +207,37 @@ fn run_hash_save(
         None => {
             println!(
                 "No stored hash found; wrote initial {} baseline",
-                decision.kind
+                stamp.decision.kind
             );
         }
     }
     Ok(())
+}
+
+/// Opens a hash argument as the file or directory it names, through the same
+/// reference grammar and candidate precedence as every file argument.
+///
+/// The first planned candidate that exists decides: a file there is hashed
+/// as one document even when a later candidate is a directory, and a
+/// directory there is hashed as a tree even when a later candidate is a file
+/// (so `&docs` is the repository's `docs/`). A candidate that cannot be probed
+/// stops the search with the `io` failure class rather than letting a later
+/// candidate answer. A recursive (`%`) reference names files only.
+///
+/// ## Errors
+///
+/// A [`DocumentArgumentError`] when the argument is not valid reference
+/// syntax (a relative path leaving the launch repository is
+/// `InvalidReference`), a candidate cannot be probed, or nothing exists;
+/// checked before any directory is read.
+fn open_hash_argument(argument: &Path, request: &MdRequest) -> Result<ReferenceEntry> {
+    let reference = parse_argument(argument)?;
+    let raw = || argument.to_string_lossy().into_owned();
+    match resolve_entry_in_context(&reference, request.launch_context()?) {
+        Ok(Some(entry)) => Ok(entry),
+        Ok(None) => Err(DocumentArgumentError::no_match(raw()).into()),
+        Err(source) => Err(DocumentArgumentError::new(raw(), source).into()),
+    }
 }
 
 /// Directory-aggregate hashing. Bare-hash only: `--save`, `--diff`, and the
@@ -282,4 +316,39 @@ fn run_hash_directory(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hash_save_stamps_last_updated_with_the_utc_date() {
+        let instant: chrono::DateTime<chrono::Utc> = "2026-09-28T23:30:00Z".parse().unwrap();
+        let east_of_utc = chrono::FixedOffset::east_opt(10 * 3600).unwrap();
+        assert_eq!(
+            instant.with_timezone(&east_of_utc).date_naive().to_string(),
+            "2026-09-29"
+        );
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("doc.md");
+        // A stale stored hash of the same kind is a content change, which bumps
+        // `last_updated`.
+        std::fs::write(
+            &file,
+            "---\ntitle: T\nhash: 1111111111111111-2222222222222222\nlast_updated: 2020-01-01\n---\n# H\n\nBody.\n",
+        )
+        .unwrap();
+        let (source, md) = read_markdown_text(&file).unwrap();
+        let options = MdHashOptions::default();
+        let stored = md.stored_hash(&options).unwrap();
+
+        run_hash_save(&md, &source, &file, stored.as_ref(), &options, instant).unwrap();
+
+        let written = std::fs::read_to_string(&file).unwrap();
+        assert!(
+            written.contains("last_updated: 2026-09-28\n"),
+            "expected the UTC date stamp in:\n{written}"
+        );
+    }
 }

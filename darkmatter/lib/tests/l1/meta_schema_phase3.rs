@@ -140,7 +140,7 @@ fn schema_detection_preserves_carrier_only_inference() {
         "definition_sequence: [string, number]\n",
         "---\nBody\n",
     ));
-    let detected = detect_schema(&[&markdown], DetectOptions::default());
+    let detected = detect_schema(&[&markdown], DetectOptions::default(), &crate::request_support::cwd_context());
     let SimplifiedSchema::Single(shape) = &detected else {
         panic!("one document must detect as one schema shape")
     };

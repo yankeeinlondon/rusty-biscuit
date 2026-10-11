@@ -550,3 +550,147 @@ fn render_tree_document_json_surface() {
     let json = serde_json::to_string_pretty(&doc).expect("document must serialize");
     insta::assert_snapshot!("document_json_surface", json);
 }
+
+/// Returns the inline children of the document's first paragraph.
+fn first_paragraph_inlines(doc: &Document) -> &[RenderNode] {
+    let paragraph = &roots(doc)[0];
+    assert!(
+        matches!(paragraph.kind, NodeKind::Paragraph { .. }),
+        "expected a paragraph, got {:?}",
+        paragraph.kind
+    );
+    paragraph.children()
+}
+
+/// Counts the `(hard, soft)` line breaks among `nodes`.
+fn breaks(nodes: &[RenderNode]) -> (usize, usize) {
+    let hard = nodes.iter().filter(|node| matches!(node.kind, NodeKind::HardBreak)).count();
+    let soft = nodes.iter().filter(|node| matches!(node.kind, NodeKind::SoftBreak)).count();
+    (hard, soft)
+}
+
+/// A backslash before a newline is a hard break: it folds to `HardBreak`,
+/// renders back to Markdown as `\` + newline, and that output folds to the
+/// same hard break. A bare newline stays a soft break through the same trip.
+#[test]
+fn render_tree_backslash_newline_round_trips_as_hard_break() {
+    let input = "first line\\\nsecond line\nthird line\n";
+    let (doc, diags) = fold_markdown_to_document(SourceDescriptor::Virtual { name: "hard.md".into() }, input);
+    assert!(diags.is_empty(), "{diags:?}");
+    let inlines = first_paragraph_inlines(&doc);
+    assert_eq!(breaks(inlines), (1, 1), "{inlines:?}");
+
+    let markdown = render(&doc).output;
+    assert!(markdown.contains("first line\\\nsecond line"), "{markdown:?}");
+    assert!(!markdown.contains("first line  \n"), "{markdown:?}");
+
+    let (again, diags) =
+        fold_markdown_to_document(SourceDescriptor::Virtual { name: "again.md".into() }, &markdown);
+    assert!(diags.is_empty(), "{diags:?}");
+    let inlines = first_paragraph_inlines(&again);
+    assert_eq!(breaks(inlines), (1, 1), "{inlines:?}");
+}
+
+/// Markdown written by a hard-break `Prose` (its `\` + newline form) folds in
+/// Darkmatter to one hard break per line boundary.
+#[test]
+fn hard_break_prose_markdown_folds_to_hard_breaks() {
+    use biscuit_terminal::components::prose::{LineBreaks, Prose};
+    use renderable::markdown::MarkdownRenderable;
+
+    let markdown = Prose::new("<dim>Command:</dim> run\n<dim>Origin:</dim> body line 3")
+        .with_line_breaks(LineBreaks::Hard)
+        .render_markdown();
+    assert!(markdown.contains("\\\n"), "{markdown:?}");
+
+    let (doc, diags) =
+        fold_markdown_to_document(SourceDescriptor::Virtual { name: "prose.md".into() }, &markdown);
+    assert!(diags.is_empty(), "{diags:?}");
+    let inlines = first_paragraph_inlines(&doc);
+    assert_eq!(breaks(inlines), (1, 0), "{inlines:?}");
+}
+
+/// Describes inline nodes as `<token>text</token>` so a fold can be compared
+/// with the tree that was rendered.
+fn describe_inlines(nodes: &[RenderNode]) -> String {
+    let mut out = String::new();
+    for node in nodes {
+        let (tag, children) = match &node.kind {
+            NodeKind::Text { value } | NodeKind::InlineCode { value } => {
+                out.push_str(value);
+                continue;
+            }
+            NodeKind::Emphasis { children } => ("em".to_string(), children),
+            NodeKind::Strong { children } => ("strong".to_string(), children),
+            NodeKind::Delete { children } => ("del".to_string(), children),
+            NodeKind::Extended {
+                token, children, ..
+            } => (token.to_string(), children),
+            NodeKind::Html { value, .. } => {
+                out.push_str(&format!("{{html:{value}}}"));
+                continue;
+            }
+            other => panic!("unexpected inline {other:?}"),
+        };
+        out.push_str(&format!("<{tag}>{}</{tag}>", describe_inlines(children)));
+    }
+    out
+}
+
+/// Every delimiter wrapper renderable writes against a letter, around
+/// punctuation, or inside a word folds back over the same text: as the same
+/// node where a delimiter can open and close there, as the inline HTML
+/// element renderable falls back to where none can (darkmatter keeps inline
+/// HTML as raw `Html`), and as plain text for an intraword `dim`, which has
+/// no spelling.
+#[test]
+fn delimiter_wrappers_round_trip_where_flanking_rules_bite() {
+    type Wrap = fn(Vec<RenderNode>) -> RenderNode;
+    let wraps: [(&str, Wrap); 5] = [
+        ("em", RenderNode::emphasis),
+        ("strong", RenderNode::strong),
+        ("del", RenderNode::delete),
+        ("mark", |children| {
+            RenderNode::extended("mark", children, None)
+        }),
+        ("dim", |children| {
+            RenderNode::extended("dim", children, None)
+        }),
+    ];
+    let cases = [
+        ("a", "(b)", " c"),
+        ("a ", "(b)", "c"),
+        ("a", "(b)", "c"),
+        ("a", "b", "c"),
+    ];
+    for (tag, wrap) in wraps {
+        for (before, body, after) in cases {
+            let tree = RenderNode::root(vec![RenderNode::paragraph(vec![
+                RenderNode::text(before),
+                wrap(vec![RenderNode::text(body)]),
+                RenderNode::text(after),
+            ])]);
+            let markdown = renderable::tree::render::render_markdown_node(
+                &tree,
+                &MarkdownRenderOptions::default(),
+            )
+            .expect("render")
+            .output;
+            let folded = Markdown::from(markdown.clone())
+                .as_document()
+                .expect("fold");
+            let expected = match (tag, body) {
+                ("dim", "b") => format!("{before}{body}{after}"),
+                ("em" | "strong" | "del", "(b)") => {
+                    format!("{before}{{html:<{tag}>}}{body}{{html:</{tag}>}}{after}")
+                }
+                _ => format!("{before}<{tag}>{body}</{tag}>{after}"),
+            };
+            assert_eq!(
+                describe_inlines(first_paragraph_inlines(&folded)),
+                expected,
+                "{tag} {markdown:?}"
+            );
+        }
+    }
+}

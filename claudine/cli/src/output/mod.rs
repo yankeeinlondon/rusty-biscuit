@@ -6,7 +6,7 @@ pub(crate) mod native_exit;
 pub(crate) mod switches;
 
 pub(crate) use api_errors::try_format_api_error;
-pub(crate) use assistant::emit_final_message;
+pub(crate) use assistant::{emit_final_message, emit_framed_final_message, write_final_message};
 pub(crate) use switches::{style_cli_switches, truncate_args};
 
 use biscuit_terminal::components::list::UnorderedList;
@@ -322,13 +322,14 @@ pub(crate) fn log_dry_run(
     sp_lines: Option<&[String]>,
 ) {
     let mut header = format!(
-        "\n<blue><bold>Claudine</bold></blue> <dim>\u{25b8}</dim> <bold>{}</bold> <dim>[DRY RUN]</dim>",
+        "<blue><bold>Claudine</bold></blue> <dim>\u{25b8}</dim> <bold>{}</bold> <dim>[DRY RUN]</dim>",
         profile.provider()
     );
     if repo_requested {
         header.push_str(&format!(" {}", &*REPO_FLAG.to_string()));
     }
-    log::message(&Prose::new(header).render(term));
+    // The blank spacing row sits outside the Prose, which trims edge newlines.
+    log::message(&format!("\n{}", Prose::new(header).render(term)));
 
     // Working directory
     log::message(

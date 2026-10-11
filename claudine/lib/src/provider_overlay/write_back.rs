@@ -191,7 +191,7 @@ impl WriteBack {
         if !fs::metadata(source)?.is_file() {
             return Ok(());
         }
-        let resolved = fs::canonicalize(source)?;
+        let resolved = biscuit_file::canonicalize_simplified(source)?;
         let name = overlay
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())

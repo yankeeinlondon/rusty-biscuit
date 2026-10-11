@@ -1,5 +1,10 @@
 # Claudine Dependencies
 
+- `claudine-cli` uses `base64` 0.22 to retain invalid UTF-8 stdout losslessly
+  in bounded completion observations. This crate already exists in the
+  workspace dependency graph; no version or native dependency is added.
+
+
 ## Native Path Test Fixtures
 
 - The `claudine` library uses `dunce` as a dev dependency so tests that need a
@@ -174,3 +179,7 @@ See [Steering Routing](topics/steering-routing.md).
   dependency rather than reached transitively through `biscuit-terminal`. This
   mirrors how `biscuit-terminal` and `darkmatter` declare the `renderable`
   path dependency.
+- `claudine-gen` depends on `renderable` directly for
+  `renderable::markdown::code_span`, which fences a user-typed value placed in
+  a report's code span (a code span's contents are literal, so the value is not
+  Prose-escaped there).

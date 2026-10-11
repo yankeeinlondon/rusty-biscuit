@@ -20,4 +20,13 @@ pub trait SemanticStreamParser: Send {
 
     /// Finalize parsing and return the accumulated summary.
     fn finish(self: Box<Self>, exit_code: i32) -> StreamExecutionSummary;
+
+    /// The summary [`finish`](Self::finish) would return if the stream ended
+    /// after the last line fed, including the provider's own verdict (for
+    /// example Claude's unfinished sub-agents), without consuming the parser
+    /// or emitting any event.
+    ///
+    /// A caller that may lose the parser — a reader thread abandoned at a
+    /// cutoff — keeps this snapshot so the run's result and failure survive.
+    fn snapshot(&self, exit_code: i32) -> StreamExecutionSummary;
 }

@@ -16,6 +16,7 @@ pub mod git;
 pub mod just;
 pub mod languages;
 pub mod path_kind;
+pub mod query;
 pub mod repo;
 mod system_view;
 
@@ -46,6 +47,7 @@ pub use git::{
 };
 pub use just::{JustRecipe, JustRecipeParam, JustfileInfo, detect_justfiles};
 pub use languages::{LanguageBreakdown, LanguageStats, detect_languages};
+pub use query::{PathUsageError, PathUsageOptions, PathUsageReport, query_path_usage};
 pub use repo::{
     DependencyEntry, DependencyKind, DetectedStandard, DetectionConfidence, MonorepoLayer,
     MonorepoStandard, MonorepoStandardSpec, Package, PackageEcosystem, PackageProvenance, RepoInfo,

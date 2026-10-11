@@ -28,11 +28,16 @@ pub struct PolicyContext {
 
 impl PolicyContext {
     /// Creates a minimal context with just a working directory.
+    ///
+    /// The home is captured once here from [`biscuit_file::home_dir`]; policy
+    /// evaluation reads only this captured value. That value comes from the
+    /// process environment, which is an input chosen by whoever launched the
+    /// process, not proof of a trusted filesystem boundary.
     pub fn new(cwd: PathBuf) -> Self {
         Self {
             cwd,
             repo_root: None,
-            home_dir: dirs::home_dir(),
+            home_dir: biscuit_file::home_dir(),
             system_root: None,
             env: BTreeMap::new(),
             trust: ProjectTrustContext::default(),

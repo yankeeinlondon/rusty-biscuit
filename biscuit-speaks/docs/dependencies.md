@@ -22,6 +22,11 @@ biscuit-speaks preparation entrypoint before normal CLI parsing, allowing both
 worker modes to re-exec the same absolute binary without exposing internal
 arguments.
 
+The CLI depends on `renderable` directly for `renderable::markdown::escape_text`,
+which encodes provider-supplied voice names and descriptions for the Markdown
+voice table so their punctuation stays literal; the table is rendered through
+`darkmatter`, which already depends on `renderable`.
+
 The CLI also uses `fs4` as a dev dependency to verify detached test schedulers
 have released their private worker locks before fixture teardown.
 

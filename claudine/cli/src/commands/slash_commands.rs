@@ -125,7 +125,7 @@ pub async fn run(args: SlashCommandsArgs, verbose: bool) -> Result<()> {
 
 fn render_detail(term: &Terminal, cmd: &CommandInfo) {
     let badge = scope_badge(cmd.scope);
-    let desc = Prose::escape_text(cmd.description.as_deref().unwrap_or("no description"));
+    let desc = Prose::escape_text_outside_code_spans(cmd.description.as_deref().unwrap_or("no description"));
 
     let name_line = Prose::new(format!(
         "<a href={}><b>{}</b></a> {badge}",

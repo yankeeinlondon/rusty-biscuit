@@ -17,7 +17,7 @@ use renderable::tree::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::components::prose::Prose;
+use crate::components::prose::InlineProse;
 use crate::components::renderable::{BrowserRenderable, TerminalRenderable};
 use crate::render_tree::{TerminalRenderOptions, render_terminal_node};
 use crate::terminal::Terminal;
@@ -265,7 +265,7 @@ impl Todo {
 
     /// Create a new TODO item with a prose-formatted description.
     ///
-    /// The description is rendered through [`Prose`] at render time,
+    /// The description is rendered through [`InlineProse`] at render time,
     /// enabling markup like `<b>bold</b>` and `<red>color</red>`.
     pub fn from_prose<T: Into<String>>(desc: T) -> Todo {
         Todo {
@@ -298,7 +298,7 @@ impl Todo {
     }
 
     /// Returns whether this Todo's description should be rendered through
-    /// [`Prose`].
+    /// [`InlineProse`].
     pub fn uses_prose(&self) -> bool {
         self.use_prose
     }
@@ -335,15 +335,18 @@ impl Todo {
         }
     }
 
-    /// Extracts plain text from a description that may carry [`Prose`] markup.
+    /// Extracts plain text from a description that may carry [`InlineProse`]
+    /// markup.
     ///
-    /// When `use_prose` is set, the description is rendered through `Prose`
-    /// against an optimistic terminal and ANSI-stripped to recover plain text.
-    /// This lossy projection matches the BlockQuote precedent — inline emphasis
-    /// is dropped at the tree boundary; only the textual content survives.
+    /// When `use_prose` is set, the description is rendered through
+    /// `InlineProse` against an optimistic terminal and ANSI-stripped to
+    /// recover plain text. A description is one line, so a blank line in it
+    /// is an ordinary break, never a paragraph. The projection is lossy:
+    /// inline emphasis is dropped at the tree boundary and only the textual
+    /// content survives.
     fn description_text(&self) -> String {
         if self.use_prose {
-            let plain = Prose::new(&self.description).render_optimistic(None);
+            let plain = InlineProse::new(&self.description).render_optimistic(None);
             crate::utils::escape_codes::strip_escape_codes(&plain)
         } else {
             self.description.clone()

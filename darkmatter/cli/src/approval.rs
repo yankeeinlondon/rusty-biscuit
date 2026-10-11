@@ -176,9 +176,10 @@ fn write_prompt<W: Write>(
         })
 }
 
-/// Escape text so it renders exactly as written inside Prose markup.
+/// Escape text so it renders exactly as written inside Prose markup; code
+/// spans it marks with backticks stay literal.
 fn escape_prose(text: &str) -> String {
-    Prose::escape_text(text)
+    Prose::escape_text_outside_code_spans(text)
 }
 
 /// Returns true if interactive prompting is safe.

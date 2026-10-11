@@ -136,6 +136,7 @@ class CiLocalTests(unittest.TestCase):
         expect_success: bool = True,
         output: dict | None = None,
         plan_fields: dict | None = None,
+        wrapper: str | None = "kache",
     ) -> list[dict]:
         if packages is None:
             packages = [gate_loop_package(name) for name in ("parallel", "serial")]
@@ -148,6 +149,8 @@ class CiLocalTests(unittest.TestCase):
             bin_dir.mkdir()
             scripts.mkdir(parents=True)
             shutil.copyfile(RECIPE, root / "ci-local.just")
+            # The real wrapper decision, which picks the target directory.
+            shutil.copyfile(ROOT / "scripts" / "kache-host.sh", root / "scripts" / "kache-host.sh")
             (root / "policy.just").write_text(thread_policy_recipe(), encoding="utf-8")
             (root / "justfile").write_text(
                 'red := ""\ngreen := ""\nreset := ""\nimport "ci-local.just"\n',
@@ -260,13 +263,15 @@ class CiLocalTests(unittest.TestCase):
             environment.update({
                 "PATH": str(bin_dir) + os.pathsep + environment.get("PATH", ""),
                 "CARGO_TARGET_DIR": str(root / "polluted-target"),
-                "RUSTC_WRAPPER": "kache",
                 "TEST_CALL_LOG": str(root / "calls.jsonl"),
                 "TEST_CORES": str(cores),
                 "TEST_REAL_JUST": JUST,
                 "TEST_POLICY_RECIPE": str(root / "policy.just"),
                 "TEST_COMPANION_LOG": str(root / "companions.jsonl"),
             })
+            environment.pop("RUSTC_WRAPPER", None)
+            if wrapper is not None:
+                environment["RUSTC_WRAPPER"] = wrapper
             # The hook exports these for the run it wraps, and this suite runs
             # inside that run's self-test loop; a fed plan would refuse `--all`.
             for key in (
@@ -323,6 +328,15 @@ class CiLocalTests(unittest.TestCase):
                 call["junit_target_dir"].removesuffix("/target"),
                 call["junit_workspace_root"],
             )
+
+    def test_with_no_rustc_wrapper_the_gates_share_the_normal_target(self) -> None:
+        # No wrapper, so no kache hardlinks to collide with: the gates build
+        # where the developer's own builds go, here the exported directory.
+        calls = self.run_recipe(wrapper=None)
+        self.assertTrue(calls)
+        for call in calls:
+            self.assertTrue(call["target_dir"].replace("\\", "/").endswith("/polluted-target"), call)
+            self.assertEqual("", call["rustc_wrapper"])
 
     def test_parallel_policy_is_bounded_and_does_not_leak_to_other_gates(self) -> None:
         calls = self.run_recipe()
@@ -1173,7 +1187,9 @@ class PlanSurfaceTests(unittest.TestCase):
             environment.pop("BISCUIT_CI_PLAN_IN", None)
             command = [JUST, "--justfile", str(root / "justfile"), "ci-local", "--all", "--plan"]
             if capture is not None:
-                command += ["--plan-out", str(root / "written-plan.json")]
+                # Forward slashes: the recipe re-reads its arguments through
+                # bash, which would eat a Windows path's backslashes.
+                command += ["--plan-out", (root / "written-plan.json").as_posix()]
             result = subprocess.run(
                 command,
                 cwd=root,
@@ -1517,8 +1533,10 @@ class PlanFedRunTests(unittest.TestCase):
             if through_env:
                 environment["BISCUIT_CI_PLAN_IN"] = str(root / "plan.json")
             else:
-                command += ["--plan-in", str(root / "plan.json")]
-            command += ["--plan-out", str(root / "written-plan.json")]
+                # Forward slashes: the recipe re-reads its arguments through
+                # bash, which would eat a Windows path's backslashes.
+                command += ["--plan-in", (root / "plan.json").as_posix()]
+            command += ["--plan-out", (root / "written-plan.json").as_posix()]
             result = subprocess.run(
                 command, cwd=root, env=environment, capture_output=True, text=True, timeout=60
             )
@@ -1801,6 +1819,7 @@ class WorkflowScopeStepTests(unittest.TestCase):
         expect_failure: bool = False,
         verifier_failure: str | None = None,
         overlay_failure: bool = False,
+        all_environments: bool = False,
         seed=None,
     ) -> StepRun:
         """The job's run steps through the scope step, for one event, over a
@@ -1823,7 +1842,9 @@ class WorkflowScopeStepTests(unittest.TestCase):
         `overlay_failure` breaks only the planner's `--apply-to` form: it
         clobbers the `--plan-out` target and exits 7, so a step that let the
         overlay write straight into `resolved-plan.json` would hand the
-        fan-out a corrupt plan.
+        fan-out a corrupt plan. `all_environments` is the `ci:all-os` label on
+        the pull request (`ALL_ENVIRONMENTS`, `true` or `false` as GitHub
+        renders it).
         """
         with tempfile.TemporaryDirectory(prefix="ci-scope-step-") as temporary:
             root = Path(temporary).resolve()
@@ -1913,6 +1934,7 @@ class WorkflowScopeStepTests(unittest.TestCase):
                     "PUSH_HEAD": head,
                     "PR_BASE": base if event == "pull_request" else "",
                     "PR_HEAD": head if event == "pull_request" else "",
+                    "ALL_ENVIRONMENTS": "true" if all_environments else "false",
                 }
             )
             if push_base == "FIRST":
@@ -1924,9 +1946,15 @@ class WorkflowScopeStepTests(unittest.TestCase):
             # One shell per step, as GitHub runs them; a failing step ends
             # the job unless it is `continue-on-error` (the notes fetch is,
             # and fails here because the fixture has no `origin`).
-            for step in self.steps:
+            for index, step in enumerate(self.steps):
+                # From a file, as GitHub runs a step: on Windows a `-c`
+                # argument goes through the command line, where MSYS and
+                # Cygwin re-split the script at its nested quotes and bash
+                # runs only the first fragment.
+                script = root / f"step-{index}.sh"
+                script.write_text(step.script, encoding="utf-8", newline="\n")
                 result = subprocess.run(
-                    [STEP_BASH, "-c", step.script],
+                    [STEP_BASH, script.as_posix()],
                     cwd=root,
                     env=environment,
                     capture_output=True,
@@ -2179,6 +2207,16 @@ class WorkflowScopeStepTests(unittest.TestCase):
         # projecting the carried plan yields, so a hit with no evidence and a
         # hit with evidence read the same shape.
         self.assertEqual(receipt["scope"], legacy_scope_document(receipt["plan"]))
+
+    def test_the_all_os_label_plans_every_environment_despite_a_matching_receipt(self) -> None:
+        # A receipt is planned for the event's own environments, so it can
+        # never stand in for `ci:all-os`; on PR #112 one did, and Windows and
+        # WSL2 were deferred although the label was set.
+        run = self.run_step("pull_request", scope_receipt=self.local_scope_receipt, all_environments=True)
+        self.assertEqual("CI (ci:all-os plans every environment)", run.scope_source())
+        self.assertEqual(1, len(run.planner_calls), run.planner_calls)
+        self.assertIn("--all-environments", run.planner_calls[0])
+        self.assertEqual([], run.plan.get("deferred_environments", []), "nothing deferred")
 
     def test_a_receipt_for_another_base_falls_back_with_its_code(self) -> None:
         run = self.run_step("push", push_base="FIRST", scope_receipt=self.local_scope_receipt)

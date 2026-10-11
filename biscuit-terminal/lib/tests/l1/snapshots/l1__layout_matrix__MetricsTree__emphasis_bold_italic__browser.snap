@@ -1,7 +1,6 @@
 ---
-source: biscuit-terminal/lib/tests/layout_matrix.rs
+source: biscuit-terminal/lib/tests/l1/layout_matrix.rs
+assertion_line: 217
 expression: html
 ---
-<div style="font-weight:bold;font-style:italic"><p><strong>Total    </strong>  100.0<span style="opacity:0.6">ms</span>  100%
-├─ parse    40.0<span style="opacity:0.6">ms</span>   40%
-└─ render   60.0<span style="opacity:0.6">ms</span>   60%</p></div>
+<div style="font-weight:bold;font-style:italic"><p><strong>Total    </strong>  100.0<span style="opacity:0.6">ms</span>  100%<br>├─ parse    40.0<span style="opacity:0.6">ms</span>   40%<br>└─ render   60.0<span style="opacity:0.6">ms</span>   60%</p></div>

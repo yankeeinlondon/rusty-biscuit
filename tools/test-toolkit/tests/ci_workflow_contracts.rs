@@ -193,6 +193,22 @@ fn the_compiler_work_wrapper_is_never_global() {
     }
 }
 
+/// Every workflow that runs on a Windows host runs Python in UTF-8 mode.
+///
+/// CI's scripts print non-ASCII, and a Windows runner's piped stdout is cp1252
+/// otherwise: `completion.py`'s check mark raised `UnicodeEncodeError` after
+/// every test of a Windows cell had passed, so no Windows cell could go green.
+#[test]
+fn windows_hosted_workflows_run_python_in_utf8_mode() {
+    for file in ["_package-ci.yml", "_wsl-ci.yml"] {
+        let source = read(&format!(".github/workflows/{file}"));
+        assert!(
+            source.lines().any(|line| line == "  PYTHONUTF8: \"1\""),
+            "{file}: must set `PYTHONUTF8: \"1\"` in its workflow-level `env:`"
+        );
+    }
+}
+
 /// Measuring compiler work changes no cell, artifact, or gate.
 ///
 /// The switch defaults off on every path, and its steps publish a measurement
@@ -456,6 +472,25 @@ fn every_cargo_workflow_neutralizes_a_stray_rustc_wrapper() {
         assert!(
             source.contains("RUSTC_WRAPPER"),
             "{name} can invoke Cargo but does not clear RUSTC_WRAPPER"
+        );
+    }
+}
+
+#[test]
+fn cross_check_unix_builds_neutralize_host_compiler_wrappers() {
+    let source = read("scripts/cross-check.sh");
+    let prelude = source
+        .split_once("unix_prelude() {")
+        .expect("Unix remote prelude")
+        .1
+        .split_once("\nEOF\n}")
+        .expect("end of Unix remote prelude")
+        .0;
+    for variable in ["RUSTC_WRAPPER", "RUSTC_WORKSPACE_WRAPPER"] {
+        assert!(
+            prelude.contains(&format!("export {variable}=\"\"")),
+            "cross-check must clear {variable} before native and archive builds; \
+             unsetting it permits host config or cold-build shims to reactivate caching"
         );
     }
 }
@@ -6217,6 +6252,11 @@ fn the_area_fan_out_waits_for_the_owner_without_being_cancelled_by_it() {
 /// checker with `cargo run`. A hosted Linux consumer happens to have Cargo, so
 /// both would silently succeed there and fail only in the toolchain-free guest.
 /// One spelling for both: the overrides, and the sidecar the producer built.
+/// The planner's key helper is a third unintended build: the verified
+/// `ci-build` the archive carries is bound as `BISCUIT_CI_BUILD_BIN`, so a
+/// planner test never `cargo run`s a cold one. A `requires-toolchain` suite
+/// still makes its own deliberate Cargo calls; this contract is about runner
+/// setup, not those.
 #[test]
 fn an_archive_consumer_asks_cargo_for_nothing_including_metadata() {
     let header = "  test:";
@@ -6228,12 +6268,50 @@ fn an_archive_consumer_asks_cargo_for_nothing_including_metadata() {
         "export BISCUIT_JUNIT_WORKSPACE_ROOT=\"$ARCHIVE_WORKSPACE\"",
         "export BISCUIT_JUNIT_TARGET_DIR=\"$ARCHIVE_WORKSPACE/target\"",
         "export INSTA_WORKSPACE_ROOT=\"$ARCHIVE_WORKSPACE\"",
+        "export BISCUIT_CI_BUILD_BIN=\"$ARCHIVE_KEY_HELPER\"",
     ] {
         assert!(
             gate.contains(knob),
             "{header}: archive mode must set `{knob}` so no consumer path reaches Cargo"
         );
     }
+    // The planner's key helper is the verified `ci-build` the archive carries.
+    // The binding is the gate's alone, and it must sit inside the archive branch
+    // and ahead of the recipe, or a native cell would export an empty override
+    // and the recipe would run without it.
+    assert!(
+        step_env(gate).contains(&(
+            "ARCHIVE_KEY_HELPER".to_owned(),
+            "${{ steps.verified.outputs.key_helper }}".to_owned()
+        )),
+        "{header}: the gate must bind `ARCHIVE_KEY_HELPER` from the verification output"
+    );
+    let require = ": \"${ARCHIVE_KEY_HELPER:?verification did not report the ci-build key helper}\"";
+    let export = "export BISCUIT_CI_BUILD_BIN=\"$ARCHIVE_KEY_HELPER\"";
+    let branch_start = gate
+        .find("if [ -n \"${ARCHIVE_FILE:-}\" ]; then\n            archive_args=(")
+        .expect("the gate has an archive branch");
+    let branch_end = gate[branch_start..]
+        .find("\n          fi\n")
+        .map(|offset| branch_start + offset)
+        .expect("the archive branch closes");
+    let recipe = gate
+        .find("just \"$RECIPE\"")
+        .expect("the gate runs the canonical recipe");
+    let required_at = gate.find(require).expect("the gate requires a nonempty key helper");
+    let exported_at = gate.find(export).expect("the gate exports the key helper");
+    assert!(
+        branch_start < required_at
+            && required_at < exported_at
+            && exported_at < branch_end
+            && branch_end < recipe,
+        "{header}: the key-helper requirement and export belong inside the archive branch, \
+         in that order, before the canonical recipe"
+    );
+    assert!(
+        gate.matches("BISCUIT_CI_BUILD_BIN").count() == 1,
+        "{header}: the gate exports the key helper once, in the archive branch only"
+    );
     // The expected-test listing runs the same archived binaries, so it needs
     // the same knobs; `insta` is the one exception — a listing renders no
     // snapshot.
@@ -6248,6 +6326,10 @@ fn an_archive_consumer_asks_cargo_for_nothing_including_metadata() {
             "{header}: the listing must set `{knob}` so it reaches Cargo for nothing either"
         );
     }
+    assert!(
+        !expected.contains("BISCUIT_CI_BUILD_BIN") && !expected.contains("ARCHIVE_KEY_HELPER"),
+        "{header}: the listing runs no planner, so it binds no key helper"
+    );
     // The L2 execution proof is a producer-built sidecar, not a `cargo run`.
     assert!(
         job.contains("BISCUIT_BACKEND_PROOF_BIN=$proof"),
@@ -6385,6 +6467,26 @@ fn an_archive_consumer_hands_native_programs_native_paths() {
         .split("_ci_build_verify dir artifact environment plan=\"\":")
         .nth(1)
         .expect("`_ci_build_verify` exists");
+    // Limit the inspection to the recipe itself: the next recipe's text must
+    // not satisfy an assertion about this one.
+    let verify = verify
+        .split("\n_")
+        .next()
+        .expect("the recipe has a body");
+    let verifier_ran = verify
+        .find("\"${tool}\" \"${verify_args[@]}\"")
+        .expect("`_ci_build_verify` runs the verifier");
+    let output_block = verify
+        .find(">>\"${GITHUB_OUTPUT}\"")
+        .expect("`_ci_build_verify` writes its outputs");
+    let key_helper = verify
+        .find("echo \"key_helper=${tool}\"")
+        .expect("`_ci_build_verify` must report the verified tool as `key_helper`");
+    assert!(
+        verifier_ran < key_helper && key_helper < output_block,
+        "`key_helper` must be reported only after the verifier succeeded, inside the \
+         `$GITHUB_OUTPUT` block"
+    );
     for normalized in [
         "dir=\"$(just _native_path '{{ dir }}')\"",
         "workspace=\"$(just _native_path \"$PWD\")\"",

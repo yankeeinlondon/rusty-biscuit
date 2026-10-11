@@ -92,6 +92,14 @@ Measured on `build-win-native` on 2026-09-25 through `just cross-check`
   as a terminal launching a shell effectively does
   (`claudine/cli/tests/l1/lifecycle_message_drain_console_windows.rs`,
   `build-win-native`, 2026-09-27).
+- **A ConPTY child starts about 3 s late unless the host answers its Device
+  Attributes query.** ConPTY writes `ESC [ c` first and holds the child's
+  startup until a reply arrives or ~3 s pass; even `cmd /c echo hi` took 3 s.
+  Answer from the output-reader thread with Windows Terminal's reply
+  (`ESC [ ? 61;4;6;7;14;21;22;23;24;28;32;42 c`); a bare `ESC [ ? 1;0 c` does
+  NOT release it. The child then starts in ~50 ms
+  (`lifecycle_message_drain_console_windows.rs`, 2026-10-09). Any other test
+  that reads a `xpty` pseudoconsole should do the same.
 - **`xpty::CommandBuilder` starts from the parent's environment**, like
   `std::process::Command`. When copying a `Command` built by a fixture that
   inherits and only overrides, apply its `get_envs()` on top without

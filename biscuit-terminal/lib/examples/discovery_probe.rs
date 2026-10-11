@@ -48,6 +48,10 @@
 //!   then time `PROBE_TERM_SAMPLES` (default 50) repeated constructions and
 //!   print min/median/mean/max/stddev (nanoseconds) plus the raw sample
 //!   vector. Finding 2/3 repeated-construction latency evidence.
+//! * `query_budget` — Exercise the queries an image-rendering CLI makes: two
+//!   `Terminal` constructions, three `cell_size()` lookups, and one cursor
+//!   position query, then print `query_budget_elapsed_ms=` and
+//!   `query_budget_done`. The test counts each query on the master side.
 //! * `prose` — Render a [`Prose`] string against the detected (or
 //!   override-built) terminal and print the raw bytes between
 //!   `---PROSE---` / `---END---` markers.
@@ -206,6 +210,7 @@ fn main() {
         "terminal" => probe_terminal(),
         "terminal_cache" => probe_terminal_cache(),
         "terminal_latency" => probe_terminal_latency(),
+        "query_budget" => probe_query_budget(),
         "prose" => probe_prose(),
         _ => probe_all(),
     }
@@ -461,6 +466,27 @@ fn probe_terminal_latency() {
     println!("terminal_latency_raw_ns={}", raw.join(","));
     print_osc_query_counts();
     println!("terminal_latency_done");
+}
+
+// ---------------------------------------------------------------------------
+// Query budget (one exchange per piece of terminal information)
+// ---------------------------------------------------------------------------
+
+fn probe_query_budget() {
+    use biscuit_terminal::discovery::cursor_position::cursor_position;
+    use biscuit_terminal::terminal::Terminal;
+    use std::hint::black_box;
+    use std::time::Instant;
+
+    let start = Instant::now();
+    let term = Terminal::new();
+    black_box(Terminal::new());
+    for _ in 0..3 {
+        black_box(term.cell_size());
+    }
+    black_box(cursor_position());
+    println!("query_budget_elapsed_ms={}", start.elapsed().as_millis());
+    println!("query_budget_done");
 }
 
 // ---------------------------------------------------------------------------

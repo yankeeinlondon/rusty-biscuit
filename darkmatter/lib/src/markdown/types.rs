@@ -346,6 +346,56 @@ impl From<crate::markdown::reference::ReferenceError> for MarkdownError {
 pub type MarkdownResult<T> = Result<T, MarkdownError>;
 
 impl MarkdownError {
+    /// The class of the file-reference failure nearest the top of this
+    /// error's cause chain, if a file reference failed.
+    ///
+    /// A transclusion keeps its reference's class whatever stage or nested
+    /// child raised it, and a schema `file` value keeps the class of its
+    /// first failing reference, so a caller compares failures by class
+    /// rather than by message.
+    pub fn resolution_failure(&self) -> Option<biscuit_file::ResolutionFailure> {
+        use crate::markdown::compose::TransclusionError;
+        let mut current: Option<&(dyn std::error::Error + 'static)> = Some(self);
+        while let Some(error) = current {
+            let markdown = error
+                .downcast_ref::<MarkdownError>()
+                .or_else(|| error.downcast_ref::<Box<MarkdownError>>().map(AsRef::as_ref));
+            if let Some(MarkdownError::SchemaValidationFailed { problems, .. }) = markdown
+                && let Some(reference) = problems.iter().find_map(|problem| problem.file_reference.as_ref())
+            {
+                return Some(reference.resolution_failure());
+            }
+            let transclusion = error
+                .downcast_ref::<TransclusionError>()
+                .or_else(|| error.downcast_ref::<Box<TransclusionError>>().map(AsRef::as_ref));
+            if let Some(failure) = transclusion.and_then(TransclusionError::resolution_failure) {
+                return Some(failure);
+            }
+            if let Some(failure) = error
+                .downcast_ref::<crate::markdown::compose::toc_linking::TocLinkingError>()
+                .and_then(crate::markdown::compose::toc_linking::TocLinkingError::resolution_failure)
+            {
+                return Some(failure);
+            }
+            if let Some(reference) = error.downcast_ref::<biscuit_file::FileReferenceError>() {
+                return Some(reference.resolution_failure());
+            }
+            // `ExpressionError::GlobReference` shares its cause through an `Arc`.
+            if let Some(glob) = error
+                .downcast_ref::<biscuit_file::GlobReferenceError>()
+                .or_else(|| {
+                    error
+                        .downcast_ref::<std::sync::Arc<biscuit_file::GlobReferenceError>>()
+                        .map(AsRef::as_ref)
+                })
+            {
+                return Some(glob.resolution_failure());
+            }
+            current = error.source();
+        }
+        None
+    }
+
     /// The missing runtime context failure somewhere in this error's cause
     /// chain, if any.
     ///

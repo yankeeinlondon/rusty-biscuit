@@ -202,7 +202,7 @@ impl StagedDocument<'_> {
             repo_root: self.repo_root,
             launch_area: self.launch_area,
             context: self.context,
-            file_resolution_context: self.bootstrap.input_layers.file_resolution_context.as_ref(),
+            file_resolution_context: &self.bootstrap.input_layers.file_resolution_context,
             current: self.current.clone(),
             frontmatter,
             document_start: self.document_start,
@@ -237,7 +237,6 @@ pub(crate) fn route_staged_initialize(
     child_cwd: &Path,
     provider: Provider,
     ledger: &SharedRunLedger,
-    invocation: Option<&InvocationContext>,
 ) -> Result<StagedInitialize> {
     let empty = serde_json::Map::new();
     let frontmatter = document
@@ -290,7 +289,7 @@ pub(crate) fn route_staged_initialize(
     match routed {
         CompositionPhaseResult::Proceed(DocumentTransition::Proxy(request)) => Ok(
             StagedInitialize::Handoff(commit_initialize_proxy(
-                guard, ledger, request, invocation, &surface,
+                guard, ledger, request, &surface,
             )?),
         ),
         CompositionPhaseResult::Proceed(_) => Ok(StagedInitialize::Proceed),

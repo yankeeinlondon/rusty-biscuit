@@ -87,9 +87,14 @@ fn build_corpus() -> Vec<Markdown> {
 
 /// Runs `compose_with` over the corpus using the supplied options.
 fn compose_corpus(corpus: &[Markdown], options: &ComposeOptions) {
+    let request = darkmatter::markdown::compose::ComposeRequest::prepare(
+        options.clone(),
+        &darkmatter::markdown::compose::RequestSnapshot::new(std::env::temp_dir()),
+    )
+    .expect("prepare request");
     for md in corpus {
         let (composed, report) = md
-            .compose_with(options.clone())
+            .compose_with(&request)
             .expect("compose must not fault");
         black_box((composed, report));
     }

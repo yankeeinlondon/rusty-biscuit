@@ -22,6 +22,9 @@ The **worktree** package area, like many in this monorepo, is composed of both a
 
 ## CLI Commands
 
+Run repository commands from inside a Git repository or one of its worktrees.
+Outside a repository, `wt` explains where to run it and exits with code 1.
+
 - `wt list`
     Lists the worktrees (along with the base repo checkout) which currently exist. See [`docs/cli/list.md`](./docs/cli/list.md) for the full output.
 
@@ -35,7 +38,7 @@ The **worktree** package area, like many in this monorepo, is composed of both a
         - **`-> parent`**: the same against the branch's fork parent (its local branch)
         - open PRs from this repository as badges, placed by the PR's target. Every listing asks again and shows the answer that arrives within its wait; otherwise it shows the last stored answer for the current `origin`, with a dim item saying how old it is (`PRs as of N min ago`) or that this run `couldn't refresh` it (`couldn't get open PRs` when nothing is stored)
     - a legend, then, on image-capable terminals, a branch graph (see [`docs/git-graph.md`](./docs/git-graph.md))
-    - notes when they apply: one credentials line under the caption, either a warning when a missing or rejected API key (or a rate limit) stopped the check or the PR request, or, failing that, a notice that the provider answered without an API key (with the variables to set), a hint to run again when the wait ran out, and closing notes suggesting `wt --ff` when the default branch is behind or explaining the `ls-remote` fallback
+    - notes when they apply: one credentials line, either a warning when a missing or rejected API key (or a rate limit) stopped the check or the PR request, or, failing that, a notice that the provider answered without an API key (with the variables to set), a hint to run again when the wait ran out, and closing notes suggesting `wt --ff` when the default branch is behind or explaining the `ls-remote` fallback
     - flags (listing only): `-r`/`--refresh` waits for a full update from `origin`; `--ignore-api` makes this repository use `git ls-remote` only, recorded in `~/.wt.json`; `--ff`/`--fast-forward` fast-forwards the local default branch to `origin/<default>`
 
     > The **list** command is the default command so it will be run if a user types only `wt`
@@ -104,8 +107,8 @@ The **worktree** package area, like many in this monorepo, is composed of both a
 
     Removes a worktree by branch or directory name and, when its commits are safe elsewhere, its local branch. It starts from one question: would removing this lose work? See [`docs/cli/remove.md`](./docs/cli/remove.md) for the full rules and examples.
 
-    - **report first**: before asking or removing anything it prints uncommitted files, included ignored files needing consent (marked new, changed, or unknown), a summary of other ignored entries, the branch's safety tier and supporting ref, ahead/behind against the default branch, its copy on origin (as of your last fetch), and its PR; each question then starts after one blank line
-    - **the worktree**: new, changed, or unknown included files and uncommitted files need consent. An interactive run asks (default No); a non-interactive run needs `--force-worktree` or exits 3 without removing anything. Unchanged included copies and other ignored files do not need consent.
+    - **report first**: before asking or removing anything it prints uncommitted files, included ignored files needing consent (marked new, changed, or unknown), the branch's safety tier and supporting ref, ahead/behind against the default branch, its copy on origin (as of your last fetch), and its PR; each question then starts after one blank line
+    - **the worktree**: new, changed, or unknown included files and uncommitted files need consent. An interactive run asks (default No); a non-interactive run needs `--force-worktree` or exits 3 without removing anything. Unchanged included copies and other ignored files do not need consent and are omitted from the report.
     - **the local branch**, by where its last commit is found:
         - *Safe*: on the default branch (local or `origin/<default>`), or the exact head of an open or merged PR from this repository; deleted
         - *Pretty safe*: on another local branch, a tag, or an `origin/*` branch whose live head `wt` checked with `git ls-remote` (3 s deadline, never prompting for credentials); deleted, and the report names where the commits still live
@@ -114,11 +117,12 @@ The **worktree** package area, like many in this monorepo, is composed of both a
     - `--force-branch` on a worktree with files but without `--force-worktree` is a conflict (exit 3 when non-interactive)
     - **standing in the worktree**: with the [shell integration](#shell-integration) the first run asks everything, then moves your shell to the fork parent's worktree (or the base repo) and the wrapper finishes the removal from there, keeping your subdirectory when it exists there. If protected files, include rules, the copy record, or other approved work changes between the two steps (including files inside a nested repository, which git lists as one directory), or the handoff is over a minute old, nothing is removed; a file it cannot read stops it too (exit 4). Without the wrapper `wt remove` refuses (exit 4)
         - the second step asks the network only for what the approved actions still need: keeping the branch or deleting it by explicit choice needs no PR lookup or live check, and a branch deleted because it was safe needs none when a local default branch, another local branch, or a tag still holds its commits. A branch proved safe only by a PR or an `origin/*` copy is checked live again, and nothing is removed if that proof is gone or cannot be checked. With `--force-remote`, the branch on origin is checked again before anything is removed, and a change, deletion, or unreachable origin stops the removal. Every dirty file is still read in full
-    - on Windows, a worktree folder another program holds (a cmd window or terminal tab opened in it, an open file) is detected before anything is deleted and refused with exit 4
+    - **a folder other programs are using**: while any other program's current directory is inside the worktree (an editor's language server, an agent, a terminal tab; your own shell is exempt), `wt remove` names those programs and refuses with exit 4 before the report, and checks again right before deleting. No flag overrides it: a program that writes into the folder while git deletes it leaves a half-deleted folder. Close the programs or move them out, then run it again. On Windows an open file inside the folder is also detected; on macOS and Linux only current directories are visible
+        - if git still fails partway (it stops at the first entry it cannot delete, after unregistering the worktree), `wt` retries deleting the rest; if that fails too it exits 1 with the `rm -rf` (Windows: `Remove-Item -Recurse -Force`) that finishes the job, and leaves the branch and origin untouched
     - the main checkout cannot be removed (use plain `git` for that), whether it is named `base` or by its branch
     - **a worktree Git can't read** (`✕` in `wt list`) is prepared before the report, never by deleting anything:
         - *directory gone*: the index Git kept for it is compared with its last commit; staged changes need the usual consent (`--force-worktree` in a script), an index that can't be read, or that changed after it was checked (including the `sharedindex.*` file a split index depends on), refuses (exit 3), and only that worktree's record is removed (`git worktree remove <path>`, never `prune`), then its branch is handled as usual
-        - *directory present, `.git` file gone*: `wt` runs `git worktree repair <path>` from the base checkout **before asking anything**, verifies the restored link itself (never trusting Git's exit status), says `Restored the link for <name> so its files could be checked.`, and continues as for any worktree. If you decline or a later check refuses, the restored link is left in place and the message says so. Git's repair can also restore other worktrees' broken links
+        - *directory present, `.git` file gone*: `wt` runs `git worktree repair <path>` from the base checkout **before asking anything**, verifies the restored link itself (never trusting Git's exit status), says in the report that its `.git` file was missing, and continues as for any worktree. If you decline or a later check refuses, the restored link is left in place and the message says so. Git's repair can also restore other worktrees' broken links
         - *a link that can't be verified, or anything else* (a file or link at the path, an unreadable path, a `.git` Git can't use): refused with exit 3 and the condition found. No working files, branches, or records are removed, but a repair attempt may have changed Git metadata, and the message says so
         - **no `--force-*` flag allows deleting a directory whose files could not be checked**
     - **a worktree whose path is itself a link** (a symbolic link, or on Windows any reparse point such as a junction, standing where the checkout was) is refused with exit 3 whatever the flags, even though Git reads the checkout through it and does not mark it `prunable`: removing it would delete the files the link leads to. The path is checked before anything else, after a repair, in both runs of a handoff, and immediately before deletion. A link among the parent directories (macOS `/tmp`) is fine
@@ -181,7 +185,7 @@ cmd.exe has no wrapper.
 | 1 | Something failed |
 | 2 | Invalid arguments (clap) |
 | 3 | Refused to avoid losing work; nothing was removed, though `wt remove` may have repaired a worktree's `.git` link first (the message says so) |
-| 4 | Blocked by the environment (for example, no shell wrapper); nothing was removed |
+| 4 | Blocked by the environment (for example, no shell wrapper, or another program using the worktree folder); nothing was removed |
 
 > Important: always try to use `biscuit-terminal` renderable components to produce a nice looking output. `Prose` is the most commonly used component but `UnorderedList`, `BlockQuote`, or `Table` can also be very helpful.
 
@@ -197,11 +201,11 @@ cmd.exe has no wrapper.
 
 ### Runtime diagnostic
 
-Run `wt list --perf` to emit a per-stage timing report to stderr after the command completes. The report is rendered as a reconciling tree: the top-level rows plus an `unattributed` row sum to the total wall-clock time. Work that runs at the same time is one measured group (`remote wait ‖ local gather`, or `local gather` without an `origin`; `regather` when the tips moved), whose children show their own durations with no share and are not added to the total. Only stages that actually ran are shown, so on a non-image terminal the graph-related stages are omitted.
+Run `wt list --perf` to emit a per-stage timing report to stderr after the listing. The report is a reconciling tree of named steps (for example `read worktrees and refs`, `graph history`, `table render`): each level's sequential steps plus a generated `unattributed` row (hidden under 1 ms) or `over-attributed` row sum to their parent, and a step that starts `git` shows its count, as in `[12 git]`. Work that runs at the same time is one concurrent group (`refresh worker ‖ local reads`, or `local reads` when no wait ran), whose children show their own durations with no share. Only steps that actually ran are shown. When the listing followed the background refresh, a separate section, `Refresh worker (diagnostic, measured in the worker)`, lists each launch's own measurements (its setup, then the PR and live-head halves side by side) with no share of the total, since they ran in another process; they reconcile with the same `unattributed` and `over-attributed` rows. Its heading says whether they are `complete`, `partial` (a half stopped early), `missing` (the listing ended before the worker reported), `invalid`, `adopted` (another run's check was followed), or `origin changed`. `wt list --perf=json` instead ends stderr with one line, `WT_PERF_JSON ` followed by the same report as a versioned JSON document, for scripts and tests; read only the final nonempty line. The measuring is the library's: `worktree::list::gather` with `ListOptions::timings` set returns the same document (scope `library`, without the CLI's startup and render steps) in `Listing::timings`.
 
 ### Dev-time benchmarks
 
-`just bench` runs Criterion benches for the library-owned `list_worktrees()` gather stage. The HTML report is written to `target/criterion/report/index.html`.
+`just bench` runs Criterion benches for the local half of the listing, the library's `worktree::list::gather` with no refresh worker, graph, or timings. The HTML report is written to `target/criterion/report/index.html`.
 
 Use `just bench-save` to capture a host-derived baseline before a change, then `just bench-compare` after the change to see the delta. The shared bench helpers run a preflight check (battery, memory, load) and use a host-derived baseline ID so comparisons stay on the same machine.
 
