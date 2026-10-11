@@ -653,7 +653,7 @@ def _read_collection(
             )
             continue
         if cell["outcome"] == "pass":
-            reason = _report_problem(observation, report_probe)
+            reason = _report_problem(observation, report_probe) or _proof_problem(observation)
             if reason:
                 rejections.append(f"{reason} (note on {note_commit[:9]})")
                 continue
@@ -710,6 +710,58 @@ def _report_problem(
                 f"observation-report-unavailable: {label} cites {report['path']!r}, "
                 "whose bytes differ from the recorded digest"
             )
+    return None
+
+
+def _proof_problem(observation: dict[str, Any]) -> str | None:
+    """Why a passing observation's proof documents do not match its digests.
+
+    Only a `rig` or `seed` observation whose `report_dir` is on this host can be
+    rechecked; another host's directory is accepted with its provenance, as a
+    `host-dir` report is. A hosted observation's proof lives in workflow
+    artifacts, which `report_probe` vouches for.
+    """
+    proof = observation.get("proof")
+    producer = observation["producer"]
+    if proof is None or producer["kind"] not in ("rig", "seed"):
+        return None
+    directory = Path(producer["host"].get("report_dir", "")).expanduser()
+    if not producer["host"].get("report_dir") or not directory.is_dir():
+        return None
+    cell = observation["cell"]
+    label = f"{cell['package']}/{cell['gate']} observation {observation['observation_id'][:12]}"
+    for field, template in (
+        ("expected_listing_digest", schema.PROOF_EXPECTED_FILE),
+        ("completion_record_digest", schema.PROOF_COMPLETION_FILE),
+    ):
+        name = template.format(package=cell["package"], gate=cell["gate"])
+        try:
+            content = (directory / name).read_bytes()
+        except OSError:
+            return (
+                f"observation-report-unavailable: {label} cites {name!r} as its "
+                f"{field}, which {directory} no longer retains"
+            )
+        if hashlib.sha256(content).hexdigest() != proof[field]:
+            return (
+                f"observation-report-unavailable: {label} cites {name!r}, whose "
+                f"bytes differ from its {field}"
+            )
+        if field == "completion_record_digest":
+            try:
+                record = schema.loads_strict(content.decode("utf-8"))
+            except (UnicodeDecodeError, ValueError):
+                return f"observation-proof-missing: {label} {name!r} is not a JSON document"
+            if (
+                not isinstance(record, dict)
+                or record.get("complete") is not True
+                or record.get("package") != cell["package"]
+                or record.get("gate") != cell["gate"]
+            ):
+                return (
+                    f"observation-proof-missing: {label} {name!r} does not certify "
+                    "this cell as complete"
+                )
     return None
 
 
@@ -1410,6 +1462,15 @@ def cross_check_rejection(
     return None
 
 
+#: The rig environments a `cross-check` run can be recorded for, with the host
+#: OS and default label each is described by. WSL2 runs Linux code paths and is
+#: never filed under `windows-latest`, nor the reverse.
+CROSS_CHECK_HOSTS = {
+    "wsl2-ubuntu": ("Linux", "WSL2 (cross-check archive mode)"),
+    "windows-latest": ("Windows", "native Windows (cross-check archive mode)"),
+}
+
+
 def record_cross_check(
     plan_path: str,
     package: str,
@@ -1428,6 +1489,11 @@ def record_cross_check(
 ) -> str:
     """The receipt for a qualifying `cross-check` run.
 
+    `environment` is the rig the run executed on: `wsl2-ubuntu` (a Linux guest)
+    or `windows-latest` (native Windows). A result is only ever recorded for
+    the environment it ran on; the plan must carry that environment's cell.
+    `report` sits inside the directory the receipt names as retaining it.
+
     `build_key` and `build_digest` are the manifest the remote consumer
     VERIFIED, not the plan's expectation of it: a receipt that named a key
     nothing checked would be a claim rather than evidence. Both or neither —
@@ -1439,6 +1505,11 @@ def record_cross_check(
     not qualify, so the caller can print it rather than silently publishing
     nothing.
     """
+    if environment not in CROSS_CHECK_HOSTS:
+        raise ValueError(
+            f"{environment} is not a rig environment; a cross-check run can only "
+            f"be recorded for {sorted(CROSS_CHECK_HOSTS)}"
+        )
     head_sha = revision(head)
     head_tree = revision(f"{head_sha}^{{tree}}")
     refusal = cross_check_rejection(tested_tree, head_tree, remote_dirty, run_filters)
@@ -1489,8 +1560,8 @@ def record_cross_check(
         "complete",
         "",
         host={
-            "os": "Linux",
-            "kernel": host_label or "WSL2 (cross-check archive mode)",
+            "os": CROSS_CHECK_HOSTS[environment][0],
+            "kernel": host_label or CROSS_CHECK_HOSTS[environment][1],
             "report_dir": str(stage),
         },
     )
@@ -1678,6 +1749,13 @@ def parse_args() -> argparse.Namespace:
         metavar="FILE",
         help="write the coded rejection reasons here",
     )
+    verifier.add_argument(
+        "--artifact-repo",
+        metavar="OWNER/REPO",
+        help="vouch for hosted `artifact` report references by fetching them from "
+        "this repository's workflow runs (needs GH_TOKEN); without it a hosted "
+        "observation earns no credit",
+    )
     return parser.parse_args()
 
 
@@ -1743,7 +1821,14 @@ def main() -> None:
     if args.cells:
         if not args.plan:
             raise SystemExit("verify --cells requires --plan")
-        accepted, rejections = verify_cells(args.plan, args.base, args.head)
+        probe = None
+        if args.artifact_repo:
+            import hosted_observations  # noqa: PLC0415  (only the nightly reaches the network)
+
+            probe = hosted_observations.gh_probe(args.artifact_repo)
+        accepted, rejections = verify_cells(
+            args.plan, args.base, args.head, report_probe=probe
+        )
         if args.rejections:
             Path(args.rejections).write_text(
                 json.dumps(rejections, indent=0), encoding="utf-8"

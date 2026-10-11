@@ -19,24 +19,37 @@ The order of operations is the contract:
 
 A failure at any point leaves the local ref intact and is reported; the cells
 the unpublished observations cover simply stay scheduled for everyone else.
+
+Two producers call this module. The pre-push hook publishes a version-2
+receipt's cells (`publish-receipt`, kind `hook`). A rig run of
+`scripts/cross-check.sh` publishes one cell per finished leg (`publish-receipt
+--kind rig`, [`publish_rig_cell`]): the fetched staging directory is judged by
+`completion.py`, the documents the proof cites are retained under the evidence
+directory, and the observation is `rig` with that directory as its
+`report_dir`. This runs on the orchestrating host over fetched files because a
+native Windows rig has no usable `python3`.
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import json
 import platform
 import random
+import shutil
 import subprocess
 import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import completion  # noqa: E402
+import local_evidence  # noqa: E402
 import schema  # noqa: E402
 
 NOTES_PREFIX = "refs/notes/ci-local"
@@ -96,12 +109,19 @@ def with_identity(observation: dict[str, Any]) -> dict[str, Any]:
 
 
 def receipt_observations(
-    receipt: dict[str, Any], *, kind: str = "hook"
+    receipt: dict[str, Any],
+    *,
+    kind: str = "hook",
+    proof: dict[str, str] | None = None,
+    features: str = "",
+    run_id: str = "",
 ) -> list[dict[str, Any]]:
     """One observation per cell of a valid version-2 receipt.
 
     Each cell's report is digested from `receipt.host.report_dir`, where the
-    recorder already verified it exists.
+    recorder already verified it exists. `proof`, `features`, and `run_id` are
+    carried onto every observation; a `hook` observation proves through its
+    report counts and takes no proof.
 
     ## Errors
 
@@ -127,18 +147,22 @@ def receipt_observations(
             reports.append(
                 {"path": cell["report"], "sha256": digest, "bytes": size, "store": "host-dir"}
             )
-        observations.append(
-            with_identity(
-                {
-                    "producer": {"kind": kind, "host": dict(host)},
-                    "base": receipt["base"],
-                    "scope_identity": receipt["scope_identity"],
-                    "completion": receipt["completion"],
-                    "cell": cell,
-                    "reports": reports,
-                }
-            )
-        )
+        producer: dict[str, Any] = {"kind": kind, "host": dict(host)}
+        if run_id:
+            producer["run_id"] = run_id
+        observation: dict[str, Any] = {
+            "producer": producer,
+            "base": receipt["base"],
+            "scope_identity": receipt["scope_identity"],
+            "completion": receipt["completion"],
+            "cell": cell,
+            "reports": reports,
+        }
+        if proof is not None:
+            observation["proof"] = dict(proof)
+        if features:
+            observation["features"] = features
+        observations.append(with_identity(observation))
     return sorted(observations, key=lambda observation: observation["observation_id"])
 
 
@@ -339,18 +363,20 @@ def publish(
     commit = _git("rev-parse", "--verify", commit, repo=repo).stdout.strip()
     tree = tree or _git("rev-parse", "--verify", f"{commit}^{{tree}}", repo=repo).stdout.strip()
     existing = read_note(ref, commit, repo)
-    base = (
-        _collection_from_note(existing, environment, commit, repo)["observations"]
-        if existing
-        else []
-    )
+    current = _collection_from_note(existing, environment, commit, repo) if existing else None
     merged = collection_of(
         environment,
         commit,
         tree,
-        merge_observations(base, new_observations, link_retries=link_retries),
+        merge_observations(
+            current["observations"] if current else [],
+            new_observations,
+            link_retries=link_retries,
+        ),
     )
-    write_note(ref, commit, merged, repo)
+    # Republishing what the note already holds must not move the notes ref.
+    if current is None or schema.canonical(current) != schema.canonical(merged):
+        write_note(ref, commit, merged, repo)
     ids = [o["observation_id"] for o in merged["observations"]]
     result = PublishResult(local=True, published=False, attempts=0, observation_ids=ids)
     if remote is None:
@@ -366,11 +392,13 @@ def publish(
                 theirs_text = read_note(scratch, commit, repo)
                 if theirs_text:
                     theirs = _collection_from_note(theirs_text, environment, commit, repo)
-                    merged = collection_of(
+                    unioned = collection_of(
                         environment, commit, tree,
                         merge_observations(theirs["observations"], merged["observations"]),
                     )
-                    write_note(ref, commit, merged, repo)
+                    if schema.canonical(unioned) != schema.canonical(merged):
+                        merged = unioned
+                        write_note(ref, commit, merged, repo)
                 tip = _git("rev-parse", "--verify", scratch, repo=repo).stdout.strip()
                 descends = _git(
                     "merge-base", "--is-ancestor", tip, ref, repo=repo, check=False
@@ -398,6 +426,253 @@ def publish(
     return result
 
 
+@contextlib.contextmanager
+def _removed_on_failure(path: Path) -> Iterator[None]:
+    """Remove `path` if the block does not finish: a declined leg leaves no litter."""
+    try:
+        yield
+    except BaseException:
+        shutil.rmtree(path, ignore_errors=True)
+        raise
+
+
+class RigDeclined(Exception):
+    """A rig run that must publish nothing, with the reason to print."""
+
+
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _manifest_of(path: Path) -> dict[str, Any] | None:
+    """The expected-test manifest if it is a readable JSON object, else `None`."""
+    try:
+        document = schema.loads_strict(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return document if isinstance(document, dict) else None
+
+
+def _nonempty(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
+def record_rig_cell(
+    *,
+    plan_path: str,
+    package: str,
+    environment: str,
+    reports_dir: str,
+    evidence_dir: str,
+    run_id: str,
+    head: str,
+    base: str,
+    tested_tree: str,
+    remote_dirty: bool,
+    run_filters: str,
+    exit_code: int,
+    duration_s: int,
+    host_label: str = "",
+    build_key: str = "",
+    build_digest: str = "",
+    root: str = ".",
+    gate: str = "L1",
+) -> tuple[str, list[dict[str, Any]]]:
+    """The `rig` observation(s) for one finished leg, and the head they belong to.
+
+    `reports_dir` is the leg's fetched staging directory: `manifest.jsonl`,
+    `<gate>/<package>.xml`, and the producer's `expected-<gate>.json`. The
+    documents the proof cites are copied into one directory per cell and run,
+    `<evidence_dir>/<head>/<environment>/<package>-<gate>-<run_id>/`, which
+    becomes the observation's `report_dir`.
+
+    A cell that finished with failing tests is a completed failure and is
+    recorded as such; `completion.py` refuses such a run, so no completion
+    record exists and the failing observation carries at most the manifest-side
+    proof. Every other refusal means the run is incomplete.
+
+    ## Errors
+
+    Raises [`RigDeclined`] with the printable reason when nothing may be
+    published: an unqualified tree, a cell the plan did not schedule, an
+    incomplete run, or an exit code that contradicts the report.
+    """
+    if environment not in local_evidence.CROSS_CHECK_HOSTS:
+        raise RigDeclined(
+            f"{environment} is not a rig environment; a WSL2 result is never filed "
+            "as native Windows, nor the reverse"
+        )
+    try:
+        head_sha = local_evidence.revision(head)
+        head_tree = local_evidence.revision(f"{head_sha}^{{tree}}")
+    except ValueError as error:
+        raise RigDeclined(str(error)) from error
+    refusal = local_evidence.cross_check_rejection(
+        tested_tree, head_tree, remote_dirty, run_filters
+    )
+    if refusal is not None:
+        raise RigDeclined(refusal)
+
+    plan = local_evidence.load_plan(plan_path)
+    problems = schema.validate_resolved_plan(plan)
+    if problems:
+        raise RigDeclined(f"the resolved plan is invalid: {problems[0]}")
+    planned = next(
+        (
+            cell
+            for cell in plan["cells"]
+            if (cell["package"], cell["environment"], cell["gate"])
+            == (package, environment, gate)
+        ),
+        None,
+    )
+    if planned is None:
+        raise RigDeclined(
+            f"the resolved plan has no {package}/{environment}/{gate} cell for this "
+            "head, so the run proves nothing the plan asked for"
+        )
+
+    reports = Path(reports_dir)
+    report_source = reports / gate / f"{package}.xml"
+    if not report_source.is_file():
+        raise RigDeclined("the remote run produced no JUnit report")
+
+    retained = Path(evidence_dir).expanduser() / head_sha / environment / f"{package}-{gate}-{run_id}"
+    # A run id names one run: replacing its directory never touches another run's
+    # documents, which the digests of an earlier observation depend on.
+    if retained.exists():
+        shutil.rmtree(retained)
+    retained.mkdir(parents=True)
+    with _removed_on_failure(retained):
+        report = retained / f"{package}-{gate}.xml"
+        shutil.copyfile(report_source, report)
+        expected = retained / schema.PROOF_EXPECTED_FILE.format(package=package, gate=gate)
+        manifest: dict[str, Any] | None = None
+        manifest_source = reports / f"expected-{gate}.json"
+        if manifest_source.is_file():
+            shutil.copyfile(manifest_source, expected)
+            manifest = _manifest_of(expected)
+
+        completion_file = retained / schema.PROOF_COMPLETION_FILE.format(package=package, gate=gate)
+        backend_proofs = reports / "backend-proofs.json"
+        target = manifest.get("target", "") if manifest is not None else ""
+        arguments = argparse.Namespace(
+            plan=Path(plan_path),
+            cell=f"{package}/{environment}/{gate}",
+            expected_manifest=expected if manifest is not None else None,
+            artifacts=reports,
+            companions=None,
+            backend_proofs=backend_proofs if backend_proofs.is_file() else None,
+            target=target if isinstance(target, str) else "",
+            run=run_id,
+            attempt=1,
+            out=completion_file,
+            root=Path(root),
+        )
+        proven = False
+        codes: list[str] = []
+        try:
+            record = completion.validate(arguments)
+        except completion.Refused as refused:
+            codes = [problem.split(":", 1)[0] for problem in refused.problems]
+            failed_only = (
+                not refused.infrastructure
+                and bool(codes)
+                and set(codes) == {"completion-test-failed"}
+            )
+            if manifest is None and codes == ["completion-manifest-missing"]:
+                # No usable listing: the only completed result left is a failure the
+                # report itself shows, which `record_cross_check` confirms below.
+                failed_only = exit_code != 0
+            if not failed_only:
+                raise RigDeclined(
+                    "the run is incomplete and proves nothing: " + "; ".join(refused.problems)
+                ) from refused
+        else:
+            proven = True
+            completion_file.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+
+        if proven and exit_code != 0:
+            raise RigDeclined(
+                f"the run exited {exit_code} although its report shows every expected "
+                "test passing, so the outcome is not attributable"
+            )
+        if not proven and exit_code == 0:
+            raise RigDeclined(
+                "the run exited 0 although its report shows a failing test, so the "
+                "outcome is not attributable"
+            )
+
+        try:
+            receipt = json.loads(
+                local_evidence.record_cross_check(
+                    plan_path, package, str(report), exit_code, duration_s, tested_tree,
+                    remote_dirty, run_filters, base, head_sha, environment, host_label,
+                    build_key, build_digest,
+                )
+            )
+        except (OSError, ValueError) as error:
+            raise RigDeclined(str(error)) from error
+
+        proof: dict[str, str] | None = None
+        if manifest is not None and _nonempty(manifest.get("nextest_version")) and _nonempty(target):
+            proof = {
+                "nextest_version": manifest["nextest_version"],
+                "target": target,
+                "expected_listing_digest": _sha256(expected),
+            }
+            if proven:
+                proof["completion_record_digest"] = _sha256(completion_file)
+        if proven and proof is None:
+            raise RigDeclined("the passing run's expected manifest names no nextest version or target")
+        observations = receipt_observations(
+            receipt,
+            kind="rig",
+            proof=proof,
+            features=local_evidence._planned_features(plan, planned),
+            run_id=run_id,
+        )
+        return head_sha, observations
+
+
+def publish_rig_cell(*, remote: str | None, **recorded: Any) -> int:
+    """Record and publish one rig leg; the exit code the script maps.
+
+    `0` published, `4` recorded locally only, `3` nothing recorded. Every
+    outcome prints its own line, so a leg that publishes nothing says why.
+    """
+    environment = recorded["environment"]
+    package = recorded["package"]
+    try:
+        head, observations = record_rig_cell(**recorded)
+    except RigDeclined as reason:
+        print(f"cross-check: publishing no {environment} observation - {reason}", file=sys.stderr)
+        return 3
+    except (PublicationError, ValueError, OSError) as error:
+        print(f"cross-check: publishing no {environment} observation - {error}", file=sys.stderr)
+        return 3
+    outcome = observations[0]["cell"]["outcome"]
+    try:
+        result = publish(environment, head, observations, remote=remote)
+    except (PublicationError, ValueError) as error:
+        shutil.rmtree(observations[0]["producer"]["host"]["report_dir"], ignore_errors=True)
+        print(f"cross-check: publishing no {environment} observation - {error}", file=sys.stderr)
+        return 3
+    label = "a passing" if outcome == "pass" else "a FAILING"
+    if result.published:
+        print(
+            f"cross-check: published {label} {environment} observation for "
+            f"{package} at {head[:9]}."
+        )
+        return 0
+    print(
+        f"cross-check: recorded {label} {environment} observation for {package} "
+        f"locally; it could not be pushed ({result.error})",
+        file=sys.stderr,
+    )
+    return 4
+
+
 def host_description(label: str = "") -> dict[str, str]:
     host = {"os": platform.system(), "kernel": f"{platform.system()} {platform.release()}"}
     if label:
@@ -409,15 +684,61 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     receipt = commands.add_parser(
-        "publish-receipt", help="publish the cells of a version-2 receipt as observations"
+        "publish-receipt",
+        help="publish a version-2 receipt's cells (hook) or one finished rig leg (rig)",
     )
-    receipt.add_argument("--receipt", required=True, help="file holding the receipt")
+    receipt.add_argument("--kind", choices=("hook", "rig"), default="hook")
+    receipt.add_argument("--receipt", help="file holding the receipt (kind hook)")
     receipt.add_argument("--head", required=True)
     receipt.add_argument("--environment", required=True, choices=schema.ENVIRONMENTS)
     receipt.add_argument("--remote", default="origin")
     receipt.add_argument("--no-push", action="store_true")
     receipt.add_argument("--json", action="store_true", help="print the result as JSON")
+    rig = receipt.add_argument_group("kind rig")
+    rig.add_argument("--plan", help="the resolved plan the leg ran under")
+    rig.add_argument("--package")
+    rig.add_argument("--reports-dir", help="the leg's fetched staging directory")
+    rig.add_argument("--evidence-dir", help="where the per-run proof directory is created")
+    rig.add_argument("--run-id")
+    rig.add_argument("--base")
+    rig.add_argument("--tested-tree", default="")
+    rig.add_argument("--remote-dirty", action="store_true")
+    rig.add_argument("--run-filters", default="")
+    rig.add_argument("--exit-code", type=int)
+    rig.add_argument("--duration", type=int, default=0)
+    rig.add_argument("--host-label", default="")
+    rig.add_argument("--build-key", default="")
+    rig.add_argument("--build-digest", default="")
     args = parser.parse_args()
+
+    if args.kind == "rig":
+        required = ("plan", "package", "reports_dir", "evidence_dir", "run_id", "base", "exit_code")
+        missing = [name for name in required if getattr(args, name) is None]
+        if missing:
+            parser.error("--kind rig needs " + ", ".join("--" + n.replace("_", "-") for n in missing))
+        raise SystemExit(
+            publish_rig_cell(
+                remote=None if args.no_push else args.remote,
+                plan_path=args.plan,
+                package=args.package,
+                environment=args.environment,
+                reports_dir=args.reports_dir,
+                evidence_dir=args.evidence_dir,
+                run_id=args.run_id,
+                head=args.head,
+                base=args.base,
+                tested_tree=args.tested_tree,
+                remote_dirty=args.remote_dirty,
+                run_filters=args.run_filters,
+                exit_code=args.exit_code,
+                duration_s=args.duration,
+                host_label=args.host_label,
+                build_key=args.build_key,
+                build_digest=args.build_digest,
+            )
+        )
+    if not args.receipt:
+        parser.error("--kind hook needs --receipt")
 
     document = schema.loads_strict(Path(args.receipt).read_text(encoding="utf-8"))
     try:

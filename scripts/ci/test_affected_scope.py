@@ -3898,6 +3898,7 @@ class SuiteOwnershipRegistryTests(unittest.TestCase):
         "test_constraints.py": "repo-deps",
         "test_cross_check.py": "repo-deps",
         "test_evidence_reuse.py": "repo-deps",
+        "test_hosted_observations.py": "repo-deps",
         "test_local_evidence.py": "repo-deps",
         "test_publish_gaps.py": "repo-deps",
         "test_resolved_plan.py": "repo-deps",

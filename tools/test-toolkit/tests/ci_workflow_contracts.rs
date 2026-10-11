@@ -2277,7 +2277,7 @@ fn only_recovery_and_diagnostic_steps_ignore_errors() {
     ];
     // `check` and `lint` are measured too, from Phase 5: each is its own
     // compile configuration, and the same advisory pair carries it.
-    for header in ["  check:", "  lint:", "  test:"] {
+    for header in ["  check:", "  lint:"] {
         assert_eq!(
             normalized("_package-ci.yml", header),
             measurement,
@@ -2285,6 +2285,15 @@ fn only_recovery_and_diagnostic_steps_ignore_errors() {
             header.trim()
         );
     }
+    // The test job also hides the scheduled observation recorder: it must
+    // never change a cell's verdict, and it refuses (with an annotation) rather
+    // than invent proof. Its upload is NOT hidden: a lost observation is a
+    // failed producer.
+    assert_eq!(
+        normalized("_package-ci.yml", "  test:"),
+        [measurement.clone(), vec!["Record this cell's observation".to_owned()]].concat(),
+        "_package-ci.yml: `test` may hide the measurement steps and the observation recorder only"
+    );
     // `ci.yml`'s build owner hides nothing: a failed produce, a failed upload,
     // and a lost runner must all reach the fold and the dependent cells.
     assert_eq!(
@@ -2301,9 +2310,10 @@ fn only_recovery_and_diagnostic_steps_ignore_errors() {
             "Census the Windows host before extraction",
             "Guest post-mortem",
             "Host post-mortem",
+            "Record this cell's observation",
         ],
-        "_wsl-ci.yml: `wsl` may ignore only the first provisioning attempt and \
-         diagnostics — never tests, staging, or upload"
+        "_wsl-ci.yml: `wsl` may ignore only the first provisioning attempt, \
+         diagnostics, and the observation recorder — never tests, staging, or upload"
     );
     // The audit tool's own exit 2 is normalized so its enforcement step can
     // explain a coverage block; `package-ci` is a `uses:` job with no steps.
@@ -2888,8 +2898,13 @@ fn every_top_level_job_is_either_folded_by_ci_gate_or_the_advisory_report() {
         .iter()
         .map(|block| block.lines().next().unwrap_or("").trim().trim_end_matches(':').to_owned())
         // The certification publishes after the gate and is checked by its own
-        // contract; folding it would make the gate wait on its own output.
-        .filter(|name| !["ci-gate", "ci-reporting", "certify-nightly"].contains(&name.as_str()))
+        // contract; folding it would make the gate wait on its own output. The
+        // observation publisher runs beside the gate and is checked by its own
+        // contract too.
+        .filter(|name| {
+            !["ci-gate", "ci-reporting", "certify-nightly", "publish-observations"]
+                .contains(&name.as_str())
+        })
         .collect::<Vec<_>>();
     headers.sort_unstable();
     let mut gated = GATED_JOBS.map(str::to_owned).to_vec();
@@ -4264,10 +4279,10 @@ fn archive_guard_registry_entry() -> String {
 #[test]
 fn a_failing_archive_path_guard_blocks_the_merge_through_the_existing_fold() {
     assert_eq!(
-        9,
+        10,
         TARGET_CI_JOBS.len(),
         "the guard must add NO top-level job beyond the nightly's \
-         `certify-nightly`; ci.yml now declares {TARGET_CI_JOBS:?}"
+         `certify-nightly` and `publish-observations`; ci.yml now declares {TARGET_CI_JOBS:?}"
     );
     assert_eq!(
         6,
@@ -7021,8 +7036,10 @@ fn top_level_job_ids(file: &str) -> Vec<String> {
 /// `biscuit-tui-captured-stdout` retired into their owners' package cells and
 /// the advisory `summary` became `ci-reporting`; `build` and `area-drift`
 /// arrived with the single-OS-compile fix; `certify-nightly` publishes a
-/// finished nightly's coverage and sits outside the gate's fold.
-const TARGET_CI_JOBS: [&str; 9] = [
+/// finished nightly's coverage and sits outside the gate's fold, as does
+/// `publish-observations`, which turns the nightly's hosted cell observations
+/// into notes.
+const TARGET_CI_JOBS: [&str; 10] = [
     "validation",
     "scope",
     "preflight",
@@ -7030,6 +7047,7 @@ const TARGET_CI_JOBS: [&str; 9] = [
     "area-ci",
     "area-drift",
     "certify-nightly",
+    "publish-observations",
     "ci-gate",
     "ci-reporting",
 ];
@@ -7832,6 +7850,20 @@ fn the_evidence_verifier_runs_on_schedule_and_not_on_manual_dispatch() {
 }
 
 #[test]
+fn the_evidence_verifier_vouches_for_hosted_artifacts_through_the_token() {
+    let scope = named_job("ci.yml", "scope");
+    let lines = executable_lines(&scope);
+    assert!(
+        lines.contains(r#"--artifact-repo "$GITHUB_REPOSITORY""#),
+        "discovery must fetch hosted artifacts, or a hosted observation earns no credit"
+    );
+    assert!(
+        scope.contains("GH_TOKEN: ${{ github.token }}"),
+        "the artifact lookup needs the read-only job token"
+    );
+}
+
+#[test]
 fn the_scope_job_reads_contents_and_actions_and_writes_nothing() {
     let scope = named_job("ci.yml", "scope");
     assert_eq!(
@@ -7894,9 +7926,10 @@ fn the_nightly_certification_is_schedule_only_gated_on_the_final_gate_and_read_o
         jobs_containing("ci.yml", "checks: write"),
         "no certification or scope job may hold `checks: write`"
     );
-    assert!(
-        jobs_containing("ci.yml", "contents: write").is_empty(),
-        "no ci.yml job may hold `contents: write`"
+    assert_eq!(
+        vec!["publish-observations".to_owned()],
+        jobs_containing("ci.yml", "contents: write"),
+        "only the scheduled observation publisher may hold `contents: write`"
     );
 }
 
@@ -7933,4 +7966,181 @@ fn pull_requests_and_pushes_still_prove_linux_and_macos_only() {
         validation.contains("--wait-minutes 90"),
         "the same-tree PR wait stays 90 minutes"
     );
+}
+
+// --- hosted cells are recorded as durable observations ------------------------
+
+/// The producer jobs that finish a hosted cell, as `(file, job header, the
+/// step id of the gate command, the artifact name the upload uses)`.
+fn observation_producers() -> [(&'static str, &'static str, &'static str, &'static str); 2] {
+    [
+        (
+            "_package-ci.yml",
+            "  test:",
+            "gate",
+            "observation-${{ matrix.package }}-${{ matrix.gate }}-${{ matrix.environment }}",
+        ),
+        (
+            "_wsl-ci.yml",
+            "  wsl:",
+            "l1",
+            "observation-${{ steps.cell.outputs.package }}-${{ steps.cell.outputs.gate }}-wsl2-ubuntu",
+        ),
+    ]
+}
+
+#[test]
+fn every_hosted_producer_records_and_uploads_its_cell_on_the_nightly_only() {
+    let guard = "if: ${{ !cancelled() && github.event_name == 'schedule' }}";
+    for (file, header, gate_id, artifact) in observation_producers() {
+        let job = job_block(file, header);
+        let all = steps(&job);
+        let names: Vec<String> = all.iter().map(|step| step_name(step)).collect();
+        let position = |name: &str| {
+            names
+                .iter()
+                .position(|candidate| candidate == name)
+                .unwrap_or_else(|| panic!("{file}: `{}` must carry the `{name}` step", header.trim()))
+        };
+        let completion = position("Upload this cell's completion record");
+        let record = position("Record this cell's observation");
+        let upload = position("Upload this cell's observation");
+        assert!(
+            completion < record && record + 1 == upload && upload + 1 == all.len(),
+            "{file}: the observation is recorded after the completion record is uploaded, uploaded \
+             straight after, and is the job's last step"
+        );
+
+        let recorder = executable_lines(&all[record]);
+        assert!(
+            recorder.contains(guard) && recorder.contains("continue-on-error: true"),
+            "{file}: the recorder runs on `!cancelled()` (a failed gate records its honest failure, \
+             a cancelled job records nothing), only on the nightly, and never changes the verdict"
+        );
+        assert!(
+            recorder.contains("scripts/ci/hosted_observations.py emit")
+                && recorder.contains(&format!("steps.{gate_id}.outcome"))
+                && recorder.contains("--completion"),
+            "{file}: the recorder must emit from the gate's own outcome and the completion record"
+        );
+        assert!(
+            !recorder.contains("success()") && !recorder.contains("always()"),
+            "{file}: neither a green-only nor a cancel-proof guard"
+        );
+
+        let uploader = executable_lines(&all[upload]);
+        assert!(
+            uploader.contains(guard)
+                && uploader.contains("uses: actions/upload-artifact@v6")
+                && uploader.contains(&format!("name: {artifact}"))
+                && uploader.contains("retention-days: 90")
+                && uploader.contains("if-no-files-found: ignore"),
+            "{file}: the observation uploads under the exact name the publisher collects, kept \
+             90 days, and a cell that recorded nothing uploads nothing"
+        );
+        assert!(
+            !uploader.contains("continue-on-error"),
+            "{file}: a lost observation upload is a failed producer"
+        );
+    }
+}
+
+#[test]
+fn the_observation_recorder_changes_nothing_a_pull_request_can_reach() {
+    // Every step that touches an observation is guarded by the nightly event;
+    // a pull request or a push never runs one.
+    for file in ["_package-ci.yml", "_wsl-ci.yml"] {
+        for job in jobs(&workflow(file)) {
+            for step in steps(&job) {
+                let text = executable_lines(&step);
+                if text.contains("hosted_observations.py") || text.contains("name: observation-") {
+                    assert!(
+                        text.contains("github.event_name == 'schedule'"),
+                        "{file}: `{}` handles observations and must be schedule-only",
+                        step_name(&step)
+                    );
+                }
+            }
+        }
+        let source = executable_lines(&workflow(file));
+        assert!(
+            !source.contains("contents: write") && !source.contains("checks: write"),
+            "{file}: producers keep the read-only token they inherit"
+        );
+    }
+    let area = executable_lines(&job_block("_area-ci.yml", "  package-ci:"));
+    assert!(
+        area.contains("contents: read") && !area.contains("write"),
+        "`package-ci` keeps `contents: read` and nothing writable"
+    );
+    assert_eq!(
+        vec!["accepted-gaps".to_owned()],
+        jobs_containing("_area-ci.yml", "checks: write"),
+        "accepted-gaps stays the sole `checks: write` owner"
+    );
+}
+
+#[test]
+fn the_observation_publisher_is_a_trusted_schedule_only_job_outside_the_gate() {
+    let publisher = named_job("ci.yml", "publish-observations");
+    let body = executable_lines(&publisher);
+    for required in [
+        "always()",
+        "github.event_name == 'schedule'",
+        "needs.scope.result == 'success'",
+        "needs: [scope, area-ci]",
+        "ref: ${{ needs.scope.outputs.head }}",
+        "scripts/ci/hosted_observations.py publish",
+        r#"--run-id "$GITHUB_RUN_ID""#,
+    ] {
+        assert!(body.contains(required), "publish-observations must carry `{required}`");
+    }
+    assert_eq!(
+        vec![
+            ("contents".to_owned(), "write".to_owned()),
+            ("actions".to_owned(), "read".to_owned()),
+        ],
+        job_permissions(&publisher),
+        "the publisher writes refs (notes) and reads artifacts, nothing else"
+    );
+    assert!(
+        !body.contains("continue-on-error") && !body.contains("|| true"),
+        "a publication that fails must fail the run visibly"
+    );
+    assert!(
+        !body.contains("pull_request") && !body.contains("github.head_ref"),
+        "no pull-request value reaches the job that holds the write token"
+    );
+
+    let gate = executable_lines(&named_job("ci.yml", "ci-gate"));
+    assert!(
+        !gate.contains("publish-observations"),
+        "ci-gate stays a policy-free fold and must not wait on, or fold, the publisher"
+    );
+    let report = executable_lines(&named_job("ci.yml", "ci-reporting"));
+    assert!(
+        !report.contains("publish-observations"),
+        "the advisory report does not wait on the publisher"
+    );
+    assert_eq!(
+        vec!["publish-observations".to_owned()],
+        jobs_containing("ci.yml", "contents: write"),
+        "no other ci.yml job holds a write token"
+    );
+}
+
+#[test]
+fn the_observation_artifact_prefix_is_the_one_the_publisher_collects() {
+    let python = read("scripts/ci/hosted_observations.py");
+    assert!(
+        python.contains(r#"name.startswith("observation-")"#)
+            && python.contains(r#"f"observation-{package}-{gate}-{environment}""#),
+        "the publisher collects `observation-*` and the module derives names the workflows upload"
+    );
+    for (file, _, _, artifact) in observation_producers() {
+        assert!(
+            workflow(file).contains(&format!("name: {artifact}")),
+            "{file}: the uploaded name must follow `observation-<package>-<gate>-<environment>`"
+        );
+    }
 }

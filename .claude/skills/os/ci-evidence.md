@@ -34,14 +34,38 @@ An observation's report is cited by digest. A `host-dir` report on the verifying
 host is checked byte for byte; one on another host is accepted with its
 provenance shown. When two results for one cell cannot be ordered (no retry link,
 neither commit descends from the other) and they disagree, the cell executes.
-`cross-check.sh` copies its WSL report to the same evidence directory before
-citing it.
+A `cross-check.sh` rig leg (`wsl` or `windows`, each filed under its own
+environment) retains its report, expected manifest, and completion record in one
+per-run directory under the same evidence directory and cites that directory as
+the observation's `report_dir`.
 
 The JUnit reports behind a hook receipt stay on the host that produced it, at
 the observation's `producer.host.report_dir`
 (`$BISCUIT_CI_EVIDENCE_DIR/<head sha>/<environment>/`, root default
 `~/.rusty-biscuit/ci-evidence`). Investigating a reused cell means asking that
 host.
+
+## Hosted nightly cells publish their own proof
+
+On the nightly, each hosted native test cell and each WSL2 guest cell records
+itself as a `hosted` observation (`scripts/ci/hosted_observations.py`) and
+uploads `observation-<package>-<gate>-<environment>`; the schedule-only
+`publish-observations` job then writes the run's observations to
+`refs/notes/ci-local/<environment>` (WSL2 cells under the `wsl2-ubuntu` ref).
+So a pass in one environment survives a later unrelated failure or cancellation
+and a retry executes only what is unproven.
+
+- The report is **not** on any host: it is the `junit-<package>-<gate>-<environment>`
+  artifact of the producer run. A `hosted` pass is credited only while that
+  artifact is retrievable and its bytes match, so an expired artifact (the
+  repository's artifact retention) re-runs the cell. A completed failure is kept
+  and still blocks an older pass.
+- Nothing is invented: a cancelled, skipped, or report-less cell, or a passing
+  gate with no valid completion record, records nothing. `publish
+  --run-id N` republishes a run by hand if the publisher job was lost.
+- Unverified on a real run: that the ruleset lets `GITHUB_TOKEN` push
+  `refs/notes/*`. If it does not, the publisher step is red and the artifacts
+  are the only record. The CI/CD topic page has the flow.
 
 ## Execution bans
 

@@ -133,10 +133,15 @@ When the plan schedules no cell it names the changed documents and states that n
 required. That is an **affirmative scheduling decision**, not a warning, a failure, an accepted
 gap, or a fabricated passing result.
 
-`scripts/cross-check.sh` publishes a `wsl2-ubuntu` receipt only when its WSL leg ran the outgoing
-head's exact tree on a clean remote worktree with no test filter; every other run prints why it
-published nothing. It ships the developer's local tree, uncommitted work included, so most of its
-runs test a tree no head names.
+`scripts/cross-check.sh` records a `rig` observation for a leg's cell, the moment that leg finishes,
+under the leg's own environment: `wsl2-ubuntu` for the WSL2 guest and `windows-latest` for native
+Windows. It does so only when the leg ran the outgoing head's exact tree on a clean remote worktree
+with no test filter, in archive mode; every other run prints why it published nothing. It ships the
+developer's local tree, uncommitted work included, so most of its runs test a tree no head names.
+Each recorded cell cites its JUnit report, the expected-test listing, and the completion record,
+all kept in one per-run directory; a completed failure is recorded too (without a completion
+record, which `completion.py` refuses for a failing test), and an interrupted or incomplete leg
+records nothing, so an earlier leg's proof survives it.
 
 ### Execution constraints
 
@@ -265,15 +270,79 @@ instead waits, up to 90 minutes, for the pull request's run of the same head. A 
 same tree is reused; a failure, cancellation, or timeout falls back to the normal grid.
 
 **Planned:** a resumable workspace seeding command will gather Windows and WSL2 evidence on
-configured rigs. Scheduled evidence consumption is implemented, but native Windows cross-check
-receipt publication and hosted-cell observation publication are not yet, so until a rig or hosted
-producer publishes proof for a cell, a nightly executes it. An optional Windows-risk workflow will
-reuse this infrastructure before pushing.
+configured rigs. Scheduled evidence consumption, rig cross-check publication for both WSL2 and
+native Windows, and hosted-cell observation publication are implemented (next section); until a rig
+or a hosted nightly publishes proof for a cell, a nightly executes it. An optional Windows-risk
+workflow will reuse this infrastructure before pushing.
 
-**Planned partial-run recovery:** failed or canceled nightlies will leave the
-last successful baseline unchanged and retain independently published proof
-from completed cells. Retries will verify and reuse qualifying rig or hosted
-cell evidence, executing only unproven cells. A newer qualifying failure will
+### Hosted cell observations
+
+A nightly that fails in one place no longer discards the cells it proved elsewhere. Every scheduled
+hosted producer (a native test job in `_package-ci.yml`, or the WSL2 guest job in `_wsl-ci.yml`)
+records its finished cell as an observation and uploads it before its area or the workflow knows how
+it ended. A trusted job then publishes the run's observations to the notes refs, where the normal
+verifier reads them like any other producer's.
+
+```mermaid
+flowchart LR
+    gate[gate command] --> junit[upload junit-pkg-gate-env]
+    junit --> cert[completion.py]
+    cert --> comp[upload completion-pkg-gate-env]
+    comp --> emit["hosted_observations.py emit"]
+    gate -. "failed: no completion record" .-> emit
+    emit --> obs[upload observation-pkg-gate-env]
+    obs --> pub["publish-observations (schedule only, contents: write)"]
+    pub --> notes["refs/notes/ci-local/ENV"]
+    notes --> verify["verify_cells + gh_probe"]
+    verify -->|"artifact bytes match"| reuse[cell reused]
+    verify -->|"expired, altered, or API down"| run[cell executes]
+```
+
+What each stage records, and what it refuses:
+
+- **A passing cell** needs the gate to have succeeded and a completion record bound to this cell,
+  head, run, and attempt. The observation cites the report by SHA-256 and byte count, and its proof
+  carries the digests of `expected-<gate>.json` and `completion.json`.
+- **An honest failure** (a real report that names a failing test) is recorded too, with whatever
+  proof the expected listing allows. A failure needs no completion record, and it still blocks an
+  older pass of the same inputs.
+- **Interrupted or unproven work records nothing.** A cancelled or skipped gate, a missing or
+  unreadable report, a report the failure cannot be attributed to, or a passing gate with no valid
+  completion record makes `emit` exit nonzero with the reason and write no file. The step is
+  `continue-on-error` so it can never change the cell's verdict.
+- **Cancellation.** A job cancelled before its `emit` step publishes nothing. One cancelled after
+  its observation upload keeps the artifact, and `publish-observations` still runs (`always()`), so a
+  cell that finished is not lost to an unrelated failure or a cancelled sibling.
+- **Names are conventions, not stored.** The report lives in `junit-<package>-<gate>-<environment>`
+  of the producer run; the observation's `producer.host.label` is the environment, which is how the
+  probe recomputes that name. The observation itself records `workflow`, `run_id`, and `attempt` and
+  is never rewritten: a retry at a new head is verified, not copied, and a re-run attempt is a new
+  observation linked with `retry_of`.
+
+Discovery fetches the artifact. `local_evidence.py verify --artifact-repo OWNER/REPO` (what `ci.yml` passes) builds
+`hosted_observations.gh_probe` and hands it to `verify_cells` as its `report_probe`; the probe
+lists the producer run's artifacts through `gh api`, requires the conventional artifact to exist and
+be unexpired, downloads it, and compares the cited member's bytes and the proof's digests. Anything
+else (expired, altered, deleted, API failure) answers "unavailable" and the cell executes, with the
+`observation-report-unavailable` reason in the plan. A failure is kept regardless.
+
+The report artifacts keep the repository's default artifact retention, so hosted proof is reusable
+for that long and no longer; an expired artifact makes the cell run again rather than fail.
+
+`publish-observations` runs only on `schedule`, holds `contents: write` and `actions: read`, and
+runs default-branch code from the tested checkout. It writes notes refs only. A push the remote
+refuses leaves the proof local and prints "hosted observations are local to this runner; remote reuse
+unavailable"; the step then fails red, but the job is not part of `ci-gate`.
+
+**Unverified:** whether the repository ruleset permits `GITHUB_TOKEN` to push `refs/notes/*`; whether
+a cancelled run still schedules the publisher on a real cancellation; and how the Actions artifact
+service behaves for a re-run attempt that repeats an artifact name. None has been exercised on a
+hosted run.
+
+**Partial-run recovery:** failed or canceled nightlies leave the last
+successful baseline unchanged. Hosted cells that finished keep their proof
+(previous section); rig-published proof is planned. Retries verify and reuse
+qualifying evidence, executing only unproven cells. A newer qualifying failure will
 prevent an older pass from hiding that cell's failure.
 
 **Planned release evidence policy:** native Windows and WSL2 passes are not

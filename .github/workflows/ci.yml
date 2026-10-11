@@ -317,6 +317,7 @@ jobs:
               --plan resolved-plan.json \
               --base "$base" \
               --head "$head" \
+              --artifact-repo "$GITHUB_REPOSITORY" \
               --rejections evidence-rejections.json > accepted-cells.json \
               || verifier_status=$?
             if (( verifier_status != 0 )); then
@@ -1006,6 +1007,67 @@ jobs:
           path: certifications/${{ steps.certify.outputs.name }}/certification.json
           retention-days: 90
           if-no-files-found: error
+
+  # Turns the observations this nightly's hosted producers uploaded into notes
+  # (`refs/notes/ci-local/<environment>`), so a later run can reuse a cell this
+  # one proved even when something else in this run failed.
+  #
+  # WHY IT IS A JOB OF ITS OWN. `package-ci` and `area-ci` keep
+  # `contents: read`; the one credential that can write a ref lives here, in a
+  # job that runs only on `schedule` (so only default-branch code, never pull
+  # request code), checks out the tested revision, and runs a script from that
+  # checkout. It writes only the notes refs, never a branch, and `accepted-gaps`
+  # stays the sole owner of `checks: write`.
+  #
+  # WHEN IT RUNS. `always()` so an unrelated red area, or a cancelled one,
+  # cannot lose a cell that finished: each producer uploads its observation
+  # before the area knows how it ended, and this job collects whatever exists.
+  # It is deliberately NOT in `ci-gate`'s `needs` (the gate stays a policy-free
+  # fold of what blocks a merge); a failure here fails the RUN instead, so a
+  # nightly whose proof could not be published is visibly red.
+  #
+  # RESIDUAL RISK. On a cancelled run `always()` still schedules this job under
+  # a normal cancel, but a force-cancel, a lost runner, or the 15-minute limit
+  # leaves the observations as artifacts (90 days) with no note. Nothing is
+  # fabricated: the next nightly simply executes those cells again, and
+  # `hosted_observations.py publish --run-id N` recovers them by hand.
+  #
+  # UNVERIFIED. Whether the repository's rulesets let `GITHUB_TOKEN` push
+  # `refs/notes/*`. If they do not, the push is refused, the step fails red
+  # with "hosted observations are local to this runner; remote reuse
+  # unavailable", and the artifacts stay the only record.
+  # No `name:`: a skipped job is never labelled from its matrix.
+  publish-observations:
+    needs: [scope, area-ci]
+    if: >-
+      always() &&
+      github.event_name == 'schedule' &&
+      needs.scope.result == 'success' &&
+      needs.scope.outputs.has_packages == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.scope.outputs.head }}
+      # `git notes` needs a committer. This is the workflow's own identity, not
+      # an author's: nothing here is a commit anyone wrote.
+      - name: Publish this run's observations
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/hosted_observations.py publish \
+            --repository "$GITHUB_REPOSITORY" \
+            --run-id "$GITHUB_RUN_ID"
 
   # The run's reader-facing account of itself, in exactly three modes
   # (specification section 6): a reused whole-PR validation, a successful scope,

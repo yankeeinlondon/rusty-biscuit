@@ -69,10 +69,10 @@ local and hosted runs. Its package policy is deliberately narrow:
   `scope-verify --event` refuses a receipt planned for another event
   (`scope-event-mismatch`). Without `--event`, every environment is planned.
 - **Planned:** resumable workspace rig seeding, which needs native Windows
-  receipt publication and hosted observation publication; scheduled evidence
-  consumption and per-environment anchors are implemented, but no producer
-  publishes Windows or hosted-cell proof yet, so a nightly executes what no
-  verified observation covers. See `docs/topics/ci-cd.md`.
+  receipt publication; scheduled evidence consumption, per-environment anchors,
+  and hosted observation publication are implemented, but no rig publishes
+  Windows proof yet, so a nightly executes what no verified observation covers.
+  See `docs/topics/ci-cd.md`.
   Risk-directed pre-push use of that infrastructure remains optional. Do not
   describe a nightly as a fixed 24-hour diff or treat old WSL2-only nightlies
   as Windows proof.
@@ -1125,15 +1125,37 @@ and is published with the plan.
 Publication goes through `scripts/ci/observation_notes.py`: local write first,
 then fetch, union, and a non-force push retried up to five times, so concurrent
 publishers keep each other's observations and a remote failure keeps the proof
-local. `rig`, `hosted`, and `seed` producer kinds need a `proof` object that
-only the planned rig and hosted producers write; today the hook and
-`cross-check.sh` publish `hook` observations.
+local. `rig`, `hosted`, and `seed` producer kinds need a `proof` object (a
+failing cell may omit it); the hook publishes `hook` observations,
+`cross-check.sh` publishes `rig` ones for its WSL2 and native Windows legs, and the
+scheduled hosted producers publish `hosted` ones.
 
-`scripts/cross-check.sh` publishes a `wsl2-ubuntu` observation only when its WSL leg
-ran the outgoing head's exact tree on a clean remote worktree with no test
-filter; every other run prints why it published nothing. It ships the
+**Hosted observations** (`scripts/ci/hosted_observations.py`, scheduled runs
+only). Each hosted test producer records its finished cell after its completion
+step (`emit`, `continue-on-error`, `!cancelled()`) and uploads
+`observation-<package>-<gate>-<environment>`; passes need a succeeded gate plus a
+completion record bound to the cell, head, run, and attempt, honest failures are
+recorded without one, and a cancelled, skipped, or report-less cell records
+nothing. `publish-observations` (`ci.yml`, `schedule` only, `always()`,
+`contents: write` + `actions: read`, not in `ci-gate`) validates and publishes
+them through `observation_notes.py`; a refused push fails that step red and
+prints that the proof is local. Discovery passes `hosted_observations.gh_probe`
+as `verify_cells`' `report_probe`, which downloads the producer run's artifact
+and credits the cell only when the cited bytes and proof digests match
+(`producer.host.label` is the environment it derives the artifact name from).
+Nothing outside `publish-observations` may hold `contents: write`;
+`accepted-gaps` remains the only `checks: write` job. Unverified on a hosted
+run: that rulesets let `GITHUB_TOKEN` push `refs/notes/*`, cancellation
+behavior of the publisher, re-run attempts that repeat an artifact name.
+
+`scripts/cross-check.sh` publishes a `rig` observation per finished leg, under that
+leg's environment (`wsl2-ubuntu`, `windows-latest`), only when the leg ran the
+outgoing head's exact tree on a clean remote worktree with no test filter in
+archive mode; every other run prints why it published nothing. It ships the
 developer's local tree, uncommitted work included, so most of its runs test a
-tree no head names.
+tree no head names. A rig observation's proof documents sit beside its report in
+a per-run directory and are rechecked byte for byte by a reader on the same
+host.
 
 **Record the restriction, do not remember it.** The store at
 `<home>/.rusty-biscuit/ci-constraints/<repository>/` (beside the evidence

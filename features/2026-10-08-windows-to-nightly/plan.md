@@ -3,7 +3,7 @@ kind: plan
 title: Scoped Windows nightlies and resumable evidence seeding
 created: 2026-10-11
 total_phases: 6
-phase: 3
+phase: 4
 agent: codex/gpt-6.1-sol
 yolo: true
 spec: 2026-10-08-windows-to-nightly
@@ -53,6 +53,32 @@ docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
   - .claude/skills/rust-devops/ci-cd.md
   - .claude/skills/os/ci-evidence.md
+source_files_during_phase_4:
+  - scripts/cross-check.sh
+  - scripts/ci/schema.py
+  - scripts/ci/local_evidence.py
+  - scripts/ci/observation_notes.py
+  - scripts/ci/hosted_observations.py
+  - scripts/ci/affected_scope.py
+  - scripts/ci/test_evidence_reuse.py
+  - scripts/ci/test_cross_check.py
+  - scripts/ci/test_hosted_observations.py
+  - scripts/ci/test_affected_scope.py
+  - scripts/Cargo.toml
+  - tools/test-toolkit/tests/ci_workflow_contracts.rs
+  - .github/workflows/ci.yml
+  - .github/workflows/_package-ci.yml
+  - .github/workflows/_wsl-ci.yml
+  - .github/ci/schemas/contract.json
+docs_updated_during_phase_4:
+  - .github/ci/README.md
+  - .github/ci/schemas/README.md
+  - docs/topics/ci-cd.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/rust-devops/ci-cd.md
+  - .claude/skills/os/ci-evidence.md
+  - .claude/skills/os/build-hosts.md
 packages:
   - repo-deps
   - test-toolkit
@@ -170,12 +196,12 @@ Every phase has an exit checkpoint. Waves have globally unique numeric indices. 
 
 ### Wave 8 — Parallel producer paths
 
-- [ ] **Record rig cells**
+- [x] **Record rig cells**
   - Extend native Windows cross-check publication alongside WSL2, using the canonical planned gates/features/filter and native target/runtime proof. Retain expected manifests, real reports, completion, backend/build proof, and failure outcomes per completed cell.
   - Publish as each cell finishes; interruption preserves earlier proof and gives the interrupted cell no passing credit. Keep WSL2 faithful archive mode, existing warm directories/locks, and configured `BUILD_*` discovery.
   - Test unsupported flags, dirty/mismatched trees, zero reports against nonempty expectations, legitimate empty expectations, missing backends/rigs, and publication failure. Compile-only or WSL2 results cannot prove native Windows behavior.
   - Ownership: `cross-check.sh`, rig recorder adapters, and cross-check tests.
-- [ ] **Record hosted cells**
+- [x] **Record hosted cells**
   - Make trusted scheduled producers durably publish each completed observation with immutable artifact/report references before area/workflow success is known. Publish honest completed failures through the observation path even where no passing completion exists.
   - Bind proof to original head/build/workflow/run/attempt. Retrying at a new head uses verified reuse; never rewrite original completion. Ensure discovery actually fetches/validates hosted artifacts, not just uploads them.
   - Keep PR permissions unchanged and accepted-gap reporting's exclusive `checks: write` owner. Test publication denial, artifact expiry, unrelated producer failure, and cancellation after versus before durable publication.
@@ -183,7 +209,7 @@ Every phase has an exit checkpoint. Waves have globally unique numeric indices. 
 
 ### Wave 9 — Recovery integration
 
-- [ ] **Exercise partial recovery**
+- [x] **Exercise partial recovery**
   - Feed both producer paths through the same verifier and overlay. Simulate a pass in one environment followed by failure/cancellation elsewhere; retain the prior successful anchor and execute only remaining unproved cells on retry.
   - Cover a later `main` commit with changed and unchanged gate inputs, sequential packages at one revision, mixed warn-mode outcomes, and unresolved same-input conflicting observations.
   - Reproduce concrete current red cells from Phase 1 on matching configured rigs with targeted gates; record fixes or unresolved blockers honestly. Do not change unrelated packages or broaden hosted scope to diagnose them.

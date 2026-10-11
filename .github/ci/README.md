@@ -313,6 +313,25 @@ the outgoing head's exact tree on a clean remote worktree with no test filter.
 Any other run prints why it published nothing — it ships the developer's local
 tree, uncommitted work included, so most of its runs test a tree no head names.
 
+**Hosted observations.** On the nightly (`schedule` only), each hosted test producer
+(`_package-ci.yml` `test`, `_wsl-ci.yml` `wsl`) runs `scripts/ci/hosted_observations.py emit` after its
+completion step and uploads `observation-<package>-<gate>-<environment>` (90 days). A passing cell
+needs a succeeded gate and a completion record bound to this cell, head, run, and attempt; an honest
+failure with a real report is recorded without one; a cancelled, skipped, report-less, or unproven
+cell records nothing and the step says why (it is `continue-on-error`, so it never changes the
+cell's verdict). The `publish-observations` job in `ci.yml` (`schedule` only, `always()` so an
+unrelated failure or cancellation does not lose finished cells, `contents: write` + `actions: read`,
+outside `ci-gate`'s fold) downloads the run's `observation-*` artifacts, drops any that fail
+`schema.validate_observation`, and publishes the rest through `observation_notes.py` under
+`refs/notes/ci-local/<environment>` (`wsl2-ubuntu` cells under the WSL2 ref). `producer.kind` is
+`hosted`; `producer.host.label` is the environment, from which the discovery probe derives the
+conventional `junit-<package>-<gate>-<environment>` artifact name. `hosted_observations.gh_probe`
+is the `report_probe` for `verify_cells`: it downloads the producer run's artifact and credits the
+cell only when the cited bytes and proof digests match. `hosted_observations.py publish --run-id N`
+republishes a run by hand. **Unverified:** that the repository ruleset lets `GITHUB_TOKEN` push
+`refs/notes/*` (a refusal fails the publisher step red and leaves the artifacts the only record),
+and behavior on a real cancellation or re-run attempt.
+
 ### Execution constraints
 
 Reuse qualifying passing evidence per required cell on every OS. If no

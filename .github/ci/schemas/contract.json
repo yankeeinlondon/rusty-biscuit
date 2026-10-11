@@ -308,7 +308,7 @@
         "nextest_version": true,
         "target": true,
         "expected_listing_digest": true,
-        "completion_record_digest": true
+        "completion_record_digest": false
       },
       "report": {
         "path": true,

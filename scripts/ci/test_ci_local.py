@@ -1924,6 +1924,9 @@ class WorkflowScopeStepTests(unittest.TestCase):
                     "PATH": os.pathsep.join([str(stubs), environment.get("PATH", "")]),
                     "GITHUB_OUTPUT": str(output),
                     "GITHUB_STEP_SUMMARY": str(summary),
+                    # Actions always sets it; the verifier names it as the
+                    # repository whose hosted artifacts back an observation.
+                    "GITHUB_REPOSITORY": "owner/repo",
                     "TEST_CALL_LOG": str(call_log),
                     "EVENT_NAME": event,
                     # `github.event.before` is empty outside a push; the PR

@@ -18,6 +18,7 @@ the `test_today_*` fixtures below pin that narrower job.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -34,6 +35,7 @@ import local_evidence  # noqa: E402
 import observation_notes  # noqa: E402
 import plan_fixtures  # noqa: E402
 import schema  # noqa: E402
+import test_completion  # noqa: E402
 from affected_scope import change_inventory  # noqa: E402
 from local_evidence import NOTES_PREFIX, verified_environment  # noqa: E402
 
@@ -1721,6 +1723,27 @@ class ObservationFixture(EvidenceFixture):
         directory.mkdir(exist_ok=True)
         return directory
 
+    def proof_for(self, directory: Path, package: str, gate: str, outcome: str) -> dict:
+        """The proof a rig writes, with the two documents it cites retained."""
+        listing = f'{{"package": "{package}", "run": "{directory.name}", "tests": 4}}'
+        record = json.dumps(
+            {"package": package, "gate": gate, "complete": True, "run": directory.name}
+        )
+        names = (
+            schema.PROOF_EXPECTED_FILE.format(package=package, gate=gate),
+            schema.PROOF_COMPLETION_FILE.format(package=package, gate=gate),
+        )
+        (directory / names[0]).write_text(listing, encoding="utf-8")
+        proof = {
+            "nextest_version": "0.9.99",
+            "target": "aarch64-apple-darwin",
+            "expected_listing_digest": hashlib.sha256(listing.encode()).hexdigest(),
+        }
+        if outcome == "pass":
+            (directory / names[1]).write_text(record, encoding="utf-8")
+            proof["completion_record_digest"] = hashlib.sha256(record.encode()).hexdigest()
+        return proof
+
     def observation(
         self,
         package: str,
@@ -1763,12 +1786,7 @@ class ObservationFixture(EvidenceFixture):
             ],
         }
         if kind != "hook":
-            document["proof"] = {
-                "nextest_version": "0.9.99",
-                "target": "aarch64-apple-darwin",
-                "expected_listing_digest": "ab" * 32,
-                "completion_record_digest": "cd" * 32,
-            }
+            document["proof"] = self.proof_for(directory, package, gate, outcome)
         if retry_of:
             document["retry_of"] = retry_of
         return observation_notes.with_identity(document)
@@ -1998,6 +2016,79 @@ class ObservationReportTests(ObservationFixture):
                 ["alpha/macos-latest/L1"],
                 self.accepted_keys(report_probe=lambda report, obs: True),
             )
+
+    def test_a_rig_pass_is_rechecked_against_the_documents_its_proof_cites(self) -> None:
+        for what, name in (("listing", schema.PROOF_EXPECTED_FILE), ("record", schema.PROOF_COMPLETION_FILE)):
+            for damage in ("missing", "altered"):
+                with self.subTest(what=what, damage=damage):
+                    directory = self.retained_dir(f"{what}-{damage}")
+                    observation = self.observation("alpha", kind="rig", report_dir=directory)
+                    cited = directory / name.format(package="alpha", gate="L1")
+                    if damage == "missing":
+                        cited.unlink()
+                    else:
+                        cited.write_text("tampered")
+                    self.add_note("macos-latest", self.collection([observation]))
+                    accepted, rejections = self.verify()
+                    self.assertEqual([], accepted)
+                    self.assertTrue(
+                        any(r.startswith("observation-report-unavailable") for r in rejections),
+                        rejections,
+                    )
+
+    def test_a_record_that_certifies_another_cell_is_not_proof(self) -> None:
+        directory = self.retained_dir()
+        observation = self.observation("alpha", kind="rig", report_dir=directory)
+        record = directory / schema.PROOF_COMPLETION_FILE.format(package="alpha", gate="L1")
+        record.write_text('{"package": "beta", "gate": "L1", "complete": true}')
+        document = {k: v for k, v in observation.items() if k != "observation_id"}
+        document["proof"] = {
+            **document["proof"],
+            "completion_record_digest": hashlib.sha256(record.read_bytes()).hexdigest(),
+        }
+        self.add_note("macos-latest", self.collection([observation_notes.with_identity(document)]))
+        accepted, rejections = self.verify()
+        self.assertEqual([], accepted)
+        self.assertTrue(any("does not certify" in r for r in rejections), rejections)
+
+    def assert_rig_failure_blocks(self, with_proof: bool) -> None:
+        failed = self.observation("beta", kind="rig", outcome="fail")
+        if not with_proof:
+            failed = observation_notes.with_identity(
+                {k: v for k, v in failed.items() if k not in ("observation_id", "proof")}
+            )
+        self.add_note(
+            "macos-latest",
+            self.collection([self.observation("beta")], commit=self.base),
+            self.base,
+        )
+        self.add_note("macos-latest", self.collection([failed]))
+        self.assertEqual([], schema.validate_collection(self.collection([failed])))
+        self.assertEqual([], self.accepted_keys())
+
+    def test_a_rig_failure_with_a_listing_but_no_record_blocks_an_older_pass(self) -> None:
+        self.assert_rig_failure_blocks(with_proof=True)
+
+    def test_a_rig_failure_with_no_proof_blocks_an_older_pass(self) -> None:
+        self.assert_rig_failure_blocks(with_proof=False)
+
+    def test_a_passing_rig_observation_without_a_record_or_proof_is_invalid(self) -> None:
+        passed = self.observation("alpha", kind="rig")
+        for what in ("record", "proof"):
+            with self.subTest(what=what):
+                body = {k: v for k, v in passed.items() if k != "observation_id"}
+                if what == "proof":
+                    del body["proof"]
+                else:
+                    body["proof"] = {
+                        k: v for k, v in body["proof"].items() if k != "completion_record_digest"
+                    }
+                problems = schema.validate_collection(
+                    self.collection([observation_notes.with_identity(body)])
+                )
+                self.assertTrue(
+                    problems and problems[0].startswith("observation-proof-missing"), problems
+                )
 
     def test_a_failure_whose_reports_are_gone_still_blocks_an_older_pass(self) -> None:
         directory = self.retained_dir()
@@ -2446,6 +2537,13 @@ class PublicationTests(ObservationFixture):
         self.assertTrue(result.published)
         self.assertEqual(before, self.git("notes", "--ref", self.ref, "show", self.head))
 
+    def test_republishing_does_not_move_the_notes_ref(self) -> None:
+        observation = self.observation("alpha")
+        self.publish_from([observation])
+        tip = self.git("rev-parse", self.ref)
+        self.publish_from([observation])
+        self.assertEqual(tip, self.git("rev-parse", self.ref))
+
     def test_a_second_run_of_a_cell_is_linked_as_a_retry(self) -> None:
         failed = self.observation("alpha", outcome="fail")
         self.publish_from([failed])
@@ -2628,6 +2726,546 @@ class RecorderPublicationTests(ObservationFixture):
         self.assertEqual(4, completed.returncode, completed.stderr)
         self.assertIn("local only", completed.stderr)
         self.assertEqual(["alpha/macos-latest/L1"], self.accepted_keys())
+
+
+# ---------------------------------------------------------------------------
+# Rig legs of `scripts/cross-check.sh`: producer -> discovery -> reuse
+# ---------------------------------------------------------------------------
+
+RIG_TARGETS = {
+    "wsl2-ubuntu": "x86_64-unknown-linux-gnu",
+    "windows-latest": "x86_64-pc-windows-msvc",
+}
+RIG_OS = {"wsl2-ubuntu": "Linux", "windows-latest": "Windows"}
+OBSERVATION_NOTES = Path(observation_notes.__file__)
+
+
+def write_rig_reports(
+    directory: Path,
+    package: str = "alpha",
+    environment: str = "wsl2-ubuntu",
+    *,
+    expected: tuple[str, ...] = ("t_one", "t_two", "t_three"),
+    reported: dict[str, str] | None = None,
+    manifest: bool = True,
+    report: bool = True,
+    skip_listing: bool = False,
+) -> Path:
+    """A rig leg's staging directory, written the way `_stage_junit` and
+    `_expected_manifest` leave it (`manifest.jsonl`, `L1/<package>.xml`,
+    `expected-L1.json`) and `scp -r` fetches it."""
+    shutil.rmtree(directory, ignore_errors=True)
+    directory.mkdir(parents=True)
+    suite = f"{package}::l1"
+    reported = reported if reported is not None else {name: "pass" for name in expected}
+    if report:
+        cases = ""
+        for name, outcome in reported.items():
+            body = {"pass": "", "fail": "<failure>boom</failure>", "skip": "<skipped/>"}[outcome]
+            cases += f'<testcase classname="{suite}" name="{name}">{body}</testcase>'
+        failed = sum(1 for o in reported.values() if o == "fail")
+        skipped = sum(1 for o in reported.values() if o == "skip")
+        (directory / "L1").mkdir()
+        (directory / "L1" / f"{package}.xml").write_text(
+            f'<?xml version="1.0"?><testsuites><testsuite name="{suite}" '
+            f'tests="{len(reported)}" failures="{failed}" errors="0" '
+            f'skipped="{skipped}">{cases}</testsuite></testsuites>',
+            encoding="utf-8",
+        )
+        entry = {
+            "tier": "L1", "package": package, "xml": f"L1/{package}.xml",
+            "exit_code": 100 if failed else 0, "environment": environment,
+            "duration_s": 9, "report_present": True,
+        }
+        (directory / "manifest.jsonl").write_text(json.dumps(entry) + "\n", encoding="utf-8")
+    else:
+        (directory / "manifest.jsonl").write_text("", encoding="utf-8")
+    if manifest:
+        (directory / "expected-L1.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": 2,
+                    "environment": environment,
+                    "tier": "L1",
+                    "target": RIG_TARGETS[environment],
+                    "nextest_version": "cargo-nextest 0.9.136 (fixture)",
+                    "from_archive": True,
+                    "selection": {
+                        "filter": f"package({package}) & ({test_completion.L1_SELECTION})",
+                        "profile": "ci",
+                        "test_args": "--archive-file x --workspace-remap y",
+                    },
+                    "backends": [],
+                    "companion_suites": [],
+                    "packages": {
+                        package: {
+                            "tests": [] if skip_listing else [f"{suite}::{n}" for n in expected],
+                            "ignored": [],
+                            "excluded": [],
+                        }
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+    return directory
+
+
+class RigCellFixture(ObservationFixture):
+    """A fetched rig staging directory published through the real command.
+
+    The staging directories are written the way `_stage_junit` and
+    `_expected_manifest` leave them (`manifest.jsonl`, `L1/<package>.xml`,
+    `expected-L1.json`), and the command under test is the one
+    `scripts/cross-check.sh` runs on the orchestrating host. Notes are read back
+    through `verify_cells`, the question CI and the hook ask.
+    """
+
+    def plan(self) -> dict:
+        document = super().plan()
+        document["cells"] += [
+            self.plan_cell(package, "windows-latest", "L1") for package in ("alpha", "beta")
+        ]
+        document["job_estimate"] = len(document["cells"])
+        return plan_fixtures.finalize_plan(document)
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.head_tree = self.git("rev-parse", f"{self.head}^{{tree}}")
+        self.remote = self.root / "remote.git"
+        subprocess.run(["git", "init", "-q", "--bare", str(self.remote)], check=True)
+        self.git("remote", "add", "origin", str(self.remote))
+        self.git("push", "-q", "origin", "main")
+        self.evidence = self.root / "evidence"
+
+    def fetched(self, package: str = "alpha", environment: str = "wsl2-ubuntu", **kwargs) -> Path:
+        """The staging directory a rig leg leaves, as `scp -r` fetches it."""
+        return write_rig_reports(
+            self.root / f"fetched-{environment}-{package}", package, environment, **kwargs
+        )
+
+    def publish_rig(
+        self,
+        environment: str,
+        directory: Path,
+        *,
+        package: str = "alpha",
+        exit_code: int = 0,
+        tested_tree: str | None = None,
+        dirty: bool = False,
+        filters: str = "",
+        run_id: str = "run-1",
+        push: bool = True,
+        cwd: Path | None = None,
+    ) -> subprocess.CompletedProcess:
+        command = [
+            sys.executable, str(OBSERVATION_NOTES), "publish-receipt", "--kind", "rig",
+            "--plan", str(self.plan_path), "--package", package,
+            "--environment", environment, "--reports-dir", str(directory),
+            "--evidence-dir", str(self.evidence), "--run-id", run_id,
+            "--head", self.head, "--base", self.base,
+            "--tested-tree", self.head_tree if tested_tree is None else tested_tree,
+            "--exit-code", str(exit_code), "--duration", "61",
+            "--build-key", "0f1e2d3c4b5a6978", "--build-digest", "9a8b7c6d5e4f3021",
+        ]
+        if dirty:
+            command.append("--remote-dirty")
+        if filters:
+            command += ["--run-filters", filters]
+        command += ["--remote", "origin"] if push else ["--no-push"]
+        return subprocess.run(
+            command, cwd=cwd or self.root, capture_output=True, text=True, timeout=120
+        )
+
+    def note(self, environment: str) -> dict | None:
+        shown = subprocess.run(
+            ["git", "notes", "--ref", f"{NOTES_PREFIX}/{environment}", "show", self.head],
+            capture_output=True, text=True,
+        )
+        return json.loads(shown.stdout) if shown.returncode == 0 else None
+
+    def observations(self, environment: str) -> list[dict]:
+        note = self.note(environment)
+        return note["observations"] if note else []
+
+    def assertPublishedNothing(self, completed: subprocess.CompletedProcess, *reasons: str) -> None:
+        self.assertEqual(3, completed.returncode, completed.stdout + completed.stderr)
+        self.assertRegex(completed.stderr, r"cross-check: publishing no \S+ observation - ")
+        for reason in reasons:
+            self.assertIn(reason, completed.stderr)
+        for environment in RIG_TARGETS:
+            self.assertIsNone(self.note(environment), "a declined leg must record nothing")
+
+
+class RigProducerToReuseTests(RigCellFixture):
+    """AC: a finished rig leg is proof for its own environment's cell, only."""
+
+    def test_wsl2_round_trips_to_exactly_its_own_cell(self) -> None:
+        self.assertRoundTrip("wsl2-ubuntu", "windows-latest")
+
+    def test_native_windows_round_trips_to_exactly_its_own_cell(self) -> None:
+        self.assertRoundTrip("windows-latest", "wsl2-ubuntu")
+
+    def assertRoundTrip(self, environment: str, other: str) -> None:
+        completed = self.publish_rig(environment, self.fetched("alpha", environment))
+        self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
+        self.assertIn(f"published a passing {environment} observation", completed.stdout)
+        self.assertEqual([f"alpha/{environment}/L1"], self.accepted_keys())
+        self.assertIsNone(self.note(other), "the other rig must be untouched")
+        (observation,) = self.observations(environment)
+        self.assertEqual("rig", observation["producer"]["kind"])
+        self.assertEqual(RIG_OS[environment], observation["producer"]["host"]["os"])
+        self.assertEqual("run-1", observation["producer"]["run_id"])
+        self.assertEqual(RIG_TARGETS[environment], observation["proof"]["target"])
+        self.assertEqual("pass", observation["cell"]["outcome"])
+
+    def test_the_cited_proof_is_retained_in_one_directory_per_run(self) -> None:
+        self.publish_rig("windows-latest", self.fetched("alpha", "windows-latest"))
+        (observation,) = self.observations("windows-latest")
+        retained = Path(observation["producer"]["host"]["report_dir"])
+        self.assertEqual(
+            self.evidence / self.head / "windows-latest" / "alpha-L1-run-1", retained
+        )
+        for name, field in (
+            (schema.PROOF_EXPECTED_FILE, "expected_listing_digest"),
+            (schema.PROOF_COMPLETION_FILE, "completion_record_digest"),
+        ):
+            content = (retained / name.format(package="alpha", gate="L1")).read_bytes()
+            self.assertEqual(hashlib.sha256(content).hexdigest(), observation["proof"][field])
+        record = json.loads((retained / "alpha-L1.completion.json").read_text())
+        self.assertTrue(record["complete"])
+        self.assertEqual("windows-latest", record["environment"])
+        self.assertTrue((retained / "alpha-L1.xml").is_file())
+
+    def test_both_rigs_for_one_package_are_credited_independently(self) -> None:
+        self.publish_rig("windows-latest", self.fetched("alpha", "windows-latest"), run_id="w")
+        self.publish_rig("wsl2-ubuntu", self.fetched("alpha", "wsl2-ubuntu"), run_id="l")
+        self.assertEqual(
+            ["alpha/windows-latest/L1", "alpha/wsl2-ubuntu/L1"], self.accepted_keys()
+        )
+
+    def test_sequential_packages_from_one_rig_are_unioned_not_overwritten(self) -> None:
+        self.publish_rig("wsl2-ubuntu", self.fetched("alpha"), run_id="a")
+        self.publish_rig("wsl2-ubuntu", self.fetched("beta"), package="beta", run_id="b")
+        self.assertEqual(
+            ["alpha/wsl2-ubuntu/L1", "beta/wsl2-ubuntu/L1"], self.accepted_keys()
+        )
+        shown = subprocess.run(
+            ["git", "--git-dir", str(self.remote), "notes", "--ref",
+             f"{NOTES_PREFIX}/wsl2-ubuntu", "show", self.head],
+            capture_output=True, text=True, check=True,
+        ).stdout
+        self.assertEqual(2, len(json.loads(shown)["observations"]), "the remote carries both")
+
+    def test_a_declined_later_cell_leaves_the_earlier_proof_untouched(self) -> None:
+        self.publish_rig("wsl2-ubuntu", self.fetched("alpha"), run_id="a")
+        before = self.git("notes", "--ref", f"{NOTES_PREFIX}/wsl2-ubuntu", "show", self.head)
+        incomplete = self.fetched("beta", reported={"t_one": "pass"})
+        completed = self.publish_rig("wsl2-ubuntu", incomplete, package="beta", run_id="b")
+        self.assertEqual(3, completed.returncode)
+        self.assertEqual(
+            before, self.git("notes", "--ref", f"{NOTES_PREFIX}/wsl2-ubuntu", "show", self.head)
+        )
+        self.assertEqual(["alpha/wsl2-ubuntu/L1"], self.accepted_keys())
+
+
+class RigFailureAndIncompleteTests(RigCellFixture):
+    """A completed failure is an observation; an incomplete run is nothing."""
+
+    def test_a_completed_failure_is_published_and_blocks_an_older_pass(self) -> None:
+        self.publish_rig("wsl2-ubuntu", self.fetched("alpha"), run_id="pass")
+        self.assertEqual(["alpha/wsl2-ubuntu/L1"], self.accepted_keys())
+        failing = self.fetched("alpha", reported={"t_one": "pass", "t_two": "fail", "t_three": "pass"})
+        completed = self.publish_rig("wsl2-ubuntu", failing, exit_code=100, run_id="fail")
+        self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
+        self.assertIn("published a FAILING wsl2-ubuntu observation", completed.stdout)
+        accepted, rejections = self.verify()
+        self.assertEqual([], self.keys(accepted), "the newer failure must hide the older pass")
+        self.assertTrue([r for r in rejections if r.startswith("failed-cell")], rejections)
+        failure = next(o for o in self.observations("wsl2-ubuntu") if o["cell"]["outcome"] == "fail")
+        self.assertNotIn("completion_record_digest", failure["proof"])
+        self.assertEqual(
+            {"nextest_version", "target", "expected_listing_digest"}, set(failure["proof"])
+        )
+        retained = Path(failure["producer"]["host"]["report_dir"])
+        self.assertFalse(
+            (retained / "alpha-L1.completion.json").exists(), "a failure has no completion record"
+        )
+
+    def test_a_later_passing_retry_restores_reuse(self) -> None:
+        failing = self.fetched("alpha", reported={"t_one": "fail", "t_two": "pass", "t_three": "pass"})
+        self.publish_rig("windows-latest", failing, exit_code=100, run_id="fail")
+        self.assertEqual([], self.accepted_keys())
+        self.publish_rig("windows-latest", self.fetched("alpha", "windows-latest"), run_id="pass")
+        self.assertEqual(["alpha/windows-latest/L1"], self.accepted_keys())
+
+    def test_a_failure_without_a_manifest_is_published_without_proof(self) -> None:
+        failing = self.fetched(
+            "alpha", reported={"t_one": "fail", "t_two": "pass", "t_three": "pass"}, manifest=False
+        )
+        completed = self.publish_rig("wsl2-ubuntu", failing, exit_code=100)
+        self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
+        (observation,) = self.observations("wsl2-ubuntu")
+        self.assertEqual("fail", observation["cell"]["outcome"])
+        self.assertNotIn("proof", observation)
+        self.assertEqual([], self.accepted_keys())
+
+    def test_a_pass_without_a_manifest_publishes_nothing(self) -> None:
+        completed = self.publish_rig("wsl2-ubuntu", self.fetched("alpha", manifest=False))
+        self.assertPublishedNothing(completed, "completion-manifest-missing")
+
+    def test_a_missing_test_is_an_incomplete_run(self) -> None:
+        short = self.fetched(
+            "alpha", "windows-latest", reported={"t_one": "pass", "t_two": "pass"}
+        )
+        completed = self.publish_rig("windows-latest", short)
+        self.assertPublishedNothing(completed, "completion-test-missing", "t_three")
+        self.assertEqual([], self.accepted_keys())
+
+    def test_zero_reports_against_a_nonempty_expectation_publish_nothing(self) -> None:
+        completed = self.publish_rig("windows-latest", self.fetched("alpha", "windows-latest", report=False))
+        self.assertPublishedNothing(completed, "no JUnit report")
+        # The same, when a stray empty report exists but staged no entry for it.
+        directory = self.fetched("alpha", "windows-latest", reported={})
+        completed = self.publish_rig("windows-latest", directory)
+        self.assertPublishedNothing(completed, "completion-test-missing")
+
+    def test_a_failure_alongside_a_missing_test_is_incomplete_not_a_failure(self) -> None:
+        mixed = self.fetched("alpha", reported={"t_one": "fail", "t_two": "pass"})
+        completed = self.publish_rig("wsl2-ubuntu", mixed, exit_code=100)
+        self.assertPublishedNothing(completed, "completion-test-missing")
+
+    def test_an_empty_expectation_keeps_completions_refusal(self) -> None:
+        empty = self.fetched("alpha", expected=(), reported={}, skip_listing=True)
+        completed = self.publish_rig("wsl2-ubuntu", empty)
+        self.assertPublishedNothing(completed, "completion-expected-empty")
+
+    def test_an_exit_code_that_contradicts_the_report_publishes_nothing(self) -> None:
+        completed = self.publish_rig("wsl2-ubuntu", self.fetched("alpha"), exit_code=1)
+        self.assertPublishedNothing(completed, "exited 1", "passing")
+        failing = self.fetched("alpha", reported={"t_one": "fail", "t_two": "pass", "t_three": "pass"})
+        completed = self.publish_rig("wsl2-ubuntu", failing, exit_code=0)
+        self.assertPublishedNothing(completed, "exited 0", "failing test")
+
+    def test_a_manifest_from_the_other_environment_is_never_filed(self) -> None:
+        """A WSL2 listing cannot make a native Windows observation, or the reverse."""
+        wrong = self.fetched("alpha", "wsl2-ubuntu")
+        completed = self.publish_rig("windows-latest", wrong)
+        self.assertPublishedNothing(completed, "completion-manifest-provenance", "names environment 'wsl2-ubuntu'")
+
+    def test_only_rig_environments_can_be_recorded(self) -> None:
+        completed = self.publish_rig("macos-latest", self.fetched("alpha"))
+        self.assertPublishedNothing(completed, "not a rig environment")
+
+
+class RigQualificationTests(RigCellFixture):
+    """Runs that are smoke evidence only: the reason is printed, nothing recorded."""
+
+    def test_a_tree_that_is_not_the_heads_publishes_nothing(self) -> None:
+        completed = self.publish_rig("wsl2-ubuntu", self.fetched("alpha"), tested_tree="0" * 40)
+        self.assertPublishedNothing(completed, "is not this head's tree")
+        self.assertFalse(self.evidence.exists(), "nothing is retained for a declined leg")
+
+    def test_a_dirty_remote_publishes_nothing(self) -> None:
+        completed = self.publish_rig("windows-latest", self.fetched("alpha", "windows-latest"), dirty=True)
+        self.assertPublishedNothing(completed, "dirty")
+
+    def test_a_filtered_run_publishes_nothing(self) -> None:
+        completed = self.publish_rig("wsl2-ubuntu", self.fetched("alpha"), filters="level2_")
+        self.assertPublishedNothing(completed, "narrowed by")
+
+    def test_a_package_the_plan_did_not_schedule_publishes_nothing(self) -> None:
+        completed = self.publish_rig("wsl2-ubuntu", self.fetched("gamma"), package="gamma")
+        self.assertPublishedNothing(completed, "has no gamma/wsl2-ubuntu/L1 cell")
+
+    def test_a_missing_staging_directory_publishes_nothing(self) -> None:
+        completed = self.publish_rig("wsl2-ubuntu", self.root / "never-fetched")
+        self.assertPublishedNothing(completed, "no JUnit report")
+
+    def test_an_unreachable_remote_keeps_the_proof_local_and_others_scheduled(self) -> None:
+        self.git("remote", "set-url", "origin", str(self.root / "missing.git"))
+        completed = self.publish_rig("wsl2-ubuntu", self.fetched("alpha"))
+        self.assertEqual(4, completed.returncode, completed.stdout + completed.stderr)
+        self.assertIn("locally; it could not be pushed", completed.stderr)
+        self.assertEqual(["alpha/wsl2-ubuntu/L1"], self.accepted_keys(), "proof stays on this host")
+        # A reader who only has the remote sees nothing, so the cell stays scheduled.
+        clone = self.root / "clone"
+        subprocess.run(["git", "clone", "-q", str(self.remote), str(clone)], check=True)
+        previous = Path.cwd()
+        os.chdir(clone)
+        try:
+            accepted, _ = local_evidence.verify_cells(str(self.plan_path), self.base, self.head)
+        finally:
+            os.chdir(previous)
+        self.assertEqual([], accepted)
+
+    def test_a_run_with_no_push_target_is_recorded_locally_only(self) -> None:
+        completed = self.publish_rig("wsl2-ubuntu", self.fetched("alpha"), push=False)
+        self.assertEqual(4, completed.returncode)
+        self.assertEqual(["alpha/wsl2-ubuntu/L1"], self.accepted_keys())
+
+    def test_two_runs_of_one_cell_keep_separate_proof_directories(self) -> None:
+        self.publish_rig("wsl2-ubuntu", self.fetched("alpha"), run_id="first")
+        self.publish_rig("wsl2-ubuntu", self.fetched("alpha"), run_id="second")
+        first = self.evidence / self.head / "wsl2-ubuntu" / "alpha-L1-first"
+        second = self.evidence / self.head / "wsl2-ubuntu" / "alpha-L1-second"
+        self.assertTrue((first / "alpha-L1.completion.json").is_file())
+        self.assertTrue((second / "alpha-L1.completion.json").is_file())
+        self.assertEqual(["alpha/wsl2-ubuntu/L1"], self.accepted_keys())
+
+    def test_retained_proof_that_was_altered_is_not_credited(self) -> None:
+        self.publish_rig("windows-latest", self.fetched("alpha", "windows-latest"))
+        retained = self.evidence / self.head / "windows-latest" / "alpha-L1-run-1"
+        (retained / "alpha-L1.completion.json").write_text("{}", encoding="utf-8")
+        accepted, rejections = self.verify()
+        self.assertEqual([], accepted)
+        self.assertTrue([r for r in rejections if "observation-report-unavailable" in r], rejections)
+
+
+class PartialRecoveryTests(ObservationFixture):
+    """Rig and hosted proof through one verifier and overlay, across partial runs.
+
+    A nightly can pass in one environment, fail or be cancelled in another, and
+    be retried; what survives must be exactly what completed, and the retry must
+    execute only what is still unproved.
+    """
+
+    def hosted(self, package: str, *, outcome: str = "pass", retry_of: str | None = None) -> dict:
+        observation = self.observation(
+            package, kind="hosted", store="artifact", outcome=outcome, retry_of=retry_of
+        )
+        body = {k: v for k, v in observation.items() if k != "observation_id"}
+        body["producer"] = {
+            **body["producer"],
+            "workflow": ".github/workflows/ci.yml",
+            "run_id": "424242",
+            "attempt": 1,
+        }
+        if outcome == "fail":
+            body.pop("proof", None)
+        return observation_notes.with_identity(body)
+
+    def rig(self, package: str, **kwargs) -> dict:
+        return self.observation(
+            package, kind="rig", report_dir=self.retained_dir(f"rig-{package}-{len(kwargs)}"), **kwargs
+        )
+
+    def overlaid(self, **kwargs) -> dict[str, tuple[str, str]]:
+        accepted, rejections = self.verify(report_probe=lambda report, observation: True, **kwargs)
+        plan = json.loads(self.plan_path.read_text(encoding="utf-8"))
+        applied = affected_scope.apply_accepted_cells(plan, accepted, rejections)
+        self.assertEqual([], schema.validate_resolved_plan(applied))
+        return {
+            f"{c['package']}/{c['environment']}/{c['gate']}": (c["execution"], c["state"])
+            for c in applied["cells"]
+        }
+
+    def advance(self, relative: str, text: str) -> str:
+        self.write(relative, text)
+        self.git("commit", "-q", "-am", f"touch {relative}")
+        self.head = self.git("rev-parse", "HEAD")
+        self.plan_path.write_text(schema.canonical(self.plan()), encoding="utf-8")
+        return self.head
+
+    def test_proof_survives_a_failure_and_a_cancellation_and_the_retry_runs_only_the_rest(self) -> None:
+        self.add_note(
+            "wsl2-ubuntu",
+            self.collection([self.rig("alpha"), self.rig("beta")], environment="wsl2-ubuntu"),
+        )
+        failed_beta = self.hosted("beta", outcome="fail")
+        self.add_note(
+            "macos-latest", self.collection([self.hosted("alpha"), failed_beta])
+        )
+        # ubuntu-latest was cancelled before it recorded anything.
+        first = self.overlaid()
+        self.assertEqual(("reuse", "reused"), first["alpha/wsl2-ubuntu/L1"])
+        self.assertEqual(("reuse", "reused"), first["beta/wsl2-ubuntu/L1"])
+        self.assertEqual(("reuse", "reused"), first["alpha/macos-latest/L1"])
+        executing = sorted(key for key, (execution, _) in first.items() if execution == "execute")
+        self.assertEqual(
+            ["alpha/ubuntu-latest/L1", "beta/macos-latest/L1", "beta/ubuntu-latest/L1"], executing
+        )
+
+        # The retry passes the failed cell and runs the cancelled environment; the
+        # earlier proof is untouched.
+        self.add_note(
+            "macos-latest",
+            self.collection(
+                [
+                    self.hosted("alpha"),
+                    failed_beta,
+                    self.hosted("beta", retry_of=failed_beta["observation_id"]),
+                ]
+            ),
+        )
+        self.add_note(
+            "ubuntu-latest",
+            self.collection([self.hosted("alpha"), self.hosted("beta")], environment="ubuntu-latest"),
+        )
+        second = self.overlaid()
+        self.assertEqual({"reuse"}, {execution for execution, _ in second.values()})
+
+    def test_a_later_main_commit_reuses_unchanged_inputs_and_reruns_changed_ones(self) -> None:
+        for environment, kind in (("wsl2-ubuntu", "rig"), ("macos-latest", "hosted")):
+            made = self.rig if kind == "rig" else self.hosted
+            self.add_note(
+                environment,
+                self.collection([made("alpha"), made("beta")], environment=environment),
+            )
+        self.advance("docs/unrelated.md", "prose that no gate reads\n")
+        unchanged = self.overlaid()
+        for key in ("alpha/wsl2-ubuntu/L1", "beta/wsl2-ubuntu/L1", "alpha/macos-latest/L1"):
+            self.assertEqual(("reuse", "reused"), unchanged[key], key)
+        self.advance("pkg/alpha/src/lib.rs", "pub fn alpha() { /* changed again */ }\n")
+        changed = self.overlaid()
+        self.assertEqual(("execute", "pending"), changed["alpha/wsl2-ubuntu/L1"])
+        self.assertEqual(("execute", "pending"), changed["alpha/macos-latest/L1"])
+        self.assertEqual(("reuse", "reused"), changed["beta/wsl2-ubuntu/L1"])
+        self.assertEqual(("reuse", "reused"), changed["beta/macos-latest/L1"])
+
+    def test_a_warn_mode_failure_in_one_environment_does_not_hide_a_pass_in_another(self) -> None:
+        self.add_note(
+            "macos-latest", self.collection([self.observation("alpha", outcome="fail")])
+        )
+        self.add_note(
+            "wsl2-ubuntu",
+            self.collection([self.rig("alpha")], environment="wsl2-ubuntu"),
+        )
+        states = self.overlaid()
+        self.assertEqual(("execute", "pending"), states["alpha/macos-latest/L1"])
+        self.assertEqual(("reuse", "reused"), states["alpha/wsl2-ubuntu/L1"])
+
+    def test_an_unordered_rig_and_hosted_disagreement_executes_until_a_later_commit_settles_it(self) -> None:
+        self.add_note(
+            "wsl2-ubuntu",
+            self.collection(
+                [self.rig("beta"), self.hosted("beta", outcome="fail")], environment="wsl2-ubuntu"
+            ),
+        )
+        conflicted = self.overlaid()
+        self.assertEqual(("execute", "pending"), conflicted["beta/wsl2-ubuntu/L1"])
+        _, rejections = self.verify(report_probe=lambda report, observation: True)
+        self.assertTrue(any(r.startswith("conflicting-evidence") for r in rejections), rejections)
+
+        later = self.advance("docs/unrelated.md", "prose that no gate reads\n")
+        self.add_note(
+            "wsl2-ubuntu",
+            self.collection([self.rig("beta", duration_s=77)], environment="wsl2-ubuntu", commit=later),
+            later,
+        )
+        settled = self.overlaid()
+        self.assertEqual(("reuse", "reused"), settled["beta/wsl2-ubuntu/L1"])
+
+    def test_a_hosted_pass_whose_artifacts_expired_executes_while_the_rig_pass_stays_reusable(self) -> None:
+        self.add_note(
+            "wsl2-ubuntu", self.collection([self.rig("alpha")], environment="wsl2-ubuntu")
+        )
+        self.add_note("macos-latest", self.collection([self.hosted("alpha")]))
+        accepted, rejections = self.verify(report_probe=lambda report, observation: False)
+        self.assertEqual(["alpha/wsl2-ubuntu/L1"], self.keys(accepted))
+        self.assertTrue(
+            any(r.startswith("observation-report-unavailable") for r in rejections), rejections
+        )
 
 
 if __name__ == "__main__":

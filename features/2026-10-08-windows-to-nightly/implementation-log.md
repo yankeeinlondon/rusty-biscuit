@@ -47,6 +47,32 @@ docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
   - .claude/skills/rust-devops/ci-cd.md
   - .claude/skills/os/ci-evidence.md
+source_files_during_phase_4:
+  - scripts/cross-check.sh
+  - scripts/ci/schema.py
+  - scripts/ci/local_evidence.py
+  - scripts/ci/observation_notes.py
+  - scripts/ci/hosted_observations.py
+  - scripts/ci/affected_scope.py
+  - scripts/ci/test_evidence_reuse.py
+  - scripts/ci/test_cross_check.py
+  - scripts/ci/test_hosted_observations.py
+  - scripts/ci/test_affected_scope.py
+  - scripts/Cargo.toml
+  - tools/test-toolkit/tests/ci_workflow_contracts.rs
+  - .github/workflows/ci.yml
+  - .github/workflows/_package-ci.yml
+  - .github/workflows/_wsl-ci.yml
+  - .github/ci/schemas/contract.json
+docs_updated_during_phase_4:
+  - .github/ci/README.md
+  - .github/ci/schemas/README.md
+  - docs/topics/ci-cd.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/rust-devops/ci-cd.md
+  - .claude/skills/os/ci-evidence.md
+  - .claude/skills/os/build-hosts.md
 packages:
   - repo-deps
   - test-toolkit
@@ -662,3 +688,153 @@ per-field walk, and a duplicate-key walk of the plan reader.
 - `certify` needs the real job names; if `coverage-audit` ever gets a `name:`,
   update `reuse_validation.AUDIT_JOB`.
 - `workflow_dispatch` never anchors and never certifies.
+
+## Phase 4
+
+Rig and hosted cell producers (Waves 8-9). The rig side (`cross-check.sh`,
+`observation_notes.py` rig helpers) and the hosted side (`hosted_observations.py`,
+workflows, contracts) ran as two foreground subagents with disjoint file
+ownership; I owned the shared schema/verifier contract, the verifier wiring, the
+no-op republication fix, the recovery tests, the docs reconciliation, and the
+red-cell diagnosis. Rulings below are implementation assumptions pending author
+review.
+
+### What changed
+
+- **Proof contract** (`schema.py`, `contract.json`): `completion_record_digest` is
+  required of a *passing* `rig`/`hosted`/`seed` observation only, and a *failing*
+  one may omit `proof` entirely. Reason: `completion.py` refuses a run with a
+  failing test, so a completed failure has no completion record, yet it must stay
+  an observation that blocks reuse. New `PROOF_EXPECTED_FILE` /
+  `PROOF_COMPLETION_FILE` name the two documents a `rig`/`seed` proof cites,
+  inside `producer.host.report_dir`.
+- **Verifier** (`local_evidence.py`): `_proof_problem` rechecks those documents
+  byte for byte (and that the record is `complete: true` for the same
+  package/gate) when the producer's directory is on the reading host; another
+  host's directory is accepted with provenance. `verify --artifact-repo` builds
+  `hosted_observations.gh_probe` as `verify_cells`' `report_probe`; `ci.yml`
+  passes it.
+- **Publication** (`observation_notes.py`): republishing what a note already holds
+  no longer moves the notes ref (both the local write and the post-fetch union
+  are skipped when unchanged). Rig helpers `record_rig_cell` / `publish_rig_cell`
+  and `publish-receipt --kind rig`.
+- **Rig producers** (`cross-check.sh`): both remote legs build `expected-L1.json`
+  with `_expected_manifest` before the tests (a failure prints
+  `cross-check-manifest-exit` and does not stop the tests), copy the staging dir
+  to a per-run path, and `publish_rig_observation <os>` runs for WSL2 *and* native
+  Windows, **right after each leg**. It fetches the staging dir, qualifies the run
+  (exact tree, clean, unfiltered, archive mode), validates with `completion`
+  in-process on the orchestrating host (native Windows has no usable `python3`),
+  and publishes under the leg's own environment. A completed failure is published
+  as a failing observation; an incomplete run (missing/unexpected tests, zero
+  reports against a nonempty expectation, contradictory exit code) publishes
+  nothing. INT/TERM are trapped: an interrupted leg records nothing and earlier
+  legs' proof survives. Exit 75 prints as BUSY, ssh 255 as UNREACHABLE.
+- **Hosted producers** (`hosted_observations.py`, `_package-ci.yml`,
+  `_wsl-ci.yml`, `ci.yml`): scheduled-only `emit` step (`continue-on-error`,
+  `!cancelled()`) after the completion step uploads
+  `observation-<package>-<gate>-<environment>` for passes *and* honest failures;
+  a scheduled-only `publish-observations` job (`contents: write`, `actions: read`,
+  `always()`, not in `ci-gate`) validates and publishes them through
+  `observation_notes.publish`. `accepted-gaps` stays the sole `checks: write`
+  owner; PR permissions are unchanged.
+
+### Departures from the Phase 1 rulings (assumptions)
+
+- `proof` / `completion_record_digest` are conditional on outcome (above); the
+  ruling listed them as always required for non-hook kinds.
+- Rig proof documents live beside the report in a per-(cell, run) directory;
+  `producer.run_id` is set on rig observations and a second run of a cell at one
+  head links as a retry.
+- The hosted observation's environment is carried by an envelope
+  `{schema_version, environment, head, observation}` and `producer.host.label`
+  (the probe derives the conventional artifact name from it).
+- Hosted report artifacts keep the repository's default retention, so hosted proof
+  is reusable only as long as the artifacts live; an expired artifact makes the
+  cell execute with `observation-report-unavailable`.
+
+### Requirement-to-test mapping
+
+| Behavior | Test |
+|---|---|
+| Proof contract: pass needs all four; fail may omit record or proof; matrix of absent/null/wrong type per proof field | `test_evidence_reuse.ObservationReportTests` (`..._without_a_record_or_proof_is_invalid`, `test_a_rig_failure_*`), `ObservationMatrixTests.test_producer_and_proof_fields` |
+| Rig proof rechecked byte for byte; record for another cell is not proof | `ObservationReportTests.test_a_rig_pass_is_rechecked_against_the_documents_its_proof_cites`, `...test_a_record_that_certifies_another_cell_is_not_proof` |
+| WSL2 and native Windows each credited only in their own environment; sequential packages unioned; declined later cell leaves earlier proof | `test_evidence_reuse.RigProducerToReuseTests` |
+| Completed failure published and blocks an older pass; incomplete runs publish nothing; qualification refusals; publication failure keeps proof local; separate per-run directories; tampered proof not credited | `RigFailureAndIncompleteTests`, `RigQualificationTests` |
+| `cross-check.sh` end to end with stub ssh/scp, real publisher and `completion.py`, bare origin: per-leg publication before the next leg, interruption keeps the first leg, BUSY/UNREACHABLE, native mode publishes nothing | `test_cross_check.RigPublicationRunTests`, `RigPublicationContractTests` |
+| Hosted emit (pass, WSL2, honest failure, 14-row refusal matrix), publish (idempotent, unrelated failure, cancellation-before-publication, invalid observation, push denied keeps proof local), discovery (matching bytes credit; altered/expired/deleted/API-down do not; failure still blocks), field matrix | `test_hosted_observations` (33 tests) |
+| Workflow structure: emit/upload on `!cancelled()` + schedule, read-only producers, publisher trusted/outside the gate, verifier gets `--artifact-repo` | `ci_workflow_contracts.rs` (5 new tests) |
+| Republishing does not move the notes ref | `PublicationTests.test_republishing_does_not_move_the_notes_ref` |
+| Partial recovery through one verifier and overlay: pass survives a failure and a cancellation and the retry runs only the rest; later `main` commit reuses unchanged and reruns changed inputs; warn-mode failure does not hide another environment's pass; unordered rig/hosted disagreement executes until a later commit settles it; expired hosted artifacts execute while the rig pass stays reusable | `PartialRecoveryTests` (5 tests) |
+
+### Recovery targets re-read (2026-10-11)
+
+`gh run view 38059157100 --log-failed` (read-only) and targeted rig runs:
+
+- `reaper`, `reaper-cli`, `ui`, `agent-sandbox-cli`, `research-cli`: each ran
+  **"0 tests run"** on the hosted guest. These packages contain no tests at all
+  (0 `#[test]` in `reaper/lib`, `reaper/cli`, `tabby/ui`, `agent-sandbox/cli`,
+  `research/cli`), the plan still schedules an L1 cell, and `completion.py`
+  refuses an empty expectation (`completion-expected-empty`). Reproduced on
+  `build-win` with `just cross-check reaper --os wsl`: 0 expected, 0 run. **Not
+  fixed**: relaxing the check changes a deliberate safety contract. Raised as a
+  human-review item in the spec with options and a recommendation.
+- `claudine-cli`: one test timed out on the hosted guest at 100 s
+  (`commands::wrap::exec::spawn::descendants::tests::a_descendant_outside_the_group_is_terminated_after_its_parent_dies`).
+  On the rig the same package ran **3617 passed, 304 skipped in 52 s**. Not
+  reproduced; hosted-WSL-specific and load-dependent. Unresolved.
+
+### Real rig results (from the rig subagent)
+
+`just cross-check biscuit-file` on both rigs produced `expected-L1.json` (WSL2: 1062
+tests, `x86_64-unknown-linux-gnu`; native Windows: 1054, `x86_64-pc-windows-msvc`;
+`build-win-native` has Cygwin `jq`), and fetched the staging dir. From a pristine
+scratch clone with a local bare remote, each rig published a passing `rig`
+observation and `local_evidence.py verify --cells` credited exactly the matching
+environment's cell; a deliberately failing test published a failing observation.
+Nothing was pushed to GitHub. A native Windows failing test, a real Ctrl-C, and a
+real busy lock were not exercised on a rig (stub-tested only).
+
+### Gates run (macOS, local)
+
+- Python unittest: `test_evidence_reuse` 172, `test_schema` 200, `test_cross_check`
+  52, `test_completion` 74, `test_hosted_observations` 33, `test_reuse_validation`
+  42, `test_local_evidence` 23, `test_resolved_plan` 103 - all pass;
+  `test_affected_scope` 453 passed (hosted agent, after the registry change).
+- `CDPATH= bash .githooks/tests/test-pre-push.sh`: 0 failed. `shellcheck -S warning`
+  on `cross-check.sh` and the hook: clean. `actionlint .github/workflows/*.yml`: clean.
+- `cargo nextest run -p test-toolkit`: 473 passed. `-p repo-deps`: 490 passed
+  (the `slow_real_package_archives_...` test took 75 s but passed this time).
+- Not run: `just lint` (no Python linter wired; Rust changes are tests only),
+  `just test-l2`, a hosted run, a real Ctrl-C on a rig.
+
+### Skipped / unverified
+
+- Whether rulesets let `GITHUB_TOKEN` push `refs/notes/*`; publisher behavior on a
+  real cancellation; re-run attempts repeating an artifact name; the Windows-host
+  path of the WSL `emit` step; `gh api .../zip` on a real runner.
+- A side effect to know: the rig subagent's scratch rehearsal deleted three warm
+  clones on `build-win-native` (the prune keeps only clones of worktrees the local
+  repo lists). They hold no unique work and re-clone cold; recorded in
+  `build-hosts.md`.
+
+### OS evidence
+
+macOS locally; WSL2 and native Windows via `just cross-check` and the scratch-clone
+rehearsal above. Linux was not exercised (the Linux rig does not produce a scheduled
+environment). Python code uses list argv and `pathlib` only; hosted Windows runs set
+`PYTHONUTF8=1`.
+
+### Notes for later phases
+
+See `message_to_agent` in the spec. Phase 5's seed should reuse
+`publish_rig_observation` and keep one evidence directory per (cell, run).
+
+### Phase 4 close-out (2026-10-11)
+
+- Phase 4 left `test_ci_local.py` red: 29 `WorkflowScopeStepTests` failed
+  because the scope step now passes `--artifact-repo "$GITHUB_REPOSITORY"` and
+  the step harness did not emulate that Actions variable. The harness now sets
+  it; 103 pass.
+- The spec frontmatter carried two `message_to_agent` keys; they are merged,
+  Phase 4's notes first.

@@ -918,12 +918,27 @@ OBSERVATION_PRODUCER_FIELDS: dict[str, bool] = {
     "seed_id": False,
 }
 
+#: What a `rig`, `hosted`, or `seed` producer cites to show the cell ran the work
+#: the plan scheduled. `completion_record_digest` is required of a passing cell
+#: only: `completion.py` refuses a run with a failing test, so a completed
+#: failure has no record to cite, and the failure still blocks reuse without
+#: one. A failing observation may also omit `proof` altogether, because a
+#: failure needs no proof that everything else ran.
 OBSERVATION_PROOF_FIELDS: dict[str, bool] = {
     "nextest_version": True,
     "target": True,
     "expected_listing_digest": True,
-    "completion_record_digest": True,
+    "completion_record_digest": False,
 }
+
+#: Where a `rig` or `seed` producer retains the two documents its proof cites,
+#: inside `producer.host.report_dir`. The proof carries only their digests, so
+#: a reader on the producing host can recheck them byte for byte and a reader
+#: elsewhere accepts them with provenance, as it does a `host-dir` report. A
+#: directory therefore holds one run of one cell: a second run of the same
+#: cell would replace the documents the first run's digests name.
+PROOF_EXPECTED_FILE = "{package}-{gate}.expected.json"
+PROOF_COMPLETION_FILE = "{package}-{gate}.completion.json"
 
 OBSERVATION_REPORT_FIELDS: dict[str, bool] = {
     "path": True,
@@ -2721,10 +2736,11 @@ def validate_observation(observation: Any, environment: str) -> list[str]:
                 "through its report counts and carries no proof"
             )
     elif "proof" not in observation:
-        problems.append(
-            f"observation-proof-missing: {label} is a {kind!r} observation and "
-            "names no proof"
-        )
+        if not (isinstance(observation.get("cell"), dict) and observation["cell"].get("outcome") == "fail"):
+            problems.append(
+                f"observation-proof-missing: {label} is a {kind!r} observation and "
+                "names no proof"
+            )
     else:
         proof = observation["proof"]
         problems += _keys(f"{label} proof", proof, OBSERVATION_PROOF_FIELDS)
@@ -2734,6 +2750,15 @@ def validate_observation(observation: Any, environment: str) -> list[str]:
                 for name in OBSERVATION_PROOF_FIELDS
                 if name in proof and (not isinstance(proof[name], str) or not proof[name])
             ]
+            if (
+                isinstance(observation.get("cell"), dict)
+                and observation["cell"].get("outcome") == "pass"
+                and "completion_record_digest" not in proof
+            ):
+                problems.append(
+                    f"observation-proof-missing: {label} passed and its proof cites "
+                    "no completion record"
+                )
 
     cell = observation["cell"]
     problems += receipt_cell_problems(cell, environment)
