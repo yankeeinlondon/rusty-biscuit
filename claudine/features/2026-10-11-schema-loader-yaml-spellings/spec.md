@@ -28,29 +28,25 @@ $schema:
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-11
-review_iterations: 0
+review_iterations: 2
+completed: true
 human_review: false
 message_to_agent: |-
-  Phase 3 is complete. Read the "Phase 3" section of implementation-log.md
-  first. Facts the Phase 4 (docs and final verification) agent needs:
+  All four phases are implemented; read the "Phase 4" section of
+  implementation-log.md first. Status is "implementation complete, ready for
+  review". For a reviewer:
 
-  1. DMLS changes to document, in comments and the docs/ topic pages:
-     - `diagnostics/frontmatter.rs::grammar_token_span` ranges a standalone
-       definition's grammar error at the offending token. It projects the
-       error's expression-relative span through the scalar decoder. This now
-       applies to single-line definitions too, so `t: string(min(1);
-       bogus(2))` underlines `bogus`. The frontmatter inline `$schema` path is
-       unchanged.
-     - `providers/frontmatter.rs`: completion follows a plain scalar continued
-       onto later lines (`continued_scalar_holder`), and an indentless `- `
-       item at any column finds its parent key (`enclosing_path_by_indent`,
-       `is_sequence_item_line`).
-  2. `darkmatter/docs/topics/schemas/definition.md` ("Source-Aware
-     Presentation Boundary") has not been updated yet; that is Wave 6. No
-     docs, README, or skill file was touched in Phases 1-3.
-  3. The spec claims the description-only fold example failed with the
-     projection error. Phase 1 found that it actually loaded with a truncated
-     span. Docs should describe current behavior, not that claim.
+  1. Two recorded departures to weigh: grammar-error token ranging in DMLS
+     also applies to single-line standalone definitions (not only folded
+     ones), and the spec's description-only fold example originally loaded
+     with a truncated span rather than failing as the spec stated.
+  2. Behavior is documented in darkmatter/docs/topics/schemas/definition.md
+     ("Source-Aware Presentation Boundary"), darkmatter/dmls/docs/diagnostics.md
+     ("Ranging"), and docs/topics/schemas/dmls-schema-support.md. Every doc
+     example was checked against the real `md` binary.
+  3. Local evidence is macOS only (darkmatter 9150 passed / 11 skipped; lint
+     clean). No OS-specific code changed; CI covers the other environments.
+implemented: true
 pipeline_step: 1
 related:
     - 2026-10-20-lifecycle-grammar

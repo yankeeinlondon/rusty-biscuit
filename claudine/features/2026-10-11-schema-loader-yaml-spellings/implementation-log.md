@@ -47,6 +47,58 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+  - darkmatter/lib/src/markdown/schemas/simplified/source.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/cursor.rs
+  - darkmatter/dmls/src/providers/frontmatter.rs
+docs_updated_during_phase_4:
+  - darkmatter/docs/topics/schemas/definition.md
+  - darkmatter/docs/topics/schemas/dmls-schema-support.md
+  - darkmatter/dmls/docs/diagnostics.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/darkmatter/schema.md
+  - .claude/skills/darkmatter/compose.md
+source_code:
+  - darkmatter/lib/src/markdown/schemas/simplified/source.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/standalone.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/yaml_scalar.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/cursor.rs
+  - darkmatter/lib/tests/l1/schema_yaml_spellings.rs
+  - darkmatter/lib/tests/l1/main.rs
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/tagged.conventional.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/tagged.serialized.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/nested.conventional.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/nested.serialized.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/root-union.conventional.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/root-union.serialized.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/anchors.conventional.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/anchors.indentless.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/spec-indentless.conventional.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/spec-indentless.indentless.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/spec-continued.conventional.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/spec-continued.continued.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/continued.conventional.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/continued.continued.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/blank-line.conventional.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/blank-line.continued.yaml
+  - darkmatter/dmls/src/overlay/frontmatter.rs
+  - darkmatter/dmls/src/overlay/suggestions.rs
+  - darkmatter/dmls/src/diagnostics/frontmatter.rs
+  - darkmatter/dmls/src/providers/frontmatter.rs
+  - darkmatter/dmls/tests/l1/lsp_session.rs
+  - darkmatter/dmls/tests/l1/schema_yaml_spellings.rs
+  - darkmatter/dmls/tests/l1/main.rs
+  - darkmatter/cli/tests/l1/schema_validate.rs
+documentation:
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/README.md
+  - darkmatter/docs/topics/schemas/definition.md
+  - darkmatter/docs/topics/schemas/dmls-schema-support.md
+  - darkmatter/dmls/docs/diagnostics.md
+  - .claude/skills/darkmatter/schema.md
+  - .claude/skills/darkmatter/compose.md
+completed_phase: 4
+implemented: true
 packages:
   - darkmatter
   - dmls
@@ -405,3 +457,137 @@ tests are in `darkmatter/cli/tests/l1/schema_validate.rs`.
   changed. CI covers the other environments.
 
 Phase 3 status: complete.
+
+## Phase 4
+
+### Wave 6 — Behavior Documentation (Update Boundary)
+
+Docs (current-behavior record, no feature references):
+
+- `darkmatter/docs/topics/schemas/definition.md`, "Source-Aware Presentation
+  Boundary". This section now lists both new spellings in the accepted
+  presentations. It adds compact examples for an indentless union with a
+  sibling, a continued type expression, constraint list, and description, and
+  blank-line folding (shown equal to the quoted `\n` spelling). It explains
+  where a continued value ends, that folding never makes an invalid
+  expression valid, and how byte ranges work: original buffer, LF/CRLF kept,
+  continuation tokens ranged on their own line, cross-fold expressions given
+  one enclosing range, and DMLS converting ranges to the negotiated editor
+  encoding. It restates the unchanged exclusions with the actual failure
+  message, and notes that frontmatter's tolerance does not extend to schema
+  files.
+- `darkmatter/dmls/docs/diagnostics.md` ("Ranging"): a standalone
+  `invalid_type_definition` grammar error is ranged at the offending token
+  (the spec's `bogus` example). It falls back to the whole value when the
+  token cannot be placed exactly, and is never given an empty range.
+- `darkmatter/docs/topics/schemas/dmls-schema-support.md` (Diagnostics): the
+  same token ranging, plus hover and completion on continuation lines and
+  indentless items, and position-encoding conversion.
+
+Every doc example was checked against the real `md` binary before being
+written down. The first draft of the continued-constraint example used `,`
+between constraints, and `md schema validate` rejected it ("expected `;` or
+`)` between constraints"). It now uses `;`. With `;`, a valid instance passes,
+and an over-length one fails on `max(8)` with the folded description intact.
+The blank-line example validates. A `!!str` sibling fails with "could not
+project SimplifiedSchema expression spans through YAML source", which is the
+message the doc quotes.
+
+Code comments:
+
+- `source.rs` module `//!` "V1 presentation boundary" still described the old
+  boundary. It now names continued plain scalars and parent-aligned block
+  sequences, and lists the excluded tags, block scalars, and quoted
+  continuations; "may return a projection error" became "return".
+  The per-function locator, tolerant-locator, and suggestion-scanner comments
+  were already corrected in Phase 2, and `yaml_scalar.rs` too. No comment
+  still claims that strict parsing rejects all multi-line scalars.
+- `cursor.rs` `//!`: names continuation-line text among the presentations that
+  project to authored ranges (behavior pinned in Phase 2, comment lagged).
+- `dmls/src/providers/frontmatter.rs::enclosing_path`: the doc comment said
+  "Empty for a top-level line". That drifted in Phase 3, because a column-0
+  `- ` item now belongs to the key above it. Corrected.
+
+Skills:
+
+- `.claude/skills/darkmatter/compose.md` claimed that schema documents "keep
+  the closed v1 grammar that rejects" block *and multi-line* scalars. That
+  drift is now fixed: the strict and tolerant grammars share indentless
+  sequences and continued plain scalars, and only tolerant follows the rest.
+- `.claude/skills/darkmatter/schema.md` gained a short "source spans" note
+  for agents. It covers the one locator with two grammars, the
+  full-consumption and `serde_yaml_ng` agreement checks, and the hidden
+  coupling found in Phase 2: a source-aware slice must start at a line
+  boundary, and DMLS uses `line_aligned_span`. It also says to never add a
+  third locator.
+- READMEs (`darkmatter/lib`, `dmls`): no public claim conflicts; unchanged.
+  No dependency change, so no `dependencies.md` change.
+- The `claudine` skill needed no change. This work does not touch Claudine
+  behavior.
+
+### Wave 7 — Final Verification (Run Gates)
+
+- `just test` in `darkmatter/`: **9150 passed, 11 skipped, 0 failed** (two
+  runs; the 11 are the recipe's standing skips). The log confirms that the
+  required suites ran and passed. That includes all 28 lib/DMLS
+  `schema_yaml_spellings::` tests, the six robustness-matrix runs (eight
+  matching names), `strict_source_aware_parsing_keeps_every_other_presentation_closed`,
+  `schemas_source_projection`, the CLI `schema_validate` spelling tests, and
+  the shipped-corpus, anchor/alias, and tolerant-frontmatter tests. No test
+  was reported SLOW.
+- `just lint` in `darkmatter/`: clean (0 warnings or errors).
+- `just test` in `claudine/`: 8673 passed, 9 skipped. `just lint` in
+  `claudine/`: exit 0; the only output line is the pre-existing macOS linker
+  note `__eh_frame section too large`, which is not a clippy finding.
+- `just check-tier-coverage darkmatter`: 0 stranded tests.
+- Portability review: the fixtures are `eol: lf` (`git check-attr`). CRLF
+  cases are built as explicit strings. CLI tests use `CliProcessFixture`
+  (isolated home and CWD) with runtime temp paths. DMLS tests use the
+  in-memory LSP harness with `Url::from_file_path` on temp dirs. No `cfg`
+  code, shell setup, or window focus is involved. Local evidence is
+  **macOS only**. No cross-OS run was made: every change is in-memory string
+  processing or a comment, so there is no OS-specific risk to probe. The tests
+  remain eligible for the existing Linux/Windows/WSL2 CI coverage, and no CI
+  cells were added.
+- Diff review against acceptance criteria 1–7, over the feature commits
+  `3010cee8b..HEAD` plus this phase:
+  1. Library structural equality and CLI valid/invalid validation:
+     `presentation_pairs_load_with_equal_semantics_and_keep_their_siblings`,
+     `schema_yaml_spellings_resolve_to_conventional_json_schema`, and
+     `schema_validate_applies_*`.
+  2. Both envelopes, the indentless pure root union, the nested arm, compact
+     mappings, siblings, and `types` sequence rejection:
+     `indentless_sequences_project_each_arm_and_stop_at_the_sibling`,
+     `schema_validate_applies_indentless_pure_root_union`, and
+     `schema_validate_rejects_indentless_types_sequence`.
+  3. Folds, blank lines, comments, and no final newline, decoded the same as
+     `serde_yaml_ng`: `folded_values_decode_like_the_yaml_parser_and_match_single_line_semantics`
+     and `a_blank_line_in_a_continued_scalar_decodes_like_the_yaml_parser`.
+  4. Exact structural and suggestion ranges, the advisory lint, repeated
+     definitions, CRLF, non-ASCII text, and offsets: the Phase 2 range tests
+     and `a_lint_invalid_suggestion_on_a_continuation_line_stays_advisory_and_exact`.
+  5. DMLS `bogus` ranging, hover, completion, and UTF-16: the Phase 3 DMLS
+     tests.
+  6. Strict exclusions stay closed and wrapped in `SchemaDocument`; the
+     tolerant and anchor tests still pass.
+  7. The corpus, the gates, and L1 portability, as recorded above.
+- Envelope recognition, raw JSON Schema interpretation, and the public
+  `SchemaError::SchemaDocument` shape are unchanged. `standalone.rs` only
+  stopped calling `project_suggestion_spans`, because the payload path now
+  projects per path (Phase 2).
+- Smell grep over added source lines: one `unwrap_or_default`, in DMLS
+  `is_sequence_item_line`. It is an editor-only lexical check where a missing
+  line means "not a list item", so it reads no load-bearing input. There is
+  no `#[serde(default)]`, `filter_map(as_str)`, or new load-bearing `.ok()`.
+
+### Departures from the spec (recorded here, spec left as decided)
+
+- Phase 1 found that the spec's description-only fold example loaded with a
+  truncated span; it did not fail with the projection error as the spec
+  claimed. The docs describe current behavior, which now loads correctly.
+- Phase 3 extended token-level grammar-error ranging to *single-line*
+  standalone definitions as well (`t: string(min(1); bogus(2))` underlines
+  `bogus`). The docs state this generally ("ranged at the offending token").
+
+Phase 4 status: **implementation complete, ready for review.** The author
+owns moving the feature to `_completed`.

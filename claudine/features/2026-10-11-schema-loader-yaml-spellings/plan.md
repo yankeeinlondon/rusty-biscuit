@@ -48,6 +48,58 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+  - darkmatter/lib/src/markdown/schemas/simplified/source.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/cursor.rs
+  - darkmatter/dmls/src/providers/frontmatter.rs
+docs_updated_during_phase_4:
+  - darkmatter/docs/topics/schemas/definition.md
+  - darkmatter/docs/topics/schemas/dmls-schema-support.md
+  - darkmatter/dmls/docs/diagnostics.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/darkmatter/schema.md
+  - .claude/skills/darkmatter/compose.md
+source_code:
+  - darkmatter/lib/src/markdown/schemas/simplified/source.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/standalone.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/yaml_scalar.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/cursor.rs
+  - darkmatter/lib/tests/l1/schema_yaml_spellings.rs
+  - darkmatter/lib/tests/l1/main.rs
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/tagged.conventional.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/tagged.serialized.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/nested.conventional.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/nested.serialized.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/root-union.conventional.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/root-union.serialized.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/anchors.conventional.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/anchors.indentless.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/spec-indentless.conventional.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/spec-indentless.indentless.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/spec-continued.conventional.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/spec-continued.continued.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/continued.conventional.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/continued.continued.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/blank-line.conventional.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/blank-line.continued.yaml
+  - darkmatter/dmls/src/overlay/frontmatter.rs
+  - darkmatter/dmls/src/overlay/suggestions.rs
+  - darkmatter/dmls/src/diagnostics/frontmatter.rs
+  - darkmatter/dmls/src/providers/frontmatter.rs
+  - darkmatter/dmls/tests/l1/lsp_session.rs
+  - darkmatter/dmls/tests/l1/schema_yaml_spellings.rs
+  - darkmatter/dmls/tests/l1/main.rs
+  - darkmatter/cli/tests/l1/schema_validate.rs
+documentation:
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/README.md
+  - darkmatter/docs/topics/schemas/definition.md
+  - darkmatter/docs/topics/schemas/dmls-schema-support.md
+  - darkmatter/dmls/docs/diagnostics.md
+  - .claude/skills/darkmatter/schema.md
+  - .claude/skills/darkmatter/compose.md
+completed_phase: 4
+implemented: true
 packages:
   - darkmatter
   - dmls
@@ -165,7 +217,7 @@ Prerequisite: Phase 3 consumer results agree with library behavior.
 
 ### Wave 6 — Behavior Documentation
 
-- [ ] **Update Boundary**
+- [x] **Update Boundary**
   - Update `darkmatter/docs/topics/schemas/definition.md`, especially “Source-Aware Presentation Boundary,” with compact indentless and physically continued plain-scalar examples, sibling behavior, blank-line folding, authored ranges, and unchanged exclusions. Keep docs self-contained and free of feature-directory references.
   - Update locator, suggestion-projector, tolerant-locator, cursor, and DMLS comments wherever behavior changed; remove claims that strict parsing rejects all multiline scalars. Preserve useful contracts rather than narrating implementation steps.
   - Update `.claude/skills/darkmatter/schema.md` if its boundary notes need clarification. Inspect the area README and change it only if a public claim conflicts. No dependency-doc change is needed without a dependency change.
@@ -173,7 +225,7 @@ Prerequisite: Phase 3 consumer results agree with library behavior.
 
 ### Wave 7 — Final Verification
 
-- [ ] **Run Gates**
+- [x] **Run Gates**
   - Run `just test` and then `just lint` in `darkmatter/`, sequentially; these cover library, CLI, and DMLS through the existing recipes. Do not run a workspace-wide gate or add an L2/L3/browser run for this passive parser change. Respect the prohibition on running `cargo fmt`; if lint exposes formatting drift, correct only touched lines manually.
   - Confirm the shipped schema corpus, supported anchor/alias tests, tolerant-frontmatter tests, strict exclusion tests, robustness matrix, source-range tests, and existing normal-invocation tests actually ran and passed. Use existing recipe filters for focused iteration before the final full area run.
   - Review portability of fixtures: explicit LF/CRLF strings, isolated homes/CWD, runtime fixture paths, and no shell-dependent setup or focus changes. Tests must remain eligible for existing macOS/Linux/Windows/WSL2 coverage; report only environments actually evidenced locally, without adding CI cells.
