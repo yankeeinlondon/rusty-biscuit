@@ -39,7 +39,7 @@ use crate::markdown::schemas::errors::SchemaError;
 
 use super::{
     SchemaDeclaration, SchemaSourceMap, SimplifiedSchema, SuggestionLintProblem, lint_suggestions,
-    project_suggestion_spans, source::parse_standalone_schema_payload_with_source,
+    source::parse_standalone_schema_payload_with_source,
 };
 
 /// The content envelope used by a standalone SimplifiedSchema document.
@@ -182,9 +182,6 @@ pub fn parse_standalone_schema_document(
         })?;
     let suggestion_lints = match &mut parsed.value {
         SchemaDeclaration::Schema(schema) => {
-            project_suggestion_spans(schema, source, 0).map_err(|error| {
-                schema_document_error(path, format!("invalid SimplifiedSchema payload: {error}"))
-            })?;
             lint_suggestions(schema).map_err(|error| {
                 schema_document_error(path, format!("could not lint SimplifiedSchema payload: {error}"))
             })?

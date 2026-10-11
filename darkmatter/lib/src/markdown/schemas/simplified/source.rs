@@ -133,16 +133,25 @@ pub struct SourceAware<T> {
 /// Parses one property definition and projects its structure into authored
 /// source byte ranges.
 ///
-/// `yaml_source` must be the authored YAML representation of `value` itself.
+/// `yaml_source` must be the authored YAML representation of `value` itself,
+/// starting at a line boundary or dedented (see [`locate_schema_value`]).
 /// `source_offset` moves all returned spans into the caller's document.
+///
+/// ## Errors
+///
+/// A grammar error from the semantic parser, or the projection error when the
+/// source is outside the strict presentation grammar or does not decode to
+/// `value`.
 pub fn parse_property_definition_with_source(
     property: &str,
     value: &YamlValue,
     yaml_source: &str,
     source_offset: usize,
 ) -> Result<SourceAware<PropertyDef>, SchemaError> {
-    let value = parse_property_definition(property, value)?;
+    let parsed = parse_property_definition(property, value)?;
     let located = locate_yaml_value(yaml_source)?;
+    verify_located(&located, value)?;
+    let value = parsed;
     let mut source_map = SchemaSourceMap::default();
     project_property_source(
         &value,
@@ -161,8 +170,10 @@ pub fn parse_schema_declaration_with_source(
     yaml_source: &str,
     source_offset: usize,
 ) -> Result<SourceAware<SchemaDeclaration>, SchemaError> {
-    let value = parse_schema_declaration(value)?;
+    let parsed = parse_schema_declaration(value)?;
     let located = locate_yaml_value(yaml_source)?;
+    verify_located(&located, value)?;
+    let value = parsed;
     let mut source_map = SchemaSourceMap::default();
     let root = SchemaSourcePath::root();
     source_map.insert(
@@ -192,7 +203,7 @@ pub(super) fn parse_standalone_schema_payload_with_source(
     yaml_source: &str,
     payload_key: &str,
 ) -> Result<SourceAware<SchemaDeclaration>, SchemaError> {
-    let value = parse_schema_declaration(value)?;
+    let parsed = parse_schema_declaration(value)?;
     let located = locate_yaml_value(yaml_source)?;
     let LocatedKind::Mapping(pairs) = &located.kind else {
         return Err(projection_error());
@@ -202,18 +213,130 @@ pub(super) fn parse_standalone_schema_payload_with_source(
         .find(|pair| pair.key == payload_key)
         .map(|pair| &pair.value)
         .ok_or_else(projection_error)?;
+    verify_located(payload, value)?;
+    let mut value = parsed;
     let mut source_map = SchemaSourceMap::default();
     let root = SchemaSourcePath::root();
     source_map.insert(&root, SchemaSpanKind::Declaration, payload.span.clone());
-    match &value {
+    match &mut value {
         SchemaDeclaration::Reference(_) => {
             record_scalar_content(payload, &root, SchemaSpanKind::FileReference, 0, &mut source_map)?;
         }
         SchemaDeclaration::Schema(schema) => {
             project_schema_source(schema, payload, 0, &mut source_map)?;
+            project_located_schema_suggestions(schema, payload)?;
         }
     }
     Ok(SourceAware { value, source_map })
+}
+
+/// Projects every `suggest(...)` candidate span through the located scalar
+/// authoring its own definition, the same decoded coordinates the structural
+/// source map uses, so identical definitions cannot trade spans.
+///
+/// An alias stands for a definition authored elsewhere; one carrying
+/// suggestions has no scalar of its own to project into and is a projection
+/// error.
+fn project_located_schema_suggestions(
+    schema: &mut SimplifiedSchema,
+    located: &LocatedValue,
+) -> Result<(), SchemaError> {
+    match (schema, &located.kind) {
+        (SimplifiedSchema::Single(shape), LocatedKind::Mapping(_)) => {
+            project_located_shape_suggestions(shape, located)
+        }
+        (SimplifiedSchema::Union(arms), LocatedKind::Sequence(items))
+            if arms.len() == items.len() =>
+        {
+            for (arm, item) in arms.iter_mut().zip(items) {
+                if let SchemaArm::Inline(shape) = arm {
+                    project_located_shape_suggestions(shape, item)?;
+                }
+            }
+            Ok(())
+        }
+        (schema, LocatedKind::Scalar(scalar)) if scalar.decoded().starts_with('*') => {
+            let suggests = |shape: &SchemaShape| {
+                shape.properties.values().any(property_has_suggestions)
+                    || shape.pattern_keys.iter().any(|pattern| property_has_suggestions(&pattern.def))
+            };
+            let has_suggestions = match schema {
+                SimplifiedSchema::Single(shape) => suggests(shape),
+                SimplifiedSchema::Union(arms) => arms.iter().any(|arm| match arm {
+                    SchemaArm::Inline(shape) => suggests(shape),
+                    SchemaArm::FileRef(_) => false,
+                }),
+            };
+            if has_suggestions { Err(projection_error()) } else { Ok(()) }
+        }
+        _ => Err(projection_error()),
+    }
+}
+
+fn project_located_shape_suggestions(
+    shape: &mut SchemaShape,
+    located: &LocatedValue,
+) -> Result<(), SchemaError> {
+    let LocatedKind::Mapping(pairs) = &located.kind else {
+        return Err(projection_error());
+    };
+    for pair in pairs {
+        if pair.key == "$constraints" {
+            continue;
+        }
+        let definition = match shape.properties.get_mut(&pair.key) {
+            Some(definition) => definition,
+            None => {
+                let key = super::PatternKey::parse(&pair.key).map_err(|_| projection_error())?;
+                shape
+                    .pattern_keys
+                    .iter_mut()
+                    .find(|pattern| pattern.key == key)
+                    .map(|pattern| &mut pattern.def)
+                    .ok_or_else(projection_error)?
+            }
+        };
+        project_located_property_suggestions(definition, &pair.value)?;
+    }
+    Ok(())
+}
+
+fn project_located_property_suggestions(
+    definition: &mut PropertyDef,
+    located: &LocatedValue,
+) -> Result<(), SchemaError> {
+    if let LocatedKind::Scalar(scalar) = &located.kind
+        && scalar.decoded().starts_with('*')
+    {
+        return if property_has_suggestions(definition) {
+            Err(projection_error())
+        } else {
+            Ok(())
+        };
+    }
+    match (definition, &located.kind) {
+        (PropertyDef::Single(atom), _) => project_located_atom_suggestions(atom, located),
+        (PropertyDef::Union(atoms), LocatedKind::Sequence(items)) if atoms.len() == items.len() => {
+            for (atom, item) in atoms.iter_mut().zip(items) {
+                project_located_atom_suggestions(atom, item)?;
+            }
+            Ok(())
+        }
+        _ => Err(projection_error()),
+    }
+}
+
+fn project_located_atom_suggestions(
+    atom: &mut PropertyAtom,
+    located: &LocatedValue,
+) -> Result<(), SchemaError> {
+    match (&mut atom.ty, &located.kind) {
+        (TypeExpr::InlineObject(shape), LocatedKind::Mapping(_)) => {
+            project_located_shape_suggestions(shape, located)
+        }
+        (_, LocatedKind::Scalar(scalar)) => project_atom_suggestions(atom, scalar, 0),
+        _ => Err(projection_error()),
+    }
 }
 
 /// One authored node inside a schema value, with its exact source span.
@@ -289,6 +412,16 @@ pub struct SchemaValueEntry {
 /// byte offset in the caller's document. The source is never
 /// line-ending-normalized.
 ///
+/// Indentation decides where a continued plain scalar ends, so `yaml_source`
+/// must start at a line boundary, including the first line's indentation, or
+/// be dedented as a whole. A slice starting at a block mapping's first key
+/// reads that key at column 0 and its siblings as continuation text.
+///
+/// The grammar is strict: indentless block sequences and plain scalars
+/// continued onto more-indented lines are followed, and every non-comment
+/// line must belong to the value. Block scalars, tags, multi-line quoted
+/// scalars, and empty (null) values are not.
+///
 /// ## Returns
 ///
 /// `None` when the text is not a locatable YAML block or flow node — the signal
@@ -300,16 +433,17 @@ pub fn locate_schema_value(yaml_source: &str, source_offset: usize) -> Option<Sc
 }
 
 /// [`locate_schema_value`] for a document's frontmatter, which also follows a
-/// literal (`|`) or folded (`>`) block scalar and a multi-line quoted or plain
-/// scalar over its continuation lines instead of giving up.
+/// literal (`|`) or folded (`>`) block scalar, a multi-line quoted scalar, a
+/// tag, and an empty value instead of giving up, and does not require every
+/// line to belong to the value.
 ///
-/// Schema documents keep [`locate_schema_value`]'s closed v1 grammar, which
+/// Schema documents keep [`locate_schema_value`]'s strict grammar, which
 /// rejects those presentations.
 pub(crate) fn locate_frontmatter_value(
     yaml_source: &str,
     source_offset: usize,
 ) -> Option<SchemaValueNode> {
-    locate_yaml_value_with(yaml_source, true)
+    locate_yaml_value_with(yaml_source, LocatorGrammar::Tolerant)
         .ok()
         .map(|located| public_node(&located, source_offset))
 }
@@ -365,13 +499,30 @@ struct SourceLine {
     content_start: usize,
 }
 
+/// Which YAML presentations [`BlockLocator`] follows.
+///
+/// Both grammars accept a block sequence aligned with its parent key
+/// (`key:\n- a`), including after a mapping-value anchor, and a plain scalar
+/// continued onto more-indented lines.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LocatorGrammar {
+    /// The closed schema-document grammar. Every non-comment source line must
+    /// belong to the located node, so a presentation the locator does not
+    /// model fails instead of leaving lines unread.
+    Strict,
+    /// Frontmatter lookup, which also follows tags, block scalars, multi-line
+    /// quoted scalars, empty (null) values, and compact sequence items wider
+    /// than `- `.
+    Tolerant,
+}
+
 fn locate_yaml_value(source: &str) -> Result<LocatedValue, SchemaError> {
-    locate_yaml_value_with(source, false)
+    locate_yaml_value_with(source, LocatorGrammar::Strict)
 }
 
 fn locate_yaml_value_with(
     source: &str,
-    multi_line_scalars: bool,
+    grammar: LocatorGrammar,
 ) -> Result<LocatedValue, SchemaError> {
     let lines = source_lines(source);
     if lines.is_empty() {
@@ -381,10 +532,14 @@ fn locate_yaml_value_with(
         source,
         lines,
         next: 0,
-        multi_line_scalars,
+        tolerant: grammar == LocatorGrammar::Tolerant,
     };
     let indent = parser.lines[0].indent;
-    parser.node(indent)
+    let located = parser.node(indent)?;
+    if grammar == LocatorGrammar::Strict && parser.next != parser.lines.len() {
+        return Err(projection_error());
+    }
+    Ok(located)
 }
 
 fn source_lines(source: &str) -> Vec<SourceLine> {
@@ -436,10 +591,9 @@ struct BlockLocator<'a> {
     source: &'a str,
     lines: Vec<SourceLine>,
     next: usize,
-    /// Whether [`BlockLocator::inline_value`] follows block and multi-line
-    /// scalars and [`BlockLocator::value`] looks past a tag; off for the
-    /// closed v1 schema grammar.
-    multi_line_scalars: bool,
+    /// [`LocatorGrammar::Tolerant`]: follow the presentations only
+    /// frontmatter lookup accepts.
+    tolerant: bool,
 }
 
 impl BlockLocator<'_> {
@@ -457,7 +611,14 @@ impl BlockLocator<'_> {
             self.mapping(indent)
         } else {
             self.next += 1;
-            locate_inline(self.source, line.content_start..line.end)
+            let range = line.content_start..line.end;
+            if self.tolerant {
+                // Frontmatter lookup keeps reading a scalar that opens its own
+                // line as that line alone.
+                locate_inline(self.source, range)
+            } else {
+                self.inline_value(range, indent)
+            }
         }
     }
 
@@ -505,9 +666,9 @@ impl BlockLocator<'_> {
                 if explicit_indicator_content(item_content, '?').is_some()
                     || mapping_separator(item_content, false).is_some()
                 {
-                    // The item's keys align with its first key. The closed v1
+                    // The item's keys align with its first key. The strict
                     // grammar keeps the conventional `- ` width.
-                    let item_indent = if self.multi_line_scalars {
+                    let item_indent = if self.tolerant {
                         indent + relative
                     } else {
                         indent + 2
@@ -612,25 +773,18 @@ impl BlockLocator<'_> {
     ) -> Result<LocatedValue, SchemaError> {
         if value_range.start < value_range.end {
             if let Some(after_properties) =
-                node_properties_end(self.source, &value_range, self.multi_line_scalars)
+                node_properties_end(self.source, &value_range, self.tolerant)
             {
                 let remainder = trim_range(self.source, after_properties..value_range.end);
                 let mut value = if remainder.start < remainder.end {
                     self.inline_value(remainder, indent)?
+                } else if let Some(node) = self.block_value(indent)? {
+                    node
+                } else if self.tolerant {
+                    // A tagged empty value (`key: !!str`) has no node to descend into.
+                    locate_inline(self.source, value_range.clone())?
                 } else {
-                    let child_indent = self
-                        .lines
-                        .get(self.next)
-                        .filter(|line| line.indent > indent)
-                        .map(|line| line.indent);
-                    match child_indent {
-                        Some(child_indent) => self.node(child_indent)?,
-                        // A tagged empty value (`key: !!str`) has no node to descend into.
-                        None if self.multi_line_scalars => {
-                            locate_inline(self.source, value_range.clone())?
-                        }
-                        None => return Err(projection_error()),
-                    }
+                    return Err(projection_error());
                 };
                 value.span.start = value_range.start;
                 Ok(value)
@@ -638,35 +792,44 @@ impl BlockLocator<'_> {
                 self.inline_value(value_range, indent)
             }
         } else {
-            let next = self.lines.get(self.next).cloned();
-            match next {
-                Some(line) if line.indent > indent => self.node(line.indent),
-                // `serde_yaml_ng` writes a mapping's sequence value without
-                // indenting it (`key:\n- a`), and an empty value is null.
-                Some(line)
-                    if self.multi_line_scalars
-                        && line.indent == indent
-                        && sequence_content(&self.source[line.content_start..line.end])
-                            .is_some() =>
-                {
-                    self.sequence(indent)
-                }
-                _ if self.multi_line_scalars => Ok(LocatedValue {
+            match self.block_value(indent)? {
+                Some(node) => Ok(node),
+                // An empty value is null.
+                None if self.tolerant => Ok(LocatedValue {
                     span: value_range.start..value_range.start,
                     kind: LocatedKind::Scalar(DecodedScalar::empty(value_range.start)),
                 }),
-                _ => Err(projection_error()),
+                None => Err(projection_error()),
             }
+        }
+    }
+
+    /// The node a mapping value at key column `indent` holds on the following
+    /// lines: anything more indented, or a block sequence aligned with the key,
+    /// which is how `serde_yaml_ng` writes a mapping's sequence value
+    /// (`key:\n- a`). `None` when the next line holds neither.
+    fn block_value(&mut self, indent: usize) -> Result<Option<LocatedValue>, SchemaError> {
+        let Some(line) = self.lines.get(self.next).cloned() else {
+            return Ok(None);
+        };
+        if line.indent > indent {
+            self.node(line.indent).map(Some)
+        } else if line.indent == indent
+            && sequence_content(&self.source[line.content_start..line.end]).is_some()
+        {
+            self.sequence(indent).map(Some)
+        } else {
+            Ok(None)
         }
     }
 }
 
 impl BlockLocator<'_> {
-    /// Locates a value that starts inside a line. With
-    /// [`multi_line_scalars`](Self::multi_line_scalars) on, a block scalar or
-    /// a multi-line quoted or plain scalar is followed onto its continuation
-    /// lines, which are then consumed. `parent_indent` is the column of the
-    /// holding mapping key or sequence entry.
+    /// Locates a value that starts inside a line. A plain scalar continued
+    /// onto more-indented lines is followed and those lines consumed; the
+    /// tolerant grammar also follows block scalars and quoted scalars that
+    /// may span lines. `parent_indent` is the column of the holding mapping
+    /// key or sequence entry.
     fn inline_value(
         &mut self,
         range: Range<usize>,
@@ -677,10 +840,19 @@ impl BlockLocator<'_> {
             .lines
             .get(self.next)
             .is_some_and(|line| line.indent > parent_indent);
-        let multi_line = is_block_scalar_header(raw)
-            || raw.starts_with(['\'', '"'])
-            || (continues && !raw.starts_with(['[', '{']));
-        if !(self.multi_line_scalars && multi_line) {
+        let multi_line = if self.tolerant {
+            is_block_scalar_header(raw)
+                || raw.starts_with(['\'', '"'])
+                || (continues && !raw.starts_with(['[', '{']))
+        } else {
+            // Only a plain scalar: a quoted, tagged, anchored, or aliased
+            // first line stays single-line here, so its continuation lines
+            // go unconsumed and the strict grammar rejects the document.
+            continues
+                && !is_block_scalar_header(raw)
+                && !raw.starts_with(['\'', '"', '[', '{', '!', '&', '*'])
+        };
+        if !multi_line {
             return locate_inline(self.source, range);
         }
         let (scalar, end) =
@@ -733,6 +905,43 @@ fn node_properties_end(source: &str, range: &Range<usize>, tags: bool) -> Option
             .take_while(u8::is_ascii_whitespace)
             .count();
     }
+}
+
+/// Checks that a strictly located tree describes `value`, the YAML parser's
+/// reading of the same text: the same mapping keys in order, the same
+/// sequence lengths, and every string scalar decoding to the parser's text.
+/// Any disagreement means the decoded-to-authored maps describe other text,
+/// so no span may be projected through them.
+///
+/// An alias stands for its anchored node and is not compared; a non-string
+/// scalar (number, boolean, null) carries no expression to project.
+fn verify_located(located: &LocatedValue, value: &YamlValue) -> Result<(), SchemaError> {
+    let agrees = match (&located.kind, value) {
+        (LocatedKind::Scalar(scalar), _) if scalar.decoded().starts_with('*') => true,
+        (LocatedKind::Scalar(scalar), YamlValue::String(text)) => scalar.decoded() == text,
+        (LocatedKind::Scalar(_), YamlValue::Null | YamlValue::Bool(_) | YamlValue::Number(_)) => {
+            true
+        }
+        (LocatedKind::Mapping(pairs), YamlValue::Mapping(map)) if pairs.len() == map.len() => {
+            for (pair, (key, child)) in pairs.iter().zip(map) {
+                if key.as_str().is_some_and(|key| key != pair.key) {
+                    return Err(projection_error());
+                }
+                verify_located(&pair.value, child)?;
+            }
+            true
+        }
+        (LocatedKind::Sequence(items), YamlValue::Sequence(values))
+            if items.len() == values.len() =>
+        {
+            for (item, child) in items.iter().zip(values) {
+                verify_located(item, child)?;
+            }
+            true
+        }
+        _ => false,
+    };
+    if agrees { Ok(()) } else { Err(projection_error()) }
 }
 
 fn located_mapping(pairs: Vec<LocatedPair>) -> Result<LocatedValue, SchemaError> {
@@ -1798,7 +2007,8 @@ fn offset_span(span: &Range<usize>, offset: usize) -> Range<usize> {
 ///
 /// `source_offset` is added after YAML scalar projection. Pass zero for a
 /// standalone YAML buffer, or the frontmatter YAML block's document offset for
-/// inline Markdown. The source is never line-ending-normalized.
+/// inline Markdown. The source is never line-ending-normalized, and must start
+/// at a line boundary or be dedented (see [`locate_schema_value`]).
 pub fn parse_yaml_schema_with_source(
     value: &YamlValue,
     yaml_source: &str,
@@ -1813,8 +2023,15 @@ pub fn parse_yaml_schema_with_source(
 /// and escaping into byte ranges in the caller's source document.
 ///
 /// Plain, single-quoted, and double-quoted YAML scalars are supported, including
-/// CRLF input and UTF-8 text. A projection mismatch is a grammar error rather
-/// than a silently approximate range.
+/// a plain scalar continued onto more-indented lines, CRLF input, and UTF-8
+/// text. A projection mismatch is a grammar error rather than a silently
+/// approximate range.
+///
+/// Each suggestion-bearing atom takes the first later scalar in source order
+/// that parses to the same atom. Properties are visited before pattern keys,
+/// so an identical pattern-key definition authored before a property can take
+/// the property's spans; the standalone loader projects through each
+/// definition's located scalar instead.
 pub fn project_suggestion_spans(
     schema: &mut SimplifiedSchema,
     yaml_source: &str,
@@ -1932,9 +2149,8 @@ fn project_atom_suggestions(
         }
     }) {
         for candidate in candidates {
-            let start = scalar.raw_offset(candidate.span.start).ok_or_else(projection_error)?;
-            let end = scalar.raw_offset(candidate.span.end).ok_or_else(projection_error)?;
-            candidate.span = source_offset + start..source_offset + end;
+            let span = scalar.project(candidate.span.clone()).ok_or_else(projection_error)?;
+            candidate.span = offset_span(&span, source_offset);
         }
     }
     Ok(())
@@ -1964,44 +2180,58 @@ fn projection_error() -> SchemaError {
     }
 }
 
+/// Every block mapping or sequence value in `source` that may be a type
+/// expression, decoded, in source order.
+///
+/// A plain scalar continued onto more-indented lines is decoded whole and its
+/// continuation lines are not read again as values of their own; flow
+/// sequences and quoted scalars are read on their first line.
 fn scan_value_scalars(source: &str) -> Vec<DecodedScalar> {
     let mut scalars = Vec::new();
     let mut line_start = 0;
+    let mut consumed_to = 0;
     for line_with_ending in source.split_inclusive('\n') {
+        let start = line_start;
+        line_start += line_with_ending.len();
+        if start < consumed_to {
+            continue;
+        }
         let line = line_with_ending
             .strip_suffix('\n')
-            .unwrap_or(line_with_ending)
-            .strip_suffix('\r')
-            .unwrap_or_else(|| line_with_ending.strip_suffix('\n').unwrap_or(line_with_ending));
+            .unwrap_or(line_with_ending);
+        let line = line.strip_suffix('\r').unwrap_or(line);
         let trimmed = line.trim_start();
         let indent = line.len() - trimmed.len();
         if trimmed.is_empty() || trimmed.starts_with('#') {
-            line_start += line_with_ending.len();
             continue;
         }
+        // The value's start and the column of the mapping key or `-` holding
+        // it, which a continuation line must be indented past.
         let value_at = if let Some(rest) = trimmed.strip_prefix('-') {
             if rest.starts_with(char::is_whitespace) {
                 let leading = rest.len() - rest.trim_start().len();
                 let item = rest.trim_start();
+                let item_at = indent + 1 + leading;
                 mapping_value_offset(item)
                     .map(|offset| {
                         let value = &item[offset..];
-                        indent + 1 + leading + offset + (value.len() - value.trim_start().len())
+                        (item_at + offset + (value.len() - value.trim_start().len()), item_at)
                     })
-                    .or(Some(indent + 1 + leading))
+                    .or(Some((item_at, indent)))
             } else {
                 None
             }
         } else {
             mapping_value_offset(line).map(|offset| {
                 let rest = &line[offset..];
-                offset + (rest.len() - rest.trim_start().len())
+                (offset + (rest.len() - rest.trim_start().len()), indent)
             })
         };
-        if let Some(value_at) = value_at.filter(|offset| *offset < line.len()) {
-            scan_value(&line[value_at..], line_start + value_at, &mut scalars);
+        if let Some((value_at, holder)) = value_at.filter(|(offset, _)| *offset < line.len())
+            && let Some(end) = scan_value(source, &line[value_at..], start + value_at, holder, &mut scalars)
+        {
+            consumed_to = end;
         }
-        line_start += line_with_ending.len();
     }
     // `split_inclusive` produces no item for an empty trailing remainder, and
     // handles a final line without `\n` in the ordinary case above.
@@ -2014,7 +2244,15 @@ fn mapping_value_offset(line: &str) -> Option<usize> {
     mapping_separator(line, false).map(|colon| colon + 1)
 }
 
-fn scan_value(raw: &str, base: usize, out: &mut Vec<DecodedScalar>) {
+/// Decodes the value at `base`, whose first line is `raw`. Returns where a
+/// plain scalar decoded through [`yaml_scalar::decode_scalar_node`] ends.
+fn scan_value(
+    source: &str,
+    raw: &str,
+    base: usize,
+    holder: usize,
+    out: &mut Vec<DecodedScalar>,
+) -> Option<usize> {
     if raw.starts_with('[') {
         let mut offset = 1;
         while offset < raw.len() {
@@ -2034,9 +2272,17 @@ fn scan_value(raw: &str, base: usize, out: &mut Vec<DecodedScalar>) {
                 break;
             }
         }
-    } else if let Some((scalar, _)) = yaml_scalar::decode_scalar_at(raw, base) {
+        return None;
+    }
+    let plain = !is_block_scalar_header(raw) && !raw.starts_with(['\'', '"', '{', '!', '&', '*']);
+    if plain && let Some((scalar, end)) = yaml_scalar::decode_scalar_node(source, base, holder) {
+        out.push(scalar);
+        return Some(end);
+    }
+    if let Some((scalar, _)) = yaml_scalar::decode_scalar_at(raw, base) {
         out.push(scalar);
     }
+    None
 }
 
 #[cfg(test)]
