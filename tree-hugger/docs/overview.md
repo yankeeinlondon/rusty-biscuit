@@ -134,6 +134,13 @@ Type records list the base types their declarations write
 one declaration in the same file. See
 [Declared Type Relations](./type-relations.md).
 
+### Re-exports
+
+A file's forwarding statements (`pub use`, `export ... from`, Python `__all__`,
+Go aliases and more) are reported with an honest coverage state, so an empty
+list is only a negative when the report says it is complete. See
+[Re-exports](./reexports.md).
+
 ### The cache
 
 `hug` keeps one cache entry per source file, keyed by the file's path and
@@ -152,6 +159,7 @@ See [The Persistent Symbol Cache](./cache-design.md).
 | Read or consume the JSON records | [Symbol Records](./symbol-records.md) |
 | Know what a kind, visibility or `static` flag means per language | [Symbol Kinds, Visibility and `static`](./symbol-kinds-and-visibility.md) |
 | Understand base-type lists | [Declared Type Relations](./type-relations.md) |
+| Find what a file re-exports, in any language | [Re-exports](./reexports.md) |
 | Use complexity metrics | [Cyclomatic Complexity](./cyclomatic-complexity.md) |
 | Understand or clear the cache | [The Persistent Symbol Cache](./cache-design.md) |
 | Change or add a language's queries | [Tree-sitter Queries](./queries.md) |

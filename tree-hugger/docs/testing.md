@@ -112,6 +112,12 @@ When you change a [query](./queries.md) or the extraction logic, cover:
 3. **Regressions.** A bug fix comes with a test that fails without the fix.
 4. **Diagnostics.** Lint and syntax diagnostics have regression tests for
    representative languages.
+5. **Re-exports.** A change to forwarding extraction keeps the report equal
+   across the direct call, the complete index, a selective query and the
+   cache (cold, hit, narrowed, widened, another scan root), and the work
+   counters show one extraction and no reference or diagnostic work for a
+   report-only request. The per-language rules are in
+   [Re-exports](./reexports.md).
 
 Every query for every language is compiled by the L1 tests, so a broken
 pattern fails `just test` rather than a user's run.

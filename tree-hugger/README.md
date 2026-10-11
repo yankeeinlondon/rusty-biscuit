@@ -84,6 +84,8 @@ overview.
 - [Symbol Records](./docs/symbol-records.md): what each record holds
 - [Symbol Kinds, Visibility and `static`](./docs/symbol-kinds-and-visibility.md)
 - [Scope-Aware References](./docs/references.md): occurrences and `hug refs`
+- [Re-exports](./docs/reexports.md): what each language forwards, and how
+  complete the report is
 - [Declared Type Relations](./docs/type-relations.md) and
   [Cyclomatic Complexity](./docs/cyclomatic-complexity.md)
 - [Tree Hugger's Persistent Symbol Cache](./docs/cache-design.md)
