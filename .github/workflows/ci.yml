@@ -2,12 +2,12 @@ name: ci
 
 # Dependency-aware CI for pull requests, pushes to main, and a nightly full
 # run. Each environment names the events that schedule it in
-# `.github/ci/environments.json`: a pull request proves Linux (and macOS,
-# normally from the hook's local evidence), a push to main adds Windows, and
-# the nightly run adds WSL2. A main push reuses successful PR validation only
-# with an identical tested tree and integration base, and then plans only the
-# environments the push event adds; missing evidence falls back to the normal
-# grid. Source-changed workspace
+# `.github/ci/environments.json`: a pull request and a push to main prove
+# Linux (and macOS, normally from the hook's local evidence), and the nightly
+# run proves native Windows and WSL2. A main push reuses successful PR
+# validation only with an identical tested tree and integration base, and then
+# plans nothing; it waits for a PR run still in progress, and missing evidence
+# falls back to the normal grid. Source-changed workspace
 # packages receive every gate; an unchanged direct reverse dependency receives
 # no area, no job, and no result cell, and is reported by name instead. The
 # result is fanned out one caller identity per selected package AREA, with each
@@ -30,12 +30,12 @@ on:
   pull_request:
   push:
     branches: [main]
-  # The nightly WSL2 run. Which environments it plans is the environment
-  # table's decision, not this file's: `wsl2-ubuntu` alone names `schedule`
-  # in its `events` (fixes/2026-09-18-ci-cadence, narrowed by
-  # fixes/2026-09-19-nightly-scope). Its Linux producer joins the plan for
-  # its archives only, cell-less; Windows is proven by every push to `main`;
-  # macOS by the development Mac through the hook. The scope is what changed
+  # The nightly Windows and WSL2 run. Which environments it plans is the
+  # environment table's decision, not this file's: `windows-latest` and
+  # `wsl2-ubuntu` name `schedule` in their `events`
+  # (features/2026-10-08-windows-to-nightly). WSL2's Linux producer joins the
+  # plan for its archives only, cell-less; Linux and macOS are proven by pull
+  # requests and pushes, macOS by the development Mac through the hook. The scope is what changed
   # since the last successful nightly, so an unchanged workspace plans nothing.
   schedule:
     - cron: "0 8 * * *"
@@ -86,7 +86,9 @@ jobs:
   validation:
     name: Check reusable PR validation
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    # A PR merged before its own CI finished is waited for (up to 90 min, the
+    # long end of a pull request's duration) rather than re-run in full.
+    timeout-minutes: 100
     permissions:
       contents: read
       actions: read
@@ -101,19 +103,18 @@ jobs:
       - name: Verify prior PR validation
         id: reuse
         continue-on-error: true
-        timeout-minutes: 1
+        timeout-minutes: 95
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 scripts/ci/reuse_validation.py check
+        run: python3 scripts/ci/reuse_validation.py check --wait-minutes 90
 
   scope:
     name: Determine affected scope
     needs: validation
     # Always, including on a reused PR validation: that reuse proves the
     # environments the pull request event schedules, and the push event may
-    # schedule more (Windows). Scope plans exactly the difference, which is
-    # nothing when the events agree — and then every job downstream skips as
-    # before.
+    # schedule more. Scope plans exactly the difference, which is nothing
+    # while the events agree — and then every job downstream skips.
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     outputs:

@@ -195,25 +195,36 @@ SHAs, verifies every published local receipt per cell, and resolves the plan.
 GitHub events that schedule it, and the planner plans nothing for an environment the event does
 not schedule (recorded as `deferred_environments`). As decided on 2026-09-18
 (`fixes/2026-09-18-ci-cadence`): a pull request proves `ubuntu-latest` and `macos-latest`, the
-latter normally from the pre-push hook's local evidence; a push to `main` adds `windows-latest`;
-the nightly run (08:00 UTC) plans `wsl2-ubuntu` alone over the packages that changed since the
-last successful nightly, with `ubuntu-latest` joining cell-less as the producer of their archives
-(`fixes/2026-09-19-nightly-scope`); `workflow_dispatch` plans every environment over the full
-workspace. A push to `main` whose pull request
-validation is reused plans only the environments the push adds. The `ci:all-os` label plans every
-environment for a pull request from its next push.
+latter normally from the pre-push hook's local evidence; a push to `main` schedules the same two;
+the nightly run (08:00 UTC) plans `windows-latest` and `wsl2-ubuntu` over the packages that
+changed since the last successful nightly, with `ubuntu-latest` joining cell-less as the producer
+of WSL2's archives; `workflow_dispatch` plans every environment over the full workspace. A push to
+`main` whose pull request validation is reused therefore plans nothing, and every downstream job
+skips. The `ci:all-os` label plans every environment for a pull request from its next push.
 
-**Planned cadence correction:** ordinary PRs and pushes to `main` will cover
-Linux and macOS; native Windows will move to the scoped nightly alongside
-WSL2. Nightly scope will remain the changes since the last successful qualifying
-ancestor run, rather than a fixed 24-hour window. With no qualifying baseline,
-the current implementation falls back to full scope; failed runs do not advance
-that baseline. A required resumable workspace seeding command will gather
-Windows and WSL2 evidence on configured rigs and let the bootstrap nightly
-execute only unproven cells. Scheduled evidence consumption and Windows
-cross-check receipt publication are not yet implemented. An optional
-Windows-risk workflow will reuse this infrastructure before pushing. Explicit
-manual and all-OS opt-ins will remain available.
+```mermaid
+flowchart LR
+    PR[pull request] -->|Linux + macOS| Merge[merge to main]
+    Merge -->|same tree already green| Skip[push plans nothing]
+    Merge -->|PR run still going| Wait[wait up to 90 min, then reuse]
+    Merge -->|tree never tested| Grid[Linux + macOS grid]
+    Main[main since last green nightly] --> Nightly[nightly: Windows + WSL2]
+```
+
+Nightly scope is the changes since the last successful qualifying ancestor run, not a fixed
+24-hour window. With no qualifying baseline it falls back to the full workspace; failed runs do not
+advance that baseline. Windows and WSL2 failures are found after merge and fixed forward; they
+never block a merge.
+
+A pull request merged before its own CI finished would otherwise get the whole grid again. The push
+instead waits, up to 90 minutes, for the pull request's run of the same head. A green finish on the
+same tree is reused; a failure, cancellation, or timeout falls back to the normal grid.
+
+**Planned:** a resumable workspace seeding command will gather Windows and WSL2 evidence on
+configured rigs and let the nightly execute only unproven cells. Scheduled evidence consumption and
+Windows cross-check receipt publication are not yet implemented, so today a nightly executes every
+Windows and WSL2 cell in its scope on hosted runners. An optional Windows-risk workflow will reuse
+this infrastructure before pushing.
 
 **Planned partial-run recovery:** failed or canceled nightlies will leave the
 last successful baseline unchanged and retain independently published proof
@@ -760,9 +771,8 @@ What a reviewer can rely on when approving a PR:
 
 1. **Every affected gating package passed the environments its event schedules** against the
    exact pinned Rust version in `rust-toolchain.toml`. A pull request proves Linux and macOS;
-   the push to `main` after it adds Windows; the nightly run adds `wsl2-ubuntu`, a distinct
-   archive-based L1 cell. Windows and WSL2 failures are therefore found after merge and fixed
-   forward, by decision (`fixes/2026-09-18-ci-cadence`).
+   the nightly run adds native Windows and `wsl2-ubuntu`, a distinct archive-based L1 cell.
+   Windows and WSL2 failures are therefore found after merge and fixed forward, by decision.
 2. **`just check-canonical` confirms the area structure is well-formed** — no `justfile`
    recipe drift snuck in.
 

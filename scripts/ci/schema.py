@@ -1436,10 +1436,20 @@ def validate_resolved_plan(document: Any, today: Any = None) -> list[str]:
             problems.append(
                 f"malformed-receipt: package {entry['package']} l1_include_slow must be a boolean"
             )
-        if ("exclusion" in entry) != (entry.get("gates") == []):
+        # A push whose pull request already proved every environment it
+        # schedules plans no environment, so its selected packages gate
+        # nothing without being excluded. Anywhere else an empty gate list is
+        # an owned `gates = false` exclusion.
+        nothing_scheduled = document.get("environments") == []
+        if "exclusion" in entry and entry.get("gates") != []:
             problems.append(
                 f"malformed-receipt: package {entry['package']} carries an exclusion "
-                "exactly when it gates nothing"
+                "but gates something"
+            )
+        elif entry.get("gates") == [] and "exclusion" not in entry and not nothing_scheduled:
+            problems.append(
+                f"malformed-receipt: package {entry['package']} gates nothing "
+                "without an exclusion"
             )
         if "dependent_seam" in entry:
             problems += _dependent_seam(entry["package"], entry["dependent_seam"])

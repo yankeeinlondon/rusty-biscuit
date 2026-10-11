@@ -56,7 +56,7 @@
       "name": "windows-latest",
       "runner": "windows-latest",
       "native_key": "windows-latest",
-      "events": ["push", "workflow_dispatch"],
+      "events": ["schedule", "workflow_dispatch"],
       "capabilities": {
         "tmux": {
           "available": false,

@@ -12,7 +12,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from reuse_validation import check_validation, find_validation, main, nightly_base, record_receipt
+from reuse_validation import (
+    check_validation, find_validation, main, nightly_base, pending_waiter, record_receipt,
+)
 
 REPO = "owner/repo"
 BASE, HEAD, MERGE, TREE = (c * 40 for c in "abcd")
@@ -95,6 +97,36 @@ class ValidationTests(unittest.TestCase):
         self.assertEqual(self.find(), "")
         self.assertEqual(self.api.call_count, 2)
 
+    def test_an_unfinished_pr_run_is_awaited_and_then_reused(self) -> None:
+        pending = {**RUN, "status": "in_progress", "conclusion": None}
+        self.api.side_effect = [
+            [PR], {"workflow_runs": [{**pending, "status": "queued"}]},
+            {"workflow_runs": [pending]}, {"workflow_runs": [RUN]},
+            {"artifacts": [self.artifact]},
+        ]
+        waits = Mock(return_value=True)
+        run, _ = find_validation(REPO, MERGE, BASE, TREE, self.api, waits)
+        self.assertEqual(run, "295")
+        self.assertEqual(waits.call_count, 2)
+
+    def test_an_awaited_run_that_fails_runs_ci(self) -> None:
+        self.api.side_effect = [
+            [PR], {"workflow_runs": [{**RUN, "status": "in_progress", "conclusion": None}]},
+            {"workflow_runs": [{**RUN, "conclusion": "failure"}]},
+        ]
+        self.assertEqual(find_validation(REPO, MERGE, BASE, TREE, self.api, Mock(return_value=True))[0], "")
+
+    def test_an_unfinished_run_past_the_wait_budget_runs_ci(self) -> None:
+        self.api.side_effect = [
+            [PR], {"workflow_runs": [{**RUN, "status": "in_progress", "conclusion": None}]},
+        ]
+        waits = Mock(return_value=False)
+        run, reason = find_validation(REPO, MERGE, BASE, TREE, self.api, waits)
+        self.assertEqual(run, "")
+        self.assertIn("not completed", reason)
+        waits.assert_called_once()
+        self.assertEqual(self.api.call_count, 2)
+
     def test_missing_expired_and_old_protocol_receipts_run_ci(self) -> None:
         for artifact in ({}, {"name": RECEIPT, "expired": True},
                          {"name": RECEIPT.replace("v1", "v0"), "expired": False}):
@@ -145,6 +177,18 @@ class ValidationTests(unittest.TestCase):
                 "push", "refs/heads/main", {"before": BASE}, REPO, MERGE, self.api,
             )[0], "")
         self.api.assert_not_called()
+
+
+class PendingWaiterTests(unittest.TestCase):
+    def test_a_spent_budget_stops_waiting_without_sleeping(self) -> None:
+        with patch("reuse_validation.time.sleep") as sleep:
+            self.assertFalse(pending_waiter(0)())
+            sleep.assert_not_called()
+
+    def test_each_wait_sleeps_at_most_one_interval(self) -> None:
+        with patch("reuse_validation.time.sleep") as sleep:
+            self.assertTrue(pending_waiter(10, interval=60)())
+            self.assertLessEqual(sleep.call_args.args[0], 60)
 
 
 class ReceiptTests(unittest.TestCase):

@@ -68,10 +68,15 @@ when investigating changes to external dependencies or hosted runners.
 
 On reuse, `scope` still runs, with `--proven-event pull_request`: the
 environments the pull request event schedules are recorded in the plan's
-`proven_environments` and planned nowhere, and only the environments the push
-event adds (Windows, per `environments.json`) receive cells. When the two
-events agree the plan is empty, `preflight`, the `area-ci` fan-out, and every
-rollup skip, and `ci-gate` folds those skipped results and passes. Advisory
+`proven_environments` and planned nowhere, and only environments the push
+event adds would receive cells. Today the two events schedule the same
+environments, so the plan is empty: `preflight`, the `area-ci` fan-out, and
+every rollup skip, and `ci-gate` folds those skipped results and passes.
+
+A pull request merged while its own run is queued or in progress is waited
+for: `reuse_validation.py check --wait-minutes 90` polls that run once a
+minute and reuses it when it finishes green on the same tree. Failure,
+cancellation, or a run still going after 90 minutes schedules normal CI. Advisory
 `ci-reporting` links the original PR run in either case. The `ci` workflow
 still completes on `main`, preserving Release-plz's existing successful-CI
 trigger. Runs predating receipt publication cannot be reused.
@@ -393,13 +398,12 @@ and its preflight runner, still cell-less, and is listed in
 (fixes/2026-09-18-ci-cadence, narrowed 2026-09-19): `ubuntu-latest` on
 `pull_request`, `push`, and `workflow_dispatch`; `macos-latest` the same,
 since the development Mac proves it on every push through the hook;
-`windows-latest` on `push` and `workflow_dispatch`; `wsl2-ubuntu` on
-`schedule` and `workflow_dispatch` only. So a pull request proves Linux and
-macOS, a push to `main` adds Windows, and the nightly `schedule` (08:00 UTC,
-`ci.yml`) runs WSL2 alone — over the packages that changed since the last
-successful nightly (`reuse_validation.py nightly-base`; the full workspace
-when there is none), with Linux compiling their archives and hosting nothing
-else. The `ci:all-os` label plans every environment for a pull request; it is
+`windows-latest` and `wsl2-ubuntu` on `schedule` and `workflow_dispatch`
+only. So a pull request and a push to `main` prove Linux and macOS, and the
+nightly `schedule` (08:00 UTC, `ci.yml`) runs native Windows and WSL2 — over
+the packages that changed since the last successful nightly
+(`reuse_validation.py nightly-base`; the full workspace when there is none),
+with Linux compiling WSL2's archives and hosting nothing else. The `ci:all-os` label plans every environment for a pull request; it is
 read from the event payload, so it takes effect on the next push.
 
 `lint` and `check` are single-environment gates hosted on `ubuntu-latest`, so

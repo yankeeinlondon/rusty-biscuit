@@ -38,12 +38,12 @@ local and hosted runs. Its package policy is deliberately narrow:
   record in `environments.json` names the GitHub events that schedule it; the
   planner takes `--event`, plans nothing (no cell, build, or preflight runner)
   for an environment the event does not schedule, and records it in the
-  plan's `deferred_environments`. Policy as of 2026-09-18: a pull request
-  proves `ubuntu-latest` and `macos-latest` (the latter normally from the
-  hook's local evidence); a push to `main` adds `windows-latest`; the nightly
-  `schedule` (`0 8 * * *`, its own concurrency group) plans WSL2 over changes
-  since the last successful ancestor nightly, with Linux joining only as a
-  demanded archive producer. No qualifying baseline means full scope;
+  plan's `deferred_environments`. A pull request and a push to `main` prove
+  `ubuntu-latest` and `macos-latest` (the latter normally from the hook's
+  local evidence); the nightly `schedule` (`0 8 * * *`, its own concurrency
+  group) plans native Windows and WSL2 over changes since the last successful
+  ancestor nightly, with Linux joining only as WSL2's demanded archive
+  producer. No qualifying baseline means full scope;
   `workflow_dispatch` plans everything. The `ci:all-os` label plans every
   environment for a pull request and takes effect on the next push; such a
   run never takes the hook's scope receipt, which is planned for the
@@ -51,19 +51,20 @@ local and hosted runs. Its package policy is deliberately narrow:
   silently ignored). A push
   whose pull request validation is reused plans with `--proven-event
   pull_request`: the proven environments land in `proven_environments`, so
-  only Windows runs, and an empty plan skips everything as before. The hook
+  the plan is empty and every downstream job skips. A push merged while its
+  pull request's run is still going waits for it (`reuse_validation.py check
+  --wait-minutes 90`) and falls back to the normal grid if it fails, is
+  canceled, or outlasts the wait. The hook
   plans `push` for `main` and `pull_request` for every other branch, and
   `scope-verify --event` refuses a receipt planned for another event
   (`scope-event-mismatch`). Without `--event`, every environment is planned.
-- **Planned cadence correction:** move native Windows from ordinary pushes
-  to scoped nightlies alongside WSL2; PRs and pushes retain Linux/macOS.
-  Preserve explicit manual/all-OS opt-ins. The live table above still governs
-  until implementation. Required resumable workspace rig seeding will need
-  native Windows receipt publication and scheduled evidence consumption;
-  neither is currently wired through `cross-check` and the nightly. See the
-  planned policy in `docs/topics/ci-cd.md`. Risk-directed pre-push use of that
-  infrastructure remains optional. Do not describe a nightly as a
-  fixed 24-hour diff or treat old WSL2-only nightlies as Windows proof.
+- **Planned:** resumable workspace rig seeding, which needs native Windows
+  receipt publication and scheduled evidence consumption; neither is wired
+  through `cross-check` and the nightly yet, so a nightly executes its whole
+  Windows/WSL2 scope on hosted runners. See `docs/topics/ci-cd.md`.
+  Risk-directed pre-push use of that infrastructure remains optional. Do not
+  describe a nightly as a fixed 24-hour diff or treat old WSL2-only nightlies
+  as Windows proof.
 - A package owning changed source receives lint, L1, and its declared higher
   tiers — and `check` when it declares `example` or `bench` targets or has
   unchanged direct reverse dependents. The L1 build already compiles the

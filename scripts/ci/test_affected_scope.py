@@ -2851,7 +2851,7 @@ class EventSchedulingTests(unittest.TestCase):
         """The test table carrying the shipped table's `events` policy."""
         events = {
             "ubuntu-latest": ["pull_request", "push", "workflow_dispatch"],
-            "windows-latest": ["push", "workflow_dispatch"],
+            "windows-latest": ["schedule", "workflow_dispatch"],
             "macos-latest": ["pull_request", "push", "workflow_dispatch"],
             "wsl2-ubuntu": ["schedule", "workflow_dispatch"],
         }
@@ -2879,13 +2879,13 @@ class EventSchedulingTests(unittest.TestCase):
     def test_the_shipped_table_schedules_each_environment_as_decided(self) -> None:
         environments = load_environments(ENVIRONMENTS_CONFIG, today=TODAY)
         events = {environment["name"]: environment["events"] for environment in environments}
-        # The nightly is WSL2's alone (fixes/2026-09-19-nightly-scope):
-        # Windows is proven by every push to main, and Linux joins the
-        # nightly as WSL2's producer without cells of its own.
+        # Pull requests and pushes prove Linux and macOS; native Windows and
+        # WSL2 are the nightly's (features/2026-10-08-windows-to-nightly), and
+        # Linux joins the nightly as WSL2's producer without cells of its own.
         self.assertEqual(
             {
                 "ubuntu-latest": ["pull_request", "push", "workflow_dispatch"],
-                "windows-latest": ["push", "workflow_dispatch"],
+                "windows-latest": ["schedule", "workflow_dispatch"],
                 "macos-latest": ["pull_request", "push", "workflow_dispatch"],
                 "wsl2-ubuntu": ["schedule", "workflow_dispatch"],
             },
@@ -2910,8 +2910,8 @@ class EventSchedulingTests(unittest.TestCase):
     def test_each_event_schedules_its_environments_and_defers_the_rest(self) -> None:
         cases = {
             "pull_request": (["ubuntu-latest", "macos-latest"], ["windows-latest", "wsl2-ubuntu"]),
-            "push": (["ubuntu-latest", "windows-latest", "macos-latest"], ["wsl2-ubuntu"]),
-            "schedule": (["wsl2-ubuntu"], ["ubuntu-latest", "windows-latest", "macos-latest"]),
+            "push": (["ubuntu-latest", "macos-latest"], ["windows-latest", "wsl2-ubuntu"]),
+            "schedule": (["windows-latest", "wsl2-ubuntu"], ["ubuntu-latest", "macos-latest"]),
             "workflow_dispatch": (
                 ["ubuntu-latest", "windows-latest", "macos-latest", "wsl2-ubuntu"],
                 [],
@@ -2927,41 +2927,48 @@ class EventSchedulingTests(unittest.TestCase):
                     self.assertNotIn(event, entry["events"])
 
     def test_a_scheduled_guest_brings_its_producer_without_cells(self) -> None:
-        # The nightly schedules WSL2 alone. Its archives are compiled on
-        # Linux, so Linux joins the plan's table for its build records and
-        # preflight runner — and for nothing else: no lint, check, or test
-        # cell, which the pull request already proved. Before this, Linux
-        # stayed on the schedule event for the archives alone and put 161
-        # cells into every nightly (fixes/2026-09-19-nightly-scope).
+        # The nightly schedules native Windows and WSL2. WSL2's archives are
+        # compiled on Linux, so Linux joins the plan's table for its build
+        # records and preflight runner — and for nothing else: no lint, check,
+        # or test cell, which the pull request already proved. Before this,
+        # Linux stayed on the schedule event for the archives alone and put
+        # 161 cells into every nightly (fixes/2026-09-19-nightly-scope).
         plan = self.plan(event="schedule")
-        self.assertEqual(["ubuntu-latest", "wsl2-ubuntu"], self.names(plan["environments"]))
         self.assertEqual(
-            {"wsl2-ubuntu"}, {cell["environment"] for cell in plan["cells"]}
+            ["ubuntu-latest", "windows-latest", "wsl2-ubuntu"], self.names(plan["environments"])
+        )
+        self.assertEqual(
+            {"windows-latest", "wsl2-ubuntu"}, {cell["environment"] for cell in plan["cells"]}
         )
         self.assertEqual(
             [{"name": "ubuntu-latest", "for": ["wsl2-ubuntu"]}], plan["producing_environments"]
         )
         self.assertEqual(
-            ["windows-latest", "macos-latest"],
-            [entry["name"] for entry in plan["deferred_environments"]],
+            ["macos-latest"], [entry["name"] for entry in plan["deferred_environments"]]
         )
-        self.assertEqual({"ubuntu-latest"}, {record["producer"] for record in plan["builds"]})
-        for record in plan["builds"]:
-            self.assertEqual(
-                [{"environment": "wsl2-ubuntu", "gate": "L1"}], record["consumers"]
-            )
+        # Linux builds for WSL2 alone; native Windows builds its own.
+        self.assertEqual(
+            {
+                "ubuntu-latest": [{"environment": "wsl2-ubuntu", "gate": "L1"}],
+                "windows-latest": [{"environment": "windows-latest", "gate": "L1"}],
+            },
+            {record["producer"]: record["consumers"] for record in plan["builds"]},
+        )
         # The owner job runs on the producer's runner, so it preflights there
         # too, beside the runner hosting the guest.
-        self.assertIn("ubuntu-latest", plan["preflight_os"])
-        self.assertIn("windows-latest", plan["preflight_os"])
+        self.assertEqual(["ubuntu-latest", "windows-latest"], plan["preflight_os"])
         # And the workflow-facing projection schedules no Linux cell either.
-        self.assertEqual({("wsl2-ubuntu", "L1")}, dispatched(plan, "alpha-core"))
+        self.assertEqual(
+            {("windows-latest", "L1"), ("wsl2-ubuntu", "L1")}, dispatched(plan, "alpha-core")
+        )
         self.assertEqual(
             ["alpha-core"],
             [row["package"] for document in row_sets_of(plan).values() for row in document["wsl"]],
         )
         owners = legacy_scope_document(plan)["build_owners"]
-        self.assertEqual(["ubuntu-latest"], [owner["environment"] for owner in owners])
+        self.assertEqual(
+            ["ubuntu-latest", "windows-latest"], [owner["environment"] for owner in owners]
+        )
 
     def test_an_event_that_schedules_no_guest_brings_no_producer(self) -> None:
         for event in ("pull_request", "push"):
@@ -2995,8 +3002,10 @@ class EventSchedulingTests(unittest.TestCase):
         scheduled, deferred, proven = schedule_environments(
             self.shipped_events(), "push", proven_event="pull_request"
         )
-        self.assertEqual(["windows-latest"], self.names(scheduled))
-        self.assertEqual(["wsl2-ubuntu"], [entry["name"] for entry in deferred])
+        self.assertEqual([], self.names(scheduled))
+        self.assertEqual(
+            ["windows-latest", "wsl2-ubuntu"], [entry["name"] for entry in deferred]
+        )
         self.assertEqual(
             [
                 {"name": "ubuntu-latest", "event": "pull_request"},
@@ -3011,7 +3020,7 @@ class EventSchedulingTests(unittest.TestCase):
         self.assertEqual(["ubuntu-latest", "macos-latest"], self.names(plan["environments"]))
         self.assertEqual(
             [
-                {"name": "windows-latest", "events": ["push", "workflow_dispatch"]},
+                {"name": "windows-latest", "events": ["schedule", "workflow_dispatch"]},
                 {"name": "wsl2-ubuntu", "events": ["schedule", "workflow_dispatch"]},
             ],
             plan["deferred_environments"],
@@ -3033,9 +3042,11 @@ class EventSchedulingTests(unittest.TestCase):
             self.assertNotIn(field, plan)
         self.assertEqual(4, len(plan["environments"]))
 
-    def test_a_reused_pull_request_narrows_a_push_to_what_it_could_not_prove(self) -> None:
+    def test_a_reused_pull_request_leaves_its_push_nothing_to_run(self) -> None:
+        # The push schedules exactly what the pull request proved, so a
+        # matching reuse is an empty grid, not a Windows one.
         plan = self.plan(event="push", proven_event="pull_request")
-        self.assertEqual(["windows-latest"], self.names(plan["environments"]))
+        self.assertEqual([], self.names(plan["environments"]))
         self.assertEqual(
             [
                 {"name": "ubuntu-latest", "event": "pull_request"},
@@ -3043,26 +3054,25 @@ class EventSchedulingTests(unittest.TestCase):
             ],
             plan["proven_environments"],
         )
-        self.assertEqual({"windows-latest"}, {cell["environment"] for cell in plan["cells"]})
-        # The check environment was proven by the pull request; nothing checks
-        # here, and the L1 build still compiles the L1 kinds.
-        self.assertEqual([], [cell for cell in plan["cells"] if cell["gate"] == "check"])
-        self.assertEqual(["ubuntu-latest", "windows-latest"], plan["preflight_os"])
+        self.assertEqual([], plan["cells"])
+        self.assertEqual([], plan["builds"])
+        self.assertEqual([], plan["preflight_os"])
 
     def test_a_full_scope_run_preflights_only_the_scheduled_runners(self) -> None:
-        # A full-scope nightly: WSL2's cells on the Windows-hosted guest, and
-        # Linux as their producer — so those two runners preflight, and the
-        # deferred Windows and macOS do not.
+        # A full-scope nightly: native Windows cells, WSL2's cells on the
+        # Windows-hosted guest, and Linux as WSL2's producer — so those two
+        # runners preflight, and the deferred macOS does not.
         plan = self.plan(force_all=True, event="schedule")
         self.assertEqual(["ubuntu-latest", "windows-latest"], plan["preflight_os"])
         self.assertEqual(
             [
-                {"name": "windows-latest", "events": ["push", "workflow_dispatch"]},
                 {"name": "macos-latest", "events": ["pull_request", "push", "workflow_dispatch"]},
             ],
             plan["deferred_environments"],
         )
-        self.assertEqual({"wsl2-ubuntu"}, {cell["environment"] for cell in plan["cells"]})
+        self.assertEqual(
+            {"windows-latest", "wsl2-ubuntu"}, {cell["environment"] for cell in plan["cells"]}
+        )
 
     def test_the_label_plans_every_environment_for_a_pull_request(self) -> None:
         plan = self.plan(event="pull_request", all_environments=True)
@@ -4810,7 +4820,7 @@ class ArchiveGuardScopeTests(unittest.TestCase):
 
     def test_a_proven_linux_environment_gains_no_guard_execution(self) -> None:
         # The other half of the nightly rule. A pull request that already
-        # proved ubuntu-latest narrows the follow-up push to windows-latest;
+        # proved ubuntu-latest leaves the follow-up push nothing to schedule;
         # the guard is hosted on Linux alone, so it must accept that the scan
         # already ran rather than invent the extra run the specification's
         # "without inventing an extra Linux run" forbids.
@@ -4824,7 +4834,7 @@ class ArchiveGuardScopeTests(unittest.TestCase):
             event="push",
             proven_event="pull_request",
         )
-        self.assertEqual(["windows-latest"], [item["name"] for item in plan["environments"]])
+        self.assertEqual([], [item["name"] for item in plan["environments"]])
         guard = plan["archive_guard"]
         self.assertFalse(guard["selected"], guard["reason"])
         self.assertIn("ubuntu-latest", guard["reason"])

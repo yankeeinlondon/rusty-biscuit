@@ -78,14 +78,13 @@ environment's cell and how to record an execution ban.
 
 ## Standing rules
 
-- **Planned CI cadence correction:** ordinary PRs and main pushes will cover
-  Linux/macOS; scoped nightlies will cover native Windows and WSL2. Until
-  implementation, the live environment table still schedules Windows on
-  push and WSL2 on schedule. Required resumable workspace seeding on rigs
-  will suppress proved Windows/WSL2 nightly cells after receipt publication
-  and scheduled evidence verification are implemented. Risk-directed pre-push
-  use remains optional. Read `docs/topics/ci-cd.md` for the
-  current and planned policy; WSL2 is never native Windows evidence.
+- **CI cadence:** ordinary PRs and main pushes cover Linux/macOS; the
+  scoped nightly covers native Windows and WSL2. A Windows failure surfaces
+  in the nightly, after merge, and is fixed forward. **Planned:** resumable
+  workspace seeding on the rigs, whose published receipts the nightly will
+  reuse per cell; until then the nightly runs its whole Windows/WSL2 scope on
+  hosted runners. Read `docs/topics/ci-cd.md` for the current and planned
+  policy; WSL2 is never native Windows evidence.
 - The Windows and WSL2 Level 2 CI cells are a **temporary policy gap**
   (`.github/ci/environments.json`, owner and expiry recorded there). Do not
   amend an acceptance criterion to exclude them; record the criterion as unmet

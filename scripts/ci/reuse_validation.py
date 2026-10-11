@@ -17,6 +17,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any, Callable
 
@@ -50,11 +51,31 @@ def github_api(endpoint: str) -> Any:
     ).stdout)
 
 
+def pending_waiter(minutes: float, interval: float = 60.0) -> Callable[[], bool]:
+    """Sleep one poll interval and return True until `minutes` have passed."""
+    deadline = time.monotonic() + minutes * 60
+
+    def wait() -> bool:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        time.sleep(min(interval, remaining))
+        return True
+
+    return wait
+
+
 def find_validation(
     repo: str, sha: str, before: str, tree: str,
     api: Callable[[str], Any] = github_api,
+    wait: Callable[[], bool] = lambda: False,
 ) -> tuple[str, str]:
-    """Return a run ID and reason; bounded searches may miss reuse, never tests."""
+    """Return a run ID and reason; bounded searches may miss reuse, never tests.
+
+    A PR merged while its CI run is still queued or in progress would
+    otherwise get the full grid again; `wait` lets the push hold until that
+    run finishes, and returns False once its budget is spent.
+    """
     receipt_name(tree, before, sha)
     if before == "0" * 40:
         return "", "A new main branch requires normal CI."
@@ -67,19 +88,24 @@ def find_validation(
             continue
         head = pr["head"]["sha"]
         expected = receipt_name(tree, before, head)
-        runs = api(
-            f"{root}/actions/workflows/ci.yml/runs"
-            f"?event=pull_request&head_sha={head}&per_page=20"
-        )["workflow_runs"]
-        candidates = [run for run in runs
-                      if run.get("event") == "pull_request"
-                      and run.get("path") == ".github/workflows/ci.yml"
-                      and run.get("head_sha") == head
-                      and run["repository"]["full_name"] == repo]
+        while True:
+            runs = api(
+                f"{root}/actions/workflows/ci.yml/runs"
+                f"?event=pull_request&head_sha={head}&per_page=20"
+            )["workflow_runs"]
+            candidates = [run for run in runs
+                          if run.get("event") == "pull_request"
+                          and run.get("path") == ".github/workflows/ci.yml"
+                          and run.get("head_sha") == head
+                          and run["repository"]["full_name"] == repo]
+            if not candidates:
+                break
+            # Do not resurrect an older green run after a newer failure or rerun.
+            run = max(candidates, key=lambda item: int(item["id"]))
+            if run.get("status") == "completed" or not wait():
+                break
         if not candidates:
             continue
-        # Do not resurrect an older green run after a newer failure or rerun.
-        run = max(candidates, key=lambda item: int(item["id"]))
         if run.get("status") != "completed" or run.get("conclusion") != "success":
             return "", "The latest PR CI run has not completed successfully."
         run_id = str(int(run["id"]))
@@ -95,13 +121,14 @@ def find_validation(
 def check_validation(
     event_name: str, ref: str, event: dict[str, Any], repo: str, sha: str,
     api: Callable[[str], Any] = github_api,
+    wait: Callable[[], bool] = lambda: False,
 ) -> tuple[str, str]:
     if event_name != "push" or ref != "refs/heads/main":
         return "", "PR and manual runs always perform normal CI."
     try:
         if git_revision("HEAD") != sha:
             return "", "The checkout does not match the pushed commit."
-        return find_validation(repo, sha, event["before"], git_revision("HEAD^{tree}"), api)
+        return find_validation(repo, sha, event["before"], git_revision("HEAD^{tree}"), api, wait)
     except Exception:
         # Missing permissions, rate limits, timeouts, malformed API data, or
         # unavailable Git objects must schedule normal CI, never skip it.
@@ -152,6 +179,10 @@ def nightly_base(
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("mode", choices=("record", "check", "nightly-base"))
+    parser.add_argument(
+        "--wait-minutes", type=float, default=0.0,
+        help="check: how long to wait for an unfinished PR run of the merged head",
+    )
     args = parser.parse_args()
     if args.mode == "nightly-base":
         try:
@@ -173,6 +204,7 @@ def main() -> None:
     run_id, reason = check_validation(
         os.environ["GITHUB_EVENT_NAME"], os.environ["GITHUB_REF"], event,
         os.environ["GITHUB_REPOSITORY"], sha,
+        wait=pending_waiter(args.wait_minutes),
     )
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
         output.write(f"reuse={'true' if run_id else 'false'}\nrun_id={run_id}\n")

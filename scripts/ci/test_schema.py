@@ -1113,10 +1113,23 @@ class ResolvedPlanValidationTests(unittest.TestCase):
             ]
         )
         self.assertIn(
-            "malformed-receipt: package claudine carries an exclusion exactly when it "
-            "gates nothing",
+            "malformed-receipt: package claudine carries an exclusion but gates something",
             schema.validate_resolved_plan(document),
         )
+
+    def test_a_package_gating_nothing_needs_an_exclusion_while_anything_is_scheduled(self):
+        self.assertIn(
+            "malformed-receipt: package claudine gates nothing without an exclusion",
+            schema.validate_resolved_plan(plan(packages=[package(gates=[])], cells=[])),
+        )
+
+    def test_a_fully_proven_push_may_select_packages_that_gate_nothing(self):
+        # A push whose pull request proved every environment it schedules
+        # plans none, so its packages gate nothing and carry no exclusion.
+        problems = schema.validate_resolved_plan(
+            plan(packages=[package(gates=[])], cells=[], environments=[])
+        )
+        self.assertFalse([problem for problem in problems if "exclusion" in problem], problems)
 
     def test_a_dependent_seam_that_is_not_an_object_is_refused(self):
         self.assertIn(
