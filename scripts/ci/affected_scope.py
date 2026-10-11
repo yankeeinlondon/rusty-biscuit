@@ -529,6 +529,10 @@ CI_TEST_FIELDS = {
     #: out of that scan, so such a test runs only when its own package changes
     #: (see `test_input_references`).
     "source-inputs",
+    #: Why a package that is not built yet has no tests. While its source
+    #: holds none, it gets no test cell; the first test found schedules it
+    #: normally and reports the marker as stale (`package_has_tests`).
+    "unimplemented",
 }
 EXCLUSION_FIELDS = {"exclusion-class", "owner", "reason", "expiry"}
 
@@ -1464,6 +1468,14 @@ def validate_package_ci(
             f"allowed: {sorted(CI_TEST_FIELDS)}"
         )
 
+    unimplemented = tests.get("unimplemented")
+    if unimplemented is not None and (
+        not isinstance(unimplemented, str) or not unimplemented.strip()
+    ):
+        raise RuntimeError(
+            f"{label}.tests field 'unimplemented' must be a non-empty reason"
+        )
+
     tiers = tests.get("tiers", ["L1"])
     if not isinstance(tiers, list) or not all(isinstance(t, str) for t in tiers):
         raise RuntimeError(f"{label}.tests field 'tiers' must be a list of tier names")
@@ -1781,6 +1793,7 @@ def package_ci_policy(
             "archive_includes": tests.get("archive-includes", []),
             "sidecars": tests.get("sidecars", []),
             "source_inputs": tests.get("source-inputs", []),
+            "unimplemented": tests.get("unimplemented"),
         }
         for path in record["source_inputs"]:
             own = manifest_directory(root, package).as_posix()
@@ -1862,6 +1875,39 @@ def area_slug(area: str) -> str:
     ```
     """
     return area.replace("/", "--")
+
+
+#: A test the harness would run: `#[test]` and its path-qualified forms
+#: (`#[tokio::test]`), the attribute macros of `rstest`, `test-case`, and
+#: `wasm-bindgen-test`, and `proptest!` blocks.
+_TEST_MARKER = re.compile(
+    r"#\[\s*(?:[A-Za-z_][\w]*::)*(?:test|rstest|test_case|wasm_bindgen_test)\b"
+    r"|\bproptest!"
+)
+
+
+def package_has_tests(root: Path, package: dict[str, Any]) -> bool:
+    """Whether a package's own source declares any test.
+
+    Read only for a package declaring `unimplemented`, so a test this scan
+    cannot recognize never drops coverage from a package that made no such
+    declaration. Any Rust file under `tests/` counts as a test.
+    """
+    directory = root / manifest_directory(root, package)
+    for path in directory.rglob("*.rs"):
+        relative = path.relative_to(directory).parts
+        if "target" in relative:
+            continue
+        if relative[0] == "tests":
+            return True
+        try:
+            if _TEST_MARKER.search(path.read_text(encoding="utf-8", errors="replace")):
+                return True
+        except OSError:
+            # Unreadable source is assumed to hold tests: the safe direction
+            # schedules the cell rather than dropping it.
+            return True
+    return False
 
 
 def manifest_directory(root: Path, package: dict[str, Any]) -> PurePosixPath:
@@ -3444,9 +3490,11 @@ def policy_record(
     shaped = {
         "package": record["package"],
         "area": record["area"],
-        # A gating package always owns at least its lint cell, so an empty
-        # gate list is exactly `gates = false`.
-        "gates": bool(record["gates"]),
+        # Only a `gates = false` package carries an exclusion. A gating one
+        # can gate nothing this run (a fully proven push, or an
+        # `unimplemented` package off Linux), and the plan's cells, not this
+        # flag, then say it is expected to produce nothing.
+        "gates": "exclusion" not in record,
         "tiers": record["tiers"] if testing else [],
         "l2_backends": record["l2_backends"],
         # The rollup needs to know a companion suite was DECLARED: a green
@@ -3462,7 +3510,7 @@ def policy_record(
             )
         ],
     }
-    if not record["gates"]:
+    if "exclusion" in record:
         shaped["exclusion"] = record["exclusion"]
     return shaped
 
@@ -4264,6 +4312,15 @@ def calculate_scope(
                 if package_id in suite_ids
                 else dependent_seam(attributed_dependents(package_id), packages_by_name)
             )
+            unimplemented = None
+            if record["unimplemented"]:
+                tests_found = package_has_tests(root, packages[package_id])
+                unimplemented = {"reason": record["unimplemented"], "tests_found": tests_found}
+                if not tests_found:
+                    # No test cell: a run of zero tests is indistinguishable
+                    # from a broken filter and fails completion. Lint still
+                    # compiles every target.
+                    record = {**record, "tiers": []}
             owned = package_cells(
                 record,
                 area,
@@ -4301,6 +4358,8 @@ def calculate_scope(
                     package_id, root, graph, packages
                 ),
             }
+            if unimplemented:
+                package_record["unimplemented"] = unimplemented
             if seam:
                 seam["native"] = sorted({
                     prerequisite

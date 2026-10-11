@@ -3057,6 +3057,11 @@ class EventSchedulingTests(unittest.TestCase):
         self.assertEqual([], plan["cells"])
         self.assertEqual([], plan["builds"])
         self.assertEqual([], plan["preflight_os"])
+        # Its projection launches no area and tells the rollup to expect
+        # nothing, instead of reading the empty gate list as an exclusion.
+        projection = legacy_scope_document(plan)
+        self.assertEqual([], projection["scheduled_areas"])
+        self.assertTrue(all(entry["gates"] for entry in projection["policy"]))
 
     def test_a_full_scope_run_preflights_only_the_scheduled_runners(self) -> None:
         # A full-scope nightly: native Windows cells, WSL2's cells on the
@@ -8464,6 +8469,121 @@ class HistoricalDocumentationBlindSpotReplayTests(unittest.TestCase):
         self.assertEqual([], plan["cells"])
         self.assertEqual([], plan["builds"])
         self.assertEqual("documentation", plan["change_class"])
+
+
+class UnimplementedPackageTests(unittest.TestCase):
+    """`unimplemented`: a package not built yet runs no test cell until it has a test.
+
+    Zero tests fail completion (`completion-expected-empty`), which is also
+    what a broken filter looks like, so these packages kept every nightly red.
+    """
+
+    REASON = "not implemented yet"
+
+    def setUp(self) -> None:
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary_directory.name).resolve()
+        seed_build_inputs(self.root)
+
+    def tearDown(self) -> None:
+        self.temporary_directory.cleanup()
+
+    def plan(
+        self, files: dict[str, str], tests: dict[str, object] | None, **kwargs: object
+    ) -> dict:
+        write_tree(self.root, files)
+        packages = [
+            rust_package(
+                self.root,
+                "pending",
+                "pending/lib",
+                [("lib", "pending", "src/lib.rs")],
+                ci={"tests": tests} if tests is not None else None,
+            )
+        ]
+        metadata = {
+            "workspace_members": [item["id"] for item in packages],
+            "packages": packages,
+            "resolve": None,
+        }
+        policy = package_ci_policy(
+            workspace_packages_from(metadata),
+            runner_labels={"ubuntu-latest", "windows-latest", "macos-latest"},
+            root=self.root,
+            today=TODAY,
+        )
+        plan = calculate_scope(
+            ["pending/lib/src/lib.rs"],
+            self.root,
+            metadata,
+            EventSchedulingTests.shipped_events() if kwargs else environments_for_tests(),
+            policy,
+            **kwargs,  # type: ignore[arg-type]
+        )
+        self.assertEqual([], schema.validate_resolved_plan(plan))
+        return plan
+
+    @staticmethod
+    def gates(plan: dict) -> set[str]:
+        return {cell["gate"] for cell in plan["cells"]}
+
+    def test_a_declared_package_without_tests_gets_no_test_cell(self) -> None:
+        plan = self.plan({"pending/lib/src/lib.rs": "pub fn later() {}\n"},
+                         {"unimplemented": self.REASON})
+        self.assertNotIn("L1", self.gates(plan))
+        self.assertIn("lint", self.gates(plan))
+        entry = plan["packages"][0]
+        self.assertEqual([], entry["tiers"])
+        self.assertEqual({"reason": self.REASON, "tests_found": False}, entry["unimplemented"])
+
+    def test_the_first_test_schedules_it_and_reports_the_marker_stale(self) -> None:
+        for files in (
+            {"pending/lib/src/lib.rs": "#[test]\nfn works() {}\n"},
+            {"pending/lib/src/lib.rs": "#[tokio::test]\nasync fn works() {}\n"},
+            {"pending/lib/src/lib.rs": "proptest! { #[test] fn p(x in 0..1u8) {} }\n"},
+            {"pending/lib/src/lib.rs": "", "pending/lib/tests/it.rs": "fn helper() {}\n"},
+        ):
+            with self.subTest(files=files):
+                plan = self.plan(files, {"unimplemented": self.REASON})
+                self.assertIn("L1", self.gates(plan))
+                entry = plan["packages"][0]
+                self.assertEqual(["L1"], entry["tiers"])
+                self.assertTrue(entry["unimplemented"]["tests_found"])
+                for leftover in ("pending/lib/tests/it.rs",):
+                    (self.root / leftover).unlink(missing_ok=True)
+
+    def test_a_nightly_gives_a_declared_package_without_tests_nothing_to_run(self) -> None:
+        # Lint is Linux's, on pull requests; the nightly schedules no test
+        # cell for it either, so it is selected with no gate and no area job.
+        plan = self.plan({"pending/lib/src/lib.rs": "pub fn later() {}\n"},
+                         {"unimplemented": self.REASON}, event="schedule")
+        self.assertEqual([], plan["cells"])
+        self.assertEqual([], plan["packages"][0]["gates"])
+        self.assertNotIn("exclusion", plan["packages"][0])
+        self.assertEqual([], legacy_scope_document(plan)["scheduled_areas"])
+
+    def test_an_undeclared_package_without_tests_keeps_its_test_cell(self) -> None:
+        # The scan never runs without the declaration, so a test it cannot
+        # recognize can never drop coverage from an ordinary package.
+        plan = self.plan({"pending/lib/src/lib.rs": "pub fn later() {}\n"}, None)
+        self.assertIn("L1", self.gates(plan))
+        self.assertNotIn("unimplemented", plan["packages"][0])
+
+    def test_a_marker_that_is_not_a_reason_is_refused(self) -> None:
+        for value in ("", "   ", True, ["x"]):
+            with self.subTest(value=value), self.assertRaises(RuntimeError) as raised:
+                self.plan({"pending/lib/src/lib.rs": ""}, {"unimplemented": value})
+            self.assertIn("unimplemented", str(raised.exception))
+
+    def test_target_directories_are_not_scanned(self) -> None:
+        plan = self.plan(
+            {
+                "pending/lib/src/lib.rs": "",
+                "pending/lib/target/debug/build/out.rs": "#[test]\nfn generated() {}\n",
+            },
+            {"unimplemented": self.REASON},
+        )
+        self.assertFalse(plan["packages"][0]["unimplemented"]["tests_found"])
 
 
 class SourceInputSelectionTests(unittest.TestCase):

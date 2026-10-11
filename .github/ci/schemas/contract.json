@@ -58,7 +58,8 @@
       "requires_toolchain": false,
       "exclusion": false,
       "input_paths": false,
-      "dependent_seam": false
+      "dependent_seam": false,
+      "unimplemented": false
     },
     "cell": {
       "package": true,

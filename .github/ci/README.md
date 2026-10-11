@@ -596,6 +596,26 @@ would silently exempt a package and miss its first test.
 | `sidecars` | string[] | `[]` | named build sidecars from [`sidecars.json`](sidecars.json) — another package's binaries, compiled by the producer |
 | `source-inputs` | string[] | `[]` | another package's source files this package's tests execute or read, by exact repository path; a change to one adds a narrowed `ubuntu-latest` L1 cell for the tests that spell it. Must exist, be source, and lie outside this package. See [`docs/cicd/test-inputs.md`](../../docs/cicd/test-inputs.md) |
 | `requires-toolchain` | bool | `false` | this package's L1 shells out to `cargo` or `just`, so its consumer provisions the pinned toolchain where the environment has `cargo_toolchain`, and an environment without it renders a governed `ACCEPTED GAP` rather than a red cell |
+| `unimplemented` | string | absent | why a package that is not built yet has no tests. While its source holds no test, it gets no test cell; lint still runs. The first test schedules it normally, and the plan reports the marker as stale |
+
+`unimplemented` exists because a run of zero tests fails completion
+(`completion-expected-empty`): an empty test list looks exactly like a broken
+filter. The planner checks the claim on every run by scanning the package's
+own source (not `target/`) for `#[test]` and its path-qualified forms such as
+`#[tokio::test]`, the `rstest`, `test_case`, and `wasm_bindgen_test`
+attributes, `proptest!`, and any Rust file under `tests/`. Only a package that
+declares the marker is ever scanned, so a test the scan cannot recognize never
+drops coverage from an ordinary package.
+
+```toml
+[package.metadata.ci.tests]
+unimplemented = "not implemented yet, so there are no tests to run"
+```
+
+The plan records `unimplemented: {reason, tests_found}` on the package. With
+`tests_found: false` the package's tiers are empty; with `true` it runs its
+declared tiers and the marker should be deleted. Until its first test, the
+package's compile coverage is Linux's lint (`clippy --all-targets`) alone.
 
 `requires-toolchain` is for the minority of suites that test the repository's
 own tooling — they open the workspace with `cargo metadata` or drive real

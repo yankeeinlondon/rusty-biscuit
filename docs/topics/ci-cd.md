@@ -269,6 +269,20 @@ A pull request merged before its own CI finished would otherwise get the whole g
 instead waits, up to 90 minutes, for the pull request's run of the same head. A green finish on the
 same tree is reused; a failure, cancellation, or timeout falls back to the normal grid.
 
+**A package that is not built yet runs no tests.** Zero tests fail the completeness check, because
+an empty test list looks exactly like a broken filter, so such a package declares why it has none:
+
+```toml
+[package.metadata.ci.tests]
+unimplemented = "not implemented yet, so there are no tests to run"
+```
+
+While the package's own source holds no test, the planner gives it no test cell and records
+`unimplemented: {reason, tests_found: false}` on it; lint still compiles every target on Linux.
+The first `#[test]` (or `#[tokio::test]`, `rstest`, `proptest!`, a file under `tests/`) schedules
+its tests normally, and the plan reports `tests_found: true` so the marker can be deleted. Only
+declaring packages are scanned. The field reference is in `.github/ci/README.md`.
+
 **Planned:** a resumable workspace seeding command will gather Windows and WSL2 evidence on
 configured rigs. Scheduled evidence consumption, rig cross-check publication for both WSL2 and
 native Windows, and hosted-cell observation publication are implemented (next section); until a rig

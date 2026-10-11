@@ -122,6 +122,12 @@ local and hosted runs. Its package policy is deliberately narrow:
   *source* is scanned the same way only for a package that lists it in
   `[package.metadata.ci.tests] source-inputs` (test-toolkit's kache suites
   declare the two `repo-deps` kache scripts they execute).
+- A package not built yet declares `[package.metadata.ci.tests]
+  unimplemented = "<why>"`. While a scan of its own source finds no test it
+  gets no test cell (zero tests fail `completion-expected-empty`); the first
+  test schedules it again and the plan's `unimplemented.tests_found: true`
+  says the marker is stale. Never use it to silence a package that has
+  tests, and never infer it: only declaring packages are scanned.
 - CI's own inputs are the exception, because CI's own suites now have owners.
   `SUITE_REGISTRY` in `affected_scope.py` declares every suite's owner,
   canonical recipe, environment, and kind (`cargo` or `companion`);

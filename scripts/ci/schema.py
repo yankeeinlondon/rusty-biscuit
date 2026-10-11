@@ -702,6 +702,10 @@ PACKAGE_FIELDS: dict[str, bool] = {
     #: Present exactly when at least one is attributed; never names a package
     #: the plan also selects.
     "dependent_seam": False,
+    #: A package declaring `unimplemented`: `{reason, tests_found}`. While
+    #: `tests_found` is false the package has no test tier and no test cell;
+    #: once true it is scheduled normally and the marker is stale.
+    "unimplemented": False,
 }
 
 CELL_FIELDS: dict[str, bool] = {
@@ -1590,6 +1594,23 @@ def _rows(value: Any, areas: set[str]) -> list[str]:
     return problems
 
 
+def _unimplemented(entry: dict[str, Any]) -> list[str]:
+    where = f"package {entry['package']} unimplemented"
+    marker = entry["unimplemented"]
+    if not isinstance(marker, dict) or set(marker) != {"reason", "tests_found"}:
+        return [f"malformed-receipt: {where} must be {{reason, tests_found}}"]
+    problems = []
+    if not isinstance(marker["reason"], str) or not marker["reason"].strip():
+        problems.append(f"malformed-receipt: {where} reason must be a non-empty string")
+    if not isinstance(marker["tests_found"], bool):
+        problems.append(f"malformed-receipt: {where} tests_found must be a boolean")
+    elif not marker["tests_found"] and entry.get("tiers"):
+        problems.append(
+            f"malformed-receipt: {where} has no tests but declares tiers {entry['tiers']}"
+        )
+    return problems
+
+
 def validate_resolved_plan(document: Any, today: Any = None) -> list[str]:
     """Every reason `document` is not a valid resolved plan, or an empty list.
 
@@ -1677,11 +1698,16 @@ def validate_resolved_plan(document: Any, today: Any = None) -> list[str]:
             problems.append(
                 f"malformed-receipt: package {entry['package']} l1_include_slow must be a boolean"
             )
-        # A push whose pull request already proved every environment it
-        # schedules plans no environment, so its selected packages gate
-        # nothing without being excluded. Anywhere else an empty gate list is
+        # Two plans select a package that gates nothing without excluding it:
+        # a push whose pull request already proved every environment it
+        # schedules plans no environment at all, and an `unimplemented`
+        # package with no tests has no test cell, so an event that schedules
+        # no Linux lint leaves it nothing. Anywhere else an empty gate list is
         # an owned `gates = false` exclusion.
-        nothing_scheduled = document.get("environments") == []
+        marker = entry.get("unimplemented")
+        nothing_scheduled = document.get("environments") == [] or (
+            isinstance(marker, dict) and marker.get("tests_found") is False
+        )
         if "exclusion" in entry and entry.get("gates") != []:
             problems.append(
                 f"malformed-receipt: package {entry['package']} carries an exclusion "
@@ -1692,6 +1718,8 @@ def validate_resolved_plan(document: Any, today: Any = None) -> list[str]:
                 f"malformed-receipt: package {entry['package']} gates nothing "
                 "without an exclusion"
             )
+        if "unimplemented" in entry:
+            problems += _unimplemented(entry)
         if "dependent_seam" in entry:
             problems += _dependent_seam(entry["package"], entry["dependent_seam"])
 

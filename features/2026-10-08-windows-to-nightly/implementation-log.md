@@ -838,3 +838,40 @@ See `message_to_agent` in the spec. Phase 5's seed should reuse
   it; 103 pass.
 - The spec frontmatter carried two `message_to_agent` keys; they are merged,
   Phase 4's notes first.
+
+## Human review resolved: packages with no tests (2026-10-11)
+
+The author chose **option B**, with a constraint: these packages have no tests
+because they are not implemented yet, and must be tested as soon as they are.
+
+- New `[package.metadata.ci.tests] unimplemented = "<why>"`. For a declaring
+  package, the planner scans its own source (not `target/`) for a test
+  (`#[test]` and path-qualified forms, `rstest`, `test_case`,
+  `wasm_bindgen_test`, `proptest!`, any `.rs` under `tests/`). None found: the
+  package has no tiers and no test cell; lint still runs on Linux. One found:
+  it is scheduled normally and the plan reports the marker stale. The package
+  record carries `unimplemented: {reason, tests_found}` (resolved plan 7,
+  amended without a bump).
+- Declared on `reaper`, `reaper-cli`, `ui`, `agent-sandbox-cli`,
+  `research-cli`. A full nightly plan of the real workspace gives them no
+  cell and validates.
+- **Bug found in Phase 1 and fixed here:** `policy_record` read an empty gate
+  list as `gates = false` and indexed the missing exclusion, so a fully
+  proven push that selected a package would have crashed in the scope step's
+  projection. The projection now keys on the exclusion's presence. The schema
+  likewise admits an empty gate list without an exclusion for an
+  `unimplemented` package with no tests, besides the fully proven push.
+- Trade-off: until its first test, such a package's compile coverage is
+  Linux lint (`clippy --all-targets`) only.
+
+### Validation
+
+- `scripts/ci` Python suites: all pass. `actionlint`: clean. Hook tests: 68
+  passed, 0 failed.
+- `cargo nextest run -p test-toolkit -p repo-deps`: 962 of 963 passed. The
+  remaining one, `ci-build`'s
+  `slow_real_package_archives_read_their_fixtures_from_the_consumers_checkout`
+  (two full relocated dependency builds, 75 s when it passed in Phase 4 against
+  a 90 s limit), timed out alone at a host load average of 89. This change
+  touches neither `ci-build` nor the two packages it builds; it was not
+  re-run on a quiet host.

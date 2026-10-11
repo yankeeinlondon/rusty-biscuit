@@ -27,24 +27,12 @@ reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-11
 review_iterations: 0
-human_review: true
-human_review_items:
-  - |-
-    **Five packages that have no tests keep every nightly red, and the guard that catches "a test run that silently did nothing" blocks them.**
-
-    What we found (re-read on 2026-10-11 from the latest nightly, run 38059157100, and reproduced on the WSL2 rig): `reaper`, `reaper-cli`, `ui` (tabby), `agent-sandbox-cli` and `research-cli` contain no tests at all. The plan still schedules an L1 test cell for each. Their runs finish with "0 tests run", and the completeness check refuses them (`completion-expected-empty`) because an empty test list with an empty report is also what a broken test filter looks like. So each nightly fails on these five cells, which is why no nightly has ever succeeded and why the first nightly baseline cannot be established until this is settled. This must be decided before Phase 5, because the seeding command in Phase 5 and the "genuine successful baseline" in its acceptance both depend on those cells being able to pass or be legitimately absent.
-
-    Options:
-    - **A. Teach the completeness check to accept an empty list only when the listing proves the compiled test binaries contain no tests of any kind** (nothing selected, nothing ignored, nothing excluded by the filter). Pros: smallest change; a broken filter still fails because it leaves tests in the "excluded" set; the five cells pass honestly with "0 tests" shown. Cons: it relaxes a safety rule the earlier design deliberately made strict, so it needs your explicit approval; a package whose tests are all compiled out by `cfg` on one platform would pass silently there.
-    - **B. Stop scheduling an L1 cell for a package that has no tests.** Pros: no weakening of the check; less CI work. Cons: the planner cannot know the test count without compiling, so it needs a static or declared signal (for example a per-package "no tests yet" marker), which is new surface and can go stale when tests are added.
-    - **C. Record the five cells as governed, expiring accepted gaps.** Pros: reuses an existing mechanism and requires no code change. Cons: it hides a real structural issue behind approvals that expire and must be renewed, and adds a human chore.
-
-    Recommendation: **A**, with a test for each of the three states (tests present and selected, tests present but filtered out, no tests at all). It is the narrowest change and still refuses the case the guard was written for. I did not implement it because it changes a deliberate safety contract.
+human_review: false
 message_to_agent: |-
   Phase 4 is implemented (see the log). Things the next phase must know:
   1. Rig and hosted producers now publish observations: `scripts/cross-check.sh` records one `rig` observation per finished leg (`wsl2-ubuntu`, `windows-latest`) with a per-run proof directory; `hosted_observations.py` emits and publishes `hosted` ones on scheduled runs; `local_evidence.py verify --artifact-repo` vouches for hosted artifacts. A passing rig/seed observation's proof documents are rechecked byte for byte by a reader on the same host.
   2. A seed command (Phase 5) should call the same `publish_rig_observation` path in `cross-check.sh` per cell, or the `observation_notes.py publish-receipt --kind rig` CLI it wraps. Each rig run needs its own evidence directory (`<head>/<environment>/<package>-<gate>-<run_id>`): two runs sharing one would break the first run's digests.
-  3. Pending the human decision on zero-test packages, a full-workspace seed will fail for `reaper`, `reaper-cli`, `ui`, `agent-sandbox-cli` and `research-cli` with `completion-expected-empty`: expect those five to stay unproved and report them as such rather than as seed bugs.
+  3. The zero-test packages are settled (author chose option B, 2026-10-11): `reaper`, `reaper-cli`, `ui`, `agent-sandbox-cli` and `research-cli` declare `[package.metadata.ci.tests] unimplemented`, so while their source has no test the planner gives them no test cell and records `unimplemented: {reason, tests_found: false}`. A full-workspace seed must therefore schedule nothing for them, not report them unproved. The first test they gain schedules them normally.
   4. Unverified on a real hosted run: that `GITHUB_TOKEN` may push `refs/notes/*`, `always()` behavior of the publisher on cancel, and re-run attempts that repeat an artifact name.
   5. Do not run cross-check from a scratch clone against the real rigs: its prune step deletes clones of worktrees it does not know about (it removed three warm clones on `build-win-native` in Phase 4).
 

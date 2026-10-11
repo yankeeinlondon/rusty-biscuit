@@ -68,6 +68,7 @@ The document that describes everything one run will do. Field contract:
 | 5, 6 (unreleased) | On the direct-cell-execution branch: one dispatch row per executing cell, so every execution input has to come from the plan. Adds `skip_policy`, area `execution_path`, per-cell `profile` and `requires_node` (5), then an executing L2 cell's `backends` (6). Never reached `main` under these numbers. | `2026-09-19-direct-cell-execution` |
 | 7 | The union of `main`'s 5 and the branch's 6. The optional per-cell `companions_only` (a lint cell whose required work is its companions) arrives with it. | both of the above |
 | 7 (amended) | The optional per-cell `test_filter`: an L1 cell narrowed to the tests that read a changed file. No bump, because absence means exactly what every version-7 plan already meant — the whole tier — and a plan is only ever read by the code at the head it was resolved for, so no reader meets the field without understanding it. | `2026-09-22-test-input-blind-spot` |
+| 7 (amended) | The optional package `unimplemented: {reason, tests_found}`, and a selected gating package may now carry an empty gate list without an exclusion when the plan schedules no environment or the package is `unimplemented` with no tests. No bump: absence means what it always did, and only the same head's code reads the plan. | `2026-10-08-windows-to-nightly` |
 
 A scope receipt from any earlier generation misses once as `scope-schema`.
 

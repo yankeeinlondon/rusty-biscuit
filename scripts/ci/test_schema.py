@@ -1292,6 +1292,32 @@ class ResolvedPlanValidationTests(unittest.TestCase):
         )
         self.assertFalse([problem for problem in problems if "exclusion" in problem], problems)
 
+    def test_an_unimplemented_marker_must_be_well_formed(self):
+        good = {"reason": "not built yet", "tests_found": False}
+        self.assertEqual(
+            [],
+            [p for p in schema.validate_resolved_plan(
+                plan(packages=[package(tiers=[], unimplemented=good)])
+            ) if "unimplemented" in p],
+        )
+        for marker, fragment in (
+            ("yes", "must be {reason, tests_found}"),
+            ({"reason": "x"}, "must be {reason, tests_found}"),
+            ({"reason": "", "tests_found": False}, "non-empty string"),
+            ({"reason": "x", "tests_found": "no"}, "must be a boolean"),
+        ):
+            with self.subTest(marker=marker):
+                problems = schema.validate_resolved_plan(
+                    plan(packages=[package(tiers=[], unimplemented=marker)])
+                )
+                self.assertTrue(any(fragment in p for p in problems), problems)
+
+    def test_a_package_without_tests_cannot_declare_a_test_tier(self):
+        problems = schema.validate_resolved_plan(
+            plan(packages=[package(unimplemented={"reason": "x", "tests_found": False})])
+        )
+        self.assertTrue(any("has no tests but declares tiers" in p for p in problems), problems)
+
     def test_a_dependent_seam_that_is_not_an_object_is_refused(self):
         self.assertIn(
             "malformed-receipt: package claudine dependent_seam must be an object",
