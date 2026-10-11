@@ -67,6 +67,16 @@ conditions that masquerade as repository defects.
   sniff-cli's `relative_base_with_unreadable_cwd_fails` does (measured
   2026-10-06). Keep such a test to one lookup.
 
+## Homebrew link paths
+
+Cargo can retain a native library search path to a removed Homebrew Cellar
+version. A Sniff rebuild failed with `library 'git2' not found` while
+`/opt/homebrew/opt/libgit2/lib/libgit2.dylib` still existed (2026-10-11).
+A process-local `LIBRARY_PATH=/opt/homebrew/opt/libgit2/lib` allowed the
+focused nextest build to link without changing dependencies or project
+configuration. Check that the library exists before using this workaround;
+the missing Cellar path alone is not evidence of a source defect.
+
 ## Process groups
 
 - One `kill(-pgid, SIGKILL)` does not reach a child that a group member is
