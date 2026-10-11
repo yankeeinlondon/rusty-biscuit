@@ -579,7 +579,7 @@ fn incompatible_record_schema_versions_are_misses_never_served_or_widened() {
     let path = fixture(ProgrammingLanguage::Python);
     let narrow = SymbolQuery::new().kinds(FUNCTION_KINDS);
     let complete = SymbolQuery::complete_index();
-    let current = json!({ "major": 5, "minor": 1 });
+    let current = json!({ "major": 5, "minor": 2 });
     for version in [
         json!({ "major": 2, "minor": 0 }),
         json!({ "major": 3, "minor": 0 }),
@@ -588,7 +588,7 @@ fn incompatible_record_schema_versions_are_misses_never_served_or_widened() {
         json!({ "major": 4, "minor": 2 }),
         json!({ "major": 4, "minor": 3 }),
         json!({ "major": 5, "minor": 0 }),
-        json!({ "major": 5, "minor": 2 }),
+        json!({ "major": 5, "minor": 1 }),
         json!({ "major": 6, "minor": 0 }),
     ] {
         for (position, request) in [("first", &narrow), ("last", &narrow), ("first", &complete)] {

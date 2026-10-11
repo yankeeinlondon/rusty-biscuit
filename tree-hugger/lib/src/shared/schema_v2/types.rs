@@ -38,11 +38,15 @@ impl SchemaVersion {
     /// scoped per-occurrence evidence, and a file index may carry
     /// `occurrences` and `reference_coverage`; no longer emitted.
     pub const V5_0: Self = Self { major: 5, minor: 0 };
-    /// Shape with an occurrence's selected import name span.
+    /// Shape with an occurrence's selected import name span; no longer
+    /// emitted.
     pub const V5_1: Self = Self { major: 5, minor: 1 };
+    /// Shape with the required `imports[].reexported` marker and the optional
+    /// file-index `reexports` report.
+    pub const V5_2: Self = Self { major: 5, minor: 2 };
     /// The shape records, file indexes, CLI envelopes and cache entries are
     /// written in, and the only one the cache serves.
-    pub const CURRENT: Self = Self::V5_1;
+    pub const CURRENT: Self = Self::V5_2;
 }
 
 /// 1-based text location.

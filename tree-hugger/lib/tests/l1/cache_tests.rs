@@ -114,6 +114,7 @@ fn test_in_process_cache_symbol_index_hit_miss() {
             diagnostics: Vec::new(),
             occurrences: Vec::new(),
             reference_coverage: Vec::new(),
+            reexports: None,
         },
     );
 

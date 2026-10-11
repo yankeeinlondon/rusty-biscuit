@@ -16,6 +16,7 @@ static RELATION_LINKS: AtomicU64 = AtomicU64::new(0);
 static COMPLEXITY_WALKS: AtomicU64 = AtomicU64::new(0);
 static REFERENCE_CAPTURES: AtomicU64 = AtomicU64::new(0);
 static OCCURRENCE_RESOLUTIONS: AtomicU64 = AtomicU64::new(0);
+static REEXPORT_EXTRACTIONS: AtomicU64 = AtomicU64::new(0);
 
 /// A snapshot of the process-wide work counts.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -59,6 +60,9 @@ pub struct WorkCounters {
     /// coverage): one per analysis that binds references, from which the
     /// reference edges and recursion are both read.
     pub occurrence_resolutions: u64,
+    /// Extractions of a file's re-export report: one per analysis that
+    /// requires `Capability::Reexports`, none otherwise.
+    pub reexport_extractions: u64,
 }
 
 impl WorkCounters {
@@ -73,6 +77,7 @@ impl WorkCounters {
             complexity_walks: self.complexity_walks - earlier.complexity_walks,
             reference_captures: self.reference_captures - earlier.reference_captures,
             occurrence_resolutions: self.occurrence_resolutions - earlier.occurrence_resolutions,
+            reexport_extractions: self.reexport_extractions - earlier.reexport_extractions,
         }
     }
 }
@@ -94,6 +99,7 @@ pub fn work_counters() -> WorkCounters {
         complexity_walks: COMPLEXITY_WALKS.load(Ordering::Relaxed),
         reference_captures: REFERENCE_CAPTURES.load(Ordering::Relaxed),
         occurrence_resolutions: OCCURRENCE_RESOLUTIONS.load(Ordering::Relaxed),
+        reexport_extractions: REEXPORT_EXTRACTIONS.load(Ordering::Relaxed),
     }
 }
 
@@ -127,4 +133,8 @@ pub(crate) fn count_reference_capture() {
 
 pub(crate) fn count_occurrence_resolution() {
     OCCURRENCE_RESOLUTIONS.fetch_add(1, Ordering::Relaxed);
+}
+
+pub(crate) fn count_reexport_extraction() {
+    REEXPORT_EXTRACTIONS.fetch_add(1, Ordering::Relaxed);
 }

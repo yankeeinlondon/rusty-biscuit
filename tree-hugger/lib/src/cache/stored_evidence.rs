@@ -106,6 +106,7 @@ struct StoredImport {
     span: StoredSpan,
     statement_span: Option<StoredSpan>,
     symbol: StoredImportRef,
+    reexported: bool,
 }
 
 #[derive(Deserialize)]
@@ -128,6 +129,7 @@ struct StoredImportView<'a> {
     span: StoredSpan,
     statement_span: Option<StoredSpan>,
     symbol: StoredImportRefView<'a>,
+    reexported: bool,
 }
 
 #[derive(Serialize)]
@@ -166,6 +168,7 @@ impl<'a> From<&'a ImportRecord> for StoredImportView<'a> {
                 qualified_name: import.symbol.qualified_name.as_deref(),
                 source_span: import.symbol.source_span.as_ref().map(StoredSpan::from),
             },
+            reexported: import.reexported,
         }
     }
 }
@@ -179,6 +182,7 @@ impl From<StoredImport> for ImportRecord {
                 id: import.symbol.id, name: import.symbol.name, qualified_name: import.symbol.qualified_name,
                 source_span: import.symbol.source_span.map(TextSpan::from),
             },
+            reexported: import.reexported,
         }
     }
 }
@@ -1172,6 +1176,7 @@ mod tests {
                     qualified_name: Some("std::collections::HashMap".into()),
                     source_span: None,
                 },
+                reexported: false,
             },
             ImportRecord {
                 name: "io".into(),
@@ -1185,9 +1190,10 @@ mod tests {
                     qualified_name: None,
                     source_span: Some(span(35, 37)),
                 },
+                reexported: false,
             },
         ];
-        assert_eq!(import_inventory(&imports), "2e17ca531591bdeff902137eff802af4b44ebabe9b45ea534ac6b3fc5356a6bc");
+        assert_eq!(import_inventory(&imports), "67e537e1556367bab0e019d379a74bb473fae432d8857d49cc7ed6c1b99ae79f");
         assert_eq!(import_inventory(&[]), "d53d18c23212ea7b6300594bb89bce60218f6eff2b9d628b8cc42d3e79bbd5ab");
     }
 

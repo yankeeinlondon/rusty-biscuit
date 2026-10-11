@@ -12,11 +12,13 @@ use super::{
 mod facets;
 mod kinds;
 mod occurrences;
+mod reexports;
 mod types;
 
 pub use facets::*;
 pub use kinds::*;
 pub use occurrences::*;
+pub use reexports::*;
 pub use types::*;
 
 /// Top-level v2 symbol record.
@@ -66,6 +68,10 @@ pub struct ImportRecord {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub statement_span: Option<TextSpan>,
     pub symbol: SymbolRef,
+    /// Whether a `syntax` or `declared` re-export entry forwards this
+    /// import. Meaningful only when `FileSymbolIndex::reexports` was
+    /// computed; `false` for every record otherwise.
+    pub reexported: bool,
 }
 
 /// Export entry aligned to v2 relations.
@@ -100,6 +106,11 @@ pub struct FileSymbolIndex {
     /// `occurrences` (empty exactly when they were not computed).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub reference_coverage: Vec<ReferenceCoverage>,
+    /// The file's re-export report; `None` exactly when
+    /// `Capability::Reexports` was not computed, which is not the same as a
+    /// report with no entries.
+    #[serde(default, deserialize_with = "facets::present", skip_serializing_if = "Option::is_none")]
+    pub reexports: Option<ReexportReport>,
 }
 
 /// Deterministic stable symbol key used to derive `SymbolId`.

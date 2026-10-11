@@ -581,11 +581,17 @@ impl From<SymbolSnapshot> for FileSymbolIndex {
             file_hash: snapshot.key.file_hash,
             completed_passes: snapshot.completed_passes,
             symbols: snapshot.symbols,
-            imports: snapshot.imports,
+            // The snapshot keeps no re-export report, so no marker survives.
+            imports: snapshot
+                .imports
+                .into_iter()
+                .map(|import| ImportRecord { reexported: false, ..import })
+                .collect(),
             exports: snapshot.exports,
             diagnostics: snapshot.diagnostics,
             occurrences: Vec::new(),
             reference_coverage: Vec::new(),
+            reexports: None,
         }
     }
 }

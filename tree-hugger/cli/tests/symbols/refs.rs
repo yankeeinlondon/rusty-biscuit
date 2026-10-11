@@ -460,7 +460,7 @@ fn the_json_envelope_is_versioned_and_ends_with_errors() {
     let scratch = scratch();
     let stdout = scratch.stdout(&["--json", "refs", "parse", "app.ts"]);
     assert!(
-        stdout.starts_with(r#"{"report_schema_version":1,"schema_version":{"major":5,"minor":1},"root_dir":"#),
+        stdout.starts_with(r#"{"report_schema_version":1,"schema_version":{"major":5,"minor":2},"root_dir":"#),
         "{}",
         &stdout[..120.min(stdout.len())]
     );

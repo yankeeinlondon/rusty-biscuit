@@ -745,7 +745,7 @@ fn json_symbols_carry_visibility_and_current_schema() {
     // `--all-scopes`: the local `localValue` is asserted below.
     let json = json_of(&scratch.stdout(&["--json", "symbols", "--all-scopes", "typescript.ts"]));
 
-    let schema = serde_json::json!({ "major": 5, "minor": 1 });
+    let schema = serde_json::json!({ "major": 5, "minor": 2 });
     assert_eq!(json["report_schema_version"], 1, "TypeScript: report_schema_version");
     assert_eq!(json["schema_version"], schema, "TypeScript: envelope schema_version");
     let records = report_records(&json);
@@ -768,6 +768,25 @@ fn json_symbols_carry_visibility_and_current_schema() {
         named(&records, "localValue", "TypeScript")["visibility"]["level"], "Unknown",
         "TypeScript `localValue`: Unknown access"
     );
+}
+
+/// `--json-full` is the complete index, so it carries the re-export report
+/// and the import marker; a plain `--json` listing computes neither.
+#[test]
+fn json_full_carries_the_reexport_report_and_json_does_not() {
+    let scratch = Scratch::new(&[("typescript.ts", TYPESCRIPT_FIXTURE), ("lib.rs", "pub fn f() {}\n")]);
+    let full = json_of(&scratch.stdout(&["--json-full", "symbols", "--no-cache", "typescript.ts", "lib.rs"]));
+    for index in full["indexes"].as_array().expect("indexes") {
+        let file = index["file"].as_str().expect("file");
+        assert_eq!(index["reexports"]["coverage"]["state"], "limited", "{file}: unimplemented language stays limited");
+        assert!(index["reexports"]["entries"].as_array().is_some_and(Vec::is_empty), "{file}");
+        for import in index["imports"].as_array().expect("imports") {
+            assert_eq!(import["reexported"], false, "{file}: no forwarding evidence yet");
+        }
+    }
+
+    let plain = json_of(&scratch.stdout(&["--json", "symbols", "--no-cache", "typescript.ts"]));
+    assert!(!plain.to_string().contains("\"reexports\""), "an unrequested report is not written");
 }
 
 /// Schema 4.x records carry the declaring keyword, the display header and

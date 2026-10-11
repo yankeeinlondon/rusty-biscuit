@@ -22,6 +22,7 @@ pub mod counters;
 pub(crate) mod coverage;
 pub(crate) mod declaration_names;
 pub(crate) mod occurrences;
+pub(crate) mod reexports;
 pub(crate) mod name_identity;
 pub(crate) mod scope;
 pub(crate) mod syntax_markers;
@@ -48,6 +49,8 @@ struct PassPlan {
     semantic: bool,
     docs: bool,
     diagnostics: bool,
+    /// The re-export report and the imports' `reexported` markers.
+    reexports: bool,
 }
 
 impl PassPlan {
@@ -59,6 +62,7 @@ impl PassPlan {
             semantic: query.requires(Capability::Semantics),
             docs: query.requires(Capability::StructuredDocs),
             diagnostics: query.requires(Capability::Diagnostics),
+            reexports: query.requires(Capability::Reexports),
         }
     }
 
@@ -143,6 +147,13 @@ fn run_indexed(
     };
     let symbols = tree_file.records_from(definitions, &selection, facts, rust_walk)?;
 
+    let mut import_records: Vec<ImportRecord> = imports.into_iter().map(import_record).collect();
+    let reexports = plan.reexports.then(|| {
+        let report = reexports::extract(tree_file, &import_records);
+        reexports::mark_forwarded_imports(&mut import_records, &report);
+        report
+    });
+
     let mut index = FileSymbolIndex {
         schema_version: crate::shared::SchemaVersion::CURRENT,
         file: tree_file.file.clone(),
@@ -150,11 +161,12 @@ fn run_indexed(
         file_hash: tree_file.hash.clone(),
         completed_passes: plan.passes(),
         symbols,
-        imports: imports.into_iter().map(import_record).collect(),
+        imports: import_records,
         exports,
         diagnostics,
         occurrences: Vec::new(),
         reference_coverage: Vec::new(),
+        reexports,
     };
 
     let names = NameIndex::new(&index.symbols);
@@ -220,6 +232,7 @@ fn import_record(import: ImportSymbol) -> ImportRecord {
             name: import.name,
             qualified_name: import.original_name,
         },
+        reexported: false,
     }
 }
 

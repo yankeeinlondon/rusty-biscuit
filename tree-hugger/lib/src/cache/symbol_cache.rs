@@ -24,7 +24,7 @@ use crate::queries::{QueryKind, resolve_query_text};
 use crate::rule_registry::RuleRegistry;
 use crate::shared::{
     Diagnostic, ExportRecord, FileSymbolIndex, ImportRecord, Occurrence, ProgrammingLanguage,
-    ReferenceCoverage, SchemaVersion, SymbolKindV2, SymbolRecord,
+    ReexportReport, ReferenceCoverage, SchemaVersion, SymbolKindV2, SymbolRecord,
 };
 
 /// The queries whose text decides a file's records, imports and references.
@@ -496,6 +496,7 @@ impl SymbolCache {
                 diagnostics: &index.diagnostics,
                 occurrences: &index.occurrences,
                 reference_coverage: &index.reference_coverage,
+                reexports: index.reexports.as_ref(),
             },
         )
     }
@@ -545,6 +546,8 @@ struct WrittenEntry<'a> {
     occurrences: &'a [Occurrence],
     #[serde(serialize_with = "write_coverage")]
     reference_coverage: &'a [ReferenceCoverage],
+    /// `null` exactly when `reexports` is not a completed capability.
+    reexports: Option<&'a ReexportReport>,
 }
 
 /// Every kind is the string `"all"`, never an empty list.
@@ -589,6 +592,10 @@ struct StoredEntry {
     occurrences: ReadOccurrences,
     #[serde(deserialize_with = "read_coverage")]
     reference_coverage: Vec<ReferenceCoverage>,
+    /// Required but nullable: `null` when the entry did not compute
+    /// re-exports.
+    #[serde(deserialize_with = "nullable")]
+    reexports: Option<ReexportReport>,
 }
 
 impl StoredEntry {
@@ -650,6 +657,15 @@ impl StoredEntry {
         {
             return Err(CacheMiss::Inconsistent("a record without metrics under the metrics capability"));
         }
+        let has_reexports = capabilities.contains(&Capability::Reexports);
+        if has_reexports != self.reexports.is_some() {
+            return Err(CacheMiss::Inconsistent(
+                "a re-export report without the reexports capability, or the reverse",
+            ));
+        }
+        if !has_reexports && self.imports.iter().any(|import| import.reexported) {
+            return Err(CacheMiss::Inconsistent("a reexported marker without the reexports capability"));
+        }
         let lines = LineStarts::new(source.source());
         validate_imports(&lines, self.language, &self.imports, &self.import_inventory).map_err(CacheMiss::Inconsistent)?;
         validate_evidence(&StoredEvidence {
@@ -692,6 +708,7 @@ impl StoredEntry {
             diagnostics: self.diagnostics,
             occurrences: self.occurrences.occurrences,
             reference_coverage: self.reference_coverage,
+            reexports: self.reexports,
         };
         (coverage, self.diagnostics_fingerprint, index)
     }

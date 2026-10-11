@@ -18,7 +18,7 @@ use crate::queries::{GrammarRef, QueryKind, format_rule_message, query_for};
 use crate::rule_registry::{RuleRegistry, diagnostic_metadata_from_rule};
 use crate::shared::{
     AnalysisPass, Attribute, CodeBlock, CodeRange, Diagnostic, DiagnosticSeverity, FileSymbolIndex,
-    ImportSymbol, LintDiagnostic, ProgrammingLanguage, ReferenceEvidence, ReferencedSymbol, SourceContext, SymbolInfo,
+    ImportSymbol, LintDiagnostic, ProgrammingLanguage, ReexportReport, ReferenceEvidence, ReferencedSymbol, SourceContext, SymbolInfo,
     SymbolKind, SymbolKindData, SymbolKindV2, SymbolRecord, SyntaxDiagnostic,
     normalize_modifiers,
 };
@@ -2031,6 +2031,23 @@ impl TreeFile {
             occurrences: index.occurrences,
             reference_coverage: index.reference_coverage,
         })
+    }
+
+    /// This file's re-export report: the names and modules it forwards from
+    /// other modules, with the coverage that says how far to trust an empty
+    /// list. It describes the whole file and reads nothing outside it.
+    ///
+    /// A language with no forwarding construct reports `not_applicable`.
+    /// Until a language's contract is implemented, its report is `limited`
+    /// with `grammar_gap`, never a `complete` negative.
+    ///
+    /// ## Errors
+    /// Returns an error if a query fails to compile or a record cannot be
+    /// built.
+    pub fn reexports(&self) -> Result<ReexportReport, TreeHuggerError> {
+        let query = SymbolQuery::new().kinds([]).capabilities([Capability::Reexports]);
+        let index = crate::analysis::run_query(self, &query)?.index;
+        Ok(index.reexports.expect("the planner computes a report whenever Reexports is required"))
     }
 
     /// Runs `query`: plans the passes its capabilities need and returns the

@@ -11,7 +11,10 @@
 //! spans); the occurrences and their coverage stay in the index only under
 //! `Occurrences` and describe the whole file whatever kinds are selected;
 //! the semantic pass sets `semantics` on functions, methods and
-//! constructors from those occurrences; the docs pass sets `docs.parsed`. Flags and
+//! constructors from those occurrences; the docs pass sets `docs.parsed`. The
+//! re-export report and the imports' `reexported` markers describe the whole
+//! file and exist only under `Reexports`, so projection drops both together
+//! and adding the capability needs a parse. Flags and
 //! metrics are read from the syntax tree while records are built, so adding
 //! either needs a parse; without them a record's `is_test` and
 //! `is_deprecated` are `false` and it has no `metrics` facet. Generic
@@ -61,7 +64,8 @@ pub(crate) fn record_passes_suffice(
         | Capability::Occurrences
         | Capability::Diagnostics
         | Capability::Flags
-        | Capability::Metrics => false,
+        | Capability::Metrics
+        | Capability::Reexports => false,
     })
 }
 
@@ -132,6 +136,12 @@ pub(crate) fn project(mut index: FileSymbolIndex, query: &SymbolQuery) -> Symbol
     }
     if !query.requires(Capability::Diagnostics) {
         index.diagnostics.clear();
+    }
+    if !query.requires(Capability::Reexports) {
+        index.reexports = None;
+        for import in &mut index.imports {
+            import.reexported = false;
+        }
     }
     index.completed_passes = PassPlan::for_query(query).passes();
     stamp_parse_pass(&mut index, query);

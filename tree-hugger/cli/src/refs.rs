@@ -186,7 +186,7 @@ enum Phased {
     /// Its evidence analysis: a scan of one file runs the evidence query
     /// first, since that file is the only one that can declare.
     Analyzed {
-        index: FileSymbolIndex,
+        index: Box<FileSymbolIndex>,
         completed_capabilities: Vec<Capability>,
     },
 }
@@ -253,7 +253,7 @@ fn select(
             // matching file keeps the exact bytes it was read from.
             let state = if one_file {
                 Phased::Analyzed {
-                    index: result.index,
+                    index: Box::new(result.index),
                     completed_capabilities: result.completed_capabilities,
                 }
             } else {
@@ -334,7 +334,7 @@ pub(crate) fn run(scan: RefsScan, analyzer: &Analyzer) -> Result<i32, TreeHugger
             display, first, state, ..
         } = matched;
         let (index, completed_capabilities) = match state {
-            Phased::Analyzed { index, completed_capabilities } => (index, completed_capabilities),
+            Phased::Analyzed { index, completed_capabilities } => (*index, completed_capabilities),
             Phased::Read(source) => match analyzer.analyze_source(source, &evidence) {
                 Ok(analyzed) => {
                     stats.record(&display, &analyzed.cache, scan.verbose, &mut stderr);

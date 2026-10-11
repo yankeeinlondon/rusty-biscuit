@@ -23,8 +23,10 @@ use crate::shared::{
 /// [`References`](Self::References) implies
 /// [`Containment`](Self::Containment), [`Occurrences`](Self::Occurrences)
 /// implies [`References`](Self::References), [`Semantics`](Self::Semantics)
-/// implies [`Occurrences`](Self::Occurrences), and every capability implies
-/// [`Declarations`](Self::Declarations).
+/// implies [`Occurrences`](Self::Occurrences),
+/// [`Diagnostics`](Self::Diagnostics) implies [`Reexports`](Self::Reexports)
+/// (the `unused-import` exemption reads proven forwarding), and every
+/// capability implies [`Declarations`](Self::Declarations).
 ///
 /// [`Flags`](Self::Flags) and [`Metrics`](Self::Metrics) fill record fields
 /// that otherwise hold their defaults: an unrequested `false` flag or absent
@@ -69,11 +71,16 @@ pub enum Capability {
     /// The `metrics` facet (`parameters`, `has_docs`, `lines` and
     /// `cyclomatic`), read while the declarations are extracted.
     Metrics,
+    /// The file's re-export report (`FileSymbolIndex::reexports`) and the
+    /// `reexported` marker on its import records. Read from the definition
+    /// and import captures and a same-file binding scan, over the whole file
+    /// whatever kinds are selected; it needs no reference captures.
+    Reexports,
 }
 
 impl Capability {
     /// Every capability, in canonical order.
-    pub const ALL: [Capability; 9] = [
+    pub const ALL: [Capability; 10] = [
         Capability::Declarations,
         Capability::Containment,
         Capability::References,
@@ -83,6 +90,7 @@ impl Capability {
         Capability::Diagnostics,
         Capability::Flags,
         Capability::Metrics,
+        Capability::Reexports,
     ];
 
     fn prerequisites(self) -> &'static [Capability] {
@@ -92,10 +100,11 @@ impl Capability {
             Capability::References => &[Capability::Containment],
             Capability::Occurrences => &[Capability::References],
             Capability::Semantics => &[Capability::Occurrences],
+            Capability::Diagnostics => &[Capability::Reexports],
             Capability::StructuredDocs
-            | Capability::Diagnostics
             | Capability::Flags
-            | Capability::Metrics => &[Capability::Declarations],
+            | Capability::Metrics
+            | Capability::Reexports => &[Capability::Declarations],
         }
     }
 }

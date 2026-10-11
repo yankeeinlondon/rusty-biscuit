@@ -48,6 +48,7 @@ mod symbols_reference_summaries;
 mod symbols_relation_work;
 mod symbols_relations;
 mod symbols_query;
+mod symbols_reexports;
 mod symbols_query_filters;
 mod symbols_scope;
 mod symbols_selection_filters;

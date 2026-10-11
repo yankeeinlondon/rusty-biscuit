@@ -2227,6 +2227,39 @@ fn entry_from_extractor_revision_fifty_is_not_served_after_the_registry_severity
     });
 }
 
+/// Revision 51 wrote schema 5.1 entries with no `reexports` key, no
+/// `imports[].reexported` marker and no `reexports` capability; revision 52
+/// writes schema 5.2 with all three.
+#[test]
+fn entry_from_extractor_revision_fifty_one_is_not_served_after_the_reexports_bump() {
+    assert_schema_bump_entry_is_not_served(&SchemaBump {
+        revision: "51",
+        schema: serde_json::json!({ "major": 5, "minor": 1 }),
+        lacks: "`reexports`, `imports[].reexported` and the `reexports` capability",
+        revert: |entry| {
+            let entry = entry.as_object_mut().expect("entry object");
+            entry.remove("reexports");
+            entry
+                .get_mut("completed_capabilities")
+                .and_then(Value::as_array_mut)
+                .expect("capabilities")
+                .retain(|capability| capability != "reexports");
+            for import in entry.get_mut("imports").and_then(Value::as_array_mut).expect("imports") {
+                import.as_object_mut().expect("import").remove("reexported");
+            }
+        },
+        is_current: |entry| {
+            entry["reexports"].is_object()
+                && entry["completed_capabilities"]
+                    .as_array()
+                    .is_some_and(|list| list.iter().any(|capability| capability == "reexports"))
+                && entry["imports"]
+                    .as_array()
+                    .is_some_and(|list| list.iter().all(|import| import["reexported"].is_boolean()))
+        },
+    });
+}
+
 /// An earlier revision that wrote another schema, and what its entries
 /// lacked.
 struct SchemaBump {

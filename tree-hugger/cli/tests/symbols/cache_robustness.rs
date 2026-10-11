@@ -655,7 +655,7 @@ fn columns() -> Vec<Column> {
             control: None,
             empty: None,
             public: |out| record(out, METHOD)["schema_version"].clone(),
-            outcomes: [S(json!({ "major": 5, "minor": 1 })), R, R, R, R, R, R, R, R],
+            outcomes: [S(json!({ "major": 5, "minor": 2 })), R, R, R, R, R, R, R, R],
         },
         // Entry-level fields: none has a default. An empty record list is
         // servable only where no stored evidence names a record (a file with
@@ -835,7 +835,7 @@ fn edited_entry(base: &Value, column: &Column, shape: Shape, value: &Value) -> S
             _ => parent[key] = Value::Array(vec![json!(123); elements.len().max(1)]),
         },
         Shape::IncompatibleMajor => parent[key] = json!({ "major": 3, "minor": 0 }),
-        Shape::IncompatibleMinor => parent[key] = json!({ "major": 5, "minor": 2 }),
+        Shape::IncompatibleMinor => parent[key] = json!({ "major": 5, "minor": 1 }),
         Shape::Empty => {
             parent[key] = match (&column.empty, value) {
                 (Some(empty), _) => empty.clone(),
@@ -1110,7 +1110,8 @@ fn the_cache_entry_records_the_coverage_it_holds() {
             "structured_docs",
             "diagnostics",
             "flags",
-            "metrics"
+            "metrics",
+            "reexports"
         ])
     );
     assert!(entry["diagnostics_fingerprint"].is_string(), "diagnostics carry their fingerprint");
