@@ -6,10 +6,10 @@ Every symbol record, every file index and every `hug` JSON envelope carries a
 `schema_version`:
 
 ```json
-"schema_version": { "major": 5, "minor": 1 }
+"schema_version": { "major": 5, "minor": 2 }
 ```
 
-The current version is **5.1**. A consumer can check it before reading
+The current version is **5.2**. A consumer can check it before reading
 anything else and refuse a major version it does not know.
 
 ## How the version moves
@@ -44,9 +44,10 @@ Neither the schema version nor the extractor revision is part of a record's
 | 4.2 | `relations.unclassified_bases`, and the optional `source_span` on a relation's symbol reference |
 | 4.3 | the required `metrics.cyclomatic` key inside a present `metrics` facet |
 | 5.0 | `relations.references`, `dependencies`, `referenced_by` and `semantics.is_recursive` are derived from scope-aware reference occurrences instead of the first same-named declaration (a change of meaning, so a major bump); a file index may carry `occurrences` and `reference_coverage` |
-| 5.1 (current) | the optional `import_span` on an occurrence, naming the particular import binding a reference uses |
+| 5.1 | the optional `import_span` on an occurrence, naming the particular import binding a reference uses |
+| 5.2 (current) | the required `imports[].reexported` marker and the optional file-index `reexports` report |
 
-Only 5.1 is emitted today.
+Only 5.2 is emitted today.
 
 ### Fields added without a bump
 

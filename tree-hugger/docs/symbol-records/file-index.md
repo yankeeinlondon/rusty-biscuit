@@ -21,7 +21,7 @@ export function run() { return p.join("a"); }
 
 ```json
 {
-  "schema_version": { "major": 5, "minor": 1 },
+  "schema_version": { "major": 5, "minor": 2 },
   "file": "m.ts",
   "language": "TypeScript",
   "file_hash": "…",
@@ -30,7 +30,8 @@ export function run() { return p.join("a"); }
   "imports": [
     { "name": "p", "alias": "p", "source": "os",
       "span": { … }, "statement_span": { … },
-      "symbol": { "name": "p", "qualified_name": "path" } }
+      "symbol": { "name": "p", "qualified_name": "path" },
+      "reexported": false }
   ],
   "exports": [
     { "name": "run", "span": { … },
@@ -38,7 +39,8 @@ export function run() { return p.join("a"); }
   ],
   "diagnostics": [],
   "occurrences": [ … ],
-  "reference_coverage": [ … ]
+  "reference_coverage": [ … ],
+  "reexports": { "coverage": { … }, "entries": [] }
 }
 ```
 
@@ -55,6 +57,7 @@ export function run() { return p.join("a"); }
 | `diagnostics` | lint and syntax diagnostics, when the diagnostics pass ran |
 | `occurrences` | every reference written in the file, when asked for; omitted otherwise |
 | `reference_coverage` | how completely each region's references were assessed, beside `occurrences`; omitted otherwise |
+| `reexports` | the file's re-export report (`entries` and `coverage`), when asked for; omitted otherwise |
 
 An **import** entry has the `name` it binds in the file, the `alias` when it
 was renamed, the module `source` it comes from, the `span` of the bound name,
@@ -62,7 +65,21 @@ the `span` of the whole import statement (`statement_span`) and a `symbol`
 reference whose `qualified_name` is the imported name as the source module
 spells it. An **export** entry has the exported `name`, its `span` and a
 `symbol` reference that carries the exported record's `id` once the bind pass
-has matched it.
+has matched it. An import's `reexported` is `true` when a `syntax` or
+`declared` re-export entry forwards that exact import; it is `false` for every
+import when the report was not computed, so read it only beside a present
+`reexports`.
+
+The **re-export report** says which names or modules the file forwards from
+other modules. `coverage.state` is `complete`, `limited` or `not_applicable`
+(the language has no forwarding construct: Java, C, Bash, Zsh, PHP), and
+`coverage.limits` explains every `limited` result. An empty `entries` list is
+a negative only when the state is `complete`. The report is absent unless it
+was asked for; `TreeFile::reexports()` always computes it.
+
+> **Planned:** the per-language extractors. Until a language's extractor
+> lands, its report is `limited` with a whole-file `grammar_gap` limit and no
+> entries.
 
 `occurrences` and `reference_coverage` are described in
 [Scope-Aware References](../references.md).
@@ -121,9 +138,10 @@ resolution. Asking for a capability adds its prerequisites:
 | `Occurrences` | References | `occurrences` and `reference_coverage` kept in the index, over the whole file |
 | `Semantics` | Occurrences | the semantic pass |
 | `StructuredDocs` | Declarations | the docs pass |
-| `Diagnostics` | Declarations | the diagnostics pass |
+| `Diagnostics` | Reexports | the diagnostics pass |
 | `Flags` | Declarations | `visibility.is_test` and `is_deprecated`, read while records are built (no extra pass) |
 | `Metrics` | Declarations | the `metrics` facet, read while records are built (no extra pass) |
+| `Reexports` | Declarations | `reexports` and the imports' `reexported` markers, over the whole file; no reference captures |
 
 In JSON, capabilities are written in lowercase (`"declarations"`,
 `"flags"`). `hug --json` lists the ones it computed in

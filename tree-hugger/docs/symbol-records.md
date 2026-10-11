@@ -136,7 +136,7 @@ flowchart LR
 
 | Part | What it answers | Example from `norm` |
 |---|---|---|
-| `schema_version`, `id`, `language`, `kind`, `scope` | which record format, which declaration, what kind of thing, where it sits | `5.1`, a 64-character hash, `Rust`, `Method`, `Member` |
+| `schema_version`, `id`, `language`, `kind`, `scope` | which record format, which declaration, what kind of thing, where it sits | `5.2`, a 64-character hash, `Rust`, `Method`, `Member` |
 | `identity` | its names: plain, qualified, its container's, the keyword that declares it | `Point::norm`, `fn` |
 | `source` | where it is written: spans, the declaration's text and its display header | lines 10 to 12, `pub fn norm(&self) -> f64` |
 | `visibility` | its access level, and flags such as exported, deprecated, test-only | `Public`, not exported |
@@ -258,7 +258,7 @@ and its predicates are described in
 ## Schema version
 
 Every record and file index, and every `hug` JSON envelope, carries
-`schema_version`; the current version is **5.1**. The minor number moves when
+`schema_version`; the current version is **5.2**. The minor number moves when
 the record gains a field, the major number when a field is renamed or
 removed or its meaning changes. The symbol cache serves only entries written
 in exactly the current version and recomputes anything else. The full

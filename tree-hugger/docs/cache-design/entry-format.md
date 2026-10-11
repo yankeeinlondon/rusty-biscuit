@@ -180,7 +180,8 @@ An entry for `shapes.rs` after `hug functions`, trimmed:
   "exports": [ ... ],
   "diagnostics": [],
   "occurrences": [],
-  "reference_coverage": []
+  "reference_coverage": [],
+  "reexports": null
 }
 ```
 
@@ -211,6 +212,12 @@ An entry for `shapes.rs` after `hug functions`, trimmed:
   the entry writes an absent owner or ID as `null` and an empty candidate or
   reason list as `[]` (see
   [Reference evidence](./robustness.md#reference-evidence)).
+- `reexports` is required and nullable: the file's re-export report when
+  `reexports` is among the capabilities, and `null` exactly when it is not.
+  Each import also carries a required `reexported` boolean, which may be
+  `true` only under that capability. An entry that has a report without the
+  capability, the capability without a report, or a marker without the
+  capability is refused and recomputed.
 
 An entry is internally consistent by construction, and the reader checks it:
 an entry whose contents contradict its coverage is refused. The
