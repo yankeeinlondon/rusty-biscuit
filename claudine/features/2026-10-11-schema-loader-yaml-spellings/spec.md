@@ -20,11 +20,15 @@ $schema:
     reviewed_by: string -> the agent and model used in the spec review
     reviewed_on: date -> the date the spec was reviewed
     review_iterations: number -> the number of implementation reviews have taken place in the review/fix cycle
+    clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented_by: string -> the agent who implemented the plan
     formerly: string -> the spec's previous `{date}-{name}`, when it was renamed in the 2026-10-10 restructure
     pipeline_step: number -> position in the claudine/docs/rollout-strategy.md pipeline
-reviewed: false
+reviewed: true
+reviewed_by: codex/gpt-6.1-sol
+reviewed_on: 2026-10-11
+review_iterations: 0
 human_review: false
 pipeline_step: 1
 related:
@@ -34,34 +38,36 @@ related:
 
 # Schema Loader: Indentless Sequences and Folded Plain Scalars
 
-A hand-edited SimplifiedSchema file can be written in two ordinary YAML
-spellings that every YAML parser accepts but that Darkmatter's standalone
-schema loader rejects today. The whole file fails to load with
-`could not project SimplifiedSchema expression spans through YAML source`, so
-`md schema validate`, composition, trigger discovery, and DMLS all lose the
-schema. After this change both spellings load, and every diagnostic and editor
-feature that points into them (grammar errors, DMLS hover, completion,
-suggestion linting) lands on the correct physical line and column.
+Darkmatter's standalone SimplifiedSchema loader rejects two valid YAML
+presentations: block sequences aligned with their parent mapping key and
+plain scalar values continued across physical lines. A valid schema can fail
+with `could not project SimplifiedSchema expression spans through YAML source`.
+That prevents schema use in `md schema validate`, composition, schema-trigger
+loading, and the Darkmatter language server (DMLS).
 
-The two spellings are common because tools produce them: PyYAML's default
-dump, `yq`, and many editors write a block sequence without indenting it under
-its key, and editors with soft wrap fold a long plain scalar onto a second
-line. The lifecycle-grammar schema spike hit both (its Finding 11) and had to
-dump with `width=inf` and indented sequences to work around them.
+After this change, both presentations load with the same meaning as their
+conventionally indented or single-line equivalents. Source ranges used for
+schema diagnostics, hover, completion, and suggestion linting identify the
+correct authored text.
+
+The lifecycle-grammar investigation in `2026-10-20-lifecycle-grammar` recorded
+these failures under its finding titled “Two valid-YAML spellings crash the
+standalone loader.” Its generator currently works around them by indenting
+sequences and disabling line wrapping. YAML serializers and editors that
+insert physical line breaks can produce these presentations. Visual soft wrap
+alone does not change a file and does not cause this failure.
 
 ## Decided
 
-Decided 2026-10-10: the schema loader accepts both spellings, with precise
-source positions, and the documented accepted-YAML boundary is updated to
-list them.
+Decided 2026-10-10; clarified by inline review 2026-10-11: accept these two
+presentations with precise source positions, while preserving the rest of the
+closed source-map boundary.
 
-### 1. Indentless block sequences
+### Indentless block sequences
 
 A block sequence whose `-` sits at the same column as its parent mapping key
-is accepted anywhere a block sequence is accepted today (a named type's union
-arms, a property-level union, a nested mapping value, at any depth).
-
-Reproduction (fails today, loads after this change):
+is accepted wherever the schema grammar already permits a sequence value.
+Indentation changes presentation, never which values the schema grammar allows.
 
 ```yaml
 kind: schema
@@ -69,97 +75,195 @@ types:
   t:
   - string
   - number
+  next: boolean
 ```
 
-`t` is the property-level union `[string, number]`, identical to the indented
-spelling. A sequence of compact mappings written indentless (`- a: string`)
-is accepted the same way.
+The named definition `t` is the property-level union `[string, number]`.
+`next` remains a sibling definition; it is not consumed as part of the list.
+This also applies to union-valued properties in nested mapping arms and
+compact mapping items
+such as `- a: string`, where those structures are already semantically valid.
 
-### 2. Plain scalars folded across physical lines
+Both existing standalone envelopes retain their contracts: a pure document has
+`$schema` as its sole root key; a kinded document has exactly `kind: schema`
+and a `types` mapping. In particular, an indentless list under `$schema` may
+be a root-level schema union, but a list under `types` is still invalid.
 
-A plain (unquoted) scalar that continues onto one or more more-indented lines
-is accepted. Its value is the YAML-folded value (line breaks become single
-spaces), exactly as `serde_yaml_ng` reads it; the type-expression grammar sees
-that folded text.
+### Plain scalars continued across physical lines
 
-Reproduction (fails today, loads after this change):
+A plain (unquoted) scalar continued onto more-indented lines is accepted,
+including values in sequence items. The type-expression parser receives
+exactly the decoded string that `serde_yaml_ng` produces. Ordinary adjacent
+content lines fold to spaces; blank lines can preserve line breaks. Indentation,
+comments, and trailing whitespace follow the existing YAML decoder's rules,
+rather than a new rule that joins every line with a space.
 
 ```yaml
 kind: schema
 types:
   t: string(min(1)) -> a description long enough that the editor
     wraps it onto a second physical line
+  next: boolean
 ```
 
-`t` is `string(min(1))` with the description `a description long enough that
-the editor wraps it onto a second physical line`.
+The definition `t` retains the constraint `min(1)` and the description
+`a description long enough that the editor wraps it onto a second physical
+line`. `next` is a sibling, not continuation text. Continuations may occur in
+the type expression, its constraints, or its description; this change is not
+limited to wrapping descriptions. Folding never makes an otherwise invalid
+type expression valid.
 
-### 3. Positions stay exact
+### Source ranges preserve authored coordinates
 
-Every span projected from either spelling maps back to the authored bytes. In
-particular, a grammar error, suggestion-lint finding, or DMLS range inside the
-continuation line of a folded scalar reports that continuation line and the
-column of the offending text, not the first line of the scalar and not
-`0..0`. A projection that genuinely cannot be computed still fails with the
-existing typed error; it never silently reports a wrong position.
+Structural spans and suggestion-candidate spans must both project through the
+same decoded scalar coordinates. A token entirely on a continuation line has
+a range on that line, excluding its leading indentation. A token or expression
+that crosses a fold has one enclosing authored range, from its first authored
+byte through its last; intervening line breaks and indentation lie inside that
+range. This fits the existing contiguous-range API without introducing a new
+public span representation.
 
-### 4. The boundary stays closed otherwise
+Library source maps retain byte offsets into the original buffer. Add a
+caller's document offset once, after scalar projection; do not normalize line
+endings. DMLS converts those byte ranges using its existing negotiated position
+encoding, including UTF-16, rather than treating byte offsets as editor columns.
+Cursor lookup on continuation text must select the same decoded token and
+schema node as its single-line counterpart. Positions in removed indentation
+or folded whitespace follow the existing decoder's cursor-clamping behavior.
 
-Only these two presentations join the accepted set. Block scalars (`|`, `>`),
-tags, multi-line quoted scalars, complex keys, explicit flow-mapping keys, and
-directives remain outside the schema-document source-map contract, exactly as
-today. The frontmatter locator, which already tolerates more presentations,
-is unchanged.
+Malformed expressions need positions too, even though no successful parse
+product exists. DMLS must project the grammar parser's expression-relative
+error range through the offending decoded scalar. For example:
+
+```yaml
+kind: schema
+types:
+  t: string(min(1);
+    bogus(2))
+```
+
+The unknown-constraint diagnostic identifies `bogus` on physical line 5,
+starting at column 5 when displayed with one-based line and column numbers.
+It must not underline the whole scalar starting on line 4.
+
+Reader's note: the current standalone loader wraps failures in a
+`SchemaError::SchemaDocument` without a token range, and DMLS's malformed-type
+fallback currently selects the whole value. Accepting folded scalars alone
+cannot fulfill this position requirement. Preserve the public error wrapper;
+use the existing grammar error and decoded scalar mapping in DMLS to recover
+the precise range. This requirement covers schema-authoring diagnostics, not
+positions of invalid values in a document being validated.
+
+A genuine projection failure retains the existing typed error and consumer
+fallback behavior. Never fabricate a successful source range or substitute
+`0..0` for a token in either newly supported presentation.
+
+### The boundary stays closed otherwise
+
+Block scalars (`|`, `>`), tags, multi-line quoted scalars, complex keys,
+explicit flow-mapping keys, and directives remain outside the strict
+schema-document source-map contract. Existing supported quoting, mappings,
+flow sequences, anchors, and aliases retain their behavior.
+
+The tolerant frontmatter locator continues to accept its existing broader set
+of presentations. Reusing its decoder does not authorize those presentations
+in strict schema authoring. This work changes neither standalone envelope
+recognition nor raw JSON Schema interpretation.
 
 ## Requirements
 
-- The strict schema-document locator in
-  `darkmatter/lib/src/markdown/schemas/simplified/source.rs`
-  (`locate_yaml_value` and the `BlockLocator` it drives) accepts the two
-  presentations above. The tolerant frontmatter path
-  (`locate_frontmatter_value`) already handles both; reuse its logic for these
-  two cases rather than writing a third locator, without widening the strict
-  path to the other presentations it tolerates.
-- The implementer updates the closed-boundary documentation at
-  `darkmatter/docs/topics/schemas/definition.md` ("Source-Aware Presentation
-  Boundary", around lines 155-174) to list indentless block sequences and
-  folded multi-line plain scalars as accepted presentations, with a compact
-  example of each, and removes any wording that implies they are rejected.
-- Update the `darkmatter` skill's schema notes if they describe the boundary.
+- In the `darkmatter` library,
+  [the schema source locator](../../../darkmatter/lib/src/markdown/schemas/simplified/source.rs)
+  supplies authored ranges for schema values. Share its existing indentless
+  sequence handling and the plain-scalar continuation decoder between strict
+  schema authoring and tolerant frontmatter lookup. Separate these permissions
+  from the current broad multiline/tolerant switch so strict parsing cannot
+  accidentally admit tags, block scalars, quoted continuations, or empty values.
+  Account for sibling keys, compact mapping items, and mapping-value anchors
+  already supported by the strict locator. Do not add a third locator.
+- In the `darkmatter` library,
+  [the decoded scalar mapper](../../../darkmatter/lib/src/markdown/schemas/simplified/yaml_scalar.rs)
+  preserves coordinates through indentation and folding. Reuse it for both
+  structural spans and suggestion spans. The separate line-oriented suggestion
+  scanner must also handle whole continued scalars; merely changing the block
+  locator leaves schemas with `suggest(...)` vulnerable to projection failure.
+  Use its range projection operation for nonempty ranges so starts exclude
+  skipped indentation. Check decoded values against the semantic YAML value
+  and fail on a mismatch. Repeated identical expressions must retain their
+  own occurrence's spans.
+- In `dmls`, [schema-authoring diagnostics](../../../darkmatter/dmls/src/diagnostics/frontmatter.rs)
+  report malformed definitions. Cover the error path described above as well
+  as successful schema-node lookup, hover, and completion. Preserve diagnostic
+  codes and severity, and preserve suggestion lint as advisory data that does
+  not prevent a schema from loading.
+- All parsing and projection remain passive and in-memory: no file reads,
+  shell execution, network access, or document rewriting. File resolution in
+  normal command invocations continues through the existing request context
+  and `biscuit-file` reference handling.
+- Update [Darkmatter's schema definition documentation](../../../darkmatter/docs/topics/schemas/definition.md),
+  especially “Source-Aware Presentation Boundary,” with compact examples of
+  both accepted presentations. Describe blank-line folding and the unchanged
+  exclusions. Update the library's locator and suggestion-projection comments,
+  and the darkmatter skill's schema notes if they describe the boundary.
+  Update the area README only if its public claims conflict with this change.
+- Reuse the existing scalar decoder and scans. No performance spike or new
+  benchmark gate is required: this change concerns source decoding and range
+  projection, not named-type expansion or resolved-schema size.
 
 ## Out of scope
 
-- Any other YAML presentation (see Decided 4).
-- Named-type reference semantics: `2026-10-13-named-type-presence-and-local-names`.
-- Diagnostic positions inside validated frontmatter documents:
-  `2026-10-15-diagnostic-node-positions`.
+- Other YAML presentations, new type-expression grammar, or new envelope forms.
+- Named-type reference semantics, addressed separately by
+  `2026-10-13-named-type-presence-and-local-names`.
+- Positions of invalid frontmatter values in documents being validated,
+  addressed separately by `2026-10-15-diagnostic-node-positions`.
+- A public error-type redesign, a general YAML syntax tree, or a change to
+  tolerant frontmatter lookup behavior.
 
 ## Acceptance criteria
 
-1. Both reproduction files above load through
-   `parse_standalone_schema_document` and through `md schema validate` run
-   against a document that references them; the resolved JSON Schema is
-   byte-identical to the one produced from the indented / single-line
-   spelling of the same file.
-2. An indentless sequence nested two levels deep (a union arm list under a
-   mapping under `types`) and an indentless sequence of compact mappings both
-   load and resolve identically to their indented spellings.
-3. A folded plain scalar whose continuation line contains a grammar error
-   reports the error with the continuation line's line number and the column
-   of the offending token. Example: `t: string(min(1);` on one line and
-   `    bogus(2))` on the next folds to `string(min(1); bogus(2))`; the
-   unknown-constraint error points at `bogus` on the second line.
-4. DMLS: hover and completion inside a folded continuation line and inside an
-   indentless sequence item resolve to the same schema node as in the
-   indented / single-line spelling (L1 test through the DMLS test harness).
-5. Block scalars, tags, and multi-line quoted scalars in a schema document
-   still fail with the existing projection error (regression tests).
-6. The shipped schema corpus loads unchanged (existing corpus tests green).
-7. `just test` and `just lint` pass in `darkmatter/`. Tests are L1, use no
-   terminal or browser windows, and are portable to macOS, Linux, Windows, and
-   WSL2 (fixture text uses `\n` and is written through the repo's fixture
-   helpers, not checked-in files with platform line endings). No new CI cells.
+1. Both valid examples load through the `darkmatter` library's
+   [standalone schema parser](../../../darkmatter/lib/src/markdown/schemas/simplified/standalone.rs),
+   which recognizes schema envelopes, and through `md schema validate` against
+   a document referencing them. Compare the resolved JSON Schema values with
+   conventional spellings using structural equality. Source spans are expected
+   to differ; serialization byte equality is not the semantic contract. CLI
+   tests include one valid instance and one invalid instance to prove the
+   referenced schema was applied, not just that the process exited successfully.
+2. Cover both envelopes, including an indentless pure `$schema` root union,
+   a property union nested under a mapping arm, and a sequence of compact
+   mappings. Include a sibling after each list and continuation to detect
+   accidental consumption. A `types` sequence remains rejected.
+3. Test folded plain values in mapping and sequence positions, multiple
+   continuation lines, a blank line, a trailing comment, and a final line
+   without a newline. Compare decoded text with `serde_yaml_ng`; compare
+   resolved semantics with an equivalent supported scalar spelling.
+4. Check exact structural and suggestion ranges on continuation text and
+   across a fold. Include a lint-invalid suggestion on a continuation line
+   and repeated identical definitions so occurrence lookup cannot silently
+   point at a different node. The lint stays advisory. Include targeted CRLF,
+   non-ASCII text, and nonzero document-offset cases; retain the original
+   authored buffer when asserting byte ranges.
+5. Through the existing DMLS L1 harness, the `bogus` example reports the
+   continuation token's exact range. Hover and completion on continuation
+   text and indentless items select the correct node. Check UTF-16 conversion
+   with non-ASCII text before a target token. Cover both a complete expression
+   and the existing partially typed completion path without requiring an
+   invalid document to load successfully.
+6. Regression cases for block scalars, tags, multi-line quoted scalars,
+   complex keys, explicit flow-mapping keys, and directives remain rejected
+   through strict source-aware parsing. Through the standalone loader,
+   projection failures remain wrapped in `SchemaError::SchemaDocument`; do
+   not require its caller to receive the inner projection error directly.
+   Existing tolerant-frontmatter tests and supported anchor/alias tests pass.
+7. The shipped schema corpus loads unchanged. Existing normal-invocation tests
+   remain green. Run `just test` and `just lint` in `darkmatter/` through the
+   repository's nextest recipes. New tests are L1, use the test toolkit's
+   isolated fixtures for CLI calls, open no terminal or browser windows, and
+   are portable to macOS, Linux, Windows, and WSL2. Construct LF and CRLF test
+   strings explicitly; do not rely on checkout line endings. No new CI cells.
 
-## Open questions
+## Open Questions
 
-None.
+None. The source-range behavior and error-wrapper boundary above are decided
+within the existing APIs; no broader design change is required.

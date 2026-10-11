@@ -20,11 +20,15 @@ $schema:
     reviewed_by: string -> the agent and model used in the spec review
     reviewed_on: date -> the date the spec was reviewed
     review_iterations: number -> the number of implementation reviews have taken place in the review/fix cycle
+    clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented_by: string -> the agent who implemented the plan
     formerly: string -> the spec's previous `{date}-{name}`, when it was renamed in the 2026-10-10 restructure
     pipeline_step: number -> position in the claudine/docs/rollout-strategy.md pipeline
-reviewed: false
+reviewed: true
+reviewed_by: codex/gpt-6.1-sol
+reviewed_on: 2026-10-11
+review_iterations: 0
 human_review: false
 pipeline_step: 7
 formerly: 2026-10-04-content-policy-base-schema
@@ -143,6 +147,9 @@ whether the document is fresh.
   matching triggers and a document's schema retain their existing precedence.
   If a document redefines `content_policy`, its declaration wins. The baseline
   is a default contract, not an unoverrideable enforcement layer.
+  In DMLS, matching extension baselines continue to overlay the built-in
+  baseline before triggers and the document schema; this feature does not
+  replace the editor's existing configuration with the CLI selection rules.
 - **Keep validation passive.** Import preparation may resolve declared schema
   dependencies, but policy checks must not evaluate freshness, execute
   expressions, read watched files, fetch URLs, stamp `last_updated`, or renew
@@ -161,9 +168,10 @@ whether the document is fresh.
 ## Embedded schema resolution
 
 The embedded baseline currently parses its text without expanding imports
-(`darkmatter_base_schema_ref` in `darkmatter/lib/src/markdown/schemas/mod.rs`
-calls the bare YAML parser on an `include_str!`). Adding the policy reference
-alone therefore fails conversion and can panic when DMLS first loads the cached
+(the Darkmatter library’s
+[`darkmatter_base_schema_ref`](../../../darkmatter/lib/src/markdown/schemas/mod.rs)
+loads the baseline with the bare YAML parser on an `include_str!`). Adding the
+policy reference alone therefore fails conversion and can panic when DMLS first loads the cached
 JSON Schema. Both the typed schema used for completion and the compiled schema
 used for validation must be fully resolved.
 
@@ -181,6 +189,12 @@ named-type parser, import expansion, and lowering rules; do not create a
 second grammar. The table is an internal source for shipped schemas, not a new
 public file-reference scheme.
 
+Separate how the existing resolver obtains schema text from how it parses and
+expands named types. The embedded source supplies registered text and virtual
+identities; the filesystem source retains its request-scoped resolution.
+Both feed the same expansion logic. Keep this seam internal and limited to
+schema loading rather than adding a general-purpose resource registry.
+
 - Resolve virtual paths lexically with portable `/` separators. Do not
   canonicalize them as host files, use the process's current directory, or
   require a repository checkout.
@@ -189,6 +203,12 @@ public file-reference scheme.
   are errors; never fall back to disk or the network. Apply the resolver's
   existing cycle and definition rules rather than introducing another cycle
   policy.
+  Here the virtual root is the repository root, not the importing document's
+  folder: the baseline's three `..` segments are legal and lead to
+  `content-policy/schemas/content-policy.yaml`. Reject traversal above that
+  root and host-path or URL forms. Use a distinct internal embedded identity,
+  so a disk file with the same repository-relative spelling remains a
+  different source.
 - Resolve and lower once per process, preserving the existing shared caches.
   Carry any referenced definitions through baseline merging and DMLS's typed
   schema view, including schema unions. Virtual definition identities must not
@@ -202,6 +222,15 @@ public file-reference scheme.
   schema references continue to use Biscuit File's `FileReference` and the
   request's captured resolution context; the embedded table does not intercept
   them.
+
+The internal preparation operation returns the existing typed schema errors
+with the importing virtual document and requested type identified. Negative
+tests exercise that operation with a test-owned table. Keep the public
+baseline accessors' existing infallible signatures and documented panic
+contract for an invalid shipped artifact; a passive test must prepare, lower,
+and compile the actual shipped baseline so such defects fail before release.
+Do not turn an embedded preparation failure into an empty baseline or partial
+validation success.
 
 The **Embedded Schema Reference** findings under `2026-09-28-content-policy`
 already demonstrate installed-binary operation and a prototype of about 110
@@ -246,6 +275,15 @@ Resolve custom paths in the launch context and document references in their
 document context. A selected custom baseline that cannot load remains an
 error; it must not fall back to the built-in baseline.
 
+These selection rules apply to `md schema validate`. Compose retains its
+existing `--baseline-schema` flag and DMLS retains its extension settings;
+neither gains `BASELINE_SCHEMA` behavior as an incidental effect of this
+change. Reuse the disable-value definition without calling compose's current
+helper that reads the live process environment. For example,
+`DARKMATTER_NO_BASELINE_SCHEMA=true md schema validate --schema custom.yaml notes.md`
+still uses `custom.yaml`, while `md schema validate --no-baseline-schema notes.md`
+only validates schemas supplied by the document or matching triggers.
+
 Disabling the baseline does not disable the document's schema or triggers.
 `--no-trigger-schemas` keeps its separate existing meaning. Success without
 schema checks means no effective schema remains, not merely that `$schema` is
@@ -281,9 +319,18 @@ new differences fail the test instead of being silently accepted. Cover:
 | --- | --- |
 | Each supported rule, legal actions, and a mixed compact/long-form list | Both accept; test `Evergreen` alone because the parser forbids combining it with other rules |
 | `Duration(3mo)`, invalid units or capitalization, zero/leading-zero durations, nested property references, missing action, unknown action, non-null values that are not lists, empty lists | Both reject |
-| Missing `rule` in a long-form entry, and `rule: null` | Both reject |
+| Missing `rule` in a long-form entry, `rule: null`, `action: null`, null list items, wrong-typed `rule`/`action`, and extra long-form fields | Both reject; object entries are closed and list items are not wrapped as nullable |
 | Impossible calendar dates, duration overflow, unsupported path prefixes such as `vault:` or URLs, and `{{` inside a path | Parser rejects; editor patterns may accept, as documented |
-| `Evergreen` with another rule, extra long-form fields, explicit null for the whole list, and nullable values allowed by existing schema semantics | Parser rejects; preserve and document the editor schema's existing limits |
+| `Evergreen` with another rule, and explicit null for the whole list | Parser rejects; schema accepts under the existing cross-entry and optional-property limits |
+| `FileChanged(notes/a(b.md, @fp)`, `FileChanged(&Cargo.toml, @fp)`, and `FileChanged(^README.md, @fp)` | Both accept; the path grammar permits an opening parenthesis and the repository/package-root prefixes |
+
+> **Reader’s note:** Null is allowed for the optional `content_policy`
+> property, but not for an item inside its array or either required long-form
+> field. Extra fields in a long-form mapping are rejected by the established
+> closed-object schema rules. These are distinct from the remaining limitations
+> above; accepting arbitrary fields or nullable items would accidentally weaken
+> the declaration contract. A missing field has no source node: report its
+> containing mapping’s position under the prerequisite diagnostic contract.
 
 The existing test
 `long_form_without_rule_is_not_flagged_by_the_schema` in
@@ -291,7 +338,13 @@ The existing test
 limitation; it is replaced by a both-reject assertion.
 
 Use real YAML shapes, including block lists and quoted flow-list rules with
-commas. Validate declaration syntax without providing evidence or a clock;
+commas. Retire the old fixture that treated `Evergreen` alongside other rules
+as a valid policy. Preserve valid path cases such as `&Cargo.toml`,
+`^README.md`, and `../x.md`: declaration parsing does not check whether these
+files exist or stay within the runtime boundary. That check belongs to policy
+evaluation. Keep the declared rule strings unchanged during checks;
+no trimming or coercion may turn an invalid declaration into a valid one.
+Validate declaration syntax without providing evidence or a clock;
 missing baseline dates or fingerprints belong to evaluation, not these checks.
 Do not expand this feature into exact parser enforcement or a new regex
 language. Any corrected schema pattern remains owned by Content Policy and
@@ -348,23 +401,32 @@ ships through its exported constant.
 2. The same entry points reject an unknown rule, unknown action, empty list,
    wrong list shape, and a long-form entry with no `rule` or `rule: null`.
    Diagnostics identify the offending list item or field (instance path such as
-   `/content_policy/1/rule`, with the line and column of that node), retain
+   `/content_policy/1/rule`, with the line and column of the value when
+   present). For missing required fields, use the containing mapping's position;
+   for an empty or wrong-typed list, use the `content_policy` value. Retain
    typed problem information and baseline origin. DMLS also completes
    supported rule forms and actions and provides hover information inside list
-   entries.
+   entries. Assert completion inside a compact item, `rule:` values, `action:`
+   values, and long-form keys, with hover on both compact and long-form rules.
+   Preserve branch descriptions and shipped suggestions through embedding.
 3. A library baseline test and subprocess tests for the built `md` and DMLS
    run outside the repository with only the test documents available. Baseline
    validation and DMLS completion work without schema files on disk or a
    schema environment override. A second schema load reuses the cached
-   resolved baseline.
+   resolved baseline within that process; do not infer cache reuse by comparing
+   separate subprocesses. Isolate fixture homes and captured environments,
+   including `BASELINE_SCHEMA`, `DARKMATTER_NO_BASELINE_SCHEMA`, and
+   `SCHEMAS_DIR`, so host configuration cannot supply the missing artifact.
 4. Disk-resolved and embedded copies of the real schema have equivalent
    behavior and type information. Tests cover bare local-name references
    inside an embedded document, missing embedded documents/types, invalid
    virtual paths, and definition isolation when a document or trigger supplies
    its own schema using the same type names.
 5. Tests prove the CLI precedence above, including a broken custom baseline,
-   explicit opt-out, environment opt-out, document/trigger validation after
-   opt-out, and a document schema that replaces `content_policy`. JSON fields,
+   explicit opt-out, environment opt-out, every supported truthy spelling and
+   representative non-disabling values, the explicit flag conflict,
+   document/trigger validation after opt-out, and a document schema that
+   replaces `content_policy`. JSON fields,
    quiet behavior, and existing failure exit codes remain compatible.
 6. The shared declaration cases distinguish agreement from each documented
    schema limitation; the missing-`rule` row is both-reject. The shipped
@@ -372,7 +434,13 @@ ships through its exported constant.
    same-file names, and no longer carries the "`rule` … is not `(required)`"
    header note. Validation leaves document bytes and frontmatter unchanged,
    performs no policy evidence reads, and does not evaluate or renew the
-   policy. Compose retains its established pending-value handling.
+   policy. A valid `FileChanged` declaration naming a nonexistent file still
+   passes these syntax checks. Compose retains its established pending-value
+   handling: authored pending expressions are checked after resolution, while
+   already-resolved invalid values are rejected. Also verify that an explicit
+   document declaration of `content_policy` retains the existing composition
+   rule that may materialize an absent optional property as `null`; the new
+   baseline declaration alone must not materialize it.
 7. Use the repository Test Toolkit and existing subprocess fixtures for
    isolated documents and environment settings. Run `just test` and `just lint`
    in Darkmatter and Content Policy; these are nextest-based unit and process
