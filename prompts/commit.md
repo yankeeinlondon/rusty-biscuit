@@ -12,7 +12,7 @@ step_timeout: 12m
 show_system_prompt: false
 operation: commit
 agent: claude
-model: sonnet
+model: haiku
 resides_in: |-
     {{
         length(ctx.dirty_package_areas) == 1

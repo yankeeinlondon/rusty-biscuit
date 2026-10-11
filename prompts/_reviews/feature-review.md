@@ -6,10 +6,28 @@ $schema:
     review: file -> the review file which will be created based on this prompt's execution
     spec_name: string -> the name of the spec (which is really just the spec's folder name)
     in_loop: boolean -> set by the `review-loop` sequence; when true this review opts out if the previous review already ended the loop
+    next_spec: file(match(**/*spec*.md)) -> if the current spec is part of a multi-spec/multi-plan process then this points to the NEXT spec in the sequence
+    next_plan: file(match(**/*plan*.md)) -> if the current spec is part of a multi-spec/multi-plan process then this points to the NEXT plan in the sequence
+    human_in_the_loop: string[] -> filled out with review items when it has determined that a human review is required
 description: |-
     Reviews a _feature specification_ to make sure that the specification has been fully implemented. This prompt is also aware of the likelihood of more than one review being necessary and therefore names the reviews `review-{iteration}.md` in the same folder where the feature was specified.
 
-    Note: the caller _can_ pass in the **iteration** number but it should be detected automatically.
+    > **Note:** the caller _can_ pass in the **iteration** number but it should be detected automatically.
+
+    There are two special cases in the review cycle that can be activated:
+
+    1. **First Review**
+
+        When we are in the first review cycle, the very first thing we will consider is whether there is a need for human-in-the-loop review.
+
+        - if there is then this review will be repurposed to focus on getting the review feedback from the caller
+        - if there is not then this review will be conducted like a normal review that compares the implementation against what was specified
+    
+    2. **Last Review** (_in a multi-spec pipeline_)
+
+        In the last review cycle (aka, when `ready` has been set to `true`) -- but _only_ if this spec is part of a multi-spec pipeline -- we will
+        look at whether the next spec and plan need to be refreshed based on the current spec's findings and decisions.
+    
 dir: "{{dirname(spec)}}"
 design: |-
     {{ file_exists(dir + '/design.md') ? dir + '/design.md' : null }}
@@ -21,6 +39,13 @@ review: "{{ dirname(spec) + '/review-' + iteration + '.md' }}"
 # repo-relative `dir`.
 previous_review: "{{ iteration > 1 ? replace(spec, basename(spec), 'review-' + (iteration - 1) + '.md') : null }}"
 spec_name: "{{ parent_dir(spec) }}"
+next_plan: |-
+    {{
+        next 
+            ? replace(next_spec, "spec","plan")
+            : null
+    }}
+
 
 feature_or_fix: "{{ contains(spec, 'fixes') ? 'fix' : 'feature' }}"
 initialize:
@@ -73,6 +98,56 @@ failure:
     message: |-
         💥 {{feature_or_fix}} review #{{iteration}} for `{{parent_dir(spec)}}` in **{{ ctx.area || ctx.repo }}** failed to complete ({{err.msg}})!
     effect: phase-jump-3
+finalize:
+    stack:
+        - when: "human_in_the_loop && !err"
+          message: |-
+            - the first review after the implementation of `{{spec_name}}` was conducted and there are decisions that require your attention:
+
+            {{human_in_the_loop}}
+          info: |-
+              - the first review after the implementation of {{ link(spec) }} was conducted and there are decisions that require your attention:
+    
+              {{human_in_the_loop}}
+          stop
+        - when: "refreshed && !err"
+          message: |-
+            - we have finished the review/fix cycle for `{{spec_name}}` but we are in a multi-spec pipeline
+            - the next spec which will be implemented is `{{parent_dir(next_spec)}}`
+            - the spec and plan have been refreshed:
+
+            {{refreshed}}
+
+            > **Note:** no human review was needed for this refresh
+          info: |-
+            - we have finished the review/fix cycle for `{{link(spec)}}` but we are in a multi-spec pipeline
+            - the next spec which will be implemented is `{{link(next_spec)}}`
+            - the spec and plan have been refreshed:
+
+            {{refreshed}}
+
+            > **Note:** no human review was needed for this refresh
+        - when: "refresh_review && !err"
+          message: |-
+            - we have finished the review/fix cycle for `{{spec_name}}` but we are in a multi-spec pipeline
+            - the next spec which will be implemented is `{{parent_dir(next_spec)}}`
+            - the spec and plan have decisions that require human intervention:
+  
+            {{refresh_review}}
+          info: |-
+            - we have finished the review/fix cycle for `{{link(spec)}}` but we are in a multi-spec pipeline
+            - the next spec which will be implemented is `{{link(next_spec)}}`
+            - the spec and plan have been refreshed:
+  
+            {{refreshed}}     
+          stop
+        - when: "no_refresh && !err"
+          message: |-
+            - we have finished the review/fix cycle for `{{spec_name}}` and are in a multi-spec pipeline
+            - the next _spec_ and _plan_ -- {{parent_dir(next_spec)}} -- was evaluated but did not need to be refreshed to be ready for implementation
+          info: |-
+              - we have finished the review/fix cycle for `{{spec_name}}` and are in a multi-spec pipeline
+              - the next _spec_ and _plan_ -- {{parent_dir(next_spec)}} -- was evaluated but did not need to be refreshed to be ready for implementation
 ---
 # Review of {{title_case(without_date(parent_dir(spec)))}}
 
@@ -90,10 +165,7 @@ You are performing a review of the functionality defined by the `{{spec_name}}` 
 - This is the #{{iteration}} iteration of the review/fix cycle for this specification
 - The first thing you will need to check is whether the _findings_ in the review's `## Unblocked Findings` section were all implemented
     - this is the most obvious thing that the last implementation was supposed to have addressed
-- The second thing you will need to check is whether:
-    - any of the _
-    - any of the _findings_ in the review's `## Blocked Findings` were _unblocked_ prior to the last implementation's
-- The third thing is the repair's log (`{{dirname(spec)}}/log.md`): a finding the repair marked **disputed** is either re-raised with the authority it was missing (see "What blocks readiness") or dropped; never re-raise it unchanged
+
 ::end-block
 
 
@@ -112,10 +184,61 @@ Read both the specification and design documents and then perform a review on th
 Read both the specification document and then perform a review on the implementation:
 
 ::end-block
-::block when="design"
-Read both the specification document and then perform a review on the implementation:
 
+## Task
+
+::block when="iterations == 1"
+### Choose Course of Action
+
+You are in the first review cycle after the implementation. During the implementation the agent was told to avoid human-in-the-loop review cycles
+intermixed with the implementation where ever possible. As a result, the very first thing you are asked to do is:
+
+- have two sub-agent review:
+    - the implementation-log 
+    - the spec file
+- both subagents should be instructed to:
+    - find any decisions which were made by the agent during the implementations
+    - find any rules or decisions that the agent flagged as needing to be made
+    - find any work that was deferred
+- based on what you hear back you need to choose one of the following courses of action:
+    1. **Human review:**
+        - There are impactful/meaningful design decisions or rules that need to be made 
+        - so we will report on this and stop the review cycle to allow for a human-in-the-loop review
+        - Process:
+            - Report back to caller using the **Writing Clearly** guidelines below
+            - the reporting should include rich context, give examples where possible
+            - use Mermaid code blocks for any diagrams you feel would help
+            - Set the following properties on the review file's Frontmatter:
+                - Synthesize your key points and set the `human_in_the_loop` Frontmatter property on this review file ({{review}}):
+                    - this property will be an array of points
+                    - you may use Markdown syntax to help your report be more easily digested
+                    - that includes using Mermaid code blocks -- where appropriate -- for diagrams
+                - set `reviewed_by` property to "{{ctx.agent}}/{{ctx.model}}" 
+                - set `created` property to "{{ctx.now}}"
+                - set `spec` property to "{{ parent_dir(spec) }}/{{ basename(spec) }}"
+                - set `implemented` property to `false`
+                - set `description` property to "A **{{feature_or_fix}}** review of `{{ parent_dir(spec) }}/{{ basename(spec) }}`"
+                ::block when="next_spec"
+                - set `next_spec` property to "{{next_spec}}"
+                - set `next_plan` property to "{{next_plan}}"
+                ::end-block
+
+        - You are done when:
+            - you have summarized -- in prose -- what needs to be reviewed back to the caller
+            - and documented those same idea/points in the `human_in_the_loop` frontmatter property of the {{review}} file
+            - all other required Frontmatter metadata is set on the review file
+
+        > **Note:** the exercise of comparing the implementation to the specification is **not** done during this review when you choose this course of action; the focus is exclusively to document what we need from the caller.
+    2. **Summary decisions and gather findings:**
+        - Small decisions were made by the agent but nothing that really warrants a human review
+        - so we will report these decisions to the caller for informational purposes, but
+        - set `human_in_the_loop` property on the review file to `null` 
+        - the review process will continue in a normal fashion
 ::end-block
+
+## Spec Review
+
+Read both the specification document and then perform a review on the implementation:
 
 - look for gaps in functionality that were designed but not implemented
 - features who's implementation is broken or incomplete
@@ -270,13 +393,44 @@ The spec file which underpins the requirements for this feature review needs to 
 - Set the `review_iterations` Frontmatter property to '{{iteration}}'
 - if you set the review's `ready` property to `true` then set the spec file's `completed` property to `true`
 
-### Summarize
-
-- Summarize to the caller what was found and be sure to mention whether the review deemed the {{feature_or_fix}} to be **production ready** or not.
 
 ::block when="iteration != 1"
 > **Note:** this is _not_ the first review we've done on this functionality but the prior review's suggestions have now all been implemented (or at least the developer has claimed that they are).
 ::end-block
+::block when="iteration == 1"
+
+### Human in the Loop?
+
+This is the first review after the implementation completed:
+
+- during this implementation the agent was strongly encouraged to complete the work including making small design decisions where there was a gap
+- this means that there may now be several "decisions" that the agent made without a review or things that were deferred because a decision was needed. If either condition exists then we will stop now to get feedback:
+    - report all decisions/rules/deferred scope that needs to be reviewed
+    - take the time to write this clearly, giving examples where possible
+    - avoid jargon and do not assume that the caller knows this repo
+    - YOU MUST set the `human_in_the_loop` to `true` on the review file ({{review}})
+- if no review is required by the caller then you must set `human-in-the-loop` to `false` on the review file ({{review}})
+
+::end-block
+
+::block when="iteration == 1 && !is_empty('next')"
+
+### Spec and Plan Refresh
+
+We are in a multi-plan based implementation:
+
+- the next spec is '{{next}}', it has a plan located at '{{next_plan}}'
+- both the **spec** and the **plan** were written _before_ the current spec was implemented
+- we must now refresh the next spec and plan based on:
+    - what we've learned during the implementation of the current phase
+    - 
+
+::end-block
+
+### Summarize
+
+- Summarize to the caller what was found and be sure to mention whether the review deemed the {{feature_or_fix}} to be **production ready** or not.
+
 
 **IMPORTANT:**
 
