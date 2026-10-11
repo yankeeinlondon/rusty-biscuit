@@ -35,6 +35,22 @@ related:
     - 2026-08-27-preserve-backslash-escapes
 human_review: false
 implemented: false
+message_to_agent: |-
+    Phase 1 changed no production source. Read implementation-log.md "## Phase 1" sections 3-6 before starting.
+    - Decision: cleanup becomes bounded source edits on the authored text plus one final semantic comparison; the
+      pulldown-cmark-to-cmark serializer and every artifact-repair pass are removed in Phase 3 (pass table in section 3).
+    - Frozen module ownership and type names are in section 5: everything lives under `markdown::cleanup`
+      (rules.rs, diagnostic.rs, frontmatter.rs in Phase 2; protect.rs, compare.rs, edits.rs in Phase 3; document.rs in Phase 4).
+      `cleanup::rules` is the single validator; the style parser's `style.markdown` registration delegates to it.
+    - Read rules into `Leaf<T>` (Absent / Null / Value) from raw values; do not reuse `StyleFrontmatter`'s
+      `#[serde(default)]` Options for rules.
+    - DMLS config: `recompute` serializes the file config, defaults included, before merging. That would make new configs look
+      "mixed" with legacy `cleanup`. Normalize each authored source to MarkdownRuleOverrides first, then merge leaf by leaf.
+      DMLS has no client notification channel today (no showMessage or logMessage), so config warnings need a stored
+      record that Phase 4 routes through router.rs.
+    - New test files under lib/tests, cli/tests and dmls/tests must be declared in the consolidated l1 `main.rs` (autotests = false).
+    - The archived spike in spike/ is reference only, not compiled. Its "lessons" list covers container-prefix segments,
+      marker columns from source bytes, segment-boundary mapping, and scanner parse sharing.
 ---
 
 # Clean Fidelity and Formatting Rules
