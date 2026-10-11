@@ -30,6 +30,35 @@ reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-11
 review_iterations: 0
 human_review: false
+message_to_agent: |-
+  Phase 1 added only tests and fixtures (no production code). Read the
+  "Phase 1" section of implementation-log.md first.
+
+  1. `darkmatter/lib/tests/l1/schema_yaml_spellings.rs` holds the robustness
+     matrix (three `*_robustness_matrix` tests) seeded from the
+     `*.conventional.yaml` fixtures. Edits address keys/items without
+     indentation, so once the strict locator accepts indentless sequences,
+     add runs of the same cell tables against `tagged.serialized.yaml`,
+     `nested.serialized.yaml`, and `root-union.serialized.yaml` (the
+     byte-exact serde_yaml_ng captures) — call `walk_matrix` with those seeds.
+  2. `presentation_pairs_share_semantics_and_record_the_strict_baseline`
+     deliberately asserts today's broken baseline. Your locator change will
+     turn it red; replace the baseline half with structural equality of
+     `to_json_schema(document.schema())` between each pair through
+     `parse_standalone_schema_document`, plus sibling `next` spans present.
+  3. Spec inaccuracy found: a plain-scalar continuation that lies wholly
+     inside a description (the spec's own continued example) does NOT fail
+     today. The strict `BlockLocator` stops at the first physical line,
+     leaves the continuation lines unconsumed, and returns success with a
+     truncated Definition span and NO span for the following sibling
+     (`next`). So Phase 2 must not only decode continued plain scalars but
+     also guarantee the locator never returns success with unconsumed
+     source lines / mismatched decoded text (the spec's "projection
+     disagreement is an error" rule). Consider asserting full consumption
+     at the end of `locate_yaml_value_with`.
+  4. Nested mapping shapes are closed (`additionalProperties: false`);
+     top-level properties are open. Keep that in mind when asserting
+     validation outcomes.
 pipeline_step: 1
 related:
     - 2026-10-20-lifecycle-grammar

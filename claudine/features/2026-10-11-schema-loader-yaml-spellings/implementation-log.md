@@ -3,6 +3,31 @@ spec: "/Volumes/coding/wt/rusty-biscuit/feat-osc-9-4-protocol/claudine/features/
 plan: "claudine/features/2026-10-11-schema-loader-yaml-spellings/plan.md"
 implemented_by: "claude/opus"
 started_phase: "1"
+source_files_during_phase_1:
+  - darkmatter/lib/tests/l1/schema_yaml_spellings.rs
+  - darkmatter/lib/tests/l1/main.rs
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/tagged.conventional.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/tagged.serialized.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/nested.conventional.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/nested.serialized.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/root-union.conventional.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/root-union.serialized.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/anchors.conventional.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/anchors.indentless.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/spec-indentless.conventional.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/spec-indentless.indentless.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/spec-continued.conventional.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/spec-continued.continued.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/continued.conventional.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/continued.continued.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/blank-line.conventional.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/blank-line.continued.yaml
+docs_updated_during_phase_1: []
+docs_created_during_phase_1:
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/README.md
+skills_files_updated_during_phase_1: []
+packages:
+  - darkmatter
 ---
 
 # Implementation Log for 2026-10-11-schema-loader-yaml-spellings (4 phases)
@@ -38,3 +63,90 @@ keys and a mapping `types`; pure needs `$schema` as the sole key. For
 `Ok(None)` the resolver falls back to raw JSON Schema (`simplified: None`) for
 valid YAML and returns `AmbiguousReferenced` for invalid YAML.
 
+### Wave 2 — Fixture contract (Build Matrix)
+
+Added `darkmatter/lib/tests/l1/schema_yaml_spellings.rs` (declared in
+`tests/l1/main.rs`) and the fixture set
+`darkmatter/lib/tests/fixtures/schema_yaml_spellings/` (provenance in its
+`README.md`). No production code changed in this phase.
+
+**Robustness matrix** — one table-driven test per seed, each walking every
+cell from an unedited seed with exactly one edit:
+
+| Test | Seed | Columns covered |
+| --- | --- | --- |
+| `tagged_envelope_robustness_matrix` | `tagged.conventional.yaml` | `kind`, `types`, named definition `title`, property-union `status` (scalar and compact mapping arms), tagged extra root keys (string and non-string) |
+| `pure_mapping_robustness_matrix` | `nested.conventional.yaml` | `$schema`, nested definition `meta.level`, pure extra root key |
+| `pure_root_union_robustness_matrix` | `root-union.conventional.yaml` | root-union members (compact mapping arms, reference arm) |
+
+Each cell asserts the public result three ways: classification
+(`parse_standalone_schema_document`), normal loading
+(`resolve_schema_with_roots` of a real schema file in a temp dir — raw JSON
+Schema with `simplified: None` for a declined mapping, `AmbiguousReferenced`
+for declined non-mapping/invalid YAML, `SchemaDocument` for E), and, for A
+cells, validation of instances through `DarkmatterSchemas::effective_for` on a
+document whose `$schema` references that file. Control rows prove every
+declaration is load-bearing (`title: ab` fails `min(3)`, `level: 9` fails
+`max(5)`, `status: word` fails the union, `{}` fails the root union, etc.).
+Edits address keys and items without their indentation so Phase 2 can run the
+same cells against the `serialized` (indentless) seeds. Every cell gets its own
+schema file name so a path-keyed cache cannot serve stale content.
+
+Outcomes observed match the plan's table in every cell. Facts worth knowing:
+
+- A removed **nested** definition is not "undeclared but allowed": nested
+  mapping shapes are closed, so the key becomes an unknown key
+  (`additionalProperties`); a removed **top-level** definition is accepted as
+  undeclared. The `level absent` cell asserts the former.
+- Removing the sole `$schema` key leaves an empty document; normal loading
+  rejects it (`AmbiguousReferenced`). A separate cell renames the key beside
+  other content and gets the raw-JSON-Schema reading.
+- A repeated scalar (or mapping) union arm is accepted — it is not a
+  duplicate key. A duplicate key inside a mapping arm is invalid YAML (D).
+- `standalone.rs` builds its unsupported-key message with
+  `filter_map(YamlValue::as_str)`, but the `map.len() != 2` check still
+  rejects a non-string extra key; a cell now pins that.
+
+**Paired fixtures** (`conventional` vs new presentation), each with a sibling
+after the list or continuation: tagged / nested / root-union `serialized`
+(byte-exact `serde_yaml_ng` output, guarded by
+`serializer_captures_are_serde_yaml_ng_output`), mapping-value anchors with an
+alias (`anchors.indentless.yaml`), both spec examples verbatim, continuations
+in the type expression, a constraint list, a description and a sequence item
+with a trailing comment (`continued.continued.yaml`), and a blank line plus
+no final newline (`blank-line.continued.yaml`, paired with a single-line
+double-quoted `\n`). `presentation_pairs_share_semantics_and_record_the_strict_baseline`
+proves every pair resolves to structurally equal JSON Schema through the
+source-free parser and that the conventional spelling loads source-aware.
+
+**Baseline captured (same test):** six new-presentation fixtures fail at the
+projection boundary (`SchemaDocument` … "could not project SimplifiedSchema
+expression spans through YAML source"). The two fixtures whose continuation
+lies wholly inside a **description** (`spec-continued`, `blank-line`) do *not*
+fail: the strict locator reads only the first physical line, never consumes
+the continuation lines, and returns success with a truncated `Definition`
+span and **no span at all for the sibling `next`**. This is a pre-existing
+false success — the spec's claim that this example fails with the projection
+error is inaccurate for description-only folds — and Phase 2 must make the
+locator consume or reject every line (and check decoded text against the
+semantic value) rather than stop early. The test asserts this baseline so the
+locator change cannot land without replacing it.
+
+Requirement → test mapping for this phase:
+
+| Requirement | Test |
+| --- | --- |
+| Robustness table, every cell, control row | the three `*_robustness_matrix` tests |
+| Serializer-produced fixture with provenance | `serializer_captures_are_serde_yaml_ng_output` + fixture `README.md` |
+| Paired fixtures mean the same schema; baseline outcomes | `presentation_pairs_share_semantics_and_record_the_strict_baseline` |
+
+Gates: `cargo nextest … --test l1 schema_yaml_spellings` (5 tests, ≤0.1 s
+each); `just test` in `darkmatter/` — 9120 passed, 11 skipped, 0 failed;
+`just lint` in `darkmatter/` clean; `cargo clippy -p darkmatter --test l1 -- -D
+warnings` clean. No cross-OS run: the tests are in-memory plus a temp dir, the
+fixtures are LF on every checkout (`* text=auto eol=lf`), and no OS-specific
+code was touched. Claudine's `just test`/`just lint` were not run: no Claudine
+source changed (only this feature's plan/log/spec metadata). No pre-existing
+failures; nothing skipped beyond the recipe's standing 11.
+
+Phase 1 status: complete.

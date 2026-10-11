@@ -4,6 +4,31 @@ created: 2026-10-11
 phase: 1
 agent: codex/gpt-6.1-sol
 yolo: true
+source_files_during_phase_1:
+  - darkmatter/lib/tests/l1/schema_yaml_spellings.rs
+  - darkmatter/lib/tests/l1/main.rs
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/tagged.conventional.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/tagged.serialized.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/nested.conventional.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/nested.serialized.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/root-union.conventional.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/root-union.serialized.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/anchors.conventional.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/anchors.indentless.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/spec-indentless.conventional.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/spec-indentless.indentless.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/spec-continued.conventional.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/spec-continued.continued.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/continued.conventional.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/continued.continued.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/blank-line.conventional.yaml
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/blank-line.continued.yaml
+docs_updated_during_phase_1: []
+docs_created_during_phase_1:
+  - darkmatter/lib/tests/fixtures/schema_yaml_spellings/README.md
+skills_files_updated_during_phase_1: []
+packages:
+  - darkmatter
 ---
 
 # Schema Loader YAML Spellings Implementation Plan
@@ -39,7 +64,7 @@ Waves are numbered globally and execute in order. Tasks within a wave may be del
 
 ### Wave 2 — Fixture Contract
 
-- [ ] **Build Matrix**
+- [x] **Build Matrix**
   - Implement the YAML robustness table below as one table-driven L1 test, starting from a captured serializer-produced schema fixture with recorded provenance. Use separate pure, tagged, root-union, and nested-property variants from that seed where a field only exists in one envelope. Reset to the control fixture and make exactly one edit per cell; do not hand-write unrelated cases.
   - Assert public classification and normal loading/validation results, including the effective property's presence and behavior. A semantic YAML value or successful low-level parse alone is insufficient evidence.
   - Add paired conventional/new-presentation fixtures for later tasks: both envelopes, pure root union, nested property union, compact mapping items, mapping-value anchors, and siblings after lists and continued values. Include a serializer-produced indentless fixture and explicitly authored physical continuation variants.
