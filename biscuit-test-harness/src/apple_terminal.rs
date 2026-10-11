@@ -55,8 +55,8 @@ use std::io;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::Once;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Once, OnceLock};
 use std::time::Duration;
 
 use super::{
@@ -66,6 +66,11 @@ use super::{
 
 const WINDOW_TITLE_PREFIX: &str = "biscuit-test-terminal-";
 static CLEANUP_ONCE: Once = Once::new();
+
+/// Set when a stale-window cleanup closed a window or quit Terminal.app, so
+/// the next [`AppleTerminalHarness::spawn_shell`] lets those asynchronous
+/// closes land before it spawns. A spawn with nothing closed skips the wait.
+static CLEANUP_CLOSED_WINDOWS: AtomicBool = AtomicBool::new(false);
 
 fn ci_value_is_truthy(value: Option<&str>) -> bool {
     value.is_some_and(|value| {
@@ -350,8 +355,9 @@ fn entries_to_keep(
 /// window out of the developer's way. Miniaturize triggers macOS's
 /// genie / scale animation which is slow, distracting, and pushes the
 /// window into the Dock where it is easy to click by accident. Instead
-/// we now snapshot the frontmost process before `do script` and
-/// re-`activate` it afterwards: the spawned Terminal.app window remains
+/// the window is opened with `open -g`, which leaves Terminal.app in the
+/// background, and the frontmost application is restored if it changed
+/// anyway: the spawned Terminal.app window remains
 /// part of normal window-manager z-order but sits behind whatever the
 /// developer was working in, with no animation and no risk of stray
 /// keystrokes being typed into the test window.
@@ -464,20 +470,26 @@ impl AppleTerminalHarness {
 
     /// Returns `true` when this harness can be used:
     /// macOS, not in CI, and `osascript` can address Terminal.app.
+    ///
+    /// The `osascript` probe runs once per process; a test's gate and its
+    /// spawn both ask.
     pub fn available() -> bool {
+        static TERMINAL_ADDRESSABLE: OnceLock<bool> = OnceLock::new();
         if !cfg!(target_os = "macos") {
             return false;
         }
         if ci_value_is_truthy(env::var("CI").ok().as_deref()) {
             return false;
         }
-        Command::new("osascript")
-            .args(["-e", "id of application \"Terminal\""])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false)
+        *TERMINAL_ADDRESSABLE.get_or_init(|| {
+            Command::new("osascript")
+                .args(["-e", "id of application \"Terminal\""])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false)
+        })
     }
 
     /// Returns the spawned (or attached) window id, or `None` when no
@@ -509,58 +521,52 @@ impl AppleTerminalHarness {
             let script = format!(
                 "tell application \"Terminal\" to close (every window whose id is {id}) saving no",
             );
-            let mut cmd = Command::new("osascript");
-            cmd.args(["-e", &script])
-                .stdout(Stdio::null())
-                .stderr(Stdio::piped());
-            match run_with_timeout(&mut cmd, CLEANUP_TIMEOUT) {
-                Ok(output) if !output.status.success() => {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    eprintln!(
-                        "warning: failed to close Terminal.app window {id}: {}",
-                        stderr.trim()
-                    );
+            if let Err(err) = Self::run_script_with_timeout(&script, CLEANUP_TIMEOUT) {
+                eprintln!("warning: failed to close Terminal.app window {id}: {err}");
+                return;
+            }
+            // Terminal.app processes the close asynchronously; wait until
+            // the window actually disappears so the next test doesn't race
+            // on a stale window ID.
+            let check = format!(
+                "tell application \"Terminal\" to return (count of (every window whose id is {id})) as text"
+            );
+            for attempt in 0..31 {
+                if attempt > 0 {
+                    std::thread::sleep(Duration::from_millis(100));
                 }
-                Err(err) => {
-                    eprintln!("warning: failed to close Terminal.app window {id}: {err}");
-                }
-                Ok(_) => {
-                    // Terminal.app processes the close asynchronously;
-                    // wait until the window actually disappears so the
-                    // next test doesn't race on a stale window ID.
-                    for _ in 0..30 {
-                        std::thread::sleep(Duration::from_millis(100));
-                        let check = format!(
-                            "tell application \"Terminal\" to return (count of (every window whose id is {id}))"
-                        );
-                        let mut check_cmd = Command::new("osascript");
-                        check_cmd
-                            .args(["-e", &check])
-                            .stdout(Stdio::null())
-                            .stderr(Stdio::null());
-                        if let Ok(out) = run_with_timeout(&mut check_cmd, Duration::from_secs(2))
-                            && out.status.success()
-                            && let Ok(s) = std::str::from_utf8(&out.stdout)
-                            && s.trim() == "0"
-                        {
-                            break;
-                        }
-                    }
+                if Self::run_script_with_timeout(&check, Duration::from_secs(2))
+                    .is_ok_and(|count| count == "0")
+                {
+                    break;
                 }
             }
         }
     }
 
-    /// Runs `osascript -e <script>` and returns its trimmed stdout.
+    /// Runs an AppleScript `script` and returns its trimmed result, which
+    /// must be text (a list result reads as empty).
     ///
     /// ## Errors
     ///
-    /// Returns `io::Error` when the spawn fails or osascript exits
-    /// non-zero, with stderr embedded in the message.
+    /// Returns `io::Error` when the script cannot be run, fails, or does
+    /// not finish within [`QUERY_TIMEOUT`], with the AppleScript error
+    /// embedded in the message.
     fn run_script(script: &str) -> io::Result<String> {
+        Self::run_script_with_timeout(script, QUERY_TIMEOUT)
+    }
+
+    /// [`run_script`](Self::run_script) with a caller-chosen `timeout`.
+    ///
+    /// Scripts run in this process's [`osa_helper`]; a one-shot
+    /// `osascript -e` runs one only when the helper cannot take it.
+    fn run_script_with_timeout(script: &str, timeout: Duration) -> io::Result<String> {
+        if let Some(result) = osa_helper::run(script, timeout) {
+            return result.map(|out| out.trim().to_string());
+        }
         let mut cmd = Command::new("osascript");
         cmd.args(["-e", script]);
-        let out = run_with_timeout(&mut cmd, QUERY_TIMEOUT)?;
+        let out = run_with_timeout(&mut cmd, timeout)?;
         if !out.status.success() {
             return Err(io::Error::other(format!(
                 "osascript failed: {}",
@@ -571,11 +577,214 @@ impl AppleTerminalHarness {
     }
 }
 
+/// A long-lived `osascript` that runs the harness's AppleScript.
+///
+/// Every `osascript` process spends about 100 ms loading Terminal.app's
+/// scripting dictionary at its first `tell`; a process that stays up pays
+/// that once, and each later script takes 10–20 ms. A test makes a dozen
+/// such calls, so the helper saves over a second per test, more on a loaded
+/// host.
+///
+/// The helper is a JXA loop that reads one escaped AppleScript source per
+/// line from stdin, runs it with `NSAppleScript` inside an AppleScript
+/// `try`, and answers one line on stdout: `OK <text>` or `ERR <message>`.
+/// (JXA crashes when `executeAndReturnError` is handed an error out-pointer,
+/// hence the `try`.) It exits when its stdin closes, which happens when this
+/// process exits, so it never outlives the test that started it, and its
+/// stderr is discarded so it holds none of the test's output pipes.
+mod osa_helper {
+    use std::io::{self, BufRead as _, BufReader, Write as _};
+    use std::process::{Child, ChildStdin, Command, Stdio};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Mutex, PoisonError, mpsc};
+    use std::time::Duration;
+
+    /// Requests arrive ASCII-only (see [`encode_request`]), so the loop can
+    /// decode stdin chunk by chunk without splitting a UTF-8 sequence.
+    /// `availableData.length` reaches JXA as a string, hence `Number(…)`.
+    const SCRIPT: &str = r#"ObjC.import('Foundation');
+const input = $.NSFileHandle.fileHandleWithStandardInput;
+const output = $.NSFileHandle.fileHandleWithStandardOutput;
+const MARK = '__biscuit_osa_error__';
+let buffer = '';
+function readLine() {
+  while (buffer.indexOf('\n') < 0) {
+    const data = input.availableData;
+    if (Number(data.length) === 0) return null;
+    buffer += $.NSString.alloc.initWithDataEncoding(data, $.NSASCIIStringEncoding).js;
+  }
+  const end = buffer.indexOf('\n');
+  const line = buffer.slice(0, end);
+  buffer = buffer.slice(end + 1);
+  return line;
+}
+function decode(s) {
+  return s.replace(/\\(u\{([0-9a-f]+)\}|.)/g, (m, e, hex) =>
+    hex ? String.fromCodePoint(parseInt(hex, 16)) : e === 'n' ? '\n' : e === 'r' ? '\r' : e);
+}
+function encode(s) {
+  return s.replace(/\\/g, '\\\\').replace(/\n/g, '\\n').replace(/\r/g, '\\r');
+}
+function reply(status, text) {
+  output.writeData($(status + ' ' + encode(text) + '\n').dataUsingEncoding($.NSUTF8StringEncoding));
+}
+for (;;) {
+  const line = readLine();
+  if (line === null) break;
+  const source = 'try\n' + decode(line) + '\non error errorText number errorNumber\nreturn "' + MARK + '" & errorText & " (" & errorNumber & ")"\nend try';
+  const result = $.NSAppleScript.alloc.initWithSource($(source)).executeAndReturnError(null);
+  if (result.isNil()) { reply('ERR', 'the script did not compile'); continue; }
+  const value = result.stringValue;
+  const text = value.isNil() ? '' : value.js;
+  if (text.startsWith(MARK)) reply('ERR', text.slice(MARK.length)); else reply('OK', text);
+}"#;
+
+    struct Helper {
+        child: Child,
+        stdin: ChildStdin,
+        replies: mpsc::Receiver<String>,
+    }
+
+    static HELPER: Mutex<Option<Helper>> = Mutex::new(None);
+    static UNAVAILABLE: AtomicBool = AtomicBool::new(false);
+
+    /// Runs `script` in the helper, starting it on first use.
+    ///
+    /// Returns `None` when the script was never delivered (no helper could
+    /// be started, or writing to it failed), so the caller can run it with a
+    /// one-shot `osascript`. Once delivered the script may have run, so a
+    /// timeout or a helper that died answers `Some(Err(…))` rather than
+    /// inviting a second run; the helper is then stopped and the next call
+    /// starts a fresh one.
+    pub(super) fn run(script: &str, timeout: Duration) -> Option<io::Result<String>> {
+        if UNAVAILABLE.load(Ordering::Relaxed) {
+            return None;
+        }
+        let mut slot = HELPER.lock().unwrap_or_else(PoisonError::into_inner);
+        if slot.is_none() {
+            match spawn() {
+                Ok(helper) => *slot = Some(helper),
+                Err(_) => {
+                    UNAVAILABLE.store(true, Ordering::Relaxed);
+                    return None;
+                }
+            }
+        }
+        let helper = slot.as_mut()?;
+        let request = encode_request(script);
+        let delivered = helper
+            .stdin
+            .write_all(request.as_bytes())
+            .and_then(|()| helper.stdin.flush());
+        if delivered.is_err() {
+            stop(slot.take());
+            return None;
+        }
+        match helper.replies.recv_timeout(timeout) {
+            Ok(reply) => Some(parse_reply(&reply)),
+            Err(err) => {
+                stop(slot.take());
+                Some(Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    format!("osascript helper gave no answer: {err}"),
+                )))
+            }
+        }
+    }
+
+    fn spawn() -> io::Result<Helper> {
+        let mut child = Command::new("osascript")
+            .args(["-l", "JavaScript", "-e", SCRIPT])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()?;
+        let (Some(stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(io::Error::other("osascript helper has no pipes"));
+        };
+        let (sender, replies) = mpsc::channel();
+        std::thread::spawn(move || {
+            for line in BufReader::new(stdout).lines() {
+                let Ok(line) = line else { break };
+                if sender.send(line).is_err() {
+                    break;
+                }
+            }
+        });
+        Ok(Helper {
+            child,
+            stdin,
+            replies,
+        })
+    }
+
+    fn stop(helper: Option<Helper>) {
+        if let Some(mut helper) = helper {
+            let _ = helper.child.kill();
+            let _ = helper.child.wait();
+        }
+    }
+
+    /// Encodes `script` as one ASCII request line: backslash, CR, and LF
+    /// are escaped, and every non-ASCII character becomes `\u{hex}`.
+    pub(super) fn encode_request(script: &str) -> String {
+        let mut line = String::with_capacity(script.len() + 1);
+        for ch in script.chars() {
+            match ch {
+                '\\' => line.push_str("\\\\"),
+                '\n' => line.push_str("\\n"),
+                '\r' => line.push_str("\\r"),
+                c if c.is_ascii() => line.push(c),
+                c => line.push_str(&format!("\\u{{{:x}}}", u32::from(c))),
+            }
+        }
+        line.push('\n');
+        line
+    }
+
+    /// Parses one helper reply line into the script's text or its error.
+    pub(super) fn parse_reply(reply: &str) -> io::Result<String> {
+        if let Some(text) = reply.strip_prefix("OK ") {
+            Ok(decode_reply_text(text))
+        } else if let Some(message) = reply.strip_prefix("ERR ") {
+            Err(io::Error::other(format!(
+                "osascript failed: {}",
+                decode_reply_text(message)
+            )))
+        } else {
+            Err(io::Error::other(format!(
+                "malformed osascript helper reply {reply:?}"
+            )))
+        }
+    }
+
+    /// Reverses the helper's escaping of backslash, CR, and LF.
+    fn decode_reply_text(text: &str) -> String {
+        let mut out = String::with_capacity(text.len());
+        let mut chars = text.chars();
+        while let Some(ch) = chars.next() {
+            if ch != '\\' {
+                out.push(ch);
+                continue;
+            }
+            match chars.next() {
+                Some('n') => out.push('\n'),
+                Some('r') => out.push('\r'),
+                Some(other) => out.push(other),
+                None => out.push('\\'),
+            }
+        }
+        out
+    }
+}
+
 /// Removes stale Terminal.app windows created by earlier
 /// [`AppleTerminalHarness`] instances whose owning test process no longer
 /// exists.
 ///
-/// Runs two independent passes, both safe with a developer's own windows
+/// Runs three independent passes, all safe with a developer's own windows
 /// open:
 ///
 /// 1. **Registry pass (primary).** Reads the title-independent window-id
@@ -598,22 +807,165 @@ impl AppleTerminalHarness {
 /// `close` cannot: invisible zero-tab **husks**. `close … saving no` does not
 /// destroy a Terminal.app window on current macOS — it leaves a `visible
 /// false` husk that no further `close` removes, and the only reliable
-/// recovery is to quit the app.
+/// recovery is to quit the app. Zero-tab windows are closed next
+/// ([`close_tabless_windows`]).
+///
+/// Every pass reads one shared [`snapshot_windows`] enumeration, because this
+/// runs once per test process and is that process's first AppleScript call,
+/// the one that pays to load Terminal.app's scripting dictionary; the sweep
+/// re-enumerates only when an earlier pass closed something.
 pub fn cleanup_stale_apple_terminal_windows() {
     if !AppleTerminalHarness::available() {
         return;
     }
+    let Some(snapshot) = snapshot_windows() else {
+        return;
+    };
+    let ids: Vec<i64> = snapshot.windows.iter().map(|w| w.id).collect();
     // Husk recovery first: if the window list has degenerated into only
     // leaked harness windows and unclosceable husks, quitting Terminal is the
     // one thing that clears husks. It relaunches clean on the next spawn, so
     // the per-window passes below have nothing left to do.
-    if quit_terminal_if_only_disposable() {
+    if quit_terminal_if_only_disposable(&ids) {
         return;
     }
-    close_tabless_windows();
+    // Only a window with no tabs, or one whose id cannot be read, gives
+    // the object-based tabless pass anything to close.
+    if snapshot.window_count > snapshot.windows.len()
+        || snapshot.windows.iter().any(|w| w.tab_count == 0)
+    {
+        close_tabless_windows();
+    }
     reap_registered_windows();
-    reap_titled_windows();
-    sweep_legacy_apple_terminal_windows();
+    reap_titled_windows(&snapshot.windows);
+    delete_stale_harness_settings(&snapshot.harness_settings);
+    let sweep_ids = if CLEANUP_CLOSED_WINDOWS.load(Ordering::Relaxed) {
+        existing_window_ids()
+    } else {
+        Some(ids)
+    };
+    if let Some(sweep_ids) = sweep_ids {
+        sweep_legacy_apple_terminal_windows(&sweep_ids);
+    }
+}
+
+/// Terminal.app's windows as the cleanup passes see them.
+struct WindowsSnapshot {
+    /// Every window Terminal.app reports, including any whose id cannot be
+    /// read and is therefore missing from `windows`.
+    window_count: usize,
+    windows: Vec<WindowSnapshot>,
+    /// Names of settings sets carrying the harness tag, which a spawn
+    /// imports and deletes again; one still present outlived its spawn.
+    harness_settings: Vec<String>,
+}
+
+/// One Terminal.app window as the cleanup passes see it.
+struct WindowSnapshot {
+    id: i64,
+    tab_count: usize,
+    /// Invisible without being miniaturized: what `close … saving no` leaves
+    /// behind, which no further `close` removes.
+    husk: bool,
+    /// Empty when the window has no custom title or it cannot be read.
+    custom_title: String,
+}
+
+/// Enumerates every Terminal.app window whose id can be read, with its tab
+/// count and custom title, and every harness-tagged settings set, in one
+/// `osascript` call. Returns `None` when the enumeration script itself
+/// fails.
+fn snapshot_windows() -> Option<WindowsSnapshot> {
+    // `tab` inside `tell application "Terminal"` names Terminal's tab
+    // class, not the character, so the separator is bound outside it.
+    let script = format!(
+        r#"set sep to (character id 9)
+        set out to ""
+        tell application "Terminal"
+            set out to ((count of windows) as text) & linefeed
+            repeat with w in windows
+                try
+                    set wid to (id of w) as text
+                    set tabCount to (count of tabs of w) as text
+                    set husk to ((visible of w) is false and (miniaturized of w) is false) as text
+                    set t to ""
+                    try
+                        set t to custom title of w
+                    end try
+                    set out to out & wid & sep & tabCount & sep & husk & sep & t & linefeed
+                end try
+            end repeat
+            repeat with s in settings sets
+                try
+                    set n to name of s
+                    if n starts with "{prefix}" then set out to out & "settings" & sep & n & linefeed
+                end try
+            end repeat
+        end tell
+        return out"#,
+        prefix = WINDOW_TITLE_PREFIX,
+    );
+    let stdout = AppleTerminalHarness::run_script(&script).ok()?;
+    let mut lines = stdout.lines();
+    let window_count = lines.next()?.trim().parse().ok()?;
+    let mut snapshot = WindowsSnapshot {
+        window_count,
+        windows: Vec::new(),
+        harness_settings: Vec::new(),
+    };
+    for line in lines {
+        if let Some(name) = line.strip_prefix("settings\t") {
+            snapshot.harness_settings.push(name.to_string());
+        } else if let Some(window) = parse_window_snapshot(line) {
+            snapshot.windows.push(window);
+        }
+    }
+    Some(snapshot)
+}
+
+/// Parses one `id<TAB>tab-count<TAB>husk<TAB>custom-title` line of
+/// [`snapshot_windows`] output.
+fn parse_window_snapshot(line: &str) -> Option<WindowSnapshot> {
+    let mut fields = line.splitn(4, '\t');
+    let id = fields.next()?.trim().parse().ok()?;
+    let tab_count = fields.next()?.trim().parse().ok()?;
+    let husk = fields.next()?.trim() == "true";
+    let custom_title = fields.next().unwrap_or("").to_string();
+    Some(WindowSnapshot {
+        id,
+        tab_count,
+        husk,
+        custom_title,
+    })
+}
+
+/// Deletes harness settings sets whose owning process is dead.
+///
+/// A spawn imports a settings set named after its window tag and deletes it
+/// again as soon as the window exists; a set is left behind only when the
+/// spawning process died in between. A live owner's set may belong to a
+/// spawn in progress, so it is left alone.
+fn delete_stale_harness_settings(names: &[String]) {
+    let me = current_process_id();
+    let stale: Vec<&String> = names
+        .iter()
+        .filter(|name| {
+            pid_from_tag(name, WINDOW_TITLE_PREFIX)
+                .is_some_and(|pid| pid != me && !process_is_alive(pid))
+        })
+        .collect();
+    if stale.is_empty() {
+        return;
+    }
+    let mut script = String::from("tell application \"Terminal\"\n");
+    for name in stale {
+        script.push_str(&format!(
+            "try\ndelete (every settings set whose name is \"{}\")\nend try\n",
+            applescript_escape(name)
+        ));
+    }
+    script.push_str("end tell");
+    let _ = AppleTerminalHarness::run_script(&script);
 }
 
 /// Quits Terminal.app when every open window is **disposable** and the count
@@ -627,10 +979,7 @@ pub fn cleanup_stale_apple_terminal_windows() {
 /// developer's real working window — this refuses to quit and returns
 /// `false`, leaving the gentler per-window passes to run. Returns `true` only
 /// when it actually quit Terminal.
-fn quit_terminal_if_only_disposable() -> bool {
-    let Some(ids) = existing_window_ids() else {
-        return false;
-    };
+fn quit_terminal_if_only_disposable(ids: &[i64]) -> bool {
     let forced = env::var("BISCUIT_TEST_HARNESS_SWEEP_LEGACY_APPLE").as_deref() == Ok("1");
     if !forced && ids.len() <= LEGACY_WINDOW_LIMIT {
         return false;
@@ -669,11 +1018,11 @@ fn window_is_invisible(window_id: i64) -> bool {
 /// Best-effort: idle login shells and husks do not trip Terminal's
 /// running-process quit prompt, so `quit` returns without blocking.
 fn quit_terminal() {
-    let mut cmd = Command::new("osascript");
-    cmd.args(["-e", "tell application \"Terminal\" to quit"])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    let _ = run_with_timeout(&mut cmd, CLEANUP_TIMEOUT);
+    let _ = AppleTerminalHarness::run_script_with_timeout(
+        "tell application \"Terminal\" to quit",
+        CLEANUP_TIMEOUT,
+    );
+    CLEANUP_CLOSED_WINDOWS.store(true, Ordering::Relaxed);
     for _ in 0..30 {
         std::thread::sleep(Duration::from_millis(100));
         let running = Command::new("pgrep")
@@ -693,17 +1042,27 @@ fn quit_terminal() {
 ///
 /// A zero-tab window cannot contain user work or a harness shell, but Terminal's
 /// AppleScript `front window` lookup can still resolve to it. Leaving that stale
-/// object around makes later `do script` spawns record the wrong window id and
-/// fail at `selected tab`.
+/// object around misdirects any script that falls back to `front window`, which
+/// then fails at `selected tab`.
 fn close_tabless_windows() {
     let script = r#"tell application "Terminal"
+            set before to count of windows
             repeat with w in windows
                 try
                     if (count of tabs of w) is 0 then close w saving no
                 end try
             end repeat
+            return (before - (count of windows)) as text
         end tell"#;
-    let _ = AppleTerminalHarness::run_script(script);
+    // Only a close that removed a window gives a following spawn anything
+    // to wait for; a pass that found nothing to close (a window whose id
+    // cannot be read is usually a close-confirmation sheet) closes nothing.
+    let closed = AppleTerminalHarness::run_script(script)
+        .ok()
+        .and_then(|out| out.trim().parse::<i64>().ok());
+    if closed != Some(0) {
+        CLEANUP_CLOSED_WINDOWS.store(true, Ordering::Relaxed);
+    }
 }
 
 /// Registry pass: close dead-owner windows that still look idle, then
@@ -751,39 +1110,24 @@ fn prune_registry(path: &Path) {
 
 /// Title pass: close windows whose `custom title` still carries a
 /// dead owner's `biscuit-test-terminal-<pid>-<seq>` tag.
-fn reap_titled_windows() {
-    let script = format!(
-        r#"set out to ""
-        tell application "Terminal"
-            repeat with w in windows
-                try
-                    set t to custom title of w
-                    if t starts with "{prefix}" then
-                        set out to out & ((id of w) as text) & tab & t & linefeed
-                    end if
-                end try
-            end repeat
-        end tell
-        return out"#,
-        prefix = WINDOW_TITLE_PREFIX,
-    );
-    let Ok(stdout) = AppleTerminalHarness::run_script(&script) else {
-        return;
-    };
-    for line in stdout.lines() {
-        let Some((id, title)) = line.split_once('\t') else {
+fn reap_titled_windows(windows: &[WindowSnapshot]) {
+    for window in windows {
+        // A tabless window was already closed by the tabless pass, and a
+        // husk keeps its tag but cannot be closed again; only
+        // `quit_terminal_if_only_disposable` clears husks.
+        if window.tab_count == 0
+            || window.husk
+            || !window.custom_title.starts_with(WINDOW_TITLE_PREFIX)
+        {
             continue;
-        };
-        let Ok(id) = id.parse::<i64>() else {
-            continue;
-        };
-        let Some(pid) = pid_from_tag(title, WINDOW_TITLE_PREFIX) else {
+        }
+        let Some(pid) = pid_from_tag(&window.custom_title, WINDOW_TITLE_PREFIX) else {
             continue;
         };
         if pid == current_process_id() || process_is_alive(pid) {
             continue;
         }
-        close_window_by_id(id);
+        close_window_by_id(window.id);
     }
 }
 
@@ -887,15 +1231,12 @@ fn looks_like_harness_window(window_id: i64) -> bool {
 /// only matches are closed: the predicate requires default 80×24 geometry,
 /// an empty/"Terminal"/harness-tag title, and only idle login-shell
 /// processes — a match a developer's working window effectively never has.
-fn sweep_legacy_apple_terminal_windows() {
-    let Some(ids) = existing_window_ids() else {
-        return;
-    };
+fn sweep_legacy_apple_terminal_windows(ids: &[i64]) {
     let forced = env::var("BISCUIT_TEST_HARNESS_SWEEP_LEGACY_APPLE").as_deref() == Ok("1");
     if !forced && ids.len() <= LEGACY_WINDOW_LIMIT {
         return;
     }
-    for id in ids {
+    for &id in ids {
         if looks_like_harness_window(id) {
             close_window_by_id(id);
         }
@@ -924,28 +1265,26 @@ pub fn close_window_by_id(window_id: i64) {
     let script = format!(
         "tell application \"Terminal\" to close (every window whose id is {window_id}) saving no",
     );
-    let mut cmd = Command::new("osascript");
-    cmd.args(["-e", &script])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    let _ = run_with_timeout(&mut cmd, CLEANUP_TIMEOUT);
+    let _ = AppleTerminalHarness::run_script_with_timeout(&script, CLEANUP_TIMEOUT);
+    CLEANUP_CLOSED_WINDOWS.store(true, Ordering::Relaxed);
 }
 
 impl TerminalHarness for AppleTerminalHarness {
     /// Opens a fresh Terminal.app window running a login shell and
     /// captures its AppleScript window id.
     ///
-    /// Focus handling: the frontmost application is snapshotted before
-    /// the `do script` call and re-activated immediately after, so the
+    /// Focus handling: the window is opened with `open -g`, which leaves
+    /// Terminal.app in the background, and the frontmost application is
+    /// brought back to the front if the spawn displaced it anyway, so the
     /// spawned window sits behind the developer's current work without
-    /// being miniaturized. There is no Dock animation and the test
-    /// window cannot accidentally receive keystrokes meant for the
-    /// developer's foreground app.
+    /// being miniaturized. There is no Dock animation and the test window
+    /// cannot accidentally receive keystrokes meant for the developer's
+    /// foreground app.
     ///
-    /// The `do script` line `exec`s away the shell Terminal.app started
-    /// for its own reasons and replaces it with the harness's two-stage
-    /// login shell, whose interactive stage runs with rc files
-    /// suppressed — see
+    /// The window runs the harness's two-stage login shell directly, as
+    /// its shell, through a transient settings file rather than typing it
+    /// into the profile's own shell; the interactive stage runs with rc
+    /// files suppressed — see
     /// [`configure_login_shell`](super::configure_login_shell).
     ///
     /// Cargo's target binary directory is prepended to `PATH` so CLI
@@ -968,11 +1307,14 @@ impl TerminalHarness for AppleTerminalHarness {
             return Err(io::Error::other("Terminal.app via osascript not available"));
         }
         CLEANUP_ONCE.call_once(cleanup_stale_apple_terminal_windows);
-        // Brief pause to let Terminal.app settle after any preceding
-        // window close. AppleScript window operations are asynchronous
-        // inside Terminal.app; spawning immediately after a close can
-        // race on stale window lists.
-        std::thread::sleep(Duration::from_millis(300));
+        // Let Terminal.app settle after a cleanup close: AppleScript window
+        // operations are asynchronous inside Terminal.app, and spawning
+        // immediately after a close can race on stale window lists. A
+        // harness `Drop` already waits for its own window to disappear, so
+        // only a cleanup close needs this.
+        if CLEANUP_CLOSED_WINDOWS.swap(false, Ordering::Relaxed) {
+            std::thread::sleep(Duration::from_millis(300));
+        }
         let shell = super::detect_shell();
         let window_tag = unique_window_tag();
         let mut shell_cmd = String::new();
@@ -1007,119 +1349,127 @@ impl TerminalHarness for AppleTerminalHarness {
         }
         shell_cmd.push_str(&super::login_shell_command_line(&shell, bin_dir.is_some()));
 
-        // Snapshot the frontmost process *before* `do script` so we can
-        // restore focus afterwards. The outer `try` blocks let the script
-        // proceed silently if System Events cannot resolve a frontmost
-        // process (e.g. login window). We deliberately do NOT call
-        // `activate` on Terminal — `do script` creates the window without
-        // it, so spawning is focus-free (it never steals foreground focus,
-        // a hard invariant: the harness runs while the developer works).
+        let launch = LaunchFiles::write(&window_tag, &shell, &shell_cmd)?;
+
+        // ## Why a `.terminal` file instead of `do script`
+        //
+        // `do script` with no target window starts the *profile's* shell —
+        // the developer's interactive login shell, rc files included — and
+        // only then types the harness command into it. That startup cost
+        // 1.5–2.5 s per window on a development Mac and owes the harness
+        // nothing. Opening a settings file whose `CommandString` runs the
+        // launcher script (`RunCommandAsShell`) makes Terminal.app run it
+        // as the window's shell instead, still under `login -pf` and with
+        // Terminal's own environment (`TERM_PROGRAM`, `TERM`, `LANG`); see
+        // [`LaunchFiles::write`] for why the command names the shell.
+        //
+        // Opening the file imports it as a settings set named after the
+        // window tag. The spawn deletes that set as soon as the window
+        // exists (the window keeps running and falls back to the default
+        // settings), so the developer's profile list is left as it was;
+        // [`cleanup_stale_apple_terminal_windows`] deletes any set a crashed
+        // run left behind. No existing profile, and never the default, is
+        // touched.
+        //
+        // A new window is always created, so unlike `do script` the spawn
+        // can never adopt a pre-existing window; the window is identified by
+        // its settings-set name, not by diffing window lists.
+        //
+        // ## Focus
+        //
+        // `open -g` opens the file without bringing Terminal.app forward,
+        // and nothing here calls `activate` — spawning is focus-free, a hard
+        // invariant: the harness runs while the developer works. As a guard,
+        // the frontmost application is snapshotted first and restored if it
+        // changed anyway.
+        //
+        // The snapshot uses StandardAdditions' `path to frontmost
+        // application`, not System Events: a System Events `whose frontmost`
+        // query cost 2.1 s per spawn on a development Mac (and times out
+        // outright when System Events is wedged), while `path to` answers
+        // in milliseconds. System Events is consulted only when the
+        // frontmost application actually changed.
         //
         // The restore step uses `System Events` to re-frontmost the
-        // captured process by *process name* rather than
-        // `tell application prevApp to activate`. The latter resolves
-        // `prevApp` through LaunchServices by app name, and the captured
-        // string is the executable / process name (e.g. `wezterm-gui`,
-        // many Electron helpers) which often does not match any
-        // installed `.app` bundle — LaunchServices then pops a
-        // "Choose Application — Where is X?" dialog that blocks the
-        // test until the developer dismisses it.
-        //
-        // ## Ownership guard (do-script window reuse)
-        //
-        // `do script` with no target window does NOT reliably create a new
-        // window: when an idle Terminal window is frontmost it *reuses* it,
-        // nondeterministically. We must never mistake a reused window for
-        // our own and close it on `Drop` — doing so destroys another
-        // harness's (e.g. the shared broker) window and breaks every later
-        // test. So we snapshot the window-id set before `do script` and
-        // report whether the resulting window id is genuinely new
-        // (`isNew`). The Rust side clears `owned` when it is not, so `Drop`
-        // leaves reused windows alone. This is the focus-free half of the
-        // fix; the conflicting self-spawning test
-        // (`level2_apple_terminal_harness_lifecycle`) additionally skips
-        // when a shared broker window is present.
+        // captured process by *bundle identifier* rather than
+        // `tell application prevApp to activate`. Resolving an application
+        // by name goes through LaunchServices, and a process name that
+        // matches no installed `.app` bundle (e.g. `wezterm-gui`, many
+        // Electron helpers) pops a "Choose Application — Where is X?"
+        // dialog that blocks the test until the developer dismisses it.
         let script = format!(
             r#"set prevApp to ""
             try
-                tell application "System Events" to set prevApp to name of first process whose frontmost is true
+                set prevApp to (path to frontmost application as text)
             end try
-            set beforeIds to {{}}
+            do shell script "/usr/bin/open -g -a Terminal " & quoted form of "{settings_path}"
+            set winId to 0
+            repeat 200 times
+                tell application "Terminal"
+                    repeat with w in windows
+                        try
+                            if (name of current settings of selected tab of w) is "{window_tag}" then set winId to (id of w)
+                        end try
+                    end repeat
+                end tell
+                if winId is not 0 then exit repeat
+                delay 0.05
+            end repeat
             tell application "Terminal"
-                repeat with w in windows
-                    set end of beforeIds to (id of w)
-                end repeat
-                do script "{cmd}"
-                delay 0.3
-                set afterIds to {{}}
-                repeat with w in windows
-                    set end of afterIds to (id of w)
-                end repeat
-                set newIds to {{}}
-                repeat with candidateId in afterIds
-                    if beforeIds does not contain candidateId then set end of newIds to candidateId
-                end repeat
-                if (count of newIds) is greater than 0 then
-                    set winId to item 1 of newIds
-                else
-                    set winId to id of front window
+                if winId is not 0 then
+                    try
+                        set custom title of (first window whose id is winId) to "{window_tag}"
+                    end try
                 end if
                 try
-                    set custom title of (first window whose id is winId) to "{window_tag}"
+                    delete (every settings set whose name is "{window_tag}")
                 end try
             end tell
-            set isNew to ((count of newIds) is greater than 0)
-            if prevApp is not "" and prevApp is not "Terminal" then
+            if prevApp is not "" then
                 try
-                    tell application "System Events" to set frontmost of (first process whose name is prevApp) to true
+                    if (path to frontmost application as text) is not prevApp then
+                        set prevBundleId to id of application prevApp
+                        tell application "System Events" to set frontmost of (first process whose bundle identifier is prevBundleId) to true
+                    end if
                 end try
             end if
-            return (winId as text) & tab & (isNew as text)"#,
-            cmd = applescript_escape(&shell_cmd),
+            return winId as text"#,
+            settings_path = applescript_escape(&launch.settings.to_string_lossy()),
             window_tag = applescript_escape(&window_tag),
         );
         let stdout = Self::run_script(&script)?;
-        let (id_str, is_new) = stdout.split_once('\t').unwrap_or((stdout.as_str(), "true"));
-        let id: i64 = id_str
+        let id: i64 = stdout
             .trim()
             .parse()
-            .map_err(|e| io::Error::other(format!("unparseable window id {id_str:?}: {e}")))?;
-        // `do script` reused a pre-existing window rather than creating one:
-        // it is not ours, so never close it on `Drop`.
-        if is_new.trim() != "true" {
-            self.owned = false;
-            eprintln!(
-                "warning: Terminal `do script` reused existing window {id} instead of creating \
-                 one; leaving it open (not taking ownership)"
-            );
+            .map_err(|e| io::Error::other(format!("unparseable window id {stdout:?}: {e}")))?;
+        if id == 0 {
+            return Err(io::Error::other(format!(
+                "Terminal.app did not open the harness window {window_tag} within 10 s"
+            )));
         }
+        // The window's shell now owns the launcher script, which deletes
+        // itself once it runs.
+        launch.keep_script();
         self.window_id = Some(id);
         self.window_tag = Some(window_tag);
-
-        // Record only windows we genuinely created. A reused window
-        // (`owned == false`) belongs to another harness; registering it
-        // would later authorize the reaper to close someone else's window.
-        if self.owned {
-            register_window(id);
-        }
+        register_window(id);
 
         // Poll for the shell prompt instead of sleeping a fixed
         // 800 ms — `wait_for_prompt` returns early once `$`/`#`/`%`
-        // appears on the last line, with a 5 s ceiling. If polling
-        // returns without a prompt match, fall back to a small settle
-        // (≤ 200 ms) so subsequent `do script` calls still race-free
-        // dispatch into a ready prompt on slow hosts.
+        // appears on the last line, with a 5 s ceiling. Once the inner
+        // shell's prompt is visible it is reading the tab's input, and
+        // `do script … in selected tab` queues later lines on that input
+        // in order, so no settle sleep follows.
         super::wait_for_prompt(self)?;
-        std::thread::sleep(Duration::from_millis(200));
 
         // When preserve_capabilities is true we must ensure no
         // FORCE_COLOR / CLICOLOR_FORCE leak through from the user's
-        // shell profile (e.g. .zshrc).  Unset them now so subsequent
-        // `bt` invocations see a clean environment.
+        // login profile (e.g. .bash_profile).  Unset them now so subsequent
+        // `bt` invocations see a clean environment. Every later line
+        // queues behind this one on the tab's input, so there is no need
+        // to wait for it to finish.
         if self.preserve_capabilities {
             self.send_text(b"unset FORCE_COLOR CLICOLOR_FORCE\n")?;
-            super::wait_for_prompt(self)?;
-            std::thread::sleep(Duration::from_millis(200));
         }
 
         Ok(())
@@ -1262,6 +1612,102 @@ fn unique_window_tag() -> String {
         super::owner_process_id(),
         current_process_id()
     )
+}
+
+/// The two files a spawn hands Terminal.app: a settings file that names the
+/// launcher script as its shell, and the launcher script itself.
+///
+/// Dropping the value deletes the settings file, which Terminal.app has
+/// imported by the time the window exists. The launcher script is deleted
+/// too unless [`keep_script`](Self::keep_script) was called: once a window
+/// has started it, the script unlinks itself, and deleting it earlier would
+/// race the shell that is about to read it.
+struct LaunchFiles {
+    settings: PathBuf,
+    script: PathBuf,
+    keep_script: bool,
+}
+
+impl LaunchFiles {
+    /// Writes the launcher script running `shell_cmd` and the settings file
+    /// that runs it with `/bin/{shell}`, both named after `window_tag`.
+    ///
+    /// The settings file names `/bin/{shell}`, not the script, as the
+    /// window's command: Terminal.app counts the tab as idle only while its
+    /// process carries the command's name, and the shell the script `exec`s
+    /// is `{shell}`. A tab running anything else reports `busy`, which makes
+    /// closing it raise a confirmation sheet and makes the stale-window
+    /// reaper skip it.
+    ///
+    /// ## Errors
+    ///
+    /// Returns the `io::Error` of a failed write.
+    fn write(window_tag: &str, shell: &str, shell_cmd: &str) -> io::Result<Self> {
+        // Terminal.app splits `CommandString` on whitespace, so the script
+        // path must not contain any.
+        let mut dir = registry_dir();
+        if dir.to_string_lossy().chars().any(char::is_whitespace) {
+            dir = PathBuf::from("/tmp");
+        }
+        let files = Self {
+            settings: dir.join(format!("{window_tag}.terminal")),
+            script: dir.join(format!("{window_tag}.sh")),
+            keep_script: false,
+        };
+        fs::write(&files.script, format!("rm -f \"$0\"\n{shell_cmd}\n"))?;
+        let command = format!("/bin/{shell} {}", files.script.to_string_lossy());
+        fs::write(
+            &files.settings,
+            terminal_settings_plist(window_tag, &command),
+        )?;
+        Ok(files)
+    }
+
+    fn keep_script(mut self) {
+        self.keep_script = true;
+    }
+}
+
+impl Drop for LaunchFiles {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.settings);
+        if !self.keep_script {
+            let _ = fs::remove_file(&self.script);
+        }
+    }
+}
+
+/// A Terminal.app settings (`.terminal`) document named `name` that runs
+/// `command` as the window's shell in place of the profile's login shell.
+fn terminal_settings_plist(name: &str, command: &str) -> String {
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>name</key>
+	<string>{name}</string>
+	<key>type</key>
+	<string>Window Settings</string>
+	<key>ProfileCurrentVersion</key>
+	<real>2.07</real>
+	<key>CommandString</key>
+	<string>{command}</string>
+	<key>RunCommandAsShell</key>
+	<true/>
+</dict>
+</plist>
+"#,
+        name = xml_escape(name),
+        command = xml_escape(command),
+    )
+}
+
+/// Escapes the characters XML text content cannot hold literally.
+fn xml_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 /// Wraps `s` in single quotes and escapes embedded single quotes using
@@ -1636,10 +2082,32 @@ mod tests {
         assert!(!ci_value_is_truthy(None));
     }
 
+    /// A request is one ASCII line, whatever the script contains, so the
+    /// helper can decode stdin chunk by chunk.
+    #[test]
+    fn osa_request_is_one_ascii_line() {
+        let line = osa_helper::encode_request("say \"a\\b\"\nem—dash 💻\r");
+        assert_eq!(line, "say \"a\\\\b\"\\nem\\u{2014}dash \\u{1f4bb}\\r\n");
+        assert!(line.is_ascii());
+        assert_eq!(line.matches('\n').count(), 1);
+    }
+
+    #[test]
+    fn osa_reply_decodes_text_and_errors() {
+        assert_eq!(
+            osa_helper::parse_reply("OK a\\nb\\\\c\\r").unwrap(),
+            "a\nb\\c\r"
+        );
+        assert_eq!(osa_helper::parse_reply("OK ").unwrap(), "");
+        let err = osa_helper::parse_reply("ERR boom (42)").unwrap_err();
+        assert_eq!(err.to_string(), "osascript failed: boom (42)");
+        assert!(osa_helper::parse_reply("garbage").is_err());
+    }
+
     /// Phase-5 static verification: the spawn AppleScript must never call
     /// `activate` or emit a `keystroke` — both would steal foreground focus
-    /// from the developer. The harness is focus-free by design: `do script`
-    /// creates the window without activation, and focus is restored to the
+    /// from the developer. The harness is focus-free by design: `open -g`
+    /// opens the window without activation, and focus is restored to the
     /// previous frontmost process via `set frontmost … to true` (not
     /// `activate`). This test encodes that invariant so a future edit cannot
     /// accidentally regress it.
