@@ -491,6 +491,26 @@ fn pure_root_union_robustness_matrix() {
     walk_matrix("root-union", seed, StandaloneSchemaEnvelope::Pure, ROOT_UNION_CELLS);
 }
 
+/// The same cells against the `serde_yaml_ng` captures, whose block sequences
+/// are indentless: the presentation changes no cell's outcome.
+#[test]
+fn tagged_envelope_robustness_matrix_indentless() {
+    let seed = include_str!("../fixtures/schema_yaml_spellings/tagged.serialized.yaml");
+    walk_matrix("tagged-serialized", seed, StandaloneSchemaEnvelope::Tagged, TAGGED_CELLS);
+}
+
+#[test]
+fn pure_mapping_robustness_matrix_indentless() {
+    let seed = include_str!("../fixtures/schema_yaml_spellings/nested.serialized.yaml");
+    walk_matrix("nested-serialized", seed, StandaloneSchemaEnvelope::Pure, NESTED_CELLS);
+}
+
+#[test]
+fn pure_root_union_robustness_matrix_indentless() {
+    let seed = include_str!("../fixtures/schema_yaml_spellings/root-union.serialized.yaml");
+    walk_matrix("root-union-serialized", seed, StandaloneSchemaEnvelope::Pure, ROOT_UNION_CELLS);
+}
+
 /// Provenance: each `serialized` fixture is exactly what `serde_yaml_ng`
 /// writes for its conventional seed's value, so the indentless spelling under
 /// test is real serializer output rather than a hand-written approximation.
@@ -531,18 +551,14 @@ fn envelope_payload(source: &str) -> serde_yaml_ng::Value {
 /// not be consumed.
 ///
 /// Each pair means the same schema through the source-free semantic parser,
-/// so the source-aware loader is the only thing that can tell them apart.
-///
-/// The new presentations' outcome is the baseline before the strict locator
-/// accepts them, captured so the locator change cannot land without replacing
-/// it with structural equality through `parse_standalone_schema_document`.
-/// Most fail at the documented projection boundary. A continuation that lies
-/// wholly inside a description is worse: the strict locator stops at the first
-/// physical line, leaves the remaining lines unread, and reports success with
-/// a source map that has no span for the sibling `next` — an approximate range
-/// presented as a successful one.
+/// and the source-aware standalone loader must agree: both spellings load,
+/// resolve to structurally equal JSON Schema, and keep a span for the sibling
+/// `next` after the list or continuation. Before the strict locator accepted
+/// these presentations, most failed at the projection boundary, and a
+/// continuation wholly inside a description loaded with its remaining lines
+/// unread and no span for `next`.
 #[test]
-fn presentation_pairs_share_semantics_and_record_the_strict_baseline() {
+fn presentation_pairs_load_with_equal_semantics_and_keep_their_siblings() {
     let pairs: [(&str, &str, &str); 8] = [
         (
             "tagged serialized",
@@ -585,8 +601,7 @@ fn presentation_pairs_share_semantics_and_record_the_strict_baseline() {
             include_str!("../fixtures/schema_yaml_spellings/blank-line.continued.yaml"),
         ),
     ];
-    let truncated_description = ["spec continued example", "blank line, no final newline"];
-
+    let next = SchemaSourcePath::root().property("next");
     for (label, conventional, presented) in pairs {
         let expected = to_json_schema(&parse_yaml_schema(&envelope_payload(conventional)).expect(label))
             .expect(label);
@@ -594,31 +609,468 @@ fn presentation_pairs_share_semantics_and_record_the_strict_baseline() {
             .expect(label);
         assert_eq!(actual, expected, "{label}: presentations must resolve to equal JSON Schema");
 
-        let document = parse_standalone_schema_document(conventional, "/w/conventional.yaml")
-            .unwrap_or_else(|error| panic!("{label}: conventional spelling must load: {error}"))
-            .unwrap_or_else(|| panic!("{label}: conventional spelling must be recognized"));
-        let loaded = to_json_schema(document.schema().expect("inline schema")).expect(label);
-        assert_eq!(loaded, expected, "{label}: source-aware load must match the semantic parse");
-
-        let result = parse_standalone_schema_document(presented, "/w/presented.yaml");
-        if truncated_description.contains(&label) {
-            let document = result
-                .unwrap_or_else(|error| panic!("{label}: {error}"))
-                .unwrap_or_else(|| panic!("{label}: recognized envelope"));
-            let next = SchemaSourcePath::root().property("next");
-            assert!(
-                document.source_map.spans(&next, SchemaSpanKind::MappingKey).is_empty(),
-                "{label}: baseline drops the sibling after the continued description"
-            );
-            continue;
+        for (spelling, source) in [("conventional", conventional), ("presented", presented)] {
+            let document = parse_standalone_schema_document(source, "/w/schema.yaml")
+                .unwrap_or_else(|error| panic!("{label} {spelling}: must load: {error}"))
+                .unwrap_or_else(|| panic!("{label} {spelling}: must be recognized"));
+            let loaded = to_json_schema(document.schema().expect("inline schema")).expect(label);
+            assert_eq!(loaded, expected, "{label} {spelling}: source-aware load must match the semantic parse");
+            if source.contains("next:") {
+                let keys = document.source_map.spans(&next, SchemaSpanKind::MappingKey);
+                assert_eq!(keys.len(), 1, "{label} {spelling}: sibling `next` keeps its key span");
+                assert_eq!(&source[keys[0].clone()], "next", "{label} {spelling}");
+            }
         }
-        let error = result.expect_err(label);
+    }
+}
+
+/// The authored text of every span recorded for `path` and `kind`.
+fn span_texts<'a>(
+    source: &'a str,
+    document: &darkmatter::markdown::schemas::StandaloneSchemaDocument,
+    path: &SchemaSourcePath,
+    kind: SchemaSpanKind,
+) -> Vec<&'a str> {
+    document
+        .source_map
+        .spans(path, kind)
+        .iter()
+        .map(|span| &source[span.clone()])
+        .collect()
+}
+
+/// The union-arm span text of each of `count` arms under `path`.
+fn arm_texts<'a>(
+    source: &'a str,
+    document: &darkmatter::markdown::schemas::StandaloneSchemaDocument,
+    path: &SchemaSourcePath,
+    count: usize,
+) -> Vec<&'a str> {
+    (0..count)
+        .flat_map(|index| span_texts(source, document, &path.union_arm(index), SchemaSpanKind::UnionArm))
+        .collect()
+}
+
+fn load(source: &str) -> darkmatter::markdown::schemas::StandaloneSchemaDocument {
+    parse_standalone_schema_document(source, "/w/schema.yaml")
+        .unwrap_or_else(|error| panic!("{source:?} must load: {error}"))
+        .unwrap_or_else(|| panic!("{source:?} must be recognized"))
+}
+
+/// A continued plain scalar is read whole: a token on a continuation line has
+/// a range on that line without its indentation, and a token crossing a fold
+/// has one range from its first authored byte to its last, line break and
+/// indentation inside. A trailing comment is not part of the definition.
+/// Both line endings are built explicitly, so the checkout never decides.
+#[test]
+fn continued_plain_scalars_project_structural_spans_onto_authored_lines() {
+    let lf = include_str!("../fixtures/schema_yaml_spellings/continued.continued.yaml");
+    for newline in ["\n", "\r\n"] {
+        let source = lf.replace('\n', newline);
+        let document = load(&source);
+        let root = SchemaSourcePath::root();
+        let title = root.property("title");
+        let texts = |path: &SchemaSourcePath, kind| span_texts(&source, &document, path, kind);
+
+        assert_eq!(
+            texts(&title, SchemaSpanKind::Definition),
+            [format!("string(min(3);{newline}    max(40)) -> the display{newline}    title")],
+            "{newline:?}"
+        );
+        assert_eq!(
+            texts(&title, SchemaSpanKind::Atom),
+            [format!("string(min(3);{newline}    max(40))")],
+            "{newline:?}"
+        );
+        assert_eq!(texts(&title, SchemaSpanKind::Constraint), ["min(3)", "max(40)"], "{newline:?}");
+        assert_eq!(texts(&title, SchemaSpanKind::Argument), ["3", "40"], "{newline:?}");
+
+        // `max(40)` sits on the second physical line, after its indentation.
+        let max = document.source_map.spans(&title, SchemaSpanKind::Constraint)[1].clone();
+        let line_start = source[..max.start].rfind('\n').expect("continuation line") + 1;
+        assert_eq!(&source[line_start..max.start], "    ", "{newline:?}");
+
+        let tags = root.property("tags");
+        assert_eq!(
+            texts(&tags.union_arm(0), SchemaSpanKind::Atom),
+            [format!("string(min(2){newline}      )")],
+            "{newline:?}"
+        );
+        assert_eq!(texts(&tags.union_arm(0), SchemaSpanKind::Constraint), ["min(2)"], "{newline:?}");
+        assert_eq!(texts(&tags.union_arm(1), SchemaSpanKind::Atom), ["number(max(9))"], "{newline:?}");
+        assert_eq!(texts(&root.property("next"), SchemaSpanKind::Definition), ["boolean"], "{newline:?}");
+    }
+}
+
+/// A blank line inside a continued scalar is a line break in the decoded
+/// text, exactly as `serde_yaml_ng` reads it, and the scalar without a final
+/// newline still ends at its last authored byte.
+#[test]
+fn a_blank_line_in_a_continued_scalar_decodes_like_the_yaml_parser() {
+    let source = include_str!("../fixtures/schema_yaml_spellings/blank-line.continued.yaml");
+    let payload = envelope_payload(source);
+    let title = payload.get("title").and_then(serde_yaml_ng::Value::as_str).expect("title");
+    assert_eq!(title, "string(min(3)) -> first paragraph\nsecond paragraph");
+
+    let document = load(source);
+    let root = SchemaSourcePath::root();
+    assert_eq!(
+        span_texts(source, &document, &root.property("title"), SchemaSpanKind::Definition),
+        ["string(min(3)) -> first paragraph\n\n    second paragraph"]
+    );
+    assert_eq!(
+        span_texts(source, &document, &root.property("next"), SchemaSpanKind::Definition),
+        ["boolean"]
+    );
+    assert!(!source.ends_with('\n'), "the fixture must end without a newline");
+}
+
+/// Indentless block sequences under both envelopes, in a nested mapping arm,
+/// as a pure root union of compact mappings, and after a mapping-value anchor
+/// project each arm to its own item, and the sibling after the list stays a
+/// sibling.
+#[test]
+fn indentless_sequences_project_each_arm_and_stop_at_the_sibling() {
+    let root = SchemaSourcePath::root();
+
+    let tagged = include_str!("../fixtures/schema_yaml_spellings/tagged.serialized.yaml");
+    let document = load(tagged);
+    let status = root.property("status");
+    assert_eq!(
+        arm_texts(tagged, &document, &status, 3),
+        ["number", "boolean", "code: number(min(1))"]
+    );
+    assert_eq!(
+        span_texts(tagged, &document, &status.union_arm(2).property("code"), SchemaSpanKind::Constraint),
+        ["min(1)"]
+    );
+    assert_eq!(
+        span_texts(tagged, &document, &root.property("next"), SchemaSpanKind::MappingKey),
+        ["next"]
+    );
+
+    let nested = include_str!("../fixtures/schema_yaml_spellings/nested.serialized.yaml");
+    let document = load(nested);
+    assert_eq!(
+        arm_texts(nested, &document, &root.property("meta").property("mode"), 2),
+        ["number", "boolean"]
+    );
+    assert_eq!(
+        span_texts(nested, &document, &root.property("next"), SchemaSpanKind::Definition),
+        ["boolean"]
+    );
+
+    let union = include_str!("../fixtures/schema_yaml_spellings/root-union.serialized.yaml");
+    let document = load(union);
+    assert_eq!(
+        arm_texts(union, &document, &root, 2),
+        ["title: string(required)", "count: number(required)"]
+    );
+    assert_eq!(
+        span_texts(union, &document, &root.union_arm(1).property("count"), SchemaSpanKind::Constraint),
+        ["required"]
+    );
+
+    let anchors = include_str!("../fixtures/schema_yaml_spellings/anchors.indentless.yaml");
+    let document = load(anchors);
+    assert_eq!(
+        span_texts(anchors, &document, &root.property("status"), SchemaSpanKind::Definition),
+        ["&arms\n  - number\n  - boolean"]
+    );
+    assert_eq!(
+        arm_texts(anchors, &document, &root.property("status"), 2),
+        ["number", "boolean"]
+    );
+    assert_eq!(
+        span_texts(anchors, &document, &root.property("fallback"), SchemaSpanKind::Definition),
+        ["*arms"]
+    );
+    assert_eq!(
+        span_texts(anchors, &document, &root.property("next"), SchemaSpanKind::Definition),
+        ["boolean"]
+    );
+}
+
+/// Non-ASCII text before and inside a fold leaves byte ranges exact.
+#[test]
+fn continued_scalars_project_byte_ranges_through_non_ascii_text() {
+    let source = "kind: schema\ntypes:\n  café: string(min(1)) -> naïve\n    ünïcode max(2) text\n  t: string(min(1);\n    max(2)) -> é\n";
+    let document = load(source);
+    let root = SchemaSourcePath::root();
+    assert_eq!(
+        span_texts(source, &document, &root.property("café"), SchemaSpanKind::Definition),
+        ["string(min(1)) -> naïve\n    ünïcode max(2) text"]
+    );
+    assert_eq!(
+        span_texts(source, &document, &root.property("t"), SchemaSpanKind::Constraint),
+        ["min(1)", "max(2)"]
+    );
+    let max = document.source_map.spans(&root.property("t"), SchemaSpanKind::Constraint)[1].clone();
+    assert_eq!(max.start, source.rfind("max(2)").expect("continuation token"));
+}
+
+/// The source-aware entry points that take a caller's document offset add it
+/// once, after projecting through the fold.
+#[test]
+fn a_continued_definition_projects_through_a_caller_offset() {
+    use darkmatter::markdown::schemas::parse_property_definition_with_source;
+
+    for newline in ["\n", "\r\n"] {
+        let yaml = format!("string(min(1);{newline}  max(5)) -> é{newline}");
+        let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(&yaml).expect("YAML");
+        let projected = parse_property_definition_with_source("p", &value, &yaml, 100)
+            .unwrap_or_else(|error| panic!("{yaml:?}: {error}"));
+        let constraints: Vec<&str> = projected
+            .source_map
+            .spans(&SchemaSourcePath::root(), SchemaSpanKind::Constraint)
+            .iter()
+            .map(|span| &yaml[span.start - 100..span.end - 100])
+            .collect();
+        assert_eq!(constraints, ["min(1)", "max(5)"], "{newline:?}");
+    }
+}
+
+/// Every presentation outside the two this grammar accepts still fails at the
+/// projection boundary through the standalone loader, wrapped in
+/// `SchemaDocument`, including when it hides behind a continuation or an
+/// indentless list. Where the source-free parser accepts the value, the
+/// failure is the presentation boundary rather than the schema.
+#[test]
+fn strict_source_aware_parsing_keeps_every_other_presentation_closed() {
+    let cases: &[(&str, &str)] = &[
+        ("literal block scalar", "$schema:\n  t: |\n    string\n  next: boolean\n"),
+        ("folded block scalar", "$schema:\n  t: >-\n    string(min(1))\n  next: boolean\n"),
+        ("block scalar arm", "$schema:\n  t:\n  - |\n    string\n  - number\n"),
+        ("tag", "$schema:\n  t: !!str string\n  next: boolean\n"),
+        ("tag on an indentless arm", "$schema:\n  t:\n  - !!str string\n  - number\n  next: boolean\n"),
+        ("tag before a continuation", "$schema:\n  t: !!str string -> a\n    b\n  next: boolean\n"),
+        ("multi-line double-quoted", "$schema:\n  t: \"string -> a\n    b\"\n  next: boolean\n"),
+        ("multi-line single-quoted", "$schema:\n  t: 'string -> a\n    b'\n  next: boolean\n"),
+        ("multi-line quoted arm", "$schema:\n  t:\n  - \"string -> a\n    b\"\n  - number\n"),
+        ("complex key", "$schema:\n  ? [a, b]\n  : string\n"),
+        ("explicit flow-mapping key", "$schema:\n  t: {? a: string}\n"),
+        ("directive", "%YAML 1.2\n---\n$schema:\n  t: string\n"),
+    ];
+    for (label, source) in cases {
+        let semantic_ok = parse_yaml_schema(&envelope_payload(source)).is_ok();
+        let error = parse_standalone_schema_document(source, "/w/schema.yaml")
+            .expect_err(label);
         assert!(matches!(error, SchemaError::SchemaDocument { .. }), "{label}: {error:?}");
+        if semantic_ok {
+            assert!(
+                error
+                    .to_string()
+                    .contains("could not project SimplifiedSchema expression spans through YAML source"),
+                "{label}: {error}"
+            );
+        }
+    }
+}
+
+/// The authored spans of each `suggest(...)` candidate of the single-atom
+/// top-level property `name`.
+fn suggestion_spans(
+    schema: &darkmatter::markdown::schemas::SimplifiedSchema,
+    name: &str,
+) -> Vec<std::ops::Range<usize>> {
+    use darkmatter::markdown::schemas::{Constraint, PropertyDef, SimplifiedSchema};
+    let SimplifiedSchema::Single(shape) = schema else {
+        panic!("expected a single root shape");
+    };
+    let PropertyDef::Single(atom) = &shape.properties[name] else {
+        panic!("expected a single atom for {name}");
+    };
+    atom.constraints
+        .iter()
+        .find_map(|constraint| match constraint {
+            Constraint::Suggest(candidates) => {
+                Some(candidates.iter().map(|candidate| candidate.span.clone()).collect())
+            }
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("{name} has no suggest(...)"))
+}
+
+/// `suggest(...)` candidates on a continuation line and across a fold project
+/// to their authored bytes. A lint-invalid candidate on a continuation line is
+/// advisory: the schema still loads, and the problem points at that line.
+#[test]
+fn suggestion_candidates_on_continuation_lines_project_exactly() {
+    let lf = "kind: schema\ntypes:\n  mode: string(min(5);\n    suggest(no,\n      valid)) -> pick\n    one\n  next: boolean\n";
+    for newline in ["\n", "\r\n"] {
+        let source = lf.replace('\n', newline);
+        let document = load(&source);
+        let schema = document.schema().expect("inline schema");
+        let candidates = suggestion_spans(schema, "mode");
+        let texts: Vec<&str> = candidates.iter().map(|span| &source[span.clone()]).collect();
+        assert_eq!(texts, ["no", "valid"], "{newline:?}");
+
+        let valid = source.find("valid").expect("candidate");
+        let line_start = source[..valid].rfind('\n').expect("continuation line") + 1;
+        assert_eq!(&source[line_start..valid], "      ", "{newline:?}");
+
+        assert_eq!(document.suggestion_lints.len(), 1, "{newline:?}: {:?}", document.suggestion_lints);
+        let problem = &document.suggestion_lints[0];
+        assert_eq!(&source[problem.span.clone()], "no", "{newline:?}");
+        assert_eq!(problem.span.start, source.find("no,").expect("lint target"), "{newline:?}");
+
+        // Structural and suggestion coordinates agree on the same arguments.
+        let path = SchemaSourcePath::root().property("mode");
+        let arguments = span_texts(&source, &document, &path, SchemaSpanKind::Argument);
+        assert_eq!(arguments, ["5", "no", "valid"], "{newline:?}");
+        let argument_spans = document.source_map.spans(&path, SchemaSpanKind::Argument);
+        assert_eq!(&argument_spans[1..], candidates.as_slice(), "{newline:?}");
+    }
+}
+
+/// Identical definitions, folded and single-line, each keep their own
+/// occurrence's candidate spans, with unrelated definitions between them.
+#[test]
+fn repeated_identical_definitions_keep_their_own_suggestion_spans() {
+    let source = "$schema:\n  plain: string\n  a: string(suggest(x,\n    y))\n  other: string(min(1))\n  b: string(suggest(x, y))\n  c: string(suggest(x,\n      y))\n";
+    let document = load(source);
+    let schema = document.schema().expect("inline schema");
+    let x_positions: Vec<usize> = source.match_indices("x").map(|(at, _)| at).collect();
+    let y_positions: Vec<usize> = source.match_indices("y))").map(|(at, _)| at).collect();
+    for (index, name) in ["a", "b", "c"].into_iter().enumerate() {
+        let spans = suggestion_spans(schema, name);
+        assert_eq!(spans, [x_positions[index]..x_positions[index] + 1, y_positions[index]..y_positions[index] + 1], "{name}");
+    }
+}
+
+/// The suggestion projector's document offset is added once, after the fold,
+/// with non-ASCII text before the candidate.
+#[test]
+fn folded_suggestions_project_through_a_caller_offset_and_non_ascii_text() {
+    use darkmatter::markdown::schemas::simplified::parse_yaml_schema_with_source;
+
+    for newline in ["\n", "\r\n"] {
+        let yaml = format!("café: string -> naïve{newline}  text{newline}value: string(suggest(ünï,{newline}    beta)){newline}");
+        let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(&yaml).expect("YAML");
+        let schema = parse_yaml_schema_with_source(&value, &yaml, 100)
+            .unwrap_or_else(|error| panic!("{yaml:?}: {error}"));
+        let spans = suggestion_spans(&schema, "value");
+        let texts: Vec<&str> = spans.iter().map(|span| &yaml[span.start - 100..span.end - 100]).collect();
+        assert_eq!(texts, ["ünï", "beta"], "{newline:?}");
+    }
+}
+
+/// A folded value decodes exactly as `serde_yaml_ng` reads it, through
+/// multiple continuation lines, trailing whitespace, a trailing comment, and
+/// a final line without a newline, and means what its single-line spelling
+/// means.
+#[test]
+fn folded_values_decode_like_the_yaml_parser_and_match_single_line_semantics() {
+    let cases: &[(&str, &str)] = &[
+        (
+            "$schema:\n  t: string(min(1);   \n    max(9))   \n    -> one   \n    two # note\n  next: boolean",
+            "$schema:\n  t: string(min(1); max(9)) -> one two\n  next: boolean\n",
+        ),
+        (
+            "$schema:\n  t:\n  - string(min(1)\n    ) -> a\n\n\n    b\n  - number\n  next: boolean\n",
+            "$schema:\n  t:\n  - \"string(min(1) ) -> a\\n\\nb\"\n  - number\n  next: boolean\n",
+        ),
+    ];
+    for (folded, single) in cases {
+        let folded_value = envelope_payload(folded);
+        let single_value = envelope_payload(single);
+        assert_eq!(folded_value, single_value, "{folded:?}: the YAML parser must read both alike");
+        let expected = to_json_schema(&parse_yaml_schema(&single_value).expect("single")).expect("single");
+        let document = load(folded);
+        assert_eq!(to_json_schema(document.schema().expect("schema")).expect("folded"), expected, "{folded:?}");
+        assert_eq!(
+            span_texts(folded, &document, &SchemaSourcePath::root().property("next"), SchemaSpanKind::Definition),
+            ["boolean"],
+            "{folded:?}"
+        );
+    }
+}
+
+/// A source buffer that does not author the parsed value is a projection
+/// error, never a successful range: the structural parser compares every
+/// located scalar with the parser's text, and the suggestion projector finds
+/// no scalar meaning the atom.
+#[test]
+fn a_source_that_disagrees_with_the_value_is_a_projection_error() {
+    use darkmatter::markdown::schemas::{
+        parse_property_definition_with_source, simplified::parse_yaml_schema_with_source,
+    };
+
+    let value: serde_yaml_ng::Value =
+        serde_yaml_ng::from_str("string(min(1)) -> one two").expect("YAML");
+    for source in ["string(min(1)) -> one\n  three\n", "string(min(1)) -> one\n"] {
+        let error = parse_property_definition_with_source("p", &value, source, 0)
+            .expect_err(source);
+        assert!(error.to_string().contains("could not project"), "{source:?}: {error}");
+    }
+
+    let value: serde_yaml_ng::Value =
+        serde_yaml_ng::from_str("value: string(suggest(alpha, beta))").expect("YAML");
+    let error = parse_yaml_schema_with_source(&value, "value: string(suggest(alpha,\n  gamma))\n", 0)
+        .expect_err("mismatched candidates");
+    assert!(error.to_string().contains("could not project"), "{error}");
+}
+
+/// A cursor on a continuation line reads the same token and role as on the
+/// single-line spelling, with a range on its authored line.
+#[test]
+fn a_cursor_on_a_continuation_line_reads_the_authored_token() {
+    use darkmatter::markdown::schemas::{SchemaCursorRole, locate_type_definition_cursor};
+
+    for newline in ["\n", "\r\n"] {
+        let value = format!("string(min(1);{newline}    ma");
+        let state = locate_type_definition_cursor(&value, 40, 40 + value.len()).expect("cursor");
+        let single = locate_type_definition_cursor("string(min(1); ma", 0, 17).expect("single-line cursor");
+        assert_eq!(state.token, "ma", "{newline:?}");
+        assert_eq!(state.role, single.role, "{newline:?}");
+        assert!(matches!(state.role, SchemaCursorRole::Constraint { .. }), "{newline:?}");
+        assert_eq!(state.token_span, 40 + value.len() - 2..40 + value.len(), "{newline:?}");
+
+        let value = format!("string(min(1);{newline}    suggest(a,{newline}      b");
+        let state = locate_type_definition_cursor(&value, 0, value.len()).expect("argument cursor");
         assert!(
-            error
-                .to_string()
-                .contains("could not project SimplifiedSchema expression spans through YAML source"),
-            "{label}: {error}"
+            matches!(&state.role, SchemaCursorRole::Argument { constraint, .. } if constraint == "suggest"),
+            "{newline:?}: {:?}",
+            state.role
+        );
+        assert_eq!(&value[state.token_span.clone()], "b", "{newline:?}");
+    }
+}
+
+/// A pattern key authored before a property with an identical, folded
+/// definition keeps its own candidate spans. Properties and pattern keys are
+/// separate collections in the parsed schema, so only the located definition
+/// (not source order) can tell the two occurrences apart.
+#[test]
+fn a_pattern_key_before_an_identical_property_keeps_its_own_suggestion_spans() {
+    use darkmatter::markdown::schemas::{Constraint, PropertyDef, SimplifiedSchema};
+
+    for newline in ["\n", "\r\n"] {
+        let source = format!(
+            "$schema:{newline}  \"<starting::x>\": string(suggest(a,{newline}    b)){newline}  k: string(suggest(a,{newline}    b)){newline}"
+        );
+        let document = load(&source);
+        let SimplifiedSchema::Single(shape) = document.schema().expect("schema") else {
+            panic!("expected a single root shape");
+        };
+        let pattern_line = source.find("<starting").expect("pattern key");
+        let property_line = source.find("  k:").expect("property");
+
+        let PropertyDef::Single(pattern) = &shape.pattern_keys[0].def else {
+            panic!("expected a single pattern atom");
+        };
+        let Some(Constraint::Suggest(candidates)) = pattern.constraints.first() else {
+            panic!("expected suggest on the pattern key");
+        };
+        assert!(
+            candidates.iter().all(|candidate| (pattern_line..property_line).contains(&candidate.span.start)),
+            "{newline:?}: pattern-key candidates must stay in its own definition: {candidates:?}"
+        );
+        assert!(
+            suggestion_spans(document.schema().expect("schema"), "k")
+                .iter()
+                .all(|span| span.start > property_line),
+            "{newline:?}: property candidates must stay in its own definition"
         );
     }
 }
