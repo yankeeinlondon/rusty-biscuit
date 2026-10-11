@@ -214,7 +214,7 @@ pub fn overlay_query_provenance(
         upstream_revision: env!("CARGO_PKG_VERSION").to_string(),
         upstream_path: local_path.clone(),
         local_path,
-        license: "MIT".to_string(),
+        license: REPOSITORY_LICENSE.to_string(),
         translation_status: TranslationStatus::Original,
         notes: Vec::new(),
     })
@@ -294,6 +294,27 @@ mod tests {
         assert_eq!(prov.license, REPOSITORY_LICENSE);
         assert_eq!(prov.translation_status, TranslationStatus::Original);
         assert_eq!(prov.local_path, "queries/vendor/perl/locals.scm");
+    }
+
+    #[test]
+    fn every_record_carries_the_license_of_its_origin() {
+        let all = all_query_provenance();
+        let (originals, vendored): (Vec<_>, Vec<_>) = all
+            .iter()
+            .partition(|(_, prov)| prov.translation_status == TranslationStatus::Original);
+        assert!(!originals.is_empty() && !vendored.is_empty());
+
+        for ((language, kind), prov) in originals {
+            assert_eq!(
+                prov.license, "AGPL-3.0-only",
+                "{language:?} {kind:?} is a Tree Hugger original"
+            );
+        }
+        // A modified vendored query keeps its upstream license.
+        for ((language, kind), prov) in vendored {
+            assert_eq!(prov.source_project, "nvim-treesitter", "{language:?} {kind:?}");
+            assert_eq!(prov.license, "Apache-2.0", "{language:?} {kind:?}");
+        }
     }
 
     #[test]
