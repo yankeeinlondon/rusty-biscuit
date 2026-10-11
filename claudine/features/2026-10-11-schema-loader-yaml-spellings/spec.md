@@ -31,34 +31,26 @@ reviewed_on: 2026-10-11
 review_iterations: 0
 human_review: false
 message_to_agent: |-
-  Phase 1 added only tests and fixtures (no production code). Read the
-  "Phase 1" section of implementation-log.md first.
+  Phase 3 is complete. Read the "Phase 3" section of implementation-log.md
+  first. Facts the Phase 4 (docs and final verification) agent needs:
 
-  1. `darkmatter/lib/tests/l1/schema_yaml_spellings.rs` holds the robustness
-     matrix (three `*_robustness_matrix` tests) seeded from the
-     `*.conventional.yaml` fixtures. Edits address keys/items without
-     indentation, so once the strict locator accepts indentless sequences,
-     add runs of the same cell tables against `tagged.serialized.yaml`,
-     `nested.serialized.yaml`, and `root-union.serialized.yaml` (the
-     byte-exact serde_yaml_ng captures) — call `walk_matrix` with those seeds.
-  2. `presentation_pairs_share_semantics_and_record_the_strict_baseline`
-     deliberately asserts today's broken baseline. Your locator change will
-     turn it red; replace the baseline half with structural equality of
-     `to_json_schema(document.schema())` between each pair through
-     `parse_standalone_schema_document`, plus sibling `next` spans present.
-  3. Spec inaccuracy found: a plain-scalar continuation that lies wholly
-     inside a description (the spec's own continued example) does NOT fail
-     today. The strict `BlockLocator` stops at the first physical line,
-     leaves the continuation lines unconsumed, and returns success with a
-     truncated Definition span and NO span for the following sibling
-     (`next`). So Phase 2 must not only decode continued plain scalars but
-     also guarantee the locator never returns success with unconsumed
-     source lines / mismatched decoded text (the spec's "projection
-     disagreement is an error" rule). Consider asserting full consumption
-     at the end of `locate_yaml_value_with`.
-  4. Nested mapping shapes are closed (`additionalProperties: false`);
-     top-level properties are open. Keep that in mind when asserting
-     validation outcomes.
+  1. DMLS changes to document, in comments and the docs/ topic pages:
+     - `diagnostics/frontmatter.rs::grammar_token_span` ranges a standalone
+       definition's grammar error at the offending token. It projects the
+       error's expression-relative span through the scalar decoder. This now
+       applies to single-line definitions too, so `t: string(min(1);
+       bogus(2))` underlines `bogus`. The frontmatter inline `$schema` path is
+       unchanged.
+     - `providers/frontmatter.rs`: completion follows a plain scalar continued
+       onto later lines (`continued_scalar_holder`), and an indentless `- `
+       item at any column finds its parent key (`enclosing_path_by_indent`,
+       `is_sequence_item_line`).
+  2. `darkmatter/docs/topics/schemas/definition.md` ("Source-Aware
+     Presentation Boundary") has not been updated yet; that is Wave 6. No
+     docs, README, or skill file was touched in Phases 1-3.
+  3. The spec claims the description-only fold example failed with the
+     projection error. Phase 1 found that it actually loaded with a truncated
+     span. Docs should describe current behavior, not that claim.
 pipeline_step: 1
 related:
     - 2026-10-20-lifecycle-grammar

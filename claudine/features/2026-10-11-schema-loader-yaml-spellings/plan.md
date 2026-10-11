@@ -27,8 +27,31 @@ docs_updated_during_phase_1: []
 docs_created_during_phase_1:
   - darkmatter/lib/tests/fixtures/schema_yaml_spellings/README.md
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - darkmatter/lib/src/markdown/schemas/simplified/source.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/standalone.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/yaml_scalar.rs
+  - darkmatter/lib/tests/l1/schema_yaml_spellings.rs
+  - darkmatter/dmls/src/overlay/frontmatter.rs
+  - darkmatter/dmls/src/overlay/suggestions.rs
+  - darkmatter/dmls/src/diagnostics/frontmatter.rs
+  - darkmatter/dmls/tests/l1/lsp_session.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+  - darkmatter/dmls/src/diagnostics/frontmatter.rs
+  - darkmatter/dmls/src/providers/frontmatter.rs
+  - darkmatter/dmls/tests/l1/schema_yaml_spellings.rs
+  - darkmatter/dmls/tests/l1/main.rs
+  - darkmatter/cli/tests/l1/schema_validate.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
 packages:
   - darkmatter
+  - dmls
+  - darkmatter-cli
 ---
 
 # Schema Loader YAML Spellings Implementation Plan
@@ -100,7 +123,7 @@ Prerequisite: Phase 1 contract and fixture inventory. Both tasks edit `source.rs
 
 ### Wave 3 — Strict Locator
 
-- [ ] **Separate Permissions**
+- [x] **Separate Permissions**
   - Replace the broad `multi_line_scalars` coupling with the smallest explicit strict/tolerant policy needed to share indentless handling and plain continuation decoding. Keep tolerant-only presentations and empty-value handling independently gated.
   - Update both empty mapping-value descent and anchored mapping-value descent to recognize same-indent sequences. Preserve compact-item ownership and stop at sibling keys/items.
   - Decode whole continued plain values in mapping and sequence positions with `decode_scalar_node`; retain blank lines in the original slice even though `source_lines` omits them. Check decoded text against semantic values before projecting structure.
@@ -109,7 +132,7 @@ Prerequisite: Phase 1 contract and fixture inventory. Both tasks edit `source.rs
 
 ### Wave 4 — Scalar Coordinates
 
-- [ ] **Project Suggestions**
+- [x] **Project Suggestions**
   - Make `scan_value_scalars` consume complete continued plain scalars and advance past consumed physical lines. Retain existing flow/quoted/anchor behavior; prevent continuation punctuation from being scanned as another value.
   - Reuse the existing scalar decoder and `DecodedScalar::project` for nonempty suggestion ranges instead of separately projecting endpoints with `raw_offset`. Check semantic agreement and preserve each repeated definition's occurrence, including identical expressions with and without suggestions before the target.
   - Verify cursor lookup through the shared decoded scalar mapping in `cursor.rs`; adjust only seams that fail continuation or indentless-item lookup, retaining existing clamping behavior and partial-expression support.
@@ -123,14 +146,14 @@ Prerequisite: Phase 2 completes the shared mapping/cursor seam. The two Wave 5 t
 
 ### Wave 5 — Consumer Paths
 
-- [ ] **Recover Diagnostics**
+- [x] **Recover Diagnostics**
   - In DMLS standalone diagnostics, identify the offending scalar occurrence and project the existing grammar error's expression-relative span through its decoded mapping. Preserve inner-definition versus outer-declaration diagnostic classification and existing fallbacks when decoding/projection genuinely fails.
   - Cover the specified `bogus` example through the existing L1 LSP harness: underline exactly `bogus` on physical line 5, displayed columns 5–9 inclusive (zero-based LSP line 4, characters 4..9 for ASCII). Preserve code and severity; do not require malformed schemas to load.
   - Add hover/completion assertions for continued text and indentless union items, including complete and partially typed expressions, sibling node selection, and repeated identical definitions. Compare node/token meaning with conventional spellings and assert authored ranges.
   - Negotiate UTF-16 and use non-BMP text before a target token to distinguish byte, Unicode-scalar, and UTF-16 offsets. Cover CRLF and advisory suggestion diagnostics without normalizing the source.
   - Checkpoint: public LSP results have exact ranges and correct node selection; malformed grammar and genuine projection failure follow their respective paths.
 
-- [ ] **Prove Validation**
+- [x] **Prove Validation**
   - Extend `darkmatter/cli/tests/l1/schema_validate.rs` using `CliProcessFixture` and the test toolkit. Reference isolated schema files containing both new presentations and compare the library's resolved JSON Schema values with conventional forms using structural equality.
   - For each spelling, run `md schema validate` on a valid and invalid instance, asserting reported validation outcome and the specific applied constraint/type. Use real-file references through the existing invocation context; do not introduce another resolver.
   - Include both envelope contracts and an indentless pure root union; retain the `types`-sequence rejection. Keep process cases compact while the library matrix carries exhaustive shape coverage.
