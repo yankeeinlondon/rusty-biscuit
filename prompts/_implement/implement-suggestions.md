@@ -90,7 +90,7 @@ The review file above has completed in the {{ctx.area}} package area with a numb
 In order to track progress of this task we are using the '{{log}}' as a log file:
 
 - you should immediately create a section for your part of this log file:
-    - add an H2 header section called `## Implementation of Review Findings #{{iteration}`
+    - add an H2 header section called `## Implementation of Review Findings #{{iteration}}`
     - then timestamp it with: `> **started at:** {{ctx.now}}`
 - when you write to this section you always write as a set of Markdown unordered list items 
     - if you have structured sub-items for something then you can and should use a nested unordered list to represent this
@@ -192,11 +192,16 @@ find an edge in.
 Observations and medium or low findings never require a repair; take one only
 when it is a small, surgical change inside the spec's code.
 
-::block when="review && file_exists(review) && frontmatter(review, 'recurrence') == true"
-**This review reports a recurring finding class.** Its `## Recurrence` section
-names the sibling sites an earlier fix missed. That list is the minimum scope
-for this cycle, apart from any finding you dispute: fix every site it names,
-then run your own sweep for any it missed.
+::block when="review && file_exists(review) && !is_empty(frontmatter(review, 'human_in_the_loop'))"
+**This review stopped for a human instead of reporting findings.** The author
+answered each item under the `## Human rulings` heading of the review file. A
+ruling is a decision with the same authority as the specification. Your task for
+this cycle is to carry the rulings out:
+
+- for each ruling, make the code, test, documentation, and skill changes it implies; a ruling that confirms the existing behavior needs none
+- log each ruling and what you did about it
+- a ruling that conflicts with another ruling, or cannot be implemented as written, is logged as **deferred** with the reason; do not guess
+- the sweep and dispute rules above apply to defects you find while doing this; they do not apply to the rulings themselves
 ::end-block
 
 The repository's surgical-changes rule bounds each change to the defect class.

@@ -8,8 +8,9 @@ repair_agent: claude
 description: |-
     Implements the plan first when the spec is not yet marked `implemented`, then alternates
     a feature review with an implementation of its findings, committing after each repair,
-    until a review is marked ready. A review that reports a recurring finding class
-    does not end the loop; the next repair implements its sweep list.
+    until a review is marked ready. A first review that finds decisions only the author
+    can make fails its step, which halts the sequence (`fail_fast`); answer in that review,
+    set `human_resolved: true` in it, and run the sequence again.
     The list is static, so the cap is the number of repair cycles written below (5);
     once a review is ready every remaining step opts out from its own `initialize`
     and launches nothing. Reviews run under `review_agent` and implementation and
