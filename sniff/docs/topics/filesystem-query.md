@@ -51,6 +51,16 @@ returns what it collected, with `budget_exhausted: true` and incomplete
 coverage. A native call already running can overrun the budget, so the
 deadline is not a guarantee of when the function returns.
 
+The budget is also checked between the mechanisms of one process. On Linux
+and macOS, a process's working directory is read only after its descriptors,
+and only while the budget lasts. If the budget runs out during the descriptor
+scan, the descriptors already read stay in the report, the working directory
+is not read, and that process counts toward a `budget_exhausted` limitation
+on `working_directories`. The coverage record is `not_attempted` when no
+process's working directory was read, and `partial` otherwise. Each process's
+start time is still rechecked after an expired inspection, because that check
+is what attributes the evidence already read to the right process.
+
 ## Errors versus reports
 
 `query_path_usage` returns `Err(PathUsageError)` only when it cannot build a
@@ -86,6 +96,11 @@ serial plus 128-bit file ID on Windows.
   Windows the lookup, not text comparison, settles drive/UNC/`\\?\`
   spellings, 8.3 short names, and case-sensitive directories. An object known
   to be deleted is never matched by its former path.
+- That lookup runs as the backend reads each object, and the match travels
+  with the evidence; building the report never looks a path up. So a budget
+  that runs out later keeps every match already made, and an object the
+  budget stopped before its lookup is counted as a `budget_exhausted` gap
+  rather than reported unverified.
 
 ## Process identity
 
@@ -155,12 +170,14 @@ Linux processes, never native Windows ones.
   registration, kept separately even when several share a descriptor:
 
   ```text
-  inotify wd:3 ino:b84b5 sdev:800011 mask:fff ignored_mask:0
+  inotify wd:1a ino:b84b5 sdev:800011 mask:fff ignored_mask:0
   ```
 
-  becomes watch evidence with `descriptor`, `watch.watch_id: 3`,
+  becomes watch evidence with `descriptor`, `watch.watch_id: 26`,
   `watch.mask`, and `watch.recursive: false` (inotify has no recursive
-  watches). `sdev` is the kernel's device number (`major << 20 | minor`, here
+  watches). Every field of the line is hexadecimal, `wd` included: the
+  kernel writes watch descriptor 16 as `wd:10`, and `watch_id` reports the
+  number, not the text. `sdev` is the kernel's device number (`major << 20 | minor`, here
   8:17) and is converted to the `st_dev` encoding before it is compared, so
   `sdev:800011` matches `st_dev` `0x811`. A watch has no path of its own:
   `observed_path` is always `null`.
@@ -256,7 +273,11 @@ workers. It reports file and directory handle owners, and `loaded_modules`
 for every executable and DLL a process has mapped. A module is observed by path only, so its path is looked up and
 matched by identity (`match_basis: path_lookup`). That settles `\\?\`,
 8.3 short-name, and case spellings, and a case-sensitive directory keeps
-`Module.dll` and `module.dll` apart.
+`Module.dll` and `module.dll` apart. Each module is looked up as soon as its
+path is read: if the budget runs out after `tool.exe` matched but before
+`helper.dll` was read, the report keeps the `tool.exe` evidence and its
+process, and `loaded_modules` is `partial` with a `budget_exhausted`
+limitation.
 
 For example, a build tool started from `C:\work\app\bin\tool.exe` that has
 also loaded `C:\work\app\bin\helper.dll` yields, for a query of
