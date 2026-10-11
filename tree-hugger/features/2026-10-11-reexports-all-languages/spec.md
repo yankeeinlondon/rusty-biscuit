@@ -32,6 +32,22 @@ reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: "2026-10-11"
 review_iterations: 0
+human_review: true
+human_review_items:
+  - |-
+    **Decide the support contract before any code is written (Phase 1 exit gate).**
+
+    The audit of all 16 languages is finished (see the "Audit results" section of this spec). The plan cannot continue to Phase 2 until you rule on what "re-export" supports, because every later phase builds on that contract. Phase 1 was run non-interactively, so nothing below was approved on your behalf.
+
+    Decisions needed:
+    - **Supported conventions.** Options: (a) dedicated syntax only, simple but leaves Python, Perl, Lua and CommonJS unsupported; (b) dedicated syntax plus bounded static conventions, more useful, needs per-language rules; (c) broad inference, rejected by repo rules. Also rule on the borderline cases: C# `TypeForwardedTo`, Java `requires transitive`, PHP `class_alias`, shell sourcing "barrel" files, and Python's `import X as X` marker.
+    - **Canonical representation.** Recommended: a dedicated typed report in the file index, a `TreeFile` method, a query capability, and a stored imported-binding marker. You must pin the exact type names, JSON shape, method name and schema version.
+    - **Consumer exposure.** Recommended: keep declaration lists unchanged, expose the report separately, keep `hug imports` flags, include the report in full-index JSON, add no new command.
+    - **C++20 modules grammar blocker.** The pinned tree-sitter-cpp (newest published) cannot parse `export import` or `export module`, and some module files parse as ordinary declarations with no error. Options: (1) ship C++ with `using` forms only and report modules as "limited" (honest, no scope growth); (2) authorize a grammar upgrade or fork (full coverage, new scope and risk); (3) drop C++ from the goal. I recommend option 1.
+
+    I recommend approving option (b) above with option 1 for C++, then marking this spec finalized so Phase 2 can be refined from it.
+message_to_agent: |-
+  Phase 1 produced audit evidence only; no Rust code changed. Read audit/notes-*.md (per-construct tables) and the "Audit results" section in spec.md. Samples are under audit/samples/<lang>/ and are meant to become regression fixtures (copy into the L1 fixture layout, they parse with the pinned grammars). Probe tool: /tmp/th-probe (disposable, may be gone; rebuild from the lockfile versions). The probe hides anonymous tokens (`default`, `*`, `type`, `static`, `global`, `using namespace`), so inspect tokens, not just named nodes. The placeholder `reexported_symbols()` is already removed. The author's rulings are still pending: do not start Phase 2 until spec.md is finalized/planned with concrete types and JSON.
 ---
 
 # Spec: Re-exports across all supported languages
@@ -163,6 +179,75 @@ describes forwarding members of a path. Python's
 defines public names for star imports using `__all__`, or non-underscore
 names when it is absent. Those rules describe exposure, not an author's
 intent to make a stable API. The audit must preserve that distinction.
+
+## Audit results (consolidated 2026-10-11)
+
+Evidence lives beside this spec: per-construct tables with sources are in
+`audit/notes-module-syntax.md`, `audit/notes-static-conventions.md` and
+`audit/notes-interface-boundaries.md`; every sample parsed is under
+`audit/samples/<lang>/` and is intended as a later regression fixture. All
+parses used the lockfile-pinned grammars (tree-sitter 0.26.9; rust 0.24.2,
+javascript 0.25.0, typescript 0.23.2, python 0.25.0, go 0.25.0, java 0.23.5,
+php 0.24.2, perl 1.1.2, bash 0.25.1, zsh 0.56.0, c 0.24.2, cpp 0.23.4,
+c-sharp 0.23.5, swift 0.7.3, scala 0.24.1, lua 0.5.0). Items a fetched page did
+not confirm are marked "source not verified" in the notes and are not promoted
+to verified support.
+
+| Language | Classification | Grammar gaps (separate from semantic negatives) |
+|----------|----------------|--------------------------------------------------|
+| Rust | Dedicated syntax (`pub use`, restricted forms); `pub(self)` is effectively private; block-scoped and macro-generated uses need limits | none; all samples parse cleanly |
+| JavaScript | Dedicated ES-module syntax; import-then-export and CommonJS `require` are conventions needing a same-file binding table | `export {a} from "m" with {type:"json"}` yields ERROR |
+| TypeScript | JavaScript forms plus type-only exports; `export =` of an imported binding is a convention; `export as namespace` is not a forward | `export type *`, `export type * as ns from` yield ERROR; `export import D = require("m")` yields MISSING |
+| Python | Convention only (imports, aliases, star imports, literal `__all__`); runtime exposure and declared interface differ and need a basis marker | none |
+| Go | Dedicated syntax for aliases (`type X = pkg.X`, generic aliases); `var`/`const` copies are a convention with a mutability limit; defined types, wrappers, embedding and imports are negatives | build tags are plain comments |
+| Java | No applicable construct for symbols; `requires transitive` is dependency exposure that JLS 7.7.1 itself distinguishes from re-export | none |
+| PHP | No applicable construct; `use` is per file, `include`/`require` execute a file; `class_alias` is a dubious runtime convention | none (newer grammar 0.25.1 exists, untested) |
+| Perl | Convention only (Exporter lists plus names bound by `use Mod qw(..)` in the same package) | `@Pkg::EXPORT_OK` parses silently to a wrong tree; `%EXPORT_TAGS` keys parse as barewords calls; `use`/`no` share a node |
+| Bash | No applicable construct (sourcing, `export -f` are not re-export); a sourcing barrel file is dubious | none |
+| Zsh | Same as Bash; `autoload` is lazy loading, not forwarding | none (newer grammar 0.63.4 exists, untested) |
+| C | No applicable construct (`#include`, `#define`, `typedef` do not establish an interface) | `#if __has_include` is a parse error that unbalances `#endif` |
+| C++ | Dedicated syntax: namespace-level `using ns::x;`, `using namespace` (wildcard, fallback-only lookup); type aliases are a convention; class-member `using` and `#include` are outside the definition; C++20 `export import`/`export using` are dedicated syntax the grammar cannot parse | **blocker:** no C++20 module rules in tree-sitter-cpp 0.23.4 (newest published); `import x;`/`module m;` parse as ordinary declarations with no error; `using typename`, multi-name `using` are errors |
+| C# | `using`, aliases, `using static`, `global using` are per file or compilation, outside the definition; `[assembly: TypeForwardedTo]` is the one dubious dedicated construct | none |
+| Swift | `@_exported import` is the one dedicated form; `public import` (SE-0409) is access control, not forwarding; `#if` is a sibling node with a lossy condition | none |
+| Scala | Scala 3 `export` is dedicated syntax; Scala 2 has no applicable construct | `private`/`inline`/annotated `export` yield ERROR yet the export is recovered (a restricted export would read as public); `export a.b, c.d.{e}` is flattened; `given` vs plain selector differs only by `type_identifier` |
+| Lua | Convention only (what the chunk returns); `M` needs top-level assignments, no rebinding, `return M` last; legacy `module()` is limit-only | none |
+
+Cross-cutting findings that shape the design:
+
+- The probe prints named nodes only; anonymous tokens carry load-bearing
+  distinctions (`default`, `*`, TS `type`, Java `static`, PHP `use function`,
+  C# `global`/`static`, C++ `using namespace`). Extraction must read tokens,
+  not only named nodes.
+- A clean parse is not proof of meaning: C++ module files parse without errors
+  as ordinary declarations, and a Perl qualified variable parses wrongly with
+  no error flag. Coverage cannot be derived from `has_error` alone.
+- The placeholder `TreeFile::reexported_symbols()` is already removed in this
+  checkout (the removal landed with the docs-audit work; only the release note
+  remains). The replacement name is still the author's ruling.
+
+### Author decision package (pending; nothing below is approved)
+
+1. **Conventions.** Recommended: dedicated syntax plus bounded static
+   conventions. Proposed supported set: Rust, JavaScript, TypeScript, Swift,
+   Scala, Go (aliases and value copies), Python, Perl, Lua, and C++ named/
+   wildcard `using`. Proposed "no applicable construct": Java (symbols), C,
+   Bash, Zsh, PHP, C# `using` forms. To rule on: C# `TypeForwardedTo`
+   (lean: admit with an unresolved-source limit), Java `requires transitive`
+   (lean: out of scope or a separate kind), `class_alias` (lean: out), shell
+   barrel files (lean: out), Python basis marker and `import X as X`.
+2. **Representation.** Recommended: typed report in `FileSymbolIndex`, a
+   `TreeFile` method and `SymbolQuery` capability, plus a stored imported-
+   binding marker; schema version from the changed shape. Exact type names,
+   JSON and method name remain to be pinned by the author.
+3. **Consumers.** Recommended: separate exposure; `exported_symbols()` and
+   `--exported` stay declaration-only; `hug imports` keeps flags; full-index
+   JSON carries the requested report; no new command.
+4. **Grammar blocker (C++20 modules).** Options: (a) ship C++ with the
+   `using` forms only and report modules as limited (honest, no scope
+   expansion; recommended); (b) authorize a grammar upgrade or fork; (c) drop
+   C++ from the goal. Per the out-of-scope rules this needs the author.
+5. **Scala/TS/JS grammar gaps.** Recommended: report damaged or unparsed
+   export syntax as a limited region, never a definite complete negative.
 
 ## Design constraints
 

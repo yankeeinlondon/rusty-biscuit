@@ -6,6 +6,17 @@ created: 2026-10-11
 phase: 1
 agent: codex/gpt-6.1-sol
 yolo: true
+source_files_during_phase_1: []
+docs_updated_during_phase_1:
+  - tree-hugger/features/2026-10-11-reexports-all-languages/spec.md
+docs_created_during_phase_1:
+  - tree-hugger/features/2026-10-11-reexports-all-languages/audit/notes-module-syntax.md
+  - tree-hugger/features/2026-10-11-reexports-all-languages/audit/notes-static-conventions.md
+  - tree-hugger/features/2026-10-11-reexports-all-languages/audit/notes-interface-boundaries.md
+  - tree-hugger/features/2026-10-11-reexports-all-languages/audit/samples/ (279 sample files across 16 languages)
+skills_files_updated_during_phase_1: []
+packages:
+  - tree-hugger
 ---
 
 # Re-exports across all supported languages: implementation plan
@@ -78,7 +89,7 @@ session tree is non-interactive, and never assign two workers the same shared
 Rust file or document. Audit workers deliver separate notes; the integration
 owner consolidates them into the specification after this wave.
 
-- [ ] **Audit module syntax**
+- [x] **Audit module syntax**
   - Audit Rust, JavaScript, TypeScript, Swift, and Scala against authoritative
     language documentation and each grammar/version pinned by the manifest
     and lockfile. Cover every candidate listed in the specification, including
@@ -88,14 +99,14 @@ owner consolidates them into the specification after this wave.
     files, semantic source URLs and dialect/version, exact nodes/fields,
     error/missing-node results, and expected names, paths, scope, qualifiers,
     form, and coverage limits. Treat dedicated syntax and conventions separately.
-- [ ] **Audit static conventions**
+- [x] **Audit static conventions**
   - Produce the same evidence for Python, Go, Perl, and Lua: ordinary Python
     modules and export-list variants, aliases versus Go defined types,
     imported versus locally defined Perl exports, and Lua's returned interface.
   - Identify the smallest same-file binding and mutation facts each accepted
     pattern needs. Pair conditional, rebound, computed, shadowed, and ambiguous
     forms with explicit expected limits rather than guessed forwarding.
-- [ ] **Audit interface boundaries**
+- [x] **Audit interface boundaries**
   - Produce the same evidence for Java, PHP, Bash, Zsh, C, C++, and C#.
     Parse Bash and Zsh independently; separate dependency/interface exposure,
     local aliases, namespace/class members, preprocessing, and runtime effects.
@@ -111,7 +122,7 @@ probe if necessary. No runtime language interpreter or compiler is needed.
 
 ### Wave 2: Sequential design closure
 
-- [ ] **Consolidate audit evidence**
+- [x] **Consolidate audit evidence**
   - Merge Wave 1 notes into the specification's audit, as it requests. Account
     for all 16 languages and all listed candidates; retain grammar failures
     separately from semantic negatives. Record unanswered questions explicitly.
