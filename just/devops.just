@@ -299,10 +299,11 @@ _ci_build_verify dir artifact environment plan="":
         } >>"${GITHUB_OUTPUT}"
     fi
 
-# Worker budget: keep two slots for other host work, except on small CI
-# runners where reserving them would discard half or more of the capacity.
-# This limits test processes, not CPU affinity or Cargo build jobs.
-_test_threads:
+# Worker budget. L2 takes half the cores, rounded down, on every host, CI
+# runners included. Other tiers keep two slots for other host work, except on
+# small CI runners where reserving them would discard half or more of the
+# capacity. This limits test processes, not CPU affinity or Cargo build jobs.
+_test_threads tier="L1":
     #!/usr/bin/env bash
     set -euo pipefail
     cores=""
@@ -314,22 +315,21 @@ _test_threads:
         cores="$(getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo "${NUMBER_OF_PROCESSORS:-1}")"
     fi
     [[ "$cores" =~ ^[1-9][0-9]*$ ]] || cores=1
-    if [[ "${CI:-}" == "true" || "${GITHUB_ACTIONS:-}" == "true" || -n "${BISCUIT_CI_ENVIRONMENT:-}" ]] && (( cores <= 4 )); then
+    if [[ "{{ tier }}" == "L2" ]]; then
+        echo "$(( cores > 1 ? cores / 2 : 1 ))"
+    elif [[ "${CI:-}" == "true" || "${GITHUB_ACTIONS:-}" == "true" || -n "${BISCUIT_CI_ENVIRONMENT:-}" ]] && (( cores <= 4 )); then
         echo "$cores"
     else
         echo "$(( cores > 2 ? cores - 2 : 1 ))"
     fi
 
-# Worker budget for parallel self-spawn L2: `_test_threads`, capped at 4.
-# Every worker drives a real terminal, and WezTerm serves all of them through
-# one mux server; at 14 workers its CLI calls (spawn, capture) timed out while
-# 4 stayed green. CI runners have four or fewer cores, so the cap binds only
-# on larger hosts.
+# Worker budget for parallel self-spawn L2: half the host's cores, rounded
+# down. Every worker starts a login shell and a terminal pane, the panes of
+# every concurrent run share one tmux server or WezTerm mux, and spawn and
+# capture deadlines are wall-clock, so overload fails tests instead of slowing
+# them. At 14 workers on a 16-core Mac, WezTerm spawns and captures timed out.
 _test_l2_threads:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    threads="$(just _test_threads)"
-    echo "$(( threads < 4 ? threads : 4 ))"
+    @just _test_threads L2
 
 # Build the package
 _build package pkg_name *args="": _storage_preflight

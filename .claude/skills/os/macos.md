@@ -277,7 +277,8 @@ Measured 2026-10-05 on macOS 27.2 (arm64) for Sniff's path-usage query:
   serves the developer's own WezTerm windows. On 2026-10-08, claudine-cli's
   L2 at 14 workers (`logical_cores - 2` on this 16-core Mac) failed three
   then four different WezTerm tests in consecutive runs; at 4 workers all
-  281 passed. `_test_l2_threads` now caps parallel L2 at four. If it recurs,
+  281 passed. `_test_l2_threads` now gives parallel L2 half the host's cores
+  (8 here). If it recurs,
   check `ps` for another worktree's `just ci-local` or `test-l2` before
   blaming the test.
 - **Terminal detection forks `defaults`.** On an iTerm2 host,

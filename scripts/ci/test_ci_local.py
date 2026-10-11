@@ -65,7 +65,7 @@ def thread_policy_recipe() -> str:
     lines = DEVOPS.read_text(encoding="utf-8").splitlines(keepends=True)
     recipes = []
     for name in ("_test_threads", "_test_l2_threads"):
-        start = next(index for index, line in enumerate(lines) if line.startswith(f"{name}:"))
+        start = next(index for index, line in enumerate(lines) if line.startswith((f"{name}:", f"{name} ")))
         end = start + 1
         while end < len(lines) and (not lines[end].strip() or lines[end][0].isspace()):
             end += 1
@@ -233,8 +233,8 @@ class CiLocalTests(unittest.TestCase):
                 ),
                 "just": (
                     "import json, os, subprocess, sys\n"
-                    "if sys.argv[1:] in (['_test_threads'], ['_test_l2_threads']):\n"
-                    "    raise SystemExit(subprocess.run([os.environ['TEST_REAL_JUST'], '--justfile', os.environ['TEST_POLICY_RECIPE'], sys.argv[1]], check=False).returncode)\n"
+                    "if sys.argv[1] in ('_test_threads', '_test_l2_threads'):\n"
+                    "    raise SystemExit(subprocess.run([os.environ['TEST_REAL_JUST'], '--justfile', os.environ['TEST_POLICY_RECIPE'], *sys.argv[1:]], check=False).returncode)\n"
                     "assert sys.argv[1] in ('_lint', '_test', '_test_l2'), sys.argv\n"
                     "with open(os.environ['TEST_CALL_LOG'], 'a', encoding='utf-8') as log:\n"
                     "    log.write(json.dumps({'args': sys.argv[1:], "
@@ -344,8 +344,8 @@ class CiLocalTests(unittest.TestCase):
     def test_parallel_policy_is_bounded_and_does_not_leak_to_other_gates(self) -> None:
         calls = self.run_recipe()
         l2 = [call for call in calls if call["args"][0] == "_test_l2"]
-        # 16 cores leave 14 workers; parallel L2 stops at its cap of 4.
-        self.assertEqual(["4", "1"], [call["threads"] for call in l2])
+        # 16 cores: parallel L2 takes half of them.
+        self.assertEqual(["8", "1"], [call["threads"] for call in l2])
         for call in l2:
             self.assertEqual("tmux", call["backends"])
             self.assertEqual(["--features", "terminal-tests,daemon-tests"], call["args"][2:])
@@ -375,7 +375,7 @@ class CiLocalTests(unittest.TestCase):
             reports["gate_backends"],
         )
 
-    def test_parallel_policy_reserves_two_cores_on_small_hosts(self) -> None:
+    def test_parallel_policy_keeps_one_worker_on_small_hosts(self) -> None:
         calls = self.run_recipe(cores=3)
         l2 = [call for call in calls if call["args"][0] == "_test_l2"]
         self.assertEqual(["1", "1"], [call["threads"] for call in l2])
@@ -720,7 +720,9 @@ class CiLocalDiffScopeTests(unittest.TestCase):
 
 
 class ThreadPolicyTests(unittest.TestCase):
-    def run_policy(self, cores: int, markers: dict[str, str] | None = None, sniff_fails: bool = False) -> str:
+    def run_policy(
+        self, cores: int, markers: dict[str, str] | None = None, sniff_fails: bool = False, recipe_name: str = "_test_threads"
+    ) -> str:
         with tempfile.TemporaryDirectory(prefix="test-thread-policy-") as temporary:
             root = Path(temporary)
             bin_dir = root / "bin"
@@ -751,7 +753,7 @@ class ThreadPolicyTests(unittest.TestCase):
             })
             environment.update(markers or {})
             result = subprocess.run(
-                [JUST, "--justfile", str(recipe), "_test_threads"],
+                [JUST, "--justfile", str(recipe), recipe_name],
                 cwd=root,
                 env=environment,
                 capture_output=True,
@@ -776,6 +778,12 @@ class ThreadPolicyTests(unittest.TestCase):
 
     def test_false_ci_markers_keep_local_policy(self) -> None:
         self.assertEqual("2", self.run_policy(4, {"CI": "false", "GITHUB_ACTIONS": "false", "BISCUIT_CI_ENVIRONMENT": ""}))
+
+    def test_l2_policy_takes_half_the_cores_rounded_down_on_every_host(self) -> None:
+        for markers in (None, {"CI": "true"}, {"GITHUB_ACTIONS": "true"}, {"BISCUIT_CI_ENVIRONMENT": "macos-latest"}):
+            for cores, expected in ((1, 1), (2, 1), (3, 1), (4, 2), (5, 2), (8, 4), (16, 8)):
+                with self.subTest(markers=markers, cores=cores):
+                    self.assertEqual(str(expected), self.run_policy(cores, markers, recipe_name="_test_l2_threads"))
 
     def test_platform_fallback_retains_policy_when_sniff_fails(self) -> None:
         self.assertEqual("6", self.run_policy(8, sniff_fails=True))

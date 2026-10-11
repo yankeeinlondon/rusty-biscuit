@@ -5101,7 +5101,7 @@ fn the_worker_policy_survives_the_area_restructure() {
         l2_branch.contains("l2-serial")
             && l2_branch.contains("just _test_l2_threads")
             && l2_branch.contains("BISCUIT_L2_THREADS"),
-        "L2 must use the capped parallel worker budget unless the package declares `l2-serial`"
+        "L2 must use the parallel L2 worker budget unless the package declares `l2-serial`"
     );
     assert!(
         l2_branch.contains("BISCUIT_TEST_REQUIRED_BACKENDS"),

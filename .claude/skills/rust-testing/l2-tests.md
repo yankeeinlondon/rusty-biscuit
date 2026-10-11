@@ -11,7 +11,7 @@ choice. Bypassing it leaks windows on timeout/panic and produces ambiguous
 The recipe has two modes:
 
 - **Default (parallel self-spawn):** skips the broker, exports no
-  `BISCUIT_SHARED_*`, and runs `-j N` (`_test_l2_threads`, at most four).
+  `BISCUIT_SHARED_*`, and runs `-j N` (`_test_l2_threads`, half the host's cores).
   Every `shared_or_spawn()` then takes its owned-pane fallback, so there is no
   shared resource.
 - **Serial (`l2-serial`, rare):** pre-spawns one shared pane per backend via
@@ -47,10 +47,11 @@ A test that (a) spawns its **own** uniquely-named session/PTY (e.g.
 **no shared resource** and is parallel-safe. That is why parallel is the
 default: with no `BISCUIT_SHARED_*` exported, `shared_or_spawn()` itself falls
 back to an **owned, `Drop`-cleaned** pane, so the whole tier self-isolates and
-runs at `-j N`. Local runs use `max(1, logical_cores - 2)` workers; CI uses all
-logical cores on runners with four or fewer, otherwise `logical_cores - 2`.
-Either way L2 caps that at four (`_test_l2_threads`), because every worker
-drives a real terminal through one WezTerm mux server. Worker count does not set
+runs at `-j N`. N is `max(1, floor(logical_cores / 2))` on every host, CI
+runners included (`_test_l2_threads`), fewer than L1's `logical_cores - 2`:
+every worker starts a login shell and a terminal pane, the panes of concurrent
+runs share one tmux server or WezTerm mux, and spawn and capture deadlines are
+wall-clock, so overload fails tests rather than slowing them. Worker count does not set
 CPU affinity or guarantee reserved capacity. Explicit `BISCUIT_L2_THREADS` takes
 precedence. Declare `l2-serial` (with `l2-serial-reason`) only when a test truly
 needs a resource no other test may touch at the same time, and write that

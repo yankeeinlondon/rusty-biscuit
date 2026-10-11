@@ -685,9 +685,9 @@ command surface:
 - **`l2-serial`** — run the L2 tier on `_test_l2`'s shared-pane serial path
   (`-j 1`) instead of the default parallel self-spawn mode. Requires
   `l2-serial-reason` naming the resource the tests contend for. Every other
-  L2 suite runs `_test_l2_threads` workers: `max(1, logical_cores - 2)`
-  locally, all logical cores on CI runners with four or fewer, capped at four
-  because every worker drives a real terminal through one WezTerm mux server.
+  L2 suite runs `_test_l2_threads` workers: `max(1, floor(logical_cores / 2))`
+  on every host (2 on `ubuntu-latest`, 1 on `macos-latest`), because every
+  worker drives a real terminal through one tmux server or WezTerm mux.
   An explicit `BISCUIT_L2_THREADS` takes precedence.
 - **`neovim`** — provisions Neovim for packages whose L2 contract exercises
   the editor backend.

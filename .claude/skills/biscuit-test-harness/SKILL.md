@@ -260,11 +260,13 @@ declare the backend, or each test self-spawns its own window.
 exports no `BISCUIT_SHARED_*`, and runs nextest at `-j N`, so every
 `shared_or_spawn()` takes its fallback branch and spawns an *owned*,
 `Drop`-cleaned pane: there is no shared resource to contend for.
-N is `_test_l2_threads`: `max(1, logical_cores - 2)` locally (all cores on
-CI runners with four or fewer), capped at four, because every worker drives a
-real terminal and one WezTerm mux server serves them all; at 14 workers its
-spawn and capture calls time out. It controls worker count, not CPU affinity
-or a guaranteed reservation.
+N is `_test_l2_threads`: `max(1, floor(logical_cores / 2))` on every host, CI
+runners included, because every worker drives a real terminal and one WezTerm
+mux server serves them all; at 14 workers on a 16-core Mac its spawn and
+capture calls time out. The count follows the host, not the OS: that Mac's
+pre-push run gets 8, a GitHub-hosted `ubuntu-latest` runner (4 cores) 2, and a
+GitHub-hosted `macos-latest` runner (3 cores) 1. It controls worker count, not
+CPU affinity or a guaranteed reservation.
 
 **Serial is the rare exception and must say why.** A package whose L2 tests
 genuinely contend for a resource declares it in its manifest, and the CI

@@ -153,8 +153,8 @@ all logical cores when there are four or fewer, and `logical_cores - 2` on
 larger runners. This preserves capacity on developer and larger shared hosts
 without crippling small CI runners. It is a concurrency setting, not CPU
 affinity or a guarantee that cores stay reserved. L2 runs in parallel by
-default, capped at four workers by `_test_l2_threads` because each worker
-drives a real terminal; only a package declaring the `l2-serial` runner tool,
+default at `max(1, floor(logical_cores / 2))` workers on every host
+(`_test_l2_threads`) because each worker drives a real terminal; only a package declaring the `l2-serial` runner tool,
 with its required `l2-serial-reason`, runs at one worker. An explicit
 `BISCUIT_L2_THREADS` takes precedence.
 

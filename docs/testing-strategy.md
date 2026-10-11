@@ -365,12 +365,12 @@ l2-backends = ["tmux", "wezterm", "kitty", "apple-terminal"]
 
 L2 suites run in parallel by default. Each test spawns its own terminal
 session, so tests do not share a pane and can run side by side. The worker
-count is `max(1, logical_cores - 2)` locally, and all logical cores on CI
-runners with four or fewer, but never more than four: each worker drives a
-real terminal, and a single WezTerm mux server serves every WezTerm test, so
-more workers make its spawn and capture calls time out rather than finish
-sooner. A 16-core Mac, for example, runs claudine-cli's L2 suite with 4
-workers, not 14. The count controls test workers, not CPU affinity or a
+count is half the host's logical cores, rounded down, with a minimum of one,
+on every host, CI runners included: each worker drives a real terminal, and a
+single WezTerm mux server serves every WezTerm test, so more workers make its
+spawn and capture calls time out rather than finish sooner. A 16-core Mac, for
+example, runs claudine-cli's L2 suite with 8 workers, not 14; a GitHub-hosted
+`ubuntu-latest` runner (4 cores) runs 2 and `macos-latest` (3 cores) runs 1. The count controls test workers, not CPU affinity or a
 guaranteed reservation.
 
 Serial L2 is a rare, declared exception. A package whose tests truly contend
