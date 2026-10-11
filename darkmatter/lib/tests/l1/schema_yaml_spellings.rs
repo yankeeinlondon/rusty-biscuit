@@ -891,9 +891,11 @@ fn suggestion_spans(
         .unwrap_or_else(|| panic!("{name} has no suggest(...)"))
 }
 
-/// `suggest(...)` candidates on a continuation line and across a fold project
-/// to their authored bytes. A lint-invalid candidate on a continuation line is
-/// advisory: the schema still loads, and the problem points at that line.
+/// `suggest(...)` candidates on a continuation line project to their authored
+/// bytes, each on one physical line. A lint-invalid candidate on a
+/// continuation line is advisory: the schema still loads, and the problem
+/// points at that line. A candidate whose own range crosses a fold is
+/// `a_suggestion_candidate_crossing_a_fold_projects_one_authored_range`.
 #[test]
 fn suggestion_candidates_on_continuation_lines_project_exactly() {
     let lf = "kind: schema\ntypes:\n  mode: string(min(5);\n    suggest(no,\n      valid)) -> pick\n    one\n  next: boolean\n";
@@ -920,6 +922,80 @@ fn suggestion_candidates_on_continuation_lines_project_exactly() {
         assert_eq!(arguments, ["5", "no", "valid"], "{newline:?}");
         let argument_spans = document.source_map.spans(&path, SchemaSpanKind::Argument);
         assert_eq!(&argument_spans[1..], candidates.as_slice(), "{newline:?}");
+    }
+}
+
+/// A quoted candidate split by a fold decodes with the fold as one space, and
+/// its one range runs from the opening quote to the closing quote, line break
+/// and indentation inside. The structural `Argument` span and the advisory
+/// `min(40)` lint report that same range, and the schema still loads.
+#[test]
+fn a_suggestion_candidate_crossing_a_fold_projects_one_authored_range() {
+    for newline in ["\n", "\r\n"] {
+        let source = format!(
+            "kind: schema{newline}types:{newline}  mode: string(min(40); suggest('first{newline}    second')){newline}  next: boolean{newline}"
+        );
+        let document = load(&source);
+        let schema = document.schema().expect("inline schema");
+
+        let start = source.find("'first").expect("opening quote");
+        let end = source.find("second'").expect("closing quote") + "second'".len();
+        assert_eq!(&source[start..end], format!("'first{newline}    second'"), "{newline:?}");
+        let candidate = start..end;
+        assert_eq!(suggestion_spans(schema, "mode"), [candidate], "{newline:?}");
+
+        use darkmatter::markdown::schemas::{Constraint, PropertyDef, SimplifiedSchema};
+        let SimplifiedSchema::Single(shape) = schema else { panic!("single root shape") };
+        let PropertyDef::Single(atom) = &shape.properties["mode"] else { panic!("single atom") };
+        let decoded: Vec<&str> = atom
+            .constraints
+            .iter()
+            .filter_map(|constraint| match constraint {
+                Constraint::Suggest(candidates) => Some(candidates),
+                _ => None,
+            })
+            .flatten()
+            .map(|candidate| candidate.decoded.as_str())
+            .collect();
+        assert_eq!(decoded, ["first second"], "{newline:?}");
+
+        let path = SchemaSourcePath::root().property("mode");
+        let arguments = document.source_map.spans(&path, SchemaSpanKind::Argument);
+        assert_eq!(arguments.len(), 2, "{newline:?}: {arguments:?}");
+        assert_eq!(&source[arguments[0].clone()], "40", "{newline:?}");
+        assert_eq!(arguments[1], start..end, "{newline:?}");
+
+        assert_eq!(document.suggestion_lints.len(), 1, "{newline:?}: {:?}", document.suggestion_lints);
+        assert_eq!(document.suggestion_lints[0].span, start..end, "{newline:?}");
+
+        // The sibling after the fold keeps its own definition.
+        assert_eq!(
+            span_texts(&source, &document, &SchemaSourcePath::root().property("next"), SchemaSpanKind::Definition),
+            ["boolean"],
+            "{newline:?}"
+        );
+    }
+}
+
+/// The inline-schema suggestion projector carries a candidate crossing a fold
+/// as one range enclosing both authored lines, with the caller's document
+/// offset applied exactly once.
+#[test]
+fn a_folded_suggestion_candidate_projects_through_a_caller_offset() {
+    use darkmatter::markdown::schemas::simplified::parse_yaml_schema_with_source;
+
+    const OFFSET: usize = 100;
+    for newline in ["\n", "\r\n"] {
+        let yaml = format!("mode: string(min(40); suggest('first{newline}  second')){newline}next: boolean{newline}");
+        let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(&yaml).expect("YAML");
+        let schema = parse_yaml_schema_with_source(&value, &yaml, OFFSET)
+            .unwrap_or_else(|error| panic!("{yaml:?}: {error}"));
+
+        let start = yaml.find("'first").expect("opening quote");
+        let end = yaml.find("second'").expect("closing quote") + "second'".len();
+        let projected = start + OFFSET..end + OFFSET;
+        assert_eq!(suggestion_spans(&schema, "mode"), [projected], "{newline:?}");
+        assert_eq!(&yaml[start..end], format!("'first{newline}  second'"), "{newline:?}");
     }
 }
 
