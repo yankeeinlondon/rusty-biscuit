@@ -73,7 +73,7 @@ the first context's base; a target that advanced past the branch point is review
 receipt, and CI calculates scope itself.
 
 The hook uses `sniff` to identify macOS, Linux, native Windows, or WSL2 and publishes a
-**validation receipt** under `refs/notes/ci-local/<environment>` — schema version 2, carrying the
+**validation receipt** — schema version 2, carrying the
 reviewed base (the scope receipt's: a pull request's target tip, never a merge base with
 `origin/main`), head, tree, and the scope receipt's plan identity plus one record per
 `{package, gate}` cell that this run executed with its
@@ -85,16 +85,29 @@ reports themselves are retained on the producing host under
 before the receipt is written; `host.report_dir` names that directory, and a copy that fails
 publishes no receipt.
 
+The receipt is not stored as-is. `scripts/ci/observation_notes.py` turns each of its cells into an
+immutable **observation** (cited by report digest) and unions them into the **observation
+collection** (schema version 3) on `refs/notes/ci-local/<environment>`, so the next package, a
+retry, or another host at the same head adds to the note instead of replacing it. The union is
+written locally first, then the remote ref is fetched, merged, and pushed without force, retrying a
+lost race up to five times; a failure leaves the proof on the local ref and the covered cells
+scheduled for CI. A retry of a cell links to the observation it replaces (`retry_of`), and the
+verifier orders results only by that link and by commit ancestry, never by time: a later failure
+beats an earlier pass, a later pass beats an earlier failure, and results nothing orders that
+disagree make the cell execute. The field contract is in
+[`.github/ci/schemas/README.md`](../../.github/ci/schemas/README.md#observation-collection).
+
 A **complete** run is evidence whether it passed or failed; `strict` and `warn` both publish one.
 A gate that staged no report is recorded `partial` and refused for reuse, so a compile failure
 cannot pass for a tested cell. An L2 cell is `partial` unless a backend it required actually drove
 a test — an absent backend makes the suite *skip*, and nextest prints PASS in about 0.02 s.
 `lint` and `check` stage no report and are therefore always CI-origin.
 
-CI reads **every** note on every environment's notes ref between the merge base and the outgoing
-head, so a macOS receipt from this push and a prior `cross-check` WSL receipt combine in one
-answer, and two receipts on one environment covering different packages combine across commits;
-each cell is resolved by the newest note that qualifies for it. A receipt from an
+CI reads **every** note on every environment's notes ref from the merge base (included) to the
+outgoing head, so a macOS receipt from this push and a prior `cross-check` WSL receipt combine in
+one answer, and results on one environment covering different packages combine across commits and
+across observations of one commit; each cell is resolved among the observations that qualify for it,
+newest by retry link and commit ancestry. A receipt from an
 **older head** is accepted per cell when that cell's *gate-input identity* is unchanged — the
 `git ls-tree` entries of the tested package's build closure (dev-dependencies and the lockfile
 included) plus that gate's global inputs, plus the Just recipes the gate's CI entry recipes
@@ -196,8 +209,8 @@ GitHub events that schedule it, and the planner plans nothing for an environment
 not schedule (recorded as `deferred_environments`). As decided on 2026-09-18
 (`fixes/2026-09-18-ci-cadence`): a pull request proves `ubuntu-latest` and `macos-latest`, the
 latter normally from the pre-push hook's local evidence; a push to `main` schedules the same two;
-the nightly run (08:00 UTC) plans `windows-latest` and `wsl2-ubuntu` over the packages that
-changed since the last successful nightly, with `ubuntu-latest` joining cell-less as the producer
+the nightly run (08:00 UTC) plans `windows-latest` and `wsl2-ubuntu`, each over the packages that
+changed since the last successful nightly that proved that environment, with `ubuntu-latest` joining cell-less as the producer
 of WSL2's archives; `workflow_dispatch` plans every environment over the full workspace. A push to
 `main` whose pull request validation is reused therefore plans nothing, and every downstream job
 skips. The `ci:all-os` label plans every environment for a pull request from its next push.
@@ -211,20 +224,51 @@ flowchart LR
     Main[main since last green nightly] --> Nightly[nightly: Windows + WSL2]
 ```
 
-Nightly scope is the changes since the last successful qualifying ancestor run, not a fixed
-24-hour window. With no qualifying baseline it falls back to the full workspace; failed runs do not
-advance that baseline. Windows and WSL2 failures are found after merge and fixed forward; they
-never block a merge.
+Nightly scope is per environment, not per run. Each scheduled environment is anchored to the
+newest successful nightly on `main` that this head descends from **and** that proved that
+environment, and the planner unions the per-anchor selections once per `{package, environment,
+gate}`. A run proves an environment when it published a **coverage certification** for it — written
+by the `certify-nightly` job only after the final gate passed and every normal audit ran — or, for a
+run from before certifications existed, when its own workflow scheduled the environment and every
+`coverage-audit` job succeeded. So the old WSL2-only history anchors WSL2 and leaves Windows on the
+full gated workspace; once a dual-environment nightly is certified, both share the newer anchor.
+
+```mermaid
+flowchart LR
+    Runs[successful nightlies on main] --> Anchor{proved this environment<br/>and an ancestor?}
+    Anchor -->|certified| Inc[diff since that run]
+    Anchor -->|legacy WSL2-only run| Inc
+    Anchor -->|none| Full[full gated workspace + coded reason]
+    Inc --> Delta[+ cells current policy requires<br/>that the anchor never covered]
+    Delta --> Plan[one resolved plan]
+    Full --> Plan
+    Plan --> Verify[verified evidence reused]
+    Verify --> Run[execute the rest, audit, certify]
+```
+
+The plan records each environment's anchor and reason in `coverage_anchors` (reasons:
+`bootstrap-no-run`, `api-failure`, `search-exhausted`, `policy-uncertified`,
+`no-qualifying-ancestor`, `certified-ancestor`, `legacy-wsl2-ancestor`), so a first nightly, an API
+outage, or an exhausted search is visible rather than inferred from silence. `policy_delta` lists
+cells that current policy requires (an expired accepted gap, a newly declared gate or backend) that
+the anchor's certification never covered: they are selected whatever the source diff says.
+`inherited_cells` are cells the anchor still covers, which keeps coverage transitive across nightlies
+that execute nothing. A legacy anchor proves no cell list, so it is taken to cover whatever the diff
+does not reselect and adds no delta; the first certified nightly replaces that assumption. A failed,
+canceled, incomplete, foreign, or non-ancestor run never becomes or moves an anchor. The nightly now
+runs the same evidence verifier as pushes, so notes published from a rig satisfy Windows and WSL2
+cells there. Windows and WSL2 failures are found after merge and fixed forward; they never block a
+merge.
 
 A pull request merged before its own CI finished would otherwise get the whole grid again. The push
 instead waits, up to 90 minutes, for the pull request's run of the same head. A green finish on the
 same tree is reused; a failure, cancellation, or timeout falls back to the normal grid.
 
 **Planned:** a resumable workspace seeding command will gather Windows and WSL2 evidence on
-configured rigs and let the nightly execute only unproven cells. Scheduled evidence consumption and
-Windows cross-check receipt publication are not yet implemented, so today a nightly executes every
-Windows and WSL2 cell in its scope on hosted runners. An optional Windows-risk workflow will reuse
-this infrastructure before pushing.
+configured rigs. Scheduled evidence consumption is implemented, but native Windows cross-check
+receipt publication and hosted-cell observation publication are not yet, so until a rig or hosted
+producer publishes proof for a cell, a nightly executes it. An optional Windows-risk workflow will
+reuse this infrastructure before pushing.
 
 **Planned partial-run recovery:** failed or canceled nightlies will leave the
 last successful baseline unchanged and retain independently published proof

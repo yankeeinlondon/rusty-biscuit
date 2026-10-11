@@ -400,10 +400,11 @@ and its preflight runner, still cell-less, and is listed in
 since the development Mac proves it on every push through the hook;
 `windows-latest` and `wsl2-ubuntu` on `schedule` and `workflow_dispatch`
 only. So a pull request and a push to `main` prove Linux and macOS, and the
-nightly `schedule` (08:00 UTC, `ci.yml`) runs native Windows and WSL2 — over
-the packages that changed since the last successful nightly
-(`reuse_validation.py nightly-base`; the full workspace when there is none),
-with Linux compiling WSL2's archives and hosting nothing else. The `ci:all-os` label plans every environment for a pull request; it is
+nightly `schedule` (08:00 UTC, `ci.yml`) runs native Windows and WSL2 — each
+over the packages that changed since the newest successful nightly that proved
+*that* environment (`reuse_validation.py nightly-anchors`; the full gated
+workspace, with a coded reason, when there is none), with Linux compiling WSL2's
+archives and hosting nothing else. The `ci:all-os` label plans every environment for a pull request; it is
 read from the event payload, so it takes effect on the next push.
 
 `lint` and `check` are single-environment gates hosted on `ubuntu-latest`, so

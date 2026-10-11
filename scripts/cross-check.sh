@@ -785,6 +785,16 @@ publish_wsl_receipt() {
         return 0
     fi
 
+    # The work directory is deleted when this script exits, and the observation
+    # cites the report by digest, so keep the report where a later reader can
+    # find it: the same durable directory the pre-push hook retains reports in.
+    local durable="${BISCUIT_CI_EVIDENCE_DIR:-${HOME}/.rusty-biscuit/ci-evidence}/${head_sha}/wsl2-ubuntu"
+    if ! mkdir -p "${durable}" || ! cp "${report}" "${durable}/wsl-${package}-L1.xml"; then
+        echo "cross-check: publishing no receipt — could not retain the report under ${durable}"
+        return 0
+    fi
+    report="${durable}/wsl-${package}-L1.xml"
+
     local -a extra=()
     [[ -n "${run_args[*]:-}" ]] && extra=(--run-filters "${run_args[*]}")
     [[ "${dirty:-1}" != "0" ]] && extra+=(--remote-dirty)
@@ -798,13 +808,18 @@ publish_wsl_receipt() {
         "${extra[@]}" > "${receipt}"; then
         return 0
     fi
-    git notes --ref refs/notes/ci-local/wsl2-ubuntu add -f -F "${receipt}" "${head_sha}"
-    if git push --no-verify origin \
-        refs/notes/ci-local/wsl2-ubuntu:refs/notes/ci-local/wsl2-ubuntu > /dev/null 2>&1; then
-        echo "cross-check: published a wsl2-ubuntu receipt for ${package} at ${head_sha:0:9}."
-    else
-        echo "cross-check: recorded a wsl2-ubuntu receipt locally; it could not be pushed."
-    fi
+    # The note is a collection of observations: this run is unioned into what
+    # the head already holds (another package, another host) after fetching the
+    # remote ref, never written over it.
+    local status=0
+    python3 scripts/ci/observation_notes.py publish-receipt \
+        --receipt "${receipt}" --head "${head_sha}" \
+        --environment wsl2-ubuntu --remote origin || status=$?
+    case "${status}" in
+        0) echo "cross-check: published a wsl2-ubuntu observation for ${package} at ${head_sha:0:9}." ;;
+        4) echo "cross-check: recorded a wsl2-ubuntu observation locally; it could not be pushed." ;;
+        *) echo "cross-check: publishing no receipt — the observation could not be recorded" ;;
+    esac
 }
 
 # The native-Windows body of `Invoke-CrossCheck`: the same seven steps the Unix

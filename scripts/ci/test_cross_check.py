@@ -910,5 +910,43 @@ class CrossCheckStaleCloneTests(CrossCheckHarness):
         self.assertIn(f'".cross-check-trash--$prefix"', command)
         self.assertNotIn("Remove-Item", command)
 
+class WslObservationPublicationTests(unittest.TestCase):
+    """`publish_wsl_receipt` hands its receipt to the collection publisher.
+
+    The script cannot reach a real WSL host here, so this pins the contract by
+    reading it: a run is unioned into the head's collection after the report is
+    retained somewhere that outlives the script's work directory, rather than
+    written over the note, which is what dropped the first package when a second
+    one was cross-checked at the same head.
+    """
+
+    def function_body(self) -> str:
+        text = SCRIPT.read_text(encoding="utf-8")
+        start = text.index("publish_wsl_receipt() {")
+        return text[start : text.index("\n}\n", start)]
+
+    def test_the_note_is_published_through_the_observation_publisher(self) -> None:
+        body = self.function_body()
+        self.assertIn("scripts/ci/observation_notes.py publish-receipt", body)
+        self.assertNotIn("git notes", body)
+        self.assertNotIn("git push", body)
+
+    def test_the_report_is_retained_before_the_receipt_cites_it(self) -> None:
+        body = self.function_body()
+        self.assertLess(
+            body.index("BISCUIT_CI_EVIDENCE_DIR"), body.index("local_evidence.py cross-check")
+        )
+        self.assertIn('report="${durable}/wsl-${package}-L1.xml"', body)
+
+    def test_each_publisher_outcome_has_its_own_message(self) -> None:
+        body = self.function_body()
+        for status in ("0)", "4)", "*)"):
+            self.assertIn(status, body)
+
+    def test_the_script_still_parses(self) -> None:
+        completed = subprocess.run(["bash", "-n", str(SCRIPT)], capture_output=True, text=True)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

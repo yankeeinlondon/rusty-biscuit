@@ -9646,5 +9646,295 @@ class LoadMetadataBoundaryTests(unittest.TestCase):
         self.assertTrue(any(targets for targets in graph.values()), "the real graph has edges")
 
 
+class CoverageAnchorTests(unittest.TestCase):
+    """A nightly plans each environment from its own comparison anchor.
+
+    Windows and WSL2 may sit at different anchors (or none), so selection runs
+    once per anchor, the results are unioned once per `{package, environment,
+    gate}`, and current policy adds what the anchor's certification never
+    covered even when the diff is empty.
+    """
+
+    OLD, NEW = "1" * 40, "2" * 40
+    WIN, WSL = "windows-latest", "wsl2-ubuntu"
+
+    def setUp(self) -> None:
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary_directory.name)
+        seed_build_inputs(self.root)
+        packages = [
+            package(self.root, "alpha-core", "alpha/lib/Cargo.toml", targets=["lib"]),
+            package(self.root, "beta-core", "beta/lib/Cargo.toml", targets=["lib"]),
+        ]
+        self.metadata = {
+            "workspace_members": [item["id"] for item in packages],
+            "packages": packages,
+            "resolve": None,
+        }
+        self.policy = package_ci_policy(
+            workspace_packages_from(self.metadata),
+            runner_labels={"ubuntu-latest", "windows-latest", "macos-latest"},
+            root=self.root,
+            today=TODAY,
+        )
+        self.table = EventSchedulingTests.shipped_events()
+
+    def tearDown(self) -> None:
+        self.temporary_directory.cleanup()
+
+    def entry(self, environment: str, **fields: object) -> dict[str, object]:
+        base: dict[str, object] = {
+            "environment": environment, "mode": "full", "anchor": None,
+            "reason": "bootstrap-no-run",
+            "source": {"kind": "none", "run_id": None, "head": None},
+            "covered_cells": None,
+        }
+        base.update(fields)
+        return base
+
+    def certified(self, environment: str, anchor: str, covered: list[tuple[str, str]]) -> dict[str, object]:
+        return self.entry(
+            environment, mode="incremental", anchor=anchor, reason="certified-ancestor",
+            source={"kind": "nightly-certified", "run_id": 7, "head": anchor},
+            covered_cells=[{"package": p, "gate": g} for p, g in covered],
+        )
+
+    def legacy(self, environment: str, anchor: str) -> dict[str, object]:
+        return self.entry(
+            environment, mode="incremental", anchor=anchor, reason="legacy-wsl2-ancestor",
+            source={"kind": "nightly-legacy", "run_id": 6, "head": anchor},
+        )
+
+    def plan(self, anchors: list[dict[str, object]], changed: dict[str, list[str]]) -> dict[str, object]:
+        """Plan a nightly; `changed` maps an anchor to the paths changed since it."""
+        document = {"schema_version": 1, "anchors": anchors}
+        groups = affected_scope.coverage_anchor_groups(
+            document, "f" * 40, self.root, lambda anchor, head, root: (changed.get(anchor, []), [], []),
+        )
+        plan = calculate_scope(
+            [], self.root, self.metadata, self.table, self.policy,
+            base="0" * 40, head="f" * 40, event="schedule", coverage_groups=groups,
+        )
+        self.assertEqual([], schema.validate_resolved_plan(plan))
+        return plan
+
+    @staticmethod
+    def cells(plan: dict[str, object]) -> set[tuple[str, str, str]]:
+        return {(c["package"], c["environment"], c["gate"]) for c in plan["cells"]}
+
+    @staticmethod
+    def anchors(plan: dict[str, object]) -> dict[str, dict[str, object]]:
+        return {entry["environment"]: entry for entry in plan["coverage_anchors"]}
+
+    ALPHA = "alpha/lib/src/lib.rs"
+
+    def test_wsl2_only_history_anchors_wsl2_and_runs_windows_in_full(self) -> None:
+        plan = self.plan(
+            [self.entry(self.WIN, reason="policy-uncertified"), self.legacy(self.WSL, self.OLD)],
+            {self.OLD: [self.ALPHA]},
+        )
+        self.assertEqual(
+            {
+                ("alpha-core", self.WIN, "L1"), ("beta-core", self.WIN, "L1"),
+                ("alpha-core", self.WSL, "L1"),
+            },
+            self.cells(plan),
+        )
+        anchors = self.anchors(plan)
+        self.assertEqual(("full", None, "policy-uncertified"), (
+            anchors[self.WIN]["mode"], anchors[self.WIN]["anchor"], anchors[self.WIN]["reason"],
+        ))
+        self.assertEqual(("incremental", self.OLD), (anchors[self.WSL]["mode"], anchors[self.WSL]["anchor"]))
+        self.assertEqual(
+            [{"package": "beta-core", "gate": "L1"}], anchors[self.WSL]["inherited_cells"],
+            "the legacy anchor is taken to cover what the diff does not reselect",
+        )
+        self.assertEqual([], anchors[self.WSL]["policy_delta"])
+        self.assertFalse(plan["full_scope"], "a mixed plan must not relabel the incremental environment")
+
+    def test_a_certified_dual_nightly_shares_one_anchor_and_one_diff(self) -> None:
+        covered = [("alpha-core", "L1"), ("beta-core", "L1")]
+        plan = self.plan(
+            [self.certified(self.WIN, self.OLD, covered), self.certified(self.WSL, self.OLD, covered)],
+            {self.OLD: [self.ALPHA]},
+        )
+        self.assertEqual(
+            {("alpha-core", self.WIN, "L1"), ("alpha-core", self.WSL, "L1")}, self.cells(plan)
+        )
+        self.assertEqual(["alpha-core"], [entry["package"] for entry in plan["packages"]])
+        for entry in plan["coverage_anchors"]:
+            self.assertEqual([{"package": "beta-core", "gate": "L1"}], entry["inherited_cells"])
+            self.assertEqual([], entry["policy_delta"])
+
+    def test_an_unchanged_certified_head_plans_no_cell_and_inherits_everything(self) -> None:
+        covered = [("alpha-core", "L1"), ("beta-core", "L1")]
+        plan = self.plan(
+            [self.certified(self.WIN, self.OLD, covered), self.certified(self.WSL, self.OLD, covered)],
+            {},
+        )
+        self.assertEqual([], plan["cells"])
+        self.assertEqual([], plan["packages"])
+        for entry in plan["coverage_anchors"]:
+            self.assertEqual(2, len(entry["inherited_cells"]))
+
+    def test_current_policy_adds_uncovered_cells_whatever_the_diff_says(self) -> None:
+        # The anchor's certification never covered beta-core on WSL2 (a newly
+        # declared gate, or a gap that has since expired): it is selected with
+        # an empty diff, and Windows, fully covered, adds nothing.
+        plan = self.plan(
+            [
+                self.certified(self.WIN, self.OLD, [("alpha-core", "L1"), ("beta-core", "L1")]),
+                self.certified(self.WSL, self.OLD, [("alpha-core", "L1")]),
+            ],
+            {},
+        )
+        self.assertEqual({("beta-core", self.WSL, "L1")}, self.cells(plan))
+        anchors = self.anchors(plan)
+        self.assertEqual([{"package": "beta-core", "gate": "L1"}], anchors[self.WSL]["policy_delta"])
+        self.assertEqual([], anchors[self.WIN]["policy_delta"])
+        self.assertEqual(["beta-core"], [entry["package"] for entry in plan["packages"]])
+        self.assertEqual(["L1"], plan["packages"][0]["gates"])
+        self.assertIn("anchor's certification does not cover", plan["cells"][0]["selection_reason"])
+
+    def test_a_delta_cell_joins_a_package_the_diff_already_selected(self) -> None:
+        plan = self.plan(
+            [
+                self.certified(self.WIN, self.OLD, [("alpha-core", "L1")]),
+                self.certified(self.WSL, self.OLD, []),
+            ],
+            {self.OLD: [self.ALPHA]},
+        )
+        # alpha is selected on both (diff); beta is uncovered on both (delta).
+        self.assertEqual(
+            {(p, e, "L1") for p in ("alpha-core", "beta-core") for e in (self.WIN, self.WSL)},
+            self.cells(plan),
+        )
+
+    def test_environments_with_different_anchors_use_their_own_diffs(self) -> None:
+        covered = [("alpha-core", "L1"), ("beta-core", "L1")]
+        plan = self.plan(
+            [self.certified(self.WIN, self.NEW, covered), self.certified(self.WSL, self.OLD, covered)],
+            {self.NEW: ["beta/lib/src/lib.rs"], self.OLD: [self.ALPHA]},
+        )
+        self.assertEqual(
+            {("beta-core", self.WIN, "L1"), ("alpha-core", self.WSL, "L1")}, self.cells(plan)
+        )
+
+    def test_identical_inputs_resolve_to_identical_plans(self) -> None:
+        arguments = (
+            [self.entry(self.WIN, reason="policy-uncertified"), self.legacy(self.WSL, self.OLD)],
+            {self.OLD: [self.ALPHA]},
+        )
+        self.assertEqual(
+            schema.canonical(self.plan(*arguments)), schema.canonical(self.plan(*arguments))
+        )
+
+    def test_a_full_bootstrap_matches_the_unanchored_full_plan(self) -> None:
+        anchored = self.plan(
+            [self.entry(self.WIN), self.entry(self.WSL)], {}
+        )
+        plain = calculate_scope(
+            [], self.root, self.metadata, self.table, self.policy, True,
+            base="0" * 40, head="f" * 40, event="schedule",
+        )
+        self.assertEqual(self.cells(plain), self.cells(anchored))
+        self.assertTrue(anchored["full_scope"])
+        self.assertEqual({"bootstrap-no-run"}, {e["reason"] for e in anchored["coverage_anchors"]})
+
+    def test_anchors_that_do_not_cover_the_scheduled_environments_stop_planning(self) -> None:
+        groups = affected_scope.coverage_anchor_groups(
+            {"schema_version": 1, "anchors": [self.entry(self.WIN)]}, "f" * 40, self.root,
+        )
+        with self.assertRaises(RuntimeError) as raised:
+            calculate_scope(
+                [], self.root, self.metadata, self.table, self.policy,
+                base="0" * 40, head="f" * 40, event="schedule", coverage_groups=groups,
+            )
+        self.assertIn("every scheduled environment needs exactly one anchor", str(raised.exception))
+
+    def test_the_plan_without_anchors_carries_no_anchor_field(self) -> None:
+        plan = calculate_scope(
+            [self.ALPHA], self.root, self.metadata, self.table, self.policy,
+            base="0" * 40, head="f" * 40, event="schedule",
+        )
+        self.assertNotIn("coverage_anchors", plan)
+
+    def test_anchor_input_matrix_every_malformed_document_stops_planning(self) -> None:
+        """One edit per cell of the anchor document; the control plans."""
+        good = {
+            "schema_version": 1,
+            "anchors": [self.certified(self.WIN, self.OLD, [("alpha-core", "L1")]), self.entry(self.WSL)],
+        }
+        no_diff = lambda anchor, head, root: ([], [], [])  # noqa: E731
+        affected_scope.coverage_anchor_groups(copy.deepcopy(good), "f" * 40, self.root, no_diff)
+
+        def mutate(path: tuple, value: object) -> dict[str, object]:
+            document = copy.deepcopy(good)
+            target = document
+            for key in path[:-1]:
+                target = target[key]
+            if value is ...:
+                del target[path[-1]]
+            else:
+                target[path[-1]] = value
+            return document
+
+        cases: list[tuple[str, dict[str, object]]] = []
+        for key in ("schema_version", "anchors"):
+            cases += [
+                (f"{key} absent", mutate((key,), ...)),
+                (f"{key} null", mutate((key,), None)),
+                (f"{key} wrong type", mutate((key,), "x")),
+            ]
+        cases += [
+            ("version 2", mutate(("schema_version",), 2)),
+            ("version true", mutate(("schema_version",), True)),
+            ("anchors empty", mutate(("anchors",), [])),
+            ("one element wrong", mutate(("anchors",), [self.entry(self.WIN), 5])),
+            ("every element wrong", mutate(("anchors",), [5])),
+            ("duplicate environment", mutate(("anchors",), [self.entry(self.WIN), self.entry(self.WIN)])),
+            ("anchor not a sha", mutate(("anchors", 0, "anchor"), "abc")),
+            ("mode contradicts reason", mutate(("anchors", 0, "mode"), "full")),
+            ("covered cell malformed", mutate(("anchors", 0, "covered_cells"), [{"package": "x"}])),
+            ("source kind contradicts reason", mutate(("anchors", 0, "source", "kind"), "none")),
+            ("full carries an anchor", mutate(("anchors", 1, "anchor"), self.OLD)),
+            ("full carries covered cells", mutate(("anchors", 1, "covered_cells"), [])),
+            ("source run on a bootstrap", mutate(("anchors", 1, "source", "run_id"), 5)),
+        ]
+        for field in ("environment", "mode", "anchor", "reason", "source", "covered_cells"):
+            cases += [
+                (f"{field} absent", mutate(("anchors", 0, field), ...)),
+                (f"{field} null", mutate(("anchors", 0, field), None)),
+                (f"{field} wrong type", mutate(("anchors", 0, field), 3)),
+            ]
+        cases.append(("unknown environment", mutate(("anchors", 0, "environment"), "beos")))
+        for label, document in cases:
+            with self.subTest(edit=label), self.assertRaises(RuntimeError):
+                affected_scope.coverage_anchor_groups(document, "f" * 40, self.root, no_diff)
+
+    def test_certified_and_legacy_entries_must_agree_with_their_coverage_shape(self) -> None:
+        for label, entry in (
+            ("certified without a list", {**self.certified(self.WIN, self.OLD, []), "covered_cells": None}),
+            ("legacy with a list", {**self.legacy(self.WIN, self.OLD), "covered_cells": []}),
+            ("certified with a bad cell", {**self.certified(self.WIN, self.OLD, []), "covered_cells": [{"package": "x"}]}),
+            ("incremental without a sha", {**self.legacy(self.WIN, self.OLD), "anchor": "abc"}),
+            ("certified from a legacy source", {
+                **self.certified(self.WIN, self.OLD, []),
+                "source": {"kind": "nightly-legacy", "run_id": 1, "head": self.OLD},
+            }),
+        ):
+            with self.subTest(case=label), self.assertRaises(RuntimeError):
+                affected_scope.coverage_anchor_groups(
+                    {"schema_version": 1, "anchors": [entry, self.entry(self.WSL)]}, "f" * 40, self.root,
+                )
+
+    def test_the_command_refuses_anchors_beside_a_file_list_or_all(self) -> None:
+        for extra in (["--all"], ["--deleted", "x"], ["some/file.rs"]):
+            with self.subTest(extra=extra), unittest.mock.patch.object(
+                sys, "argv", ["affected_scope.py", "--anchors", "a.json", *extra]
+            ), self.assertRaises(SystemExit):
+                affected_scope.parse_args()
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -41,9 +41,19 @@ local and hosted runs. Its package policy is deliberately narrow:
   plan's `deferred_environments`. A pull request and a push to `main` prove
   `ubuntu-latest` and `macos-latest` (the latter normally from the hook's
   local evidence); the nightly `schedule` (`0 8 * * *`, its own concurrency
-  group) plans native Windows and WSL2 over changes since the last successful
-  ancestor nightly, with Linux joining only as WSL2's demanded archive
-  producer. No qualifying baseline means full scope;
+  group) plans native Windows and WSL2, each over changes since the newest
+  successful ancestor nightly that proved *that* environment
+  (`reuse_validation.py nightly-anchors`; the plan's `coverage_anchors` records
+  the anchor and a coded reason per environment, and `affected_scope.py
+  --anchors` unions the per-anchor selections), with Linux joining only as
+  WSL2's demanded archive producer. A run proves an environment by a coverage
+  certification (`certify-nightly` job, artifact `ci-coverage-v1-<env>-<head>-<policy16>`,
+  published only after the final gate and every audit passed) or, for a
+  pre-certification run, by its own schedule policy plus all `coverage-audit`
+  jobs succeeding. No qualifying anchor means that environment runs the full
+  gated workspace; current policy also adds cells the anchor never covered
+  (`policy_delta`) whatever the diff says. The scheduled run now verifies and
+  reuses notes evidence like a push does;
   `workflow_dispatch` plans everything. The `ci:all-os` label plans every
   environment for a pull request and takes effect on the next push; such a
   run never takes the hook's scope receipt, which is planned for the
@@ -59,9 +69,10 @@ local and hosted runs. Its package policy is deliberately narrow:
   `scope-verify --event` refuses a receipt planned for another event
   (`scope-event-mismatch`). Without `--event`, every environment is planned.
 - **Planned:** resumable workspace rig seeding, which needs native Windows
-  receipt publication and scheduled evidence consumption; neither is wired
-  through `cross-check` and the nightly yet, so a nightly executes its whole
-  Windows/WSL2 scope on hosted runners. See `docs/topics/ci-cd.md`.
+  receipt publication and hosted observation publication; scheduled evidence
+  consumption and per-environment anchors are implemented, but no producer
+  publishes Windows or hosted-cell proof yet, so a nightly executes what no
+  verified observation covers. See `docs/topics/ci-cd.md`.
   Risk-directed pre-push use of that infrastructure remains optional. Do not
   describe a nightly as a fixed 24-hour diff or treat old WSL2-only nightlies
   as Windows proof.
@@ -404,9 +415,9 @@ inventing one.
 Same-head retries must update that evidence cumulatively. The planner skips
 the already-passing cells, so replacing the note or clearing the retained
 report directory with only the retry's staged files silently discards exactly
-the evidence that caused those skips. Overlay the report directory, merge only
-a receipt with identical execution bindings and host provenance, and let the
-new run replace the cells it actually reran.
+the evidence that caused those skips. Overlay the report directory and publish
+through the collection (never `git notes add -f` a receipt over the note); the
+new run's observation links to the one it replaces with `retry_of`.
 
 The rollup consumes that evidence. `ci-rollup rollup --plan` reads the resolved
 execution plan, so a cell a receipt satisfied is reported as a completed
@@ -1095,16 +1106,30 @@ suppressing the matrix entry while leaving the policy expecting a CI result was
 the PR #76 seven-cell regression.
 
 `local_evidence.py verify --cells` produces that set by reading **every**
-note on every environment's notes ref between the merge base and the outgoing
-head, so a macOS receipt from this push and a prior WSL receipt combine in one
-run. Within one environment each cell is resolved by the **newest note that
-qualifies for it**, so a later run that covered fewer packages does not hide an
-older, still-equivalent passing receipt for the rest. Complete failures are
-diagnostic records and never enter the accepted set. Each refusal describes
-one candidate note, carries a code from `schema.REJECTIONS`, and is published
-with the plan.
+note on every environment's notes ref from the coverage boundary (the merge
+base, included) to the outgoing head — or, for an all-zero base, the annotated
+ancestors of the head, bounded at 500 — so a macOS receipt from this push and a
+prior WSL receipt combine in one run. A note is a version-3 **observation
+collection**; version-1 and -2 notes are read as one observation per cell. All
+candidates are gathered first and resolved per `{package, environment, gate}`
+afterwards: among those that qualify (exact tree, or an unchanged gate-input
+identity), a `retry_of` link or a descendant commit supersedes, and results
+nothing orders that disagree are `conflicting-evidence` and execute. So a later
+run that covered fewer packages does not hide an older, still-equivalent passing
+observation, a newer failure is never hidden by an older pass, and a later
+passing retry restores reuse. A complete failure never enters the accepted set.
+A passing observation also needs its reports (`observation-report-unavailable`).
+Each refusal describes one candidate, carries a code from `schema.REJECTIONS`,
+and is published with the plan.
 
-`scripts/cross-check.sh` publishes a `wsl2-ubuntu` receipt only when its WSL leg
+Publication goes through `scripts/ci/observation_notes.py`: local write first,
+then fetch, union, and a non-force push retried up to five times, so concurrent
+publishers keep each other's observations and a remote failure keeps the proof
+local. `rig`, `hosted`, and `seed` producer kinds need a `proof` object that
+only the planned rig and hosted producers write; today the hook and
+`cross-check.sh` publish `hook` observations.
+
+`scripts/cross-check.sh` publishes a `wsl2-ubuntu` observation only when its WSL leg
 ran the outgoing head's exact tree on a clean remote worktree with no test
 filter; every other run prints why it published nothing. It ships the
 developer's local tree, uncommitted work included, so most of its runs test a

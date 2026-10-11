@@ -18,8 +18,11 @@ selecting a push mode.
 ## Evidence combines per cell, across environments and commits
 
 `local_evidence.py verify --cells` reads every note on every
-`refs/notes/ci-local/<environment>` ref between the merge base and the outgoing
-head. So:
+`refs/notes/ci-local/<environment>` ref from the coverage boundary (the merge
+base, included) up to the outgoing head; with an all-zero base it reads the
+annotated commits reachable from the head instead. A note is a version-3
+collection of observations, so a second package, a retry, or a second host at one
+head is added to the note and never overwrites it. So:
 
 - a macOS receipt from this push and a prior `cross-check` WSL receipt suppress
   their own cells together;
@@ -27,8 +30,15 @@ head. So:
   covered another;
 - a successful macOS receipt alone does **not** suppress WSL.
 
+An observation's report is cited by digest. A `host-dir` report on the verifying
+host is checked byte for byte; one on another host is accepted with its
+provenance shown. When two results for one cell cannot be ordered (no retry link,
+neither commit descends from the other) and they disagree, the cell executes.
+`cross-check.sh` copies its WSL report to the same evidence directory before
+citing it.
+
 The JUnit reports behind a hook receipt stay on the host that produced it, at
-the receipt's `host.report_dir`
+the observation's `producer.host.report_dir`
 (`$BISCUIT_CI_EVIDENCE_DIR/<head sha>/<environment>/`, root default
 `~/.rusty-biscuit/ci-evidence`). Investigating a reused cell means asking that
 host.
@@ -68,3 +78,16 @@ host.
   and differs exactly when the checkout is dirty.
 - `git push --no-verify` produces no new evidence and does not invalidate
   already-published matching receipts, which CI still verifies.
+
+## Nightly anchors and legacy history
+
+The nightly anchors each environment to the newest successful scheduled run that
+proved *that* environment. A run from before certifications existed is credited
+only for environments its own `environments.json` scheduled for `schedule` at
+that run's commit, and only if every `coverage-audit` job succeeded, so the
+WSL2-only history never counts as native Windows proof (Windows stays on the full
+gated workspace). A legacy anchor proves no list of cells: the planner assumes it
+covers whatever the diff does not reselect, and cannot see a gap that expired or a
+backend that became required since. The first certified nightly ends that
+assumption. When reproducing "why did the nightly run everything", read the scope
+job's summary row `coverage anchors`: it names the reason code per environment.

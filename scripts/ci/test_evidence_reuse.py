@@ -31,6 +31,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import affected_scope  # noqa: E402
 import local_evidence  # noqa: E402
+import observation_notes  # noqa: E402
 import plan_fixtures  # noqa: E402
 import schema  # noqa: E402
 from affected_scope import change_inventory  # noqa: E402
@@ -1710,6 +1711,923 @@ class GateGlobalInputTests(EvidenceFixture):
         for entry in plan["packages"]:
             entry.pop("input_paths", None)
         self.assertIsNone(local_evidence.cell_input_paths(plan, "alpha", "L1"))
+
+
+class ObservationFixture(EvidenceFixture):
+    """Version-3 observation collections, built the way a producer writes them."""
+
+    def retained_dir(self, name: str = "retained") -> Path:
+        directory = self.root / name
+        directory.mkdir(exist_ok=True)
+        return directory
+
+    def observation(
+        self,
+        package: str,
+        gate: str = "L1",
+        *,
+        outcome: str = "pass",
+        kind: str = "hook",
+        retry_of: str | None = None,
+        report_dir: Path | None = None,
+        store: str = "host-dir",
+        write_report: bool = True,
+        **cell_overrides: object,
+    ) -> dict:
+        directory = report_dir or self.retained_dir()
+        cell = self.receipt_cell(package, gate, outcome=outcome, **cell_overrides)
+        cell["report"] = cell_overrides.get(
+            "report", f"{package}-{gate}-{outcome}-{cell['duration_s']}.xml"
+        )
+        if outcome == "fail":
+            cell.setdefault("failed_tests", ["suite::boom"])
+            cell["exit_code"] = 100
+            cell["counts"] = {"total": 4, "passed": 3, "failed": 1, "skipped": 0, "errored": 0}
+        report = directory / cell["report"]
+        if write_report:
+            report.write_text(f"<testsuites>{package}{outcome}{cell['duration_s']}</testsuites>")
+        digest, size = (
+            observation_notes.file_digest(report) if report.is_file() else ("0" * 64, 0)
+        )
+        document = {
+            "producer": {
+                "kind": kind,
+                "host": {"os": "Darwin", "kernel": "Darwin 27", "report_dir": str(directory)},
+            },
+            "base": self.base,
+            "scope_identity": "00112233445566778899aabb",
+            "completion": "complete",
+            "cell": cell,
+            "reports": [
+                {"path": cell["report"], "sha256": digest, "bytes": size, "store": store}
+            ],
+        }
+        if kind != "hook":
+            document["proof"] = {
+                "nextest_version": "0.9.99",
+                "target": "aarch64-apple-darwin",
+                "expected_listing_digest": "ab" * 32,
+                "completion_record_digest": "cd" * 32,
+            }
+        if retry_of:
+            document["retry_of"] = retry_of
+        return observation_notes.with_identity(document)
+
+    def collection(
+        self, observations: list[dict], environment: str = "macos-latest", commit: str | None = None
+    ) -> dict:
+        commit = commit or self.head
+        return {
+            "schema_version": schema.COLLECTION_SCHEMA_VERSION,
+            "environment": environment,
+            "head": commit,
+            "tree": self.git("rev-parse", f"{commit}^{{tree}}"),
+            "observations": sorted(observations, key=lambda o: o["observation_id"]),
+        }
+
+    def verify(self, base: str | None = None, head: str | None = None, **kwargs):
+        return local_evidence.verify_cells(
+            str(self.plan_path), base or self.base, head or self.head, **kwargs
+        )
+
+    def accepted_keys(self, **kwargs) -> list[str]:
+        accepted, _ = self.verify(**kwargs)
+        return self.keys(accepted)
+
+
+class ObservationCollectionTests(ObservationFixture):
+    def test_a_collection_credits_every_package_it_holds(self) -> None:
+        self.add_note(
+            "macos-latest",
+            self.collection([self.observation("alpha"), self.observation("beta")]),
+        )
+        accepted, rejections = self.verify()
+        self.assertEqual(
+            ["alpha/macos-latest/L1", "beta/macos-latest/L1"], self.keys(accepted)
+        )
+        self.assertEqual([], rejections)
+        self.assertTrue(all("observation" in cell["evidence"] for cell in accepted))
+        self.assertTrue(all(cell["origin"] == "local" for cell in accepted))
+
+    def test_the_coverage_boundary_commit_is_a_candidate(self) -> None:
+        # Beta's inputs never changed between the base and the head, so a pass
+        # recorded ON the base commit still describes the head.
+        self.add_note(
+            "macos-latest",
+            self.collection([self.observation("beta")], commit=self.base),
+            self.base,
+        )
+        accepted, _ = self.verify()
+        self.assertEqual(["beta/macos-latest/L1"], self.keys(accepted))
+        self.assertEqual("prior-local", accepted[0]["origin"])
+
+    def test_a_changed_gate_input_on_the_boundary_is_refused(self) -> None:
+        self.add_note(
+            "macos-latest",
+            self.collection([self.observation("alpha")], commit=self.base),
+            self.base,
+        )
+        accepted, rejections = self.verify()
+        self.assertEqual([], accepted)
+        self.assertTrue(any(r.startswith("gate-inputs-changed") for r in rejections))
+
+    def test_a_newer_failure_beats_an_older_pass_of_equivalent_inputs(self) -> None:
+        self.add_note(
+            "macos-latest",
+            self.collection([self.observation("beta")], commit=self.base),
+            self.base,
+        )
+        self.add_note(
+            "macos-latest",
+            self.collection([self.observation("beta", outcome="fail")]),
+        )
+        accepted, rejections = self.verify()
+        self.assertEqual([], accepted)
+        self.assertTrue(any(r.startswith("failed-cell") for r in rejections))
+
+    def test_a_later_passing_commit_restores_reuse_over_an_older_failure(self) -> None:
+        self.add_note(
+            "macos-latest",
+            self.collection([self.observation("beta", outcome="fail")], commit=self.base),
+            self.base,
+        )
+        self.add_note("macos-latest", self.collection([self.observation("beta")]))
+        self.assertEqual(["beta/macos-latest/L1"], self.accepted_keys())
+
+    def test_a_retry_that_passes_supersedes_the_failure_it_names(self) -> None:
+        failed = self.observation("alpha", outcome="fail")
+        passed = self.observation("alpha", retry_of=failed["observation_id"])
+        self.add_note("macos-latest", self.collection([failed, passed]))
+        self.assertEqual(["alpha/macos-latest/L1"], self.accepted_keys())
+
+    def test_a_retry_that_fails_supersedes_the_pass_it_names(self) -> None:
+        passed = self.observation("alpha")
+        failed = self.observation("alpha", outcome="fail", retry_of=passed["observation_id"])
+        self.add_note("macos-latest", self.collection([passed, failed]))
+        accepted, _ = self.verify()
+        self.assertEqual([], accepted)
+
+    def test_unlinked_disagreeing_observations_on_one_commit_conflict(self) -> None:
+        self.add_note(
+            "macos-latest",
+            self.collection(
+                [self.observation("alpha"), self.observation("alpha", outcome="fail")]
+            ),
+        )
+        accepted, rejections = self.verify()
+        self.assertEqual([], accepted)
+        self.assertTrue(any(r.startswith("conflicting-evidence") for r in rejections))
+
+    def test_unlinked_agreeing_passes_credit_the_cell_once(self) -> None:
+        self.add_note(
+            "macos-latest",
+            self.collection(
+                [self.observation("alpha"), self.observation("alpha", duration_s=99)]
+            ),
+        )
+        self.assertEqual(["alpha/macos-latest/L1"], self.accepted_keys())
+
+    def test_results_on_unordered_commits_conflict(self) -> None:
+        # Two parents of a merge: neither descends from the other.
+        self.git("checkout", "-q", "-b", "side", self.base)
+        self.write("docs/side.md", "side\n")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "side")
+        side = self.git("rev-parse", "HEAD")
+        self.git("checkout", "-q", "main")
+        self.git("merge", "-q", "--no-ff", "-m", "merge", "side")
+        merged = self.git("rev-parse", "HEAD")
+        self.add_note("macos-latest", self.collection([self.observation("beta")], commit=self.head), self.head)
+        self.add_note(
+            "macos-latest",
+            self.collection([self.observation("beta", outcome="fail")], commit=side),
+            side,
+        )
+        accepted, rejections = self.verify(head=merged)
+        self.assertEqual([], accepted)
+        self.assertTrue(any(r.startswith("conflicting-evidence") for r in rejections))
+
+    def test_an_incomplete_observation_neither_credits_nor_supersedes(self) -> None:
+        good = self.observation("alpha")
+        partial = self.observation("alpha", completion="partial")
+        interrupted = {**self.observation("beta"), "completion": "interrupted"}
+        interrupted = observation_notes.with_identity(
+            {k: v for k, v in interrupted.items() if k != "observation_id"}
+        )
+        self.add_note(
+            "macos-latest", self.collection([good, partial, interrupted])
+        )
+        accepted, rejections = self.verify()
+        self.assertEqual(["alpha/macos-latest/L1"], self.keys(accepted))
+        self.assertTrue(any(r.startswith("incomplete-run") for r in rejections))
+
+    def test_a_dangling_retry_link_rejects_the_whole_collection(self) -> None:
+        orphan = self.observation("alpha", retry_of="ab" * 32)
+        self.add_note("macos-latest", self.collection([orphan]))
+        accepted, rejections = self.verify()
+        self.assertEqual([], accepted)
+        self.assertTrue(any(r.startswith("observation-link-invalid") for r in rejections))
+
+    def test_a_retry_across_cells_is_rejected(self) -> None:
+        first = self.observation("alpha")
+        crossing = self.observation("beta", retry_of=first["observation_id"])
+        self.add_note("macos-latest", self.collection([first, crossing]))
+        accepted, rejections = self.verify()
+        self.assertEqual([], accepted)
+        self.assertTrue(any(r.startswith("observation-link-invalid") for r in rejections))
+
+    def test_an_id_that_is_not_the_identity_of_its_content_is_rejected(self) -> None:
+        forged = {**self.observation("alpha"), "observation_id": "ab" * 32}
+        self.add_note("macos-latest", self.collection([forged]))
+        accepted, rejections = self.verify()
+        self.assertEqual([], accepted)
+        self.assertTrue(any(r.startswith("observation-id-mismatch") for r in rejections))
+
+    def test_a_note_filed_under_the_wrong_environment_is_credited_to_neither(self) -> None:
+        self.add_note(
+            "ubuntu-latest",
+            self.collection([self.observation("alpha")], environment="macos-latest"),
+        )
+        accepted, rejections = self.verify()
+        self.assertEqual([], accepted)
+        self.assertTrue(any(r.startswith("environment-mismatch") for r in rejections))
+
+
+class ObservationReportTests(ObservationFixture):
+    def test_missing_report_bytes_reject_a_pass(self) -> None:
+        directory = self.retained_dir()
+        observation = self.observation("alpha", report_dir=directory)
+        (directory / observation["cell"]["report"]).unlink()
+        self.add_note("macos-latest", self.collection([observation]))
+        accepted, rejections = self.verify()
+        self.assertEqual([], accepted)
+        self.assertTrue(any(r.startswith("observation-report-unavailable") for r in rejections))
+
+    def test_altered_report_bytes_reject_a_pass(self) -> None:
+        directory = self.retained_dir()
+        observation = self.observation("alpha", report_dir=directory)
+        (directory / observation["cell"]["report"]).write_text("tampered")
+        self.add_note("macos-latest", self.collection([observation]))
+        accepted, rejections = self.verify()
+        self.assertEqual([], accepted)
+        self.assertTrue(any("differ from the recorded digest" in r for r in rejections))
+
+    def test_a_directory_on_another_host_is_accepted_with_provenance(self) -> None:
+        observation = self.observation("alpha")
+        observation["producer"]["host"]["report_dir"] = str(self.root / "other-host" / "evidence")
+        observation = observation_notes.with_identity(
+            {k: v for k, v in observation.items() if k != "observation_id"}
+        )
+        self.add_note("macos-latest", self.collection([observation]))
+        accepted, _ = self.verify()
+        self.assertEqual(["alpha/macos-latest/L1"], self.keys(accepted))
+        self.assertEqual(str(self.root / "other-host" / "evidence"),
+                         accepted[0]["evidence"]["host"]["report_dir"])
+
+    def test_an_artifact_reference_needs_a_probe_that_finds_it(self) -> None:
+        observation = self.observation("alpha", store="artifact")
+        self.add_note("macos-latest", self.collection([observation]))
+        with self.subTest("no probe"):
+            accepted, rejections = self.verify()
+            self.assertEqual([], accepted)
+            self.assertTrue(any("cannot be retrieved" in r for r in rejections))
+        with self.subTest("expired"):
+            self.assertEqual([], self.accepted_keys(report_probe=lambda report, obs: False))
+        with self.subTest("retained"):
+            self.assertEqual(
+                ["alpha/macos-latest/L1"],
+                self.accepted_keys(report_probe=lambda report, obs: True),
+            )
+
+    def test_a_failure_whose_reports_are_gone_still_blocks_an_older_pass(self) -> None:
+        directory = self.retained_dir()
+        failed = self.observation("beta", outcome="fail", report_dir=directory)
+        (directory / failed["cell"]["report"]).unlink()
+        self.add_note(
+            "macos-latest",
+            self.collection([self.observation("beta")], commit=self.base),
+            self.base,
+        )
+        self.add_note("macos-latest", self.collection([failed]))
+        self.assertEqual([], self.accepted_keys())
+
+    def test_a_complete_cell_must_cite_its_report(self) -> None:
+        observation = self.observation("alpha")
+        observation["reports"] = []
+        observation = observation_notes.with_identity(
+            {k: v for k, v in observation.items() if k != "observation_id"}
+        )
+        self.add_note("macos-latest", self.collection([observation]))
+        accepted, rejections = self.verify()
+        self.assertEqual([], accepted)
+        self.assertTrue(any(r.startswith("observation-report-unavailable") for r in rejections))
+
+    def test_features_other_than_the_plans_are_refused(self) -> None:
+        plain = self.observation("alpha")
+        featured = observation_notes.with_identity(
+            {**{k: v for k, v in self.observation("beta").items() if k != "observation_id"},
+             "features": "--features extra"}
+        )
+        self.add_note("macos-latest", self.collection([plain, featured]))
+        accepted, rejections = self.verify()
+        self.assertEqual(["alpha/macos-latest/L1"], self.keys(accepted))
+        self.assertTrue(any("ran with features" in r for r in rejections))
+
+    def test_an_observation_that_misses_a_planned_backend_is_refused(self) -> None:
+        observation = self.observation("alpha")
+        plan = json.loads(self.plan_path.read_text(encoding="utf-8"))
+        planned = {**plan["cells"][0], "backends": ["tmux"]}
+        self.assertIn(
+            "did not prove backend(s) ['tmux']",
+            local_evidence._observation_refusal(
+                observation, ("alpha", "macos-latest", "L1"), {"cells": [planned], "builds": []},
+                "alpha/macos-latest/L1",
+            ),
+        )
+        observation = self.observation("alpha", backends=["tmux"])
+        self.assertIsNone(
+            local_evidence._observation_refusal(
+                observation, ("alpha", "macos-latest", "L1"), {"cells": [planned], "builds": []},
+                "alpha/macos-latest/L1",
+            )
+        )
+
+
+class BootstrapDiscoveryTests(ObservationFixture):
+    ZERO = "0" * 40
+
+    def test_an_all_zero_base_reads_the_head_note(self) -> None:
+        self.add_note("macos-latest", self.collection([self.observation("alpha")]))
+        accepted, rejections = self.verify(base=self.ZERO)
+        self.assertEqual(["alpha/macos-latest/L1"], self.keys(accepted))
+        self.assertEqual([], rejections)
+
+    def test_an_all_zero_base_finds_equivalent_proof_on_an_ancestor(self) -> None:
+        self.add_note(
+            "macos-latest",
+            self.collection([self.observation("beta")], commit=self.base),
+            self.base,
+        )
+        self.assertEqual(["beta/macos-latest/L1"], self.accepted_keys(base=self.ZERO))
+
+    def test_an_all_zero_base_ignores_proof_that_is_not_an_ancestor(self) -> None:
+        self.git("checkout", "-q", "-b", "elsewhere", self.base)
+        self.write("docs/elsewhere.md", "x\n")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "elsewhere")
+        stranger = self.git("rev-parse", "HEAD")
+        self.git("checkout", "-q", "main")
+        self.add_note(
+            "macos-latest",
+            self.collection([self.observation("beta")], commit=stranger),
+            stranger,
+        )
+        accepted, _ = self.verify(base=self.ZERO)
+        self.assertEqual([], accepted)
+
+    def test_an_all_zero_base_needs_no_merge_base(self) -> None:
+        calls: list[tuple[str, ...]] = []
+        original = local_evidence.git
+
+        def spy(*args: str) -> str:
+            calls.append(args)
+            return original(*args)
+
+        local_evidence.git = spy
+        try:
+            self.verify(base=self.ZERO)
+        finally:
+            local_evidence.git = original
+        self.assertFalse([call for call in calls if call[0] == "merge-base"])
+
+    def test_the_search_is_bounded_by_the_notes_that_exist(self) -> None:
+        for index in range(3):
+            self.write("docs/unrelated.md", f"edit {index}\n")
+            self.git("commit", "-q", "-am", f"edit {index}")
+        later = self.git("rev-parse", "HEAD")
+        self.assertEqual([later, self.head], local_evidence.candidate_commits(self.ZERO, later)[:1] + [self.head][:1])
+        self.add_note(
+            "macos-latest", self.collection([self.observation("beta")], commit=self.base), self.base
+        )
+        commits = local_evidence.candidate_commits(self.ZERO, later)
+        self.assertEqual([later, self.base], commits)
+
+
+class StrictDocumentTests(ObservationFixture):
+    def assert_nothing_accepted(self, text: str) -> None:
+        self.add_note("macos-latest", text)
+        accepted, rejections = self.verify()
+        self.assertEqual([], accepted)
+        self.assertTrue(any(r.startswith("malformed-receipt") for r in rejections), rejections)
+
+    def test_a_duplicate_key_is_refused(self) -> None:
+        text = schema.canonical(self.collection([self.observation("alpha")]))
+        self.assert_nothing_accepted(text.replace('"environment":', '"environment":"x","environment":', 1))
+
+    def test_trailing_content_is_refused(self) -> None:
+        self.assert_nothing_accepted(
+            schema.canonical(self.collection([self.observation("alpha")])) + "\ngarbage"
+        )
+
+    def test_a_non_finite_number_is_refused(self) -> None:
+        text = schema.canonical(self.collection([self.observation("alpha")]))
+        self.assert_nothing_accepted(text.replace('"duration_s":12', '"duration_s":NaN', 1))
+
+    def test_a_boolean_schema_version_is_not_version_one(self) -> None:
+        document = self.receipt("macos-latest", [self.receipt_cell("alpha")], schema_version=True)
+        self.add_note("macos-latest", document)
+        accepted, rejections = self.verify()
+        self.assertEqual([], accepted)
+        self.assertTrue(any(r.startswith("unknown-schema-version") for r in rejections))
+
+
+def _dumps_with_duplicate(value, path, key):
+    """`value` as JSON text with `key` written twice in the object at `path`."""
+    if isinstance(value, dict):
+        pairs = []
+        if not path:
+            pairs.append(f"{json.dumps(key)}:{json.dumps(value[key])}")
+        for name, item in value.items():
+            pairs.append(f"{json.dumps(name)}:{_dumps_with_duplicate(item, path[1:] if path and path[0] == name else None, key) if path and path[0] == name else json.dumps(item)}")
+        return "{" + ",".join(pairs) + "}"
+    if isinstance(value, list):
+        index = path[0] if path else None
+        return "[" + ",".join(
+            _dumps_with_duplicate(item, path[1:], key) if position == index else json.dumps(item)
+            for position, item in enumerate(value)
+        ) + "]"
+    return json.dumps(value)
+
+
+class ObservationMatrixTests(ObservationFixture):
+    """The input robustness matrix, walked through `verify_cells`.
+
+    One edit per cell of the matrix, against unedited real-shape controls. The
+    public decision is whether the edited cell is credited. `R` rows must
+    leave the cell scheduled AND say why; `D` and `E` rows must still credit
+    (the field has a defined absent or empty meaning).
+    """
+
+    ABSENT, NULL, WHOLE, ONE, EVERY, EMPTY, DUPLICATE = (
+        "absent", "null", "whole-type", "one-element", "every-element", "empty", "duplicate-key",
+    )
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.directory = self.retained_dir()
+
+    def control(self, kind: str = "hook") -> dict:
+        return self.collection([self.observation("alpha", kind=kind, report_dir=self.directory)])
+
+    def publish_text(self, text: str) -> None:
+        self.git("notes", "--ref", f"{NOTES_PREFIX}/macos-latest", "remove", "--ignore-missing", self.head)
+        self.add_note("macos-latest", text)
+
+    def credited(self, text: str) -> tuple[bool, list[str]]:
+        self.publish_text(text)
+        accepted, rejections = self.verify()
+        return bool(accepted), rejections
+
+    def get(self, document, path):
+        for step in path:
+            document = document[step]
+        return document
+
+    def reseal(self, document: dict) -> dict:
+        """Recompute every id after an edit, so the edit and not the id is tested."""
+        for index, observation in enumerate(document["observations"]):
+            if isinstance(observation, dict) and "observation_id" in observation:
+                body = {k: v for k, v in observation.items() if k != "observation_id"}
+                document["observations"][index] = observation_notes.with_identity(body)
+        return document
+
+    def edit(self, kind: str, path: tuple, shape: str):
+        """The control with `path` edited to `shape`, or `None` if the shape does not apply."""
+        document = self.control(kind)
+        parent = self.get(document, path[:-1])
+        key = path[-1]
+        current = parent[key] if (isinstance(parent, dict) and key in parent) or isinstance(parent, list) else None
+        if shape == self.ABSENT:
+            if not isinstance(parent, dict) or key not in parent:
+                return None
+            del parent[key]
+        elif shape == self.NULL:
+            parent[key] = None
+        elif shape == self.WHOLE:
+            parent[key] = 123 if not isinstance(current, int) or isinstance(current, bool) else "wrong"
+        elif shape == self.ONE:
+            if not isinstance(current, list) or not current:
+                return None
+            parent[key] = [*current[:-1], 123]
+        elif shape == self.EVERY:
+            if not isinstance(current, list) or not current:
+                return None
+            parent[key] = [123 for _ in current]
+        elif shape == self.EMPTY:
+            parent[key] = [] if isinstance(current, list) else {} if isinstance(current, dict) else ""
+        elif shape == self.DUPLICATE:
+            return None
+        return document
+
+    def walk(self, kind: str, fields: dict[tuple, dict[str, str]]) -> None:
+        control_credited, control_rejections = self.credited(schema.canonical(self.control(kind)))
+        self.assertTrue(control_credited, control_rejections)
+        for path, outcomes in fields.items():
+            for shape in (self.ABSENT, self.NULL, self.WHOLE, self.ONE, self.EVERY, self.EMPTY):
+                expected = outcomes.get(shape)
+                if expected is None:
+                    continue
+                with self.subTest(field="/".join(map(str, path)), shape=shape):
+                    document = self.edit(kind, path, shape)
+                    if document is None:
+                        # A field the control does not carry has no absent edit:
+                        # the control already IS the absent case.
+                        self.assertEqual("D", expected)
+                        continue
+                    if path[0] == "observations":
+                        document = self.reseal(document)
+                    credited, rejections = self.credited(schema.canonical(document))
+                    if expected == "R":
+                        self.assertFalse(credited, "an edited field must not earn credit")
+                        self.assertTrue(rejections, "a refusal must say why")
+                    else:
+                        self.assertTrue(credited, rejections)
+            with self.subTest(field="/".join(map(str, path)), shape=self.DUPLICATE):
+                document = self.control(kind)
+                parent_path = path[:-1]
+                parent = self.get(document, parent_path)
+                if path[-1] not in parent:
+                    continue
+                text = _dumps_with_duplicate(document, tuple(parent_path), path[-1])
+                credited, rejections = self.credited(text)
+                self.assertFalse(credited)
+                self.assertTrue(rejections)
+
+    R = "R"
+    ALL_REJECT = {"absent": "R", "null": "R", "whole-type": "R"}
+
+    def test_collection_envelope(self) -> None:
+        envelope = {
+            ("schema_version",): {**self.ALL_REJECT, "empty": "R"},
+            ("environment",): {**self.ALL_REJECT, "empty": "R"},
+            ("head",): {**self.ALL_REJECT, "empty": "R"},
+            ("tree",): {**self.ALL_REJECT, "empty": "R"},
+            ("observations",): {**self.ALL_REJECT, "one-element": None, "empty": "E"},
+        }
+        self.walk("hook", {k: v for k, v in envelope.items() if k != ("observations",)})
+        # An empty collection is a real "zero proof": valid, and credits nothing.
+        empty = self.control("hook")
+        empty["observations"] = []
+        self.publish_text(schema.canonical(empty))
+        accepted, rejections = self.verify()
+        self.assertEqual(([], []), (accepted, rejections))
+        for shape in ("absent", "null", "whole-type"):
+            document = self.edit("hook", ("observations",), shape)
+            credited, rejections = self.credited(schema.canonical(document))
+            self.assertFalse(credited, shape)
+            self.assertTrue(rejections, shape)
+
+    def test_observation_fields(self) -> None:
+        base = ("observations", 0)
+        fields = {
+            (*base, "observation_id"): {**self.ALL_REJECT, "empty": "R"},
+            (*base, "retry_of"): {"absent": "D", "null": "R", "whole-type": "R", "empty": "R"},
+            (*base, "producer"): {**self.ALL_REJECT, "empty": "R"},
+            (*base, "base"): {**self.ALL_REJECT, "empty": "R"},
+            (*base, "scope_identity"): {**self.ALL_REJECT, "empty": "R"},
+            (*base, "completion"): {**self.ALL_REJECT, "empty": "R"},
+            (*base, "cell"): {**self.ALL_REJECT, "empty": "R"},
+            (*base, "reports"): {**self.ALL_REJECT, "one-element": "R", "every-element": "R", "empty": "R"},
+            (*base, "features"): {"absent": "D", "null": "R", "whole-type": "R"},
+        }
+        # retry_of / observation_id edits are tested on their own below: the
+        # reseal step would otherwise repair a deliberately wrong id.
+        controllable = {k: v for k, v in fields.items() if k[-1] not in ("observation_id", "retry_of")}
+        self.walk("hook", controllable)
+        for shape in ("null", "whole-type", "empty"):
+            document = self.control("hook")
+            observation = document["observations"][0]
+            observation["retry_of"] = None if shape == "null" else 123 if shape == "whole-type" else ""
+            document = self.reseal(document)
+            credited, rejections = self.credited(schema.canonical(document))
+            self.assertFalse(credited, shape)
+            self.assertTrue(rejections, shape)
+        for shape in ("absent", "null", "whole-type", "empty"):
+            document = self.control("hook")
+            observation = document["observations"][0]
+            if shape == "absent":
+                del observation["observation_id"]
+            else:
+                observation["observation_id"] = None if shape == "null" else 123 if shape == "whole-type" else ""
+            credited, rejections = self.credited(schema.canonical(document))
+            self.assertFalse(credited, shape)
+            self.assertTrue(rejections, shape)
+
+    def test_producer_and_proof_fields(self) -> None:
+        base = ("observations", 0)
+        fields = {
+            (*base, "producer", "kind"): {**self.ALL_REJECT, "empty": "R"},
+            (*base, "producer", "host"): {**self.ALL_REJECT, "empty": "R"},
+            (*base, "producer", "host", "os"): {**self.ALL_REJECT, "empty": "R"},
+            (*base, "producer", "host", "kernel"): {**self.ALL_REJECT, "empty": "R"},
+            (*base, "producer", "host", "report_dir"): {"absent": "R", "null": "R", "whole-type": "R"},
+            (*base, "proof"): {**self.ALL_REJECT, "empty": "R"},
+            (*base, "proof", "nextest_version"): {**self.ALL_REJECT, "empty": "R"},
+            (*base, "proof", "target"): {**self.ALL_REJECT, "empty": "R"},
+            (*base, "proof", "expected_listing_digest"): {**self.ALL_REJECT, "empty": "R"},
+            (*base, "proof", "completion_record_digest"): {**self.ALL_REJECT, "empty": "R"},
+        }
+        self.walk("rig", fields)
+
+    def test_a_hook_observation_carries_no_proof_and_the_others_must(self) -> None:
+        hook = self.control("hook")
+        hook["observations"][0]["proof"] = self.control("rig")["observations"][0]["proof"]
+        credited, rejections = self.credited(schema.canonical(self.reseal(hook)))
+        self.assertFalse(credited)
+        self.assertTrue(rejections)
+
+    def test_report_reference_fields(self) -> None:
+        base = ("observations", 0, "reports", 0)
+        fields = {
+            (*base, "path"): {**self.ALL_REJECT, "empty": "R"},
+            (*base, "sha256"): {**self.ALL_REJECT, "empty": "R"},
+            (*base, "bytes"): {**self.ALL_REJECT, "empty": "R"},
+            (*base, "store"): {**self.ALL_REJECT, "empty": "R"},
+        }
+        self.walk("hook", fields)
+
+    def test_cell_fields(self) -> None:
+        base = ("observations", 0, "cell")
+        reject = {**self.ALL_REJECT, "empty": "R"}
+        fields = {
+            (*base, "package"): reject,
+            (*base, "gate"): reject,
+            (*base, "outcome"): reject,
+            (*base, "exit_code"): reject,
+            (*base, "completion"): reject,
+            (*base, "counts"): {**reject, "one-element": None},
+            (*base, "duration_s"): {"absent": "R", "null": "R", "whole-type": "R"},
+            (*base, "gate_input_identity"): reject,
+            (*base, "backends"): {"absent": "R", "null": "R", "whole-type": "R", "empty": "E"},
+            (*base, "report"): reject,
+            (*base, "failed_tests"): {"absent": "D", "null": "R", "whole-type": "R", "empty": "E"},
+            (*base, "build"): {"absent": "D", "null": "R", "whole-type": "R"},
+            (*base, "test_filter"): {"absent": "D", "null": "R", "whole-type": "R"},
+        }
+        # Edits to a cell that do not exist in the control need a baseline.
+        control = self.control("hook")
+        cell = control["observations"][0]["cell"]
+        cell["failed_tests"] = []
+        cell["build"] = {"key": "ab" * 8, "digest": "cd" * 8}
+        cell["backends"] = ["tmux"]
+        self.reseal(control)
+        original = self.control
+        self.control = lambda kind="hook": json.loads(json.dumps(control))
+        try:
+            self.walk("hook", fields)
+        finally:
+            self.control = original
+
+
+class PublicationTests(ObservationFixture):
+    """`observation_notes.publish` against a real bare remote and second clone."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.remote = self.root / "remote.git"
+        subprocess.run(["git", "init", "-q", "--bare", str(self.remote)], check=True)
+        self.git("remote", "add", "origin", str(self.remote))
+        self.git("push", "-q", "origin", "main")
+        self.clone = self.root / "clone"
+        subprocess.run(
+            ["git", "clone", "-q", str(self.remote), str(self.clone)], check=True
+        )
+        subprocess.run(["git", "-C", str(self.clone), "config", "user.name", "B"], check=True)
+        subprocess.run(["git", "-C", str(self.clone), "config", "user.email", "b@example.com"], check=True)
+        self.ref = f"{NOTES_PREFIX}/macos-latest"
+
+    def publish_from(self, observations, *, repo: Path | None = None, **kwargs):
+        return observation_notes.publish(
+            "macos-latest", self.head, observations, repo=repo,
+            sleep=lambda seconds: None, **kwargs,
+        )
+
+    def remote_ids(self, commit: str | None = None) -> list[str]:
+        shown = subprocess.run(
+            ["git", "--git-dir", str(self.remote), "notes", "--ref", self.ref, "show", commit or self.head],
+            capture_output=True, text=True, check=True,
+        ).stdout
+        return [o["observation_id"] for o in json.loads(shown)["observations"]]
+
+    def test_publication_lands_locally_and_on_the_remote(self) -> None:
+        observation = self.observation("alpha")
+        result = self.publish_from([observation])
+        self.assertTrue(result.local and result.published, result.error)
+        self.assertEqual(1, result.attempts)
+        self.assertEqual([observation["observation_id"]], self.remote_ids())
+        self.assertEqual(["alpha/macos-latest/L1"], self.accepted_keys())
+
+    def test_sequential_packages_at_one_head_do_not_overwrite_each_other(self) -> None:
+        alpha, beta = self.observation("alpha"), self.observation("beta")
+        self.publish_from([alpha])
+        self.publish_from([beta])
+        self.assertEqual(
+            sorted([alpha["observation_id"], beta["observation_id"]]), self.remote_ids()
+        )
+        self.assertEqual(
+            ["alpha/macos-latest/L1", "beta/macos-latest/L1"], self.accepted_keys()
+        )
+
+    def test_republishing_one_observation_is_idempotent(self) -> None:
+        observation = self.observation("alpha")
+        self.publish_from([observation])
+        before = self.git("notes", "--ref", self.ref, "show", self.head)
+        result = self.publish_from([observation])
+        self.assertTrue(result.published)
+        self.assertEqual(before, self.git("notes", "--ref", self.ref, "show", self.head))
+
+    def test_a_second_run_of_a_cell_is_linked_as_a_retry(self) -> None:
+        failed = self.observation("alpha", outcome="fail")
+        self.publish_from([failed])
+        self.assertEqual([], self.accepted_keys())
+        self.publish_from([self.observation("alpha", duration_s=33)])
+        collection = json.loads(self.git("notes", "--ref", self.ref, "show", self.head))
+        retried = [o for o in collection["observations"] if "retry_of" in o]
+        self.assertEqual([failed["observation_id"]], [o["retry_of"] for o in retried])
+        self.assertEqual(["alpha/macos-latest/L1"], self.accepted_keys())
+
+    def test_a_second_host_unions_with_what_the_remote_already_holds(self) -> None:
+        alpha, beta = self.observation("alpha"), self.observation("beta")
+        self.publish_from([alpha])
+        subprocess.run(["git", "-C", str(self.clone), "fetch", "-q", "origin", "main"], check=True)
+        # The clone has never seen the first host's note.
+        result = observation_notes.publish(
+            "macos-latest", self.head, [beta], repo=self.clone, sleep=lambda s: None
+        )
+        self.assertTrue(result.published, result.error)
+        self.assertEqual(
+            sorted([alpha["observation_id"], beta["observation_id"]]), self.remote_ids()
+        )
+
+    def test_a_lost_race_is_retried_without_losing_the_winner(self) -> None:
+        alpha, beta = self.observation("alpha"), self.observation("beta")
+        winner = {"done": False}
+
+        def other_host_wins(attempt: int) -> None:
+            if not winner["done"]:
+                winner["done"] = True
+                subprocess.run(["git", "-C", str(self.clone), "fetch", "-q", "origin", "main"], check=True)
+                observation_notes.publish(
+                    "macos-latest", self.head, [beta], repo=self.clone, sleep=lambda s: None
+                )
+
+        # Seed the remote ref so this publisher's first push is non-fast-forward
+        # after the other host moves it.
+        self.publish_from([self.observation("beta", duration_s=1)])
+        result = self.publish_from([alpha], before_push=other_host_wins)
+        self.assertTrue(result.published, result.error)
+        self.assertEqual(2, result.attempts)
+        self.assertIn(alpha["observation_id"], self.remote_ids())
+        self.assertIn(beta["observation_id"], self.remote_ids())
+
+    def test_unrelated_commits_notes_survive_a_rebase_onto_the_remote(self) -> None:
+        other = self.observation("beta")
+        other_collection = self.collection([other], commit=self.base)
+        subprocess.run(["git", "-C", str(self.clone), "fetch", "-q", "origin", "main"], check=True)
+        observation_notes.publish(
+            "macos-latest", self.base, other_collection["observations"],
+            repo=self.clone, sleep=lambda s: None,
+        )
+        # This host holds an unpublished note of its own on another commit.
+        unpublished = self.observation("beta", duration_s=5)
+        observation_notes.publish(
+            "macos-latest", self.head, [unpublished], remote=None, repo=None
+        )
+        result = self.publish_from([self.observation("alpha")])
+        self.assertTrue(result.published, result.error)
+        self.assertEqual([other["observation_id"]], self.remote_ids(self.base))
+        self.assertIn(unpublished["observation_id"], self.remote_ids())
+
+    def test_an_unreachable_remote_keeps_the_proof_local(self) -> None:
+        self.git("remote", "set-url", "origin", str(self.root / "missing.git"))
+        result = self.publish_from([self.observation("alpha")], attempts=2)
+        self.assertTrue(result.local)
+        self.assertFalse(result.published)
+        self.assertIn("local only", result.error)
+        self.assertEqual(["alpha/macos-latest/L1"], self.accepted_keys())
+
+    def test_a_remote_that_keeps_winning_stops_after_the_bound(self) -> None:
+        counter = {"n": 0}
+
+        def always_lose(attempt: int) -> None:
+            counter["n"] += 1
+            subprocess.run(["git", "-C", str(self.clone), "fetch", "-q", "origin", "main"], check=True)
+            observation_notes.publish(
+                "macos-latest", self.head, [self.observation("beta", duration_s=100 + counter["n"])],
+                repo=self.clone, sleep=lambda s: None,
+            )
+
+        self.publish_from([self.observation("beta", duration_s=1)])
+        result = self.publish_from(
+            [self.observation("alpha")], attempts=2, before_push=always_lose
+        )
+        self.assertFalse(result.published)
+        self.assertEqual(2, result.attempts)
+        self.assertIn("rejecting the push after 2 attempt", result.error)
+        # The proof stays local, along with whatever the fetches merged in.
+        self.assertEqual(
+            ["alpha/macos-latest/L1", "beta/macos-latest/L1"], self.accepted_keys()
+        )
+
+    def test_an_oversized_collection_writes_nothing(self) -> None:
+        observation = self.observation("alpha")
+        observation["cell"]["failed_tests"] = []
+        padded = dict(observation)
+        padded["reports"] = [
+            {**observation["reports"][0], "path": f"{n}-" + "x" * 200}
+            for n in range(schema.COLLECTION_SIZE_LIMIT // 150)
+        ]
+        with self.assertRaises(observation_notes.PublicationError):
+            self.publish_from([observation_notes.with_identity(
+                {k: v for k, v in padded.items() if k != "observation_id"})])
+        self.assertEqual(
+            "", subprocess.run(["git", "notes", "--ref", self.ref, "list"],
+                               capture_output=True, text=True).stdout.strip()
+        )
+
+    def test_the_same_id_with_different_content_is_refused(self) -> None:
+        observation = self.observation("alpha")
+        forged = {**observation, "cell": {**observation["cell"], "duration_s": 99}}
+        with self.assertRaises(observation_notes.PublicationError):
+            observation_notes.merge_observations([observation], [forged])
+
+
+class RecorderPublicationTests(ObservationFixture):
+    """The recorder's receipt, carried into a collection and read back."""
+
+    def recorded_receipt(self) -> tuple[dict, Path]:
+        record = self.staged("alpha")
+        directory = self.stage(record)
+        self.report(directory, record)
+        retained = self.root / "evidence" / self.head / "macos-latest"
+        shutil.copytree(directory, retained)
+        document = json.loads(
+            local_evidence.record_cells(
+                str(self.plan_path), str(directory), "macos-latest", self.base, self.head,
+                report_dir=str(retained),
+            )
+        )
+        return document, retained
+
+    def test_a_recorded_receipt_round_trips_through_the_collection(self) -> None:
+        receipt, _ = self.recorded_receipt()
+        result = observation_notes.publish(
+            "macos-latest", self.head, observation_notes.receipt_observations(receipt),
+            remote=None,
+        )
+        self.assertTrue(result.local)
+        accepted, rejections = self.verify()
+        self.assertEqual(["alpha/macos-latest/L1"], self.keys(accepted))
+        self.assertEqual([], rejections)
+        # read / write / read: a second publication of the same receipt changes nothing.
+        before = self.git("notes", "--ref", f"{NOTES_PREFIX}/macos-latest", "show", self.head)
+        observation_notes.publish(
+            "macos-latest", self.head, observation_notes.receipt_observations(receipt), remote=None
+        )
+        self.assertEqual(
+            before, self.git("notes", "--ref", f"{NOTES_PREFIX}/macos-latest", "show", self.head)
+        )
+        self.assertEqual(["alpha/macos-latest/L1"], self.accepted_keys())
+
+    def test_an_existing_version_two_note_is_carried_not_overwritten(self) -> None:
+        receipt, _ = self.recorded_receipt()
+        self.add_note("macos-latest", receipt)
+        beta = self.observation("beta")
+        result = observation_notes.publish("macos-latest", self.head, [beta], remote=None)
+        self.assertTrue(result.local)
+        self.assertEqual(
+            ["alpha/macos-latest/L1", "beta/macos-latest/L1"], self.accepted_keys()
+        )
+
+    def test_a_receipt_whose_reports_are_gone_publishes_nothing(self) -> None:
+        receipt, retained = self.recorded_receipt()
+        shutil.rmtree(retained)
+        with self.assertRaises(observation_notes.PublicationError):
+            observation_notes.receipt_observations(receipt)
+
+    def test_the_publish_receipt_command_records_locally_without_a_remote(self) -> None:
+        receipt, _ = self.recorded_receipt()
+        path = self.root / "receipt.json"
+        path.write_text(json.dumps(receipt))
+        completed = subprocess.run(
+            [sys.executable, str(Path(local_evidence.__file__).with_name("observation_notes.py")),
+             "publish-receipt", "--receipt", str(path), "--head", self.head,
+             "--environment", "macos-latest", "--no-push"],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(4, completed.returncode, completed.stderr)
+        self.assertIn("local only", completed.stderr)
+        self.assertEqual(["alpha/macos-latest/L1"], self.accepted_keys())
 
 
 if __name__ == "__main__":

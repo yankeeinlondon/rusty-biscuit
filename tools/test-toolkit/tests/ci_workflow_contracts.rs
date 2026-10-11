@@ -2887,7 +2887,9 @@ fn every_top_level_job_is_either_folded_by_ci_gate_or_the_advisory_report() {
     let mut headers = jobs(&ci)
         .iter()
         .map(|block| block.lines().next().unwrap_or("").trim().trim_end_matches(':').to_owned())
-        .filter(|name| name != "ci-gate" && name != "ci-reporting")
+        // The certification publishes after the gate and is checked by its own
+        // contract; folding it would make the gate wait on its own output.
+        .filter(|name| !["ci-gate", "ci-reporting", "certify-nightly"].contains(&name.as_str()))
         .collect::<Vec<_>>();
     headers.sort_unstable();
     let mut gated = GATED_JOBS.map(str::to_owned).to_vec();
@@ -4262,9 +4264,10 @@ fn archive_guard_registry_entry() -> String {
 #[test]
 fn a_failing_archive_path_guard_blocks_the_merge_through_the_existing_fold() {
     assert_eq!(
-        8,
+        9,
         TARGET_CI_JOBS.len(),
-        "the guard must add NO top-level job; ci.yml now declares {TARGET_CI_JOBS:?}"
+        "the guard must add NO top-level job beyond the nightly's \
+         `certify-nightly`; ci.yml now declares {TARGET_CI_JOBS:?}"
     );
     assert_eq!(
         6,
@@ -7017,14 +7020,16 @@ fn top_level_job_ids(file: &str) -> Vec<String> {
 /// `ci.yml`'s whole top-level job set. `ci-tooling` and
 /// `biscuit-tui-captured-stdout` retired into their owners' package cells and
 /// the advisory `summary` became `ci-reporting`; `build` and `area-drift`
-/// arrived with the single-OS-compile fix.
-const TARGET_CI_JOBS: [&str; 8] = [
+/// arrived with the single-OS-compile fix; `certify-nightly` publishes a
+/// finished nightly's coverage and sits outside the gate's fold.
+const TARGET_CI_JOBS: [&str; 9] = [
     "validation",
     "scope",
     "preflight",
     "build",
     "area-ci",
     "area-drift",
+    "certify-nightly",
     "ci-gate",
     "ci-reporting",
 ];
@@ -7766,5 +7771,166 @@ fn every_matrix_in_the_reader_facing_workflows_keeps_fail_fast_false() {
     assert!(
         checked > 0,
         "the reader-facing workflows carry matrices; this contract went vacuous"
+    );
+}
+
+// --- the nightly plans per environment anchor and certifies what it proved -----
+
+/// The `permissions:` entries a job block declares at job level, as
+/// `(scope, access)` pairs; empty when the job inherits the workflow's.
+fn job_permissions(block: &str) -> Vec<(String, String)> {
+    let mut entries = Vec::new();
+    let mut inside = false;
+    for line in executable_lines(block).lines() {
+        if line == "    permissions:" {
+            inside = true;
+            continue;
+        }
+        if inside {
+            if !line.starts_with("      ") {
+                break;
+            }
+            let (scope, access) = line.trim().split_once(':').expect("a permission entry");
+            entries.push((scope.to_owned(), access.trim().to_owned()));
+        }
+    }
+    entries
+}
+
+fn named_job(file: &str, id: &str) -> String {
+    job_block(file, &format!("  {id}:"))
+}
+
+#[test]
+fn the_nightly_plans_from_per_environment_anchors_and_never_a_single_base() {
+    let ci = workflow("ci.yml");
+    let scope = executable_lines(&named_job("ci.yml", "scope"));
+    assert!(
+        scope.contains("reuse_validation.py nightly-anchors > nightly-anchors.json")
+            && scope.contains("--anchors nightly-anchors.json"),
+        "the schedule path must resolve anchors and hand them to the planner"
+    );
+    for stale in ["nightly-base", "nightly_base"] {
+        assert!(
+            !executable_lines(&ci).contains(stale),
+            "ci.yml must not call the single-base lookup `{stale}`"
+        );
+    }
+}
+
+#[test]
+fn the_evidence_verifier_runs_on_schedule_and_not_on_manual_dispatch() {
+    let scope = executable_lines(&named_job("ci.yml", "scope"));
+    assert!(
+        scope.contains(r#"if [[ "$EVENT_NAME" != "workflow_dispatch" ]]; then"#),
+        "the verifier and overlay must be skipped for workflow_dispatch alone"
+    );
+    assert!(
+        !scope.contains(r#""$EVENT_NAME" != "schedule""#),
+        "the schedule event must not be excluded from evidence verification"
+    );
+}
+
+#[test]
+fn the_scope_job_reads_contents_and_actions_and_writes_nothing() {
+    let scope = named_job("ci.yml", "scope");
+    assert_eq!(
+        vec![
+            ("contents".to_owned(), "read".to_owned()),
+            ("actions".to_owned(), "read".to_owned()),
+        ],
+        job_permissions(&scope),
+        "the scope job needs `actions: read` for the anchor lookup and nothing more"
+    );
+}
+
+#[test]
+fn the_nightly_certification_is_schedule_only_gated_on_the_final_gate_and_read_only() {
+    let certify = named_job("ci.yml", "certify-nightly");
+    let body = executable_lines(&certify);
+    for required in [
+        "github.event_name == 'schedule'",
+        "needs.ci-gate.result == 'success'",
+        "needs.scope.result == 'success'",
+    ] {
+        assert!(body.contains(required), "certify-nightly must require `{required}`");
+    }
+    assert!(
+        body.contains("needs: [scope, ci-gate]"),
+        "certify-nightly must wait for the final gate"
+    );
+    assert_eq!(
+        vec![
+            ("contents".to_owned(), "read".to_owned()),
+            ("actions".to_owned(), "read".to_owned()),
+        ],
+        job_permissions(&certify),
+        "certify-nightly holds read permissions only"
+    );
+    assert!(
+        body.contains("retention-days: 90") && body.contains("if-no-files-found: error"),
+        "a certification is kept 90 days and a missing file fails the upload"
+    );
+    assert!(
+        body.contains("fromJSON(needs.scope.outputs.coverage_environments)")
+            && body.contains("scripts/ci/reuse_validation.py certify"),
+        "certifications derive from the plan's anchored environments"
+    );
+
+    let gate = executable_lines(&named_job("ci.yml", "ci-gate"));
+    let gate_needs: Vec<&str> = gate
+        .lines()
+        .skip_while(|line| line.trim() != "needs:")
+        .skip(1)
+        .take_while(|line| line.trim_start().starts_with("- "))
+        .map(|line| line.trim_start_matches([' ', '-']))
+        .collect();
+    assert!(
+        !gate_needs.contains(&"certify-nightly"),
+        "ci-gate stays a policy-free fold and must not wait on the certification"
+    );
+    assert_eq!(
+        vec!["area-ci".to_owned()],
+        jobs_containing("ci.yml", "checks: write"),
+        "no certification or scope job may hold `checks: write`"
+    );
+    assert!(
+        jobs_containing("ci.yml", "contents: write").is_empty(),
+        "no ci.yml job may hold `contents: write`"
+    );
+}
+
+#[test]
+fn pull_requests_and_pushes_still_prove_linux_and_macos_only() {
+    let table: serde_json::Value =
+        serde_json::from_str(&read(".github/ci/environments.json")).expect("environments.json");
+    let environments = table["environments"].as_array().expect("environments list");
+    let scheduled_on = |event: &str| -> Vec<&str> {
+        environments
+            .iter()
+            .filter(|record| {
+                record["events"]
+                    .as_array()
+                    .is_some_and(|events| events.iter().any(|name| name == event))
+            })
+            .filter_map(|record| record["name"].as_str())
+            .collect()
+    };
+    for event in ["pull_request", "push"] {
+        assert_eq!(
+            vec!["ubuntu-latest", "macos-latest"],
+            scheduled_on(event),
+            "{event} proves Linux and macOS only"
+        );
+    }
+    assert_eq!(
+        vec!["windows-latest", "wsl2-ubuntu"],
+        scheduled_on("schedule"),
+        "the nightly proves native Windows and WSL2"
+    );
+    let validation = executable_lines(&named_job("ci.yml", "validation"));
+    assert!(
+        validation.contains("--wait-minutes 90"),
+        "the same-tree PR wait stays 90 minutes"
     );
 }
