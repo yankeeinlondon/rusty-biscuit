@@ -11,6 +11,7 @@
 
 <ul>
   <li>OS, hardware, network, filesystem detection</li>
+  <li>Processes using a file or directory tree: <code>sniff filesystem query &lt;path&gt;</code></li>
   <li>Software inventory with install support (editors, utilities, package managers, test runners, etc.)</li>
   <li>System services and init system detection</li>
   <li>Git repository analysis, monorepo detection, and remote inspection</li>
