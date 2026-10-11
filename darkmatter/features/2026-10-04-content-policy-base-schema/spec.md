@@ -1,6 +1,5 @@
 ---
 area: darkmatter
-status: draft-spec
 created: 2026-10-04
 owner: Ken Snyder <ken@ken.net>
 $schema:
@@ -26,7 +25,7 @@ $schema:
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-05
-review_iterations: 0
+review_iterations: 1
 human_review: true
 human_review_items:
     - |-
@@ -104,6 +103,12 @@ human_review_items:
         confirmation exists), and the prerequisite gate still fails
         underneath it. Six runs, zero implementation — the sequencing
         decision above is the only way forward.
+
+        **Update (2026-10-10, seventh run):** Phase 1 was dispatched again.
+        Its work was already done. The prerequisite is still a draft with no
+        plan, and the resolver still rejects the needed schema shape. Nothing
+        was changed. Darkmatter's tests (9115) and lint pass. Re-dispatching
+        phases will keep stopping here until you choose an option above.
     - |-
         Secondary decision (only if you pick option 2 above): if the feature
         is reshaped to avoid union list items, the spec's acceptance criteria
@@ -158,7 +163,9 @@ message_to_agent: >-
     has no entry yet), and rulings R1-R8 (R6 is the Phase 3 design note:
     validate reads the env from request.snapshot().env() with one shared
     parse of the disable values, shared with compose's
-    env_disables_baseline_schema).
+    env_disables_baseline_schema). A Phase 1 re-run on 2026-10-10 re-verified
+    the gate a seventh time (still draft-spec; resolve.rs:1328 rejection
+    unchanged; no schema-tree commits since b9ce7c893) and changed nothing.
 ---
 
 # Compile Content Policy's Schema into the Base Schema
