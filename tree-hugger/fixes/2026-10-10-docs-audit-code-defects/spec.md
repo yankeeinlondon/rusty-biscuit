@@ -13,6 +13,7 @@ packages:
   - tree-hugger
   - tree-hugger-cli
 needs_rulings: false
+review_iterations: 1
 ---
 
 # Six code defects found while auditing the Tree Hugger docs
