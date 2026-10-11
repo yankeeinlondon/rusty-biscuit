@@ -43,7 +43,12 @@ When modifying queries or symbol extraction:
    `SchemaBump` row: what the old shape lacked and how to recognize the current
    one): rejected under both keys; a later schema bump adds a row there
    (revision 51, schema 5.1, lacks `reexports`, `imports[].reexported` and the
-   `reexports` capability).
+   `reexports` capability). Revision 52 stored the placeholder report; its row
+   is a `StaleRevision` (Python `from m import a`, probe: entry count).
+   The re-export report's matrix lives in `cache_robustness`
+   (`reexport_report_fields_are_served_only_when_consistent` and its limited,
+   not-applicable, widening and duplicate-key siblings; JSON paths under
+   `reexports.entries[n]`), and the consumers in `tests/l1/reexports_consumers.rs`.
    `cache_robustness` pins which malformed
    shapes of the entry fields and record columns (including nested generics,
    relation targets and attribute/modifier members) are served or

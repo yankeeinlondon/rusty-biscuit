@@ -44,7 +44,7 @@ Symbol analysis rules computed at runtime:
 `unused-import` is off by default (opt in with `--warn unused-import`): a
 syntactic
 scan cannot resolve imports used only via trait methods or macros, so it has an
-irreducible false-positive rate. `pub use` re-exports and type-position usages
+irreducible false-positive rate. Imports forwarded by a re-export report entry (`pub use`, not `pub(self) use`; `ImportSymbol::is_reexport`) and type-position usages
 (`fn f(x: T)`, `field: T`) are **not** flagged — those were fixed.
 
 ### Syntax Diagnostics

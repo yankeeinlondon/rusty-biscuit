@@ -86,22 +86,38 @@ post-lookup predicates.
   directories are never opened, so they no longer fail the scan. Tests compare
   each literal with the same pattern bracketed (`src/lib.r[s]`, forces the
   walk): `filters::literal_positional_paths_select_what_the_walker_selects`.
-- **Re-exports** (`analysis/reexports.rs`, types in
+- **Re-exports** (`analysis/reexports/`, types in
   `shared/schema_v2/reexports.rs`): `Capability::Reexports` (prerequisite
   `Declarations`; `Diagnostics` requires it) makes `run_indexed` call
-  `reexports::extract` once, after the import records exist, then
-  `mark_forwarded_imports` sets `ImportRecord::reexported` by exact import span
-  for `syntax`/`declared` entries only. `FileSymbolIndex::reexports` is `None`
+  `reexports::flag_forwarded_imports` once, right after the imports are read and
+  before diagnostics: it runs `extract`, then sets `ImportSymbol::is_reexport`
+  (and so `ImportRecord::reexported`) by exact import span for
+  `syntax`/`declared` entries only. It is the only place the flag is decided:
+  `imported_symbols()`, `lint_diagnostics()` and the CLI's index conversion all
+  use it or the stored marker, never a Rust `visibility_modifier` check. `FileSymbolIndex::reexports` is `None`
   exactly when the capability was not computed (key omitted); `coverage::project`
   drops the report and clears the markers together, and
-  `record_passes_suffice` never widens it without a parse. `extract` matches
-  every language: Java/C/Bash/Zsh/PHP are `not_applicable`, every other
-  language is a whole-file `limited`/`grammar_gap` until its extractor lands
-  (never a `complete` negative). `work_counters().reexport_extractions` proves
+  `record_passes_suffice` never widens it without a parse. `extract`
+  (`reexports/mod.rs`) matches every language: Java/C/Bash/Zsh/PHP are
+  `not_applicable`, every other language has its own module
+  (`rust`, `ecma` for JS+TS, `python`, `go`, `perl`, `lua`, `swift`, `scala`,
+  `cpp`, `csharp`) taking `(&TreeFile, &[ImportRecord])`; `reexports/common.rs`
+  holds `entry`, `limit`, `finish` (source order, one entry per span, sorted
+  limits, state derived) and `damaged_nodes`. Extractors read only the
+  analyzed file; an ERROR/MISSING node limits coverage only when it touches a
+  forwarding trigger, and clean parses are not proof (C++ module files and
+  Perl `@Pkg::EXPORT_OK` parse silently wrong, so they are limited by
+  structure). Tests: `tests/l1/symbols_reexports_<lang>.rs` plus the
+  16-language guard in `symbols_reexports.rs`. `work_counters().reexport_extractions` proves
   one extraction per analysis and none without the capability. The cache entry
   writes a required, nullable `reexports` key and `imports[].reexported`;
   `StoredEntry::validate` refuses a report without the capability (or the
-  reverse) and a marker without it.
+  reverse) and a marker without it, and `cache/stored_reexports.rs`
+  (`validate_reexports`) refuses state/limits/language disagreement, spans
+  outside the file, out-of-order entries or limits, form-vs-name
+  contradictions, an `import_span` that is no import, and marker-vs-entries
+  disagreement (the import inventory digest covers each marker, so it fires
+  first on a flipped marker).
 - **Parent navigation goes through the parent index** (`file/parents.rs`):
   `run_query` installs one per file (`TreeFile::with_parent_index`, one
   `TreeCursor` pass); inside it `node.indexed_parent()` / `parents::parent` /

@@ -49,9 +49,9 @@ fn reexports(&self) -> Result<ReexportReport, TreeHuggerError> // whole-file for
 `referenced_symbols()` is the older name-only usage list (diagnostics read
 the same captures); it carries no owner, kind or confidence.
 
-There is no re-export method: re-exports are detected for Rust `pub use`
-only, through `ImportSymbol::is_reexport` on `imported_symbols()`; every
-other language reports `false`.
+`ImportSymbol::is_reexport` on `imported_symbols()` is `true` for an import a
+`syntax`/`declared` entry of `reexports()` forwards (all languages; Rust
+`pub(self) use` is not one); `reexports()` itself has the full evidence.
 
 #### Reference Evidence (`shared/schema_v2/occurrences.rs`)
 
