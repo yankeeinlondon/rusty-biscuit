@@ -424,3 +424,44 @@ fn a_lint_invalid_suggestion_on_a_continuation_line_stays_advisory_and_exact() {
     }
     fixture.shutdown();
 }
+
+/// A lint-invalid candidate whose own range crosses a fold is reported once,
+/// ranged from its opening quote on the first line to just after its closing
+/// quote on the continuation line. Non-ASCII text on both lines makes the
+/// UTF-16 columns differ from the byte columns.
+#[test]
+fn a_lint_invalid_suggestion_crossing_a_fold_is_one_two_line_range() {
+    let body = concat!(
+        "kind: schema\n",
+        "types:\n",
+        "  mode: string(min(40); suggest('fïrst\n",
+        "    sécond')) -> mode\n",
+        "  next: boolean\n",
+    );
+    let workspace = LspWorkspace::new();
+    let mut fixture = start(&workspace, "utf-16");
+    for (text, ending) in [(body.to_string(), "lf"), (crlf(body), "crlf")] {
+        let uri = open(&fixture, &workspace, &format!("{ending}-folded-suggest.yaml"), &text);
+        let diagnostics = definition_diagnostics(&mut fixture, &uri);
+        let [diagnostic] = diagnostics.as_slice() else {
+            panic!("{ending}: expected one schema diagnostic: {diagnostics:#?}");
+        };
+        assert_eq!(diagnostic["code"], json!("dm.schema.invalid_suggestion"), "{ending}");
+        assert_eq!(diagnostic["severity"], json!(2), "{ending}");
+        let start = text.find("'fïrst").expect("opening quote");
+        let end = text.find("sécond'").expect("closing quote") + "sécond'".len();
+        assert_eq!(
+            diagnostic["range"],
+            json!({ "start": { "line": 2, "character": 32 }, "end": { "line": 3, "character": 11 } }),
+            "{ending}"
+        );
+        assert_eq!(
+            diagnostic["range"],
+            json!({ "start": position(&text, start, "utf-16"), "end": position(&text, end, "utf-16") }),
+            "{ending}"
+        );
+        let next = hover(&mut fixture, &uri, range_of(&text, "boolean", 0, "utf-16")["start"].clone());
+        assert!(next.contains("Declares: **boolean**"), "{ending}: {next}");
+    }
+    fixture.shutdown();
+}

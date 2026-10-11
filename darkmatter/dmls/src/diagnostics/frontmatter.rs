@@ -2009,6 +2009,39 @@ mod tests {
         assert_eq!(range.start.line, 2);
     }
 
+    /// An inline `$schema` candidate whose own range crosses a fold projects
+    /// through the frontmatter offset to one range from its opening quote to
+    /// its closing quote, and converts to a two-line UTF-16 range. Non-ASCII
+    /// text on the continuation line separates UTF-16 from byte columns.
+    #[test]
+    fn a_folded_inline_suggestion_converts_to_one_two_line_range() {
+        use crate::source_map::{PositionEncoding, SourceMap};
+        use lsp_types::{Position, Range, Uri};
+
+        for newline in ["\n", "\r\n"] {
+            let text = format!(
+                "---{newline}$schema:{newline}  mode: string(min(40); suggest('first{newline}    sécond')){newline}---{newline}{newline}body{newline}"
+            );
+            let ast = crate::overlay::FrontmatterAst::parse(&text).unwrap().ast.unwrap();
+            let problems = match crate::overlay::suggestions::inline_lints(&text, Some(&ast)) {
+                crate::overlay::SuggestionState::Inline(problems) => problems,
+                other => panic!("{newline:?}: expected Inline, got {other:?}"),
+            };
+            assert_eq!(problems.len(), 1, "{newline:?}: {problems:?}");
+            let start = text.find("'first").unwrap();
+            let end = text.find("sécond'").unwrap() + "sécond'".len();
+            assert_eq!(problems[0].span, start..end, "{newline:?}");
+
+            let uri: Uri = "file:///w/test.md".parse().unwrap();
+            let source_map = SourceMap::new(uri, 1, PositionEncoding::Utf16, text.as_str().into());
+            assert_eq!(
+                source_map.byte_range_to_lsp(problems[0].span.clone()),
+                Some(Range::new(Position::new(2, 32), Position::new(3, 11))),
+                "{newline:?}"
+            );
+        }
+    }
+
     /// Many aliases of one long malformed scalar whose union-typed properties
     /// accept it, then one alias under a plain `expression` property that
     /// rejects it. The scalar is parsed once, and the error kept from the
