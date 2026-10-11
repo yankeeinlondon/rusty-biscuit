@@ -20,11 +20,15 @@ $schema:
     reviewed_by: string -> the agent and model used in the spec review
     reviewed_on: date -> the date the spec was reviewed
     review_iterations: number -> the number of implementation reviews have taken place in the review/fix cycle
+    clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented_by: string -> the agent who implemented the plan
     formerly: string -> the spec's previous `{date}-{name}`, when it was renamed in the 2026-10-10 restructure
     pipeline_step: number -> position in the claudine/docs/rollout-strategy.md pipeline
-reviewed: false
+reviewed: true
+reviewed_by: codex/gpt-6.1-sol
+reviewed_on: 2026-10-11
+review_iterations: 0
 human_review: false
 pipeline_step: 16
 depends-on:
@@ -81,18 +85,25 @@ sequence:
 | | `proxy` / `retry` / `prep` `with` | task `with` |
 |---|---|---|
 | Target | the target document's top-level frontmatter | the task document's top-level frontmatter |
-| Precedence, lowest → highest | target frontmatter → `with` → caller setters | task document frontmatter → `with` → caller setters |
+| Precedence, lowest → highest | target frontmatter → `with` → caller setters (runtime layering retained) | task document frontmatter → `with` → caller setters → runtime mutations → generated bindings |
 | Evaluation | once, in the source, when the directive fires; the target receives resolved data | at the task's turn, in the sequence's live state; the child receives resolved data |
 
 - **Hard rename, and `params` is freed.** `with` is the task key. `params` is
   no longer a reserved task key: on a step it is ordinary step data, read as
-  `seq.params`. The migration sweep converts every in-repo `params:`.
-- **Where it is accepted.** Exactly where `params:` is accepted today; on a
-  task whose executable it cannot affect (a `shell:` task, …) it is the same
-  typed error `params:` raises today.
-- **Caller setters still win.** `claudine sequence doc.md agent=codex` forces
-  every prompt task onto Codex, because caller setters sit above `with`; this
-  is existing layering, and the docs say so.
+  `seq.params`. The migration sweep converts task-input `params:` in maintained code,
+  prompts, fixtures, docs, and skills; unrelated data named `params` and
+  historical specification snapshots are preserved.
+- **Where it is accepted.** `with` is accepted on `prompt:` tasks. It is not an
+  overlay for `shell:`, `side_effect:`, `group:`, `task:`, or nested `sequence:`
+  entries, and is rejected there by the task-option error naming `with`.
+  External task references remain immutable: put `with` inside the referenced
+  task file, not beside `task:`. Body steps retain their existing option rules.
+- **Caller setters outrank `with`.** `claudine sequence doc.md agent=codex`
+  overrides each task's authored `agent`, including `with.agent`. This does
+  not pin the provider against later runtime `set` mutations: the existing
+  task override order is `with` → caller setters → runtime mutations →
+  generated container bindings. An explicit provider flag pins every launch.
+  This spec preserves runtime layering rather than changing it during a rename.
 
 ### 2. One provenance rule for every `with`
 
@@ -107,9 +118,33 @@ lazy `file` binds to its first candidate from the origin). The value is still
 not caller input: caller setters keep their own launch origin and their place
 above `with`.
 
-This keeps the current task `params` behavior and changes `proxy.with`, whose
-values were previously resolved as the target's own frontmatter (the "not
-caller input" rule in `composition.md`).
+Only schema-selected file values are anchored; ordinary strings that happen
+to look like paths remain strings. Reuse `biscuit-file`'s `FileReference`
+resolver and the captured source context, including repository roots, home,
+and environment; do not join a directory to a string or recapture process
+CWD. For schema unions, use the existing selected-arm or unanimous-file-type
+rule; ambiguous file/string arms remain raw for validation. Lazy remote values
+remain URLs, recursive lazy references keep their existing typed refusal,
+and body presentation remains separate from native path identity.
+
+Preserve each winning value's raw data and origin through nested containers,
+retry, and proxy handoffs. Re-evaluate task `with` at each task turn, using a
+concurrent group's shared start snapshot; a fired directive evaluates its
+mapping once and retains the resolved data for its target's fresh reads.
+Do not re-interpret resolved strings as templates. If an expression copies an
+already anchored file value, keep its identity; a newly produced relative file
+string uses the `with` entry's authoring origin. Mapping evaluation is atomic:
+a failing entry installs no partial overlay and launches no target. Retry
+retention follows the lifecycle grammar contract; this feature changes the
+origin, not which attempts retain an overlay.
+
+> **Reader note — intentional behavior change.** This keeps the current task
+> `params` behavior and changes `proxy.with`, whose
+> values were previously resolved as the target's own frontmatter. Existing
+> lifecycle overlays that relied on target-relative paths must be rewritten
+> relative to their authoring file. The migration covers those usages and the
+> documentation's old rule; values retain their source ownership and are never
+> relabeled as caller input.
 
 ```yaml
 # prompts/router.md
@@ -132,7 +167,8 @@ success:
 These are the `LifecycleProxyWith*` errors renamed, because `with` is no
 longer proxy-specific; task `with` raises the same errors with the task's
 source location. (If 2026-10-20-lifecycle-grammar already renamed the family,
-its names are kept and task `with` uses them.) `with: {}` equals no `with`.
+its names are kept and task `with` uses them.) The whole-mapping error takes
+priority over the generic non-mapping error. `with: {}` equals no `with`.
 Values follow the existing typing: a value that is exactly one span keeps the
 expression's type; text with spans becomes a string; YAML scalars, arrays, and
 objects keep their authored types.
@@ -153,12 +189,13 @@ A provider is chosen twice:
 
 1. **Before the run**, one target is planned from the **sequence document's**
    `agent`/`model` and the caller's flags and setters
-   (`claudine/cli/src/commands/wrap/sequence/mod.rs`, Phase 1a/1b). If that
+   in Claudine CLI's [sequence entry point](../../../cli/src/commands/wrap/sequence/mod.rs). If that
    does not resolve, a terminal gets the review screen and anything else gets
    `AgentResolutionFailed`.
 2. **At every launch**, the provider is rebuilt from the composed frontmatter
-   of the document about to run (`select_rebuilt_provider`,
-   `claudine/cli/src/commands/wrap/harness_orch/loop_control/target_launch.rs`):
+   of the document about to run (Claudine CLI's
+   [select_rebuilt_provider](../../../cli/src/commands/wrap/harness_orch/loop_control/target_launch.rs),
+   which selects the provider for a refreshed target):
    explicit flag, then that document's `agent` (its frontmatter, then `with`,
    then caller setters), then the planned target. This rebuild is deliberate:
    it lets a `retry` or `proxy` target change `agent:`.
@@ -174,10 +211,12 @@ planned target:
   made for a task whose document names an `agent` is silently discarded at
   launch.
 - **Reporting.** The step status line and the `env.AGENT`/`env.MODEL` values the
-  step's prompt is composed with (`step_env_overrides`,
-  `claudine/cli/src/commands/wrap/sequence/jit.rs`) come from the planned target,
+  step's prompt is composed with (Claudine CLI's
+  [step_env_overrides](../../../cli/src/commands/wrap/sequence/jit.rs),
+  which supplies a step's composition environment) come from the planned target,
   not the provider that launched. The launched process's own
-  `AGENT`/`MODEL`/`YOLO` are already correct (`apply_target_env_overrides`).
+  `AGENT`/`MODEL`/`YOLO` are already correct (set by Claudine CLI's
+  [apply_target_env_overrides](../../../cli/src/commands/wrap/harness_orch/loop_control.rs)).
 - **Late failure.** A task naming a provider that is not installed is refused
   only at its turn, after earlier tasks have run.
 
@@ -200,18 +239,65 @@ planned target:
 - **An honest review screen.** Tasks with a predicted provider of their own are
   read-only rows showing it. Only the remaining tasks are editable, and a choice
   made there is what launches.
-- **Report what launched.** Step status lines, composition-time
-  `env.AGENT`/`env.MODEL`, the dry-run table, and the sequence report use the
-  task's predicted provider, which the launch confirms.
+- **Report what launched.** Preflight and dry-run rows show a prediction or
+  **decided at launch**. Completion lines and sequence reports use the actual
+  launch identity. Refresh selection at the existing preparation boundary so
+  composition-time `env.AGENT`/`env.MODEL` and the child environment agree.
+  Retries and proxy targets may change providers; record each attempt's actual
+  identity and label any single completion summary with the final attempt's
+  provider. A task that launched no provider must not be reported as having
+  used its prediction.
 
-Precedence for a prompt task, highest first:
+Provider precedence for a prompt task, highest first (model selection is
+separate, as described below):
 
 | Source | Scope |
 |---|---|
-| `--<provider>` / `--provider`, `--model` | every task |
-| the task document's composed `agent`/`model`: its frontmatter, then `with`, then caller setters | that task |
-| the nearest enclosing sequence document's `agent`/`model` (a nested file-reference sequence's own, then outward to the root), or a review-screen choice for a task with no hint of its own | that task |
+| `--<provider>` / `--provider` | every task |
+| the task document's effective `agent`: frontmatter, then `with`, caller setters, and runtime mutations | that task |
+| a review-screen choice for a task with no own hint, otherwise the nearest enclosing sequence document's `agent` (nested file first, then outward to the root) | that task |
 | favorite / picker | that task |
+
+Preflight classifies tasks as **predicted**, **decided at launch**, or
+**missing a provider**. Only the last state needs an editable review row or
+fails without a terminal. Dynamic hints are not missing hints: retain them
+for launch-time evaluation rather than replacing them with a picker result.
+A graph containing only shell and side-effect tasks needs no provider.
+
+Prediction is a read-only inspection after the root's shell-free initialization.
+It does not execute descendant lifecycle events, `prep`, shell substitutions,
+or side-effecting expressions, compose prompt bodies, or contact providers to
+refresh model catalogs. It follows nested sequences, groups, and external
+task files using their source contexts. Inspect only selection inputs and the
+`with` entries they depend on. Values that need a later output, mutable state,
+`current.*`, or the provider environment being selected are
+**decided at launch**; ordinary expression errors in otherwise static inputs
+remain typed failures. A launch-time hint that depends on its own `env.AGENT`
+or `env.MODEL` has a circular dependency: reject it with a source-located
+selection error instead of composing with another task's stale identity. A statically known higher-precedence override makes a
+lower dynamic hint irrelevant. Preflight still checks tasks with a false
+`when`, following the existing approval contract.
+
+Use the canonical provider resolver for scalar and list-valued hints, including
+installed-provider filtering, favorites, ambiguity, and non-terminal errors;
+do not introduce a second picker or select an unavailable list member. A
+predictable hint that the canonical non-terminal rule cannot resolve gets the
+same typed failure, annotated with the task's source and enclosing container
+names. Dynamic selection gets that check at preparation, before spawning the
+task; prior tasks may already have run. A changed document or live-state hint
+may change the prediction, so it is never an authorization to skip launch-time
+validation. Store choices by task identity and container ancestry, so repeated
+names in nested containers do not share a review-screen selection.
+
+Model resolution keeps the established order: explicit `--model`, captured
+provider-specific model environment, captured generic `MODEL`, effective task
+`model`, compatible planned fallback, then provider defaults. Use the shared
+model resolver, preserving scalar/list hint behavior and warnings. An
+inherited or review-selected model is eligible only for the provider it was
+resolved against; switching provider cannot carry that provider's model into
+the new launch. Clear stale `MODEL` overlays when no model resolves. A review
+choice is a fallback for its task, not an authored `agent` setter that could
+prevent a later proxy target from selecting its own provider.
 
 A body step composes its sequence document, so its own hints are that
 document's. A group has no `agent`: each prompt task inside it resolves on its
@@ -222,8 +308,9 @@ own. `shell:` and `side_effect:` tasks launch no provider.
 Two files in `claudine/schemas/`, discovered by the normal schema-root walk:
 
 - `sequence.yaml`, `kind: trigger-schema`, matching
-  `sequence: ["unknown[](required)", string]` (a list of steps or a
-  file-reference string; a concrete type, because `required` has no effect on
+  `sequence: [string(required), number, boolean, object, "unknown[]"]`
+  (every non-null YAML type, so malformed values also activate validation;
+  `required` is attached to a concrete type because it has no effect on
   `any`/`unknown`);
   its payload types a sequence document's root;
 - `sequence-types.yaml`, `kind: schema`, the type library the payload imports.
@@ -238,31 +325,48 @@ file-reference nested sequences, concurrent groups with `fail_fast`, `loop:` on
 a group, at the root, and on an inline nested sequence's task entry (with
 `gate:` typed as a stack), and the lifecycle events — `cancelled` included — on
 the root, on groups, and on inline nested sequences, each typed with the event
-type 2026-10-21-claudine-schemas exports for it. The removed keys (`execution`,
-`params`, `setup`, `teardown`, root `fail_fast`) are absent, so DMLS reports them
-as unknown; the parser's typed errors remain the authority.
+type 2026-10-21-claudine-schemas exports for it. Removed keys such as group `execution` and root `fail_fast` are absent,
+so DMLS reports them as unknown. Step objects deliberately accept authored
+data: `params` is valid data, while removed step options `setup`/`teardown`
+remain parser errors even if the catch-all accepts their shape. The parser
+also enforces which executables can carry `with`.
 
-The shape, with event and stack type names standing for whatever
-2026-10-21-claudine-schemas exports:
+The sketches below describe the intended coverage, not a loadable recursive
+type library. `steps → task → sequence → steps` and `task → group → tasks →
+task` are cycles; the schema engine at this rollout point rejects them, so
+the interim schema uses bounded expansion, matching
+2026-10-21-claudine-schemas' interim approach: distinct task, group, and
+sequence types at three typed container levels, then an untyped container
+boundary. A valid document nested deeper than the typed levels stays valid;
+the schema checks less there, and the parser still accepts unlimited
+nesting. Documentation explains the boundary.
+2026-10-30-claudine-recursive-schemas removes it.
+Use the actual exported `initialize-stack`, `stack`, and `loop` types from
+the lifecycle library, extending it for `cancelled` using the container
+contract's restricted actions. Reuse that shared loop type instead of creating
+a second version that drifts from `claudine.yaml`.
 
 ```yaml
 # claudine/schemas/sequence.yaml
 kind: trigger-schema
 match:
     sequence:
-        - unknown[](required)
-        - string
+        - string(required)
+        - number
+        - boolean
+        - object
+        - "unknown[]"
 $schema:
     sequence: steps@./sequence-types.yaml
     template: object -> values merged into every step (formal sequence documents)
-    loop: loop@./sequence-types.yaml
-    initialize: initialize@./lifecycle.yaml
-    start: start@./lifecycle.yaml
-    blocked: blocked@./lifecycle.yaml
-    success: success@./lifecycle.yaml
-    failure: failure@./lifecycle.yaml
-    cancelled: cancelled@./lifecycle.yaml
-    finalize: finalize@./lifecycle.yaml
+    loop: loop@./lifecycle.yaml
+    initialize: initialize-stack@./lifecycle.yaml
+    start: stack@./lifecycle.yaml
+    blocked: stack@./lifecycle.yaml
+    success: stack@./lifecycle.yaml
+    failure: stack@./lifecycle.yaml
+    cancelled: cancelled-stack@./lifecycle.yaml
+    finalize: stack@./lifecycle.yaml
 ```
 
 ```yaml
@@ -292,14 +396,14 @@ types:
         timeout: string -> per-command shell timeout, such as `45s`
         operation: string
         flow: string
-        loop: loop -> only beside an inline `sequence:` list
-        initialize: initialize@./lifecycle.yaml
-        start: start@./lifecycle.yaml
-        blocked: blocked@./lifecycle.yaml
-        success: success@./lifecycle.yaml
-        failure: failure@./lifecycle.yaml
-        cancelled: cancelled@./lifecycle.yaml
-        finalize: finalize@./lifecycle.yaml
+        loop: loop@./lifecycle.yaml -> only beside an inline `sequence:` list
+        initialize: initialize-stack@./lifecycle.yaml
+        start: stack@./lifecycle.yaml
+        blocked: stack@./lifecycle.yaml
+        success: stack@./lifecycle.yaml
+        failure: stack@./lifecycle.yaml
+        cancelled: cancelled-stack@./lifecycle.yaml
+        finalize: stack@./lifecycle.yaml
         <string>: any -> authored step data, read as `seq.<field>`
     group:
         name: string(required)
@@ -310,33 +414,31 @@ types:
         fail_fast: boolean -> true (default) = the legs are atomic
         operation: string
         flow: string
-        loop: loop
-        initialize: initialize@./lifecycle.yaml
-        start: start@./lifecycle.yaml
-        blocked: blocked@./lifecycle.yaml
-        success: success@./lifecycle.yaml
-        failure: failure@./lifecycle.yaml
-        cancelled: cancelled@./lifecycle.yaml
-        finalize: finalize@./lifecycle.yaml
-    loop:
-        while: expression
-        until: expression
-        action: any -> mutations applied when the loop continues
-        actions: any -> alias of `action`
-        max:
-        - number(integer; min(1))
-        - string -> a `{{ … }}` cap, resolved once
-        gate: stack@./lifecycle.yaml
+        loop: loop@./lifecycle.yaml
+        initialize: initialize-stack@./lifecycle.yaml
+        start: stack@./lifecycle.yaml
+        blocked: stack@./lifecycle.yaml
+        success: stack@./lifecycle.yaml
+        failure: stack@./lifecycle.yaml
+        cancelled: cancelled-stack@./lifecycle.yaml
+        finalize: stack@./lifecycle.yaml
 ```
 
-The loose verb keys a `loop:` block may carry instead of `gate:` are typed by
-importing the action bundle type 2026-10-21-claudine-schemas exports into
-`loop`. The schema cannot express the rules the parser enforces (exactly one
+The shared lifecycle `loop` type includes the loose verb keys allowed instead
+of `gate`, updated by the loop specification. No object-merge syntax is assumed.
+The schema cannot express the rules the parser enforces (exactly one
 of `while`/`until`; `gate:` never beside loose verbs; event keys only on an
 inline-sequence task; reserved step keys; unique leg names), and does not try.
-When a document matches both `sequence.yaml` and `claudine.yaml`, the shared
-keys (`loop`, the events, `agent`, `model`) are typed identically in both
-payloads.
+When a document matches both `sequence.yaml` and `claudine.yaml`, shared
+keys have identical declarations. Upgrade `claudine.yaml`'s previously loose
+`sequence` declaration to the same imported sequence type so a later payload
+cannot weaken task validation. The general Claudine payload retains `agent`,
+`model`, and the other common frontmatter fields; neither trigger requires a
+document-level provider. The sequence root accepts `template` and the
+container's `operation`/`flow` according to their existing types. Add both new
+files to the embedded launch-validation bundle as well as disk discovery, and
+verify every relative import without a repository checkout. Installation
+instructions copy the whole schema bundle, rather than individual files.
 
 ## Evidence
 
@@ -362,8 +464,10 @@ launch. In the second, step 1 launched `codex` but reported
 ## Requirements
 
 1. **Rename.** Task `with:` replaces `params:` in the task parser, the
-   sequence runner (`claudine/lib/src/composition/sequence/task/mod.rs`,
-   `layered_overrides`; `claudine/cli/src/commands/wrap/sequence/task_run.rs`),
+   sequence runner (Claudine library's
+   [layered_overrides](../../../lib/src/composition/sequence/task/mod.rs), which
+   combines task input layers, and the Claudine CLI's
+   [task runner](../../../cli/src/commands/wrap/sequence/task_run.rs)),
    the reserved-key catalog, and every shipped prompt, fixture, test, doc page,
    and skill reference, including `prompts/review-loop.md`,
    `docs/topics/flow-control/sequences.md`, and `docs/cli/sequence.md`.
@@ -397,12 +501,15 @@ launch. In the second, step 1 launched `codex` but reported
 
 ## Acceptance criteria
 
-All L1 unless noted. Tests use `CliProcessFixture` with a private CWD and
+All L1 unless noted. Tests use the monorepo Test Toolkit and
+`CliProcessFixture` with a private CWD and
 home, stub providers (with stderr redirected), and `PLAYA_DRY_RUN` with a
 private spool; none launches a real provider or focuses a window; all are
 portable to macOS, Linux, native Windows, and WSL2. `just test` and `just lint`
 are green in `claudine/` and, for the schema fixtures, `darkmatter/` (DMLS
-included). No new CI cell.
+included). Run the review-screen L2 coverage with `just test-l2` in
+`claudine/`, using the terminal test harness without focusing a window.
+No new CI cell.
 
 1. **`with` on tasks.** A task `with:` reaches the task document with the
    section 1 precedence; `params:` on a step is plain step data readable as
@@ -411,9 +518,15 @@ included). No new CI cell.
    `proxy.with`, a `retry.with`, and a `prep.with` each resolves from its
    authoring file, including a task in a `kind: task` file in another
    directory and a `proxy` target in another directory; a caller setter still
-   resolves from the launch directory and wins.
+   resolves from the launch directory and outranks `with`. Include lazy
+   missing local files, eager missing-file errors, remote lazy values,
+   ambiguous file/string schema arms, an expression forwarding an already
+   anchored value, and a chained handoff whose target schema changes. Assert
+   an evaluation error installs no partial overlay.
 3. **Shape errors.** Each row of section 3 raises its error, for task `with`
-   and for `proxy.with`, pointing at the source.
+   and for `proxy.with`, `retry.with`, and `prep.with`, pointing at the source.
+   Whole-mapping interpolation gets its specific error rather than the generic
+   non-mapping error; reserved generated bindings remain protected.
 4. **Tasks name their providers.** A sequence document with no `agent` runs
    against stub providers: one task passes `agent: codex` through `with`, one
    runs a prompt declaring `agent: opencode`, inside a looping sequence. The run
@@ -422,24 +535,42 @@ included). No new CI cell.
 5. **Precedence.** A table-driven test covers each row of the precedence table
    once, including a caller setter `agent=gemini` overriding a task's
    `with.agent` and a nested file-reference sequence's own `agent` applying to
-   its tasks.
+   its tasks. Include runtime `set` overriding a caller setter, scalar/list
+   provider hints under canonical installed-provider rules, and model
+   environment precedence. A provider switch drops an incompatible inherited
+   model and clears stale `MODEL` when necessary.
 6. **Early failure.** A task naming a provider that is not installed fails
-   preflight, naming the task, before any task launches.
+   preflight, naming the task and its source, before any task launches, even
+   when its `when` is false. Shell-only and side-effect-only graphs run without
+   a provider, picker, or provider-resolution error.
 7. **Review screen** (L2). With a terminal, and some tasks without a hint of
    their own, tasks that have their own provider are read-only rows, and a
    choice on an editable row is the provider that launches.
 8. **Decided at launch.** A task whose `agent` reads `seq.outputs` is reported
    as decided at launch, does not gate the run, and launches on the value
-   composed at its turn.
+   composed at its turn. Repeat with a runtime-mutated value and a hint in a
+   concurrent leg using the group's start snapshot. Preflight executes no
+   child lifecycle action, shell substitution, or model-network refresh.
+   Retries and proxy provider switches report actual attempt identities;
+   skipped and blocked tasks claim no launched provider. An unresolved or
+   unavailable dynamic hint fails before that task spawns.
 9. **Schema.** `md schema triggers` picks up `sequence.yaml` for a sequence
    document with no `$schema:` pointer; `md schema validate` and DMLS accept
    every sequence example in 2026-10-24-sequence-containers and
    2026-10-25-loops-and-flow-control (saved as fixtures), and report
    `execution` and a typo'd key such as `max_paralel:` on a group object, and
-   `fail_fast` at a sequence document's root, by name. (Steps accept authored
-   data, so an unknown step key is step data, not a schema error.)
-10. **Sweep.** A repository-wide search for task `params:` returns only spec
-    snapshots and `timeline.md`; the shipped-prompt tests pass.
+   `fail_fast` at a sequence document's root, by name. A non-null malformed
+   `sequence: 42` or mapping activates the sequence trigger and fails payload
+   validation; missing/null `sequence` does not activate it. With both Claudine
+   triggers active, malformed task `with` still fails. Installed launch
+   validation resolves the embedded bundle's imports without checkout files.
+   Add valid and invalid fixtures at each of the three typed container levels
+   and a valid deeper fixture demonstrating the documented untyped boundary. Steps accept
+   authored data, so an unknown step key is step data, not a schema error.
+10. **Sweep.** No maintained task-input use of `params:` remains; ordinary
+    authored data named `params`, historical spec snapshots, and timeline
+    evidence remain intact. Shipped-prompt fixtures and tests use the new
+    grammar; tests of prompt snapshots remain opt-in under repository rules.
 
 ## Open questions
 

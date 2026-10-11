@@ -20,11 +20,15 @@ $schema:
     reviewed_by: string -> the agent and model used in the spec review
     reviewed_on: date -> the date the spec was reviewed
     review_iterations: number -> the number of implementation reviews have taken place in the review/fix cycle
+    clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented_by: string -> the agent who implemented the plan
     formerly: string -> the spec's previous `{date}-{name}`, when it was renamed in the 2026-10-10 restructure
     pipeline_step: number -> position in the claudine/docs/rollout-strategy.md pipeline
-reviewed: false
+reviewed: true
+reviewed_by: codex/gpt-6.1-sol
+reviewed_on: 2026-10-11
+review_iterations: 0
 human_review: false
 pipeline_step: 18
 formerly: 2026-09-21-schema-enhancements
@@ -41,7 +45,7 @@ related:
 
 # Schema Enhancements
 
-The current `SimplifiedSchema` is very helpful but it has some constraints that make it less capable and ergonomic than it could be. This specification tries to address that as well as some impacts to how Darkmatter and DMLS (Darkmatter's language server) build their internal model for function types.
+Darkmatter authors will be able to describe tuples and function signatures with SimplifiedSchema, use the same conversion rules for frontmatter and function arguments, and see proven call errors in DMLS (Darkmatter's language server) before composition runs. This specification defines the grammar, catalog migration, shared conversion engine, and editor checks needed for that behavior.
 
 > For reference, here is the most authoritative document we currently have for our schema support:
 >
@@ -59,7 +63,7 @@ The goals are:
 2. **One function catalog.** Replace Darkmatter's current expression-function catalog with a catalog written in the new grammar, housed in Darkmatter.
 3. **One coercion engine.** Darkmatter has exactly one set of conversion rules. The same engine converts frontmatter values when a document is validated against its `$schema`, and converts arguments before a function is called. Functions declare the types they need and stop converting their own inputs. **Every** catalog function moves onto the engine in one pass; there is no staged rollout.
 4. **Proportionate design-time checking.** Darkmatter classifies every argument into one of five categories, rejects documents containing calls that are proven wrong, and exposes the classification through an API. DMLS uses that API to show the same verdicts as the author types, with a strict-mode setting for authors who want more warnings. Composition and the editor must never disagree about a call. _(Editor work moved into this spec in clarification round 5.)_ The checks read variable types from a minimal [expression-variable type projection](#expression-variable-type-projection) built in this spec.
-5. **One numeric model.** Every Darkmatter number is an `f64`, and a value that `f64` cannot hold exactly is a type error, never silently changed (see [Numbers](#numbers)).
+5. **One numeric model.** Every Darkmatter number is an `f64`; whole-number admission preserves the input exactly, fractional input takes the nearest `f64`, and non-finite or non-zero-underflow results error (see [Numbers](#numbers)).
 
 The documents in this directory work together:
 
@@ -81,7 +85,7 @@ The charter's 2026-09-26 consolidation absorbed an early draft of this spec with
 
 | Topic | Outcome |
 |---|---|
-| Numbers | One representation, `f64`, plus an exactness check: a value `f64` cannot hold exactly is a type error (see [Numbers](#numbers)). This replaces this spec's earlier "exact 64-bit integer" rule and the charter's "accept ordinary rounding" rule at the point a value enters the number model. |
+| Numbers | One representation, `f64`, plus a whole-number exactness check; whole numbers must be exact whatever their spelling, decimals such as `0.1` take the nearest `f64`, and a non-zero value that underflows to zero is an error (see [Numbers](#numbers)). This replaces this spec's earlier "exact 64-bit integer" rule and the charter's "accept ordinary rounding" rule at the point a value enters the number model. |
 | Runtime `null` | Decision 20 stands: `null` is never converted, and a function receives `null` only on a parameter that declares `\| null`. Which parameters declare it follows the [migration-ledger null rule](#which-functions-accept-null). The charter's M2 ("ordinary functions reject null") is replaced by that rule. |
 | Nullable-argument warnings | Silent by default (category 2); `expressions.strict` warns. The charter's "a union including null warns" is withdrawn. |
 | Conversion spellings | This spec's lenient spellings (`" 4 "`, `"+4"`, `"1e3"`, `".5"`, `"1_000"`, boolean words in any case) win. |
@@ -103,7 +107,7 @@ This spec is careful to separate what is known while a document is being _writte
 
 - **Design-time type** — what a schema or signature says a value can be, known before anything runs. `number`, `string(min(3))`, and `any` are design-time types. An editor can only ever see these.
 - **Runtime value** — the actual value that exists when a document is validated or an expression is evaluated, such as `4`, `"4"`, `"pear"`, or `null`. The same design-time type `string` covers both `"4"` and `"pear"`.
-- **`any`, `unknown`, and `null`** — formal SimplifiedSchema types, added by `2026-10-16-core-schema-types` (Phase A). `unknown` admits every value, including null; `any` is an accepted alias for it. `null` admits only null. An untyped frontmatter variable has the design-time type `unknown`, and an optional typed property declared `number` has the design-time type `number | null`.
+- **`any`, `unknown`, and `null`** — formal SimplifiedSchema types, added by `2026-10-16-core-schema-types` (Phase A). `unknown` admits every value, including null; `any` is an accepted alias for it. `null` admits only null. As a function parameter type, `unknown` does not admit null; only an explicit `| null` does (see [Null Is a Type Like Any Other](#null-is-a-type-like-any-other)). An untyped frontmatter variable has the design-time type `unknown`, and an optional typed property declared `number` has the design-time type `number | null`.
 - **Text** — a string value. "Refined text" is a text type with its own validation: `file`, `date`, `url`, `email`, `enum(...)`, string literals, and the content types `json` and `yaml`.
 - **Coercion engine** — Darkmatter's single shared set of conversion rules. Given a runtime value and a target type, it either keeps the value, converts it, or reports a type error. It serves two surfaces: frontmatter validation and function calls.
 - **The two interfaces of a type** — every parameter type (and every frontmatter property type) describes two separate contracts, detailed in [Two Interfaces per Type](#two-interfaces-per-type):
@@ -114,7 +118,7 @@ This spec is careful to separate what is known while a document is being _writte
 - **Domain behavior** — what a function does with arguments that have already bound: its computation, its handling of `null` where it declares `| null`, and any error its own work can produce.
 - **Fallible** — a function that can return an error even when every argument bound, because its own work can fail (a file is unreadable, a network is down). A type mismatch alone never makes a function fallible; that error belongs to the coercion engine.
 - **Argument-type category** — one of five design-time verdicts on "does this argument's type fit this parameter's type?", described in [Argument-Type Categories](#argument-type-categories).
-- **Composition** — Darkmatter's processing of a document into its final output. Schema validation runs at the start of composition, before any expression is evaluated.
+- **Composition** — Darkmatter's processing of a document into its final output. The new passive call check runs before expression evaluation; frontmatter schema validation retains its established position after initial frontmatter interpolation.
 - **Overload** — one of several alternative signatures for the same function name, such as `pr_list(count)` and `pr_list(query)`.
 - **Constraint** — a refinement written inside a type's parentheses, such as `min(1)`, `max(3)`, `pattern(re)`, `integer`, or `required`. Some constraints (`category`, `example`) carry metadata rather than restricting values.
 - **Category** — a named group used to organize items in documentation, such as `Math` or `Filesystem`. Not to be confused with an _argument-type_ category.
@@ -159,12 +163,9 @@ Four function facts are deliberately **not** part of the `function(...)` grammar
 
 ### Grammar: Types Added
 
-> Note:
->
-> - one consistency concession I think we need to make for ergonomics is that function parameters and tuple elements should be considered required unless specified as optional.
-> - for people more involved in language structure this may seem like an obvious thing but for others it may be a surprise
-> - however I think that most of the people who would be writing schemas for functions would be a very limited subset and probably leaning toward more advanced in language design
-> - in a _way_ this isn't actually a full consistency break: both functions and tuples are describing _elements_ of a property in their own constraint block versus property definitions which are at a different level
+Document properties remain optional by default. Function parameters and tuple positions are required by default; `?` permits omission. This distinction makes `parameters(x: number)` mean one argument and `tuple([number, number])` mean two positions without adding `required` to each.
+
+Inside parameters and tuple positions, a type describes the value itself: the document-property optional-null wrapper is not applied. `x: number | null` still requires an argument, but accepts explicit null; `x?: number` permits omission but rejects explicit null. Likewise, `tuple([number?])` accepts `[]` and `[1]`, but not `[null]`. Phase A's null-admitting **property** presence rules do not make function arguments or tuple positions optional.
 
 #### Tuples
 
@@ -210,7 +211,7 @@ my_tuple: tuple([string, ...number[]])
 - to keep complexity within bounds the grammar only allows _one_ spread per tuple, and it must be the last element.
 - the `?` operator must not be applied to a variadic element because it's redundant: every variadic element is optional by nature (it may match zero values).
 
-Element order is therefore fixed: required elements, then optional (`?`) elements, then at most one spread. Any other order is a schema-load error.
+Element order is therefore fixed: required elements, then optional (`?`) elements, then at most one spread. Any other order is a schema-load error. The spread must name an array type (`...number[]`, including a grouped union array); a scalar spread is invalid. `tuple([])` is the empty tuple and accepts only an empty array. A supplied optional position is checked normally; omission never shifts a later supplied value to a different position.
 
 ##### Tuples in JSON Schema
 
@@ -225,10 +226,10 @@ The easy part is the generic **type**, which is just called `function`. The comp
 **A `function` type is description-only.** It describes a callable; it never validates data:
 
 - it may appear as a named type in a schema file's `types:` mapping, and nested inside another function's parameters or return type or inside a tuple element;
-- a document schema (`$schema` in a Markdown file's frontmatter) that declares a function-typed property is a **schema-load error**, because no frontmatter value can be a function;
+- a document schema (`$schema` in a Markdown file's frontmatter) that reaches a function type is a **schema-load error**, including through a named reference, union, array, tuple, or nested object; checking only direct properties would leave invalid shapes loadable;
 - no JSON Schema output is produced for `function`.
 
-Parsing a `function(...)` type produces a description only. It does not create an executable function; a Darkmatter function also needs a registered Rust implementation.
+Parsing a `function(...)` type produces a description only. It does not create an executable function; a Darkmatter function also needs a registered Rust implementation. Higher-order signatures may be described, but this spec adds no function runtime values, callbacks, or callable serialization. An executable registration whose parameter or return requires a function value fails catalog registration; unused description-only named types remain legal.
 
 `parameters(...)` and `returns(...)` are both **required**; leaving either out is a schema-load error.
 
@@ -248,7 +249,7 @@ Parsing a `function(...)` type produces a description only. It does not create a
     doit: function( parameters(name: string, age?: number); returns(boolean) )
     ```
 
-    The `?:` symbol marks `age` as an _optional_ parameter. Optional parameters must follow all required parameters.
+    The `?:` symbol marks `age` as an _optional_ parameter. Optional parameters must follow all required parameters. Names must be unique. At most one rest parameter is allowed, it must be last, and it cannot carry `?`. `void` cannot be mixed with other parameters. Unknown constraints and duplicate singleton constraints (`parameters`, `returns`, `category`, `fallible`) fail schema loading; repeated `example` constraints are allowed.
 
     > Note: being an "optional parameter" (it may be omitted) is distinct from having a union type that includes `null` (it may be passed an explicit `null`). `age?: number | null` allows both.
 
@@ -336,7 +337,7 @@ pr_list:
         ) -> Lists pull or merge requests matching a structured query.
 ```
 
-Which signature a call uses is decided by the order-independent rules in [Overload Selection](#overload-selection); reordering the list never changes the outcome. Two overloads with identical parameter lists are a **catalog-load error**.
+Which signature a call uses is decided by the order-independent rules in [Overload Selection](#overload-selection); reordering the list never changes the outcome. Two overloads with identical binding contracts are a **catalog-load error**. Compare resolved parameter types, constraints, optional/rest positions, and registered source exclusions; parameter names, descriptions, examples, categories, return types, aliases such as `any`/`unknown`, and union ordering do not distinguish overloads. This prevents spelling differences from creating a call that can only be ambiguous.
 
 ##### Example
 
@@ -408,7 +409,7 @@ Today Darkmatter embeds `darkmatter/docs/schemas/expression-functions.yaml` at b
 Requirements:
 
 1. **Home.** The new catalog is `darkmatter/schemas/partials/functions.yaml` (decided 2026-10-10; charter M8), in line with `2026-09-17-remove-strict-mode`. Its companion `claudine/docs/schemas/partials/mutations.yaml` describes Darkmatter's document mutations and moves with it to `darkmatter/schemas/partials/mutations.yaml`. Darkmatter embeds the catalog; Claudine reads it through Darkmatter's library API rather than from its own copy, and Darkmatter never depends on Claudine for its built-ins.
-2. **Consumers.** Every current consumer switches to the new catalog: the Darkmatter library, DMLS, and `claudine context --expressions`.
+2. **Consumers.** Every current consumer switches to the new catalog: the Darkmatter library, DMLS, and `claudine context --expressions`. Preserve registered aliases and case-insensitive lookup, but list each canonical function only once. Unknown-function suggestions use the same registry. Schema changes must update public catalog descriptors and generated references together; consumers must not retain the old reduced type vocabulary or a second hand-maintained signature list.
 3. **Discovery.** Both files are types-only schema files. Types-only files never auto-apply to documents; 2026-09-17-remove-strict-mode already guarantees this, so no extra exclusion is needed.
 4. **Completeness.** The draft is missing 14 functions that are still implemented. Each must be added: `has_binary`, `has_alias`, `has_builtin_function`, `has_user_function`, `can_execute`, `has_agentic_cli`, `package`, `package_area`, `recent_commits`, `ipv4`, `ipv6`, `ping`, `ping_under`, and `as_markdown`. Two new functions join the catalog: `keys(obj: object): string[]` and `values(obj: object): any[]` (see [Map Functions](#map-functions-keys-and-values)). `is_file_type`, which some drafts already list, is added by `2026-10-31-type-aware-evaluation`, not here.
 5. **Examples carried over.** All 117 examples in the old catalog are carried over: the 72 marked `verification: executable` as executable examples, and the rest as `display-only:` examples with their existing reason, or as file-form examples where the result spans several lines.
@@ -503,8 +504,8 @@ What stays is `file_exists`'s own domain behavior: a provably malformed literal,
 
 `null` is a formal type. The engine never converts `null` into anything (`0`, `false`, `""`, `"null"`, or omission).
 
-- A function that wants to receive `null` declares it: `min(a: number | null, b: number | null): number | null`. The engine keeps `null`, and the function handles it in its compute step.
-- A function that does not declare `| null` on a parameter never sees a `null` there. A null argument to such a parameter is a type error.
+- A function that wants to receive `null` declares a null-admitting type: `min(a: number | null, b: number | null): number | null`. The engine keeps `null`, and the function handles it in its compute step.
+- A function that does not declare `| null` on a parameter never sees a `null` there. A null argument to such a parameter is a type error. This includes an `unknown` (`any`) parameter: only an explicit `| null` admits null, so a function that accepts anything including null declares `unknown | null`.
 
 **Example.** A document declares `low: number` (optional, so its design-time type is `number | null`) and leaves `high` untyped. The frontmatter omits `low` and sets `high: pear`. The call `min(low, high)` against `min(a: number, b: number): number`:
 
@@ -572,7 +573,7 @@ _Decided 2026-10-10; replaces decisions 23 and 33 and the charter's M4–M7, M15
 
 **One representation.** Every Darkmatter number is an `f64`: literals, frontmatter values, converted text, function arguments and results, calculations, and comparisons. `number(integer)` is a constraint on the value (no fractional part, and below `2^64`), not a separate storage type. There is no exact-integer or arbitrary-precision subsystem.
 
-**The exactness check.** A value enters the number model only if `f64` holds it without changing it; otherwise the engine reports a type error with the reason "cannot be represented exactly". It never rounds, truncates, saturates, or clamps a whole number to make it fit. The check applies wherever a value becomes a number: text converted by the engine or by `number()`/`round()`, native YAML or JSON numbers in frontmatter and function arguments, and numeric literals in expressions.
+**The exactness check.** A whole number must be represented exactly, whatever its spelling: `9007199254740993`, `9007199254740993.0`, and `9.007199254740993e15` are all the same whole number and all error. A decimal (a value with a non-zero fractional part) takes the nearest `f64`, so `0.1` is accepted. A non-zero value that underflows to zero is an error. Otherwise the engine reports a type error with the reason "cannot be represented exactly". Whether a value is whole is decided on the mathematical input before conversion, so YAML/JSON loaders, expression literals, and numeric schema metadata keep the numeric spelling (or an equivalent lossless parsed value) until admission; `f64` stays the only runtime representation. A caller that supplies an existing `f64` gets a finiteness check only, since Darkmatter cannot recover digits lost before the value reached it. It never rounds, truncates, saturates, or clamps a whole number to make it fit. The check applies wherever a value becomes a number: text converted by the engine or by `number()`/`round()`, native YAML or JSON numbers in frontmatter and function arguments, and numeric literals in expressions.
 
 | Input | Result | Why |
 |---|---|---|
@@ -580,7 +581,8 @@ _Decided 2026-10-10; replaces decisions 23 and 33 and the charter's M4–M7, M15
 | `"9007199254740993"` | type error | `f64` would store `9007199254740992` |
 | YAML `count: 9007199254740993` against `count: number` | validation error | the same check on a native integer |
 | `"18446744073709551615"` (`u64::MAX`) | type error | `f64` would store `2^64` |
-| `"0.1"`, `"1.2"`, `"1e3"` | the nearest `f64` (`0.1`, `1.2`, `1000`) | text with a decimal point or exponent is a decimal fraction; its nearest `f64` is the value, as in every language that uses binary floating point |
+| `"0.1"`, `"1.2"`, `"1e3"` | the nearest `f64` (`0.1`, `1.2`, `1000`) | decimals take the nearest `f64`; `1e3` denotes the exactly representable whole number 1000 |
+| `"9007199254740993.0"`, `"9.007199254740993e15"` | type error | a whole number in decimal or exponent spelling gets the same whole-number check |
 | `"1e400"` | type error | not finite |
 | `"1e-400"` | type error | a non-zero value would become `0` |
 
@@ -662,7 +664,7 @@ For lists, tuples, and structured objects, the engine walks into the value follo
 - a single value is never wrapped into a list;
 - a plain `object` or `any` has no declared structure, so its contents are kept as they are.
 
-In frontmatter this means the engine now reaches nested objects too; today it stops at top-level properties, typed arrays, and inline objects.
+In frontmatter this preserves existing inline-object conversion and adds the missing paths through unions, preservation types (`numberlike`/`boolish`), and pattern-key dictionaries. Missing optional object properties remain missing inside the engine; defaults and top-level optional-property materialization stay with their existing schema stages.
 
 | Signature | Runtime value | Outcome |
 |---|---|---|
@@ -744,6 +746,16 @@ Moving frontmatter onto the shared engine intentionally changes some results. Th
 
 Validation-only calls stay non-mutating, and compose's write-back of converted values is unchanged in shape. The JSON Schema that `numberlike` and `boolish` compile to (today `anyOf` a number or boolean and a text pattern or enum) must accept the same text as the engine: both compile to the custom formats `darkmatter-numberlike` and `darkmatter-boolish`, registered with the validator and backed by the canonical parser, because a regex cannot express the exactness check. The resulting change to `md schema detect --format json` output and its snapshots is intentional; external consumers that ignore unknown formats become looser, which is acceptable.
 
+#### Raw JSON Schema Conversion Boundaries
+
+Reader's note: a conversion translator is not a replacement validator. Raw schemas retain Draft 2020-12 behavior: `oneOf` requires exactly one matching alternative, `$ref` siblings still apply, and a key matching both `properties` and `patternProperties` must satisfy both. `additionalProperties` applies only to keys covered by neither. These rules differ from the SimplifiedSchema dictionary convenience rule and must not be erased during translation. See [JSON Schema's applicator rules](https://json-schema.org/draft/2020-12/json-schema-core#section-10) and [reference rules](https://json-schema.org/draft/2020-12/json-schema-core#section-8.2.3).
+
+Candidate conversions are built from the original value, independently; never feed one candidate's changes into the next. Discard any candidate that fails the complete applicable schema, including unmodeled assertions, before choosing among valid candidates with the union rules. If the original value fully validates, keep it. For overlapping property declarations, commit only a conversion satisfying every applicable declaration; conflicting converted readings error instead of depending on traversal order. No partial write-back occurs after failure. For example, `{oneOf: [{type: number}, {type: integer}]}` rejects `"3"`: the converted `3` matches both alternatives.
+
+Local references use the validator's resolved identity and dialect; translation must not treat every `#...` as a root JSON pointer when `$id` or anchors change its meaning. Unmodeled or cyclic shapes remain validation-only with a bounded traversal; they never become unconstrained success. Unresolved references retain existing schema errors and never trigger a new network fetch. Referenced schema resolution stays in the captured request context.
+
+Unsupported conversion keywords still constrain the final value. For `{type: number, multipleOf: 2}`, `"3"` fails and `"4"` may convert to `4`. Raw `integer` retains its standard whole-number meaning; the SimplifiedSchema `number(integer)` ceiling is not applied to a raw schema unless explicitly authored.
+
 #### Spike Rulings (Decided 2026-10-10)
 
 Two throwaway spikes ran on 2026-09-26 (`spikes/single-engine/`, `spikes/coercion-baseline/`). Their open questions are settled:
@@ -751,7 +763,7 @@ Two throwaway spikes ran on 2026-09-26 (`spikes/single-engine/`, `spikes/coercio
 1. **Engine structure.** One rule core over a neutral shape type, fed by two translators (compiled or raw JSON Schema → shape, used by frontmatter; grammar descriptors → shape, used by function calls and design-time checks). Translators map syntax only and never decide keep/convert/error; a conformance test binds every grammar case through both translators and requires identical outcomes. The callers that pick union options themselves today (`compose/schema_validation.rs::root_schema_arm_applies`, `schemas/rewrite.rs`, `schemas/example.rs`) call the engine instead.
 2. **Raw JSON Schema** converts through every keyword the translator models (the Changes table row above).
 3. **The Changes table** includes enum/literal refined text and pattern-key values (rows above).
-4. **Key order.** The workspace enables `serde_json`'s `preserve_order` feature, so a native mapping serialized into `json` keeps its written order (criterion 33). Because Cargo unifies features across the workspace, every crate's `serde_json::Map` becomes insertion-ordered; snapshots and tests whose expectations relied on sorted keys are updated in the same change, and `docs/dependencies.md` records the feature.
+4. **Key order.** The workspace enables `serde_json`'s `preserve_order` feature, so a native mapping serialized into `json` keeps its written order (criterion 33). Because Cargo unifies features across the workspace, every crate's `serde_json::Map` becomes insertion-ordered; audit existing consumers that rely on sorted serialized output before updating expectations. Preserve an established stable-order contract by sorting explicitly at that consumer; update snapshots only where insertion order is the intended change. Include recursively nested maps and maps built by functions: their order is insertion order, which need not be source order. `docs/dependencies.md` records the feature.
 5. **Nested objects.** The row is restated as above: the gaps were unions, `numberlike`/`boolish`, and dictionary values inside nested objects, not nested objects as such.
 6. **Null.** The [migration-ledger null rule](#which-functions-accept-null) replaces the spike's suggested `propagates-null` flag.
 7. **Conversion functions.** `number()` and `round()` take the charter contract ([below](#function-contracts-carried-from-the-charter)).
@@ -795,7 +807,7 @@ Order is the map's stored order, which `preserve_order` makes the written (inser
 
 #### Performance
 
-This spec sets no numeric performance targets. Before/after measurements on representative repository documents (composition and DMLS analysis, same host, same fixtures, checking cost isolated from unrelated I/O) are recorded in the implementation log for the engine, including the frontmatter path it replaces; any regression is explained there for review. Existing expression depth and resource bounds are preserved. No CI job is added for this.
+This spec sets no numeric performance targets. If the existing spike results do not already answer the implementation's cost question, record one quick before/after sample on one host using an existing representative fixture, with checking cost separated from unrelated I/O. Explain a visible regression in the implementation log. No additional hosts, workload matrix, repetitions, statistical threshold, or CI job are required. Existing expression depth and resource bounds are preserved; compile descriptors once and reuse them rather than parsing the catalog for each call or editor diagnostic.
 
 ### Design-time Checking
 
@@ -803,7 +815,7 @@ _Confirmed in the use-case review of 2026-09-25; scope settled in clarification 
 
 #### Design Time and Runtime
 
-An editor sees only design-time information: schemas, signatures, and literals, never runtime values. Darkmatter's schema validation evaluates the same design-time setup at the start of composition, before any expression is evaluated. Unlike TypeScript, declared types are still available at runtime.
+An editor sees only design-time information: schemas, signatures, and literals, never runtime values. Darkmatter's passive call check reads the same design-time setup before any expression is evaluated; schema validation and conversion retain their later position after initial frontmatter interpolation. Unlike TypeScript, declared types are still available at runtime.
 
 So the five categories below drive two consumers:
 
@@ -811,6 +823,18 @@ So the five categories below drive two consumers:
 - **DMLS** (this spec, since clarification round 5) turns them into editor diagnostics as the author types; see [Editor Diagnostics](#editor-diagnostics).
 
 For everything else, the engine decides per runtime value when the call runs. A call that raises nothing at design time can still fail at runtime; silence means "not proven wrong," not "proven right."
+
+**Check before evaluation.** The current Darkmatter [compose pipeline](../../../darkmatter/lib/src/markdown/compose/mod.rs) evaluates frontmatter interpolation before schema validation. Therefore the new call check is a passive preparation step before that interpolation, using a resolved schema and declared types, without executing expressions to discover types. Reuse Darkmatter's [prepared-expression validation](../../../darkmatter/lib/src/markdown/compose/expression/prepared.rs), which already walks every branch without evaluation. Preserve the established interpolation → schema conversion → shell expansion order after this check. The check must reject a bad frontmatter call before a sibling expression can perform a side effect. DMLS checks the same authored expressions and types.
+
+```mermaid
+flowchart LR
+    A[Resolve schema and declared types] --> B[Check authored calls without evaluation]
+    B --> C[Interpolate frontmatter]
+    C --> D[Validate and convert frontmatter]
+    D --> E[Expand approved shells and compose body]
+```
+
+Check only executable authored syntax: frontmatter expressions, body expressions, and conditional block expressions within the requested composition surface. Examples in fenced code, literal tokens, inserted data, and a body excluded by `only_frontmatter_surface` are not executable syntax. A transcluded document is checked in its own schema and origin before its evaluation; this spec does not require fetching unseen documents solely to reject the parent before any parent evaluation.
 
 **Branches that do not run** _(decided 2026-10-10)_. The check covers every call in every expression of the document, including both branches of a ternary, both sides of `||` and `&&`, and the body of a conditional block whose condition is false. A category 5 call in a branch that will never run still rejects the document at composition, exactly as DMLS reports it as an error. `true ? 'ok' : min(flag, 5)` with `flag: boolean(required)` is rejected even though `min` would never be called.
 
@@ -824,9 +848,10 @@ One Darkmatter library function derives, from a document's `EffectiveSchema`, a 
 |---|---|
 | A top-level property declared `A(required)` in the document's typed projection (`EffectiveSchema.simplified`, single shape) | `A`, constraints included |
 | A top-level property declared `A` without `required` | `A \| null` |
-| A top-level property-level union (`[string(required), number(required)]`) | the union of its options, plus `\| null` unless every option is `required` |
+| A top-level property-level union (`[string(required), number]`) | the union of its options, using the shared effective presence rule: a required marker on any arm requires the property unless its whole-value type explicitly admits null or `unknown` |
 | A top-level property that the schema does not declare, or any variable when the effective schema has no typed single-shape projection (raw JSON Schema, a mixed root union) | `unknown` |
-| A path below a top-level property (`meta.count`), a reserved root (`fm`, `ctx`, `env`, `err`, `timing`, `current`, `seq`, `loop`, `group`), or a host global | `unknown` |
+| A static frontmatter access (`fm.size` or `fm["size"]`) | the same projected type as the top-level property `size` |
+| A path below a top-level property (`meta.count` or `fm.meta.count`), bare `fm`, a dynamic index (`fm[key]`), any other reserved root (`ctx`, `env`, `err`, `timing`, `current`, `seq`, `loop`, `group`), or a host global | `unknown` |
 | A literal (`5`, `"pear"`, `[1, 2]`) | judged by its value, as the [classification notes](#argument-type-categories) say |
 | Any other expression (a call, an operator such as `maybe \|\| 0`, a ternary) | `unknown` |
 
@@ -834,7 +859,8 @@ Rules:
 
 - The projection is passive: it reads no file, runs no expression, and never inserts or replaces a property to supply a name or a type.
 - It is deterministic and independent of mapping order or validator error order.
-- Optionality is a default constraint: an optional `A` is `A | null` because `null` is how YAML says "not supplied". `required` removes `| null`. `unknown` and `null` keep their Phase A meaning, so `unknown(required)` is still `unknown`.
+- Frontmatter namespace access follows `2026-10-18-fm-namespace`: `fm.size` and `fm["size"]` are static aliases of the document property, not host globals. A bare reserved name still resolves to its registered root, so a document property named `env` is typed through `fm.env`, never by assigning its type to the bare `env` root. This prevents a namespace spelling from bypassing a proven type error without adding nested-path inference.
+- Use the same resolved presence calculation as schema lowering and validation, including inherited and hoisted markers, rather than requiring every union arm to carry `required`. An optional `A` includes `| null`; a concrete required whole value does not. An explicitly null-admitting whole value stays optional even with `required`, as Phase A specifies. `unknown(required)` remains `unknown`. This corrects accidental disagreement with the prerequisite specs; it is not a new presence policy.
 
 Under this projection rows a–e of the worked example below are exact, and row d (`min(flag, 5)`) is rejected at composition. Rows f–i need return types, operator typing, and narrowing, which `2026-10-31-type-aware-evaluation` adds.
 
@@ -854,12 +880,15 @@ The principle, in the author's words: _"if you don't type at all you are given l
 
 Classification notes:
 
-- **Unions.** A union argument whose non-null options all fit (exactly or by an always-safe conversion) is category 1, or category 2 if it also admits `null`. If every option is known to be wrong, it is category 5. Anything in between is category 3.
-- **Conversions.** Typed text to a `number` or `boolean` parameter is category 3. A typed number or boolean to a text parameter is category 1, and so is any value to a `json`/`yaml` parameter.
+- **Unions.** A union argument whose non-null options all fit (exactly or by an always-safe conversion) is category 1, or category 2 if it also admits `null` that the target rejects. If every option is known to be wrong, it is category 5. Anything in between is category 3.
+- **Conversions.** Typed text to a `number` or `boolean` parameter is category 3. A typed number or boolean to a text parameter is category 1. A native non-null object, list, number, or boolean to `json`/`yaml` is category 1; arbitrary text is category 3 because it must parse as the target content format. Null is accepted only by a null-admitting target, and `unknown` follows category 4. For example, literal `"{a"` to `json` is category 5, while typed `string` to `json` is category 3.
 - **`numberlike` and `boolish`.** A `numberlike` argument to a `number` parameter is category 1 (its text always converts), and so is a `numberlike` argument to a `string` parameter, or a `number` argument to a `numberlike` parameter. Typed text to a `numberlike` parameter is category 3. `boolish` follows the same pattern against `boolean`.
 - **Constraints and refinements do not warn.** Categories are judged on types; constraints are enforced at runtime. A typed `string` to `string(min(3); max(3))`, a typed `number` to the same parameter, and a typed `number` to `number(integer)` are all category 1. Refinements (`file`, `date`, `url`, `email`, `enum`) are judged the same way: a typed `string` or `number` to a `file` or `enum` parameter is category 1, and the refinement is checked on the value at runtime.
 - **Literals** are the only arguments judged by their actual value, constraints and refinements included: a literal certain to bind (`"4"` to `number`, `2026` to `string`) is category 1; one that cannot (`"pear"` to `number`, `0` to `number(min(1))`, `"purple"` to `enum("red","green")`, `min("pear", 5)`) is category 5.
 - **Wrong argument count**, and a definite overload ambiguity, are always category 5.
+- **Null accepted by the target.** `number | null` to `number | null` is category 1; category 2 is only for an otherwise compatible source that can be null when the target rejects null. Only an explicit `| null` accepts null: any non-null source to `unknown` is category 1, a source that can be null to a plain `unknown` parameter is category 2, and any source to `unknown | null` is category 1.
+- **Registered exceptions.** Source exclusions and conversion recovery are part of whole-call classification, not just the runtime binder. `length(true)` is category 5 even though boolean → text normally works. `number("pear", 7)` and `round(true, 7)` are category 1 because their valid fallback recovers the first-argument binding failure; their first argument must not independently cause a category 5 rejection. `number("4", "x")` remains category 5 because the supplied fallback must bind. A typed incompatible first argument with a valid literal fallback is likewise recoverable.
+- **Passive refinements.** Literal checks perform only validation that needs no I/O. File existence, remote access, command lookup, and repository state are domain or composition concerns; they cannot make a literal category 5 in an editor. A structurally valid file reference remains runtime-checked against the captured request context.
 
 #### Worked Example: One Schema, Nine Calls
 
@@ -874,7 +903,7 @@ $schema:
     foo:                       # required  → string | number
         - string(required)
         - number(required)
-    # untyped_var has no schema entry     → any
+    # untyped_var has no schema entry     → unknown
 ```
 
 The functions:
@@ -944,7 +973,7 @@ Many Darkmatter functions are lenient today and declare `any` parameters. The on
 
 #### Design-time Compatibility API
 
-Darkmatter exposes a fast design-time query: "given an argument of design-time type A and a parameter of type B, which [argument-type category](#argument-type-categories) applies?" The answer is one of the five categories (or a classification that maps exactly onto them). Literals are checked by value through the same rules the runtime uses. DMLS is the most important client. A batch form may be offered if measurement shows a benefit.
+Darkmatter exposes a fast design-time query: "given an argument of design-time type A and a parameter of type B, which [argument-type category](#argument-type-categories) applies?" The answer is one of the five categories (or a classification that maps exactly onto them). Literals are checked by value through the same rules the runtime uses. DMLS is the most important client. It also exposes whole-call classification with arity, overload selection, source exclusions, and recovery metadata, so callers cannot misclassify a recoverable argument in isolation. A batch form may be offered if measurement shows a benefit.
 
 The rules live in Darkmatter only; DMLS and Claudine call this API rather than reproduce them. See [coercion-design.md](./coercion-design.md#public-compatibility-api-and-dmls).
 
@@ -988,7 +1017,9 @@ Requirements:
 3. **No function converts its own inputs.** Every function's own arity checks, type checks, and conversion code are removed, along with the shared conversion helpers that only served them. Conversions that _are_ a function's purpose, such as `number()`, remain as documented domain behavior.
 4. **The old catalog is deleted.** `darkmatter/docs/schemas/expression-functions.yaml` has no remaining reader and is removed.
 5. **Per-function items resolved.** The [per-function items](#per-function-items-for-the-catalog-migration) are decided within this spec, and the catalog records the outcome.
-6. **Behavior-change ledger.** Every function's behavior, measured against the baseline in [current-state-coercion.md](./current-state-coercion.md), is recorded as either **preserved** or **intentionally changed**, with a one-line reason for each change. Nothing is left "to be decided". The ledger is reviewed by the human before merge.
+6. **Lazy calls.** `and` and `or` retain short-circuit evaluation. The passive check visits all authored arguments, but the runtime binder evaluates and binds only an argument the function actually needs. A skipped argument never runs a function, filesystem probe, or provider call. Do not route lazy calls through an eager argument-array builder merely to reuse binding.
+7. **Return contracts.** Returned values must already satisfy the declared return type; never coerce a handler result to conceal a wrong implementation. Validate pure value constraints without probing files or remotes. A wrong return shape is a typed implementation-contract error, distinct from argument rejection and a declared domain failure. Cover it with a deliberately faulty test handler.
+8. **Behavior-change ledger.** Every function's behavior, measured against the baseline in [current-state-coercion.md](./current-state-coercion.md), is recorded as either **preserved** or **intentionally changed**, with a one-line reason for each change. Nothing is left "to be decided". The ledger is reviewed by the human before merge.
 
 **Suggested order within the pass.** The earlier pilot functions (`min`, `is_number`, `number()`, and both `pr_list` forms, which together exercise conversion, `any` pass-through, a constraint, and overloads) are a sensible place to start building, as described in [coercion-design.md](./coercion-design.md#suggested-implementation-order). This is an order of work, not a stopping point: the spec is not done until every function has moved.
 
@@ -1107,10 +1138,14 @@ Decisions 1–15 were confirmed by the human on 2026-09-25 in a clarification pa
 74. **Charter-only function contracts are owned here:** numeric presentation (M6), `validate_schema` merging (M9), text-based `contains` (M10), and operator consistency (M15). Strict-root validation and the `is_known_variable_root` hook are struck from the type system.
 75. **Spike rulings:** raw JSON Schema converts through every keyword the translator models; the Changes table adds enum/literal text and pattern-key values; `serde_json` `preserve_order` is enabled; the nested-objects row is restated; `pr_list` and `cicd_list` keep `max(100)`, matching their handlers.
 76. **`keys()` and `values()` join the catalog** for iterating over key/value maps such as `group.legs`.
+77. **Inline review, 2026-10-11: presence follows the prerequisites.** The variable projection uses the shared effective-property presence calculation; parameters and tuple positions keep their separate omission rules.
+78. **Inline review: call checks honor registration metadata.** Valid conversion fallbacks are not rejected at composition, lazy calls keep short-circuit behavior, and literal refinements remain passive. The passive document check precedes frontmatter evaluation.
+79. **Inline review: raw schemas keep their original assertions.** Conversion candidates must pass the complete applicable schema; `oneOf`, reference siblings, and overlapping key declarations cannot be reduced to permissive unions or first-match traversal.
+80. **Inline review: numeric wording distinguishes fractions from whole values.** Exact binary preservation cannot be required for `0.1`. Settled 2026-10-11: whole numbers must be exact in every spelling, decimals take the nearest `f64`, and a non-zero value that underflows to zero is an error.
 
 ## Acceptance Criteria
 
-Runtime criteria for function calls run through normal dispatch with a handler-invocation counter; functions named "test-registered" exist only in tests. Frontmatter criteria run through Darkmatter's schema validation and compose paths on fixture documents. Every criterion is an L1 test run with nextest through `just test` in `darkmatter/` (and in `claudine/` for the `claudine context --expressions` renderer); `just lint` passes in both areas. Grammar, schema, and catalog changes also get a passive shipped-artifact corpus test and an end-to-end test through `md compose`. No test focuses a terminal or browser window, every test is portable to macOS, Linux, native Windows, and WSL2, and no CI cell is added.
+Runtime criteria for function calls run through normal dispatch with a handler-invocation counter; functions named "test-registered" exist only in tests. Frontmatter criteria run through Darkmatter's schema validation and compose paths on fixture documents. Every automated criterion is an L1 test run with nextest through `just test` in `darkmatter/` (including DMLS) and in `claudine/` for the `claudine context --expressions` renderer; the ledger review remains a human review requirement. `just lint` passes in both areas. Grammar, schema, and catalog changes also get a passive shipped-artifact corpus test and an end-to-end test through `md compose`. No test focuses a terminal or browser window, every test is portable to macOS, Linux, native Windows, and WSL2, and no CI cell is added.
 
 ### Grammar and Catalog
 
@@ -1187,6 +1222,21 @@ Runtime criteria for function calls run through normal dispatch with a handler-i
 | 47 | `(A \| B)[]` uses the list-of-union representation. | `tags: (string \| number)[]` and the named-type form `t: [string, number]` used as `tags: t[]` lower to identical JSON Schema (`items: { anyOf }`); both accept `["a", 1]` and reject `[true]`; `["2", "yes"]` against `(boolean \| number)[]` converts element by element to `[2, true]` by the union rule. |
 | 48 | The variable-type projection. | A library test over the worked-example schema returns `size: number`, `maybe: number \| null`, `count: string \| null`, `flag: boolean`, `foo: string \| number`, and no entry (`unknown`) for `untyped_var`; a raw JSON Schema document and a mixed root union project every variable as `unknown`; projection performs no I/O (failing access stubs) and leaves the frontmatter unchanged. |
 | 49 | Calls in branches that do not run are checked. | Documents containing `true ? 'ok' : min(flag, 5)`, `size \|\| min(flag, 5)`, and a `::block when="false"` whose body calls `min(flag, 5)` (with `flag: boolean(required)`) are each rejected at composition before any expression is evaluated (counter at 0); DMLS reports an error on `flag` in each. |
+
+### Review-added Contract Checks
+
+| # | Criterion | How to validate |
+|---|---|---|
+| 50 | Projection agrees with property presence. | A union `[string(required), number]` projects without an implicit null arm; `[string(required), null]` remains optional; inherited required markers and `unknown(required)` agree with lowering. `min(fm.flag, 5)` and `min(fm["flag"], 5)` reject exactly like `min(flag, 5)` for a required boolean property, while bare reserved roots keep their registered meaning. `number | null` to a null-admitting parameter is category 1. |
+| 51 | Recovery agrees between composition and editor. | Compose and DMLS accept `number("pear", 7)`, `number(true, 7)`, `number(null, 7)`, and `round("pear", 2.7)` without an argument error; reject `number("4", "x")`, `number("pear")`, and missing required arguments. Repeat with a typed boolean first argument and valid literal fallback. |
+| 52 | Content-format classification matches binding. | Typed `string` to `json` is category 3; a valid literal JSON string is category 1; malformed literal JSON is category 5; a native object is category 1; null to a non-null target is category 5. |
+| 53 | Lazy evaluation is preserved. | `and(false, effect())` and `or(true, effect())` do not invoke a test-registered effect counter, while passive checking still rejects a proven bad call inside either skipped argument. |
+| 54 | Checking precedes effects and respects the requested surface. | A bad frontmatter call rejects before a sibling effect counter runs. Fenced examples, literal tokens, and inserted data are not checked as executable expressions. Frontmatter-only composition leaves an invalid body untouched; full composition checks it. |
+| 55 | Raw schema assertions survive conversion. | Cover overlapping `oneOf` number/integer alternatives; `$ref` siblings; a referenced number constrained by a sibling; overlapping literal/pattern keys; typed additional keys; unmodeled `multipleOf`; and a cyclic local reference. Failure leaves the input unchanged, and reordering alternatives or patterns cannot change the result. |
+| 56 | Grammar closes indirect invalid forms. | Reject scalar tuple spreads, duplicate parameter names, two/nonfinal/optional rest parameters, and `void` mixed with parameters. Reject a document schema reaching a function through each container/reference form. Accept `tuple([])` only for `[]`; optional numeric slots reject supplied null. |
+| 57 | Catalog identity and return contracts survive migration. | Canonical names and registered aliases resolve as before, documentation lists canonicals once, semantically duplicate overloads fail loading, and a deliberately wrong-return test handler reports an implementation-contract error without converting its result. |
+| 58 | Map ordering does not silently alter existing contracts. | Cover nested insertion order and function-built maps; keep existing stable-order consumers explicitly sorted. Review changed serialized-output expectations for intentional behavior rather than mechanically replacing snapshots. |
+| 59 | Numeric admission checks whole numbers in every spelling. | `"9007199254740993.0"`, `"9.007199254740993e15"`, and the native YAML `n: 9007199254740993.0` against `n: number` are rejected as "cannot be represented exactly"; `"-9007199254740992"` is accepted and `"-9007199254740993"` rejected; numeric defaults, literals, enum members, and constraints get the same check; an externally supplied finite `f64` is accepted and a non-finite one rejected. Keep the existing `0.1`, overflow, and underflow outcomes. |
 
 ## Open Questions
 

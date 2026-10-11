@@ -20,11 +20,15 @@ $schema:
     reviewed_by: string -> the agent and model used in the spec review
     reviewed_on: date -> the date the spec was reviewed
     review_iterations: number -> the number of implementation reviews have taken place in the review/fix cycle
+    clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented_by: string -> the agent who implemented the plan
     formerly: string -> the spec's previous `{date}-{name}`, when it was renamed in the 2026-10-10 restructure
     pipeline_step: number -> position in the claudine/docs/rollout-strategy.md pipeline
-reviewed: false
+reviewed: true
+reviewed_by: codex/gpt-6.1-sol
+reviewed_on: 2026-10-11
+review_iterations: 0
 human_review: false
 pipeline_step: 10
 formerly: 2026-09-21-lifecycle-ergonomics
@@ -41,7 +45,8 @@ related:
 
 Lifecycle events today have two shapes at once: a dictionary of notification
 fields, and a nested `stack:` of `action:` items. This feature replaces both
-with one shape — an event is an ordered list of actions — and adds `else`,
+with one action grammar — an ordered list with a compact dictionary form —
+and adds `else`,
 nesting, and a list home for loop concerns. Authors write less, read order
 directly off the page, and get a typed error with a replacement hint for every
 old spelling.
@@ -86,9 +91,11 @@ still reads frontmatter through the implicit namespace.
 
 Everything that defines the grammar lands in **Claudine**: the parser, the
 validator, the executor's audio-ordering change, and the migration. Darkmatter
-gains **no lifecycle machinery** — no engine, no grammar knowledge, no parser.
-What changes on the Darkmatter side is test and mirror material that must move
-with the grammar, listed in [Migration Sweep](#migration-sweep) bucket (f).
+gains no lifecycle parser or executor.
+Darkmatter's existing Claudine schema extension, editor path classifiers, and
+tests must move with the grammar, as listed in [Migration Sweep](#migration-sweep).
+These edits preserve existing integration surfaces; the lifecycle parser and
+executor remain in Claudine.
 
 The parser and action-model slice — `parse.rs`, `action_shape.rs`,
 `actions.rs`, `validate.rs`, `signatures.rs`, and `source_map.rs` under
@@ -107,7 +114,8 @@ a unit without untangling it first.
 
 ### Ergonomic shift
 
-An event is a list. There is no `stack:` key and no `action:` key. Unguarded
+The preferred event form is a list; the compact dictionary form expands into
+the same action model. There is no `stack:` key and no `action:` aggregator. Unguarded
 actions sit at the root of the list:
 
 ```yaml
@@ -142,15 +150,18 @@ today. The full verb list is the [Action Inventory](#action-inventory).
 
 ### Execution model
 
-The stack is an **ordered array and nothing else**. There is no concurrency
-between actions, no audio thread, and no bundle concept in the executor.
+The parsed stack contains ordered actions and conditional nodes with ordered
+branch bodies. Dictionary bundles are expanded during parsing; the executor
+never iterates a dictionary to choose action order. Actions dispatch serially.
+Playa playback and tracked message delivery keep their existing background
+behavior; this feature adds no concurrent action dispatch.
 
 - Items run strictly in the order written. A `set` mutation is visible to
   every action after it (today's behavior: the executor is a plain ordered
   loop, and `set` commits against a pre-write snapshot).
 - A **dictionary bundle** — a `when` item with sibling verb keys, or a whole
   stack written as a dictionary (see [Dictionary grammar](#dictionary-grammar))
-  — is **desugared at parse time** into an ordered action list. The order is
+  — is **expanded at parse time** into an ordered action list. The order is
   fixed:
     1. the `when` guard (if present; only a list item can carry one — a
        root-level dictionary never does)
@@ -159,7 +170,8 @@ between actions, no audio thread, and no bundle concept in the executor.
        `stderr`, `info`, `warn`, `success`, `message`, `notify`, then the audio
        verbs `effect`, `say`
     4. `shell`
-    5. Darkmatter side-effect verbs and expression functions
+    5. Darkmatter side-effect verbs and expression functions, sorted by
+       canonical verb name in ascending ASCII order
     6. the single flow-control key, last
 - A root-level dictionary **never carries `when`**: a guarded action needs
   the list form. This is today's rule — the key set the parser reads at a
@@ -167,8 +179,10 @@ between actions, no audio thread, and no bundle concept in the executor.
   loose verb keys the same way.
 - Audio (`say`/`speak`, `effect`) is **published** to Playa in stack order and
   never blocks on playback. See [Background audio](#background-audio).
-- An event is **complete** when its non-audio work has finished and its audio
-  has been published — never "when the audio has played".
+- An event is **complete** when its synchronous work has finished, message
+  deliveries have been registered, and its audio has been published. Existing
+  message delivery tracking and CLI shutdown draining still apply; returning
+  from an event does not prove that an outbound message has arrived.
 - Audio drains across flow-control transitions: when `retry`, `resume`, or
   `proxy` fires, audio already published keeps playing in queue order and the
   next flow state's audio queues behind it. There is no cancel API.
@@ -220,22 +234,27 @@ start:
       say: "do you have any water?"
 ```
 
-The bundle desugars in the canonical order above: the guard first, then
+The bundle expands in the canonical order above: the guard first, then
 `message` before `say`. The author does not choose the order; that is the trade
 for the compact spelling. A bundle:
 
 - cannot order its operations; the canonical order applies
-- holds each verb at most once
-- allows no long-form actions
+- holds each canonical verb at most once (`say` and `speak` count as the
+  same verb and cannot coexist in one dictionary)
+- uses short-form actions when it contains several verbs; long form is
+  permitted only in a dictionary containing one verb, as described below
 - holds at most one flow-control key, which runs last
 - may not carry `then` or `else`; an item that needs `else` uses `then` for the
   true branch instead of sibling verbs
 
-One extra sibling key is permitted: `no_error: true`, applying to every action
-in the item. (`no_error` means a side-effect dispatch failure — a channel, TTS,
-or shell action that evaluated fine but whose effect failed — is logged and
-does not stop the stack or change the outcome. It never suppresses an
-expression-evaluation error.)
+One extra sibling key is permitted: `no_error: true`, applying to every
+eligible action in the item. A mixed bundle may contain `set`, but the sibling
+flag never applies to that mutation; `{set: {...}, no_error: true}` by itself
+is rejected. The flag must be a YAML boolean, and defaults to `false`.
+A dispatch failure is a channel, TTS, or shell operation that failed after
+its parameters evaluated successfully. With `no_error`, that failure is
+logged and does not stop the stack or change the outcome. The flag never
+suppresses an expression-evaluation error.
 
 ```yaml
 success:
@@ -257,22 +276,75 @@ start:
 It runs `message`, then `say`, then `shell`. A root dictionary follows the
 bundle rules above and **never carries `when`**.
 
+### Shape validation and branch execution
+
+An omitted or `null` event, `[]`, and `{}` are empty stacks. An explicitly
+provided `then:` or `else:` must contain at least one action; `null`, `[]`,
+and `{}` are errors there. An item containing only `when` or `no_error` is
+also an error. Unknown item keys and unknown long-form parameters are errors,
+never silently discarded. Validate removed keys before filtering lifecycle
+concerns out of `loop:`, so an old `loop.stack` cannot disappear unnoticed.
+Duplicate YAML keys remain subject to the frontmatter parser's existing
+handling; this feature does not introduce a second YAML decoder.
+
+Parse and validate both branches before execution, including branch shape,
+verb placement, expression syntax, nested-span checks, and shell approval.
+The `initialize` shell prohibition also covers whole-value `$(...)` values
+inside `set`, even in an unselected branch. Preserve the existing early
+binding rule: approved shell command bytes are fixed at preflight, and all
+nested branches contribute commands to that approval pass.
+
+At event time, evaluate a `when` exactly once against the current live state.
+Use Darkmatter's existing truthiness rules. Execute only the selected body;
+an omitted `else` does nothing when the guard is false. Apart from shell
+approval, unselected operands are not evaluated and produce no effects.
+An expression failure is never treated as a false guard and cannot select
+`else`. Preserve the current per-event failure routing and exactly-once
+`finalize` behavior; no new catch-event recursion is introduced.
+
+Preserve each action's authored source path while expanding dictionaries.
+For example, an error in `failure[0].else[1].shell.command` names that path,
+not a synthetic action index. The shared expression walker and source map
+must recurse through `then` and `else`, including `set` and `retry.with`
+values, for binding checks, nested-span diagnostics, and shell collection.
+DMLS classifies the same authored paths. This keeps validation from missing
+an action merely because it is inside a new branch shape.
+
 ### Long form
 
 The short form `{verb}: {value}` covers the one required parameter. The long
 form `verb: { <params>, no_error?: bool }` exposes optional parameters.
+A one-verb dictionary at a stack root, as a list item, or as a branch body
+may use long form: `start: {shell: {command: "git status"}}`. Several sibling
+verbs use short form only; use a list when several actions need named
+parameters. A sibling `no_error` and an inner `no_error` on the same action
+are an ambiguous shape and are rejected, even if their values agree.
+
+A mapping under a verb is its named-parameter form, except `set`, whose
+mapping is always mutation data. Preserve today's value typing: ordinary
+strings are literal; `{{ ... }}` evaluates an expression; whole-value spans
+retain their native type. The existing rules for object-valued arguments,
+required parameters, positional arity, and optional defaults remain in force.
+For example, a short-form `http_post` body that is an object is passed through
+a whole-value interpolation, rather than mistaken for action parameters.
 
 `no_error` has exactly two homes: a parameter of any long-form action map
 (`- shell: { command: "post-summary.sh", no_error: true }`), and the
 dictionary-item sibling above. It is not accepted beside `then`/`else` on a
-`when` item. `set` has neither home: it has no long form, and a failed `set` is
-an expression-evaluation error, so `no_error` on `set` is rejected.
+`when` item. `set` has no long form and accepts no action-specific
+`no_error`; a bundle-level flag excludes `set`, as described above. This
+rule covers all mutation failures, including a failed shell-valued assignment.
+The change does not reclassify dispatch failures as expression failures.
 
-Every directive that moves to another document — one that re-reads or
-recomposes a document — takes an optional `with` overlay, applied to the target
-of the transition, for that transition only, never written to disk, never
-merged back. This is `proxy`'s existing `with`; `retry` gains it here (and
-`prep` takes it when built):
+`proxy` and `retry` take an optional `with` overlay (`prep` does when built).
+The overlay is never written to disk or merged back into its source. `proxy`
+keeps its current immediate-target semantics, including retention when that
+active target is re-read for retry or resume. `retry` gains the same typed
+mapping and source-side evaluation here. A `retry.with` overlay is applied to
+the target of that transition, for that transition only: it is not retained
+for a later retry or resume, and a later `retry` without `with` supplies no
+retry overlay. A retained `proxy` overlay still applies beneath it on the
+proxy-owned active document.
 
 ```yaml
 failure:
@@ -284,9 +356,28 @@ failure:
 
 For `retry` the target is the fresh re-read of the same document, so the next
 attempt can read `fm.reason`. `resume` takes no `with`: it sends a follow-up
-message into the live provider session, so no document is re-read; state a
-resumed attempt's later events should see is what `set` is for. `break`,
+message into the live provider session. It still re-reads and validates the
+active document, recomputes launch settings, and applies the existing session
+compatibility check. Keeping `with` off `resume` is an intentional API limit,
+not a claim that it avoids refresh; use `set` for invocation-local state,
+subject to its existing persistence rules. `break`,
 `stop`, `skip`, `error`, and `defer` take none either.
+
+Evaluate the whole `retry.with` mapping once when the directive fires, against
+the source's live frontmatter and event globals. Preserve native values,
+static top-level keys, and literal data on target refresh exactly as for
+`proxy.with`. Reject whole-mapping interpolation and unresolved executable
+spans in lifecycle-key values. Any evaluation failure installs no overlay,
+consumes no retry transition, and follows the existing failure path;
+`no_error` does not suppress it. Apply the resolved overlay before the fresh
+read's schema validation and composition, without re-evaluating its data as
+templates. File references continue through the existing request-scoped
+`FileReference` resolution; this feature adds no path-rebasing rule.
+
+Attempt budgets, backoff, retry re-entry, and event counts are unchanged:
+`max_attempts` counts additional attempts beyond the original, and
+`initialize` still fires once per active document. An overlay cannot reset
+attempt budgets or bypass refresh validation.
 
 ### Action Inventory
 
@@ -298,8 +389,8 @@ This is the **v1 inventory** the parser, the docs, and (in
 
 | Verb | Category | Short-form value | Long-form parameters | Notes |
 |---|---|---|---|---|
-| `stop` | control | none | — | any event |
-| `skip` | control | none | — | `initialize` only |
+| `stop` | control | none | `no_error` only | any event |
+| `skip` | control | none | `no_error` only | `initialize` only |
 | `error` | control | `reason` string (opt) | `reason` | |
 | `proxy` | control | `target` file-ref (req) | `target` req; `with` mapping | |
 | `retry` | control | `max_attempts` number (opt) | `max_attempts`; `delay` duration; `backoff` `fixed`\|`exponential`; `with` mapping | `with` new |
@@ -345,10 +436,12 @@ Rules:
    semantics and shape rules. Today `LifecycleProxyOnlyParameter` rejects
    `with` anywhere but `proxy`; that error and the `LifecycleProxyWith*` family
    are renamed for `with` in this feature, because `with` is now shared.
-6. **The communication long form has one payload alias, `text`.** The `message`
+6. **The communication long form has one payload parameter, `text`.** The `message`
    and `sound` aliases are dropped. The `route` parameter is dropped from the
    grammar: it is parsed and validated but never read by the executor. It may
-   return when messaging routes are wired.
+   return when messaging routes are wired. Both dropped payload aliases raise
+   the same removed-grammar diagnostic with a `text` replacement hint; a
+   `resume.message` parameter remains valid.
 7. **The count parameter on `retry` and `resume` is `max_attempts`.**
 8. **Confirmed as today:** `shell` takes `command` (required) and `on_error`,
    no `cwd`, `env`, or `timeout`; `error` takes `reason` only; `say`/`speak`
@@ -412,7 +505,9 @@ failure:
 
 ### Conditional nesting
 
-Conditionals nest. The limit is **five** levels; a sixth is the parse error
+Conditionals nest. A root-list `when` is level one; each `when` inside a
+selected or unselected branch adds one level, and sibling guards do not.
+The limit is **five** levels; a sixth is the parse error
 `LifecycleStackInvalidShape` naming the path. The limit lives **only in the
 parser**. The editor-side schema types fewer levels and accepts deeper bodies
 loosely, so it never rejects a legal document and never catches a sixth level
@@ -463,7 +558,8 @@ Warming the TTS cache before an event fires is not part of this feature; see
 ### Loop values move to the `loop` root
 
 The five loop values lose their `_loop_` prefix and move under the top-level
-reserved root `loop` (reserved by `2026-10-18-fm-namespace`). Decided
+host-declared root `loop`. This feature introduces that declaration;
+`2026-10-18-fm-namespace` deliberately leaves it for this step. Decided
 2026-10-10: the root is `loop`, not `state.loop`.
 
 | Removed | Replacement |
@@ -483,13 +579,28 @@ start:
           - info: "pass {{ loop.count }}; last exit {{ loop.last_exit_code }}"
 ```
 
-This is a rename only: `loop.*` resolves wherever `_loop_*` resolves today,
-with the same values, and is unavailable wherever `_loop_*` is unavailable
-today, with the same outcome. The `loop:` frontmatter block (the loop's
-configuration) is read as `fm.loop`, per the reserved-root rule. `reserved.rs`
-no longer seeds `_loop_*`; the loop engine supplies `loop.*` and
-`looping/expression.rs` resolves them. Any `_loop_*` read is a removed-grammar
-error (AC6). There is no alias period.
+The member values and availability inside a loop are unchanged: `loop.*`
+resolves wherever `_loop_*` resolved. The new root also needs an explicit
+scope rule. Declare `loop` through Claudine's binding views and
+supply it through runtime bindings and loop lookups, rather than adding it to
+Darkmatter's fixed root catalog. Bare `loop` is the ambient object; dotted
+and bracket access resolve its five members. In a declared Claudine scope a
+missing member never falls back to frontmatter. Outside a loop the declaration
+is unavailable with a typed scope diagnostic, rather than reading the
+configuration object. Plain `md compose` does not gain a loop global.
+The `loop:` frontmatter block (the loop's configuration) is read as `fm.loop`, per the reserved-root rule. `reserved.rs`
+no longer seeds `_loop_*`; every affected composition, lifecycle, approval,
+and loop-condition evaluation surface uses the captured host binding. The
+loop engine supplies `loop.*` and
+`looping/expression.rs` resolves them. Reads of the five exact retired names,
+including `fm._loop_count` and the other explicit frontmatter forms, are removed-grammar errors. Detect reads
+through the shared expression parsing/validation surfaces, not a raw text
+search: quoted literals, ordinary Markdown, code examples, and unrelated
+properties such as `_loop_notes` remain data. Static bracket reads are checked
+as well; dynamically computed keys follow ordinary lookup semantics. Before
+launch, reject discoverable reads in the document being prepared; if a later
+render introduces an expression, reject it when that expression is prepared.
+There is no alias period.
 
 ## Loop Lifecycle
 
@@ -552,13 +663,15 @@ The removed grammar — `stack:`, `action:` as the item aggregator (`- action:`)
 or as a sibling of `when` on a list item, `say_first`, the communication
 `route` parameter, and the `_loop_*` names — was spelled in 65 non-Rust and 62
 Rust files when inventoried on 2026-09-28. All are rewritten. Re-take the
-inventory at implementation with the AC16 grep; the buckets below say where to
+inventory at implementation with the migration search in Acceptance Criteria; the buckets below say where to
 look, not an exact count. Whether the sweep lands as one commit or per area is
 an implementation choice.
 
-**(a) Executed prompt documents.** Run by agents; covered by no test until
-AC10.
+**(a) Executed prompt documents.** Extend their existing opt-in parser and
+execution coverage with the new grammar; keep live internal prompts out of CI.
 
+- Internal `darkmatter/prompts/` and `claudine/prompts/` wherever the
+  implementation inventory finds lifecycle syntax.
 - Root `prompts/` (24 at inventory): `_add/add-context-variables`,
   `_add/add-expressions`, `_clarify/findings`, `_implement/implement-plan`,
   `_implement/implement-review`, `_implement/implement-suggestions`,
@@ -577,6 +690,9 @@ restructure that produced this spec did not touch them).
 
 **(b) Docs and skills.**
 
+- Claudine READMEs wherever they show lifecycle grammar or loop-variable
+  examples.
+
 - `claudine/docs/topics/flow-control/lifecycle.md`, `flow-control.md`,
   `flow-control-reference.md`, `looping.md`, `sequences.md`,
   `state-management/side-effects.md`, `frontmatter-properties.md` (the
@@ -592,10 +708,14 @@ restructure that produced this spec did not touch them).
 **(c) Markdown fixtures.**
 
 - `claudine/cli/tests/fixtures/nested_span_regression/commit.md`.
+- All mirrored prompts under `claudine/lib/tests/fixtures/frozen_prompts/`
+  and `claudine/cli/tests/fixtures/frozen_prompts/`. Preserve the behavior each
+  frozen fixture proves while updating its lifecycle syntax.
 - `claudine/cli/tests/fixtures/shipped_implement_route/_implement/implement-plan.md`,
-  hash-pinned by `shipped_prompt_route_drift.rs`; refresh with
-  `CLAUDINE_UPDATE_SHIPPED_PROMPT_HASHES=1 just test-cli shipped_prompt_route_drift::`
-  (AC11).
+  hash-pinned by `shipped_prompt_route_drift.rs`; after reviewing the fixture
+  delta, refresh the opt-in target from the repository root:
+  `CLAUDINE_UPDATE_SHIPPED_PROMPT_HASHES=1 cargo nextest run -p claudine-cli -F prompt-tests,test-fixtures --test prompts shipped_prompt_route_drift::`.
+  Default `just test-cli` does not select that target.
 - `darkmatter/dmls/tests/fixtures/sequence_descent/implement-plan.md`.
 
 **(d) Claudine Rust.**
@@ -615,36 +735,33 @@ restructure that produced this spec did not touch them).
 **(e) Darkmatter Rust that names `_loop_*`.** The `dasherized_identifier_*`
 tests and `darkmatter/lib/src/markdown/compose/expression/parser.rs`.
 
-**(f) Darkmatter schema copies and DMLS.** The old grammar *is* the schema in
-`darkmatter/docs/schemas/claudine.yaml` and
-`darkmatter/docs/schemas/claudine-types.yaml`. Both are **deleted** here: they
-describe a grammar that no longer exists, and Claudine's schemas have one home,
-`claudine/schemas/` (written by `2026-10-21-claudine-schemas`). The DMLS edits
-that move with the grammar:
+**(f) Existing schema integration and DMLS.** Update the existing extension
+at `darkmatter/docs/schemas/claudine.yaml` and its type library
+`darkmatter/docs/schemas/claudine-types.yaml` to accept the new grammar in this
+change. Keep their paths and references working. The full action typing,
+new authoritative files under `claudine/schemas/`, and eventual retirement of
+the old extension belong to `2026-10-21-claudine-schemas`.
 
-- `darkmatter/dmls/src/diagnostics/nested_span.rs` — the static lifecycle
-  layout mirror: drop `say_first` and `stack` from its field lists and
-  re-express its path matcher for list items, `then`/`else` bodies, root
-  dictionaries, and `gate:`; update `nested_span_tests.rs` paths to match.
-- `lifecycle_inventory_matches_the_authored_claudine_schema` reads the deleted
-  files; it is removed here and re-created against `claudine/schemas/` by
-  `2026-10-21-claudine-schemas`.
-- `darkmatter/dmls/src/overlay/frontmatter.rs` tests that assert
-  `initialize.stack[0].when` pointers move to the new paths
-  (`initialize[0].when`).
-- Every other Darkmatter test, config example, or doc that loads either
-  deleted file (find them with
-  `grep -rln "claudine-types.yaml\|docs/schemas/claudine.yaml" darkmatter`;
-  at inventory: `dmls/tests/l1/mapping_only_corpus.rs`,
-  `dmls/src/config/mod.rs`, `dmls/src/providers/frontmatter/sequence_tests.rs`,
-  `dmls/src/overlay/mod.rs`, `dmls/docs/editors/README.md`,
-  `docs/topics/schemas/dmls-schema-support.md`) stops depending on it. A test
-  whose subject is not Claudine's schema uses an inline schema of its own; a
-  doc or config example that showed the Claudine extension points at
-  `claudine/schemas/`. A baseline that changes because the Claudine extension
-  is gone (`mapping_only_corpus`) is re-blessed with
-  `DMLS_BLESS_MAPPING_CORPUS=1` and the reason is recorded in the
-  implementation log.
+**Reader's note:** the earlier draft deleted these files before their
+replacement existed. That would leave editor users without lifecycle
+validation and examples pointing at missing files between rollout steps.
+Retaining the existing integration until the schema replacement lands avoids
+that gap without pulling the full schema feature into this one. The interim
+extension may accept nested bodies loosely where its type system cannot
+express them; the parser remains authoritative for the five-level limit.
+
+- `darkmatter/dmls/src/diagnostics/nested_span.rs` — drop `say_first` and
+  `stack` from structural field lists and classify list items, `then`/`else`
+  bodies, root dictionaries, and `gate:`. Update `nested_span_tests.rs` paths.
+- Keep `lifecycle_inventory_matches_the_authored_claudine_schema` working
+  against the retained extension, and migrate it to the authoritative schema
+  files when the next feature lands; do not remove the coverage between steps.
+- `darkmatter/dmls/src/overlay/frontmatter.rs` pointers change from
+  `initialize.stack[0].when` to `initialize[0].when`.
+- Extension-loading tests and configuration examples continue to use existing
+  valid paths. Run `mapping_only_corpus`; re-bless only an intentional changed
+  diagnostic using `DMLS_BLESS_MAPPING_CORPUS=1`, with the reason recorded in
+  the implementation log. Never re-bless simply to hide missing validation.
 
 **Not swept:** spec and review snapshots; `.claude/skills/claudine/timeline.md`;
 `claudine/docs/research/hooks/*.md`, whose tables describe provider hooks.
@@ -672,15 +789,18 @@ Tests are tiered: **L1** tests are hermetic (no network, no real terminal, no
 audio) and run with `just test` in a package area; **L2** tests carry the
 `level2_` prefix and run with `just test-l2`. `just lint` in `claudine/` also
 runs `lint-lifecycle-doc-facets`, a grep gate over the lifecycle topic pages.
-Tests never focus a terminal or browser window, run on macOS, Linux, native
-Windows, and WSL2, and this feature adds no CI cell. All criteria are L1 unless
-marked.
+Tests never focus a terminal or browser window and remain portable to macOS,
+Linux, native Windows, and WSL2. Existing CI scheduling selects affected
+packages and environments; this feature adds no new environment or gate.
+Internal prompt corpus and live-prompt execution tests stay opt-in through
+`prompt-tests` and `just test-prompts`, never in default L1 or CI. Default
+behavior tests use frozen prompt copies. Other criteria are L1 unless marked.
 
 **Parser**
 
 - **AC1** Every stack — each of the six events, a `loop:` block's `gate:`, and
   a task's `setup:`/`teardown:` — accepts a flat action list; a root-level
-  dictionary is accepted, never carries `when`, and desugars in the canonical
+  dictionary is accepted, never carries `when`, and expands in the canonical
   order.
 - **AC2** `when`/`then`/`else` nest to depth 5; depth 6 is a typed parse error
   naming the path.
@@ -689,16 +809,22 @@ marked.
   list is legal; a `when` item never counts as unconditional.
 - **AC4** `no_error` is accepted in both homes (long-form parameter;
   dictionary-item sibling, a bundle body included) and rejected beside
-  `then`/`else` and on `set`.
+  `then`/`else` and on a standalone `set`; in a mixed bundle it cannot
+  suppress a `set` failure. Conflicting inner and sibling flags are rejected.
 - **AC5** `with` is accepted on `retry` and `proxy` and rejected elsewhere,
   `resume` included; a `retry` overlay is visible to the fresh re-read and never
-  persisted; the renamed `with` errors replace `LifecycleProxyOnlyParameter`
+  persisted; it applies to that transition only, so a later retry or resume
+  does not see it (cover repeated retry, retry followed by resume, and a
+  proxy-owned active document, with no real provider launch). The
+  renamed `with` errors replace `LifecycleProxyOnlyParameter`
   and the `LifecycleProxyWith*` family.
 - **AC6** In any stack, the `loop:` block included: `stack:`; `action:` as the
   item aggregator or as a sibling of `when` on a list item; `say_first:`; the
-  communication `route` parameter; and any `_loop_*` read raise a typed
+  communication `route`, `message`, and `sound` parameters; and reads of the
+  five exact retired `_loop_*` names raise a typed
   removed-grammar `CompositionError` (name chosen at implementation) carrying
-  the replacement, before the provider launches, in `compose`,
+  the replacement and authored path, before provider launch for statically
+  discoverable expressions, in `compose`,
   `inline-compose`, and `sequence`. The `_loop_*` scan covers frontmatter
   expressions and body spans; where a body read is discoverable only at render
   time, the same typed error is raised there. The CLI-boundary test follows
@@ -707,14 +833,21 @@ marked.
 - **AC7** `loop.count`, `loop.is_first`, `loop.is_last`, `loop.last_output`,
   and `loop.last_exit_code` resolve with the values `_loop_*` produced, in
   every place `_loop_*` resolved (the existing `gate_ambient.rs` coverage is
-  migrated, not dropped); `reserved.rs` seeds no `_loop_*`.
+  migrated, not dropped); `reserved.rs` seeds no `_loop_*`. Cover bare,
+  dotted, and bracket lookup, `fm.loop` access to configuration, scope
+  unavailability, and the lack of frontmatter fallback. Literal old names
+  and unrelated `_loop_notes` data are not removed-grammar errors.
 
 **Audio**
 
 - **AC8** `say_first` and `audio_phases` are gone; audio is published in stack
-  order; a lifecycle test asserts publication order (`effect` then `say`, and
-  `say` then `effect`) through `test_toolkit::LockedAudioSpool` with
-  `PLAYA_DRY_RUN=1`, and no test plays sound.
+  order. A hermetic executor test records publication calls (`effect` then
+  `say`, and `say` then `effect`) with a fake publisher and proves already
+  published audio survives a flow transition. Publication-boundary coverage
+  uses `test_toolkit::LockedAudioSpool` and stubbed TTS preparation with dry
+  run disabled only for that isolated fixture, so durable queue records exist
+  but playback cannot run. Dry-run prompt tests separately assert no audio
+  is published. No test plays sound or reaches a real TTS provider.
 
 **Lift-ready slice**
 
@@ -726,15 +859,19 @@ marked.
 
 **Shipped artifacts**
 
-- **AC10** `claudine/cli/tests/l1/shipped_prompts.rs` gains a walker that runs
-  the lifecycle parser over every `.md` under `prompts/` and every
-  `claudine/docs/research/**/_fleet.md` plus `_TEMPLATE.md`; zero
-  removed-grammar errors and zero parse errors.
+- **AC10** Extend the opt-in `claudine/cli/tests/prompts/shipped_prompts.rs`
+  corpus to run the lifecycle parser over every `.md` under the internal
+  prompt directories and every `claudine/docs/research/**/_fleet.md` plus
+  `_TEMPLATE.md`; zero removed-grammar errors and zero parse errors. Extend
+  the default L1 shipped-artifact corpus for frozen fixtures. Keep a
+  representative CLI execution case with a fake provider that proves a
+  selected branch executes in order and the other branch performs no work.
 - **AC11** `shipped_prompt_route_drift.rs` hashes are refreshed after its
   fixture is re-derived.
-- **AC12** `darkmatter/docs/schemas/claudine.yaml` and `claudine-types.yaml`
-  are deleted and nothing in the repository outside spec snapshots names them;
-  the DMLS `nested_span.rs` mirror classifies new-grammar paths (list item,
+- **AC12** The existing Darkmatter Claudine extension and its type library
+  still load at their documented paths and accept new-grammar fixtures;
+  their inventory guard stays active. The DMLS `nested_span.rs` mirror
+  classifies new-grammar paths (list item,
   `then`/`else` body, root dictionary, `gate:`) as its tests assert; the
   `overlay/frontmatter.rs` pointer tests use new paths; `mapping_only_corpus`
   passes (re-blessed if needed, with the reason logged).
@@ -749,13 +886,29 @@ marked.
   outside `timeline.md`.
 - **AC15** `just test`, `just test-l2`, and `just lint` are green in
   `claudine/`; `just test` and `just lint` are green in `darkmatter/` (DMLS
-  included).
-- **AC16** A grep for
+  included). Run `just test-prompts` from the repository root and inspect its
+  results: the recipe is informational and exits zero even when prompt checks
+  fail, so its exit code alone is not passing evidence. The migrated lifecycle
+  corpus and route-drift tests must pass; record unrelated draft-prompt failures
+  separately rather than widening this feature's scope.
+- **AC16** Re-take the migration inventory with `rg` for
   `^\s+stack:|say_first|^\s+- action:|_loop_(count|is_first|is_last|last_output|last_exit_code)`
   over `prompts/`, `claudine/docs/`, `claudine/lib/`, `claudine/cli/`,
   `darkmatter/docs/`, `darkmatter/dmls/`, `darkmatter/lib/`, and
-  `.claude/skills/claudine/` returns only `timeline.md` and the removed-grammar
-  error's own tests and messages.
+  `.claude/skills/claudine/` returns only documented intentional hits:
+  historical records, removed-grammar tests and diagnostics, and literal-data
+  tests. Also search for old `action` discriminator maps and communication
+  `message`/`sound`/`route` parameters; classify those by structure so legitimate
+  loop actions, `resume.message`, and message verbs remain valid. Record every
+  remaining hit and its reason in the implementation log. Text search
+  inventories the migration; parser tests enforce rejection.
+- **AC17** Parser and executor coverage proves empty-stack rules, single-verb
+  long forms versus multi-verb bundles, alias collisions, deterministic
+  dictionary ordering, and rejection of unknown keys and parameters. Both
+  branches are validated and contribute shells to approval; only the selected
+  branch evaluates event-time operands. A nested directive stops the enclosing
+  event, and nested `initialize` shell or `set` shell commands are rejected.
+  Diagnostics retain authored paths through dictionary expansion and nesting.
 
 ## Open Questions
 

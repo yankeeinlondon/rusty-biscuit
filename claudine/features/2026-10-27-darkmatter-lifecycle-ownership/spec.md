@@ -20,11 +20,15 @@ $schema:
     reviewed_by: string -> the agent and model used in the spec review
     reviewed_on: date -> the date the spec was reviewed
     review_iterations: number -> the number of implementation reviews have taken place in the review/fix cycle
+    clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented_by: string -> the agent who implemented the plan
     formerly: string -> the spec's previous `{date}-{name}`, when it was renamed in the 2026-10-10 restructure
     pipeline_step: number -> position in the claudine/docs/rollout-strategy.md pipeline
-reviewed: false
+reviewed: true
+reviewed_by: codex/gpt-6.1-sol
+reviewed_on: 2026-10-11
+review_iterations: 0
 human_review: false
 pipeline_step: 17
 formerly: 2026-09-22-lifecycle-events
@@ -72,6 +76,13 @@ parser and action-model slice):
   `err`, `timing`, `seq`, `loop`, and `group` per scope through its
   `BindingView` until this spec moves every global into one declaration.
 
+These are implementation prerequisites, not a claim that the dated drafts
+have already shipped in this checkout. Stage 1 starts only after the task-input
+and provider-selection prerequisite and its transitive prerequisites have
+landed. Record the starting revision and capture traces from that revision;
+otherwise the extraction could accidentally preserve behavior those changes
+were meant to replace.
+
 The lifecycle code lives under `claudine/lib/src/composition/lifecycle/`
 (parser, action model, executor, run guard, catch protocol, control admission,
 binding catalog) with orchestration in
@@ -100,7 +111,7 @@ and may rename two of Darkmatter's.
 | `composed` | Composition and preflight succeeded | unavailable | `start` |
 | `failed` | Composition or preflight failed, or the host reported a refusal before its operation started (see [section 8](#8-the-spikes-event-model-gaps-are-documented-not-redesigned)) | available | `blocked` |
 | `cancelled` | The run was cancelled: Ctrl-C (always ends execution) or a `fail_fast: true` sibling failure (opt-in per page) | as defined by `2026-10-24-sequence-containers` | `cancelled` (cannot be renamed) |
-| `finalize` | Always last, except after `skip` or a `proxy` handoff | available (`null` when there is no error) | `finalize` (cannot be renamed) |
+| `finalize` | Always last, except after `skip`, `proxy`, `retry`, or `resume` (`retry` and `resume` re-enter without running it); closes the lifecycle once per loop iteration (see section 8) | available (`null` when there is no error) | `finalize` (cannot be renamed) |
 
 Claudine owns `success` and `failure` (the end of the agent loop) and `loop`
 (the post-`finalize` iteration gate).
@@ -115,7 +126,7 @@ initialize:
           - error: "CHANGELOG.md is missing"
 composed:
     - info: "composed {{ title }}"
-    - shell: "touch .last-compose"
+    - shell: "git status --short"
 failed:
     - warn: "could not compose {{ title }}: {{ err.msg }}"
 finalize:
@@ -186,6 +197,17 @@ Claudine's registrations:
 | `failure` | after-composition | terminal-outcome (failure; catch handler) | available |
 | `loop` | after-finalize | iteration-gate | unavailable |
 
+**Terminal-event selection.** Position and name cannot tell the engine which
+terminal event to fire after the host reports completion, so terminal-event
+registration carries a typed outcome disposition. A host registers its
+successful and failed alternatives as a pair, each with its binding view, and
+the permitted downgrade target (for Claudine, `success` and `blocked` may
+downgrade to `failure`). The host's completion reply names an outcome, not an
+event; the engine selects the registered alternative and owns catch routing,
+so Darkmatter never recognizes Claudine names. Registration rejects a
+duplicate or missing alternative. A host with no post-composition outcome
+pair, such as `md`, registers none: its terminal slot holds only `failed`.
+
 Order of one run, with Claudine's names in parentheses:
 
 ```mermaid
@@ -196,7 +218,8 @@ flowchart TD
     BC --> P[composition + preflight incl. host checks]
     P -->|succeeded| C["composed (start)"]
     P -->|failed| F["failed (blocked)"]
-    C --> AC["host after-composition events (success | failure)"]
+    C --> OP[host performs its operation]
+    OP --> AC["selected host outcome (success | failure)"]
     C -->|host refusal before its operation| F
     F --> Z[finalize]
     AC --> Z
@@ -204,12 +227,17 @@ flowchart TD
     AF -->|re-enter| C
 ```
 
-- `initialize` is always the first event and `finalize` the last of an
-  attempt's events, so a host's before-composition events fire after
-  `initialize` and its after-composition events fire before `finalize`.
-  `cancelled` can interrupt at any point after `initialize` and is followed by
-  `finalize`.
-- Within one position, events fire in registration order, never hash order.
+- `initialize` is the first event; `finalize` closes the lifecycle subject
+  to section 8. A host's before-composition events fire after `initialize`,
+  and its after-composition events fire before `finalize`.
+  Cancellation can interrupt any started run, including an in-progress
+  `initialize`. An authored `cancelled` stack runs before `finalize`; without
+  that stack, the run still cancels and finalizes.
+- Within one position, eligible notification events fire in registration
+  order, never hash order. Terminal outcomes are alternatives: only the
+  selected outcome fires, with the existing downgrade rules in section 8.
+  An iteration gate runs after ordinary finalization to decide whether another
+  iteration is admitted, never after `skip`, an adopted handoff, or cancellation.
   Authored action order inside a stack is unchanged.
 - Registration is fixed for a run. A handler cannot emit an event. A host
   cannot fire an event out of its position or role, and a name alone never
@@ -232,6 +260,26 @@ feature, but it runs Darkmatter's preflight collection for each task document
 with Claudine's checks registered, so the same process approves the same
 commands ahead of time. Approvals, prompts, diagnostics, and their order are
 unchanged for Claudine.
+
+The existing `md` blacklist, whitelist, batched approval, non-interactive
+refusal, shell timeout, and remote-host consent rules also govern lifecycle
+commands. A document containing only lifecycle shells still needs this audit,
+even when no body shell operation is enabled. Disabling a compose shell
+operation must not accidentally authorize lifecycle shells. Report-only
+`md compose --shell` collects lifecycle candidates without firing stacks,
+executing commands, or prompting; dry runs likewise execute no lifecycle
+effects.
+
+Lifecycle shell permission and composition shell permission are distinct:
+body/frontmatter shells can run during composition after their audit succeeds;
+lifecycle shells unlock only upon entering `composed`. Both use the same
+approval authority. Reuse the approved discovery graph and remote-fetch
+runtime rather than collecting or fetching everything again. Runtime `set`
+mutations cannot change an approved command unnoticed: execution must still
+match an existing exact approval or an admitted typed template, with the
+missing-value, type-checking, and argument-quoting rules established by
+`2026-10-23-shell-template-approval`. A mismatch is refused before execution.
+This extraction adds no new approval prompt after a Claudine launch.
 
 ### 5. Action types and the invariants Darkmatter enforces
 
@@ -262,12 +310,16 @@ expression functions), `flow`, `communicate`, and `shell`.
       Shells unlock only at `composed`, and proxy adoption locks them again.
     - `skip` is valid only in `initialize`. It ends the run: no later event
       fires, `finalize` included.
-    - `finalize` runs on success, failure, `break`, and cancellation; `skip`
-      and `proxy` are the two exceptions (`proxy` hands off before the
-      source's `finalize`, which never runs; see
+    - `finalize` runs on success, failure, `break`, and cancellation; `skip`,
+      `proxy`, `retry`, and `resume` are the only exceptions (`proxy` hands
+      off before the source's `finalize`, which never runs; an accepted
+      `retry` or `resume` re-enters without running the current attempt's
+      `finalize`; see
       [section 8](#8-the-spikes-event-model-gaps-are-documented-not-redesigned)
       for how recovery interacts with it).
-    - Approved shell command text is executed exactly as approved.
+    - Approved shell command text is executed exactly as approved; a typed
+      template is materialized only through the existing approved substitution
+      rules, never by unconstrained event-time string expansion.
 - Claudine allows exactly the actions it allows today in each of its events,
   including the recovery directives (`retry`, `resume`, `proxy`, `prep`) and
   `break`, which only Claudine provides.
@@ -288,7 +340,9 @@ The `md` host's behavior (decided 2026-10-11):
   expression functions); `shell` (not in `initialize`, per section 5); the
   terminal `communicate` verbs `stdout`, `stderr`, `info`, `warn`, `success`,
   and `message`; and the `flow` verbs `stop`, `skip`, and `error`. These are
-  the actions `md` runs.
+  the actions `md` runs. In `cancelled`, its flow actions are restricted to
+  `stop`; `skip` and `error` are typed errors, preserving the cancellation
+  contract established by `2026-10-24-sequence-containers`.
 - **Any other action is ignored with a warning.** Audio (`say`, `speak`,
   `effect`), `notify`, the recovery directives, `break`, `prep`, `defer`, and
   any verb `md` does not know have no `md` service. `md` skips each such
@@ -296,6 +350,16 @@ The `md` host's behavior (decided 2026-10-11):
   continues with the rest of the stack; it never fails the run for one. To
   run a document written for another host with its actions, use that host
   (for Claudine, `claudine compose`).
+- **Ignored actions remain inert.** Preserve their authored name and source
+  span, but never interpolate their operands, evaluate their conditions, run
+  their nested payloads, request a service, or collect commands hidden inside
+  that payload. Warn once per ignored action occurrence reached during an
+  event, including a verb in a selected conditional branch or mixed bundle;
+  an unselected branch produces no warning. This tolerance does not apply to
+  malformed YAML, malformed shared control structures, invalid operands of a
+  supported action, or a supported action forbidden in that event. Those are
+  typed errors. For example, `shell` in `initialize` and `skip` in `composed`
+  must fail rather than be treated as unknown actions.
 - **Schema.** Darkmatter's event-action schema names action keys with
   `suggest`, not `enum`. Darkmatter's own actions are typed and offered as
   completions; an unknown action (for example Claudine's `say`) passes the
@@ -306,12 +370,33 @@ The `md` host's behavior (decided 2026-10-11):
   before `finalize`. `stdout` actions write to stdout in stack order, so
   output from `composed` appears before the document and output from
   `finalize` after it; every other terminal verb writes to stderr.
-- **Errors.** An evaluation or dispatch error in `initialize` or `composed`
-  routes to `failed`, then `finalize`. `md` exits non-zero with the selected
-  error. As in Claudine, an evaluation error raised inside `failed` or
+- **`stop`.** Ends only the current event's stack. It preserves the current
+  outcome and does not suppress composition, document output, or `finalize`.
+- **Errors.** An evaluation or dispatch error in `initialize` routes to
+  `failed`, then `finalize`. An error in the `composed` stack does not route
+  to `failed`, because composition and preflight already succeeded: `md`
+  runs `finalize`. In both cases `md` exits non-zero with the selected error. As in Claudine, an evaluation error raised inside `failed` or
   `finalize` replaces the original error.
 - **`skip`.** Writes no document and exits 0.
 - **`set`.** Changes run state for later events; it never recomposes the body.
+  Mutations in `initialize` are input to the first full composition. Once
+  composed, the output body is fixed; later changes to effective frontmatter
+  follow the existing runtime-state behavior and do not rewrite the source
+  file unless an explicit side-effect action does so.
+- **Output failures.** Writing the composed document is the `md` host
+  operation after `composed`. A write failure, including a broken stdout pipe,
+  does not select `failed`, because composition and preflight already
+  succeeded: `md` runs `finalize` and exits non-zero. Output already written
+  is not rolled back or repeated. An error in `failed`
+  updates the selected error without recursively running `failed` again;
+  an error in `finalize` never re-enters either cleanup stack.
+- **Interrupts.** Ctrl-C stops further normal actions and document output,
+  cancels pending composition or host work, and runs an authored `cancelled`
+  stack followed by `finalize`. Without `cancelled`, only `finalize` runs.
+  Cleanup errors remain diagnosable but cannot change the interrupted exit
+  code of 130. A second Ctrl-C may cut cleanup short, preserving Claudine's
+  force-exit rule. Before lifecycle shells unlock, cancellation cleanup
+  cannot execute a shell either.
 
 ### 7. No behavior change in Claudine
 
@@ -359,8 +444,9 @@ those facts:
 
 **`blocked` routes.** Because of the third row, `blocked` (Darkmatter's
 `failed`) can follow `start` (`composed`) when a host reports a refusal before
-its operation starts. Under `md`, which has no operation after composition,
-`composed` and `failed` are mutually exclusive. `blocked` reached from compose
+its operation starts. Under `md`, `failed` never follows `composed`: an error
+in the `composed` stack or a failed output write is a non-zero exit after
+`finalize` (section 6). `blocked` reached from compose
 preflight cannot `retry`, `resume`, or `proxy`
 (`LifecycleSetupPhaseRecoveryUnsupported`). When an explicit error in a
 `success` or `blocked` stack redesignates the terminal slot to `failure`, the
@@ -376,8 +462,10 @@ document's lifecycle once per loop iteration:
   when the lifecycle ends.
 - A `proxy` from a terminal event hands off before the source's `finalize`,
   and the source's `finalize` never runs (decided 2026-10-11: today's
-  behavior is kept, so `skip` and `proxy` are the two exceptions to the
-  `finalize` guarantee); the target runs its own lifecycle.
+  behavior is kept); the target runs its own lifecycle.
+- The exceptions to the `finalize` guarantee are therefore exactly `skip`,
+  `proxy`, `retry`, and `resume`: `retry` and `resume` re-enter immediately
+  without running the current attempt's `finalize`.
 - A recovery chosen inside `finalize` happens after that `finalize` ran, and
   is never followed by a second `finalize` for the old attempt.
 - An error inside `finalize` never finalizes again.
@@ -388,6 +476,46 @@ Re-entry keeps its rules: `retry` and `resume` re-read and re-audit without a
 second `initialize`; a new loop iteration re-enters at `start` using the
 already-audited plan; proxy adoption starts a fresh lifecycle (new
 `initialize`, shells locked) for the target.
+
+### Run preparation and context lifetime
+
+A host opens the root source and parses its lifecycle structure before any
+stack effect. An unreadable root, malformed frontmatter, or malformed lifecycle
+structure fails without attempting to execute untrusted or incomplete cleanup
+stacks. Once the lifecycle is structurally valid, shell-free frontmatter
+bootstrap precedes `initialize`; failures after the run starts use the catch
+protocol. Preserve Claudine's existing distinction between initial parse
+failure and target-parse failure during recovery.
+
+Use Darkmatter's existing staged frontmatter projection in
+[the compose module](../../../darkmatter/lib/src/markdown/compose/mod.rs)
+rather than composing the body twice. Keep the active host's lifecycle
+operands deferred through bootstrap and full composition; evaluate them only
+in their event's binding view. Body discovery follows `initialize`, so an
+initialization side effect can create a file the body includes. Child
+transclusions never register or run their own lifecycle, even if their
+frontmatter is merged into the root: the root's parsed stacks retain their
+identity and source spans.
+
+Every host run takes a Darkmatter
+[ComposeRequest](../../../darkmatter/lib/src/markdown/compose/context/request.rs),
+the library's captured composition settings and file-resolution context.
+Bootstrap, preflight, composition, event expressions, services, and shell audit
+reuse that request or a source-derived view of it. They never recapture CWD,
+home, repository roots, environment, network policy, or approval identity in
+an adapter. Passed `with:` values preserve their originating file context and
+remain data, following the task-input prerequisite's rules.
+
+The engine distinguishes run, loop iteration, and recovery attempt: an
+admitted retry/resume continues the current lifecycle without another
+`initialize`, while proxy adoption creates a new lifecycle. `env` and
+file-resolution environment stay coherent with their request at every
+boundary; a recovery re-read does not by itself authorize a process-environment
+recapture. `current` keeps its existing lazy observation behavior, while `ctx`
+keeps its captured behavior; sharing their schema does not make their values
+identical or permit a new filesystem context. Concurrent subjects hold separate
+mutable run state and terminal/finalize accounting. They may share immutable
+registry definitions and authorized cache infrastructure.
 
 ### 9. One file declares every global
 
@@ -433,8 +561,18 @@ $schema:
   and `group`, with the shapes `2026-10-24-sequence-containers` defined. The
   host catalog feeds the same `BindingView` declarations the events use, so
   prepare-time validation, event-time evaluation, and DMLS cannot disagree.
+- Catalog entries describe shapes, not unconditional availability. The four
+  fixed roots remain `fm`, `ctx`, `env`, and `current`. Darkmatter now owns
+  declarations for `err` and `timing` in lifecycle and approval binding views;
+  unavailable `err` must fail with the view's reason rather than fall back to
+  `fm.err`. Claudine declares `seq`, `loop`, and `group` in its host views.
+  Outside those views, existing frontmatter lookup behavior is preserved.
 - Generated or embedded artifacts work without the source YAML on the deployed
-  filesystem.
+  filesystem. Resolve the catalog and its transitive relative imports from one
+  embedded bundle, without runtime network access or dependence on the launch
+  directory. Preserve baseline overrides, document-schema merge precedence,
+  and disable-baseline behavior. Generated metadata is derived from YAML;
+  parity tests compare it to the resolved catalog, not to a second manual list.
 
 ### 10. Trigger renames
 
@@ -539,6 +677,13 @@ the host performs it and replies with facts. Requirements:
   each with failure stage and entry reason where relevant. A caller's claim of
   approval is never a security boundary; shell dispatch consults the existing
   approval authority.
+- Cancelling a run invalidates outstanding normal-work generations before
+  cleanup starts. A late reply from cancelled work cannot emit an outcome,
+  reopen shells, write output, or finalize again. Host drivers retain ownership
+  of stopping their subprocesses and draining required services; dropping an
+  engine request is not proof that the underlying work stopped. Interrupts
+  during cleanup use the existing force-exit rule rather than starting another
+  cleanup pass.
 - Recovery mode and cleanup mode are named types (normal recovery,
   fatal-evaluation cleanup, refusal cleanup), not boolean flags.
 - The run is subject-neutral. Claudine drives document, group, and sequence
@@ -576,16 +721,27 @@ work without runtime services and drive:
 - schema typing.
 
 Darkmatter's baseline types `initialize`, `composed`, `failed`, `cancelled`,
-and `finalize` with the `md` host's action unions. The action types Darkmatter
-executes are defined once, in Darkmatter's schemas. Action names there are
+and `finalize` with the `md` host's action unions. The moved action shapes
+and parameter definitions are owned by Darkmatter,
+including the neutral shapes of host-provided verbs. Host profiles select
+which definitions to expose and which actions to admit. Darkmatter's baseline
+exposes only the `md` profile; Claudine's schema remains closed to unknown
+verbs and includes Claudine's definitions without copying their shapes. Action names there are
 `suggest`ed, not `enum`erated: Darkmatter's actions are typed and suggested,
 and an action key Darkmatter does not know passes the baseline unsuggested
 and untyped, so a document written for Claudine raises no baseline schema
 error for `say`. Claudine's schemas
 (`2026-10-21-claudine-schemas`) reference those definitions rather than
 redefining them, and keep typing Claudine's event keys under Claudine's names.
-A parity test checks that the registry and the schemas agree on event names,
-positions, and allowed action types for both hosts. No new hand-maintained list
+A parity test checks that the registry and schemas agree on authored event
+names and allowed actions for both hosts. Position and role belong to registry
+metadata, not ordinary frontmatter schema properties; test their parity
+against the host descriptors. The open unknown-action branch must exclude all
+known `md` action names, including ones forbidden in the current event, so it cannot swallow an invalid
+`info` long form or a `shell` in `initialize`. Shared conditional and bundle
+structure retains the grammar prerequisite's validation. Preserve the existing
+three typed nesting levels and runtime validation below them until the separate
+recursive-schema work lands. No new hand-maintained list
 of event names or late-binding roots is introduced.
 
 ### The control-flow spike tests
@@ -659,9 +815,9 @@ the AND/OR grammar, and migrate the trigger files.
 
 ### Effort
 
-Re-estimated from the reduced scope: the grammar, container, loop, and input
-work is already done, and the parser and action-model slice is lift-ready.
-About 29,000 lines of lifecycle and looping code and tests exist today. Most of
+Re-estimated for the prerequisite revision: the grammar, container, loop, and
+input work will be done, and the parser and action-model slice will be lift-ready.
+At that prerequisite revision, about 29,000 lines of lifecycle and looping code and tests exist today. Most of
 it moves rather than being rewritten.
 
 | Work | Engineer-days |
@@ -703,7 +859,8 @@ Run with the package-area recipes (`just test`, `just lint` in `darkmatter/`
 and `claudine/`; `just test-l2` only where a real terminal is the subject).
 Tests use the Test Toolkit and nextest, never focus a terminal or browser
 window, keep audio silent (`PLAYA_DRY_RUN=1`, private spool), and are portable
-to macOS, Linux, native Windows, and WSL2. No new CI cells.
+to macOS, Linux, native Windows, and WSL2. Do not add speculative CI cells for this review or extraction; the existing
+planner still schedules the required cells for packages whose code changes.
 
 1. **Stage 1 gate recorded.** The trace fixtures and the non-agent prototype
    host exist as L1 tests and pass, and the implementation log records the gate
@@ -728,8 +885,12 @@ to macOS, Linux, native Windows, and WSL2. No new CI cells.
    carries a source location where one exists.
 7. **Prototype host.** The non-agent host's before-composition event fires
    after `initialize` and before composition. Its terminal-outcome pair shares
-   the terminal slot with `failed`, and its rename is honored in parsing and
-   diagnostics.
+   the terminal slot with `failed`, is selected through the outcome
+   disposition (a successful and a failed completion each fire their
+   registered alternative, and a downgrade reaches only the registered
+   target), and its rename is honored in parsing and diagnostics. The
+   core-only `md` host registers no outcome pair, and registering a pair
+   with a duplicate or missing alternative is a typed error.
 8. **Shell invariants.** For both hosts: `shell` in `initialize`, in a dead
    branch of `initialize`, as a `set` whole-value `$( … )`, and in a
    `failed`/`finalize` path reached before preflight succeeded is refused
@@ -745,7 +906,8 @@ to macOS, Linux, native Windows, and WSL2. No new CI cells.
     `failure` on an incompatible resume, no `finalize` after `skip`, and no
     second `finalize` after a recovery chosen in `finalize`.
 11. **`md compose` events.** CLI L1 tests through `md compose` cover: each of
-    the five events firing in order; `failed` then `finalize` on a preflight
+    the successful path (`initialize`, `composed`, `finalize`) and the
+    separate failure and cancellation paths; `failed` then `finalize` on a preflight
     denial and on a missing include; `skip` writing no document and exiting
     0 with no `finalize`; on an interrupt, `cancelled` then `finalize` when
     `cancelled` is authored and `finalize` alone when it is not, exiting 130
@@ -777,9 +939,11 @@ to macOS, Linux, native Windows, and WSL2. No new CI cells.
     per-event availability matches the runtime `BindingView`.
 16. **Trigger kind.** `kind: schema-trigger` loads. `kind: trigger-schema` is
     a typed error naming `schema-trigger`, which fails the scan and, in DMLS,
-    reports incomplete validation only within the rule's discovery scope. No
-    file in the repository outside completed or historical specs still says
-    `trigger-schema` (checked by a source guard).
+    reports incomplete validation only within the rule's discovery scope.
+    No active shipped trigger, user example, or completion still uses the old
+    spelling. Negative migration fixtures and the diagnostics that name the
+    rejected spelling are explicit source-guard exceptions, along with
+    completed and historical specs.
 17. **Trigger flag.** `--no-schema-triggers` works on `md compose`,
     `md schema validate`, and `md clean`. `--no-trigger-schemas` fails with a
     message naming `--no-schema-triggers`. Shell completions list only the new
@@ -795,6 +959,23 @@ to macOS, Linux, native Windows, and WSL2. No new CI cells.
     `spike/model.rs` and `spike/scenarios.rs` unmoved.
 20. **Docs.** The Stage 5 pages exist and describe the shipped behavior. No
     `docs/` page names this spec, and the lint recipes pass in both areas.
+
+21. **Lifecycle boundaries and output failures.** L1 tests cover an unreadable
+    root and malformed lifecycle failing before effects; initialization creating
+    a missing include; child stacks not firing or replacing root stacks;
+    initialization mutations reaching composition; `stop` preserving output
+    and finalization; output-write failure and a `composed` stack error each
+    running `finalize` and exiting non-zero without `failed`; cleanup failures
+    not recursively firing cleanup; cancellation during `initialize`,
+    composition, and output; and late replies after cancellation. Use fake
+    cancellation and failing writers where possible; real signal delivery is
+    not required for these engine tests.
+22. **Approval and tolerant parsing.** Tests cover a lifecycle-only command
+    being audited, report-only mode causing no effects or prompts, `set`
+    invalidating an exact approval, and the existing typed-template rules.
+    An ignored action's operand and payload cause no effects, while malformed
+    supported actions and forbidden supported actions still fail. Test the
+    schema fallback with those same cases.
 
 ## Open questions
 

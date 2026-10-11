@@ -20,11 +20,15 @@ $schema:
     reviewed_by: string -> the agent and model used in the spec review
     reviewed_on: date -> the date the spec was reviewed
     review_iterations: number -> the number of implementation reviews have taken place in the review/fix cycle
+    clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented_by: string -> the agent who implemented the plan
     formerly: string -> the spec's previous `{date}-{name}`, when it was renamed in the 2026-10-10 restructure
     pipeline_step: number -> position in the claudine/docs/rollout-strategy.md pipeline
-reviewed: false
+reviewed: true
+reviewed_by: codex/gpt-6.1-sol
+reviewed_on: 2026-10-11
+review_iterations: 0
 human_review: false
 pipeline_step: 14
 formerly: 2026-09-27-sequence-improvements
@@ -56,8 +60,9 @@ the legs atomic?" switch), adds a `cancelled` event, removes the budget
 ledger (`claudine budget`, `claudine sequence --budget-ledger`), and moves
 every built-in container value to three reserved roots: `seq`, `loop`, and
 `group`.
-An author gets one mental model: every primitive initializes, starts,
-succeeds or fails, may be cancelled, and finalizes; every container returns a
+An author gets one mental model: every primitive initializes, prepares, then
+starts or is blocked; a started primitive succeeds, fails, or is cancelled,
+and finalizes with the exceptions below. Every container returns a
 result (an array for a sequence, a dictionary for a group); and a page reads
 only the container it is directly inside.
 
@@ -116,12 +121,26 @@ grammar, including the `-> offset` and `::operator` suffixes `sequence:`
 accepts today. An inline list follows the same step grammar as a root
 sequence.
 
+`sequence:` joins `prompt:`, `shell:`, `side_effect:`, `group:`, and `task:`
+as an exclusive executable field: combining two on one entry is a typed
+error. External `task:` expansion remains immutable and may contain either
+container. Groups still require at least one leg; an empty sequence, including
+an empty dynamic source, succeeds with `[]` and runs its own lifecycle once.
+Sequence source discovery, offsets, operators, and string-step normalization
+keep their existing behavior at every nesting level. A nested sequence
+without a Markdown body requires every step to have an executable; an inline
+sequence's body-only steps use its authoring sequence document's body.
+
 **Any container may hold any container.** A group leg may be a sequence (the
 way to do ordered work inside concurrency) or a group; a sequence step may be
 a group or a sequence. The v1 rule "groups do not nest" is removed. Static
 preflight walks every nested container transitively and rejects a reference
-cycle (a sequence file that reaches itself) with the complete chain, as it
-does for document references today.
+cycle with the complete chain, including sequence, task, group, and catalog
+references. Cycle detection uses the active reference chain, not a global
+visited-file ban: invoking the same reusable sequence twice is legal, and
+two different groups in one catalog are different targets. References use
+the existing request-scoped `biscuit-file` resolution and retain their
+authoring-file origin for relative paths and file-touching actions.
 
 **Where a container's own keys live.** A group's lifecycle events, its
 `fail_fast`, and (from 2026-10-25-loops-and-flow-control) its `loop:` sit on
@@ -130,6 +149,15 @@ frontmatter root beside `sequence:`. A task whose executable is an inline
 `sequence:` list carries that nested sequence's lifecycle events (and later
 its `loop:`) on the task entry beside `sequence:`; on any other task those
 keys are a typed error.
+
+For a referenced sequence, events belong in the target's frontmatter, not on
+the referencing task. A prompt leg opts into sibling cancellation through its
+prompt document; a container leg through its own container definition.
+`shell:` and `side_effect:` tasks have no authored document lifecycle. Wrap
+either in a group of one to add events or opt into sibling cancellation;
+Ctrl-C still interrupts their processes. Presence of a valid `cancelled:`
+key, including an empty stack, is the opt-in; it is not inherited from a
+descendant.
 
 **A sequence document's root events belong to the sequence.** In a document
 that has `sequence:`, the root lifecycle events and `loop:` are the
@@ -172,13 +200,41 @@ stateDiagram-v2
     skipped --> [*]
 ```
 
-Recovery in a container's `failure` (or `blocked`) event uses the same
-directives as a document's:
+Recovery in a container's `failure` event uses the same directives as a
+document's. Existing setup restrictions still apply: `retry` in `initialize`
+and `retry`/`resume`/`proxy` in a preflight `blocked` event raise the existing
+typed setup-recovery error. This feature does not add recovery from denied
+preflight. `proxy` from `initialize` remains a supported handoff.
 
 - **`retry`** runs the container again from its beginning: a sequence from
-  its first step, a group with all of its legs. A `retry` `with:` overlay
-  enters the container's runtime `set` layer for the retried pass, so every
-  child reads it as an ordinary frontmatter key, never persisted.
+  its first step, a group with all of its legs. All old legs must settle
+  before a new attempt starts. `initialize` fires once per container
+  invocation, not once per retry; each attempt has its own `start` and
+  terminal event. An accepted `retry` re-enters immediately without running
+  the failed attempt's `finalize`; `finalize` runs once, after the attempt
+  that does not re-enter (section 5).
+  `max_attempts` counts additional attempts and cannot be reset by re-entry;
+  exhaustion keeps the failed outcome. A `retry.with` mapping is evaluated
+  once in the source event and its values enter the container's runtime
+  state for the new attempt, as the container's `with:` values; there is no
+  separate retry overlay for a container. They are validated afresh and never
+  persisted or written back into the source file.
+- **What survives a container retry.** The failed attempt's results are
+  discarded and its mutations are kept. Before the next attempt the
+  container's child accumulator (`seq.outputs`) and group outcome records
+  (`group.legs`, `group.succeeded`, `group.failed`, `group.cancelled`) are
+  cleared, so the final result never contains duplicates from an abandoned
+  attempt. Frontmatter and runtime mutations already applied to the
+  container's state are kept, including those made by the failure handler
+  that requested the retry and the retry's `with:` values. The rerun is
+  therefore not a clean slate: children may read values an earlier attempt
+  produced. No disk edits or other external effects are rolled back.
+  For nested retries, an enclosing sequence's `seq.outputs` holds only the
+  published results of its completed children: while a child container
+  retries, nothing from its discarded attempts appears there, and its result
+  is appended once, when it completes after its `finalize`. Exhausting
+  `max_attempts` keeps the failed outcome, and the container publishes
+  nothing.
 - **`resume`** needs a live agent session; a container has none, so `resume`
   in a container event is the existing typed runtime error, as in
   `initialize`.
@@ -188,6 +244,10 @@ directives as a document's:
   document (section 5).
 
 `--dry-run` fires no lifecycle events, for containers as for documents.
+It preserves today's dry-run behavior recursively: it still runs shell tasks
+and composition shell expansions against initial state, performs no provider
+launch or inline write-back, and does not simulate runtime `set` mutations.
+Help and docs must explain that shell work can have real effects.
 
 ### 3. Failure handling
 
@@ -205,6 +265,28 @@ atomic?":
 |---|---|
 | `true` (default) | the group fails. Running legs that opt into cancellation are cancelled (section 4); the rest run to completion and their state is not passed forward; legs not yet admitted never start. Once every leg has settled, the group's `failure` event fires. |
 | `false` | the other legs keep working. Once every leg has completed, the group **always succeeds**, whatever each leg's outcome. `fail_fast: false` is the explicit handling of leg failures; the group's own events read which legs failed from `group.failed` (section 7). |
+
+Here "always succeeds" means leg failures alone do not fail the group.
+Preparation errors, errors in the group's own events, and Ctrl-C still fail
+or cancel it. `stop` ends an event stack and keeps the current outcome; merely
+logging a failure or using `stop` does not recover it.
+
+**Atomic results, not reversible work.** A failed `fail_fast: true` group
+publishes no leg mutations or output to its parent, including those from legs
+that finished before the failure. Retain private leg state until settlement
+and the group's terminal events and `finalize` have completed. A successful
+`fail_fast: false` group keeps today's declaration-order merge of completed
+legs' mutations, including failed legs; cancelled and skipped legs contribute
+none. Its terminal events see that staged merge, and their own mutations are
+included on publication. A group whose own `finalize` fails publishes neither
+the staged leg mutations nor its result.
+
+> **Reader's note:** withholding a failed atomic group's state is an intended
+> change from today's group runner, which merges completed legs even when the
+> group fails. File edits, shell commands, provider work, and notifications
+> already performed cannot be rolled back. Authors who need compensation
+> must provide cleanup in lifecycle events; `fail_fast` is not a filesystem
+> transaction.
 
 `fail_fast` is removed everywhere else: a sequence document's `fail_fast` and
 the `--fail-fast` flag are typed errors naming the replacement, and Claudine
@@ -252,9 +334,9 @@ group is a leg failure like any other.
   mutations are not merged and its output is not published).
 - **Ctrl-C always ends execution** (decided 2026-10-11), whether or not a
   page declares `cancelled`. It interrupts every running primitive as it does
-  today (signal ladder). Each started primitive that declares `cancelled`
-  runs those actions first, innermost first; then every started primitive
-  runs `finalize`, innermost first; then the process exits `130`. A primitive
+  today (signal ladder). Each primitive whose lifecycle was entered runs its
+  declared `cancelled` actions and then its `finalize`, after its descendants
+  finish their cleanup; then the process exits `130`. A primitive
   without `cancelled` is still interrupted and still runs `finalize`. A
   second Ctrl-C keeps today's force-exit ladder and may cut those events
   short.
@@ -272,6 +354,27 @@ group is a leg failure like any other.
   rule that lifecycle shells are disabled before preflight succeeds).
 - **`finalize` still runs** after `cancelled`.
 
+Cancellation stops admission first and waits for running descendants to settle
+before invoking their owner's terminal events. An opted-in container leg
+interrupts all its running descendants, including descendants without their
+own `cancelled` stack; the opt-in belongs to the leg as a whole. A primitive
+already finalized is not cancelled again. Preparation that has entered
+`initialize` but not `start` still receives cancellation cleanup, with shells
+disabled; an unadmitted primitive fires no events. Across concurrent siblings
+cleanup may interleave, but every child's cleanup finishes before its parent's
+cleanup starts. No ordering between sibling cleanup stacks is promised.
+
+`stop` in `cancelled` only ends that stack. Cancellation remains terminal:
+recovery directives in a following `finalize` cannot restart work or replace
+the target, and must raise a typed cancellation-recovery error. Cleanup errors
+are retained as secondary diagnostics; Ctrl-C still exits `130`, and sibling
+cancellation still records `cancelled`. A timeout caused by a cleanup shell
+is a cleanup error, not a new cancellation or a recovered run. Cancellation
+causes use the existing structured diagnostic contract, with the originating
+group and leg identified for sibling failure; they are not unstructured
+strings. If failures race, the first observed unhandled failure triggers
+cancellation and is recorded as its cause, even if other legs later fail.
+
 ```yaml
 group:
     name: fan-out
@@ -285,21 +388,44 @@ group:
         - warn: "failed: {{ as_csv(group.failed) }}; cancelled: {{ as_csv(group.cancelled) }}"
 ```
 
-### 5. `finalize` always runs, except after `skip` or `proxy`
+### 5. `finalize` always runs, except after `skip`, `proxy`, `retry`, or `resume`
 
-`finalize` is the last event of every primitive that started. Success,
+`finalize` is the last event of every primitive whose lifecycle was entered,
+including a primitive blocked before `start`. Success,
 failure, `blocked`, cancellation, and (from 2026-10-25-loops-and-flow-control)
-`break` all run it. `skip` and `proxy` are the two exceptions:
+`break` all run it. `skip`, `proxy`, `retry`, and `resume` are the exceptions,
+and the only ones:
 
 - `skip` from `initialize`: a skipped primitive fires no further events,
   `finalize` included.
 - `proxy` (decided 2026-10-11, keeping today's behavior): the primitive that
   hands off to a proxy target does not run its own `finalize`; the target
   runs its own lifecycle, including its own `finalize`.
+- `retry` and `resume`: an accepted recovery re-enters immediately without
+  running the current attempt's `finalize`. The re-entered attempt runs its
+  own events; `finalize` runs at the end of the attempt that finishes without
+  re-entering. Authors who need cleanup before a retry put it in the
+  `failure` stack ahead of the `retry` directive.
 
 A container's result is published to the enclosing accumulator only after its
 `finalize` completes; if `finalize` raises an error, the container fails and
 publishes nothing.
+
+Exactly-once means once for an invocation that does not end in `skip` or
+`proxy`, including pre-start catch paths: attempts that end in `retry` or
+`resume` run no `finalize`, and the attempt that does not re-enter runs it
+once. A terminal-event error
+follows the existing catch routing; an error in `finalize` never re-enters
+that same `finalize`. Preserve the original failure as primary and attach
+cleanup failures as secondary diagnostics; a cleanup error after otherwise
+successful work turns that work into failure. A malformed primitive rejected
+before its lifecycle can be parsed cannot run its own events; the initialized
+enclosing container receives the preparation failure instead.
+
+This matches the shared lifecycle dispatch in
+[runtime.rs](../../lib/src/composition/lifecycle/runtime.rs), which already
+re-enters immediately on `retry` or `resume` without requesting `finalize`;
+documents keep that behavior and containers adopt it.
 
 ### 6. Task `setup:` and `teardown:` are removed
 
@@ -318,7 +444,8 @@ replacement:
   prompt: "@prompts/review.md"
   teardown:
       - when: "ctx.dirty_files"
-        message: "I've made a mess of the place"
+        then:
+            - message: "I've made a mess of the place"
 
 # after
 - name: review
@@ -329,7 +456,8 @@ replacement:
             prompt: "@prompts/review.md"
       finalize:
           - when: "ctx.dirty_files"
-            message: "I've made a mess of the place"
+            then:
+                - message: "I've made a mess of the place"
 ```
 
 ### 7. Built-in values live on `seq`, `loop`, and `group`
@@ -343,12 +471,21 @@ property named `seq`, `loop`, or `group` is read as `fm.seq`, `fm.loop`,
 `fm.group`.
 
 **Innermost only.** A page sees only the loop, group, and sequence it is
-directly inside — one of each kind, the nearest — never an outer one.
+inside — the nearest ancestor of each kind, never a second ancestor of that
+same kind.
 Coordination across levels goes through frontmatter. In a container's own
 lifecycle events the root of its kind names the container itself: a group's
 `failure` reads its own `group`, a sequence's `finalize` its own `seq`. A
 document in a group in a sequence reads `group` (that group) and `seq` (that
 sequence).
+
+Shadow the complete root, not individual fields: an inner sequence with empty
+outputs cannot fall back to outer outputs. Leaving a nested container restores
+the enclosing bindings. An absent group keeps today's typed outside-group
+error; an absent loop keeps its existing availability rules. These runtime
+roots are not frontmatter and cannot be assigned through `set` or persisted
+by inline-compose. `fm.group` remains ordinary authored frontmatter even
+outside a group.
 
 #### `seq`
 
@@ -380,6 +517,10 @@ A step entry that authors a generated name — `id`, `index`, `count`,
 `is_first`, `is_last`, `previous`, `next`, `outputs`, or `run_id` — is a typed
 error naming the step and key. Task keys stay reserved as today, with
 `sequence` added and `setup`/`teardown` now removed-grammar errors.
+Neighbor rows contain authored step data and generated identity/position
+fields, not recursively embedded neighbors or live output accumulators.
+IDs are unique within each sequence; different nested sequences may reuse
+an ID, so diagnostics identify the containing sequence and full task path.
 
 Standalone `compose` and `inline-compose` keep a `seq` root holding only
 `seq.outputs`, with its current standalone contents, so a prompt written with
@@ -390,6 +531,16 @@ other `seq.*` value is `null` there.
 replacement. The error is raised where an expression reads the old name and
 the reading document neither declares nor is supplied a frontmatter property
 of that name; a document that defines its own `previous` reads it as normal.
+
+Check parsed root reads, including static bracket access, across body,
+conditions, lifecycle operands, and shell discovery; do not search literal
+text to generate these errors. Property presence, including a declared or
+supplied `null`, is enough to preserve ordinary frontmatter behavior.
+`fm.previous` explicitly asks for frontmatter and is never a renamed runtime
+root. Do not classify unrelated members such as `ctx.state` or quoted strings
+as legacy globals. Removing generated frontmatter overlays also removes
+implicit access through `fm.outputs` and `fm.state`: callers must migrate
+those reads to `seq` unless they refer to their own authored properties.
 
 | Old | New |
 |---|---|
@@ -419,7 +570,9 @@ of that name; a document that defines its own `previous` reads it as normal.
   false `when:`) is `skipped`.
 - **`output`** is the leg's result (section 8), including the partial stdout
   of a failed leg; `null` for a leg that never ran.
-- **`err`** is the leg's failure, or `null`.
+- **`err`** is the leg's structured failure or cancellation cause, or `null`
+  for success and skip. An unadmitted cancelled leg records the triggering
+  sibling failure even though it fires no events.
 - `group.legs` and the summary lists are populated in the group's own
   `success`, `failure`, `cancelled`, and `finalize` events (and its loop
   gate), once every leg has settled. In its `initialize`, `start`, and
@@ -433,6 +586,7 @@ of that name; a document that defines its own `previous` reads it as normal.
   single leg is read by name (`group.legs.lint.output`).
 
 Each leg also fires its own events, as any primitive does.
+Shell and side-effect legs use the wrapper rule in section 1 to author events.
 
 ### 8. Container results
 
@@ -471,17 +625,27 @@ this dictionary.
 - Entries are data, exactly as today: stored raw and never re-evaluated.
 - A skipped child appends nothing to a sequence. A failed child appends
   nothing to a sequence. In a group dictionary every leg name is a key; a leg
-  that never ran maps to `null`.
+  that never ran or was skipped maps to `null`. An executed failed leg retains
+  its partial result in a successful `fail_fast: false` group's dictionary.
 - A `fail_fast: true` group that failed appends nothing; a `fail_fast: false`
-  group always succeeds and appends its full dictionary.
+  group that finishes without an error in its own lifecycle appends its full
+  dictionary.
+
+Keep array/object results as native values through the task result, runtime
+accumulator, and expression adapters; do not flatten them to stdout or encode
+them as JSON strings. Human-readable rendering is separate from stored data.
+Shell-command trailing newlines retain today's capture behavior; the example
+above abbreviates those newlines. A failed nested container can expose its
+completed children's partial result through its parent's `group.legs` for
+diagnosis, but that result is not published to `seq.outputs`.
 
 ### 9. Lift-ready event model
 
 `cancelled` and `finalize` are document-lifecycle events that
 2026-10-27-darkmatter-lifecycle-ownership moves to Darkmatter. This spec
 implements them in Claudine, written so that move changes no behavior: the
-event names, their order, the `finalize` guarantee with its `skip` and
-`proxy` exceptions, the
+event names, their order, the `finalize` guarantee with its `skip`, `proxy`,
+`retry`, and `resume` exceptions, the
 `cancelled` action set, and the container event table live in the lift-ready
 parser and action-model slice (`claudine/lib/src/composition/lifecycle/`
 `parse.rs`, `action_shape.rs`, `actions.rs`, `validate.rs`, `signatures.rs`),
@@ -506,7 +670,8 @@ removal:
   error.
 - Exit codes `76` and `77` are no longer produced or documented by Claudine.
 
-Messenger's research refresh is the only other user. Its use of the ledger is
+Messenger's research refresh is the known other user; the repository-wide
+migration search must verify that no additional consumer remains. Its use of the ledger is
 removed with it: `messenger research prepare` no longer creates a ledger
 (`claudine budget init … --exclusive-lock …`) and no longer passes
 `--budget-ledger` to `claudine sequence`, and every messenger behavior that
@@ -516,6 +681,24 @@ resting states applied to a run record (the `exhausted` run status, and the
 refusal and its `claudine budget grant`/`resume` guidance, the ledger-lock
 check in cleanup, the ledger line in `messenger research runs`, and the
 "within the same budget" wording of `--resume`.
+
+Removing the ledger also removes its shared `fleet.lock`, runtime liveness
+signal, and crash-to-interrupted transition. Those are behavior changes,
+not merely obsolete command arguments. Preserve Messenger's run-record
+validation, stage checks, resume limit, preparation lock, and refusal to
+promote incomplete research. Do not delete unrelated locks or timeout limits.
+Decided 2026-10-11: Messenger keeps its run protection itself, without a
+budget ledger. A Messenger-owned runner holds an OS-backed fleet lock (one
+research run at a time) for the whole execution and records completion or
+interruption (`finished`, `interrupted`, `stopped`) in its existing run
+record; the per-refresh cap on agent runs stays. Cleanup and promotion are
+refused while a run is live. An `active` record whose runner no longer holds
+the lock is a stale run, recovered explicitly (the record is marked
+`interrupted`), never silently. This replaces the ledger lock path before
+that path is deleted. Existing run
+records must remain readable or produce an actionable migration error before
+any run is launched or deleted; do not silently discard old ledger artifacts
+or reinterpret an old `exhausted` record as successful research.
 
 ## Requirements
 
@@ -527,27 +710,55 @@ check in cleanup, the ledger line in `messenger research runs`, and the
    that is not an inline sequence; missing or duplicate leg names; reserved
    step keys; reserved group variable names; the renamed names of section 7.
 2. **Runtime.** One container runner drives groups and sequences through the
-   section 2 event order using the existing `LifecycleRunGuard` (extended with
+   section 2 event order using Claudine's existing
+   [LifecycleRunGuard](../../lib/src/composition/lifecycle/mod.rs), which records
+   event delivery and prevents duplicate terminal cleanup (extended with
    `cancelled`), so every primitive has the same exactly-once guarantees.
    Failure propagation follows section 3; cancellation section 4; results
-   section 8. Snapshot isolation, declaration-order state merge, no
-   interactivity in concurrent legs, the write-back collision preflight
-   error, process isolation, and the concurrent output rendering all keep
-   their current rules for group legs, including legs that are sequences.
+   section 8. Declaration-order state merge, no interactivity in concurrent
+   legs, the write-back collision preflight error, process isolation, and the
+   concurrent output rendering all keep their current rules for group legs,
+   including legs that are sequences. Snapshot isolation is defined for
+   nested sequences as follows: each leg gets a private in-memory runtime
+   state branched from the group-start state, so a leg's nested steps see
+   their own earlier mutations and never a sibling's. The discovered task
+   graph stays frozen, but prompt sources are reread from disk at their
+   normal preparation boundaries, so a later nested step can observe file
+   edits made by a sibling leg or by its own earlier steps. Isolation covers
+   in-memory bindings only, not the filesystem; write-back collision
+   rejection is retained. Docs state this limit explicitly.
 3. **Preflight.** Static preflight walks nested sequences and groups,
    validates every container's events, and approves their shell commands
    (late values through 2026-10-23-shell-template-approval, whose late roots
    are now `seq.outputs`, `loop.*`, and `group.*`). Shell commands in container
    events read the container's own root values as late values.
-4. **Bindings.** `seq`, `loop`, and `group` resolve innermost-only through the
-   existing `BindingView` mechanism; the event availability table in
+   Freeze discovered task graphs for the invocation, and retain transitive
+   write-back collision checks across nested containers. A reread or proxy
+   target introducing an unapproved command is refused after approval closes;
+   concurrent descendants never prompt. First-task resolved-value approval
+   follows the execution position through the whole invocation
+   (2026-10-23-shell-template-approval, section 13): only a task along an
+   all-first-step ancestry, before any earlier executable work, qualifies; a
+   group that is the first task qualifies with all its legs; a nested
+   sequence that is the first task qualifies only for its own first task,
+   recursively; container terminal-event commands (such as a container's
+   `finalize`) and commands reading `group.*` are typed templates. This feature does not make `err`,
+   `timing`, or `current.*` legal in sequence shell commands.
+4. **Bindings.** `seq`, `loop`, and `group` resolve innermost-only through
+   Claudine's [binding catalog](../../lib/src/composition/lifecycle/bindings.rs),
+   which uses Darkmatter's shared binding view for both validation and runtime
+   expressions; the event availability table in
    `lifecycle.md` gains `cancelled` and the container events.
 5. **Schemas.** Claudine's schemas (2026-10-21-claudine-schemas) gain the
    `cancelled` event, typed with the section 4 action set, on every primitive;
    the `claudine.yaml` payload drops the document-level `fail_fast` and the
-   generated sequence overlays (`state`, `previous_state`, `next_state`,
-   `step`, `total_steps`, root `is_first`/`is_last`), which are reserved roots
-   now. The `sequence.yaml` trigger schema is written by
+   generated sequence overlays (`state`, `previous`, `next`, `outputs`,
+   `sequence_id`, `previous_state`, `next_state`, `step`, `total_steps`, root
+   `is_first`/`is_last`). Their replacement fields belong to the `seq` runtime
+   root; the old individual names are not newly reserved. Update existing
+   group, task, and lifecycle schema partials and their editor-facing
+   completions for the grammar landing here; do not defer validation of
+   nested containers to a later feature. The `sequence.yaml` trigger schema is written by
    2026-10-26-task-inputs-and-providers.
 6. **Migration sweep.** Every shipped prompt, fixture, test, doc page, and the
    `claudine` skill that reads `state`, `previous`, `next`, `outputs`,
@@ -557,6 +768,9 @@ check in cleanup, the ledger line in `messenger research runs`, and the
    repository; absence from shipped prompts alone is not enough. The
    route-drift fixture under `claudine/cli/tests/fixtures/` is re-derived and
    its hash refreshed if a prompt in that route changes.
+   Classify search hits by behavior: migrate runtime-global reads and removed
+   grammar, while preserving legitimate authored properties, unrelated code,
+   and historical spec snapshots. Audit `fm.outputs`/`fm.state` reads too.
 7. **Docs.** `sequences.md` (steps, step state, reserved keys, groups, outputs,
    fail-fast, out-of-scope list), `lifecycle.md` (event table, availability
    table, state machine), `flow-control.md`, `flow-control-reference.md`,
@@ -637,7 +851,9 @@ and (for affected integration behavior) `just test-l2` are green in
 4. **Failure propagation.** A failing document with no recovery fails its
    enclosing group and then the root sequence (exit `1`), later steps do not
    start, and every level's `finalize` runs innermost first; a `retry` in the
-   group's `failure` re-runs every leg and, on success, the sequence continues;
+   group's `failure` re-runs every leg without running the failed attempt's
+   `finalize` and, on success, the sequence continues with the group's
+   `finalize` having run exactly once;
    `resume` in a container event raises the typed no-session error.
 5. **`fail_fast`.** With `true`: a leg failure cancels a leg that declares
    `cancelled` (its child is terminated; `cancelled` then `finalize` fire),
@@ -665,8 +881,11 @@ and (for affected integration behavior) `just test-l2` are green in
 10. **Rename errors.** Each old name in the section 7 table raises the typed
     error naming its replacement; a document that declares its own `previous`
     reads it without error.
-11. **Innermost only.** A document inside a group inside a looped sequence
+11. **Innermost only.** A document inside a group inside a nested sequence
     inside an outer group reads the inner group and the inner sequence only.
+    An empty inner accumulator never reads the outer accumulator; after return
+    the next outer step reads its restored roots. Loop integration is tested
+    by the subsequent loops feature, not required to land this feature.
 12. **Body steps.** In a sequence document with a body and root `success`,
     the `success` fires once for the sequence, not once per body step.
 13. **Results publication.** A container whose `finalize` raises an error
@@ -691,7 +910,60 @@ and (for affected integration behavior) `just test-l2` are green in
 17. **Shipped prompts.** `shipped_prompt_contract`,
     `shipped_prompt_route_drift`, and the shipped-prompt lifecycle walker pass
     after the migration; a repository-wide search for the removed names and
-    keys returns only spec snapshots and `timeline.md`.
+    keys finds no remaining use as removed runtime globals or task grammar.
+    Legitimate authored properties, unrelated symbols, snapshots, and
+    `timeline.md` are classified rather than required to disappear.
+18. **Edge cases.** An empty sequence returns `[]` with one lifecycle; a
+    skipped leg maps to `null` without events after `initialize`; reusing a
+    sequence twice succeeds while mixed task/group/sequence reference cycles
+    fail with their chain; nested same-target inline writes are rejected.
+19. **Cleanup and state.** A preparation failure before `start` finalizes
+    once with shells disabled. A successful group whose `finalize` fails
+    publishes no result or leg mutations. A failed atomic group publishes
+    none of its successful siblings' state; a non-atomic group retains
+    completed failed-leg mutations in declaration order. An opted-in nested
+    container cancels all descendants; cleanup errors preserve cancellation,
+    and a recovery directive after cancellation never launches more work.
+20. **Retry retention, recovery cleanup, and nested rereads.**
+    - A sequence completes two children, sets a frontmatter value, fails on
+      its third child, and its `failure` sets another value and returns
+      `retry`: the next attempt starts with empty `seq.outputs`, both set
+      values readable, and its final result has exactly one entry per
+      child. The same holds after two retries; exhausting `max_attempts`
+      keeps the failed outcome and publishes nothing. A retried group starts
+      with empty `group.legs`/`succeeded`/`failed`/`cancelled`.
+    - A nested sequence that retries inside an enclosing sequence: the
+      enclosing `seq.outputs`, read from the next sibling, holds only the
+      completed children's results and the nested sequence's single final
+      result.
+    - `retry` from `failure` on a document, a group, and a sequence, and
+      `resume` on a document, re-enter without running `finalize`; the
+      final attempt runs `finalize` exactly once, and no work is launched
+      twice. Event recordings show the failed attempt's terminal event
+      followed directly by the next attempt's events.
+    - Two legs of a group are nested sequences coordinated by deterministic
+      fixture signals: leg A's second step sees leg A's first-step mutation
+      but not leg B's in-memory mutation, and does see a file leg B wrote
+      before A's second step was prepared. A write-back collision between
+      the legs is still rejected in preflight.
+21. **Nested approval positions.** With an outer first task that is a group,
+    every leg's commands are offered resolved-value approval; with an outer
+    first task that is a nested sequence, only its own first task is, and its
+    second task's command is a template; the first group's `finalize` command
+    and a command reading `group.*` are templates; a command in a task after
+    an outer `set` is a template filled with the post-`set` value at run
+    time; no approval prompt appears once execution has begun.
+22. **Messenger run protection.** Focused Messenger tests cover a live runner
+    (a second run is refused while the fleet lock is held), an interrupted
+    runner (recorded `interrupted`), a stale `active` record recovered
+    explicitly, an old ledger-era `exhausted` record (readable or an
+    actionable migration error, never treated as successful research), and
+    cleanup and promotion refused during a live run. No CI environment or
+    performance study is added.
+23. **Container `retry.with`.** A container `failure` event returning
+    `retry` with `with: { attempt_note: "second" }` re-runs the container from
+    its start with `attempt_note` readable in its runtime state; the source
+    file is unchanged afterward.
 
 ## Open questions
 

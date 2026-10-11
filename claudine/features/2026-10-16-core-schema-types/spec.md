@@ -20,11 +20,15 @@ $schema:
     reviewed_by: string -> the agent and model used in the spec review
     reviewed_on: date -> the date the spec was reviewed
     review_iterations: number -> the number of implementation reviews have taken place in the review/fix cycle
+    clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented_by: string -> the agent who implemented the plan
     formerly: string -> the spec's previous `{date}-{name}`, when it was renamed in the 2026-10-10 restructure
     pipeline_step: number -> position in the claudine/docs/rollout-strategy.md pipeline
-reviewed: false
+reviewed: true
+reviewed_by: codex/gpt-6.1-sol
+reviewed_on: 2026-10-11
+review_iterations: 0
 human_review: false
 pipeline_step: 6
 related:
@@ -75,7 +79,8 @@ Schema, `md schema about`, and DMLS completion/hover all agreeing.
   uses a concrete type, for example `agent: string(required)`. "Anything
   except null" is written as a union of every accepted type except `null`,
   for example `value: [string(required), number, boolean, object, "unknown[]"]`
-  (the `unknown[]` arm is an array, which does not admit null). Decided
+  (the `unknown[]` arm's underlying type is an array; the union's required
+  presence removes the ordinary optional-null wrapper). Decided
   2026-10-11.
 - An unschematized expression variable's type is `unknown`. Every place in the
   docs or diagnostics that describes an undeclared name's type as `any` says
@@ -96,11 +101,17 @@ Schema, `md schema about`, and DMLS completion/hover all agreeing.
   expression string.
 - A `default(…)` on `null` must be null; any other default is a schema-load
   error.
+- This adds null only at a **property type position**, including a union arm
+  or a named type's definition. It does not make an empty root `$schema:`,
+  a null root-union arm, or `literal(null)` legal. Serialization emits the
+  explicit type string `"null"`, not an empty YAML scalar. Meta-type validation
+  uses the same rule as ordinary schema parsing.
 
 ### 3. Null-admitting properties are never required
 
-A property whose type admits null — `null`, `unknown`/`any`, or a
-property-level union with a `null`, `unknown`, or `any` arm — is never
+A property whose underlying value type explicitly admits null — scalar
+`null`, scalar `unknown`/`any`, or a property-level union with one of those
+scalar arms — is never
 required. A `required` written on it, inherited from a named type
 (`2026-10-13-named-type-presence-and-local-names`), or hoisted from another
 union arm has no effect. This is how a whole value is made optional when its
@@ -117,10 +128,30 @@ types:
 The compact `code | null` spelling arrives with
 `2026-10-28-schema-enhancements` and means the same thing.
 
+Determine this after named references have been resolved, before adding the
+ordinary optional-property null wrapper. Otherwise every optional concrete
+type would accidentally lose its ability to become required. This concerns
+the **whole property**, not its children: `unknown[](required)` and
+`null[](required)` require a non-null array, whose items respectively accept
+any value or only null. A required object with a nullable child still requires
+the object. Existing rules for `required` before and after `[]` remain intact.
+
+One shared presence calculation must govern lowering, trigger matching,
+composition's optional-property materialization, and launch/completion phase
+validation. Neither `eager` nor `generated` restores presence for an explicitly
+nullable whole value. Constraints on other arms still apply to their non-null
+values; `[string(required; min(3)), null]` rejects `"ab"`.
+Raw JSON Schema retains its authored `required` list, including a required
+property whose schema is `{}` or `{"type":"null"}`. This is an intentional
+SimplifiedSchema change, not a change to raw JSON Schema.
+
 ### 4. Root unions are inclusive; exclusion is explicit
 
-Root-level unions accept a document that matches **one or more** arms. A
-property an arm does not declare is unconstrained (`unknown`) in that arm.
+Root-level unions accept a document that matches **one or more** arms.
+Ordinary root mappings are open, so a property an arm does not declare is
+unconstrained in that arm. Existing pattern-key dictionary restrictions and
+explicit raw JSON Schema restrictions still apply; this feature does not
+make closed objects open.
 
 ```yaml
 $schema:
@@ -187,10 +218,18 @@ $schema:
   The type's canonical form drops redundant options; identity, the subtype
   relation (Decided 7), serialization, and `md schema about` use the
   canonical form.
+- `leading-alpha` also makes `block-leading-dash` and
+  `block-leading-slash` redundant. Canonical option order follows the table
+  above regardless of input order; compare named option sets after
+  canonicalization. Equivalent spellings do not cause a use-site conflict.
 - **Constraints** after `;`: `min(n)`, `max(n)`, `not-empty`, `pattern(re)`,
   `suggest(…)`, `default(…)`, and the universal `required`, `generated`,
-  `eager`. They only narrow. A `default` or `suggest` value must itself be a
+  `eager`, plus the existing `example(…)` annotation. Value constraints only
+  narrow; suggestions, defaults, examples, and timing/ownership annotations
+  retain their existing roles. A `default` or `suggest` value must itself be a
   valid value of the type, or the schema fails to load.
+  This stricter suggestion check applies to `alphanumeric` only; it does not
+  turn other types' advisory suggestions into validation constraints.
 - **Named types:** constraint merging from
   `2026-10-13-named-type-presence-and-local-names` applies only to the
   constraints after `;`. A use site may repeat the named type's exact option
@@ -213,9 +252,19 @@ $schema:
   user-written `pattern(…)` must hold as well (both patterns apply). The
   lowered fragment also carries an annotation recording the type and its
   canonical options (`"x-darkmatter-type": "alphanumeric"` plus the option
-  list) so JSON consumers can recover the type identity.
+  list under `"x-darkmatter-options"`) so JSON consumers can recover the type
+  identity. Emit an array of canonical keyword strings, empty for the base
+  type. These annotations do not perform validation. Preserve the base
+  pattern, each user pattern, and `not-empty` together using `allOf` where
+  necessary; none may overwrite another. The base pattern must check the
+  entire string, including leading/trailing newlines, and encode forbidden
+  consecutive periods without switching to a backtracking engine.
 - Coercion: native numbers and booleans are not coerced; they are type
   mismatches (an `alphanumeric` value must be a YAML string).
+- Options are independent of the host. `allow-slashes` allows `/`, never
+  `\`; `allow-whitespace` allows space, never tabs, newlines, or other Unicode
+  whitespace. This type does not establish that a value is a safe path or a
+  safe shell argument; quoting and path policy belong to their consumers.
 
 ### 6. `shell`
 
@@ -226,43 +275,79 @@ family beside `expression`.
   It performs **no shell-syntax check**: Darkmatter's own command grammar
   (frontmatter `$( … )` and `::shell`) is narrower than the system shell that
   runs Claudine's lifecycle `shell` actions (`sh -c` / `cmd /C`), so no single
-  parser is correct for every host. Parse-only and passive: never executed,
+  parser is correct for every host. Validation is passive: never executed,
   never approved, no I/O.
-- Lowers to `{"type": "string", "format": "darkmatter-shell"}`.
+- Lowers to `{"type": "string", "format": "darkmatter-shell"}`. Register
+  the format in every Darkmatter validator builder and use the existing
+  literal-token decoding boundary. Whitespace follows Rust's
+  `char::is_whitespace`; custom-format enforcement is required for consumers
+  of exported JSON Schema. A validator that ignores unknown formats cannot
+  enforce this check.
 - Constraint applicability, optional-nullability, coercion of native booleans
   and numbers to their string form, and the `$( … )` / `{{ … }}`
   pending-value deferral rules mirror `expression` exactly: it permits
   `required`, `default(…)` (whose value must itself be a valid `shell` value),
-  `generated`, and array constraints with `[]`; string constraints and
-  `suggest(…)` are rejected.
+  `generated`, `eager`, `example(…)`, and array constraints with `[]`; string
+  constraints and `suggest(…)` are rejected. Scalar boolean/number defaults
+  use the same text conversion as supplied values; structured defaults fail
+  to load.
 - Its job is type identity: a schema can say "this value is a shell command",
   and a union of action types can include or exclude it. For example, a
   lifecycle schema can type `start` as a list of an action union that
-  includes `{ shell: shell }` and type `initialize` as a list of a union that
-  does not, so a `shell` action under `initialize` fails ordinary schema
+  includes `{ shell: shell(required) }` and type `initialize` as a list of a
+  union that does not, so a `shell` action under `initialize` fails ordinary schema
   validation in `md schema validate`, composition, and DMLS.
+- Action object alternatives must be closed inline shapes, as existing
+  SimplifiedSchema inline objects are, with a required action key. An opaque
+  `object` or `unknown` alternative would accept a shell action regardless of
+  this type's exclusion. Reject both a shell-only object and an object mixing
+  an allowed action with a `shell` key. This type adds authoring validation;
+  Claudine's existing parser and runtime prohibition on shells during
+  `initialize` remain necessary, including shell-valued `set` and bootstrap
+  `$(...)` forms, which are not covered merely by excluding a `shell` key.
 
 ### 7. Subtype relation among string-like types
 
-Darkmatter exposes one passive function that answers "does every value of
-type A also satisfy type B?" for the string-like types below, computed from
+Darkmatter exposes one passive function that answers "does every non-null
+string accepted by the underlying type A also satisfy the underlying type
+B?" for the types in the table below, computed from
 the typed SimplifiedSchema atoms (not from lowered JSON). Ordinary
 constraints (`min`, `max`, `pattern`, …) are ignored; only the type and its
-options count. `2026-10-23-shell-template-approval` consumes it to decide
+options count. Property absence, optional-null wrappers, scalar coercion,
+array containers, unresolved references, and ordinary constraints are outside
+this relation. Resolve named types first. Two identical types (the same type
+with the same canonical options) are always subtypes of each other, whatever
+the type. `2026-10-23-shell-template-approval` consumes it to decide
 whether a saved approval rule covers a command.
 
 | A | B | A ⊆ B? |
 |---|---|---|
 | any type | the same type with the same canonical options | yes |
-| `alphanumeric(X)` | `alphanumeric(Y)` | yes iff X's allow-options ⊆ Y's allow-options **and** X's narrowing options ⊇ Y's narrowing options |
-| `alphanumeric(…)` (any options) | `string` | yes |
-| `email` | `string` | yes |
+| `alphanumeric(X)` | `alphanumeric(Y)` | yes iff X's allowed character set and allowed first-character set are subsets of Y's corresponding sets, and any prohibition on `..` in Y is guaranteed by X |
+| any always-text type: `alphanumeric(…)` (any options), `url`, `enum(…)`, `date`, `datetime`, `time`, `email`, `shell`, `expression`, and every other type whose accepted values are always strings | `string` | yes |
 | `string` | `alphanumeric(…)` | no |
 | `email` | `alphanumeric(…)` | no |
 | any other pair | | no |
 
 Example, with B = `alphanumeric(allow-slashes)`: `alphanumeric(allow-slashes)`
 ⊆ B (identical); `alphanumeric` ⊆ B (narrower); `string` ⊄ B; `email` ⊄ B.
+
+The first-character set is the allowed character set with the leading
+restrictions applied; all option sets still accept the empty string. X
+guarantees a prohibition on `..` when it either blocks double periods or
+does not allow periods at all. For example, base `alphanumeric` is a subtype
+of `alphanumeric(allow-periods, block-double-periods)`, and
+`alphanumeric(leading-alpha, allow-dashes)` is a subtype of
+`alphanumeric(allow-dashes, block-leading-dash)`.
+
+**Reader's note:** Comparing keyword sets alone misses both examples. Compare
+what the options permit, so an approval is not refused just because a narrower
+type guarantees a restriction without spelling its keyword. This is bounded
+reasoning over the listed options, not inclusion checking for user regexes.
+The later shell-approval design additionally says a `string` rule covers
+every scalar after conversion; that conversion rule is distinct from this
+function and must not make `unknown`, numbers, or arrays subtypes of `string`
+here. Runtime value checks and shell quoting remain mandatory.
 
 ## Requirements
 
@@ -279,14 +364,39 @@ Example, with B = `alphanumeric(allow-slashes)`: `alphanumeric(allow-slashes)`
   `steps: any(required)`), the trigger examples in
   `darkmatter/docs/topics/schemas/definition.md`, and the two
   `value: any(required)` fields in
-  `claudine/docs/schemas/partials/side-effect.yaml`. A trigger arm whose only
+  `claudine/docs/schemas/partials/side-effect.yaml`. These are the known sites,
+  not an exhaustive list: audit shipped schemas, embedded baselines, inline
+  schemas, tests, and documentation, and record the results in the
+  implementation log. A trigger arm whose only
   presence condition was `any(required)` becomes vacuous and is rejected by
   the vacuous-arm lint. Replace each use with a concrete type: the narrowest
   type expression that admits every valid value of that key in the schema the
-  trigger or partial targets, with `(required)`. Where the key accepts any
-  non-null value (the side-effect `value` fields), write the union of every
-  accepted type except `null`, as in Decided 1. Update the existing convert
-  test that asserts `any(required)` rejects absence. Later specs that add
+  trigger targets, with `(required)`. Preserve positive and negative matching,
+  including `none` conditions: validate the fixture's actual input domain
+  rather than inferring it from a target schema that does not declare `steps`.
+  Replacing a presence check with a concrete type also stops matching
+  malformed non-null values; record that intentional difference and test that
+  it cannot silently select an unrelated trigger.
+  **Side-effect `value` fields: null acceptance is decided per field.**
+  Rejecting `null` is the rule, but a field accepts `null` where null has a
+  defined meaning for that action; otherwise it becomes a union of every
+  accepted type except `null`, with `(required)`. Today's `any(required)`
+  accepts explicit null, so each field is decided on that basis:
+  `set_frontmatter`'s `value` accepts null, because the operation stores a
+  supplied null value today
+  ([`set_frontmatter`](../../../darkmatter/lib/src/effects/verbs.rs)); its
+  type is the union of every accepted type including `null` (a
+  null-admitting union, so per Decided 3 `required` has no effect on it).
+  `merge_frontmatter` has no `value` field after the correction below. Any
+  further migrated `any(required)` side-effect field found by the audit
+  applies the same rule, and the implementation log records the decision for
+  each. Correct the `merge_frontmatter` schema shape to
+  its existing two-argument operation (file plus object); it has no `prop`
+  argument and does not accept arbitrary scalar values. This corrects schema
+  drift; it does not change the operation.
+  Update the existing convert
+  test that asserts `any(required)` rejects absence, while retaining its
+  explicit-null acceptance case. Later specs that add
   trigger files (`2026-10-21-claudine-schemas`,
   `2026-10-27-darkmatter-lifecycle-ownership`) write concrete types from the
   start.
@@ -311,6 +421,14 @@ Example, with B = `alphanumeric(allow-slashes)`: `alphanumeric(allow-slashes)`
   (and, for `alphanumeric`, the effective character set of its canonical
   options). Grammar errors for options (unknown, repeated, after `;`, mixed
   without `;`, conflicting option sets) appear as schema diagnostics.
+- **Consumer parity.** DMLS and `md` use the library's parsed type options and
+  canonicalizer, rather than reconstructing them from display strings. Preserve
+  authored spans for native YAML null and option errors, including related
+  locations when a named definition conflicts with a use site. Update the
+  Darkmatter README's public type summary and the current schema topic pages,
+  including editor support. The implementation must not change composition
+  stage order or treat inserted data containing `$(...)` or `{{...}}` as newly
+  executable or pending syntax.
 
 ## Out of scope
 
@@ -353,21 +471,35 @@ Example, with B = `alphanumeric(allow-slashes)`: `alphanumeric(allow-slashes)`
    rejected; grammar errors for unknown, repeated, post-`;`, and mixed
    options; the named-type option-set conflict error; a native number value is
    a type mismatch; the generated regex compiles in the validator.
-6. Subtype function: every row of the Decided 7 table, the redundant-option
+6. Subtype function: every row of the string-like subtype table above, the
+   redundant-option
    canonicalization case (`alphanumeric(block-leading-dash)` and
    `alphanumeric` are mutually subtypes), and that `min`/`pattern`
-   constraints do not affect the answer.
+   constraints do not affect the answer. Cover option order, restrictions
+   implied by `leading-alpha` or an absent allow-option, identical
+   non-string-like types (`number` ⊆ `number`, an identical array type)
+   returning true, each always-text type (`url`, `enum(…)`, `date`,
+   `datetime`, `time`, `email`, `shell`, `expression`, `alphanumeric(…)`)
+   ⊆ `string` returning true, and `unknown`, `number`, or an array type
+   against `string` returning false.
 7. `shell`: an empty or whitespace-only string is rejected; a command
    containing a pipe or `;` is accepted; a native boolean coerces to its
    string form; a lifecycle-shaped fixture schema whose `initialize` union
-   excludes `{ shell: shell }` rejects a `shell` action under `initialize` in
-   `md schema validate` and as a DMLS diagnostic, and accepts it under
-   `start`.
+   excludes `{ shell: shell(required) }` rejects a `shell` action under
+   `initialize` in `md schema validate` and as a DMLS diagnostic, and accepts it under
+   `start`. Also reject a mixed allowed-action-plus-shell object and an empty
+   action object. Existing initialization parser/runtime tests remain green.
 8. The `any(required)` migration is complete: shipped trigger fixtures and
-   partials load and match as before their edit (existing trigger tests green
-   with updated fixtures), no shipped file still relies on
-   `any(required)` demanding presence, and the side-effect `value` fields
-   reject omission and null while accepting every other value.
+   partials load, valid trigger inputs retain their selection, and malformed
+   inputs follow the documented migration policy (existing trigger tests green
+   with updated fixtures). No shipped file still relies on
+   `any(required)` demanding presence. `set_frontmatter`'s `value` is
+   the null-admitting union and accepts explicit null and every other
+   accepted type; any
+   other migrated side-effect field accepts null only where the
+   implementation log records a defined meaning for it, and otherwise
+   rejects null. The `merge_frontmatter` definition accepts an object without
+   `prop` and rejects non-object input.
 9. DMLS completion offers the new keywords and `alphanumeric` options; hover
    shows `unknown` with its `any` alias.
 10. `md schema about` lists `unknown` (alias `any`), `null`, `alphanumeric`
@@ -377,6 +509,29 @@ Example, with B = `alphanumeric(allow-slashes)`: `alphanumeric(allow-slashes)`
     shipped-artifact corpus test and an end-to-end test through
     `md schema validate`. Tests are L1, use no terminal or browser windows,
     and are portable to macOS, Linux, Windows, and WSL2. No new CI cells.
+12. Presence agrees across ordinary validation, trigger matching, composition,
+    and launch/completion validation: required nullable whole values remain
+    optional, required arrays with nullable items remain required, and a
+    nullable child's presence does not change its parent. Raw JSON Schema
+    `required` continues to require nullable properties. Ordinary optional
+    concrete types can still become required; generated/eager phase behavior
+    for non-nullable types is unchanged.
+13. Generated schemas and Darkmatter's typed validation agree for
+    `alphanumeric`, including newlines at either edge, tabs, non-ASCII
+    whitespace, overlapping constraints, and canonical annotations. Optional
+    null is accepted while required null is rejected. Coercion preserves
+    numeric/boolean inputs unchanged when checking `alphanumeric`, including
+    array items and candidate union arms; other union arms retain their own
+    coercion rules. A round trip through the SimplifiedSchema serializer preserves
+    meaning and emits canonical options, `unknown` for `any`, and an explicit
+    `"null"` type spelling.
+14. `null` works as a native YAML property definition, a property-union arm,
+    and a named definition through local and imported references. Null root
+    declarations/arms and `literal(null)` remain errors. Valid null defaults
+    load; non-null defaults for scalar `null` fail with a source location.
+    `unknown` values retain their native scalar/object/array types and nested
+    nulls; they undergo no string coercion. Schema meta-types, DMLS, and the
+    CLI agree on these cases.
 
 ## Open questions
 
