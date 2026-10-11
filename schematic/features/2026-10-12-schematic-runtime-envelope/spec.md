@@ -30,6 +30,7 @@ depends_on:
     - 2026-10-11-schematic-generation-integrity
 refresh_required: true
 related: []
+next_spec: 2026-10-13-schematic-pagination
 ---
 
 # Schematic runtime and response envelope

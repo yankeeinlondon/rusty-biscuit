@@ -27,9 +27,10 @@ human_review: false
 message_to_agent: ''
 parent: ../../reviews/2026-07-31-macro-review/spec.md
 depends_on:
-    - 2026-10-11-schematic-response-model-graphql
+    - 2026-10-16-schematic-response-model-graphql
 refresh_required: true
 related: []
+next_spec: 2026-10-18-schematic-fidelity-polish
 ---
 
 # Schematic WebSocket
@@ -637,7 +638,7 @@ specifics are listed below.
 
 ## Dependencies and ordering
 
-- **Frontmatter dependency:** `2026-10-11-schematic-response-model-graphql`
+- **Frontmatter dependency:** `2026-10-16-schematic-response-model-graphql`
   must have landed and passed its review 1. It sits after the definition-API
   spec (builders, typed registration, `oauth_scopes`/`auth_policy` decision),
   so this spec needs the settled REST vocabulary. The parent's own D50 line

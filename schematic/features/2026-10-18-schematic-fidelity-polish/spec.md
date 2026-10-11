@@ -27,7 +27,7 @@ human_review: false
 message_to_agent: ''
 parent: ../../reviews/2026-07-31-macro-review/spec.md
 depends_on:
-    - 2026-10-11-schematic-websocket
+    - 2026-10-17-schematic-websocket
 refresh_required: true
 related: []
 ---
@@ -827,7 +827,7 @@ use.
 
 ## Dependencies and ordering
 
-- `depends_on` lists spec 6 (`2026-10-11-schematic-websocket`) because the
+- `depends_on` lists spec 6 (`2026-10-17-schematic-websocket`) because the
   AsyncAPI exporter (D47) must export the WebSocket types after they reuse the
   REST types (D8). The parent runs the eight specs strictly in order, so the
   full chain 1 to 6 (1 schematic-generation-integrity, 2

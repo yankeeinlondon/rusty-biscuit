@@ -27,9 +27,10 @@ human_review: false
 message_to_agent: ''
 parent: ../../reviews/2026-07-31-macro-review/spec.md
 depends_on:
-    - 2026-10-11-schematic-definition-api
+    - 2026-10-14-schematic-definition-api
 refresh_required: true
 related: []
+next_spec: 2026-10-16-schematic-response-model-graphql
 ---
 
 # Schematic definition vocabulary
@@ -194,7 +195,7 @@ The author must confirm these before the unattended run (D50 item 8). Anything n
 
 ## Dependencies and ordering
 
-- **Needs landed first:** `2026-10-11-schematic-definition-api` (4a): the builders, the context, the descriptor's optional structural component and serde derives, the plain serde derives on `RestApi`, `Endpoint`, `EndpointParams`, `ParamDef` (and `QueryParamType`, `ParamStyle`) with JSON snapshots and their comparison test (D55), the hard error for `?` in path templates, and the `auth_policy` retention and `oauth_scopes` removal (D56). Earlier specs (1 diagnostics and isolated compile check; 2 runtime types; 3 pagination) are transitive.
+- **Needs landed first:** `2026-10-14-schematic-definition-api` (4a): the builders, the context, the descriptor's optional structural component and serde derives, the plain serde derives on `RestApi`, `Endpoint`, `EndpointParams`, `ParamDef` (and `QueryParamType`, `ParamStyle`) with JSON snapshots and their comparison test (D55), the hard error for `?` in path templates, and the `auth_policy` retention and `oauth_scopes` removal (D56). Earlier specs (1 diagnostics and isolated compile check; 2 runtime types; 3 pagination) are transitive.
 - **Blocks:** spec 5 (reads the context and descriptors, may use `oneOf` registration for typed errors); spec 6 (shares `ParamDef`, auth and env types as changed here); spec 7 (reads definitions through the serializable form and takes the accepted-gap candidates).
 - **Internal order:** query fidelity (R9, R14) last. Also needs spec 3's adopted-parameter rule before R14.
 

@@ -29,6 +29,7 @@ parent: ../../reviews/2026-07-31-macro-review/spec.md
 depends_on: []
 refresh_required: false
 related: []
+next_spec: 2026-10-12-schematic-runtime-envelope
 ---
 
 # Schematic generation integrity

@@ -27,9 +27,10 @@ human_review: false
 message_to_agent: ''
 parent: ../../reviews/2026-07-31-macro-review/spec.md
 depends_on:
-    - 2026-10-11-schematic-definition-vocabulary
+    - 2026-10-15-schematic-definition-vocabulary
 refresh_required: true
 related: []
+next_spec: 2026-10-17-schematic-websocket
 ---
 
 # Schematic response model v2 and GraphQL
@@ -783,12 +784,12 @@ parent spec.
 
 ## Dependencies and ordering
 
-- **Requires, landed first:** `2026-10-11-schematic-definition-vocabulary` (spec 4b),
-  which in turn requires `2026-10-11-schematic-definition-api` (spec 4a): builders, the
+- **Requires, landed first:** `2026-10-15-schematic-definition-vocabulary` (spec 4b),
+  which in turn requires `2026-10-14-schematic-definition-api` (spec 4a): builders, the
   definition context and typed registration (D2, D44), the `.returns`/`.errors`
   placeholders, and the removal of the old pagination types. If those surfaces landed
   differently from what this spec assumes, conform to what landed and log it.
-- **Transitively requires:** spec 2 (`2026-10-11-schematic-runtime-envelope`: envelope,
+- **Transitively requires:** spec 2 (`2026-10-12-schematic-runtime-envelope`: envelope,
   typed send, the `EndpointSpec` trait, codecs, hook marker trait, managed builder,
   `send_raw`, cross-origin; the `ResponseKind` guard is removed), spec 3
   (`schematic-pagination`: the pagination model GraphQL pagination uses), and spec 4a.

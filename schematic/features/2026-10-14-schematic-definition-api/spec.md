@@ -23,13 +23,13 @@ status: draft-spec
 reviewed: false
 clarified: false
 implemented: false
-human_review: false
 message_to_agent: ''
 parent: ../../reviews/2026-07-31-macro-review/spec.md
 depends_on:
-    - 2026-10-11-schematic-pagination
+    - 2026-10-13-schematic-pagination
 refresh_required: true
 related: []
+next_spec: 2026-10-15-schematic-definition-vocabulary
 ---
 
 # Schematic definition API: builders and typed registration
@@ -40,7 +40,7 @@ An API is described today by a hand-written `fn define_x_api() -> RestApi` that 
 
 1. **Ceremony without safety.** There are about 519 endpoint literals across the 18 REST APIs (OpenAI alone has 265; the parent's July figure of 253 is stale and is not used anywhere in this spec). The parent's July counts of defaulted fields (`oauth_scopes: None`, `headers: vec![]`, `params: None`, `request: None`, about 1,387 `.to_string()` calls) were taken on the smaller set and are re-measured at the start of the run (R18). The links between a definition and the Rust types it names are hand-typed strings: `ApiResponse::json_type("RepositoryInfo")` has no compile-time relationship to `pub struct RepositoryInfo`, and a parallel `SchemaRegistry` (`schematic/definitions/src/registry/mod.rs`) maps other hand-typed name strings to `schemars` schemas. `validate_completeness` compares one set of hand-written strings with another. The crate bends to fit strings (`pub type Commit = CommitInfo;` in `schematic/definitions/src/huggingface/types/stubs.rs` exists so a string resolves).
 2. **Dead or doubtful surface.** `Endpoint::oauth_scopes` has no `Some` in any shipped definition; the only non-test reader copies it into the `x-schematic` operation extension (`schematic/define/src/openapi/export/paths.rs:88`). `RestApi::auth_policy` is `None` in every shipped definition, but the generator does read it through `effective_auth_policy()` (`schematic/gen/src/codegen/api_struct/mod.rs:77`, `helpers.rs:7`) and an API-variant path (`api_struct/variant.rs`), so the parent's phrase "zero codegen consumers" is not accurate for `auth_policy` (see Risks). Several definitions also write the same environment variable twice (`openai/mod.rs`: `env_auth` and `env_mapping`).
-3. **A rewrite that must happen once.** The parent decided (D5, D42, D50) that the endpoint literals are rewritten in exactly one pass, and that the builder surface must already fit the response vocabulary of a later spec so no definition is rewritten twice. D52 (2026-10-11) split the original definition-API spec in two so that this pass, which is mechanical and large, is not entangled with the vocabulary work: this spec (4a) is the pass and the surface it needs; the vocabulary additions (typed path parameters, auth override, `deprecated`, rate limits, Basic shape, `oneOf` bodies, the self-contained by-name `Schema` serialization contract, OAuth2 grants, query-parameter fidelity) are the next spec, `2026-10-11-schematic-definition-vocabulary` (4b), and are added to the builders this spec creates as new methods and fields, so no definition is rewritten again.
+3. **A rewrite that must happen once.** The parent decided (D5, D42, D50) that the endpoint literals are rewritten in exactly one pass, and that the builder surface must already fit the response vocabulary of a later spec so no definition is rewritten twice. D52 (2026-10-11) split the original definition-API spec in two so that this pass, which is mechanical and large, is not entangled with the vocabulary work: this spec (4a) is the pass and the surface it needs; the vocabulary additions (typed path parameters, auth override, `deprecated`, rate limits, Basic shape, `oneOf` bodies, the self-contained by-name `Schema` serialization contract, OAuth2 grants, query-parameter fidelity) are the next spec, `2026-10-15-schematic-definition-vocabulary` (4b), and are added to the builders this spec creates as new methods and fields, so no definition is rewritten again.
 
 **Not stated in the parent, found while drafting.** The `just import-openai` recipe regenerates `schematic/definitions/src/openai/{mod,types}.rs` through `schematic/gen/src/definition_gen.rs`, which emits `Endpoint { .. }` struct literals as source text (it also emits `oauth_scopes`). If only the hand-written definitions are rewritten, the next OpenAI re-import silently reintroduces literals. The emitter is therefore in scope here (R22).
 
@@ -301,8 +301,8 @@ The author must confirm these before the unattended run (D50 item 8); they would
 
 ## Dependencies and ordering
 
-- **Needs landed first:** `2026-10-11-schematic-pagination` (spec 3) because this spec moves its exceptions table (R19), removes the types it leaves inert (R20) and keeps its list recognition working (R21). Spec 3 depends on `2026-10-11-schematic-runtime-envelope` (spec 2), which supplies the `cross_origin` type (R14), the definition-side request-id field and redaction interface (R15) and the managed-client mock harness; spec 2 depends on spec 1 (generation integrity), whose per-output validation, diagnostics format and isolated compile check this spec relies on. `depends_on` lists only spec 3 because the chain is transitive.
-- **Blocks:** spec 4b (`2026-10-11-schematic-definition-vocabulary`), which adds vocabulary on these builders and uses the descriptor's structural component (R2); spec 5 builds on the placeholders of R13 and on the context for GraphQL typed variables and data (D34); spec 6 reuses `ParamDef`, auth and env types and the serde derives of R17 (D8); spec 7 reads definitions through the shared lists and takes the accepted-gap candidates.
+- **Needs landed first:** `2026-10-13-schematic-pagination` (spec 3) because this spec moves its exceptions table (R19), removes the types it leaves inert (R20) and keeps its list recognition working (R21). Spec 3 depends on `2026-10-12-schematic-runtime-envelope` (spec 2), which supplies the `cross_origin` type (R14), the definition-side request-id field and redaction interface (R15) and the managed-client mock harness; spec 2 depends on spec 1 (generation integrity), whose per-output validation, diagnostics format and isolated compile check this spec relies on. `depends_on` lists only spec 3 because the chain is transitive.
+- **Blocks:** spec 4b (`2026-10-15-schematic-definition-vocabulary`), which adds vocabulary on these builders and uses the descriptor's structural component (R2); spec 5 builds on the placeholders of R13 and on the context for GraphQL typed variables and data (D34); spec 6 reuses `ParamDef`, auth and env types and the serde derives of R17 (D8); spec 7 reads definitions through the shared lists and takes the accepted-gap candidates.
 - **Internal order:** the safety net (phase 1) precedes every definition change; the builders and removals precede the rewrite; PD17 and PD21 follow the rewrite.
 
 ## Planning-time details assigned to this spec
