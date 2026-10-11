@@ -35,19 +35,22 @@ const BODY_NEEDLE: &str = "Telemetry";
 /// Unique hint word.
 const HINT_NEEDLE: &str = "endpoint";
 
-/// Sends a `bt status-block` command with body and hint, waits for
-/// the prompt to return, and captures the settled frame.
+/// Runs a `bt status-block` command with body and hint on a cleared screen
+/// and returns the settled frame: its output and the prompt after it.
+///
+/// The `clear` shares the command line, so no fixed wait for it is needed and
+/// output from an earlier test in a shared pane cannot reach the frame. One
+/// subshell runs both: on a loaded macOS host the interactive shell's job
+/// control can print `child setpgid` errors for each job it forks.
 fn capture_status_block<H: TerminalHarness>(harness: &mut H) -> biscuit_test_harness::CapturedFrame {
-    harness
-        .send_command_with_env(
-            &common::bt_command(&format!(
-                "status-block --severity error --hint \"{HINT_TEXT}\" \"{BODY_TEXT}\""
-            )),
-            &[("FORCE_COLOR", "1")],
-        )
-        .expect("send_command_with_env failed");
-    let _ = biscuit_test_harness::wait_for_prompt(harness);
-    biscuit_test_harness::capture_settled(harness).expect("capture failed")
+    let line = format!(
+        "FORCE_COLOR='1' {}",
+        common::bt_command(&format!(
+            "status-block --severity error --hint \"{HINT_TEXT}\" \"{BODY_TEXT}\""
+        ))
+    );
+    biscuit_test_harness::send_command_settled(harness, &format!("(clear; {line})"), &[])
+        .expect("capture failed")
 }
 
 #[test]
@@ -58,8 +61,6 @@ fn level2_status_block_body_hint_layout_in_tmux() {
     let mut guard = SHARED_TMUX
         .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
     let harness = guard.as_mut().expect("shared tmux harness present");
-    harness.send_text(b"clear\n").expect("send_text failed");
-    harness.settle();
 
     let frame = capture_status_block(harness);
     let plain = &frame.plain;
@@ -123,33 +124,26 @@ fn level2_status_block_hint_carries_italic_sgr_in_wezterm() {
     let mut guard = SHARED_WEZTERM
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().expect("shared WezTerm harness present");
-    harness.send_text(b"clear\n").expect("send_text failed");
-    harness.settle();
 
-    let frame_a = capture_status_block(harness);
-    std::thread::sleep(std::time::Duration::from_millis(200));
-    let frame_b = capture_status_block(harness);
+    // One run is enough. WezTerm's first `get-text` after a write can lack
+    // the cells' SGR; this test once ran the command twice and accepted
+    // either capture because `capture_settled` then gave up after 2 s and
+    // could return such a frame. It now returns only two byte-identical
+    // captures that show a prompt, and an SGR-less capture differs from the
+    // one after it.
+    let frame = capture_status_block(harness);
 
     let italic_sgr = "\x1b[3m";
-
-    let hint_line_a_has_italic = frame_a
-        .raw
-        .lines()
-        .filter(|l| l.contains(HINT_NEEDLE))
-        .any(|l| l.contains(italic_sgr));
-    let hint_line_b_has_italic = frame_b
+    let hint_line_has_italic = frame
         .raw
         .lines()
         .filter(|l| l.contains(HINT_NEEDLE))
         .any(|l| l.contains(italic_sgr));
 
     assert!(
-        hint_line_a_has_italic || hint_line_b_has_italic,
-        "hint line must carry italic SGR (ESC[3m) in WezTerm raw capture.\n\
-         capture A raw:\n{}\n\
-         capture B raw:\n{}",
-        frame_a.raw,
-        frame_b.raw,
+        hint_line_has_italic,
+        "hint line must carry italic SGR (ESC[3m) in WezTerm raw capture.\nraw:\n{}",
+        frame.raw,
     );
 }
 

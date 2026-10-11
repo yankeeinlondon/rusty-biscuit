@@ -19,27 +19,19 @@
 
 use crate::common;
 
-use biscuit_test_harness::TerminalHarness;
 use biscuit_test_harness::shared::SharedHarness;
 use biscuit_test_harness::wezterm::WezTermHarness;
 use serial_test::serial;
 use test_toolkit::{Backend, Level, LevelDecision, decide_harness};
 
-/// Process-shared WezTerm pane reused across every test in this file.
-///
-/// Real-terminal spawns cost 2–3 s each; with `#[serial(level2_terminal)]`
-/// every test runs sequentially anyway, so a single pane is enough to
-/// cut wall-clock time without changing observable behaviour. `clear` is
-/// sent before every command to reset visible state.
+/// The WezTerm pane a test attaches to: `just test-l2`'s shared pane in
+/// serial mode, or one the test spawns. `common::run_bt_rows` clears the
+/// screen and reads only the rows between its own markers, so an earlier
+/// test's output cannot reach an assertion.
 static SHARED_WEZTERM: SharedHarness<WezTermHarness> = SharedHarness::new();
 
-/// A sentinel printed on its own line immediately before `bt` runs, so the
-/// rendered output can be isolated from the (possibly line-wrapped) shell
-/// command echo above it.
-const START_SENTINEL: &str = "__BTL2_START__";
-
-/// Runs a `bt` command in a fresh WezTerm pane and returns the rendered
-/// output lines (ANSI stripped), with the shell command echo excluded.
+/// Runs a `bt` command in the WezTerm pane and returns the rendered output
+/// lines (ANSI stripped), with the shell command echo excluded.
 ///
 /// Returns `None` when WezTerm is unavailable.
 fn run_bt(args: &str) -> Option<Vec<String>> {
@@ -57,27 +49,8 @@ fn run_bt(args: &str) -> Option<Vec<String>> {
     let mut guard = SHARED_WEZTERM
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().expect("shared WezTerm harness present");
-    // Reset the pane so prior tests' rendered output cannot leak into
-    // this run's capture window.
-    harness.send_text(b"clear\n").expect("send_text failed");
-    harness.settle();
-    // `printf` emits the sentinel on its own line after the command echo (and
-    // any echo line-wrapping) but before `bt`'s output.
-    let command = common::bt_command(args);
-    harness
-        .send_text(format!("printf '{START_SENTINEL}\\n'; {command}\n").as_bytes())
-        .expect("send_text failed");
-    harness.settle();
-    let _ = biscuit_test_harness::wait_for_prompt(harness);
-    std::thread::sleep(std::time::Duration::from_millis(200));
-    let frame = harness.capture().expect("capture failed");
-
-    let lines: Vec<&str> = frame.plain.lines().collect();
-    let start = lines
-        .iter()
-        .position(|l| l.trim() == START_SENTINEL)
-        .unwrap_or_else(|| panic!("start sentinel not found in pane:\n{}", frame.plain));
-    Some(lines[start + 1..].iter().map(|l| l.to_string()).collect())
+    let (_, rows) = common::run_bt_rows(harness, args, &[]);
+    Some(rows.into_iter().map(|row| row.plain).collect())
 }
 
 /// Counts leading spaces on `line`.

@@ -18,7 +18,7 @@ use biscuit_test_harness::shared::SharedHarness;
 use biscuit_test_harness::tmux::TmuxHarness;
 use biscuit_test_harness::wezterm::WezTermHarness;
 use biscuit_test_harness::{CapturedFrame, TerminalHarness};
-use common::{OutputRow, active_runs, osc8_destinations, run_bt_output, run_bt_rows, send_bt_command};
+use common::{OutputRow, active_runs, osc8_destinations, run_bt_output, run_bt_rows};
 use crate::prose_cells::{attr_run_cells, fg_red_run_cells, osc8_run_cells};
 use biscuit_terminal::components::prose::{LineBreaks, Prose};
 use biscuit_terminal::components::renderable::TerminalRenderable;
@@ -26,9 +26,11 @@ use serial_test::serial;
 use test_toolkit::{Backend, Level, require_level};
 use unicode_width::UnicodeWidthStr;
 
-/// Process-shared WezTerm pane reused across the WezTerm prose tests.
-/// A `clear` is sent before each test's first interaction so prior
-/// renders cannot leak into the capture window.
+/// The WezTerm pane a test attaches to: `just test-l2`'s shared pane in
+/// serial mode, or one the test spawns. Each command runs through
+/// `common::run_bt_rows`, which clears the screen and reads only the rows
+/// between its own markers, so an earlier test's output cannot reach an
+/// assertion.
 static SHARED_WEZTERM: SharedHarness<WezTermHarness> = SharedHarness::new();
 
 /// Process-shared Kitty window reused across the Kitty prose tests.
@@ -48,8 +50,6 @@ fn level2_prose_emits_sgr_in_real_terminal() {
     let mut guard = SHARED_WEZTERM
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().expect("shared WezTerm harness present");
-    harness.send_text(b"clear\n").expect("send_text failed");
-    harness.settle();
 
     // Scope FORCE_COLOR=1 to the spawned `bt` and use the CLI
     // `--force-color` flag so styling is decoupled from both the
@@ -78,15 +78,8 @@ fn level2_prose_osc8_link_renders() {
     let mut guard = SHARED_WEZTERM
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().expect("shared WezTerm harness present");
-    harness.send_text(b"clear\n").expect("send_text failed");
-    harness.settle();
 
-    send_bt_command(
-        harness,
-        "prose \"<a href=https://example.com>link</a>\"",
-    );
-
-    let frame = harness.capture().expect("capture failed");
+    let frame = run_bt_output(harness, "prose \"<a href=https://example.com>link</a>\"", &[]);
     assert_osc8_link_present(&frame, "https://example.com", "link");
 }
 
@@ -98,8 +91,6 @@ fn level2_no_color_strips_sgr_in_real_terminal() {
     let mut guard = SHARED_WEZTERM
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().expect("shared WezTerm harness present");
-    harness.send_text(b"clear\n").expect("send_text failed");
-    harness.settle();
 
     // Scope NO_COLOR=1 to a single command via the harness helper
     // (portable inline-env syntax; works regardless of the developer's
@@ -122,8 +113,6 @@ fn level2_prose_emits_sgr_in_kitty() {
     let mut guard = SHARED_KITTY
         .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
     let harness = guard.as_mut().expect("shared Kitty harness present");
-    harness.send_text(b"clear\n").expect("send_text failed");
-    harness.settle();
 
     // Scope FORCE_COLOR=1 and use the CLI `--force-color` flag for
     // symmetry with the WezTerm test.
@@ -146,15 +135,8 @@ fn level2_prose_osc8_link_renders_in_kitty() {
     let mut guard = SHARED_KITTY
         .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
     let harness = guard.as_mut().expect("shared Kitty harness present");
-    harness.send_text(b"clear\n").expect("send_text failed");
-    harness.settle();
 
-    send_bt_command(
-        harness,
-        "prose \"<a href=https://example.com>link</a>\"",
-    );
-
-    let frame = harness.capture().expect("capture failed");
+    let frame = run_bt_output(harness, "prose \"<a href=https://example.com>link</a>\"", &[]);
     assert_osc8_link_present(&frame, "https://example.com", "link");
 }
 
@@ -170,12 +152,8 @@ fn level2_pad_columns_respect_actual_pane_width() {
     let mut guard = SHARED_WEZTERM
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().expect("shared WezTerm harness present");
-    harness.send_text(b"clear\n").expect("send_text failed");
-    harness.settle();
 
-    send_bt_command(harness, "padleft 30 \"x\"");
-
-    let frame = harness.capture().expect("capture failed");
+    let frame = run_bt_output(harness, "padleft 30 \"x\"", &[]);
     let plain = &frame.plain;
 
     // Find a line where 'x' is the last non-space character and there are leading spaces.
@@ -217,8 +195,6 @@ fn level2_columns_word_wrap_in_pane() {
     let mut guard = SHARED_WEZTERM
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().expect("shared WezTerm harness present");
-    harness.send_text(b"clear\n").expect("send_text failed");
-    harness.settle();
 
     // Read the actual pane geometry so the wrap-row math is portable
     // across host font configurations.
@@ -381,8 +357,6 @@ fn level2_prose_rich_styling_emits_sgr_in_wezterm() {
     let mut guard = SHARED_WEZTERM
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().expect("shared WezTerm harness present");
-    harness.send_text(b"clear\n").expect("send_text failed");
-    harness.settle();
     assert_rich_prose_sgr(harness);
 }
 
@@ -394,8 +368,6 @@ fn level2_prose_rich_styling_emits_sgr_in_kitty() {
     let mut guard = SHARED_KITTY
         .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
     let harness = guard.as_mut().expect("shared Kitty harness present");
-    harness.send_text(b"clear\n").expect("send_text failed");
-    harness.settle();
     assert_rich_prose_sgr(harness);
 }
 
@@ -486,8 +458,6 @@ fn level2_prose_code_block_restores_parent_style_in_wezterm() {
     let mut guard = SHARED_WEZTERM
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().expect("shared WezTerm harness present");
-    harness.send_text(b"clear\n").expect("send_text failed");
-    harness.settle();
     assert_code_block_restores_parent_style(harness);
 }
 
@@ -499,8 +469,6 @@ fn level2_prose_code_block_restores_parent_style_in_kitty() {
     let mut guard = SHARED_KITTY
         .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
     let harness = guard.as_mut().expect("shared Kitty harness present");
-    harness.send_text(b"clear\n").expect("send_text failed");
-    harness.settle();
     assert_code_block_restores_parent_style(harness);
 }
 
@@ -512,13 +480,8 @@ fn level2_prose_nested_emphasis_visible_text_in_wezterm() {
     let mut guard = SHARED_WEZTERM
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().expect("shared WezTerm harness present");
-    harness.send_text(b"clear\n").expect("send_text failed");
-    harness.settle();
 
-    send_bt_command(harness, "prose \"<b><i>nested</i></b> tail\"");
-    let _ = biscuit_test_harness::wait_for_prompt(harness);
-
-    let frame = harness.capture().expect("capture failed");
+    let frame = run_bt_output(harness, "prose \"<b><i>nested</i></b> tail\"", &[]);
     // The styled and trailing text must remain visible with no escape
     // garbage leaking into the captured plain cells.
     assert!(
@@ -571,8 +534,6 @@ fn level2_prose_inverse_emits_sgr_in_wezterm() {
     let mut guard = SHARED_WEZTERM
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().expect("shared WezTerm harness present");
-    harness.send_text(b"clear\n").expect("send_text failed");
-    harness.settle();
     assert_prose_inverse_sgr(harness);
 }
 
@@ -584,8 +545,6 @@ fn level2_prose_inverse_emits_sgr_in_kitty() {
     let mut guard = SHARED_KITTY
         .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
     let harness = guard.as_mut().expect("shared Kitty harness present");
-    harness.send_text(b"clear\n").expect("send_text failed");
-    harness.settle();
     assert_prose_inverse_sgr(harness);
 }
 
@@ -601,8 +560,6 @@ fn level2_prose_hidden_renders_as_literal_text_in_wezterm() {
     let mut guard = SHARED_WEZTERM
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().expect("shared WezTerm harness present");
-    harness.send_text(b"clear\n").expect("send_text failed");
-    harness.settle();
 
     let frame = run_bt_output(harness, "prose \"<hidden>x</hidden>\"", &[]);
 
@@ -825,26 +782,28 @@ fn link_runs(row: &OutputRow) -> Vec<String> {
     active_runs(&osc8_run_cells(&row.raw), false)
 }
 
-/// Inline code in the cells the terminal displays: the backtick delimiters
-/// are gone and the code is dim; inside a colored run the code keeps the color
-/// and the color resumes after it while the dim does not; inside a link the
-/// code is dim and the hyperlink covers exactly the label; a relative link
-/// destination reaches the terminal as a `file://` URL; and with color off the
-/// visible text keeps a backtick fence instead.
-fn assert_inline_code_display<H: TerminalHarness>(harness: &mut H) {
+/// Inline code displays dim with its backtick delimiters gone.
+fn assert_code_span<H: TerminalHarness>(harness: &mut H) {
     let command = "prose --force-color 'See `md hash` here'";
     let (frame, rows) = run_bt_rows(harness, command, FORCED);
     let row = only_row(command, &frame, &rows);
     assert_eq!(row.plain, "See md hash here", "delimiters must not display: {row:?}");
     assert_eq!(dim_runs(row), ["md hash"], "only the code is dim: {row:?}");
+}
 
+/// Inside a colored run the code keeps the color, and the color resumes after
+/// it while the dim does not.
+fn assert_code_in_color<H: TerminalHarness>(harness: &mut H) {
     let command = "prose --force-color '<red>run `md hash` now</red>'";
     let (frame, rows) = run_bt_rows(harness, command, FORCED);
     let row = only_row(command, &frame, &rows);
     assert_eq!(row.plain, "run md hash now", "{row:?}");
     assert_eq!(red_runs(row), ["run md hash now"], "red spans the code and resumes after it: {row:?}");
     assert_eq!(dim_runs(row), ["md hash"], "the dim ends with the code: {row:?}");
+}
 
+/// Inside a link the code is dim and the hyperlink covers exactly the label.
+fn assert_code_in_link<H: TerminalHarness>(harness: &mut H) {
     let command = "prose --force-color 'see [`inline-block`](https://x.io/a) done'";
     let (frame, rows) = run_bt_rows(harness, command, FORCED);
     let row = only_row(command, &frame, &rows);
@@ -852,7 +811,10 @@ fn assert_inline_code_display<H: TerminalHarness>(harness: &mut H) {
     assert_eq!(dim_runs(row), ["inline-block"], "{row:?}");
     assert_eq!(link_runs(row), ["inline-block"], "the link covers exactly its code label: {row:?}");
     assert_eq!(osc8_destinations(&row.raw), ["https://x.io/a"], "{row:?}");
+}
 
+/// A relative link destination reaches the terminal as a `file://` URL.
+fn assert_relative_link<H: TerminalHarness>(harness: &mut H) {
     let command = "prose --force-color 'read [plan](plan.md) first'";
     let (frame, rows) = run_bt_rows(harness, command, FORCED);
     let row = only_row(command, &frame, &rows);
@@ -865,57 +827,70 @@ fn assert_inline_code_display<H: TerminalHarness>(harness: &mut H) {
             && destinations[0].ends_with("/plan.md"),
         "a relative destination must reach the terminal as a file URL: {destinations:?}"
     );
-
-    // Unstyled fallback, through `--plain` and through `NO_COLOR` (which wins
-    // over the forced color).
-    for (command, env) in [
-        ("prose --plain 'See `md hash` here'", FORCED),
-        ("prose 'See `md hash` here'", &[("FORCE_COLOR", "1"), ("NO_COLOR", "1")][..]),
-        ("prose --plain '<red>run `md hash` now</red>'", FORCED),
-        ("prose '<red>run `md hash` now</red>'", &[("FORCE_COLOR", "1"), ("NO_COLOR", "1")][..]),
-    ] {
-        let (frame, rows) = run_bt_rows(harness, command, env);
-        let row = only_row(command, &frame, &rows);
-        assert!(
-            row.plain == "See `md hash` here" || row.plain == "run `md hash` now",
-            "the colorless fallback must show a backtick fence ({command}, {env:?}): {row:?}"
-        );
-        assert!(
-            dim_runs(row).is_empty() && red_runs(row).is_empty(),
-            "the colorless fallback must not be styled ({command}, {env:?}): {row:?}"
-        );
-    }
 }
 
-/// Paragraph and line-break geometry as displayed: a single newline reflows as
-/// one space, a blank line puts a blank row between paragraphs, a backslash
-/// before the newline (or any newline in `Hard` mode) breaks the row,
-/// whitespace around a soft break inside a wrapper collapses to exactly one
-/// space, and a link around an explicit code block displays linked paragraphs
-/// around the dim code.
-///
-/// The commands build their newlines with `printf` so every POSIX shell the
-/// pane may run types them identically.
-fn assert_break_geometry_display<H: TerminalHarness>(harness: &mut H) {
-    let plain_rows = |rows: &[OutputRow]| rows.iter().map(|row| row.plain.clone()).collect::<Vec<_>>();
+/// The unstyled fallback, through `--plain` or through `NO_COLOR` (which wins
+/// over the forced color), keeps a backtick fence and applies no style.
+fn assert_colorless_fallback<H: TerminalHarness>(
+    harness: &mut H,
+    command: &str,
+    env: &[(&str, &str)],
+) {
+    let (frame, rows) = run_bt_rows(harness, command, env);
+    let row = only_row(command, &frame, &rows);
+    assert!(
+        row.plain == "See `md hash` here" || row.plain == "run `md hash` now",
+        "the colorless fallback must show a backtick fence ({command}, {env:?}): {row:?}"
+    );
+    assert!(
+        dim_runs(row).is_empty() && red_runs(row).is_empty(),
+        "the colorless fallback must not be styled ({command}, {env:?}): {row:?}"
+    );
+}
 
+/// Forced color with `NO_COLOR` set, which wins.
+const NO_COLOR: &[(&str, &str)] = &[("FORCE_COLOR", "1"), ("NO_COLOR", "1")];
+
+fn plain_rows(rows: &[OutputRow]) -> Vec<String> {
+    rows.iter().map(|row| row.plain.clone()).collect()
+}
+
+// Paragraph and line-break geometry as displayed. The commands build their
+// newlines with `printf` so every POSIX shell the pane may run types them
+// identically.
+
+/// A single newline reflows as one space.
+fn assert_soft_break<H: TerminalHarness>(harness: &mut H) {
     let (_, rows) = run_bt_rows(harness, r#"prose --force-color "$(printf 'a\nb')""#, FORCED);
     assert_eq!(plain_rows(&rows), ["a b"], "a soft break reflows as one space");
+}
 
+/// A blank line puts a blank row between paragraphs.
+fn assert_blank_line<H: TerminalHarness>(harness: &mut H) {
     let (_, rows) = run_bt_rows(harness, r#"prose --force-color "$(printf 'a\n\nb')""#, FORCED);
     assert_eq!(plain_rows(&rows), ["a", "", "b"], "a blank line separates paragraphs");
+}
 
+/// A backslash before the newline breaks the row.
+fn assert_backslash_break<H: TerminalHarness>(harness: &mut H) {
     let (_, rows) = run_bt_rows(harness, r#"prose --force-color "$(printf 'a\\\nb')""#, FORCED);
     assert_eq!(plain_rows(&rows), ["a", "b"], "a backslash before the newline breaks the row");
+}
 
-    // `bt prose` has no line-break flag, so `Hard` mode is rendered in-process
-    // and its bytes shown in the pane.
+/// In `Hard` mode any newline breaks the row. `bt prose` has no line-break
+/// flag, so `Hard` mode is rendered in-process and its bytes shown in the
+/// pane.
+fn assert_hard_mode_break<H: TerminalHarness>(harness: &mut H) {
     let hard = Prose::new("a\nb")
         .with_line_breaks(LineBreaks::Hard)
         .render(&common::styled_terminal());
     let (_, rows) = common::display_bytes_rows(harness, hard.as_bytes());
     assert_eq!(plain_rows(&rows), ["a", "b"], "in `Hard` mode a newline breaks the row");
+}
 
+/// Whitespace around a soft break inside a wrapper collapses to exactly one
+/// space, and the wrapper keeps its extent.
+fn assert_wrapper_soft_break<H: TerminalHarness>(harness: &mut H) {
     let (frame, rows) = run_bt_rows(
         harness,
         r#"prose --force-color "$(printf 'a <b> \nb</b>')""#,
@@ -928,7 +903,11 @@ fn assert_break_geometry_display<H: TerminalHarness>(harness: &mut H) {
         ["b"],
         "the bold keeps its extent: {row:?}"
     );
+}
 
+/// A link around an explicit code block displays linked paragraphs around the
+/// dim, unlinked code.
+fn assert_link_around_code_block<H: TerminalHarness>(harness: &mut H) {
     let command = "prose --force-color '[a<code-block>x</code-block>b](https://e.io)'";
     let (frame, rows) = run_bt_rows(harness, command, FORCED);
     let shown: Vec<&OutputRow> = rows.iter().filter(|row| !row.plain.trim().is_empty()).collect();
@@ -948,35 +927,122 @@ fn assert_break_geometry_display<H: TerminalHarness>(harness: &mut H) {
     assert!(link_runs(code).is_empty(), "the code block is not linked: {code:?}");
 }
 
-#[test]
-#[serial(level2_terminal)]
-fn level2_prose_inline_code_and_breaks_in_wezterm() {
-    require_level!(Level::L2, WezTermHarness::available(), Backend::WezTerm);
+/// A named scenario run against one terminal.
+type Case<H> = (&'static str, fn(&mut H));
+
+/// Inline code, link extent, the unstyled fallback, and break geometry, as
+/// each terminal displays them. The names are the test names;
+/// `every_inline_case_has_a_test_per_terminal` holds each terminal's test list
+/// to this table.
+fn inline_cases<H: TerminalHarness>() -> [Case<H>; 14] {
+    [
+        ("code_span", |h| assert_code_span(h)),
+        ("code_in_color", |h| assert_code_in_color(h)),
+        ("code_in_link", |h| assert_code_in_link(h)),
+        ("relative_link", |h| assert_relative_link(h)),
+        ("plain_code_fallback", |h| {
+            assert_colorless_fallback(h, "prose --plain 'See `md hash` here'", FORCED)
+        }),
+        ("no_color_code_fallback", |h| {
+            assert_colorless_fallback(h, "prose 'See `md hash` here'", NO_COLOR)
+        }),
+        ("plain_colored_code_fallback", |h| {
+            assert_colorless_fallback(h, "prose --plain '<red>run `md hash` now</red>'", FORCED)
+        }),
+        ("no_color_colored_code_fallback", |h| {
+            assert_colorless_fallback(h, "prose '<red>run `md hash` now</red>'", NO_COLOR)
+        }),
+        ("soft_break", |h| assert_soft_break(h)),
+        ("blank_line", |h| assert_blank_line(h)),
+        ("backslash_break", |h| assert_backslash_break(h)),
+        ("hard_mode_break", |h| assert_hard_mode_break(h)),
+        ("wrapper_soft_break", |h| assert_wrapper_soft_break(h)),
+        ("link_around_code_block", |h| assert_link_around_code_block(h)),
+    ]
+}
+
+/// Runs the inline case called `name`.
+fn run_inline_case<H: TerminalHarness>(harness: &mut H, name: &str) {
+    let cases = inline_cases::<H>();
+    let (_, case) = cases
+        .iter()
+        .find(|(case, _)| *case == name)
+        .unwrap_or_else(|| panic!("no inline prose case named {name:?}"));
+    case(harness);
+}
+
+fn inline_case_in_wezterm(name: &str) {
     let mut guard = SHARED_WEZTERM
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().expect("shared WezTerm harness present");
-    assert_inline_code_display(harness);
-    assert_break_geometry_display(harness);
+    run_inline_case(harness, name);
 }
 
-#[test]
-#[serial(level2_terminal)]
-fn level2_prose_inline_code_and_breaks_in_kitty() {
-    require_level!(Level::L2, KittyHarness::available(), Backend::Kitty);
+fn inline_case_in_kitty(name: &str) {
     let mut guard =
         SHARED_KITTY.get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
     let harness = guard.as_mut().expect("shared Kitty harness present");
-    assert_inline_code_display(harness);
-    assert_break_geometry_display(harness);
+    run_inline_case(harness, name);
 }
 
-#[test]
-#[serial(level2_terminal)]
-fn level2_prose_inline_code_and_breaks_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+fn inline_case_in_tmux(name: &str) {
     let mut guard =
         SHARED_TMUX.get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
     let harness = guard.as_mut().expect("shared tmux harness present");
-    assert_inline_code_display(harness);
-    assert_break_geometry_display(harness);
+    run_inline_case(harness, name);
+}
+
+/// Generates module `$module` with one `#[test]` per listed case, gated on
+/// `$harness` and run by `$run`, and a `CASES` list of the names for the
+/// guard test. One test per case lets nextest spread them over the runner's
+/// cores; one test running all fourteen took over 5 s in WezTerm.
+macro_rules! inline_case_tests {
+    ($module:ident, $harness:ty, $backend:expr, $run:ident) => {
+        mod $module {
+            use super::*;
+
+            inline_case_tests!(@cases $harness, $backend, $run, [
+                code_span,
+                code_in_color,
+                code_in_link,
+                relative_link,
+                plain_code_fallback,
+                no_color_code_fallback,
+                plain_colored_code_fallback,
+                no_color_colored_code_fallback,
+                soft_break,
+                blank_line,
+                backslash_break,
+                hard_mode_break,
+                wrapper_soft_break,
+                link_around_code_block,
+            ]);
+        }
+    };
+    (@cases $harness:ty, $backend:expr, $run:ident, [$($case:ident),* $(,)?]) => {
+        pub(super) const CASES: &[&str] = &[$(stringify!($case)),*];
+
+        $(
+            #[test]
+            #[serial(level2_terminal)]
+            fn $case() {
+                require_level!(Level::L2, <$harness>::available(), $backend);
+                $run(stringify!($case));
+            }
+        )*
+    };
+}
+
+inline_case_tests!(level2_prose_inline_code_and_breaks_in_wezterm, WezTermHarness, Backend::WezTerm, inline_case_in_wezterm);
+inline_case_tests!(level2_prose_inline_code_and_breaks_in_kitty, KittyHarness, Backend::Kitty, inline_case_in_kitty);
+inline_case_tests!(level2_prose_inline_code_and_breaks_in_tmux, TmuxHarness, Backend::Tmux, inline_case_in_tmux);
+
+/// A case added to the table without a test in every terminal's list would
+/// never run.
+#[test]
+fn every_inline_case_has_a_test_per_terminal() {
+    let names: Vec<&str> = inline_cases::<TmuxHarness>().iter().map(|(name, _)| *name).collect();
+    assert_eq!(names, level2_prose_inline_code_and_breaks_in_wezterm::CASES);
+    assert_eq!(names, level2_prose_inline_code_and_breaks_in_kitty::CASES);
+    assert_eq!(names, level2_prose_inline_code_and_breaks_in_tmux::CASES);
 }

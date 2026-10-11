@@ -201,39 +201,43 @@ fn content(row: &OutputRow) -> &str {
         .trim_end()
 }
 
-/// Inline code inside a quote and a list displays dim with its delimiters
-/// gone; a link around an explicit code block displays as linked paragraphs
-/// around the dim, unlinked code; and a backslash hard break in a list item
-/// keeps its second row under the item's hanging indent.
-fn assert_container_inline_display<H: TerminalHarness>(harness: &mut H) {
-    for subcommand in ["quote", "list"] {
-        let (frame, rows) = common::run_bt_rows(harness, &format!("{subcommand} 'see `md hash` here'"), FORCED);
-        let shown = non_blank(&rows);
-        assert_eq!(shown.len(), 1, "`bt {subcommand}`.\nplain:\n{}", frame.plain);
-        assert_eq!(content(shown[0]), "see md hash here", "{:?}", shown[0]);
-        assert_eq!(dim_runs(shown[0]), ["md hash"], "{:?}", shown[0]);
+/// Inline code inside a `bt <subcommand>` container displays dim with its
+/// delimiters gone.
+fn assert_container_inline_code<H: TerminalHarness>(harness: &mut H, subcommand: &str) {
+    let (frame, rows) = common::run_bt_rows(harness, &format!("{subcommand} 'see `md hash` here'"), FORCED);
+    let shown = non_blank(&rows);
+    assert_eq!(shown.len(), 1, "`bt {subcommand}`.\nplain:\n{}", frame.plain);
+    assert_eq!(content(shown[0]), "see md hash here", "{:?}", shown[0]);
+    assert_eq!(dim_runs(shown[0]), ["md hash"], "{:?}", shown[0]);
+}
 
-        let (frame, rows) = common::run_bt_rows(
-            harness,
-            &format!("{subcommand} '[a<code-block>x</code-block>b](https://e.io)'"),
-            FORCED,
-        );
-        let shown = non_blank(&rows);
-        let texts: Vec<&str> = shown.iter().map(|row| content(row)).collect();
-        assert!(
-            texts.first() == Some(&"a") && texts.last() == Some(&"b") && texts.contains(&"x"),
-            "`bt {subcommand}` must show the linked paragraphs around the code: {texts:?}\nplain:\n{}",
-            frame.plain,
-        );
-        for row in [shown[0], shown[shown.len() - 1]] {
-            assert_eq!(link_runs(row), [content(row)], "{row:?}");
-            assert_eq!(common::osc8_destinations(&row.raw), ["https://e.io"], "{row:?}");
-        }
-        let code = shown.iter().find(|row| content(row) == "x").expect("code row");
-        assert_eq!(dim_runs(code), ["x"], "{code:?}");
-        assert!(link_runs(code).is_empty(), "{code:?}");
+/// A link around an explicit code block inside a `bt <subcommand>` container
+/// displays as linked paragraphs around the dim, unlinked code.
+fn assert_container_link_around_code_block<H: TerminalHarness>(harness: &mut H, subcommand: &str) {
+    let (frame, rows) = common::run_bt_rows(
+        harness,
+        &format!("{subcommand} '[a<code-block>x</code-block>b](https://e.io)'"),
+        FORCED,
+    );
+    let shown = non_blank(&rows);
+    let texts: Vec<&str> = shown.iter().map(|row| content(row)).collect();
+    assert!(
+        texts.first() == Some(&"a") && texts.last() == Some(&"b") && texts.contains(&"x"),
+        "`bt {subcommand}` must show the linked paragraphs around the code: {texts:?}\nplain:\n{}",
+        frame.plain,
+    );
+    for row in [shown[0], shown[shown.len() - 1]] {
+        assert_eq!(link_runs(row), [content(row)], "{row:?}");
+        assert_eq!(common::osc8_destinations(&row.raw), ["https://e.io"], "{row:?}");
     }
+    let code = shown.iter().find(|row| content(row) == "x").expect("code row");
+    assert_eq!(dim_runs(code), ["x"], "{code:?}");
+    assert!(link_runs(code).is_empty(), "{code:?}");
+}
 
+/// A backslash hard break in a list item keeps its second row under the
+/// item's hanging indent.
+fn assert_list_backslash_break<H: TerminalHarness>(harness: &mut H) {
     let (frame, rows) = common::run_bt_rows(harness, r#"list "$(printf 'one\\\ntwo')""#, FORCED);
     let shown = non_blank(&rows);
     let plain: Vec<&str> = shown.iter().map(|row| row.plain.as_str()).collect();
@@ -267,35 +271,98 @@ fn assert_hard_mode_list_display<H: TerminalHarness>(harness: &mut H) {
     assert_eq!(dim_runs(shown[1]), ["x"], "{:?}", shown[1]);
 }
 
-#[test]
-#[serial(level2_terminal)]
-fn level2_container_inline_code_and_breaks_in_wezterm() {
-    require_level!(Level::L2, WezTermHarness::available(), Backend::WezTerm);
+/// A named scenario run against one terminal.
+type Case<H> = (&'static str, fn(&mut H));
+
+/// Inline code, links around block code, and hard breaks in containers, as
+/// each terminal displays them. The names are the test names;
+/// `every_inline_case_has_a_test_per_terminal` holds each terminal's test list
+/// to this table.
+fn inline_cases<H: TerminalHarness>() -> [Case<H>; 6] {
+    [
+        ("quote_inline_code", |h| assert_container_inline_code(h, "quote")),
+        ("list_inline_code", |h| assert_container_inline_code(h, "list")),
+        ("quote_link_around_code_block", |h| assert_container_link_around_code_block(h, "quote")),
+        ("list_link_around_code_block", |h| assert_container_link_around_code_block(h, "list")),
+        ("list_backslash_break", |h| assert_list_backslash_break(h)),
+        ("hard_mode_list", |h| assert_hard_mode_list_display(h)),
+    ]
+}
+
+/// Runs the inline case called `name`.
+fn run_inline_case<H: TerminalHarness>(harness: &mut H, name: &str) {
+    let cases = inline_cases::<H>();
+    let (_, case) = cases
+        .iter()
+        .find(|(case, _)| *case == name)
+        .unwrap_or_else(|| panic!("no container case named {name:?}"));
+    case(harness);
+}
+
+fn inline_case_in_wezterm(name: &str) {
     let mut guard = SHARED_WEZTERM
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().expect("shared WezTerm harness present");
-    assert_container_inline_display(harness);
-    assert_hard_mode_list_display(harness);
+    run_inline_case(harness, name);
 }
 
-#[test]
-#[serial(level2_terminal)]
-fn level2_container_inline_code_and_breaks_in_kitty() {
-    require_level!(Level::L2, KittyHarness::available(), Backend::Kitty);
+fn inline_case_in_kitty(name: &str) {
     let mut guard =
         SHARED_KITTY.get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
     let harness = guard.as_mut().expect("shared Kitty harness present");
-    assert_container_inline_display(harness);
-    assert_hard_mode_list_display(harness);
+    run_inline_case(harness, name);
 }
 
-#[test]
-#[serial(level2_terminal)]
-fn level2_container_inline_code_and_breaks_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+fn inline_case_in_tmux(name: &str) {
     let mut guard =
         SHARED_TMUX.get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
     let harness = guard.as_mut().expect("shared tmux harness present");
-    assert_container_inline_display(harness);
-    assert_hard_mode_list_display(harness);
+    run_inline_case(harness, name);
+}
+
+/// Generates module `$module` with one `#[test]` per case, gated on
+/// `$harness` and run by `$run`, and a `CASES` list of the names for the
+/// guard test. One test per case lets nextest spread them over the runner's
+/// cores; one test running all six took over 5 s in WezTerm.
+macro_rules! inline_case_tests {
+    ($module:ident, $harness:ty, $backend:expr, $run:ident) => {
+        mod $module {
+            use super::*;
+
+            inline_case_tests!(@cases $harness, $backend, $run, [
+                quote_inline_code,
+                list_inline_code,
+                quote_link_around_code_block,
+                list_link_around_code_block,
+                list_backslash_break,
+                hard_mode_list,
+            ]);
+        }
+    };
+    (@cases $harness:ty, $backend:expr, $run:ident, [$($case:ident),* $(,)?]) => {
+        pub(super) const CASES: &[&str] = &[$(stringify!($case)),*];
+
+        $(
+            #[test]
+            #[serial(level2_terminal)]
+            fn $case() {
+                require_level!(Level::L2, <$harness>::available(), $backend);
+                $run(stringify!($case));
+            }
+        )*
+    };
+}
+
+inline_case_tests!(level2_container_inline_code_and_breaks_in_wezterm, WezTermHarness, Backend::WezTerm, inline_case_in_wezterm);
+inline_case_tests!(level2_container_inline_code_and_breaks_in_kitty, KittyHarness, Backend::Kitty, inline_case_in_kitty);
+inline_case_tests!(level2_container_inline_code_and_breaks_in_tmux, TmuxHarness, Backend::Tmux, inline_case_in_tmux);
+
+/// A case added to the table without a test in every terminal's list would
+/// never run.
+#[test]
+fn every_inline_case_has_a_test_per_terminal() {
+    let names: Vec<&str> = inline_cases::<TmuxHarness>().iter().map(|(name, _)| *name).collect();
+    assert_eq!(names, level2_container_inline_code_and_breaks_in_wezterm::CASES);
+    assert_eq!(names, level2_container_inline_code_and_breaks_in_kitty::CASES);
+    assert_eq!(names, level2_container_inline_code_and_breaks_in_tmux::CASES);
 }

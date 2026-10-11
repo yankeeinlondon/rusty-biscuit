@@ -25,17 +25,16 @@ use biscuit_test_harness::{CapturedFrame, TerminalHarness};
 use serial_test::serial;
 use test_toolkit::{Backend, Level, require_level};
 
-/// Process-shared WezTerm pane reused across the WezTerm tests in this
-/// file. A `clear` is sent before each test's first interaction so
-/// prior renders cannot leak into the capture window.
+/// The WezTerm pane a test attaches to: `just test-l2`'s shared pane in
+/// serial mode, or one the test spawns. Every command clears the screen on
+/// its own line (see [`run_cleared`]), so output from an earlier test in a
+/// shared pane cannot reach a capture.
 static SHARED_WEZTERM: SharedHarness<WezTermHarness> = SharedHarness::new();
 
-/// Process-shared Kitty window reused across the Kitty tests in this
-/// file.
+/// The Kitty window a test attaches to; see [`SHARED_WEZTERM`].
 static SHARED_KITTY: SharedHarness<KittyHarness> = SharedHarness::new();
 
-/// Process-shared tmux session reused across the tmux tests in this
-/// file.
+/// The tmux session a test attaches to; see [`SHARED_WEZTERM`].
 static SHARED_TMUX: SharedHarness<TmuxHarness> = SharedHarness::new();
 
 /// Unique words in the quoted text so the rendered output row can be
@@ -57,15 +56,21 @@ fn bt_command(args: &str) -> String {
     format!("'{escaped}' {args}")
 }
 
+/// Runs the shell `line` on a cleared screen and returns the settled frame:
+/// the line's output and the prompt after it.
+///
+/// The `clear` shares the command line, so no fixed wait for it is needed and
+/// a frame that settles before the output arrives cannot show a prompt. One
+/// subshell runs both: on a loaded macOS host the interactive shell's job
+/// control can print `child setpgid` errors for each job it forks.
+fn run_cleared<H: TerminalHarness>(harness: &mut H, line: &str) -> CapturedFrame {
+    biscuit_test_harness::send_command_settled(harness, &format!("(clear; {line})"), &[])
+        .unwrap_or_else(|error| panic!("failed to run {line:?}: {error}"))
+}
+
 /// Sends a `bt quote` with color forced on and returns the captured frame.
 fn capture_styled_quote<H: TerminalHarness>(harness: &mut H) -> CapturedFrame {
-    harness
-        .send_command_with_env(
-            &bt_command(&format!("quote \"{QUOTE_TEXT}\"")),
-            &[("FORCE_COLOR", "1")],
-        )
-        .expect("send_command_with_env failed");
-    biscuit_test_harness::capture_settled(harness).expect("capture failed")
+    capture_bt(harness, &format!("bt quote \"{QUOTE_TEXT}\""))
 }
 
 /// Returns the raw (escape-bearing) capture line for the rendered block
@@ -128,8 +133,6 @@ fn level2_block_quote_style_border_in_wezterm() {
     let mut guard = SHARED_WEZTERM
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().expect("shared WezTerm harness present");
-    harness.send_text(b"clear\n").expect("send_text failed");
-    harness.settle();
     assert_styled_border(harness);
 }
 
@@ -141,8 +144,6 @@ fn level2_block_quote_style_border_in_kitty() {
     let mut guard = SHARED_KITTY
         .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
     let harness = guard.as_mut().expect("shared Kitty harness present");
-    harness.send_text(b"clear\n").expect("send_text failed");
-    harness.settle();
     assert_styled_border(harness);
 }
 
@@ -154,8 +155,6 @@ fn level2_block_quote_style_border_in_tmux() {
     let mut guard = SHARED_TMUX
         .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
     let harness = guard.as_mut().expect("shared tmux harness present");
-    harness.send_text(b"clear\n").expect("send_text failed");
-    harness.settle();
     let frame = capture_styled_quote(harness);
 
     // tmux faithfully relays text glyphs: the declared left border must be
@@ -203,15 +202,7 @@ const STYLED_QUOTE_INPUT: &str = "<red>alpha</red> bravo";
 /// span color and then continues the trailing run, all within the declared
 /// left border.
 fn assert_styled_inline_content<H: TerminalHarness>(harness: &mut H) {
-    harness
-        .send_command_with_env(
-            &bt_command(&format!("quote \"{STYLED_QUOTE_INPUT}\"")),
-            &[("FORCE_COLOR", "1")],
-        )
-        .expect("send_command_with_env failed");
-    let _ = biscuit_test_harness::wait_for_prompt(harness);
-    std::thread::sleep(std::time::Duration::from_millis(200));
-    let frame = harness.capture().expect("capture failed");
+    let frame = capture_bt(harness, &format!("bt quote \"{STYLED_QUOTE_INPUT}\""));
 
     // Isolate the rendered quote row by its compact visible text.
     let raw_lines: Vec<&str> = frame.raw.lines().collect();
@@ -255,8 +246,6 @@ fn level2_block_quote_styled_inline_content_in_wezterm() {
     let mut guard = SHARED_WEZTERM
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().expect("shared WezTerm harness present");
-    harness.send_text(b"clear\n").expect("send_text failed");
-    harness.settle();
     assert_styled_inline_content(harness);
 }
 
@@ -268,8 +257,6 @@ fn level2_block_quote_styled_inline_content_in_kitty() {
     let mut guard = SHARED_KITTY
         .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
     let harness = guard.as_mut().expect("shared Kitty harness present");
-    harness.send_text(b"clear\n").expect("send_text failed");
-    harness.settle();
     assert_styled_inline_content(harness);
 }
 
@@ -284,15 +271,13 @@ fn level2_block_quote_styled_inline_content_in_kitty() {
 // `render_tree::style`; these confirm the styling survives to the cells the
 // emulator actually displays.
 
-/// Runs a `bt` command with color forced on and returns the captured frame.
+/// Runs a `bt` command with color forced on and returns the captured frame
+/// (see [`run_cleared`]).
 fn capture_bt<H: TerminalHarness>(harness: &mut H, cmd: &str) -> CapturedFrame {
     let args = cmd
         .strip_prefix("bt ")
         .expect("capture_bt command must start with bt");
-    harness
-        .send_command_with_env(&bt_command(args), &[("FORCE_COLOR", "1")])
-        .unwrap_or_else(|error| panic!("failed to send {cmd:?}: {error}"));
-    biscuit_test_harness::capture_settled(harness).expect("capture failed")
+    run_cleared(harness, &format!("FORCE_COLOR='1' {}", bt_command(args)))
 }
 
 /// Returns the raw (escape-bearing) capture line whose plain text contains
@@ -416,11 +401,10 @@ fn assert_block_rounded_border<H: TerminalHarness>(harness: &mut H) {
         frame.plain,
     );
     // `--border-radius` must select the rounded corner set *for this block*,
-    // never the square set. A whole-frame `!contains('┌')` check is invalid:
-    // an earlier `bt block --border all` leaves a square-bordered block in
-    // scrollback. Scope the negative check to the rounded block's own border
-    // rows — the line carrying `╭`/`╮` (top) and the line carrying `╰`/`╯`
-    // (bottom) — which sit on different rows from any earlier square block.
+    // never the square set. Scope the negative check to the rounded block's
+    // own border rows — the line carrying `╭`/`╮` (top) and the line carrying
+    // `╰`/`╯` (bottom) — so it judges this block's corners and nothing else
+    // the frame shows.
     let top_border = frame
         .plain
         .lines()
@@ -532,10 +516,7 @@ fn assert_table_example_striped_without_force_color<H: TerminalHarness>(harness:
         "env -u NO_COLOR -u FORCE_COLOR -u CLICOLOR_FORCE {}",
         bt_command("table --example")
     );
-    harness
-        .send_command_with_env(&cmd, &[])
-        .expect("send_command_with_env failed");
-    let frame = biscuit_test_harness::capture_settled(harness).expect("capture failed");
+    let frame = run_cleared(harness, &cmd);
 
     let raw_lines: Vec<&str> = frame.raw.lines().collect();
     let row = frame
@@ -801,16 +782,19 @@ fn assert_block_painted_padding<H: TerminalHarness>(harness: &mut H) {
 }
 
 /// Asserts border interior spacing is owned by `padding`: a bordered block with
-/// no padding renders the content adjacent to the drawn edge (`│snug`), while
-/// adding `--padding 1` restores the one-cell gap (`│ roomy`).
-fn assert_block_border_adjacency<H: TerminalHarness>(harness: &mut H) {
+/// no padding renders the content adjacent to the drawn edge (`│snug`).
+fn assert_block_border_snug<H: TerminalHarness>(harness: &mut H) {
     let snug = capture_bt(harness, "bt block \"snug\" --border all");
     assert!(
         snug.plain.contains("│snug"),
         "a no-padding border must sit adjacent to its content.\nplain:\n{}",
         snug.plain,
     );
+}
 
+/// Asserts `--padding 1` restores the one-cell gap inside a border
+/// (`│ roomy`).
+fn assert_block_border_roomy<H: TerminalHarness>(harness: &mut H) {
     let roomy = capture_bt(harness, "bt block \"roomy\" --border all --padding 1");
     assert!(
         roomy.plain.contains("│ roomy"),
@@ -819,81 +803,79 @@ fn assert_block_border_adjacency<H: TerminalHarness>(harness: &mut H) {
     );
 }
 
-/// Asserts a sub-available `Fixed(20)` box is placed at the exact column
-/// `--align` dictates within the pane. With no margins the box may use the full
-/// pane width as its alignment area, so the slack is `available − 20`: left sits
-/// flush, center leads by `slack / 2`, and right leads by the whole slack.
+/// Asserts a box `box_width` cells wide, aligned with `--align <align>`, leads
+/// by the column the alignment dictates: left sits flush, center leads by
+/// `slack / 2`, and right leads by the whole slack, where the slack is the
+/// pane's live column count less `box_width`.
 ///
-/// `available` is the live pane column count from the harness geometry — pinning
-/// the absolute lead, not just the `left < center < right` ordering (which a
-/// one-third / two-thirds placement bug would also satisfy).
-///
-/// Each alignment uses a distinct needle because the captures accumulate in the
-/// shared pane; a shared needle would always match the first (left) row.
-fn assert_block_alignment_placement<H: TerminalHarness>(harness: &mut H, available: u32) {
-    // box = content(20) + no padding + no border; no margins, so the alignment
-    // area is the full pane and the slack is `available − 20`.
-    let slack = (available - 20) as usize;
-    let left = capture_bt(harness, "bt block \"leftmark\" --width 20 --align left");
-    let left_lead = row_leading_spaces(&left, "bt block", "leftmark")
-        .unwrap_or_else(|| panic!("left-aligned row missing.\nplain:\n{}", left.plain));
-    let center = capture_bt(harness, "bt block \"centermark\" --width 20 --align center");
-    let center_lead = row_leading_spaces(&center, "bt block", "centermark")
-        .unwrap_or_else(|| panic!("center-aligned row missing.\nplain:\n{}", center.plain));
-    let right = capture_bt(harness, "bt block \"rightmark\" --width 20 --align right");
-    let right_lead = row_leading_spaces(&right, "bt block", "rightmark")
-        .unwrap_or_else(|| panic!("right-aligned row missing.\nplain:\n{}", right.plain));
-
-    assert!(
-        left_lead <= 1,
-        "left placement should be flush left, got {left_lead} lead"
-    );
+/// Pinning the absolute lead, not just the `left < center < right` ordering,
+/// catches a one-third / two-thirds placement bug the ordering would accept.
+fn assert_aligned_lead<H: PaneWidth>(harness: &H, what: &str, align: &str, lead: usize, box_width: usize) {
+    if align == "left" {
+        assert!(lead <= 1, "{what} left placement should be flush left, got {lead} lead");
+        return;
+    }
+    let available = harness.pane_width();
+    let slack = available as usize - box_width;
+    let (expected, share) = match align {
+        "center" => (slack / 2, "half the slack"),
+        "right" => (slack, "the whole slack"),
+        other => panic!("no alignment named {other:?}"),
+    };
     assert_eq!(
-        center_lead,
-        slack / 2,
-        "center must lead by half the slack ({} of {available}-wide pane)",
-        slack / 2,
-    );
-    assert_eq!(
-        right_lead, slack,
-        "right must lead by the whole slack ({slack} of {available}-wide pane)",
+        lead, expected,
+        "{what} {align} must lead by {share} ({expected} for a {box_width}-wide box in a \
+         {available}-wide pane)",
     );
 }
 
-/// Asserts the drawn box follows the resolved content box across width modes:
-/// a `Fixed(20)` box draws 22 cells (20 content + 2 edges), `FitContent` hugs
-/// its content (`fitmark` = 7 → 9), and `Auto` fills the whole pane. With no
-/// margin or padding the `Auto` content box is `available − 2` (the two border
-/// edges), so the drawn box is exactly `available`. This is the real-terminal
-/// analogue of the `bt block hi --width 20 --border all` reproduction the review
-/// flagged — the prior code drew the box at the text width, not the resolved
-/// width.
+/// Asserts a sub-available `Fixed(20)` box is placed at the exact column
+/// `--align <align>` dictates within the pane. With no margins the box may use
+/// the full pane width as its alignment area, so the slack is `available − 20`
+/// (see [`assert_aligned_lead`]).
 ///
-/// `available` is the live pane column count from the harness geometry, so the
-/// `Auto` fill is pinned exactly rather than merely "wider than the fixed box".
-fn assert_block_width_mode_box<H: TerminalHarness>(harness: &mut H, available: u32) {
-    let fixed = capture_bt(harness, "bt block \"fixmark\" --width 20 --border all");
-    assert_eq!(
-        box_width_for(&fixed, "fixmark"),
-        22,
-        "Fixed(20) must draw a 22-cell box (20 content + 2 edges).\nplain:\n{}",
-        fixed.plain,
-    );
+/// Each alignment uses a distinct needle, so a row can only match its own
+/// command's output.
+fn assert_block_alignment_placement<H: TerminalHarness + PaneWidth>(harness: &mut H, align: &str) {
+    let needle = format!("{align}mark");
+    let frame = capture_bt(harness, &format!("bt block \"{needle}\" --width 20 --align {align}"));
+    let lead = row_leading_spaces(&frame, "bt block", &needle)
+        .unwrap_or_else(|| panic!("{align}-aligned row missing.\nplain:\n{}", frame.plain));
+    // box = content(20) + no padding + no border.
+    assert_aligned_lead(harness, "Fixed(20)", align, lead, 20);
+}
 
-    let fit = capture_bt(harness, "bt block \"fitmark\" --width fit --border all");
-    assert_eq!(
-        box_width_for(&fit, "fitmark"),
-        9,
-        "FitContent must hug its 7-cell content (box 9).\nplain:\n{}",
-        fit.plain,
-    );
+/// Asserts the drawn box of the bordered block `needle` rendered with
+/// `width_flag` is `expected` cells wide. Together the width-mode cases pin
+/// that the drawn box follows the resolved content box: a `Fixed(20)` box
+/// draws 22 cells (20 content + 2 edges), `FitContent` hugs its content
+/// (`fitmark` = 7 → 9), and `Auto` fills the whole pane. This is the
+/// real-terminal analogue of the `bt block hi --width 20 --border all`
+/// reproduction the review flagged — the prior code drew the box at the text
+/// width, not the resolved width.
+fn assert_block_width_box<H: TerminalHarness>(
+    harness: &mut H,
+    needle: &str,
+    width_flag: &str,
+    expected: usize,
+    why: &str,
+) {
+    let frame = capture_bt(harness, &format!("bt block \"{needle}\" {width_flag} --border all"));
+    assert_eq!(box_width_for(&frame, needle), expected, "{why}.\nplain:\n{}", frame.plain);
+}
 
-    let auto = capture_bt(harness, "bt block \"automark\" --width auto --border all");
+/// Asserts an `Auto` box fills the whole pane. With no margin or padding the
+/// `Auto` content box is `available − 2` (the two border edges), so the drawn
+/// box is exactly the pane's live column count — pinned exactly rather than
+/// merely "wider than the fixed box".
+fn assert_block_auto_width_box<H: TerminalHarness + PaneWidth>(harness: &mut H) {
+    let frame = capture_bt(harness, "bt block \"automark\" --width auto --border all");
+    let available = harness.pane_width();
     assert_eq!(
-        box_width_for(&auto, "automark"),
+        box_width_for(&frame, "automark"),
         available as usize,
         "Auto must fill the whole {available}-wide pane (box == pane width).\nplain:\n{}",
-        auto.plain,
+        frame.plain,
     );
 }
 
@@ -935,77 +917,28 @@ fn assert_block_box_order_clamp<H: TerminalHarness>(harness: &mut H) {
     );
 }
 
-/// Asserts a `FitContent` box is placed at the exact `--align` column. A
-/// borderless, unpadded fit box hugs its content, so its drawn width is the
-/// measured content width and the alignment slack is `available − width`: left
-/// sits flush, center leads by `slack / 2`, and right leads by the whole slack.
-///
-/// The box width is measured from each capture (the content words differ in
-/// length per needle), and `available` is the live pane column count — together
-/// pinning the absolute lead, not just the `left < center < right` ordering.
-fn assert_block_fit_alignment<H: TerminalHarness>(harness: &mut H, available: u32) {
-    let left = capture_bt(harness, "bt block \"fitleftward\" --width fit --align left");
-    let (left_lead, _) = row_lead_and_width(&left, "bt block", "fitleftward")
-        .unwrap_or_else(|| panic!("fit left row missing.\nplain:\n{}", left.plain));
-    let center = capture_bt(harness, "bt block \"fitcenterward\" --width fit --align center");
-    let (center_lead, center_w) = row_lead_and_width(&center, "bt block", "fitcenterward")
-        .unwrap_or_else(|| panic!("fit center row missing.\nplain:\n{}", center.plain));
-    let right = capture_bt(harness, "bt block \"fitrightward\" --width fit --align right");
-    let (right_lead, right_w) = row_lead_and_width(&right, "bt block", "fitrightward")
-        .unwrap_or_else(|| panic!("fit right row missing.\nplain:\n{}", right.plain));
-
-    let center_slack = available as usize - center_w;
-    let right_slack = available as usize - right_w;
-    assert!(
-        left_lead <= 1,
-        "FitContent left placement should be flush left, got {left_lead}"
-    );
-    assert_eq!(
-        center_lead,
-        center_slack / 2,
-        "FitContent center must lead by half the slack ({} for a {center_w}-wide box)",
-        center_slack / 2,
-    );
-    assert_eq!(
-        right_lead, right_slack,
-        "FitContent right must lead by the whole slack ({right_slack} for a {right_w}-wide box)",
-    );
+/// Asserts a `FitContent` box is placed at the exact `--align <align>` column.
+/// A borderless, unpadded fit box hugs its content, so its drawn width is the
+/// measured content width (the words differ in length per needle) and the
+/// slack is `available − width` (see [`assert_aligned_lead`]).
+fn assert_block_fit_alignment<H: TerminalHarness + PaneWidth>(harness: &mut H, align: &str) {
+    let needle = format!("fit{align}ward");
+    let frame = capture_bt(harness, &format!("bt block \"{needle}\" --width fit --align {align}"));
+    let (lead, width) = row_lead_and_width(&frame, "bt block", &needle)
+        .unwrap_or_else(|| panic!("fit {align} row missing.\nplain:\n{}", frame.plain));
+    assert_aligned_lead(harness, "FitContent", align, lead, width);
 }
 
 /// Asserts an `Auto` box capped by `--max-width 20` is placed at the exact
-/// `--align` column. The cap fixes the content box at 20 cells; with no margin
-/// or border the box is 20 wide and the alignment slack is `available − 20`:
-/// left sits flush, center leads by `slack / 2`, and right leads by the whole
-/// slack.
-///
-/// `available` is the live pane column count, pinning the absolute lead rather
-/// than only the `left < center < right` ordering.
-fn assert_block_capped_alignment<H: TerminalHarness>(harness: &mut H, available: u32) {
-    // Auto capped to `max-width 20`: box = 20 content + no padding + no border.
-    let slack = (available - 20) as usize;
-    let left = capture_bt(harness, "bt block \"capleftward\" --max-width 20 --align left");
-    let left_lead = row_leading_spaces(&left, "bt block", "capleftward")
-        .unwrap_or_else(|| panic!("capped left row missing.\nplain:\n{}", left.plain));
-    let center = capture_bt(harness, "bt block \"capcenterward\" --max-width 20 --align center");
-    let center_lead = row_leading_spaces(&center, "bt block", "capcenterward")
-        .unwrap_or_else(|| panic!("capped center row missing.\nplain:\n{}", center.plain));
-    let right = capture_bt(harness, "bt block \"caprightward\" --max-width 20 --align right");
-    let right_lead = row_leading_spaces(&right, "bt block", "caprightward")
-        .unwrap_or_else(|| panic!("capped right row missing.\nplain:\n{}", right.plain));
-    assert!(
-        left_lead <= 1,
-        "capped-Auto left placement should be flush left, got {left_lead}"
-    );
-    assert_eq!(
-        center_lead,
-        slack / 2,
-        "capped-Auto center must lead by half the slack ({} of {available}-wide pane)",
-        slack / 2,
-    );
-    assert_eq!(
-        right_lead, slack,
-        "capped-Auto right must lead by the whole slack ({slack} of {available}-wide pane)",
-    );
+/// `--align <align>` column. The cap fixes the content box at 20 cells; with
+/// no margin or border the box is 20 wide and the slack is `available − 20`
+/// (see [`assert_aligned_lead`]).
+fn assert_block_capped_alignment<H: TerminalHarness + PaneWidth>(harness: &mut H, align: &str) {
+    let needle = format!("cap{align}ward");
+    let frame = capture_bt(harness, &format!("bt block \"{needle}\" --max-width 20 --align {align}"));
+    let lead = row_leading_spaces(&frame, "bt block", &needle)
+        .unwrap_or_else(|| panic!("capped {align} row missing.\nplain:\n{}", frame.plain));
+    assert_aligned_lead(harness, "capped-Auto", align, lead, 20);
 }
 
 /// Asserts acceptance criterion 1 in a styling-capable terminal: a
@@ -1059,83 +992,18 @@ fn assert_block_painted_padding_and_transparent_margin<H: TerminalHarness>(harne
     );
 }
 
-#[test]
-#[serial(level2_terminal)]
-fn level2_render_tree_style_in_wezterm() {
-    require_level!(Level::L2, WezTermHarness::available(), Backend::WezTerm);
+// ---------------------------------------------------------------------------
+// tmux — relays glyphs and text but carries no styling protocol of its own
+// ---------------------------------------------------------------------------
+//
+// tmux faithfully relays text glyphs. These assert the border glyphs and
+// visible text survive and that no raw escape garbage leaks into the
+// displayed cells. The painted background band is verified only on
+// styling-capable terminals (WezTerm / Kitty) since tmux's plain capture
+// carries no SGR.
 
-    let mut guard = SHARED_WEZTERM
-        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
-    let harness = guard.as_mut().expect("shared WezTerm harness present");
-    harness.send_text(b"clear\n").expect("send_text failed");
-    harness.settle();
-    let available = harness.pane_size().expect("WezTerm pane size").cols;
-    assert_block_fg(harness);
-    assert_block_bg(harness);
-    assert_block_bold(harness);
-    assert_block_border(harness);
-    assert_block_rounded_border(harness);
-    assert_progress_slot_colors(harness);
-    assert_table_striped(harness);
-    assert_table_example_striped_without_force_color(harness);
-    assert_table_styled(harness);
-    assert_block_painted_padding(harness);
-    assert_block_border_adjacency(harness);
-    assert_block_alignment_placement(harness, available);
-    assert_block_width_mode_box(harness, available);
-    assert_block_max_width_box(harness);
-    assert_block_box_order_clamp(harness);
-    assert_block_fit_alignment(harness, available);
-    assert_block_capped_alignment(harness, available);
-    assert_block_painted_padding_and_transparent_margin(harness);
-}
-
-#[test]
-#[serial(level2_terminal)]
-fn level2_render_tree_style_in_kitty() {
-    require_level!(Level::L2, KittyHarness::available(), Backend::Kitty);
-
-    let mut guard = SHARED_KITTY
-        .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
-    let harness = guard.as_mut().expect("shared Kitty harness present");
-    harness.send_text(b"clear\n").expect("send_text failed");
-    harness.settle();
-    let available = harness.pane_cols().expect("kitty pane cols");
-    assert_block_fg(harness);
-    assert_block_bg(harness);
-    assert_block_bold(harness);
-    assert_block_border(harness);
-    assert_block_rounded_border(harness);
-    assert_progress_slot_colors(harness);
-    assert_table_striped(harness);
-    assert_table_example_striped_without_force_color(harness);
-    assert_table_styled(harness);
-    assert_block_painted_padding(harness);
-    assert_block_border_adjacency(harness);
-    assert_block_alignment_placement(harness, available);
-    assert_block_width_mode_box(harness, available);
-    assert_block_max_width_box(harness);
-    assert_block_box_order_clamp(harness);
-    assert_block_fit_alignment(harness, available);
-    assert_block_capped_alignment(harness, available);
-    assert_block_painted_padding_and_transparent_margin(harness);
-}
-
-#[test]
-#[serial(level2_terminal)]
-fn level2_render_tree_style_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
-
-    let mut guard = SHARED_TMUX
-        .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
-    let harness = guard.as_mut().expect("shared tmux harness present");
-    harness.send_text(b"clear\n").expect("send_text failed");
-    harness.settle();
-    let available = harness.pane_cols().expect("tmux pane cols");
-
-    // tmux carries no styling protocol of its own, but it faithfully relays
-    // text glyphs. Assert the border glyphs and visible text survive and that
-    // no raw escape garbage leaks into the displayed cells.
+/// A bordered block relays its box-drawing glyphs and text through tmux.
+fn assert_tmux_block_border<H: TerminalHarness>(harness: &mut H) {
     let frame = capture_bt(harness, "bt block \"bordered notice\" --border all");
     assert!(
         frame.plain.contains('┌') && frame.plain.contains('│') && frame.plain.contains('└'),
@@ -1152,8 +1020,10 @@ fn level2_render_tree_style_in_tmux() {
         "expected no raw escape bytes in the tmux plain capture. plain:\n{}",
         frame.plain,
     );
+}
 
-    // A rounded border must relay its light-arc corner glyphs through tmux.
+/// A rounded border relays its light-arc corner glyphs through tmux.
+fn assert_tmux_block_rounded_border<H: TerminalHarness>(harness: &mut H) {
     let frame = capture_bt(
         harness,
         "bt block \"rounded notice\" --border all --border-radius 1",
@@ -1163,15 +1033,20 @@ fn level2_render_tree_style_in_tmux() {
         "expected light-arc corner glyphs in the tmux capture.\nplain:\n{}",
         frame.plain,
     );
+}
 
-    // The progress bar and striped table glyphs must also relay through tmux.
-    let frame = capture_bt(harness,"bt progress 50 --label Loading");
+/// The progress bar's text relays through tmux.
+fn assert_tmux_progress<H: TerminalHarness>(harness: &mut H) {
+    let frame = capture_bt(harness, "bt progress 50 --label Loading");
     assert!(
         frame.plain.contains("50%") && frame.plain.contains("Loading"),
         "expected the progress bar text in tmux. plain:\n{}",
         frame.plain,
     );
+}
 
+/// A striped table's cell text relays through tmux.
+fn assert_tmux_table_striped<H: TerminalHarness>(harness: &mut H) {
     let frame = capture_bt(
         harness,
         "bt table --columns \"Name,Score\" --row \"Annwyl,90\" --row \"Bertrand,75\" --striped",
@@ -1186,9 +1061,10 @@ fn level2_render_tree_style_in_tmux() {
         "expected no raw escape bytes in the tmux table capture. plain:\n{}",
         frame.plain,
     );
+}
 
-    // A table with typed header / body slot styling relays its text faithfully
-    // through tmux with no escape garbage in the displayed cells.
+/// A table with typed header / body slot styling relays its text through tmux.
+fn assert_tmux_table_styled<H: TerminalHarness>(harness: &mut H) {
     let frame = capture_bt(
         harness,
         "bt table --columns \"Pipeline,Verdict\" --row \"Quokka,Affirmed\" \
@@ -1204,17 +1080,278 @@ fn level2_render_tree_style_in_tmux() {
         "expected no raw escape bytes in the tmux styled-table capture. plain:\n{}",
         frame.plain,
     );
+}
 
-    // Box-model geometry relays faithfully through tmux: border interior gap is
-    // owned by padding, the drawn box follows the resolved width across modes,
-    // the box-order clamp holds, and `--align` places sub-available boxes. The
-    // painted background band is verified only on styling-capable terminals
-    // (WezTerm / Kitty) since tmux's plain capture carries no SGR.
-    assert_block_border_adjacency(harness);
-    assert_block_alignment_placement(harness, available);
-    assert_block_width_mode_box(harness, available);
-    assert_block_max_width_box(harness);
-    assert_block_box_order_clamp(harness);
-    assert_block_fit_alignment(harness, available);
-    assert_block_capped_alignment(harness, available);
+// ---------------------------------------------------------------------------
+// One test per scenario per terminal
+// ---------------------------------------------------------------------------
+//
+// Each scenario is its own `#[test]` so nextest spreads them over the
+// runner's cores; one test running every scenario took about 5 s in WezTerm.
+
+/// The pane's live column count, which the alignment and `Auto` width
+/// scenarios pin their expected geometry to.
+trait PaneWidth {
+    fn pane_width(&self) -> u32;
+}
+
+impl PaneWidth for WezTermHarness {
+    fn pane_width(&self) -> u32 {
+        self.pane_size().expect("WezTerm pane size").cols
+    }
+}
+
+impl PaneWidth for KittyHarness {
+    fn pane_width(&self) -> u32 {
+        self.pane_cols().expect("kitty pane cols")
+    }
+}
+
+impl PaneWidth for TmuxHarness {
+    fn pane_width(&self) -> u32 {
+        self.pane_cols().expect("tmux pane cols")
+    }
+}
+
+/// A named scenario run against one terminal.
+type Case<H> = (&'static str, fn(&mut H));
+
+/// The scenarios a styling-capable terminal (WezTerm, Kitty) checks. The
+/// names are the test names; `every_case_has_a_test_per_terminal` holds each
+/// terminal's test list to this table.
+fn styled_cases<H: TerminalHarness + PaneWidth>() -> [Case<H>; 27] {
+    [
+        ("block_fg", |h| assert_block_fg(h)),
+        ("block_bg", |h| assert_block_bg(h)),
+        ("block_bold", |h| assert_block_bold(h)),
+        ("block_border", |h| assert_block_border(h)),
+        ("block_rounded_border", |h| assert_block_rounded_border(h)),
+        ("progress_slot_colors", |h| assert_progress_slot_colors(h)),
+        ("table_striped", |h| assert_table_striped(h)),
+        ("table_example_striped_without_force_color", |h| {
+            assert_table_example_striped_without_force_color(h)
+        }),
+        ("table_styled", |h| assert_table_styled(h)),
+        ("block_painted_padding", |h| assert_block_painted_padding(h)),
+        ("block_border_snug", |h| assert_block_border_snug(h)),
+        ("block_border_roomy", |h| assert_block_border_roomy(h)),
+        ("block_align_left", |h| assert_block_alignment_placement(h, "left")),
+        ("block_align_center", |h| assert_block_alignment_placement(h, "center")),
+        ("block_align_right", |h| assert_block_alignment_placement(h, "right")),
+        ("block_fixed_width_box", |h| {
+            assert_block_width_box(h, "fixmark", "--width 20", 22, "Fixed(20) must draw a 22-cell box (20 content + 2 edges)")
+        }),
+        ("block_fit_width_box", |h| {
+            assert_block_width_box(h, "fitmark", "--width fit", 9, "FitContent must hug its 7-cell content (box 9)")
+        }),
+        ("block_auto_width_box", |h| assert_block_auto_width_box(h)),
+        ("block_max_width_box", |h| assert_block_max_width_box(h)),
+        ("block_box_order_clamp", |h| assert_block_box_order_clamp(h)),
+        ("block_fit_align_left", |h| assert_block_fit_alignment(h, "left")),
+        ("block_fit_align_center", |h| assert_block_fit_alignment(h, "center")),
+        ("block_fit_align_right", |h| assert_block_fit_alignment(h, "right")),
+        ("block_capped_align_left", |h| assert_block_capped_alignment(h, "left")),
+        ("block_capped_align_center", |h| assert_block_capped_alignment(h, "center")),
+        ("block_capped_align_right", |h| assert_block_capped_alignment(h, "right")),
+        ("block_painted_padding_and_transparent_margin", |h| {
+            assert_block_painted_padding_and_transparent_margin(h)
+        }),
+    ]
+}
+
+/// The scenarios tmux checks: glyph and text relay, and the box-model
+/// geometry, which needs no styling protocol.
+fn tmux_cases<H: TerminalHarness + PaneWidth>() -> [Case<H>; 21] {
+    [
+        ("block_border", |h| assert_tmux_block_border(h)),
+        ("block_rounded_border", |h| assert_tmux_block_rounded_border(h)),
+        ("progress", |h| assert_tmux_progress(h)),
+        ("table_striped", |h| assert_tmux_table_striped(h)),
+        ("table_styled", |h| assert_tmux_table_styled(h)),
+        ("block_border_snug", |h| assert_block_border_snug(h)),
+        ("block_border_roomy", |h| assert_block_border_roomy(h)),
+        ("block_align_left", |h| assert_block_alignment_placement(h, "left")),
+        ("block_align_center", |h| assert_block_alignment_placement(h, "center")),
+        ("block_align_right", |h| assert_block_alignment_placement(h, "right")),
+        ("block_fixed_width_box", |h| {
+            assert_block_width_box(h, "fixmark", "--width 20", 22, "Fixed(20) must draw a 22-cell box (20 content + 2 edges)")
+        }),
+        ("block_fit_width_box", |h| {
+            assert_block_width_box(h, "fitmark", "--width fit", 9, "FitContent must hug its 7-cell content (box 9)")
+        }),
+        ("block_auto_width_box", |h| assert_block_auto_width_box(h)),
+        ("block_max_width_box", |h| assert_block_max_width_box(h)),
+        ("block_box_order_clamp", |h| assert_block_box_order_clamp(h)),
+        ("block_fit_align_left", |h| assert_block_fit_alignment(h, "left")),
+        ("block_fit_align_center", |h| assert_block_fit_alignment(h, "center")),
+        ("block_fit_align_right", |h| assert_block_fit_alignment(h, "right")),
+        ("block_capped_align_left", |h| assert_block_capped_alignment(h, "left")),
+        ("block_capped_align_center", |h| assert_block_capped_alignment(h, "center")),
+        ("block_capped_align_right", |h| assert_block_capped_alignment(h, "right")),
+    ]
+}
+
+/// Runs the case called `name` from `cases`.
+fn run_case<H>(harness: &mut H, cases: &[Case<H>], name: &str) {
+    let (_, case) = cases
+        .iter()
+        .find(|(case, _)| *case == name)
+        .unwrap_or_else(|| panic!("no render-tree style case named {name:?}"));
+    case(harness);
+}
+
+fn styled_case_in_wezterm(name: &str) {
+    let mut guard = SHARED_WEZTERM
+        .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
+    let harness = guard.as_mut().expect("shared WezTerm harness present");
+    run_case(harness, &styled_cases(), name);
+}
+
+fn styled_case_in_kitty(name: &str) {
+    let mut guard =
+        SHARED_KITTY.get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
+    let harness = guard.as_mut().expect("shared Kitty harness present");
+    run_case(harness, &styled_cases(), name);
+}
+
+fn tmux_case(name: &str) {
+    let mut guard =
+        SHARED_TMUX.get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
+    let harness = guard.as_mut().expect("shared tmux harness present");
+    run_case(harness, &tmux_cases(), name);
+}
+
+/// Generates module `$module` with one `#[test]` per listed case, gated on
+/// `$harness` and run by `$run`, and a `CASES` list of the names for the
+/// guard test.
+macro_rules! case_tests {
+    ($module:ident, $harness:ty, $backend:expr, $run:ident, [$($case:ident),* $(,)?]) => {
+        mod $module {
+            use super::*;
+
+            pub(super) const CASES: &[&str] = &[$(stringify!($case)),*];
+
+            $(
+                #[test]
+                #[serial(level2_terminal)]
+                fn $case() {
+                    require_level!(Level::L2, <$harness>::available(), $backend);
+                    $run(stringify!($case));
+                }
+            )*
+        }
+    };
+}
+
+case_tests!(
+    level2_render_tree_style_in_wezterm,
+    WezTermHarness,
+    Backend::WezTerm,
+    styled_case_in_wezterm,
+    [
+        block_fg,
+        block_bg,
+        block_bold,
+        block_border,
+        block_rounded_border,
+        progress_slot_colors,
+        table_striped,
+        table_example_striped_without_force_color,
+        table_styled,
+        block_painted_padding,
+        block_border_snug,
+        block_border_roomy,
+        block_align_left,
+        block_align_center,
+        block_align_right,
+        block_fixed_width_box,
+        block_fit_width_box,
+        block_auto_width_box,
+        block_max_width_box,
+        block_box_order_clamp,
+        block_fit_align_left,
+        block_fit_align_center,
+        block_fit_align_right,
+        block_capped_align_left,
+        block_capped_align_center,
+        block_capped_align_right,
+        block_painted_padding_and_transparent_margin,
+    ]
+);
+
+case_tests!(
+    level2_render_tree_style_in_kitty,
+    KittyHarness,
+    Backend::Kitty,
+    styled_case_in_kitty,
+    [
+        block_fg,
+        block_bg,
+        block_bold,
+        block_border,
+        block_rounded_border,
+        progress_slot_colors,
+        table_striped,
+        table_example_striped_without_force_color,
+        table_styled,
+        block_painted_padding,
+        block_border_snug,
+        block_border_roomy,
+        block_align_left,
+        block_align_center,
+        block_align_right,
+        block_fixed_width_box,
+        block_fit_width_box,
+        block_auto_width_box,
+        block_max_width_box,
+        block_box_order_clamp,
+        block_fit_align_left,
+        block_fit_align_center,
+        block_fit_align_right,
+        block_capped_align_left,
+        block_capped_align_center,
+        block_capped_align_right,
+        block_painted_padding_and_transparent_margin,
+    ]
+);
+
+case_tests!(
+    level2_render_tree_style_in_tmux,
+    TmuxHarness,
+    Backend::Tmux,
+    tmux_case,
+    [
+        block_border,
+        block_rounded_border,
+        progress,
+        table_striped,
+        table_styled,
+        block_border_snug,
+        block_border_roomy,
+        block_align_left,
+        block_align_center,
+        block_align_right,
+        block_fixed_width_box,
+        block_fit_width_box,
+        block_auto_width_box,
+        block_max_width_box,
+        block_box_order_clamp,
+        block_fit_align_left,
+        block_fit_align_center,
+        block_fit_align_right,
+        block_capped_align_left,
+        block_capped_align_center,
+        block_capped_align_right,
+    ]
+);
+
+/// A case added to a table without a test in every terminal's list would
+/// never run.
+#[test]
+fn every_case_has_a_test_per_terminal() {
+    let names = |cases: &[Case<TmuxHarness>]| cases.iter().map(|(name, _)| *name).collect::<Vec<_>>();
+    let styled = names(&styled_cases());
+    assert_eq!(styled, level2_render_tree_style_in_wezterm::CASES);
+    assert_eq!(styled, level2_render_tree_style_in_kitty::CASES);
+    assert_eq!(names(&tmux_cases()), level2_render_tree_style_in_tmux::CASES);
 }

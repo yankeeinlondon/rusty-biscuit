@@ -37,15 +37,16 @@ use biscuit_test_harness::{CapturedFrame, TerminalHarness};
 use serial_test::serial;
 use test_toolkit::{Backend, Level, require_level};
 
-/// Process-share WezTerm pane reused across the WezTerm tests in this file.
-/// A `clear` is sent before each test's first interaction so prior renders
-/// cannot leak into the capture window.
+/// The WezTerm pane a test attaches to: `just test-l2`'s shared pane in
+/// serial mode, or one the test spawns. [`capture_bt`] reads only the rows
+/// between its own command's markers on a cleared screen, so an earlier
+/// test's output cannot reach an assertion.
 static SHARED_WEZTERM: SharedHarness<WezTermHarness> = SharedHarness::new();
 
-/// Process-share Kitty window reused across the Kitty tests in this file.
+/// The Kitty window a test attaches to; see [`SHARED_WEZTERM`].
 static SHARED_KITTY: SharedHarness<KittyHarness> = SharedHarness::new();
 
-/// Process-share tmux session reused across the tmux tests in this file.
+/// The tmux session a test attaches to; see [`SHARED_WEZTERM`].
 static SHARED_TMUX: SharedHarness<TmuxHarness> = SharedHarness::new();
 
 // ---------------------------------------------------------------------------
@@ -233,8 +234,6 @@ fn level2_style_everywhere_in_wezterm() {
     let mut guard = SHARED_WEZTERM
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
     let harness = guard.as_mut().expect("shared WezTerm harness present");
-    harness.send_text(b"clear\n").expect("send_text failed");
-    harness.settle();
     assert_background_subtle_painted(harness);
     assert_border_thin_left_glyph(harness);
     assert_emphasis_bold_italic_sgr(harness);
@@ -252,8 +251,6 @@ fn level2_style_everywhere_in_kitty() {
     let mut guard = SHARED_KITTY
         .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
     let harness = guard.as_mut().expect("shared Kitty harness present");
-    harness.send_text(b"clear\n").expect("send_text failed");
-    harness.settle();
     assert_background_subtle_painted(harness);
     assert_border_thin_left_glyph(harness);
     assert_emphasis_bold_italic_sgr(harness);
@@ -271,8 +268,6 @@ fn level2_style_everywhere_in_tmux() {
     let mut guard = SHARED_TMUX
         .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
     let harness = guard.as_mut().expect("shared tmux harness present");
-    harness.send_text(b"clear\n").expect("send_text failed");
-    harness.settle();
 
     // background_subtle: the painted band relays as visible cells. The left
     // padding column still appears before the content (the box geometry is
