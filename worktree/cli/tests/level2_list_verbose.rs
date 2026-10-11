@@ -41,7 +41,7 @@ use std::process::Command;
 use std::time::Duration;
 
 use assert_cmd::cargo::cargo_bin;
-use biscuit_test_harness::tmux::TmuxHarness;
+use biscuit_test_harness::tmux::{TmuxHarness, tmux_command};
 use biscuit_test_harness::CapturedFrame;
 use biscuit_test_harness::TerminalHarness;
 use perf_support::{FakeGitea, GitHold, GiteaReply, NoRequest, WorkerPaths, reap_workers, wait_for_refresh_workers};
@@ -153,7 +153,7 @@ fn assert_redesigned_table(frame: &CapturedFrame) {
 /// image + verbose section may exceed the visible pane height.
 fn capture_with_scrollback(harness: &TmuxHarness) -> CapturedFrame {
     let session = harness.session_name().to_string();
-    let output = Command::new("tmux")
+    let output = tmux_command()
         .args([
             "capture-pane", "-t", &session, "-p", "-e", "-S", "-200", "-E", "-",
         ])
@@ -1424,7 +1424,7 @@ impl DesignFixture {
         // The quotes keep the typed command line from matching the marker.
         let mut harness = self.start_in_pane(cols, "list; echo wt-list-\"\"done", "15;0", "http://127.0.0.1:9");
         wait_for_pane(&mut harness, |plain| plain.lines().any(|line| line.trim() == "wt-list-done"));
-        let output = Command::new("tmux")
+        let output = tmux_command()
             .args(["capture-pane", "-t", harness.session_name(), "-p", "-e", "-J", "-S", "-200", "-E", "-"])
             .output()
             .expect("tmux capture-pane should succeed");

@@ -14,11 +14,10 @@
 mod perf_support;
 mod remote_fixture;
 
-use std::process::Command;
 use std::time::{Duration, Instant};
 
 use assert_cmd::cargo::cargo_bin;
-use biscuit_test_harness::tmux::TmuxHarness;
+use biscuit_test_harness::tmux::{TmuxHarness, tmux_command};
 use biscuit_test_harness::{CapturedFrame, TerminalHarness};
 use remote_fixture::Fixture;
 use serial_test::serial;
@@ -108,7 +107,7 @@ fn perf_report_rows(fixture: &Fixture, cols: u32, graph: bool) -> Vec<String> {
 /// The pane including scrollback, so the table above the report never pushes
 /// the report's heading out of the capture.
 fn capture_with_scrollback(harness: &TmuxHarness) -> CapturedFrame {
-    let output = Command::new("tmux")
+    let output = tmux_command()
         .args(["capture-pane", "-t", harness.session_name(), "-p", "-e", "-S", "-200", "-E", "-"])
         .output()
         .expect("tmux capture-pane should succeed");
