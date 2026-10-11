@@ -108,7 +108,10 @@ fn run_indexed(
     };
     // The definition run captured the imports too: `imported_symbols` would
     // run the same query text again.
-    let imports = tree_file.imports_from_nodes(&import_nodes);
+    let mut imports = tree_file.imports_from_nodes(&import_nodes);
+    // Forwarding is proven before diagnostics, which read each import's
+    // `is_reexport`; `Diagnostics` requires `Reexports`.
+    let reexports = plan.reexports.then(|| reexports::flag_forwarded_imports(tree_file, &mut imports));
     let captures = if plan.bind || plan.diagnostics {
         tree_file.reference_captures()?
     } else {
@@ -147,12 +150,7 @@ fn run_indexed(
     };
     let symbols = tree_file.records_from(definitions, &selection, facts, rust_walk)?;
 
-    let mut import_records: Vec<ImportRecord> = imports.into_iter().map(import_record).collect();
-    let reexports = plan.reexports.then(|| {
-        let report = reexports::extract(tree_file, &import_records);
-        reexports::mark_forwarded_imports(&mut import_records, &report);
-        report
-    });
+    let import_records: Vec<ImportRecord> = imports.iter().map(import_record).collect();
 
     let mut index = FileSymbolIndex {
         schema_version: crate::shared::SchemaVersion::CURRENT,
@@ -219,20 +217,20 @@ fn text_span(range: &crate::shared::CodeRange) -> crate::shared::TextSpan {
     }
 }
 
-fn import_record(import: ImportSymbol) -> ImportRecord {
+pub(crate) fn import_record(import: &ImportSymbol) -> ImportRecord {
     ImportRecord {
         name: import.name.clone(),
-        alias: import.alias,
-        source: import.source,
+        alias: import.alias.clone(),
+        source: import.source.clone(),
         span: text_span(&import.range),
         statement_span: import.statement_range.as_ref().map(text_span),
         symbol: SymbolRef {
             source_span: None,
             id: None,
-            name: import.name,
-            qualified_name: import.original_name,
+            name: import.name.clone(),
+            qualified_name: import.original_name.clone(),
         },
-        reexported: false,
+        reexported: import.is_reexport,
     }
 }
 

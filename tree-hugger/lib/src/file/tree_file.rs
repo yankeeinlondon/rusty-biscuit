@@ -207,6 +207,8 @@ impl TreeFile {
     ///
     /// ## Returns
     /// Returns the imported symbols that tree-sitter can detect.
+    /// `is_reexport` is set on an import a `syntax` or `declared` re-export
+    /// entry forwards (see [`reexports`](Self::reexports)).
     ///
     /// ## Errors
     /// Returns an error if query compilation fails.
@@ -232,7 +234,15 @@ impl TreeFile {
             );
             matches.advance();
         }
-        Ok(self.imports_from_nodes(&nodes))
+        Ok(self.forwarded_imports_from_nodes(&nodes))
+    }
+
+    /// [`Self::imports_from_nodes`] with `is_reexport` decided from the
+    /// file's own re-export report, for callers outside the planner.
+    fn forwarded_imports_from_nodes(&self, nodes: &[Node<'_>]) -> Vec<ImportSymbol> {
+        let mut imports = self.imports_from_nodes(nodes);
+        crate::analysis::reexports::flag_forwarded_imports(self, &mut imports);
+        imports
     }
 
     /// The imports of the `@local.definition.import` captures `nodes`, given
@@ -263,7 +273,6 @@ impl TreeFile {
             let (source, original_name, alias) =
                 self.extract_import_metadata(node, &name, self.language);
             let statement_range = self.import_statement_range(node, self.language);
-            let is_reexport = self.import_is_reexport(node, self.language);
 
             imports.push(ImportSymbol {
                 name,
@@ -274,7 +283,7 @@ impl TreeFile {
                 language: self.language,
                 file: self.file.clone(),
                 source,
-                is_reexport,
+                is_reexport: false,
             });
         }
 
@@ -593,24 +602,6 @@ impl TreeFile {
         };
 
         statement.map(range_for_node)
-    }
-
-    /// Reports whether an import re-exports its symbol (part of the public API).
-    ///
-    /// Only languages with explicit re-export syntax are detected; others return
-    /// `false`. Rust: a `use` declaration carrying a `visibility_modifier`
-    /// (`pub use`, `pub(crate) use`, …) is a re-export.
-    fn import_is_reexport(&self, node: Node, language: ProgrammingLanguage) -> bool {
-        match language {
-            ProgrammingLanguage::Rust => find_ancestor_by_kind(node, "use_declaration")
-                .map(|stmt| {
-                    let mut cursor = stmt.walk();
-                    stmt.children(&mut cursor)
-                        .any(|child| child.kind() == "visibility_modifier")
-                })
-                .unwrap_or(false),
-            _ => false,
-        }
     }
 
     /// Extracts import metadata for JavaScript/TypeScript.
@@ -1149,7 +1140,7 @@ impl TreeFile {
         let mut diagnostics = Vec::new();
         diagnostics.extend(self.run_pattern_diagnostics().unwrap_or_default());
         let semantic = self.definitions(&MetadataSelection::ALL).and_then(|definitions| {
-            let imports = self.imports_from_nodes(&definitions.import_nodes);
+            let imports = self.forwarded_imports_from_nodes(&definitions.import_nodes);
             let references = self.references_from(&definitions.symbols, &imports)?;
             Ok(self.run_semantic_diagnostics(&definitions.symbols, &imports, &references))
         });
@@ -1169,7 +1160,7 @@ impl TreeFile {
     /// analyzer failed to run.
     pub fn try_lint_diagnostics(&self) -> Result<Vec<LintDiagnostic>, TreeHuggerError> {
         let definitions = self.definitions(&MetadataSelection::ALL)?;
-        let imports = self.imports_from_nodes(&definitions.import_nodes);
+        let imports = self.forwarded_imports_from_nodes(&definitions.import_nodes);
         let references = self.references_from(&definitions.symbols, &imports)?;
         self.lint_diagnostics_from(&definitions.symbols, &imports, &references)
     }
@@ -1746,7 +1737,7 @@ impl TreeFile {
     /// analyzer failed to run.
     pub fn try_diagnostics(&self) -> Result<Vec<Diagnostic>, TreeHuggerError> {
         let definitions = self.definitions(&MetadataSelection::ALL)?;
-        let imports = self.imports_from_nodes(&definitions.import_nodes);
+        let imports = self.forwarded_imports_from_nodes(&definitions.import_nodes);
         let references = self.references_from(&definitions.symbols, &imports)?;
         self.diagnostics_from(&definitions.symbols, &imports, &references)
     }

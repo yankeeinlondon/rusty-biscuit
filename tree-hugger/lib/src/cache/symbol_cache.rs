@@ -12,6 +12,7 @@ use serde::ser::Serializer;
 use serde::{Deserialize, Serialize};
 use tree_sitter::Language;
 
+use super::stored_reexports::validate_reexports;
 use super::stored_evidence::{
     LineStarts, ReadOccurrences, StoredEvidence, import_inventory, nullable, read_coverage, read_imports, read_occurrences, validate_evidence, validate_imports, write_coverage, write_imports, write_occurrences,
 };
@@ -668,6 +669,9 @@ impl StoredEntry {
         }
         let lines = LineStarts::new(source.source());
         validate_imports(&lines, self.language, &self.imports, &self.import_inventory).map_err(CacheMiss::Inconsistent)?;
+        if let Some(report) = &self.reexports {
+            validate_reexports(&lines, self.language, &self.imports, report).map_err(CacheMiss::Inconsistent)?;
+        }
         validate_evidence(&StoredEvidence {
             lines: &lines,
             language: self.language,

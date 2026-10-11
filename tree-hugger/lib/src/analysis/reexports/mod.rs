@@ -5,21 +5,29 @@
 //! User contract: `tree-hugger/docs/reexports.md`.
 
 use crate::analysis::counters::count_reexport_extraction;
-use crate::file::extract::text_span_for_node;
 use crate::file::tree_file::TreeFile;
-use crate::shared::{
-    ImportRecord, ProgrammingLanguage, ReexportLimit, ReexportLimitReason, ReexportReport,
-};
+use crate::analysis::import_record;
+use crate::shared::{ImportRecord, ImportSymbol, ProgrammingLanguage, ReexportReport};
+
+mod common;
+mod cpp;
+mod csharp;
+mod ecma;
+mod go;
+mod lua;
+mod perl;
+mod python;
+mod rust;
+mod scala;
+mod swift;
 
 /// The file's re-export report, read from its own syntax and its import
 /// records only: nothing outside the file is opened.
 ///
 /// A language with no forwarding construct reports `not_applicable`. Every
-/// other language reports `limited` with `grammar_gap` over the whole file
-/// until its contract is implemented, so an unimplemented language can never
-/// read as a `complete` negative. Each language replaces its arm with its
-/// extractor; the arms name every language so a new one cannot be skipped.
-pub(crate) fn extract(tree_file: &TreeFile, _imports: &[ImportRecord]) -> ReexportReport {
+/// other language has an extractor in its own module; the arms name every
+/// language so a new one cannot be skipped.
+pub(crate) fn extract(tree_file: &TreeFile, imports: &[ImportRecord]) -> ReexportReport {
     count_reexport_extraction();
     match tree_file.language {
         ProgrammingLanguage::Java
@@ -27,26 +35,17 @@ pub(crate) fn extract(tree_file: &TreeFile, _imports: &[ImportRecord]) -> Reexpo
         | ProgrammingLanguage::Bash
         | ProgrammingLanguage::Zsh
         | ProgrammingLanguage::Php => ReexportReport::not_applicable(),
-        ProgrammingLanguage::Rust
-        | ProgrammingLanguage::JavaScript
-        | ProgrammingLanguage::TypeScript
-        | ProgrammingLanguage::Go
-        | ProgrammingLanguage::Python
-        | ProgrammingLanguage::Perl
-        | ProgrammingLanguage::Cpp
-        | ProgrammingLanguage::CSharp
-        | ProgrammingLanguage::Swift
-        | ProgrammingLanguage::Scala
-        | ProgrammingLanguage::Lua => unimplemented_language(tree_file),
+        ProgrammingLanguage::Rust => rust::extract(tree_file, imports),
+        ProgrammingLanguage::JavaScript | ProgrammingLanguage::TypeScript => ecma::extract(tree_file, imports),
+        ProgrammingLanguage::Go => go::extract(tree_file, imports),
+        ProgrammingLanguage::Python => python::extract(tree_file, imports),
+        ProgrammingLanguage::Perl => perl::extract(tree_file, imports),
+        ProgrammingLanguage::Cpp => cpp::extract(tree_file, imports),
+        ProgrammingLanguage::CSharp => csharp::extract(tree_file, imports),
+        ProgrammingLanguage::Swift => swift::extract(tree_file, imports),
+        ProgrammingLanguage::Scala => scala::extract(tree_file, imports),
+        ProgrammingLanguage::Lua => lua::extract(tree_file, imports),
     }
-}
-
-/// `limited` over the whole file: the language's extractor is not written.
-fn unimplemented_language(tree_file: &TreeFile) -> ReexportReport {
-    ReexportReport::limited(vec![ReexportLimit {
-        reason: ReexportLimitReason::GrammarGap,
-        span: text_span_for_node(tree_file.root_node()),
-    }])
 }
 
 /// Sets `reexported` on each import that a `syntax` or `declared` entry of
@@ -56,6 +55,33 @@ pub(crate) fn mark_forwarded_imports(imports: &mut [ImportRecord], report: &Reex
     for import in imports {
         import.reexported = report.entries.iter().any(|entry| entry.forwards_import_at(&import.span));
     }
+}
+
+/// Extracts the file's report and sets `is_reexport` on each import it
+/// forwards. The one place the flag is decided, so the planner,
+/// `imported_symbols()` and the diagnostics agree.
+pub(crate) fn flag_forwarded_imports(tree_file: &TreeFile, imports: &mut [ImportSymbol]) -> ReexportReport {
+    let mut records: Vec<ImportRecord> = imports.iter().map(import_record).collect();
+    let report = extract(tree_file, &records);
+    mark_forwarded_imports(&mut records, &report);
+    for (import, record) in imports.iter_mut().zip(&records) {
+        import.is_reexport = record.reexported;
+    }
+    report
+}
+
+/// Whether the language has no forwarding construct, which decides the
+/// `not_applicable` state by language alone. Must list the languages
+/// [`extract`] reports as `not_applicable`.
+pub(crate) fn is_not_applicable(language: ProgrammingLanguage) -> bool {
+    matches!(
+        language,
+        ProgrammingLanguage::Java
+            | ProgrammingLanguage::C
+            | ProgrammingLanguage::Bash
+            | ProgrammingLanguage::Zsh
+            | ProgrammingLanguage::Php
+    )
 }
 
 #[cfg(test)]

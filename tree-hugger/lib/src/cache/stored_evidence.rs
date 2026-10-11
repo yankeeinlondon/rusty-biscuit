@@ -1107,7 +1107,7 @@ impl<'a> LineStarts<'a> {
 
     /// Whether `span` is a (possibly empty) range of the source whose points
     /// agree with its offsets.
-    fn is_region(&self, span: &TextSpan) -> bool {
+    pub(super) fn is_region(&self, span: &TextSpan) -> bool {
         span.start_byte <= span.end_byte
             && self.point(span.start_byte) == Some(span.start)
             && self.point(span.end_byte) == Some(span.end)

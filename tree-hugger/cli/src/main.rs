@@ -1155,11 +1155,11 @@ fn run() -> Result<(), TreeHuggerError> {
     }
 
     // `imports` and `lint` keep their own report shapes. Lint asks for
-    // diagnostics; imports need only the declarations pass, which carries
-    // the import records.
+    // diagnostics; imports ask for re-exports, which set each import's
+    // `reexported` marker (`is_reexport`).
     let query = match command_kind {
         CommandKind::Lint { .. } => SymbolQuery::new().capabilities([Capability::Diagnostics]),
-        _ => SymbolQuery::new(),
+        _ => SymbolQuery::new().capabilities([Capability::Reexports]),
     };
     let import_selection = match &cli.command {
         Command::Imports(args) => ImportSelection::new(&args.targets, &scan.exclude_symbols),
@@ -1727,9 +1727,9 @@ fn import_symbols_from_index(index: &FileSymbolIndex) -> Vec<ImportSymbol> {
             language: index.language,
             file: index.file.clone(),
             source: import.source.clone(),
-            // The v2 ImportRecord carries no re-export marker; the `unused-import`
-            // lint runs on the v1 `imported_symbols()` path, which sets this.
-            is_reexport: false,
+            // Copied from the stored marker so a cached and a fresh run agree;
+            // `false` for an index that did not compute re-exports.
+            is_reexport: import.reexported,
         })
         .collect()
 }
@@ -2485,6 +2485,26 @@ fn format_refactor_hint(hint: &RefactorHint) -> String {
 mod tests {
     use super::*;
     use tree_hugger::{DiagnosticCategory, DiagnosticConfidence, DiagnosticMetadata, DiagnosticSource};
+
+    /// The index-to-`ImportSymbol` conversion copies the stored marker, so a
+    /// cached run reports the same `is_reexport` as a fresh one.
+    #[test]
+    fn imports_from_an_index_carry_the_stored_reexport_marker() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("lib.rs");
+        std::fs::write(&path, "pub use a::Forwarded;\nuse b::Local;\n").expect("write source");
+        let file = tree_hugger::TreeFile::new(&path).expect("parse");
+        let computed = SymbolQuery::new().capabilities([Capability::Reexports]);
+        let index = file.query(&computed).expect("query").index;
+        let flags: Vec<(String, bool)> = import_symbols_from_index(&index)
+            .into_iter()
+            .map(|import| (import.name, import.is_reexport))
+            .collect();
+        assert_eq!(flags, [("Forwarded".to_string(), true), ("Local".to_string(), false)]);
+
+        let uncomputed = file.query(&SymbolQuery::new()).expect("query").index;
+        assert!(import_symbols_from_index(&uncomputed).iter().all(|import| !import.is_reexport));
+    }
 
     /// `apply_lint_policy` over its own output changes nothing, for every
     /// built-in rule, an alias, and unknown native and external rules, with

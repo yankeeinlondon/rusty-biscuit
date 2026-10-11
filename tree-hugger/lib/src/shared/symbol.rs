@@ -683,9 +683,11 @@ pub struct ImportSymbol {
     /// The source module path (e.g., `"fs"`, `"typing"`, `"std::io"`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
-    /// Whether this import re-exports the symbol (e.g. Rust `pub use`), making it
-    /// part of the public API rather than a local-only import. Re-exports are
-    /// "used" by being exported, so the `unused-import` rule must not flag them.
+    /// Whether a `syntax` or `declared` re-export entry forwards this import
+    /// (e.g. Rust `pub use`), making it part of the public API rather than a
+    /// local-only import. Re-exports are "used" by being exported, so the
+    /// `unused-import` rule must not flag them. Decided from the file's
+    /// re-export report, never from the import's name.
     #[serde(skip)]
     pub is_reexport: bool,
 }

@@ -7,6 +7,7 @@ use biscuit_hash::blake3_hash;
 use serde::{Deserialize, Serialize};
 
 mod stored_evidence;
+mod stored_reexports;
 mod symbol_cache;
 
 pub use symbol_cache::{
