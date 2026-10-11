@@ -800,10 +800,12 @@ jobs:
               if [ -n "$required" ]; then
                 export BISCUIT_TEST_REQUIRED_BACKENDS="$required"
               fi
-              # Only declared self-isolating suites can use the shared worker
-              # budget; suites using a shared pane must remain serial.
-              if [ "$(jq -r 'contains(["l2-parallel-self-spawn"])' <<<"$RUNNER_TOOLS")" = "true" ]; then
-                export BISCUIT_L2_THREADS="${BISCUIT_L2_THREADS:-${NEXTEST_TEST_THREADS:-$(just _test_threads)}}"
+              # L2 runs in parallel unless the package declared `l2-serial`
+              # (with its reason) in `[package.metadata.ci.tests]`.
+              if [ "$(jq -r 'contains(["l2-serial"])' <<<"$RUNNER_TOOLS")" = "true" ]; then
+                export BISCUIT_L2_THREADS="${BISCUIT_L2_THREADS:-1}"
+              else
+                export BISCUIT_L2_THREADS="${BISCUIT_L2_THREADS:-$(just _test_l2_threads)}"
               fi
               ;;
           esac

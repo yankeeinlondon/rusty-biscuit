@@ -256,25 +256,29 @@ every pre-push `ci-local` L2 cell, opened one, which developers saw as "tests
 popping up Terminal windows". A package that adds an Apple Terminal test must
 declare the backend, or each test self-spawns its own window.
 
-**Parallel self-spawn mode (`BISCUIT_L2_THREADS`).** The shared-pane +
-`-j 1` model serializes the *entire* tier for the sake of whichever tests
-attach to the shared pane. An area whose L2 suite is dominated by
-self-isolating tests (each spawns its OWN session/PTY — e.g. claudine)
-sets `BISCUIT_L2_THREADS=N`: `_test_l2`
-then skips the broker, exports no `BISCUIT_SHARED_*`, and runs nextest at
-`-j N`. With the env var unset, every `shared_or_spawn()` takes its
-fallback branch and spawns an *owned*, `Drop`-cleaned pane, so there is
-no shared resource to contend for. Default (`1`/unset) keeps the serial
-shared-pane path. Backstop: claudine-cli L2 carries a 1 s leak-grace
-override in `.config/nextest.toml` for concurrent child teardown.
+**Parallel self-spawn mode is the default.** `_test_l2` skips the broker,
+exports no `BISCUIT_SHARED_*`, and runs nextest at `-j N`, so every
+`shared_or_spawn()` takes its fallback branch and spawns an *owned*,
+`Drop`-cleaned pane: there is no shared resource to contend for.
+N is `_test_l2_threads`: `max(1, logical_cores - 2)` locally (all cores on
+CI runners with four or fewer), capped at four, because every worker drives a
+real terminal and one WezTerm mux server serves them all; at 14 workers its
+spawn and capture calls time out. It controls worker count, not CPU affinity
+or a guaranteed reservation.
 
-The `l2-parallel-self-spawn` runner marker selects this mode automatically.
-Local runs use `max(1, logical_cores - 2)` workers. CI uses all logical cores
-on runners with four or fewer and `logical_cores - 2` on larger runners.
-The policy leaves capacity for developer work and larger shared hosts without
-crippling small CI runners; it controls worker count, not CPU affinity or a
-guaranteed CPU reservation. An explicit `BISCUIT_L2_THREADS` overrides the
-default. Shared-resource L2 suites remain at one worker.
+**Serial is the rare exception and must say why.** A package whose L2 tests
+genuinely contend for a resource declares it in its manifest, and the CI
+planner rejects the marker without a non-empty reason:
+
+```toml
+[package.metadata.ci.tests]
+runner-tools = ["l2-serial"]
+l2-serial-reason = "every test reads and writes the one system clipboard"
+```
+
+That package gets the shared-pane `-j 1` path above. `BISCUIT_L2_THREADS`
+overrides both (`1` forces serial). Backstop: claudine-cli L2 carries a 1 s
+leak-grace override in `.config/nextest.toml` for concurrent child teardown.
 
 ## Level 3 — OS keyboard injection
 

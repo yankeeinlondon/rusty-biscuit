@@ -16,7 +16,7 @@ use color_eyre::eyre::Result;
 use tracing::Span;
 
 use super::super::termination::{
-    early_termination_guard_context, trip_to_early_termination,
+    ChildInterrupts, early_termination_guard_context, trip_to_early_termination,
     wait_with_signal_and_early_termination,
 };
 use super::super::reader_join::{
@@ -117,6 +117,7 @@ pub(crate) fn run_child_capture(
 
     setup::isolate_into_process_group(&mut command);
 
+    let interrupts = ChildInterrupts::install(true)?;
     let spawned_at = Instant::now();
     let mut child = command.spawn()?;
     let captured_pid = child.id();
@@ -223,7 +224,7 @@ pub(crate) fn run_child_capture(
         let (timeout_ticker, watchdog_rx) = setup::wall_clock_timeout_ticker(timeout, spawned_at);
         let (code, termination, early) = wait_with_signal_and_early_termination(
             &mut child,
-            true,
+            interrupts,
             early_rx,
             watchdog_rx,
             kill_grace,

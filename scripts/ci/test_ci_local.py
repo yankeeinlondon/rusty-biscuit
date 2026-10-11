@@ -63,11 +63,14 @@ def relocate_home(environment: dict[str, str], home: Path) -> None:
 
 def thread_policy_recipe() -> str:
     lines = DEVOPS.read_text(encoding="utf-8").splitlines(keepends=True)
-    start = next(index for index, line in enumerate(lines) if line.startswith("_test_threads:"))
-    end = start + 1
-    while end < len(lines) and (not lines[end].strip() or lines[end][0].isspace()):
-        end += 1
-    return "".join(lines[start:end])
+    recipes = []
+    for name in ("_test_threads", "_test_l2_threads"):
+        start = next(index for index, line in enumerate(lines) if line.startswith(f"{name}:"))
+        end = start + 1
+        while end < len(lines) and (not lines[end].strip() or lines[end][0].isspace()):
+            end += 1
+        recipes.append("".join(lines[start:end]))
+    return "\n".join(recipes)
 
 
 def clean_policy_environment() -> dict[str, str]:
@@ -103,7 +106,7 @@ def gate_loop_package(name: str, **overrides: object) -> dict:
         "tiers": ["L1", "L2"],
         "test_args": "--features terminal-tests,daemon-tests",
         "check_args": f"-p {name}",
-        "runner_tools": ["l2-parallel-self-spawn"] if name == "parallel" else [],
+        "runner_tools": ["l2-serial"] if name == "serial" else [],
         "l2_backends": ["tmux"],
     } | overrides
 
@@ -230,8 +233,8 @@ class CiLocalTests(unittest.TestCase):
                 ),
                 "just": (
                     "import json, os, subprocess, sys\n"
-                    "if sys.argv[1:] == ['_test_threads']:\n"
-                    "    raise SystemExit(subprocess.run([os.environ['TEST_REAL_JUST'], '--justfile', os.environ['TEST_POLICY_RECIPE'], '_test_threads'], check=False).returncode)\n"
+                    "if sys.argv[1:] in (['_test_threads'], ['_test_l2_threads']):\n"
+                    "    raise SystemExit(subprocess.run([os.environ['TEST_REAL_JUST'], '--justfile', os.environ['TEST_POLICY_RECIPE'], sys.argv[1]], check=False).returncode)\n"
                     "assert sys.argv[1] in ('_lint', '_test', '_test_l2'), sys.argv\n"
                     "with open(os.environ['TEST_CALL_LOG'], 'a', encoding='utf-8') as log:\n"
                     "    log.write(json.dumps({'args': sys.argv[1:], "
@@ -341,7 +344,8 @@ class CiLocalTests(unittest.TestCase):
     def test_parallel_policy_is_bounded_and_does_not_leak_to_other_gates(self) -> None:
         calls = self.run_recipe()
         l2 = [call for call in calls if call["args"][0] == "_test_l2"]
-        self.assertEqual(["14", "1"], [call["threads"] for call in l2])
+        # 16 cores leave 14 workers; parallel L2 stops at its cap of 4.
+        self.assertEqual(["4", "1"], [call["threads"] for call in l2])
         for call in l2:
             self.assertEqual("tmux", call["backends"])
             self.assertEqual(["--features", "terminal-tests,daemon-tests"], call["args"][2:])

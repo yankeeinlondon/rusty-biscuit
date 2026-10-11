@@ -688,10 +688,10 @@ ci-local *args="":
                 if [[ " ${backends} " == *" kitty "* ]] && command -v kitty > /dev/null 2>&1 && [[ -n "${KITTY_LISTEN_ON:-}" ]]; then
                     required+=(kitty)
                 fi
-                l2_threads="${BISCUIT_L2_THREADS:-1}"
-                parallel_l2="$(jq -r '(.runner_tools // []) | index("l2-parallel-self-spawn") != null' <<< "${record}")"
-                if [[ "${parallel_l2}" == "true" ]]; then
-                    l2_threads="${BISCUIT_L2_THREADS:-${NEXTEST_TEST_THREADS:-$(just _test_threads)}}"
+                l2_threads="${BISCUIT_L2_THREADS:-$(just _test_l2_threads)}"
+                serial_l2="$(jq -r '(.runner_tools // []) | index("l2-serial") != null' <<< "${record}")"
+                if [[ "${serial_l2}" == "true" ]]; then
+                    l2_threads="${BISCUIT_L2_THREADS:-1}"
                 fi
                 required_csv="$(IFS=,; echo "${required[*]}")"
                 if (( ${#required[@]} == 0 )); then
