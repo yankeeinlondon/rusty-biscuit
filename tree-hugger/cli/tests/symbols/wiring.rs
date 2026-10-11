@@ -774,16 +774,27 @@ fn json_symbols_carry_visibility_and_current_schema() {
 /// and the import marker; a plain `--json` listing computes neither.
 #[test]
 fn json_full_carries_the_reexport_report_and_json_does_not() {
-    let scratch = Scratch::new(&[("typescript.ts", TYPESCRIPT_FIXTURE), ("lib.rs", "pub fn f() {}\n")]);
+    let scratch = Scratch::new(&[("typescript.ts", TYPESCRIPT_FIXTURE), ("lib.rs", "pub use std::io::Read;\nuse std::fmt::Debug;\n")]);
     let full = json_of(&scratch.stdout(&["--json-full", "symbols", "--no-cache", "typescript.ts", "lib.rs"]));
+    let mut seen_rust = false;
     for index in full["indexes"].as_array().expect("indexes") {
         let file = index["file"].as_str().expect("file");
-        assert_eq!(index["reexports"]["coverage"]["state"], "limited", "{file}: unimplemented language stays limited");
-        assert!(index["reexports"]["entries"].as_array().is_some_and(Vec::is_empty), "{file}");
-        for import in index["imports"].as_array().expect("imports") {
-            assert_eq!(import["reexported"], false, "{file}: no forwarding evidence yet");
+        assert_eq!(index["reexports"]["coverage"]["state"], "complete", "{file}");
+        let imports = index["imports"].as_array().expect("imports");
+        if file.ends_with("lib.rs") {
+            seen_rust = true;
+            let entries = index["reexports"]["entries"].as_array().expect("entries");
+            assert_eq!(entries.len(), 1, "{file}: one forwarding site");
+            assert_eq!(entries[0]["exported_name"], "Read", "{file}");
+            // The marker lands on the forwarded import only.
+            let marked: Vec<_> = imports.iter().filter(|import| import["reexported"] == true).map(|import| import["name"].clone()).collect();
+            assert_eq!(marked, [serde_json::json!("Read")], "{file}: only the `pub use` import is marked");
+        } else {
+            assert!(index["reexports"]["entries"].as_array().is_some_and(Vec::is_empty), "{file}");
+            assert!(imports.iter().all(|import| import["reexported"] == false), "{file}");
         }
     }
+    assert!(seen_rust, "lib.rs was indexed");
 
     let plain = json_of(&scratch.stdout(&["--json", "symbols", "--no-cache", "typescript.ts"]));
     assert!(!plain.to_string().contains("\"reexports\""), "an unrequested report is not written");

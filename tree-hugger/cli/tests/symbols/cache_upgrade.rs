@@ -2260,6 +2260,27 @@ fn entry_from_extractor_revision_fifty_one_is_not_served_after_the_reexports_bum
     });
 }
 
+/// Revision 52 stored the placeholder report (a whole-file `grammar_gap`
+/// limit, no entries) for every supported language; revision 53 stores the
+/// language's real forwarding entries.
+#[test]
+fn entry_from_extractor_revision_fifty_two_is_not_served_after_the_language_extractors_land() {
+    assert_stale_revision_is_not_served(&StaleRevision {
+        revision: "52", key: OldKey::Computed, file: "forward.py", language: "python",
+        source: "from m import a\n\ndef Sentinel():\n    pass\n".to_string(),
+        sentinel: "Sentinel",
+        probe: |out| Value::from(out["indexes"][0]["reexports"]["entries"].as_array().expect("entries").len()),
+        repaired: Value::from(1), stale: Value::from(0),
+        revert: |snapshot| {
+            let span = snapshot["reexports"]["entries"][0]["statement_span"].clone();
+            snapshot["reexports"] = serde_json::json!({
+                "coverage": { "state": "limited", "limits": [{ "reason": "grammar_gap", "span": span }] },
+                "entries": [],
+            });
+        },
+    });
+}
+
 /// An earlier revision that wrote another schema, and what its entries
 /// lacked.
 struct SchemaBump {

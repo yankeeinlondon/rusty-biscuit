@@ -25,7 +25,7 @@
     "language": "Bash",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -119,7 +119,7 @@
     "language": "Bash",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -226,7 +226,7 @@
     "language": "Bash",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -351,7 +351,7 @@
     "language": "C",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -460,7 +460,7 @@
     "language": "C",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -557,7 +557,7 @@
     "language": "C",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -648,7 +648,7 @@
     "language": "C",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -740,7 +740,7 @@
     ],
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -846,7 +846,7 @@
     "language": "C",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -965,7 +965,7 @@
     "language": "C",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -1077,7 +1077,7 @@
     "language": "CSharp",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -1206,7 +1206,7 @@
     "language": "CSharp",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -1315,7 +1315,7 @@
     "language": "CSharp",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -1412,7 +1412,7 @@
     "language": "CSharp",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -1520,7 +1520,7 @@
     "language": "CSharp",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -1646,7 +1646,7 @@
     ],
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -1760,7 +1760,7 @@
     "language": "CSharp",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -1869,7 +1869,7 @@
     "language": "CSharp",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -1969,7 +1969,7 @@
     "language": "Cpp",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -2086,7 +2086,7 @@
     "language": "Cpp",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -2214,7 +2214,7 @@
     "language": "Cpp",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -2323,7 +2323,7 @@
     "language": "Cpp",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -2444,7 +2444,7 @@
     "language": "Cpp",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -2541,7 +2541,7 @@
     "language": "Cpp",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -2658,7 +2658,7 @@
     "language": "Cpp",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -2788,7 +2788,7 @@
     "language": "Java",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -2897,7 +2897,7 @@
     "language": "Java",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -3004,7 +3004,7 @@
     "language": "Java",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -3113,7 +3113,7 @@
     "language": "Java",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -3239,7 +3239,7 @@
     ],
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -3351,7 +3351,7 @@
     "language": "Java",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -3460,7 +3460,7 @@
     "language": "Java",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -3560,7 +3560,7 @@
     "language": "JavaScript",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -3678,7 +3678,7 @@
     "language": "JavaScript",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -3786,7 +3786,7 @@
     "language": "JavaScript",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -3893,7 +3893,7 @@
     "language": "JavaScript",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -3993,7 +3993,7 @@
     "language": "JavaScript",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -4081,7 +4081,7 @@
     "language": "Lua",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -4169,7 +4169,7 @@
     "language": "Lua",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -4276,7 +4276,7 @@
     "language": "Lua",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -4385,7 +4385,7 @@
     "language": "Lua",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -4492,7 +4492,7 @@
     "language": "Lua",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -4594,7 +4594,7 @@
     "language": "Go",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -4702,7 +4702,7 @@
     "language": "Go",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -4799,7 +4799,7 @@
     "language": "Go",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -4907,7 +4907,7 @@
     "language": "Go",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -5007,7 +5007,7 @@
     "language": "Go",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -5103,7 +5103,7 @@
     "language": "Go",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -5214,7 +5214,7 @@
     "language": "Python",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -5304,7 +5304,7 @@
     "language": "Python",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -5431,7 +5431,7 @@
     "language": "Python",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -5558,7 +5558,7 @@
     "language": "Python",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -5665,7 +5665,7 @@
     "language": "Python",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -5765,7 +5765,7 @@
     "language": "Perl",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -5855,7 +5855,7 @@
     "language": "Perl",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -5952,7 +5952,7 @@
     "language": "Perl",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -6061,7 +6061,7 @@
     "language": "Perl",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -6179,7 +6179,7 @@
     "language": "Php",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -6288,7 +6288,7 @@
     "language": "Php",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -6397,7 +6397,7 @@
     "language": "Php",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -6524,7 +6524,7 @@
     ],
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -6644,7 +6644,7 @@
     "language": "Php",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -6776,7 +6776,7 @@
     "language": "Rust",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -6885,7 +6885,7 @@
     "language": "Rust",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -6999,7 +6999,7 @@
     ],
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -7144,7 +7144,7 @@
     ],
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -7254,7 +7254,7 @@
     "language": "Rust",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -7355,7 +7355,7 @@
     "language": "Rust",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -7444,7 +7444,7 @@
     "language": "Rust",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -7532,7 +7532,7 @@
     "language": "Rust",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -7628,7 +7628,7 @@
     "language": "Rust",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -7740,7 +7740,7 @@
     "language": "Scala",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -7849,7 +7849,7 @@
     "language": "Scala",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -7954,7 +7954,7 @@
     "language": "Scala",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {
@@ -8072,7 +8072,7 @@
     "language": "Scala",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -8184,7 +8184,7 @@
     "language": "Scala",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -8299,7 +8299,7 @@
     ],
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -8429,7 +8429,7 @@
     "language": "Swift",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -8539,7 +8539,7 @@
     "language": "Swift",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -8637,7 +8637,7 @@
     "language": "Swift",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -8749,7 +8749,7 @@
     "language": "Swift",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -8859,7 +8859,7 @@
     "language": "Swift",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -8967,7 +8967,7 @@
     "language": "Swift",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -9097,7 +9097,7 @@
     "language": "TypeScript",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -9206,7 +9206,7 @@
     "language": "TypeScript",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -9298,7 +9298,7 @@
     "language": "TypeScript",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -9404,7 +9404,7 @@
     "language": "TypeScript",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {
@@ -9521,7 +9521,7 @@
     "language": "TypeScript",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -9628,7 +9628,7 @@
     "language": "TypeScript",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -9748,7 +9748,7 @@
     "language": "TypeScript",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -9868,7 +9868,7 @@
     "language": "TypeScript",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -9980,7 +9980,7 @@
     "language": "Zsh",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -10074,7 +10074,7 @@
     "language": "Zsh",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},
@@ -10181,7 +10181,7 @@
     "language": "Zsh",
     "provenance": {
       "extractor": "tree-sitter",
-      "extractor_version": "0.1.0+rev.52",
+      "extractor_version": "0.1.0+rev.53",
       "parse_pass": "parse"
     },
     "relations": {},

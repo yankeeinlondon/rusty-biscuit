@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 use tempfile::TempDir;
 use tree_hugger::cache::{CacheLookup, CacheMiss, PersistentCache, SymbolCache};
 use tree_hugger::{
-    Capability, ProgrammingLanguage, ReexportCoverageState, ReexportLimitReason, SourceFile,
+    Capability, ProgrammingLanguage, ReexportCoverageState, SourceFile,
     SymbolKindV2, SymbolQuery, TreeFile, work_counters,
 };
 
@@ -93,27 +93,74 @@ fn an_unrequested_report_is_absent_not_empty() {
     assert!(json["imports"].as_array().unwrap().iter().all(|import| import["reexported"] == false));
 }
 
+/// One forwarding snippet per supported language: the seam reaches every
+/// extractor, and none is left as the whole-file `grammar_gap` placeholder.
+const FORWARDING_SNIPPETS: [(ProgrammingLanguage, &str, &str); 11] = [
+    (ProgrammingLanguage::Rust, "lib.rs", "pub use std::io::Read;\n"),
+    (ProgrammingLanguage::JavaScript, "m.js", "export { a } from \"m\";\n"),
+    (ProgrammingLanguage::TypeScript, "m.ts", "export type { Shape } from \"./shapes\";\n"),
+    (ProgrammingLanguage::Python, "m.py", "from m import a\n__all__ = [\"a\"]\n"),
+    (ProgrammingLanguage::Go, "m.go", "package p\nimport \"x/pkg\"\ntype X = pkg.Y\n"),
+    (
+        ProgrammingLanguage::Perl,
+        "M.pm",
+        "package M;\nuse parent 'Exporter';\nuse Other qw(f);\nour @EXPORT_OK = ('f');\n1;\n",
+    ),
+    (ProgrammingLanguage::Lua, "m.lua", "return require(\"m\")\n"),
+    (ProgrammingLanguage::Swift, "m.swift", "@_exported import Foo\n"),
+    (ProgrammingLanguage::Scala, "m.scala", "object A { export impl.run }\n"),
+    (ProgrammingLanguage::Cpp, "m.hpp", "namespace a { using b::c; }\n"),
+    (
+        ProgrammingLanguage::CSharp,
+        "m.cs",
+        "[assembly: System.Runtime.CompilerServices.TypeForwardedTo(typeof(N.T))]\n",
+    ),
+];
+
 #[test]
-fn every_language_reports_not_applicable_or_a_limited_whole_file() {
+fn every_language_reports_not_applicable_or_its_forwarding_entries() {
+    let supported: Vec<_> = FORWARDING_SNIPPETS.iter().map(|(language, ..)| *language).collect();
     for language in ProgrammingLanguage::all() {
-        let path = fixture(language);
-        let file = TreeFile::new(&path).expect("parse");
+        assert_ne!(
+            supported.contains(&language),
+            NOT_APPLICABLE.contains(&language),
+            "{language:?} must be in exactly one of the two tables"
+        );
+    }
+
+    for language in NOT_APPLICABLE {
+        let file = TreeFile::new(fixture(language)).expect("parse");
         let report = file.reexports().expect("reexports");
         let label = language.query_name();
-        assert!(report.entries.is_empty(), "{label}");
-        if NOT_APPLICABLE.contains(&language) {
-            assert_eq!(report.coverage.state, ReexportCoverageState::NotApplicable, "{label}");
-            assert!(report.coverage.limits.is_empty(), "{label}");
-        } else {
-            assert_eq!(report.coverage.state, ReexportCoverageState::Limited, "{label}");
-            let [limit] = report.coverage.limits.as_slice() else {
-                panic!("{label}: one whole-file limit");
-            };
-            assert_eq!(limit.reason, ReexportLimitReason::GrammarGap, "{label}");
-            let source = std::fs::read_to_string(&path).expect("source");
-            assert_eq!(limit.span.start_byte, 0, "{label}");
-            assert_eq!(limit.span.end_byte as usize, source.len(), "{label}: the root node's span");
-        }
+        assert_eq!(report.coverage.state, ReexportCoverageState::NotApplicable, "{label}");
+        assert!(report.coverage.limits.is_empty() && report.entries.is_empty(), "{label}");
+    }
+
+    for (language, name, source) in FORWARDING_SNIPPETS {
+        let dir = TempDir::new().expect("temp");
+        let path = dir.path().join(name);
+        std::fs::write(&path, source).expect("write");
+        let report = TreeFile::new(&path).expect("parse").reexports().expect("reexports");
+        let label = language.query_name();
+        assert_eq!(report.coverage.state, ReexportCoverageState::Complete, "{label}: {report:#?}");
+        assert!(!report.entries.is_empty(), "{label}: a forward is reported");
+    }
+}
+
+#[test]
+fn a_language_without_forwarding_syntax_is_a_complete_negative_not_a_placeholder() {
+    for (language, name, source) in [
+        (ProgrammingLanguage::Rust, "lib.rs", "pub fn f() {}\n"),
+        (ProgrammingLanguage::Python, "m.py", "x = 1\n"),
+        (ProgrammingLanguage::Go, "m.go", "package p\n"),
+        (ProgrammingLanguage::Cpp, "m.cpp", "int f();\n"),
+    ] {
+        let dir = TempDir::new().expect("temp");
+        let path = dir.path().join(name);
+        std::fs::write(&path, source).expect("write");
+        let report = TreeFile::new(&path).expect("parse").reexports().expect("reexports");
+        assert_eq!(report.coverage.state, ReexportCoverageState::Complete, "{language:?}");
+        assert!(report.entries.is_empty() && report.coverage.limits.is_empty(), "{language:?}");
     }
 }
 

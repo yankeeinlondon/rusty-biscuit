@@ -2482,3 +2482,407 @@ fn summary_and_evidence_list_edits_are_recomputed_in_every_resolving_language() 
     });
     assert!(failures.is_empty(), "summary and list matrix:\n{}", failures.join("\n"));
 }
+
+// The persisted re-export report and the imports' `reexported` marker. Each
+// column below is a JSON path of a real `hug --json-full` entry; the shapes
+// of `SHAPES` edit one cell at a time and a rejected cell must equal an
+// uncached run.
+
+const REEXPORT_FILE: &str = "reexports.ts";
+const REEXPORT_ARGS: [&str; 3] = ["--json-full", "symbols", REEXPORT_FILE];
+/// Three forwarding sites in source order (entries 0 to 2: a renamed
+/// `export … from`, a local export of an import, a wildcard) and one import,
+/// `delta`, that nothing forwards.
+const REEXPORT_SOURCE: &str = "export { alpha as beta } from \"./a\";\nimport { gamma } from \"./g\";\nexport { gamma };\nexport * from \"./w\";\nimport { delta } from \"./d\";\nfunction module_function(): void {}\n";
+const LIMITED_FILE: &str = "limited.js";
+const LIMITED_ARGS: [&str; 3] = ["--json-full", "symbols", LIMITED_FILE];
+/// One `dynamic_forwarding` limit and no entry.
+const LIMITED_SOURCE: &str = "const x = require(\"./a\");\nmodule.exports = Object.assign({}, x);\nfunction module_function() {}\n";
+const NOT_APPLICABLE_FILE: &str = "NotApplicable.java";
+const NOT_APPLICABLE_ARGS: [&str; 3] = ["--json-full", "symbols", NOT_APPLICABLE_FILE];
+const NOT_APPLICABLE_SOURCE: &str = "class NotApplicable { void module_function() {} }\n";
+
+/// A path from the entry root, leaked so a column can borrow it for `'static`.
+fn rx(parts: &[&'static str]) -> &'static [&'static str] {
+    Box::leak(parts.to_vec().into_boxed_slice())
+}
+
+/// Like `written_evidence`, for any single-file source.
+fn written_entry(file: &str, source: &str) -> (Scratch, Value, std::path::PathBuf, Value) {
+    let scratch = Scratch::new(&[(file, source)]);
+    let uncached = json_of(&scratch.stdout(&["--json-full", "symbols", "--no-cache", file]));
+    assert_eq!(json_of(&scratch.stdout(&["--json-full", "symbols", file])), uncached, "the cache-writing run");
+    let entry = only_entry(scratch.temp.path());
+    let relative = entry.strip_prefix(scratch.temp.path()).expect("entry under the scratch temp directory").to_path_buf();
+    let original = read_json(&entry);
+    (scratch, uncached, relative, original)
+}
+
+/// A field served only unedited (an object, or an array holding members).
+fn rx_object(name: &'static str, path: &'static [&'static str]) -> Column {
+    evidence_column(name, path)
+}
+
+/// A scalar field served only unedited, whose empty value is `empty`.
+fn rx_scalar(name: &'static str, path: &'static [&'static str], empty: Value) -> Column {
+    evidence_scalar(name, path, empty)
+}
+
+/// A nullable scalar: `null` is a legal value (a served edit, or the control
+/// written back), `""` is not.
+fn rx_nullable(name: &'static str, path: &'static [&'static str]) -> Column {
+    Column { outcomes: [S(json!(true)), R, S(json!(true)), R, X, X, R, R, R], ..evidence_leaf(name, path, json!("")) }
+}
+
+/// An array that is empty in the entry: an empty list is the control value.
+fn rx_empty_list(name: &'static str, path: &'static [&'static str]) -> Column {
+    Column { outcomes: [S(json!(true)), R, R, R, R, R, S(json!(true)), R, R], ..evidence_column(name, path) }
+}
+
+/// The geometry of one span: the span, its points and their leaves. Every
+/// edit leaves a span that disagrees with the source, so only the control is
+/// served.
+fn rx_span_columns(label: &'static str, span: &'static [&'static str]) -> Vec<Column> {
+    let at = |tail: &[&'static str]| {
+        let mut path = span.to_vec();
+        path.extend_from_slice(tail);
+        rx(&path)
+    };
+    let name = |tail: &str| -> &'static str { Box::leak(format!("{label}.{tail}").into_boxed_str()) };
+    let zero = || json!(0);
+    let mut columns = vec![
+        rx_object(name("span"), span),
+        evidence_leaf(name("start_byte"), at(&["start_byte"]), zero()),
+        evidence_leaf(name("end_byte"), at(&["end_byte"]), zero()),
+        evidence_leaf(name("start"), at(&["start"]), json!({})),
+        evidence_leaf(name("end"), at(&["end"]), json!({})),
+    ];
+    for (point, tails) in [("start", ["line", "column"]), ("end", ["line", "column"])] {
+        for tail in tails {
+            let label = name(&format!("{point}.{tail}"));
+            columns.push(rx_scalar(label, at(&[point, tail]), zero()));
+        }
+    }
+    columns
+}
+
+fn reexport_columns() -> Vec<Column> {
+    const ENTRY: [&str; 3] = ["reexports", "entries", "0"];
+    const LOCAL: [&str; 3] = ["reexports", "entries", "1"];
+    const WILD: [&str; 3] = ["reexports", "entries", "2"];
+    let under = |entry: &[&'static str], key: &'static str| {
+        let mut path = entry.to_vec();
+        path.push(key);
+        rx(&path)
+    };
+    let mut columns = vec![
+        rx_object("reexports", &["reexports"]),
+        rx_object("reexports.coverage", &["reexports", "coverage"]),
+        rx_scalar("reexports.coverage.state", &["reexports", "coverage", "state"], json!("")),
+        rx_empty_list("reexports.coverage.limits", &["reexports", "coverage", "limits"]),
+        // A positive report cannot lose its entries: `gamma`'s import marker
+        // names one.
+        rx_object("reexports.entries", &["reexports", "entries"]),
+        rx_scalar("entry.form", under(&ENTRY, "form"), json!("")),
+        rx_scalar("entry.evidence", under(&ENTRY, "evidence"), json!("")),
+        // A named entry needs both names; a wildcard has neither.
+        rx_scalar("named entry.exported_name", under(&ENTRY, "exported_name"), json!("")),
+        rx_scalar("named entry.original_name", under(&ENTRY, "original_name"), json!("")),
+        rx_nullable("wildcard entry.exported_name", under(&WILD, "exported_name")),
+        rx_nullable("wildcard entry.original_name", under(&WILD, "original_name")),
+        rx_nullable("entry.local_name", under(&ENTRY, "local_name")),
+        rx_nullable("entry.source", under(&ENTRY, "source")),
+        rx_empty_list("entry.excluded_names", under(&ENTRY, "excluded_names")),
+        rx_nullable("entry.scope", under(&ENTRY, "scope")),
+        rx_nullable("entry.restriction", under(&ENTRY, "restriction")),
+        rx_scalar("entry.type_only", under(&ENTRY, "type_only"), json!("")),
+        rx_scalar("entry.conditional", under(&ENTRY, "conditional"), json!("")),
+        rx_empty_list("entry.caveats", under(&ENTRY, "caveats")),
+        // No import to forward: `null` is the control.
+        Column {
+            outcomes: [S(json!(true)), R, S(json!(true)), R, R, R, R, R, R],
+            empty: Some(json!({})),
+            ..evidence_column("entry.import_span (none)", under(&ENTRY, "import_span"))
+        },
+        // `gamma`'s forward: the import marker names it.
+        rx_object("entry.import_span (linked)", under(&LOCAL, "import_span")),
+        rx_nullable("linked entry.local_name", under(&LOCAL, "local_name")),
+        rx_object("imports.reexported marker list", &["imports"]),
+        rx_scalar("forwarded import.reexported", &["imports", "0", "reexported"], json!("")),
+        rx_scalar("unforwarded import.reexported", &["imports", "1", "reexported"], json!("")),
+        rx_object("completed_capabilities", &["completed_capabilities"]),
+    ];
+    columns.extend(rx_span_columns("entry.span", under(&LOCAL, "span")));
+    columns.extend(rx_span_columns("entry.statement_span", under(&LOCAL, "statement_span")));
+    columns
+}
+
+/// Every matrix cell of a complete report, from a real entry: only the
+/// control and the cells whose edit is a no-op or a legal empty are served.
+#[test]
+fn reexport_report_fields_are_served_only_when_consistent() {
+    let (scratch, uncached, relative_entry, original) = written_entry(REEXPORT_FILE, REEXPORT_SOURCE);
+    assert_eq!(original["reexports"]["coverage"]["state"], "complete", "a complete report");
+    assert_eq!(original["reexports"]["entries"].as_array().map(Vec::len), Some(3));
+    assert_eq!(original["imports"][0]["reexported"], true);
+    assert_eq!(original["imports"][1]["reexported"], false);
+    let columns = reexport_columns();
+    let failures = check_reexport_columns(&scratch, &REEXPORT_ARGS, &original, &uncached, &relative_entry, &columns);
+    assert!(failures.is_empty(), "re-export matrix:\n{}", failures.join("\n"));
+}
+
+fn check_reexport_columns(
+    scratch: &Scratch,
+    args: &[&str],
+    original: &Value,
+    uncached: &Value,
+    relative_entry: &Path,
+    columns: &[Column],
+) -> Vec<String> {
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = columns
+            .iter()
+            .map(|column| {
+                scope.spawn(move || {
+                    let base = field_base(original.clone(), column);
+                    check_column(scratch, args, &base, uncached, relative_entry, column)
+                })
+            })
+            .collect();
+        handles.into_iter().flat_map(|handle| handle.join().expect("column thread")).collect()
+    })
+}
+
+/// A limited report: the reasons are required, and an empty entry list is a
+/// genuine value.
+#[test]
+fn a_limited_reexport_report_is_served_only_when_consistent() {
+    let (scratch, uncached, relative_entry, original) = written_entry(LIMITED_FILE, LIMITED_SOURCE);
+    assert_eq!(original["reexports"]["coverage"]["state"], "limited");
+    let limit: &'static [&'static str] = &["reexports", "coverage", "limits", "0"];
+    let mut columns = vec![
+        rx_scalar("limited state", &["reexports", "coverage", "state"], json!("")),
+        // A limited report with no reason is never produced.
+        rx_object("limits", &["reexports", "coverage", "limits"]),
+        rx_scalar("limit.reason", rx(&["reexports", "coverage", "limits", "0", "reason"]), json!("")),
+        rx_empty_list("limited entries", &["reexports", "entries"]),
+    ];
+    columns.extend(rx_span_columns("limit.span", rx(&[limit[0], limit[1], limit[2], limit[3], "span"])));
+    let failures = check_reexport_columns(&scratch, &LIMITED_ARGS, &original, &uncached, &relative_entry, &columns);
+    assert!(failures.is_empty(), "limited re-export matrix:\n{}", failures.join("\n"));
+}
+
+/// The lookup, refusal reason and output of one run over an edited entry.
+fn serve_edited(scratch: &Scratch, temp: &Path, entry: &Path, args: &[&str], edited: &Value) -> (&'static str, String, Value) {
+    std::fs::write(entry, serde_json::to_vec(edited).expect("serialize")).expect("write entry");
+    let mut verbose = vec!["--verbose"];
+    verbose.extend_from_slice(args);
+    let output = scratch.hug_with_temp(temp, &verbose);
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    (lookup_of(&output.stderr), stderr, json_of(&stdout_of(output, &verbose)))
+}
+
+type Edit = fn(&mut Value);
+
+/// Well-typed edits no fresh analysis produces: each is refused for its
+/// stated reason and recomputed to the uncached output, and the unedited
+/// entry is a hit.
+fn check_inconsistencies(file: &str, source: &str, args: &[&str], cases: &[(&str, &str, Edit)]) {
+    let scratch = Scratch::new(&[(file, source)]);
+    let uncached = json_of(&scratch.stdout(&["--json-full", "symbols", "--no-cache", file]));
+    let temp = TempDir::new().expect("cell temp");
+    let mut verbose = vec!["--verbose"];
+    verbose.extend_from_slice(args);
+    let written = scratch.hug_with_temp(temp.path(), &verbose);
+    assert_eq!(lookup_of(&written.stderr), "miss", "{file}: the writing run");
+    let entry = only_entry(temp.path());
+    let original = read_json(&entry);
+    let (lookup, _, served) = serve_edited(&scratch, temp.path(), &entry, args, &original);
+    assert_eq!((lookup, &served), ("hit", &uncached), "{file}: the unedited entry");
+    let mut failures = Vec::new();
+    for &(label, reason, edit) in cases {
+        let mut edited = original.clone();
+        edit(&mut edited);
+        let (lookup, stderr, output) = serve_edited(&scratch, temp.path(), &entry, args, &edited);
+        if lookup != "miss" {
+            failures.push(format!("{label}: expected a miss, entry was served"));
+        } else if !stderr.contains(&format!("inconsistent entry: {reason}")) {
+            failures.push(format!("{label}: refused for another reason: {stderr}"));
+        } else if output != uncached {
+            failures.push(format!("{label}: missed, but output differs from an uncached run"));
+        }
+    }
+    assert!(failures.is_empty(), "{file} inconsistencies:\n{}", failures.join("\n"));
+}
+
+#[test]
+fn well_typed_reexport_inconsistencies_in_a_complete_report_are_refused() {
+    let cases: &[(&str, &str, Edit)] = &[
+        ("evidence without its capability", "a re-export report without the reexports capability, or the reverse", |entry| {
+            // Diagnostics requires re-exports, so the entry gives up both.
+            let capabilities = entry["completed_capabilities"].as_array_mut().expect("capabilities");
+            capabilities.retain(|capability| capability != "reexports" && capability != "diagnostics");
+            entry["diagnostics_fingerprint"] = Value::Null;
+            entry["diagnostics"] = json!([]);
+        }),
+        ("a positive report's entries deleted", "an import marker that disagrees with the re-export entries", |entry| {
+            entry["reexports"]["entries"] = json!([]);
+        }),
+        // The import inventory digest covers each marker, so it refuses first.
+        ("a marker cleared while an entry forwards the import", "imports disagree with their complete producer inventory", |entry| {
+            entry["imports"][0]["reexported"] = json!(false);
+        }),
+        ("a marker set on an import nothing forwards", "imports disagree with their complete producer inventory", |entry| {
+            entry["imports"][1]["reexported"] = json!(true);
+        }),
+        ("an import site that is not an import", "a re-export import span that is not an import", |entry| {
+            entry["reexports"]["entries"][1]["import_span"] = entry["reexports"]["entries"][0]["span"].clone();
+        }),
+        ("a span past the end of the file", "a re-export span disagrees with the source", |entry| {
+            entry["reexports"]["entries"][0]["span"]["end_byte"] = json!(100_000);
+        }),
+        ("a statement that does not contain its specifier", "a re-export statement span that does not contain its specifier", |entry| {
+            let (span, statement) = (entry["reexports"]["entries"][2]["span"].clone(), entry["reexports"]["entries"][0]["statement_span"].clone());
+            entry["reexports"]["entries"][2]["span"] = span;
+            entry["reexports"]["entries"][2]["statement_span"] = statement;
+        }),
+        ("entries out of source order", "re-export entries are out of source order", |entry| {
+            entry["reexports"]["entries"].as_array_mut().expect("entries").swap(0, 2);
+        }),
+        ("a wildcard that names an export", "an exported name that disagrees with the re-export form", |entry| {
+            entry["reexports"]["entries"][2]["exported_name"] = json!("x");
+        }),
+        ("a named forward that lost its original name", "an original name that disagrees with the re-export form", |entry| {
+            entry["reexports"]["entries"][0]["original_name"] = Value::Null;
+        }),
+        ("excluded names on a named forward", "excluded names on a form that is not a wildcard", |entry| {
+            entry["reexports"]["entries"][0]["excluded_names"] = json!(["a"]);
+        }),
+        ("an empty source path", "an empty re-export name or path", |entry| {
+            entry["reexports"]["entries"][0]["source"] = json!("");
+        }),
+        ("repeated caveats", "re-export caveats are unordered or repeated", |entry| {
+            entry["reexports"]["entries"][0]["caveats"] = json!(["mutable_binding", "mutable_binding"]);
+        }),
+        ("limits on a complete report", "limits that disagree with the coverage state", |entry| {
+            entry["reexports"]["coverage"]["limits"] =
+                json!([{ "reason": "parse_error", "span": entry["reexports"]["entries"][0]["span"].clone() }]);
+        }),
+        ("a not-applicable state for a supported language", "a coverage state that disagrees with the language", |entry| {
+            entry["reexports"]["coverage"]["state"] = json!("not_applicable");
+            entry["reexports"]["entries"] = json!([]);
+        }),
+    ];
+    check_inconsistencies(REEXPORT_FILE, REEXPORT_SOURCE, &REEXPORT_ARGS, cases);
+}
+
+#[test]
+fn well_typed_reexport_inconsistencies_in_a_limited_report_are_refused() {
+    let cases: &[(&str, &str, Edit)] = &[
+        ("a limited state with its reasons deleted", "limits that disagree with the coverage state", |entry| {
+            entry["reexports"]["coverage"]["limits"] = json!([]);
+        }),
+        ("a complete state with a reason left", "limits that disagree with the coverage state", |entry| {
+            entry["reexports"]["coverage"]["state"] = json!("complete");
+        }),
+        ("a limit span past the end of the file", "a re-export limit span disagrees with the source", |entry| {
+            entry["reexports"]["coverage"]["limits"][0]["span"]["end_byte"] = json!(100_000);
+        }),
+        ("limits out of order", "re-export limits are out of order", |entry| {
+            let first = entry["reexports"]["coverage"]["limits"][0].clone();
+            let mut earlier = first.clone();
+            earlier["span"] = json!({
+                "start": { "line": 1, "column": 1 }, "end": { "line": 1, "column": 2 }, "start_byte": 0, "end_byte": 1
+            });
+            entry["reexports"]["coverage"]["limits"] = json!([first, earlier]);
+        }),
+    ];
+    check_inconsistencies(LIMITED_FILE, LIMITED_SOURCE, &LIMITED_ARGS, cases);
+}
+
+#[test]
+fn a_not_applicable_language_is_complete_only_as_not_applicable() {
+    let cases: &[(&str, &str, Edit)] = &[
+        ("a supported state for a language with no forwarding", "a coverage state that disagrees with the language", |entry| {
+            entry["reexports"]["coverage"]["state"] = json!("complete");
+        }),
+        ("entries in a language with no forwarding", "entries in a language with no forwarding construct", |entry| {
+            let forged = json!({
+                "form": "wildcard", "evidence": "syntax", "exported_name": null, "original_name": null, "local_name": null,
+                "source": "x", "excluded_names": [], "scope": null, "restriction": null, "type_only": false,
+                "conditional": false, "caveats": [], "import_span": null,
+                "span": { "start": { "line": 1, "column": 1 }, "end": { "line": 1, "column": 2 }, "start_byte": 0, "end_byte": 1 },
+                "statement_span": { "start": { "line": 1, "column": 1 }, "end": { "line": 1, "column": 2 }, "start_byte": 0, "end_byte": 1 },
+            });
+            entry["reexports"]["entries"] = json!([forged]);
+        }),
+    ];
+    check_inconsistencies(NOT_APPLICABLE_FILE, NOT_APPLICABLE_SOURCE, &NOT_APPLICABLE_ARGS, cases);
+}
+
+/// An entry written without the capability is widened by the next
+/// `--json-full` run, never served as a complete negative; the result
+/// equals an uncached run and the entry is then served as a hit.
+#[test]
+fn an_entry_without_reexports_is_widened_not_read_as_empty() {
+    let scratch = Scratch::new(&[(REEXPORT_FILE, REEXPORT_SOURCE)]);
+    let temp = TempDir::new().expect("cell temp");
+    let uncached = json_of(&scratch.stdout(&["--json-full", "symbols", "--no-cache", REEXPORT_FILE]));
+    let narrow = scratch.hug_with_temp(temp.path(), &["symbols", REEXPORT_FILE]);
+    assert!(narrow.status.success());
+    let entry = only_entry(temp.path());
+    assert!(read_json(&entry)["reexports"].is_null(), "the narrow entry computed no report");
+    assert!(read_json(&entry)["imports"].as_array().expect("imports").iter().all(|import| import["reexported"] == false));
+    let widened = scratch.hug_with_temp(temp.path(), &["--verbose", "--json-full", "symbols", REEXPORT_FILE]);
+    assert!(String::from_utf8_lossy(&widened.stderr).contains("cache: 0 hits, 1 partial hits"), "the narrow entry is a partial hit");
+    assert_eq!(json_of(&stdout_of(widened, &REEXPORT_ARGS)), uncached, "the widening run");
+    for round in [2, 3] {
+        let (lookup, _, output) = serve_edited(&scratch, temp.path(), &entry, &REEXPORT_ARGS, &read_json(&entry));
+        assert_eq!((lookup, &output), ("hit", &uncached), "round {round}");
+    }
+    assert_eq!(read_json(&entry)["reexports"]["coverage"]["state"], "complete", "the widened entry is stored");
+}
+
+/// A name that is `null` in the entry is served as `null`, and the report
+/// the caller sees says so: the edit is the public value.
+#[test]
+fn a_nullable_reexport_name_is_served_as_null() {
+    let (scratch, _, relative_entry, original) = written_entry(REEXPORT_FILE, REEXPORT_SOURCE);
+    let temp = TempDir::new().expect("cell temp");
+    let entry = temp.path().join(&relative_entry);
+    std::fs::create_dir_all(entry.parent().expect("shard")).expect("create shard");
+    let mut base = original.clone();
+    rename_record(&mut base, SENTINEL_FROM, SENTINEL_TO);
+    for (field, index) in [("local_name", 1), ("source", 0)] {
+        let mut edited = base.clone();
+        edited["reexports"]["entries"][index][field] = Value::Null;
+        let (lookup, stderr, output) = serve_edited(&scratch, temp.path(), &entry, &REEXPORT_ARGS, &edited);
+        assert_eq!(lookup, "hit", "{field}: {stderr}");
+        assert!(has_sentinel(&output), "{field}: served from the entry");
+        assert_eq!(output["indexes"][0]["reexports"]["entries"][index][field], Value::Null, "{field}");
+    }
+}
+
+/// Raw JSON a map serializer cannot express: a duplicated or trailing member
+/// of a nested report leaf is refused and recomputed.
+#[test]
+fn a_duplicated_or_trailing_reexport_member_is_refused_and_recomputed() {
+    let (scratch, uncached, relative_entry, original) = written_entry(REEXPORT_FILE, REEXPORT_SOURCE);
+    let temp = TempDir::new().expect("cell temp");
+    let entry = temp.path().join(&relative_entry);
+    std::fs::create_dir_all(entry.parent().expect("shard")).expect("create shard");
+    let mut base = original;
+    base["reexports"]["entries"][1]["local_name"] = json!("__dup__");
+    let text = serde_json::to_string(&base).expect("serialize");
+    for (label, replacement) in [
+        ("duplicate", "\"local_name\":\"gamma\",\"local_name\":\"gamma\""),
+        ("trailing", "\"local_name\":\"gamma\" trailing"),
+    ] {
+        std::fs::write(&entry, text.replacen("\"local_name\":\"__dup__\"", replacement, 1)).expect("write entry");
+        let mut verbose = vec!["--verbose"];
+        verbose.extend_from_slice(&REEXPORT_ARGS);
+        let output = scratch.hug_with_temp(temp.path(), &verbose);
+        assert_eq!(lookup_of(&output.stderr), "miss", "{label}");
+        assert_eq!(json_of(&stdout_of(output, &verbose)), uncached, "{label}");
+    }
+}
