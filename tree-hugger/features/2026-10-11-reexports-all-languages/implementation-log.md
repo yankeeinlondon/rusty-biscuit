@@ -24,6 +24,18 @@ docs_updated_during_phase_3:
   - tree-hugger/features/2026-10-11-reexports-all-languages/spec.md
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4: []
+docs_updated_during_phase_4:
+  - tree-hugger/features/2026-10-11-reexports-all-languages/implementation-log.md
+  - tree-hugger/features/2026-10-11-reexports-all-languages/spec.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+source_files_during_phase_5: []
+docs_updated_during_phase_5:
+  - tree-hugger/features/2026-10-11-reexports-all-languages/implementation-log.md
+  - tree-hugger/features/2026-10-11-reexports-all-languages/spec.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
 packages:
   - tree-hugger
 ---
@@ -117,3 +129,38 @@ Phase 3 was **not implemented**. It is blocked twice over.
   frontmatter), the same set as Phase 2, whose scope result was
   `"packages": []`, `change_class: "documentation"`. The gates were skipped as
   permitted; no behavior changed so no tests were mapped.
+
+## Phase 4
+
+Phase 4 was **not implemented**. It is blocked transitively.
+
+- It persists and consumes the forwarding report, schema, capability and
+  import marker that Phase 2 defines and Phase 3 populates. Neither was built:
+  no report type, capability, schema bump or extraction exists to cache or to
+  convert in `analysis::import_record` and `cli/src/main.rs`.
+- Both depend on the author's rulings (support contract, canonical
+  representation, consumer exposure, C++ grammar blocker). The spec is still
+  `draft-spec` with `human_review: true`; an agent cannot approve them.
+- No source, test or skill changed; no plan tasks were checked off, and no
+  behavior changed, so there is no requirement-to-test mapping.
+- Gates: only docs under `tree-hugger/features/` changed. The scope result is
+  recorded below.
+- Scope command result: `"packages": []`, `change_class: "documentation"`, so the test and lint gates were skipped as permitted.
+
+## Phase 5
+
+Phase 5 was **not implemented**. It is blocked transitively.
+
+- It verifies equivalence of, and documents, a forwarding report, capability,
+  cache evidence and consumer output that Phases 2-4 were meant to build. None
+  exist, so there is nothing to compare, count work for, or document as current
+  behavior (the `docs/` tree must not describe behavior that does not exist).
+- The root cause is unchanged: the author's rulings (support contract,
+  canonical representation, consumer exposure, C++ modules grammar blocker) are
+  still pending. The spec is still `draft-spec` with `human_review: true`.
+- No source, test, skill or plan task changed; no tasks were checked off. There
+  is no requirement-to-test mapping because no behavior changed. Wave 9 is not
+  applicable (no styled view exists).
+- Gates: only docs under `tree-hugger/features/` changed.
+- Scope command result: see below.
+- Scope command result: `"packages": []`, `change_class: "documentation"`, so the test and lint gates were skipped as permitted.
