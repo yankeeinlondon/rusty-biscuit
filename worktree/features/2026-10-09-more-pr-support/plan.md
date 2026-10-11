@@ -22,8 +22,20 @@ source_files_during_phase_1:
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+    - worktree/lib/src/pull_requests.rs
+    - worktree/lib/src/list/wait/tests.rs
+    - worktree/cli/src/commands/list/tests.rs
+    - worktree/cli/src/commands/git_graph/tests.rs
+    - worktree/cli/tests/list_table.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/worktree/list-remote.md
 packages:
     - sniff
+    - worktree
+    - worktree-cli
 ---
 
 # Plan: account for open PRs in `wt list`, and show their check status
@@ -185,15 +197,15 @@ Depends on Phase 1 checkpoint.
 
 ### Wave 1 (parallel)
 
-- [ ] **Record field** — add `status` to `OpenPullRequest`
+- [x] **Record field** — add `status` to `OpenPullRequest`
       (`worktree/lib/src/pull_requests.rs`) with a string form
       `failing|running|passed|unknown`; map from `PrSummary::status`
       in the production `OpenPrSource`.
-- [ ] **Format 7 writer/reader** — bump `PR_STORE_FORMAT_VERSION` 6→7; write all
+- [x] **Format 7 writer/reader** — bump `PR_STORE_FORMAT_VERSION` 6→7; write all
       fields explicitly. Read 5 and 6 as before, forcing `unknown` status even if
       a `status` field is present (add a status-free reader path for 6, as
       format 5 has `UncredentialedStoreFile`). Formats ≤4 and ≥8 stay misses.
-- [ ] **Format 7 status leniency** — a missing, null, wrongly typed, or
+- [x] **Format 7 status leniency** — a missing, null, wrongly typed, or
       unrecognized `status` becomes unknown **for that PR only**; all other
       strictness (malformed JSON, duplicate keys including duplicate `status`,
       identity fields, publication, origin digest, timestamp, credentials) is
@@ -201,19 +213,19 @@ Depends on Phase 1 checkpoint.
 
 ### Wave 2 (after Wave 1)
 
-- [ ] **Worker/publish path** — confirm `refresh` publishes list + statuses in
+- [x] **Worker/publish path** — confirm `refresh` publishes list + statuses in
       one atomic write, empty list still publishes, enrichment failure
       publishes unknown statuses, incomplete REST publishes nothing, a later
       answer replaces old statuses, origin recheck still suppresses. Keep the
       PR lock, 10 s deadline, publication ID semantics.
-- [ ] **Duplicate numbers** — ensure `PrListing` consumers tolerate duplicate
+- [x] **Duplicate numbers** — ensure `PrListing` consumers tolerate duplicate
       PR records (dedupe at coverage time, Phase 3).
-- [ ] **Library docs** — update `///` on `OpenPullRequest`, the store module doc
+- [x] **Library docs** — update `///` on `OpenPullRequest`, the store module doc
       and `PR_STORE_FORMAT_VERSION` history.
 
 ### Validation checkpoint 2
 
-- [ ] `just test` / `just lint` in `worktree/`. Extend
+- [x] `just test` / `just lint` in `worktree/`. Extend
       `the_store_reader_walks_the_input_robustness_matrix` and the format-5 test;
       add format 5/6/7 status cases and unsupported formats.
 

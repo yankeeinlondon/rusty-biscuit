@@ -26,20 +26,17 @@ reviewed_on: 2026-10-09
 review_iterations: 0
 clarified: false
 implemented: false
-related:
-    - 2026-10-02-fresh-prs
 human_review: false
 message_to_agent: |-
-    Phase 1 is done in sniff only. In worktree, call the new opt-in
-    `sniff::remote::blocking::open_pull_requests_with_status(remote_url, deadline)`
-    (in `SniffOpenPrSource::fetch`, worktree/lib/src/pull_requests.rs) and map
-    `PrSummary::status` (a `sniff::remote::blocking::PrCheckStatus`:
-    Failing/Running/Passed/Unknown) to the stored string. The ordinary
-    `open_pull_requests` still reports Unknown. Enrichment never fails the
-    list, and its GraphQL requests are already folded into
-    `OpenPullRequests::credentials`. The GraphQL count-field names (plan R7)
-    were not confirmed against GitHub's live reference; confirm them when
-    writing the Phase 4 docs.
+    Phase 2 is done: OpenPullRequest::status (sniff's PrCheckStatus, re-exported
+    as worktree::pull_requests::PrCheckStatus) is stored in format 7, with
+    status_name() giving failing|running|passed|unknown. The store may hold two
+    records with the same PR number, so Phase 3's coverage code must dedupe by
+    number. Struct literals of OpenPullRequest now need a status field. Also
+    still open from Phase 1: confirm the GraphQL count-field names against
+    GitHub's reference before the Phase 4 docs.
+related:
+    - 2026-10-02-fresh-prs
 ---
 
 # Account for open PRs in `wt list`, and show their check status

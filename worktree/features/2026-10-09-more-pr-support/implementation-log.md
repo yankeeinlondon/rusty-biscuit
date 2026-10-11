@@ -21,8 +21,20 @@ source_files_during_phase_1:
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+    - worktree/lib/src/pull_requests.rs
+    - worktree/lib/src/list/wait/tests.rs
+    - worktree/cli/src/commands/list/tests.rs
+    - worktree/cli/src/commands/git_graph/tests.rs
+    - worktree/cli/tests/list_table.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/worktree/list-remote.md
 packages:
     - sniff
+    - worktree
+    - worktree-cli
 ---
 
 # Implementation Log for 2026-10-09-more-pr-support (4 phases)
@@ -58,3 +70,22 @@ Gates: `just test` and `just lint` in `sniff/` pass (3355 tests). Tests are in t
 Open item: the GraphQL field names (R7) were written from knowledge of GitHub's schema and could not be checked against the live reference from this headless session; the saved fixtures follow the same names. Worth a doc-read confirmation before Phase 4 docs.
 
 Departure: a duplicate key or trailing content in a GraphQL body is treated as request-wide (stops later batches) rather than "that PR unknown"; the list is kept either way.
+
+## Phase 2
+
+All in `worktree/lib/src/pull_requests.rs` (the other touched files only gained the new `status` field in `OpenPullRequest` test literals).
+
+- `OpenPullRequest::status: PrCheckStatus` (sniff's enum, re-exported from `worktree::pull_requests`); stored as `failing|running|passed|unknown` via a `status_form` serde module (`status_name()` exposes the string). `SniffOpenPrSource` now calls `open_pull_requests_with_status` and copies `summary.status`.
+- Format 7 (`PR_STORE_FORMAT_VERSION` 6 -> 7): all fields written explicitly. Formats 5 and 6 read through status-free structs (`StatuslessStoreFile` new for 6, `UncredentialedStoreFile` for 5, both using `StatuslessPullRequest`), so any `status` there is ignored and reads `unknown`. <=4 and >=8 remain misses.
+- Leniency: `#[serde(default, with = "status_form")]` reads the value as a JSON `Value`; absent/null/wrong type/unrecognized -> `unknown` for that PR only. A repeated `status` key is still a miss because serde's derive rejects duplicate fields (tested). The `#[serde(default)]` smell is intentional here and is the only one on this struct.
+- Worker/publish path: `refresh` is unchanged; it already publishes list + statuses in one atomic write, publishes empty lists, writes nothing on failure, and rechecks origin. Enrichment failures inside sniff yield `unknown` statuses with a complete list, so they publish. Verified by `statuses_round_trip_and_a_later_answer_replaces_them` (replace, failed refresh keeps old, empty clears). No lock/deadline/publication-ID change.
+- Duplicate numbers: the store accepts two records with one number (matrix cell kept); dedupe is Phase 3's coverage job.
+
+Requirement -> test (all `worktree pull_requests::tests::`):
+
+- format 7 matrix incl. control row, format_version 7 valid / 8 miss, every status shape (absent, null, number, bool, `[]`, `["passed"]`, `{}`, `""`, bogus, wrong case, each valid name, duplicate key = miss, one wrong element among valid, every element wrong): `the_store_reader_walks_the_input_robustness_matrix`
+- formats 5/6 ignore any status and keep their other rules (bad element, duplicate key, trailing, missing credentials, anonymous credentials kept): `formats_5_and_6_read_as_unknown_status_whatever_a_pr_spells`
+- format 5 stray credentials / format 8 miss: `a_format_5_answer_is_served_with_unknown_credentials_and_a_future_format_is_a_miss`
+- read/write/read round trip and replacement: `statuses_round_trip_and_a_later_answer_replaces_them`
+
+Gates: `just test` (1099 passed) and `just lint` in `worktree/` pass. The production `SniffOpenPrSource` mapping is a field copy and is not exercised against a live provider (no network in tests). Smell grep: no `unwrap_or_default()`/`filter_map(as_str)` added on the identity path. Skill updated: `.claude/skills/worktree/list-remote.md`. L2 not run this phase (no L2 test touches the store format directly beyond `PR_STORE_FORMAT_VERSION` constants).
