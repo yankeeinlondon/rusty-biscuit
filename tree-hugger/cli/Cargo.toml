@@ -66,3 +66,5 @@ l2-backends = ["tmux", "wezterm", "kitty"]
 sidecars = ["backend-proof", "harness-broker"]
 features = ["terminal-tests"]
 local-features = []
+# The library/CLI severity agreement test reads the library's shared fixture.
+source-inputs = ["tree-hugger/lib/tests/fixtures/lint/undefined_symbol.py"]

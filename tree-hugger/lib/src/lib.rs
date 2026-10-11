@@ -18,7 +18,6 @@ pub mod shared;
 // Re-export query subsystem for consumers
 pub use queries::{
     compatibility::{CompatibilityRegistry, find_hook_predicates, find_unsupported_predicates},
-    drift::{DriftItem, DriftReport, check_all_drift, check_query_drift, summarize_drift},
     inventory::{CaptureEntry, LanguageInventory, NvimQuerySuite, QueryInventory, suite_for_kind},
     provenance::{QueryProvenance, TranslationStatus, all_query_provenance, query_provenance},
 };

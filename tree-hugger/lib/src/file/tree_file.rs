@@ -14,7 +14,7 @@ use crate::file::extract::attributes::declaration_attributes;
 use crate::file::extract::*;
 use crate::file::query::{Capability, SymbolQuery, SymbolQueryResult};
 use crate::file::source_file::SourceFile;
-use crate::queries::{GrammarRef, QueryKind, format_rule_message, query_for, severity_for_rule};
+use crate::queries::{GrammarRef, QueryKind, format_rule_message, query_for};
 use crate::rule_registry::{RuleRegistry, diagnostic_metadata_from_rule};
 use crate::shared::{
     AnalysisPass, Attribute, CodeBlock, CodeRange, Diagnostic, DiagnosticSeverity, FileSymbolIndex,
@@ -29,6 +29,28 @@ mod relations;
 
 pub(crate) use definitions::{Definitions, ExtractedSymbol, MetadataSelection, RecordFacts};
 pub(crate) use relations::LexicalWalk;
+
+/// Rule IDs emitted by Rust code rather than by a `lint.scm` capture: the
+/// semantic checks below plus `invalid-syntax`. Add an ID here with the check
+/// that emits it; the registry consistency test requires every registered rule
+/// to be emitted by a query or listed here.
+pub const SEMANTIC_RULE_IDS: &[&str] = &[
+    "dead-code",
+    "undefined-symbol",
+    "unused-symbol",
+    "unused-import",
+    "undefined-module",
+    "invalid-syntax",
+];
+
+/// A diagnostic's severity is its rule's registry default, whether or not the
+/// rule is enabled. An unregistered ID is `Info`, not `get_or_default`'s
+/// `Warning`.
+fn registry_severity(rule_id: &str) -> DiagnosticSeverity {
+    RuleRegistry::builtin()
+        .get(rule_id)
+        .map_or(DiagnosticSeverity::Info, |rule| rule.default_severity)
+}
 
 /// Represents a parsed source file backed by tree-sitter.
 #[derive(Debug, Clone)]
@@ -1083,17 +1105,6 @@ impl TreeFile {
             .map(|extracted| &extracted.symbol)
     }
 
-    /// Provides the list of symbols re-exported by this file.
-    ///
-    /// ## Returns
-    /// Returns an empty list until re-export capture support is added.
-    ///
-    /// ## Errors
-    /// Returns an error if query compilation fails.
-    pub fn reexported_symbols(&self) -> Result<Vec<ImportSymbol>, TreeHuggerError> {
-        Ok(Vec::new())
-    }
-
     /// Provides symbols defined in this file but not exported.
     ///
     /// ## Returns
@@ -1228,7 +1239,7 @@ impl TreeFile {
                     diagnostics.push(LintDiagnostic {
                         message: format_rule_message(rule_id),
                         range,
-                        severity: severity_for_rule(rule_id),
+                        severity: registry_severity(rule_id),
                         rule: Some(rule_id.to_string()),
                         context: Some(context),
                         metadata: Some(self.diagnostic_metadata(rule_id)),
@@ -1310,7 +1321,7 @@ impl TreeFile {
                 LintDiagnostic {
                     message: "Unreachable code after unconditional exit".to_string(),
                     range,
-                    severity: severity_for_rule("dead-code"),
+                    severity: registry_severity("dead-code"),
                     rule: Some("dead-code".to_string()),
                     context: Some(context),
                     metadata: Some(self.diagnostic_metadata("dead-code")),
@@ -1409,7 +1420,6 @@ impl TreeFile {
 
             // Skip common patterns that are likely valid:
             // - Single character identifiers (often loop variables, etc.)
-            // - Identifiers starting with uppercase (often type references from other modules)
             // - Identifiers starting with underscore (intentionally unused)
             if name.len() == 1 || name.starts_with('_') {
                 continue;
@@ -1426,7 +1436,7 @@ impl TreeFile {
             diagnostics.push(LintDiagnostic {
                 message: format!("Reference to undefined symbol '{}'", name),
                 range: reference.range.clone(),
-                severity: severity_for_rule("undefined-symbol"),
+                severity: registry_severity("undefined-symbol"),
                 rule: Some("undefined-symbol".to_string()),
                 context: Some(context),
                 metadata: Some(self.diagnostic_metadata("undefined-symbol")),
@@ -1478,7 +1488,7 @@ impl TreeFile {
             diagnostics.push(LintDiagnostic {
                 message: format!("Symbol '{}' is defined but never used", name),
                 range: definition.range.clone(),
-                severity: severity_for_rule("unused-symbol"),
+                severity: registry_severity("unused-symbol"),
                 rule: Some("unused-symbol".to_string()),
                 context: Some(context),
                 metadata: Some(self.diagnostic_metadata("unused-symbol")),
@@ -1536,7 +1546,7 @@ impl TreeFile {
             diagnostics.push(LintDiagnostic {
                 message: format!("Imported symbol '{}' is never used", name),
                 range: import.range.clone(),
-                severity: severity_for_rule("unused-import"),
+                severity: registry_severity("unused-import"),
                 rule: Some("unused-import".to_string()),
                 context: Some(context),
                 metadata: Some(self.diagnostic_metadata("unused-import")),
@@ -1613,7 +1623,7 @@ impl TreeFile {
             diagnostics.push(LintDiagnostic {
                 message: format!("Reference to undefined module or namespace '{}'", qualifier),
                 range: reference.range.clone(),
-                severity: severity_for_rule("undefined-module"),
+                severity: registry_severity("undefined-module"),
                 rule: Some("undefined-module".to_string()),
                 context: Some(context),
                 metadata: Some(self.diagnostic_metadata("undefined-module")),
@@ -1689,7 +1699,7 @@ impl TreeFile {
                 diagnostics.push(SyntaxDiagnostic {
                     message,
                     range,
-                    severity: DiagnosticSeverity::Error,
+                    severity: registry_severity("invalid-syntax"),
                     context: Some(context),
                     metadata: Some(self.diagnostic_metadata("invalid-syntax")),
                 });
@@ -2161,6 +2171,16 @@ pub(crate) fn definition_ranges(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// No query can emit an unregistered ID today, so the fallback is checked
+    /// here: `Info`, never `get_or_default`'s `Warning`; aliases resolve.
+    #[test]
+    fn registry_severity_falls_back_to_info_and_resolves_aliases() {
+        assert_eq!(registry_severity("no-such-rule"), DiagnosticSeverity::Info);
+        assert_eq!(registry_severity("unused-variable"), DiagnosticSeverity::Info);
+        assert_eq!(registry_severity("unreachable-code"), registry_severity("dead-code"));
+        assert_eq!(registry_severity("undefined-symbol"), DiagnosticSeverity::Warning);
+    }
 
     /// Every line, and the first indexes past the end, read as `lines()`
     /// reads them.

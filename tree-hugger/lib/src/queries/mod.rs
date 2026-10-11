@@ -1,5 +1,4 @@
 pub mod compatibility;
-pub mod drift;
 pub mod inventory;
 pub mod provenance;
 
@@ -360,27 +359,6 @@ fn comments_query_by_name(name: &str) -> Option<&'static str> {
     }
 }
 
-use crate::shared::DiagnosticSeverity;
-
-/// Maps rule IDs to their severity level.
-pub fn severity_for_rule(rule_id: &str) -> DiagnosticSeverity {
-    match rule_id {
-        // Error-level rules (semantic)
-        "unreachable-code" | "invalid-syntax" | "undefined-variable" | "undefined-symbol" => {
-            DiagnosticSeverity::Error
-        }
-        // Warning-level rules (semantic)
-        "unused-variable" | "shadowed-variable" | "unused-symbol" | "unused-import"
-        | "dead-code" | "undefined-module" => DiagnosticSeverity::Warning,
-        // Warning-level rules (pattern)
-        "unwrap-call" | "expect-call" | "dbg-macro" | "eval-call" | "exec-call"
-        | "debugger-statement" | "breakpoint-call" | "deprecated-syntax" | "console-log"
-        | "print-call" | "fmt-println" => DiagnosticSeverity::Warning,
-        // Default to info
-        _ => DiagnosticSeverity::Info,
-    }
-}
-
 /// Generates a human-readable message for a lint rule.
 pub fn format_rule_message(rule_id: &str) -> String {
     match rule_id {
@@ -395,17 +373,14 @@ pub fn format_rule_message(rule_id: &str) -> String {
         "expect-call" => "Explicit expect() call".to_string(),
         "dbg-macro" => "Debug macro dbg!() call".to_string(),
         "eval-call" => "Use of eval() is discouraged".to_string(),
-        "exec-call" => "Use of exec() is discouraged".to_string(),
+        "exec-call" => "Dynamic code or command execution via exec() is discouraged".to_string(),
         "debugger-statement" => "Debugger statement found".to_string(),
         "breakpoint-call" => "Breakpoint call found".to_string(),
         "console-log" => "console.log() call found".to_string(),
         "print-call" => "print() call found".to_string(),
         "fmt-println" => "fmt.Println() call found".to_string(),
-        // Legacy rules (kept for compatibility)
-        "unused-variable" => "Potentially unused variable".to_string(),
-        "shadowed-variable" => "Variable shadows outer binding".to_string(),
+        // Registry alias of `dead-code`
         "unreachable-code" => "Unreachable code detected".to_string(),
-        "deprecated-syntax" => "Deprecated syntax".to_string(),
         _ => format!("Lint rule: {rule_id}"),
     }
 }

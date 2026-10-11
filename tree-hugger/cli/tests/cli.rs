@@ -1378,6 +1378,24 @@ fn test_lint_list_rules_json_exposes_rule_metadata() {
     assert_eq!(unwrap_rule["enabled_by_default"], false);
 }
 
+/// Rules nothing emits are not registered, so `--list-rules` omits them.
+#[test]
+fn test_lint_list_rules_omits_rules_that_never_fire() {
+    let output = hug_cmd().args(["--json", "lint", "--list-rules"]).output().expect("run hug");
+    assert!(output.status.success());
+    let json: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let ids: Vec<&str> = json.as_array().unwrap().iter().map(|rule| rule["id"].as_str().unwrap()).collect();
+    assert!(ids.contains(&"undefined-symbol") && ids.contains(&"exec-call"), "{ids:?}");
+    for removed in ["unused-variable", "shadowed-variable", "deprecated-syntax"] {
+        assert!(!ids.contains(&removed), "{removed} is listed: {ids:?}");
+    }
+    let plain = hug_cmd().args(["--plain", "lint", "--list-rules"]).output().expect("run hug");
+    let plain = String::from_utf8(plain.stdout).unwrap();
+    for removed in ["unused-variable", "shadowed-variable", "deprecated-syntax"] {
+        assert!(!plain.contains(removed), "{removed} is listed:\n{plain}");
+    }
+}
+
 #[test]
 fn test_lint_cache_separates_experimental_semantics_policy() {
     let dir = tempfile::TempDir::new().unwrap();

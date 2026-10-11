@@ -2209,6 +2209,24 @@ fn entry_from_extractor_revision_forty_eight_is_not_served_after_import_inventor
     });
 }
 
+/// Revision 50 stamped library `undefined-symbol` diagnostics `Error` rather
+/// than the registry's `Warning`, and a hit replays a stored severity. Symbols
+/// output shows no severity and `hug lint` restamps it from the registry, so
+/// this row proves the entry is a miss through a renamed `compute` record;
+/// `symbols_cache` in the library checks the severity itself.
+#[test]
+fn entry_from_extractor_revision_fifty_is_not_served_after_the_registry_severity_repair() {
+    assert_stale_revision_is_not_served(&StaleRevision {
+        revision: "50", key: OldKey::Computed, file: "undefined.py", language: "python",
+        source: "def compute(items):\n    return items\n\ndef Sentinel():\n    pass\n\ntotal = compute_total(items)\n"
+            .to_string(),
+        sentinel: "Sentinel",
+        probe: |out| Value::from(names(out).iter().any(|name| name == "compute")),
+        repaired: Value::Bool(true), stale: Value::Bool(false),
+        revert: |snapshot| rename_record(snapshot, "compute", "stale_compute"),
+    });
+}
+
 /// An earlier revision that wrote another schema, and what its entries
 /// lacked.
 struct SchemaBump {

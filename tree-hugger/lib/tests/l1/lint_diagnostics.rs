@@ -479,6 +479,70 @@ function foo() {
     assert!(eval_diagnostic.is_some(), "Expected eval-call rule for PHP");
 }
 
+/// Lines (1-based) carrying a `rule` diagnostic in `source`, after asserting
+/// the file parses cleanly so a miss cannot come from an error node.
+fn php_rule_lines(source: &str, rule: &str) -> Vec<usize> {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(&dir, "test.php", source);
+    let tree_file = TreeFile::new(&path).unwrap();
+    let syntax = tree_file.syntax_diagnostics();
+    assert!(syntax.is_empty(), "fixture must parse cleanly: {syntax:?}");
+    let mut lines: Vec<usize> = tree_file
+        .lint_diagnostics()
+        .into_iter()
+        .filter(|d| d.rule.as_deref() == Some(rule))
+        .map(|d| {
+            assert_eq!(d.severity, DiagnosticSeverity::Warning);
+            d.range.start_line
+        })
+        .collect();
+    lines.sort_unstable();
+    lines
+}
+
+/// PHP function names are case-insensitive, and `\exec` is the global
+/// function written with a leading backslash.
+#[test]
+fn test_php_lint_exec_call_global_spellings() {
+    let source = "<?php\nexec('ls');\nEXEC('ls');\n\\exec('ls');\n\\ExEc('ls');\nExec('ls -l');\n";
+    assert_eq!(php_rule_lines(source, "exec-call"), vec![2, 3, 4, 5, 6]);
+}
+
+/// A namespaced `exec` is a different function, and PHP's other shell APIs
+/// are outside the rule.
+#[test]
+fn test_php_lint_exec_call_ignores_other_functions() {
+    let source = "<?php\nFoo\\exec('ls');\nnamespace\\exec('ls');\n\\Foo\\exec('ls');\nshell_exec('ls');\nsystem('ls');\npassthru('ls');\nproc_open('ls', [], $pipes);\npopen('ls', 'r');\n$out = `ls`;\nexecutor('ls');\n$obj->exec('ls');\n";
+    assert_eq!(php_rule_lines(source, "exec-call"), Vec::<usize>::new());
+}
+
+/// The phase-1 grammar sample: only the bare and global spellings report.
+#[test]
+fn test_php_lint_exec_call_grammar_sample() {
+    let source = "<?php\nexec('ls');\n\\exec('ls');\nFoo\\exec('ls');\nnamespace\\exec('ls');\nEXEC('ls');\neval('1');\n";
+    assert_eq!(php_rule_lines(source, "exec-call"), vec![2, 3, 6]);
+    assert_eq!(php_rule_lines(source, "eval-call"), vec![7]);
+}
+
+#[test]
+fn test_php_lint_eval_call_is_case_insensitive() {
+    let source = "<?php\neval('1 + 1;');\nEVAL('1 + 1;');\nEvAl('1 + 1;');\nevaluate('1');\n";
+    assert_eq!(php_rule_lines(source, "eval-call"), vec![2, 3, 4]);
+}
+
+/// Python names are case-sensitive, so only the exact builtins report.
+#[test]
+fn test_python_lint_eval_exec_stay_case_sensitive() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(&dir, "test.py", "eval('1')\nEVAL('1')\nexec('x = 1')\nExec('x = 1')\n");
+    let diagnostics = TreeFile::new(&path).unwrap().lint_diagnostics();
+    let lines = |rule: &str| -> Vec<usize> {
+        diagnostics.iter().filter(|d| d.rule.as_deref() == Some(rule)).map(|d| d.range.start_line).collect()
+    };
+    assert_eq!(lines("eval-call"), vec![1]);
+    assert_eq!(lines("exec-call"), vec![3]);
+}
+
 // ============================================================================
 // No False Positives Tests
 // ============================================================================

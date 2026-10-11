@@ -3382,6 +3382,20 @@ fn rust_imports_report_only_their_bound_names() {
     );
 }
 
+/// Re-exports are detected for Rust `pub use` only: `is_reexport` is set on
+/// the name a `pub use` binds and on no plain `use`.
+#[test]
+fn rust_pub_use_alone_is_a_reexport() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(&dir, "r.rs", "pub use a::B;\nuse c::D;\n");
+    let imports = TreeFile::new(&path).unwrap().imported_symbols().unwrap();
+    let observed: Vec<(&str, bool)> = imports
+        .iter()
+        .map(|import| (import.name.as_str(), import.is_reexport))
+        .collect();
+    assert_eq!(observed, [("B", true), ("D", false)]);
+}
+
 /// `R7-F3.S3`: a PHP `use` clause reports the name it binds: its alias
 /// (`original_name` the path's last segment) or else its last segment,
 /// for a one-segment path, each clause of a group (`source` with the

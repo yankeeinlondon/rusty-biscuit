@@ -4076,7 +4076,7 @@ fn a_warm_hit_replays_the_stored_diagnostic_severity() {
     let uncached = as_value(&source().query(&query).expect("uncached query"));
     assert_eq!(cold, uncached, "the cold result equals an uncached run");
     let computed = undefined_symbol_severities(&cold["index"]);
-    assert!(!computed.is_empty(), "the fixture reports undefined-symbol: {cold:#}");
+    assert_eq!(computed, vec![json!("Warning"); 2], "`compute_total` and `items` carry the registry severity");
 
     let entry_path = files_with_extension(&dir.path().join("cache"), "json")
         .into_iter()
@@ -4103,4 +4103,58 @@ fn a_warm_hit_replays_the_stored_diagnostic_severity() {
         undefined_symbol_severities(&replayed["index"]).iter().all(|severity| severity == "Info"),
         "the hit replays the stored severity: {replayed:#}"
     );
+}
+
+/// An entry written at extractor revision 50, which stamped `undefined-symbol`
+/// `Error`, is refused even under the current key: it is recomputed with the
+/// registry's `Warning`, and the rewritten entry is then a hit equal to an
+/// uncached run. A control proves the same `Error` payload under current
+/// fingerprints would be served.
+#[test]
+fn a_revision_fifty_entry_never_replays_its_error_severity() {
+    let dir = TempDir::new().expect("temp");
+    let path = dir.path().join("undefined.py");
+    std::fs::write(&path, "total = compute_total(items)\n").expect("write source");
+    let source = || read(&path).experimental_semantics(true);
+    let query = SymbolQuery::new().capabilities([Capability::Diagnostics]);
+    let cache = cache_in(&dir);
+    let uncached = as_value(&source().query(&query).expect("uncached query"));
+    assert_eq!(undefined_symbol_severities(&uncached["index"]), vec![json!("Warning"); 2]);
+
+    cached(&cache, source(), &query);
+    let entry_path = files_with_extension(&dir.path().join("cache"), "json")
+        .into_iter()
+        .next()
+        .expect("one stored entry");
+    let mut entry = read_entry(&entry_path);
+    for diagnostic in entry["diagnostics"].as_array_mut().expect("diagnostics") {
+        if diagnostic["rule"] == "undefined-symbol" {
+            diagnostic["severity"] = json!("Error");
+        }
+    }
+
+    // Control: under current fingerprints the `Error` payload is served.
+    write_entry(&entry_path, &entry);
+    let (lookup, control, _) = cached(&cache, source(), &query);
+    assert_eq!(lookup, CacheLookup::Hit);
+    assert_eq!(undefined_symbol_severities(&control["index"]), vec![json!("Error"); 2]);
+
+    // Revision 50's fingerprints, as that build wrote them.
+    let inputs = FingerprintInputs::shipped(ProgrammingLanguage::Python, &path).expect("inputs");
+    let at_revision_fifty = |mut fingerprint: tree_hugger::cache::PassFingerprint| {
+        fingerprint.tree_hugger_version = format!("{}+rev.50", env!("CARGO_PKG_VERSION"));
+        fingerprint.digest()
+    };
+    entry["fingerprint"] = json!(at_revision_fifty(inputs.records_fingerprint()));
+    entry["diagnostics_fingerprint"] = json!(at_revision_fifty(inputs.diagnostics_fingerprint(true)));
+    write_entry(&entry_path, &entry);
+
+    let (lookup, recomputed, _) = cached(&cache, source(), &query);
+    assert_eq!(lookup, CacheLookup::Miss(CacheMiss::Mismatched("fingerprint")));
+    assert_eq!(recomputed, uncached, "the revision-50 entry is recomputed, not served");
+    assert_eq!(undefined_symbol_severities(&read_entry(&entry_path)), vec![json!("Warning"); 2]);
+
+    let (lookup, warm, _) = cached(&cache, source(), &query);
+    assert_eq!(lookup, CacheLookup::Hit);
+    assert_eq!(warm, uncached, "the rewritten entry is a hit equal to an uncached run");
 }

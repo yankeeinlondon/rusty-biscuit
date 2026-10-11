@@ -1,7 +1,7 @@
 //! Phase 6: Neovim Query Reuse
 //!
-//! Tests for query provenance, nvim-treesitter inventory, predicate
-//! compatibility, and upstream drift detection.
+//! Tests for query provenance, nvim-treesitter inventory, and predicate
+//! compatibility.
 
 use tree_hugger::ProgrammingLanguage;
 use tree_hugger::queries::{
@@ -10,7 +10,6 @@ use tree_hugger::queries::{
         CompatibilityRegistry, CompatibilityStatus, find_hook_predicates,
         find_unsupported_predicates,
     },
-    drift::{DriftItem, check_all_drift, check_query_drift, summarize_drift},
     inventory::{NvimQuerySuite, QueryInventory, suite_for_kind},
     provenance::{TranslationStatus, all_query_provenance, query_provenance},
     query_for,
@@ -20,12 +19,10 @@ use tree_hugger::queries::{
 // Query Compilation with Provenance
 // =============================================================================
 
-/// Every supported language must have queries that compile, and vendored
-/// locals queries must carry provenance metadata.
+/// Every supported language must have queries that compile, and every
+/// query must carry a provenance record with a recorded upstream revision.
 #[test]
 fn all_queries_compile_with_provenance() {
-    let _provenance = all_query_provenance();
-
     for language in ProgrammingLanguage::all() {
         let grammar = language.tree_sitter_language();
         let grammar_ref = GrammarRef {
@@ -43,11 +40,14 @@ fn all_queries_compile_with_provenance() {
             let query = query_for(grammar_ref, kind);
             assert!(query.is_ok(), "{language} {kind} query should compile");
 
-            // Provenance should exist for locals (vendored) and overlays
-            if let Some(prov) = query_provenance(language, kind) {
-                assert!(!prov.source_project.is_empty());
-                assert!(!prov.local_path.is_empty());
-            }
+            let prov = query_provenance(language, kind)
+                .unwrap_or_else(|| panic!("{language} {kind} query has no provenance"));
+            assert!(!prov.source_project.is_empty());
+            assert!(!prov.local_path.is_empty());
+            assert!(
+                !prov.upstream_revision.is_empty(),
+                "{language} {kind}: upstream_revision should not be empty"
+            );
         }
     }
 }
@@ -353,91 +353,11 @@ fn simple_query_has_no_issues() {
 }
 
 // =============================================================================
-// Upstream Drift Detection
+// Integration: Provenance + Compatibility
 // =============================================================================
 
-/// When the upstream revision matches, drift should not be actionable.
-#[test]
-fn no_actionable_drift_when_revision_matches() {
-    let report = check_query_drift(ProgrammingLanguage::Rust, QueryKind::Locals, Some("0.10.4"));
-    assert!(report.is_some());
-    assert!(!report.unwrap().actionable);
-}
-
-/// When the upstream revision differs, drift should be actionable.
-#[test]
-fn actionable_drift_when_revision_differs() {
-    let report = check_query_drift(ProgrammingLanguage::Rust, QueryKind::Locals, Some("0.11.0"));
-    assert!(report.is_some());
-    let report = report.unwrap();
-    assert!(report.actionable);
-    assert!(
-        report
-            .items
-            .iter()
-            .any(|i| matches!(i, DriftItem::NewerUpstreamRevision { .. }))
-    );
-}
-
-/// Original (non-vendored) queries should not produce drift reports.
-#[test]
-fn original_queries_have_no_drift() {
-    let report = check_query_drift(ProgrammingLanguage::Rust, QueryKind::Lint, Some("0.11.0"));
-    assert!(report.is_none());
-}
-
-/// Bulk drift check should cover all vendored queries: every locals query
-/// except Perl's, which Tree Hugger wrote itself.
-#[test]
-fn bulk_drift_check_covers_all_vendored() {
-    let reports = check_all_drift(Some("0.10.4"));
-    let vendored: Vec<ProgrammingLanguage> = ProgrammingLanguage::all()
-        .into_iter()
-        .filter(|language| {
-            query_provenance(*language, QueryKind::Locals)
-                .is_some_and(|prov| prov.translation_status != TranslationStatus::Original)
-        })
-        .collect();
-    assert_eq!(vendored.len(), ProgrammingLanguage::all().len() - 1);
-    assert!(!vendored.contains(&ProgrammingLanguage::Perl));
-    assert_eq!(
-        reports.len(),
-        vendored.len(),
-        "should check drift for every vendored locals query"
-    );
-}
-
-/// Drift summary should be human-readable.
-#[test]
-fn drift_summary_format() {
-    let reports = check_all_drift(Some("0.11.0"));
-    let summary = summarize_drift(&reports);
-    assert!(summary.contains("Upstream drift detected"));
-    assert!(summary.contains("0.10.4"));
-    assert!(summary.contains("0.11.0"));
-}
-
-/// Empty drift reports produce a friendly message.
-#[test]
-fn empty_drift_summary() {
-    let summary = summarize_drift(&[]);
-    assert_eq!(summary, "No drift detected.");
-}
-
-/// Up-to-date drift reports produce a friendly message.
-#[test]
-fn up_to_date_drift_summary() {
-    let reports = check_all_drift(Some("0.10.4"));
-    let summary = summarize_drift(&reports);
-    assert_eq!(summary, "Drift checked: all queries up to date.");
-}
-
-// =============================================================================
-// Integration: Provenance + Compatibility + Drift
-// =============================================================================
-
-/// A full workflow that checks a query file for provenance, compatibility,
-/// and drift all at once.
+/// A full workflow that checks a query file for provenance and
+/// compatibility together.
 #[test]
 fn full_query_audit_workflow() {
     let language = ProgrammingLanguage::Rust;
@@ -454,14 +374,6 @@ fn full_query_audit_workflow() {
     assert!(
         unsupported.is_empty(),
         "rust locals should not contain unsupported predicates"
-    );
-
-    // 3. Drift check
-    let drift = check_query_drift(language, kind, Some(&prov.upstream_revision));
-    assert!(drift.is_some());
-    assert!(
-        !drift.unwrap().actionable,
-        "same revision should not be actionable"
     );
 }
 
