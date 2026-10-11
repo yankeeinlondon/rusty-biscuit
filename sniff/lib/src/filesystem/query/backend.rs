@@ -1,6 +1,7 @@
 //! The seam between the platform-neutral query and an OS backend.
 //!
-//! A backend lists processes and inspects each one; the query owns matching,
+//! A backend lists processes and inspects each one, with an optional file-side
+//! scan over the captured tree; the query owns matching,
 //! merging, enrichment ordering, coverage, and the outcome. Tests drive the
 //! query through a fake backend that replays injected observations.
 
@@ -135,7 +136,8 @@ impl InspectionContext<'_> {
 /// When a backend inspects the querying process itself it must omit exactly
 /// the handles it opened for that inspection, and nothing else: the query's
 /// genuine usage, including a caller's own open files and cwd, stays in the
-/// report.
+/// report where the OS exposes it. Windows' file-side API excludes the calling
+/// process; that native limitation must be documented.
 pub(crate) trait UsageBackend {
     /// Backend-private state carried from enumeration to inspection.
     type Payload;
@@ -153,6 +155,16 @@ pub(crate) trait UsageBackend {
         candidate: &ProcessCandidate<Self::Payload>,
         context: &InspectionContext<'_>,
     ) -> Vec<MechanismInspection>;
+
+    /// File-side mechanisms scan the already-collected tree once, independently
+    /// of the process count. Coverage counts paths rather than processes.
+    fn inspect_paths(
+        &mut self,
+        _context: &InspectionContext<'_>,
+        _candidates: &[ProcessCandidate<Self::Payload>],
+    ) -> Option<(Vec<super::process::Observation>, super::report::Coverage)> {
+        None
+    }
 
     /// Re-reads `pid`'s creation token so enrichment can prove the PID still
     /// names the inspected lifetime.

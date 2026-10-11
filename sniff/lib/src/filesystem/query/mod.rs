@@ -31,6 +31,8 @@ mod tree;
 // build; the Win32 calls themselves are Windows-only.
 #[cfg(any(windows, test))]
 mod win32;
+#[cfg(any(windows, test))]
+mod win32_paths;
 
 #[cfg(test)]
 mod tests;
@@ -164,14 +166,33 @@ pub(crate) fn run<B: UsageBackend>(
         root: &root,
         index: &tree.index,
     };
+    let mut retained_by_lifetime = std::collections::HashMap::new();
+    let path_inspection = backend.inspect_paths(&context, &candidates);
+    let path_coverage = path_inspection.map(|(path_observations, coverage)| {
+        for observation in &path_observations {
+            let count = observation.evidence.len() as u64;
+            retained_total += count;
+            if let Some(token) = observation.creation_token {
+                *retained_by_lifetime.entry((observation.pid, token)).or_insert(0) += count;
+            }
+        }
+        observations.extend(path_observations);
+        coverage
+    });
     for (position, candidate) in candidates.iter().enumerate() {
         if budget.expired() {
             skipped = (candidates.len() - position) as u64;
             break;
         }
         performance::increment_counter(counters::QUERY_PROCESS_INSPECTIONS, 1);
-        let evidence = inspect(backend, candidate, &context, &mut tallies, &mut retained_total);
+        let retained_for_process = candidate.creation_token
+            .and_then(|token| retained_by_lifetime.get(&(candidate.pid, token)).copied())
+            .unwrap_or(0);
+        let evidence = inspect(backend, candidate, &context, &mut tallies, &mut retained_total, retained_for_process);
         if !evidence.is_empty() {
+            if let Some(token) = candidate.creation_token {
+                *retained_by_lifetime.entry((candidate.pid, token)).or_insert(0) += evidence.len() as u64;
+            }
             observations.push(Observation {
                 pid: candidate.pid,
                 creation_token: candidate.creation_token,
@@ -223,7 +244,23 @@ pub(crate) fn run<B: UsageBackend>(
     let mut coverage = vec![enumeration_coverage];
     coverage.extend(tree.coverage);
     for tally in tallies {
-        coverage.push(finish(tally, scope, &not_started, skipped, &gaps));
+        if path_coverage.as_ref().is_some_and(|c| c.mechanism == tally.support.mechanism) {
+            let mut paths = path_coverage.clone().expect("path coverage");
+            paths.scope = scope;
+            if paths.status != CoverageStatus::NotAttempted && (gaps.tree || gaps.root.is_some()) {
+                if paths.status == CoverageStatus::Complete {
+                    paths.status = CoverageStatus::Partial;
+                }
+                paths.limitations.push(Limitation {
+                    kind: LimitationKind::PrerequisiteIncomplete,
+                    message: "tree collection or root verification was incomplete".to_string(),
+                    count: 1, examples: Vec::new(),
+                });
+            }
+            coverage.push(paths);
+        } else {
+            coverage.push(finish(tally, scope, &not_started, skipped, &gaps));
+        }
     }
 
     let outcome = report::outcome(&coverage, &processes);
@@ -326,6 +363,7 @@ fn inspect<B: UsageBackend>(
     context: &InspectionContext<'_>,
     tallies: &mut [Tally],
     retained_total: &mut u64,
+    retained_for_process: u64,
 ) -> Vec<Evidence> {
     let mut evidence = Vec::new();
     for inspection in backend.inspect(candidate, context) {
@@ -368,7 +406,7 @@ fn inspect<B: UsageBackend>(
             let Some(found) = context.match_object(&raw.object) else {
                 continue;
             };
-            if evidence.len() as u64 >= MAX_EVIDENCE_PER_PROCESS
+            if evidence.len() as u64 + retained_for_process >= MAX_EVIDENCE_PER_PROCESS
                 || *retained_total >= MAX_EVIDENCE_TOTAL
             {
                 tally.omitted += 1;

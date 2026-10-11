@@ -13,6 +13,17 @@ use std::path::PathBuf;
 #[derive(Debug, Default)]
 pub(crate) struct TreeIndex {
     paths: HashMap<FileIdentity, Vec<PathBuf>>,
+    #[cfg(any(windows, test))]
+    pub(crate) entries: Vec<ProbeEntry>,
+}
+
+/// A regular file or directory from the existing walk, safe to open for probing.
+#[cfg(any(windows, test))]
+#[derive(Debug, Clone)]
+pub(crate) struct ProbeEntry {
+    pub(crate) path: PathBuf,
+    pub(crate) identity: FileIdentity,
+    pub(crate) directory: bool,
 }
 
 impl TreeIndex {
@@ -48,6 +59,11 @@ pub(crate) struct TreeCollection {
 pub(crate) fn collect(root: &Root, recursive: bool, budget: &Budget) -> TreeCollection {
     let mut index = TreeIndex::default();
     index.insert(root.identity, root.resolved.clone());
+    #[cfg(any(windows, test))]
+    index.entries.push(ProbeEntry {
+        path: root.resolved.clone(), identity: root.identity,
+        directory: root.kind == TargetKind::Directory,
+    });
     if root.kind != TargetKind::Directory || !recursive {
         return TreeCollection {
             index,
@@ -95,6 +111,13 @@ pub(crate) fn collect(root: &Root, recursive: bool, budget: &Budget) -> TreeColl
             Ok(identity) => {
                 succeeded += 1;
                 index.insert(identity, entry.path().to_path_buf());
+                #[cfg(any(windows, test))]
+                if entry.file_type().is_file() || entry.file_type().is_dir() {
+                    index.entries.push(ProbeEntry {
+                        path: entry.path().to_path_buf(), identity,
+                        directory: entry.file_type().is_dir(),
+                    });
+                }
             }
             Err(error) => limitations.record(
                 LimitationKind::UnreadableTreeEntry,

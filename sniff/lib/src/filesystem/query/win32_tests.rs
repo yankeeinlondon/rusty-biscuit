@@ -112,6 +112,7 @@ impl Scripted {
 
 #[derive(Default)]
 struct Fake {
+    path_reader: Option<super::win32_paths::PathReader>,
     pids: Option<Result<Vec<u32>, String>>,
     processes: BTreeMap<u32, Scripted>,
     opens: HashMap<u32, usize>,
@@ -153,6 +154,8 @@ impl Fake {
 
 impl Source for &mut Fake {
     type Process = FakeHandle;
+
+    fn path_reader(&self) -> Option<super::win32_paths::PathReader> { self.path_reader.clone() }
 
     fn pids(&mut self) -> Result<Vec<u32>, String> {
         match &self.pids {
@@ -247,7 +250,7 @@ fn indexed(path: &Path) -> PathBuf {
 }
 
 fn module_paths(record: &ProcessRecord) -> Vec<PathBuf> {
-    record.evidence.iter().flat_map(paths).collect()
+    record.evidence.iter().filter(|e| e.kind == EvidenceKind::LoadedModule).flat_map(paths).collect()
 }
 
 #[test]
@@ -648,6 +651,136 @@ fn inspect_directly(
 
 
 /// Windows spellings of an in-tree module path, resolved by lookup.
+#[test]
+fn file_side_holders_are_joined_to_process_lifetimes_and_keep_handles_for_enrichment() {
+    let scene = scene();
+    let file = scene.root.join("held.txt");
+    std::fs::write(&file, "held").unwrap();
+    let requested = indexed(&file);
+    let mut source = Fake::default().with(PID, Scripted::new());
+    source.path_reader = Some(std::sync::Arc::new(move |entry, _| {
+        Ok((entry.identity, if entry.path == requested { vec![PID] } else { Vec::new() }))
+    }));
+    let report = source.query(&scene.root, &PathUsageOptions::default());
+    let record = report.processes.iter().find(|p| p.pid == PID).unwrap();
+    assert_eq!(record.creation_token, Some(CREATED));
+    assert!(!record.identity_uncertain);
+    assert_eq!(record.user.as_deref(), Some(USER));
+    assert_eq!(record.evidence.len(), 1);
+    assert_eq!(record.evidence[0].kind, EvidenceKind::OpenHandle);
+    assert_eq!(paths(&record.evidence[0]), vec![indexed(&file)]);
+    assert_eq!(coverage(&report, Mechanism::OpenHandles).status, CoverageStatus::Complete);
+}
+
+#[test]
+fn file_side_failures_and_replacements_are_visible_without_invented_evidence() {
+    let scene = scene();
+    let mut source = Fake {
+        path_reader: Some(std::sync::Arc::new(|entry, _| {
+            if entry.directory { Err("STATUS_DELETE_PENDING".to_string().into()) }
+            else { Ok((FileIdentity::Windows { volume_serial: 0, file_id: 0 }, vec![PID])) }
+        })), ..Fake::default()
+    };
+    let report = source.query(&scene.root, &PathUsageOptions::default());
+    assert!(report.processes.is_empty());
+    let handles = coverage(&report, Mechanism::OpenHandles);
+    assert_eq!(handles.status, CoverageStatus::Failed);
+    assert!(handles.limitations.iter().any(|l| l.kind == LimitationKind::InspectionFailed));
+    assert!(handles.limitations.iter().any(|l| l.kind == LimitationKind::DescriptorReplaced));
+}
+
+#[test]
+fn a_file_side_pid_missing_from_enumeration_keeps_uncertain_evidence() {
+    let scene = scene();
+    let mut source = Fake {
+        path_reader: Some(std::sync::Arc::new(|entry, _| Ok((entry.identity, (OTHER_PID..OTHER_PID + 10).collect())))),
+        ..Fake::default()
+    };
+    let report = source.query(&scene.root, &PathUsageOptions::default());
+    assert_eq!(report.processes.len(), 10);
+    assert!(report.processes.iter().all(|p| p.identity_uncertain && p.name.is_none() && !p.evidence.is_empty()));
+    let gaps: Vec<_> = coverage(&report, Mechanism::OpenHandles).limitations.iter()
+        .filter(|l| l.kind == LimitationKind::IdentityUncertain).collect();
+    assert_eq!(gaps.len(), 1);
+    assert_eq!(gaps[0].count, 10);
+    assert_eq!(gaps[0].examples.len(), super::report::MAX_LIMITATION_EXAMPLES);
+}
+
+#[test]
+fn a_new_holder_is_reconfirmed_without_assigning_its_identity_to_earlier_paths() {
+    let scene = scene();
+    let mut source = Fake {
+        pids: Some(Ok(Vec::new())),
+        path_reader: Some(std::sync::Arc::new(|entry, _| Ok((entry.identity, vec![PID])))),
+        ..Fake::default()
+    }.with(PID, Scripted::new());
+    let report = source.query(&scene.root, &PathUsageOptions::default());
+    let known = report.processes.iter().find(|p| !p.identity_uncertain).unwrap();
+    assert_eq!(known.creation_token, Some(CREATED));
+    assert_eq!(known.evidence.len(), 1);
+    assert_eq!(known.user.as_deref(), Some(USER));
+    let uncertain = report.processes.iter().find(|p| p.identity_uncertain).unwrap();
+    assert!(uncertain.name.is_none());
+    assert!(!uncertain.evidence.is_empty());
+    assert_eq!(coverage(&report, Mechanism::OpenHandles).status, CoverageStatus::Partial);
+}
+
+#[test]
+fn retention_limits_span_file_side_and_loaded_module_evidence() {
+    let scene = scene();
+    let module = scene.root.join("module.dll");
+    std::fs::write(&module, "").unwrap();
+    for n in 0..MAX_EVIDENCE_PER_PROCESS {
+        std::fs::write(scene.root.join(format!("file-{n}")), "").unwrap();
+    }
+    let mut source = Fake {
+        path_reader: Some(std::sync::Arc::new(|entry, _| Ok((entry.identity, vec![PID])))),
+        ..Fake::default()
+    }.with(PID, Scripted::new().module(&module));
+    let report = source.query(&scene.root, &PathUsageOptions::default());
+    let process = report.processes.iter().find(|p| p.pid == PID).unwrap();
+    assert_eq!(process.evidence.len() as u64, MAX_EVIDENCE_PER_PROCESS);
+    assert!(process.evidence.iter().all(|e| e.kind == EvidenceKind::OpenHandle));
+    assert!(coverage(&report, Mechanism::OpenHandles).truncation.as_ref().unwrap().omitted > 0);
+    assert_eq!(coverage(&report, Mechanism::LoadedModules).truncation.as_ref().unwrap().omitted, 1);
+}
+
+#[test]
+fn file_side_workers_stop_at_the_budget_and_flush_the_request_counters() {
+    let scene = scene();
+    for n in 0..100 { std::fs::write(scene.root.join(format!("entry-{n}")), "").unwrap(); }
+    let mut source = Fake {
+        path_reader: Some(std::sync::Arc::new(|entry, budget| {
+            budget.expire();
+            Ok((entry.identity, vec![OTHER_PID]))
+        })), ..Fake::default()
+    };
+    let budget = Budget::start(Duration::from_secs(60)).unwrap();
+    let mut backend = ModuleBackend::with_source(&mut source);
+    let (report, metrics) = measure(|| run(&scene.root, &PathUsageOptions::default(),
+        &mut backend, &budget, chrono::Utc::now()).unwrap());
+    let handles = coverage(&report, Mechanism::OpenHandles);
+    assert_eq!(handles.status, CoverageStatus::Partial);
+    assert!(report.budget_exhausted);
+    assert!(!report.processes.is_empty());
+    assert!(handles.limitations.iter().any(|l| l.kind == LimitationKind::BudgetExhausted));
+    assert_eq!(metrics.get(counters::QUERY_PATH_HOLDER_INSPECTIONS), handles.attempted.unwrap());
+}
+
+#[cfg(windows)]
+#[test]
+fn pipe_namespaces_are_rejected_without_any_metadata_or_process_probe() {
+    for path in [r"\\.\pipe\query-fixture", r"\\?\pipe\query-fixture",
+        r"\\server\pipe\query-fixture", r"\\?\UNC\server\pipe\query-fixture",
+        r"\\?\GLOBALROOT\Device\NamedPipe\query-fixture"]
+    {
+        let (result, counts) = measure(|| query_path_usage(Path::new(path), &PathUsageOptions::default()));
+        assert_eq!(result.unwrap_err().kind(), "unsupported_target_kind", "{path}");
+        assert_eq!(counts.get(counters::FS_METADATA_PROBES), 0, "{path}");
+        assert_eq!(counts.get(counters::QUERY_PROCESS_ENUMERATIONS), 0, "{path}");
+    }
+}
+
 #[cfg(windows)]
 mod spellings {
     use super::*;
@@ -762,6 +895,46 @@ mod live {
     #[test]
     #[ignore = "subprocess fixture invoked by the live Win32 tests"]
     fn usage_child() {
+        use std::os::windows::fs::OpenOptionsExt;
+        use std::os::windows::io::AsRawHandle;
+        use windows::Win32::Foundation::HANDLE;
+        use windows::Win32::Storage::FileSystem::{LockFileEx, LOCKFILE_EXCLUSIVE_LOCK,
+            ReadDirectoryChangesW, FILE_NOTIFY_CHANGE_FILE_NAME};
+        use windows::Win32::System::IO::OVERLAPPED;
+        let mut held = Vec::new();
+        if let Some(tree) = std::env::var_os("SNIFF_USAGE_TREE") {
+            let root = PathBuf::from(tree);
+            let file = std::fs::OpenOptions::new().read(true).write(true).open(root.join("held.txt")).unwrap();
+            let directory = std::fs::OpenOptions::new().read(true).custom_flags(0x02000000).open(&root).unwrap();
+            let mode = std::env::var("SNIFF_USAGE_MODE").unwrap_or_default();
+            if mode == "lock" {
+                let mut overlapped = OVERLAPPED::default();
+                unsafe { LockFileEx(HANDLE(file.as_raw_handle()), LOCKFILE_EXCLUSIVE_LOCK,
+                    None, 1, 0, &mut overlapped) }.unwrap();
+                let waiter = std::fs::OpenOptions::new().read(true).write(true).open(root.join("held.txt")).unwrap();
+                let (send, receive) = std::sync::mpsc::sync_channel(0);
+                std::thread::spawn(move || {
+                    let mut overlapped = OVERLAPPED::default();
+                    send.send(()).unwrap();
+                    let _ = unsafe { LockFileEx(HANDLE(waiter.as_raw_handle()), LOCKFILE_EXCLUSIVE_LOCK,
+                        None, 1, 0, &mut overlapped) };
+                });
+                receive.recv().unwrap();
+            } else if mode == "watch" {
+                let watcher = std::fs::OpenOptions::new().read(true).custom_flags(0x02000000).open(&root).unwrap();
+                let (send, receive) = std::sync::mpsc::sync_channel(0);
+                std::thread::spawn(move || {
+                    let mut buffer = [0u32; 1024];
+                    let mut returned = 0;
+                    send.send(()).unwrap();
+                    let _ = unsafe { ReadDirectoryChangesW(HANDLE(watcher.as_raw_handle()),
+                        buffer.as_mut_ptr().cast(), size_of_val(&buffer) as u32, false,
+                        FILE_NOTIFY_CHANGE_FILE_NAME, Some(&mut returned), None, None) };
+                });
+                receive.recv().unwrap();
+            }
+            held.extend([file, directory]);
+        }
         println!("ready");
         std::io::stdout().flush().unwrap();
         let mut sink = Vec::new();
@@ -780,7 +953,9 @@ mod live {
 
     /// Runs a copy of this test executable from `image`, so the child's own
     /// executable is a module loaded from inside the tree.
-    fn spawn_child(image: &Path) -> ChildGuard {
+    fn spawn_child(image: &Path) -> ChildGuard { spawn_holder(image, None) }
+
+    fn spawn_holder(image: &Path, mode: Option<(&Path, &str)>) -> ChildGuard {
         let current = std::env::current_exe().expect("test executable");
         if std::fs::hard_link(&current, image).is_err() {
             std::fs::copy(&current, image).expect("copy the test executable");
@@ -796,14 +971,28 @@ mod live {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit());
+        command.env_remove("SNIFF_USAGE_TREE").env_remove("SNIFF_USAGE_MODE");
+        if let Some((tree, mode)) = mode {
+            command.env("SNIFF_USAGE_TREE", tree).env("SNIFF_USAGE_MODE", mode).current_dir(tree);
+        }
         let mut child = ChildGuard(command.spawn().expect("spawn the usage child"));
         let stdout = child.0.stdout.take().unwrap();
-        for line in BufReader::new(stdout).lines() {
-            if line.expect("child stdout") == "ready" {
-                return child;
+        let (send, receive) = std::sync::mpsc::sync_channel(1);
+        let reader = std::thread::spawn(move || {
+            for line in BufReader::new(stdout).lines() {
+                if line.expect("child stdout") == "ready" {
+                    let _ = send.send(());
+                    return;
+                }
             }
+        });
+        if receive.recv_timeout(Duration::from_secs(2)).is_err() {
+            drop(child);
+            reader.join().expect("read child readiness");
+            panic!("the usage child did not become ready");
         }
-        panic!("the usage child exited before it was ready");
+        reader.join().expect("read child readiness");
+        child
     }
 
     fn live_query(path: &Path) -> PathUsageReport {
@@ -829,11 +1018,41 @@ mod live {
         assert!(!record.identity_uncertain);
         assert_eq!(record.name.as_ref().map(|n| n.as_os_str().to_owned()), Some("usage-child.exe".into()));
         assert_eq!(module_paths(record), vec![indexed(&image)]);
-        let evidence = &record.evidence[0];
+        let evidence = record.evidence.iter().find(|e| e.kind == EvidenceKind::LoadedModule).unwrap();
         assert_eq!(evidence.kind, EvidenceKind::LoadedModule);
         assert_eq!(evidence.match_basis, MatchBasis::PathLookup);
         assert_eq!(evidence.identity, Some(super::super::identity::of_path(&image, true).unwrap()));
         drop(child);
+    }
+
+    fn assert_file_and_directory_holders(mode: &str) {
+        let scene = scene();
+        let file = scene.root.join("held.txt");
+        std::fs::write(&file, "held").unwrap();
+        let image = scene.root.join("usage-holder.exe");
+        let child = spawn_holder(&image, Some((&scene.root, mode)));
+        let report = live_query(&scene.root);
+        let process = report.processes.iter().find(|p| p.pid == child.0.id()).expect("holder found");
+        let handles: Vec<_> = process.evidence.iter().filter(|e| e.kind == EvidenceKind::OpenHandle).collect();
+        assert!(handles.iter().any(|e| paths(e).contains(&indexed(&file))), "{mode}: {report:#?}");
+        assert!(handles.iter().any(|e| paths(e).contains(&indexed(&scene.root))), "{mode}: {report:#?}");
+        assert!(process.creation_token.is_some());
+        assert!(!process.identity_uncertain);
+    }
+
+    #[test]
+    fn a_controlled_child_is_found_by_its_open_file_and_directory() {
+        assert_file_and_directory_holders("open");
+    }
+
+    #[test]
+    fn handle_owners_are_found_while_a_child_waits_in_lock_file_ex() {
+        assert_file_and_directory_holders("lock");
+    }
+
+    #[test]
+    fn handle_owners_are_found_while_a_child_waits_in_read_directory_changes() {
+        assert_file_and_directory_holders("watch");
     }
 
     #[test]
@@ -850,7 +1069,6 @@ mod live {
         assert_eq!(modules.status, CoverageStatus::Partial, "{modules:#?}");
         assert!(!modules.limitations.is_empty());
         for mechanism in [
-            Mechanism::OpenHandles,
             Mechanism::WorkingDirectories,
             Mechanism::DirectoryChangeSubscriptions,
             Mechanism::Polling,
