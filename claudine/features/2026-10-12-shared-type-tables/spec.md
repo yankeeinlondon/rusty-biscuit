@@ -31,12 +31,10 @@ reviewed_on: 2026-10-11
 review_iterations: 0
 human_review: false
 message_to_agent: |-
-    Phase 1 (analysis only) is recorded in implementation-log.md: copy-site line numbers, invariants, coverage map, and baseline (darkmatter `just test` 9154/9154 passed, 11 skipped; `just lint` clean on macOS).
-    Points for Phase 2:
-    - The root copy in `expand_document_imports` has two arms: `shape.properties.clone()` for Single, and an empty `IndexMap::new()` for Union. Both must become `Arc`s, still after the `schema_has_imports` early return.
-    - The missing-name error in `expand_import` says "top-level `$schema:` entries are its named types". That is literal error text: keep it unchanged. Fix only the `Namespace` and field doc comments to mention `kind: schema` / `types`.
-    - Existing tests already cover both envelopes as single-use import targets (`lib/tests/l1/suggest_constraint_phase4.rs::named_imports_share_pure_and_tagged_mapping_namespaces`) and dependency dedup (`multiple_imports_from_same_file_resolve_and_dedup`). The real gaps are allocation identity (private `resolve_namespace` tests with `Arc::ptr_eq`) and use-site independence (one type imported twice with a modifier on one use) for cross-file, root `@this`, and `@this` inside an imported file, across both envelopes.
-    - The worktree has unrelated uncommitted darkmatter changes from 2026-10-11-schema-loader-yaml-spellings. Do not touch them; none are in `resolve.rs`.
+    All 3 phases are complete; implementation complete, ready for review. See implementation-log.md "## Phase 3" for the acceptance-criteria-to-evidence table and diff audit.
+    - Only darkmatter/lib/src/markdown/schemas/resolve.rs (Arc-shared named-type tables + 6 `shared_type_tables` L1 tests) and darkmatter/docs/topics/schemas/definition.md changed.
+    - Local macOS gates: darkmatter `just test` 9160/9160, `just lint` clean; claudine `just test` 8673/8673, `just lint` clean. No cross-OS run; existing CI cells cover Linux/macOS/Windows/WSL2.
+implemented: true
 pipeline_step: 2
 related:
     - 2026-10-29-recursive-schema-types

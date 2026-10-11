@@ -8,7 +8,24 @@ source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
-packages: []
+source_files_during_phase_2:
+  - darkmatter/lib/src/markdown/schemas/resolve.rs
+docs_updated_during_phase_2:
+  - darkmatter/docs/topics/schemas/definition.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3: []
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+source_code:
+  - darkmatter/lib/src/markdown/schemas/resolve.rs
+documentation:
+  - darkmatter/docs/topics/schemas/definition.md
+completed_phase: 3
+implemented: true
+packages:
+  - darkmatter
 ---
 
 # Shared Named-Type Tables Implementation Plan
@@ -102,7 +119,7 @@ the resolver owner edits `resolve.rs`, while the documentation owner edits only
 `definition.md`. Tests in Wave 3 remain with the resolver owner because they
 share the implementation file.
 
-- [ ] **Share namespaces**
+- [x] **Share namespaces**
   - In `darkmatter/lib/src/markdown/schemas/resolve.rs`, use
     `std::sync::Arc` and change both private named-table fields to
     `Arc<IndexMap<String, PropertyDef>>`.
@@ -123,7 +140,7 @@ share the implementation file.
   - Checkpoint: the diff contains exactly the intended ownership changes and
     relevant comment corrections; no public API or dependency changes.
 
-- [ ] **Document sharing**
+- [x] **Document sharing**
   - Update `darkmatter/docs/topics/schemas/definition.md` in the named-import
     discussion with a short implementation note: unexpanded tables are shared
     within an expansion, while each use receives its own expanded definition.
@@ -141,7 +158,7 @@ share the implementation file.
 Depends on the resolver changes in Wave 2. These tasks run sequentially under
 one resolver owner to avoid concurrent edits to `resolve.rs`.
 
-- [ ] **Prove allocation identity**
+- [x] **Prove allocation identity**
   - Add focused private tests beside the resolver implementation that call
     `ImportEngine::resolve_namespace` on hermetic temporary schema files.
   - Compare the first returned file namespace with its cache entry using
@@ -156,7 +173,7 @@ one resolver owner to avoid concurrent edits to `resolve.rs`.
   - Use existing canonical-path helpers and fixture context for cache access;
     introduce no public inspection API, counters, or observer callbacks.
 
-- [ ] **Prove independent imports**
+- [x] **Prove independent imports**
   - Add or reuse small public-resolution regression tests importing one type
     twice, applying a constraint or description only to one use, and asserting
     the expected JSON Schema for both properties.
@@ -180,7 +197,7 @@ one resolver owner to avoid concurrent edits to `resolve.rs`.
 Depends on all Phase 2 tasks. Run validation sequentially to keep failures
 attributable and avoid unnecessary competing builds.
 
-- [ ] **Run acceptance checks**
+- [x] **Run acceptance checks**
   - Run `just test` from `darkmatter/`; require the new private tests and the
     existing resolver, cycle, envelope, and shipped-schema corpus tests to pass.
     Keep all pre-existing expectations unchanged.
@@ -191,7 +208,7 @@ attributable and avoid unnecessary competing builds.
     Preserve existing cross-platform coverage without adding special runs or
     claiming an OS result that was not obtained.
 
-- [ ] **Audit final diff**
+- [x] **Audit final diff**
   - Verify all three full-table copy sites now clone shared pointers, first
     load creates exactly one table allocation, and root setup retains exactly
     its intentional properties copy.
@@ -205,7 +222,7 @@ attributable and avoid unnecessary competing builds.
     Confirm no parser, public API, dependency, CI, or unrelated changes entered
     the patch.
 
-- [ ] **Prepare review handoff**
+- [x] **Prepare review handoff**
   - Record acceptance criteria 1–6 with the test names or diff evidence that
     satisfies each, along with any baseline failures or remaining blockers.
   - Record any departure from the specification in the implementation log;

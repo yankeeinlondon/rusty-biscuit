@@ -7,7 +7,24 @@ source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
-packages: []
+source_files_during_phase_2:
+  - darkmatter/lib/src/markdown/schemas/resolve.rs
+docs_updated_during_phase_2:
+  - darkmatter/docs/topics/schemas/definition.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3: []
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+source_code:
+  - darkmatter/lib/src/markdown/schemas/resolve.rs
+documentation:
+  - darkmatter/docs/topics/schemas/definition.md
+completed_phase: 3
+implemented: true
+packages:
+  - darkmatter
 ---
 
 # Implementation Log for 2026-10-12-shared-type-tables (3 phases)
@@ -161,3 +178,167 @@ use-site independence (including imported-file `@this` and both envelopes).
 No unresolved ruling, parser change, or spike is needed; Phase 2 can proceed
 as planned.
 
+
+## Phase 2
+
+Host: macOS (local). No other OS was run in this phase (see "OS risk" below).
+
+### Wave 2 — implementation (`darkmatter/lib/src/markdown/schemas/resolve.rs`)
+
+- Added `std::sync::Arc`; `Namespace.named_types` and
+  `CachedNamespace.named_types` are now `Arc<IndexMap<String, PropertyDef>>`.
+- First load: `Arc::new(load_named_types(&path)?)` once; the cache gets
+  `Arc::clone(&named_types)` and the returned `Namespace` takes the original
+  pointer, so both share one allocation (previously two deep copies).
+- Cache-hit and `this` branches: `Arc::clone(...)` instead of deep
+  `IndexMap::clone`.
+- Root table in `expand_document_imports`: both arms (`shape.properties.clone()`
+  for `Single`, `IndexMap::new()` for `Union`) wrapped in one `Arc::new`, still
+  after the `schema_has_imports` early return, so no-import schemas allocate
+  nothing.
+- Unchanged: `load_named_types` signature and classification, the selected
+  `PropertyDef` `.cloned()` in `expand_import` (works through `Arc` deref),
+  `strip_top_level_presence`, `apply_import_postfix`, dependency insertion
+  before cache lookup, canonical cache keys, base dirs, cycle stack, depth cap,
+  and the literal missing-name error text ("top-level `$schema:` entries are
+  its named types").
+- Comments: the module section comment and `Namespace` doc now name both
+  envelopes (`$schema:` and `kind: schema` / `types:`); the module comment
+  states the per-expansion sharing lifetime; the `named_types` field doc says
+  the table is shared and never mutated; the root copy carries a one-line WHY.
+
+### Wave 2 — documentation (`darkmatter/docs/topics/schemas/definition.md`)
+
+- "Cross-File Named-Type Imports": named types are now described as the
+  top-level mapping entries of either envelope, linking to
+  `#standalone-schema-documents`.
+- Added an implementation note (before the "composition is the type system"
+  paragraph) with a compact YAML example: tables are shared unexpanded within
+  one resolution, each use gets its own definition copy, nothing persists
+  across calls, no fixed speedup promised. No feature/fix references.
+
+### Wave 3 — tests (new private module `resolve.rs::shared_type_tables`, L1)
+
+| Requirement | Test |
+| --- | --- |
+| AC: first load and cache share one allocation; two later imports (distinct names `A`/`B`, reference spelled `./types.yaml` and `types.yaml`) reuse it; full `expand_schema` keeps it; one dependency edge — both envelopes | `first_load_cache_and_later_imports_share_one_table` |
+| AC: `this` twice from inline root shares the root table; no cache entry or dependency | `this_from_inline_root_shares_the_root_table` |
+| AC: `this` twice from a loaded file shares that file's table and is distinct from the root's — both envelopes | `this_from_loaded_file_shares_that_files_table` |
+| AC: one cross-file type imported twice; constraints + description only on `primary`; exact JSON for both, `required == ["primary"]`, imported `required` still stripped on `backup`; one dependency — both envelopes | `cross_file_type_imported_twice_keeps_each_use_independent` |
+| AC: inline-root `@this` imported twice, modifiers on one use only, exact JSON | `root_this_type_imported_twice_keeps_each_use_independent` |
+| AC: `@this` inside an imported file selects that file's `name` (string) while root `@this` selects the root's `name` (number); use-site independence inside the imported object — both envelopes | `this_inside_imported_file_selects_that_files_type` |
+
+- Identity tests call `ImportEngine::resolve_namespace` / `expand_schema`
+  directly with `FileResolutionContext::new(tempdir)`; cache lookups use
+  `canonical_path`. No public inspection API, counters, or env mutation.
+- Envelope parameterization is a two-iteration in-process loop (no spawns;
+  each test runs in ~30 ms).
+- Existing tests reused rather than duplicated: single-use imports for both
+  envelopes (`suggest_constraint_phase4::named_imports_share_pure_and_tagged_mapping_namespaces`),
+  dependency dedup (`multiple_imports_from_same_file_resolve_and_dedup`),
+  cycles, missing-name/file, raw-JSON and root-union rejection, shipped corpus.
+  No existing expectation was edited.
+- Mutation check: temporarily replacing the first-load and `this` sharing with
+  deep copies (`Arc::new((*x).clone())`) made the three identity tests fail and
+  left the three behavior tests green (behavior is meant to be identical);
+  the source was then restored.
+- Input robustness matrix: not applicable (no parser/loader change), as the
+  plan states.
+
+### Gates (local macOS)
+
+- `darkmatter`: `just test` — 9160 run, 9160 passed, 11 skipped (baseline 9154
+  + 6 new); `just lint` — exit 0.
+- `claudine`: `just test` — 8673 run, 8673 passed, 9 skipped; `just lint` —
+  exit 0 (claudine source unchanged; run as the downstream consumer).
+- No pre-existing failures; nothing skipped beyond the suites' standard skips.
+
+### OS risk
+
+No cross-check run. The change is `std::sync::Arc` ownership only, and the new
+tests build expected paths with the production `canonical_path`
+(`canonicalize_simplified`) on hermetic temp dirs, so the macOS `/private`
+symlink and Windows `\\?\` spellings match by construction. Existing CI cells
+(Linux/macOS on PR, Windows on `main`) cover the rest.
+
+### Departures from the spec
+
+None.
+
+## Phase 3
+
+Host: macOS (local). No source, test, doc, or skill file changed in this
+phase; it is validation, diff audit, and handoff only.
+
+### Acceptance checks (local macOS)
+
+| Command | Result |
+| --- | --- |
+| `just test` in `darkmatter/` | 9160 run, 9160 passed, 11 skipped (5 slow, all pre-existing `dmls` corpus/parity tests); exit 0 |
+| `cargo nextest run -p darkmatter --lib -E 'test(/resolve::\|shared_type_tables/)'` | 102 passed, incl. all 6 `shared_type_tables::*` (each ≈ 30–40 ms) |
+| `just lint` in `darkmatter/` | exit 0 (lib, cli, dmls, zed-dmls-cli, zed-dmls wasm32-wasip2) |
+| `just test` in `claudine/` (downstream consumer) | 8673 run, 8673 passed, 9 skipped; exit 0 |
+| `just lint` in `claudine/` | exit 0 |
+
+- Evidence is local macOS only. No Linux, Windows, or WSL2 run was made in
+  this phase; those come from the existing CI cells (PR: Linux + macOS; push to
+  `main`: + Windows; nightly: + WSL2). No CI cell was added. The OS reasoning
+  from Phase 2 stands: the change is `std::sync::Arc` ownership, and the new
+  tests compute expected cache keys with production `canonical_path`.
+- The claudine lint log printed `Checking darkmatter … (/Volumes/coding/personal/rusty-biscuit/…)`;
+  `cargo metadata` confirms the workspace resolves darkmatter to this
+  worktree, so that line is replayed cached compiler output, not a build of
+  another checkout.
+- Baseline comparison: Phase 1 baseline was 9154; the +6 are exactly the new
+  `shared_type_tables` tests. Every resolver/corpus identity listed in the
+  Phase 1 baseline passed, and no existing expectation was edited
+  (`git diff` of `resolve.rs` shows no removed or changed lines inside any
+  pre-existing test module).
+
+### Final diff audit (`resolve.rs`, `definition.md`)
+
+- Copy sites: `this` branch → `Arc::clone(&current.named_types)`; cache hit →
+  `Arc::clone(&cached.named_types)`; first load → one
+  `Arc::new(load_named_types(&path)?)` with `Arc::clone` into the cache and the
+  original moved into the returned `Namespace`. No `named_types.clone()` deep
+  copy remains.
+- Root setup: one `Arc::new(match …)` holding the `Single` properties copy (or
+  empty `Union` table), still after the `schema_has_imports` early return.
+- Selected definition: `target.named_types.get(&name).cloned()` (L1109) still
+  copies before recursive expansion, `strip_top_level_presence`, and
+  `apply_import_postfix`. No `Arc::make_mut`, `Mutex`, `RefCell`, or global
+  cache in the file; no expanded definition is shared.
+- Phase 1 invariants 1–8 re-checked against the diff: dependency insertion
+  before cache lookup, canonical keys, base dirs, request-scoped context and
+  schema roots, `this` keeping `current.key`/`base_dir`, cycle stack and
+  `MAX_IMPORT_DEPTH`, literal missing-name error text — all untouched lines.
+- Comments: module comment, `Namespace` doc, and `named_types` field doc name
+  both envelopes and describe the immutable per-expansion sharing; matches
+  code. `definition.md` note matches implemented behavior, has no
+  feature/fix references, and adds no planned behavior.
+- Scope: no parser, loader signature, public API, `Cargo.toml`, CI, or
+  unrelated file in the diff (`git diff --stat`: `resolve.rs`, `definition.md`,
+  and this feature's own spec/plan/log).
+
+### Acceptance criteria → evidence
+
+| AC | Evidence |
+| --- | --- |
+| 1. No behavior change | darkmatter `just test` 9160/9160; Phase 1 resolver/corpus identities all pass; no expectation edits |
+| 2. Allocation identity via `Arc::ptr_eq` | `shared_type_tables::first_load_cache_and_later_imports_share_one_table`, `this_from_inline_root_shares_the_root_table`, `this_from_loaded_file_shares_that_files_table` (Phase 2 mutation check made all three fail under deep copies) |
+| 3. Use-site independence, both envelopes, cross-file / root `@this` / imported-file `@this` | `cross_file_type_imported_twice_keeps_each_use_independent`, `root_this_type_imported_twice_keeps_each_use_independent`, `this_inside_imported_file_selects_that_files_type`; single-use envelope coverage reused from `suggest_constraint_phase4::named_imports_share_pure_and_tagged_mapping_namespaces` |
+| 4. Diff review | "Final diff audit" above |
+| 5. Lint, portable L1, no new CI cells | darkmatter `just lint` exit 0; tests are hermetic temp-dir L1 in the lib test binary; no CI change |
+| 6. Comments and docs | `resolve.rs` comment corrections; `definition.md` implementation note and two-envelope wording |
+
+### Skipped / pre-existing
+
+- No failures, pre-existing or new. No cross-OS run (see above). The
+  `MAX_IMPORT_DEPTH` cap and whole-file-reference import targets still have no
+  dedicated test; both were noted in Phase 1 as pre-existing gaps on code
+  paths this work does not touch.
+- Claudine skill: no update needed (no claudine code or workflow changed).
+
+### Departures from the spec
+
+None. Implementation complete, ready for review.
