@@ -2,7 +2,7 @@
 kind: fix
 name: docs-audit-code-defects
 area: tree-hugger
-status: finalized-spec
+status: planned
 date: 2026-10-10
 clarified: true
 clarified_by: claude/sonnet
@@ -14,6 +14,49 @@ packages:
   - tree-hugger-cli
 needs_rulings: false
 review_iterations: 1
+$schema:
+    status: |-
+        enum(
+            draft-spec,
+            finalized-spec,
+            planned,
+            implemented,
+            review-findings,
+            human-in-the-loop,
+            completed,
+            on-hold,
+            abandoned
+        ) -> an indicator of progress for this specification
+    reviewed: boolean -> indicates whether the specification file has been reviewed by another agent from the one which created the spec
+    reviewed_by: string -> the agent and model used in the spec review
+    reviewed_on: date -> the date the spec was reviewed
+    review_iterations: number -> the number of implementation reviews have taken place in the review/fix cycle
+    clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
+    implemented: boolean -> indicates whether this spec's plan has been implemented
+    implemented_by: string -> the agent who implemented the plan
+implemented: false
+implemented_by: claude/opus
+human_review: false
+message_to_agent: |-
+    Phase 1 (readiness) is done; see the Phase 1 section of implementation-log.md.
+    (1) lib/tests/l1/symbols_cache.rs now has
+    `a_warm_hit_replays_the_stored_diagnostic_severity`. It is deliberately
+    severity-neutral (it asserts a warm hit serves whatever severity is stored,
+    and replays an edited `Info`), so it stays valid after the fix. A one-off
+    temporary assertion proved revision 50 stores and replays `Error` for both
+    `undefined-symbol` findings (`compute_total`, `items`); it was removed and
+    never left in the tree. In Phase 2, add the final assertion that the
+    stored/served severity is `Warning`, plus the revision-50 cache-upgrade row.
+    (2) PHP grammar: bare `exec(...)` is `function: (name)`; `\exec(...)` is
+    `function: (qualified_name (name))` with NO `prefix:` field (an anonymous
+    `\` token precedes the name); `Foo\exec` is `(qualified_name prefix:
+    (namespace_name (name)) (name))`; `namespace\exec` is `(relative_name
+    (name))`; `EXEC`/`eval` are plain `(name)`. Discriminator for the global
+    form: `(qualified_name !prefix (name) @n)`.
+    (3) Registry has `has_rule` (alias-aware), `get` (alias-aware, returns
+    Option) and `get_or_default` (unknown -> Warning; do NOT use it).
+    (4) Selector assembly is `Command::kind()` in cli/src/main.rs (the only
+    caller of `parse_selectors`, called once from main); warn there.
 ---
 
 # Six code defects found while auditing the Tree Hugger docs

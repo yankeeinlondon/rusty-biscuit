@@ -7,6 +7,13 @@ created: 2026-10-11
 phase: 1
 agent: codex/default
 yolo: true
+source_files_during_phase_1:
+  - tree-hugger/lib/tests/l1/symbols_cache.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+packages:
+  - tree-hugger
 ---
 
 # Implementation plan: docs audit code defects
@@ -71,7 +78,7 @@ must receive the non-interactive constraints and a bounded file ownership brief.
 
 ### Wave 1: Sequential readiness tasks
 
-- [ ] **Prove cache replay**
+- [x] **Prove cache replay**
   - Make this the first implementation task, before editing production code.
     In `lib/tests/l1/symbols_cache.rs`, analyze an experimental undefined-symbol
     fixture with the unmodified revision-50 build, persist it, then prove a
@@ -81,7 +88,7 @@ must receive the non-interactive constraints and a bounded file ownership brief.
     regression assertions; never commit an obsolete `Error` expectation.
   - Use existing cache APIs and test isolation. If hashing is needed, use
     `biscuit-hash` and load its skill rather than introducing a new hasher.
-- [ ] **Confirm implementation seams**
+- [x] **Confirm implementation seams**
   - Confirm revision `50`, the six severity call sites, rule metadata/message
     tables, query capture access, removed API consumers, provenance enumeration,
     `main` error boundary, and command selector construction against the tree
