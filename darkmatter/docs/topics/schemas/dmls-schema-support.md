@@ -72,6 +72,7 @@ A few details worth knowing:
 - extension baselines whose activation globs match the document contribute their shapes even when the document declares no `$schema` — this is how a Claudine prompt gets `provider`/`model` completions "for free"
 - the effective schema (and every file it depends on — the referenced `$schema` file, its imports, its examples, and each matched extension baseline) is content-hash cached per document; editing any dependency invalidates the bundle immediately
 - the cache is also keyed on the document's file-resolution context: its repository, its folder, its tree root and how that was chosen, the home folder, the environment (so `SCHEMAS_DIR`), and the extra `@` roots. A `$schema: ^shape.yaml` that resolves to a package's `shape.yaml` is never served to the same text once the package root changes; the schema is assembled again for the new context
+- a failed assembly is cached together with the files its error names, so fixing an imported schema file clears the error without reopening the document
 - when a schema fails to load, DMLS keeps the **last good** bundle serving completion and hover rather than flapping to nothing mid-keystroke
 
 DMLS searches the same five [schema roots](./definition.md#schema-roots) as `md`, for the document being edited (when it is inside an open workspace folder), so the editor and the terminal apply the same triggers and resolve the same bare-name `$schema`. `SCHEMAS_DIR` and the home folder come from the environment the editor started the server with: a GUI editor that was not launched from your shell may lack `SCHEMAS_DIR`, and a changed value takes effect after a server restart. Additional always-on baselines arrive through [configuration](#extensibility-through-configuration).
@@ -88,8 +89,8 @@ Diagnostics are **push-based** (`textDocument/publishDiagnostics`): DMLS compute
 |----------------------------------------------------------------|-------------------------------------------------------------------------------------------------------|
 | `dm.frontmatter.yaml_parse`                                    | the frontmatter YAML could not be parsed                                                              |
 | `dm.schema.invalid_schema_shape`                               | the `$schema` value is not a valid schema shape (also covers a rejected standalone outer declaration) |
-| `dm.schema.invalid_type_definition`                            | a property definition in a schema-authoring surface is invalid                                        |
-| `dm.schema.prepare`                                            | the schema could not be resolved, merged, or compiled                                                 |
+| `dm.schema.invalid_type_definition`                            | a property definition in a schema-authoring surface is invalid, including an unknown named type, contradictory constraints on a reused type, and a named-type cycle (see [Named-type references](#named-type-references)) |
+| `dm.schema.prepare`                                            | the schema could not be resolved, merged, or compiled; in a standalone schema file, an explicit `Name@file` target that cannot be found or read |
 | `dm.schema.type_mismatch`                                      | a value did not match its declared type                                                               |
 | `dm.schema.constraint`                                         | a non-type constraint failed (range, length, pattern, enum, …)                                        |
 | `dm.schema.missing_required`                                   | a required key is absent — **strict mode only**                                                       |
@@ -111,6 +112,38 @@ The severity policy follows one guiding principle: *diagnose edit-time problems,
 
 Standalone schema documents **own their problems**: when a `kind: schema` file is open in the editor, its `invalid_suggestion` warnings and `document_malformed` errors are published on that file, never duplicated onto the Markdown documents consuming it.
 
+#### Named-type references
+
+Named-type failures are defects of the schema, not of a document value, so
+DMLS publishes them as `dm.schema.invalid_type_definition` wherever the
+reference is written: in a Markdown document's inline `$schema` or in a
+standalone schema file. Three library errors are projected this way:
+
+| Library error | Example | Primary range | Related locations |
+|---|---|---|---|
+| `UnknownNamedType` | `title: nope` | the reference name | the reference and the schema searched, when they are in another file |
+| `ConstraintConflict` | `title: label(max(2))` over `label: string(min(5))` | the consuming reference name | each conflicting declaration, in its own file |
+| `ImportCycle` | `a: b`, `b: a` | the whole `$schema` declaration | none |
+
+- The primary range is the consuming reference's name, for bare, `@this`, and
+  cross-file spellings alike. A `$schema` written as a YAML block scalar
+  cannot be projected, so its diagnostic falls back to the property entry.
+- A conflict lists every declaration that took part as
+  `relatedInformation`, so the editor can show the inherited `min(5)` in
+  `types.yaml` beside the use site's `max(2)`. In a multi-hop chain each
+  related location is the declaration that introduced the value.
+- An import cycle carries no single source location, so it is ranged on the
+  whole declaration; its message shows the chain, such as `b -> a -> b`.
+- When the error is inside a schema file the document references, the
+  diagnostic points at the reference inside that file.
+- A standalone schema file resolves its own references, so a missing name
+  (`title: nope`) is reported on the file itself. An explicit target there
+  that cannot be found or read (`Name@./missing.yaml`) is a
+  `dm.schema.prepare` diagnostic on the target text.
+- `suggest(...)` candidates written on a reference are checked against the
+  resolved type, as `dm.schema.invalid_suggestion`. An invalid candidate the
+  type inherits is reported in the file that declared it.
+
 In a schema file, an invalid definition is ranged at the token the grammar rejected, such as an unknown constraint name, rather than the whole value. This also holds for the two line-wrapped spellings the schema grammar accepts, a plain value continued onto more-indented lines and a list whose `-` sits at its parent key's column (see [Source-Aware Presentation Boundary](./definition.md#source-aware-presentation-boundary)). Hover and completion work on continuation lines and indentless list items too, and select the same schema node as the conventional spelling. Ranges are converted to the editor's negotiated position encoding (UTF-8 or UTF-16).
 
 ### Completion
@@ -124,7 +157,7 @@ Completion is a merged provider chain (substrate → wiki → frontmatter → DS
 - **`style.*` keys** — the style descriptor catalog when the cursor is inside the opaque `style` object
 - **`suggest(...)` candidates** — advisory value suggestions (including block-sequence items) that aid discovery but never validate
 - **literal-discriminated union arms** — when a union's arms are discriminated by a `literal(...)` value, selecting the authored discriminant narrows key completion to that arm's shape
-- **imported types** — named types offered as `Name@this` when the passive schema namespace declares them
+- **named types** — while authoring a schema, local names are offered bare (`person`), including types declared later in the same table. A local name that is also a built-in keyword is offered as `string@this`, and a type from another file with its target (`person@./people.yaml`). Root-union schema files, whole-file reference files, and raw JSON Schema export no names, so they contribute none
 - **`ctx.*` variables** — the generated context keys, fully qualified
 
 While *authoring a schema* — inside an inline `$schema` value, a `type-definition`-typed value, or a standalone schema file — the same request flips to grammar completion, driven by the shared descriptor catalogs:
@@ -142,6 +175,8 @@ All items are **eager and self-contained**: every item carries an explicit `text
 
 ### Hover
 
+Hovering a named-type reference (`person`, `person@this`, or `person@./people.yaml`) shows the definition it selects, with local references inside it spelled bare.
+
 Hovering a schema-declared frontmatter property renders its full declaration — type (including `Name@reference` for imports and `[]` array suffixes), a `literal(...)` pinned value, `Required`, eager timing, enum values, default, and the `->` prose description. The formatting rule is bounded by what LSP hover Markdown can express (color is a theme decision, never ours): **inline-code box = the subject, bold = its type, italic = its enum/default values, plain prose = the description**.
 
 Hover also understands schema *authoring*:
@@ -153,6 +188,7 @@ Hover also understands schema *authoring*:
 ### Navigation
 
 - **go-to-definition** on a `$schema` file reference or a `file(...)` value jumps to the target file; both also render as clickable **document links**
+- **go-to-definition** on a named-type reference (bare, `@this`, or cross-file) lands on the defining key in the file that defines it
 - an interpolation variable in the body jumps to the frontmatter key that defines it, and a key the effective schema declares counts as a known identifier even when the document has not set it
 - **references** answers "who transcludes this file" across the workspace graph
 
@@ -166,6 +202,24 @@ Document highlights currently cover headings and wiki links; schema keys are not
 ### Quick Fixes and Formatting
 
 One schema-specific code action ships today: **add a missing required key**, offered directly on a `dm.schema.missing_required` diagnostic (and therefore only in strict mode). Other code actions — create the missing file, migrate a deprecated `style:` key, close an unclosed `::block`, wrap a malformed interpolation in a literal — are schema-adjacent rather than schema-driven. Whole-document **formatting** is byte-equivalent to the `md clean` cleanup sequence; it is a document-level operation, not a schema one.
+
+### Imported files stay live
+
+Every file a schema imports a named type from is a dependency of the
+assembled schema. Editing that file refreshes completion, hover,
+go-to-definition, and diagnostics in the documents that use it, without
+reopening them, and clears an error that the edit fixed. A local reference
+reads no other file and adds no dependency.
+
+### Known limitations
+
+- In a schema whose `$schema` is a root union, completion offers the local
+  names of every inline arm, although each arm resolves bare names and `@this`
+  only against its own top-level entries. A name offered from another arm is
+  then reported as unknown.
+- When a named type and its use site both declare `suggest(...)`, the "at
+  most one `suggest`" error is ranged on the whole `$schema`, because the
+  inherited candidate's span belongs to another file.
 
 ## Not Implemented (yet)
 
@@ -196,7 +250,7 @@ The scorecard: one dimension is the LSP capability, the other is the Darkmatter 
 | Frontmatter values (type / constraint)        | ✅          | ✅         | ✅    | —            | —               | ❌          | ❌     | —            |
 | `enum(...)` and `suggest(...)` values         | ✅ ⁴        | ✅ ⁵       | ✅    | —            | —               | ❌          | ❌     | —            |
 | Union types with `literal(...)` discriminants | ✅          | ✅ ⁶       | ✅    | —            | —               | ❌          | ❌     | —            |
-| Imports (`Name@file`)                         | ✅ ⁷        | ✅ ⁸       | ✅    | 🟨 ⁹         | —               | ❌          | ❌     | —            |
+| Named types (`Name`, `Name@file`)             | ✅ ⁷        | ✅ ⁸       | ✅    | ✅ ⁹         | —               | ❌          | ❌     | —            |
 | Pattern dictionary keys (`<string>`, …)       | ✅          | ❌ ¹⁰      | 🟨 ¹¹ | —            | —               | ❌          | ❌     | —            |
 | `file(...)` references                        | ✅          | ✅         | —     | ✅           | —               | ❌          | ❌     | —            |
 | `$schema` inline authoring                    | ✅          | ✅ ¹²      | ✅    | —            | —               | ❌          | ❌     | —            |
@@ -213,9 +267,9 @@ The scorecard: one dimension is the LSP capability, the other is the Darkmatter 
 4. Constraint violations for enums; `invalid_suggestion` linting for advisory candidates.
 5. Enum choices rigid; `suggest(...)` candidates advisory — they never validate.
 6. The authored `literal(...)` discriminant selects one union arm; key completion narrows to it.
-7. Missing/cyclic imports surface through `dm.schema.prepare` with source origins.
-8. Declared names offered as `Name@this` while authoring.
-9. Whole-file `$schema` references jump and link; a `Name@file` import inside an inline schema does not yet.
+7. Unknown names, constraint conflicts, and cycles are `dm.schema.invalid_type_definition` at the reference, with related locations for conflicting declarations.
+8. Local names offered bare; `name@this` only for a built-in collision; imported names with their target.
+9. Go-to-definition on every reference spelling; whole-file `$schema` references also render as links.
 10. Pattern keys validate but are not offered as completions — an inline object's keys are the author's own.
 11. Authored pattern-key definitions hover in schema documents; consumers hover the value definition only where the shape resolves it.
 12. Type keywords, array forms, scaffolds, and subject-filtered constraint keywords; constraint *arguments* are deliberately not completed.
@@ -293,6 +347,7 @@ The programmatic seam is the **`darkmatter` library itself** (`darkmatter::markd
     - `validate(...)`, `validate_for_phase(...)`, `detect(...)` — validation and schema detection/inference
 
 - **`EffectiveSchema`** carries the assembled result: `validate_with_positions(...)` for source-spanned problems, `dependencies()` for the files the schema depends on (what DMLS content-hash watches), and `advisories()` for non-fatal findings.
+- **`resolve::expand_named_types`** expands the named-type references of a schema held in memory, using that schema (not the file on disk) as `this`, so an unsaved buffer resolves. **`resolve::named_type_reference_path`** returns the file an explicit `Name@target` selects, using the resolver's own lookup. DMLS uses both for standalone schema files.
 - **`parse_standalone_schema_document`** is the passive classifier for standalone schema files — the same authority that decides when your open buffer is a `kind: schema` document deserving authoring intelligence.
 - **The shared catalogs** — `schema_type_descriptors()`, `schema_constraint_descriptors()`, `suggestions_for_path()`, `select_literal_discriminant_arm()`, and the tolerant cursor parsers `locate_schema_declaration_cursor(...)` / `locate_type_definition_cursor(...)` — are public. DMLS uses these authorities when constructing completion and hover responses, which keeps their schema vocabulary aligned with library validation. A documentation generator, linter, or custom editor can build on the same primitives, while still owning its presentation and request-specific behavior.
 

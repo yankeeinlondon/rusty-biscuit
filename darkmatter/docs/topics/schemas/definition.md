@@ -1,19 +1,8 @@
----
-related_specs:
-    - "@darkmatter/features/_completed/2026-05-11-schemas/spec.md"
-    - "@darkmatter/features/_completed/2026-05-23-compose-schema/spec.md"
-    - "@darkmatter/features/_completed/2026-05-28-schema-coercion/spec.md"
-    - "@darkmatter/features/_completed/2026-06-10-schema-improvement/spec.md"
-    - "@darkmatter/features/_completed/2026-07-08-schema-plus/spec.md"
-    - "@darkmatter/features/_completed/2026-07-09-suggest-constraint/spec.md"
-    - "@darkmatter/features/2026-07-13-meta-schema/spec.md"
----
-
 # Schema Definition
 
 Darkmatter can **define**, **detect**, and **evaluate** schemas for Markdown frontmatter. Authors declare the shape of their frontmatter with **SimplifiedSchema** — a single-line YAML grammar that compiles deterministically to a Draft 2020-12 JSON Schema. Every validation runs through the `jsonschema` crate; SimplifiedSchema is a surface, not a parallel validator.
 
-This topic covers the practical usage of schemas for standalone validation, schema detection, and validation within the compose pipeline. The original specification lives in [`features/_completed/2026-05-11-schemas/spec.md`](../../../features/_completed/2026-05-11-schemas/spec.md); the compose integration is specified in [`features/_completed/2026-05-23-compose-schema/spec.md`](../../../features/_completed/2026-05-23-compose-schema/spec.md).
+This topic covers the practical usage of schemas for standalone validation, schema detection, and validation within the compose pipeline.
 
 ## What You Get
 
@@ -342,6 +331,8 @@ synthesized.
 | `default(s)`   | Default string.                                                                                   | `default`               |
 | `required`     | Property is required.                                                                             | parent `required` entry |
 
+A value must satisfy every pattern. When an atom has more than one pattern-producing constraint (for example `not-empty` with a `pattern(...)`, or several `pattern(...)` constraints), each lowers to its own `allOf` entry instead of a single `pattern` keyword.
+
 ### Date / Time Constraints
 
 `date`, `datetime`, and `time` accept `default(s)` (ISO string) and `required`. The type itself emits the corresponding `format` with format-assertion enabled.
@@ -574,6 +565,13 @@ In a single schema it only suggests paths, so an existing file outside the
 configured globs still validates. In a root union, it is also an arm constraint:
 an existing file outside an arm's declared glob rules that arm out. This holds
 when the other arms declare the same glob, a different glob, or no glob.
+
+Each `match(...)` is one **group**: a path must match one of the group's
+positive globs and none of its `!` exclusions. Repeating `match(...)`, which
+usually happens when a [named type](#merging-use-site-constraints) is reused
+with another `match`, adds a group, and a path must satisfy every group:
+`file(match('*.md'); match('guide*'))` admits `guide-intro.md` but neither
+`notes.md` nor `guide.txt`. An exclusion stays inside its own group.
 
 Each glob is a **glob reference**: an optional `!` (exclude), an optional
 file-reference prefix, then the glob. The prefix says where the glob starts,
@@ -868,27 +866,37 @@ Resolved example objects are emitted onto the JSON Schema as the `x-darkmatter-e
 
 `Name@fileref` **inlines** the definition of the named type `Name` from the referenced file at the use site — structural substitution, not a persistent reference. A schema file's **top-level mapping entries are its named types** — the entries under `$schema:` in a pure envelope, or under `types:` in a `kind: schema` envelope (see [Standalone Schema Documents](#standalone-schema-documents)). Each is a full SimplifiedSchema definition (scalar, enum, union, or an inline object with literal or pattern keys).
 
+A type defined in the same schema may be referenced by its **bare name**: `type` and `type@this` are the same reference. See [Local Type References](./local-type-references.md) for where local names live, built-in collisions, and why a bare name inside an imported definition still resolves in its defining file.
+
 ```yaml
 $schema:
     type:       type@./types.yaml        # inlines types.yaml's `type` definition
     parameters: parameter[]@./types.yaml # array of the inlined `parameter` map
-    value:      type@this                # the `type` defined in *this* file
+    value:      kind                     # the `kind` defined in *this* schema
+    other:      kind@this                # the same reference, spelled explicitly
+    kind:       enum(a, b)
 ```
 
-Grammar: `type_ref := ident ('[]')? ('(' constraints ')')? '@' fileref`. Postfix composes **outward**:
+Grammar: `type_ref := ident ('[]')? ('(' constraints ')')? ('@' fileref)?`. A bare `ident` that is a built-in type keyword is the built-in; any other bare `ident` is a local reference. Postfix composes **outward**:
 
 - `Name[]@file` — an array of the inlined `Name`.
-- `Name(constraints)@file` — the inlined type with `constraints` applied to it.
-- `@this` — the current schema file (self-target), including inline top-level documents.
+- `Name(constraints)@file` — the inlined type with `constraints` merged into its own (see [Merging use-site constraints](#merging-use-site-constraints)).
+- `Name[](constraints)@file` — an array of the inlined `Name`, with `constraints` on the array.
+- `Name -> description` — a use-site description replaces the inherited one; omitting it keeps the inherited description.
+- `@this` (or no `@` at all) — the current schema (self-target), including inline top-level documents.
+
+`[]` must come before the constraint list: `Name(c)[]` is a grammar error. Adding `[]` to a named type that is already an array is an error. A postfix of any kind, including a description, on a reference to a **union-typed** named type is rejected; a plain reference to it, or its use as a union arm, is supported. Postfixes on union-typed references are **planned**.
 
 The file reference is read as written up to the next `->`, `,`, or `}`, whichever comes first. No other punctuation in it has meaning, so `Name@./a(b.yaml` names the file `./a(b.yaml`, and `Name@./a{b.yaml -> the shared shape` names `./a{b.yaml` and describes it. Inside a YAML flow sequence, quote an arm whose filename contains `[` or `{`, because YAML ends a plain flow scalar there: `['Name@./a{b.yaml', string]`.
 
 Rules:
 
 - The right side resolves as a `biscuit_file::FileReference` whose `cwd` is the schema file's directory, in the request's file-resolution context when one is supplied — the same resolution as root-union file refs and `$schema`.
-- The target must be a SimplifiedSchema file with a matching named type. Importing from a raw JSON Schema file, from a file with no matching type name, or a missing file is a schema error.
-- Expansion is **eager, bounded, and cycle-checked**. Named types form a DAG; a type that transitively references itself is a recursion error (`SchemaError::ImportCycle`), and an import chain that exceeds the depth cap is rejected — the same protection as the inline-object nesting cap. True recursive types are deferred.
-- Each import is a **dependency edge** recorded on the resolved schema (`ResolvedSchema.imports`) so the schema cache and DMLS index can invalidate when an imported file changes.
+- The target must be a SimplifiedSchema file whose payload is a mapping with a matching named type. Importing from a raw JSON Schema file, from a root-union schema file, from a file whose whole payload is a reference to another file, or from a missing file is a schema error. A name the target does not define is `SchemaError::UnknownNamedType`, naming the type, the schema searched, and the property that holds the reference.
+- **Every constraint of the definition survives the reference**, including `required` and `generated`. An inherited `required` keeps its scope: on `people: person[]` it makes `people` required, and inside one arm of a property-level union it is hoisted to the property like any arm's `required`. Requiring a field *inside* an object type does not require the property that holds the object.
+- Expansion is **eager, bounded, and cycle-checked**. Named types form a DAG; a type that transitively references itself, through bare or explicit references, is a recursion error (`SchemaError::ImportCycle`, reporting the chain such as `b -> a -> b`), and an import chain deeper than 32 references is rejected — the same protection as the inline-object nesting cap. True recursive types are deferred.
+- Each import of another file is a **dependency edge** recorded on the resolved schema (`ResolvedSchema.imports`) so the schema cache and DMLS index can invalidate when an imported file changes. A local reference adds no edge.
+- An inherited `example(...)` reference resolves from the file that declared it, not from the importing schema.
 - `to_json_schema` rejects any unresolved import that reaches conversion, exactly as it rejects unresolved root-union file arms — imports are always expanded by the resolver first.
 
 > **Implementation note:** within one schema resolution, each target file's
@@ -905,6 +913,95 @@ Rules:
 >
 > The sharing ends when that resolution finishes: nothing is kept between
 > calls, and it reduces copying without promising a fixed end-to-end speedup.
+
+#### Merging use-site constraints
+
+Constraints written at a use site combine with the constraints the named type
+already carries. This is a merge inside one reused type; it is unrelated to
+[schema layering](./authoring-schemas.md#schema-layering), where the winning
+schema's whole property definition replaces lower layers.
+
+```yaml
+# types.yaml
+kind: schema
+types:
+    label: string(min(3))
+    site: url(scheme(http, https))
+```
+
+```yaml
+$schema:
+    title: label(max(80))@./types.yaml       # 3..80 characters
+    short: label(min(5))@./types.yaml        # at least 5 characters
+    home: site(scheme(https))@./types.yaml   # https only
+```
+
+| Situation | Result | Example |
+|---|---|---|
+| Different constraints | Both apply | `label` + `max(80)` → 3..80 characters |
+| Repeated lower bound | The larger (stricter) wins | `min(3)` + `min(5)` → `min(5)` |
+| Repeated upper bound | The smaller (stricter) wins | `max(80)` + `max(50)` → `max(50)` |
+| Contradictory bounds | `SchemaError::ConstraintConflict` | `min(10)` + `max(5)` |
+| Flags (`not-empty`, `integer`, `unique`, `eager`, `required`, `generated`) | Idempotent | `required` twice = `required` |
+| Repeated `pattern(…)` | Every pattern applies | `pattern(^a)` + `pattern(z$)` accepts `az`, rejects `ab` and `bz` |
+| Repeated `match(…)` | Groups intersect | `file(match('*.md'))` + `match('guide*')` offers `guide-intro.md`, not `notes.md` or `guide.txt` |
+| Repeated `scheme(…)` | Intersection; empty is a `ConstraintConflict` | `scheme(http, https)` + `scheme(https)` → `https` |
+| Repeated `default(…)` | Must be equal; different values are a `ConstraintConflict` | `default(3)` + `default(3.0)` is fine; `default(3)` + `default("3")` is not |
+| Repeated `suggest(…)` | Error: at most one `suggest` per property | |
+| Repeated `example(…)` | All kept, inherited first | each resolves from the file that declared it |
+
+The rules in detail:
+
+- **Bounds compare per kind:** string length (`min`/`max` on a string),
+  number (`min`/`max` on a number), item count (`min`/`max` on an array), and
+  key count (`min-keys`/`max-keys`). Equal lower and upper bounds are valid.
+- **Bounds are read against the resolved target.** Parsing a reference does
+  not know its target type, so `label(max(80))` means a length when `label`
+  is a string and a numeric maximum when it is a number. On a named type that
+  is already an array, such as `tags: string[](max(5))`, a use-site `min` or
+  `max` is an item count: `tags(min(6))` conflicts with the inherited
+  `max(5)`. A fractional length bound on a string target is an error.
+- **Item and container constraints never merge.** A named `string(min(3))`
+  used as `label[]` requires each item to have at least three characters;
+  `label[](min(1))` also requires at least one item. The two minima stay
+  separate.
+- **Patterns are conjunctive.** `not-empty` counts as a pattern. With a single
+  pattern-producing constraint the JSON Schema keeps one `pattern` keyword;
+  with several, each becomes its own entry in an `allOf` beside the base
+  `type`, `format`, bounds, and `x-darkmatter-*` annotations. Patterns are
+  never combined into one regular expression, and Darkmatter does not try to
+  prove that they can all match.
+- **`match` groups intersect.** Each `match(...)` keeps its own positive and
+  `!` exclusion list, and a path must satisfy every group. An exclusion in one
+  group never applies to another group's positives. Groups are not
+  concatenated, because a combined list would widen the choices instead of
+  narrowing them. As with a single `match`, the groups only shape completion
+  in a single schema and reject no value there; in a
+  [root union](#files) an existing file must satisfy every group of an arm
+  for that arm to apply. An empty intersection is not detected at schema-load
+  time, which would need a file search: the schema loads, and completion
+  offers no files.
+- **Defaults compare after number normalization**, so `3` equals `3.0`, while
+  `"3"` and `3` differ. Existing type-specific default checks still apply.
+- **One `suggest` per property.** The limit covers the whole property,
+  including the arms of a union reached through different named types.
+  Use-site `suggest(...)` candidates are checked against the resolved target,
+  which must be exactly `string` or `number`.
+- **The definition owns the target type.** A use site cannot replace enum
+  members or a literal value, or change the type. A constraint the resolved
+  type does not accept is rejected, as on any property.
+
+A `ConstraintConflict` names the property, the kind of conflict (`Bounds`,
+`Scheme`, or `Default`), and every declaration involved as a
+`SchemaConstraintOrigin`: its source (a file or the inline document), path,
+keyword, and, for a file, the byte span of the constraint. In a multi-hop
+chain each origin points at the declaration that introduced the value. When
+the conflict arises inside a schema the document references,
+`SchemaError::ReferencedSchema` wraps it.
+
+The same contradictions on a single atom, with no reuse involved, are errors
+too: `string(min(10); max(5))`, `url(scheme(http); scheme(ftp))`, and two
+different defaults are each a `SchemaError::Convert` naming the property.
 
 Because a named type can be *any* definition and `@` inlines it, composition (named types + `@` + `[]` + unions + pattern keys) **is** the type system — SimplifiedSchema's ergonomic answer to JSON Schema `$ref` / `$defs`.
 
@@ -957,6 +1054,25 @@ $schema:
 ```
 
 `$constraints` (dollar-prefixed, mirroring `$schema`) is **reserved only inside authored schema objects**: it is stripped before shape assembly and never participates in literal/pattern key matching. Flag constraints are written `name: true`. This does **not** reserve `$constraints` in user frontmatter data — only the schema-authoring language uses the sentinel.
+
+The block and the postfix are one scope. Key bounds from a `$constraints` block, from the object's postfix, and from a use site that reuses the object as a named type merge under the [merge rules](#merging-use-site-constraints): the stricter bound wins, and a minimum above the maximum is an error whichever spelling declared it.
+
+What else a block may hold depends on where it sits:
+
+| Block on | Accepted keys | Anything else |
+|---|---|---|
+| an object-typed property | `min-keys`, `max-keys`, `required`, `generated` | schema error ("`$constraints` key `…` is not valid on an inline object") |
+| the root schema, or one arm of a root union | `min-keys`, `max-keys` | schema error ("… is not valid on the root object") |
+
+On a property's object, `required: true` and `generated: true` mean exactly the same as the postfix spelling: they apply to the property, so this `author` is required:
+
+```yaml
+$schema:
+    author:
+        name: string
+        $constraints:
+            required: true
+```
 
 ### Content-Format Types (`yaml` / `json`)
 
@@ -1645,11 +1761,11 @@ The `completion` module is a read-only consumer of an `EffectiveSchema`. It expo
 
 Three completion categories are surfaced:
 
-- `CompletionKind::File { patterns }` — filesystem-path completion filtered by the `match(...)` globs (including `!`-prefixed negations). The caller walks the filesystem.
+- `CompletionKind::File { alternatives }` — filesystem-path completion. `alternatives: Vec<Vec<Vec<String>>>` is an OR of AND-ed groups: a path is a candidate when it satisfies **every** group of **some** alternative, each group being the raw globs of one `match(...)` (including `!`-prefixed exclusions). A single property gives one alternative holding all of its groups, including those a reused named type inherits; a root union gives one alternative per `file` arm that declares a `match`. Empty means no `match` at all (a bare `file`). `file_match::FileMatchGroups` judges one alternative. The caller walks the filesystem.
 - `CompletionKind::Enum { members }` — the enumerated members in declaration order.
 - `CompletionKind::Hint { format }` — a one-line format hint for value-completion-unfriendly types (`url`, `email`, `date`, `datetime`, `time`).
 
-Root unions and raw JSON Schema inputs do not expose a SimplifiedSchema projection, so they return no completion data.
+For a root union, `completable_properties` lists every inline arm's completable properties, and a property declared as `file` in several arms offers each arm's groups as a separate alternative. Raw JSON Schema inputs do not expose a SimplifiedSchema projection, so they return no completion data.
 
 ## Error Model
 
@@ -1665,8 +1781,10 @@ All failure modes are variants of `SchemaError`:
 | `SchemaDocument`        | A recognized standalone schema document (pure or tagged envelope) has a missing or malformed payload.     |
 | `FrontmatterShape`      | `$schema` is present but is not a mapping, sequence, or string.                                           |
 | `Baseline`              | Baseline could not be loaded or is not a simple object schema.                                            |
-| `Convert`               | SimplifiedSchema could not be lowered to JSON Schema (e.g. conflicting `default(...)` on a union, an unresolved `@`-import reaching conversion, or a `<pattern::RE>` that cannot be wrapped for literal-key precedence). |
-| `ImportCycle`           | A `Name@file` named-type import references itself directly or transitively (or exceeds the import-depth cap). |
+| `Convert`               | SimplifiedSchema could not be lowered to JSON Schema (e.g. conflicting `default(...)` on a union, contradictory bounds or schemes on one atom, a `$constraints` key the block's object cannot use, an unresolved `@`-import reaching conversion, or a `<pattern::RE>` that cannot be wrapped for literal-key precedence). |
+| `ImportCycle`           | A named-type reference (bare or `Name@file`) references itself directly or transitively (or exceeds the import-depth cap). |
+| `UnknownNamedType`      | A named-type reference names a type its schema does not define. Carries the name, the schema searched (`SchemaSourceId`), and the reference site (`SchemaReferenceSite`). |
+| `ConstraintConflict`    | Constraints merged onto a reused named type contradict each other (`Bounds`, `Scheme`, or `Default`). Carries every conflicting declaration as a `SchemaConstraintOrigin`. See [Merging use-site constraints](#merging-use-site-constraints). |
 | `InvalidExample`        | An `example(...)` file is malformed or fails validation against the example envelope or inherited target shape. |
 | `BuildValidator`        | `jsonschema` could not build a validator from the produced schema.                                        |
 | `Io`                    | Filesystem read failure with the offending path.                                                          |
@@ -1762,7 +1880,8 @@ unless the same baseline is supplied explicitly.
 ## Limitations (v1)
 
 - **No remote `$schema`.** Download referenced schemas locally for now.
-- **No `$ref` or reusable inline fragments.** Inline objects are anonymous; reuse still requires an external JSON Schema file.
+- **No `$ref`.** Reuse a definition through [named types](#cross-file-named-type-imports-namefile), which are inlined at each use site; recursive types are not supported.
+- **No nullable unions yet.** A `null` type and unions such as `[person, "null"]` are **planned**; until then, declare an optional variant of a required named type separately.
 - **No `lenient` opt-out for inline object `additionalProperties: false`.** Every inline object rejects extra keys. Authors who want looser object typing should drop down to the opaque `object` type, which preserves the root-schema `additionalProperties: true` behavior.
 - **Hard 32-level inline object nesting cap.** The parser rejects deeper nesting with `SchemaError::Grammar`. Reference a JSON Schema file for deeper typing.
 - **No inline object detection.** `md schema detect` continues to emit `object` for object-typed values; inline object schemas must be hand-written.
@@ -1780,12 +1899,7 @@ unless the same baseline is supplied explicitly.
 
 ## See Also
 
-- [Schemas specification](../../../features/_completed/2026-05-11-schemas/spec.md) — authoritative behavior, EBNF grammar, ADRs.
-- [Compose schema specification](../../../features/_completed/2026-05-23-compose-schema/spec.md) — schema validation in the compose pipeline.
-- [Inline object spec](../../../features/_completed/2026-06-10-schema-improvement/spec.md) — inline object literals, postfix constraints, nesting rules, and the `md schema about` descriptor catalog.
-- [Schema-plus spec](../../../features/_completed/2026-07-08-schema-plus/spec.md) — composition primitives: `example(...)`, `Name@file` imports, pattern keys, `min-keys` / `max-keys`, `yaml` / `json`.
-- [Suggest-constraint spec](../../../features/_completed/2026-07-09-suggest-constraint/spec.md) — the `suggest(...)` advisory-completion constraint.
-- [Literal / expression spec](../../../features/_completed/2026-07-12-literal-expression/spec.md) — the `literal(value)` and `expression` types and the DMLS unlocks they enable.
+- [Local Type References](./local-type-references.md) — bare local names, where they resolve, and how reused types inherit constraints.
 - [`json-schema-primitives.md`](../json-schema-primitives.md) — JSON Schema primitives reused under the hood.
 - [`magic-paths.md`](../magic-paths.md) — `FileReference` resolution rules.
 - [`frontmatter-recursion.md`](../frontmatter-recursion.md) — how frontmatter is layered through the compose pipeline.

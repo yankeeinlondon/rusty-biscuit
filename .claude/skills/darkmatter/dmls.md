@@ -105,7 +105,17 @@ DMLS projects Darkmatter's typed surfaces into LSP:
 
 - Frontmatter and schema diagnostics with source spans.
 - Schema-aware completion for keys, values, suggestions, literal-discriminated
-  union arms, and imported types.
+  union arms, and named types (local names bare, `name@this` only for a
+  built-in collision, imports with their target).
+- Named-type references (`overlay/named_types.rs`,
+  `providers/frontmatter/named_references.rs`, `diagnostics/named_types.rs`):
+  hover and go-to-definition on bare, `@this`, and cross-file spellings;
+  `UnknownNamedType`/`ConstraintConflict`/`ImportCycle` publish as
+  `dm.schema.invalid_type_definition` on the reference's `ImportName` span
+  with conflict origins as `relatedInformation`. Standalone schema files
+  resolve their references through `resolve::expand_named_types`. Imported
+  files are dependency edges, and a failed assembly records the files its
+  error names so a fix clears it; local references add no edge.
 - Expression completion, hover, and parse diagnostics inside
   expression-typed frontmatter.
 - Hover/documentation from typed descriptor catalogs.

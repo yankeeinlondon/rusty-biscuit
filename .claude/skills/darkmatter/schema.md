@@ -104,7 +104,40 @@ excluded keys without executing anything.
 ## Imports and dictionaries
 
 - `Name@file` and `Name@this` import named types eagerly with dependency and
-  cycle tracking.
+  cycle tracking. A bare non-keyword `Name` parses to the same
+  `TypeExpr::Imported { reference: "this" }` as `Name@this` (no stored
+  spelling; `SimplifiedType::is_keyword` decides built-in vs reference, so
+  `string` is built-in and `string@this` is local). Local names are the
+  schema's own top-level entries (`types` of `kind: schema`, else `$schema`);
+  each inline root-union arm uses only its own entries. Root-union,
+  whole-file-reference, and raw JSON Schema files export no names. A bare name
+  inside an imported definition resolves in its defining file. Serialization
+  writes local references bare unless the name is a keyword.
+- Every constraint survives a reference, including `required` and `generated`
+  (nothing is stripped; no use-site opt-out). Presence declared inside an
+  object type does not make the holding property required. An optional variant
+  is declared directly; aliasing the required type re-inherits presence.
+  Nullable unions are planned.
+- `apply_import_postfix` (`resolve.rs`) merges use-site constraints: stricter
+  bound wins per kind (string length, number, item count, keys), lower > upper
+  is `SchemaError::ConstraintConflict` (`Bounds`/`Scheme`/`Default`, each
+  origin a `SchemaConstraintOrigin` with source, path, keyword, occurrence,
+  span), flags dedupe, every `pattern` and `match` group is kept, schemes
+  intersect, defaults compare after number normalization, one `suggest` per
+  property (checked after union flattening), examples keep their defining
+  file. Bounds are read against the resolved target (`label(max(80))` is a
+  length on a string; on an already-array target a value-level `min`/`max` is
+  an item count). `$constraints` key bounds and postfix key bounds are one
+  scope; the parser moves block `required`/`generated` onto the property atom;
+  other block keys are `Convert` errors, and the root accepts only
+  `min-keys`/`max-keys`. One-atom contradictions are `Convert` errors. Several
+  patterns lower to `allOf`; one keeps the single `pattern` keyword.
+- A missing name is `SchemaError::UnknownNamedType { name, namespace, site }`;
+  cycles stay `ImportCycle`. Both new errors are wrapped by `ReferencedSchema`
+  when raised inside a referenced schema.
+- `resolve::expand_named_types` expands an in-memory schema with it as
+  `this` (DMLS unsaved buffers); `resolve::named_type_reference_path` returns
+  the file an explicit `Name@target` selects. Neither adds a second resolver.
 - Root unions can compose schema arms without erasing each arm's origin.
 - `file(match(...))` only suggests files in a single schema. In a root union,
   each simplified arm's declared glob emits `x-darkmatter-match`, including
@@ -124,7 +157,12 @@ excluded keys without executing anything.
   every group `lists_file`s it. `root_union_match_groups`/`file_match_admits`
   take the groups. `x-darkmatter-match` is a flat array for one group and an
   array of arrays for several; its rejection still comes from the keyword
-  itself (never wrapped in `allOf`), which `validate.rs` relies on.
+  itself (never wrapped in `allOf`), which `validate.rs` relies on. An empty
+  intersection is accepted (no file search) and completes nothing.
+- `CompletionKind::File { alternatives: Vec<Vec<Vec<String>>> }` is an OR of
+  AND-ed groups: one alternative of every group for a property, one per
+  `file` arm for a root union; empty means a bare `file`.
+  `file_match::file_match_groups` is public for consumers such as Claudine.
 - Pattern dictionary keys lower to `additionalProperties` or
   `patternProperties`; literal keys take precedence.
 - `min-keys` and `max-keys` constrain dictionaries.

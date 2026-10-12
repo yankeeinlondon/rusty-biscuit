@@ -365,8 +365,7 @@ Inline composition uses the `prompt` frontmatter property as the request and
 launches the agent **on the document itself**: the agent is told the file's
 native absolute path, writes the requested body (and any requested frontmatter)
 into that file, and returns a short summary as its final response. This restores
-the 2026-03-17 file-aware flow
-(`fixes/2026-09-05-inline-flow-and-validations/spec.md`, D3).
+the 2026-03-17 file-aware flow.
 
 ```sh
 claudine inline-compose @research.md
@@ -1130,7 +1129,7 @@ In a root union, an **existing** file outside a simplified arm's declared `match
 
 A partial such as `cli` names no file yet, so it rules no arm out; a settled `kind: fix` still offers only the `fixes` tree. Paths are compared in `/` spelling relative to the launch directory, the same anchor the chooser walks, so every file the chooser offers is one its arm accepts. When the late verdict reports an unresolved value on a union whose literal discriminant is settled, the chooser searches only that arm's glob.
 
-Every report of an unresolved caller value names the directory that value was resolved from, which is the launch directory for `key=value`, not the prompt's directory. This holds for the verdict reached after `initialize` as well as for the early pass. When Interactive Mode is denied (not both stdin and stderr TTYs, `--silent`, etc.), the original error is preserved byte-for-byte so scripts and CI output are unaffected. The directory walk lives in `claudine-cli`, and the glob comparison is Darkmatter's `FileMatchGlobs`, the one validation uses; the library only classifies the failure into the typed `UnresolvedFileReference { property, provided, patterns }` signal and never gains a `globset`/`ignore` dependency.
+Every report of an unresolved caller value names the directory that value was resolved from, which is the launch directory for `key=value`, not the prompt's directory. This holds for the verdict reached after `initialize` as well as for the early pass. When Interactive Mode is denied (not both stdin and stderr TTYs, `--silent`, etc.), the original error is preserved byte-for-byte so scripts and CI output are unaffected. The directory walk lives in `claudine-cli`, and the glob comparison is Darkmatter's `FileMatchGlobs`, the one validation uses; the library only classifies the failure into the typed `UnresolvedFileReference { property, provided, alternatives, .. }` signal and never gains a `globset`/`ignore` dependency. `alternatives` (`Vec<Vec<Vec<String>>>`) is an OR over root-union arms of an AND over one property's `match(...)` groups: a file qualifies when it satisfies every group of some alternative. A single schema gives one alternative holding every group, including groups a reused named type inherits; an undecided root union gives one alternative per contending arm, so one arm's exclusions never apply to another. `InteractiveShape::File` carries the same `alternatives` field, with one alternative, or none for a bare `file`.
 
 Supplied eager file inputs are resolved **before `initialize` consumes them**,
 including on a proxy target that first declares their file schema. Candidate
@@ -1357,7 +1356,7 @@ The authoring surface is additive: positional `proxy: target.md` is unchanged, k
 > invocation. Those are compatibility fixes required by the equivalence
 > contract, not preserved route quirks.
 
-All four fixes named in that note are live today: a proxied target may execute additional loop iterations, select its authored provider/model, request approval for its own shell actions, and surface the same typed error direct invocation produces. Each is a compatibility fix required by the equivalence contract, not a preserved route quirk; see [`notes/acceptance-map.md`](../../features/2026-07-13-proxy-with/notes/acceptance-map.md) for the named criteria and their passing L2 rows.
+All four fixes named in that note are live today: a proxied target may execute additional loop iterations, select its authored provider/model, request approval for its own shell actions, and surface the same typed error direct invocation produces. Each is a compatibility fix required by the equivalence contract, not a preserved route quirk.
 
 ## Migrating from the Retired Harness DSL
 

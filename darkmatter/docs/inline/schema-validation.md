@@ -1,10 +1,3 @@
----
-related_specs:
-    - "@darkmatter/features/_completed/2026-05-11-schemas/spec.md"
-    - "@darkmatter/features/_completed/2026-05-23-compose-schema/spec.md"
-    - "@darkmatter/features/_completed/2026-05-28-schema-coercion/spec.md"
----
-
 # Schema Validation
 
 Schema validation lets a Markdown document declare the **shape of its frontmatter** and have Darkmatter enforce it. You describe the expected properties once — using a friendly single-line grammar called **SimplifiedSchema** — and Darkmatter checks every document against it, reporting a styled error that names the offending property instead of letting a downstream tool fail cryptically.
@@ -426,7 +419,9 @@ it raw too rather than re-anchor it as though the document had authored it.
 ### Root unions and file `match`
 
 Each simplified arm's declared glob is compiled into that arm as
-`x-darkmatter-match`, and an existing file outside it rules the arm out:
+`x-darkmatter-match`, and an existing file outside it rules the arm out. An
+arm with several `match(...)` groups, as when a reused named type adds its
+own, keeps every group, and a file must satisfy each one:
 
 | Value | Result |
 |---|---|
